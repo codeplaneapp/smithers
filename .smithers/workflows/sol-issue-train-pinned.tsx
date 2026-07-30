@@ -111,6 +111,14 @@ const laneSchema = z.object({
 });
 type Lane = z.infer<typeof laneSchema>;
 
+const lanePathsSchema = z.object({
+  issueNumber: z.number().int(),
+  verified: z.boolean(),
+  paths: z.array(z.string()).default([]),
+  summary: z.string().min(2),
+});
+type LanePaths = z.infer<typeof lanePathsSchema>;
+
 const commitSchema = z.object({
   issueNumber: z.number().int(),
   committed: z.boolean(),
@@ -218,6 +226,7 @@ const { Workflow, Task, Sequence, Parallel, Loop, MergeQueue, smithers, outputs 
   strainFix: fixSchema,
   strainReview: reviewSchema,
   strainLane: laneSchema,
+  strainLanePaths: lanePathsSchema,
   strainCommit: commitSchema,
   strainCommitCheck: commitCheckSchema,
   strainSync: syncSchema,
@@ -364,8 +373,27 @@ function normalizePath(path: string): string {
 function uniquePaths(values: string[]): string[] {
   return [...new Set(values.map(normalizePath).filter(Boolean))].sort();
 }
+function isSafeRepoPath(value: string, allowRoot = false): boolean {
+  const path = normalizePath(value);
+  if (allowRoot && path === ".") return true;
+  return (
+    path.length > 0 &&
+    path !== "." &&
+    !path.startsWith("/") &&
+    !path.includes("\\") &&
+    !path.split("/").some((part) => part === "" || part === "." || part === "..") &&
+    path !== ".git" &&
+    !path.startsWith(".git/")
+  );
+}
+function pathWithinArea(path: string, area: string): boolean {
+  return area === "." || path === area || path.startsWith(area + "/");
+}
 function latest<T>(ctx: any, table: any, targetNodeId: string): T | undefined {
   return ctx.latest(table, targetNodeId) as T | undefined;
+}
+function iterationOf(row: unknown): number {
+  return Number((row as { iteration?: number } | undefined)?.iteration ?? 0);
 }
 function asArray(value: unknown): string[] {
   if (Array.isArray(value)) return value.map(String);
@@ -387,19 +415,55 @@ type ProcessResult = { exitCode: number; stdout: string; stderr: string; duratio
 function runProcess(command: string, args: string[], cwd: string, timeoutMs: number): Promise<ProcessResult> {
   return new Promise((resolve) => {
     const started = Date.now();
+    const useProcessGroup = process.platform !== "win32";
     const child = spawn(command, args, {
       cwd,
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
       stdio: ["ignore", "pipe", "pipe"],
+      detached: useProcessGroup,
     });
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let timedOut = false;
+    let childClosed = false;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    let treePollTimer: ReturnType<typeof setTimeout> | undefined;
+    const processGroupAlive = () => {
+      if (!useProcessGroup || child.pid === undefined) return !childClosed;
+      try {
+        process.kill(-child.pid, 0);
+        return true;
+      } catch (error) {
+        return (error as NodeJS.ErrnoException).code === "EPERM";
+      }
+    };
+    const killTree = (signal: "SIGTERM" | "SIGKILL") => {
+      if (useProcessGroup && child.pid !== undefined) {
+        try {
+          process.kill(-child.pid, signal);
+          return;
+        } catch {}
+      }
+      try {
+        child.kill(signal);
+      } catch {}
+    };
     const finish = (exitCode: number) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+      if (treePollTimer) clearTimeout(treePollTimer);
       resolve({ exitCode, stdout, stderr, durationMs: Date.now() - started });
+    };
+    const finishTimedOutWhenTreeExits = () => {
+      if (settled) return;
+      if (childClosed && !processGroupAlive()) {
+        finish(124);
+        return;
+      }
+      treePollTimer = setTimeout(finishTimedOutWhenTreeExits, 50);
     };
     child.stdout.on("data", (chunk) => {
       stdout += String(chunk);
@@ -409,14 +473,22 @@ function runProcess(command: string, args: string[], cwd: string, timeoutMs: num
     });
     child.on("error", (error) => {
       stderr += String(error);
-      finish(1);
+      childClosed = true;
+      if (timedOut) finishTimedOutWhenTreeExits();
+      else finish(1);
     });
-    child.on("close", (code) => finish(code ?? 1));
+    child.on("close", (code) => {
+      childClosed = true;
+      if (timedOut) finishTimedOutWhenTreeExits();
+      else finish(code ?? 1);
+    });
     const timer = setTimeout(() => {
+      timedOut = true;
       stderr += "\nTimed out after " + timeoutMs + "ms";
-      child.kill("SIGTERM");
-      setTimeout(() => child.kill("SIGKILL"), 5_000).unref();
-      finish(124);
+      killTree("SIGTERM");
+      killTimer = setTimeout(() => killTree("SIGKILL"), 5_000);
+      killTimer.unref();
+      finishTimedOutWhenTreeExits();
     }, timeoutMs);
     timer.unref();
   });
@@ -510,7 +582,7 @@ function discoverIssues(input: Input): z.infer<typeof discoverySchema> {
 }
 
 function areasOverlap(a: string[], b: string[]): boolean {
-  return a.some((x) => b.some((y) => x === y || x.startsWith(y + "/") || y.startsWith(x + "/")));
+  return a.some((x) => b.some((y) => pathWithinArea(x, y) || pathWithinArea(y, x)));
 }
 type WaveEntry = { issueNumber: number; areas: string[] };
 function buildWaves(entries: WaveEntry[], waveSize: number): number[][] {
@@ -564,8 +636,67 @@ function issueRefPattern(issueNumber: number): RegExp {
   return new RegExp("#" + issueNumber + "(?![0-9])");
 }
 
+function dirtyPaths(cwd: string): string[] {
+  return uniquePaths([
+    ...splitZero(git(["diff", "--name-only", "-z"], cwd)),
+    ...splitZero(git(["diff", "--cached", "--name-only", "-z"], cwd)),
+    ...splitZero(git(["ls-files", "--others", "--exclude-standard", "-z"], cwd)),
+  ]).filter((path) => isSafeRepoPath(path));
+}
+
+function snapshotLanePaths(
+  cwd: string,
+  issueNumber: number,
+  areas: string[],
+  peers: Array<{ issueNumber: number; areas: string[] }>,
+): LanePaths {
+  const normalizedAreas = uniquePaths(areas);
+  const unsafeAreas = normalizedAreas.filter((area) => !isSafeRepoPath(area, true));
+  if (unsafeAreas.length) {
+    return {
+      issueNumber,
+      verified: false,
+      paths: [],
+      summary: "Rejected unsafe assigned area(s): " + unsafeAreas.slice(0, 10).join(", ") + ".",
+    };
+  }
+  const paths = dirtyPaths(cwd).filter((path) => normalizedAreas.some((area) => pathWithinArea(path, area)));
+  const overlaps = paths.filter((path) => peers.some((peer) => peer.areas.some((area) => pathWithinArea(path, area))));
+  if (overlaps.length) {
+    return {
+      issueNumber,
+      verified: false,
+      paths: [],
+      summary: "Rejected cross-lane path overlap: " + overlaps.slice(0, 10).join(", ") + ".",
+    };
+  }
+  if (!paths.length) {
+    return {
+      issueNumber,
+      verified: false,
+      paths: [],
+      summary: "No actual uncommitted diff exists inside the lane's assigned areas.",
+    };
+  }
+  return {
+    issueNumber,
+    verified: true,
+    paths,
+    summary: "Checkpointed " + paths.length + " actual changed path(s) inside the assigned areas.",
+  };
+}
+
 function verifyCommit(cwd: string, issueNumber: number, expected: string[]): CommitCheck {
   try {
+    const safeExpected = uniquePaths(expected).filter((path) => isSafeRepoPath(path));
+    if (!safeExpected.length || safeExpected.length !== uniquePaths(expected).length) {
+      return {
+        issueNumber,
+        verified: false,
+        commitSha: "",
+        summary: "Expected-path checkpoint is empty or contains an unsafe path.",
+      };
+    }
     const headSha = git(["rev-parse", "HEAD"], cwd);
     const message = git(["log", "-1", "--format=%B"], cwd);
     if (!issueRefPattern(issueNumber).test(message)) {
@@ -580,16 +711,20 @@ function verifyCommit(cwd: string, issueNumber: number, expected: string[]): Com
     if (!touched.length) {
       return { issueNumber, verified: false, commitSha: headSha, summary: "Commit is empty." };
     }
-    const strays = touched.filter(
-      (path) => !expected.some((allowed) => path === allowed || path.startsWith(allowed + "/")),
-    );
-    if (strays.length) {
+    const missing = safeExpected.filter((path) => !touched.includes(path));
+    const strays = touched.filter((path) => !safeExpected.includes(path));
+    if (missing.length || strays.length) {
       git(["reset", "--mixed", "HEAD~1"], cwd);
       return {
         issueNumber,
         verified: false,
         commitSha: "",
-        summary: "Commit touched unexpected paths (" + strays.slice(0, 10).join(", ") + "); reset.",
+        summary:
+          "Commit did not match its diff checkpoint (missing: " +
+          (missing.slice(0, 10).join(", ") || "none") +
+          "; unexpected: " +
+          (strays.slice(0, 10).join(", ") || "none") +
+          "); reset.",
       };
     }
     const staged = git(["diff", "--cached", "--name-only"], cwd);
@@ -1146,6 +1281,8 @@ export default smithers((ctx) => {
     latest<Review>(ctx, outputs.strainReview, "w" + w + ":i" + n + ":review");
   const laneFix = (w: number, n: number) => latest<Fix>(ctx, outputs.strainFix, "w" + w + ":i" + n + ":fix");
   const laneRow = (w: number, n: number) => latest<Lane>(ctx, outputs.strainLane, "w" + w + ":i" + n + ":ready");
+  const lanePathsFor = (w: number, n: number) =>
+    latest<LanePaths>(ctx, outputs.strainLanePaths, "w" + w + ":i" + n + ":paths");
   const laneCommitCheck = (w: number, n: number) =>
     latest<CommitCheck>(ctx, outputs.strainCommitCheck, "w" + w + ":i" + n + ":verify-commit");
   const laneDone = (w: number, n: number) => {
@@ -1160,8 +1297,7 @@ export default smithers((ctx) => {
     const areas = uniquePaths(asArray(triageFor(n)?.areas));
     return areas.length ? areas : ["."];
   };
-  const expectedPathsFor = (w: number, n: number) =>
-    uniquePaths([...asArray(laneFix(w, n)?.filesChanged), ...asArray(laneReview(w, n)?.filesChanged)]);
+  const expectedPathsFor = (w: number, n: number) => uniquePaths(asArray(lanePathsFor(w, n)?.paths));
 
   // Verified commits and push progress, data-only (no subprocess calls during render).
   const verifiedCommits = new Map<number, string>();
@@ -1175,6 +1311,18 @@ export default smithers((ctx) => {
     latest<Push>(ctx, outputs.strainPush, "w" + w + ":push"),
   );
   const finalPush = latest<Push>(ctx, outputs.strainPush, "final-push");
+  const finalSyncBase = latest<Sync>(ctx, outputs.strainSync, "final-sync");
+  const finalSyncFinish = latest<Sync>(ctx, outputs.strainSync, "final-sync-finish");
+  const finalSyncResolve = latest<WaveFix>(ctx, outputs.strainWaveFix, "final-sync-resolve");
+  const finalSyncEffective =
+    finalSyncBase?.status === "conflict"
+      ? finalSyncFinish && iterationOf(finalSyncFinish) >= iterationOf(finalSyncBase)
+        ? finalSyncFinish
+        : finalSyncBase
+      : finalSyncBase;
+  const finalSyncOk =
+    finalSyncEffective !== undefined && ["current", "rebased", "finished"].includes(finalSyncEffective.status);
+  const finalPushDone = finalPush !== undefined && (finalPush.pushed || input.dryRun);
   let maxPushedWave = -1;
   pushRows.forEach((row, w) => {
     if (row?.pushed) maxPushedWave = Math.max(maxPushedWave, w);
@@ -1315,12 +1463,20 @@ export default smithers((ctx) => {
             .filter((issue): issue is Issue => issue !== undefined);
           const lanesSettled = waveIssues.every((issue) => laneRow(w, issue.number) !== undefined);
           const approvedIssues = waveIssues.filter((issue) => laneReview(w, issue.number)?.verdict === "approve");
-          const commitsSettled = approvedIssues.every((issue) => laneCommitCheck(w, issue.number) !== undefined);
+          const pathChecksSettled = approvedIssues.every((issue) => lanePathsFor(w, issue.number) !== undefined);
+          const pathsVerified =
+            pathChecksSettled && approvedIssues.every((issue) => lanePathsFor(w, issue.number)?.verified === true);
+          const commitAttemptsSettled =
+            pathsVerified && approvedIssues.every((issue) => laneCommitCheck(w, issue.number) !== undefined);
+          const commitsVerified =
+            commitAttemptsSettled &&
+            approvedIssues.every((issue) => laneCommitCheck(w, issue.number)?.verified === true);
           const committedIssues = approvedIssues.filter((issue) => laneCommitCheck(w, issue.number)?.verified === true);
+          const waveReadyForPush =
+            !approvedIssues.length || (pathChecksSettled && (!pathsVerified || commitAttemptsSettled));
           const gate = latest<Gate>(ctx, outputs.strainGate, "w" + w + ":gate");
           const gatePassed = gate?.passed === true;
           const waveFix = latest<WaveFix>(ctx, outputs.strainWaveFix, "w" + w + ":gate-fix");
-          const iterationOf = (row: unknown) => Number((row as { iteration?: number } | undefined)?.iteration ?? 0);
           const syncBase = latest<Sync>(ctx, outputs.strainSync, "w" + w + ":sync");
           const syncFinish = latest<Sync>(ctx, outputs.strainSync, "w" + w + ":sync-finish");
           const syncResolve = latest<WaveFix>(ctx, outputs.strainWaveFix, "w" + w + ":sync-resolve");
@@ -1440,6 +1596,27 @@ export default smithers((ctx) => {
               ) : null}
 
               {lanesSettled && approvedIssues.length ? (
+                <Parallel id={"w" + w + ":path-checks"} maxConcurrency={approvedIssues.length}>
+                  {approvedIssues.map((issue) => {
+                    const n = issue.number;
+                    const peers = approvedIssues
+                      .filter((peer) => peer.number !== n)
+                      .map((peer) => ({ issueNumber: peer.number, areas: areasFor(peer.number) }));
+                    return (
+                      <Task
+                        key={"w" + w + ":i" + n + ":paths"}
+                        id={"w" + w + ":i" + n + ":paths"}
+                        output={outputs.strainLanePaths}
+                        continueOnFail
+                      >
+                        {() => snapshotLanePaths(trainPath, n, areasFor(n), peers)}
+                      </Task>
+                    );
+                  })}
+                </Parallel>
+              ) : null}
+
+              {pathsVerified && approvedIssues.length ? (
                 <MergeQueue id={"w" + w + ":commit-queue"} maxConcurrency={1}>
                   {approvedIssues.map((issue) => {
                     const n = issue.number;
@@ -1469,13 +1646,13 @@ export default smithers((ctx) => {
                 </MergeQueue>
               ) : null}
 
-              {lanesSettled && (commitsSettled || !approvedIssues.length) ? (
+              {lanesSettled && (!approvedIssues.length || commitsVerified) ? (
                 <Task id={"w" + w + ":wipe"} output={outputs.strainWipe} timeoutMs={10 * 60_000} continueOnFail>
                   {() => wipeStrays(trainPath, w)}
                 </Task>
               ) : null}
 
-              {lanesSettled && commitsSettled && committedIssues.length ? (
+              {lanesSettled && commitsVerified && committedIssues.length ? (
                 <Loop
                   id={"w" + w + "-gate-loop"}
                   until={gatePassed}
@@ -1551,19 +1728,25 @@ export default smithers((ctx) => {
                 </Loop>
               ) : null}
 
-              {lanesSettled && (commitsSettled || !approvedIssues.length) ? (
+              {lanesSettled && waveReadyForPush ? (
                 <Task id={"w" + w + ":push"} output={outputs.strainPush} timeoutMs={20 * 60_000} continueOnFail>
                   {() =>
-                    committedIssues.length && latest<Gate>(ctx, outputs.strainGate, "w" + w + ":gate")?.passed === true
+                    commitsVerified &&
+                    committedIssues.length &&
+                    latest<Gate>(ctx, outputs.strainGate, "w" + w + ":gate")?.passed === true
                       ? pushTrain(trainPath, w, input.dryRun)
                       : Promise.resolve({
                           waveIndex: w,
                           pushed: false,
                           headSha: "",
                           remoteSha: "",
-                          summary: committedIssues.length
-                            ? "Gate never went green; wave not pushed."
-                            : "No verified commits in this wave; nothing to push.",
+                          summary: !pathsVerified
+                            ? "Lane diff checkpoint failed; wave not pushed and reviewed changes were preserved."
+                            : approvedIssues.length && !commitsVerified
+                              ? "Not every approved fix produced a verified commit; wave not pushed and changes were preserved."
+                              : committedIssues.length
+                                ? "Gate never went green; wave not pushed."
+                                : "No verified commits in this wave; nothing to push.",
                         })
                   }
                 </Task>
@@ -1609,9 +1792,48 @@ export default smithers((ctx) => {
         })}
 
         {allWavesSettled ? (
-          <Task id="final-push" output={outputs.strainPush} timeoutMs={20 * 60_000} continueOnFail>
-            {() => pushTrain(trainPath, waves.length, input.dryRun)}
-          </Task>
+          <Loop id="final-sync-push-loop" until={finalPushDone} maxIterations={3} onMaxReached="return-last">
+            <Sequence>
+              <Task id="final-sync" output={outputs.strainSync} timeoutMs={15 * 60_000} continueOnFail>
+                {() => syncTrain(trainPath, waves.length)}
+              </Task>
+              {finalSyncBase?.status === "conflict" ? (
+                <Task
+                  id="final-sync-resolve"
+                  output={outputs.strainWaveFix}
+                  agent={solChain(trainPath)}
+                  retries={AGENT_RETRIES}
+                  timeoutMs={REVIEW_TIMEOUT_MS}
+                  heartbeatTimeoutMs={HEARTBEAT_MS}
+                  continueOnFail
+                >
+                  {syncResolvePrompt(waves.length, finalSyncBase)}
+                </Task>
+              ) : null}
+              {finalSyncBase?.status === "conflict" &&
+              finalSyncResolve &&
+              iterationOf(finalSyncResolve) >= iterationOf(finalSyncBase) ? (
+                <Task id="final-sync-finish" output={outputs.strainSync} timeoutMs={15 * 60_000} continueOnFail>
+                  {() => finishSync(trainPath, waves.length)}
+                </Task>
+              ) : null}
+              {finalSyncEffective && finalSyncEffective.status !== "conflict" ? (
+                <Task id="final-push" output={outputs.strainPush} timeoutMs={20 * 60_000} continueOnFail>
+                  {() =>
+                    finalSyncOk
+                      ? pushTrain(trainPath, waves.length, input.dryRun)
+                      : Promise.resolve({
+                          waveIndex: waves.length,
+                          pushed: false,
+                          headSha: finalSyncEffective.headSha,
+                          remoteSha: "",
+                          summary: "Final sync did not complete: " + finalSyncEffective.summary,
+                        })
+                  }
+                </Task>
+              ) : null}
+            </Sequence>
+          </Loop>
         ) : null}
 
         {allWavesSettled && finalPush && !input.dryRun ? (
