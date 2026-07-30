@@ -1487,6 +1487,7 @@ export default smithers((ctx) => {
                 <Approval
                   id="gate-publish"
                   output={outputs.gatePublish}
+                  bind={ctx.prove(outputs.releaseApprovalBinding, { nodeId: "releaseApprovalBinding" })}
                   request={{
                     title: "Publish the 10 federated PUBLIC repos?",
                     summary: `${postFixReleaseDryRun?.summary ?? ""}\nRevision readiness: ${releaseReadinessResult?.summary ?? ""}\nApproval binding: ${releaseApprovalBindingResult.summary}\nFinal verification: ${lastFinalVerify?.summary ?? ""}\n\nApproving invokes the validated root release coordinator (publishes every publishable package in the release plan, in package-DAG order) and creates tags + GitHub releases for each of the 10 new repos.`,

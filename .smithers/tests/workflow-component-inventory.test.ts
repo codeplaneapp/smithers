@@ -408,4 +408,76 @@ describe("federation workflow smoke coverage", () => {
     const train = await renderWorkflow(module.default, { workflowPath, input: {}, outputs: {} });
     expect(train.tasks.map((task) => task.nodeId)).toContain("setup");
   }, 30_000);
+
+  test("the publish approval is proof-bound to the reviewed release revision", async () => {
+    const file = "smithers-repo-federation.tsx";
+    const workflowPath = join(workflowRoot, file);
+    const module = await import(workflowPath);
+    const lanes = [
+      "smithers-examples",
+      "smithers-agents",
+      "smithers-sandboxes",
+      "smithers-integrations",
+      "smithers-plugins",
+      "smithers-packs",
+      "smithers-observability",
+      "smithers-review",
+      "smithers-evals",
+      "smithers-signal",
+      "multi",
+      "plue",
+      "awesome-smithers",
+    ];
+    const binding = {
+      nodeId: "releaseApprovalBinding",
+      iteration: 0,
+      laneRevisions: lanes.map((lane) => ({
+        lane,
+        headSha: `${lane}-reviewed`,
+        remote: `https://github.com/smithersai/${lane}.git`,
+        branch: `federation/${lane}`,
+      })),
+      releasePlanSha256: "reviewed-plan",
+      coordinatorSha256: "reviewed-coordinator",
+      summary: "Exact release revision captured for approval.",
+    };
+    const frame = await renderWorkflow(module.default, {
+      workflowPath,
+      input: {},
+      outputs: {
+        manifestReview: [
+          {
+            nodeId: "manifestReviewFinalApproved",
+            approvable: true,
+            summary: "reviewed",
+            boundaryIssues: [],
+            ambiguousUtilities: [],
+            licenseGaps: [],
+          },
+        ],
+        gateManifest: [{ nodeId: "gate-manifest", approved: true }],
+        lanePush: lanes.map((lane) => ({ nodeId: `push-${lane}`, lane, pushed: true })),
+        updateSmithers: [{ nodeId: "updateSmithers" }],
+        releaseDryRun: [
+          { nodeId: "releaseDryRun", ok: true },
+          { nodeId: "releaseDryRunPostFix", ok: true },
+        ],
+        releaseReadiness: [{ nodeId: "releaseReadiness", ok: true, issues: [], summary: "ready" }],
+        finalVerify: [{ nodeId: "finalVerify", approvable: true, fixList: [], summary: "reviewed" }],
+        releaseApprovalBinding: [binding],
+      },
+    });
+    const gate = frame.tasks.find((task) => task.nodeId === "gate-publish");
+
+    expect(gate?.needsApproval).toBe(true);
+    expect(gate?.proofBindingRequired).toBe(true);
+    expect(gate?.proofBindings).toEqual([
+      expect.objectContaining({
+        table: "releaseApprovalBinding",
+        nodeId: "releaseApprovalBinding",
+        iteration: 0,
+        digest: expect.stringMatching(/^sha256:/),
+      }),
+    ]);
+  }, 30_000);
 });
