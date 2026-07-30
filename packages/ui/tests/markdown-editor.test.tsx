@@ -184,6 +184,11 @@ describe("MarkdownEditor styling", () => {
     expect(markdownEditorCss).toContain("--crepe-color-outline:var(--text-faint,#8c8c95)");
   });
 
+  test("ships no external resource references", () => {
+    expect(markdownEditorCss).not.toContain("@font-face");
+    expect(markdownEditorCss).not.toContain("url(");
+  });
+
   test("explicit data-theme toggles the Crepe palette independently of the OS", async () => {
     await render(<MarkdownEditor value="theme probe" />);
     const milkdown = document.createElement("div");

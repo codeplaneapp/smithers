@@ -73,8 +73,15 @@ const hostCss = `
 .sui-markdown-editor-fallback:read-only { cursor:default; }
 `.trim();
 
-/** The complete stylesheet the adapter injects: Crepe theme + host chrome. */
-export const markdownEditorCss = `${crepeThemeCss}\n${hostCss}`;
+/**
+ * KaTeX's bundled font declarations point at files this source-shipping
+ * package does not include. Strip those declarations from the emitted sheet
+ * so math uses the existing fallback stack without making network requests.
+ */
+const selfContainedCrepeThemeCss = crepeThemeCss.replace(/@font-face\s*\{[^}]*\}/g, "");
+
+/** The complete self-contained stylesheet the adapter injects: Crepe theme + host chrome. */
+export const markdownEditorCss = `${selfContainedCrepeThemeCss}\n${hostCss}`;
 
 /**
  * Browser fallback injector (mirrors `useInjectUiCss` in the base package):
