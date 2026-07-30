@@ -122,6 +122,92 @@ describeHeadlessRender("LogMode – terminal rendering (CI-safe, no gateway)", (
     renderer.destroy();
   });
 
+  it("windows rows and memoizes fallback text by sequence", async () => {
+    let jsonCalls = 0;
+    const makeJsonFrame = (seq: number) =>
+      frame(seq, "run.event", {
+        toJSON() {
+          jsonCalls++;
+          return { value: `event-${seq}` };
+        },
+      });
+    const initialEvents = Array.from({ length: 40 }, (_, idx) => makeJsonFrame(idx + 1));
+
+    function StreamingHarness() {
+      const [events, setEvents] = useState(initialEvents);
+      useKeyboard((e) => {
+        if (e.name === "a") setEvents((prev) => [...prev, makeJsonFrame(prev.length + 1)]);
+      });
+      return <LogView events={events} />;
+    }
+
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } = await renderForTest(
+      <StreamingHarness />,
+      { width: 120, height: 6 },
+    );
+    await waitForVisualIdle();
+
+    // Three viewport heights are rendered, not the entire event history.
+    expect(jsonCalls).toBeLessThanOrEqual(15);
+    const callsBeforeAppend = jsonCalls;
+
+    act(() => {
+      mockInput.pressKey("a");
+    });
+    await flush();
+    await waitForVisualIdle();
+
+    // The overlapping rows reuse text cached by seq; only the new row is
+    // stringified even though the streamed events array has a new identity.
+    expect(jsonCalls - callsBeforeAppend).toBe(1);
+    expect(captureCharFrame()).toContain("41/41 events");
+
+    renderer.destroy();
+  });
+
+  it("keeps the rendered window anchored while follow is paused", async () => {
+    const initialEvents = Array.from({ length: 20 }, (_, idx) =>
+      frame(idx + 1, "run.event", { text: `event-${idx + 1}` }),
+    );
+
+    function PausedHarness() {
+      const [events, setEvents] = useState(initialEvents);
+      useKeyboard((e) => {
+        if (e.name === "a") {
+          setEvents((prev) => [...prev, frame(prev.length + 1, "run.event", { text: `event-${prev.length + 1}` })]);
+        }
+      });
+      return <LogView events={events} />;
+    }
+
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } = await renderForTest(<PausedHarness />, {
+      width: 120,
+      height: 6,
+    });
+    await waitForVisualIdle();
+
+    act(() => {
+      mockInput.pressKey("f");
+      mockInput.pressKey("a");
+    });
+    await flush();
+    await waitForVisualIdle();
+
+    const pausedFrame = captureCharFrame();
+    expect(pausedFrame).toContain("[paused]");
+    expect(pausedFrame).toContain("event-20");
+    expect(pausedFrame).not.toContain("event-21");
+
+    act(() => {
+      mockInput.pressKey("f");
+    });
+    await flush();
+    await waitForVisualIdle();
+    expect(captureCharFrame()).toContain("event-21");
+
+    renderer.destroy();
+  });
+
   it("shows event count in header", async () => {
     const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(<LogView events={CANNED_EVENTS} />, {
       width: 120,

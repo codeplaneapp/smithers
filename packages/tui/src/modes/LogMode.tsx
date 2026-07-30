@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useRunInspectorVm } from "@smithers-orchestrator/ui-core";
 import { TUI_EVENT_CAP } from "../data.ts";
@@ -16,6 +16,7 @@ import { useOverlayOpen } from "../OverlayContext.tsx";
 import { sanitizeTerminalText } from "@smithers-orchestrator/tui-ui";
 
 const COMPACT_WIDTH = 100;
+const LOG_WINDOW_VIEWPORTS = 3;
 
 /**
  * Thin wrapper: reads the run's event stream via ui-core's
@@ -28,7 +29,7 @@ const COMPACT_WIDTH = 100;
  */
 export function LogMode({ runId }: { runId: string }) {
   const { events, streaming } = useRunInspectorVm(runId, { maxEvents: TUI_EVENT_CAP });
-  return <LogView events={events} streaming={streaming} />;
+  return <LogView key={runId} events={events} streaming={streaming} />;
 }
 
 /**
@@ -37,10 +38,12 @@ export function LogMode({ runId }: { runId: string }) {
  * is the exact component the render tests mount with canned data.
  */
 export function LogView({ events, streaming = false }: { events: GatewayEventFrame[]; streaming?: boolean }) {
-  const { width } = useTerminalDimensions();
+  const { width, height } = useTerminalDimensions();
   const compact = width < COMPACT_WIDTH;
   const overlayOpen = useOverlayOpen();
   const [follow, setFollow] = useState(true);
+  const pausedEndSeq = useRef<number | null>(null);
+  const textBySeq = useRef(new Map<number, string>());
   // The filter is pinned to the attempt's KEY (nodeId:iteration), not a
   // positional index. `attempts` is rebuilt from the sliding event window, so
   // once the oldest attempt's frames evict from the front of the ring every
@@ -66,6 +69,7 @@ export function LogView({ events, streaming = false }: { events: GatewayEventFra
     // are not log-view bindings.
     if (overlayOpen || isModifiedKeyEvent(e)) return;
     if (e.name === "f") {
+      if (follow) pausedEndSeq.current = filteredEvents.at(-1)?.seq ?? null;
       setFollow((prev) => !prev);
     } else if (e.name === "[") {
       setSelectedAttempt((prev) => {
@@ -102,6 +106,49 @@ export function LogView({ events, streaming = false }: { events: GatewayEventFra
   })();
 
   const followColor = follow ? "#00d787" : "#ffaf00";
+  const renderedRows = useMemo(() => {
+    const windowRows = Math.max(1, height - 1) * LOG_WINDOW_VIEWPORTS;
+    let end = filteredEvents.length;
+
+    // When follow is paused, keep the rendered window anchored to the last
+    // event that was visible instead of shifting it as streamed frames arrive.
+    if (!follow && pausedEndSeq.current !== null) {
+      let low = 0;
+      let high = filteredEvents.length;
+      while (low < high) {
+        const mid = (low + high) >>> 1;
+        if (filteredEvents[mid]!.seq <= pausedEndSeq.current) low = mid + 1;
+        else high = mid;
+      }
+      end = low === 0 && filteredEvents.length > 0 ? 1 : low;
+    }
+
+    const visibleEvents = filteredEvents.slice(Math.max(0, end - windowRows), end);
+    const rows = visibleEvents.map((ev) => {
+      const { event, payload, nodeId } = normalizeFrame(ev);
+      let text = textBySeq.current.get(ev.seq);
+      if (text === undefined) {
+        text = sanitizeTerminalText(extractEventText(event, payload));
+        textBySeq.current.set(ev.seq, text);
+      }
+
+      return {
+        seq: ev.seq,
+        seqStr: String(ev.seq).padStart(4, " "),
+        tag: nodeId ? sanitizeTerminalText(nodeId).slice(0, tagMaxLen) : "·",
+        text,
+      };
+    });
+
+    // The event ring itself is bounded; keep the memo bounded too.
+    while (textBySeq.current.size > TUI_EVENT_CAP) {
+      const oldestSeq = textBySeq.current.keys().next().value;
+      if (oldestSeq === undefined) break;
+      textBySeq.current.delete(oldestSeq);
+    }
+
+    return rows;
+  }, [filteredEvents, follow, height, tagMaxLen]);
 
   return (
     <box width="100%" height="100%" flexDirection="column">
@@ -117,23 +164,16 @@ export function LogView({ events, streaming = false }: { events: GatewayEventFra
         {filteredEvents.length === 0 ? (
           <text fg="#444444">{"  (no events)"}</text>
         ) : (
-          filteredEvents.map((ev) => {
-            const { event, payload, nodeId } = normalizeFrame(ev);
-            const text = sanitizeTerminalText(extractEventText(event, payload));
-            const tag = nodeId ? sanitizeTerminalText(nodeId).slice(0, tagMaxLen) : "·";
-            const seqStr = String(ev.seq).padStart(4, " ");
-
-            return (
-              <box key={ev.seq} width="100%" height={1} flexDirection="row">
-                <text fg="#444444">{`${seqStr} `}</text>
-                <text fg="#555555">{`[${tag}]`}</text>
-                <text fg="#444444">{" │ "}</text>
-                <text fg="#cccccc" wrapMode="char">
-                  {text}
-                </text>
-              </box>
-            );
-          })
+          renderedRows.map((row) => (
+            <box key={row.seq} width="100%" height={1} flexDirection="row">
+              <text fg="#444444">{`${row.seqStr} `}</text>
+              <text fg="#555555">{`[${row.tag}]`}</text>
+              <text fg="#444444">{" │ "}</text>
+              <text fg="#cccccc" wrapMode="char">
+                {row.text}
+              </text>
+            </box>
+          ))
         )}
       </scrollbox>
     </box>
