@@ -124,6 +124,34 @@ const MAX_COHORT_MODULES = 10;
 const BLANKET_GATE = "noop-host reconciler suites (76 files / 1,039 cases)";
 
 const TEST_DIR = (reactRepo: string) => join(reactRepo, "packages", "react-reconciler", "src", "__tests__");
+const SAFE_ID = /^[a-zA-Z0-9._-]+$/;
+
+const failQueueContract: (why: string) => never = (why) => {
+  throw new Error(
+    `D5_QUEUE_CONTRACT: ${why}. Regenerate MODULE_QUEUE.tsv (report-fable §4.4) or amend the COHORTS table in QueueParse.tsx.`,
+  );
+};
+
+export function parseQueueRows(raw: string) {
+  return raw
+    .trim()
+    .split("\n")
+    .slice(1)
+    .map((l) => {
+      const [order, module_, loc, _fanIn, scc, deps, gating] = l.split("\t");
+      if (!module_ || !SAFE_ID.test(module_)) {
+        failQueueContract(`module id "${module_ ?? ""}" must match ${SAFE_ID}`);
+      }
+      return {
+        order: Number(order),
+        module: module_,
+        loc: Number(loc),
+        scc: (scc ?? "-").trim(),
+        deps: (deps ?? "").trim() ? (deps ?? "").trim().split(",") : [],
+        gate: (gating ?? "").trim(),
+      };
+    });
+}
 
 /** Parse the gating_tests column: `File-test.js(N),...` -> [{file, cases}]. */
 const parseGating = (raw: string): Array<{ file: string; cases: number }> =>
@@ -149,29 +177,14 @@ export function QueueParse({ c }: { c: FerricConfig }) {
   return (
     <Task id="queue-parse" output={outputs.frcQueue}>
       {() => {
-        const lines = readFileSync(c.queuePath, "utf8").trim().split("\n").slice(1);
-        const rows = lines.map((l) => {
-          const [order, module_, loc, _fanIn, scc, deps, gating] = l.split("\t");
-          return {
-            order: Number(order),
-            module: module_,
-            loc: Number(loc),
-            scc: (scc ?? "-").trim(),
-            deps: (deps ?? "").trim() ? (deps ?? "").trim().split(",") : [],
-            gate: (gating ?? "").trim(),
-          };
-        });
+        const rows = parseQueueRows(readFileSync(c.queuePath, "utf8"));
 
         const leafRows = rows.filter((r) => r.scc === "-");
         const sccRows = rows.filter((r) => r.scc !== "-");
         const sccSet = new Set(sccRows.map((r) => r.module));
         const byName = new Map(sccRows.map((r) => [r.module, r]));
 
-        const fail: (why: string) => never = (why) => {
-          throw new Error(
-            `D5_QUEUE_CONTRACT: ${why}. Regenerate MODULE_QUEUE.tsv (report-fable §4.4) or amend the COHORTS table in QueueParse.tsx.`,
-          );
-        };
+        const fail = failQueueContract;
 
         // Leaves: exactly the 22 scc==="-" rows, in queue order.
         const inFileOrder = leafRows.every((r, i) => i === 0 || leafRows[i - 1].order < r.order);
@@ -179,12 +192,16 @@ export function QueueParse({ c }: { c: FerricConfig }) {
           fail(`expected 22 leaf rows in queue order, got leaves=${leafRows.length} ordered=${inFileOrder}`);
         }
 
-        const leaves: SliceDef[] = leafRows.map((r) => ({
-          id: `m4-leaf-${r.module}`,
-          kind: "leaf",
-          modules: [r.module],
-          gate: r.gate,
-        }));
+        const leaves: SliceDef[] = leafRows.map((r) => {
+          const id = `m4-leaf-${r.module}`;
+          if (!SAFE_ID.test(id)) fail(`slice id "${id}" must match ${SAFE_ID}`);
+          return {
+            id,
+            kind: "leaf",
+            modules: [r.module],
+            gate: r.gate,
+          };
+        });
 
         if (sccRows.length !== 59) {
           fail(`expected one 59-module SCC, got scc=${sccRows.length}`);
@@ -226,7 +243,9 @@ export function QueueParse({ c }: { c: FerricConfig }) {
         const assignedCount = new Map<string, number>();
         const testDir = TEST_DIR(c.reactRepo);
         const cohorts: SliceDef[] = COHORTS.map(([suffix, mods]) => {
-          if (mods.length === 0) fail(`cohort m4-cohort-${suffix} is empty`);
+          const id = `m4-cohort-${suffix}`;
+          if (!SAFE_ID.test(id)) fail(`slice id "${id}" must match ${SAFE_ID}`);
+          if (mods.length === 0) fail(`cohort ${id} is empty`);
           if (mods.length > MAX_COHORT_MODULES) {
             fail(
               `cohort m4-cohort-${suffix} has ${mods.length} modules, over MAX_COHORT_MODULES=${MAX_COHORT_MODULES}`,
@@ -261,7 +280,7 @@ export function QueueParse({ c }: { c: FerricConfig }) {
               );
             }
           }
-          return { id: `m4-cohort-${suffix}`, kind: "cohort" as const, modules: mods, gate };
+          return { id, kind: "cohort" as const, modules: mods, gate };
         });
 
         const duplicated = [...assignedCount.entries()].filter(([, n]) => n > 1).map(([m]) => m);

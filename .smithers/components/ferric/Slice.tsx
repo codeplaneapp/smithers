@@ -121,7 +121,14 @@ export function Slice(props: { key?: string; ctx: any; c: FerricConfig; slice: S
                 // The patch itself, for the review UI's DiffHunks surface.
                 // Truncated so a large slice cannot bloat the persisted row.
                 const patch = await sh(
-                  ["bash", "-lc", `jj diff --from "${diffRange}" --to ferric/${sid} --git | head -c 200000`],
+                  [
+                    "bash",
+                    "-lc",
+                    'jj diff --from "$1" --to "$2" --git | head -c 200000',
+                    "bash",
+                    diffRange,
+                    `ferric/${sid}`,
+                  ],
                   lane,
                 );
 
@@ -129,7 +136,10 @@ export function Slice(props: { key?: string; ctx: any; c: FerricConfig; slice: S
                   [
                     "bash",
                     "-lc",
-                    `jj diff --from "${diffRange}" --to ferric/${sid} | grep -nE "todo!\\(|unimplemented!\\(" | head -20 || true`,
+                    'jj diff --from "$1" --to "$2" | grep -nE "todo!\\(|unimplemented!\\(" | head -20 || true',
+                    "bash",
+                    diffRange,
+                    `ferric/${sid}`,
                   ],
                   lane,
                 );
@@ -140,7 +150,10 @@ export function Slice(props: { key?: string; ctx: any; c: FerricConfig; slice: S
                   [
                     "bash",
                     "-lc",
-                    `jj diff --from "${diffRange}" --to ferric/${sid} -- 'glob:**/*.rs' 'glob:!crates/ferric-abi/**' | grep -nE "^\\+.*\\bunsafe\\b" | head -20 || true`,
+                    'jj diff --from "$1" --to "$2" -- \'glob:**/*.rs\' \'glob:!crates/ferric-abi/**\' | grep -nE "^\\+.*\\bunsafe\\b" | head -20 || true',
+                    "bash",
+                    diffRange,
+                    `ferric/${sid}`,
                   ],
                   lane,
                 );
@@ -186,7 +199,10 @@ export function Slice(props: { key?: string; ctx: any; c: FerricConfig; slice: S
                   [
                     "bash",
                     "-lc",
-                    `jj diff --from "${diffRange}" --to ferric/${sid} --name-only | grep -q "diff-ffi" && echo yes || true`,
+                    'jj diff --from "$1" --to "$2" --name-only | grep -q "diff-ffi" && echo yes || true',
+                    "bash",
+                    diffRange,
+                    `ferric/${sid}`,
                   ],
                   lane,
                 );
@@ -204,7 +220,10 @@ export function Slice(props: { key?: string; ctx: any; c: FerricConfig; slice: S
                   [
                     "bash",
                     "-lc",
-                    `jj diff --from "${diffRange}" --to ferric/${sid} --name-only | grep -q "warnings.rs" && echo yes || true`,
+                    'jj diff --from "$1" --to "$2" --name-only | grep -q "warnings.rs" && echo yes || true',
+                    "bash",
+                    diffRange,
+                    `ferric/${sid}`,
                   ],
                   lane,
                 );
@@ -267,7 +286,14 @@ export function Slice(props: { key?: string; ctx: any; c: FerricConfig; slice: S
               }
 
               const merge = await sh(
-                ["bash", "-lc", `jj new main "ferric/${sid}" -m "[ferric] land ${sid}" && jj bookmark set main -r @`],
+                [
+                  "bash",
+                  "-lc",
+                  'jj new main "$1" -m "$2" && jj bookmark set main -r @',
+                  "bash",
+                  `ferric/${sid}`,
+                  `[ferric] land ${sid}`,
+                ],
                 c.repo,
               );
               if (!merge.ok) throw new Error(`land merge failed for ${sid}:\n${merge.err.slice(-2000)}`);

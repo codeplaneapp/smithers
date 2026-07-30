@@ -3,6 +3,9 @@ import "../preload.ts";
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { renderWorkflow } from "smithers-orchestrator/testing";
+import { publishMarkerPath } from "../components/ferric/PublishPipeline";
+import { parseQueueRows } from "../components/ferric/QueueParse";
+import { ferricSchemas } from "../components/ferric/ferricSchemas";
 
 const workflowsDir = join(import.meta.dir, "..", "workflows");
 let nonce = 0;
@@ -76,5 +79,24 @@ describe("ferric and accounts campaign components", () => {
       const mod = await import(join(import.meta.dir, "..", "components", file));
       expect(Object.keys(mod).length, `${file} has no exports`).toBeGreaterThan(0);
     }
+  });
+
+  test("rejects traversal publish idempotency keys at schema and path boundaries", () => {
+    const idempotencyKey = "../../../../tmp/x";
+    const decision = {
+      artifact: "ferric-release",
+      shouldPublish: true,
+      reason: "Publish the verified release.",
+      idempotencyKey,
+    };
+
+    expect(ferricSchemas.frcPublishDecision.safeParse(decision).success).toBe(false);
+    expect(() => publishMarkerPath("/repo", idempotencyKey)).toThrow("Invalid publish idempotency key");
+  });
+
+  test("rejects shell metacharacters in queue module ids", () => {
+    const queue = "order\tmodule\tloc\tfan_in\tscc\tdeps\tgating_tests\n1\tmodule;touch-pwned\t10\t0\t-\t\t";
+
+    expect(() => parseQueueRows(queue)).toThrow(/D5_QUEUE_CONTRACT: module id .* must match/);
   });
 });
