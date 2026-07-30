@@ -105,7 +105,8 @@ export async function resolveHijackCandidate(adapter, runId, target) {
   // load, run shutdown can return before the final attempt metadata is flushed,
   // so recover native CLI handoffs from the event instead of falsely reporting
   // CHAT_CREATE_UNAVAILABLE.
-  const hijackEvents = await adapter.listEventsByType(runId, "RunHijacked");
+  const hijackEvents =
+    typeof adapter.listEventsByType === "function" ? await adapter.listEventsByType(runId, "RunHijacked") : [];
   for (const event of [...hijackEvents].reverse()) {
     const payload = parseAttemptMeta(event.payloadJson ?? event.payload_json);
     const engine = typeof payload.engine === "string" ? payload.engine : undefined;
