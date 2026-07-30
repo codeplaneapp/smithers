@@ -41,6 +41,12 @@ let binDir = "";
 let proc: ChildProcess | undefined;
 let port = 0;
 let base = "";
+let fixtureStdout = "";
+let fixtureStderr = "";
+
+function appendFixtureLog(current: string, chunk: unknown): string {
+  return (current + String(chunk)).slice(-20_000);
+}
 
 function findOpenPort(): Promise<number> {
   return new Promise((resolvePort, reject) => {
@@ -121,7 +127,13 @@ beforeAll(async () => {
       UG_PORT: String(port),
       UG_RUN_ID: RUN_ID,
     },
-    stdio: "ignore",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  proc.stdout?.on("data", (chunk) => {
+    fixtureStdout = appendFixtureLog(fixtureStdout, chunk);
+  });
+  proc.stderr?.on("data", (chunk) => {
+    fixtureStderr = appendFixtureLog(fixtureStderr, chunk);
   });
   expect(await waitForHealth(60_000)).toBe(true);
 }, 80_000);
@@ -161,14 +173,31 @@ browserTest(
       // The worker really dispatched and finished — its activity appears, and the
       // living spec + question pool render THIS run's real worker output.
       await page.waitForSelector('[data-testid="ug-feed-worker"]', { timeout: 30_000 });
-      await page.waitForFunction(
-        () => {
-          const text = document.body.textContent ?? "";
-          return text.includes("Settings Page — Living Spec") && text.includes("dark-mode toggle");
-        },
-        undefined,
-        { timeout: 120_000 },
-      );
+      try {
+        await page.waitForFunction(
+          () => {
+            const text = document.body.textContent ?? "";
+            return text.includes("Settings Page — Living Spec") && text.includes("dark-mode toggle");
+          },
+          undefined,
+          { timeout: 60_000 },
+        );
+      } catch (cause) {
+        const bodyText = ((await page.textContent("body")) ?? "").slice(-5_000);
+        const workerText = ((await page.textContent('[data-testid="ug-feed-worker"]')) ?? "").trim();
+        throw new Error(
+          [
+            "UltraGrill worker output did not reach the browser.",
+            `worker=${JSON.stringify(workerText)}`,
+            `fixtureExit=${String(proc?.exitCode)} fixtureSignal=${String(proc?.signalCode)}`,
+            `pageErrors=${JSON.stringify(errors)}`,
+            `body=${JSON.stringify(bodyText)}`,
+            `fixtureStdout=${JSON.stringify(fixtureStdout)}`,
+            `fixtureStderr=${JSON.stringify(fixtureStderr)}`,
+          ].join("\n"),
+          { cause },
+        );
+      }
       await page.waitForSelector('[data-testid="ug-question"]', { timeout: 20_000 });
       const questionText = await page.evaluate(
         () => document.querySelector('[data-testid="ug-questions"]')?.textContent ?? "",
