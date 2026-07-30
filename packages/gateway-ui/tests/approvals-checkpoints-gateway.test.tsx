@@ -140,7 +140,6 @@ describe("gatewayApprovalKey", () => {
         runId: "run-1",
         nodeId: "gate",
         iteration: 0,
-        approved: false,
         decision: { approved: false, note: "not yet" },
         note: "not yet",
       },
@@ -170,7 +169,6 @@ describe("GatewayApprovalList", () => {
       runId: "run-1",
       nodeId: "gate",
       iteration: 0,
-      approved: true,
       decision: { approved: true },
     });
     // The resolved row leaves the collection, so the list drains to empty.
@@ -200,7 +198,6 @@ describe("GatewayApprovalList", () => {
     );
     await waitFor(harness, () => gateway!.approvalsSubmitted.length === 1, "deny submitted");
     expect(gateway.approvalsSubmitted[0]).toMatchObject({
-      approved: false,
       decision: { approved: false, note: "lgtm" },
       note: "lgtm",
     });
@@ -375,7 +372,7 @@ describe("GatewayApprovalConfirmation", () => {
       click(harness.container.querySelector("[data-slot='deny-confirmation'] [data-decision='deny']")),
     );
     await waitFor(harness, () => harness.container.textContent!.includes("Denied"), "denied state");
-    expect(gateway.approvalsSubmitted[0]).toMatchObject({ approved: false, decision: { approved: false } });
+    expect(gateway.approvalsSubmitted[0]).toMatchObject({ decision: { approved: false } });
   });
 
   test("an identity change without a remount resets the card to requested", async () => {
@@ -428,7 +425,7 @@ describe("GatewayApprovalConfirmation", () => {
     gateway.releaseApprovalSubmits();
     await harness.flush(150);
     expect(gateway.approvalsSubmitted).toHaveLength(1);
-    expect(gateway.approvalsSubmitted[0]).toMatchObject({ nodeId: "gate", approved: true });
+    expect(gateway.approvalsSubmitted[0]).toMatchObject({ nodeId: "gate", decision: { approved: true } });
     expect(harness.container.querySelector("[data-slot='confirmation']")!.getAttribute("data-state")).toBe("requested");
     expect(harness.container.querySelector<HTMLButtonElement>("[data-decision='approve']")!.disabled).toBe(false);
   });

@@ -33,7 +33,6 @@ export function submitDecision(
     runId: approval.runId,
     nodeId: approval.nodeId,
     iteration: approval.iteration,
-    approved,
     decision: { approved, ...(trimmed ? { note: trimmed } : {}) },
     ...(trimmed ? { note: trimmed } : {}),
   });
