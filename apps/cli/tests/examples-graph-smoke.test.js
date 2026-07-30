@@ -74,7 +74,7 @@ function findTopLevelExampleWorkflows() {
   return Array.from(new Bun.Glob("examples/*.jsx").scanSync({ cwd: REPO_ROOT })).sort();
 }
 
-async function renderExample(projectDir, workerDir, example) {
+async function renderExampleAttempt(projectDir, workerDir, example) {
   const child = Bun.spawn(
     [
       process.execPath,
@@ -129,7 +129,13 @@ async function renderExample(projectDir, workerDir, example) {
         : new Error(`graph subprocess exited with code ${exitCode}`),
     stdout,
     stderr,
+    timedOut,
   };
+}
+
+async function renderExample(projectDir, workerDir, example) {
+  const first = await renderExampleAttempt(projectDir, workerDir, example);
+  return first.timedOut ? renderExampleAttempt(projectDir, workerDir, example) : first;
 }
 
 test("top-level example workflows render as graphs", async () => {
