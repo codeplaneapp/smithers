@@ -107,6 +107,45 @@ function libImportsOf(source: string): string[] {
 }
 
 /**
+ * Runtime files resolved relative to a workflow module. Static-import walking
+ * cannot see paths passed to resolve(import.meta.dir, ...), but those files
+ * are just as required by a fresh `smithers init`.
+ */
+function runtimeLibFilesOf(source: string): string[] {
+  const specs = new Set<string>();
+  const re = /resolve\s*\(\s*import\.meta\.dir\s*,\s*["']\.\.\/lib\/([^"']+)["']\s*\)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source)) !== null) specs.add(m[1]);
+  return [...specs];
+}
+
+/** `.smithers/lib/*` file paths embedded in a bundled JSON runtime config. */
+function jsonLibFilesOf(source: string, label: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source);
+  } catch (error) {
+    throw new Error(`${label} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const specs = new Set<string>();
+  const visit = (value: unknown) => {
+    if (typeof value === "string" && value.startsWith(".smithers/lib/")) {
+      specs.add(value.slice(".smithers/lib/".length));
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const entry of value) visit(entry);
+      return;
+    }
+    if (value && typeof value === "object") {
+      for (const entry of Object.values(value)) visit(entry);
+    }
+  };
+  visit(parsed);
+  return [...specs];
+}
+
+/**
  * Relative imports inside a lib module (`./x`, `../y`), resolved against the
  * module's own path (relative to `.smithers/lib/`). Anything that escapes
  * `.smithers/lib/` is rejected — seeded lib helpers must stay self-contained.
@@ -171,9 +210,16 @@ function resolveUiFile(specifier: string): { relPath: string; absPath: string } 
 /** Resolve a lib import specifier to an on-disk file under `.smithers/lib/`. */
 function resolveLibFile(specifier: string): { relPath: string; absPath: string } {
   const candidates =
-    specifier.endsWith(".ts") || specifier.endsWith(".tsx")
+    specifier.endsWith(".ts") || specifier.endsWith(".tsx") || specifier.endsWith(".json")
       ? [specifier]
-      : [specifier, `${specifier}.ts`, `${specifier}.tsx`, `${specifier}/index.ts`, `${specifier}/index.tsx`];
+      : [
+          specifier,
+          `${specifier}.ts`,
+          `${specifier}.tsx`,
+          `${specifier}.json`,
+          `${specifier}/index.ts`,
+          `${specifier}/index.tsx`,
+        ];
   for (const candidate of candidates) {
     const absPath = resolve(SMITHERS_DIR, "lib", candidate);
     if (existsSync(absPath)) return { relPath: candidate, absPath };
@@ -250,7 +296,9 @@ function build(): TemplateFile[] {
     // Bundle `../lib/*` helpers (transitively) so a seeded workflow loads from
     // a fresh init — a workflow shipped without its lib imports fails
     // `smithers graph` with a module-not-found the moment it is seeded.
-    const libQueue = libImportsOf(workflowSource).map((specifier) => resolveLibFile(specifier));
+    const libQueue = [...libImportsOf(workflowSource), ...runtimeLibFilesOf(workflowSource)].map((specifier) =>
+      resolveLibFile(specifier),
+    );
     if (id === "docs-driven-development") {
       for (const helper of DDD_HELPER_FILES) libQueue.push(resolveLibFile(`ddd/${helper}`));
       push(".smithers/spec/features.json", "[]\n");
@@ -266,7 +314,10 @@ function build(): TemplateFile[] {
       visitedLibs.add(relPath);
       const libSource = readOrThrow(absPath, `lib module ${relPath} for workflow ${id}`);
       push(`.smithers/lib/${relPath}`, libSource);
-      for (const nested of libRelativeImportsOf(libSource, relPath)) {
+      const nestedFiles = relPath.endsWith(".json")
+        ? jsonLibFilesOf(libSource, `lib asset ${relPath} for workflow ${id}`)
+        : libRelativeImportsOf(libSource, relPath);
+      for (const nested of nestedFiles) {
         libQueue.push(resolveLibFile(nested));
       }
     }
