@@ -102,9 +102,9 @@ describe("scorers e2e", () => {
     const stored = await adapter.listScorerResults("replay-run");
     expect(stored).toHaveLength(1);
     expect(stored[0].id).toMatch(/^scorer_[0-9a-f]{64}$/);
-    expect(stored[0].score).toBe(0.25);
+    expect(stored[0].score).toBe(0.75);
     const aggregated = await aggregateScores(adapter, { runId: "replay-run" });
-    expect(aggregated).toMatchObject([{ scorerId: "replay-quality", count: 1, mean: 0.25 }]);
+    expect(aggregated).toMatchObject([{ scorerId: "replay-quality", count: 1, mean: 0.75 }]);
   });
   it("handles schema validation failure correctly", async () => {
     const outputSchema = z.object({
