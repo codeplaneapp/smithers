@@ -510,6 +510,9 @@ function discoverIssues(input: Input): z.infer<typeof discoverySchema> {
 }
 
 function areasOverlap(a: string[], b: string[]): boolean {
+  // "." is the conservative marker for an unscoped lane: it may edit
+  // anywhere, so it must never share a wave with another lane.
+  if (a.includes(".") || b.includes(".")) return true;
   return a.some((x) => b.some((y) => x === y || x.startsWith(y + "/") || y.startsWith(x + "/")));
 }
 type WaveEntry = { issueNumber: number; areas: string[] };
@@ -737,7 +740,7 @@ function finishSync(cwd: string, waveIndex: number): Sync {
  *  `pnpm test` never goes green on a busy machine. Instead: typecheck, then the
  *  full recursive suite, then ONE serial re-run of just the packages that
  *  failed; the wave is green when every re-run is. */
-async function runGate(cwd: string, waveIndex: number): Promise<Gate> {
+async function runGateUnsafe(cwd: string, waveIndex: number): Promise<Gate> {
   const headSha = git(["rev-parse", "HEAD"], cwd);
   const typecheck = await runProcess("bash", ["-lc", "pnpm typecheck"], cwd, 40 * 60_000);
   if (typecheck.exitCode !== 0) {
@@ -803,7 +806,22 @@ async function runGate(cwd: string, waveIndex: number): Promise<Gate> {
   };
 }
 
-async function pushTrain(cwd: string, waveIndex: number, dryRun: boolean): Promise<Push> {
+async function runGate(cwd: string, waveIndex: number): Promise<Gate> {
+  try {
+    return await runGateUnsafe(cwd, waveIndex);
+  } catch (error) {
+    return {
+      waveIndex,
+      passed: false,
+      exitCode: 1,
+      headSha: "",
+      logTail: String(error).slice(0, 24_000),
+      summary: "Gate could not start or settle: " + String(error).slice(0, 2_000),
+    };
+  }
+}
+
+async function pushTrainUnsafe(cwd: string, waveIndex: number, dryRun: boolean): Promise<Push> {
   const headSha = git(["rev-parse", "HEAD"], cwd);
   if (dryRun) {
     return {
@@ -850,6 +868,20 @@ async function pushTrain(cwd: string, waveIndex: number, dryRun: boolean): Promi
     remoteSha: after,
     summary: after === headSha ? "Pushed train head to origin/main." : "Push verification mismatch.",
   };
+}
+
+async function pushTrain(cwd: string, waveIndex: number, dryRun: boolean): Promise<Push> {
+  try {
+    return await pushTrainUnsafe(cwd, waveIndex, dryRun);
+  } catch (error) {
+    return {
+      waveIndex,
+      pushed: false,
+      headSha: "",
+      remoteSha: "",
+      summary: "Push could not start or settle: " + String(error).slice(0, 2_000),
+    };
+  }
 }
 
 function verifyClose(issueNumber: number): CloseCheck {
@@ -1317,6 +1349,9 @@ export default smithers((ctx) => {
           const approvedIssues = waveIssues.filter((issue) => laneReview(w, issue.number)?.verdict === "approve");
           const commitsSettled = approvedIssues.every((issue) => laneCommitCheck(w, issue.number) !== undefined);
           const committedIssues = approvedIssues.filter((issue) => laneCommitCheck(w, issue.number)?.verified === true);
+          const commitVerificationFailures = approvedIssues.filter(
+            (issue) => laneCommitCheck(w, issue.number)?.verified === false,
+          );
           const gate = latest<Gate>(ctx, outputs.strainGate, "w" + w + ":gate");
           const gatePassed = gate?.passed === true;
           const waveFix = latest<WaveFix>(ctx, outputs.strainWaveFix, "w" + w + ":gate-fix");
@@ -1340,12 +1375,15 @@ export default smithers((ctx) => {
             if (laneObsolete(n)) return true;
             return push?.pushed === true && verifiedCommits.has(n);
           });
-          // Lanes that ended without LGTM or obsolete: blocked, rejected past the loop cap,
-          // needs_human, or produced nothing. These get deterministic ops TODOs.
+          // Lanes that ended without LGTM, or whose approved commit failed
+          // deterministic verification, get deterministic ops TODOs.
           const blockedLanes = lanesSettled
             ? waveIssues.filter((issue) => {
                 const row = laneRow(w, issue.number);
-                return row !== undefined && ["reject", "needs_human", "none"].includes(row.verdict);
+                return (
+                  (row !== undefined && ["reject", "needs_human", "none"].includes(row.verdict)) ||
+                  commitVerificationFailures.some((candidate) => candidate.number === issue.number)
+                );
               })
             : [];
 
@@ -1424,14 +1462,22 @@ export default smithers((ctx) => {
                         {() => {
                           const row = laneRow(w, n);
                           const verdict = row?.verdict ?? "none";
+                          const commitFailure = laneCommitCheck(w, n);
                           const reason =
-                            verdict === "reject"
-                              ? "review never reached LGTM after " +
-                                input.reviewIterations +
-                                " iterations; last feedback: " +
-                                (row?.summary ?? "")
-                              : (row?.summary ?? "lane produced no output");
-                          return fileOpsTodo(n, issue.title, reason, "lane-" + verdict);
+                            commitFailure?.verified === false
+                              ? "approved lane failed commit verification: " + commitFailure.summary
+                              : verdict === "reject"
+                                ? "review never reached LGTM after " +
+                                  input.reviewIterations +
+                                  " iterations; last feedback: " +
+                                  (row?.summary ?? "")
+                                : (row?.summary ?? "lane produced no output");
+                          return fileOpsTodo(
+                            n,
+                            issue.title,
+                            reason,
+                            commitFailure?.verified === false ? "commit-verification" : "lane-" + verdict,
+                          );
                         }}
                       </Task>
                     );
