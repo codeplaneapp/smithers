@@ -59,6 +59,17 @@
         ]
       },
       {
+        "tab": "Next",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "next"
+            ]
+          }
+        ]
+      },
+      {
         "tab": "Product API",
         "groups": [
           {
