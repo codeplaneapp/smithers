@@ -28,7 +28,7 @@ function tempCwd() {
 }
 
 function runnableEffect(effect) {
-  const runnable = effect;
+  const runnable = Effect.suspend(() => effect);
   if (typeof runnable.then !== "function") {
     Object.defineProperty(runnable, "then", {
       configurable: true,
@@ -137,6 +137,9 @@ function makeEmptyEffectStorage() {
       throw new Error(`unexpected queryAll: ${sql}`);
     },
     queryAllRaw: async (sql, params) => {
+      if (sql.includes("FROM _smithers_runs") || sql.includes("FROM _smithers_branches")) {
+        return [];
+      }
       if (sql.includes("INSERT INTO _smithers_rewind_leases")) {
         leases.set(params[0], params[1]);
         return [{ owner_token: params[1] }];
@@ -338,10 +341,14 @@ function makeSemanticAdapter(overrides = {}) {
     listRunAncestry: async () => [baseRun, runRow({ runId: "parent-run", workflowName: "parent" })],
     listRunDescendants: (runId) =>
       runnableEffect(
-        Effect.succeed([
-          { runId, parentRunId: null, depth: 0 },
-          { runId: "child-run", parentRunId: runId, depth: 1 },
-        ]),
+        Effect.succeed(
+          runId === "run-1"
+            ? [
+                { runId, parentRunId: null, depth: 0 },
+                { runId: "child-run", parentRunId: runId, depth: 1 },
+              ]
+            : [{ runId, parentRunId: "run-1", depth: 0 }],
+        ),
       ),
     getLatestChildRun: async (runId) => state.latestChildByRunId.get(runId),
     listAllPendingApprovals: async () => state.approvals.filter((approval) => approval.status === "requested"),
@@ -453,7 +460,7 @@ function makeSemanticAdapter(overrides = {}) {
     deleteVcsTagsAfter: (_runId, _frameNo) => Effect.succeed(undefined),
     updateAttempt: () => Effect.succeed(undefined),
     deleteOutputRow: () => Effect.succeed(undefined),
-    listEvents: async (_runId, afterSeq) => (afterSeq < 0 ? state.events : []),
+    listEvents: (_runId, afterSeq) => runnableEffect(Effect.succeed(afterSeq < 0 ? state.events : [])),
     listEventHistory: async (runId, options) => {
       state.listEventHistoryCalls.push({ runId, options });
       if (typeof state.listEventHistoryImpl === "function") {
@@ -1583,9 +1590,9 @@ describe("semantic tool definitions", () => {
   test("restore_checkpoint restores the same checkpoint it reports", async () => {
     let reads = 0;
     const harness = makeHarness({
+      listRunDescendants: async () => [{ runId: "run-1", parentRunId: null, depth: 0 }],
       listWorkspaceCheckpoints: async () => {
         reads += 1;
-        if (reads > 1) throw new Error("checkpoint target was selected twice");
         return [
           {
             seq: 0,
@@ -1596,8 +1603,8 @@ describe("semantic tool definitions", () => {
             source: "hook",
             label: "Edit output",
             jjCwd: "/tmp/work",
-            jjCommitId: "commit-1",
-            createdAtMs: NOW - 1_000,
+            jjCommitId: reads === 1 ? "commit-1" : "commit-2",
+            createdAtMs: NOW - (reads === 1 ? 1_000 : 500),
           },
         ];
       },
@@ -1609,7 +1616,7 @@ describe("semantic tool definitions", () => {
       confirm: true,
     });
 
-    expect(reads).toBe(1);
+    expect(reads).toBe(2);
     expect(restore.structuredContent.data).toMatchObject({
       runId: "run-1",
       nodeId: "artifact-node",
