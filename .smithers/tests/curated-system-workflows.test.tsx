@@ -12,7 +12,6 @@ import type { TaskDescriptor } from "smithers-orchestrator/graph";
 import { attempt, investigate, smithersBug } from "./curated-system-workflows.contracts";
 
 type Row = Record<string, unknown> & { nodeId: string };
-type PackResult = { written: number; skipped: number; changed: string[] };
 type Frame = RenderedWorkflow;
 const workflows = join(import.meta.dir, "..", "workflows");
 const cliSrc = pathToFileURL(resolve(import.meta.dir, "../../apps/cli/src")).href;
@@ -132,7 +131,7 @@ describe.serial("curated system workflow causal contracts", () => {
         )!.contents;
         const first = (await runTask(
           task(await render("init.tsx", { force: false, refreshSkills: false, skipInstall: true }), "install-pack"),
-        )) as PackResult;
+        )) as { written: number; skipped: number; changed: string[] };
         expect(first).toMatchObject({ skipped: 1, changed: [] });
         const seededFileCount = Number(first.written) + Number(first.skipped);
         expect(seededFileCount).toBeGreaterThan(1);

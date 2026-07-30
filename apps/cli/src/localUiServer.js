@@ -1371,6 +1371,23 @@ export function startLocalUiServer({
  * Ensure the bundle is built (building from source if needed), then serve it.
  * Returns `{ server, url }`. Throws on unrecoverable errors.
  */
+export function allocateConciergePort() {
+  return new Promise((resolvePromise, reject) => {
+    const probe = createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const address = probe.address();
+      if (!address || typeof address !== "object") {
+        probe.close();
+        reject(new Error("Could not allocate an ephemeral concierge port."));
+        return;
+      }
+      const ephemeralPort = address.port;
+      probe.close((error) => (error ? reject(error) : resolvePromise(ephemeralPort)));
+    });
+  });
+}
+
 export async function serveLocalUi({ gatewayBase, port, rebuild = false }) {
   const ui = resolveLocalUi();
   if (!ui) {
@@ -1391,6 +1408,7 @@ export async function serveLocalUi({ gatewayBase, port, rebuild = false }) {
   // `smithers ui --app` serves a working chat that backgrounds workflows. It's
   // best-effort: a missing concierge just leaves /api/chat unproxied.
   let concierge = null;
+  let conciergeStopping = false;
   let conciergePort;
   // The concierge (chat backend) runs from source in the repo, or from the
   // bundled `concierge.js` staged next to a prebuilt bundle. Either way it uses
@@ -1405,7 +1423,9 @@ export async function serveLocalUi({ gatewayBase, port, rebuild = false }) {
     if (!hasBunOnPath()) {
       throw new Error(MISSING_BUN_MESSAGE);
     }
-    conciergePort = Number(process.env.SMITHERS_CONCIERGE_PORT ?? "5179");
+    // Allocate a new port for every CLI session. A concierge orphaned by an
+    // abnormal parent exit can no longer capture the next session's API proxy.
+    conciergePort = await allocateConciergePort();
     concierge = spawn("bun", [conciergeEntry], {
       stdio: "ignore",
       env: {
@@ -1414,7 +1434,14 @@ export async function serveLocalUi({ gatewayBase, port, rebuild = false }) {
         SMITHERS_GATEWAY_PROXY_TARGET: gatewayBase,
       },
     });
-    concierge.on("error", () => {});
+    concierge.once("error", (error) => {
+      console.error(`[smithers ui] Concierge failed to start: ${error?.message ?? String(error)}`);
+    });
+    concierge.once("exit", (code, signal) => {
+      if (conciergeStopping) return;
+      const reason = signal ? `signal ${signal}` : `exit code ${code}`;
+      console.error(`[smithers ui] Concierge died unexpectedly (${reason}); the chat API is unavailable.`);
+    });
   }
 
   let server;
@@ -1429,6 +1456,7 @@ export async function serveLocalUi({ gatewayBase, port, rebuild = false }) {
   } catch (error) {
     // The concierge was already spawned above; a failed bind (e.g. EADDRINUSE)
     // would otherwise orphan it, leaking its port on every failed launch.
+    conciergeStopping = true;
     concierge?.kill();
     throw error;
   }
@@ -1437,6 +1465,7 @@ export async function serveLocalUi({ gatewayBase, port, rebuild = false }) {
   // Tear the concierge down with the server.
   const close = server.close.bind(server);
   server.close = (...args) => {
+    conciergeStopping = true;
     concierge?.kill();
     return close(...args);
   };

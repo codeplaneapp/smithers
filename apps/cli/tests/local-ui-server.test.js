@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, realpath, rm, symlink, utimes, writeFile } from "node:f
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  allocateConciergePort,
   bundleIsFresh,
   checkLocalWorkspaceReadiness,
   chooseLocalUiSource,
@@ -177,6 +178,23 @@ describe("bundleIsFresh", () => {
 });
 
 describe("localUiServer workspace readiness", () => {
+  test("allocates an available ephemeral port for each concierge session", async () => {
+    const occupied = createServer();
+    const occupiedBase = await listen(occupied);
+    const occupiedPort = Number(new URL(occupiedBase).port);
+
+    const conciergePort = await allocateConciergePort();
+
+    expect(conciergePort).toBeGreaterThan(0);
+    expect(conciergePort).not.toBe(occupiedPort);
+    const probe = createServer();
+    await new Promise((resolve, reject) => {
+      probe.once("error", reject);
+      probe.listen(conciergePort, "127.0.0.1", resolve);
+    });
+    await new Promise((resolve) => probe.close(resolve));
+  });
+
   test("reports a ready local workspace scoped to the proxied gateway", async () => {
     const workspace = await tempWorkspace();
     const gatewayBase = await listen(

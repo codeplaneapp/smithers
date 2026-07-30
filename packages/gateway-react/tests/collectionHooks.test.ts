@@ -290,8 +290,12 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
       {
         runId,
         seq: 2,
-        event: "NodeFinished",
-        payload: { runId, nodeId, iteration: 0 },
+        event: "run.event",
+        payload: {
+          event: "node.finished",
+          seq: 2,
+          payload: { runId, nodeId, iteration: 0 },
+        },
       },
     ];
     await act(async () => {

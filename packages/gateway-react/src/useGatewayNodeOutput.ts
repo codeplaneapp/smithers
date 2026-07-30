@@ -22,20 +22,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function unwrapRunEvent(event: { event: string; payload?: unknown }): {
+  event: string;
+  payload: Record<string, unknown>;
+} {
+  let eventName = event.event;
+  let payload = isRecord(event.payload) ? event.payload : {};
+  for (let depth = 0; depth < 3 && eventName === "run.event"; depth += 1) {
+    const nestedEvent = typeof payload.event === "string" ? payload.event : undefined;
+    if (!nestedEvent) break;
+    eventName = nestedEvent;
+    payload = isRecord(payload.payload) ? payload.payload : payload;
+  }
+  return { event: eventName, payload };
+}
+
 function invalidatesNodeOutput(
   event: { event: string; payload?: unknown },
   nodeId: string,
   iteration: number,
 ): boolean {
-  const payload = isRecord(event.payload) ? event.payload : {};
+  const unwrapped = unwrapRunEvent(event);
+  const payload = unwrapped.payload;
   if (
-    RUN_TERMINAL_EVENTS.has(event.event) ||
-    (event.event === "RunStatusChanged" && TERMINAL_RUN_STATUSES.has(String(payload.status)))
+    RUN_TERMINAL_EVENTS.has(unwrapped.event) ||
+    (unwrapped.event === "RunStatusChanged" && TERMINAL_RUN_STATUSES.has(String(payload.status)))
   ) {
     return true;
   }
   return (
-    NODE_OUTPUT_INVALIDATION_EVENTS.has(event.event) &&
+    NODE_OUTPUT_INVALIDATION_EVENTS.has(unwrapped.event) &&
     payload.nodeId === nodeId &&
     (typeof payload.iteration !== "number" || payload.iteration === iteration)
   );
