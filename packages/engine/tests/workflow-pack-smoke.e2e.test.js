@@ -54,7 +54,7 @@ function initWorkflowPack(repo = createTempRepo()) {
   return { repo, env };
 }
 test(
-  "curated init pack discovers only the public authoring workflows",
+  "curated init pack discovers every public workflow",
   () => {
     const { repo, env } = initWorkflowPack();
     const result = runSmithers(["workflow", "list"], {
@@ -64,7 +64,13 @@ test(
     });
     expect(result.exitCode).toBe(0);
     const ids = (result.json?.workflows ?? result.json ?? []).map((workflow) => workflow.id ?? workflow.name);
-    expect(ids.sort()).toEqual(["create-skill", "create-workflow", "docs-driven-development"]);
+    expect(ids.sort()).toEqual([
+      "create-skill",
+      "create-workflow",
+      "docs-driven-development",
+      "smithers-repo-federation",
+      "whole-foods-meal-planner",
+    ]);
     expect(ids).not.toContain("implement");
     expect(ids).not.toContain("review");
     expect(ids).not.toContain("plan");

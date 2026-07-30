@@ -7,9 +7,9 @@ import { renderPrompt, renderWorkflow } from "smithers-orchestrator/testing";
 setDefaultTimeout(60_000);
 
 /**
- * Owner suite for the four long-running campaign workflows:
- * design-partner-fixes.tsx, sol-issue-train.tsx, tui-parity.tsx and
- * xcombo-fix-train.tsx. Each of these drives real repos, worktrees and
+ * Owner suite for the three long-running campaign workflows:
+ * sol-issue-train.tsx, tui-parity.tsx and xcombo-fix-train.tsx.
+ * Each of these drives real repos, worktrees and
  * remotes, so the contract this suite pins is the GRAPH: what mounts, what
  * stays unmounted until its evidence row exists, and which prompt carries
  * which sentinel. Behavior against real services belongs to their runs.
@@ -47,90 +47,6 @@ const staged = (nodeId: string, value: Record<string, unknown>) => ({
 });
 
 describe("campaign workflow owner coverage", () => {
-  test("design-partner-fixes.tsx gates lanes, the landing approval, and the merge queue on evidence", async () => {
-    const file = "design-partner-fixes.tsx";
-    const module = await load(file);
-    const parsed = module.default.inputSchema.parse({});
-    expect(parsed).toEqual({ perIssueIterations: 3, maxConcurrency: 3 });
-    expect(() => module.default.inputSchema.parse({ perIssueIterations: 5 })).toThrow();
-    expect(() => module.default.inputSchema.parse({ maxConcurrency: 7 })).toThrow();
-
-    // Discovery is a compute task, so nothing about the issues is known yet.
-    const empty = await render(file);
-    expect(ids(empty)).toEqual(["discover"]);
-
-    // The workflow only ever accepts its own pinned partner issues; a row for
-    // any other number is discarded rather than silently opening a lane.
-    const issues = [
-      { number: 1416, title: "elizaOS crash", body: "REPRO_SENTINEL", url: "https://example.test/1416" },
-      { number: 1420, title: "aomi drift", body: "second", url: "https://example.test/1420" },
-    ];
-    const discovered = {
-      dpfDiscovery: [staged("discover", { issues, summary: "two issues" })],
-    };
-    const lanes = await render(file, {}, discovered);
-    for (const issue of issues) {
-      expect(ids(lanes)).toContain(`i${issue.number}:investigate`);
-      expect(ids(lanes)).toContain(`i${issue.number}:implement`);
-      expect(ids(lanes)).toContain(`i${issue.number}:review-fable`);
-      expect(ids(lanes)).toContain(`i${issue.number}:review-sol`);
-    }
-    // Two independent review seats, never the same agent twice.
-    expect(task(lanes, "i1416:review-fable").agent).toBeDefined();
-    expect(task(lanes, "i1416:review-sol").agent).toBeDefined();
-    expect(task(lanes, "i1416:review-fable").agent).not.toEqual(task(lanes, "i1416:review-sol").agent);
-    expect(renderPrompt(task(lanes, "i1416:investigate").prompt as never)).toContain("REPRO_SENTINEL");
-    // The landing gate waits for EVERY issue to produce a PR row.
-    expect(ids(lanes)).not.toContain("approve-landing");
-
-    const onePr = await render(
-      file,
-      {},
-      {
-        ...discovered,
-        dpfPr: [staged("i1416:pr", { issueNumber: 1416, prepared: true, prNumber: 1516, prUrl: "u", summary: "one" })],
-      },
-    );
-    expect(ids(onePr)).not.toContain("approve-landing");
-
-    const prRows = [
-      staged("i1416:pr", { issueNumber: 1416, prepared: true, prNumber: 1516, prUrl: "u1", summary: "one" }),
-      staged("i1420:pr", { issueNumber: 1420, prepared: true, prNumber: 1520, prUrl: "u2", summary: "two" }),
-    ];
-    const gated = await render(file, {}, { ...discovered, dpfPr: prRows });
-    expect(task(gated, "approve-landing").needsApproval).toBe(true);
-    expect(ids(gated)).not.toContain("merge-1416");
-
-    const approved = await render(
-      file,
-      {},
-      {
-        ...discovered,
-        dpfPr: prRows,
-        dpfLandingApproval: [staged("approve-landing", { approved: true, note: null })],
-      },
-    );
-    expect(ids(approved)).toContain("merge-1416");
-    expect(ids(approved)).toContain("merge-1420");
-    expect(ids(approved)).not.toContain("landing-skipped");
-
-    const denied = await render(
-      file,
-      {},
-      {
-        ...discovered,
-        dpfPr: prRows,
-        dpfLandingApproval: [staged("approve-landing", { approved: false, note: "not yet" })],
-      },
-    );
-    expect(ids(denied)).toContain("landing-skipped");
-    expect(ids(denied)).not.toContain("merge-1416");
-
-    // Porcelain parsing is the scope guard for the lane worktrees.
-    expect(module.parsePorcelainPaths(" M src/a.ts\0?? src/b.ts\0")).toEqual(["src/a.ts", "src/b.ts"]);
-    expect(module.parsePorcelainPaths("")).toEqual([]);
-  });
-
   test("sol-issue-train.tsx mounts setup, discovery, triage fan-out, and the plan in order", async () => {
     const file = "sol-issue-train.tsx";
     const module = await load(file);

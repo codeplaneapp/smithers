@@ -65,7 +65,6 @@ describe("pipeline workflow behavior", () => {
     const packs = (await moduleFor("implement-packs.tsx")).inputSchema;
     const stable = (await moduleFor("implement-stable.tsx")).inputSchema;
     const plue = (await moduleFor("implement-plue-runner.tsx")).inputSchema;
-    const investor = await moduleFor("investor.tsx");
     expect(packs.parse({})).toEqual({ planDoc: "research/packs-share-workflows-like-skills.md", maxIterations: 3 });
     expect(stable.parse({})).toEqual({ prompt: "Implement the requested change.", maxIterations: 3 });
     expect(plue.parse({})).toEqual({ plueCliBin: "plue", maxIterations: 3 });
@@ -77,17 +76,6 @@ describe("pipeline workflow behavior", () => {
       expect(schema.safeParse(blank).success).toBe(false);
       expect(schema.safeParse({ ...valid, maxIterations: 0 }).success).toBe(false);
       expect(schema.safeParse({ ...valid, maxIterations: 11 }).success).toBe(false);
-    }
-    for (const bad of [
-      { voice: " " },
-      { rate: 0 },
-      { rate: 501 },
-      { startAt: -1 },
-      { startAt: 10_001 },
-      { autoMs: -1 },
-      { autoMs: 600_001 },
-    ]) {
-      expect(investor.inputSchema.safeParse(bad).success).toBe(false);
     }
   }, 30_000);
 

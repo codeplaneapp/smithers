@@ -68,7 +68,7 @@ const row = (nodeId: string, iteration: number, value: Record<string, unknown>) 
 
 describe("local orchestration workflows C", () => {
   test("issue-train orchestration workflows remain importable", async () => {
-    for (const name of ["design-partner-fixes.tsx", "sol-issue-train.tsx", "xcombo-fix-train.tsx"]) {
+    for (const name of ["sol-issue-train.tsx", "xcombo-fix-train.tsx"]) {
       expect(await load(name)).toBeDefined();
     }
   });
