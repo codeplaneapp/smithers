@@ -68,7 +68,7 @@ const vcs = {
 
 /**
  * Initialize a fresh jj repo with a single committed file. Returns the repo
- * directory and a getter for the most recent change_id (`@-`).
+ * directory and getters for immutable commit ids plus the current change id.
  */
 async function makeRepo(prefix = "jj-real-") {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -94,9 +94,9 @@ async function makeRepo(prefix = "jj-real-") {
       if (r.status !== 0) throw new Error(r.stderr);
       return r.stdout.trim();
     },
-    /** @returns {Promise<string>} change_id of `@-` */
-    async parentChangeId() {
-      const r = spawnSync("jj", ["log", "-r", "@-", "--no-graph", "--template", "change_id"], {
+    /** @returns {Promise<string>} commit_id of `@-` */
+    async parentCommitId() {
+      const r = spawnSync("jj", ["log", "-r", "@-", "--no-graph", "--template", "commit_id"], {
         cwd: dir,
         encoding: "utf8",
       });
@@ -122,7 +122,7 @@ describeIfJj("revertToJjPointer with dirty working tree", () => {
     const repo = await makeRepo();
     try {
       await commitFile(repo, "a.txt", "hello\n", "first");
-      const target = await repo.parentChangeId();
+      const target = await repo.parentCommitId();
       // Mutate the working copy without committing.
       await fs.writeFile(path.join(repo.dir, "a.txt"), "MODIFIED\n");
       const result = await vcs.revertToJjPointer(target, repo.dir);
@@ -138,7 +138,7 @@ describeIfJj("revertToJjPointer with dirty working tree", () => {
     const repo = await makeRepo();
     try {
       await commitFile(repo, "a.txt", "hello\n", "first");
-      const target = await repo.parentChangeId();
+      const target = await repo.parentCommitId();
       // Add an untracked file. jj automatically tracks it on the next snapshot.
       await fs.writeFile(path.join(repo.dir, "untracked.txt"), "new\n");
       const result = await vcs.revertToJjPointer(target, repo.dir);
@@ -156,20 +156,14 @@ describeIfJj("revertToJjPointer with dirty working tree", () => {
   }, 30_000);
 });
 
-describeIfJj("revertToJjPointer with abandoned change", () => {
-  test("returns success:false with a useful error string when target is abandoned", async () => {
+describeIfJj("revertToJjPointer with a missing immutable commit", () => {
+  test("returns success:false with a useful error string when the target does not exist", async () => {
     const repo = await makeRepo();
     try {
       await commitFile(repo, "a.txt", "hello\n", "first");
-      const oldId = await repo.parentChangeId();
-      // Move forward and abandon the original commit.
-      const newRes = repo.jj(["new", "-m", "second"]);
-      expect(newRes.status).toBe(0);
-      const ab = repo.jj(["abandon", oldId]);
-      expect(ab.status).toBe(0);
-      const result = await vcs.revertToJjPointer(oldId, repo.dir);
+      const missingCommitId = "f".repeat(40);
+      const result = await vcs.revertToJjPointer(missingCommitId, repo.dir);
       expect(result.success).toBe(false);
-      // The error string should mention either "doesn't exist" or the id.
       expect(typeof result.error).toBe("string");
       expect((result.error ?? "").length).toBeGreaterThan(0);
     } finally {
@@ -336,7 +330,7 @@ describeIfJj("symlinks in workspace", () => {
       const ptr = await vcs.getJjPointer(repo.dir);
       expect(typeof ptr).toBe("string");
       // A symlink should still be a symlink after we restore from the parent change.
-      const parent = await repo.parentChangeId();
+      const parent = await repo.parentCommitId();
       const result = await vcs.revertToJjPointer(parent, repo.dir);
       expect(result.success).toBe(true);
       const stat = await fs.lstat(path.join(repo.dir, "link.txt"));
@@ -511,7 +505,7 @@ describeIfJj("getJjPointer -> revertToJjPointer round-trip on the SAME change (a
     }
   }, 30_000);
 
-  test("legacy change_id pointer logs the silent-no-op warning and leaves edits in place", async () => {
+  test("legacy change_id pointer fails closed without changing filesystem bytes", async () => {
     const repo = await makeRepo();
     try {
       await fs.writeFile(path.join(repo.dir, "f.txt"), "state A\n");
@@ -521,12 +515,11 @@ describeIfJj("getJjPointer -> revertToJjPointer round-trip on the SAME change (a
       const { value: result, records } = await runVcsCapturingLogs(
         vcsEffects.revertToJjPointer(legacyPointer, repo.dir),
       );
-      // jj accepts the change_id but resolves it to the change's current
-      // commit: exit 0, "Nothing changed.", bytes untouched.
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Cannot restore legacy jj change_id pointer");
       expect(await fs.readFile(path.join(repo.dir, "f.txt"), "utf8")).toBe("state B\n");
       const warned = records.some(
-        (record) => record.level === "WARN" && record.message.includes("legacy change_id pointer"),
+        (record) => record.level === "WARN" && record.message.includes("legacy jj change_id pointer"),
       );
       expect(warned).toBe(true);
     } finally {

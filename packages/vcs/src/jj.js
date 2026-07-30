@@ -217,7 +217,10 @@ function snapshotGap(step, code, reason) {
  * @returns {boolean}
  */
 function isJjChangeIdPointer(pointer) {
-  return /^[k-z]+$/.test(pointer);
+  // `change_id` templates emit the full 32-character reverse-hex identifier.
+  // Legacy database rows stored that full template value; arbitrary short
+  // revision strings still go to jj for its normal validation.
+  return /^[k-z]{32}$/.test(pointer);
 }
 /**
  * Restore the working copy to a previously recorded jj pointer (a `commit_id`
@@ -229,20 +232,24 @@ function isJjChangeIdPointer(pointer) {
  * commit, so when `@` never left the change the restore is a silent
  * filesystem no-op. That aliasing cannot be repaired from the pointer alone
  * (the historical commit is unrecoverable without the evolog position), so it
- * is logged loudly instead of silently succeeding.
+ * must fail closed instead of invoking a command known to alias to the current
+ * filesystem state.
  *
  * @param {string} pointer
  * @param {string} [cwd]
  * @returns {Effect.Effect<JjRevertResult, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
  */
 export function revertToJjPointer(pointer, cwd) {
-  const legacyWarning = isJjChangeIdPointer(pointer)
-    ? Effect.logWarning(
-        "revertToJjPointer received a legacy change_id pointer; jj resolves it to the change's current commit, so the filesystem restore may be a silent no-op",
-      )
-    : Effect.void;
-  return legacyWarning.pipe(
-    Effect.andThen(runJj(["restore", "--from", pointer], { cwd })),
+  if (isJjChangeIdPointer(pointer)) {
+    const error =
+      "Cannot restore legacy jj change_id pointer: it resolves to the change's current commit, not the recorded historical filesystem state.";
+    return Effect.logWarning(error).pipe(
+      Effect.as({ success: false, error }),
+      Effect.annotateLogs({ cwd: cwd ?? "", pointer }),
+      Effect.withLogSpan("vcs:jj-revert"),
+    );
+  }
+  return runJj(["restore", "--from", pointer], { cwd }).pipe(
     Effect.map((res) => (res.code === 0 ? { success: true } : { success: false, error: jjError(res) })),
     Effect.annotateLogs({ cwd: cwd ?? "", pointer }),
     Effect.withLogSpan("vcs:jj-revert"),
