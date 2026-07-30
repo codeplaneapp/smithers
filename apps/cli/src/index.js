@@ -423,7 +423,14 @@ async function restoreRetryTaskState(adapter, snapshot, resumeClaim) {
  */
 async function rollbackFailedRetryResume(adapter, snapshot, resumeClaim, resumeError) {
   try {
-    await restoreRetryTaskState(adapter, snapshot, resumeClaim);
+    const restored = await restoreRetryTaskState(adapter, snapshot, resumeClaim);
+    if (!restored) {
+      throw new SmithersError(
+        "RETRY_TASK_ROLLBACK_OWNERSHIP_LOST",
+        `Retry-task rollback refused because run ${snapshot.rootRunId} is no longer owned by the resume claim.`,
+        { runId: snapshot.rootRunId, claimOwnerId: resumeClaim.claimOwnerId },
+      );
+    }
   } catch (rollbackError) {
     throw new AggregateError(
       [resumeError, rollbackError],
@@ -11422,7 +11429,11 @@ function reportFatalCliError(err) {
   }
   process.exit(1);
 }
-export { cli, formatStatusExitCode, isWaitingStatus, pauseCtas };
+const __retryTaskCliInternals = {
+  rollbackFailedRetryResume,
+};
+
+export { __retryTaskCliInternals, cli, formatStatusExitCode, isWaitingStatus, pauseCtas };
 
 if (process.env.SMITHERS_CLI_DISABLE_AUTO_MAIN !== "1") {
   process.on("unhandledRejection", (reason) => {
