@@ -49,28 +49,25 @@ describe("smithers supervise scope", () => {
       const repo = createTempRepo();
       const workflowPath = repo.write("workflow.tsx", "export default {};\n");
       const { sqlite, adapter } = openRepoDb(repo);
-      try {
-        await insertStaleRun(adapter, "run-x", workflowPath);
-        await insertStaleRun(adapter, "run-y", workflowPath);
+      await insertStaleRun(adapter, "run-x", workflowPath);
+      await insertStaleRun(adapter, "run-y", workflowPath);
+      sqlite.close();
 
-        const scoped = runSmithers(["supervise", "--run", "run-x", "--dry-run"], {
-          cwd: repo.dir,
-          format: "json",
-          timeoutMs: TIMEOUT_MS,
-        });
-        expect(scoped.exitCode, `${scoped.stdout}\n${scoped.stderr}`).toBe(0);
-        expect(scoped.json?.wouldResume).toEqual(["run-x"]);
+      const scoped = runSmithers(["supervise", "--run", "run-x", "--dry-run"], {
+        cwd: repo.dir,
+        format: "json",
+        timeoutMs: TIMEOUT_MS,
+      });
+      expect(scoped.exitCode, `${scoped.stdout}\n${scoped.stderr}`).toBe(0);
+      expect(scoped.json?.wouldResume).toEqual(["run-x"]);
 
-        const all = runSmithers(["supervise", "--all", "--dry-run"], {
-          cwd: repo.dir,
-          format: "json",
-          timeoutMs: TIMEOUT_MS,
-        });
-        expect(all.exitCode, `${all.stdout}\n${all.stderr}`).toBe(0);
-        expect(new Set(all.json?.wouldResume)).toEqual(new Set(["run-x", "run-y"]));
-      } finally {
-        sqlite.close();
-      }
+      const all = runSmithers(["supervise", "--all", "--dry-run"], {
+        cwd: repo.dir,
+        format: "json",
+        timeoutMs: TIMEOUT_MS,
+      });
+      expect(all.exitCode, `${all.stdout}\n${all.stderr}`).toBe(0);
+      expect(new Set(all.json?.wouldResume)).toEqual(new Set(["run-x", "run-y"]));
     },
     TIMEOUT_MS,
   );
