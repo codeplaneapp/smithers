@@ -259,6 +259,11 @@ function App() {
         status = "failed";
       } else if (event === "run.cancelled" || event === "runcancelled") {
         status = "cancelled";
+      } else if (event === "run.started" || event === "runstarted" || event === "run.resumed" || event === "runresumed") {
+        // The engine's resume path appends RunStarted without a matching
+        // RunStatusChanged("running"), so a parked waiting-* status would
+        // otherwise survive every resume.
+        status = "running";
       } else if (event === "runcontinued") {
         status = asString(payload.status) ?? "continued";
       } else if (event === "runstatuschanged") {

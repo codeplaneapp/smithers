@@ -150,17 +150,9 @@ describe("Task deps", () => {
     );
     const summary = frame.tasks.find((task) => task.nodeId === "summary");
     expect(summary).toBeDefined();
-<<<<<<< HEAD
-    expect(summary?.kind).toBe("compute");
-    expect(summary?.staticPayload).toBeUndefined();
-    expect(summary?.computeFn()).toEqual({ text: "a=approved b=missing" });
-||||||| parent of 6c8d7222fc (🧪 test(components): align deferred dependency computes)
-    expect(summary?.staticPayload).toEqual({ text: "a=approved b=missing" });
-=======
     expect(summary?.kind).toBe("compute");
     expect(summary?.staticPayload).toBeUndefined();
     expect(await summary?.computeFn()).toEqual({ text: "a=approved b=missing" });
->>>>>>> 6c8d7222fc (🧪 test(components): align deferred dependency computes)
     expect(new Set(summary?.dependsOn)).toEqual(new Set(["review-a", "review-b"]));
     cleanup();
   });
