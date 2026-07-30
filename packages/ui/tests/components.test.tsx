@@ -85,6 +85,18 @@ describe("Button", () => {
     expect(html).not.toContain("<button");
   });
 
+  test("asChild forwards loading semantics without injecting a spinner", () => {
+    const html = renderToStaticMarkup(
+      <Button asChild loading>
+        <a href="/runs/123">Open run</a>
+      </Button>,
+    );
+    expect(html).toContain('disabled=""');
+    expect(html).toContain('aria-disabled="true"');
+    expect(html).toContain('aria-busy="true"');
+    expect(html).not.toContain("sui-spinner");
+  });
+
   test("keeps consumer className and explicit submit type", () => {
     const html = renderToStaticMarkup(
       <Button type="submit" className="my-extra">
