@@ -261,14 +261,11 @@ export function createTaskComponent({ applyCliToolAllowlist }) {
         : agentChain;
     const nextDependsOn = mergeDependsOn(rest.dependsOn, depNodeIds);
     const hasFunctionChild = typeof children === "function";
-    const hasAsyncFunctionChild = hasFunctionChild && children.constructor?.name === "AsyncFunction";
-    // Preserve the historical render-time ordering of synchronous deps
-    // callbacks. Declared async callbacks must not run here: they route through
-    // the compute bridge below, which invokes and awaits them exactly once.
-    const childValue =
-      hasFunctionChild && (agent || (deps && !hasAsyncFunctionChild))
-        ? children(resolvedDeps ?? Object.create(null))
-        : children;
+    // Agent children are prompt render functions and must resolve while the
+    // prompt is rendered. Compute children, including ordinary functions that
+    // happen to return a Promise, are passed to the execution bridge without
+    // being probed during React render.
+    const childValue = hasFunctionChild && agent ? children(resolvedDeps ?? Object.create(null)) : children;
     if (agent) {
       // Auto-inject `schema` prop into React element children when output is a ZodObject
       let childElement = childValue;
@@ -293,28 +290,13 @@ export function createTaskComponent({ applyCliToolAllowlist }) {
         prompt,
       );
     }
-    const syncChildReturnedThenable =
-      deps &&
-      hasFunctionChild &&
-      !hasAsyncFunctionChild &&
-      childValue != null &&
-      (typeof childValue === "object" || typeof childValue === "function") &&
-      typeof childValue.then === "function";
-    if (hasFunctionChild && (!deps || hasAsyncFunctionChild || syncChildReturnedThenable)) {
+    if (hasFunctionChild) {
       const nextProps = {
         ...rest,
         dependsOn: nextDependsOn,
         waitAsync: rest.async === true,
         __smithersKind: "compute",
-        // A normal function may still return a Promise. It was already invoked
-        // above to preserve sync compatibility, so return that same thenable
-        // rather than calling it twice.
-        __smithersComputeFn:
-          deps && !hasAsyncFunctionChild
-            ? () => childValue
-            : deps
-              ? () => children(resolvedDeps ?? Object.create(null))
-              : children,
+        __smithersComputeFn: deps ? () => children(resolvedDeps ?? Object.create(null)) : children,
         ...aspectMeta,
         ...memoryMeta,
       };
