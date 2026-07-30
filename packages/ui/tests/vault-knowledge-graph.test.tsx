@@ -60,7 +60,7 @@ describe("KnowledgeGraph (server render)", () => {
       (match) => match[1],
     );
     expect(nodeTransforms).toHaveLength(NOTES.length);
-    expect(nodeTransforms).not.toMatch(/class="sui-vault-graph-node"[^>]*transform="translate\(0 0\)"/);
+    expect(nodeTransforms).not.toContain("translate(0 0)");
     expect(html).not.toContain('x1="0"');
     expect(html).not.toContain('y2="0"');
   });
