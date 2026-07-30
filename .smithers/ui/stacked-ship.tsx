@@ -286,7 +286,7 @@ function StackedShipApp() {
       ) : null}
 
       <SectionHeader title="Approvals" />
-      <ApprovalPanel filter={activeRunId ? { runId: activeRunId } : undefined} pollMs={3_000} />
+      <ApprovalPanel filter={activeRunId ? { runId: activeRunId } : undefined} />
 
       <Tabs defaultValue="runs">
         <TabsList>
