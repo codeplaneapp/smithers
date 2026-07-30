@@ -6,6 +6,8 @@ import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import { __childWorkflowInternals, executeChildWorkflow } from "../src/child-workflow.js";
 import { withWorkflowMakeBridgeRuntime } from "../src/effect/workflow-make-bridge.js";
+import { RUN_ID_PATTERN } from "../../server/src/gatewayRoutes/RUN_ID_PATTERN.js";
+import { JUMP_RUN_ID_PATTERN } from "../../time-travel/src/JUMP_RUN_ID_PATTERN.js";
 
 function makeRuntime(overrides = {}) {
   return {
@@ -27,6 +29,12 @@ describe("child workflow helpers", () => {
     expect(__childWorkflowInternals.normalizeChildInput({ a: 1 })).toEqual({ a: 1 });
     expect(__childWorkflowInternals.normalizeChildInput(["x"])).toEqual({ value: ["x"] });
     expect(__childWorkflowInternals.buildChildWorkflowRunId("parent", "node", 3)).toBe("parent:child:node:3");
+    expect(() => __childWorkflowInternals.buildValidatedChildRunId("parent", "review/security", 0)).toThrow(
+      "cannot be persisted in a Gateway-readable child run id",
+    );
+    const scopedChildRunId = __childWorkflowInternals.buildValidatedChildRunId("parent", "review@@outer=0,inner=1", 2);
+    expect(RUN_ID_PATTERN.test(scopedChildRunId)).toBe(true);
+    expect(JUMP_RUN_ID_PATTERN.test(scopedChildRunId)).toBe(true);
 
     expect(
       __childWorkflowInternals.stripSystemColumns({
@@ -151,6 +159,20 @@ describe("child workflow helpers", () => {
         maxOutputBytes: 1024,
         toolTimeoutMs: 250,
       });
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("rejects an unreadable generated child run id before persistence", async () => {
+    const { smithers, db, cleanup } = createTestSmithers(outputSchemas);
+    try {
+      const childWorkflow = smithers(() => null);
+      const runtime = makeRuntime({ db, stepId: "review/security" });
+      await expect(
+        withTaskRuntime(runtime, () => executeChildWorkflow(childWorkflow, { workflow: childWorkflow })),
+      ).rejects.toThrow("cannot be persisted in a Gateway-readable child run id");
+      expect(await new SmithersDb(db).getRun("parent-run:child:review/security:2")).toBeUndefined();
     } finally {
       cleanup();
     }

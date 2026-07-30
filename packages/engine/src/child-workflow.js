@@ -10,6 +10,7 @@ import { makeAbortError } from "./effect/bridge-utils.js";
 import { isPidAlive, parseRuntimeOwnerPid } from "./runtime-owner.js";
 import { getWorkflowMakeBridgeRuntime } from "./effect/workflow-make-bridge.js";
 import { isWorkflowFileRef, loadWorkflowFileRef } from "./workflow-file.js";
+import { buildValidatedChildRunId } from "./child-run-id.js";
 /** @typedef {import("./ChildWorkflowDefinition.ts").ChildWorkflowDefinition} ChildWorkflowDefinition */
 /** @typedef {import("./ChildWorkflowExecuteOptions.ts").ChildWorkflowExecuteOptions} ChildWorkflowExecuteOptions */
 /** @typedef {import("@smithers-orchestrator/driver/RunResult").RunResult} RunResult */
@@ -300,7 +301,7 @@ export async function executeChildWorkflow(parentWorkflow, options) {
   const childWorkflow = resolveChildWorkflow(definition, parentWorkflow);
   const input = normalizeChildInput(options.input);
   const parentRunId = options.parentRunId ?? runtime.runId;
-  const childRunId = options.runId ?? buildSubflowChildRunId(parentRunId, runtime.stepId, runtime.iteration);
+  const childRunId = options.runId ?? buildValidatedChildRunId(parentRunId, runtime.stepId, runtime.iteration);
   // The child may bring its own db (e.g. a runtime-generated workflow with
   // its own dbPath) that has never seen a run: create the system tables
   // before probing for an existing child run. No-op when the parent already
@@ -394,6 +395,7 @@ export async function executeChildWorkflow(parentWorkflow, options) {
 }
 export const __childWorkflowInternals = {
   buildChildWorkflowRunId: buildSubflowChildRunId,
+  buildValidatedChildRunId,
   isChildRunLiveElsewhere,
   loadPreservedChildResult,
   normalizeChildInput,
