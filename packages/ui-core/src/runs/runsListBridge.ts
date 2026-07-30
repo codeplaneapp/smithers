@@ -114,11 +114,11 @@ export function toRunSummary(row: Record<string, unknown>, nowMs: number = Date.
  * `/v1/rpc`. Mount once near the app root; returns null.
  */
 export function RunsListBridge(): null {
-  const { data } = useGatewayRuns({ filter: { limit: 100 } });
+  const { data, loading, error } = useGatewayRuns({ filter: { limit: 100 } });
   const identityEpoch = captureRunsIdentityEpoch();
 
   useEffect(() => {
-    if (data === undefined) {
+    if (loading || error || data === undefined) {
       setRunsListUnavailable(identityEpoch);
       return;
     }
@@ -129,7 +129,7 @@ export function RunsListBridge(): null {
       (data as GatewayRunSummaryRow[]).map((row) => toRunSummary(row)),
       identityEpoch,
     );
-  }, [data, identityEpoch]);
+  }, [data, error, identityEpoch, loading]);
 
   return null;
 }
