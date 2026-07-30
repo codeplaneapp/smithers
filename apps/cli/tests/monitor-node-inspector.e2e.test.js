@@ -235,7 +235,10 @@ browserTest(
       await page.waitForSelector('[data-testid="monitor-node-prompt"] .mon-section-body');
       await promptSection.locator("summary").click();
       expect(await promptSection.evaluate((el) => el.open)).toBe(false);
-      expect(await page.locator('[data-testid="monitor-node-prompt"] .mon-section-body').count()).toBe(0);
+      await page.waitForFunction(
+        () => document.querySelector('[data-testid="monitor-node-prompt"] .mon-section-body') === null,
+        { timeout: 5_000 },
+      );
       await promptSection.locator("summary").click();
       expect(await promptSection.evaluate((el) => el.open)).toBe(true);
       await page.waitForSelector('[data-testid="monitor-node-prompt"] .mon-section-body');
