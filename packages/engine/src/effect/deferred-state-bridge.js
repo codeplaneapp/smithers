@@ -978,7 +978,6 @@ async function syncWaitForEventDurableDeferredFromDb(adapter, runId, desc, snaps
   if (expectedSignalSeq === undefined) {
     const attempts = await Effect.runPromise(adapter.listAttemptsForRun(runId));
     for (const attempt of attempts) {
-      if (attempt.nodeId !== desc.nodeId || attempt.iteration >= desc.iteration) continue;
       const previous = parseWaitForEventSnapshot(attempt.metaJson);
       if (!previous || previous.signalName !== snapshot.signalName) continue;
       if ((previous.correlationId ?? null) !== (snapshot.correlationId ?? null)) continue;
@@ -992,10 +991,9 @@ async function syncWaitForEventDurableDeferredFromDb(adapter, runId, desc, snaps
       signalName: snapshot.signalName,
       correlationId: snapshot.correlationId ?? null,
       afterSeq,
-      // A seq cursor prevents replay across iterations of the same node. The
-      // start-time floor also prevents a different WaitForEvent node from
-      // consuming an older matching signal that predates this wait.
-      ...(expectedSignalSeq === undefined ? { receivedAfterMs: snapshot.startedAtMs } : {}),
+      // Signals accepted after the run exists are durable queued work, even
+      // when they arrive before this waiter parks. The cursor prevents a later
+      // matching wait from replaying a signal an earlier wait already handled.
       limit: 1,
     }),
   );
