@@ -3428,7 +3428,7 @@ commands[102]:
     purpose: Run a discovered workflow by ID
     args[1]{name,type,required,desc}:
       name,string,false,Workflow ID (omit with --interactive to pick one)
-    flags[41]{name,short,type,default,desc}:
+    flags[42]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; preflight the graph, then print runId/pid/logFile once the run is admitted
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks

@@ -117,6 +117,7 @@
             "pages": [
               "guide/talk-to-your-agent",
               "guide/watch-and-steer",
+              "guide/workflow-supervisor",
               "guide/post-failure"
             ]
           },
@@ -219,6 +220,7 @@
               "guides/agent-operating-playbook",
               "guides/evals-quickstart",
               "guides/testing-workflows",
+              "guides/token-free-visibility-testing",
               "guides/workflow-optimization",
               "guides/monitor",
               "guides/monitor-workflows",
@@ -363,6 +365,7 @@
               "integrations/claude-code-plugin",
               "integrations/pi-integration",
               "integrations/hermes",
+              "integrations/herdr",
               "integrations/ecosystem"
             ]
           },
