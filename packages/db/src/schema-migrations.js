@@ -197,7 +197,7 @@ const LEGACY_COLUMN_MIGRATIONS = [
     columns: [["iteration", "iteration INTEGER"]],
   },
   {
-    id: "0033_attempt_effort_column",
+    id: "0035_attempt_effort_column",
     name: "Add first-class effort column to attempts",
     table: "_smithers_attempts",
     columns: [["effort", "effort TEXT"]],
@@ -1955,32 +1955,6 @@ function buildMigrations(context) {
       },
     },
     {
-      id: "0034_add_steers",
-      name: "Add durable steer inbox table",
-      checksum: "packages/db/migrations/0034_add_steers.sql",
-      isApplied: (sqlite) => tableExists(sqlite, "_smithers_steers"),
-      isAppliedPostgres: (pgConn) => tableExistsPostgres(pgConn, "_smithers_steers"),
-      up: (sqlite) => {
-        sqlite.run(createTableStatementFor("_smithers_steers", context.createTableStatements));
-        sqlite.run(`CREATE INDEX IF NOT EXISTS _smithers_steers_queued_idx
-    ON _smithers_steers (run_id, node_id, status, created_at_ms)`);
-        return { table: "_smithers_steers" };
-      },
-      upPostgres: async (pgConn) => {
-        await pgConn.query({
-          text: translateDdl(POSTGRES, createTableStatementFor("_smithers_steers", context.createTableStatements)),
-        });
-        await pgConn.query({
-          text: translateDdl(
-            POSTGRES,
-            `CREATE INDEX IF NOT EXISTS _smithers_steers_queued_idx
-    ON _smithers_steers (run_id, node_id, status, created_at_ms)`,
-          ),
-        });
-        return { table: "_smithers_steers" };
-      },
-    },
-    {
       id: "0033_scorer_identity",
       name: "Deduplicate scorer results and enforce durable scorer identity",
       checksum: "packages/db/migrations/0033_scorer_identity.sql",
@@ -2051,6 +2025,36 @@ function buildMigrations(context) {
           }
         }
         return { table: "_smithers_runs", addedColumns };
+      },
+    },
+    {
+      id: "0036_add_steers",
+      name: "Add durable steer inbox table",
+      checksum: checksumForStatements([
+        createTableStatementFor("_smithers_steers", context.createTableStatements),
+        `CREATE INDEX IF NOT EXISTS _smithers_steers_queued_idx
+    ON _smithers_steers (run_id, node_id, status, created_at_ms)`,
+      ]),
+      isApplied: (sqlite) => tableExists(sqlite, "_smithers_steers"),
+      isAppliedPostgres: (pgConn) => tableExistsPostgres(pgConn, "_smithers_steers"),
+      up: (sqlite) => {
+        sqlite.run(createTableStatementFor("_smithers_steers", context.createTableStatements));
+        sqlite.run(`CREATE INDEX IF NOT EXISTS _smithers_steers_queued_idx
+    ON _smithers_steers (run_id, node_id, status, created_at_ms)`);
+        return { table: "_smithers_steers" };
+      },
+      upPostgres: async (pgConn) => {
+        await pgConn.query({
+          text: translateDdl(POSTGRES, createTableStatementFor("_smithers_steers", context.createTableStatements)),
+        });
+        await pgConn.query({
+          text: translateDdl(
+            POSTGRES,
+            `CREATE INDEX IF NOT EXISTS _smithers_steers_queued_idx
+    ON _smithers_steers (run_id, node_id, status, created_at_ms)`,
+          ),
+        });
+        return { table: "_smithers_steers" };
       },
     },
     // 0034 is already the inline cancellation-attribution migration above;
