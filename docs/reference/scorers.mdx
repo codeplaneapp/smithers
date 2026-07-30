@@ -27,10 +27,9 @@ import type { Scorer, ScoreResult, ScorersMap } from "smithers-orchestrator";
 ```
 
 <Note>
-The component that hosts scorers (`Task`) can be imported directly or taken
-from `createSmithers`; the factory form binds it to the workflow context. See
-the [Components reference](/reference/components) for the `scorers` prop and
-[`ScorersMap`](/reference/types#scorersmap) for its shape.
+  The component that hosts scorers (`Task`) can be imported directly or taken from `createSmithers`; the factory form
+  binds it to the workflow context. See the [Components reference](/reference/components) for the `scorers` prop and
+  [`ScorersMap`](/reference/types#scorersmap) for its shape.
 </Note>
 
 ## Concepts
@@ -105,11 +104,11 @@ keyed set of bindings you pass to the `scorers` prop. Each binding may carry a
 
 ```ts
 type ScorerBinding = { scorer: Scorer; sampling?: SamplingConfig };
-type ScorersMap    = Record<string, ScorerBinding>;
+type ScorersMap = Record<string, ScorerBinding>;
 type SamplingConfig =
-  | { type: "all" }                  // run every time (default)
-  | { type: "ratio"; rate: number }  // run with probability `rate`
-  | { type: "none" };                // never run
+  | { type: "all" } // run every time (default)
+  | { type: "ratio"; rate: number } // run with probability `rate`
+  | { type: "none" }; // never run
 ```
 
 ```tsx
@@ -220,8 +219,7 @@ const tone = llmJudge({
   description: "Evaluates professional tone",
   judge,
   instructions: "You evaluate text for professional tone.",
-  promptTemplate: ({ output }) =>
-    `Rate the professionalism (0-1 JSON):\n\n${String(output)}`,
+  promptTemplate: ({ output }) => `Rate the professionalism (0-1 JSON):\n\n${String(output)}`,
 });
 ```
 
@@ -232,18 +230,18 @@ const tone = llmJudge({
 Each built-in is a factory that returns a `Scorer`. Judge-based scorers take
 an `AgentLike` judge; the deterministic ones do not call an agent.
 
-| Scorer | What it measures | Factory |
-| --- | --- | --- |
-| `faithfulnessScorer` | Output is grounded in `context`, no hallucinations | `faithfulnessScorer(judge)` |
-| `relevancyScorer` | Output addresses the `input` | `relevancyScorer(judge)` |
-| `toxicityScorer` | Toxic, harmful, or inappropriate content (higher = more toxic) | `toxicityScorer(judge)` |
-| `schemaAdherenceScorer` | Output passes the task's `outputSchema` (1 valid, 0 invalid) | `schemaAdherenceScorer()` |
-| `latencyScorer` | Execution time vs. budget (1 at/below target, 0 at/above max) | `latencyScorer({ targetMs, maxMs })` |
-| `pocJudgmentScorer` | Delegation planning nodes' risk/probe judgment (plan-changing findings reward hardest, false negatives punished hardest) | `pocJudgmentScorer(options?)` |
-| `planSolidityScorer` | Delegation replan churn after execution started; plan-phase churn is free | `planSolidityScorer(options?)` |
-| `estimateAccuracyScorer` | Predicted tokens/costUsd/minutes vs. actuals per node (symmetric ratio, cost-weighted) | `estimateAccuracyScorer()` |
-| `tierFitScorer` | Whether a delegation node's intelligence tier matched its work | `tierFitScorer(judge)` |
-| `humanPollScorer` | End-of-run user poll (1-5 ratings and booleans) normalized to 0-1 | `humanPollScorer()` |
+| Scorer                   | What it measures                                                                                                         | Factory                              |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------ |
+| `faithfulnessScorer`     | Output is grounded in `context`, no hallucinations                                                                       | `faithfulnessScorer(judge)`          |
+| `relevancyScorer`        | Output addresses the `input`                                                                                             | `relevancyScorer(judge)`             |
+| `toxicityScorer`         | Toxic, harmful, or inappropriate content (higher = more toxic)                                                           | `toxicityScorer(judge)`              |
+| `schemaAdherenceScorer`  | Output passes the task's `outputSchema` (1 valid, 0 invalid)                                                             | `schemaAdherenceScorer()`            |
+| `latencyScorer`          | Execution time vs. budget (1 at/below target, 0 at/above max)                                                            | `latencyScorer({ targetMs, maxMs })` |
+| `pocJudgmentScorer`      | Delegation planning nodes' risk/probe judgment (plan-changing findings reward hardest, false negatives punished hardest) | `pocJudgmentScorer(options?)`        |
+| `planSolidityScorer`     | Delegation replan churn after execution started; plan-phase churn is free                                                | `planSolidityScorer(options?)`       |
+| `estimateAccuracyScorer` | Predicted tokens/costUsd/minutes vs. actuals per node (symmetric ratio, cost-weighted)                                   | `estimateAccuracyScorer()`           |
+| `tierFitScorer`          | Whether a delegation node's intelligence tier matched its work                                                           | `tierFitScorer(judge)`               |
+| `humanPollScorer`        | End-of-run user poll (1-5 ratings and booleans) normalized to 0-1                                                        | `humanPollScorer()`                  |
 
 The five delegation-chain scorers read their data from the scored output or
 context and no-op (score 1, `meta.skipped`) when it is absent. Their results
@@ -259,9 +257,8 @@ const fast = latencyScorer({ targetMs: 5000, maxMs: 20000 });
 ```
 
 <Note>
-`schemaAdherenceScorer` and `latencyScorer` no-op (score 1) when the input lacks
-an `outputSchema` or `latencyMs`. `toxicityScorer` scores the *level* of
-toxicity, so clean text scores near 0.
+  `schemaAdherenceScorer` and `latencyScorer` no-op (score 1) when the input lacks an `outputSchema` or `latencyMs`.
+  `toxicityScorer` scores the *level* of toxicity, so clean text scores near 0.
 </Note>
 
 ### smithersScorers
@@ -406,15 +403,13 @@ function runScorersAsync(
   The keyed bindings to run.
 </ParamField>
 <ParamField path="ctx" type="ScorerContext" required>
-  Run/node coordinates plus the data the scorers grade. See
-  [`ScorerContext`](/reference/types).
+  Run/node coordinates plus the data the scorers grade. See [`ScorerContext`](/reference/types).
 </ParamField>
 <ParamField path="adapter" type="SmithersDb | null" required>
   Database adapter to persist results, or `null` to skip persistence.
 </ParamField>
 <ParamField path="eventBus" type="EventBus | null">
-  Optional bus that receives `ScorerStarted` / `ScorerFinished` /
-  `ScorerFailed` events.
+  Optional bus that receives `ScorerStarted` / `ScorerFinished` / `ScorerFailed` events.
 </ParamField>
 
 ### runScorersBatch
@@ -458,10 +453,7 @@ Compute per-scorer statistics across persisted results: `count`, `mean`, `min`,
 `max`, `p50`, and `stddev`. Filter to a run, node, or scorer.
 
 ```ts
-function aggregateScores(
-  adapter: SmithersDb,
-  opts?: AggregateOptions,
-): Promise<AggregateScore[]>;
+function aggregateScores(adapter: SmithersDb, opts?: AggregateOptions): Promise<AggregateScore[]>;
 ```
 
 <ParamField path="adapter" type="SmithersDb" required>
@@ -533,7 +525,7 @@ genuine failure. Fail-closed is correct here, because an inconclusive verdict
 suppresses the strongest signal an eval suite produces.
 
 ```ts
-import { isEvalInfraFailure } from "@smithers/scorers";
+import { isEvalInfraFailure } from "smithers-orchestrator/scorers";
 
 const status = isEvalInfraFailure(caseError) ? "inconclusive" : "failed";
 ```
