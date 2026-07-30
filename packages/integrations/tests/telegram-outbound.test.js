@@ -2,11 +2,9 @@
 // (runWorkflow) against the real fixture Bot API server — no agent CLIs, so
 // CI-safe.
 //
-// Also proves the deps ↔ Task interaction this package relies on (verified
-// against packages/components/src/components/Task.js:243-266): Task's own
-// `deps` + function-children path evaluates the function at RENDER time and
-// yields a STATIC task, so the outbound components resolve deps themselves
-// and hand Task a no-deps function child, which yields kind "compute".
+// Also proves the deps ↔ Task interaction this package relies on: Task defers
+// function children to the compute bridge after resolving deps, and the
+// outbound components retain the same execution-time behavior.
 import { afterAll, describe, expect, test } from "bun:test";
 import React from "react";
 import { z } from "zod";
@@ -39,8 +37,8 @@ function makeApi() {
   );
 }
 
-describe("Task deps interaction (the reason SendMessage resolves deps itself)", () => {
-  test("raw Task with deps + function children renders STATIC, not compute", async () => {
+describe("Task deps compute interaction", () => {
+  test("raw Task with deps defers function children to compute execution", async () => {
     const api = makeApi();
     const workflow = api.smithers(() =>
       React.createElement(
@@ -51,7 +49,7 @@ describe("Task deps interaction (the reason SendMessage resolves deps itself)", 
           smithersContext: undefined,
           output: api.outputs.note,
           deps: { note: api.outputs.note },
-          children: () => () => ({ never: "runs" }),
+          children: ({ note }) => ({ text: note.text }),
         }),
       ),
     );
@@ -69,10 +67,9 @@ describe("Task deps interaction (the reason SendMessage resolves deps itself)", 
     );
     const probe = frame.tasks.find((task) => task.nodeId === "probe");
     expect(probe).toBeDefined();
-    // Function children WITH deps → children(resolvedDeps) at render time,
-    // then the static branch: kind is "static", no computeFn.
-    expect(probe?.kind).toBe("static");
-    expect(probe?.computeFn).toBeUndefined();
+    expect(probe?.kind).toBe("compute");
+    expect(probe?.staticPayload).toBeUndefined();
+    expect(await probe?.computeFn()).toEqual({ text: "ready" });
   });
   test("SendMessage defers while deps are missing, then renders a compute task", async () => {
     const api = makeApi();
