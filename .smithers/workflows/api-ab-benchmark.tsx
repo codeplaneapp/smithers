@@ -629,6 +629,23 @@ export function scoreCandidate(arm: Arm, spec: TaskSpec, trial: number): ScoreRo
   };
 }
 
+function scoreTaskFailure(arm: Arm, spec: TaskSpec, trial: number): ScoreRow {
+  return {
+    candidateKey: candidateKey(arm, spec.id, trial),
+    arm,
+    taskId: spec.id,
+    trial,
+    authored: existsSync(candidatePath(arm, spec.id, trial)),
+    typechecks: false,
+    runs: false,
+    correct: false,
+    firstTryClean: false,
+    wallClockMs: 0,
+    failureKind: "score",
+    failureOutput: "score task failed before producing a result row",
+  };
+}
+
 export function writeReport(
   rows: readonly ScoreRow[],
   meta: { builderModel: string; trials: number },
@@ -694,8 +711,6 @@ export default smithers(
         nodeId: `score-${candidateKey(candidate.arm, candidate.spec.id, candidate.trial)}`,
       }),
     );
-    const allScored = scored.every((row) => row !== undefined);
-
     return (
       <Workflow name="api-ab-benchmark">
         <UI entry="../ui/api-ab-benchmark.tsx" title="API A/B Benchmark" />
@@ -709,7 +724,6 @@ export default smithers(
                 const key = candidateKey(candidate.arm, candidate.spec.id, candidate.trial);
                 const dir = candidateDir(candidate.arm, candidate.spec.id, candidate.trial);
                 const scratchDocPath = resolve(dir, "reference.txt");
-                const built = ctx.outputMaybe(outputs.build, { nodeId: `build-${key}` });
                 return (
                   <Sequence key={key}>
                     <Task
@@ -718,22 +732,29 @@ export default smithers(
                       agent={builder}
                       timeoutMs={20 * 60_000}
                       heartbeatTimeoutMs={10 * 60_000}
+                      continueOnFail
                     >
                       {renderBuilderPrompt(candidate.arm, candidate.spec, candidate.trial, scratchDocPath)}
                     </Task>
-                    {built ? (
-                      <Task id={`score-${key}`} output={outputs.score}>
-                        {() => scoreCandidate(candidate.arm, candidate.spec, candidate.trial)}
-                      </Task>
-                    ) : null}
+                    <Task id={`score-${key}`} output={outputs.score} continueOnFail>
+                      {() => scoreCandidate(candidate.arm, candidate.spec, candidate.trial)}
+                    </Task>
                   </Sequence>
                 );
               })}
             </Parallel>
           ) : null}
-          {setup?.ready && allScored ? (
+          {setup?.ready ? (
             <Task id="report" output={outputs.report}>
-              {() => writeReport(scored as ScoreRow[], { builderModel, trials })}
+              {() =>
+                writeReport(
+                  candidates.map(
+                    (candidate, index) =>
+                      scored[index] ?? scoreTaskFailure(candidate.arm, candidate.spec, candidate.trial),
+                  ),
+                  { builderModel, trials },
+                )
+              }
             </Task>
           ) : null}
         </Sequence>

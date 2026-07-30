@@ -48,7 +48,7 @@ describe("api-ab-benchmark workflow", () => {
     expect(nodeIds).toEqual(["setup"]);
   });
 
-  test("renders one builder task per arm x task x trial after setup", async () => {
+  test("renders fail-soft build and score sequences for every candidate after setup", async () => {
     const frame = await renderWorkflow(workflow, {
       workflowPath,
       input: { trials: 2 },
@@ -58,11 +58,16 @@ describe("api-ab-benchmark workflow", () => {
     expect(nodeIds).toContain("build-effect-pipeline-1");
     expect(nodeIds).toContain("build-jsx-reuse-2");
     expect(nodeIds.filter((id: string) => id.startsWith("build-"))).toHaveLength(ARMS.length * TASK_SPECS.length * 2);
-    expect(nodeIds.some((id: string) => id.startsWith("score-"))).toBe(false);
-    expect(nodeIds).not.toContain("report");
+    expect(nodeIds.filter((id: string) => id.startsWith("score-"))).toHaveLength(ARMS.length * TASK_SPECS.length * 2);
+    expect(nodeIds).toContain("report");
+    for (const task of frame.tasks.filter(
+      (candidate: { nodeId: string }) => candidate.nodeId.startsWith("build-") || candidate.nodeId.startsWith("score-"),
+    )) {
+      expect(task.continueOnFail).toBe(true);
+    }
   });
 
-  test("mounts a candidate's scoring task once its builder has produced output", async () => {
+  test("keeps every scoring task mounted when another builder has produced output", async () => {
     const frame = await renderWorkflow(workflow, {
       workflowPath,
       input: { trials: 1 },
@@ -81,7 +86,8 @@ describe("api-ab-benchmark workflow", () => {
     });
     const nodeIds = frame.tasks.map((task: { nodeId: string }) => task.nodeId);
     expect(nodeIds).toContain("score-effect-pipeline-1");
-    expect(nodeIds).not.toContain("score-jsx-pipeline-1");
+    expect(nodeIds).toContain("score-jsx-pipeline-1");
+    expect(nodeIds).toContain("report");
   });
 
   test("setup removes a candidate left by a prior run before builders mount", async () => {
