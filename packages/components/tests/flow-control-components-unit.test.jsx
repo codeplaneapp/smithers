@@ -61,9 +61,17 @@ describe("flow control component units", () => {
     );
 
     expect(readyCtx._deferredDeps).toEqual([]);
+<<<<<<< HEAD
     expect(resolved.tasks[0].kind).toBe("compute");
     expect(resolved.tasks[0].staticPayload).toBeUndefined();
     expect(resolved.tasks[0].computeFn()).toEqual({ message: "ready" });
+||||||| parent of 6c8d7222fc (🧪 test(components): align deferred dependency computes)
+    expect(resolved.tasks[0].staticPayload).toEqual({ message: "ready" });
+=======
+    expect(resolved.tasks[0].kind).toBe("compute");
+    expect(resolved.tasks[0].staticPayload).toBeUndefined();
+    expect(await resolved.tasks[0].computeFn()).toEqual({ message: "ready" });
+>>>>>>> 6c8d7222fc (🧪 test(components): align deferred dependency computes)
     expect(resolved.tasks[0].dependsOn).toEqual(["gate", "load-source"]);
   });
 
