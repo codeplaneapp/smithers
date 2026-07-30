@@ -782,10 +782,13 @@ function App() {
   approvalsRef.current = approvalsQuery;
 
   useEffect(() => {
-    if (!activeRunId) return;
-    for (const query of outputRef.current) void query.refetch();
-    void approvalsRef.current.refetch();
-    void runsRef.current.refetch();
+    if (typeof window === "undefined" || !activeRunId) return;
+    const timeout = window.setTimeout(() => {
+      for (const query of outputRef.current) void query.refetch();
+      void approvalsRef.current.refetch();
+      void runsRef.current.refetch();
+    }, 100);
+    return () => window.clearTimeout(timeout);
   }, [activeRunId, eventCount, runStatus]);
   useEffect(() => {
     setDecision("idle");
