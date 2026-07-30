@@ -86,7 +86,7 @@ export function planFromRow(row: unknown, maxPrs: number): StackPlan | null {
 
 export function stackKeyFromRunId(rawRunId: string): string {
   const readable = rawRunId.replace(/[^a-zA-Z0-9_-]+/g, "-").slice(0, 27) || "run";
-  const hash = createHash("sha256").update(rawRunId).digest("hex").slice(0, 12);
+  const hash = createHash("sha256").update(rawRunId).digest("hex");
   return readable + "-" + hash;
 }
 
