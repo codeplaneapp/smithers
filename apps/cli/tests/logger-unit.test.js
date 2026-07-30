@@ -8,15 +8,15 @@ describe("CLI logger", () => {
   test("resolves SMITHERS_LOG_LEVEL-style names to Effect log levels", () => {
     expect(resolveCliLogLevel(undefined)).toBe(LogLevel.Info);
     expect(resolveCliLogLevel("debug")).toBe(LogLevel.Debug);
-    expect(resolveCliLogLevel("warn")).toBe(LogLevel.Warning);
-    expect(resolveCliLogLevel("warning")).toBe(LogLevel.Warning);
+    expect(resolveCliLogLevel("warn")).toBe(LogLevel.Warn);
+    expect(resolveCliLogLevel("warning")).toBe(LogLevel.Warn);
     expect(resolveCliLogLevel("error")).toBe(LogLevel.Error);
     expect(resolveCliLogLevel("none")).toBe(LogLevel.None);
-    expect(resolveCliLogLevel("unknown")).toBe(LogLevel.Warning);
+    expect(resolveCliLogLevel("unknown")).toBe(LogLevel.Warn);
   });
 
   test("filters levels using the configured minimum", () => {
-    expect(shouldEmitLogLevel(LogLevel.Warning, LogLevel.Error)).toBe(false);
+    expect(shouldEmitLogLevel(LogLevel.Warn, LogLevel.Error)).toBe(false);
     expect(shouldEmitLogLevel(LogLevel.Error, LogLevel.Error)).toBe(true);
     expect(shouldEmitLogLevel(LogLevel.Debug, LogLevel.Debug)).toBe(true);
     expect(shouldEmitLogLevel(LogLevel.Info, LogLevel.Debug)).toBe(true);
@@ -26,7 +26,7 @@ describe("CLI logger", () => {
     const line = stripAnsi(
       formatCliLogLine({
         fiberId: FiberId.none,
-        logLevel: LogLevel.Warning,
+        logLevel: LogLevel.Warn,
         message: "ClaudeCodeAgent: unsetting ANTHROPIC_API_KEY",
         cause: Cause.empty,
         context: {},

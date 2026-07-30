@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, References } from "effect";
 import {
   getCurrentCorrelationContextEffect,
   mergeCorrelationContext,
@@ -10,7 +10,7 @@ import {
 import { annotateSmithersTrace, makeSmithersSpanAttributes, withSmithersSpan } from "../src/_coreTracing.js";
 
 function plainAnnotations(annotations) {
-  return Object.fromEntries(annotations);
+  return { ...annotations };
 }
 
 describe("core correlation context", () => {
@@ -128,7 +128,7 @@ describe("core tracing", () => {
         "tool:apply-patch",
         Effect.gen(function* () {
           const span = yield* Effect.currentSpan;
-          const annotations = yield* Effect.logAnnotations;
+          const annotations = yield* References.CurrentLogAnnotations;
           return {
             spanName: span.name,
             attributes: Object.fromEntries(span.attributes),

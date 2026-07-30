@@ -11,7 +11,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import { spawnSync } from "node:child_process";
 import { Effect, HashMap, Logger, Option } from "effect";
-import * as BunContext from "@effect/platform-bun/BunContext";
+import * as BunContext from "@effect/platform-bun/BunServices";
 import * as vcsEffects from "../src/jj.js";
 
 const jjAvailable = (() => {

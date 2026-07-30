@@ -589,7 +589,7 @@ describe("node detail aggregation", () => {
     const missingNode = await aggregateExit(makeAdapter({ nodes: [] }));
     expect(Exit.isFailure(missingNode)).toBe(true);
     if (Exit.isFailure(missingNode)) {
-      const failure = Cause.failureOption(missingNode.cause);
+      const failure = Cause.findErrorOption(missingNode.cause);
       expect(failure._tag).toBe("Some");
       if (failure._tag === "Some") {
         expect(failure.value.code).toBe("NODE_NOT_FOUND");
@@ -605,7 +605,7 @@ describe("node detail aggregation", () => {
     );
     expect(Exit.isFailure(missingIteration)).toBe(true);
     if (Exit.isFailure(missingIteration)) {
-      const failure = Cause.failureOption(missingIteration.cause);
+      const failure = Cause.findErrorOption(missingIteration.cause);
       expect(failure._tag).toBe("Some");
       if (failure._tag === "Some") {
         expect(failure.value.summary).toBe("Node not found: task-a (iteration 2)");

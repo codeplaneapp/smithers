@@ -16,7 +16,7 @@ const tmpDir = process.cwd();
 async function run(command, args, options) {
   const exit = await Effect.runPromiseExit(spawnCaptureEffect(command, args, { cwd: tmpDir, ...options }));
   if (Exit.isSuccess(exit)) return exit.value;
-  const failureOption = Cause.failureOption(exit.cause);
+  const failureOption = Cause.findErrorOption(exit.cause);
   if (failureOption._tag === "Some") throw failureOption.value;
   throw new Error(Cause.pretty(exit.cause));
 }

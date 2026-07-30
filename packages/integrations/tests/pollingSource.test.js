@@ -31,7 +31,7 @@ describe("makePollingSource", () => {
     const source = makePollingSource({
       id: "poll-test",
       cursorStore,
-      schedule: Schedule.intersect(Schedule.spaced("10 millis"), Schedule.recurs(2)),
+      schedule: Schedule.spaced("10 millis").pipe(Schedule.upTo({ times: 2 })),
       // The injected poll callback is the user seam, not a mock of the
       // system under test: the Stream/cursor machinery is fully real.
       poll: (cursor) =>
@@ -62,7 +62,7 @@ describe("makePollingSource", () => {
     const source = makePollingSource({
       id: "poll-unacked",
       cursorStore,
-      schedule: Schedule.intersect(Schedule.spaced("10 millis"), Schedule.recurs(1)),
+      schedule: Schedule.spaced("10 millis").pipe(Schedule.upTo({ times: 1 })),
       poll: (cursor) =>
         Effect.sync(() => {
           seenCursors.push(cursor);

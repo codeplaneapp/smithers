@@ -86,6 +86,6 @@ describe("retryPolicyToSchedule edge inputs", () => {
       backoff: "fixed",
       initialDelayMs: 100,
     });
-    expect(Schedule.ScheduleTypeId in schedule).toBe(true);
+    expect("~effect/Schedule" in schedule).toBe(true);
   });
 });

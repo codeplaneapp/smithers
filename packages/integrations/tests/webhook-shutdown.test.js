@@ -89,7 +89,7 @@ describe("webhook source graceful close", () => {
       if (Exit.isSuccess(exit)) {
         expect(exit.value).toEqual({ accepted: 2 });
       } else {
-        const failure = Cause.failureOption(exit.cause);
+        const failure = Cause.findErrorOption(exit.cause);
         expect(Option.isSome(failure)).toBe(true);
         if (Option.isSome(failure)) {
           expect(failure.value).toBeInstanceOf(IntegrationError);
@@ -117,7 +117,7 @@ describe("integration runtime graceful shutdown", () => {
         if (prop === "findRunsAwaitingEvent") {
           return () =>
             Effect.sync(() => defectEntered.resolve()).pipe(
-              Effect.zipRight(Effect.die(new Error("forced webhook delivery defect"))),
+              Effect.andThen(Effect.die(new Error("forced webhook delivery defect"))),
             );
         }
         const original = Reflect.get(target, prop, receiver);
@@ -159,8 +159,8 @@ describe("integration runtime graceful shutdown", () => {
           return (eventName, correlationId) =>
             correlationId === "corr-1"
               ? Effect.sync(() => deliveryEntered.resolve()).pipe(
-                  Effect.zipRight(Effect.promise(() => releaseDelivery.promise)),
-                  Effect.zipRight(target.findRunsAwaitingEvent(eventName, correlationId)),
+                  Effect.andThen(Effect.promise(() => releaseDelivery.promise)),
+                  Effect.andThen(target.findRunsAwaitingEvent(eventName, correlationId)),
                 )
               : target.findRunsAwaitingEvent(eventName, correlationId);
         }
@@ -175,7 +175,7 @@ describe("integration runtime graceful shutdown", () => {
       id: "shutdown-polling",
       poll: () =>
         Effect.sync(() => pollingStarted.resolve()).pipe(
-          Effect.zipRight(Effect.never),
+          Effect.andThen(Effect.never),
           Effect.ensuring(
             Effect.sync(() => {
               pollingFinalized += 1;
@@ -189,7 +189,7 @@ describe("integration runtime graceful shutdown", () => {
       id: "shutdown-custom",
       events: Stream.fromEffect(
         Effect.sync(() => customStarted.resolve()).pipe(
-          Effect.zipRight(Effect.never),
+          Effect.andThen(Effect.never),
           Effect.ensuring(
             Effect.sync(() => {
               customFinalized += 1;

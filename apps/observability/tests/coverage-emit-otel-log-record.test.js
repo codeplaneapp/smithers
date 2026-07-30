@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { Effect, Logger } from "effect";
+import { Effect, Logger, References } from "effect";
 import { emitOtelLogRecord } from "../src/emitOtelLogRecord.js";
 import { setSmithersLogRunner } from "../src/logging.js";
 
@@ -12,14 +12,14 @@ const captured = [];
  * OTLP record was routed to. This is a real Effect runtime, not a mock.
  */
 function installCapturingRunner() {
-  const capturingLogger = Logger.make(({ logLevel, message, spans }) => {
+  const capturingLogger = Logger.make(({ fiber, logLevel, message }) => {
     captured.push({
-      level: logLevel.label,
+      level: logLevel.toUpperCase(),
       message: Array.isArray(message) ? message[0] : message,
-      spans: Array.from(spans, (span) => span.label),
+      spans: Array.from(fiber.getRef(References.CurrentLogSpans), ([label]) => label),
     });
   });
-  const layer = Logger.replace(Logger.defaultLogger, capturingLogger);
+  const layer = Logger.layer([capturingLogger]);
   return setSmithersLogRunner({
     runFork: (effect) => Effect.runFork(effect.pipe(Effect.provide(layer))),
     runPromise: (effect) => Effect.runPromise(effect.pipe(Effect.provide(layer))),

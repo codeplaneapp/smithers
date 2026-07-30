@@ -19,7 +19,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Schema } from "effect";
-import * as NodeContext from "@effect/platform-node/NodeContext";
+import * as NodeContext from "@effect/platform-node/NodeServices";
 import { Smithers } from "../../src/effect/builder.js";
 
 const dataDir = mkdtempSync(join(tmpdir(), "smithers-node-run-"));

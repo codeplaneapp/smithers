@@ -534,7 +534,7 @@ describe("time-travel + resume (postgres)", () => {
       const frameNo = snaps[snaps.length - 1].frameNo;
       const fork = await Effect.runPromise(
         forkRunEffect(adapter, { parentRunId, frameNo, branchLabel: "raw-fork" }).pipe(
-          Effect.provide((await import("@effect/platform-bun/BunContext")).layer),
+          Effect.provide((await import("@effect/platform-bun/BunServices")).layer),
         ),
       );
       expect(fork.runId).toBeTruthy();

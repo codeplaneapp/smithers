@@ -178,7 +178,7 @@ describe("Summarizer", () => {
       },
     });
     const exit = await Effect.runPromiseExit(summarizer.processEffect(store));
-    const failureOption = Cause.failureOption(exit.cause);
+    const failureOption = Cause.findErrorOption(exit.cause);
     expect(failureOption._tag).toBe("Some");
     const error = failureOption.value;
 

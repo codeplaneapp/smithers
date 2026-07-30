@@ -8,7 +8,7 @@ import {
   withPlatformLayer,
 } from "../src/platform-layer.js";
 
-const TestService = Context.GenericTag("smithers/test/PlatformLayer");
+const TestService = Context.Service("smithers/test/PlatformLayer");
 const layer = Layer.succeed(TestService, "test");
 const scopedLayer = Layer.succeed(TestService, "scoped");
 

@@ -16,13 +16,13 @@ describe("_coreMetrics surface", () => {
       Effect.provideService(coreMetrics.MetricsService, coreMetrics.MetricsService, shape),
     );
     expect(resolved).toBe(shape);
-    expect(Context.isTag(coreMetrics.MetricsService)).toBe(true);
+    expect(Context.isKey(coreMetrics.MetricsService)).toBe(true);
   });
 
   test("public smithersMetrics maps every catalog key to a Metric instance", () => {
     expect(Object.keys(smithersMetrics).sort()).toEqual([...smithersMetricCatalogByKey.keys()].sort());
     for (const metric of Object.values(smithersMetrics)) {
-      expect(Metric.MetricTypeId in /** @type {object} */ (metric)).toBe(true);
+      expect("~effect/observability/Metric" in /** @type {object} */ (metric)).toBe(true);
     }
   });
 });
