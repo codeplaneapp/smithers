@@ -9188,66 +9188,6 @@ async function runWorkflowBodyDriver(workflow, opts) {
     // retain their existing eager startup order.
     if (!opts.resume) await startRunRuntime();
     const runStartPerformanceMs = performance.now();
-<<<<<<< HEAD
-||||||| parent of c18f9da0d (⬆️ chore(effect): upgrade monorepo to Effect 4)
-    await cancelStaleAttempts(adapter, runId);
-    if (opts.resume) {
-      void Effect.runPromise(Metric.increment(runsResumedTotal));
-      const staleInProgress = await Effect.runPromise(adapter.listInProgressAttempts(runId));
-      const now = nowMs();
-      for (const attempt of staleInProgress) {
-        const existingNode = await Effect.runPromise(adapter.getNode(runId, attempt.nodeId, attempt.iteration));
-        await adapter.withTransaction(
-          "resume-cancel-stale-attempt",
-          Effect.gen(function* () {
-            yield* adapter.updateAttempt(runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
-              state: "cancelled",
-              finishedAtMs: now,
-            });
-            yield* adapter.insertNode({
-              runId,
-              nodeId: attempt.nodeId,
-              iteration: attempt.iteration,
-              state: "pending",
-              lastAttempt: attempt.attempt,
-              updatedAtMs: now,
-              outputTable: existingNode?.outputTable ?? "",
-              label: existingNode?.label ?? null,
-            });
-          }),
-        );
-      }
-    }
-=======
-    await cancelStaleAttempts(adapter, runId);
-    if (opts.resume) {
-      void Effect.runPromise(Metric.update(runsResumedTotal, 1));
-      const staleInProgress = await Effect.runPromise(adapter.listInProgressAttempts(runId));
-      const now = nowMs();
-      for (const attempt of staleInProgress) {
-        const existingNode = await Effect.runPromise(adapter.getNode(runId, attempt.nodeId, attempt.iteration));
-        await adapter.withTransaction(
-          "resume-cancel-stale-attempt",
-          Effect.gen(function* () {
-            yield* adapter.updateAttempt(runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
-              state: "cancelled",
-              finishedAtMs: now,
-            });
-            yield* adapter.insertNode({
-              runId,
-              nodeId: attempt.nodeId,
-              iteration: attempt.iteration,
-              state: "pending",
-              lastAttempt: attempt.attempt,
-              updatedAtMs: now,
-              outputTable: existingNode?.outputTable ?? "",
-              label: existingNode?.label ?? null,
-            });
-          }),
-        );
-      }
-    }
->>>>>>> c18f9da0d (⬆️ chore(effect): upgrade monorepo to Effect 4)
     if (opts.resume) {
       const nodes = await Effect.runPromise(adapter.listNodes(runId));
       defaultIteration = nodes.reduce((max, node) => Math.max(max, node.iteration ?? 0), 0);
