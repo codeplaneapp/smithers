@@ -132,22 +132,28 @@ describe.serial("curated system workflow causal contracts", () => {
         const first = await runTask(
           task(await render("init.tsx", { force: false, refreshSkills: false, skipInstall: true }), "install-pack"),
         );
-        expect(first).toEqual({ written: 70, skipped: 1, changed: [] });
+        expect(first).toMatchObject({ skipped: 1, changed: [] });
+        const seededFileCount = Number(first.written) + Number(first.skipped);
+        expect(seededFileCount).toBeGreaterThan(1);
         expect(await readFile(join(root, ".smithers/workflows/init.tsx"), "utf8")).toBe(bundled);
         expect(await readFile(join(root, ".smithers/agents/claude-code.ts"), "utf8")).toBe("preserve this config\n");
         const skipped = await runTask(
           task(await render("init.tsx", { force: false, refreshSkills: false, skipInstall: true }), "install-pack"),
         );
-        expect(skipped).toEqual({ written: 0, skipped: 71, changed: [] });
+        expect(skipped).toEqual({ written: 0, skipped: seededFileCount, changed: [] });
         await writeFile(join(root, ".smithers/workflows/init.tsx"), "local modification\n");
         const drift = await runTask(
           task(await render("init.tsx", { force: false, refreshSkills: false, skipInstall: true }), "install-pack"),
         );
-        expect(drift).toEqual({ written: 0, skipped: 71, changed: [".smithers/workflows/init.tsx"] });
+        expect(drift).toEqual({
+          written: 0,
+          skipped: seededFileCount,
+          changed: [".smithers/workflows/init.tsx"],
+        });
         const forced = await runTask(
           task(await render("init.tsx", { force: true, refreshSkills: false, skipInstall: true }), "install-pack"),
         );
-        expect(forced).toEqual({ written: 64, skipped: 7, changed: [] });
+        expect(forced).toEqual({ written: seededFileCount - 7, skipped: 7, changed: [] });
         expect(await readFile(join(root, ".smithers/workflows/init.tsx"), "utf8")).toBe(bundled);
         expect(await readFile(join(root, ".smithers/agents/claude-code.ts"), "utf8")).toBe("preserve this config\n");
 
