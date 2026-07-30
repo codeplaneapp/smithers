@@ -331,7 +331,9 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
         },
         listRunEvents: async (params: { afterSeq?: number; limit?: number }) => {
           eventRequests.push(params);
-          return eventRows.filter((row) => params.afterSeq === undefined || row.seq > params.afterSeq).slice(0, params.limit);
+          return eventRows
+            .filter((row) => params.afterSeq === undefined || row.seq > params.afterSeq)
+            .slice(0, params.limit);
         },
       },
       stream: {
@@ -363,10 +365,7 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
     expect(eventRequests.filter((request) => request.afterSeq === undefined)).toEqual([{ runId, limit: 1_024 }]);
 
     produced = true;
-    eventRows = [
-      ...eventRows,
-      { runId, seq: 2_501, event: "NodeFinished", payload: { runId, nodeId, iteration: 0 } },
-    ];
+    eventRows = [...eventRows, { runId, seq: 2_501, event: "NodeFinished", payload: { runId, nodeId, iteration: 0 } }];
     await act(async () => {
       for (const listener of streamListeners) {
         listener({ type: "change", seq: 2_501, collections: ["run_events"] });

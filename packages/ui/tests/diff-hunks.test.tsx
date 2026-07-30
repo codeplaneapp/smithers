@@ -48,7 +48,9 @@ const WHITESPACE_STRIPPED_PATCH = [
   " before",
   " ",
   " after",
-].join("\n").replace(/[ \t]+$/gm, "");
+]
+  .join("\n")
+  .replace(/[ \t]+$/gm, "");
 
 describe("parseUnifiedFile", () => {
   test("parses a multi-hunk patch into DiffFile totals and hunks", () => {

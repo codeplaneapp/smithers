@@ -124,15 +124,9 @@ type HijackCandidatesStore = {
   subscribe(listener: () => void, live: boolean): () => void;
 };
 
-const hijackCandidateStores = new WeakMap<
-  ReturnType<typeof useSmithersGateway>,
-  Map<string, HijackCandidatesStore>
->();
+const hijackCandidateStores = new WeakMap<ReturnType<typeof useSmithersGateway>, Map<string, HijackCandidatesStore>>();
 
-function hijackCandidatesStore(
-  gateway: ReturnType<typeof useSmithersGateway>,
-  runId: string,
-): HijackCandidatesStore {
+function hijackCandidatesStore(gateway: ReturnType<typeof useSmithersGateway>, runId: string): HijackCandidatesStore {
   let stores = hijackCandidateStores.get(gateway);
   if (!stores) {
     stores = new Map();

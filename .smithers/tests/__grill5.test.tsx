@@ -11,12 +11,25 @@ const schema = z.looseObject({ command: z.string(), available: z.boolean() });
 
 function Probe({ id, command }: { id: string; command: string }) {
   const r = spawnSync("/usr/bin/which", [command], { stdio: "ignore" });
-  console.error(`PROBE ${id} status=${r.status} signal=${r.signal} error=${String(r.error)} PATH=${process.env.PATH?.slice(0,60)}`);
-  return <Task id={id} output={schema}>{{ command, available: r.status === 0 }}</Task>;
+  console.error(
+    `PROBE ${id} status=${r.status} signal=${r.signal} error=${String(r.error)} PATH=${process.env.PATH?.slice(0, 60)}`,
+  );
+  return (
+    <Task id={id} output={schema}>
+      {{ command, available: r.status === 0 }}
+    </Task>
+  );
 }
 
 const agent = fakeAgent(grillOutputSchema, {
-  output: { question: "Ship?", recommendedAnswer: "yes", branch: "release", resolved: true, questionsAsked: 1, sharedUnderstanding: "ready" },
+  output: {
+    question: "Ship?",
+    recommendedAnswer: "yes",
+    branch: "release",
+    resolved: true,
+    questionsAsked: 1,
+    sharedUnderstanding: "ready",
+  },
 });
 
 function wf(element: React.ReactNode) {

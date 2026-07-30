@@ -27,12 +27,25 @@ function workflow(element: React.ReactNode) {
 
 test("grill child", async () => {
   const agent = fakeAgent(grillOutputSchema, {
-    output: { question: "Ship?", recommendedAnswer: "yes", branch: "release", resolved: true, questionsAsked: 1, sharedUnderstanding: "ready" },
+    output: {
+      question: "Ship?",
+      recommendedAnswer: "yes",
+      branch: "release",
+      resolved: true,
+      questionsAsked: 1,
+      sharedUnderstanding: "ready",
+    },
   });
   const defaults = await renderWorkflow(
     workflow(
       <>
-        <GrillMe idPrefix="default" context="release goal" currentDraft={{ status: "draft" }} agent={agent} output={grillOutputSchema}>
+        <GrillMe
+          idPrefix="default"
+          context="release goal"
+          currentDraft={{ status: "draft" }}
+          agent={agent}
+          output={grillOutputSchema}
+        >
           <CommandProbe id="default:child" command="true" />
         </GrillMe>
         <GrillMe idPrefix="override" context="goal" agent={agent} output={grillOutputSchema} maxIterations={3} until />

@@ -200,9 +200,7 @@ describe("createAutosaveDoc", () => {
       },
       readExternal: async () => {
         readCalls += 1;
-        return readCalls === 1
-          ? { content: "mine edited", mtimeMs: 100 }
-          : { content: "someone else", mtimeMs: 200 };
+        return readCalls === 1 ? { content: "mine edited", mtimeMs: 100 } : { content: "someone else", mtimeMs: 200 };
       },
     });
     doc.setValue("mine edited");

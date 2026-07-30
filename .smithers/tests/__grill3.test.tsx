@@ -8,7 +8,14 @@ import { CommandProbe, commandProbeOutputSchema } from "../components/CommandPro
 import { GrillMe, grillOutputSchema } from "../components/GrillMe";
 
 const agent = fakeAgent(grillOutputSchema, {
-  output: { question: "Ship?", recommendedAnswer: "yes", branch: "release", resolved: true, questionsAsked: 1, sharedUnderstanding: "ready" },
+  output: {
+    question: "Ship?",
+    recommendedAnswer: "yes",
+    branch: "release",
+    resolved: true,
+    questionsAsked: 1,
+    sharedUnderstanding: "ready",
+  },
 });
 
 function wf(element: React.ReactNode) {
@@ -19,7 +26,13 @@ function wf(element: React.ReactNode) {
 test("one grill + draft", async () => {
   const frame = await renderWorkflow(
     wf(
-      <GrillMe idPrefix="default" context="release goal" currentDraft={{ status: "draft" }} agent={agent} output={grillOutputSchema}>
+      <GrillMe
+        idPrefix="default"
+        context="release goal"
+        currentDraft={{ status: "draft" }}
+        agent={agent}
+        output={grillOutputSchema}
+      >
         <CommandProbe id="default:child" command="true" />
       </GrillMe>,
     ),
