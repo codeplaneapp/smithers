@@ -412,6 +412,28 @@
     "verifyOutput": false
   },
   {
+    "key": "smithers-repo-federation",
+    "title": "Smithers Repo Federation",
+    "runnable": false,
+    "launchArgs": [],
+    "primaryTestId": "federation-ui",
+    "populatedTestId": "",
+    "expectedText": [],
+    "mountOnlyReason": "creates repositories and pull requests through authenticated CLIs; UI is asserted to mount + boot",
+    "verifyOutput": false
+  },
+  {
+    "key": "whole-foods-meal-planner",
+    "title": "Whole Foods Meal Planner",
+    "runnable": false,
+    "launchArgs": [],
+    "primaryTestId": "",
+    "populatedTestId": "",
+    "expectedText": [],
+    "mountOnlyReason": "requires live grocery data and an approval-gated order path; UI is asserted to mount + boot",
+    "verifyOutput": false
+  },
+  {
     "key": "docs-driven-development",
     "title": "Docs Driven Development",
     "runnable": false,
