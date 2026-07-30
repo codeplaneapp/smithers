@@ -371,7 +371,8 @@ declare class BaseCliAgent {
      */
     constructor(opts: BaseCliAgentOptions$1);
     version: string;
-    tools: {};
+    /** @type {Record<string, unknown>} */
+    tools: Record<string, unknown>;
     capabilities: any;
     id: string;
     model: string | undefined;

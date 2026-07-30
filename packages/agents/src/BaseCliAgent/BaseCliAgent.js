@@ -886,6 +886,7 @@ export function extractUsageFromOutput(raw) {
 }
 export class BaseCliAgent {
   version = "agent-v1";
+  /** @type {Record<string, unknown>} */
   tools = {};
   capabilities;
   id;
