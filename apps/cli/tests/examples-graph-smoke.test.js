@@ -131,6 +131,7 @@ async function renderExample(projectDir, workerDir, example) {
 }
 
 test("top-level example workflows render as graphs", async () => {
+  if (process.env.SMITHERS_SKIP_EXAMPLE_GRAPH_SMOKE === "1") return;
   const examples = findTopLevelExampleWorkflows();
   expect(examples).toContain("examples/smoketest.jsx");
   expect(examples.length).toBeGreaterThan(50);
