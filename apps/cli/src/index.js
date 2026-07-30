@@ -807,8 +807,10 @@ function setupAbortSignal() {
   abort.setForceExitCleanup = (cleanup) => {
     forceExitCleanup = typeof cleanup === "function" ? cleanup : async () => {};
   };
-  const forceExit = async (exitCode) => {
-    await forceExitCleanup().catch(() => undefined);
+  const forceExit = (exitCode) => {
+    // Forced means forced: cleanup may contain DB, monitor-admission, or owner
+    // termination awaits that can stall forever.
+    void forceExitCleanup().catch(() => undefined);
     process.exit(exitCode);
   };
   /**
@@ -826,7 +828,7 @@ function setupAbortSignal() {
     if (signalCount >= 2) {
       // Second signal: graceful cancellation is taking too long — exit now.
       process.stderr.write(`[smithers] received ${signal} again, exiting immediately.\n`);
-      void forceExit(exitCode);
+      forceExit(exitCode);
       return;
     }
     process.stderr.write(`[smithers] cancelling run... (signal again to force-exit)\n`);
@@ -836,7 +838,7 @@ function setupAbortSignal() {
     // alive when shutdown completes normally.
     const deadline = setTimeout(() => {
       process.stderr.write(`\n[smithers] graceful shutdown timed out, exiting.\n`);
-      void forceExit(exitCode);
+      forceExit(exitCode);
     }, FORCE_EXIT_BACKSTOP_MS);
     if (typeof deadline.unref === "function") deadline.unref();
   };
