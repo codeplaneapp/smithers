@@ -25,7 +25,7 @@ export type AutosaveDocOptions = {
    * refused and the machine lands in `conflict` instead of blindly
    * overwriting someone else's edit.
    */
-  readExternal?: () => Promise<{ content: string; mtimeMs?: number }>;
+  readExternal?: () => Promise<{ content: string; mtimeMs?: number } | undefined>;
   /** Debounce window for edit-triggered saves (default 800ms). */
   debounceMs?: number;
   /** Injectable scheduler (returns a cancel fn); defaults to setTimeout. */
@@ -75,6 +75,7 @@ export function createAutosaveDoc(options: AutosaveDocOptions): AutosaveDoc {
   const schedule = options.schedule ?? defaultSchedule;
 
   let value = options.initialValue;
+  let persistedContent = options.initialValue;
   let state: AutosaveState = "clean";
   let mtimeMs = options.initialMtimeMs;
   let cancelPending: (() => void) | null = null;
@@ -106,23 +107,33 @@ export function createAutosaveDoc(options: AutosaveDocOptions): AutosaveDoc {
     }, debounceMs);
   }
 
-  /** True when the on-disk copy moved under us with different content. */
+  /** True when the on-disk copy no longer matches our last successful save. */
   async function detectConflict(): Promise<boolean> {
     if (!options.readExternal) return false;
-    let external: { content: string; mtimeMs?: number };
+    let external: { content: string; mtimeMs?: number } | undefined;
     try {
       external = await options.readExternal();
     } catch {
-      // A failed check must never block a save.
-      return false;
+      // Fail closed: an unreadable external copy cannot safely be overwritten.
+      return true;
     }
-    if (external.mtimeMs === undefined || mtimeMs === undefined) return false;
-    return external.mtimeMs > mtimeMs && external.content !== value;
+    // `undefined` means no reader is currently configured (the React binding
+    // keeps a dynamic callback proxy installed so later props are observed).
+    if (!external) return false;
+    return external.content !== persistedContent;
   }
 
-  async function saveNow(): Promise<void> {
+  async function saveNow(force = false): Promise<void> {
     cancelScheduled();
-    if (disposed || inflight) return;
+    if (disposed) return;
+    if (inflight) {
+      const pending = inflightDone;
+      if (pending) await pending;
+      if (!disposed && (state === "dirty" || (force && state === "conflict"))) {
+        await saveNow(force);
+      }
+      return;
+    }
     // Conflict detection is asynchronous too, so acquire the single-flight
     // guard before it. Same-tick callers can no longer overlap writes.
     inflight = true;
@@ -131,7 +142,7 @@ export function createAutosaveDoc(options: AutosaveDocOptions): AutosaveDoc {
       finishInflight = resolve;
     });
     try {
-      if (await detectConflict()) {
+      if (!force && (await detectConflict())) {
         if (!disposed) emit("conflict");
         return;
       }
@@ -140,6 +151,7 @@ export function createAutosaveDoc(options: AutosaveDocOptions): AutosaveDoc {
       emit("saving");
       const result = await options.save(savingValue);
       if (disposed) return;
+      persistedContent = savingValue;
       mtimeMs = result?.mtimeMs ?? mtimeMs;
       // Edits during the flight are not covered by this save: stay dirty.
       emit(value === savingValue ? "saved" : "dirty");
@@ -176,13 +188,13 @@ export function createAutosaveDoc(options: AutosaveDocOptions): AutosaveDoc {
       if (options.readExternal) {
         try {
           const external = await options.readExternal();
-          mtimeMs = external.mtimeMs ?? mtimeMs;
+          mtimeMs = external?.mtimeMs ?? mtimeMs;
         } catch {
-          // Re-baseline is best effort; saveNow proceeds regardless.
+          // Force-overwrite is explicit, so an unavailable baseline is okay.
         }
       }
       emit("dirty");
-      await saveNow();
+      await saveNow(true);
     },
     dispose() {
       disposed = true;

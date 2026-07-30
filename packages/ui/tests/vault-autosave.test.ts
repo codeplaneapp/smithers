@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
 import { autosaveStatusText, createAutosaveDoc, type AutosaveState } from "../src/vault/autosaveMachine";
+import { useAutosaveDoc, type UseAutosaveDocResult } from "../src/vault/useAutosaveDoc";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 /** Manual scheduler: the test decides when debounced saves fire. */
 function manualScheduler() {
@@ -112,6 +117,32 @@ describe("createAutosaveDoc", () => {
     expect(saved).toEqual(["b"]);
   });
 
+  test("a saveNow waiter persists an edit made during an in-flight save", async () => {
+    const saved: string[] = [];
+    let finishFirstSave!: () => void;
+    const doc = createAutosaveDoc({
+      initialValue: "a",
+      save: async (value) => {
+        saved.push(value);
+        if (saved.length === 1) {
+          await new Promise<void>((resolve) => {
+            finishFirstSave = resolve;
+          });
+        }
+      },
+    });
+    doc.setValue("b");
+    const first = doc.saveNow();
+    await flushMicrotasks();
+    doc.setValue("c");
+    const flushLatest = doc.saveNow();
+
+    finishFirstSave();
+    await Promise.all([first, flushLatest]);
+    expect(saved).toEqual(["b", "c"]);
+    expect(doc.getSnapshot().state).toBe("saved");
+  });
+
   test("a failed save returns to dirty and reschedules", async () => {
     const scheduler = manualScheduler();
     let calls = 0;
@@ -151,7 +182,7 @@ describe("createAutosaveDoc", () => {
     expect(saved).toEqual([]);
   });
 
-  test("no conflict when the external copy is older or identical", async () => {
+  test("compares external content with the persisted baseline, not the unsaved edit", async () => {
     const saved: string[] = [];
     const doc = createAutosaveDoc({
       initialValue: "mine",
@@ -160,7 +191,7 @@ describe("createAutosaveDoc", () => {
         saved.push(value);
         return { mtimeMs: 300 };
       },
-      readExternal: async () => ({ content: "mine", mtimeMs: 100 }),
+      readExternal: async () => ({ content: "mine", mtimeMs: 200 }),
     });
     doc.setValue("mine edited");
     await doc.saveNow();
@@ -168,7 +199,7 @@ describe("createAutosaveDoc", () => {
     expect(doc.getSnapshot().mtimeMs).toBe(300);
   });
 
-  test("a failed external read never blocks a save", async () => {
+  test("detects an external edit even when it matches the current unsaved value", async () => {
     const saved: string[] = [];
     const doc = createAutosaveDoc({
       initialValue: "mine",
@@ -176,11 +207,54 @@ describe("createAutosaveDoc", () => {
       save: async (value) => {
         saved.push(value);
       },
+      readExternal: async () => ({ content: "shared edit", mtimeMs: 200 }),
+    });
+    doc.setValue("shared edit");
+    await doc.saveNow();
+    expect(doc.getSnapshot().state).toBe("conflict");
+    expect(saved).toEqual([]);
+  });
+
+  test("updates the persisted-content baseline after each successful save", async () => {
+    const saved: string[] = [];
+    let external = "mine";
+    const doc = createAutosaveDoc({
+      initialValue: "mine",
+      initialMtimeMs: 100,
+      save: async (value) => {
+        saved.push(value);
+        external = value;
+      },
+      readExternal: async () => ({ content: external, mtimeMs: 200 }),
+    });
+    doc.setValue("first");
+    await doc.saveNow();
+    doc.setValue("second");
+    await doc.saveNow();
+    expect(doc.getSnapshot().state).toBe("saved");
+    expect(saved).toEqual(["first", "second"]);
+  });
+
+  test("a failed external read blocks the save until a safe retry", async () => {
+    const saved: string[] = [];
+    let readFails = true;
+    const doc = createAutosaveDoc({
+      initialValue: "mine",
+      initialMtimeMs: 100,
+      save: async (value) => {
+        saved.push(value);
+      },
       readExternal: async () => {
-        throw new Error("stat failed");
+        if (readFails) throw new Error("stat failed");
+        return { content: "mine", mtimeMs: 100 };
       },
     });
     doc.setValue("mine edited");
+    await doc.saveNow();
+    expect(doc.getSnapshot().state).toBe("conflict");
+    expect(saved).toEqual([]);
+
+    readFails = false;
     await doc.saveNow();
     expect(doc.getSnapshot().state).toBe("saved");
     expect(saved).toEqual(["mine edited"]);
@@ -227,7 +301,7 @@ describe("createAutosaveDoc", () => {
       },
       readExternal: async () => {
         readCalls += 1;
-        return readCalls === 1 ? { content: "mine edited", mtimeMs: 100 } : { content: "someone else", mtimeMs: 200 };
+        return readCalls === 1 ? { content: "mine", mtimeMs: 100 } : { content: "someone else", mtimeMs: 200 };
       },
     });
     doc.setValue("mine edited");
@@ -291,6 +365,38 @@ describe("createAutosaveDoc", () => {
     await saving;
     expect(states).toEqual(["dirty"]);
     expect(saveCalls).toBe(0);
+  });
+});
+
+describe("useAutosaveDoc", () => {
+  test("flushes a pending edit before a real unmount", async () => {
+    let api: UseAutosaveDocResult | undefined;
+    const saved: string[] = [];
+    const scheduler = manualScheduler();
+    function Probe() {
+      api = useAutosaveDoc({
+        initialValue: "before",
+        schedule: scheduler.schedule,
+        save: async (value) => {
+          saved.push(value);
+        },
+      });
+      return null;
+    }
+
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(createElement(Probe)));
+    await act(async () => api!.setValue("pending edit"));
+    expect(scheduler.pending()).toBe(1);
+
+    await act(async () => root.unmount());
+    await flushMicrotasks();
+    container.remove();
+
+    expect(saved).toEqual(["pending edit"]);
+    expect(scheduler.pending()).toBe(0);
   });
 });
 
