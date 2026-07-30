@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   assertEvalRunIdsAvailable,
   buildEvalPlan,
@@ -321,6 +322,11 @@ describe("eval suite helpers", () => {
 });
 
 describe("smithers eval command", () => {
+  test("plumbs inconclusive verdicts through both eval result branches", () => {
+    const source = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
+    expect(source.match(/inconclusive: evaluation\.inconclusive,/g)).toHaveLength(2);
+  });
+
   test("prints a dry-run plan", () => {
     const repo = createTempRepo();
     writeTestWorkflow(repo);
