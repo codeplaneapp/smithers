@@ -246,17 +246,17 @@ export function RunsCanvas() {
   const setStreamMode = useRunsListStore((state) => state.setStreamMode);
   const clearFilters = useRunsListStore((state) => state.clearFilters);
 
+  const visibleRuns = connectionStatus === "unauthorized" ? [] : runs;
   const filters = { status: statusFilter, workflow: workflowFilter, age: ageFilter, search };
-  const shown = filterRuns(runs, filters);
+  const shown = filterRuns(visibleRuns, filters);
   const groups = groupRuns(shown);
-  const workflows = distinctWorkflows(runs);
+  const workflows = distinctWorkflows(visibleRuns);
   const workflowOptions = [
     { id: "all", label: "All workflows" },
     ...workflows.map((name) => ({ id: name, label: name })),
   ];
   const showClear = hasActiveFilters(filters);
-  const lastKnown =
-    runs.length > 0 && (connectionStatus === "offline" || connectionStatus === "unauthorized" || Boolean(error));
+  const lastKnown = visibleRuns.length > 0 && (connectionStatus === "offline" || Boolean(error));
   const live = connectionStatus === "online" && streamMode === "live" && !error;
   const streamLabel = lastKnown
     ? "Last-known"
@@ -273,13 +273,11 @@ export function RunsCanvas() {
               : "Polling";
   const freshnessMessage = !lastKnown
     ? null
-    : connectionStatus === "unauthorized"
-      ? "Authorization failed. Every run shown below is last-known data and may be out of date."
-      : connectionStatus === "offline"
-        ? "Gateway offline. Every run shown below is last-known data and may be out of date."
-        : error
-          ? `Refresh failed. Every run shown below is last-known data and may be out of date. ${error}`
-          : null;
+    : connectionStatus === "offline"
+      ? "Gateway offline. Every run shown below is last-known data and may be out of date."
+      : error
+        ? `Refresh failed. Every run shown below is last-known data and may be out of date. ${error}`
+        : null;
 
   return (
     <section className="surface" data-testid="runs-canvas">
@@ -344,7 +342,7 @@ export function RunsCanvas() {
           </div>
         ) : null}
 
-        {connectionStatus === "unauthorized" && runs.length === 0 ? (
+        {connectionStatus === "unauthorized" ? (
           <EmptyState
             className="surface-empty"
             data-testid="runs-landing-state"
