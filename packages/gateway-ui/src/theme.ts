@@ -92,10 +92,10 @@ export const gatewayUiCss = `
 .gw-approval-button:disabled { cursor:not-allowed; opacity:.6; }
 .gw-node-row:focus-visible,.gw-run-row:focus-visible,.gw-approval-button:focus-visible { outline:none; border-color:${theme.ringBorder}; box-shadow:0 0 0 3px ${theme.ring}; }
 .gw-status-pill { --gw-tone:${theme.textDim}; --gw-tone-soft:${theme.neutralSoft}; --gw-tone-border:${theme.neutralBorder}; display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border-radius:999px; border:1px solid var(--gw-tone-border); background:var(--gw-tone-soft); color:var(--gw-tone); font-size:12px; font-weight:650; }
-.gw-status-pill.run { --gw-tone:${theme.accent}; --gw-tone-soft:${theme.accentSoft}; --gw-tone-border:${theme.accentBorder}; }
-.gw-status-pill.ok { --gw-tone:${theme.success}; --gw-tone-soft:${theme.successSoft}; --gw-tone-border:${theme.successBorder}; }
-.gw-status-pill.warn { --gw-tone:${theme.warning}; --gw-tone-soft:${theme.warningSoft}; --gw-tone-border:${theme.warningBorder}; }
-.gw-status-pill.bad { --gw-tone:${theme.danger}; --gw-tone-soft:${theme.dangerSoft}; --gw-tone-border:${theme.dangerBorder}; }
+.gw-status-pill[data-status-class='run'] { --gw-tone:${theme.accent}; --gw-tone-soft:${theme.accentSoft}; --gw-tone-border:${theme.accentBorder}; }
+.gw-status-pill[data-status-class='ok'] { --gw-tone:${theme.success}; --gw-tone-soft:${theme.successSoft}; --gw-tone-border:${theme.successBorder}; }
+.gw-status-pill[data-status-class='warn'] { --gw-tone:${theme.warning}; --gw-tone-soft:${theme.warningSoft}; --gw-tone-border:${theme.warningBorder}; }
+.gw-status-pill[data-status-class='bad'] { --gw-tone:${theme.danger}; --gw-tone-soft:${theme.dangerSoft}; --gw-tone-border:${theme.dangerBorder}; }
 .gw-status-pill-dot { width:6px; height:6px; border-radius:999px; background:var(--gw-tone); }
 .gw-node-output-card { --gw-tone:${theme.textDim}; --gw-tone-soft:${theme.neutralSoft}; }
 .gw-node-output-card[data-status='produced'] { --gw-tone:${theme.success}; --gw-tone-soft:${theme.successSoft}; }

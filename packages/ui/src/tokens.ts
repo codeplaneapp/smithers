@@ -113,6 +113,7 @@ export const tokens = {
   radius: "var(--r-2, 10px)",
   radiusControl: "var(--r-1, 6px)",
   radiusBubble: "var(--r-bubble, 18px)",
+  radiusFull: "var(--r-full, 999px)",
   /** Shared control height (buttons, inputs, selects, triggers). */
   controlHeight: "var(--ctl-h, 32px)",
   /** Compact UI copy: the documented 12px type-scale step. */

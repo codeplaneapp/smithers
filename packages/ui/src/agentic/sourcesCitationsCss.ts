@@ -41,7 +41,7 @@ export const sourcesCitationsCss: string = `
 .sui-citation-quote p { margin:0; }
 .sui-citation-quote cite { display:block; margin-top:2px; color:${t.textFaint}; font-size:11px; font-style:normal; }
 .sui-suggestion-group { display:flex; gap:6px; overflow-x:auto; padding:2px; scrollbar-width:thin; }
-.sui-suggestion { flex:none; min-height:28px; display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border:1px solid ${t.input}; border-radius:999px; background:${t.card}; color:${t.mutedForeground}; font:inherit; font-size:12px; white-space:nowrap; cursor:pointer; }
+.sui-suggestion { flex:none; min-height:28px; display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border:1px solid ${t.input}; border-radius:${t.radiusFull}; background:${t.card}; color:${t.mutedForeground}; font:inherit; font-size:12px; white-space:nowrap; cursor:pointer; }
 .sui-suggestion:hover { background:${t.secondary}; color:${t.foreground}; }
 .sui-suggestion:focus-visible { ${focusRing} }
 .sui-open-in-chat { min-height:28px; display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border:1px solid ${t.border}; border-radius:${t.radiusControl}; background:transparent; color:${t.mutedForeground}; font:inherit; font-size:12px; cursor:pointer; }

@@ -39,12 +39,12 @@ export const plansTasksQueuesCss = `
 .sui-queue-section-trigger[aria-expanded='true'] .sui-queue-section-chevron { transform:rotate(90deg); }
 .sui-queue-section-label { min-width:0; display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:650; }
 .sui-queue-section-icon { display:inline-flex; align-items:center; flex:none; color:${t.mutedForeground}; }
-.sui-queue-section-count { flex:none; padding:0 6px; border-radius:999px; background:${t.hoverSubtle}; color:${t.mutedForeground}; font-size:10px; font-variant-numeric:tabular-nums; line-height:16px; }
+.sui-queue-section-count { flex:none; padding:0 6px; border-radius:${t.radiusFull}; background:${t.hoverSubtle}; color:${t.mutedForeground}; font-size:10px; font-variant-numeric:tabular-nums; line-height:16px; }
 .sui-queue-section-content { min-width:0; border-top:1px solid ${t.border}; }
 .sui-queue-list { min-width:0; margin:0; padding:4px; list-style:none; display:grid; gap:2px; }
 .sui-queue-item { min-width:0; display:grid; grid-template-columns:14px minmax(0, 1fr); column-gap:8px; padding:6px 8px; border-radius:${t.radiusControl}; }
 .sui-queue-item:hover { background:${t.hoverSubtle}; }
-.sui-queue-item-indicator { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; margin-top:1px; border-radius:999px; border:1px solid ${t.borderStrong}; color:transparent; font-size:10px; line-height:1; }
+.sui-queue-item-indicator { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; margin-top:1px; border-radius:${t.radiusFull}; border:1px solid ${t.borderStrong}; color:transparent; font-size:10px; line-height:1; }
 .sui-queue-item[data-status-class='ok'] .sui-queue-item-indicator, .sui-queue-item-indicator[data-status-class='ok'] { border-color:${t.successBorder}; background:${t.successSoft}; color:${statusColors.ok}; }
 .sui-queue-item[data-status-class='run'] .sui-queue-item-indicator, .sui-queue-item-indicator[data-status-class='run'] { border-color:${t.primaryBorder}; background:${t.primarySoft}; color:${statusColors.run}; }
 .sui-queue-item[data-status-class='warn'] .sui-queue-item-indicator, .sui-queue-item-indicator[data-status-class='warn'] { border-color:${t.warningBorder}; background:${t.warningSoft}; color:${statusColors.warn}; }
@@ -56,7 +56,7 @@ export const plansTasksQueuesCss = `
 .sui-activity-timeline { min-width:0; margin:0; padding:0; list-style:none; display:grid; gap:0; }
 .sui-activity-item { position:relative; min-width:0; display:flex; align-items:flex-start; gap:10px; padding:6px 0 6px 2px; }
 .sui-activity-item + .sui-activity-item { border-top:1px solid ${t.border}; }
-.sui-activity-marker { display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; margin-top:1px; flex:none; border-radius:999px; border:1px solid ${t.border}; background:${t.surface2}; color:${t.mutedForeground}; font-size:10px; line-height:1; }
+.sui-activity-marker { display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; margin-top:1px; flex:none; border-radius:${t.radiusFull}; border:1px solid ${t.border}; background:${t.surface2}; color:${t.mutedForeground}; font-size:10px; line-height:1; }
 .sui-activity-item[data-status-class='ok'] .sui-activity-marker { border-color:${t.successBorder}; background:${t.successSoft}; color:${statusColors.ok}; }
 .sui-activity-item[data-status-class='run'] .sui-activity-marker { border-color:${t.primaryBorder}; background:${t.primarySoft}; color:${statusColors.run}; }
 .sui-activity-item[data-status-class='warn'] .sui-activity-marker { border-color:${t.warningBorder}; background:${t.warningSoft}; color:${statusColors.warn}; }

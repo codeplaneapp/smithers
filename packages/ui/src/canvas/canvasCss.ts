@@ -16,7 +16,7 @@ export const canvasCss = `
 .sui-canvas-node-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; font-weight:650; color:var(--text, #18181b); }
 .sui-canvas-node-status { margin-left:auto; flex:none; }
 .sui-canvas-node-content { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-muted, #52525b); font-size:var(--fs-2, 12px); }
-.sui-canvas-edge { display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border:1px solid var(--border, rgba(24,24,27,0.08)); border-radius:999px; background:var(--surface, #ffffff); color:var(--text-muted, #52525b); font-size:var(--fs-2, 12px); }
+.sui-canvas-edge { display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border:1px solid var(--border, rgba(24,24,27,0.08)); border-radius:var(--r-full, 999px); background:var(--surface, #ffffff); color:var(--text-muted, #52525b); font-size:var(--fs-2, 12px); }
 .sui-canvas-edge-glyph { display:inline-flex; align-items:center; justify-content:center; width:12px; height:12px; flex:none; font-size:10px; line-height:1; color:var(--text-muted, #52525b); }
 .sui-canvas-edge[data-status-class='run'] .sui-canvas-edge-glyph { color:var(--brand, #6d56d8); }
 .sui-canvas-edge[data-status-class='ok'] .sui-canvas-edge-glyph { color:var(--success, #087461); }

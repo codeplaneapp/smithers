@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { reducedMotionCss, standaloneThemeCss } from "../src";
+import { reducedMotionCss, standaloneThemeCss, workflowUiThemeCss } from "../src";
+
+function themeDeclarations(css: string, theme: "light" | "dark"): Map<string, string> {
+  const block =
+    theme === "light"
+      ? css.match(/^:root \{ ([^}]+) \}/m)?.[1]
+      : css.match(/:root\[data-theme=(["'])dark\1\] \{ ([^}]+) \}/)?.[2];
+  if (!block) throw new Error(`${theme} token block not found`);
+
+  return new Map([...block.matchAll(/(--[\w-]+):([^;]+)(?:;|$)/g)].map((match) => [match[1]!, match[2]!.trim()]));
+}
 
 describe("standaloneThemeCss", () => {
   test("ships both dark-mode strategies and keeps color values in token declarations", () => {
@@ -39,5 +49,20 @@ describe("standaloneThemeCss", () => {
     expect(css.match(/--text-faint:#8c8c95/g)).toHaveLength(2);
     expect(css.match(/--text-placeholder:#75757e/g)).toHaveLength(2);
     expect(css).not.toContain("--text-faint:#71717a; --text-placeholder:#75757e");
+  });
+
+  test("declares every workflow theme token in light and dark mode", () => {
+    const standaloneCss = standaloneThemeCss();
+    for (const theme of ["light", "dark"] as const) {
+      expect(themeDeclarations(standaloneCss, theme)).toEqual(themeDeclarations(workflowUiThemeCss, theme));
+    }
+  });
+
+  test("routes elevation shadows through the theme shadow channels", () => {
+    const css = standaloneThemeCss();
+    const shadows = css.match(/--shadow-[123]:[^;}]+/g) ?? [];
+    expect(shadows).toHaveLength(9);
+    for (const shadow of shadows) expect(shadow).toContain("rgb(var(--shadow-rgb) /");
+    expect(css).not.toMatch(/rgb\((?:24 24 27|0 0 0) \//);
   });
 });

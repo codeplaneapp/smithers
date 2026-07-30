@@ -32,7 +32,7 @@ export const approvalsCss = `
 .sui-approval-header { display:flex; align-items:center; gap:8px; min-width:0; }
 .sui-approval-title { min-width:0; flex:1; font-size:13px; font-weight:650; }
 .sui-approval-summary { min-width:0; color:${t.mutedForeground}; }
-.sui-approval-risk { flex:none; display:inline-flex; align-items:center; gap:4px; min-height:22px; padding:0 8px; border-radius:999px; font-size:11px; font-weight:650; text-transform:uppercase; letter-spacing:.05em; }
+.sui-approval-risk { flex:none; display:inline-flex; align-items:center; gap:4px; min-height:22px; padding:0 8px; border-radius:${t.radiusFull}; font-size:11px; font-weight:650; text-transform:uppercase; letter-spacing:.05em; }
 .sui-approval-risk[data-level='low'] { border:1px solid ${t.infoBorder}; background:${t.infoSoft}; color:${t.info}; }
 .sui-approval-risk[data-level='medium'] { border:1px solid ${t.warningBorder}; background:${t.warningSoft}; color:${t.warning}; }
 .sui-approval-risk[data-level='high'] { border:1px solid ${t.warningBorder}; background:color-mix(in srgb, ${t.warning} 22%, ${t.card}); color:${t.warning}; }
@@ -43,7 +43,7 @@ export const approvalsCss = `
 .sui-approval-resource a { color:${t.primary}; text-decoration:none; }
 .sui-approval-resource a:hover { text-decoration:underline; }
 .sui-approval-resource a:focus-visible { ${focusRing} }
-.sui-approval-resource-kind { flex:none; padding:2px 6px; border:1px solid ${t.border}; border-radius:999px; background:${t.surface2}; font-size:10px; text-transform:uppercase; letter-spacing:.05em; }
+.sui-approval-resource-kind { flex:none; padding:2px 6px; border:1px solid ${t.border}; border-radius:${t.radiusFull}; background:${t.surface2}; font-size:10px; text-transform:uppercase; letter-spacing:.05em; }
 .sui-approval-note { min-width:0; display:grid; gap:4px; }
 .sui-approval-note-label { font-size:12px; font-weight:650; color:${t.mutedForeground}; }
 .sui-approval-note-input { min-width:0; width:100%; min-height:56px; padding:6px 8px; border:1px solid ${t.input}; border-radius:${t.radiusControl}; background:${t.card}; color:${t.foreground}; font:inherit; font-size:13px; resize:vertical; }

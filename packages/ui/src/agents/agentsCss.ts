@@ -18,7 +18,7 @@ export const agentsCss = `
 .sui-agentdef-identity-sep { color:${t.textFaint}; }
 .sui-agentdef-provider { color:${t.mutedForeground}; }
 .sui-agentdef-model { color:${t.foreground}; }
-.sui-agentdef-availability { flex:none; display:inline-flex; align-items:center; min-height:20px; padding:0 8px; border:1px solid ${t.border}; border-radius:999px; color:${t.mutedForeground}; font-size:10px; font-weight:650; text-transform:uppercase; letter-spacing:.02em; }
+.sui-agentdef-availability { flex:none; display:inline-flex; align-items:center; min-height:20px; padding:0 8px; border:1px solid ${t.border}; border-radius:${t.radiusFull}; color:${t.mutedForeground}; font-size:10px; font-weight:650; text-transform:uppercase; letter-spacing:.02em; }
 .sui-agentdef-availability[data-availability='available'] { border-color:${t.successBorder}; background:${t.successSoft}; color:${t.success}; }
 .sui-agentdef-availability[data-availability='unauthenticated'] { border-color:${t.warningBorder}; background:${t.warningSoft}; color:${t.warning}; }
 .sui-agentdef-availability[data-availability='unavailable'] { border-color:${t.destructiveBorder}; background:${t.destructiveSoft}; color:${t.destructive}; }
@@ -51,11 +51,11 @@ export const agentsCss = `
 .sui-agentcard-provider { color:${t.mutedForeground}; }
 .sui-agentcard-model { color:${t.foreground}; }
 .sui-agentcard-description { min-width:0; color:${t.mutedForeground}; font-size:${t.fontSizeCompact}; line-height:1.45; }
-.sui-model-badge { display:inline-flex; align-items:center; gap:6px; min-width:0; max-width:100%; min-height:20px; padding:0 8px; border:1px solid ${t.primaryBorder}; border-radius:999px; background:${t.primarySoft}; color:${t.primary}; font-size:11px; font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sui-model-badge { display:inline-flex; align-items:center; gap:6px; min-width:0; max-width:100%; min-height:20px; padding:0 8px; border:1px solid ${t.primaryBorder}; border-radius:${t.radiusFull}; background:${t.primarySoft}; color:${t.primary}; font-size:11px; font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .sui-model-badge-icon { display:inline-flex; align-items:center; flex:none; }
 .sui-model-badge-name { min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .sui-model-badge-provider { flex:none; font-weight:500; opacity:.75; }
-.sui-provider-badge { display:inline-flex; align-items:center; gap:4px; min-width:0; max-width:100%; min-height:18px; padding:0 6px; border:1px solid ${t.border}; border-radius:999px; background:${t.hoverSubtle}; color:${t.mutedForeground}; font-size:10px; font-weight:650; text-transform:uppercase; letter-spacing:.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sui-provider-badge { display:inline-flex; align-items:center; gap:4px; min-width:0; max-width:100%; min-height:18px; padding:0 6px; border:1px solid ${t.border}; border-radius:${t.radiusFull}; background:${t.hoverSubtle}; color:${t.mutedForeground}; font-size:10px; font-weight:650; text-transform:uppercase; letter-spacing:.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .sui-provider-badge-icon { display:inline-flex; align-items:center; flex:none; }
 .sui-provider-badge-name { min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .sui-model-sel-trigger { gap:8px; }
@@ -66,7 +66,7 @@ export const agentsCss = `
 .sui-model-sel-item-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .sui-model-sel-item-description { color:${t.mutedForeground}; font-size:11px; line-height:1.35; }
 .sui-ctx { position:relative; display:inline-block; min-width:0; }
-.sui-ctx-trigger { min-height:24px; display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border:1px solid ${t.border}; border-radius:999px; background:${t.card}; color:${t.mutedForeground}; font:inherit; font-size:11px; font-variant-numeric:tabular-nums; cursor:pointer; }
+.sui-ctx-trigger { min-height:24px; display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border:1px solid ${t.border}; border-radius:${t.radiusFull}; background:${t.card}; color:${t.mutedForeground}; font:inherit; font-size:11px; font-variant-numeric:tabular-nums; cursor:pointer; }
 .sui-ctx-trigger:hover { background:${t.secondary}; color:${t.foreground}; }
 .sui-ctx-trigger:focus-visible { ${focusRing} }
 .sui-ctx-trigger-label { min-width:0; }

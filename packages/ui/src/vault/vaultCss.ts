@@ -32,5 +32,4 @@ export const vaultCss = `
 .sui-vault-outline-item:focus-visible { outline:none; box-shadow:0 0 0 3px var(--ring, color-mix(in srgb, var(--brand, #6d56d8) 22%, transparent)); }
 .sui-vault-outline-item[data-depth='1'] { font-weight:650; }
 .sui-vault-outline-empty { margin:0; padding:8px; color:var(--text-muted, #52525b); font-size:var(--fs-2, 12px); }
-.sui-vault-save-status { color:var(--text-muted, #52525b); font-size:11px; }
 `;

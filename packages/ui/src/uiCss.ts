@@ -69,7 +69,7 @@ export const sharedCss = `
 /* -------------------------------------------------------------------------- */
 
 export const buttonCss = `
-.sui-button { min-height:32px; display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:0 12px; border:1px solid ${t.input}; border-radius:${t.radiusControl}; background:${t.card}; color:${t.foreground}; font:inherit; font-size:13px; text-decoration:none; cursor:pointer; white-space:nowrap; user-select:none; ${interaction} }
+.sui-button { min-height:${t.controlHeight}; display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:0 12px; border:1px solid ${t.input}; border-radius:${t.radiusControl}; background:${t.card}; color:${t.foreground}; font:inherit; font-size:13px; text-decoration:none; cursor:pointer; white-space:nowrap; user-select:none; ${interaction} }
 .sui-button:hover { background:${t.secondary}; }
 .sui-button:active:not(:disabled) { background:color-mix(in srgb, ${t.foreground} 6%, ${t.secondary}); }
 .sui-button:focus-visible { ${focusRing} }
@@ -97,7 +97,7 @@ export const buttonCss = `
 .sui-button-link:hover { background:transparent; text-decoration-thickness:2px; }
 .sui-button-sm { min-height:26px; padding:0 8px; font-size:12px; }
 .sui-button-lg { min-height:38px; padding:0 16px; }
-.sui-button-icon-size { min-height:32px; width:32px; padding:0; }
+.sui-button-icon-size { min-height:${t.controlHeight}; width:32px; padding:0; }
 `;
 
 /* -------------------------------------------------------------------------- */
@@ -105,16 +105,15 @@ export const buttonCss = `
 /* -------------------------------------------------------------------------- */
 
 export const badgeCss = `
-.sui-badge { display:inline-flex; align-items:center; gap:6px; min-width:0; max-width:100%; min-height:22px; padding:0 10px; border:1px solid ${t.border}; border-radius:999px; background:transparent; color:${t.mutedForeground}; font-size:11px; font-weight:650; text-transform:uppercase; letter-spacing:.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sui-badge { display:inline-flex; align-items:center; gap:6px; min-width:0; max-width:100%; min-height:22px; padding:0 10px; border:1px solid ${t.border}; border-radius:${t.radiusFull}; background:transparent; color:${t.mutedForeground}; font-size:11px; font-weight:650; text-transform:uppercase; letter-spacing:.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .sui-badge-default { border-color:${t.primaryBorder}; background:${t.primarySoft}; color:${t.primary}; }
 .sui-badge-secondary { border-color:${t.border}; background:${t.hoverSubtle}; color:${t.mutedForeground}; }
 .sui-badge-outline { border-color:${t.input}; color:${t.foreground}; }
 .sui-badge-success { border-color:${t.successBorder}; background:${t.successSoft}; color:${t.success}; }
 .sui-badge-warning { border-color:${t.warningBorder}; background:${t.warningSoft}; color:${t.warning}; }
 .sui-badge-destructive { border-color:${t.destructiveBorder}; background:${t.destructiveSoft}; color:${t.destructive}; }
-.sui-badge-info { border-color:${t.infoBorder}; background:${t.infoSoft}; color:${t.info}; }
 .sui-badge-muted { border-color:${t.border}; background:color-mix(in srgb, ${t.mutedForeground} 12%, transparent); color:${t.mutedForeground}; }
-.sui-status-dot { width:6px; height:6px; flex:none; border-radius:999px; background:currentColor; }
+.sui-status-dot { width:6px; height:6px; flex:none; border-radius:${t.radiusFull}; background:currentColor; }
 `;
 
 /* -------------------------------------------------------------------------- */
@@ -139,7 +138,7 @@ export const cardCss = `
 /* -------------------------------------------------------------------------- */
 
 export const formCss = `
-.sui-input { min-width:0; min-height:32px; padding:0 10px; border:1px solid ${t.input}; border-radius:${t.radiusControl}; background:${t.card}; color:${t.foreground}; font:inherit; font-size:13px; outline:none; }
+.sui-input { min-width:0; min-height:${t.controlHeight}; padding:0 10px; border:1px solid ${t.input}; border-radius:${t.radiusControl}; background:${t.card}; color:${t.foreground}; font:inherit; font-size:13px; outline:none; }
 .sui-input:focus-visible { ${focusRing} }
 .sui-input::placeholder { color:${t.placeholder}; }
 .sui-input:disabled { cursor:not-allowed; opacity:.45; }
@@ -176,7 +175,7 @@ export const chatCss = `
 .sui-chat-bubble > :last-child { margin-bottom:0; }
 .sui-chat-bubble-pending { display:inline-flex; align-items:center; padding:14px; }
 .sui-chat-typing { display:inline-flex; align-items:center; gap:6px; }
-.sui-chat-typing span { width:7px; height:7px; border-radius:999px; background:${t.placeholder}; animation:sui-chat-typing 1.3s ease-in-out infinite; }
+.sui-chat-typing span { width:7px; height:7px; border-radius:${t.radiusFull}; background:${t.placeholder}; animation:sui-chat-typing 1.3s ease-in-out infinite; }
 .sui-chat-typing span:nth-child(2) { animation-delay:.2s; }
 .sui-chat-typing span:nth-child(3) { animation-delay:.4s; }
 .sui-chat-composer { position:relative; display:grid; gap:12px; width:min(100%, 720px); margin:0 auto; padding:16px; border:1px solid ${t.border}; border-radius:${t.radiusBubble}; background:${t.glass}; -webkit-backdrop-filter:blur(20px) saturate(180%); backdrop-filter:blur(20px) saturate(180%); box-shadow:0 1px 2px rgb(${t.shadowRgb} / 0.04), 0 16px 40px rgb(${t.shadowRgb} / 0.10); transition:border-color .15s ease, box-shadow .15s ease; }
@@ -201,7 +200,7 @@ export const chatScrollerCss = `
 .sui-msg-scroller-viewport { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
 .sui-msg-scroller-viewport:focus-visible { ${focusRing} }
 .sui-msg-scroller-content { min-width:0; }
-.sui-msg-scroller-jump { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:5; width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; border:1px solid ${t.border}; border-radius:999px; background:${t.glassStrong}; color:${t.foreground}; font:inherit; cursor:pointer; box-shadow:0 1px 2px rgb(${t.shadowRgb} / 0.06), 0 8px 24px rgb(${t.shadowRgb} / 0.10); ${interaction} }
+.sui-msg-scroller-jump { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:5; width:32px; height:${t.controlHeight}; display:inline-flex; align-items:center; justify-content:center; border:1px solid ${t.border}; border-radius:${t.radiusFull}; background:${t.glassStrong}; color:${t.foreground}; font:inherit; cursor:pointer; box-shadow:0 1px 2px rgb(${t.shadowRgb} / 0.06), 0 8px 24px rgb(${t.shadowRgb} / 0.10); ${interaction} }
 .sui-msg-scroller-jump:hover { background:${t.secondary}; }
 .sui-msg-scroller-jump:focus-visible { ${focusRing} }
 .sui-scroll-fade[data-fade-top='true'][data-fade-bottom='false'] { mask-image:linear-gradient(to bottom, transparent, black 32px); -webkit-mask-image:linear-gradient(to bottom, transparent, black 32px); }
@@ -227,7 +226,7 @@ export const chatScrollerCss = `
 .sui-attachment-details { min-width:0; display:grid; gap:4px; }
 .sui-attachment-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:${t.fontSizeCompact}; font-weight:650; }
 .sui-attachment-meta { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:${t.mutedForeground}; font-size:11px; }
-.sui-attachment-progress { position:relative; width:100%; height:3px; overflow:hidden; border-radius:999px; background:color-mix(in srgb, ${t.primary} 14%, transparent); }
+.sui-attachment-progress { position:relative; width:100%; height:3px; overflow:hidden; border-radius:${t.radiusFull}; background:color-mix(in srgb, ${t.primary} 14%, transparent); }
 .sui-attachment-progress-bar { display:block; height:100%; border-radius:inherit; background:${t.primary}; }
 .sui-attachment-progress-indeterminate { width:40%; animation:sui-attachment-indeterminate 1.2s ease-in-out infinite; }
 .sui-attachment-remove { width:26px; height:26px; display:inline-flex; align-items:center; justify-content:center; border:1px solid transparent; border-radius:${t.radiusControl}; background:transparent; color:${t.mutedForeground}; font:inherit; font-size:18px; cursor:pointer; ${interaction} }
@@ -239,7 +238,7 @@ export const chatScrollerCss = `
 .sui-marker[data-variant='separator']::before, .sui-marker[data-variant='separator']::after { content:""; flex:1; height:1px; background:${t.border}; }
 .sui-marker[data-variant='separator'] .sui-marker-label { flex:none; text-align:center; }
 .sui-marker[data-variant='note'] { justify-content:center; }
-.sui-marker[data-variant='note'] .sui-marker-label { max-width:100%; padding:4px 10px; border:1px solid ${t.border}; border-radius:999px; background:${t.glassStrong}; text-align:center; }
+.sui-marker[data-variant='note'] .sui-marker-label { max-width:100%; padding:4px 10px; border:1px solid ${t.border}; border-radius:${t.radiusFull}; background:${t.glassStrong}; text-align:center; }
 .sui-marker[data-variant='status'] { justify-content:flex-start; }
 .sui-shimmer { display:inline; }
 .sui-shimmer[data-active='true'] { background:linear-gradient(90deg, ${t.mutedForeground} 35%, ${t.foreground} 50%, ${t.mutedForeground} 65%); background-size:200% 100%; background-clip:text; -webkit-background-clip:text; color:transparent; animation:sui-shimmer-sweep 2s linear infinite; }
@@ -288,7 +287,7 @@ export const tabsCss = `
 .sui-tabs-trigger:focus-visible { ${focusRing} border-radius:${t.radiusControl}; }
 .sui-tabs-trigger[data-state='active'] { color:${t.foreground}; border-bottom-color:${t.primary}; }
 .sui-tabs-trigger:disabled { cursor:not-allowed; opacity:.45; }
-.sui-tab-count { font-family:${t.fontMono}; font-size:10px; color:${t.mutedForeground}; border:1px solid ${t.border}; border-radius:999px; padding:0 6px; min-width:18px; text-align:center; }
+.sui-tab-count { font-family:${t.fontMono}; font-size:10px; color:${t.mutedForeground}; border:1px solid ${t.border}; border-radius:${t.radiusFull}; padding:0 6px; min-width:18px; text-align:center; }
 .sui-tabs-trigger[data-state='active'] .sui-tab-count { color:${t.primary}; border-color:color-mix(in srgb, ${t.primary} 33%, transparent); }
 .sui-tabs-content { min-width:0; }
 .sui-tabs-content:focus-visible { outline:none; }
@@ -336,7 +335,7 @@ export const agenticPlanCss = `
 .sui-plan-steps { display:grid; gap:0; margin:0; padding:0 10px 10px; list-style:none; }
 .sui-plan-step { position:relative; min-width:0; border-top:1px solid ${t.border}; }
 .sui-plan-step-row { min-width:0; display:grid; grid-template-columns:10px minmax(0, 1fr) auto; align-items:center; gap:8px; min-height:36px; }
-.sui-plan-step-dot, .sui-taskitem-dot { width:7px; height:7px; flex:none; border-radius:999px; background:color-mix(in srgb, ${t.mutedForeground} 40%, transparent); }
+.sui-plan-step-dot, .sui-taskitem-dot { width:7px; height:7px; flex:none; border-radius:${t.radiusFull}; background:color-mix(in srgb, ${t.mutedForeground} 40%, transparent); }
 .sui-plan-step[data-status-class='run'] .sui-plan-step-dot { background:${statusColors.run}; }
 .sui-plan-step[data-status-class='ok'] .sui-plan-step-dot { background:${statusColors.ok}; }
 .sui-plan-step[data-status-class='warn'] .sui-plan-step-dot { background:${statusColors.warn}; }
@@ -356,7 +355,7 @@ export const agenticPlanCss = `
 .sui-taskitem-muted .sui-taskitem-dot { background:${statusColors.muted}; }
 .sui-taskitem-label { min-width:0; flex:1 1 auto; overflow-wrap:anywhere; }
 .sui-taskitem-files { min-width:0; display:flex; align-items:center; justify-content:flex-end; gap:4px; flex-wrap:wrap; }
-.sui-taskitem-file { max-width:180px; padding:2px 6px; border:1px solid ${t.border}; border-radius:999px; background:${t.hoverSubtle}; color:${t.mutedForeground}; font-family:${t.fontMono}; font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sui-taskitem-file { max-width:180px; padding:2px 6px; border:1px solid ${t.border}; border-radius:${t.radiusFull}; background:${t.hoverSubtle}; color:${t.mutedForeground}; font-family:${t.fontMono}; font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .sui-taskitem-elapsed { flex:none; color:${t.mutedForeground}; font-size:11px; font-variant-numeric:tabular-nums; }
 .sui-sources { min-width:0; color:${t.mutedForeground}; font-size:12px; }
 .sui-sources-trigger { min-height:28px; display:inline-flex; align-items:center; gap:6px; padding:4px 6px; border:1px solid transparent; border-radius:${t.radiusControl}; background:transparent; color:${t.mutedForeground}; font:inherit; font-size:12px; cursor:pointer; ${interaction} }
@@ -369,7 +368,7 @@ export const agenticPlanCss = `
 .sui-sources-link:focus-visible { ${focusRing} }
 .sui-sources-label { color:${t.mutedForeground}; overflow-wrap:anywhere; }
 .sui-citation { line-height:0; }
-.sui-citation > a, .sui-citation > button { display:inline-flex; align-items:center; justify-content:center; margin:0 1px; padding:2px 4px; border:1px solid color-mix(in srgb, ${t.primary} 33%, transparent); border-radius:999px; background:color-mix(in srgb, ${t.primary} 10%, transparent); color:${t.primary}; font:inherit; font-size:10px; font-weight:650; line-height:1.2; text-decoration:none; vertical-align:super; cursor:pointer; }
+.sui-citation > a, .sui-citation > button { display:inline-flex; align-items:center; justify-content:center; margin:0 1px; padding:2px 4px; border:1px solid color-mix(in srgb, ${t.primary} 33%, transparent); border-radius:${t.radiusFull}; background:color-mix(in srgb, ${t.primary} 10%, transparent); color:${t.primary}; font:inherit; font-size:10px; font-weight:650; line-height:1.2; text-decoration:none; vertical-align:super; cursor:pointer; }
 .sui-citation > a:hover, .sui-citation > button:hover { background:color-mix(in srgb, ${t.primary} 16%, transparent); }
 .sui-citation > a:focus-visible, .sui-citation > button:focus-visible { ${focusRing} }
 `;
@@ -379,7 +378,7 @@ export const agenticPlanCss = `
 /* -------------------------------------------------------------------------- */
 
 export const selectCss = `
-.sui-select-trigger { min-width:0; min-height:32px; display:inline-flex; align-items:center; justify-content:space-between; gap:8px; padding:0 10px; border:1px solid ${t.input}; border-radius:${t.radiusControl}; background:${t.card}; color:${t.foreground}; font:inherit; font-size:13px; cursor:pointer; white-space:nowrap; ${interaction} }
+.sui-select-trigger { min-width:0; min-height:${t.controlHeight}; display:inline-flex; align-items:center; justify-content:space-between; gap:8px; padding:0 10px; border:1px solid ${t.input}; border-radius:${t.radiusControl}; background:${t.card}; color:${t.foreground}; font:inherit; font-size:13px; cursor:pointer; white-space:nowrap; ${interaction} }
 .sui-select-trigger:hover { background:${t.secondary}; }
 .sui-select-trigger:focus-visible { ${focusRing} }
 .sui-select-trigger:disabled { cursor:not-allowed; opacity:.45; }
@@ -401,8 +400,8 @@ export const selectCss = `
 /* -------------------------------------------------------------------------- */
 
 export const progressCss = `
-.sui-progress { position:relative; width:100%; height:6px; overflow:hidden; border-radius:999px; background:${t.secondary}; }
-.sui-progress-indicator { width:100%; height:100%; border-radius:999px; background:${t.primary}; transition:transform .3s ease; }
+.sui-progress { position:relative; width:100%; height:6px; overflow:hidden; border-radius:${t.radiusFull}; background:${t.secondary}; }
+.sui-progress-indicator { width:100%; height:100%; border-radius:${t.radiusFull}; background:${t.primary}; transition:transform .3s ease; }
 `;
 
 export const skeletonCss = `
@@ -411,7 +410,7 @@ export const skeletonCss = `
 `;
 
 export const spinnerCss = `
-.sui-spinner { display:inline-block; width:14px; height:14px; flex:none; border:2px solid color-mix(in srgb, currentColor 25%, transparent); border-top-color:currentColor; border-radius:999px; animation:sui-spin .7s linear infinite; }
+.sui-spinner { display:inline-block; width:14px; height:14px; flex:none; border:2px solid color-mix(in srgb, currentColor 25%, transparent); border-top-color:currentColor; border-radius:${t.radiusFull}; animation:sui-spin .7s linear infinite; }
 .sui-spinner-sm { width:11px; height:11px; border-width:1.5px; }
 .sui-spinner-lg { width:20px; height:20px; }
 @keyframes sui-spin { to { transform:rotate(360deg); } }
@@ -540,8 +539,6 @@ export const markdownCss = `
 .sui-md-list { margin:6px 0; padding-left:22px; }
 .sui-md-list li { margin:2px 0; }
 .sui-md-inline-code { padding:2px 6px; border-radius:${t.radiusControl}; background:color-mix(in srgb, ${t.foreground} 7%, transparent); font-family:${t.fontMono}; font-size:.9em; }
-.sui-md-code-block { margin:8px 0; padding:12px 14px; border-radius:${t.radius}; background:${t.codeBg}; color:${t.codeText}; font-family:${t.fontMono}; font-size:12px; line-height:1.5; overflow:auto; tab-size:4; }
-.sui-md-code-block code { padding:0; background:none; font:inherit; color:inherit; }
 .sui-md-link { color:${t.primary}; text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
 .sui-md-link:hover { text-decoration-thickness:2px; }
 `;
@@ -619,7 +616,7 @@ export const agenticReasoningCss = `
 .sui-cot-step { position:relative; min-width:0; display:grid; grid-template-columns:12px minmax(0, 1fr); column-gap:8px; align-items:start; color:${t.foreground}; font-size:13px; line-height:1.45; }
 .sui-cot-step::before { content:""; position:absolute; left:5px; top:13px; bottom:-9px; border-left:1px solid ${t.border}; }
 .sui-cot-step:last-child::before { display:none; }
-.sui-cot-step-dot { position:relative; z-index:1; width:10px; height:10px; margin-top:4px; border:2px solid ${t.card}; border-radius:999px; background:color-mix(in srgb, ${t.mutedForeground} 40%, transparent); }
+.sui-cot-step-dot { position:relative; z-index:1; width:10px; height:10px; margin-top:4px; border:2px solid ${t.card}; border-radius:${t.radiusFull}; background:color-mix(in srgb, ${t.mutedForeground} 40%, transparent); }
 .sui-cot-step[data-status-class='run'] .sui-cot-step-dot { background:${statusColors.run}; }
 .sui-cot-step[data-status-class='ok'] .sui-cot-step-dot { background:${statusColors.ok}; }
 .sui-cot-step[data-status-class='warn'] .sui-cot-step-dot { background:${statusColors.warn}; }

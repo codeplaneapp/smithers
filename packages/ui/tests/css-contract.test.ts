@@ -119,7 +119,6 @@ describe("css contract", () => {
       ["success", "success"],
       ["warning", "warning"],
       ["destructive", "danger"],
-      ["info", "info"],
     ] as const;
     for (const [variant, semantic] of variants) {
       const rule = smithersUiCss.match(new RegExp(`\\.sui-badge-${variant} \\{[^}]+\\}`))?.[0] ?? "";
@@ -164,7 +163,7 @@ describe("geometry contract", () => {
   // 400 body, 500 de-emphasis, 650 the one emphasis weight; 700 is reserved
   // for KPI numerals and pinned to exactly one rule below.
   const FONT_WEIGHTS = new Set([400, 500, 650, 700]);
-  // --r-1 controls, --r-2 cards, --r-bubble chat surfaces, 999 pills, plus
+  // --r-1 controls, --r-2 cards, --r-bubble chat surfaces, --r-full pills, plus
   // the named micro-radii: 2px caret, 4px favicon/status chips.
   const RADII = new Set([2, 4, 6, 10, 18, 999]);
 
@@ -198,6 +197,14 @@ describe("geometry contract", () => {
         expect(RADII.has(Number(m[1])), `${decl.trim()} is off the radius scale`).toBe(true);
       }
     }
+  });
+
+  test("exact control heights and full radii route through their house tokens", () => {
+    expect(smithersUiCss).not.toContain("min-height:32px");
+    expect(smithersUiCss).not.toContain("height:32px");
+    expect(smithersUiCss).not.toContain("border-radius:999px");
+    expect(smithersUiCss).toContain("min-height:var(--ctl-h, 32px)");
+    expect(smithersUiCss).toContain("border-radius:var(--r-full, 999px)");
   });
 
   test("padding and gap stay on the 2px grid (1px hairline gaps sanctioned)", () => {
@@ -236,5 +243,6 @@ describe("geometry contract", () => {
     expect(tokens.fontSans).toStartWith("var(--font-sans,");
     expect(tokens.fontMono).toStartWith("var(--font-mono,");
     expect(tokens.radiusBubble).toBe("var(--r-bubble, 18px)");
+    expect(tokens.radiusFull).toBe("var(--r-full, 999px)");
   });
 });
