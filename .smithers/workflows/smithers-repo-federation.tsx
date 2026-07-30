@@ -860,6 +860,23 @@ function mergeRemovalPRs(prs: Array<{ lane: string; repo: string | null; prNumbe
       continue;
     }
     try {
+      const viewArgs = ["pr", "view", String(pr.prNumber), "--repo", pr.repo, "--json", "isDraft"];
+      const view = JSON.parse(execFileSync("gh", viewArgs, { encoding: "utf8" })) as { isDraft?: boolean };
+      if (view.isDraft) {
+        execFileSync("gh", ["pr", "ready", String(pr.prNumber), "--repo", pr.repo], { encoding: "utf8" });
+      }
+      const readyView = JSON.parse(execFileSync("gh", viewArgs, { encoding: "utf8" })) as { isDraft?: boolean };
+      if (readyView.isDraft !== false) {
+        throw new Error("PR is still draft after `gh pr ready`");
+      }
+    } catch (err) {
+      failed.push({
+        lane: pr.lane,
+        reason: `could not mark PR ready: ${String(err instanceof Error ? err.message : err).slice(0, 240)}`,
+      });
+      continue;
+    }
+    try {
       execFileSync("gh", ["pr", "checks", String(pr.prNumber), "--repo", pr.repo], { encoding: "utf8" });
     } catch (err) {
       failed.push({
