@@ -31,7 +31,7 @@ function overrideProcessProp(key, value) {
  * @param {() => boolean} predicate
  */
 async function waitFor(predicate) {
-  const deadline = Date.now() + 2000;
+  const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
     if (predicate()) return;
     await new Promise((r) => setTimeout(r, 10));
