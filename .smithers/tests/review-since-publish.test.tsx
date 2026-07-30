@@ -97,6 +97,26 @@ describe("review-since-publish workflow", () => {
     expect(solPrompts.filter((prompt) => prompt.includes("shared.ts"))).toHaveLength(1);
   });
 
+  test("dropping a seat removes its review tasks entirely", async () => {
+    const frame = await render({ seats: ["sol", "fable"], reviewShards: 2 }, { baseline: [baselineRow] });
+    const reviewIds = ids(frame).filter((id) => id.startsWith("review:"));
+    expect(reviewIds.filter((id) => id.startsWith("review:kimi"))).toEqual([]);
+    expect(reviewIds.length).toBe(4);
+  });
+
+  test("SMITHERS_PANEL_SEATS overrides the immutable run input", async () => {
+    const prior = process.env.SMITHERS_PANEL_SEATS;
+    process.env.SMITHERS_PANEL_SEATS = "sol,fable";
+    try {
+      const frame = await render({ seats: ["sol", "kimi", "fable"] }, { baseline: [baselineRow] });
+      expect(ids(frame).filter((id) => id.startsWith("review:kimi"))).toEqual([]);
+      expect(ids(frame).filter((id) => id.startsWith("review:"))).toHaveLength(2);
+    } finally {
+      if (prior === undefined) delete process.env.SMITHERS_PANEL_SEATS;
+      else process.env.SMITHERS_PANEL_SEATS = prior;
+    }
+  });
+
   test("merged issues become file-disjoint parallel fix lanes", async () => {
     const frame = await render(
       { maxFixLanes: 4 },
