@@ -4123,7 +4123,7 @@ export async function finalizeCancelledRun(adapter, runId, options = {}) {
  * @param {Map<string, TaskDescriptor>} descriptorMap
  * @param {SQLiteTable} inputTable
  * @param {EventBus} eventBus
- * @param {{ rootDir: string; allowNetwork: boolean; maxOutputBytes: number; toolTimeoutMs: number; agentPreflightCache?: WeakMap<object, Promise<void>>; memoryService?: import("@smithers-orchestrator/driver/MemoryRuntimeService").MemoryRuntimeService; memoryPrefetchCache?: Map<string, Promise<string | null>>; traceContext?: { workflowPath: string | null; workflowHash: string | null; logDir?: string; annotations?: Record<string, string | number | boolean>; }; }} toolConfig
+ * @param {{ rootDir: string; allowNetwork: boolean; maxOutputBytes: number; toolTimeoutMs: number; acceptWorkflowChange?: boolean; agentPreflightCache?: WeakMap<object, Promise<void>>; memoryService?: import("@smithers-orchestrator/driver/MemoryRuntimeService").MemoryRuntimeService; memoryPrefetchCache?: Map<string, Promise<string | null>>; traceContext?: { workflowPath: string | null; workflowHash: string | null; logDir?: string; annotations?: Record<string, string | number | boolean>; }; }} toolConfig
  * @param {string} workflowName
  * @param {boolean} cacheEnabled
  * @param {AbortSignal} [signal]
@@ -6303,7 +6303,7 @@ async function legacyExecuteTask(
           // the root RunOptions. Preserve the explicit identity waiver so a
           // parent resume that accepted edited workflow source does not fail
           // again when it reaches an existing child run.
-          taskRuntime.acceptWorkflowChange = opts.acceptWorkflowChange === true;
+          taskRuntime.acceptWorkflowChange = toolConfig.acceptWorkflowChange === true;
           return withTaskRuntime(taskRuntime, () => runWithToolContext(computeToolContext, () => desc.computeFn()));
         });
         const races = [computePromise];
@@ -7517,6 +7517,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
     allowNetwork,
     maxOutputBytes,
     toolTimeoutMs,
+    acceptWorkflowChange: opts.acceptWorkflowChange === true,
     reportError: (rawError, context) => reportSmithersError(opts.onError, rawError, context),
     agentPreflightCache: new WeakMap(),
     memoryService: workflow.memoryService,
