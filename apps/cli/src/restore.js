@@ -5,6 +5,7 @@
 import { spawn } from "node:child_process";
 import { resolveJjBinary } from "@smithers-orchestrator/vcs/resolveJjBinary";
 import { retryTask } from "@smithers-orchestrator/time-travel/retry-task";
+import { Effect } from "effect";
 import { listScopedWorkspaceSnapshots } from "./snapshot-scope.js";
 
 /**
@@ -222,11 +223,31 @@ async function prepareNewerChildWorkInvalidation(adapter, runId, target) {
  * @param {any} adapter
  * @param {string} runId
  * @param {Array<{ nodeId: string, iteration: number }>} owners
- * @returns {Promise<{ success: boolean, error?: string }>}
+ * Build every retry reset before touching the filesystem, but intercept the
+ * transactions that would apply them. The captured Effects are committed
+ * together only after jj has successfully restored the checkpoint. This
+ * prevents a failed restore (or a later invalid owner) from erasing any
+ * durable child work.
+ *
+ * @returns {Promise<{ success: boolean, effects: Array<any>, error?: string }>}
  */
-async function invalidateNewerChildWork(adapter, runId, owners) {
+async function stageNewerChildWorkInvalidation(adapter, runId, owners) {
+  const effects = [];
+  if (owners.length === 0) return { success: true, effects };
+  const stagedAdapter = new Proxy(adapter, {
+    get(target, property) {
+      if (property === "withTransaction") {
+        return async (_writeGroup, operation) => {
+          effects.push(operation);
+          return true;
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
   for (const owner of owners) {
-    const result = await retryTask(adapter, {
+    const result = await retryTask(stagedAdapter, {
       runId,
       nodeId: owner.nodeId,
       iteration: owner.iteration,
@@ -235,11 +256,41 @@ async function invalidateNewerChildWork(adapter, runId, owners) {
     if (!result.success) {
       return {
         success: false,
+        effects: [],
         error: result.error ?? `could not invalidate child work owned by ${owner.nodeId}`,
       };
     }
   }
-  return { success: true };
+  return { success: true, effects };
+}
+
+/**
+ * Commit all staged retry resets under one database transaction. An Effect
+ * failure rolls the whole owner set back instead of leaving earlier owners
+ * reset when a later write fails.
+ *
+ * @param {any} adapter
+ * @param {Array<any>} effects
+ * @returns {Promise<{ success: boolean, error?: string }>}
+ */
+async function commitNewerChildWorkInvalidation(adapter, effects) {
+  if (effects.length === 0) return { success: true };
+  if (typeof adapter?.withTransaction !== "function") {
+    return { success: false, error: "database adapter does not support transactions" };
+  }
+  try {
+    await adapter.withTransaction(
+      "restore-child-work-invalidation",
+      Effect.gen(function* () {
+        for (const operation of effects) {
+          yield* operation;
+        }
+      }),
+    );
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 /**
@@ -300,16 +351,21 @@ export async function runRestoreOnce(opts) {
     stderr.write(`Restore invalidation failed: ${invalidationPlan.error ?? "unknown error"}\n`);
     return { exitCode: 1 };
   }
-  const invalidation = await invalidateNewerChildWork(adapter, runId, invalidationPlan.owners);
+  const stagedInvalidation = await stageNewerChildWorkInvalidation(adapter, runId, invalidationPlan.owners);
+  if (!stagedInvalidation.success) {
+    stderr.write(`Restore invalidation failed: ${stagedInvalidation.error ?? "unknown error"}\n`);
+    return { exitCode: 1 };
+  }
+  const result = await revert(target.jjCommitId, target.jjCwd, { timeoutMs: opts.timeoutMs, signal: opts.signal });
+  if (!result?.success) {
+    stderr.write(`Restore failed: ${result?.error ?? "unknown error"}\n`);
+    return { exitCode: 1 };
+  }
+  const invalidation = await commitNewerChildWorkInvalidation(adapter, stagedInvalidation.effects);
   if (!invalidation.success) {
     stderr.write(`Restore invalidation failed: ${invalidation.error ?? "unknown error"}\n`);
     return { exitCode: 1 };
   }
-  const result = await revert(target.jjCommitId, target.jjCwd, { timeoutMs: opts.timeoutMs, signal: opts.signal });
-  if (result?.success) {
-    stdout.write(`Restored ${target.jjCwd} to checkpoint #${target.seq} (${short(target.jjCommitId)})\n`);
-    return { exitCode: 0 };
-  }
-  stderr.write(`Restore failed: ${result?.error ?? "unknown error"}\n`);
-  return { exitCode: 1 };
+  stdout.write(`Restored ${target.jjCwd} to checkpoint #${target.seq} (${short(target.jjCommitId)})\n`);
+  return { exitCode: 0 };
 }

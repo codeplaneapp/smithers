@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect } from "effect";
 import { runSnapshotsOnce } from "../src/snapshots.js";
 import { defaultRevert, pickTargetCheckpoint, runRestoreOnce } from "../src/restore.js";
 
@@ -533,6 +534,147 @@ describe("smithers restore", () => {
     });
     expect(r.exitCode).toBe(1);
     expect(err.get()).toContain("commit gone");
+  });
+
+  test("a failed revert preserves durable child-run state", async () => {
+    const target = { ...cps[0], runId: "parent", createdAtMs: 10 };
+    const child = {
+      ...cps[1],
+      runId: "parent:child:sub:0",
+      nodeId: "child-task",
+      createdAtMs: 20,
+    };
+    let nodeState = "finished";
+    let transactionCalls = 0;
+    const ownerNode = {
+      runId: "parent",
+      nodeId: "sub",
+      iteration: 0,
+      state: nodeState,
+      updatedAtMs: 15,
+      outputTable: "sub_output",
+    };
+    const result = await runRestoreOnce({
+      adapter: {
+        async listRunDescendants() {
+          return [
+            { runId: "parent", parentRunId: null, depth: 0 },
+            { runId: "parent:child:sub:0", parentRunId: "parent", depth: 1 },
+          ];
+        },
+        async listWorkspaceCheckpoints(runId) {
+          return runId === "parent" ? [target] : [child];
+        },
+        async listWorkspaceStates() {
+          return [];
+        },
+        async getNode() {
+          return ownerNode;
+        },
+        async getRun(runId) {
+          return runId === "parent" ? { runId, status: "failed" } : null;
+        },
+        async listNodes() {
+          return [ownerNode];
+        },
+        async listAttemptsForRun() {
+          return [];
+        },
+        async listAttempts() {
+          return [];
+        },
+        async withTransaction() {
+          transactionCalls += 1;
+          nodeState = "pending";
+          return true;
+        },
+      },
+      runId: "parent",
+      nodeId: "n1",
+      target,
+      stdout: capture(),
+      stderr: capture(),
+      revert: async () => ({ success: false, error: "commit gone" }),
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(transactionCalls).toBe(0);
+    expect(nodeState).toBe("finished");
+  });
+
+  test("reverts before invalidating all child owners in one transaction", async () => {
+    const target = { ...cps[0], runId: "parent", createdAtMs: 10 };
+    const ownerNodes = [
+      { runId: "parent", nodeId: "sub-a", iteration: 0, state: "finished", updatedAtMs: 20, outputTable: "" },
+      { runId: "parent", nodeId: "sub-b", iteration: 0, state: "finished", updatedAtMs: 30, outputTable: "" },
+    ];
+    const events = [];
+    const resetNodes = [];
+    const result = await runRestoreOnce({
+      adapter: {
+        async listRunDescendants() {
+          return [
+            { runId: "parent", parentRunId: null, depth: 0 },
+            { runId: "parent:child:sub-a:0", parentRunId: "parent", depth: 1 },
+            { runId: "parent:child:sub-b:0", parentRunId: "parent", depth: 1 },
+          ];
+        },
+        async listWorkspaceCheckpoints(runId) {
+          if (runId === "parent") return [target];
+          return [
+            {
+              ...cps[1],
+              runId,
+              nodeId: "child-task",
+              createdAtMs: runId.includes("sub-a") ? 20 : 30,
+            },
+          ];
+        },
+        async listWorkspaceStates() {
+          return [];
+        },
+        async getNode(_runId, nodeId) {
+          return ownerNodes.find((node) => node.nodeId === nodeId) ?? null;
+        },
+        async getRun(runId) {
+          return runId === "parent" ? { runId, status: "failed" } : null;
+        },
+        async listNodes() {
+          return ownerNodes;
+        },
+        async listAttemptsForRun() {
+          return [];
+        },
+        async listAttempts() {
+          return [];
+        },
+        insertNodeEffect(row) {
+          return Effect.sync(() => {
+            resetNodes.push(row.nodeId);
+          });
+        },
+        updateRunEffect() {
+          return Effect.void;
+        },
+        async withTransaction(writeGroup, operation) {
+          events.push(`transaction:${writeGroup}`);
+          return Effect.runPromise(operation);
+        },
+      },
+      runId: "parent",
+      nodeId: "n1",
+      target,
+      stdout: capture(),
+      stderr: capture(),
+      revert: async () => {
+        events.push("revert");
+        return { success: true };
+      },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(events).toEqual(["revert", "transaction:restore-child-work-invalidation"]);
+    expect(resetNodes).toEqual(["sub-a", "sub-b", "sub-b"]);
   });
 
   test("the timeout and abort signal reach the revert runner", async () => {
