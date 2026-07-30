@@ -155,7 +155,7 @@ test("oneshot flag schema parses preflight as auto by default", () => {
   expect(preflight).toMatchObject({ default: "auto", enum: ["auto", "warn", "off"] });
 }, 30_000);
 
-test("oneshot warns for a dirty cwd and stays quiet for a clean one", () => {
+test("oneshot warns for dirty and detached cwd states and stays quiet for a clean one", () => {
   const cwd = fixtureRepo();
   const workflowDir = join(cwd, ".smithers", "workflows");
   const binDir = join(cwd, "bin");
@@ -214,6 +214,15 @@ export default smithers(() => <Workflow name="custom-oneshot"><Task id="done" ou
   expect(clean.status).toBe(0);
   expect(`${clean.stdout}${clean.stderr}`).not.toContain("oneshot preflight: working copy");
 
+  git(cwd, ["checkout", "--detach", "HEAD"]);
+  const detached = run();
+  if (detached.status !== 0) {
+    throw new Error(`detached oneshot failed:\nstdout=${detached.stdout}\nstderr=${detached.stderr}`);
+  }
+  expect(`${detached.stdout}${detached.stderr}`).toContain("oneshot preflight: working copy at");
+  expect(`${detached.stdout}${detached.stderr}`).toContain("detached HEAD");
+  git(cwd, ["checkout", "main"]);
+
   writeFileSync(join(cwd, "tracked.txt"), "dirty\n");
   const dirty = run();
   if (dirty.status !== 0) {
@@ -226,7 +235,7 @@ export default smithers(() => <Workflow name="custom-oneshot"><Task id="done" ou
   try {
     const row = db
       .query("select config_json as configJson from _smithers_runs where run_id = ?")
-      .get("preflight-e2e-2");
+      .get("preflight-e2e-3");
     expect(JSON.parse(row.configJson).oneshot.preflight).toMatchObject({
       mode: "auto",
       vcs: "git",
