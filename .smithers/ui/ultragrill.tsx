@@ -48,7 +48,7 @@ function eventInfo(ev: unknown): EventInfo {
   const nodePayload = isRecord(inner.payload) ? inner.payload : {};
   return {
     nodeId: asString(nodePayload.nodeId) ?? asString(inner.nodeId) ?? asString(frame.nodeId) ?? "",
-    type: asString(inner.event) ?? asString(frame.type) ?? "",
+    type: asString(inner.event) ?? asString(frame.event) ?? asString(frame.type) ?? "",
     seq: typeof inner.seq === "number" ? inner.seq : typeof frame.seq === "number" ? frame.seq : 0,
   };
 }
@@ -57,9 +57,10 @@ function workerIndex(nodeId: string): number | null {
   return m ? Number(m[1]) : null;
 }
 function classify(type: string): "active" | "done" | "failed" | "" {
-  if (type.includes("fail") || type.includes("error")) return "failed";
-  if (type.includes("finish") || type.includes("complete")) return "done";
-  if (type.includes("start")) return "active";
+  const normalized = type.toLowerCase();
+  if (normalized.includes("fail") || normalized.includes("error")) return "failed";
+  if (normalized.includes("finish") || normalized.includes("complete")) return "done";
+  if (normalized.includes("start")) return "active";
   return "";
 }
 
@@ -236,9 +237,19 @@ function App() {
     for (const ev of events) {
       const frame = isRecord(ev) ? ev : empty;
       const inner = isRecord(frame.payload) ? frame.payload : empty;
-      if (inner.event === "run.completed") {
-        const p = isRecord(inner.payload) ? inner.payload : empty;
-        return asString(p.status) ?? "finished";
+      const event = asString(inner.event) ?? asString(frame.event) ?? "";
+      if (["run.completed", "RunFinished", "RunContinued", "RunFailed", "RunCancelled"].includes(event)) {
+        const p = isRecord(inner.payload) ? inner.payload : inner;
+        return (
+          asString(p.status) ??
+          (event === "RunContinued"
+            ? "continued"
+            : event === "RunFailed"
+              ? "failed"
+              : event === "RunCancelled"
+                ? "cancelled"
+                : "finished")
+        );
       }
     }
     return undefined;
