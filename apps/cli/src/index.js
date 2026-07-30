@@ -338,21 +338,28 @@ async function preflightRetryResume(adapter, runId, workflowPath, options = {}) 
  *
  * @param {SmithersDb} adapter
  * @param {SmithersWorkflow<any>} workflow
- * @param {string} runId
+ * @param {string[]} runIds
  */
-async function captureRetryTaskState(adapter, workflow, runId) {
+async function captureRetryTaskState(adapter, workflow, runIds) {
   const schema = resolveSchema(workflow.db);
-  const outputSnapshot = await loadOutputs(workflow.db, schema, runId);
   return {
-    run: await adapter.getRun(runId),
-    nodes: await adapter.listNodes(runId),
-    attempts: await adapter.listAttemptsForRun(runId),
-    outputs: Object.entries(schema)
-      .filter(([key]) => key !== "input")
-      .map(([key, table]) => ({
-        table,
-        rows: outputSnapshot[key] ?? [],
-      })),
+    rootRunId: runIds.at(-1),
+    runs: await Promise.all(
+      runIds.map(async (runId) => {
+        const outputSnapshot = await loadOutputs(workflow.db, schema, runId);
+        return {
+          run: await adapter.getRun(runId),
+          nodes: await adapter.listNodes(runId),
+          attempts: await adapter.listAttemptsForRun(runId),
+          outputs: Object.entries(schema)
+            .filter(([key]) => key !== "input")
+            .map(([key, table]) => ({
+              table,
+              rows: outputSnapshot[key] ?? [],
+            })),
+        };
+      }),
+    ),
   };
 }
 /**
@@ -362,12 +369,13 @@ async function captureRetryTaskState(adapter, workflow, runId) {
  * @returns {Promise<boolean>}
  */
 async function restoreRetryTaskState(adapter, snapshot, resumeClaim) {
-  if (!snapshot.run) return false;
+  const rootSnapshot = snapshot.runs.find((entry) => entry.run?.runId === snapshot.rootRunId);
+  if (!rootSnapshot?.run) return false;
   return await adapter.withTransaction(
     "retry-task-rollback",
     Effect.gen(function* () {
       const claimHeld = yield* adapter.updateClaimedRun({
-        runId: snapshot.run.runId,
+        runId: rootSnapshot.run.runId,
         expectedRuntimeOwnerId: resumeClaim.claimOwnerId,
         expectedHeartbeatAtMs: resumeClaim.claimHeartbeatAtMs,
         patch: {
@@ -376,30 +384,33 @@ async function restoreRetryTaskState(adapter, snapshot, resumeClaim) {
         },
       });
       if (!claimHeld) return false;
-      for (const node of snapshot.nodes) {
-        yield* adapter.insertNodeEffect(node);
-      }
-      for (const attempt of snapshot.attempts) {
-        yield* adapter.insertAttemptEffect(attempt);
-      }
-      for (const output of snapshot.outputs) {
-        for (const rawRow of output.rows) {
-          const row = /** @type {Record<string, unknown>} */ (rawRow);
-          const { runId, nodeId, iteration, __smithersProvenanceSeq: _provenanceSeq, ...payload } = row;
-          if (typeof runId !== "string" || typeof nodeId !== "string") continue;
-          yield* adapter.upsertOutputRowEffect(
-            /** @type {any} */ (output.table),
-            {
-              runId,
-              nodeId,
-              iteration: typeof iteration === "number" ? iteration : 0,
-            },
-            payload,
-          );
+      for (const runSnapshot of snapshot.runs) {
+        if (!runSnapshot.run) continue;
+        for (const node of runSnapshot.nodes) {
+          yield* adapter.insertNodeEffect(node);
         }
+        for (const attempt of runSnapshot.attempts) {
+          yield* adapter.insertAttemptEffect(attempt);
+        }
+        for (const output of runSnapshot.outputs) {
+          for (const rawRow of output.rows) {
+            const row = /** @type {Record<string, unknown>} */ (rawRow);
+            const { runId, nodeId, iteration, __smithersProvenanceSeq: _provenanceSeq, ...payload } = row;
+            if (typeof runId !== "string" || typeof nodeId !== "string") continue;
+            yield* adapter.upsertOutputRowEffect(
+              /** @type {any} */ (output.table),
+              {
+                runId,
+                nodeId,
+                iteration: typeof iteration === "number" ? iteration : 0,
+              },
+              payload,
+            );
+          }
+        }
+        const { runId: _runId, ...runPatch } = runSnapshot.run;
+        yield* adapter.updateRunEffect(runSnapshot.run.runId, runPatch);
       }
-      const { runId: _runId, ...runPatch } = snapshot.run;
-      yield* adapter.updateRunEffect(snapshot.run.runId, runPatch);
       return true;
     }),
   );
@@ -9420,21 +9431,26 @@ const cli = Cli.create({
           await preflightRetryResume(adapter, c.options.runId, c.args.workflow, {
             acceptWorkflowChange: c.options.acceptWorkflowChange,
           });
-          retryState = await captureRetryTaskState(adapter, workflow, c.options.runId);
           const retryResumeClaim = {
             claimOwnerId: `supervisor:retry-task:${process.pid}:${crypto.randomUUID()}`,
             claimHeartbeatAtMs: Math.max(1, Date.now()),
           };
-          const resetResult = await retryTask(adapter, {
-            runId: c.options.runId,
-            nodeId: c.options.nodeId,
-            iteration: c.options.iteration,
-            resetDependents: c.options.deps,
-            force: c.options.force,
-            acceptWorkflowChange: c.options.acceptWorkflowChange,
-            onProgress,
-            resumeClaim: retryResumeClaim,
-          });
+          const resetResult = await retryTask(
+            adapter,
+            /** @type {any} */ ({
+              runId: c.options.runId,
+              nodeId: c.options.nodeId,
+              iteration: c.options.iteration,
+              resetDependents: c.options.deps,
+              force: c.options.force,
+              acceptWorkflowChange: c.options.acceptWorkflowChange,
+              onProgress,
+              resumeClaim: retryResumeClaim,
+              beforeReset: async ({ runIds }) => {
+                retryState = await captureRetryTaskState(adapter, workflow, runIds);
+              },
+            }),
+          );
           if (!resetResult.success) {
             process.exitCode = 1;
             return c.ok(resetResult);
