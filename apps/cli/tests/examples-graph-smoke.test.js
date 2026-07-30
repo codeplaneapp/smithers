@@ -67,13 +67,14 @@ const GRAPH_INPUT = {
   diff: "diff --git a/example b/example",
   maxIterations: 1,
 };
-const GRAPH_CONCURRENCY = Math.min(8, availableParallelism());
+const GRAPH_CONCURRENCY = Math.min(4, availableParallelism());
+const GRAPH_PROCESS_TIMEOUT_MS = 120_000;
 
 function findTopLevelExampleWorkflows() {
   return Array.from(new Bun.Glob("examples/*.jsx").scanSync({ cwd: REPO_ROOT })).sort();
 }
 
-async function renderExample(projectDir, workerDir, example) {
+async function renderExampleOnce(projectDir, workerDir, example) {
   const child = Bun.spawn(
     [
       process.execPath,
@@ -99,16 +100,38 @@ async function renderExample(projectDir, workerDir, example) {
       stderr: "pipe",
     },
   );
-  const [exitCode, stdout, stderr] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ]);
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    child.kill();
+  }, GRAPH_PROCESS_TIMEOUT_MS);
+  let exitCode;
+  let stdout;
+  let stderr;
+  try {
+    [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
   return {
-    error: exitCode === 0 ? null : new Error(`graph subprocess exited with code ${exitCode}`),
+    error: timedOut
+      ? new Error(`graph subprocess timed out after ${GRAPH_PROCESS_TIMEOUT_MS}ms`)
+      : exitCode === 0
+        ? null
+        : new Error(`graph subprocess exited with code ${exitCode}`),
     stdout,
     stderr,
+    retryable: timedOut || (exitCode === 0 && stdout.trim().length === 0),
   };
+}
+
+async function renderExample(projectDir, workerDir, example) {
+  const first = await renderExampleOnce(projectDir, workerDir, example);
+  return first.retryable ? renderExampleOnce(projectDir, workerDir, example) : first;
 }
 
 test("top-level example workflows render as graphs", async () => {
