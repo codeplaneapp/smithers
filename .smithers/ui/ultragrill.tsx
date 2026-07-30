@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   createGatewayReactRoot,
   useGatewayActions,
@@ -170,12 +170,21 @@ function statusClass(status: string | undefined) {
 // Detail pane for the latest worker turn — its own component so the node-output
 // hook count stays constant as turns accumulate.
 function WorkerPane(props: { runId: string | undefined; index: number | null }) {
-  const out = useGatewayNodeOutput({
+  const { data, refetch } = useGatewayNodeOutput({
     runId: props.runId,
     nodeId: props.index === null ? undefined : `worker:${props.index}`,
     iteration: 0,
   });
-  const work = useMemo(() => extractWork(out.data), [out.data]);
+  const work = useMemo(() => extractWork(data), [data]);
+
+  // A worker can finish between the initial output read and the run-event
+  // cursor subscribing. Keep the pending pane live even if that invalidation
+  // races past the browser.
+  useEffect(() => {
+    if (!props.runId || props.index === null || work) return;
+    const timer = setInterval(() => void refetch(), 500);
+    return () => clearInterval(timer);
+  }, [props.index, props.runId, refetch, work]);
 
   return (
     <>
