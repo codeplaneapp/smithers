@@ -349,7 +349,10 @@ export function RunEventLog({
   style,
 }: RunEventLogProps) {
   useInsertionEffect(ensureGatewayUiStyles, []);
-  const { events, error, streaming } = useGatewayRunEvents(runId, { maxEvents, includeHeartbeats: true });
+  const { events, error, streaming, loading } = useGatewayRunEvents(runId, {
+    maxEvents,
+    includeHeartbeats: true,
+  });
   const [showAll, setShowAll] = useState(showAllHeartbeats);
   const [dismissedError, setDismissedError] = useState<string>();
   const endRef = useRef<HTMLDivElement | null>(null);
@@ -373,6 +376,10 @@ export function RunEventLog({
   useEffect(() => {
     if (!error) setDismissedError(undefined);
   }, [error]);
+
+  useEffect(() => {
+    setShowAll(showAllHeartbeats);
+  }, [showAllHeartbeats]);
 
   useEffect(() => {
     if (!follow) return;
@@ -401,7 +408,8 @@ export function RunEventLog({
   } else if (error && events.length === 0) {
     body = <EmptyState title="Event stream failed" description={error.message} />;
   } else if (events.length === 0) {
-    body = <EmptyState description={streaming ? "Waiting for events…" : "No events."} />;
+    const description = loading ? "Loading events…" : streaming ? "Waiting for events…" : "No events.";
+    body = <EmptyState description={description} />;
   } else {
     body = (
       <div className="gw-event-log-body">
