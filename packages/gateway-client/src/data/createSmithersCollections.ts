@@ -370,12 +370,26 @@ function createSmithersCollectionsWithClient(
   const multiplayerMode = client.mode.kind === "multiplayer" ? client.mode : null;
 
   const collections = new Map<string, AnyCollection>();
+  const evictWhenUnused = (queryKey: QueryKey, collection: AnyCollection) => {
+    const id = cacheKey(queryKey);
+    const stopListening = collection.on("subscribers:change", ({ subscriberCount }) => {
+      if (subscriberCount !== 0) return;
+      // React StrictMode unsubscribes and re-subscribes in the same commit.
+      // Defer eviction so that immediate re-subscription keeps this instance.
+      queueMicrotask(() => {
+        if (collection.subscriberCount !== 0 || collections.get(id) !== collection) return;
+        collections.delete(id);
+        stopListening();
+      });
+    });
+  };
   const getOrCreateQuery = <TRow extends object, TKey extends string | number>(
     queryKey: QueryKey,
     getKey: (row: TRow) => TKey,
     queryFn: () => Promise<TRow[]>,
     mutationHandlers: MutationHandlers<TRow, TKey> = {},
     eventMaxRows?: number,
+    evictOnZeroSubscribers = false,
   ) => {
     const id = cacheKey(queryKey);
     const existing = collections.get(id);
@@ -418,6 +432,7 @@ function createSmithersCollectionsWithClient(
       : options) as unknown as NonSingleCollectionConfig<TRow, TKey>;
     const collection = createCollection(collectionOptions) as unknown as Collection<TRow, TKey>;
     collections.set(id, collection as unknown as AnyCollection);
+    if (evictOnZeroSubscribers) evictWhenUnused(queryKey, collection as unknown as AnyCollection);
     return collection;
   };
   const getOrCreateElectric = <TRow extends Record<string, unknown>, TKey extends string | number>(
@@ -428,6 +443,7 @@ function createSmithersCollectionsWithClient(
     where?: string,
     mutationHandlers: MutationHandlers<TRow, TKey> = {},
     eventMaxRows?: number,
+    evictOnZeroSubscribers = false,
   ) => {
     if (!multiplayerMode) throw new Error("Electric collections require multiplayer mode.");
     if (!electricCollectionOptions) throw new Error("Electric collection options were not loaded.");
@@ -448,6 +464,7 @@ function createSmithersCollectionsWithClient(
       : options) as unknown as NonSingleCollectionConfig<TRow, TKey>;
     const collection = createCollection(collectionOptions) as unknown as Collection<TRow, TKey>;
     collections.set(id, collection as unknown as AnyCollection);
+    if (evictOnZeroSubscribers) evictWhenUnused(queryKey, collection as unknown as AnyCollection);
     return collection;
   };
   const getOrCreate = <TRow extends Record<string, unknown>, TKey extends string | number>(
@@ -459,10 +476,20 @@ function createSmithersCollectionsWithClient(
     where?: string,
     mutationHandlers: MutationHandlers<TRow, TKey> = {},
     eventMaxRows?: number,
+    evictOnZeroSubscribers = false,
   ) =>
     multiplayerMode
-      ? getOrCreateElectric(queryKey, shape, getKey, mapRow, where, mutationHandlers, eventMaxRows)
-      : getOrCreateQuery(queryKey, getKey, queryFn, mutationHandlers, eventMaxRows);
+      ? getOrCreateElectric(
+          queryKey,
+          shape,
+          getKey,
+          mapRow,
+          where,
+          mutationHandlers,
+          eventMaxRows,
+          evictOnZeroSubscribers,
+        )
+      : getOrCreateQuery(queryKey, getKey, queryFn, mutationHandlers, eventMaxRows, evictOnZeroSubscribers);
 
   const invalidate = async (names?: readonly string[]) => {
     if (!names || names.length === 0) {
@@ -531,6 +558,9 @@ function createSmithersCollectionsWithClient(
       () => (runId ? client.api.getRunTree({ runId }) : Promise.resolve([])),
       (row) => mapSmithersElectricRow("nodes", row),
       runId ? runWhere(runId) : undefined,
+      {},
+      undefined,
+      true,
     );
 
   // Shared between the Electric-backed crons collection and its RPC fallback.
@@ -640,6 +670,9 @@ function createSmithersCollectionsWithClient(
         async () => (runId ? [await client.api.getRun({ runId })] : []),
         (row) => mapSmithersElectricRow("run", row),
         runId ? runWhere(runId) : undefined,
+        {},
+        undefined,
+        true,
       ),
     runTree: runTreeCollection,
     approvals: (params: ListApprovalsRequest = {}) => {
@@ -782,6 +815,7 @@ function createSmithersCollectionsWithClient(
         runId ? runWhere(runId) : undefined,
         {},
         limit,
+        true,
       );
     },
     invalidate,

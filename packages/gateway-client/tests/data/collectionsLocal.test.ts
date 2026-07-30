@@ -241,6 +241,56 @@ describe("createSmithersCollections local factories", () => {
     expect(eventRequests).toEqual([{ afterSeq: undefined, limit: 1_024 }]);
   });
 
+  test("evicts unsubscribed per-run collections and recreates them on demand", async () => {
+    const { collections } = makeCollections();
+    const viewed = Array.from({ length: 50 }, (_, index) => {
+      const collection = collections.runEvents(`run-${index}`, 3);
+      const subscription = collection.subscribeChanges(() => {}, { includeInitialState: true });
+      return { collection, subscription };
+    });
+    await Promise.all(viewed.map(({ collection }) => collection.preload()));
+    for (const { subscription } of viewed) subscription.unsubscribe();
+
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    for (const [index, { collection }] of viewed.entries()) {
+      expect(collections.runEvents(`run-${index}`, 3)).not.toBe(collection);
+    }
+    await Promise.all(viewed.map(({ collection }) => collection.cleanup()));
+  });
+
+  test("re-subscribing an evicted run recreates and loads its collection", async () => {
+    const { collections } = makeCollections();
+    const original = collections.runEvents("run-1", 10);
+    const originalSubscription = original.subscribeChanges(() => {}, { includeInitialState: true });
+    await original.preload();
+    originalSubscription.unsubscribe();
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    const recreated = collections.runEvents("run-1", 10);
+    expect(recreated).not.toBe(original);
+    const subscription = recreated.subscribeChanges(() => {}, { includeInitialState: true });
+    await recreated.preload();
+    expect([...recreated.values()].map((event) => event.seq)).toEqual([1, 2]);
+    subscription.unsubscribe();
+    await Promise.all([original.cleanup(), recreated.cleanup()]);
+  });
+
+  test("defers per-run eviction across an immediate re-subscription", async () => {
+    const { collections } = makeCollections();
+    const events = collections.runEvents("run-1", 3);
+    const first = events.subscribeChanges(() => {}, { includeInitialState: true });
+    first.unsubscribe();
+    const replacement = events.subscribeChanges(() => {}, { includeInitialState: true });
+
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    expect(collections.runEvents("run-1", 3)).toBe(events);
+    await events.preload();
+    replacement.unsubscribe();
+    await events.cleanup();
+  });
+
   test("empty runId factories resolve to empty collections without hitting the API", async () => {
     const { collections } = makeCollections();
     const run = collections.run("");
