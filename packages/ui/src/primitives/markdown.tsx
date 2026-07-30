@@ -2,7 +2,7 @@
 import { type ComponentProps, Fragment, memo, type MouseEvent, type ReactNode, useMemo } from "react";
 import { CodeBlock } from "./CodeBlock";
 import { cn } from "../cn";
-import { safeHref } from "../agentic/safeHref";
+import { safeHref } from "../internal/safeHref";
 import { useInjectUiCss } from "../styles";
 
 /**
@@ -17,8 +17,8 @@ const LINK = /^\[([^\]]+)\]\(([^)]+)\)$/;
 /** Handler invoked when a rendered link is activated. */
 export type MarkdownLinkClick = (href: string, event: MouseEvent<HTMLAnchorElement>) => void;
 
-/** @deprecated Use `safeHref` from `agentic/safeHref` instead. */
-export { safeHref as safeMarkdownHref } from "../agentic/safeHref";
+/** @deprecated Use `safeHref` from `internal/safeHref` instead. */
+export { safeHref as safeMarkdownHref } from "../internal/safeHref";
 
 /**
  * Everything renders through React children (never `innerHTML`), so model

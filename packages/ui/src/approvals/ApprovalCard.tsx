@@ -3,7 +3,7 @@ import { useId, useState, type ComponentProps, type ReactNode } from "react";
 import { cn } from "../cn";
 import { useInjectUiCss } from "../styles";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
-import { safeHref } from "../agentic/safeHref";
+import { safeHref } from "../internal/safeHref";
 import {
   Confirmation,
   ConfirmationActions,
