@@ -19,7 +19,7 @@
     "marketing:thread:write": "cd .. && pnpm marketing:thread:write",
     "test:daily-ceo-intel": "bun test --preload ./preload.ts --max-concurrency=1 ./tests/daily-ceo-intel-pipeline.test.ts",
     "test:open-code-review": "bun test --preload ./preload.ts --max-concurrency=1 ./tests/open-code-review.test.ts ./tests/open-code-review-ui.e2e.test.ts",
-    "test:ddd": "bun test --preload ./preload.ts --max-concurrency=1 ./tests/ddd-scripts.test.ts ./tests/ddd-ui-parsers.test.ts ./tests/docs-driven-development-workflow.test.ts ./tests/docs-driven-development-run.e2e.test.ts ./tests/ultragrill.e2e.test.ts ./ui/ddd-tabs.test.tsx",
+    "test:ddd": "bun test --preload ./preload.ts --max-concurrency=1 ./tests/ddd-scripts.test.ts ./tests/ddd-ui-parsers.test.ts ./tests/docs-driven-development-workflow.test.ts ./tests/docs-driven-development-run.e2e.test.ts ./tests/ultragrill.e2e.test.ts ./tests/__grill2.test.tsx ./tests/__grill3.test.tsx ./tests/__grill4.test.tsx ./tests/__grill5.test.tsx ./ui/ddd-tabs.test.tsx",
     "test:ddd:browser": "bun test --preload ./preload.ts --max-concurrency=1 ./tests/ship-pipeline-run.e2e.test.ts ./tests/ship-pipeline-ui.e2e.test.tsx"
   },
   "dependencies": {
