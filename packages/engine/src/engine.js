@@ -6283,25 +6283,29 @@ async function legacyExecuteTask(
           abortSignal: taskSignal,
         });
         activeToolJournalContexts.push(computeToolContext);
-        const computePromise = Promise.resolve().then(() =>
-          withTaskRuntime(
-            {
-              runId,
-              stepId: desc.nodeId,
-              attempt: attemptNo,
-              iteration: desc.iteration,
-              rootDir: taskRoot,
-              signal: taskSignal,
-              pauseSignal,
-              db,
-              heartbeat: (data) => {
-                queueHeartbeat(data);
-              },
-              lastHeartbeat: previousHeartbeat,
+        const computePromise = Promise.resolve().then(() => {
+          /** @type {any} */
+          const taskRuntime = {
+            runId,
+            stepId: desc.nodeId,
+            attempt: attemptNo,
+            iteration: desc.iteration,
+            rootDir: taskRoot,
+            signal: taskSignal,
+            pauseSignal,
+            db,
+            heartbeat: (data) => {
+              queueHeartbeat(data);
             },
-            () => runWithToolContext(computeToolContext, () => desc.computeFn()),
-          ),
-        );
+            lastHeartbeat: previousHeartbeat,
+          };
+          // A Subflow executes from this async-local runtime rather than from
+          // the root RunOptions. Preserve the explicit identity waiver so a
+          // parent resume that accepted edited workflow source does not fail
+          // again when it reaches an existing child run.
+          taskRuntime.acceptWorkflowChange = opts.acceptWorkflowChange === true;
+          return withTaskRuntime(taskRuntime, () => runWithToolContext(computeToolContext, () => desc.computeFn()));
+        });
         const races = [computePromise];
         const abort = abortPromise(taskSignal);
         if (abort) races.push(abort);

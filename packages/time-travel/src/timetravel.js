@@ -109,7 +109,22 @@ function buildPendingNode(existingNode) {
     updatedAtMs: nowMs(),
   };
 }
-const TERMINAL_CHILD_RUN_STATUSES = new Set(["finished", "failed", "cancelled"]);
+const TERMINAL_CHILD_RUN_STATUSES = new Set(["finished", "failed", "cancelled", "canceled", "continued"]);
+/**
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ */
+async function findContinuationSuccessor(adapter, runId) {
+  if (typeof adapter.getLatestChildRun !== "function") return undefined;
+  const candidate = await adapter.getLatestChildRun(runId);
+  if (!candidate || candidate.parentRunId !== runId) return undefined;
+  try {
+    const config = JSON.parse(candidate.configJson ?? "{}");
+    return config?.continuation?.parentRunId === runId ? candidate : undefined;
+  } catch {
+    return undefined;
+  }
+}
 /**
  * Resolve terminal child workflows owned by reset parent nodes. Plans are
  * deepest-first so nested children are reset before their owning run.
@@ -128,14 +143,26 @@ async function resolveCompletedChildResetPlans(adapter, runId, resetNodes, seen 
     if (seen.has(childRunId)) continue;
     const childRun = await adapter.getRun(childRunId);
     if (childRun?.parentRunId !== runId || !TERMINAL_CHILD_RUN_STATUSES.has(childRun.status)) continue;
-    seen.add(childRunId);
-    const childNodes = await adapter.listNodes(childRunId);
-    plans.push(...(await resolveCompletedChildResetPlans(adapter, childRunId, childNodes, seen)), {
-      runId: childRunId,
-      nodes: childNodes,
-    });
+    plans.push(...(await resolveExistingChildResetPlans(adapter, childRun, seen)));
   }
   return plans;
+}
+/**
+ * @param {SmithersDb} adapter
+ * @param {any} childRun
+ * @param {Set<string>} seen
+ */
+async function resolveExistingChildResetPlans(adapter, childRun, seen) {
+  const childRunId = childRun.runId;
+  if (seen.has(childRunId) || !TERMINAL_CHILD_RUN_STATUSES.has(childRun.status)) return [];
+  seen.add(childRunId);
+  const childNodes = await adapter.listNodes(childRunId);
+  const successor = await findContinuationSuccessor(adapter, childRunId);
+  return [
+    ...(successor ? await resolveExistingChildResetPlans(adapter, successor, seen) : []),
+    ...(await resolveCompletedChildResetPlans(adapter, childRunId, childNodes, seen)),
+    { runId: childRunId, nodes: childNodes },
+  ];
 }
 /**
  * @param {SmithersDb} adapter

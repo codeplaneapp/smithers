@@ -39,7 +39,7 @@ function isActiveRunStatus(status) {
     status === "waiting-quota"
   );
 }
-const RESETTABLE_CHILD_RUN_STATUSES = new Set(["failed", "finished", "cancelled", "canceled"]);
+const RESETTABLE_CHILD_RUN_STATUSES = new Set(["failed", "finished", "cancelled", "canceled", "continued"]);
 const CHILD_RESET_TARGET_STATES = new Set([
   "waiting-approval",
   "waiting-event",
@@ -51,6 +51,25 @@ const CHILD_RESET_TARGET_STATES = new Set([
   "failed",
   "cancelled",
 ]);
+/**
+ * ContinueAsNew records its successor as a child row and stamps the source
+ * run id into config.continuation.parentRunId. Follow that structured
+ * provenance rather than treating every parentRunId child (Subflow or fork)
+ * as a continuation.
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ */
+async function findContinuationSuccessor(adapter, runId) {
+  if (typeof adapter.getLatestChildRun !== "function") return undefined;
+  const candidate = await adapter.getLatestChildRun(runId);
+  if (!candidate || candidate.parentRunId !== runId) return undefined;
+  try {
+    const config = JSON.parse(candidate.configJson ?? "{}");
+    return config?.continuation?.parentRunId === runId ? candidate : undefined;
+  } catch {
+    return undefined;
+  }
+}
 /**
  * @param {SmithersDb} adapter
  * @param {Required<Pick<RetryTaskOptions, "runId" | "resetDependents">> & { targetNode: any; }} opts
@@ -103,44 +122,56 @@ async function resolveChildResetPlans(adapter, runId, resetNodes, resetDependent
     if (childRun?.parentRunId !== runId || !RESETTABLE_CHILD_RUN_STATUSES.has(childRun.status)) {
       continue;
     }
-    seenRunIds.add(childRunId);
-    const childNodes = await adapter.listNodes(childRunId);
-    const childResetNodes = [];
-    const childResetKeys = new Set();
-    const addChildResetNodes = (nodes) => {
-      for (const node of nodes) {
-        const key = buildNodeKey(node.nodeId, node.iteration ?? 0);
-        if (childResetKeys.has(key)) continue;
-        childResetKeys.add(key);
-        childResetNodes.push(node);
-      }
-    };
-    if (childRun.status === "finished") {
-      // Explicitly retrying a successfully completed Subflow means re-running
-      // that work, so the whole finished child must be reset.
-      addChildResetNodes(childNodes);
-    } else {
-      // A failed child may contain expensive completed work before the failed
-      // task. Preserve those outputs and reset only failed/non-terminal work,
-      // plus later dependents when requested.
-      for (const targetNode of childNodes.filter((node) => CHILD_RESET_TARGET_STATES.has(node.state))) {
-        addChildResetNodes(
-          await resolveResetNodes(adapter, {
-            runId: childRunId,
-            targetNode,
-            resetDependents,
-          }),
-        );
-      }
-    }
-    if (childResetNodes.length > 0) {
-      plans.push(...(await resolveChildResetPlans(adapter, childRunId, childResetNodes, resetDependents, seenRunIds)), {
-        runId: childRunId,
-        nodes: childResetNodes,
-      });
-    }
+    plans.push(...(await resolveExistingChildResetPlans(adapter, childRun, resetDependents, seenRunIds)));
   }
   return plans;
+}
+/**
+ * Build a reset for one child plus every ContinueAsNew successor. Successors
+ * are planned first, so the durable lineage is invalidated deepest-first
+ * before the deterministic predecessor is made resumable again.
+ * @param {SmithersDb} adapter
+ * @param {any} childRun
+ * @param {boolean} resetDependents
+ * @param {Set<string>} seenRunIds
+ */
+async function resolveExistingChildResetPlans(adapter, childRun, resetDependents, seenRunIds) {
+  const childRunId = childRun.runId;
+  if (seenRunIds.has(childRunId) || !RESETTABLE_CHILD_RUN_STATUSES.has(childRun.status)) return [];
+  seenRunIds.add(childRunId);
+  const childNodes = await adapter.listNodes(childRunId);
+  const childResetNodes = [];
+  const childResetKeys = new Set();
+  const addChildResetNodes = (nodes) => {
+    for (const node of nodes) {
+      const key = buildNodeKey(node.nodeId, node.iteration ?? 0);
+      if (childResetKeys.has(key)) continue;
+      childResetKeys.add(key);
+      childResetNodes.push(node);
+    }
+  };
+  if (childRun.status === "finished" || childRun.status === "continued") {
+    // A continued predecessor must be reset wholesale. Leaving it continued
+    // makes executeChildWorkflow try to resume a non-resumable run.
+    addChildResetNodes(childNodes);
+  } else {
+    for (const targetNode of childNodes.filter((node) => CHILD_RESET_TARGET_STATES.has(node.state))) {
+      addChildResetNodes(
+        await resolveResetNodes(adapter, {
+          runId: childRunId,
+          targetNode,
+          resetDependents,
+        }),
+      );
+    }
+  }
+  if (childResetNodes.length === 0) return [];
+  const successor = await findContinuationSuccessor(adapter, childRunId);
+  return [
+    ...(successor ? await resolveExistingChildResetPlans(adapter, successor, resetDependents, seenRunIds) : []),
+    ...(await resolveChildResetPlans(adapter, childRunId, childResetNodes, resetDependents, seenRunIds)),
+    { runId: childRunId, nodes: childResetNodes },
+  ];
 }
 /**
  * @param {RetryTaskOptions} opts
