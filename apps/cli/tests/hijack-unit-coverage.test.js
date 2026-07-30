@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { addAccount } from "@smithers-orchestrator/accounts";
 import {
+  buildHijackEnvironment,
   buildHijackLaunchSpec,
   isNativeHijackCandidate,
   launchHijackSession,
@@ -68,6 +73,19 @@ describe("resolveHijackCandidate", () => {
     });
     expect(candidate.messages).toBeUndefined();
     expect(candidate.cwd).toBe(process.cwd());
+  });
+
+  test("retains the registered account identity from attempt metadata", async () => {
+    const adapter = adapterWithAttempts([
+      attempt({
+        metaJson: JSON.stringify({
+          agentId: "smithers-account:claude-work",
+          agentEngine: "claude-code",
+          agentResume: "sess-1",
+        }),
+      }),
+    ]);
+    expect(await resolveHijackCandidate(adapter, "run-1")).toMatchObject({ accountLabel: "claude-work" });
   });
 
   test("extracts a conversation continuation from hijackHandoff and keeps jjCwd", async () => {
@@ -229,6 +247,34 @@ describe("buildHijackLaunchSpec", () => {
     expect(buildHijackLaunchSpec({ ...base, engine: "forge" }).args).toEqual(["--conversation-id", "R", "-C", "/c"]);
     expect(buildHijackLaunchSpec({ ...base, engine: "amp" }).args).toEqual(["threads", "continue", "R"]);
     expect(buildHijackLaunchSpec({ ...base, engine: "codex" }).command).toBe("codex");
+  });
+
+  test("relaunches with the exact registered account without persisting its credential", () => {
+    const home = mkdtempSync(join(tmpdir(), "smithers-hijack-account-"));
+    const env = { HOME: home, SMITHERS_HOME: home, ANTHROPIC_API_KEY: "ambient-key" };
+    try {
+      addAccount({ label: "claude-work", provider: "claude-code", configDir: "/accounts/claude-work" }, { env });
+      addAccount({ label: "codex-api", provider: "openai-api", apiKey: "sk-registered" }, { env });
+
+      const claude = buildHijackLaunchSpec(
+        {
+          engine: "claude-code",
+          mode: "native-cli",
+          resume: "session-1",
+          cwd: "/work",
+          accountLabel: "claude-work",
+        },
+        env,
+      );
+      expect(claude.env.CLAUDE_CONFIG_DIR).toBe("/accounts/claude-work");
+      expect(claude.env.ANTHROPIC_API_KEY).toBe("");
+
+      expect(buildHijackEnvironment({ engine: "codex", accountLabel: "codex-api" }, env).OPENAI_API_KEY).toBe(
+        "sk-registered",
+      );
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
 

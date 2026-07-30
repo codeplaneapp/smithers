@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import { isPidAlive, parseRuntimeOwnerPid } from "@smithers-orchestrator/engine/runtime-owner";
 import { terminateRunOwner } from "../cancel-cascade.js";
 import { BUILTIN_RESUME_CONFIG_KEY, buildBuiltinRelaunch } from "../resume-target.js";
-import { resolveHijackCandidate, waitForHijackCandidate } from "../hijack.js";
+import { buildHijackEnvironment, resolveHijackCandidate, waitForHijackCandidate } from "../hijack.js";
 import { startOneshotStatusUpdater } from "./startOneshotStatusUpdater.js";
 
 const ATTACH_LEASE_MS = 35_000;
@@ -56,16 +56,17 @@ export function builtinResumeConfigOf(run) {
  * the appended message, then resumes the workflow. Other engines fail
  * explicitly until they have an equally reliable boundary handoff.
  *
- * @param {{ engine: string; mode: string; resume?: string; cwd: string }} candidate
+ * @param {{ engine: string; mode: string; resume?: string; accountLabel?: string; cwd: string }} candidate
  * @param {string} message
+ * @param {NodeJS.ProcessEnv} [baseEnv]
  */
-export function buildSteeringLaunchSpec(candidate, message) {
+export function buildSteeringLaunchSpec(candidate, message, baseEnv = process.env) {
   if (candidate.engine !== "claude-code" || candidate.mode !== "native-cli" || !candidate.resume) {
     throw new Error(
       `UI steering is unavailable for ${candidate.engine}; Claude Code is currently supported via interrupt and resume`,
     );
   }
-  const env = { ...process.env };
+  const env = buildHijackEnvironment(candidate, baseEnv);
   if (env.CLAUDE_CODE_ENTRYPOINT) env.CLAUDE_CODE_ENTRYPOINT = "";
   if (env.CLAUDECODE) env.CLAUDECODE = "";
   return {

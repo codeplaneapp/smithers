@@ -18,7 +18,7 @@ import {
   ONESHOT_NARRATOR_MODELS,
   startOneshotStatusUpdater,
 } from "../src/oneshot/startOneshotStatusUpdater.js";
-import { createOneshotMonitorControl } from "../src/oneshot/monitor-control.js";
+import { buildSteeringLaunchSpec, createOneshotMonitorControl } from "../src/oneshot/monitor-control.js";
 import { oneshotCta } from "../src/oneshot/oneshotCta.js";
 import { buildBuiltinRelaunch, buildBuiltinResumeConfig, parseBuiltinResume } from "../src/resume-target.js";
 import { bundleGatewayUiEntry } from "../../../packages/server/src/gatewayUi/bundle.js";
@@ -263,6 +263,7 @@ test("oneshot accepts a registered Kimi account and uses its config directory", 
   expect(kimi?.registeredAccountLabels).toEqual(["kimi-1"]);
   const selected = await selectOneshotAgents(detections, { cwd: home, agent: "kimi", env });
   expect(selected.agents[0].opts.configDir).toBe(configDir);
+  expect(selected.agents[0].id).toBe("smithers-account:kimi-1");
 
   const status = spawnSync(
     process.execPath,
@@ -310,6 +311,20 @@ test("oneshot accepts a registered Claude account and uses its config directory"
 
   const selected = await selectOneshotAgents(detections, { cwd: home, agent: "claude", env });
   expect(selected.agents[0].opts.configDir).toBe(configDir);
+  expect(selected.agents[0].id).toBe("smithers-account:claude-1");
+  expect(
+    buildSteeringLaunchSpec(
+      {
+        engine: "claude-code",
+        mode: "native-cli",
+        resume: "session-1",
+        accountLabel: "claude-1",
+        cwd: home,
+      },
+      "Keep going",
+      env,
+    ).env.CLAUDE_CONFIG_DIR,
+  ).toBe(configDir);
 }, 60_000);
 
 describe("oneshot status updater", () => {

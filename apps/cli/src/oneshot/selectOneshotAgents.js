@@ -1,5 +1,6 @@
 import { resolveOneshotChain } from "./resolveOneshotChain.js";
 import { listAccounts } from "@smithers-orchestrator/accounts";
+import { registeredAgentId } from "../registered-agent-id.js";
 
 const ACCOUNT_PROVIDERS = {
   claude: new Set(["claude-code", "anthropic-api"]),
@@ -10,6 +11,7 @@ const ACCOUNT_PROVIDERS = {
 /** @param {{ engine: string; model: string; provider?: string }} spec @param {string} cwd @param {{ configDir?: string; apiKey?: string } | undefined} account */
 async function createAgent(spec, cwd, account) {
   const { engine, model } = spec;
+  const identity = account ? { id: registeredAgentId(account.label) } : {};
   if (engine === "codex") {
     const { CodexAgent } = await import("@smithers-orchestrator/agents/CodexAgent");
     return new CodexAgent({
@@ -17,13 +19,19 @@ async function createAgent(spec, cwd, account) {
       model,
       config: { model_reasoning_effort: "high" },
       skipGitRepoCheck: true,
+      ...identity,
       ...(account?.configDir ? { configDir: account.configDir } : {}),
       ...(account?.apiKey ? { apiKey: account.apiKey } : {}),
     });
   }
   if (engine === "kimi") {
     const { KimiAgent } = await import("@smithers-orchestrator/agents/KimiAgent");
-    return new KimiAgent({ cwd, model, ...(account?.configDir ? { configDir: account.configDir } : {}) });
+    return new KimiAgent({
+      cwd,
+      model,
+      ...identity,
+      ...(account?.configDir ? { configDir: account.configDir } : {}),
+    });
   }
   if (engine === "pi") {
     const { PiAgent } = await import("@smithers-orchestrator/agents/PiAgent");
@@ -39,6 +47,7 @@ async function createAgent(spec, cwd, account) {
   return new ClaudeCodeAgent({
     cwd,
     model,
+    ...identity,
     ...(account?.configDir ? { configDir: account.configDir } : {}),
     ...(account?.apiKey ? { apiKey: account.apiKey } : {}),
   });

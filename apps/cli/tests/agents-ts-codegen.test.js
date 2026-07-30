@@ -87,6 +87,7 @@ describe("generateAgentsTs (account-driven)", () => {
     expect(generated).toContain("claudeWork: new SmithersClaudeCodeAgent(");
     expect(generated).toContain("claudePersonal: new SmithersClaudeCodeAgent(");
     expect(generated).toContain("codexWork: new SmithersCodexAgent(");
+    expect(generated).toContain('id: "smithers-account:claude-work"');
     // pools group by engine family
     expect(generated).toMatch(/claude:\s*\[\s*providers\.claudeWork,\s*providers\.claudePersonal,\s*\]/);
     expect(generated).toMatch(/codex:\s*\[\s*providers\.codexWork,\s*\]/);
@@ -152,13 +153,15 @@ describe("generateAgentsTs (account-driven)", () => {
     expect(generated).toContain('configDir: "/opt/shared/claude"');
   });
 
-  test("api-key providers get apiKey baked in and join the right pool", () => {
+  test("api-key providers resolve keys from the account store and join the right pool", () => {
     const env = newSmithersHome();
     addAccount({ label: "openai-prod", provider: "openai-api", apiKey: "sk-xyz", model: "gpt-5" }, { env });
     addAccount({ label: "anthropic-prod", provider: "anthropic-api", apiKey: "sk-ant" }, { env });
     const generated = generateAgentsTs(env);
-    expect(generated).toContain('apiKey: "sk-xyz"');
-    expect(generated).toContain('apiKey: "sk-ant"');
+    expect(generated).not.toContain("sk-xyz");
+    expect(generated).not.toContain("sk-ant");
+    expect(generated).toContain('apiKey: registeredAccountApiKey("openai-prod")');
+    expect(generated).toContain('apiKey: registeredAccountApiKey("anthropic-prod")');
     // openai-api goes in the codex pool, anthropic-api in the claude pool
     expect(generated).toMatch(/codex:\s*\[\s*providers\.openaiProd,\s*\]/);
     expect(generated).toMatch(/claude:\s*\[\s*providers\.anthropicProd,\s*\]/);

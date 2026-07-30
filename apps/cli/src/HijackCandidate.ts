@@ -7,5 +7,6 @@ export type HijackCandidate = {
   mode: "native-cli" | "conversation";
   resume?: string;
   messages?: unknown[];
+  accountLabel?: string;
   cwd: string;
 };
