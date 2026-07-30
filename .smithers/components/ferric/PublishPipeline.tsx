@@ -14,7 +14,9 @@ const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._-]+$/;
 
 export function publishMarkerPath(repo: string, idempotencyKey: string) {
   if (idempotencyKey.length < 8 || !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
-    throw new Error("Invalid publish idempotency key: expected at least 8 characters using only A-Z, a-z, 0-9, '.', '_', or '-'");
+    throw new Error(
+      "Invalid publish idempotency key: expected at least 8 characters using only A-Z, a-z, 0-9, '.', '_', or '-'",
+    );
   }
   return join(repo, ".ferric-published", `${idempotencyKey}.done`);
 }

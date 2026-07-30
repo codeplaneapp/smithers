@@ -223,9 +223,7 @@ describe("useDelegationChain over a real gateway", () => {
 
     for (let cycle = 1; cycle <= 2; cycle++) {
       const harness = await mountHarness();
-      await harness.render(
-        createElement(SmithersGatewayProvider, { client: observedClient }, createElement(Probe)),
-      );
+      await harness.render(createElement(SmithersGatewayProvider, { client: observedClient }, createElement(Probe)));
       await waitFor(() => backfills === cycle, `delegation backfill for mount ${cycle}`);
       await harness.unmount();
       expect(backfills).toBe(cycle);

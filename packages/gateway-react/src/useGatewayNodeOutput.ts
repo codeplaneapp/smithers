@@ -49,9 +49,9 @@ export function useGatewayNodeOutput(params: {
   const { client } = useSmithersCollections();
   const iteration = params.iteration ?? 0;
   const key = JSON.stringify([params.runId, params.nodeId, iteration]);
-  const [result, setResult] = useState<
-    { key: string; data: Record<string, unknown> | undefined } | undefined
-  >(undefined);
+  const [result, setResult] = useState<{ key: string; data: Record<string, unknown> | undefined } | undefined>(
+    undefined,
+  );
   const [error, setError] = useState<Error | undefined>(undefined);
   const enabled = Boolean(params.runId && params.nodeId);
   const [loading, setLoading] = useState(enabled);

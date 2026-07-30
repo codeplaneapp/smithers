@@ -362,12 +362,7 @@ export default smithers((ctx) => {
               )}
             </Parallel>
 
-            <Task
-              id="merge"
-              output={outputs.merged}
-              agent={providers.claude}
-              heartbeatTimeoutMs={agentTimeoutMs}
-            >
+            <Task id="merge" output={outputs.merged} agent={providers.claude} heartbeatTimeoutMs={agentTimeoutMs}>
               {mergePrompt({ briefing, round, reviews })}
             </Task>
 
