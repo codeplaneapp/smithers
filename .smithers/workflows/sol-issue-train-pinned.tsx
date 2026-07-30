@@ -26,9 +26,9 @@
 /** @jsxImportSource smithers-orchestrator */
 import { ClaudeCodeAgent, UI, createSmithers } from "smithers-orchestrator";
 import { execFileSync, spawn } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { z } from "zod/v4";
 import { codexFirst } from "../lib/codexAccounts";
 
@@ -762,14 +762,45 @@ function wipeStrays(cwd: string, waveIndex: number): z.infer<typeof wipeSchema> 
       ...splitZero(git(["ls-files", "--others", "--exclude-standard", "-z"], cwd)),
     ]);
     if (dirty.length) {
+      // A cleanup is only scheduled after every approved issue has a
+      // mechanically verified commit. Preserve any remaining diagnostics or
+      // rejected-lane work outside the worktree before removing it anyway, so
+      // a mistaken path assignment or later audit never turns cleanup into
+      // irreversible data loss.
+      const backupDir = join(
+        dirname(cwd),
+        ".sol-issue-train-backups",
+        basename(cwd),
+        "wave-" + waveIndex + "-" + Date.now(),
+      );
+      mkdirSync(backupDir, { recursive: true });
+      const trackedPatch = execFileSync("git", ["diff", "--binary", "HEAD", "--"], {
+        cwd,
+        encoding: "utf8",
+        maxBuffer: 64 * 1024 * 1024,
+      });
+      writeFileSync(join(backupDir, "tracked.patch"), trackedPatch);
+      const existingPaths = dirty.filter((path) => existsSync(join(cwd, path)));
+      if (existingPaths.length) {
+        execFileSync("tar", ["-czf", join(backupDir, "working-files.tar.gz"), "--", ...existingPaths], {
+          cwd,
+          encoding: "utf8",
+          maxBuffer: 64 * 1024 * 1024,
+        });
+      }
       git(["reset", "HEAD", "--", "."], cwd);
       git(["checkout", "--", "."], cwd);
       git(["clean", "-fd"], cwd);
+      return {
+        waveIndex,
+        wipedPaths: dirty.slice(0, 100),
+        summary: "Backed up and wiped " + dirty.length + " uncommitted stray path(s) at " + backupDir + ".",
+      };
     }
     return {
       waveIndex,
       wipedPaths: dirty.slice(0, 100),
-      summary: dirty.length ? "Wiped " + dirty.length + " uncommitted stray path(s)." : "Worktree clean.",
+      summary: "Worktree clean.",
     };
   } catch (error) {
     return { waveIndex, wipedPaths: [], summary: "Wipe failed: " + String(error).slice(0, 2_000) };
