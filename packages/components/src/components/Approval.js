@@ -222,7 +222,7 @@ export function Approval(props) {
     outputSchema,
     dependsOn: props.dependsOn,
     needs: props.needs,
-    bind: props.bind,
+    ...(Object.hasOwn(props, "bind") ? { bind: props.bind } : {}),
     needsApproval: true,
     waitAsync: props.async === true,
     approvalMode,

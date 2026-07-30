@@ -437,6 +437,13 @@ describe("Approval component", () => {
     expect(result.tasks[0].proofBindingRequired).toBe(true);
     expect(result.tasks[0].proofBindings).toEqual([binding]);
   });
+  test("does not require proof binding when bind is omitted", async () => {
+    const result = await render(
+      <Approval id="approve-deploy" output="approval_out" request={{ title: "Deploy to prod?" }} />,
+    );
+    expect(result.tasks[0].proofBindingRequired).toBeUndefined();
+    expect(result.tasks[0].proofBindings).toBeUndefined();
+  });
   test("skipIf returns null", async () => {
     const result = await render(
       <Workflow name="test">
