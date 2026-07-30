@@ -24,7 +24,7 @@ import { bindCronActions, useCronsStore } from "./cronsStore";
 
 const CRONS_PARAMS = {} as const;
 
-type CronCreateVars = { workflow: string; pattern: string; enabled: boolean };
+type CronCreateVars = { workflow: string; pattern: string; cronId?: string; enabled: boolean };
 type CronDeleteVars = { cronId: string };
 
 /**
@@ -82,10 +82,8 @@ export function CronsBridge() {
       }
 
       const crons = (data ?? []).map(toCron);
-      // Keep the selection across reconciles. A toggle is delete+recreate, which
-      // mints a NEW cronId for the same workflow+pattern, so when the exact id is
-      // gone we re-bind to the cron with the same workflow+pattern rather than
-      // dropping the user's selection mid-toggle.
+      // Keep the selection across reconciles. The fallback also preserves it if
+      // an out-of-band replacement changes the id for the same workflow/pattern.
       const prior = state.crons.find((cron) => cron.id === state.selectedId) ?? null;
       let selectedId: string | null = null;
       if (state.selectedId && crons.some((cron) => cron.id === state.selectedId)) {
