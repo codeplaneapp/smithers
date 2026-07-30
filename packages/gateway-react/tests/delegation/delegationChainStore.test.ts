@@ -247,6 +247,43 @@ describe("createDelegationChainStore — record assembly", () => {
     }
   });
 
+  test("a finish found only by history backfill refetches a mount-time missing output", async () => {
+    let releaseHistory: (rows: HistoryRow[]) => void = () => {};
+    const historyGate = new Promise<HistoryRow[]>((resolve) => {
+      releaseHistory = resolve;
+    });
+    let outputReady = false;
+    let fetches = 0;
+    const api: DelegationChainApi = {
+      listRunEvents: async () => historyGate,
+      getNodeOutput: async () => {
+        fetches += 1;
+        if (!outputReady) {
+          throw new GatewayRpcError({ method: "getNodeOutput", code: "NodeHasNoOutput", message: "not durable yet" });
+        }
+        return { status: "produced", row: planRow };
+      },
+    };
+    const { store, unsubscribe } = trackedStore(api);
+    try {
+      // The live ring has no finish event. The tree starts the mount-time
+      // fetch, which races output durability and records a missing result.
+      store.push(inputs({ treeNodes: [{ id: "dc:root:plan", iteration: 0 }], events: [] }));
+      await waitFor(() => fetches === 1 && store.getSnapshot().hydrated);
+
+      outputReady = true;
+      releaseHistory([finished(1, "dc:root:plan")]);
+
+      await waitFor(() => store.getSnapshot().graph.rootId === "root");
+      expect(fetches).toBe(2);
+      expect((store.getSnapshot().graph.nodes.root!.output as DcPlanRow).brief).toBe("Plan for root");
+      expect(store.getSnapshot().recordErrors).toHaveLength(0);
+    } finally {
+      unsubscribe();
+      store.dispose();
+    }
+  });
+
   test("a finish that arrives after the event ring evicted the previous one still refetches", async () => {
     // The live buffer is a bounded ring (`useGatewayRunEvents` caps it at
     // RING_SIZE frames). Counting finish ticks off that window alone makes the

@@ -17,7 +17,7 @@ export function useGatewayApprovals(params: ListApprovalsRequest = {}): GatewayA
   const live = useLiveQuery((q) => q.from({ row: collection }), [collection]);
   const refetch = useCallback(async () => {
     await collections.invalidate(["approvals"]);
-  }, [collections, params]);
+  }, [collections]);
 
   const data = (live.data ?? []) as GatewayApprovalRow[] as ListApprovalsResponse;
   return gatewayCollectionAsyncState({

@@ -18,7 +18,7 @@ export function useGatewayCrons(params: CronListRequest = {}): GatewayAsyncState
   const live = useLiveQuery((q) => q.from({ row: collection }), [collection]);
   const refetch = useCallback(async () => {
     await collections.invalidate(["crons"]);
-  }, [collections, params]);
+  }, [collections]);
 
   const data = (live.data ?? []) as GatewayCronRow[];
   return gatewayCollectionAsyncState({

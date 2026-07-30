@@ -47,17 +47,21 @@ export function useGatewayNodeOutput(params: {
   iteration?: number;
 }) {
   const { client } = useSmithersCollections();
-  const [data, setData] = useState<Record<string, unknown> | undefined>(undefined);
+  const iteration = params.iteration ?? 0;
+  const key = JSON.stringify([params.runId, params.nodeId, iteration]);
+  const [result, setResult] = useState<
+    { key: string; data: Record<string, unknown> | undefined } | undefined
+  >(undefined);
   const [error, setError] = useState<Error | undefined>(undefined);
   const enabled = Boolean(params.runId && params.nodeId);
   const [loading, setLoading] = useState(enabled);
   const generation = useRef(0);
-  const iteration = params.iteration ?? 0;
+  const data = result?.key === key ? result.data : undefined;
 
   const refetch = useCallback(async () => {
     const current = ++generation.current;
     if (!params.runId || !params.nodeId) {
-      setData(undefined);
+      setResult(undefined);
       setError(undefined);
       setLoading(false);
       return;
@@ -71,24 +75,25 @@ export function useGatewayNodeOutput(params: {
         iteration,
       };
       const next = await client.api.getNodeOutput(request);
-      if (generation.current === current) setData(next);
+      if (generation.current === current) setResult({ key, data: next });
     } catch (cause) {
       if (generation.current === current) setError(cause instanceof Error ? cause : new Error(String(cause)));
     } finally {
       if (generation.current === current) setLoading(false);
     }
-  }, [client, params.runId, params.nodeId, iteration]);
+  }, [client, params.runId, params.nodeId, iteration, key]);
 
   useEffect(() => {
     if (!enabled) {
       generation.current += 1;
-      setData(undefined);
+      setResult(undefined);
       setError(undefined);
       setLoading(false);
       return;
     }
+    setResult((current) => (current?.key === key ? current : undefined));
     void refetch();
-  }, [enabled, refetch]);
+  }, [enabled, key, refetch]);
 
   useEffect(() => {
     if (!params.runId || !params.nodeId) return;

@@ -133,6 +133,7 @@ type StoreMessage = Data.TaggedEnum<{
   /** The one-shot durable event-history backfill finished (or failed partway). */
   HistoryLoaded: {
     readonly targets: ReadonlyMap<string, DelegationFetchTarget>;
+    readonly finishMarks: ReadonlyMap<string, FinishMark>;
     readonly error: Error | undefined;
   };
   /** A parallel `getNodeOutput` batch settled. */
@@ -212,6 +213,23 @@ function accumulateFinishes(
     const mark = (next ?? previous).get(nodeId);
     if (mark !== undefined && count <= mark.count) continue;
     (next ??= new Map(previous)).set(nodeId, { count, lastSeq: mark?.lastSeq ?? 0 });
+  }
+  return next ?? previous;
+}
+
+/** Merge full-history completion ticks without letting live marks decrease. */
+function mergeFinishMarks(
+  previous: ReadonlyMap<string, FinishMark>,
+  found: ReadonlyMap<string, FinishMark>,
+): ReadonlyMap<string, FinishMark> {
+  let next: Map<string, FinishMark> | null = null;
+  for (const [nodeId, mark] of found) {
+    const existing = previous.get(nodeId);
+    if (existing !== undefined && existing.count >= mark.count && existing.lastSeq >= mark.lastSeq) continue;
+    (next ??= new Map(previous)).set(nodeId, {
+      count: Math.max(existing?.count ?? 0, mark.count),
+      lastSeq: Math.max(existing?.lastSeq ?? 0, mark.lastSeq),
+    });
   }
   return next ?? previous;
 }
@@ -425,12 +443,15 @@ export function createDelegationChainStore(options: {
               yield* Ref.update(finishMarks, (previous) => accumulateFinishes(previous, next.events));
               yield* reconcile;
             }),
-          HistoryLoaded: ({ targets: found, error }) =>
+          HistoryLoaded: ({ targets: found, finishMarks: foundFinishes, error }) =>
             Effect.gen(function* () {
               if (error !== undefined) yield* Ref.set(historyError, error);
               // Keep whatever was collected even on error — the tree still
               // covers current nodes.
               if (found.size > 0) yield* Ref.update(eventTargets, (previous) => mergeTargets(previous, found));
+              if (foundFinishes.size > 0) {
+                yield* Ref.update(finishMarks, (previous) => mergeFinishMarks(previous, foundFinishes));
+              }
               yield* reconcile;
             }),
           OutputsSettled: ({ results }) =>
@@ -462,6 +483,7 @@ export function createDelegationChainStore(options: {
       if (runId !== undefined) {
         const backfill = Effect.gen(function* () {
           const found = new Map<string, DelegationFetchTarget>();
+          let foundFinishes: ReadonlyMap<string, FinishMark> = new Map();
           let error: Error | undefined;
           let afterSeq: number | undefined;
           for (;;) {
@@ -481,13 +503,14 @@ export function createDelegationChainStore(options: {
             );
             if (page === undefined) break;
             for (const [key, target] of delegationTargetsFromEvents(page)) found.set(key, target);
+            foundFinishes = accumulateFinishes(foundFinishes, page);
             if (page.length < EVENT_HISTORY_PAGE_SIZE) break;
             const lastSeq = page[page.length - 1]?.seq;
             // Defensive: stop rather than loop forever on a non-advancing cursor.
             if (typeof lastSeq !== "number" || (afterSeq !== undefined && lastSeq <= afterSeq)) break;
             afterSeq = lastSeq;
           }
-          yield* Queue.offer(queue, StoreMessage.HistoryLoaded({ targets: found, error }));
+          yield* Queue.offer(queue, StoreMessage.HistoryLoaded({ targets: found, finishMarks: foundFinishes, error }));
         });
         yield* Effect.forkIn(backfill, scope);
       }
