@@ -159,9 +159,9 @@ export function runStatusToNode(status: RunListStatus): NodeStatus {
     case "failed":
       return "failed";
     case "cancelled":
-      return "queued";
+      return "cancelled";
     case "unknown":
-      return "queued";
+      return "unknown";
   }
 }
 

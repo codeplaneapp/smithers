@@ -23,6 +23,7 @@ import {
   type RunFilters,
   type RunSummary,
 } from "../../src/runs/runsList.ts";
+import { statusLabel, statusTone } from "../../src/runs/statusMeta.ts";
 
 function run(overrides: Partial<RunSummary> = {}): RunSummary {
   return {
@@ -98,13 +99,27 @@ describe("runStatusToNode / runStatusTone / runStatusLabel", () => {
     expect(runStatusToNode("waiting")).toBe("waiting");
     expect(runStatusToNode("finished")).toBe("ok");
     expect(runStatusToNode("failed")).toBe("failed");
-    expect(runStatusToNode("cancelled")).toBe("queued");
-    expect(runStatusToNode("unknown")).toBe("queued");
+    expect(runStatusToNode("cancelled")).toBe("cancelled");
+    expect(runStatusToNode("unknown")).toBe("unknown");
   });
 
   test("cancelled tones as idle, not failed", () => {
     expect(runStatusTone("cancelled")).toBe("idle");
     expect(runStatusTone("failed")).toBe("failed");
+  });
+
+  test("a cancelled run is terminal, not queued (not started)", () => {
+    const node = runStatusToNode("cancelled");
+    expect(node).not.toBe("queued");
+    expect(statusTone(node)).toBe("idle");
+    expect(statusLabel(node)).toBe("cancelled");
+  });
+
+  test("an unknown run status reads neutral, not queued", () => {
+    const node = runStatusToNode("unknown");
+    expect(node).not.toBe("queued");
+    expect(statusTone(node)).toBe("idle");
+    expect(statusLabel(node)).toBe("unknown");
   });
 
   test("labels are the lowercase status word", () => {
