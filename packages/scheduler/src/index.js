@@ -51,3 +51,10 @@ export { nowMs } from "./nowMs.js";
 export { retryPolicyToSchedule } from "./retryPolicyToSchedule.js";
 export { retryScheduleDelayMs } from "./retryScheduleDelayMs.js";
 export { computeRetryDelayMs } from "./computeRetryDelayMs.js";
+export {
+  attachDurableRetryState,
+  createDurableRetryState,
+  durableRetryStateFromError,
+  parseDurableRetryState,
+  retryDeadlineMs,
+} from "./durableRetryState.js";

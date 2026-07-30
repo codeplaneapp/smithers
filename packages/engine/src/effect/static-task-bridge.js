@@ -10,6 +10,7 @@ import { getJjPointer } from "@smthrs/vcs/jj";
 import { buildOutputValidationDiagnostics } from "../output-validation-diagnostics.js";
 import { getPlatformLayer } from "../platform-layer.js";
 import { isThenablePayload, makeThenablePayloadError } from "../thenable-payload.js";
+import { stampDurableRetryState } from "./retry-state.js";
 /** @typedef {import("@smthrs/db/adapter").SmithersDb} _SmithersDb */
 /**
  * @typedef {{ rootDir: string; }} StaticTaskBridgeToolConfig
@@ -327,6 +328,14 @@ export const executeStaticTaskBridge = async (adapter, runId, desc, eventBus, to
       "engine:task",
     );
     const failedAtMs = nowMs();
+    const failureErrorJson = errorToJson(effectiveError);
+    stampDurableRetryState({
+      attemptMeta,
+      attempts,
+      descriptor: desc,
+      error: failureErrorJson,
+      failedAtMs,
+    });
     const failureClaimed = await adapter.withTransaction(
       "task-fail",
       Effect.gen(function* () {
@@ -338,7 +347,7 @@ export const executeStaticTaskBridge = async (adapter, runId, desc, eventBus, to
           executionOwnerId,
           "failed",
           failedAtMs,
-          JSON.stringify(errorToJson(effectiveError)),
+          JSON.stringify(failureErrorJson),
         );
         if (!claimed) return false;
         yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {

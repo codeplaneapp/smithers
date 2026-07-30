@@ -30,6 +30,12 @@ describe("workflow bridge internals", () => {
     ).toBe(false);
     expect(
       I.isRetryableBridgeTaskFailure({
+        metaJson: JSON.stringify({ kind: "agent", failureRetryable: true }),
+        errorJson: JSON.stringify({ code: "AGENT_CONFIG_INVALID" }),
+      }),
+    ).toBe(true);
+    expect(
+      I.isRetryableBridgeTaskFailure({
         metaJson: JSON.stringify({ kind: "static" }),
         errorJson: JSON.stringify({ code: "INVALID_OUTPUT" }),
       }),

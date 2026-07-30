@@ -7,6 +7,7 @@ import { SmithersError } from "@smthrs/errors/SmithersError";
 import { createHindsightMemoryStore, createLocalMemoryRuntime, createMemoryStore } from "@smthrs/memory";
 import { createSmithers, createSmithersPostgres } from "./create.js";
 import { findSmithersAnchorDir } from "./findSmithersAnchorDir.js";
+import { assertNoReservedPublicOutputNames } from "./prepareOutputSchemas.js";
 import { resolveSmithersBackendChoice } from "./resolveSmithersBackendChoice.js";
 
 /**
@@ -94,6 +95,7 @@ function attachMemoryBackend(api, env, localMemoryDbPath) {
  * }>}
  */
 export async function openSmithersBackend(schemas = /** @type {Schemas} */ ({}), opts = {}) {
+  assertNoReservedPublicOutputNames(schemas);
   const startedAt = Date.now();
   const cwd = resolve(opts.cwd ?? process.cwd());
   const env = opts.env ?? process.env;

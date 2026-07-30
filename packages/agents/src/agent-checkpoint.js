@@ -159,6 +159,7 @@ function assertJsonValue(value, path, ancestors) {
   if (value === null || typeof value === "string" || typeof value === "boolean") return;
   if (typeof value === "number") {
     if (!Number.isFinite(value)) throw new TypeError(`Agent checkpoint contains a non-finite number at ${path}.`);
+    if (Object.is(value, -0)) throw new TypeError(`Agent checkpoint contains negative zero at ${path}.`);
     return;
   }
   if (value === undefined || typeof value === "function" || typeof value === "symbol" || typeof value === "bigint") {

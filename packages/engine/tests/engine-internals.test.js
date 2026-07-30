@@ -711,6 +711,48 @@ describe("engine internals: durability, options and graph helpers", () => {
     ).toBe(false);
   });
 
+  test("retry hydration accepts current durable state and ignores stale or legacy deadlines", () => {
+    const attempt = (number, state, meta = {}) => ({
+      runId: "run",
+      nodeId: "task",
+      iteration: 0,
+      attempt: number,
+      state,
+      startedAtMs: number * 100,
+      errorJson: JSON.stringify({ message: "failed" }),
+      metaJson: JSON.stringify(meta),
+    });
+    const current = I.retrySessionStateFromAttempts([
+      attempt(1, "failed", { retryState: { version: 1, failureCount: 1, retryAtMs: 5_000 } }),
+    ]);
+    expect(current.retryCounts).toEqual(new Map([["task::0", 1]]));
+    expect(current.retryWait).toEqual(new Map([["task::0", 5_000]]));
+
+    const terminalLater = I.retrySessionStateFromAttempts([
+      attempt(1, "failed", { retryState: { version: 1, failureCount: 1, retryAtMs: 5_000 } }),
+      attempt(2, "cancelled"),
+    ]);
+    expect(terminalLater.retryCounts).toEqual(new Map([["task::0", 1]]));
+    expect(terminalLater.retryWait).toEqual(new Map());
+
+    const legacy = I.retrySessionStateFromAttempts([attempt(1, "failed")]);
+    expect(legacy.retryCounts).toEqual(new Map([["task::0", 1]]));
+    expect(legacy.retryWait).toEqual(new Map());
+
+    expect(() =>
+      I.retrySessionStateFromAttempts([
+        attempt(1, "failed", { retryState: { version: 1, failureCount: 0, retryAtMs: "soon" } }),
+      ]),
+    ).toThrow("durable retry state is malformed");
+
+    expect(() =>
+      I.retrySessionStateFromAttempts([
+        attempt(1, "failed", { retryState: { version: 1, failureCount: 0, retryAtMs: "soon" } }),
+        attempt(2, "cancelled"),
+      ]),
+    ).not.toThrow();
+  });
+
   test("handles carried input rows and durability metadata comparisons", () => {
     expect(
       I.ralphStateToObject(
@@ -1199,6 +1241,12 @@ describe("engine internals: durability, options and graph helpers", () => {
     expect(I.parseAttemptErrorCode("{")).toBeNull();
     expect(I.isRetryableTaskFailure({ metaJson: '{"failureRetryable":false}' })).toBe(false);
     expect(I.isRetryableTaskFailure({ errorJson: '{"code":"AGENT_CONFIG_INVALID"}' })).toBe(false);
+    expect(
+      I.isRetryableTaskFailure({
+        metaJson: '{"failureRetryable":true}',
+        errorJson: '{"code":"AGENT_CONFIG_INVALID"}',
+      }),
+    ).toBe(true);
     expect(I.isRetryableTaskFailure({ metaJson: '{"kind":"compute"}', errorJson: '{"code":"INVALID_OUTPUT"}' })).toBe(
       false,
     );

@@ -170,6 +170,45 @@ describe("durable agent checkpoints", () => {
   );
 
   test(
+    "JSON-format checkpoint corrections omit the legacy resumeSession property",
+    async () => {
+      const { smithers, outputs, cleanup } = createTestSmithers(outputSchemas);
+      const calls = [];
+      const agent = {
+        id: "checkpoint-json-format-correction",
+        checkpointCapabilities: [{ codec: CODEC, versions: [1], modes: ["resume"] }],
+        checkpointFormats: CHECKPOINT_FORMATS,
+        async generate(args) {
+          calls.push(args);
+          if (calls.length === 1) {
+            return { text: "completed without JSON", checkpoint: checkpoint("format-c1") };
+          }
+          return { text: '{"value":42}' };
+        },
+      };
+      const workflow = smithers(() => (
+        <Workflow name="checkpoint-json-format-correction">
+          <Task id="work" output={outputs.outputA} agent={agent} noRetry>
+            work
+          </Task>
+        </Workflow>
+      ));
+
+      try {
+        const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+        expect(result.status).toBe("finished");
+        expect(calls).toHaveLength(2);
+        expect(calls[1].resumeCheckpoint).toEqual(checkpoint("format-c1"));
+        expect(calls[1].checkpointMode).toBe("resume");
+        expect(Object.hasOwn(calls[1], "resumeSession")).toBe(false);
+      } finally {
+        cleanup();
+      }
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
     "a checkpoint-only task fork survives a stopped run and uses isolated fork mode",
     async () => {
       const fixture = createTestSmithers(outputSchemas);
@@ -769,6 +808,140 @@ describe("durable agent checkpoints", () => {
         const result = await running;
         expect(result.status).toBe("running");
         expect(await adapter.listAgentCheckpointRefs(runId, { nodeId: "work" })).toEqual([]);
+      } finally {
+        release?.();
+        cleanup();
+      }
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "identical checkpoint republish is fenced after the attempt becomes terminal",
+    async () => {
+      const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);
+      let republish;
+      const agent = {
+        id: "checkpoint-identical-post-terminal",
+        checkpointCapabilities: [{ codec: CODEC, versions: [1], modes: ["resume"] }],
+        checkpointFormats: CHECKPOINT_FORMATS,
+        async generate(args) {
+          republish = () => args.onCheckpoint(checkpoint("same"));
+          await republish();
+          return { text: '{"value":31}' };
+        },
+      };
+      const workflow = smithers(() => (
+        <Workflow name="checkpoint-identical-post-terminal">
+          <Task id="work" output={outputs.outputA} agent={agent} noRetry>
+            work
+          </Task>
+        </Workflow>
+      ));
+      try {
+        const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+        expect(result.status).toBe("finished");
+        await expect(republish()).rejects.toMatchObject({ code: "HEARTBEAT_FENCE_LOST" });
+        expect(await new SmithersDb(db).listAgentCheckpointRefs(result.runId, { nodeId: "work" })).toHaveLength(1);
+      } finally {
+        cleanup();
+      }
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "identical checkpoint republish is fenced after durable cancellation is requested",
+    async () => {
+      const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);
+      const adapter = new SmithersDb(db);
+      let republish;
+      let release;
+      let published;
+      const blocked = new Promise((resolve) => {
+        release = resolve;
+      });
+      const firstPublished = new Promise((resolve) => {
+        published = resolve;
+      });
+      const agent = {
+        id: "checkpoint-identical-cancel-requested",
+        checkpointCapabilities: [{ codec: CODEC, versions: [1], modes: ["resume"] }],
+        checkpointFormats: CHECKPOINT_FORMATS,
+        async generate(args) {
+          republish = () => args.onCheckpoint(checkpoint("same"));
+          await republish();
+          published();
+          await blocked;
+          return { text: '{"value":32}' };
+        },
+      };
+      const runId = "checkpoint-identical-cancel-requested";
+      const workflow = smithers(() => (
+        <Workflow name="checkpoint-identical-cancel-requested">
+          <Task id="work" output={outputs.outputA} agent={agent} noRetry>
+            work
+          </Task>
+        </Workflow>
+      ));
+      try {
+        const running = Effect.runPromise(runWorkflow(workflow, { input: {}, runId }));
+        await firstPublished;
+        await adapter.requestRunCancel(runId, Date.now());
+        await expect(republish()).rejects.toMatchObject({ code: "HEARTBEAT_FENCE_LOST" });
+        expect((await running).status).toBe("cancelled");
+        release();
+        expect(await adapter.listAgentCheckpointRefs(runId, { nodeId: "work" })).toHaveLength(1);
+      } finally {
+        release?.();
+        cleanup();
+      }
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "identical checkpoint republish is fenced after runtime ownership changes",
+    async () => {
+      const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);
+      const adapter = new SmithersDb(db);
+      let republish;
+      let release;
+      let published;
+      const blocked = new Promise((resolve) => {
+        release = resolve;
+      });
+      const firstPublished = new Promise((resolve) => {
+        published = resolve;
+      });
+      const agent = {
+        id: "checkpoint-identical-stale-owner",
+        checkpointCapabilities: [{ codec: CODEC, versions: [1], modes: ["resume"] }],
+        checkpointFormats: CHECKPOINT_FORMATS,
+        async generate(args) {
+          republish = () => args.onCheckpoint(checkpoint("same"));
+          await republish();
+          published();
+          await blocked;
+          return { text: '{"value":33}' };
+        },
+      };
+      const runId = "checkpoint-identical-stale-owner";
+      const workflow = smithers(() => (
+        <Workflow name="checkpoint-identical-stale-owner">
+          <Task id="work" output={outputs.outputA} agent={agent} noRetry>
+            work
+          </Task>
+        </Workflow>
+      ));
+      try {
+        const running = Effect.runPromise(runWorkflow(workflow, { input: {}, runId }));
+        await firstPublished;
+        await Effect.runPromise(adapter.updateRun(runId, { runtimeOwnerId: "replacement-runtime" }));
+        await expect(republish()).rejects.toMatchObject({ code: "HEARTBEAT_FENCE_LOST" });
+        release();
+        expect((await running).status).toBe("running");
+        expect(await adapter.listAgentCheckpointRefs(runId, { nodeId: "work" })).toHaveLength(1);
       } finally {
         release?.();
         cleanup();

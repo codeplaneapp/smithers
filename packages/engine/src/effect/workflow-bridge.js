@@ -115,6 +115,9 @@ function isRetryableBridgeTaskFailure(attempt) {
   if (meta?.failureRetryable === false) {
     return false;
   }
+  if (meta?.failureRetryable === true) {
+    return true;
+  }
   const errorCode = parseAttemptErrorCode(attempt?.errorJson);
   if (errorCode === "AGENT_CONFIG_INVALID") {
     return false;

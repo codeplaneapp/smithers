@@ -37,7 +37,7 @@ describe("agent checkpoints", () => {
   });
 
   test("rejects every value JSON would omit or coerce", () => {
-    const rejected = [undefined, () => {}, Symbol("x"), 1n, NaN, Infinity, -Infinity];
+    const rejected = [undefined, () => {}, Symbol("x"), 1n, NaN, Infinity, -Infinity, -0];
     for (const payload of rejected) {
       expect(() => cloneAgentCheckpoint({ codec: "x", version: 1, payload })).toThrow();
     }

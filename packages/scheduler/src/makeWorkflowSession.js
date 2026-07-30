@@ -5,6 +5,7 @@ import { buildPlanTree } from "./buildPlanTree.js";
 import { buildStateKey } from "./buildStateKey.js";
 import { cloneTaskStateMap } from "./cloneTaskStateMap.js";
 import { computeRetryDelayMs } from "./computeRetryDelayMs.js";
+import { durableRetryStateFromError, retryDeadlineMs } from "./durableRetryState.js";
 import { findDescriptor } from "./findDescriptor.js";
 import { parseStateKey } from "./parseStateKey.js";
 import { scheduleTasks } from "./scheduleTasks.js";
@@ -243,6 +244,11 @@ const NON_RETRYABLE_COMPUTE_CODES = new Set([
   "HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE",
   "HEARTBEAT_PAYLOAD_TOO_LARGE",
 ]);
+// Timer runtimes commonly clamp larger delays and may fire them immediately.
+// Keep the complete retry deadline in retryWait, but expose at most one safe
+// timer chunk per Wait decision. The next submitGraph call recomputes the
+// remaining duration from the unchanged deadline.
+const MAX_SAFE_TIMER_DELAY_MS = 2_147_483_647;
 /**
  * @param {TaskDescriptor} descriptor
  * @param {unknown} error
@@ -257,14 +263,31 @@ function isRetryableFailure(descriptor, error) {
   const normalized = toSmithersError(error);
   const code = payloadCode ?? normalized.code;
   const failureRetryable = payloadDetails?.failureRetryable ?? normalized.details?.failureRetryable;
-  if (failureRetryable === false || code === "AGENT_CONFIG_INVALID") {
+  if (failureRetryable === false) {
     return false;
   }
+  if (failureRetryable === true) return true;
+  if (code === "AGENT_CONFIG_INVALID") return false;
   const isAgentTask = Boolean(descriptor.agent);
   if (!isAgentTask && NON_RETRYABLE_COMPUTE_CODES.has(code)) {
     return false;
   }
   return true;
+}
+/**
+ * @param {unknown} error
+ * @returns {number}
+ */
+function getRetryAfterMs(error) {
+  const payloadDetails =
+    error && typeof error === "object" && error.details && typeof error.details === "object"
+      ? error.details
+      : undefined;
+  const normalized = toSmithersError(error);
+  const details = payloadDetails ?? normalized.details;
+  if (!details || typeof details !== "object") return 0;
+  const retryAfterMs = details.retryAfterMs;
+  return typeof retryAfterMs === "number" && Number.isSafeInteger(retryAfterMs) && retryAfterMs >= 0 ? retryAfterMs : 0;
 }
 /**
  * @param {unknown} error
@@ -424,8 +447,12 @@ export function makeWorkflowSession(options = {}) {
     outputs: new Map(),
     failures: new Map(),
     failureDescriptors: new Map(),
-    retryCounts: new Map(),
-    retryWait: new Map(),
+    retryCounts: new Map(
+      [...(options.initialRetryCounts ?? [])].filter(([, count]) => Number.isSafeInteger(count) && count >= 1),
+    ),
+    retryWait: new Map(
+      [...(options.initialRetryWait ?? [])].filter(([, retryAtMs]) => Number.isFinite(retryAtMs) && retryAtMs >= 0),
+    ),
     approvals: new Set(),
     ralphState: new Map(options.initialRalphState ?? []),
     quotaResetTimes: new Map(),
@@ -596,6 +623,20 @@ export function makeWorkflowSession(options = {}) {
         // schedulable again. Removing `bind` also clears the wait.
         state.states.set(key, "pending");
       }
+      const retryCount = state.retryCounts.get(key);
+      if (
+        state.states.get(key) === "pending" &&
+        retryCount != null &&
+        task.retries !== Infinity &&
+        retryCount > task.retries
+      ) {
+        // A resume may accept a workflow change that lowers retries. Do not
+        // retain the old backoff or occupy a worker slot merely to rediscover
+        // that the durable failure rung already exhausts the new policy.
+        state.states.set(key, "failed");
+        state.retryWait.delete(key);
+        state.failureDescriptors.set(key, task);
+      }
     }
   }
   /**
@@ -735,17 +776,29 @@ export function makeWorkflowSession(options = {}) {
       }
       return decide();
     }
-    const failureCount = (state.retryCounts.get(key) ?? 0) + 1;
+    const durableRetryState = durableRetryStateFromError(error);
+    const failureCount = durableRetryState?.failureCount ?? (state.retryCounts.get(key) ?? 0) + 1;
     state.retryCounts.set(key, failureCount);
     const retryable = isRetryableFailure(descriptor, error);
     const canRetry = retryable && (descriptor.retries === Infinity || failureCount <= descriptor.retries);
     if (canRetry) {
-      const delay = computeRetryDelayMs(descriptor.retryPolicy, failureCount);
       state.states.set(key, "pending");
-      if (delay > 0) {
-        state.retryWait.set(key, nowMs() + delay);
+      if (durableRetryState) {
+        // The failed attempt and this absolute deadline were committed as one
+        // fact. Reuse it exactly instead of restarting the delay after an
+        // owner handoff or after the DB write takes noticeable time.
+        state.retryWait.set(key, durableRetryState.retryAtMs);
       } else {
-        state.retryWait.delete(key);
+        const policyDelay = computeRetryDelayMs(descriptor.retryPolicy, failureCount);
+        // retryAfterMs is a provider-declared minimum, not a request for one
+        // JavaScript timer. Preserve the complete deadline here; the engine's
+        // sleep helper chunks it into runtime-safe timer intervals.
+        const delay = Math.max(policyDelay, getRetryAfterMs(error));
+        if (delay > 0) {
+          state.retryWait.set(key, retryDeadlineMs(nowMs(), delay));
+        } else {
+          state.retryWait.delete(key);
+        }
       }
       return decide();
     }
@@ -1091,7 +1144,7 @@ export function makeWorkflowSession(options = {}) {
           _tag: "Wait",
           reason: {
             _tag: "RetryBackoff",
-            waitMs: Math.max(0, schedule.nextRetryAtMs - nowMs()),
+            waitMs: Math.min(MAX_SAFE_TIMER_DELAY_MS, Math.max(0, schedule.nextRetryAtMs - nowMs())),
           },
         };
       }

@@ -236,6 +236,29 @@ describe("compute task bridge execution branches", () => {
     }
   });
 
+  test("persists explicit retryable override for AGENT_CONFIG_INVALID", async () => {
+    const result = await runBridge({
+      descOverrides: {
+        nodeId: "retryable-config",
+        runId: "retryable-config-run",
+        retries: 1,
+        computeFn: () => {
+          throw new SmithersError("AGENT_CONFIG_INVALID", "temporary compute configuration lag", {
+            failureRetryable: true,
+          });
+        },
+      },
+    });
+    try {
+      const attempts = await Effect.runPromise(result.adapter.listAttempts(result.runId, "retryable-config", 0));
+      expect(attempts[0]?.state).toBe("failed");
+      expect(JSON.parse(attempts[0]?.metaJson ?? "{}").failureRetryable).toBe(true);
+      expect(result.eventBus.events.map((event) => event.type)).toContain("NodeRetrying");
+    } finally {
+      result.cleanup();
+    }
+  });
+
   test("records flush failures through the task failure path", async () => {
     const eventBus = makeEventBus({ failFlush: true });
     const result = await runBridge({
