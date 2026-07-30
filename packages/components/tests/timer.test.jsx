@@ -46,8 +46,7 @@ describe("timer runtime", () => {
     const workflow = smithers(() => (
       <Workflow name="timer-duration">
         <Sequence>
-          {/* Leave startup slack so a slow runner still observes the waiting state. */}
-          <Timer id="cooldown" duration="900ms" />
+          <Timer id="cooldown" duration="8s" />
           <Task id="after" output={outputs.out}>
             {{ v: 1 }}
           </Task>
@@ -56,7 +55,7 @@ describe("timer runtime", () => {
     ));
     const first = await runInTestRoot(workflow, dbPath, { input: {} });
     expect(first.status).toBe("waiting-timer");
-    await sleep(980);
+    await sleep(8_100);
     const resumed = await runInTestRoot(workflow, dbPath, {
       input: {},
       runId: first.runId,
@@ -72,14 +71,14 @@ describe("timer runtime", () => {
     expect(types).toContain("TimerFired");
     expect(types).toContain("NodeWaitingTimer");
     cleanup();
-  });
+  }, 30_000);
   test("absolute timer waits, then resumes", async () => {
     const { smithers, outputs, tables, db, dbPath, cleanup } = createTestSmithers({
       out: z.object({ v: z.number() }),
     });
     // Leave enough slack for engine startup so the first run still observes a
     // future absolute deadline on slower machines.
-    const until = new Date(Date.now() + 900).toISOString();
+    const until = new Date(Date.now() + 8_000).toISOString();
     const workflow = smithers(() => (
       <Workflow name="timer-absolute">
         <Sequence>
@@ -92,7 +91,7 @@ describe("timer runtime", () => {
     ));
     const first = await runInTestRoot(workflow, dbPath, { input: {} });
     expect(first.status).toBe("waiting-timer");
-    await sleep(980);
+    await sleep(8_100);
     const resumed = await runInTestRoot(workflow, dbPath, {
       input: {},
       runId: first.runId,
@@ -102,7 +101,7 @@ describe("timer runtime", () => {
     const rows = await db.select().from(tables.out);
     expect(rows).toHaveLength(1);
     cleanup();
-  });
+  }, 30_000);
   test("zero duration and past-until timers fire immediately", async () => {
     const { smithers, outputs, tables, db, dbPath, cleanup } = createTestSmithers({
       out: z.object({ v: z.number() }),

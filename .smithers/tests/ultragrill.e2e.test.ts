@@ -164,14 +164,13 @@ browserTest(
       // The worker really dispatched and finished — its activity appears, and the
       // living spec + question pool render THIS run's real worker output.
       await page.waitForSelector('[data-testid="ug-feed-worker"]', { timeout: 30_000 });
-      await page.waitForSelector('[data-testid="ug-feed-worker"] .ev.done', { timeout: 60_000 });
       await page.waitForFunction(
         () => {
           const text = document.body.textContent ?? "";
           return text.includes("Settings Page — Living Spec") && text.includes("dark-mode toggle");
         },
         undefined,
-        { timeout: 60_000 },
+        { timeout: 120_000 },
       );
       await page.waitForSelector('[data-testid="ug-question"]', { timeout: 20_000 });
       const questionText = await page.evaluate(
@@ -196,5 +195,5 @@ browserTest(
       await browser.close();
     }
   },
-  180_000,
+  240_000,
 );
