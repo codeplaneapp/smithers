@@ -2,9 +2,9 @@
 // (runWorkflow) against the real fixture Bot API server — no agent CLIs, so
 // CI-safe.
 //
-// Also proves the deps ↔ Task interaction this package relies on: Task defers
-// function children to the compute bridge after resolving deps, and the
-// outbound components retain the same execution-time behavior.
+// Also proves the deps ↔ Task interaction this package relies on: Task's own
+// `deps` + function-children path defers callback execution to the durable
+// compute bridge, matching the outbound components' execution semantics.
 import { afterAll, describe, expect, test } from "bun:test";
 import React from "react";
 import { z } from "zod";
@@ -37,9 +37,10 @@ function makeApi() {
   );
 }
 
-describe("Task deps compute interaction", () => {
-  test("raw Task with deps defers function children to compute execution", async () => {
+describe("Task deps interaction (the reason SendMessage resolves deps itself)", () => {
+  test("raw Task with deps + function children defers callback execution to compute", async () => {
     const api = makeApi();
+    let calls = 0;
     const workflow = api.smithers(() =>
       React.createElement(
         api.Workflow,
@@ -49,7 +50,10 @@ describe("Task deps compute interaction", () => {
           smithersContext: undefined,
           output: api.outputs.note,
           deps: { note: api.outputs.note },
-          children: ({ note }) => ({ text: note.text }),
+          children: (deps) => {
+            calls += 1;
+            return { text: deps.note.text };
+          },
         }),
       ),
     );
@@ -69,7 +73,9 @@ describe("Task deps compute interaction", () => {
     expect(probe).toBeDefined();
     expect(probe?.kind).toBe("compute");
     expect(probe?.staticPayload).toBeUndefined();
-    expect(await probe?.computeFn()).toEqual({ text: "ready" });
+    expect(calls).toBe(0);
+    expect(probe?.computeFn()).toEqual({ text: "ready" });
+    expect(calls).toBe(1);
   });
   test("SendMessage defers while deps are missing, then renders a compute task", async () => {
     const api = makeApi();

@@ -1512,7 +1512,7 @@ export default smithers((ctx) => {
                 />
               ) : null}
 
-              {publishApproved ? (
+              {publishApproved && releaseApprovalBindingResult ? (
                 <Task
                   id="executeReleases"
                   output={outputs.executeReleases}

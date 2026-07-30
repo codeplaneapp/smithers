@@ -63,7 +63,7 @@ describe("flow control component units", () => {
     expect(readyCtx._deferredDeps).toEqual([]);
     expect(resolved.tasks[0].kind).toBe("compute");
     expect(resolved.tasks[0].staticPayload).toBeUndefined();
-    expect(await resolved.tasks[0].computeFn()).toEqual({ message: "ready" });
+    expect(resolved.tasks[0].computeFn()).toEqual({ message: "ready" });
     expect(resolved.tasks[0].dependsOn).toEqual(["gate", "load-source"]);
   });
 
