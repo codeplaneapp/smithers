@@ -150,7 +150,9 @@ describe("Task deps", () => {
     );
     const summary = frame.tasks.find((task) => task.nodeId === "summary");
     expect(summary).toBeDefined();
-    expect(summary?.staticPayload).toEqual({ text: "a=approved b=missing" });
+    expect(summary?.kind).toBe("compute");
+    expect(summary?.staticPayload).toBeUndefined();
+    expect(summary?.computeFn()).toEqual({ text: "a=approved b=missing" });
     expect(new Set(summary?.dependsOn)).toEqual(new Set(["review-a", "review-b"]));
     cleanup();
   });
