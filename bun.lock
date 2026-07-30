@@ -1402,11 +1402,11 @@
     },
   },
   "trustedDependencies": [
-    "@smithers-orchestrator/jj-darwin-x64",
     "@smithers-orchestrator/jj-linux-arm64",
     "@smithers-orchestrator/jj-darwin-arm64",
     "@smithers-orchestrator/jj-linux-x64",
     "@smithers-orchestrator/jj-win32-x64",
+    "@smithers-orchestrator/jj-darwin-x64",
   ],
   "overrides": {
     "@effect/cluster": "0.59.0",

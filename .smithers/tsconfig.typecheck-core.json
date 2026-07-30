@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "./*.ts",
+    "./*.tsx",
+    "./agents/**/*",
+    "./components/**/*",
+    "./evals/**/*",
+    "./lib/**/*",
+    "./scripts/**/*",
+    "./specs/**/*",
+    "./types/**/*"
+  ]
+}
