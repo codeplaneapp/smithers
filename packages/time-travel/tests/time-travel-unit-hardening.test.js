@@ -325,6 +325,7 @@ describe("rewind validation and rate-limit boundaries", () => {
       "root:child:synchronizeFutureDependencyFacts:0",
     );
     expect(validateJumpRunId("root:child:lane@@3.taskName:2")).toBe("root:child:lane@@3.taskName:2");
+    expect(validateJumpRunId("root:child:task:quota:0")).toBe("root:child:task:quota:0");
     for (const invalid of ["", "a".repeat(65), "RunUpper", ".leading.dot", ".."]) {
       let caught;
       try {

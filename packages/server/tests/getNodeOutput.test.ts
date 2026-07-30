@@ -310,6 +310,14 @@ describe("getNodeOutputRoute input boundaries", () => {
     expect(response.status).toBe("produced");
   });
 
+  test("engine-generated child runId accepts colons in the node id", async () => {
+    const response = await invokeRoute({
+      runId: "parent-run:child:task:quota:0",
+      selectOutputRowImpl: async () => ({ value: "child output" }),
+    });
+    expect(response.status).toBe("produced");
+  });
+
   test("runId that could escape a path join still yields InvalidRunId", async () => {
     for (const runId of ["..", ".hidden", "../etc/passwd", "a".repeat(65), `parent:child:${"n".repeat(244)}:0`]) {
       await expect(invokeRoute({ runId })).rejects.toMatchObject({
