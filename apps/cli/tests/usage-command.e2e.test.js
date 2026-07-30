@@ -41,14 +41,14 @@ test("smithers usage prints a table to stderr and JSON reports to stdout", () =>
   expect(result.exitCode).toBe(0);
   expect(result.stderr).toContain("ACCOUNT");
   expect(result.stderr).toContain("kimi-main");
-  expect(result.stderr).toContain("Kimi exposes no usage endpoint yet");
+  expect(result.stderr).toContain("No Kimi OAuth credentials in configDir/credentials/kimi-code.json");
   expect(result.stdout).toContain('"reports"');
   expect(result.json?.reports).toMatchObject([
     {
       accountLabel: "kimi-main",
       provider: "kimi",
       source: "none",
-      error: "Kimi exposes no usage endpoint yet",
+      error: "No Kimi OAuth credentials in configDir/credentials/kimi-code.json",
     },
   ]);
 }, 30_000);
