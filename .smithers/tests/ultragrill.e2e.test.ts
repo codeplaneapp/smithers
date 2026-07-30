@@ -102,6 +102,8 @@ beforeAll(async () => {
   binDir = mkdtempSync(join(tmpdir(), "ultragrill-bin-"));
   const claudeSrc = [
     `#!${process.execPath}`,
+    `const args = process.argv.slice(2);`,
+    `if (args.join(" ") === "auth status") { process.stdout.write(JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }) + "\\n"); process.exit(0); }`,
     `const payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? "{}";`,
     `process.stdout.write(JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "\\u0060\\u0060\\u0060json\\n" + payload + "\\n\\u0060\\u0060\\u0060\\n" }] } }) + "\\n");`,
     ``,
@@ -116,6 +118,7 @@ beforeAll(async () => {
     env: {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH}`,
+      SMITHERS_TEST_AGENT_PATH: `${binDir}:${process.env.PATH}`,
       SMITHERS_FAKE_AGENT_RESPONSE: FAKE_RESPONSE,
       ANTHROPIC_API_KEY: "",
       UG_PORT: String(port),
@@ -160,7 +163,7 @@ browserTest(
 
       // The worker really dispatched and finished — its activity appears, and the
       // living spec + question pool render THIS run's real worker output.
-      await page.waitForSelector('[data-testid="ug-feed-worker"]', { timeout: 30_000 });
+      await page.waitForSelector('[data-testid="ug-feed-worker"] .ev.done', { timeout: 30_000 });
       await page.waitForFunction(
         () => {
           const text = document.body.textContent ?? "";
