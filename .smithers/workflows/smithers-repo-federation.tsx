@@ -1505,13 +1505,13 @@ export default smithers((ctx) => {
                 />
               ) : null}
 
-              {publishApproved ? (
+              {publishApproved && releaseApprovalBindingResult ? (
                 <Task
                   id="executeReleases"
                   output={outputs.executeReleases}
                   bind={[
-                    ctx.prove(outputs.gatePublish, { nodeId: "gate-publish" }),
-                    ctx.prove(outputs.releaseApprovalBinding, { nodeId: "releaseApprovalBinding" }),
+                    ctx.prove(outputs.gatePublish, { nodeId: "gate-publish" })!,
+                    ctx.prove(outputs.releaseApprovalBinding, { nodeId: "releaseApprovalBinding" })!,
                   ]}
                   timeoutMs={30 * 60_000}
                 >
