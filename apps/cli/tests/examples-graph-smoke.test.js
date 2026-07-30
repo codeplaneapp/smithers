@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { availableParallelism, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -67,14 +67,14 @@ const GRAPH_INPUT = {
   diff: "diff --git a/example b/example",
   maxIterations: 1,
 };
-const GRAPH_CONCURRENCY = Math.min(8, availableParallelism());
-const GRAPH_RENDER_TIMEOUT_MS = 60_000;
+const GRAPH_CONCURRENCY = 2;
+const GRAPH_RENDER_TIMEOUT_MS = 10_000;
 
 function findTopLevelExampleWorkflows() {
   return Array.from(new Bun.Glob("examples/*.jsx").scanSync({ cwd: REPO_ROOT })).sort();
 }
 
-async function renderExampleOnce(projectDir, workerDir, example) {
+async function renderExample(projectDir, workerDir, example) {
   const child = Bun.spawn(
     [
       process.execPath,
@@ -129,13 +129,7 @@ async function renderExampleOnce(projectDir, workerDir, example) {
         : new Error(`graph subprocess exited with code ${exitCode}`),
     stdout,
     stderr,
-    retryable: timedOut || (exitCode === 0 && stdout.trim().length === 0),
   };
-}
-
-async function renderExample(projectDir, workerDir, example) {
-  const first = await renderExampleOnce(projectDir, workerDir, example);
-  return first.retryable ? renderExampleOnce(projectDir, workerDir, example) : first;
 }
 
 test("top-level example workflows render as graphs", async () => {
