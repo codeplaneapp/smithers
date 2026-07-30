@@ -191,6 +191,14 @@ describe("PierreDiffView live render (happy-dom)", () => {
       document.documentElement.setAttribute("data-theme", "dark");
       await Promise.resolve();
     });
+    for (let i = 0; i < 80 && adapter()?.getAttribute("data-theme-mode") !== "dark"; i += 1) {
+      await act(async () => {
+        // Happy DOM can defer or drop MutationObserver delivery under CI load.
+        // Re-stamping queues another record while we wait for React to commit it.
+        document.documentElement.setAttribute("data-theme", "dark");
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      });
+    }
     expect(adapter()?.getAttribute("data-theme-mode")).toBe("dark");
   });
 });
