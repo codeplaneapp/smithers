@@ -47,6 +47,70 @@ function deadPid() {
 }
 
 describe("why diagnosis — owner liveness before orphaned", () => {
+  test("does not inherit pacing waits from a marked monitor sidecar", async () => {
+    const root = runRow({ runId: "watched-run", status: "waiting-timer" });
+    const monitor = runRow({
+      runId: "monitor-run",
+      status: "waiting-timer",
+      parentRunId: "watched-run",
+      configJson: JSON.stringify({ annotations: { smithersMonitorFor: "watched-run" } }),
+    });
+    const runs = new Map([
+      [root.runId, root],
+      [monitor.runId, monitor],
+    ]);
+    const adapter = {
+      getRunEffect: (runId) => Effect.succeed(runs.get(runId)),
+      listNodesEffect: (runId) =>
+        Effect.succeed(
+          runId === monitor.runId
+            ? [
+                {
+                  runId,
+                  nodeId: "pace",
+                  iteration: 0,
+                  state: "waiting-timer",
+                  updatedAtMs: NOW - 1_000,
+                },
+              ]
+            : [],
+        ),
+      listPendingApprovalsEffect: () => Effect.succeed([]),
+      listAllDecidedApprovalsEffect: () => Effect.succeed([]),
+      listAttemptsForRunEffect: (runId) =>
+        Effect.succeed(
+          runId === monitor.runId
+            ? [
+                {
+                  runId,
+                  nodeId: "pace",
+                  iteration: 0,
+                  attempt: 1,
+                  state: "waiting-timer",
+                  startedAtMs: NOW - 1_000,
+                  metaJson: JSON.stringify({ timer: { firesAtMs: NOW + 60_000 } }),
+                },
+              ]
+            : [],
+        ),
+      getLastEventSeqEffect: () => Effect.succeed(undefined),
+      getLastFrameEffect: () => Effect.succeed(undefined),
+      listEventHistoryEffect: () => Effect.succeed([]),
+      listRunDescendants: (runId) =>
+        Effect.succeed(
+          runId === root.runId
+            ? [
+                { runId: root.runId, parentRunId: null, depth: 0 },
+                { runId: monitor.runId, parentRunId: root.runId, depth: 1 },
+              ]
+            : [{ runId: monitor.runId, parentRunId: root.runId, depth: 0 }],
+        ),
+    };
+
+    const diagnosis = await Effect.runPromise(diagnoseRunEffect(adapter, root.runId, NOW));
+    expect(diagnosis.blockers).toEqual([]);
+  });
+
   test("live owner + lagging heartbeat → engine busy, no force-resume recommendation", async () => {
     const diagnosis = await diagnose(
       runRow({

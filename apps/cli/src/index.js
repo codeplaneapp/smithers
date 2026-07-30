@@ -2838,6 +2838,10 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
           }
           annotations[key] = /** @type {string | number | boolean} */ (value);
         }
+        // Annotations participate in tracing, but they are also durable run
+        // identity (notably smithersMonitorFor). Persist the non-secret flat
+        // object so diagnostics can distinguish sidecars after process exit.
+        runConfig.annotations = annotations;
       }
     } catch (err) {
       return fail({
