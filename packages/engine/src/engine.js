@@ -7144,23 +7144,14 @@ async function releaseResumeClaimQuietly(adapter, runId, cleanup) {
   }
 }
 /**
- * @param {SmithersDb} adapter
+ * Validate the read-only resume preconditions before rendering a candidate
+ * workflow graph. Activation repeats these checks immediately before claiming
+ * the run so ownership changes during the render still fail closed.
+ *
  * @param {RunRow | null | undefined} existingRun
  * @param {RunOptions} opts
- * @param {string} runtimeOwnerId
- * @param {string} runConfigJson
- * @param {RunDurabilityMetadata} runMetadata
- * @param {string | null} workflowPath
  */
-async function activateRunForResume(
-  adapter,
-  existingRun,
-  opts,
-  runtimeOwnerId,
-  runConfigJson,
-  runMetadata,
-  workflowPath,
-) {
+function assertResumeActivationPreconditions(existingRun, opts) {
   if (!isResumableRunStatus(existingRun?.status)) {
     throw new SmithersError(
       "RUN_NOT_RESUMABLE",
@@ -7179,6 +7170,32 @@ async function activateRunForResume(
       ownerPid,
     });
   }
+  if (!opts.resumeClaim && existingRun.status === "running" && isRunHeartbeatFresh(existingRun) && !opts.force) {
+    throw new SmithersError("RUN_STILL_RUNNING", `Run ${existingRun.runId} is still actively running.`, {
+      runId: existingRun.runId,
+      heartbeatAtMs: existingRun.heartbeatAtMs ?? null,
+    });
+  }
+}
+/**
+ * @param {SmithersDb} adapter
+ * @param {RunRow | null | undefined} existingRun
+ * @param {RunOptions} opts
+ * @param {string} runtimeOwnerId
+ * @param {string} runConfigJson
+ * @param {RunDurabilityMetadata} runMetadata
+ * @param {string | null} workflowPath
+ */
+async function activateRunForResume(
+  adapter,
+  existingRun,
+  opts,
+  runtimeOwnerId,
+  runConfigJson,
+  runMetadata,
+  workflowPath,
+) {
+  assertResumeActivationPreconditions(existingRun, opts);
   const claimOwnerId = opts.resumeClaim?.claimOwnerId ?? runtimeOwnerId;
   const claimHeartbeatAtMs = opts.resumeClaim?.claimHeartbeatAtMs ?? nowMs();
   const cleanup = {
@@ -7207,15 +7224,6 @@ async function activateRunForResume(
       }
       claimHeld = true;
     } else {
-      if (existingRun.status === "running") {
-        const fresh = isRunHeartbeatFresh(existingRun);
-        if (fresh && !opts.force) {
-          throw new SmithersError("RUN_STILL_RUNNING", `Run ${existingRun.runId} is still actively running.`, {
-            runId: existingRun.runId,
-            heartbeatAtMs: existingRun.heartbeatAtMs ?? null,
-          });
-        }
-      }
       const claimed = await Effect.runPromise(
         adapter.claimRunForResume({
           runId: existingRun.runId,
@@ -8989,6 +8997,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
       }
     } else if (opts.resume && !existingRun) {
       throw new SmithersError("RUN_NOT_FOUND", `Cannot resume run ${runId} because it does not exist.`, { runId });
+    }
+    if (opts.resume && existingRun) {
+      assertResumeActivationPreconditions(existingRun, opts);
     }
     if (!opts.resume) {
       assertInputObject(opts.input);
