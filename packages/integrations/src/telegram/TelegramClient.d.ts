@@ -25,7 +25,7 @@ declare function makeTelegramClient(config: TelegramClientConfig): TelegramClien
  * Live Layer for {@link TelegramClient}.
  * @param {TelegramClientConfig} config
  */
-declare function TelegramClientLive(config: TelegramClientConfig): Layer.Layer<TelegramClientService$1, never, never>;
+declare function TelegramClientLive(config: TelegramClientConfig): Layer.Layer<any, never, never>;
 declare const DEFAULT_TELEGRAM_API_BASE_URL: "https://api.telegram.org";
 /**
  * Error from the Telegram Bot API. Carries the Bot API `error_code` and

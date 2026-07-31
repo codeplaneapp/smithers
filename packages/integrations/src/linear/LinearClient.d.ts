@@ -8,7 +8,7 @@ import '@smithers-orchestrator/errors/SmithersError';
  * `configureLinear` > env).
  * @param {LinearConfig} [config]
  */
-declare function LinearClientLive(config?: LinearConfig): Layer.Layer<LinearClientService$1, never, never>;
+declare function LinearClientLive(config?: LinearConfig): Layer.Layer<any, never, never>;
 /**
  * Normalize a priority name or number to Linear's 0–4 scale.
  * @param {LinearPriority | undefined} priority
