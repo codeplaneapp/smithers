@@ -1294,6 +1294,22 @@ function headerValue(req, name) {
 export const GATEWAY_SESSION_COOKIE = "smithers_session";
 
 /**
+ * Whether the request reached us over TLS (directly or through a terminating
+ * proxy that set `X-Forwarded-Proto`). Only then may the session cookie carry
+ * `Secure` — setting it on plain HTTP would make the browser drop it.
+ *
+ * @param {IncomingMessage} req
+ * @returns {boolean}
+ */
+function isSecureRequest(req) {
+  if (/** @type {{ encrypted?: boolean }} */ (req.socket).encrypted === true) {
+    return true;
+  }
+  const forwarded = headerValue(req, "x-forwarded-proto");
+  return forwarded !== null && forwarded.split(",")[0].trim().toLowerCase() === "https";
+}
+
+/**
  * @param {IncomingMessage} req
  * @returns {string | null}
  */
@@ -3077,7 +3093,10 @@ export class Gateway {
       sendText(res, 200, renderSessionHandoffPage(next), "text/html; charset=utf-8");
       return;
     }
-    const token = url.searchParams.get("token");
+    // `?token=` is the browser handoff, but a re-navigation (or a curl with a
+    // header) may carry the bearer the normal way — fall back to it so an
+    // already-authenticated client refreshes its cookie instead of 401-ing.
+    const token = url.searchParams.get("token") ?? bearerTokenFromHeaders(req);
     const authResult = await this.authenticateRequest(req, token);
     if (authResult.ok === false) {
       sendJson(
@@ -3087,10 +3106,16 @@ export class Gateway {
       );
       return;
     }
-    res.setHeader(
-      "set-cookie",
-      `${GATEWAY_SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax`,
-    );
+    // Header-authenticated modes (trusted-proxy, mTLS) carry no token to store;
+    // writing an empty/"null" cookie would only poison later requests.
+    if (token) {
+      res.setHeader(
+        "set-cookie",
+        `${GATEWAY_SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax${
+          isSecureRequest(req) ? "; Secure" : ""
+        }`,
+      );
+    }
     sendText(res, 200, renderSessionHandoffPage(next), "text/html; charset=utf-8");
   }
   /**

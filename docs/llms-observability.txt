@@ -932,6 +932,10 @@ to `/` (no open redirects). Every authenticated surface (UI pages
 (`/monitor`, `/console`, `/workflows/*`, workflow `<UI>` mounts), the HTTP
 RPC/API, and the WebSocket `connect` frame) accepts the cookie as an
 alternative to the Bearer header, so once the handoff runs the UI just works.
+The cookie also gets `Secure` when the request arrives over TLS (directly or
+through a proxy that sets `X-Forwarded-Proto: https`). With no `?token=`, the
+endpoint falls back to the `Authorization` header or an existing session
+cookie, so a re-navigation refreshes the session instead of returning 401.
 `bunx smithers-orchestrator monitor` / `bunx smithers-orchestrator ui` /
 `bunx smithers-orchestrator gui` build this handoff URL automatically
 whenever the resolved gateway has a token.

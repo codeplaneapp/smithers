@@ -65,6 +65,22 @@ describe("gateway browser session handoff", () => {
     expect(html).not.toContain(TOKEN);
   });
 
+  test("accepts a bearer header (or an existing cookie) when no ?token is present", async () => {
+    const port = await listenWithAuth();
+    const viaHeader = await fetch(`http://127.0.0.1:${port}/v1/auth/session?next=%2Fconsole`, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    expect(viaHeader.status).toBe(200);
+    expect(viaHeader.headers.get("set-cookie") ?? "").toContain(`${GATEWAY_SESSION_COOKIE}=${TOKEN}`);
+    // Plain HTTP must NOT carry Secure, or the browser drops the cookie.
+    expect(viaHeader.headers.get("set-cookie") ?? "").not.toContain("Secure");
+
+    const viaCookie = await fetch(`http://127.0.0.1:${port}/v1/auth/session?next=%2Fconsole`, {
+      headers: { cookie: `${GATEWAY_SESSION_COOKIE}=${TOKEN}` },
+    });
+    expect(viaCookie.status).toBe(200);
+  });
+
   test("rejects an invalid token with 401 and no cookie", async () => {
     const port = await listenWithAuth();
     const response = await fetch(`http://127.0.0.1:${port}/v1/auth/session?token=wrong&next=%2Fconsole`);
