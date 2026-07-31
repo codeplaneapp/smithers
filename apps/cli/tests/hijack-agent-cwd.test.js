@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { resolveClaudeSessionCwd, resolveHijackCandidate } from "../src/hijack.js";
@@ -61,6 +61,28 @@ describe("resolveHijackCandidate cwd chain", () => {
     );
     try {
       expect(resolveClaudeSessionCwd(sid, { home })).toBe("/home/jm/dev/harnussy/kata");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("resolveClaudeSessionCwd reads only the bounded prefix of a large transcript", () => {
+    const home = join(tmpdir(), `claude-home-large-${Date.now()}`);
+    const project = join(home, ".claude", "projects", "-large-project");
+    mkdirSync(project, { recursive: true });
+    const sid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    const transcript = join(project, `${sid}.jsonl`);
+    writeFileSync(transcript, `${JSON.stringify({ type: "user", cwd: "/bounded/project", sessionId: sid })}\n`);
+    const fd = openSync(transcript, "r+");
+    try {
+      // Sparse tail: a whole-file read would allocate this size, while the
+      // resolver must consume only its 64 KB prefix.
+      truncateSync(fd, 256 * 1024 * 1024);
+    } finally {
+      closeSync(fd);
+    }
+    try {
+      expect(resolveClaudeSessionCwd(sid, { home })).toBe("/bounded/project");
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

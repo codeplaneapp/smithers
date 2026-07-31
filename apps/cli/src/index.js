@@ -148,6 +148,7 @@ import {
   makeHerdrStderrLogger,
   normalizeHerdrCockpitOpts,
   openHerdrNodePane,
+  probeCompatibleHerdr,
   reconcileHerdrResumeGates,
   resolveHerdrHijackOption,
   resolveHerdrOption,
@@ -1734,6 +1735,21 @@ async function runHerdrStatusCommand(c) {
   process.stderr.write(
     `herdr ${pong.version} · protocol ${pong.protocol} (client expects ${HERDR_PROTOCOL}: ${compatible ? "compatible" : "MISMATCH"})\n`,
   );
+  if (!compatible) {
+    return fail({
+      code: "HERDR_PROTOCOL_MISMATCH",
+      message: `Herdr protocol mismatch at ${client.socketPath}: client expects ${HERDR_PROTOCOL}, server reports ${pong.protocol}. No mutating Herdr command was run.`,
+      exitCode: 4,
+      details: {
+        socketPath: client.socketPath,
+        version: pong.version,
+        protocol: pong.protocol,
+        expectedProtocol: HERDR_PROTOCOL,
+        compatible: false,
+        capabilities: pong.capabilities ?? null,
+      },
+    });
+  }
   return c.ok({
     socketPath: client.socketPath,
     version: pong.version,
@@ -1766,8 +1782,20 @@ async function runHerdrAttachCommand(c) {
     }
     const session = c.options.session;
     const probe = createHerdrClient({ session, logger: () => {} });
-    const pong = await probe.ping().catch(() => undefined);
-    if (!pong) {
+    const compatibility = await probeCompatibleHerdr(probe);
+    if (!compatibility.available) {
+      if (compatibility.reason === "protocol_mismatch") {
+        return fail({
+          code: "HERDR_PROTOCOL_MISMATCH",
+          message: `${compatibility.error instanceof Error ? compatibility.error.message : "Herdr protocol mismatch"}. No Herdr changes were made.`,
+          exitCode: 4,
+          details: {
+            socketPath: probe.socketPath,
+            protocol: compatibility.pong?.protocol ?? null,
+            expectedProtocol: HERDR_PROTOCOL,
+          },
+        });
+      }
       return fail({
         code: "HERDR_UNAVAILABLE",
         message: `No herdr server reachable at ${probe.socketPath}. Start one with \`herdr server\`${session ? ` (session ${session})` : ""}.`,
@@ -1785,6 +1813,7 @@ async function runHerdrAttachCommand(c) {
       return c.ok({ runId, status, attached: false });
     }
     const surface = createHerdrRunSurface({
+      client: probe,
       session,
       workspaceLabel: label,
       cwd: process.cwd(),
@@ -1855,8 +1884,20 @@ async function runHerdrOpenCommand(c) {
     }
     const session = c.options.session;
     const probe = createHerdrClient({ session, logger: () => {} });
-    const pong = await probe.ping().catch(() => undefined);
-    if (!pong) {
+    const compatibility = await probeCompatibleHerdr(probe);
+    if (!compatibility.available) {
+      if (compatibility.reason === "protocol_mismatch") {
+        return fail({
+          code: "HERDR_PROTOCOL_MISMATCH",
+          message: `${compatibility.error instanceof Error ? compatibility.error.message : "Herdr protocol mismatch"}. No Herdr changes were made.`,
+          exitCode: 4,
+          details: {
+            socketPath: probe.socketPath,
+            protocol: compatibility.pong?.protocol ?? null,
+            expectedProtocol: HERDR_PROTOCOL,
+          },
+        });
+      }
       return fail({
         code: "HERDR_UNAVAILABLE",
         message: `No herdr server reachable at ${probe.socketPath}. Start one with \`herdr server\`${session ? ` (session ${session})` : ""}.`,
@@ -1873,6 +1914,7 @@ async function runHerdrOpenCommand(c) {
           cwd: process.cwd(),
         })({ runId });
     const opened = await openHerdrNodePane({
+      client: probe,
       session,
       label,
       cwd: process.cwd(),
@@ -1928,8 +1970,20 @@ async function runHerdrCleanCommand(c) {
     const adapter = db.adapter;
     const session = c.options.session;
     const client = createHerdrClient({ session, logger: () => {} });
-    const pong = await client.ping().catch(() => undefined);
-    if (!pong) {
+    const compatibility = await probeCompatibleHerdr(client);
+    if (!compatibility.available) {
+      if (compatibility.reason === "protocol_mismatch") {
+        return fail({
+          code: "HERDR_PROTOCOL_MISMATCH",
+          message: `${compatibility.error instanceof Error ? compatibility.error.message : "Herdr protocol mismatch"}. No Herdr changes were made.`,
+          exitCode: 4,
+          details: {
+            socketPath: client.socketPath,
+            protocol: compatibility.pong?.protocol ?? null,
+            expectedProtocol: HERDR_PROTOCOL,
+          },
+        });
+      }
       return fail({
         code: "HERDR_UNAVAILABLE",
         message: `No herdr server reachable at ${client.socketPath}. Start one with \`herdr server\`${session ? ` (session ${session})` : ""}.`,

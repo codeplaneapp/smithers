@@ -26,5 +26,5 @@ SMITHERS_HERDR_DOCK=1 bun packages/testing/scripts/core-campaign.mjs \
   --plane herdr --watch-pack --session smithers-dev --ops --pause-ms 6000
 ```
 
-Fixtures: `../fixtures/agent-traces/README.md`  
+Fixtures: `../fixtures/agent-traces/README.md`
 Scenarios: `../tests/scenarios/README.md`

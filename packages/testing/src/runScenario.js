@@ -1,5 +1,5 @@
 // src/runScenario.ts
-import { Effect as Effect3, Fiber as Fiber3, Option as Option2 } from "effect";
+import { Effect as Effect3, Fiber as Fiber3 } from "effect";
 
 // src/scenario/replayIdentity.ts
 import { createHash } from "crypto";
@@ -35,7 +35,7 @@ var canonicalize = (value) => encode(value);
 var replayIdentity = (input) => "ri1:" + createHash("sha256").update(canonicalize({ ast: input.ast, seed: input.seed, controlLog: input.controlLog ?? [] })).digest("hex");
 
 // src/kernel/KernelRuntime.ts
-import { Context, Effect, Either, Fiber, Layer } from "effect";
+import { Context, Effect, Fiber, Layer, Result } from "effect";
 
 // src/kernel/ControlBus.ts
 var ControlBus = class {
@@ -226,7 +226,7 @@ var VirtualClock = class {
 };
 
 // src/kernel/KernelRuntime.ts
-var KernelRuntimeService = class extends Context.Tag("@smithers/testing/KernelRuntime")() {
+var KernelRuntimeService = class extends Context.Service()("@smithers/testing/KernelRuntime") {
 };
 var kernelLayer = (kernel) => Layer.succeed(KernelRuntimeService, kernel);
 var makeKernel = (seed, controls = []) => {
@@ -240,30 +240,30 @@ var makeKernel = (seed, controls = []) => {
     // task fibers or implements a Promise race itself.
     runReadySet: (tasks) => Effect.gen(function* () {
       const fresh = tasks.filter(({ stepId }) => !active.has(stepId));
-      for (const { stepId, effect } of fresh) active.set(stepId, yield* Effect.fork(effect));
+      for (const { stepId, effect } of fresh) active.set(stepId, yield* Effect.forkChild(effect));
       if (!active.size) throw new Error("KERNEL_NO_ACTIVE_FIBERS");
       const winner = yield* Effect.raceAll(
         [...active.entries()].map(
           ([stepId, fiber]) => Fiber.join(fiber).pipe(
-            Effect.either,
+            Effect.result,
             Effect.map((exit) => ({ stepId, exit }))
           )
         )
       );
       active.delete(winner.stepId);
-      if (Either.isLeft(winner.exit)) {
+      if (Result.isFailure(winner.exit)) {
         yield* Effect.all([...active.values()].map((fiber) => Fiber.interrupt(fiber)));
         active.clear();
-        return yield* Effect.fail(winner.exit.left);
+        return yield* Effect.fail(winner.exit.failure);
       }
-      return { stepId: winner.stepId, value: winner.exit.right };
+      return { stepId: winner.stepId, value: winner.exit.success };
     })
   });
   return Object.freeze({ ...runtime, executor });
 };
 
 // src/kernel/boundary.ts
-import { Cause, Effect as Effect2, Exit, Fiber as Fiber2, Option } from "effect";
+import { Cause, Effect as Effect2, Exit, Fiber as Fiber2, Option, Result as Result2 } from "effect";
 var toHarnessError = (error) => {
   if (error && typeof error === "object") {
     const value = error;
@@ -282,15 +282,17 @@ var toHarnessError = (error) => {
   }
   return { name: "Error", code: "HARNESS_ERROR", message: String(error) };
 };
+var squashCause = (cause) => {
+  const failure = Cause.findErrorOption(cause);
+  if (Option.isSome(failure)) return failure.value;
+  const defect = Cause.findDefect(cause);
+  return Result2.isSuccess(defect) ? defect.success : new Error("kernel program failed");
+};
 var runAtBoundaryFork = (program) => {
   const fiber = Effect2.runFork(Effect2.exit(program));
   const promise = Effect2.runPromise(Fiber2.join(fiber)).then((exit) => {
     if (Exit.isSuccess(exit)) return { ok: true, value: exit.value };
-    const cause = Option.getOrElse(
-      Cause.failureOption(exit.cause),
-      () => Option.getOrElse(Cause.dieOption(exit.cause), () => new Error("kernel program failed"))
-    );
-    return { ok: false, error: toHarnessError(cause) };
+    return { ok: false, error: toHarnessError(squashCause(exit.cause)) };
   });
   return { promise, interrupt: () => Effect2.runPromise(Fiber2.interrupt(fiber)) };
 };
@@ -772,7 +774,11 @@ var settleKernel = async (promise, kernel, budget) => {
     }
   );
   for (let turn = 0; !done && turn < budget; turn++) {
-    for (let microtask = 0; microtask < Math.min(64, Math.max(1, budget)); microtask++) await Promise.resolve();
+    for (let dispatcherTurn = 0; dispatcherTurn < Math.min(64, Math.max(1, budget)); dispatcherTurn++) {
+      await Promise.resolve();
+      await new Promise((resolve) => setImmediate(resolve));
+      if (done) break;
+    }
     if (!done) {
       const advance = kernel.controls.takeAdvanceClock();
       if (advance) kernel.clock.advance(advance.ms);
@@ -1638,11 +1644,11 @@ var runKernelScenario = async (ast, options = {}) => {
             return pending;
           };
           if (runner && duringFault && harness.kind === "unit-sim") {
-            const child = yield* Effect3.fork(Effect3.tryPromise({ try: () => runTask(), catch: (e) => e }));
-            yield* Effect3.yieldNow();
+            const child = yield* Effect3.forkChild(Effect3.tryPromise({ try: () => runTask(), catch: (e) => e }));
+            yield* Effect3.yieldNow;
             yield* Effect3.tryPromise({ try: () => Promise.resolve(), catch: (cause) => cause });
-            const completedExit = yield* Fiber3.poll(child);
-            if (Option2.isSome(completedExit)) {
+            const completedExit = child.pollUnsafe();
+            if (completedExit !== void 0) {
               value = yield* Fiber3.join(child);
             } else {
               yield* Fiber3.interrupt(child);
@@ -1763,7 +1769,10 @@ var runKernelScenario = async (ast, options = {}) => {
       );
       for (const selected of executableOrdered) activeTaskIds.add(selected.id);
       const winner = yield* runtimeKernel.executor.runReadySet(
-        tasks.map((effect, index) => ({ stepId: executableOrdered[index].id, effect }))
+        tasks.map((effect, index) => ({
+          stepId: executableOrdered[index].id,
+          effect
+        }))
       );
       activeTaskIds.delete(winner.stepId);
       const winnerBarrier = ast.barriers.find(

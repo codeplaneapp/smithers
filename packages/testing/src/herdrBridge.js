@@ -10,7 +10,7 @@ async function tryCreateHerdrBridge(opts) {
     logger: () => {
     }
   });
-  const pong = await client.ping().catch(() => void 0);
+  const pong = await client.ping({ requireProtocolMatch: true }).catch(() => void 0);
   if (!pong) {
     log("warn", `no herdr server at ${client.socketPath}; running without mirror`);
     return null;
@@ -203,7 +203,7 @@ async function tryOpenHerdrClient(opts) {
     logger: () => {
     }
   });
-  const pong = await client.ping().catch(() => void 0);
+  const pong = await client.ping({ requireProtocolMatch: true }).catch(() => void 0);
   if (!pong) return null;
   return client;
 }

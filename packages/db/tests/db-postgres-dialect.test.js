@@ -19,6 +19,7 @@ import { SqlMessageStorage } from "../src/sql-message-storage.js";
 import { zodToTable } from "../src/zodToTable.js";
 import { syncZodTableSchemaPostgres } from "../src/zodToCreateTableSQL.js";
 import { POSTGRES } from "../src/dialect.js";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 
 // node-postgres returns int8 (BIGINT) as a string by default to avoid precision
 // loss; Smithers stores millisecond timestamps and booleans in BIGINT columns
@@ -507,6 +508,78 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
       await writerClient.end();
     }
   });
+
+  test("0037 repairs missing and malformed owned steer indexes with a recorded ledger row", async () => {
+    const assertCanonicalIndex = async () => {
+      const result = await client.query({
+        text: `SELECT a.attname AS name, i.indisunique, i.indisvalid, i.indisready,
+                      (i.indpred IS NOT NULL) AS is_partial
+               FROM pg_index i
+               JOIN pg_class idx ON idx.oid = i.indexrelid
+               JOIN pg_class t ON t.oid = i.indrelid
+               JOIN pg_namespace n ON n.oid = t.relnamespace
+               JOIN unnest(i.indkey) WITH ORDINALITY keys(attnum, ord) ON true
+               JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = keys.attnum
+               WHERE n.nspname = current_schema()
+                 AND t.relname = '_smithers_steers'
+                 AND idx.relname = '_smithers_steers_queued_idx'
+               ORDER BY keys.ord`,
+      });
+      expect(result.rows.map((row) => row.name)).toEqual(["run_id", "node_id", "status", "created_at_ms"]);
+      expect(result.rows.every((row) => !row.indisunique && row.indisvalid && row.indisready && !row.is_partial)).toBe(
+        true,
+      );
+    };
+
+    await client.query(`DROP INDEX _smithers_steers_queued_idx`);
+    await storage.ensureSchema();
+    await assertCanonicalIndex();
+
+    await client.query(`DROP INDEX _smithers_steers_queued_idx`);
+    await client.query(`CREATE UNIQUE INDEX _smithers_steers_queued_idx ON _smithers_steers (status, run_id)`);
+    await storage.ensureSchema();
+    await assertCanonicalIndex();
+  }, 60_000);
+
+  test("atomic steer publication rolls back event faults and deduplicates explicit ids", async () => {
+    const adapter = postgresAdapter(client);
+    const runId = `pg-steer-${Date.now().toString(36)}`;
+    await adapter.insertRun({ runId, workflowName: "steer-test", status: "running", createdAtMs: Date.now() });
+    const row = {
+      steerId: `${runId}-id`,
+      runId,
+      nodeId: "task",
+      message: "postgres atomic",
+      createdAtMs: Date.now(),
+    };
+    const eventRow = {
+      runId,
+      timestampMs: row.createdAtMs,
+      type: "SteerQueued",
+      payloadJson: JSON.stringify({
+        type: "SteerQueued",
+        runId,
+        nodeId: row.nodeId,
+        steerId: row.steerId,
+        message: row.message,
+        timestampMs: row.createdAtMs,
+      }),
+    };
+    const originalInsertEvent = adapter.insertEventWithNextSeq.bind(adapter);
+    adapter.insertEventWithNextSeq = () => Effect.fail(new SmithersError("DB_WRITE_FAILED", "postgres event fault"));
+    await expect(Effect.runPromise(adapter.enqueueSteerWithEvent(row, eventRow))).rejects.toThrow(
+      "postgres event fault",
+    );
+    expect(await storage.queryAll("SELECT steer_id FROM _smithers_steers WHERE run_id = ?", [runId])).toHaveLength(0);
+
+    adapter.insertEventWithNextSeq = originalInsertEvent;
+    expect(await Effect.runPromise(adapter.enqueueSteerWithEvent(row, eventRow))).toBe(true);
+    expect(await Effect.runPromise(adapter.enqueueSteerWithEvent(row, eventRow))).toBe(false);
+    expect(await storage.queryAll("SELECT steer_id FROM _smithers_steers WHERE run_id = ?", [runId])).toHaveLength(1);
+    expect(
+      await storage.queryAll("SELECT seq FROM _smithers_events WHERE run_id = ? AND type = 'SteerQueued'", [runId]),
+    ).toHaveLength(1);
+  }, 60_000);
 
   test("0030 skips missing/incompatible output tables, resolves quoted names, and re-runs idempotently", async () => {
     await client.query(`

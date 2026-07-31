@@ -338,10 +338,13 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface breaker reset + workspac
       tailCommand: () => ["bash", "-c", "sleep 30"],
     });
     try {
-      // First attempt hits the DEAD (silent) fixture: workspace.list/create time
-      // out, so no workspace is created.
+      // First attempt hits the DEAD (silent) fixture. Both the optimistic list
+      // and the list inside the creation barrier time out. An indeterminate list
+      // must NOT be followed by create: the timed-out response could have hidden
+      // an existing same-run workspace.
       surface.onEvent(ev("RunStarted", runId));
-      expect(await waitFor(() => rec.countOf("workspace.create") >= 1, 5000)).toBe(true);
+      expect(await waitFor(() => rec.countOf("workspace.list") >= 2, 5000)).toBe(true);
+      expect(rec.countOf("workspace.create")).toBe(0);
       expect(await workspacesWithLabel(label)).toHaveLength(0);
 
       // Point at the LIVE herdr and wait past the workspace retry interval so the

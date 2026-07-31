@@ -1,6 +1,7 @@
 import {
   createHerdrClient,
   createHerdrRunSurface,
+  HERDR_PROTOCOL,
   HERDR_SURFACE_EVENT_TYPES,
   launchHijackPane,
   openTabPane,
@@ -38,15 +39,18 @@ const HERDR_EVENT_PAGE_SIZE = 500;
  * Prefer tab.close (one full-size pane per detail tab). Never throws.
  *
  * @param {NodeJS.ProcessEnv} [env]
+ * @param {import("@smithers-orchestrator/herdr").HerdrClient} [injectedClient]
  * @returns {Promise<void>}
  */
-export async function closeCurrentHerdrDetail(env = process.env) {
+export async function closeCurrentHerdrDetail(env = process.env, injectedClient) {
   if (env.HERDR_ENV !== "1") return;
   const tabId = typeof env.HERDR_TAB_ID === "string" && env.HERDR_TAB_ID !== "" ? env.HERDR_TAB_ID : undefined;
   const paneId = typeof env.HERDR_PANE_ID === "string" && env.HERDR_PANE_ID !== "" ? env.HERDR_PANE_ID : undefined;
   if (!tabId && !paneId) return;
   try {
-    const client = createHerdrClient({ logger: () => {} });
+    const client = injectedClient ?? createHerdrClient({ logger: () => {} });
+    const compatibility = await probeCompatibleHerdr(client);
+    if (!compatibility.available) return;
     if (tabId) {
       await client.tryCall("tab.close", { tab_id: tabId });
       return;
@@ -57,6 +61,54 @@ export async function closeCurrentHerdrDetail(env = process.env) {
   } catch {
     /* soft — never block detail exit */
   }
+}
+
+/**
+ * Strict compatibility probe shared by every CLI path that may issue a Herdr
+ * mutation. A protocol mismatch is intentionally distinct from an unreachable
+ * socket so explicit commands can return a structured mismatch while optional
+ * features retain their soft degradation contract.
+ *
+ * @param {import("@smithers-orchestrator/herdr").HerdrClient} client
+ * @returns {Promise<
+ *   | { available: true; pong: import("@smithers-orchestrator/herdr").HerdrPong }
+ *   | { available: false; reason: "unavailable" | "protocol_mismatch"; pong?: import("@smithers-orchestrator/herdr").HerdrPong; error?: unknown }
+ * >}
+ */
+export async function probeCompatibleHerdr(client) {
+  try {
+    const pong = await client.ping({ requireProtocolMatch: true });
+    if (!pong) {
+      return { available: false, reason: "unavailable" };
+    }
+    // Keep the helper safe for injected/older clients that accept but ignore
+    // the strict option and still return an inspectable mismatched pong.
+    if (pong.protocol !== HERDR_PROTOCOL) {
+      return {
+        available: false,
+        reason: "protocol_mismatch",
+        pong,
+        error: new Error(`herdr protocol mismatch: client expects ${HERDR_PROTOCOL}, server reports ${pong.protocol}`),
+      };
+    }
+    return { available: true, pong };
+  } catch (error) {
+    const candidate = /** @type {{ code?: unknown; cause?: unknown }} */ (error);
+    if (candidate?.code === "protocol_mismatch") {
+      const pong =
+        candidate.cause && typeof candidate.cause === "object"
+          ? /** @type {import("@smithers-orchestrator/herdr").HerdrPong} */ (candidate.cause)
+          : undefined;
+      return { available: false, reason: "protocol_mismatch", pong, error };
+    }
+    return { available: false, reason: "unavailable", error };
+  }
+}
+
+/** @param {Awaited<ReturnType<typeof probeCompatibleHerdr>>} compatibility */
+function protocolMismatchDetail(compatibility) {
+  if (compatibility.available || compatibility.reason !== "protocol_mismatch") return undefined;
+  return compatibility.error instanceof Error ? compatibility.error.message : "herdr protocol mismatch";
 }
 
 // The event types the surface maps to a pane action (`HERDR_SURFACE_EVENT_TYPES`)
@@ -418,17 +470,21 @@ export function normalizeHerdrCockpitOpts(raw) {
  *   cliPath: string;
  *   logger?: import("@smithers-orchestrator/herdr").HerdrLogger;
  *   cockpit?: ReturnType<typeof normalizeHerdrCockpitOpts>;
+ *   client?: import("@smithers-orchestrator/herdr").HerdrClient;
  * }} params
  * @returns {Promise<import("@smithers-orchestrator/herdr").HerdrRunSurface | null>}
  */
 export async function createUpHerdrSurface(params) {
   const log = params.logger ?? makeHerdrStderrLogger();
-  const probe = createHerdrClient({ session: params.session, logger: () => {} });
-  const pong = await probe.ping().catch(() => undefined);
-  if (!pong) {
+  const probe = params.client ?? createHerdrClient({ session: params.session, logger: () => {} });
+  const compatibility = await probeCompatibleHerdr(probe);
+  if (!compatibility.available) {
+    const mismatch = protocolMismatchDetail(compatibility);
     log(
       "warn",
-      `--herdr requested but no herdr server is reachable at ${probe.socketPath}; running without the herdr mirror`,
+      mismatch
+        ? `${mismatch}; running without the herdr mirror`
+        : `--herdr requested but no herdr server is reachable at ${probe.socketPath}; running without the herdr mirror`,
     );
     return null;
   }
@@ -443,6 +499,7 @@ export async function createUpHerdrSurface(params) {
   const chrome = cockpit.chrome ?? "auto";
   const harnessCommand = cockpit.harnessCommand !== undefined ? cockpit.harnessCommand : "auto";
   return createHerdrRunSurface({
+    client: probe,
     session: params.session,
     workspaceLabel: params.label,
     cwd: params.cwd,
@@ -477,15 +534,20 @@ export async function createUpHerdrSurface(params) {
  *   sessionName: string;
  *   cwd?: string;
  *   logger?: import("@smithers-orchestrator/herdr").HerdrLogger;
+ *   client?: import("@smithers-orchestrator/herdr").HerdrClient;
  * }} params
  * @returns {Promise<void>}
  */
 export async function ensureSessionStubWorkspace(params) {
   const log = params.logger ?? makeHerdrStderrLogger();
   try {
-    const client = createHerdrClient({ logger: () => {} });
-    const pong = await client.ping().catch(() => undefined);
-    if (!pong) {
+    const client = params.client ?? createHerdrClient({ logger: () => {} });
+    const compatibility = await probeCompatibleHerdr(client);
+    if (!compatibility.available) {
+      const mismatch = protocolMismatchDetail(compatibility);
+      if (mismatch) {
+        log("warn", `${mismatch}; skipping the default-session mirror stub`);
+      }
       return;
     }
     const label = stubWorkspaceLabel(params.workflowId, params.runId, params.sessionName);
@@ -916,17 +978,21 @@ export function wrapHijackPaneAfterlife(spec, handbackLines) {
  *   cwd?: string;
  *   resumeCommand?: string | null;
  *   logger?: import("@smithers-orchestrator/herdr").HerdrLogger;
+ *   client?: import("@smithers-orchestrator/herdr").HerdrClient;
  * }} params
  * @returns {Promise<{ name: string, paneId: string, workspaceId: string | undefined } | null>}
  */
 export async function launchHerdrHijackPane(params) {
   const log = params.logger ?? makeHerdrStderrLogger();
-  const client = createHerdrClient({ session: params.session, logger: () => {} });
-  const pong = await client.ping().catch(() => undefined);
-  if (!pong) {
+  const client = params.client ?? createHerdrClient({ session: params.session, logger: () => {} });
+  const compatibility = await probeCompatibleHerdr(client);
+  if (!compatibility.available) {
+    const mismatch = protocolMismatchDetail(compatibility);
     log(
       "warn",
-      `SMITHERS_HERDR_HIJACK set but no herdr server is reachable at ${client.socketPath}; hijacking in the current terminal`,
+      mismatch
+        ? `${mismatch}; hijacking in the current terminal`
+        : `SMITHERS_HERDR_HIJACK set but no herdr server is reachable at ${client.socketPath}; hijacking in the current terminal`,
     );
     return null;
   }
@@ -1008,6 +1074,7 @@ export async function launchHerdrHijackPane(params) {
  *   nodeId?: string;
  *   argv: string[];
  *   logger?: import("@smithers-orchestrator/herdr").HerdrLogger;
+ *   client?: import("@smithers-orchestrator/herdr").HerdrClient;
  * }} params
  * @returns {Promise<{ name: string, paneId: string, workspaceId: string | undefined, tabLabel: string, nodeId: string | undefined } | null>}
  */
@@ -1016,7 +1083,18 @@ export async function openHerdrNodePane(params) {
   if (!Array.isArray(params.argv) || params.argv.length === 0) {
     return null;
   }
-  const client = createHerdrClient({ session: params.session, logger: () => {} });
+  const client = params.client ?? createHerdrClient({ session: params.session, logger: () => {} });
+  const compatibility = await probeCompatibleHerdr(client);
+  if (!compatibility.available) {
+    const mismatch = protocolMismatchDetail(compatibility);
+    log(
+      "warn",
+      mismatch
+        ? `${mismatch}; no workspace or pane was opened`
+        : `herdr open: no server is reachable at ${client.socketPath}; no workspace or pane was opened`,
+    );
+    return null;
+  }
   // Find-or-create the run's workspace via the surface API (same deterministic
   // label + prefix-tolerant matching `up --herdr` / `herdr attach` use), so an
   // on-demand pane lands in the run's own workspace instead of a stray one.

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
-import { build } from "tsup";
 import * as source from "../src/index.ts";
 
 /**
@@ -30,24 +30,52 @@ describe("published artifact parity", () => {
     expect(shipped as unknown).not.toBe(source as unknown);
   });
 
-  test("the committed coverWorkflow JavaScript exactly matches a fresh source build", async () => {
+  test("the committed coverWorkflow JavaScript exactly matches a fresh source build", () => {
     const outDir = mkdtempSync(join(tmpdir(), "smithers-testing-artifact-"));
     try {
-      await build({
-        entry: { coverWorkflow: join(import.meta.dir, "../src/coverWorkflow.ts") },
-        format: ["esm"],
-        outDir,
-        clean: false,
-        dts: false,
-        splitting: false,
-        silent: true,
-      });
+      const result = spawnSync(
+        "pnpm",
+        [
+          "exec",
+          "tsup",
+          "src/coverWorkflow.ts",
+          "--no-config",
+          "--format",
+          "esm",
+          "--out-dir",
+          outDir,
+          "--no-splitting",
+          "--silent",
+          "--external",
+          "package.json",
+        ],
+        { cwd: join(import.meta.dir, ".."), encoding: "utf8" },
+      );
+      expect(result.status, result.stderr || result.stdout).toBe(0);
       expect(readFileSync(join(outDir, "coverWorkflow.js"), "utf8")).toBe(
         readFileSync(join(import.meta.dir, "../src/coverWorkflow.js"), "utf8"),
       );
     } finally {
       rmSync(outDir, { recursive: true, force: true });
     }
+  });
+
+  test("Node can import the shipped runScenario package subpath", () => {
+    const result = spawnSync(
+      "node",
+      [
+        "--input-type=module",
+        "--eval",
+        [
+          'const shipped = await import("@smithers-orchestrator/testing/runScenario");',
+          'if (typeof shipped.runScenario !== "function") throw new Error("runScenario export missing");',
+          'if (typeof shipped.runKernelScenario !== "function") throw new Error("runKernelScenario export missing");',
+        ].join("\n"),
+      ],
+      { cwd: join(import.meta.dir, ".."), encoding: "utf8" },
+    );
+
+    expect(result.status, result.stderr || result.stdout).toBe(0);
   });
 
   test("shipped serializeBoundaryError carries family-specific native fields identically to source", () => {

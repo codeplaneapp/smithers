@@ -31,17 +31,18 @@ function normalizeSteerMessage(message) {
  * Queue a fire-and-forget steer against a running node. The message is
  * consumed into the node's next agent `generate()` call (first start, retry
  * attempt, or loop iteration). Mirrors how approvals emit their run-stream event
- * out-of-process: the durable row is written, then a `SteerQueued` event is
- * appended to the run's event log via `insertEventWithNextSeq` so mirrors
- * (herdr, gateway subscribers) observe it without the run's in-process bus.
+ * out-of-process: the durable row and `SteerQueued` event are committed in one
+ * adapter transaction so mirrors (herdr, gateway subscribers) cannot observe a
+ * consumed steer before its queued event, and an event failure cannot strand an
+ * orphan inbox row.
  *
  * Delivery is best-effort at-most-once at the generate() boundary: the engine
  * marks a steer consumed just before generate(), so a crash in the narrow window
  * before the attempt's conversation is durably persisted (streaming checkpoint /
  * post-generate) may drop a consumed steer rather than re-deliver it.
- * The row is idempotent on `steerId` (insertIgnore), but the SteerQueued event is
- * at-least-once: a retried enqueue with the SAME explicit `options.steerId`
- * re-appends the event, so mirrors must dedupe SteerQueued by `steerId`.
+ * Publication is idempotent on `steerId`: the insert's RETURNING verdict owns
+ * event publication, so a retried enqueue with the same explicit steerId leaves
+ * one durable row and one SteerQueued event.
  *
  * @param {SmithersDb} adapter
  * @param {string} runId
@@ -63,15 +64,6 @@ export function enqueueSteer(adapter, runId, nodeId, message, options = {}) {
     if (!run) {
       throw new SmithersError("RUN_NOT_FOUND", `Run not found: ${runId}`, { runId });
     }
-    yield* adapter.enqueueSteer({
-      steerId,
-      runId,
-      nodeId,
-      message: normalizedMessage,
-      author,
-      createdAtMs,
-      status: "queued",
-    });
     const event = {
       type: "SteerQueued",
       runId,
@@ -81,13 +73,24 @@ export function enqueueSteer(adapter, runId, nodeId, message, options = {}) {
       ...(author ? { author } : {}),
       timestampMs: createdAtMs,
     };
-    yield* adapter.insertEventWithNextSeq({
-      runId,
-      timestampMs: createdAtMs,
-      type: "SteerQueued",
-      payloadJson: JSON.stringify(event),
-    });
-    yield* trackEvent(/** @type {any} */ (event));
+    const inserted = yield* adapter.enqueueSteerWithEvent(
+      {
+        steerId,
+        runId,
+        nodeId,
+        message: normalizedMessage,
+        author,
+        createdAtMs,
+        status: "queued",
+      },
+      {
+        runId,
+        timestampMs: createdAtMs,
+        type: "SteerQueued",
+        payloadJson: JSON.stringify(event),
+      },
+    );
+    if (inserted) yield* trackEvent(/** @type {any} */ (event));
     return { steerId, runId, nodeId, message: normalizedMessage, author, createdAtMs };
   }).pipe(Effect.annotateLogs({ runId, nodeId, steerId }), Effect.withLogSpan("steer:enqueue"));
 }

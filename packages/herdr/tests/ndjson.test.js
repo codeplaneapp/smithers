@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createNdjsonDecoder } from "../src/ndjson.js";
+import { createNdjsonDecoder, NdjsonFrameTooLargeError } from "../src/ndjson.js";
 
 describe("createNdjsonDecoder", () => {
   test("splits multiple frames in a single chunk", () => {
@@ -49,5 +49,20 @@ describe("createNdjsonDecoder", () => {
     const rest = decoder.push(bytes.subarray(cut));
     expect(rest.length).toBe(1);
     expect(JSON.parse(rest[0]).s).toBe("café-\u{1F600}");
+  });
+
+  test("rejects an oversized completed frame using UTF-8 byte length", () => {
+    const decoder = createNdjsonDecoder({ maxFrameBytes: 4 });
+    expect(decoder.push("éé\n")).toEqual(["éé"]);
+    expect(() => decoder.push("ééx\n")).toThrow(NdjsonFrameTooLargeError);
+  });
+
+  test("bounds newline-free buffered bytes", () => {
+    const decoder = createNdjsonDecoder({ maxFrameBytes: 8 });
+    expect(decoder.push("1234")).toEqual([]);
+    expect(decoder.push("5678")).toEqual([]);
+    expect(() => decoder.push("9")).toThrow(
+      expect.objectContaining({ code: "ndjson_frame_too_large", maxFrameBytes: 8 }),
+    );
   });
 });

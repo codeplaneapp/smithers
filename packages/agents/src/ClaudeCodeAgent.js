@@ -14,7 +14,7 @@ import {
 import { normalizeCapabilityStringList } from "./capability-registry/index.js";
 import { isClaudeLimitBanner } from "./BaseCliAgent/isClaudeLimitBanner.js";
 import { logWarning } from "@smthrs/observability/logging";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, resolve as resolvePath, join as joinPath } from "node:path";
 import { tmpdir } from "node:os";
 /** @typedef {import("./BaseCliAgent/BaseCliAgentOptions.ts").BaseCliAgentOptions} BaseCliAgentOptions */
@@ -128,13 +128,23 @@ async function readSettingsFileJson(pathValue, cwd) {
  * merged object routinely contains secrets folded in from a user settings
  * file and argv is world-readable via `ps` on shared hosts.
  * @param {Record<string, unknown>} settings
- * @returns {Promise<string>}
+ * @returns {Promise<{ filePath: string; cleanup: () => Promise<void> }>}
  */
 async function writePrivateSettingsFile(settings) {
   const dir = await mkdtemp(joinPath(tmpdir(), "smithers-claude-settings-"));
   const filePath = joinPath(dir, "settings.json");
-  await writeFile(filePath, JSON.stringify(settings), { mode: 0o600 });
-  return filePath;
+  const cleanup = async () => {
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  };
+  try {
+    await writeFile(filePath, JSON.stringify(settings), { mode: 0o600 });
+    return { filePath, cleanup };
+  } catch (error) {
+    // mkdtemp succeeded, so a serialization/write failure must not strand a
+    // secret-bearing partial file or its private directory.
+    await cleanup();
+    throw error;
+  }
 }
 /**
  * @param {string} toolName
@@ -729,43 +739,54 @@ export class ClaudeCodeAgent extends BaseCliAgent {
         await foldSettingsSource(raw, true);
       }
     }
-    if (opaqueSettingsPath) {
-      // DELIBERATE tradeoff: Claude Code's `--settings` is single-valued, so an
-      // unreadable/non-JSON settings FILE cannot be folded with our computed
-      // keys — emitting a second flag would silently clobber the user's file. We
-      // preserve the file and drop our keys, but that DISABLES crash-recovery
-      // durability snapshots (and effort) for this agent, so warn loudly.
-      if (Object.keys(mergedSettings).length > 0) {
-        const losesDurability = !!(mergedSettings.hooks && durabilitySocket);
-        logWarning(
-          "ClaudeCodeAgent: could not read settings file " +
-            `'${opaqueSettingsPath}' as JSON — passing it through as the sole ` +
-            "--settings and dropping Smithers-computed keys (effort/durability). " +
-            (losesDurability ? "CRASH-RECOVERY DURABILITY SNAPSHOTS ARE DISABLED for this agent. " : "") +
-            "Supply effort/durability via a readable JSON settings file or inline " +
-            "--settings JSON to combine them.",
-          {},
-          "agent.settings",
-        );
+    /** @type {(() => Promise<void>) | undefined} */
+    let settingsCleanup;
+    try {
+      if (opaqueSettingsPath) {
+        // DELIBERATE tradeoff: Claude Code's `--settings` is single-valued, so an
+        // unreadable/non-JSON settings FILE cannot be folded with our computed
+        // keys — emitting a second flag would silently clobber the user's file. We
+        // preserve the file and drop our keys, but that DISABLES crash-recovery
+        // durability snapshots (and effort) for this agent, so warn loudly.
+        if (Object.keys(mergedSettings).length > 0) {
+          const losesDurability = !!(mergedSettings.hooks && durabilitySocket);
+          logWarning(
+            "ClaudeCodeAgent: could not read settings file " +
+              `'${opaqueSettingsPath}' as JSON — passing it through as the sole ` +
+              "--settings and dropping Smithers-computed keys (effort/durability). " +
+              (losesDurability ? "CRASH-RECOVERY DURABILITY SNAPSHOTS ARE DISABLED for this agent. " : "") +
+              "Supply effort/durability via a readable JSON settings file or inline " +
+              "--settings JSON to combine them.",
+            {},
+            "agent.settings",
+          );
+        }
+        pushFlag(args, "--settings", opaqueSettingsPath);
+      } else if (Object.keys(mergedSettings).length > 0) {
+        // A merged settings object routinely contains secrets from a folded
+        // settings file — never inline it onto argv (world-readable via `ps`).
+        // Write it to a private temp file instead and pass that path.
+        const privateSettings = await writePrivateSettingsFile(mergedSettings);
+        settingsCleanup = privateSettings.cleanup;
+        pushFlag(args, "--settings", privateSettings.filePath);
       }
-      pushFlag(args, "--settings", opaqueSettingsPath);
-    } else if (Object.keys(mergedSettings).length > 0) {
-      // A merged settings object routinely contains secrets from a folded
-      // settings file — never inline it onto argv (world-readable via `ps`).
-      // Write it to a private temp file instead and pass that path.
-      const settingsFilePath = await writePrivateSettingsFile(mergedSettings);
-      pushFlag(args, "--settings", settingsFilePath);
+      if (params.prompt) args.push(params.prompt);
+      const accountEnv = {};
+      if (durabilitySocket) accountEnv.SMITHERS_SNAPSHOT_SOCK = durabilitySocket;
+      if (this.opts.configDir) accountEnv.CLAUDE_CONFIG_DIR = this.opts.configDir;
+      if (this.opts.apiKey) accountEnv.ANTHROPIC_API_KEY = this.opts.apiKey;
+      return {
+        command: "claude",
+        args,
+        outputFormat,
+        env: Object.keys(accountEnv).length > 0 ? accountEnv : undefined,
+        ...(settingsCleanup ? { cleanup: settingsCleanup } : {}),
+      };
+    } catch (error) {
+      // BaseCliAgent cannot run commandSpec.cleanup until buildCommand returns.
+      // Cover the post-create/pre-return window here instead.
+      await settingsCleanup?.();
+      throw error;
     }
-    if (params.prompt) args.push(params.prompt);
-    const accountEnv = {};
-    if (durabilitySocket) accountEnv.SMITHERS_SNAPSHOT_SOCK = durabilitySocket;
-    if (this.opts.configDir) accountEnv.CLAUDE_CONFIG_DIR = this.opts.configDir;
-    if (this.opts.apiKey) accountEnv.ANTHROPIC_API_KEY = this.opts.apiKey;
-    return {
-      command: "claude",
-      args,
-      outputFormat,
-      env: Object.keys(accountEnv).length > 0 ? accountEnv : undefined,
-    };
   }
 }

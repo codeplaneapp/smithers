@@ -1,4 +1,5 @@
 import { createHerdrClient, workspaceLabelMatches } from "@smithers-orchestrator/herdr";
+import { probeCompatibleHerdr } from "./herdr.js";
 
 /**
  * Helpers backing `smithers steer` — the zero-ceremony steering command. Steering
@@ -78,8 +79,8 @@ export async function listActiveRunsForSteer(adapter, limit = 50) {
 export async function detectHerdrMirrorForRun(params) {
   const client = params.client ?? createHerdrClient({ session: params.session, logger: params.logger ?? (() => {}) });
   const socketPath = client.socketPath;
-  const pong = await client.ping().catch(() => undefined);
-  if (!pong) {
+  const compatibility = await probeCompatibleHerdr(client);
+  if (!compatibility.available) {
     return { mirrored: false, socketPath };
   }
   const list = await client.tryCall("workspace.list", {}).catch(() => undefined);

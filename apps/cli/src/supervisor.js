@@ -240,6 +240,56 @@ function runHasDecidedApprovalEffect(options, runId) {
   });
 }
 /**
+ * Load stale parked runs whose approval decision is still actionable.
+ *
+ * Workspace-wide polling delegates the complete predicate to the database so
+ * filtering happens before the 500-row safety limit. Scoped supervisors read
+ * their explicitly-bound run ids directly; otherwise unrelated rows could
+ * still crowd a requested run out of that global page.
+ *
+ * @param {NormalizedSupervisorOptions} options
+ * @param {"waiting-event" | "waiting-approval"} status
+ * @param {number} staleBeforeMs
+ * @returns {Effect.Effect<any[], never>}
+ */
+function listResumableApprovalRunsEffect(options, status, staleBeforeMs) {
+  if (options.runIds === null) {
+    return options.adapter
+      .listResumableApprovalRunsEffect(status, staleBeforeMs, 500)
+      .pipe(
+        Effect.catch((error) =>
+          Effect.logWarning(
+            `[supervisor] ${status} approval query failed: ${error instanceof Error ? error.message : String(error)}`,
+          ).pipe(Effect.as([])),
+        ),
+      );
+  }
+  return Effect.gen(function* () {
+    const runs = yield* Effect.all(
+      [...options.runIds].map((runId) =>
+        options.adapter
+          .getRunEffect(runId)
+          .pipe(
+            Effect.catch((error) =>
+              Effect.logWarning(
+                `[supervisor] failed to load scoped run ${runId}: ${error instanceof Error ? error.message : String(error)}`,
+              ).pipe(Effect.as(undefined)),
+            ),
+          ),
+      ),
+      { concurrency: options.maxConcurrent },
+    );
+    const candidates = runs.filter(
+      (run) => run?.status === status && (run.heartbeatAtMs == null || run.heartbeatAtMs < staleBeforeMs),
+    );
+    const decided = yield* Effect.all(
+      candidates.map((run) => runHasDecidedApprovalEffect(options, run.runId)),
+      { concurrency: options.maxConcurrent },
+    );
+    return candidates.filter((_run, index) => decided[index]);
+  });
+}
+/**
  * @param {NormalizedSupervisorOptions} options
  * @param {string} runId
  * @param {number} now
@@ -1012,23 +1062,7 @@ function pollEffect(options) {
       // way no engine is alive to consume the decision; resume so the approved
       // task runs / the denial propagates. runHasDecidedApprovalEffect matches
       // both the pending (approved) and failed (denied) node states.
-      const waitingEventRuns = (yield* options.adapter
-        .listRunsEffect(500, "waiting-event")
-        .pipe(
-          Effect.catch((error) =>
-            Effect.logWarning(
-              `[supervisor] waiting-event query failed: ${error instanceof Error ? error.message : String(error)}`,
-            ).pipe(Effect.as([])),
-          ),
-        )).filter(inScope);
-      const claimableEventRuns = waitingEventRuns.filter(
-        (run) => run.heartbeatAtMs == null || run.heartbeatAtMs < staleBeforeMs,
-      );
-      const approvalDecidedChecks = yield* Effect.all(
-        claimableEventRuns.map((run) => runHasDecidedApprovalEffect(options, run.runId)),
-        { concurrency: options.maxConcurrent },
-      );
-      const approvalDecidedRuns = claimableEventRuns.filter((_run, index) => approvalDecidedChecks[index]);
+      const approvalDecidedRuns = yield* listResumableApprovalRunsEffect(options, "waiting-event", staleBeforeMs);
       const approvalSlots = Math.max(0, options.maxConcurrent - staleResumedCount - timerResumedCount);
       const approvalResumable = approvalDecidedRuns.slice(0, approvalSlots);
       const approvalRateLimited = approvalDecidedRuns.slice(approvalSlots);
@@ -1050,23 +1084,7 @@ function pollEffect(options) {
       // (all approvals still "requested") is filtered out by
       // runHasDecidedApprovalEffect, so a run waiting purely on a human is never
       // force-resumed.
-      const waitingApprovalRuns = (yield* options.adapter
-        .listRunsEffect(500, "waiting-approval")
-        .pipe(
-          Effect.catchAll((error) =>
-            Effect.logWarning(
-              `[supervisor] waiting-approval query failed: ${error instanceof Error ? error.message : String(error)}`,
-            ).pipe(Effect.as([])),
-          ),
-        )).filter(inScope);
-      const claimableGateRuns = waitingApprovalRuns.filter(
-        (run) => run.heartbeatAtMs == null || run.heartbeatAtMs < staleBeforeMs,
-      );
-      const gateDecidedChecks = yield* Effect.all(
-        claimableGateRuns.map((run) => runHasDecidedApprovalEffect(options, run.runId)),
-        { concurrency: options.maxConcurrent },
-      );
-      const gateDecidedRuns = claimableGateRuns.filter((_run, index) => gateDecidedChecks[index]);
+      const gateDecidedRuns = yield* listResumableApprovalRunsEffect(options, "waiting-approval", staleBeforeMs);
       const gateSlots = Math.max(
         0,
         options.maxConcurrent - staleResumedCount - timerResumedCount - approvalResumedCount,

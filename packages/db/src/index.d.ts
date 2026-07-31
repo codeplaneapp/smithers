@@ -904,6 +904,13 @@ declare class SmithersDb {
      */
     listStaleRunningRuns(staleBeforeMs: number, limit?: number): RunnableEffect<StaleRunRecord[], SmithersError$1>;
     /**
+   * @param {"waiting-event" | "waiting-approval"} status
+   * @param {number} staleBeforeMs
+   * @param {number} [limit]
+   * @returns {RunnableEffect<RunRow[], SmithersError>}
+   */
+    listResumableApprovalRuns(status: "waiting-event" | "waiting-approval", staleBeforeMs: number, limit?: number): RunnableEffect<RunRow[], SmithersError$1>;
+    /**
      * @param {{ runId: string; expectedStatus?: string; expectedRuntimeOwnerId: string | null; expectedHeartbeatAtMs: number | null; staleBeforeMs: number; claimOwnerId: string; claimHeartbeatAtMs: number; requireStale?: boolean; }} params
      * @returns {RunnableEffect<boolean, SmithersError>}
      */
@@ -1323,6 +1330,41 @@ declare class SmithersDb {
      * @returns {RunnableEffect<SignalRow[], SmithersError>}
      */
     listSignals(runId: string, query?: SignalQuery): RunnableEffect<SignalRow[], SmithersError$1>;
+    /** Insert a queued steer without publishing an event. */
+    enqueueSteer(row: {
+        steerId: string;
+        runId: string;
+        nodeId: string;
+        message: string;
+        author?: string | null;
+        createdAtMs: number;
+        status?: string;
+    }): RunnableEffect<void, SmithersError$1>;
+    /** Atomically insert a queued steer and its SteerQueued event. */
+    enqueueSteerWithEvent(row: {
+        steerId: string;
+        runId: string;
+        nodeId: string;
+        message: string;
+        author?: string | null;
+        createdAtMs: number;
+        status?: string;
+    }, eventRow: {
+        runId: string;
+        timestampMs: number;
+        type: "SteerQueued";
+        payloadJson: string;
+    }): RunnableEffect<boolean, SmithersError$1>;
+    listQueuedSteers(runId: string, nodeId: string): RunnableEffect<SteerRow[], SmithersError$1>;
+    listSteers(runId: string, query?: {
+        nodeId?: string;
+    }): RunnableEffect<SteerRow[], SmithersError$1>;
+    markSteerConsumed(steerId: string, decision: {
+        consumedAtMs: number;
+        consumedByAttempt: number;
+        consumedByIteration: number;
+    }): RunnableEffect<void, SmithersError$1>;
+    markSteerExpired(steerId: string, expiredAtMs: number): RunnableEffect<void, SmithersError$1>;
     /**
      * @param {Record<string, unknown>} row
      * @returns {RunnableEffect<void, SmithersError>}
@@ -1965,6 +2007,12 @@ declare class SmithersDb {
      * @returns {RunnableEffect<StaleRunRecord[], SmithersError>}
      */
     listStaleRunningRunsEffect(staleBeforeMs: number, limit?: number): RunnableEffect<StaleRunRecord[], SmithersError$1>;
+    /**
+   * @param {"waiting-event" | "waiting-approval"} status
+   * @param {number} staleBeforeMs
+   * @param {number} [limit]
+   */
+    listResumableApprovalRunsEffect(status: "waiting-event" | "waiting-approval", staleBeforeMs: number, limit?: number): RunnableEffect<RunRow[], SmithersError$1>;
     /**
      * @param {Parameters<SmithersDb["claimRunForResume"]>[0]} params
      * @returns {RunnableEffect<boolean, SmithersError>}

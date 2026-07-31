@@ -1810,6 +1810,53 @@ export class SmithersDb {
     );
   }
   /**
+   * List stale parked runs that still have at least one decided approval whose
+   * node is actionable. The EXISTS predicate deduplicates runs and, critically,
+   * applies approval/node eligibility before ORDER BY/LIMIT so an ineligible
+   * newer run cannot crowd an eligible run out of the supervisor page.
+   * @param {"waiting-event" | "waiting-approval"} status
+   * @param {number} staleBeforeMs
+   * @param {number} [limit]
+   * @returns {RunnableEffect<RunRow[], SmithersError>}
+   */
+  listResumableApprovalRuns(status, staleBeforeMs, limit = 500) {
+    if (status !== "waiting-event" && status !== "waiting-approval") {
+      throw toSmithersError(new Error("Invalid resumable approval run status"), undefined, {
+        code: "INVALID_INPUT",
+        details: { status, allowedStatuses: ["waiting-event", "waiting-approval"] },
+      });
+    }
+    if (!Number.isFinite(staleBeforeMs)) {
+      throw toSmithersError(new Error("Invalid stale heartbeat cutoff"), undefined, {
+        code: "INVALID_INPUT",
+        details: { staleBeforeMs },
+      });
+    }
+    const normalizedLimit = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 500;
+    return this.read(`list resumable approval runs ${status}`, () =>
+      this.internalStorage.queryAll(
+        `SELECT r.*
+           FROM _smithers_runs r
+           WHERE r.status = ?
+             AND (r.heartbeat_at_ms IS NULL OR r.heartbeat_at_ms < ?)
+             AND EXISTS (
+               SELECT 1
+               FROM _smithers_approvals a
+               JOIN _smithers_nodes n
+                 ON a.run_id = n.run_id
+                AND a.node_id = n.node_id
+                AND a.iteration = n.iteration
+               WHERE a.run_id = r.run_id
+                 AND a.status IN ('approved', 'denied')
+                 AND n.state IN ('pending', 'failed')
+             )
+           ORDER BY r.created_at_ms DESC, r.run_id ASC
+           LIMIT ?`,
+        [status, staleBeforeMs, normalizedLimit],
+      ),
+    );
+  }
+  /**
    * @param {{ runId: string; expectedStatus?: string; expectedRuntimeOwnerId: string | null; expectedHeartbeatAtMs: number | null; staleBeforeMs: number; claimOwnerId: string; claimHeartbeatAtMs: number; requireStale?: boolean; }} params
    * @returns {RunnableEffect<boolean, SmithersError>}
    */
@@ -3866,6 +3913,36 @@ export class SmithersDb {
         createdAtMs: row.createdAtMs,
       }),
     );
+  }
+  /**
+   * Atomically publish a queued steer and its durable SteerQueued event. The
+   * insert's own RETURNING verdict decides event ownership: a retry with the
+   * same steerId is a no-op, while an event failure rolls the row back so the
+   * next retry can publish both facts together.
+   * @param {{ steerId: string; runId: string; nodeId: string; message: string; author?: string | null; createdAtMs: number; status?: string; }} row
+   * @param {{ runId: string; timestampMs: number; type: "SteerQueued"; payloadJson: string; }} eventRow
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+  enqueueSteerWithEvent(row, eventRow) {
+    const self = this;
+    const operation = Effect.gen(function* () {
+      const inserted = yield* self.write(`enqueue steer ${row.steerId}`, () =>
+        self.internalStorage.insertIgnoreReturningInserted("_smithers_steers", {
+          steerId: row.steerId,
+          runId: row.runId,
+          nodeId: row.nodeId,
+          message: row.message,
+          status: row.status ?? "queued",
+          author: row.author ?? null,
+          createdAtMs: row.createdAtMs,
+        }),
+      );
+      if (!inserted) return false;
+      yield* self.insertEventWithNextSeq(eventRow);
+      return true;
+    });
+    if (sqliteTransactionContext.getStore() === this) return runnableEffect(operation);
+    return this.withTransactionEffect(`enqueue steer with event ${row.steerId}`, operation);
   }
   /**
    * List the queued (not-yet-consumed, not-expired) steers targeting one node,
@@ -6014,6 +6091,15 @@ export class SmithersDb {
    */
   listStaleRunningRunsEffect(staleBeforeMs, limit = 1000) {
     return this.listStaleRunningRuns(staleBeforeMs, limit);
+  }
+  /**
+   * @param {"waiting-event" | "waiting-approval"} status
+   * @param {number} staleBeforeMs
+   * @param {number} [limit]
+   * @returns {RunnableEffect<RunRow[], SmithersError>}
+   */
+  listResumableApprovalRunsEffect(status, staleBeforeMs, limit = 500) {
+    return this.listResumableApprovalRuns(status, staleBeforeMs, limit);
   }
   /**
    * @param {Parameters<SmithersDb["claimRunForResume"]>[0]} params

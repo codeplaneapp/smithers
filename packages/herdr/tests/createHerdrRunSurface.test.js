@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHerdrClient } from "../src/createHerdrClient.js";
-import { createHerdrRunSurface, launchHijackPane } from "../src/index.js";
+import { createHerdrRunSurface, launchHijackPane, openTabPane } from "../src/index.js";
 import { isHerdrInstalled, randomSessionName, startHerdrServer } from "./herdr-server.js";
 
 const herdrInstalled = isHerdrInstalled();
@@ -161,15 +161,19 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface against a real herdr ser
     return { type, runId, iteration: 0, attempt: 1, timestampMs: Date.now(), ...extra };
   }
 
-  test("workspace find-or-create is idempotent across two surfaces with the same label", async () => {
+  test("workspace find-or-create is idempotent across concurrent surfaces for the same run", async () => {
     const label = `smithers-test-ws-${randomSessionName()}`;
+    const runId = makeRunId();
     const s1 = createHerdrRunSurface({ client, workspaceLabel: label, logger: () => {} });
-    await s1.attach(makeRunId());
     const s2 = createHerdrRunSurface({ client, workspaceLabel: label, logger: () => {} });
-    await s2.attach(makeRunId());
+    await Promise.all([s1.attach(runId), s2.attach(runId)]);
 
     const matching = (await listWorkspaces()).filter((w) => w.label === label);
     expect(matching.length).toBe(1);
+    expect(await Promise.all([s1.workspaceId(), s2.workspaceId()])).toEqual([
+      matching[0].workspace_id,
+      matching[0].workspace_id,
+    ]);
 
     await s1.close();
     await s2.close();
@@ -687,6 +691,36 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface against a real herdr ser
     const agent = await agentByName(name);
     expect(agent).toBeDefined();
     expect(await waitFor(async () => (await statusOf(name)) === "blocked")).toBe(true);
+
+    await client.call("workspace.close", { workspace_id: workspaceId }).catch(() => {});
+  });
+
+  test("a real operator tab with a colliding label survives openTabPane", async () => {
+    const runId = makeRunId();
+    const collision = `collision-${randomSessionName()}`;
+    const created = /** @type {any} */ (
+      await client.call("workspace.create", { label: `smithers-test-${collision}`, focus: false })
+    );
+    const workspaceId = created.workspace.workspace_id;
+    const operatorTabId = created.tab.tab_id;
+    const operatorPaneId = created.root_pane.pane_id;
+    await client.call("tab.rename", { tab_id: operatorTabId, label: collision });
+
+    const opened = await openTabPane(client, {
+      workspaceId,
+      label: collision,
+      name: `smithers:${runId}:collision-node`,
+      argv: STUB_TAIL(),
+      focus: false,
+    });
+    expect(opened).toBeDefined();
+    expect(opened?.tabId).not.toBe(operatorTabId);
+
+    const tabs = await listTabs(workspaceId);
+    const panes = /** @type {any} */ (await client.call("pane.list", { workspace_id: workspaceId }));
+    expect(tabs.some((tab) => tab.tab_id === operatorTabId && tab.label === collision)).toBe(true);
+    expect(panes.panes.some((pane) => pane.pane_id === operatorPaneId && pane.tab_id === operatorTabId)).toBe(true);
+    expect(tabs.filter((tab) => tab.label === collision).length).toBe(2);
 
     await client.call("workspace.close", { workspace_id: workspaceId }).catch(() => {});
   });

@@ -52,7 +52,9 @@ type HerdrBridgeOptions = {
 };
 type HerdrBridgeClient = {
     socketPath: string;
-    ping: () => Promise<unknown>;
+    ping: (options?: {
+        requireProtocolMatch?: boolean;
+    }) => Promise<unknown>;
     tryCall: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
 };
 type HerdrBridge = {

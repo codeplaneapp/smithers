@@ -103,8 +103,8 @@ bun packages/testing/scripts/setup-ops-workspace.mjs --session smithers-dev
 ```
 
 Focus workspace **`smithers-ops`**. You should see:
-- **Left:** empty shell  
-- **Right:** “waiting for a run” placeholder  
+- **Left:** empty shell
+- **Right:** “waiting for a run” placeholder
 
 ### 3. Start your harness on the left
 

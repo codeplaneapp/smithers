@@ -1,5 +1,6 @@
 // @smithers-type-exports-begin
 /** @typedef {import("./HerdrClientOptions.ts").HerdrClientOptions} HerdrClientOptions */
+/** @typedef {import("./HerdrClientOptions.ts").HerdrPingOptions} HerdrPingOptions */
 /** @typedef {import("./HerdrClientOptions.ts").HerdrClient} HerdrClient */
 /** @typedef {import("./HerdrClientOptions.ts").HerdrLogger} HerdrLogger */
 /** @typedef {import("./HerdrClientOptions.ts").HerdrLogLevel} HerdrLogLevel */
