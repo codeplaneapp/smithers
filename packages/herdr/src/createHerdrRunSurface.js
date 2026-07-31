@@ -1,4 +1,5 @@
 import { createHerdrClient } from "./createHerdrClient.js";
+import { HERDR_PROTOCOL } from "./HERDR_PROTOCOL.js";
 import {
   gateTabLabel,
   isLikelyWorkerNodeId,
@@ -33,6 +34,41 @@ const BREAKER_THRESHOLD = 3;
 
 /** Minimum wait before a memoized workspace failure is retried (avoids hammering a down herdr). */
 const WORKSPACE_RETRY_INTERVAL_MS = 5000;
+
+/**
+ * In-flight workspace acquisitions shared by surface instances in this process.
+ * herdr exposes list/create but no server-side idempotency key or compare-and-set,
+ * so this closes the same-process check-then-create race. The critical section
+ * still re-lists and reconciles after create for independently racing processes.
+ * @type {Map<string, Promise<string | undefined>>}
+ */
+const workspaceCreationBarriers = new Map();
+
+/**
+ * Coalesce one same-run workspace acquisition across surface instances. Entries
+ * live only while the acquisition is in flight; later callers re-list server
+ * state instead of retaining process-global workspace state forever.
+ *
+ * @param {string} key
+ * @param {() => Promise<string | undefined>} acquire
+ * @returns {Promise<string | undefined>}
+ */
+function withWorkspaceCreationBarrier(key, acquire) {
+  const pending = workspaceCreationBarriers.get(key);
+  if (pending) {
+    return pending;
+  }
+  const attempt = Promise.resolve().then(acquire);
+  workspaceCreationBarriers.set(key, attempt);
+  void attempt
+    .finally(() => {
+      if (workspaceCreationBarriers.get(key) === attempt) {
+        workspaceCreationBarriers.delete(key);
+      }
+    })
+    .catch(() => undefined);
+  return attempt;
+}
 
 /** Default tab budget for the adaptive cap — the cockpit tab plus mirrored node tabs. */
 const DEFAULT_TAB_CAP = 6;
@@ -323,51 +359,34 @@ function approvalMessage(event) {
  * @param {HerdrClient} client
  * @param {string} name
  * @param {string} [workspaceId]
- * @returns {Promise<string | undefined>}
+ * @returns {Promise<{ paneId: string, tabId: string | undefined, workspaceId: string | undefined } | undefined>}
  */
 async function adoptPaneByName(client, name, workspaceId) {
   const list = /** @type {{ agents?: any[] } | undefined} */ (await client.tryCall("agent.list", {}));
   const agents = list && Array.isArray(list.agents) ? list.agents : [];
-  /** @type {string | undefined} */
+  /** @type {{ paneId: string, tabId: string | undefined, workspaceId: string | undefined } | undefined} */
   let unscoped;
   for (const agent of agents) {
     if (!agent || agent.name !== name) {
       continue;
     }
     const paneId = typeof agent.pane_id === "string" ? agent.pane_id : undefined;
-    if (workspaceId != null && agent.workspace_id === workspaceId) {
-      return paneId;
+    if (paneId === undefined) {
+      continue;
     }
-    if (unscoped === undefined && paneId !== undefined) {
-      unscoped = paneId;
+    const found = {
+      paneId,
+      tabId: typeof agent.tab_id === "string" ? agent.tab_id : undefined,
+      workspaceId: typeof agent.workspace_id === "string" ? agent.workspace_id : undefined,
+    };
+    if (workspaceId != null && agent.workspace_id === workspaceId) {
+      return found;
+    }
+    if (unscoped === undefined) {
+      unscoped = found;
     }
   }
   return unscoped;
-}
-
-/**
- * Find an existing tab in a workspace by its label via `tab.list`. Soft: returns
- * `undefined` when herdr is unreachable or no tab matches.
- *
- * @param {HerdrClient} client
- * @param {string | undefined} workspaceId
- * @param {string} label
- * @returns {Promise<string | undefined>}
- */
-async function findTabByLabel(client, workspaceId, label) {
-  /** @type {Record<string, unknown>} */
-  const listParams = {};
-  if (workspaceId) {
-    listParams.workspace_id = workspaceId;
-  }
-  const res = /** @type {{ tabs?: any[] } | undefined} */ (await client.tryCall("tab.list", listParams));
-  const tabs = res && Array.isArray(res.tabs) ? res.tabs : [];
-  for (const tab of tabs) {
-    if (tab && tab.label === label && typeof tab.tab_id === "string") {
-      return tab.tab_id;
-    }
-  }
-  return undefined;
 }
 
 /**
@@ -401,11 +420,12 @@ async function closeSeedPanes(client, workspaceId, tabId, keepPaneId) {
 }
 
 /**
- * Open ONE full-size pane in its OWN tab: find-or-create a tab by `label`,
- * `agent.start` the command into it, then close the tab's seeded shell so the
- * agent pane fills the tab. Idempotent for replay/attach: an existing tab (matched
- * by label) is reused, and `agent.start` hitting `agent_name_taken` adopts the
- * existing pane by name instead of duplicating it. Soft throughout — returns
+ * Open ONE full-size pane in its OWN tab: adopt by the authoritative agent name,
+ * or create a new tab and start the command into it, then close that new tab's
+ * seeded shell so the agent pane fills the tab. Labels are presentation only:
+ * an operator-owned tab may have the same label, so it is never reused or closed.
+ * Idempotent replay/attach is keyed exclusively by the full agent name. Soft
+ * throughout — returns
  * `undefined` on any failure (dead socket, breaker open, no tab).
  *
  * `agent.start` goes through `client.call` (so a breaker-wrapped client observes
@@ -433,40 +453,34 @@ export async function openTabPane(client, opts) {
   // Prefer an already-running pane with this agent name (herdr mirror / prior open).
   // Avoids agent_name_taken races and duplicate tails while a run is live.
   const existing = await adoptPaneByName(client, opts.name, workspaceId);
-  if (typeof existing === "string") {
+  if (existing) {
     if (opts.focus === true) {
-      await client.tryCall("pane.focus", { pane_id: existing });
+      await client.tryCall("pane.focus", { pane_id: existing.paneId });
     }
-    return { tabId: undefined, paneId: existing, workspaceId };
+    return {
+      tabId: existing.tabId,
+      paneId: existing.paneId,
+      workspaceId: existing.workspaceId ?? workspaceId,
+    };
   }
 
-  let tabId = await findTabByLabel(client, opts.workspaceId, opts.label);
-  // Stale detail tabs (process exited without tab.close) stay grey with no live
-  // agent. Reusing them leaves the operator on a dead shell — close and recreate.
-  if (tabId) {
-    const live = await adoptPaneByName(client, opts.name, workspaceId);
-    if (!live) {
-      await client.tryCall("tab.close", { tab_id: tabId });
-      tabId = undefined;
-    }
+  /** @type {string | undefined} */
+  let tabId;
+  /** @type {Record<string, unknown>} */
+  const createParams = { label: opts.label, focus: false };
+  if (opts.workspaceId) {
+    createParams.workspace_id = opts.workspaceId;
   }
-  if (!tabId) {
-    /** @type {Record<string, unknown>} */
-    const createParams = { label: opts.label, focus: false };
-    if (opts.workspaceId) {
-      createParams.workspace_id = opts.workspaceId;
+  try {
+    const created = /** @type {{ tab?: { tab_id?: string, workspace_id?: string } } | undefined} */ (
+      await client.tryCall("tab.create", createParams)
+    );
+    tabId = created && created.tab && typeof created.tab.tab_id === "string" ? created.tab.tab_id : undefined;
+    if (created && created.tab && typeof created.tab.workspace_id === "string") {
+      workspaceId = created.tab.workspace_id;
     }
-    try {
-      const created = /** @type {{ tab?: { tab_id?: string, workspace_id?: string } } | undefined} */ (
-        await client.tryCall("tab.create", createParams)
-      );
-      tabId = created && created.tab && typeof created.tab.tab_id === "string" ? created.tab.tab_id : undefined;
-      if (created && created.tab && typeof created.tab.workspace_id === "string") {
-        workspaceId = created.tab.workspace_id;
-      }
-    } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
-    }
+  } catch (err) {
+    lastError = err instanceof Error ? err.message : String(err);
   }
   if (!tabId) {
     return undefined;
@@ -495,17 +509,38 @@ export async function openTabPane(client, opts) {
   } catch (err) {
     // agent_name_taken (replay/attach) or any failure: adopt the existing pane.
     lastError = err instanceof Error ? err.message : String(err);
-    paneId = await adoptPaneByName(client, opts.name, workspaceId);
+    let adopted = await adoptPaneByName(client, opts.name, workspaceId);
     // Brief retry — agent.list can lag agent.start on a busy herdr.
-    if (!paneId) {
+    if (!adopted) {
       await new Promise((r) => setTimeout(r, 80));
-      paneId = await adoptPaneByName(client, opts.name, workspaceId);
+      adopted = await adoptPaneByName(client, opts.name, workspaceId);
+    }
+    if (adopted) {
+      paneId = adopted.paneId;
+      workspaceId = adopted.workspaceId ?? workspaceId;
+      // Another caller won the agent-name race in a different tab. This tab was
+      // created by THIS invocation, so it is safe to clean up; no label-found or
+      // operator-owned resource is ever closed.
+      if (adopted.tabId && adopted.tabId !== tabId) {
+        await client.tryCall("tab.close", { tab_id: tabId });
+        tabId = adopted.tabId;
+      }
     }
   }
   if (!paneId) {
-    paneId = await adoptPaneByName(client, opts.name, workspaceId);
+    const adopted = await adoptPaneByName(client, opts.name, workspaceId);
+    if (adopted) {
+      paneId = adopted.paneId;
+      workspaceId = adopted.workspaceId ?? workspaceId;
+      if (adopted.tabId && adopted.tabId !== tabId) {
+        await client.tryCall("tab.close", { tab_id: tabId });
+        tabId = adopted.tabId;
+      }
+    }
   }
   if (typeof paneId !== "string") {
+    // The tab ID came directly from this invocation's tab.create response.
+    await client.tryCall("tab.close", { tab_id: tabId });
     if (lastError) {
       /** @type {any} */
       const fail = new Error(lastError);
@@ -1095,17 +1130,46 @@ export function createHerdrRunSurface(opts = {}) {
       if (!runId) {
         return undefined;
       }
+      // A surface is mutation-heavy (workspace/tab/pane creation). Probe an
+      // injectable client's strict ping when available and stop before the
+      // first mutation on a known protocol mismatch. `undefined` stays soft so
+      // legacy test/fake clients and a transiently unavailable daemon retain
+      // the existing best-effort behavior; subsequent calls will fail softly.
+      if (typeof rawClient.ping === "function") {
+        try {
+          const pong = await rawClient.ping({ requireProtocolMatch: true });
+          // Injected clients may ignore the strict option, so validate the pong
+          // as well. Version drift is fine when the wire protocol still matches.
+          if (pong && pong.protocol !== HERDR_PROTOCOL) {
+            log(
+              "warn",
+              `herdr protocol mismatch: client expects ${HERDR_PROTOCOL}, server reports ${pong.protocol}; mirror disabled`,
+              pong,
+            );
+            return undefined;
+          }
+        } catch (error) {
+          const code = error && typeof error === "object" ? error.code : undefined;
+          if (code === "protocol_mismatch") {
+            log("warn", `herdr protocol mismatch; mirror disabled: ${summarizeError(error)}`, error);
+            return undefined;
+          }
+          // Connectivity remains soft and is still handled by the first RPC.
+        }
+      }
       const label = resolveLabel();
-      const list = /** @type {{ workspaces?: any[] } | undefined} */ (await client.tryCall("workspace.list", {}));
-      const existing =
-        list && Array.isArray(list.workspaces)
-          ? list.workspaces.find(
+      /** @param {{ workspaces?: any[] } | undefined} result */
+      const findExisting = (result) =>
+        result && Array.isArray(result.workspaces)
+          ? result.workspaces.find(
               (w) =>
                 w &&
                 typeof w.label === "string" &&
                 workspaceLabelMatches(w.label, label, /** @type {string} */ (runId)),
             )
           : undefined;
+      const list = /** @type {{ workspaces?: any[] } | undefined} */ (await client.tryCall("workspace.list", {}));
+      const existing = findExisting(list);
       if (existing && typeof existing.workspace_id === "string") {
         workspaceId = existing.workspace_id;
         return workspaceId;
@@ -1118,31 +1182,80 @@ export function createHerdrRunSurface(opts = {}) {
         return workspaceId;
       }
 
-      /** @type {Record<string, unknown>} */
-      const params = { label, focus: false };
-      if (opts.cwd) {
-        params.cwd = opts.cwd;
-      }
-      const created =
-        /** @type {{ workspace?: { workspace_id?: string }, tab?: { tab_id?: string }, root_pane?: { pane_id?: string } } | undefined} */ (
-          await client.tryCall("workspace.create", params)
+      // A second list INSIDE the same-run barrier closes the check-then-create
+      // race between surface instances. The server protocol has no idempotency
+      // key/CAS, so after creating we list once more and retain the stable oldest
+      // matching workspace; this also converges independently racing processes.
+      const barrierKey = `${String(client.socketPath)}\0${String(runId)}`;
+      workspaceId = await withWorkspaceCreationBarrier(barrierKey, async () => {
+        const checked = /** @type {{ workspaces?: any[] } | undefined} */ (await client.tryCall("workspace.list", {}));
+        const found = findExisting(checked);
+        if (found && typeof found.workspace_id === "string") {
+          return found.workspace_id;
+        }
+        // `tryCall` uses undefined for transport/protocol failure. Never turn an
+        // indeterminate list into a create: a timed-out list may have hidden the
+        // workspace we are trying to find.
+        if (!checked || !Array.isArray(checked.workspaces)) {
+          return undefined;
+        }
+
+        /** @type {Record<string, unknown>} */
+        const params = { label, focus: false };
+        if (opts.cwd) {
+          params.cwd = opts.cwd;
+        }
+        const created =
+          /** @type {{ workspace?: { workspace_id?: string, number?: number }, tab?: { tab_id?: string }, root_pane?: { pane_id?: string } } | undefined} */ (
+            await client.tryCall("workspace.create", params)
+          );
+        const createdId = created?.workspace?.workspace_id;
+        if (typeof createdId !== "string") {
+          return undefined;
+        }
+
+        const afterCreate = /** @type {{ workspaces?: any[] } | undefined} */ (
+          await client.tryCall("workspace.list", {})
         );
-      const id = created && created.workspace ? created.workspace.workspace_id : undefined;
-      workspaceId = typeof id === "string" ? id : undefined;
-      // We CREATED the workspace (not found existing), so set up cockpit once.
-      // Path B: harness left (optional) + overview right, or full-width overview.
-      const tabId = created && created.tab ? created.tab.tab_id : undefined;
-      const rootPaneId = created && created.root_pane ? created.root_pane.pane_id : undefined;
-      if (workspaceId && typeof tabId === "string") {
-        await setupCockpit(tabId, rootPaneId, { dock: false });
-      }
+        const matching =
+          afterCreate && Array.isArray(afterCreate.workspaces)
+            ? afterCreate.workspaces
+                .filter(
+                  (w) =>
+                    w &&
+                    typeof w.workspace_id === "string" &&
+                    typeof w.label === "string" &&
+                    workspaceLabelMatches(w.label, label, /** @type {string} */ (runId)),
+                )
+                .sort((a, b) => {
+                  if (typeof a.number === "number" && typeof b.number === "number" && a.number !== b.number) {
+                    return a.number - b.number;
+                  }
+                  return String(a.workspace_id).localeCompare(String(b.workspace_id));
+                })
+            : [];
+        const winnerId = matching[0]?.workspace_id;
+        if (typeof winnerId === "string" && winnerId !== createdId) {
+          // Only close the workspace ID returned by THIS callback's create.
+          // Label matches alone never grant ownership of another workspace.
+          await client.tryCall("workspace.close", { workspace_id: createdId });
+          return winnerId;
+        }
+
+        // We created (and, when reconciliation was available, won) the workspace,
+        // so this callback alone owns one-time cockpit setup.
+        const tabId = created?.tab?.tab_id;
+        const rootPaneId = created?.root_pane?.pane_id;
+        if (typeof tabId === "string") {
+          await setupCockpit(tabId, rootPaneId, { dock: false });
+        }
+        return createdId;
+      });
       return workspaceId;
     })().catch(() => undefined);
     workspacePromise = attempt;
     // On failure (undefined) clear the memo so a later event retries (gated by
     // WORKSPACE_RETRY_INTERVAL_MS above); on success keep it memoized forever.
-    // Residual duplicate-workspace risk if `workspace.list` times out but a later
-    // `workspace.create` succeeds is rare (list-first) and acceptable.
     attempt.then((resolved) => {
       if (workspacePromise === attempt && resolved === undefined) {
         workspacePromise = null;
@@ -1194,8 +1307,8 @@ export function createHerdrRunSurface(opts = {}) {
    * recorded `unpaned`, so the tab bar stays legible under a large fan-out. A
    * cap-EXEMPT node (`entry.capExempt`: a parked approval gate, a failed node
    * promoted from unpaned, a hijack) always gets its tab and also bypasses
-   * `nodeFilter`. Idempotent for replay: a live-adopted pane returns early; an
-   * existing tab is reused and a taken agent name adopts its pane.
+   * `nodeFilter`. Idempotent for replay: a live-adopted pane returns early and a
+   * taken agent name adopts its pane; tab labels never confer ownership.
    *
    * @param {NodeEntry} entry
    * @returns {Promise<string | undefined>}
@@ -1737,8 +1850,8 @@ export function createHerdrRunSurface(opts = {}) {
  * tab) and — uniquely among the surface's panes — FOCUSED by default, so the
  * operator's screen jumps to the interactive session they just launched. Its tab
  * label is distinct from the node's mirror tab so a hijack never splits into it.
- * Idempotent for a re-launch: the existing hijack tab/pane (matched by label and
- * agent name) is reused, not duplicated. Fully soft: returns `undefined` on any
+ * Idempotent for a re-launch: the existing hijack pane is adopted by its full
+ * agent name, not by its presentation label. Fully soft: returns `undefined` on any
  * failure (dead socket, etc.) and never throws.
  *
  * @param {HerdrClient} client

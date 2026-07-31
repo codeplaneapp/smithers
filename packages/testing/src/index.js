@@ -1149,8 +1149,8 @@ function isEffectLike(value) {
 async function settleRunResult(raw) {
   let value = raw;
   if (isEffectLike(value)) {
-    const { Effect: Effect5 } = await import("effect");
-    value = await Effect5.runPromise(value);
+    const { Effect: Effect6 } = await import("effect");
+    value = await Effect6.runPromise(value);
   }
   if (value && typeof value === "object" && "then" in value && typeof value.then === "function") {
     value = await value;
@@ -1279,7 +1279,11 @@ var init_runScenario = __esm({
       );
       for (let turn = 0; !done && turn < budget; turn++) {
         const progressBefore = kernel.trace.snapshot().length + kernel.controls.consumed();
-        for (let microtask = 0; microtask < Math.min(64, Math.max(1, budget)); microtask++) await Promise.resolve();
+        for (let dispatcherTurn = 0; dispatcherTurn < Math.min(64, Math.max(1, budget)); dispatcherTurn++) {
+          await Promise.resolve();
+          await new Promise((resolve4) => setImmediate(resolve4));
+          if (done) break;
+        }
         if (!done) await new Promise((resolve3) => setImmediate(resolve3));
         if (!done) {
           const progressAfter = kernel.trace.snapshot().length + kernel.controls.consumed();
@@ -4207,15 +4211,15 @@ function scriptedAgent(vector, options = {}) {
     },
     async generate(args = {}) {
       const rootDir = typeof args.rootDir === "string" ? args.rootDir : void 0;
-      const taskContext = args.taskContext && typeof args.taskContext === "object" ? args.taskContext : void 0;
-      const attempt = typeof taskContext?.attempt === "number" ? taskContext.attempt : typeof args.retryAttempt === "number" ? args.retryAttempt : void 0;
-      const iteration = typeof taskContext?.iteration === "number" ? taskContext.iteration : void 0;
+      const taskContext2 = args.taskContext && typeof args.taskContext === "object" ? args.taskContext : void 0;
+      const attempt = typeof taskContext2?.attempt === "number" ? taskContext2.attempt : typeof args.retryAttempt === "number" ? args.retryAttempt : void 0;
+      const iteration = typeof taskContext2?.iteration === "number" ? taskContext2.iteration : void 0;
       const promptText = flattenGeneratePrompt(args);
       const call = {
         args,
         prompt: args.prompt,
         rootDir,
-        taskContext
+        taskContext: taskContext2
       };
       calls.push(call);
       const { index, turn } = selectTurn(vector, used, {
@@ -5534,8 +5538,8 @@ async function runMaybeEffect(value) {
   }
   if (typeof value.pipe === "function") {
     const effectMod = await import("effect");
-    const Effect5 = effectMod.Effect;
-    return Effect5.runPromise(value);
+    const Effect6 = effectMod.Effect;
+    return Effect6.runPromise(value);
   }
   return value;
 }
@@ -5669,7 +5673,7 @@ async function tryCreateHerdrBridge(opts) {
     logger: () => {
     }
   });
-  const pong = await client.ping().catch(() => void 0);
+  const pong = await client.ping({ requireProtocolMatch: true }).catch(() => void 0);
   if (!pong) {
     log("warn", `no herdr server at ${client.socketPath}; running without mirror`);
     return null;
@@ -5862,7 +5866,7 @@ async function tryOpenHerdrClient(opts) {
     logger: () => {
     }
   });
-  const pong = await client.ping().catch(() => void 0);
+  const pong = await client.ping({ requireProtocolMatch: true }).catch(() => void 0);
   if (!pong) return null;
   return client;
 }
@@ -5973,8 +5977,8 @@ export {
   e2eHarness,
   expectAmbiguity,
   expectEffect,
-  expectFullCoverage,
   expectEventCount,
+  expectFullCoverage,
   expectNodeState,
   expectNodeStates,
   expectRunStatus,

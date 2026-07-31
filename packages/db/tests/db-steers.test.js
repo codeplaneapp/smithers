@@ -4,6 +4,7 @@ import { ensureSmithersTables } from "../src/ensure.js";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Effect } from "effect";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 
 function createTestDb() {
   const sqlite = new Database(":memory:");
@@ -25,6 +26,107 @@ function enqueue(adapter, steerId, runId, nodeId, message, createdAtMs) {
 }
 
 describe("steer adapter", () => {
+  test("enqueueSteerWithEvent is atomic on event failure and idempotent on steer id", async () => {
+    const { adapter } = createTestDb();
+    const runId = "atomic-run";
+    const row = {
+      steerId: "atomic-steer",
+      runId,
+      nodeId: "task",
+      message: "atomic",
+      createdAtMs: 1000,
+      author: "tester",
+    };
+    const event = {
+      type: "SteerQueued",
+      runId,
+      nodeId: "task",
+      steerId: row.steerId,
+      message: row.message,
+      author: row.author,
+      timestampMs: row.createdAtMs,
+    };
+    const eventRow = {
+      runId,
+      timestampMs: row.createdAtMs,
+      type: "SteerQueued",
+      payloadJson: JSON.stringify(event),
+    };
+    await adapter.insertRun({ runId, workflowName: "steer-test", status: "running", createdAtMs: 1 });
+    const originalInsertEvent = adapter.insertEventWithNextSeq.bind(adapter);
+    adapter.insertEventWithNextSeq = () => Effect.fail(new SmithersError("DB_WRITE_FAILED", "event fault"));
+    await expect(Effect.runPromise(adapter.enqueueSteerWithEvent(row, eventRow))).rejects.toThrow("event fault");
+    expect(await Effect.runPromise(adapter.listSteers(runId))).toHaveLength(0);
+
+    adapter.insertEventWithNextSeq = originalInsertEvent;
+    expect(await Effect.runPromise(adapter.enqueueSteerWithEvent(row, eventRow))).toBe(true);
+    expect(await Effect.runPromise(adapter.enqueueSteerWithEvent(row, eventRow))).toBe(false);
+    expect(await Effect.runPromise(adapter.listSteers(runId))).toHaveLength(1);
+    expect(await Effect.runPromise(adapter.listEventsByType(runId, "SteerQueued"))).toHaveLength(1);
+  });
+
+  test("enqueueSteerWithEvent hides the row from a concurrent consumer until the queued event commits", async () => {
+    const { adapter: publisher, sqlite } = createTestDb();
+    const consumer = new SmithersDb(drizzle(sqlite));
+    const runId = "interleaving-run";
+    await publisher.insertRun({ runId, workflowName: "steer-test", status: "running", createdAtMs: 1 });
+    const row = {
+      steerId: "interleaving-steer",
+      runId,
+      nodeId: "task",
+      message: "interleaved",
+      createdAtMs: 2000,
+    };
+    const eventRow = {
+      runId,
+      timestampMs: row.createdAtMs,
+      type: "SteerQueued",
+      payloadJson: JSON.stringify({
+        type: "SteerQueued",
+        runId,
+        nodeId: row.nodeId,
+        steerId: row.steerId,
+        message: row.message,
+        timestampMs: row.createdAtMs,
+      }),
+    };
+    const originalInsertEvent = publisher.insertEventWithNextSeq.bind(publisher);
+    let signalEventEntered;
+    let releaseEvent;
+    const eventEntered = new Promise((resolve) => {
+      signalEventEntered = resolve;
+    });
+    const eventRelease = new Promise((resolve) => {
+      releaseEvent = resolve;
+    });
+    publisher.insertEventWithNextSeq = (event) =>
+      Effect.gen(function* () {
+        signalEventEntered();
+        yield* Effect.promise(() => eventRelease);
+        return yield* originalInsertEvent(event);
+      });
+
+    const publication = Effect.runPromise(publisher.enqueueSteerWithEvent(row, eventRow));
+    await eventEntered;
+    let consumerSettled = false;
+    const observation = Effect.runPromise(
+      Effect.gen(function* () {
+        const queued = yield* consumer.listQueuedSteers(runId, "task");
+        const events = yield* consumer.listEventsByType(runId, "SteerQueued");
+        return { queued, events };
+      }),
+    ).finally(() => {
+      consumerSettled = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(consumerSettled).toBe(false);
+    releaseEvent();
+    expect(await publication).toBe(true);
+    const observed = await observation;
+    expect(observed.queued).toHaveLength(1);
+    expect(observed.events).toHaveLength(1);
+  });
+
   test("enqueue + listQueuedSteers returns queued steers for a node, oldest first", async () => {
     const { adapter } = createTestDb();
     await enqueue(adapter, "n2", "run", "task", "second", 2000);

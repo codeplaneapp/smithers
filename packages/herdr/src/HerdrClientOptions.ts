@@ -23,6 +23,12 @@ export type HerdrClientOptions = {
   logger?: HerdrLogger;
 };
 
+/** Compatibility policy for {@link HerdrClient.ping}. */
+export type HerdrPingOptions = {
+  /** Reject with `HerdrError(code="protocol_mismatch")` when the server protocol differs. */
+  requireProtocolMatch?: boolean;
+};
+
 /**
  * A herdr event delivered to a {@link HerdrClient.subscribe} consumer. `event`
  * is the raw name as received (herdr emits snake_case kinds like
@@ -75,6 +81,9 @@ export type HerdrClient = {
    * exponential backoff and resubscribes on reconnect.
    */
   subscribe(subscriptions: HerdrSubscription[], onEvent: (event: HerdrEvent) => void): HerdrSubscriptionHandle;
-  /** Ping the server; soft (returns `undefined` when unreachable), warns on protocol mismatch. */
-  ping(): Promise<HerdrPong | undefined>;
+  /**
+   * Ping the server. Transport failures remain soft (`undefined`). A protocol
+   * mismatch warns by default, or rejects when `requireProtocolMatch` is true.
+   */
+  ping(options?: HerdrPingOptions): Promise<HerdrPong | undefined>;
 };

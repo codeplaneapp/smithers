@@ -1045,6 +1045,7 @@ declare class ClaudeCodeAgent extends BaseCliAgent {
         cwd: string;
         options: any;
     }): Promise<{
+        cleanup?: (() => Promise<void>) | undefined;
         command: string;
         args: string[];
         outputFormat: "text" | "json" | "stream-json";

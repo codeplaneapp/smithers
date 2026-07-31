@@ -19,6 +19,7 @@ import { enqueueSteer } from "../src/steers.js";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 
 /**
  * Flatten whatever the engine handed the agent into a single searchable string.
@@ -423,6 +424,100 @@ describe("steer runtime", () => {
       expect(await eventsOfType(adapter, runId, "SteerConsumed")).toHaveLength(0);
       expect(await eventsOfType(adapter, runId, "SteerExpired")).toHaveLength(0);
     } finally {
+      cleanup();
+    }
+  });
+
+  test("publication rolls back on event failure and an explicit steer id is idempotent", async () => {
+    const { db, cleanup } = createTestSmithers({ a: z.object({ v: z.number() }) });
+    const adapter = new SmithersDb(db);
+    const runId = "steer-atomic-fault";
+    const steerId = "steer-explicit-id";
+    const timestampMs = 1234;
+    const originalInsertEvent = adapter.insertEventWithNextSeq.bind(adapter);
+    try {
+      await adapter.insertRun({ runId, workflowName: "steer-test", status: "running", createdAtMs: 1 });
+      adapter.insertEventWithNextSeq = () =>
+        Effect.fail(new SmithersError("DB_WRITE_FAILED", "deterministic SteerQueued insert failure"));
+
+      await expect(
+        Effect.runPromise(enqueueSteer(adapter, runId, "task", "atomic steer", { steerId, timestampMs })),
+      ).rejects.toThrow("deterministic SteerQueued insert failure");
+      expect(await Effect.runPromise(adapter.listSteers(runId))).toHaveLength(0);
+      expect(await eventsOfType(adapter, runId, "SteerQueued")).toHaveLength(0);
+
+      adapter.insertEventWithNextSeq = originalInsertEvent;
+      await Effect.runPromise(enqueueSteer(adapter, runId, "task", "atomic steer", { steerId, timestampMs }));
+      await Effect.runPromise(enqueueSteer(adapter, runId, "task", "atomic steer", { steerId, timestampMs }));
+
+      expect(await Effect.runPromise(adapter.listSteers(runId))).toHaveLength(1);
+      expect(await eventsOfType(adapter, runId, "SteerQueued")).toHaveLength(1);
+    } finally {
+      adapter.insertEventWithNextSeq = originalInsertEvent;
+      cleanup();
+    }
+  });
+
+  test("a concurrent consumer cannot observe or consume a steer before SteerQueued commits", async () => {
+    const { db, cleanup } = createTestSmithers({ a: z.object({ v: z.number() }) });
+    const publisher = new SmithersDb(db);
+    const consumer = new SmithersDb(db);
+    const runId = "steer-atomic-interleaving";
+    const originalInsertEvent = publisher.insertEventWithNextSeq.bind(publisher);
+    let releaseEvent;
+    let signalEventEntered;
+    const eventEntered = new Promise((resolve) => {
+      signalEventEntered = resolve;
+    });
+    const eventRelease = new Promise((resolve) => {
+      releaseEvent = resolve;
+    });
+    try {
+      await publisher.insertRun({ runId, workflowName: "steer-test", status: "running", createdAtMs: 1 });
+      publisher.insertEventWithNextSeq = (row) =>
+        Effect.gen(function* () {
+          signalEventEntered();
+          yield* Effect.promise(() => eventRelease);
+          return yield* originalInsertEvent(row);
+        });
+
+      const publication = Effect.runPromise(
+        enqueueSteer(publisher, runId, "task", "interleaved steer", {
+          steerId: "steer-interleaving",
+          timestampMs: 2345,
+        }),
+      );
+      await eventEntered;
+
+      let consumerSettled = false;
+      const observation = Effect.runPromise(
+        Effect.gen(function* () {
+          const queued = yield* consumer.listQueuedSteers(runId, "task");
+          const queuedEvents = yield* consumer.listEventsByType(runId, "SteerQueued");
+          if (queued[0]) {
+            yield* consumer.markSteerConsumed(queued[0].steerId, {
+              consumedAtMs: 3000,
+              consumedByAttempt: 1,
+              consumedByIteration: 0,
+            });
+          }
+          return { queued, queuedEvents };
+        }),
+      ).finally(() => {
+        consumerSettled = true;
+      });
+
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(consumerSettled).toBe(false);
+      releaseEvent();
+      await publication;
+      const observed = await observation;
+      expect(observed.queued).toHaveLength(1);
+      expect(observed.queuedEvents).toHaveLength(1);
+      expect((await Effect.runPromise(consumer.listSteers(runId)))[0].status).toBe("consumed");
+    } finally {
+      releaseEvent?.();
+      publisher.insertEventWithNextSeq = originalInsertEvent;
       cleanup();
     }
   });

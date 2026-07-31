@@ -7,6 +7,7 @@ import { resolveSocketPath } from "./resolveSocketPath.js";
 /** @typedef {import("./HerdrClientOptions.ts").HerdrClient} HerdrClient */
 /** @typedef {import("./HerdrClientOptions.ts").HerdrClientOptions} HerdrClientOptions */
 /** @typedef {import("./HerdrClientOptions.ts").HerdrLogger} HerdrLogger */
+/** @typedef {import("./HerdrClientOptions.ts").HerdrPingOptions} HerdrPingOptions */
 /** @typedef {import("./HerdrClientOptions.ts").HerdrEvent} HerdrEvent */
 /** @typedef {import("./HerdrClientOptions.ts").HerdrSubscription} HerdrSubscription */
 /** @typedef {import("./HerdrClientOptions.ts").HerdrSubscriptionHandle} HerdrSubscriptionHandle */
@@ -125,7 +126,20 @@ function rpcCall(socketPath, method, params, timeoutMs) {
     });
 
     socket.on("data", (chunk) => {
-      const lines = decoder.push(chunk);
+      let lines;
+      try {
+        lines = decoder.push(chunk);
+      } catch (err) {
+        settle(
+          "reject",
+          new HerdrError(`herdr ${method} returned an oversized response frame`, {
+            method,
+            code: "frame_too_large",
+            cause: err,
+          }),
+        );
+        return;
+      }
       if (lines.length === 0) {
         return;
       }
@@ -258,7 +272,15 @@ export function createHerdrClient(opts = {}) {
       });
 
       active.on("data", (chunk) => {
-        for (const line of decoder.push(chunk)) {
+        let lines;
+        try {
+          lines = decoder.push(chunk);
+        } catch (err) {
+          log("warn", "herdr subscription closed after an oversized frame", err);
+          active.destroy();
+          return;
+        }
+        for (const line of lines) {
           let frame;
           try {
             frame = JSON.parse(line);
@@ -334,12 +356,17 @@ export function createHerdrClient(opts = {}) {
   };
 
   /**
+   * @param {HerdrPingOptions} [options]
    * @returns {Promise<HerdrPong | undefined>}
    */
-  const ping = async () => {
+  const ping = async (options = {}) => {
     const pong = /** @type {HerdrPong | undefined} */ (await tryCall("ping", {}));
     if (pong && pong.protocol !== HERDR_PROTOCOL) {
-      log("warn", `herdr protocol mismatch: client expects ${HERDR_PROTOCOL}, server reports ${pong.protocol}`, pong);
+      const message = `herdr protocol mismatch: client expects ${HERDR_PROTOCOL}, server reports ${pong.protocol}`;
+      log("warn", message, pong);
+      if (options.requireProtocolMatch === true) {
+        throw new HerdrError(message, { method: "ping", code: "protocol_mismatch", cause: pong });
+      }
     }
     return pong;
   };

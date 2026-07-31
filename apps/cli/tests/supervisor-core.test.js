@@ -704,6 +704,41 @@ describe("supervisor poll core", () => {
     expect(run?.heartbeatAtMs).toBe(now);
     sqlite.close();
   });
+  test("a scoped approval resume cannot be crowded out by 500 newer unrelated runs", async () => {
+    const { adapter, sqlite } = createTestDb();
+    const resumed = [];
+    await insertApprovalDecidedRun(adapter, "run-scoped-approval");
+    for (let index = 0; index < 500; index++) {
+      await adapter.insertRun(
+        runRow(`run-unrelated-${index}`, {
+          status: "waiting-event",
+          createdAtMs: now + index,
+          heartbeatAtMs: now - 60_000,
+        }),
+      );
+    }
+    const summary = await Effect.runPromise(
+      supervisorPollEffect({
+        adapter,
+        runIds: ["run-scoped-approval"],
+        staleThresholdMs: 30_000,
+        maxConcurrent: 1,
+        supervisorId: "scoped-approval-resume",
+        deps: {
+          now: () => now,
+          workflowExists: () => true,
+          isPidAlive: () => false,
+          spawnResumeDetached: (_workflowPath, runId) => {
+            resumed.push(runId);
+            return 9094;
+          },
+        },
+      }),
+    );
+    expect(summary.resumedCount).toBe(1);
+    expect(resumed).toEqual(["run-scoped-approval"]);
+    sqlite.close();
+  });
   test("does not resume a waiting-event run whose approval is still undecided", async () => {
     const { adapter, sqlite } = createTestDb();
     const resumed = [];

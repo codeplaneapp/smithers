@@ -52,7 +52,10 @@ streams events. The client follows that model exactly:
   during a backoff wait - hold another ref if the subscription must keep the
   process running.
 - `ping()` is soft (returns `undefined` when unreachable) and logs a warning if
-  the server reports a protocol other than `HERDR_PROTOCOL`.
+  the server reports a protocol other than `HERDR_PROTOCOL`. Call
+  `ping({ requireProtocolMatch: true })` when compatibility is mandatory; a
+  mismatch then rejects with `HerdrError.code === "protocol_mismatch"` while
+  transport failures remain soft.
 
 Event names arrive snake_case (`workspace_created`) and differ from the dotted
 subscription `type` strings (`workspace.created`); one event

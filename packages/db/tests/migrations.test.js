@@ -598,9 +598,9 @@ describe("DB migration edges", () => {
     sqlite.close();
   });
 
-  test("0033 adds the first-class effort column; a legacy meta_json-only row reads clean", () => {
+  test("0036 adds the first-class effort column; a legacy meta_json-only row reads clean", () => {
     const sqlite = new Database(":memory:");
-    // Pre-0033 attempts table: NO effort column. A legacy row smuggled effort
+    // Pre-0036 attempts table: NO effort column. A legacy row smuggled effort
     // inside meta_json (the old back-compat path).
     sqlite.exec(`
       CREATE TABLE _smithers_attempts (
@@ -626,7 +626,7 @@ describe("DB migration edges", () => {
       .all()
       .map((c) => c.name);
     expect(cols).toContain("effort");
-    expect(migrationRows(sqlite).map((row) => row.id)).toContain("0035_attempt_effort_column");
+    expect(migrationRows(sqlite).map((row) => row.id)).toContain("0036_attempt_effort_column");
 
     // ...and the legacy row still reads clean: the new column is NULL (never
     // backfilled from the blob) while the old meta_json value survives intact.
@@ -732,7 +732,7 @@ describe("DB migration edges", () => {
     sqlite.close();
   });
 
-  test("0034 creates the steer inbox table + index for a store whose ledger predates it", () => {
+  test("0037 creates the steer inbox under its stable non-preview ledger id", () => {
     const sqlite = new Database(":memory:");
     sqlite.exec(`
       CREATE TABLE _smithers_schema_migrations (
@@ -749,7 +749,6 @@ describe("DB migration edges", () => {
         created_at_ms INTEGER NOT NULL
       );
     `);
-    // Record every prior migration as applied so only 0033/0034 remain to run.
     // 0025_snapshot_contents is deliberately NOT pre-applied: it creates the
     // snapshot tables the post-migration trigger repair depends on, so a ledger
     // claiming 0025 without those tables is not a state a real store reaches.
@@ -795,8 +794,103 @@ describe("DB migration edges", () => {
       .get();
     expect(index).toBeTruthy();
     const ledger = migrationRows(sqlite).map((row) => row.id);
-    expect(ledger).toContain("0036_add_steers");
+    expect(ledger).toContain("0036_attempt_effort_column");
+    expect(ledger).toContain("0037_add_steers");
     sqlite.close();
+  });
+
+  test("preview effort/steer ledger aliases coexist and converge to the official ids", () => {
+    const { sqlite, db } = setupMemoryDb();
+    try {
+      sqlite.run("DELETE FROM _smithers_schema_migrations WHERE id IN (?, ?)", [
+        "0036_attempt_effort_column",
+        "0037_add_steers",
+      ]);
+      for (const id of ["0035_attempt_effort_column", "0036_add_steers"]) {
+        sqlite.run("INSERT INTO _smithers_schema_migrations (id, name, applied_at_ms) VALUES (?, ?, ?)", [id, id, 1]);
+      }
+      sqlite.run("DROP INDEX _smithers_steers_queued_idx");
+
+      expect(() => ensureSmithersTables(db)).not.toThrow();
+
+      const ids = migrationRows(sqlite).map((row) => row.id);
+      expect(ids).toEqual(
+        expect.arrayContaining([
+          "0035_attempt_effort_column",
+          "0036_add_steers",
+          "0036_attempt_effort_column",
+          "0037_add_steers",
+        ]),
+      );
+      // Numeric prefixes are not aliases. The official checkpoint migration is
+      // intentionally absent on this independent branch and remains free to
+      // apply later under its exact 0035_agent_checkpoints id.
+      expect(ids).not.toContain("0035_agent_checkpoints");
+      expect(
+        sqlite
+          .query("SELECT name FROM sqlite_master WHERE type = 'index' AND name = '_smithers_steers_queued_idx'")
+          .get(),
+      ).toBeDefined();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("0037 repairs a missing or malformed owned queued index even with a recorded ledger row", () => {
+    const { sqlite, db } = setupMemoryDb();
+    try {
+      sqlite.run("DROP INDEX _smithers_steers_queued_idx");
+      expect(() => ensureSmithersTables(db)).not.toThrow();
+      expect(
+        sqlite
+          .query('PRAGMA index_info("_smithers_steers_queued_idx")')
+          .all()
+          .map((row) => row.name),
+      ).toEqual(["run_id", "node_id", "status", "created_at_ms"]);
+
+      sqlite.run("DROP INDEX _smithers_steers_queued_idx");
+      sqlite.run("CREATE UNIQUE INDEX _smithers_steers_queued_idx ON _smithers_steers (status, run_id)");
+      expect(() => ensureSmithersTables(db)).not.toThrow();
+      const index = sqlite
+        .query('PRAGMA index_list("_smithers_steers")')
+        .all()
+        .find((row) => row.name === "_smithers_steers_queued_idx");
+      expect(index.unique).toBe(0);
+      expect(index.partial).toBe(0);
+      expect(
+        sqlite
+          .query('PRAGMA index_info("_smithers_steers_queued_idx")')
+          .all()
+          .map((row) => row.name),
+      ).toEqual(["run_id", "node_id", "status", "created_at_ms"]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("0037 fails closed on incompatible table and wrong-owner index collisions", () => {
+    const malformed = setupMemoryDb();
+    try {
+      malformed.sqlite.run("DROP TABLE _smithers_steers");
+      malformed.sqlite.run("CREATE TABLE _smithers_steers (steer_id TEXT PRIMARY KEY)");
+      expect(() => ensureSmithersTables(malformed.db)).toThrow(/0037 steer schema mismatch/);
+    } finally {
+      malformed.sqlite.close();
+    }
+
+    const wrongOwner = setupMemoryDb();
+    try {
+      wrongOwner.sqlite.run("DROP INDEX _smithers_steers_queued_idx");
+      wrongOwner.sqlite.run(`CREATE TABLE unrelated_steers (
+        run_id TEXT, node_id TEXT, status TEXT, created_at_ms INTEGER
+      )`);
+      wrongOwner.sqlite.run(
+        "CREATE INDEX _smithers_steers_queued_idx ON unrelated_steers (run_id, node_id, status, created_at_ms)",
+      );
+      expect(() => ensureSmithersTables(wrongOwner.db)).toThrow(/queued index name is owned by another table/);
+    } finally {
+      wrongOwner.sqlite.close();
+    }
   });
 
   test("malformed JSON in valueJson / xmlJson / configJson is caught at deserialize layer with a useful error", () => {

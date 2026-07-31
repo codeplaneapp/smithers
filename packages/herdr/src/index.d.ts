@@ -29,6 +29,10 @@ export type HerdrClientOptions = {
 	logger?: HerdrLogger;
 };
 
+export type HerdrPingOptions = {
+	requireProtocolMatch?: boolean;
+};
+
 export type HerdrEvent = {
 	event: string;
 	type: string;
@@ -49,7 +53,7 @@ export type HerdrClient = {
 	call<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T>;
 	tryCall<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T | undefined>;
 	subscribe(subscriptions: HerdrSubscription[], onEvent: (event: HerdrEvent) => void): HerdrSubscriptionHandle;
-	ping(): Promise<HerdrPong | undefined>;
+	ping(options?: HerdrPingOptions): Promise<HerdrPong | undefined>;
 };
 
 export function createHerdrClient(opts?: HerdrClientOptions): HerdrClient;
@@ -225,11 +229,10 @@ export function shortRunId(runId: string): string;
 export function shortNodeId(nodeId: string): string;
 
 /**
- * Place ONE full-size pane in its OWN tab (find-or-create the tab by `label`,
- * `agent.start` the command, close the seeded shell). Idempotent for replay: an
- * existing tab is reused and a taken agent name adopts its pane. Soft — resolves
- * `undefined` on any failure. Exported so on-demand consumers (`smithers herdr
- * open`) reuse the surface's placement + adoption semantics.
+ * Place ONE full-size pane in its OWN tab. Idempotent replay adopts only by the
+ * authoritative agent name; a label-only match is never reused or closed because
+ * it may be an operator-owned tab. Soft — resolves `undefined` on bookkeeping
+ * failure and may reject when `agent.start` cannot be recovered by adoption.
  */
 export function openTabPane(
 	client: HerdrClient,

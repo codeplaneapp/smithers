@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { accountToProviderEnv, getAccount } from "@smthrs/accounts";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { SmithersError } from "@smthrs/errors";
@@ -9,6 +9,8 @@ import { registeredAgentLabel } from "./registered-agent-id.js";
 /** @typedef {import("./HijackLaunchSpec.ts").HijackLaunchSpec} HijackLaunchSpec */
 /** @typedef {import("./NativeHijackEngine.ts").NativeHijackEngine} NativeHijackEngine */
 /** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
+
+const CLAUDE_TRANSCRIPT_PREFIX_BYTES = 64_000;
 
 /**
  * Locate the project directory Claude Code used for a session id.
@@ -34,11 +36,15 @@ export function resolveClaudeSessionCwd(sessionId, opts = {}) {
   }
   for (const dir of projectDirs) {
     const file = join(projectsRoot, dir, `${sessionId}.jsonl`);
-    if (!existsSync(file)) continue;
+    let fd;
     try {
-      // Read a small prefix — cwd appears on early lines.
-      const buf = readFileSync(file, { encoding: "utf8" });
-      const head = buf.slice(0, 64_000);
+      // Read only a bounded prefix — Claude records cwd on early lines, and a
+      // long-running session transcript may otherwise be hundreds of MiB.
+      // Opening directly also avoids a separate exists/read race.
+      fd = openSync(file, "r");
+      const buf = Buffer.allocUnsafe(CLAUDE_TRANSCRIPT_PREFIX_BYTES);
+      const bytesRead = readSync(fd, buf, 0, buf.length, 0);
+      const head = buf.toString("utf8", 0, bytesRead);
       for (const line of head.split("\n")) {
         if (!line.includes('"cwd"')) continue;
         try {
@@ -52,6 +58,14 @@ export function resolveClaudeSessionCwd(sessionId, opts = {}) {
       }
     } catch {
       /* next project */
+    } finally {
+      if (fd !== undefined) {
+        try {
+          closeSync(fd);
+        } catch {
+          /* next project */
+        }
+      }
     }
   }
   return null;

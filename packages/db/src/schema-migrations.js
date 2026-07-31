@@ -197,7 +197,7 @@ const LEGACY_COLUMN_MIGRATIONS = [
     columns: [["iteration", "iteration INTEGER"]],
   },
   {
-    id: "0035_attempt_effort_column",
+    id: "0036_attempt_effort_column",
     name: "Add first-class effort column to attempts",
     table: "_smithers_attempts",
     columns: [["effort", "effort TEXT"]],
@@ -335,6 +335,218 @@ function backfillOutputProvenanceSqlite(sqlite) {
 
 function indexExists(sqlite, index) {
   return Boolean(sqlite.query("SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?").get(index));
+}
+
+const STEERS_TABLE = "_smithers_steers";
+const STEERS_QUEUED_INDEX = "_smithers_steers_queued_idx";
+const STEERS_TABLE_SHAPE = {
+  columns: {
+    steer_id: { type: "TEXT", notNull: false },
+    run_id: { type: "TEXT", notNull: true },
+    node_id: { type: "TEXT", notNull: true },
+    message: { type: "TEXT", notNull: true },
+    status: { type: "TEXT", notNull: true },
+    author: { type: "TEXT", notNull: false },
+    created_at_ms: { type: "INTEGER", notNull: true },
+    consumed_at_ms: { type: "INTEGER", notNull: false },
+    consumed_by_attempt: { type: "INTEGER", notNull: false },
+    consumed_by_iteration: { type: "INTEGER", notNull: false },
+    expired_at_ms: { type: "INTEGER", notNull: false },
+  },
+  primaryKey: ["steer_id"],
+  queuedIndex: ["run_id", "node_id", "status", "created_at_ms"],
+};
+
+/**
+ * A same-name table or index with a different shape is not ours to mutate.
+ * Missing owned objects are repairable; incompatible collisions fail closed so
+ * CREATE IF NOT EXISTS cannot silently record a migration that never applied.
+ * @param {import("bun:sqlite").Database} sqlite
+ */
+function steerSchemaMatchesSqlite(sqlite) {
+  if (!tableExists(sqlite, STEERS_TABLE)) return false;
+  const columns = sqlite.query(`PRAGMA table_info(${quoteIdentifier(STEERS_TABLE)})`).all();
+  const expectedColumns = Object.keys(STEERS_TABLE_SHAPE.columns);
+  const primaryKey = columns
+    .filter((row) => Number(row.pk) > 0)
+    .sort((a, b) => Number(a.pk) - Number(b.pk))
+    .map((row) => row.name);
+  const tableMatches =
+    JSON.stringify(columns.map((row) => row.name)) === JSON.stringify(expectedColumns) &&
+    JSON.stringify(primaryKey) === JSON.stringify(STEERS_TABLE_SHAPE.primaryKey) &&
+    columns.every((column) => {
+      const expected = STEERS_TABLE_SHAPE.columns[column.name];
+      return (
+        expected !== undefined &&
+        String(column.type).toUpperCase() === expected.type &&
+        Boolean(Number(column.notnull)) === expected.notNull
+      );
+    }) &&
+    String(columns.find((column) => column.name === "status")?.dflt_value ?? "")
+      .replaceAll("(", "")
+      .replaceAll(")", "") === "'queued'";
+  if (!tableMatches) {
+    throw new Error("0037 steer schema mismatch: expected the canonical _smithers_steers table shape");
+  }
+  if (!indexExists(sqlite, STEERS_QUEUED_INDEX)) return false;
+  const indexRow = sqlite
+    .query("SELECT tbl_name FROM sqlite_master WHERE type = 'index' AND name = ?")
+    .get(STEERS_QUEUED_INDEX);
+  if (indexRow?.tbl_name !== STEERS_TABLE) {
+    throw new Error("0037 steer schema mismatch: queued index name is owned by another table");
+  }
+  const indexListRow = sqlite
+    .query(`PRAGMA index_list(${quoteIdentifier(STEERS_TABLE)})`)
+    .all()
+    .find((row) => row.name === STEERS_QUEUED_INDEX);
+  const indexColumns = sqlite
+    .query(`PRAGMA index_info(${quoteIdentifier(STEERS_QUEUED_INDEX)})`)
+    .all()
+    .sort((a, b) => Number(a.seqno) - Number(b.seqno))
+    .map((row) => row.name);
+  return (
+    JSON.stringify(indexColumns) === JSON.stringify(STEERS_TABLE_SHAPE.queuedIndex) &&
+    Number(indexListRow?.unique ?? 0) === 0 &&
+    Number(indexListRow?.partial ?? 0) === 0
+  );
+}
+
+/**
+ * @param {{ query: (config: { text: string; values?: readonly unknown[] }) => Promise<{ rows?: readonly Record<string, unknown>[] }> }} pgConn
+ */
+async function steerSchemaMatchesPostgres(pgConn) {
+  if (!(await tableExistsPostgres(pgConn, STEERS_TABLE))) return false;
+  const columnsResult = await pgConn.query({
+    text: `SELECT column_name AS name, data_type, is_nullable, column_default
+           FROM information_schema.columns
+           WHERE table_schema = current_schema() AND table_name = $1
+           ORDER BY ordinal_position`,
+    values: [STEERS_TABLE],
+  });
+  const columns = columnsResult.rows ?? [];
+  const expectedColumns = Object.keys(STEERS_TABLE_SHAPE.columns);
+  if (JSON.stringify(columns.map((row) => row.name)) !== JSON.stringify(expectedColumns)) {
+    throw new Error("0037 steer schema mismatch: expected the canonical _smithers_steers columns");
+  }
+  for (const column of columns) {
+    const expected = STEERS_TABLE_SHAPE.columns[column.name];
+    const numeric = expected?.type === "INTEGER";
+    // PostgreSQL primary-key columns are reported NOT NULL even when the
+    // portable SQLite DDL does not spell NOT NULL separately.
+    const expectedNullable = column.name === "steer_id" || expected?.notNull ? "NO" : "YES";
+    if (!expected || (numeric ? column.data_type !== "bigint" : column.data_type !== "text")) {
+      throw new Error(`0037 steer schema mismatch for ${STEERS_TABLE}.${String(column.name)}`);
+    }
+    if (column.is_nullable !== expectedNullable) {
+      throw new Error(`0037 steer schema mismatch for ${STEERS_TABLE}.${String(column.name)} nullability`);
+    }
+    if (column.name === "status" && !/^'queued'(?:::text)?$/i.test(String(column.column_default ?? ""))) {
+      throw new Error(`0037 steer schema mismatch for ${STEERS_TABLE}.status default`);
+    }
+  }
+  const primaryKeyResult = await pgConn.query({
+    text: `SELECT a.attname AS name
+           FROM pg_index i
+           JOIN pg_class t ON t.oid = i.indrelid
+           JOIN pg_namespace n ON n.oid = t.relnamespace
+           JOIN unnest(i.indkey) WITH ORDINALITY keys(attnum, ord) ON true
+           JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = keys.attnum
+           WHERE n.nspname = current_schema() AND t.relname = $1 AND i.indisprimary
+           ORDER BY keys.ord`,
+    values: [STEERS_TABLE],
+  });
+  if (
+    JSON.stringify((primaryKeyResult.rows ?? []).map((row) => row.name)) !==
+    JSON.stringify(STEERS_TABLE_SHAPE.primaryKey)
+  ) {
+    throw new Error("0037 steer schema mismatch: expected steer_id primary key");
+  }
+  const namedRelationResult = await pgConn.query({
+    text: `SELECT c.relkind
+           FROM pg_class c
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname = current_schema() AND c.relname = $1`,
+    values: [STEERS_QUEUED_INDEX],
+  });
+  const namedRelation = namedRelationResult.rows?.[0];
+  if (!namedRelation) return false;
+  if (namedRelation.relkind !== "i") {
+    throw new Error("0037 steer schema mismatch: queued index name is owned by a non-index relation");
+  }
+  const indexResult = await pgConn.query({
+    text: `SELECT t.relname AS table_name, a.attname AS name, keys.ord, i.indisunique, i.indisvalid, i.indisready,
+                  (i.indpred IS NOT NULL) AS is_partial
+           FROM pg_index i
+           JOIN pg_class idx ON idx.oid = i.indexrelid
+           JOIN pg_class t ON t.oid = i.indrelid
+           JOIN pg_namespace n ON n.oid = t.relnamespace
+           JOIN unnest(i.indkey) WITH ORDINALITY keys(attnum, ord) ON true
+           JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = keys.attnum
+           WHERE n.nspname = current_schema() AND idx.relname = $1
+           ORDER BY keys.ord`,
+    values: [STEERS_QUEUED_INDEX],
+  });
+  const indexRows = indexResult.rows ?? [];
+  if (indexRows.some((row) => row.table_name !== STEERS_TABLE)) {
+    throw new Error("0037 steer schema mismatch: queued index name is owned by another table");
+  }
+  return (
+    JSON.stringify(indexRows.map((row) => row.name)) === JSON.stringify(STEERS_TABLE_SHAPE.queuedIndex) &&
+    indexRows.every(
+      (row) =>
+        row.indisunique === false && row.is_partial === false && row.indisvalid === true && row.indisready === true,
+    )
+  );
+}
+
+/**
+ * Async SQLite-compatible twin used by edge stores that do not expose the
+ * synchronous bun:sqlite catalog API.
+ * @param {{ queryAllRaw: (statement: string, params?: readonly unknown[]) => Promise<readonly Record<string, unknown>[]> }} storage
+ */
+async function steerSchemaMatchesExternalSqlite(storage) {
+  const columns = await storage.queryAllRaw(`PRAGMA table_info(${quoteIdentifier(STEERS_TABLE)})`);
+  const expectedColumns = Object.keys(STEERS_TABLE_SHAPE.columns);
+  const primaryKey = columns
+    .filter((row) => Number(row.pk) > 0)
+    .sort((a, b) => Number(a.pk) - Number(b.pk))
+    .map((row) => row.name);
+  const tableMatches =
+    JSON.stringify(columns.map((row) => row.name)) === JSON.stringify(expectedColumns) &&
+    JSON.stringify(primaryKey) === JSON.stringify(STEERS_TABLE_SHAPE.primaryKey) &&
+    columns.every((column) => {
+      const expected = STEERS_TABLE_SHAPE.columns[column.name];
+      return (
+        expected !== undefined &&
+        String(column.type).toUpperCase() === expected.type &&
+        Boolean(Number(column.notnull)) === expected.notNull
+      );
+    }) &&
+    String(columns.find((column) => column.name === "status")?.dflt_value ?? "")
+      .replaceAll("(", "")
+      .replaceAll(")", "") === "'queued'";
+  if (!tableMatches) {
+    throw new Error("0037 steer schema mismatch: expected the canonical _smithers_steers table shape");
+  }
+  const indexRows = await storage.queryAllRaw("SELECT tbl_name FROM sqlite_master WHERE type = 'index' AND name = ?", [
+    STEERS_QUEUED_INDEX,
+  ]);
+  if (indexRows.length === 0) return false;
+  if (indexRows[0]?.tbl_name !== STEERS_TABLE) {
+    throw new Error("0037 steer schema mismatch: queued index name is owned by another table");
+  }
+  const indexListRow = (await storage.queryAllRaw(`PRAGMA index_list(${quoteIdentifier(STEERS_TABLE)})`)).find(
+    (row) => row.name === STEERS_QUEUED_INDEX,
+  );
+  const indexColumns = (await storage.queryAllRaw(`PRAGMA index_info(${quoteIdentifier(STEERS_QUEUED_INDEX)})`))
+    .slice()
+    .sort((a, b) => Number(a.seqno) - Number(b.seqno))
+    .map((row) => row.name);
+  return (
+    JSON.stringify(indexColumns) === JSON.stringify(STEERS_TABLE_SHAPE.queuedIndex) &&
+    Number(indexListRow?.unique ?? 0) === 0 &&
+    Number(indexListRow?.partial ?? 0) === 0
+  );
 }
 
 const AGENT_CHECKPOINT_TABLE_SHAPES = {
@@ -2028,33 +2240,53 @@ function buildMigrations(context) {
       },
     },
     {
-      id: "0036_add_steers",
+      id: "0037_add_steers",
       name: "Add durable steer inbox table",
+      repairRecorded: true,
       checksum: checksumForStatements([
         createTableStatementFor("_smithers_steers", context.createTableStatements),
         `CREATE INDEX IF NOT EXISTS _smithers_steers_queued_idx
     ON _smithers_steers (run_id, node_id, status, created_at_ms)`,
       ]),
-      isApplied: (sqlite) => tableExists(sqlite, "_smithers_steers"),
-      isAppliedPostgres: (pgConn) => tableExistsPostgres(pgConn, "_smithers_steers"),
+      isApplied: (sqlite) => steerSchemaMatchesSqlite(sqlite),
+      isAppliedPostgres: (pgConn) => steerSchemaMatchesPostgres(pgConn),
       up: (sqlite) => {
         sqlite.run(createTableStatementFor("_smithers_steers", context.createTableStatements));
+        // Assert before creating the owned index so an unrelated same-name
+        // table is never mutated merely because CREATE TABLE was a no-op.
+        const hadIndex = indexExists(sqlite, STEERS_QUEUED_INDEX);
+        steerSchemaMatchesSqlite(sqlite);
+        if (hadIndex) sqlite.run(`DROP INDEX ${quoteIdentifier(STEERS_QUEUED_INDEX)}`);
         sqlite.run(`CREATE INDEX IF NOT EXISTS _smithers_steers_queued_idx
     ON _smithers_steers (run_id, node_id, status, created_at_ms)`);
-        return { table: "_smithers_steers" };
+        if (!steerSchemaMatchesSqlite(sqlite)) {
+          throw new Error("0037 steer schema repair did not install the canonical queued index");
+        }
+        return { table: "_smithers_steers", createdIndex: !hadIndex, rebuiltIndex: hadIndex };
       },
       upPostgres: async (pgConn) => {
         await pgConn.query({
           text: translateDdl(POSTGRES, createTableStatementFor("_smithers_steers", context.createTableStatements)),
         });
+        const hadIndex = await indexExistsPostgres(pgConn, STEERS_QUEUED_INDEX);
+        // Validate the table and any same-name index before mutating the owned
+        // index. Missing or malformed indexes on the canonical table return
+        // false and are repaired; a wrong-owner name collision throws.
+        await steerSchemaMatchesPostgres(pgConn);
+        if (hadIndex) {
+          await pgConn.query({ text: `DROP INDEX ${quoteIdentifier(STEERS_QUEUED_INDEX)}` });
+        }
         await pgConn.query({
           text: translateDdl(
             POSTGRES,
             `CREATE INDEX IF NOT EXISTS _smithers_steers_queued_idx
-    ON _smithers_steers (run_id, node_id, status, created_at_ms)`,
+            ON _smithers_steers (run_id, node_id, status, created_at_ms)`,
           ),
         });
-        return { table: "_smithers_steers" };
+        if (!(await steerSchemaMatchesPostgres(pgConn))) {
+          throw new Error("0037 steer schema repair did not install the canonical queued index");
+        }
+        return { table: "_smithers_steers", createdIndex: !hadIndex, rebuiltIndex: hadIndex };
       },
     },
     // 0034 is already the inline cancellation-attribution migration above;
@@ -2196,7 +2428,8 @@ export function runSmithersSchemaMigrations(sqlite, context) {
   sqlite.run(MIGRATION_TABLE_SQL);
   const applied = loadAppliedMigrationIds(sqlite);
   for (const migration of buildMigrations(context)) {
-    if (applied.has(migration.id) || hasMigrationRecord(sqlite, migration.id)) {
+    const alreadyAppliedInLedger = applied.has(migration.id) || hasMigrationRecord(sqlite, migration.id);
+    if (alreadyAppliedInLedger && (!migration.repairRecorded || migration.isApplied(sqlite))) {
       continue;
     }
     const details = runSqliteMigrationSpan(migration, () => {
@@ -2311,8 +2544,21 @@ export async function runSmithersSchemaInitSqliteAsync(storage, context) {
   for (const statement of SNAPSHOT_SQLITE_TRIGGERS) await storage.execute(statement);
   await storage.execute(AGENT_CHECKPOINT_ATTEMPT_DELETE_TRIGGER_SQL);
   await storage.execute(AGENT_CHECKPOINT_REF_DELETE_TRIGGER_SQL);
+  const steerIndexMatches = await steerSchemaMatchesExternalSqlite(storage);
+  if (!steerIndexMatches) {
+    const ownedIndex = await storage.queryAllRaw(
+      "SELECT 1 AS one FROM sqlite_master WHERE type = 'index' AND name = ? AND tbl_name = ?",
+      [STEERS_QUEUED_INDEX, STEERS_TABLE],
+    );
+    if (ownedIndex.length > 0) {
+      await storage.execute(`DROP INDEX ${quoteIdentifier(STEERS_QUEUED_INDEX)}`);
+    }
+  }
   for (const statement of [...context.createIndexStatements, ...EXTRA_INDEX_STATEMENTS]) {
-    await storage.execute(statement);
+  await storage.execute(statement);
+}
+  if (!(await steerSchemaMatchesExternalSqlite(storage))) {
+    throw new Error("0037 steer schema repair did not install the canonical queued index");
   }
   await assertAgentCheckpointExternalSqliteSchema(storage);
 }

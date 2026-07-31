@@ -19,26 +19,26 @@ bun packages/testing/scripts/core-campaign.mjs --herdr --watch-pack --session sm
 ## Checklist (tick while looking)
 
 ### hello
-- [ ] Workspace exists; label includes run id  
-- [ ] First tab is **cockpit** (or overview)  
-- [ ] Detail tab **hello** present  
-- [ ] Status not stuck as unknown forever after finish  
+- [ ] Workspace exists; label includes run id
+- [ ] First tab is **cockpit** (or overview)
+- [ ] Detail tab **hello** present
+- [ ] Status not stuck as unknown forever after finish
 
 ### sequence
-- [ ] Cockpit tab present  
-- [ ] Detail tabs for stages are readable (not sliver splits)  
-- [ ] After finish, can still read panes (linger / stub sleep)  
+- [ ] Cockpit tab present
+- [ ] Detail tabs for stages are readable (not sliver splits)
+- [ ] After finish, can still read panes (linger / stub sleep)
 
 ### parallel (swarm soft-pin)
-- [ ] **worker-03** (failed) is visible as its own tab  
-- [ ] Healthy **worker-01/02/04** are **not** flooding the tab bar  
-- [ ] Failed worker shows **blocked**-ish / attention in agent panel  
-- [ ] Cockpit still usable as overview home  
+- [ ] **worker-03** (failed) is visible as its own tab
+- [ ] Healthy **worker-01/02/04** are **not** flooding the tab bar
+- [ ] Failed worker shows **blocked**-ish / attention in agent panel
+- [ ] Cockpit still usable as overview home
 
 ### General
-- [ ] Focus was not constantly stolen while campaign ran (if you were typing elsewhere)  
-- [ ] Workspace list remains navigable with multiple campaign runs  
-- [ ] Nothing requires a real LLM to understand the layout  
+- [ ] Focus was not constantly stolen while campaign ran (if you were typing elsewhere)
+- [ ] Workspace list remains navigable with multiple campaign runs
+- [ ] Nothing requires a real LLM to understand the layout
 
 ## After
 

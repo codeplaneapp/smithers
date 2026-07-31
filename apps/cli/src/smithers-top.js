@@ -25,6 +25,7 @@ import {
   herdrWorkspaceLabel,
   openHerdrNodePane,
   makeHerdrStderrLogger,
+  probeCompatibleHerdr,
 } from "./herdr.js";
 
 const POLL_MS = 400;
@@ -246,10 +247,9 @@ export async function buildTopPaintInput(adapter, fleetRuns, focusIndex) {
   };
 }
 
-async function probeHerdr() {
+export async function probeHerdr(client = createHerdrClient({ logger: () => {} })) {
   try {
-    const client = createHerdrClient({ logger: () => {} });
-    return Boolean(await client.ping().catch(() => undefined));
+    return (await probeCompatibleHerdr(client)).available;
   } catch {
     return false;
   }
@@ -296,6 +296,14 @@ export async function openNodeDetail(opts) {
 
   // Reuse a live client when the supervisor already holds one (lower click latency).
   const client = opts.herdrClient ?? createHerdrClient({ logger: () => {} });
+  const compatibility = await probeCompatibleHerdr(client);
+  if (!compatibility.available) {
+    const detail =
+      !compatibility.available && compatibility.reason === "protocol_mismatch"
+        ? "herdr protocol mismatch"
+        : "herdr unavailable";
+    return { mode: "hint", message: `${detail} · ${opts.nodeId} · no pane opened` };
+  }
   const name = `smithers:${opts.runId}:${opts.nodeId}`;
   // Unique per-run tab label so a finished prior "greet" tab is not reused while
   // a new live run is open (stale linger + closeSeed races).
@@ -352,6 +360,7 @@ export async function openNodeDetail(opts) {
   const label = herdrWorkspaceLabel(wf, opts.runId);
   try {
     const opened = await openHerdrNodePane({
+      client,
       label,
       cwd: storeCwd,
       runId: opts.runId,

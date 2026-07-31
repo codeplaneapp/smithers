@@ -56,7 +56,7 @@ export type HerdrBridgeOptions = {
 
 export type HerdrBridgeClient = {
   socketPath: string;
-  ping: () => Promise<unknown>;
+  ping: (options?: { requireProtocolMatch?: boolean }) => Promise<unknown>;
   tryCall: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
 };
 
@@ -89,7 +89,7 @@ export async function tryCreateHerdrBridge(opts: HerdrBridgeOptions): Promise<He
     session: opts.session,
     logger: () => {},
   });
-  const pong = await client.ping().catch(() => undefined);
+  const pong = await client.ping({ requireProtocolMatch: true }).catch(() => undefined);
   if (!pong) {
     log("warn", `no herdr server at ${client.socketPath}; running without mirror`);
     return null;
@@ -365,7 +365,7 @@ export async function tryOpenHerdrClient(opts?: { session?: string }): Promise<H
     session: opts?.session,
     logger: () => {},
   });
-  const pong = await client.ping().catch(() => undefined);
+  const pong = await client.ping({ requireProtocolMatch: true }).catch(() => undefined);
   if (!pong) return null;
   return client as HerdrBridgeClient;
 }
