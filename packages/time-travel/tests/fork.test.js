@@ -8,8 +8,10 @@ import { createHash } from "node:crypto";
 import { captureSnapshot } from "../src/snapshot/index.js";
 import { forkRun, listBranches, getBranchInfo } from "../src/fork/index.js";
 import { parseSnapshot, loadSnapshot } from "../src/snapshot/index.js";
+import { parseAgentCheckpointSnapshot } from "../src/snapshot/agentCheckpointSnapshot.js";
 import { resolveForkAgentState } from "../../engine/src/resolveForkSessionMessages.js";
 import { acquireRewindLock } from "../src/acquireRewindLock.js";
+import { jumpToFrame } from "../src/jumpToFrame.js";
 function createTestDb() {
   const sqlite = new Database(":memory:");
   const db = drizzle(sqlite);
@@ -176,6 +178,14 @@ describe("forkRun", () => {
   });
   test("inherits completed checkpoints while reset nodes start fresh with parent-deletion safety", async () => {
     const { adapter } = createTestDb();
+    await adapter.insertRun({
+      runId: "parent-checkpoints",
+      workflowName: "checkpoint-parent",
+      status: "finished",
+      createdAtMs: 1,
+      startedAtMs: 2,
+      finishedAtMs: 300,
+    });
     const hashes = {};
     for (const [nodeId, attempt] of [
       ["analyze", 1],
@@ -226,6 +236,7 @@ describe("forkRun", () => {
       "parent-checkpoints",
       7,
       sampleData({
+        outputs: {},
         nodes: [
           {
             nodeId: "analyze",
@@ -271,9 +282,79 @@ describe("forkRun", () => {
         },
       });
     }
-    const childSnapshot = parseSnapshot(await loadSnapshot(adapter, result.runId, 0));
+    const childSnapshotRow = await loadSnapshot(adapter, result.runId, 0);
+    const childSnapshot = parseSnapshot(childSnapshotRow);
     expect(childSnapshot.nodes["analyze::0"].state).toBe("finished");
     expect(childSnapshot.nodes["implement::0"]).toMatchObject({ state: "pending", lastAttempt: null });
+    const childCheckpointSnapshot = parseAgentCheckpointSnapshot(
+      JSON.parse(childSnapshotRow.outputsJson),
+      JSON.parse(childSnapshotRow.nodesJson),
+      childSnapshotRow.createdAtMs,
+    );
+    expect(childCheckpointSnapshot.provenance.attempts.map((tuple) => tuple.slice(0, 3))).toEqual([["analyze", 0, 1]]);
+    expect([...childCheckpointSnapshot.horizons.keys()]).toEqual([JSON.stringify(["analyze", 0, 1])]);
+
+    // The projected frame must itself remain a valid source for another fork.
+    const grandchild = await forkRun(adapter, { parentRunId: result.runId, frameNo: 0 });
+    expect((await adapter.listAgentCheckpointRefs(grandchild.runId)).map((ref) => ref.contentHash)).toEqual([
+      hashes.analyze,
+    ]);
+
+    // A later child attempt can also be rewound to the projected frame 0.
+    // This exercises strict metadata parsing and exact attempt restoration in
+    // the destructive path, not only when frame 0 is used as another fork.
+    await adapter.insertFrame({
+      runId: result.runId,
+      frameNo: 0,
+      createdAtMs: childSnapshotRow.createdAtMs,
+      xmlJson: JSON.stringify({ kind: "element", tag: "smithers:workflow", props: {} }),
+      xmlHash: "child-frame-0",
+      mountedTaskIdsJson: "[]",
+      taskIndexJson: "[]",
+      note: "fork frame",
+    });
+    await adapter.insertFrame({
+      runId: result.runId,
+      frameNo: 1,
+      createdAtMs: childSnapshotRow.createdAtMs + 1,
+      xmlJson: JSON.stringify({ kind: "element", tag: "smithers:workflow", props: { frame: 1 } }),
+      xmlHash: "child-frame-1",
+      mountedTaskIdsJson: "[]",
+      taskIndexJson: "[]",
+      note: "later frame",
+    });
+    await adapter.insertNode({
+      runId: result.runId,
+      nodeId: "analyze",
+      iteration: 0,
+      state: "failed",
+      lastAttempt: 2,
+      updatedAtMs: childSnapshotRow.createdAtMs + 1,
+      outputTable: "out_analyze",
+      label: null,
+    });
+    await adapter.insertAttempt({
+      runId: result.runId,
+      nodeId: "analyze",
+      iteration: 0,
+      attempt: 2,
+      state: "failed",
+      startedAtMs: childSnapshotRow.createdAtMs + 1,
+      finishedAtMs: childSnapshotRow.createdAtMs + 1,
+      cached: false,
+    });
+    await jumpToFrame({
+      adapter,
+      runId: result.runId,
+      frameNo: 0,
+      confirm: true,
+      getCurrentPointerImpl: async () => null,
+      revertToPointerImpl: async () => ({ success: true }),
+    });
+    expect((await adapter.listAttempts(result.runId, "analyze", 0)).map((attempt) => attempt.attempt)).toEqual([1]);
+    expect((await adapter.listAgentCheckpointRefs(result.runId)).map((ref) => ref.contentHash)).toEqual([
+      hashes.analyze,
+    ]);
 
     await adapter.internalStorage.deleteWhere("_smithers_attempts", "run_id = ?", ["parent-checkpoints"]);
     await adapter.pruneOrphanedAgentCheckpointContents();
@@ -518,25 +599,68 @@ describe("forkRun", () => {
     delete legacyOutputs.__smithersAgentCheckpointHorizons;
     delete legacyOutputs.__smithersAgentCheckpointProvenance;
     sqlite
-      .query(
-        `UPDATE _smithers_snapshots
-            SET nodes_json = ?, outputs_json = ?, ralph_json = ?, input_json = ?, content_hash = ?
-          WHERE run_id = ? AND frame_no = ?`,
-      )
-      .run(
-        snapshot.nodesJson,
-        JSON.stringify(legacyOutputs),
-        snapshot.ralphJson,
-        snapshot.inputJson,
-        "legacy-inline",
-        runId,
-        2,
-      );
+      .query("UPDATE _smithers_snapshot_contents SET outputs_json = ? WHERE content_hash = ?")
+      .run(JSON.stringify(legacyOutputs), snapshot.contentHash);
     await insertCheckpoint(1, "future", snapshot.createdAtMs + 1);
 
     const result = await forkRun(adapter, { parentRunId: runId, frameNo: 2 });
 
     expect((await adapter.listAgentCheckpointRefs(result.runId)).map((ref) => ref.contentHash)).toEqual([retainedHash]);
+  });
+  test("does not copy a reused attempt key newer than a legacy snapshot", async () => {
+    const { adapter, sqlite } = createTestDb();
+    const runId = "parent-attempt-legacy";
+    await adapter.insertAttempt({
+      runId,
+      nodeId: "analyze",
+      iteration: 0,
+      attempt: 1,
+      state: "finished",
+      startedAtMs: 100,
+      finishedAtMs: 200,
+      cached: false,
+      responseText: "snapshot generation",
+    });
+    const snapshot = await captureSnapshot(adapter, runId, 2, sampleData());
+    const legacyOutputs = JSON.parse(snapshot.outputsJson);
+    delete legacyOutputs.__smithersAgentCheckpointHorizons;
+    delete legacyOutputs.__smithersAgentCheckpointProvenance;
+    sqlite
+      .query("UPDATE _smithers_snapshot_contents SET outputs_json = ? WHERE content_hash = ?")
+      .run(JSON.stringify(legacyOutputs), snapshot.contentHash);
+    await adapter.internalStorage.deleteWhere(
+      "_smithers_attempts",
+      "run_id = ? AND node_id = ? AND iteration = ? AND attempt = ?",
+      [runId, "analyze", 0, 1],
+    );
+    await adapter.insertAttempt({
+      runId,
+      nodeId: "analyze",
+      iteration: 0,
+      attempt: 1,
+      state: "failed",
+      startedAtMs: snapshot.createdAtMs + 1,
+      finishedAtMs: snapshot.createdAtMs + 2,
+      cached: false,
+      responseText: "replacement generation",
+    });
+
+    const result = await forkRun(adapter, { parentRunId: runId, frameNo: 2 });
+    expect(await adapter.listAttemptsForRun(result.runId)).toEqual([]);
+  });
+  test("fails closed on malformed present provenance before creating a child", async () => {
+    const { adapter, sqlite } = createTestDb();
+    const snapshot = await captureSnapshot(adapter, "parent-malformed-checkpoint", 2, sampleData());
+    const outputs = JSON.parse(snapshot.outputsJson);
+    outputs.__smithersAgentCheckpointProvenance = { version: 1, attempts: [], checkpoints: "corrupt" };
+    sqlite
+      .query("UPDATE _smithers_snapshot_contents SET outputs_json = ? WHERE content_hash = ?")
+      .run(JSON.stringify(outputs), snapshot.contentHash);
+
+    await expect(forkRun(adapter, { parentRunId: "parent-malformed-checkpoint", frameNo: 2 })).rejects.toThrow(
+      /provenance envelope is corrupt/,
+    );
+    expect(await listBranches(adapter, "parent-malformed-checkpoint")).toEqual([]);
   });
   test("records branch label and description", async () => {
     const { adapter } = createTestDb();

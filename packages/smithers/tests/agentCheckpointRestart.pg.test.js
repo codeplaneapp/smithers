@@ -47,7 +47,7 @@ afterEach(() => {
 
 function spawnEngine(connectionString, mode, markerDir) {
   const readyPath = join(markerDir, `${mode}-process-ready`);
-  const child = spawn(process.execPath, ["run", CHILD, connectionString, RUN_ID, mode, markerDir, "60000", readyPath], {
+  const child = spawn(process.execPath, ["run", CHILD, connectionString, RUN_ID, mode, markerDir, readyPath], {
     detached: process.platform !== "win32",
     stdio: ["ignore", "pipe", "pipe"],
   });

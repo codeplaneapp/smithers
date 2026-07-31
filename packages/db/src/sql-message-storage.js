@@ -115,7 +115,7 @@ const CREATE_TABLE_STATEMENTS = [
     PRIMARY KEY (run_id, node_id, iteration, attempt)
   )`,
   `CREATE TABLE IF NOT EXISTS _smithers_agent_checkpoint_contents (
-    content_hash TEXT PRIMARY KEY,
+    content_hash TEXT NOT NULL PRIMARY KEY,
     checkpoint_json TEXT NOT NULL,
     size_bytes INTEGER NOT NULL,
     created_at_ms INTEGER NOT NULL

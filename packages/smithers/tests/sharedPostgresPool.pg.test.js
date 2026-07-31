@@ -113,6 +113,38 @@ pgTest("many workflow registrations against one URL stay inside one bounded pool
   });
 });
 
+pgTest("concurrent pooled initializers serialize schema migration and release its advisory lock", async () => {
+  await withTempPostgresDatabase(async (connectionString) => {
+    const backends = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        createSmithersPostgres({}, { provider: "postgres", connectionString, postgresPoolMax: 4 }),
+      ),
+    );
+    cleanups.push(async () => {
+      for (const backend of backends) await backend.close().catch(() => {});
+    });
+
+    expect(sharedPostgresPoolCount()).toBe(1);
+    const trigger = await backends[0].db.connection.query({
+      text: `SELECT count(*)::int AS count
+               FROM information_schema.triggers
+              WHERE trigger_schema = current_schema()
+                AND trigger_name = '_smithers_agent_checkpoint_refs_delete'`,
+    });
+    expect(trigger.rows).toEqual([{ count: 1 }]);
+    const locks = await backends[0].db.connection.query({
+      text: `SELECT count(*)::int AS count
+               FROM pg_locks
+              WHERE locktype = 'advisory'
+                AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`,
+    });
+    expect(locks.rows).toEqual([{ count: 0 }]);
+
+    for (const backend of backends) await backend.close();
+    expect(sharedPostgresPoolCount()).toBe(0);
+  });
+});
+
 pgTest("a real transaction stays pinned to one connection while pooled queries run beside it", async () => {
   await withTempPostgresDatabase(async (connectionString) => {
     const first = await acquireSharedPostgresPool({ pg: await loadPg(), connectionString, max: 4 });

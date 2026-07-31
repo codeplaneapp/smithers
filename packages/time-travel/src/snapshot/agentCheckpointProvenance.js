@@ -8,6 +8,8 @@ export const MAX_SNAPSHOT_CHECKPOINT_ATTEMPT_BYTES = 16 * 1024 * 1024;
 export const MAX_SNAPSHOT_CHECKPOINT_ATTEMPTS = 100_000;
 export const MAX_SNAPSHOT_CHECKPOINT_REFS = 100_000;
 
+const ATTEMPT_TEXT_TUPLE_INDEXES = [7, 8, 9, 11, 12, 13];
+
 function assertWithinLimit(value, limit, label) {
   if (!Number.isSafeInteger(value) || value < 0 || value > limit) {
     throw new Error(`Snapshot agent checkpoint ${label} exceeds limit ${limit}`);
@@ -23,7 +25,8 @@ function assertWithinLimit(value, limit, label) {
  * avoiding repeated object keys for potentially large histories.
  */
 export async function captureAgentCheckpointProvenance(adapter, runId, nodes) {
-  const targets = nodes
+  const targetMap = new Map();
+  for (const node of nodes
     .filter(
       (node) =>
         node &&
@@ -32,7 +35,10 @@ export async function captureAgentCheckpointProvenance(adapter, runId, nodes) {
         Number.isInteger(node.lastAttempt) &&
         node.lastAttempt >= 0,
     )
-    .map((node) => [node.nodeId, node.iteration, node.lastAttempt]);
+    .map((node) => [node.nodeId, node.iteration, node.lastAttempt])) {
+    targetMap.set(JSON.stringify(node.slice(0, 2)), node);
+  }
+  const targets = [...targetMap.values()];
   const attempts = [];
   const checkpoints = [];
   const horizonRows = [];
@@ -125,7 +131,9 @@ export async function captureAgentCheckpointProvenance(adapter, runId, nodes) {
           AND target.iteration = attempt.iteration
         WHERE attempt.run_id = ?
           AND attempt.attempt <= target.last_attempt
-        ORDER BY attempt.node_id, attempt.iteration, attempt.attempt`,
+        ORDER BY attempt.node_id, attempt.iteration, attempt.attempt${
+          adapter.internalStorage.dialect === "postgres" ? " FOR SHARE OF attempt" : ""
+        }`,
       params,
       { booleanColumns: ["cached"] },
     );
@@ -159,7 +167,9 @@ export async function captureAgentCheckpointProvenance(adapter, runId, nodes) {
          JOIN _smithers_agent_checkpoint_contents content
            ON content.content_hash = checkpoint.content_hash
         WHERE checkpoint.run_id = ?
-        ORDER BY checkpoint.node_id, checkpoint.iteration, checkpoint.attempt, checkpoint.sequence`,
+        ORDER BY checkpoint.node_id, checkpoint.iteration, checkpoint.attempt, checkpoint.sequence${
+          adapter.internalStorage.dialect === "postgres" ? " FOR SHARE OF checkpoint, content" : ""
+        }`,
       params,
     );
     const sequences = new Map();
@@ -210,14 +220,26 @@ export async function captureAgentCheckpointProvenance(adapter, runId, nodes) {
     MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES,
     "encoded bytes",
   );
-  return {
+  const captured = {
     horizons: { version: 1, attempts: horizonRows },
     provenance,
   };
+  // Revalidate the materialized rows, not only the aggregate preflight. This
+  // closes races between the stats and row reads and keeps capture and parse
+  // limits symmetric.
+  parseAgentCheckpointProvenance({ __smithersAgentCheckpointProvenance: provenance });
+  return captured;
 }
 
 /** @param {unknown} outputs */
 export function parseAgentCheckpointProvenance(outputs) {
+  if (
+    !outputs ||
+    typeof outputs !== "object" ||
+    !Object.prototype.hasOwnProperty.call(outputs, "__smithersAgentCheckpointProvenance")
+  ) {
+    return null;
+  }
   const encoded = outputs?.__smithersAgentCheckpointProvenance;
   if (
     !encoded ||
@@ -225,8 +247,9 @@ export function parseAgentCheckpointProvenance(outputs) {
     encoded.version !== PROVENANCE_VERSION ||
     !Array.isArray(encoded.attempts) ||
     !Array.isArray(encoded.checkpoints)
-  )
-    return null;
+  ) {
+    throw new Error("Snapshot agent checkpoint provenance envelope is corrupt");
+  }
   assertWithinLimit(encoded.attempts.length, MAX_SNAPSHOT_CHECKPOINT_ATTEMPTS, "attempt count");
   assertWithinLimit(encoded.checkpoints.length, MAX_SNAPSHOT_CHECKPOINT_REFS, "reference count");
   assertWithinLimit(
@@ -234,6 +257,8 @@ export function parseAgentCheckpointProvenance(outputs) {
     MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES,
     "encoded bytes",
   );
+  const attemptKeys = new Set();
+  let attemptBytes = 0;
   for (const tuple of encoded.attempts) {
     if (
       !Array.isArray(tuple) ||
@@ -257,8 +282,22 @@ export function parseAgentCheckpointProvenance(outputs) {
     ) {
       throw new Error("Snapshot agent checkpoint attempt provenance is corrupt");
     }
+    const key = JSON.stringify(tuple.slice(0, 3));
+    if (attemptKeys.has(key)) {
+      throw new Error(`Snapshot agent checkpoint attempt provenance has duplicate key ${key}`);
+    }
+    attemptKeys.add(key);
+    const tupleBytes = ATTEMPT_TEXT_TUPLE_INDEXES.reduce(
+      (total, index) => total + (typeof tuple[index] === "string" ? Buffer.byteLength(tuple[index], "utf8") : 0),
+      0,
+    );
+    assertWithinLimit(tupleBytes, MAX_SNAPSHOT_CHECKPOINT_ATTEMPT_BYTES, "attempt text size");
+    attemptBytes += tupleBytes;
+    assertWithinLimit(attemptBytes, MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES, "attempt text bytes");
   }
   let checkpointBytes = 0;
+  const checkpointKeys = new Set();
+  const contents = new Map();
   for (const tuple of encoded.checkpoints) {
     if (
       !Array.isArray(tuple) ||
@@ -292,8 +331,24 @@ export function parseAgentCheckpointProvenance(outputs) {
     ) {
       throw new Error(`Snapshot agent checkpoint content is corrupt: ${tuple[4]}`);
     }
+    const attemptKey = JSON.stringify(tuple.slice(0, 3));
+    if (!attemptKeys.has(attemptKey)) {
+      throw new Error(`Snapshot agent checkpoint reference has no attempt provenance: ${attemptKey}`);
+    }
+    const checkpointKey = JSON.stringify(tuple.slice(0, 4));
+    if (checkpointKeys.has(checkpointKey)) {
+      throw new Error(`Snapshot agent checkpoint reference provenance has duplicate key ${checkpointKey}`);
+    }
+    checkpointKeys.add(checkpointKey);
+    const contentMetadata = JSON.stringify([tuple[10], tuple[11], tuple[12]]);
+    const priorContentMetadata = contents.get(tuple[4]);
+    if (priorContentMetadata !== undefined && priorContentMetadata !== contentMetadata) {
+      throw new Error(`Snapshot agent checkpoint content metadata conflicts for ${tuple[4]}`);
+    }
+    contents.set(tuple[4], contentMetadata);
     checkpointBytes += sizeBytes;
     assertWithinLimit(checkpointBytes, MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES, "content bytes");
+    assertWithinLimit(attemptBytes + checkpointBytes, MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES, "materialized bytes");
   }
   return encoded;
 }

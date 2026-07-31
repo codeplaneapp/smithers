@@ -446,7 +446,7 @@ export async function timeTravel(adapter, opts) {
                 if (attempt.state === "cancelled") continue;
                 const patch = {
                   state: "cancelled",
-                  metaJson: markResetCancelledMeta(attempt.metaJson),
+                  metaJson: markResetCancelledMeta(attempt.metaJson, childResetAtMs),
                 };
                 if (attempt.finishedAtMs == null) patch.finishedAtMs = childResetAtMs;
                 yield* adapter.updateAttempt(plan.runId, childNode.nodeId, childIteration, attempt.attempt, patch);
@@ -472,6 +472,7 @@ export async function timeTravel(adapter, opts) {
               errorJson: null,
             });
           }
+          const targetResetAtMs = nowMs();
           for (const resetNode of resetNodes) {
             const attemptsForNode = attemptsByNode.get(nodeKey(resetNode.nodeId, resetNode.iteration ?? 0)) ?? [];
             for (const attempt of attemptsForNode) {
@@ -480,10 +481,10 @@ export async function timeTravel(adapter, opts) {
               }
               const patch = {
                 state: "cancelled",
-                metaJson: markResetCancelledMeta(attempt.metaJson),
+                metaJson: markResetCancelledMeta(attempt.metaJson, targetResetAtMs),
               };
               if (attempt.finishedAtMs == null) {
-                patch.finishedAtMs = nowMs();
+                patch.finishedAtMs = targetResetAtMs;
               }
               yield* adapter.updateAttempt(runId, resetNode.nodeId, resetNode.iteration ?? 0, attempt.attempt, patch);
             }

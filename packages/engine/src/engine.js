@@ -496,6 +496,7 @@ function parseAttemptMetaJson(metaJson) {
  * literal is duplicated deliberately, like other cross-package wire constants.
  */
 const RESET_CANCELLED_META_KEY = "resetCancelled";
+const RESET_RESUME_BOUNDARY_META_KEY = "resetResumeBoundaryMs";
 /**
  * A reset-cancelled attempt is one a time-travel reset deliberately voided so the
  * node re-runs from attempt 1. Ordinary crash-recovery cancellations (engine
@@ -519,6 +520,56 @@ function isResetCancelledAttempt(attempt) {
 function nextAttemptNumber(attempts) {
   const countedAttempts = attempts.filter((attempt) => !isResetCancelledAttempt(attempt));
   return (countedAttempts[0]?.attempt ?? 0) + 1;
+}
+
+/**
+ * Return the only attempt history eligible to supply heartbeat/session state.
+ * Attempt numbers can be reused after reset, so chronological order—not a
+ * stale higher attempt number—is authoritative. Legacy reset rows have no
+ * reconstructable wall-clock boundary and therefore remain fail-closed.
+ *
+ * @param {ReadonlyArray<{ attempt: number, state?: string | null, startedAtMs?: number | null, metaJson?: string | null }>} attempts
+ */
+function resumeEligibleAttempts(attempts) {
+  let resetBoundaryMs = null;
+  for (const attempt of attempts) {
+    if (!isResetCancelledAttempt(attempt)) continue;
+    const explicitBoundary = Number(parseAttemptMetaJson(attempt.metaJson)[RESET_RESUME_BOUNDARY_META_KEY]);
+    if (!Number.isSafeInteger(explicitBoundary) || explicitBoundary < 0) return [];
+    resetBoundaryMs = resetBoundaryMs === null ? explicitBoundary : Math.max(resetBoundaryMs, explicitBoundary);
+  }
+  return attempts
+    .filter((attempt) => {
+      if (isResetCancelledAttempt(attempt)) return false;
+      if (resetBoundaryMs === null) return true;
+      const startedAtMs = Number(attempt.startedAtMs);
+      return Number.isFinite(startedAtMs) && startedAtMs >= resetBoundaryMs;
+    })
+    .toSorted((left, right) => {
+      const timeDelta = Number(right.startedAtMs ?? 0) - Number(left.startedAtMs ?? 0);
+      return timeDelta || Number(right.attempt ?? 0) - Number(left.attempt ?? 0);
+    });
+}
+/**
+ * Decide whether pre-existing agent resume state is unusable for this task
+ * start. Explicit agent failures apply chronologically. A deliberate reset
+ * creates a one-shot boundary: it vetoes old heartbeat/session state before
+ * the first fresh attempt, then stops affecting retries of that fresh attempt.
+ *
+ * @param {ReadonlyArray<{ attempt: number, state?: string | null, startedAtMs?: number | null, finishedAtMs?: number | null, metaJson?: string | null }>} attempts
+ * @returns {boolean}
+ */
+function shouldDiscardResumeSession(attempts) {
+  const hasReset = attempts.some(isResetCancelledAttempt);
+  const eligibleAttempts = resumeEligibleAttempts(attempts);
+  if (hasReset && eligibleAttempts.length === 0) return true;
+
+  const newestRelevantAttempt = eligibleAttempts
+    .filter(
+      (attempt) => attempt.state === "failed" || parseAttemptMetaJson(attempt.metaJson).discardResumeSession === true,
+    )
+    .at(0);
+  return parseAttemptMetaJson(newestRelevantAttempt?.metaJson).discardResumeSession === true;
 }
 /**
  * @param {unknown} value
@@ -4411,17 +4462,18 @@ async function legacyExecuteTask(
 ) {
   const taskStartMs = performance.now();
   const attempts = await Effect.runPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
+  const resumeAttempts = resumeEligibleAttempts(attempts);
   const maxSchemaRetries =
     Number.isSafeInteger(desc.maxSchemaRetries) && desc.maxSchemaRetries >= 0 ? desc.maxSchemaRetries : 3;
   const previousHeartbeat = (() => {
-    for (const attempt of attempts) {
+    for (const attempt of resumeAttempts) {
       const parsed = parseAttemptHeartbeatData(attempt.heartbeatDataJson);
       if (parsed !== null) return parsed;
     }
     return null;
   })();
   const previousHeartbeatJson = (() => {
-    for (const attempt of attempts) {
+    for (const attempt of resumeAttempts) {
       if (typeof attempt.heartbeatDataJson === "string" && attempt.heartbeatDataJson.length > 0) {
         return attempt.heartbeatDataJson;
       }
@@ -5498,20 +5550,14 @@ async function legacyExecuteTask(
         // reproduces the crash), don't reuse the captured agentResume
         // from the heartbeat. Forces the agent to start a fresh
         // session on the next attempt.
-        // Also match reset-cancelled attempts: retry-task flips failed
-        // attempts to "cancelled" but preserves their meta, and the
-        // poisoned heartbeat checkpoint survives the reset — losing the
-        // flag here would resume the corrupt session with a clean-looking
-        // attempt history.
-        const lastFailedAttempt = attempts.find(
-          (a) => a.state === "failed" || parseAttemptMetaJson(a.metaJson)?.discardResumeSession === true,
-        );
-        const lastFailedMeta = parseAttemptMetaJson(lastFailedAttempt?.metaJson);
-        const discardResumeSession = lastFailedMeta?.discardResumeSession === true;
+        // A reset is a one-shot chronological boundary: suppress stale resume
+        // state for the first fresh execution, without allowing old reset rows
+        // with higher attempt numbers to poison later retries.
+        const discardResumeSession = shouldDiscardResumeSession(attempts);
         const resetAttempts = new Set(
           attempts.filter(isResetCancelledAttempt).map((attempt) => `${attempt.iteration}:${attempt.attempt}`),
         );
-        const checkpointDiscardAttempt = attempts.find(
+        const checkpointDiscardAttempt = resumeAttempts.find(
           (attempt) =>
             !resetAttempts.has(`${attempt.iteration}:${attempt.attempt}`) &&
             parseAttemptMetaJson(attempt.metaJson)?.discardAgentCheckpoint === true,
@@ -5592,7 +5638,7 @@ async function legacyExecuteTask(
             : undefined;
         const priorContinuation =
           !discardResumeSession && hijackCapableEngine
-            ? findHijackContinuation(attempts, hijackCapableEngine)
+            ? findHijackContinuation(resumeAttempts, hijackCapableEngine)
             : undefined;
         // discardResumeSession must also veto the hijack-continuation
         // path: the corrupt session id lives in prior attempt meta, so
@@ -5618,7 +5664,7 @@ async function legacyExecuteTask(
           !discardResumeSession &&
           heartbeatCheckpointUsable &&
           typeof heartbeatCheckpoint?.agentEngine === "string" &&
-          attempts.length > 0;
+          resumeAttempts.length > 0;
         const resumeMessages =
           priorContinuation?.mode === "conversation"
             ? (cloneJsonValue(priorContinuation.messages) ?? priorContinuation.messages)
@@ -10395,6 +10441,8 @@ export const __engineInternals = {
   isStructuredOutputParseFailure,
   isResetCancelledAttempt,
   nextAttemptNumber,
+  resumeEligibleAttempts,
+  shouldDiscardResumeSession,
   depsTextAccessHint,
   makeStructuredOutputCompatibilityError,
   makePlainTextOutputError,

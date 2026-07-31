@@ -50,6 +50,10 @@ const AGENT_CHECKPOINT_REF_DELETE_TRIGGER_SQL = `CREATE TRIGGER IF NOT EXISTS _s
 const AGENT_CHECKPOINT_POSTGRES_REF_DELETE_TRIGGER_SQL = `CREATE OR REPLACE FUNCTION _smithers_delete_orphan_agent_checkpoint_content()
   RETURNS TRIGGER LANGUAGE plpgsql AS $$
   BEGIN
+    PERFORM 1
+    FROM _smithers_agent_checkpoint_contents contents
+    WHERE contents.content_hash = OLD.content_hash
+    FOR UPDATE;
     DELETE FROM _smithers_agent_checkpoint_contents contents
     WHERE contents.content_hash = OLD.content_hash
       AND NOT EXISTS (
@@ -59,6 +63,10 @@ const AGENT_CHECKPOINT_POSTGRES_REF_DELETE_TRIGGER_SQL = `CREATE OR REPLACE FUNC
     RETURN OLD;
   END
   $$`;
+
+const AGENT_CHECKPOINT_POSTGRES_REF_DELETE_TRIGGER_DDL = `CREATE OR REPLACE TRIGGER _smithers_agent_checkpoint_refs_delete
+  AFTER DELETE ON _smithers_agent_checkpoints
+  FOR EACH ROW EXECUTE FUNCTION _smithers_delete_orphan_agent_checkpoint_content()`;
 
 const RUN_CANCELLATION_ATTRIBUTION_COLUMNS = [
   ["cancel_request_id", "cancel_request_id TEXT"],
@@ -326,9 +334,7 @@ function indexExists(sqlite, index) {
 const AGENT_CHECKPOINT_TABLE_SHAPES = {
   _smithers_agent_checkpoint_contents: {
     columns: {
-      // SQLite's canonical `TEXT PRIMARY KEY` reports notnull=0 even though
-      // the primary key itself rejects NULL identity values.
-      content_hash: { type: "TEXT", nullable: true },
+      content_hash: { type: "TEXT", nullable: false },
       checkpoint_json: { type: "TEXT", nullable: false },
       size_bytes: { type: "INTEGER", nullable: false },
       created_at_ms: { type: "INTEGER", nullable: false },
@@ -665,9 +671,10 @@ async function assertAgentCheckpointPostgresSchema(pgConn) {
       const numeric = ["iteration", "attempt", "sequence", "version", "size_bytes", "created_at_ms"].includes(
         column.name,
       );
+      const expectedNullable = column.name === "agent_id" ? "YES" : "NO";
       if (
         (numeric ? column.data_type !== "bigint" : column.data_type !== "text") ||
-        (column.name !== "agent_id" && column.is_nullable !== "NO")
+        column.is_nullable !== expectedNullable
       ) {
         throw new Error(`0037 agent checkpoint schema mismatch for ${table}.${column.name}`);
       }
@@ -2114,14 +2121,7 @@ function buildMigrations(context) {
           text: "CREATE INDEX IF NOT EXISTS _smithers_agent_checkpoints_content_hash_idx ON _smithers_agent_checkpoints (content_hash)",
         });
         await pgConn.query({ text: AGENT_CHECKPOINT_POSTGRES_REF_DELETE_TRIGGER_SQL });
-        await pgConn.query({
-          text: "DROP TRIGGER IF EXISTS _smithers_agent_checkpoint_refs_delete ON _smithers_agent_checkpoints",
-        });
-        await pgConn.query({
-          text: `CREATE TRIGGER _smithers_agent_checkpoint_refs_delete
-                 AFTER DELETE ON _smithers_agent_checkpoints
-                 FOR EACH ROW EXECUTE FUNCTION _smithers_delete_orphan_agent_checkpoint_content()`,
-        });
+        await pgConn.query({ text: AGENT_CHECKPOINT_POSTGRES_REF_DELETE_TRIGGER_DDL });
         await assertAgentCheckpointPostgresSchema(pgConn);
         return { tables: ["_smithers_agent_checkpoint_contents", "_smithers_agent_checkpoints"] };
       },
@@ -2322,45 +2322,49 @@ async function runPostgresMigrationSpan(migration, run) {
  * @returns {Promise<void>}
  */
 export async function runSmithersSchemaMigrationsPostgres(pgConn, context) {
-  await pgConn.query({ text: translateDdl(POSTGRES, MIGRATION_TABLE_SQL) });
-  const applied = await loadAppliedMigrationIdsPostgres(pgConn);
-  for (const migration of buildMigrations(context)) {
-    const alreadyAppliedInLedger = applied.has(migration.id);
-    if (alreadyAppliedInLedger && migration.isAppliedPostgres && (await migration.isAppliedPostgres(pgConn))) {
-      continue;
-    }
-    const details = await runPostgresMigrationSpan(migration, async () => {
-      await pgConn.query({ text: "BEGIN" });
-      try {
+  // PostgreSQL's idempotent DDL is not concurrency-safe by itself: two
+  // sessions can both observe a missing object and race in the system catalogs
+  // (for example CREATE OR REPLACE TRIGGER can raise "tuple concurrently
+  // updated"). BEGIN first so Smithers' shared pool pins one physical session,
+  // then hold a database/schema-scoped transaction lock across discovery,
+  // migrations, and lifecycle-trigger repair. Commit/rollback releases both
+  // the lock and the pool pin; independent databases/schemas remain independent.
+  const lockKey = "hashtext(current_database()), hashtext(COALESCE(current_schema(), '') || ':smithers:schema')";
+  const completed = [];
+  await pgConn.query({ text: "BEGIN" });
+  try {
+    await pgConn.query({ text: `SELECT pg_advisory_xact_lock(${lockKey})` });
+    await pgConn.query({ text: translateDdl(POSTGRES, MIGRATION_TABLE_SQL) });
+    const applied = await loadAppliedMigrationIdsPostgres(pgConn);
+    for (const migration of buildMigrations(context)) {
+      const alreadyAppliedInLedger = applied.has(migration.id);
+      if (alreadyAppliedInLedger && migration.isAppliedPostgres && (await migration.isAppliedPostgres(pgConn))) {
+        continue;
+      }
+      const details = await runPostgresMigrationSpan(migration, async () => {
         const alreadyApplied = migration.isAppliedPostgres ? await migration.isAppliedPostgres(pgConn) : false;
         const nextDetails = alreadyApplied
           ? { skipped: "schema_already_matches" }
           : await migration.upPostgres?.(pgConn);
         await recordMigrationPostgres(pgConn, migration, nextDetails);
-        await pgConn.query({ text: "COMMIT" });
         return nextDetails;
-      } catch (error) {
-        try {
-          await pgConn.query({ text: "ROLLBACK" });
-        } catch {
-          // Preserve the original migration failure.
-        }
-        throw error;
-      }
-    });
-    logDestructiveMigration(migration, details);
-    applied.add(migration.id);
+      });
+      completed.push([migration, details]);
+      applied.add(migration.id);
+    }
+    await pgConn.query({ text: AGENT_CHECKPOINT_POSTGRES_REF_DELETE_TRIGGER_SQL });
+    await pgConn.query({ text: AGENT_CHECKPOINT_POSTGRES_REF_DELETE_TRIGGER_DDL });
+    await assertAgentCheckpointPostgresSchema(pgConn);
+    await pgConn.query({ text: "COMMIT" });
+  } catch (error) {
+    try {
+      await pgConn.query({ text: "ROLLBACK" });
+    } catch {
+      // Preserve the original migration failure.
+    }
+    throw error;
   }
-  await pgConn.query({ text: AGENT_CHECKPOINT_POSTGRES_REF_DELETE_TRIGGER_SQL });
-  await pgConn.query({
-    text: "DROP TRIGGER IF EXISTS _smithers_agent_checkpoint_refs_delete ON _smithers_agent_checkpoints",
-  });
-  await pgConn.query({
-    text: `CREATE TRIGGER _smithers_agent_checkpoint_refs_delete
-           AFTER DELETE ON _smithers_agent_checkpoints
-           FOR EACH ROW EXECUTE FUNCTION _smithers_delete_orphan_agent_checkpoint_content()`,
-  });
-  await assertAgentCheckpointPostgresSchema(pgConn);
+  for (const [migration, details] of completed) logDestructiveMigration(migration, details);
 }
 
 /**

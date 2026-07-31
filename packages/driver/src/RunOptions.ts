@@ -62,7 +62,7 @@ export type RunOptions = {
   logDir?: string | null;
   allowNetwork?: boolean;
   maxOutputBytes?: number;
-  /** Maximum UTF-8 JSON bytes accepted for one durable agent checkpoint (default: 16 MiB). */
+  /** Per-checkpoint UTF-8 JSON byte limit; defaults to and cannot exceed the 16 MiB system ceiling. */
   maxAgentCheckpointBytes?: number;
   toolTimeoutMs?: number;
   hot?: boolean | HotReloadOptions;

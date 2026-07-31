@@ -397,7 +397,7 @@ export async function retryTask(adapter, opts) {
             }
             const patch = {
               state: "cancelled",
-              metaJson: markResetCancelledMeta(attempt.metaJson),
+              metaJson: markResetCancelledMeta(attempt.metaJson, resetTimestampMs),
             };
             if (attempt.finishedAtMs == null) {
               patch.finishedAtMs = resetTimestampMs;

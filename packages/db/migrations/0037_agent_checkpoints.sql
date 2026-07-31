@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS _smithers_agent_checkpoint_contents (
-  content_hash TEXT PRIMARY KEY,
+  content_hash TEXT NOT NULL PRIMARY KEY,
   checkpoint_json TEXT NOT NULL,
   size_bytes INTEGER NOT NULL,
   created_at_ms INTEGER NOT NULL

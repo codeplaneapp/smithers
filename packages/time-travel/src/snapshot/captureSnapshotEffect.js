@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { nowMs } from "@smthrs/scheduler/nowMs";
 import { snapshotsCaptured } from "../snapshotsCaptured.js";
 import { snapshotDuration } from "../snapshotDuration.js";
+import { parseAgentCheckpointSnapshot } from "./agentCheckpointSnapshot.js";
 /** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("@smthrs/errors/SmithersError").SmithersError} SmithersError */
 import { captureAgentCheckpointProvenance } from "./agentCheckpointProvenance.js";
@@ -213,7 +214,7 @@ export async function hydrateSnapshot(adapter, row) {
 }
 
 export function captureSnapshot(adapter, runId, frameNo, data, options = {}) {
-  return Effect.gen(function* () {
+  const operation = Effect.gen(function* () {
     const start = performance.now();
     const nodesJson = JSON.stringify(data.nodes);
     const signalHorizon = yield* Effect.tryPromise({
@@ -238,6 +239,7 @@ export function captureSnapshot(adapter, runId, frameNo, data, options = {}) {
       __smithersAgentCheckpointHorizons: agentCheckpointCapture.horizons,
       __smithersAgentCheckpointProvenance: agentCheckpointCapture.provenance,
     };
+    parseAgentCheckpointSnapshot(snapshotOutputs, data.nodes);
     const outputsJson = JSON.stringify(snapshotOutputs);
     const ralphJson = JSON.stringify(data.ralph);
     const inputJson = JSON.stringify(data.input);
@@ -255,7 +257,7 @@ export function captureSnapshot(adapter, runId, frameNo, data, options = {}) {
       createdAtMs: nowMs(),
     };
     yield* Effect.tryPromise({
-      try: () => persistSnapshotRow(adapter, row, options),
+      try: () => persistSnapshotRow(adapter, row, { inTransaction: true }),
       catch: (cause) =>
         toSmithersError(cause, "insert snapshot", { code: "DB_WRITE_FAILED", details: { frameNo, runId } }),
     });
@@ -263,4 +265,7 @@ export function captureSnapshot(adapter, runId, frameNo, data, options = {}) {
     yield* Metric.update(snapshotDuration, performance.now() - start);
     return row;
   }).pipe(Effect.annotateLogs({ runId, frameNo: String(frameNo) }), Effect.withLogSpan("time-travel:capture-snapshot"));
+  return options.inTransaction === true
+    ? operation
+    : adapter.withTransactionEffect(`capture snapshot ${runId}:${frameNo}`, operation);
 }

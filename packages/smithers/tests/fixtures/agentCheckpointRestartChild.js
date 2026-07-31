@@ -4,15 +4,14 @@ import { closeSingleRunnerRuntime, runWorkflow } from "../../src/index.js";
 import { buildAgentCheckpointRestartWorkflow } from "./agentCheckpointRestartWorkflow.js";
 
 async function main() {
-  const [connectionString, runId, mode, markerDir, blockMsArg, readyPath] = process.argv.slice(2);
+  const [connectionString, runId, mode, markerDir, readyPath] = process.argv.slice(2);
   if (!connectionString || !runId || !markerDir || !readyPath || !["initial", "resume"].includes(mode)) {
-    throw new Error("expected <connectionString> <runId> <initial|resume> <markerDir> <blockMs> <readyPath>");
+    throw new Error("expected <connectionString> <runId> <initial|resume> <markerDir> <readyPath>");
   }
   const { api, workflow } = await buildAgentCheckpointRestartWorkflow({
     connectionString,
     markerDir,
     mode,
-    blockMs: Number(blockMsArg),
   });
   writeFileSync(readyPath, "ready");
   try {

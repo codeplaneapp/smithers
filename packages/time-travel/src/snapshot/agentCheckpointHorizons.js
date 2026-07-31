@@ -1,3 +1,8 @@
+import {
+  MAX_SNAPSHOT_CHECKPOINT_ATTEMPTS,
+  MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES,
+} from "./agentCheckpointProvenance.js";
+
 const HORIZON_VERSION = 1;
 const CAPTURE_TUPLES_PER_QUERY = 250;
 
@@ -58,6 +63,13 @@ export async function captureAgentCheckpointHorizons(adapter, runId, nodes) {
 
 /** Return null for legacy snapshots that need timestamp filtering. */
 export function parseAgentCheckpointHorizons(outputs) {
+  if (
+    !outputs ||
+    typeof outputs !== "object" ||
+    !Object.prototype.hasOwnProperty.call(outputs, "__smithersAgentCheckpointHorizons")
+  ) {
+    return null;
+  }
   const encoded = outputs?.__smithersAgentCheckpointHorizons;
   if (
     !encoded ||
@@ -65,20 +77,37 @@ export function parseAgentCheckpointHorizons(outputs) {
     encoded.version !== HORIZON_VERSION ||
     !Array.isArray(encoded.attempts)
   ) {
-    return null;
+    throw new Error("Snapshot agent checkpoint horizon envelope is corrupt");
+  }
+  if (encoded.attempts.length > MAX_SNAPSHOT_CHECKPOINT_ATTEMPTS) {
+    throw new Error(`Snapshot agent checkpoint horizon count exceeds limit ${MAX_SNAPSHOT_CHECKPOINT_ATTEMPTS}`);
+  }
+  if (Buffer.byteLength(JSON.stringify(encoded), "utf8") > MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES) {
+    throw new Error(
+      `Snapshot agent checkpoint horizon encoded bytes exceeds limit ${MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES}`,
+    );
   }
   const horizons = new Map();
   for (const tuple of encoded.attempts) {
-    if (!Array.isArray(tuple) || tuple.length !== 4) return null;
+    if (!Array.isArray(tuple) || tuple.length !== 4) {
+      throw new Error("Snapshot agent checkpoint horizon provenance is corrupt");
+    }
     const [nodeId, iteration, attempt, sequence] = tuple;
     if (
       typeof nodeId !== "string" ||
-      !Number.isInteger(iteration) ||
-      !Number.isInteger(attempt) ||
-      !Number.isInteger(sequence)
+      !Number.isSafeInteger(iteration) ||
+      iteration < 0 ||
+      !Number.isSafeInteger(attempt) ||
+      attempt < 0 ||
+      !Number.isSafeInteger(sequence) ||
+      sequence < -1
     )
-      return null;
-    horizons.set(agentCheckpointHorizonKey(nodeId, iteration, attempt), sequence);
+      throw new Error("Snapshot agent checkpoint horizon provenance is corrupt");
+    const key = agentCheckpointHorizonKey(nodeId, iteration, attempt);
+    if (horizons.has(key)) {
+      throw new Error(`Snapshot agent checkpoint horizon provenance has duplicate key ${key}`);
+    }
+    horizons.set(key, sequence);
   }
   return horizons;
 }
