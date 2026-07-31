@@ -241,15 +241,153 @@ describe("jumpToFrame", () => {
     }
   });
 
-  test("malformed checkpoint horizons fall back to legacy timestamp filtering", () => {
-    expect(
+  test("malformed present checkpoint horizons fail closed while absent metadata stays legacy", () => {
+    expect(() =>
       parseAgentCheckpointHorizons({
         __smithersAgentCheckpointHorizons: {
           version: 1,
           attempts: [["valid", 0, 1, 2], ["malformed"]],
         },
       }),
-    ).toBeNull();
+    ).toThrow(/horizon provenance is corrupt/);
+    expect(parseAgentCheckpointHorizons({})).toBeNull();
+  });
+
+  test("rejects malformed checkpoint provenance before pausing or reverting effects", async () => {
+    const { adapter, sqlite } = setupDb();
+    try {
+      const runId = "run-checkpoint-preflight";
+      await seedRun(adapter, runId);
+      const snapshot = await captureSnapshot(adapter, runId, 1, {
+        nodes: [
+          {
+            nodeId: "task:one",
+            iteration: 0,
+            state: "finished",
+            lastAttempt: 1,
+            outputTable: "out_a",
+            label: "one",
+          },
+        ],
+        outputs: { out_a: [{ nodeId: "task:one", iteration: 0, value: 1 }] },
+        ralph: [],
+        input: {},
+      } as never);
+      const outputs = JSON.parse(snapshot.outputsJson);
+      outputs.__smithersAgentCheckpointProvenance = { version: 1, attempts: "corrupt", checkpoints: [] };
+      sqlite
+        .query("UPDATE _smithers_snapshot_contents SET outputs_json = ? WHERE content_hash = ?")
+        .run(JSON.stringify(outputs), snapshot.contentHash);
+      let pauses = 0;
+      let reverts = 0;
+
+      await expect(
+        jumpToFrame({
+          adapter,
+          runId,
+          frameNo: 1,
+          confirm: true,
+          pauseRunLoop: async () => {
+            pauses += 1;
+          },
+          revertToPointerImpl: async () => {
+            reverts += 1;
+            return { success: true };
+          },
+          getCurrentPointerImpl: async () => "current",
+        }),
+      ).rejects.toThrow(/provenance envelope is corrupt/);
+      expect(pauses).toBe(0);
+      expect(reverts).toBe(0);
+      expect((await adapter.getLastFrame(runId))?.frameNo).toBe(2);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("restores the exact sparse attempt set instead of only applying a numeric horizon", async () => {
+    const { adapter, sqlite } = setupDb();
+    try {
+      const runId = "run-checkpoint-attempt-gaps";
+      await seedRun(adapter, runId);
+      await adapter.internalStorage.execute(
+        "UPDATE _smithers_nodes SET last_attempt = ?, updated_at_ms = ? WHERE run_id = ? AND node_id = ? AND iteration = ?",
+        [3, 190, runId, "task:one", 0],
+      );
+      await adapter.insertAttempt({
+        runId,
+        nodeId: "task:one",
+        iteration: 0,
+        attempt: 3,
+        state: "finished",
+        // Frame timestamps are allocated before snapshot reads. Exact
+        // provenance must preserve an attempt captured by the snapshot even
+        // when it started after the target frame row's timestamp.
+        startedAtMs: 250,
+        finishedAtMs: 260,
+        jjPointer: "ptr-snapshot-late",
+        jjCwd: "/tmp/sandbox-a",
+        cached: false,
+      });
+      await captureSnapshot(adapter, runId, 1, {
+        nodes: [
+          {
+            nodeId: "task:one",
+            iteration: 0,
+            state: "finished",
+            lastAttempt: 3,
+            outputTable: "out_a",
+            label: "one",
+          },
+        ],
+        outputs: { out_a: [{ nodeId: "task:one", iteration: 0, value: 1 }] },
+        ralph: [],
+        input: {},
+      } as never);
+      // This backdated row evades timestamp trimming and sits below the node's
+      // numeric lastAttempt. Only exact attempt provenance can reject it.
+      await adapter.insertAttempt({
+        runId,
+        nodeId: "task:one",
+        iteration: 0,
+        attempt: 2,
+        state: "failed",
+        startedAtMs: 175,
+        finishedAtMs: 176,
+        cached: false,
+      });
+      await adapter.insertAttempt({
+        runId,
+        nodeId: "task:one",
+        iteration: 0,
+        attempt: 4,
+        state: "failed",
+        startedAtMs: 270,
+        finishedAtMs: 280,
+        jjPointer: "ptr-after-snapshot",
+        jjCwd: "/tmp/sandbox-a",
+        cached: false,
+      });
+
+      const revertedPointers: string[] = [];
+      await jumpToFrame({
+        adapter,
+        runId,
+        frameNo: 1,
+        confirm: true,
+        getCurrentPointerImpl: async () => "pre-pointer",
+        revertToPointerImpl: async (pointer) => {
+          revertedPointers.push(pointer);
+          return { success: true };
+        },
+      });
+      expect(
+        (await adapter.listAttempts(runId, "task:one", 0)).map((row) => row.attempt).sort((a, b) => a - b),
+      ).toEqual([1, 3]);
+      expect(revertedPointers).toEqual(["ptr-snapshot-late"]);
+    } finally {
+      sqlite.close();
+    }
   });
 
   test("removes a later checkpoint from an attempt retained by the target snapshot", async () => {
@@ -340,6 +478,8 @@ describe("jumpToFrame", () => {
       await seedRun(adapter, runId);
       const checkpointJson = JSON.stringify({ codec: "test.rewind", version: 1, payload: { cursor: "target" } });
       const contentHash = createHash("sha256").update(checkpointJson).digest("hex");
+      const sparseJson = JSON.stringify({ codec: "test.rewind", version: 1, payload: { cursor: "sparse" } });
+      const sparseHash = createHash("sha256").update(sparseJson).digest("hex");
       await adapter.updateAttempt(runId, "task:one", 0, 1, {
         metaJson: JSON.stringify({ generation: "target" }),
         responseText: "target response",
@@ -362,6 +502,25 @@ describe("jumpToFrame", () => {
         agentId: "test",
         purpose: "turn",
         createdAtMs: 175,
+      });
+      await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoint_contents", {
+        contentHash: sparseHash,
+        checkpointJson: sparseJson,
+        sizeBytes: Buffer.byteLength(sparseJson, "utf8"),
+        createdAtMs: 176,
+      });
+      await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoints", {
+        runId,
+        nodeId: "task:one",
+        iteration: 0,
+        attempt: 1,
+        sequence: 2,
+        contentHash: sparseHash,
+        codec: "test.rewind",
+        version: 1,
+        agentId: "test",
+        purpose: "turn",
+        createdAtMs: 176,
       });
       await captureSnapshot(adapter, runId, 1, {
         nodes: [
@@ -386,6 +545,7 @@ describe("jumpToFrame", () => {
       );
       await Effect.runPromise(adapter.pruneOrphanedAgentCheckpointContents());
       expect(await adapter.getAgentCheckpoint(contentHash)).toBeNull();
+      expect(await adapter.getAgentCheckpoint(sparseHash)).toBeNull();
       await adapter.insertAttempt({
         runId,
         nodeId: "task:one",
@@ -394,24 +554,87 @@ describe("jumpToFrame", () => {
         state: "failed",
         startedAtMs: 400,
         finishedAtMs: 450,
+        jjPointer: "ptr-replacement",
+        jjCwd: "/tmp/sandbox-a",
         cached: false,
         metaJson: JSON.stringify({ generation: "reset" }),
         responseText: "reset response",
+      });
+      const reusedJson = JSON.stringify({ codec: "test.rewind", version: 1, payload: { cursor: "reused-gap" } });
+      const reusedHash = createHash("sha256").update(reusedJson).digest("hex");
+      await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoint_contents", {
+        contentHash: reusedHash,
+        checkpointJson: reusedJson,
+        sizeBytes: Buffer.byteLength(reusedJson, "utf8"),
+        createdAtMs: 410,
+      });
+      await Effect.runPromise(
+        adapter.insertToolCall({
+          runId,
+          nodeId: "task:one",
+          iteration: 0,
+          attempt: 1,
+          seq: 1,
+          toolName: "replacement-generation-effect",
+          inputJson: "{}",
+          outputJson: "{}",
+          startedAtMs: 420,
+          finishedAtMs: 421,
+          status: "succeeded",
+          errorJson: null,
+          kind: "tool",
+          sideEffect: false,
+          idempotent: true,
+          acceptsIdempotencyKey: false,
+          hasRevert: false,
+          idempotencyKey: null,
+          revertStatus: null,
+          revertedAtMs: null,
+          revertErrorJson: null,
+          forcedPastJson: null,
+        }),
+      );
+      await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoints", {
+        runId,
+        nodeId: "task:one",
+        iteration: 0,
+        attempt: 1,
+        sequence: 1,
+        contentHash: reusedHash,
+        codec: "test.rewind",
+        version: 1,
+        agentId: "test",
+        purpose: "turn",
+        createdAtMs: 410,
       });
       // Keep this fixture focused on DB provenance rather than sandbox
       // compensation for the unrelated later task.
       await adapter.updateAttempt(runId, "task:two", 0, 1, { jjPointer: null, jjCwd: null });
 
+      const revertedPointers: string[] = [];
       await jumpToFrame({
         adapter,
         runId,
         frameNo: 1,
         confirm: true,
-        ...makeNoVcsHooks(),
+        getCurrentPointerImpl: async () => "ptr-replacement",
+        revertToPointerImpl: async (pointer) => {
+          revertedPointers.push(pointer);
+          return { success: true };
+        },
       });
 
+      expect(revertedPointers).toEqual(["ptr-one"]);
+      expect(await adapter.listToolCalls(runId, "task:one", 0)).toEqual([]);
       expect(await adapter.getAgentCheckpoint(contentHash)).toMatchObject({ checkpointJson });
-      expect((await adapter.listAgentCheckpointRefs(runId)).map((ref) => ref.contentHash)).toEqual([contentHash]);
+      expect(await adapter.getAgentCheckpoint(sparseHash)).toMatchObject({ checkpointJson: sparseJson });
+      expect(await adapter.getAgentCheckpoint(reusedHash)).toBeNull();
+      expect(
+        (await adapter.listAgentCheckpointRefs(runId)).map((ref) => [Number(ref.sequence), ref.contentHash]),
+      ).toEqual([
+        [0, contentHash],
+        [2, sparseHash],
+      ]);
       const [attempt] = await adapter.listAttempts(runId, "task:one", 0);
       expect(attempt).toMatchObject({
         state: "finished",

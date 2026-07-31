@@ -100,7 +100,7 @@ export const smithersErrorDefinitions = {
   },
   TASK_FORK_SESSION_UNAVAILABLE: {
     category: "engine",
-    when: "A <Task fork> cannot obtain usable agent state — the source produced neither a compatible checkpoint nor a forkable conversation.",
+    when: "A <Task fork> cannot use agent state because the forking task is not agent-backed, or because the source produced neither a compatible checkpoint nor a forkable conversation.",
     details: "{ nodeId, forkSource }",
   },
   TASK_FORK_CHECKPOINT_INCOMPATIBLE: {

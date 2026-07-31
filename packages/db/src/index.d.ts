@@ -7,14 +7,35 @@ import { SmithersError as SmithersError$2 } from '@smthrs/errors/SmithersError';
 import * as drizzle_orm_bun_sqlite from 'drizzle-orm/bun-sqlite';
 import * as _smithers_orchestrator_errors_toSmithersError from '@smthrs/errors/toSmithersError';
 import * as bun_sqlite from 'bun:sqlite';
+import { Database as Database$1 } from 'bun:sqlite';
 import { ManagedRuntime, Effect } from 'effect';
 import * as SqlClient from 'effect/unstable/sql/SqlClient';
-import { SqlError } from 'effect/unstable/sql/SqlError';
+import { SqlError as SqlError$1 } from 'effect/unstable/sql/SqlError';
 import * as drizzle_orm_sqlite_core from 'drizzle-orm/sqlite-core';
 
 type SchemaRegistryEntry$1 = {
     table: Table$1;
     zodSchema: zod.ZodObject;
+};
+
+type AgentCheckpointContentRow$2 = {
+    contentHash: string;
+    checkpointJson: string;
+    sizeBytes: number;
+    createdAtMs: number;
+};
+type AgentCheckpointRefRow$2 = {
+    runId: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    sequence: number;
+    contentHash: string;
+    codec: string;
+    version: number;
+    agentId: string | null;
+    purpose: string;
+    createdAtMs: number;
 };
 
 type SignalQuery$1 = {
@@ -76,27 +97,6 @@ type AttemptRow$1 = {
     metaJson: string | null;
 };
 
-type AgentCheckpointContentRow = {
-    contentHash: string;
-    checkpointJson: string;
-    sizeBytes: number;
-    createdAtMs: number;
-};
-
-type AgentCheckpointRefRow = {
-    runId: string;
-    nodeId: string;
-    iteration: number;
-    attempt: number;
-    sequence: number;
-    contentHash: string;
-    codec: string;
-    version: number;
-    agentId: string | null;
-    purpose: string;
-    createdAtMs: number;
-};
-
 declare const DB_ALERT_ALLOWED_STATUSES$1: string[];
 
 type AlertStatus$1 = (typeof DB_ALERT_ALLOWED_STATUSES$1)[number];
@@ -138,20 +138,6 @@ type StaleRunRecord$1 = {
     heartbeatAtMs: number | null;
     runtimeOwnerId: string | null;
     status: string;
-};
-
-/** Durable outcome of claiming one integration event for delivery. */
-type IntegrationDeliveryClaim$1 = {
-    status: "claimed";
-    receivedAtMs: number;
-    leaseExpiresAtMs: number;
-} | {
-    status: "completed";
-    receivedAtMs: number;
-} | {
-    status: "busy";
-    receivedAtMs: number;
-    leaseExpiresAtMs: number | null;
 };
 
 type SignalRow$1 = {
@@ -212,6 +198,53 @@ type NodeRow$1 = {
     updatedAtMs: number;
     outputTable: string;
     label: string | null;
+};
+
+/** Durable outcome of claiming one integration event for delivery. */
+type IntegrationDeliveryClaim$1 = {
+    status: "claimed";
+    receivedAtMs: number;
+    leaseExpiresAtMs: number;
+} | {
+    status: "completed";
+    receivedAtMs: number;
+} | {
+    status: "busy";
+    receivedAtMs: number;
+    leaseExpiresAtMs: number | null;
+};
+
+type EvalSuiteRow$1 = {
+    suiteId: string;
+    name: string;
+    workflowKey: string;
+    workflowPath: string;
+    workflowRoot: string;
+    /** Canonical parsed dataset (`EvalCaseInput[]`), JSON-encoded. */
+    datasetJson: string;
+    caseCount: number;
+    createdAtMs: number;
+    updatedAtMs: number;
+};
+
+type EvalCaseResultRow$1 = {
+    /** `${evalRunId}:${caseId}` */
+    id: string;
+    evalRunId: string;
+    suiteId: string;
+    caseId: string;
+    caseIndex: number;
+    name?: string | null;
+    status: "queued" | "running" | "ok" | "failed" | "cancelled";
+    caseRunId?: string | null;
+    inputJson?: string | null;
+    expectedJson?: string | null;
+    actualJson?: string | null;
+    assertionsJson?: string | null;
+    error?: string | null;
+    startedAtMs?: number | null;
+    finishedAtMs?: number | null;
+    durationMs?: number | null;
 };
 
 type CacheRow$1 = {
@@ -369,8 +402,8 @@ declare function ensureSqlMessageStorageEffect(db: BunSQLiteDatabase$3<any> | Da
 declare function ensureSqlMessageStorage(db: BunSQLiteDatabase$3<any> | Database): Promise<void>;
 declare class SqlMessageStorage {
     /**
-   * @param {BunSQLiteDatabase<any> | Database | { dialect: "postgres"; connection: object } | ExternalSqliteDescriptor} db
-   */
+     * @param {BunSQLiteDatabase<any> | Database | { dialect: "postgres"; connection: object } | ExternalSqliteDescriptor} db
+     */
     constructor(db: BunSQLiteDatabase$3<any> | Database | {
         dialect: "postgres";
         connection: object;
@@ -387,127 +420,137 @@ declare class SqlMessageStorage {
     runtime: ManagedRuntime.ManagedRuntime<SqlClient.SqlClient, never>;
     tableColumnsCache: Map<any, any>;
     /**
-   * @param {string} table
-   * @returns {Set<string> | null}
-   */
+     * @param {string} table
+     * @returns {Set<string> | null}
+     */
     getTableColumns(table: string): Set<string> | null;
     /**
-   * @param {string} table
-   * @param {Record<string, unknown>} row
-   * @returns {Record<string, unknown>}
-   */
+     * @param {string} table
+     * @param {Record<string, unknown>} row
+     * @returns {Record<string, unknown>}
+     */
     filterKnownColumns(table: string, row: Record<string, unknown>): Record<string, unknown>;
     /**
-   * @template A, E
-   * @param {Effect.Effect<A, E, SqlClient.SqlClient>} effect
-   * @returns {Promise<A>}
-   */
+     * @template A, E
+     * @param {Effect.Effect<A, E, SqlClient.SqlClient>} effect
+     * @returns {Promise<A>}
+     */
     runEffect<A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A>;
     /**
-   * @template A
-   * @param {(connection: Connection) => Effect.Effect<A, SqlError>} f
-   * @returns {Promise<A>}
-   */
+     * @template A
+     * @param {(connection: Connection) => Effect.Effect<A, SqlError>} f
+     * @returns {Promise<A>}
+     */
     withConnection<A>(f: (connection: Connection) => Effect.Effect<A, SqlError>): Promise<A>;
     /**
-   * @returns {Effect.Effect<void, never>}
-   */
+     * @returns {Effect.Effect<void, never>}
+     */
     ensureSchemaEffect(): Effect.Effect<void, never>;
     /**
-   * @returns {Promise<void>}
-   */
-    ensureSchema(): Promise<void>;
+     * @returns {Promise<number>}
+     */
+    ensureSchema(): Promise<number>;
     /**
-   * @template T
-   * @param {string} statement
-   * @param {ReadonlyArray<SqliteParam>} [params]
-   * @param {{ booleanColumns?: readonly string[] }} [options]
-   * @returns {Promise<Array<T>>}
-   */
+     * @template T
+     * @param {string} statement
+     * @param {ReadonlyArray<SqliteParam>} [params]
+     * @param {{ booleanColumns?: readonly string[] }} [options]
+     * @returns {Promise<Array<T>>}
+     */
     queryAll<T>(statement: string, params?: ReadonlyArray<SqliteParam>, options?: {
         booleanColumns?: readonly string[];
     }): Promise<Array<T>>;
     /**
-   * @template T
-   * @param {string} statement
-   * @param {ReadonlyArray<SqliteParam>} [params]
-   * @param {{ booleanColumns?: readonly string[] }} [options]
-   * @returns {Promise<T | undefined>}
-   */
+     * @template T
+     * @param {string} statement
+     * @param {ReadonlyArray<SqliteParam>} [params]
+     * @param {{ booleanColumns?: readonly string[] }} [options]
+     * @returns {Promise<T | undefined>}
+     */
     queryOne<T>(statement: string, params?: ReadonlyArray<SqliteParam>, options?: {
         booleanColumns?: readonly string[];
     }): Promise<T | undefined>;
     /**
-   * Like {@link queryAll} but returns rows with their on-disk column names (no
-   * snake→camel transform). Used for "raw" output-table reads where callers
-   * expect the storage column names verbatim.
-   * @template T
-   * @param {string} statement
-   * @param {ReadonlyArray<SqliteParam>} [params]
-   * @returns {Promise<Array<T>>}
-   */
+     * Like {@link queryAll} but returns rows with their on-disk column names (no
+     * snake→camel transform). Used for "raw" output-table reads where callers
+     * expect the storage column names verbatim.
+     * @template T
+     * @param {string} statement
+     * @param {ReadonlyArray<SqliteParam>} [params]
+     * @returns {Promise<Array<T>>}
+     */
     queryAllRaw<T>(statement: string, params?: ReadonlyArray<SqliteParam>): Promise<Array<T>>;
     /**
-   * @template T
-   * @param {string} statement
-   * @param {ReadonlyArray<SqliteParam>} [params]
-   * @returns {Promise<T | undefined>}
-   */
+     * @template T
+     * @param {string} statement
+     * @param {ReadonlyArray<SqliteParam>} [params]
+     * @returns {Promise<T | undefined>}
+     */
     queryOneRaw<T>(statement: string, params?: ReadonlyArray<SqliteParam>): Promise<T | undefined>;
     /**
-   * @param {string} statement
-   * @param {ReadonlyArray<SqliteParam>} [params]
-   * @returns {Promise<void>}
-   */
-    execute(statement: string, params?: ReadonlyArray<SqliteParam>): Promise<void>;
+     * @param {string} statement
+     * @param {ReadonlyArray<SqliteParam>} [params]
+     * @returns {Promise<number>}
+     */
+    execute(statement: string, params?: ReadonlyArray<SqliteParam>): Promise<number>;
     /**
-   * @param {string} table
-   * @param {Record<string, unknown>} row
-   * @returns {Promise<void>}
-   */
-    insertIgnore(table: string, row: Record<string, unknown>): Promise<void>;
+     * @param {string} table
+     * @param {Record<string, unknown>} row
+     * @returns {Promise<number>}
+     */
+    insertIgnore(table: string, row: Record<string, unknown>): Promise<number>;
     /**
-   * Like {@link insertIgnore} but reports whether *this* call is the one that
-   * inserted the row. The verdict comes from the insert's own `RETURNING`
-   * rows, never from a preceding `SELECT`: PostgreSQL runs Smithers'
-   * transactions at READ COMMITTED, so two concurrent claimants can both read
-   * no row, and `ON CONFLICT DO NOTHING` then silently no-ops for the loser
-   * instead of raising. Only the winner gets a row back.
-   * @param {string} table
-   * @param {Record<string, unknown>} row
-   * @returns {Promise<boolean>}
-   */
+     * Like {@link insertIgnore} but reports whether *this* call is the one that
+     * inserted the row. The verdict comes from the insert's own `RETURNING`
+     * rows, never from a preceding `SELECT`: PostgreSQL runs Smithers'
+     * transactions at READ COMMITTED, so two concurrent claimants can both read
+     * no row, and `ON CONFLICT DO NOTHING` then silently no-ops for the loser
+     * instead of raising. Only the winner gets a row back.
+     * @param {string} table
+     * @param {Record<string, unknown>} row
+     * @returns {Promise<boolean>}
+     */
     insertIgnoreReturningInserted(table: string, row: Record<string, unknown>): Promise<boolean>;
     /**
-   * @param {string} table
-   * @param {Record<string, unknown>} row
-   * @param {readonly string[]} conflictColumns
-   * @param {readonly string[]} [updateColumns]
-   * @returns {Promise<void>}
-   */
+     * @param {string} table
+     * @param {Record<string, unknown>} row
+     * @param {readonly string[]} conflictColumns
+     * @param {readonly string[]} [updateColumns]
+     * @returns {Promise<void>}
+     */
     upsert(table: string, row: Record<string, unknown>, conflictColumns: readonly string[], updateColumns?: readonly string[]): Promise<void>;
     /**
-   * @param {string} table
-   * @param {Record<string, unknown>} patch
-   * @param {string} whereSql
-   * @param {ReadonlyArray<SqliteParam>} [params]
-   * @returns {Promise<void>}
-   */
+     * @param {string} table
+     * @param {Record<string, unknown>} patch
+     * @param {string} whereSql
+     * @param {ReadonlyArray<SqliteParam>} [params]
+     * @returns {Promise<number>}
+     */
     updateWhere(table: string, patch: Record<string, unknown>, whereSql: string, params?: ReadonlyArray<SqliteParam>): Promise<number>;
     /**
-   * @param {string} table
-   * @param {string} whereSql
-   * @param {ReadonlyArray<SqliteParam>} [params]
-   * @returns {Promise<void>}
-   */
+     * @param {string} table
+     * @param {string} whereSql
+     * @param {ReadonlyArray<SqliteParam>} [params]
+     * @returns {Promise<void>}
+     */
     deleteWhere(table: string, whereSql: string, params?: ReadonlyArray<SqliteParam>): Promise<void>;
     /**
-   * @template A
-   * @param {() => A | Promise<A>} operation
-   * @returns {Promise<A>}
-   */
+     * @template A
+     * @param {() => A | Promise<A>} operation
+     * @returns {Promise<A>}
+     */
     transaction<A>(operation: () => A | Promise<A>): Promise<A>;
     /**
+     * Allocate and insert one append-only stream row on PostgreSQL. The insert
+     * computes the next sequence and writes it in one statement. A concurrent
+     * writer that chose the same sequence gets no RETURNING row, so it must
+     * recheck idempotency and retry instead of reporting a row PostgreSQL
+     * ignored.
+     *
+     * The NOT EXISTS predicate is part of the INSERT statement so an identical
+     * redelivery that becomes visible after the first lookup cannot consume a
+     * second sequence.
+     *
      * @param {string} table
      * @param {Record<string, unknown>} row
      * @param {string} dedupeWhereSql
@@ -538,42 +581,44 @@ declare class SqlMessageStorage {
         receivedBy?: string | null;
     }): Promise<number>;
     /**
-   * @param {string} runId
-   * @param {SqlMessageStorageEventHistoryQuery} [query]
-   * @returns {{ whereSql: string; params: Array<SqliteParam> }}
-   */
+     * @param {string} runId
+     * @param {SqlMessageStorageEventHistoryQuery} [query]
+     * @returns {{ whereSql: string; params: Array<SqliteParam> }}
+     */
     buildEventHistoryWhere(runId: string, query?: SqlMessageStorageEventHistoryQuery): {
         whereSql: string;
         params: Array<SqliteParam>;
     };
     /**
-   * @param {string} runId
-   * @param {SqlMessageStorageEventHistoryQuery} [query]
-   * @returns {Promise<Array<Record<string, unknown>>>}
-   */
+     * @param {string} runId
+     * @param {SqlMessageStorageEventHistoryQuery} [query]
+     * @returns {Promise<Array<Record<string, unknown>>>}
+     */
     listEventHistory(runId: string, query?: SqlMessageStorageEventHistoryQuery): Promise<Array<Record<string, unknown>>>;
     /**
-   * @param {string} runId
-   * @param {SqlMessageStorageEventHistoryQuery} [query]
-   * @returns {Promise<number>}
-   */
+     * @param {string} runId
+     * @param {SqlMessageStorageEventHistoryQuery} [query]
+     * @returns {Promise<number>}
+     */
     countEventHistory(runId: string, query?: SqlMessageStorageEventHistoryQuery): Promise<number>;
     /**
-   * @param {string} runId
-   * @returns {Promise<number | undefined>}
-   */
+     * @param {string} runId
+     * @returns {Promise<number | undefined>}
+     */
     getLastEventSeq(runId: string): Promise<number | undefined>;
     /**
-   * @param {string} runId
-   * @param {string} type
-   * @returns {Promise<Array<Record<string, unknown>>>}
-   */
+     * @param {string} runId
+     * @param {string} type
+     * @returns {Promise<Array<Record<string, unknown>>>}
+     */
     listEventsByType(runId: string, type: string): Promise<Array<Record<string, unknown>>>;
     /**
-   * @param {string} runId
-   * @returns {Promise<number | undefined>}
-   */
+     * @param {string} runId
+     * @returns {Promise<number | undefined>}
+     */
     getLastSignalSeq(runId: string): Promise<number | undefined>;
+    /** @param {string} runId @returns {Promise<number | undefined>} */
+    getLastRunProvenanceSeq(runId: string): Promise<number | undefined>;
 }
 type BunSQLiteDatabase$3 = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
 type Database = bun_sqlite.Database;
@@ -589,9 +634,18 @@ type ExternalSqliteDescriptor = {
     transaction?: <T>(operation: () => T | Promise<T>) => T | Promise<T>;
 };
 
+/** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} BunSQLiteDatabase */
+/** @typedef {import("bun:sqlite").Database} Database */
+/** @typedef {import("./SqlMessageStorageEventHistoryQuery.ts").SqlMessageStorageEventHistoryQuery} SqlMessageStorageEventHistoryQuery */
+declare class SqlError extends SqlError$1 {
+    constructor(options: any);
+}
+
 /** @typedef {import("./adapter/AlertRow.ts").AlertRow} AlertRow */
 /** @typedef {import("./adapter/AlertStatus.ts").AlertStatus} AlertStatus */
 /** @typedef {import("./adapter/AttemptRow.ts").AttemptRow} AttemptRow */
+/** @typedef {import("./adapter/AgentCheckpointRow.ts").AgentCheckpointContentRow} AgentCheckpointContentRow */
+/** @typedef {import("./adapter/AgentCheckpointRow.ts").AgentCheckpointRefRow} AgentCheckpointRefRow */
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} BunSQLiteDatabase */
 /** @typedef {import("drizzle-orm").Table} Table */
 /** @typedef {import("./adapter/EventHistoryQuery.ts").EventHistoryQuery} EventHistoryQuery */
@@ -631,8 +685,8 @@ declare const DB_RUN_WORKFLOW_NAME_MAX_LENGTH: 256;
 declare const DB_RUN_ALLOWED_STATUSES: string[];
 declare class SmithersDb {
     /**
-   * @param {BunSQLiteDatabase<Record<string, unknown>>} db
-   */
+     * @param {BunSQLiteDatabase<Record<string, unknown>>} db
+     */
     constructor(db: BunSQLiteDatabase$2<Record<string, unknown>>);
     /** @type {BunSQLiteDatabase<Record<string, unknown>>} */
     db: BunSQLiteDatabase$2<Record<string, unknown>>;
@@ -646,55 +700,54 @@ declare class SmithersDb {
     /** @type {Promise<unknown>} */
     transactionTail: Promise<unknown>;
     /**
-   * @param {string} runId
-   * @param {number} frameNo
-   * @returns {string}
-   */
+     * @param {string} runId
+     * @param {number} frameNo
+     * @returns {string}
+     */
     frameCacheKey(runId: string, frameNo: number): string;
     /**
-   * @param {string} runId
-   * @param {number} frameNo
-   * @returns {string | undefined}
-   */
+     * @param {string} runId
+     * @param {number} frameNo
+     * @returns {string | undefined}
+     */
     getCachedFrameXml(runId: string, frameNo: number): string | undefined;
     /**
-   * @param {string} runId
-   * @param {number} frameNo
-   * @param {string} xmlJson
-   */
+     * @param {string} runId
+     * @param {number} frameNo
+     * @param {string} xmlJson
+     */
     rememberFrameXml(runId: string, frameNo: number, xmlJson: string): void;
     /**
-   * @param {string} runId
-   */
+     * @param {string} runId
+     */
     clearFrameCacheForRun(runId: string): void;
     /**
      * @param {string} queryString
      * @param {unknown[]} [params]
-   * @returns {RunnableEffect<unknown[], SmithersError>}
-   */
+     * @returns {RunnableEffect<unknown[], SmithersError>}
+     */
     rawQuery(queryString: string, params?: unknown[]): RunnableEffect<unknown[], SmithersError$1>;
     /**
-   * @param {string} currentFiberThread
-   * @returns {boolean}
-   */
-    ownsActiveTransaction(currentFiberThread: string): boolean;
+     * @returns {boolean}
+     */
+    ownsActiveTransaction(): boolean;
     /**
-   * @template A
-   * @param {string} label
-   * @param {() => PromiseLike<A>} operation
-   * @returns {RunnableEffect<A, SmithersError>}
-   */
+     * @template A
+     * @param {string} label
+     * @param {() => PromiseLike<A>} operation
+     * @returns {RunnableEffect<A, SmithersError>}
+     */
     read<A>(label: string, operation: () => PromiseLike<A>): RunnableEffect<A, SmithersError$1>;
     /**
-   * @template A
-   * @param {string} label
-   * @param {() => PromiseLike<A>} operation
-   * @returns {RunnableEffect<A, SmithersError>}
-   */
+     * @template A
+     * @param {string} label
+     * @param {() => PromiseLike<A>} operation
+     * @returns {RunnableEffect<A, SmithersError>}
+     */
     write<A>(label: string, operation: () => PromiseLike<A>): RunnableEffect<A, SmithersError$1>;
     /**
-    * @returns {Effect.Effect<{ run: (sql: string) => unknown; query: (sql: string) => { run: (...args: unknown[]) => unknown; get: (...args: unknown[]) => Record<string, unknown> | null | undefined; all: () => Array<Record<string, unknown>> }; exec: (sql: string) => unknown; $client?: unknown }, SmithersError, never>}
-    */
+     * @returns {Effect.Effect<{ run: (sql: string) => unknown; query: (sql: string) => { run: (...args: unknown[]) => unknown; get: (...args: unknown[]) => Record<string, unknown> | null | undefined; all: () => Array<Record<string, unknown>> }; exec: (sql: string) => unknown; $client?: unknown }, SmithersError, never>}
+     */
     getSqliteTransactionClient(): Effect.Effect<{
         run: (sql: string) => unknown;
         query: (sql: string) => {
@@ -706,51 +759,61 @@ declare class SmithersDb {
         $client?: unknown;
     }, SmithersError$1, never>;
     /**
-    * @returns {Effect.Effect<() => void, SmithersError, never>}
-    */
+     * @returns {Effect.Effect<() => void, SmithersError, never>}
+     */
     acquireTransactionTurn(): Effect.Effect<() => void, SmithersError$1, never>;
     /**
-   * @template A
-   * @param {string} writeGroup
-   * @param {Effect.Effect<A, SmithersError>} operation
-   * @returns {RunnableEffect<A, SmithersError>}
-   */
+     * @template A
+     * @param {string} writeGroup
+     * @param {Effect.Effect<A, SmithersError>} operation
+     * @returns {RunnableEffect<A, SmithersError>}
+     */
     withTransactionEffect<A>(writeGroup: string, operation: Effect.Effect<A, SmithersError$1>): RunnableEffect<A, SmithersError$1>;
     /**
-   * @template A
-   * @param {string} writeGroup
-   * @param {Effect.Effect<A, SmithersError>} operation
-   * @returns {Promise<A>}
-   */
+     * @template A
+     * @param {string} writeGroup
+     * @param {Effect.Effect<A, SmithersError>} operation
+     * @returns {Promise<A>}
+     */
     withTransaction<A>(writeGroup: string, operation: Effect.Effect<A, SmithersError$1>): Promise<A>;
     /**
-   * @param {Record<string, unknown>} row
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
-    insertRun(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
+     * @param {Record<string, unknown>} row
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
+    insertRun(row: Record<string, unknown>): RunnableEffect<boolean, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {Record<string, unknown>} patch
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {Record<string, unknown>} patch
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     updateRun(runId: string, patch: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {Record<string, unknown>} patch
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {Record<string, unknown>} patch
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     updateRunEffect(runId: string, patch: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
-    updateRunIfNotCancelled(runId: string, patch: Record<string, unknown>): RunnableEffect<boolean, SmithersError$1>;
+    /** @returns {RunnableEffect<boolean, SmithersError>} */
+    updateRunIfNotCancelled(runId: any, patch: any): RunnableEffect<boolean, SmithersError$1>;
+    /** @returns {RunnableEffect<boolean, SmithersError>} */
+    updateRunIfNotCancelledOwned(runId: any, runtimeOwnerId: any, patch: any): RunnableEffect<boolean, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {string} runtimeOwnerId
-   * @param {number} heartbeatAtMs
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {string} runtimeOwnerId
+     * @param {number} heartbeatAtMs
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     heartbeatRun(runId: string, runtimeOwnerId: string, heartbeatAtMs: number): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {number} cancelRequestedAtMs
+     * @param {string} runId
+     * @param {number} cancelRequestedAtMs
+     * @param {{
+     *   requestId?: string | null;
+     *   source?: string | null;
+     *   transport?: string | null;
+     *   clientIdentity?: string | null;
+     *   clientPid?: number | null;
+     * }} [attribution]
      * @returns {RunnableEffect<boolean, SmithersError>}
      */
     requestRunCancel(runId: string, cancelRequestedAtMs: number, attribution?: {
@@ -760,6 +823,21 @@ declare class SmithersDb {
         clientIdentity?: string | null;
         clientPid?: number | null;
     }): RunnableEffect<boolean, SmithersError$1>;
+    /**
+     * Atomically claim terminal cancellation. Observable cleanup belongs only
+     * to the caller that receives true.
+     * @param {string} runId
+     * @param {number} cancelledAtMs
+     * @param {string | null} [errorJson]
+     * @param {{
+     *   requestId?: string | null;
+     *   source?: string | null;
+     *   transport?: string | null;
+     *   clientIdentity?: string | null;
+     *   clientPid?: number | null;
+     * } | null} [attribution]
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
     claimRunCancellation(runId: string, cancelledAtMs: number, errorJson?: string | null, attribution?: {
         requestId?: string | null;
         source?: string | null;
@@ -767,66 +845,69 @@ declare class SmithersDb {
         clientIdentity?: string | null;
         clientPid?: number | null;
     } | null): RunnableEffect<boolean, SmithersError$1>;
-    completeRun(runId: string, runtimeOwnerId: string, finishedAtMs: number): RunnableEffect<boolean, SmithersError$1>;
+    /** @returns {RunnableEffect<boolean, SmithersError>} */
+    completeRun(runId: any, runtimeOwnerId: any, finishedAtMs: any): RunnableEffect<boolean, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {number} pauseRequestedAtMs
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {number} pauseRequestedAtMs
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     requestRunPause(runId: string, pauseRequestedAtMs: number): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {number} hijackRequestedAtMs
-   * @param {string | null} [hijackTarget]
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {number} hijackRequestedAtMs
+     * @param {string | null} [hijackTarget]
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     requestRunHijack(runId: string, hijackRequestedAtMs: number, hijackTarget?: string | null): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     clearRunHijack(runId: string): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<RunRow | undefined, SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<RunRow | undefined, SmithersError>}
+     */
     getRun(runId: string): RunnableEffect<RunRow | undefined, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<RunAncestryRow[], SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<RunAncestryRow[], SmithersError>}
+     */
     listRunAncestry(runId: string, limit?: number): RunnableEffect<RunAncestryRow[], SmithersError$1>;
     /**
-   * @param {string} parentRunId
-   * @returns {RunnableEffect<RunRow | undefined, SmithersError>}
-   */
+     * @param {string} parentRunId
+     * @returns {RunnableEffect<RunRow | undefined, SmithersError>}
+     */
     getLatestChildRun(parentRunId: string): RunnableEffect<RunRow | undefined, SmithersError$1>;
     /**
-   * Walk parent_run_id DOWN from a run: the run itself at depth 0 followed by
-   * every transitive child, breadth-first (depth ascending). Mirrors
-   * listRunAncestry (which walks up) including its cycle guard.
-   *
-   * @param {string} runId
-   * @returns {RunnableEffect<RunAncestryRow[], SmithersError>}
-   */
+     * Walk parent_run_id DOWN from a run: the run itself at depth 0 followed by
+     * every transitive child, breadth-first (depth ascending). Mirrors
+     * listRunAncestry (which walks up) including its cycle guard.
+     *
+     * @param {string} runId
+     * @returns {RunnableEffect<RunAncestryRow[], SmithersError>}
+     */
     listRunDescendants(runId: string, limit?: number): RunnableEffect<RunAncestryRow[], SmithersError$1>;
     /**
-   * @param {string} [status]
-   * @param {string} [workflow]
-   * @returns {RunnableEffect<RunRow[], SmithersError>}
-   */
+     * @param {string} [status]
+     * @param {string} [workflow]
+     * @param {{ includeSystem?: boolean; parentRunId?: string }} [options]
+     * @returns {RunnableEffect<RunRow[], SmithersError>}
+     */
     listRuns(limit?: number, status?: string, workflow?: string, options?: {
         includeSystem?: boolean;
+        parentRunId?: string;
     }): RunnableEffect<RunRow[], SmithersError$1>;
     /**
-   * @param {number} staleBeforeMs
-   * @returns {RunnableEffect<StaleRunRecord[], SmithersError>}
-   */
+     * @param {number} staleBeforeMs
+     * @returns {RunnableEffect<StaleRunRecord[], SmithersError>}
+     */
     listStaleRunningRuns(staleBeforeMs: number, limit?: number): RunnableEffect<StaleRunRecord[], SmithersError$1>;
     /**
-   * @param {{ runId: string; expectedStatus?: string; expectedRuntimeOwnerId: string | null; expectedHeartbeatAtMs: number | null; staleBeforeMs: number; claimOwnerId: string; claimHeartbeatAtMs: number; requireStale?: boolean; }} params
-   * @returns {RunnableEffect<boolean, SmithersError>}
-   */
+     * @param {{ runId: string; expectedStatus?: string; expectedRuntimeOwnerId: string | null; expectedHeartbeatAtMs: number | null; staleBeforeMs: number; claimOwnerId: string; claimHeartbeatAtMs: number; requireStale?: boolean; }} params
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
     claimRunForResume(params: {
         runId: string;
         expectedStatus?: string;
@@ -838,9 +919,9 @@ declare class SmithersDb {
         requireStale?: boolean;
     }): RunnableEffect<boolean, SmithersError$1>;
     /**
-   * @param {{ runId: string; claimOwnerId: string; restoreRuntimeOwnerId: string | null; restoreHeartbeatAtMs: number | null; }} params
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {{ runId: string; claimOwnerId: string; restoreRuntimeOwnerId: string | null; restoreHeartbeatAtMs: number | null; }} params
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     releaseRunResumeClaim(params: {
         runId: string;
         claimOwnerId: string;
@@ -848,9 +929,9 @@ declare class SmithersDb {
         restoreHeartbeatAtMs: number | null;
     }): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {{ runId: string; expectedRuntimeOwnerId: string; expectedHeartbeatAtMs: number | null; expectedClaimedBy?: string | null; expectedClaimedAtMs?: number | null; patch: Record<string, unknown>; }} params
-   * @returns {RunnableEffect<boolean, SmithersError>}
-   */
+     * @param {{ runId: string; expectedRuntimeOwnerId: string; expectedHeartbeatAtMs: number | null; expectedClaimedBy?: string | null; expectedClaimedAtMs?: number | null; patch: Record<string, unknown>; }} params
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
     updateClaimedRun(params: {
         runId: string;
         expectedRuntimeOwnerId: string;
@@ -860,140 +941,155 @@ declare class SmithersDb {
         patch: Record<string, unknown>;
     }): RunnableEffect<boolean, SmithersError$1>;
     /**
-   * @param {Record<string, unknown>} row
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {Record<string, unknown>} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     insertNode(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {Record<string, unknown>} row
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {Record<string, unknown>} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     insertNodeEffect(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {string} nodeId
-   * @param {number} iteration
-   * @returns {RunnableEffect<NodeRow | undefined, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {string} nodeId
+     * @param {number} iteration
+     * @returns {RunnableEffect<NodeRow | undefined, SmithersError>}
+     */
     getNode(runId: string, nodeId: string, iteration: number): RunnableEffect<NodeRow | undefined, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {string} nodeId
-   * @returns {RunnableEffect<NodeRow[], SmithersError>}
-   */
+     * @param {string} runId
+     * @param {string} nodeId
+     * @returns {RunnableEffect<NodeRow[], SmithersError>}
+     */
     listNodeIterations(runId: string, nodeId: string): RunnableEffect<NodeRow[], SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<NodeRow[], SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<NodeRow[], SmithersError>}
+     */
     listNodes(runId: string): RunnableEffect<NodeRow[], SmithersError$1>;
     /**
-   * @param {Table} table
-   * @param {OutputKey} key
-   * @param {Record<string, unknown>} payload
-   * @returns {RunnableEffect<unknown, SmithersError>}
-   */
+     * @param {Table} table
+     * @param {OutputKey} key
+     * @param {Record<string, unknown>} payload
+     * @returns {RunnableEffect<unknown, SmithersError>}
+     */
     upsertOutputRow(table: Table, key: OutputKey, payload: Record<string, unknown>): RunnableEffect<unknown, SmithersError$1>;
     /**
-   * @param {Table} table
-   * @param {OutputKey} key
-   * @param {Record<string, unknown>} payload
-   * @returns {RunnableEffect<unknown, SmithersError>}
-   */
+     * @param {Table} table
+     * @param {OutputKey} key
+     * @param {Record<string, unknown>} payload
+     * @returns {RunnableEffect<unknown, SmithersError>}
+     */
     upsertOutputRowEffect(table: Table, key: OutputKey, payload: Record<string, unknown>): RunnableEffect<unknown, SmithersError$1>;
     /**
-   * @param {string} tableName
-   * @param {OutputKey} key
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {string} tableName
+     * @param {OutputKey} key
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     deleteOutputRow(tableName: string, key: OutputKey): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} tableName
-   * @param {OutputKey} key
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {string} tableName
+     * @param {OutputKey} key
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     deleteOutputRowEffect(tableName: string, key: OutputKey): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} tableName
-   * @param {string} runId
-   * @param {string} nodeId
-   * @returns {RunnableEffect<Record<string, unknown> | null, SmithersError>}
-   */
+     * @param {string} tableName
+     * @param {string} runId
+     * @param {string} nodeId
+     * @returns {RunnableEffect<Record<string, unknown> | null, SmithersError>}
+     */
     getRawNodeOutput(tableName: string, runId: string, nodeId: string): RunnableEffect<Record<string, unknown> | null, SmithersError$1>;
     /**
-   * @param {string} tableName
-   * @param {string} runId
-   * @param {string} nodeId
-   * @param {number} iteration
-   * @returns {RunnableEffect<Record<string, unknown> | null, SmithersError>}
-   */
+     * @param {string} tableName
+     * @param {string} runId
+     * @param {string} nodeId
+     * @param {number} iteration
+     * @returns {RunnableEffect<Record<string, unknown> | null, SmithersError>}
+     */
     /**
-   * Whether a physical table with this exact name exists in the database.
-   * @param {string} tableName
-   * @returns {RunnableEffect<boolean, SmithersError>}
-   */
-    hasPhysicalTable(tableName: string): RunnableEffect<boolean, SmithersError$1>;
-    getRawNodeOutputForIteration(tableName: any, runId: any, nodeId: any, iteration: any): RunnableEffect<Record<string, unknown> | null, _smithers_orchestrator_errors_toSmithersError.SmithersError>;
-    /**
-   * @param {Record<string, unknown>} row
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
-    insertAttempt(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
-    /**
-   * @param {Record<string, unknown>} row
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
-    insertAttemptEffect(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
-    /**
-   * @param {string} runId
-   * @param {string} nodeId
-   * @param {number} iteration
-   * @param {number} attempt
-   * @param {Record<string, unknown>} patch
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
-    updateAttempt(runId: string, nodeId: string, iteration: number, attempt: number, patch: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
-    /**
-   * @param {string} runId
-   * @param {string} nodeId
-   * @param {number} iteration
-   * @param {number} attempt
-   * @param {Record<string, unknown>} patch
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
-    updateAttemptEffect(runId: string, nodeId: string, iteration: number, attempt: number, patch: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
-    claimAttemptCompletion(runId: string, nodeId: string, iteration: number, attempt: number, runtimeOwnerId: string | null, finishedAtMs: number): RunnableEffect<boolean, SmithersError$1>;
-    claimAttemptTerminal(runId: string, nodeId: string, iteration: number, attempt: number, runtimeOwnerId: string | null, state: string, finishedAtMs: number, errorJson?: string): RunnableEffect<boolean, SmithersError$1>;
-    /**
-   * @param {string} runId
-   * @param {string} nodeId
-   * @param {number} iteration
-   * @param {number} attempt
-   * @param {number} heartbeatAtMs
-   * @param {string | null} heartbeatDataJson
+     * Whether a physical table with this exact name exists in the database.
+     * @param {string} tableName
      * @returns {RunnableEffect<boolean, SmithersError>}
      */
-    heartbeatAttempt(runId: string, nodeId: string, iteration: number, attempt: number, heartbeatAtMs: number, heartbeatDataJson: string | null, runtimeOwnerId: string | null): RunnableEffect<boolean, SmithersError$1>;
+    hasPhysicalTable(tableName: string): RunnableEffect<boolean, SmithersError$1>;
+    getRawNodeOutputForIteration(tableName: any, runId: any, nodeId: any, iteration: any): RunnableEffect<Record<string, unknown> | null, SmithersError$2>;
     /**
-   * @param {string} runId
-   * @param {string} nodeId
-   * @param {number} iteration
-   * @returns {RunnableEffect<AttemptRow[], SmithersError>}
-   */
+     * @param {Record<string, unknown>} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
+    insertAttempt(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
+    /**
+     * @param {Record<string, unknown>} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
+    insertAttemptEffect(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
+    /**
+     * @param {string} runId
+     * @param {string} nodeId
+     * @param {number} iteration
+     * @param {number} attempt
+     * @param {Record<string, unknown>} patch
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
+    updateAttempt(runId: string, nodeId: string, iteration: number, attempt: number, patch: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
+    /**
+     * @param {string} runId
+     * @param {string} nodeId
+     * @param {number} iteration
+     * @param {number} attempt
+     * @param {Record<string, unknown>} patch
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
+    updateAttemptEffect(runId: string, nodeId: string, iteration: number, attempt: number, patch: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
+    /**
+     * Compare-and-set the attempt terminal state. Output and node rows must be
+     * written in the same transaction only after this claim succeeds.
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
+    claimAttemptCompletion(runId: any, nodeId: any, iteration: any, attempt: any, runtimeOwnerId: any, finishedAtMs: any): RunnableEffect<boolean, SmithersError$1>;
+    claimAttemptTerminal(runId: any, nodeId: any, iteration: any, attempt: any, runtimeOwnerId: any, state: any, finishedAtMs: any, errorJson: any): RunnableEffect<boolean, SmithersError$2>;
+    /**
+     * @param {string} runId
+     * @param {string} nodeId
+     * @param {number} iteration
+     * @param {number} attempt
+     * @param {number} heartbeatAtMs
+     * @param {string | null} heartbeatDataJson
+     * @param {string} runtimeOwnerId
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
+    heartbeatAttempt(runId: string, nodeId: string, iteration: number, attempt: number, heartbeatAtMs: number, heartbeatDataJson: string | null, runtimeOwnerId: string): RunnableEffect<boolean, SmithersError$1>;
+    /**
+     * @param {string} runId
+     * @param {string} nodeId
+     * @param {number} iteration
+     * @returns {RunnableEffect<AttemptRow[], SmithersError>}
+     */
     listAttempts(runId: string, nodeId: string, iteration: number): RunnableEffect<AttemptRow[], SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<AttemptRow[], SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<AttemptRow[], SmithersError>}
+     */
     listAttemptsForRun(runId: string): RunnableEffect<AttemptRow[], SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {string} nodeId
-   * @param {number} iteration
-   * @param {number} attempt
-   * @returns {RunnableEffect<AttemptRow | undefined, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {string} nodeId
+     * @param {number} iteration
+     * @param {number} attempt
+     * @returns {RunnableEffect<AttemptRow | undefined, SmithersError>}
+     */
     getAttempt(runId: string, nodeId: string, iteration: number, attempt: number): RunnableEffect<AttemptRow | undefined, SmithersError$1>;
+    /**
+     * Atomically persist immutable checkpoint content and its attempt-scoped
+     * reference. The SHA-256 hash is an address, not proof: always compare the
+     * exact stored JSON bytes before creating the reference.
+     * Omit `sequence` to allocate the next sequence while holding the attempt
+     * lock. Explicit sequences remain supported for idempotent replay/import.
+     * @param {{ runId: string, nodeId: string, iteration: number, attempt: number, sequence?: number, checkpointJson: string, codec: string, version: number, agentId?: string | null, purpose: string, createdAtMs: number, runtimeOwnerId: string | null }} row
+     * @returns {RunnableEffect<AgentCheckpointRefRow | null, SmithersError>}
+     */
     putAgentCheckpoint(row: {
         runId: string;
         nodeId: string;
@@ -1007,8 +1103,17 @@ declare class SmithersDb {
         purpose: string;
         createdAtMs: number;
         runtimeOwnerId: string | null;
-    }): RunnableEffect<AgentCheckpointRefRow | null, SmithersError$1>;
-    getAgentCheckpoint(contentHash: string): RunnableEffect<AgentCheckpointContentRow | null, SmithersError$1>;
+    }): RunnableEffect<AgentCheckpointRefRow$1 | null, SmithersError$1>;
+    /**
+     * @param {string} contentHash
+     * @returns {RunnableEffect<AgentCheckpointContentRow | null, SmithersError>}
+     */
+    getAgentCheckpoint(contentHash: string): RunnableEffect<AgentCheckpointContentRow$1 | null, SmithersError$1>;
+    /**
+     * @param {string} runId
+     * @param {{ nodeId?: string, iteration?: number, attempt?: number, purpose?: string, limit?: number, after?: { nodeId: string, iteration: number, attempt: number, sequence: number } }} [filters]
+     * @returns {RunnableEffect<AgentCheckpointRefRow[], SmithersError>}
+     */
     listAgentCheckpointRefs(runId: string, filters?: {
         nodeId?: string;
         iteration?: number;
@@ -1021,7 +1126,16 @@ declare class SmithersDb {
             attempt: number;
             sequence: number;
         };
-    }): RunnableEffect<AgentCheckpointRefRow[], SmithersError$1>;
+    }): RunnableEffect<AgentCheckpointRefRow$1[], SmithersError$1>;
+    /**
+     * Read newest checkpoint references for one node iteration without loading
+     * its complete checkpoint history.
+     * @param {string} runId
+     * @param {string} nodeId
+     * @param {number} iteration
+     * @param {{ limit?: number, beforeAttemptExclusive?: number, before?: { attempt: number, sequence: number } }} [options]
+     * @returns {RunnableEffect<AgentCheckpointRefRow[], SmithersError>}
+     */
     listLatestAgentCheckpointRefs(runId: string, nodeId: string, iteration: number, options?: {
         limit?: number;
         beforeAttemptExclusive?: number;
@@ -1029,14 +1143,33 @@ declare class SmithersDb {
             attempt: number;
             sequence: number;
         };
-    }): RunnableEffect<AgentCheckpointRefRow[], SmithersError$1>;
+    }): RunnableEffect<AgentCheckpointRefRow$1[], SmithersError$1>;
+    /**
+     * @param {string} runId
+     * @param {string} nodeId
+     * @param {number} iteration
+     * @param {number} attempt
+     * @returns {RunnableEffect<number, SmithersError>}
+     */
     getNextAgentCheckpointSequence(runId: string, nodeId: string, iteration: number, attempt: number): RunnableEffect<number, SmithersError$1>;
     /**
-     * Delete refs and orphaned content for an exact reset-cancelled attempt,
-     * fenced by current run ownership. Returns false when the fence or reset
-     * marker does not match; otherwise true, including idempotent retries.
+     * Delete checkpoint references before a reset-cancelled attempt number is
+     * reused. The run ownership and reset marker are checked while locked in the
+     * same transaction as ref deletion and orphan-content collection.
+     * @param {string} runId
+     * @param {string} nodeId
+     * @param {number} iteration
+     * @param {number} attempt
+     * @param {string | null} runtimeOwnerId
+     * @returns {RunnableEffect<boolean, SmithersError>}
      */
     deleteResetAgentCheckpoints(runId: string, nodeId: string, iteration: number, attempt: number, runtimeOwnerId: string | null): RunnableEffect<boolean, SmithersError$1>;
+    /**
+     * Delete one deterministic page of unreferenced content. `afterContentHash`
+     * scopes a resumable scan; the NOT EXISTS predicate is rechecked at delete.
+     * @param {{ limit?: number, afterContentHash?: string }} [options]
+     * @returns {RunnableEffect<{ deletedCount: number, nextCursor: string | null }, SmithersError>}
+     */
     pruneOrphanedAgentCheckpointContents(options?: {
         limit?: number;
         afterContentHash?: string;
@@ -1045,133 +1178,133 @@ declare class SmithersDb {
         nextCursor: string | null;
     }, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<AttemptRow[], SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<AttemptRow[], SmithersError>}
+     */
     listInProgressAttempts(runId: string): RunnableEffect<AttemptRow[], SmithersError$1>;
     /**
-   * @returns {RunnableEffect<AttemptRow[], SmithersError>}
-   */
+     * @returns {RunnableEffect<AttemptRow[], SmithersError>}
+     */
     listAllInProgressAttempts(): RunnableEffect<AttemptRow[], SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {number} frameNo
-   * @param {number} [limit]
-   * @returns {RunnableEffect<FrameRow[], SmithersError>}
-   */
+     * @param {string} runId
+     * @param {number} frameNo
+     * @param {number} [limit]
+     * @returns {RunnableEffect<FrameRow[], SmithersError>}
+     */
     listFrameChainDesc(runId: string, frameNo: number, limit?: number): RunnableEffect<FrameRow[], SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {number} frameNo
-   * @param {Map<number, string>} [localCache]
-   * @returns {Effect.Effect<string | undefined, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {number} frameNo
+     * @param {Map<number, string>} [localCache]
+     * @returns {Effect.Effect<string | undefined, SmithersError>}
+     */
     reconstructFrameXml(runId: string, frameNo: number, localCache?: Map<number, string>): Effect.Effect<string | undefined, SmithersError$1>;
     /**
-   * @param {FrameRow} row
-   * @param {Map<number, string>} [localCache]
-   * @returns {Effect.Effect<FrameRow, SmithersError>}
-   */
+     * @param {FrameRow} row
+     * @param {Map<number, string>} [localCache]
+     * @returns {Effect.Effect<FrameRow, SmithersError>}
+     */
     inflateFrameRow(row: FrameRow, localCache?: Map<number, string>): Effect.Effect<FrameRow, SmithersError$1>;
     /**
-   * @param {Record<string, unknown>} row
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {Record<string, unknown>} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     insertFrame(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {Record<string, unknown>} row
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {Record<string, unknown>} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     insertFrameEffect(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<FrameRow | undefined, SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<FrameRow | undefined, SmithersError>}
+     */
     getLastFrame(runId: string): RunnableEffect<FrameRow | undefined, SmithersError$1>;
     /**
-   * @param {Record<string, unknown>} row
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {Record<string, unknown>} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     insertOrUpdateApproval(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {string} nodeId
-   * @param {number} iteration
-   * @returns {RunnableEffect<ApprovalRow | undefined, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {string} nodeId
+     * @param {number} iteration
+     * @returns {RunnableEffect<ApprovalRow | undefined, SmithersError>}
+     */
     getApproval(runId: string, nodeId: string, iteration: number): RunnableEffect<ApprovalRow | undefined, SmithersError$1>;
     /**
-   * @param {HumanRequestRow} row
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {HumanRequestRow} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     insertHumanRequest(row: HumanRequestRow): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} requestId
-   * @returns {RunnableEffect<HumanRequestRow | undefined, SmithersError>}
-   */
+     * @param {string} requestId
+     * @returns {RunnableEffect<HumanRequestRow | undefined, SmithersError>}
+     */
     getHumanRequest(requestId: string): RunnableEffect<HumanRequestRow | undefined, SmithersError$1>;
     /**
-   * @param {string} requestId
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {string} requestId
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     reopenHumanRequest(requestId: string): RunnableEffect<void, SmithersError$1>;
     /**
-    * @param {number} [nowMs]
-    * @returns {RunnableEffect<void, SmithersError>}
-    */
+     * @param {number} [nowMs]
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     expireStaleHumanRequests(nowMs?: number): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {number} [nowMs]
-   * @returns {RunnableEffect<PendingHumanRequestRow[], SmithersError>}
-   */
+     * @param {number} [nowMs]
+     * @returns {RunnableEffect<PendingHumanRequestRow[], SmithersError>}
+     */
     listPendingHumanRequests(nowMs?: number): RunnableEffect<PendingHumanRequestRow[], SmithersError$1>;
     /**
-   * @param {string} requestId
-   * @param {string} responseJson
-   * @param {number} answeredAtMs
-   * @param {string | null} [answeredBy]
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {string} requestId
+     * @param {string} responseJson
+     * @param {number} answeredAtMs
+     * @param {string | null} [answeredBy]
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     answerHumanRequest(requestId: string, responseJson: string, answeredAtMs: number, answeredBy?: string | null): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} requestId
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {string} requestId
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     cancelHumanRequest(requestId: string): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {AlertRow} row
-   * @returns {Promise<AlertRow | undefined>}
-   */
+     * @param {AlertRow} row
+     * @returns {Promise<AlertRow | undefined>}
+     */
     insertAlert(row: AlertRow): Promise<AlertRow | undefined>;
     /**
-   * @param {string} alertId
-   * @returns {RunnableEffect<AlertRow | undefined, SmithersError>}
-   */
+     * @param {string} alertId
+     * @returns {RunnableEffect<AlertRow | undefined, SmithersError>}
+     */
     getAlert(alertId: string): RunnableEffect<AlertRow | undefined, SmithersError$1>;
     /**
-   * @param {readonly AlertStatus[]} [statuses]
-   * @returns {RunnableEffect<AlertRow[], SmithersError>}
-   */
+     * @param {readonly AlertStatus[]} [statuses]
+     * @returns {RunnableEffect<AlertRow[], SmithersError>}
+     */
     listAlerts(limit?: number, statuses?: readonly AlertStatus[]): RunnableEffect<AlertRow[], SmithersError$1>;
     /**
-   * @param {string} alertId
-   * @returns {Promise<AlertRow | undefined>}
-   */
+     * @param {string} alertId
+     * @returns {Promise<AlertRow | undefined>}
+     */
     acknowledgeAlert(alertId: string, acknowledgedAtMs?: number): Promise<AlertRow | undefined>;
     /**
-   * @param {string} alertId
-   * @returns {Promise<AlertRow | undefined>}
-   */
+     * @param {string} alertId
+     * @returns {Promise<AlertRow | undefined>}
+     */
     resolveAlert(alertId: string, resolvedAtMs?: number): Promise<AlertRow | undefined>;
     /**
-   * @param {string} alertId
-   * @returns {Promise<AlertRow | undefined>}
-   */
+     * @param {string} alertId
+     * @returns {Promise<AlertRow | undefined>}
+     */
     silenceAlert(alertId: string): Promise<AlertRow | undefined>;
     /**
-   * @param {{ runId: string; signalName: string; correlationId: string | null; payloadJson: string; receivedAtMs: number; receivedBy?: string | null; }} row
-   * @returns {RunnableEffect<number, SmithersError>}
-   */
+     * @param {{ runId: string; signalName: string; correlationId: string | null; payloadJson: string; receivedAtMs: number; receivedBy?: string | null; }} row
+     * @returns {RunnableEffect<number, SmithersError>}
+     */
     insertSignalWithNextSeq(row: {
         runId: string;
         signalName: string;
@@ -1181,137 +1314,137 @@ declare class SmithersDb {
         receivedBy?: string | null;
     }): RunnableEffect<number, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<number | undefined, SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<number | undefined, SmithersError>}
+     */
     getLastSignalSeq(runId: string): RunnableEffect<number | undefined, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {SignalQuery} [query]
-   * @returns {RunnableEffect<SignalRow[], SmithersError>}
-   */
+     * @param {string} runId
+     * @param {SignalQuery} [query]
+     * @returns {RunnableEffect<SignalRow[], SmithersError>}
+     */
     listSignals(runId: string, query?: SignalQuery): RunnableEffect<SignalRow[], SmithersError$1>;
     /**
-   * @param {Record<string, unknown>} row
-   * @returns {RunnableEffect<void, SmithersError>}
-    */
+     * @param {Record<string, unknown>} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     insertToolCall(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {string} nodeId
-   * @param {number} iteration
-   * @param {number} attempt
-   * @param {number} seq
-   * @param {Record<string, unknown>} patch
-   * @returns {RunnableEffect<number, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {string} nodeId
+     * @param {number} iteration
+     * @param {number} attempt
+     * @param {number} seq
+     * @param {Record<string, unknown>} patch
+     * @returns {RunnableEffect<number, SmithersError>}
+     */
     updateToolCall(runId: string, nodeId: string, iteration: number, attempt: number, seq: number, patch: Record<string, unknown>): RunnableEffect<number, SmithersError$1>;
     /**
-   * @param {string} callToken
-   * @param {Record<string, unknown>} patch
-   * @returns {RunnableEffect<number, SmithersError>}
-   */
+     * @param {string} callToken
+     * @param {Record<string, unknown>} patch
+     * @returns {RunnableEffect<number, SmithersError>}
+     */
     updateToolCallByToken(callToken: string, patch: Record<string, unknown>): RunnableEffect<number, SmithersError$1>;
     /**
-   * Collapse crash/failure-interrupted effects from intended to unknown.
-   * @param {string} runId
-   * @param {string} nodeId
-   * @param {number} iteration
-   * @param {number} attempt
-   * @param {number} finishedAtMs
-   * @param {string | null} [errorJson]
-   * @returns {RunnableEffect<number, SmithersError>}
-   */
+     * Collapse crash/failure-interrupted effects from intended to unknown.
+     * @param {string} runId
+     * @param {string} nodeId
+     * @param {number} iteration
+     * @param {number} attempt
+     * @param {number} finishedAtMs
+     * @param {string | null} [errorJson]
+     * @returns {RunnableEffect<number, SmithersError>}
+     */
     markToolCallsUnknownForAttempt(runId: string, nodeId: string, iteration: number, attempt: number, finishedAtMs: number, errorJson?: string | null): RunnableEffect<number, SmithersError$1>;
     /**
-   * @param {Record<string, unknown>} row
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {Record<string, unknown>} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     upsertSandbox(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {string} sandboxId
-   * @param {number} heartbeatAtMs
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {string} sandboxId
+     * @param {number} heartbeatAtMs
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     heartbeatSandbox(runId: string, sandboxId: string, heartbeatAtMs: number): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {string} sandboxId
-   * @returns {RunnableEffect<Record<string, unknown> | undefined, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {string} sandboxId
+     * @returns {RunnableEffect<Record<string, unknown> | undefined, SmithersError>}
+     */
     getSandbox(runId: string, sandboxId: string): RunnableEffect<Record<string, unknown> | undefined, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+     */
     listSandboxes(runId: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {string} nodeId
-   * @param {number} iteration
-   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {string} nodeId
+     * @param {number} iteration
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+     */
     listToolCalls(runId: string, nodeId: string, iteration: number): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
-   * Record a distinct working-copy state (deduped by jj commit id). Upsert so a
-   * re-snapshot of the same tree refreshes the operation handle.
-   * @param {Record<string, unknown>} row
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * Record a distinct working-copy state (deduped by jj commit id). Upsert so a
+     * re-snapshot of the same tree refreshes the operation handle.
+     * @param {Record<string, unknown>} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     upsertWorkspaceState(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+     */
     listWorkspaceStates(runId: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
-   * Record a snapshot checkpoint event. One row per tool/watch boundary; never
-   * deduped, so a Tier 1 boundary always has a seq to bind a resume to.
-   * @param {Record<string, unknown>} row
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * Record a snapshot checkpoint event. One row per tool/watch boundary; never
+     * deduped, so a Tier 1 boundary always has a seq to bind a resume to.
+     * @param {Record<string, unknown>} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     insertWorkspaceCheckpoint(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+     */
     listWorkspaceCheckpoints(runId: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
-   * Prune old workspace states for a run, keeping the most recent maxKeep by
-   * created_at_ms. The latest rows are always kept. Row-value NOT IN avoids the
-   * string-concat collision a naive key would have; portable to SQLite + Postgres.
-   * @param {string} runId
-   * @param {number} [maxKeep]
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * Prune old workspace states for a run, keeping the most recent maxKeep by
+     * created_at_ms. The latest rows are always kept. Row-value NOT IN avoids the
+     * string-concat collision a naive key would have; portable to SQLite + Postgres.
+     * @param {string} runId
+     * @param {number} [maxKeep]
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     pruneWorkspaceStates(runId: string, maxKeep?: number): RunnableEffect<void, SmithersError$1>;
     /**
-   * Prune old workspace checkpoints, keeping the most recent maxKeepPerScope per
-   * (node_id, iteration, attempt) via a window function. The latest checkpoint per
-   * scope is always kept, so resume-restore targets survive.
-   * @param {string} runId
-   * @param {number} [maxKeepPerScope]
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * Prune old workspace checkpoints, keeping the most recent maxKeepPerScope per
+     * (node_id, iteration, attempt) via a window function. The latest checkpoint per
+     * scope is always kept, so resume-restore targets survive.
+     * @param {string} runId
+     * @param {number} [maxKeepPerScope]
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     pruneWorkspaceCheckpoints(runId: string, maxKeepPerScope?: number): RunnableEffect<void, SmithersError$1>;
     /**
-   * Upsert a DB-backed markdown artifact. When an existing live row has a
-   * different content hash, last-write-wins still applies, but a conflict marker
-   * row is inserted so the UI can surface the mismatch.
-   * @param {DocRow} row
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * Upsert a DB-backed markdown artifact. When an existing live row has a
+     * different content hash, last-write-wins still applies, but a conflict marker
+     * row is inserted so the UI can surface the mismatch.
+     * @param {DocRow} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     upsertDocRow(row: DocRow): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {Record<string, unknown>} row
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {Record<string, unknown>} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     insertEvent(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {{ runId: string; timestampMs: number; type: string; payloadJson: string; }} row
-   * @returns {RunnableEffect<number, SmithersError>}
-   */
+     * @param {{ runId: string; timestampMs: number; type: string; payloadJson: string; }} row
+     * @returns {RunnableEffect<number, SmithersError>}
+     */
     insertEventWithNextSeq(row: {
         runId: string;
         timestampMs: number;
@@ -1319,97 +1452,112 @@ declare class SmithersDb {
         payloadJson: string;
     }): RunnableEffect<number, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<number | undefined, SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<number | undefined, SmithersError>}
+     */
     getLastEventSeq(runId: string): RunnableEffect<number | undefined, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {EventHistoryQuery} [query]
-   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {EventHistoryQuery} [query]
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+     */
     listEventHistory(runId: string, query?: EventHistoryQuery): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {EventHistoryQuery} [query]
-   * @returns {RunnableEffect<number, SmithersError>}
-   */
+     * The newest events naming one node, ascending. One SQL pass (LIKE on the
+     * payload) instead of paging the whole history through JS: node transcripts
+     * on long runs need this to stay interactive, and unlike a bounded recency
+     * scan it finds OLD nodes' events too.
+     *
+     * @param {string} runId
+     * @param {string} nodeId Validated upstream (no quotes/percent — node id charset).
+     * @param {{ afterSeq?: number; limit?: number }} [query]
+     * @returns {RunnableEffect<EventRow[], SmithersError>}
+     */
+    listNodeEvents(runId: string, nodeId: string, query?: {
+        afterSeq?: number;
+        limit?: number;
+    }): RunnableEffect<EventRow[], SmithersError$1>;
+    /**
+     * @param {string} runId
+     * @param {EventHistoryQuery} [query]
+     * @returns {RunnableEffect<number, SmithersError>}
+     */
     countEventHistory(runId: string, query?: EventHistoryQuery): RunnableEffect<number, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {number} afterSeq
-   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {number} afterSeq
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+     */
     listEvents(runId: string, afterSeq: number, limit?: number): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {string} type
-   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {string} type
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+     */
     listEventsByType(runId: string, type: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
-   * @param {Record<string, unknown>} row
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {Record<string, unknown>} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     insertOrUpdateRalph(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+     */
     listRalph(runId: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+     */
     listPendingApprovals(runId: string): RunnableEffect<ApprovalRow[], SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+     */
     listDecidedApprovals(runId: string): RunnableEffect<ApprovalRow[], SmithersError$1>;
     /**
-   * Returns all decided approvals for a run (approved or denied), regardless of
-   * node state. Used by why-diagnosis so denied gates (node state = 'failed')
-   * are included in the diagnosis output.
-   * @param {string} runId
-   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
-   */
+     * Returns all decided approvals for a run (approved or denied), regardless of
+     * node state. Used by why-diagnosis so denied gates (node state = 'failed')
+     * are included in the diagnosis output.
+     * @param {string} runId
+     * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+     */
     listAllDecidedApprovals(runId: string): RunnableEffect<ApprovalRow[], SmithersError$1>;
     /**
-   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
-   */
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+     */
     listAllPendingApprovals(): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
-   * @param {string} workflowName
-   * @param {string} nodeId
-   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
-   */
+     * @param {string} workflowName
+     * @param {string} nodeId
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+     */
     listApprovalHistoryForNode(workflowName: string, nodeId: string, limit?: number): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {string} ralphId
-   * @returns {RunnableEffect<Record<string, unknown> | undefined, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {string} ralphId
+     * @returns {RunnableEffect<Record<string, unknown> | undefined, SmithersError>}
+     */
     getRalph(runId: string, ralphId: string): RunnableEffect<Record<string, unknown> | undefined, SmithersError$1>;
     /**
-   * @param {Record<string, unknown>} row
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {Record<string, unknown>} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     insertCache(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {Record<string, unknown>} row
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {Record<string, unknown>} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     insertCacheEffect(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} cacheKey
-   * @returns {RunnableEffect<CacheRow | undefined, SmithersError>}
-   */
+     * @param {string} cacheKey
+     * @returns {RunnableEffect<CacheRow | undefined, SmithersError>}
+     */
     getCache(cacheKey: string): RunnableEffect<CacheRow | undefined, SmithersError$1>;
     /**
-   * @param {{ runId: string; nodeId: string; iteration: number; baseRef: string; diffJson: string; computedAtMs: number; sizeBytes: number; }} row
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {{ runId: string; nodeId: string; iteration: number; baseRef: string; diffJson: string; computedAtMs: number; sizeBytes: number; }} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     upsertNodeDiffCache(row: {
         runId: string;
         nodeId: string;
@@ -1420,104 +1568,109 @@ declare class SmithersDb {
         sizeBytes: number;
     }): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {string} nodeId
-   * @param {number} iteration
-   * @param {string} baseRef
-   * @returns {RunnableEffect<NodeDiffCacheRow | undefined, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {string} nodeId
+     * @param {number} iteration
+     * @param {string} baseRef
+     * @returns {RunnableEffect<NodeDiffCacheRow | undefined, SmithersError>}
+     */
     getNodeDiffCache(runId: string, nodeId: string, iteration: number, baseRef: string): RunnableEffect<NodeDiffCacheRow$1 | undefined, SmithersError$1>;
     /**
-   * @param {string} [runId]
-   * @returns {RunnableEffect<number, SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<NodeDiffCacheRow[], SmithersError>}
+     */
+    listNodeDiffCache(runId: string): RunnableEffect<NodeDiffCacheRow$1[], SmithersError$1>;
+    /**
+     * @param {string} [runId]
+     * @returns {RunnableEffect<number, SmithersError>}
+     */
     countNodeDiffCacheRows(runId?: string): RunnableEffect<number, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {number} targetFrameNo
-   * @returns {RunnableEffect<number, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {number} targetFrameNo
+     * @returns {RunnableEffect<number, SmithersError>}
+     */
     invalidateNodeDiffsAfterFrame(runId: string, targetFrameNo: number): RunnableEffect<number, SmithersError$1>;
     /**
-   * @param {string} nodeId
-   * @param {string} [outputTable]
-   * @returns {RunnableEffect<CacheRow[], SmithersError>}
-   */
+     * @param {string} nodeId
+     * @param {string} [outputTable]
+     * @returns {RunnableEffect<CacheRow[], SmithersError>}
+     */
     listCacheByNode(nodeId: string, outputTable?: string, limit?: number): RunnableEffect<CacheRow[], SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {number} frameNo
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {number} frameNo
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     deleteFramesAfter(runId: string, frameNo: number): RunnableEffect<void, SmithersError$1>;
     /**
-   * Delete durable snapshot rows for frames after `frameNo`. Snapshots are keyed
-   * (run_id, frame_no) and are the hydration/fork source, so a rewind that
-   * truncates frames must truncate the matching snapshots too — otherwise
-   * fork/replay/loadLatestSnapshot can resurrect logically-discarded state.
-   * @param {string} runId
-   * @param {number} frameNo
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * Delete durable snapshot rows for frames after `frameNo`. Snapshots are keyed
+     * (run_id, frame_no) and are the hydration/fork source, so a rewind that
+     * truncates frames must truncate the matching snapshots too — otherwise
+     * fork/replay/loadLatestSnapshot can resurrect logically-discarded state.
+     * @param {string} runId
+     * @param {number} frameNo
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     deleteSnapshotsAfter(runId: string, frameNo: number): RunnableEffect<void, SmithersError$1>;
     /**
-   * Delete VCS tag rows for frames after `frameNo`, keyed (run_id, frame_no).
-   * A rewind truncates frames; the matching vcs-tags must go too or
-   * rerunAtRevision/loadVcsTag can restore a discarded working-copy revision.
-   * @param {string} runId
-   * @param {number} frameNo
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * Delete VCS tag rows for frames after `frameNo`, keyed (run_id, frame_no).
+     * A rewind truncates frames; the matching vcs-tags must go too or
+     * rerunAtRevision/loadVcsTag can restore a discarded working-copy revision.
+     * @param {string} runId
+     * @param {number} frameNo
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     deleteVcsTagsAfter(runId: string, frameNo: number): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {number} limit
-   * @param {number} [afterFrameNo]
-   * @returns {RunnableEffect<FrameRow[], SmithersError>}
-   */
+     * @param {string} runId
+     * @param {number} limit
+     * @param {number} [afterFrameNo]
+     * @returns {RunnableEffect<FrameRow[], SmithersError>}
+     */
     listFrames(runId: string, limit: number, afterFrameNo?: number): RunnableEffect<FrameRow[], SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<Array<{ state: string; count: number }>, SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<Array<{ state: string; count: number }>, SmithersError>}
+     */
     countNodesByState(runId: string): RunnableEffect<Array<{
         state: string;
         count: number;
     }>, SmithersError$1>;
     /**
-   * @param {Record<string, unknown>} row
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {Record<string, unknown>} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     upsertCron(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
-    * @param {boolean} [enabledOnly]
-    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
-    */
+     * @param {boolean} [enabledOnly]
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+     */
     listCrons(enabledOnly?: boolean): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
-   * @param {string} cronId
-   * @param {number} lastRunAtMs
-   * @param {number} nextRunAtMs
-   * @param {string | null} [errorJson]
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {string} cronId
+     * @param {number} lastRunAtMs
+     * @param {number} nextRunAtMs
+     * @param {string | null} [errorJson]
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     updateCronRunTime(cronId: string, lastRunAtMs: number, nextRunAtMs: number, errorJson?: string | null): RunnableEffect<void, SmithersError$1>;
     /**
-   * Atomically claim one cron fire by advancing the schedule only when the
-   * stored next fire time still matches what this scheduler read. Concurrent
-   * schedulers sharing a DB race this compare-and-set; exactly one observes
-   * `true` and may launch, the rest observe `false` and skip.
-   * @param {string} cronId
-   * @param {number | null} expectedNextRunAtMs
-   * @param {number} lastRunAtMs
-   * @param {number} nextRunAtMs
-   * @returns {RunnableEffect<boolean, SmithersError>}
-   */
+     * Atomically claim one cron fire by advancing the schedule only when the
+     * stored next fire time still matches what this scheduler read. Concurrent
+     * schedulers sharing a DB race this compare-and-set; exactly one observes
+     * `true` and may launch, the rest observe `false` and skip.
+     * @param {string} cronId
+     * @param {number | null} expectedNextRunAtMs
+     * @param {number} lastRunAtMs
+     * @param {number} nextRunAtMs
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
     claimCronRun(cronId: string, expectedNextRunAtMs: number | null, lastRunAtMs: number, nextRunAtMs: number): RunnableEffect<boolean, SmithersError$1>;
     /**
-   * @param {string} cronId
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {string} cronId
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     deleteCron(cronId: string): RunnableEffect<void, SmithersError$1>;
     /**
    * List cross-run memory facts, optionally scoped to a namespace. Reads the
@@ -1532,15 +1685,15 @@ declare class SmithersDb {
    */
     listMemoryFacts(namespace?: string | null): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
-   * List LIVE docs from `_smithers_docs` (tombstones — `deleted_at_ms IS NOT
-   * NULL` — are NEVER returned), optionally scoped to one `kind`. Backs the
-   * gateway's `listTickets` RPC and the file-watcher's reconcile read. Columns
-   * are snake→camel cased by the storage layer (`content_hash → contentHash`,
-   * etc.); newest-updated first so the surface shows recent edits on top.
-   * @param {string | null | { kind?: string; includeDeleted?: boolean; updatedAfterMs?: number; limit?: number }} [arg]
-   *   Either a positional `kind` filter (string) or an options object.
-   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
-   */
+     * List LIVE docs from `_smithers_docs` (tombstones — `deleted_at_ms IS NOT
+     * NULL` — are NEVER returned), optionally scoped to one `kind`. Backs the
+     * gateway's `listTickets` RPC and the file-watcher's reconcile read. Columns
+     * are snake→camel cased by the storage layer (`content_hash → contentHash`,
+     * etc.); newest-updated first so the surface shows recent edits on top.
+     * @param {string | null | { kind?: string; includeDeleted?: boolean; updatedAfterMs?: number; limit?: number }} [arg]
+     *   Either a positional `kind` filter (string) or an options object.
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+     */
     listDocs(arg?: string | null | {
         kind?: string;
         includeDeleted?: boolean;
@@ -1548,41 +1701,44 @@ declare class SmithersDb {
         limit?: number;
     }): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
-   * Read a single doc row by path (INCLUDING a tombstone, so the watcher's
-   * last-write-wins can compare against a soft-deleted row). Returns `undefined`
-   * when the path was never written.
-   * @param {string} path
-   * @returns {RunnableEffect<Record<string, unknown> | undefined, SmithersError>}
-   */
+     * Read a single doc row by path (INCLUDING a tombstone, so the watcher's
+     * last-write-wins can compare against a soft-deleted row). Returns `undefined`
+     * when the path was never written.
+     * @param {string} path
+     * @returns {RunnableEffect<Record<string, unknown> | undefined, SmithersError>}
+     */
     getDoc(path: string, options?: {}): RunnableEffect<Record<string, unknown> | undefined, SmithersError$1>;
     /**
-   * Upsert a doc row (insert-or-replace by `path`). The caller supplies the
-   * already-computed `contentHash` (`sha256(content)`) and `updatedAtMs` so the
-   * RPC handler and the file-watcher hash/stamp identically. Writing a row with
-   * `deletedAtMs: null` REVIVES a previously soft-deleted path (a re-create or a
-   * fresh file write), which is the intended last-write-wins behaviour.
-   * @param {Record<string, unknown>} row
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * Upsert a doc row (insert-or-replace by `path`). The caller supplies the
+     * already-computed `contentHash` (`sha256(content)`) and `updatedAtMs` so the
+     * RPC handler and the file-watcher hash/stamp identically. Writing a row with
+     * `deletedAtMs: null` REVIVES a previously soft-deleted path (a re-create or a
+     * fresh file write), which is the intended last-write-wins behaviour.
+     * @param {Record<string, unknown>} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     upsertDoc(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
-   * Soft-delete a doc by stamping `deleted_at_ms` (a tombstone) rather than
-   * removing the row, so `listTickets` hides it while the watcher can still see
-   * it survived. `updated_at_ms` is bumped so the change orders correctly.
-   * @param {string} path
-   * @param {number} deletedAtMs
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * Soft-delete a doc by stamping `deleted_at_ms` (a tombstone) rather than
+     * removing the row, so `listTickets` hides it while the watcher can still see
+     * it survived. `updated_at_ms` is bumped so the change orders correctly.
+     * @param {string} path
+     * @param {number} deletedAtMs
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     softDeleteDoc(path: string, deletedAtMs: number): RunnableEffect<void, SmithersError$1>;
     /**
-   * Insert an integration-delivery dedupe row if `(sourceId, dedupeKey)` was
-   * never recorded. Returns `true` when the row was inserted (first delivery)
-   * and `false` when it already existed (a redelivery to drop). The
-   * check-then-insert runs inside a single adapter transaction so two
-   * concurrent redeliveries cannot both claim "first".
-   * @param {{ sourceId: string; dedupeKey: string; eventName: string; receivedAtMs: number }} row
-   * @returns {RunnableEffect<boolean, SmithersError>}
-   */
+     * Insert an integration-delivery dedupe row if `(sourceId, dedupeKey)` was
+     * never recorded. Returns `true` when the row was inserted (first delivery)
+     * and `false` when it already existed (a redelivery to drop). The insert
+     * itself is the verdict — a preceding `SELECT` cannot decide this on
+     * PostgreSQL, where Smithers' transactions run at READ COMMITTED and two
+     * concurrent redeliveries both read no row before either commits. Only the
+     * `ON CONFLICT DO NOTHING` winner gets a `RETURNING` row, so two concurrent
+     * redeliveries cannot both claim "first".
+     * @param {{ sourceId: string; dedupeKey: string; eventName: string; receivedAtMs: number }} row
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
     insertIntegrationDeliveryIfNew(row: {
         sourceId: string;
         dedupeKey: string;
@@ -1590,12 +1746,15 @@ declare class SmithersDb {
         receivedAtMs: number;
     }): RunnableEffect<boolean, SmithersError$1>;
     /**
-   * Atomically claim an integration delivery. The first insert preserves the
-   * canonical `receivedAtMs`; replays return that timestamp even when the
-   * provider decoder stamped a newer one. Completed rows dedupe permanently,
-   * active leases return `busy`, and expired or released pending rows can be
-   * reclaimed.
-   */
+     * Atomically claim an integration delivery. The first insert preserves the
+     * canonical `receivedAtMs`; replays return that timestamp even when the
+     * provider decoder stamped a newer one. Completed rows dedupe permanently,
+     * active leases return `busy`, and expired or released pending rows can be
+     * reclaimed.
+     * @param {{ sourceId: string; dedupeKey: string; eventName: string; receivedAtMs: number }} row
+     * @param {{ ownerToken: string; nowMs?: number; leaseDurationMs?: number }} options
+     * @returns {RunnableEffect<IntegrationDeliveryClaim, SmithersError>}
+     */
     claimIntegrationDelivery(row: {
         sourceId: string;
         dedupeKey: string;
@@ -1605,66 +1764,91 @@ declare class SmithersDb {
         ownerToken: string;
         nowMs?: number;
         leaseDurationMs?: number;
-    }): RunnableEffect<IntegrationDeliveryClaim$1, SmithersError$1>;
-    /** Extend a pending delivery lease while `ownerToken` still owns it. */
+    }): RunnableEffect<IntegrationDeliveryClaim, SmithersError$1>;
+    /**
+     * Extend a pending delivery lease while `ownerToken` still owns it. Lease
+     * renewal is an owner-CAS so a worker that lost the claim to stale takeover
+     * cannot revive or complete it.
+     * @param {string} sourceId
+     * @param {string} dedupeKey
+     * @param {string} ownerToken
+     * @param {number} [nowMs]
+     * @param {number} [leaseDurationMs]
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
     renewIntegrationDeliveryClaim(sourceId: string, dedupeKey: string, ownerToken: string, nowMs?: number, leaseDurationMs?: number): RunnableEffect<boolean, SmithersError$1>;
-    /** Mark a pending delivery completed while `ownerToken` still owns it. */
+    /**
+     * Mark a pending integration delivery completed if `ownerToken` still owns
+     * the claim. Returns false after lease takeover or prior completion.
+     * @param {string} sourceId
+     * @param {string} dedupeKey
+     * @param {string} ownerToken
+     * @param {number} [completedAtMs]
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
     completeIntegrationDelivery(sourceId: string, dedupeKey: string, ownerToken: string, completedAtMs?: number): RunnableEffect<boolean, SmithersError$1>;
-    /** Release a live pending claim while retaining its canonical ledger row. */
+    /**
+     * Release a live pending claim after an ordinary failure or interruption.
+     * The ledger row and canonical timestamp remain for immediate retry.
+     * @param {string} sourceId
+     * @param {string} dedupeKey
+     * @param {string} ownerToken
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
     releaseIntegrationDeliveryClaim(sourceId: string, dedupeKey: string, ownerToken: string): RunnableEffect<boolean, SmithersError$1>;
     /**
-   * Read a polling source's persisted cursor. Returns `undefined` when the
-   * source never persisted one; a stored NULL cursor comes back as `null`.
-   * @param {string} sourceId
-   * @returns {RunnableEffect<string | null | undefined, SmithersError>}
-   */
+     * Read a polling source's persisted cursor. Returns `undefined` when the
+     * source never persisted one; a stored NULL cursor comes back as `null`.
+     * @param {string} sourceId
+     * @returns {RunnableEffect<string | null | undefined, SmithersError>}
+     */
     getIntegrationCursor(sourceId: string): RunnableEffect<string | null | undefined, SmithersError$1>;
     /**
-   * Persist a polling source's cursor (upsert by `source_id`).
-   * @param {string} sourceId
-   * @param {string | null} cursor
-   * @param {number} [updatedAtMs]
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * Persist a polling source's cursor (upsert by `source_id`).
+     * @param {string} sourceId
+     * @param {string | null} cursor
+     * @param {number} [updatedAtMs]
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     setIntegrationCursor(sourceId: string, cursor: string | null, updatedAtMs?: number): RunnableEffect<void, SmithersError$1>;
     /**
-   * Find runs with a node currently parked on `WaitForEvent` for
-   * `eventName` + `correlationId`. This is the run-targeting query for
-   * external integration events: SQL narrows to non-terminal runs whose
-   * `waiting-event` nodes have a `waiting-event` attempt with wait-for-event
-   * metadata, then the shared `parseWaitForEventAttemptSnapshot` parser
-   * (also used by the engine's `bridgeSignalResolve`) confirms the exact
-   * signal-name + normalized-correlation-id match in JS. Returns distinct
-   * run ids.
-   * @param {string} eventName
-   * @param {string | null} [correlationId]
-   * @returns {RunnableEffect<string[], SmithersError>}
-   */
+     * Find runs with a node currently parked on `WaitForEvent` for
+     * `eventName` + `correlationId`. This is the run-targeting query for
+     * external integration events: SQL narrows to non-terminal runs whose
+     * `waiting-event` nodes have a `waiting-event` attempt with wait-for-event
+     * metadata, then the shared `parseWaitForEventAttemptSnapshot` parser
+     * (also used by the engine's `bridgeSignalResolve`) confirms the exact
+     * signal-name + normalized-correlation-id match in JS. Returns distinct
+     * run ids.
+     * @param {string} eventName
+     * @param {string | null} [correlationId]
+     * @returns {RunnableEffect<string[], SmithersError>}
+     */
     findRunsAwaitingEvent(eventName: string, correlationId?: string | null): RunnableEffect<string[], SmithersError$1>;
     /**
-   * @param {Record<string, unknown>} row
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {Record<string, unknown>} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     insertScorerResult(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {string} [nodeId]
-   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {string} [nodeId]
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+     */
     listScorerResults(runId: string, nodeId?: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
-   * Count scorer rows across a bounded set of runs. Every caller-supplied value
-   * is bound as a placeholder; only the fixed filter column names are composed
-   * into the statement.
-   * @param {{
-   *   runIds: string[];
-   *   nodeId?: string;
-   *   scorerId?: string;
-   *   scorerName?: string;
-   *   source?: string;
-   * }} query
-   * @returns {RunnableEffect<number, SmithersError>}
-   */
+     * Count scorer rows across a bounded set of runs. Every caller-supplied value
+     * is bound as a placeholder; only the fixed filter column names are composed
+     * into the statement.
+     * @param {{
+     *   runIds: string[];
+     *   nodeId?: string;
+     *   scorerId?: string;
+     *   scorerName?: string;
+     *   source?: string;
+     * }} query
+     * @returns {RunnableEffect<number, SmithersError>}
+     */
     countScorerResultsForRuns(query: {
         runIds: string[];
         nodeId?: string;
@@ -1673,21 +1857,21 @@ declare class SmithersDb {
         source?: string;
     }): RunnableEffect<number, SmithersError$1>;
     /**
-   * Fetch one globally-sortable candidate page of scorer rows for a set of
-   * runs. The server merges candidates from distinct stores and applies the
-   * final global offset/limit.
-   * @param {{
-   *   runIds: string[];
-   *   nodeId?: string;
-   *   scorerId?: string;
-   *   scorerName?: string;
-   *   source?: string;
-   *   order: "scoredAtAsc" | "scoredAtDesc";
-   *   offset: number;
-   *   limit: number;
-   * }} query
-   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
-   */
+     * Fetch one globally-sortable candidate page of scorer rows for a set of
+     * runs. The server merges candidates from distinct stores and applies the
+     * final global offset/limit.
+     * @param {{
+     *   runIds: string[];
+     *   nodeId?: string;
+     *   scorerId?: string;
+     *   scorerName?: string;
+     *   source?: string;
+     *   order: "scoredAtAsc" | "scoredAtDesc";
+     *   offset: number;
+     *   limit: number;
+     * }} query
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+     */
     listScorerResultsForRuns(query: {
         runIds: string[];
         nodeId?: string;
@@ -1699,161 +1883,197 @@ declare class SmithersDb {
         limit: number;
     }): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
-   * Read one scorer row by its exact persisted id, scoped to its owning run.
-   * @param {string} runId
-   * @param {string} scoreId
-   * @returns {RunnableEffect<Record<string, unknown> | undefined, SmithersError>}
-   */
+     * Read one scorer row by its exact persisted id, scoped to its owning run.
+     * @param {string} runId
+     * @param {string} scoreId
+     * @returns {RunnableEffect<Record<string, unknown> | undefined, SmithersError>}
+     */
     getScorerResult(runId: string, scoreId: string): RunnableEffect<Record<string, unknown> | undefined, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<RunRow | undefined, SmithersError>}
-   */
+     * Insert-or-replace a saved eval suite by `suiteId`. Callers that intend an
+     * UPDATE (an existing suiteId) should read the current row first and carry
+     * its original `createdAtMs` forward — this upsert has no update-column
+     * allowlist, so every field present on `row` (including `createdAtMs`) is
+     * written verbatim.
+     * @param {EvalSuiteRow} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
+    upsertEvalSuite(row: EvalSuiteRow): RunnableEffect<void, SmithersError$1>;
+    /**
+     * @returns {RunnableEffect<EvalSuiteRow[], SmithersError>}
+     */
+    listEvalSuites(): RunnableEffect<EvalSuiteRow[], SmithersError$1>;
+    /**
+     * @param {string} suiteId
+     * @returns {RunnableEffect<EvalSuiteRow | undefined, SmithersError>}
+     */
+    getEvalSuite(suiteId: string): RunnableEffect<EvalSuiteRow | undefined, SmithersError$1>;
+    /**
+     * Insert-or-replace one case's live result row, keyed by the caller-composed
+     * `${evalRunId}:${caseId}` id. Every field present on `row` is written
+     * verbatim on conflict (no update-column allowlist), matching
+     * `upsertEvalSuite`.
+     * @param {EvalCaseResultRow} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
+    upsertEvalCaseResult(row: EvalCaseResultRow): RunnableEffect<void, SmithersError$1>;
+    /**
+     * @param {string} evalRunId
+     * @returns {RunnableEffect<EvalCaseResultRow[], SmithersError>}
+     */
+    listEvalCaseResults(evalRunId: string): RunnableEffect<EvalCaseResultRow[], SmithersError$1>;
+    /**
+     * @param {string} runId
+     * @returns {RunnableEffect<RunRow | undefined, SmithersError>}
+     */
     getRunEffect(runId: string): RunnableEffect<RunRow | undefined, SmithersError$1>;
     /**
-   * @param {string} [status]
-   * @param {string} [workflow]
-   * @returns {RunnableEffect<RunRow[], SmithersError>}
-   */
+     * @param {string} [status]
+     * @param {string} [workflow]
+     * @returns {RunnableEffect<RunRow[], SmithersError>}
+     */
     listRunsEffect(limit?: number, status?: string, workflow?: string): RunnableEffect<RunRow[], SmithersError$1>;
     /**
-   * @param {number} staleBeforeMs
-   * @returns {RunnableEffect<StaleRunRecord[], SmithersError>}
-   */
+     * @param {number} staleBeforeMs
+     * @returns {RunnableEffect<StaleRunRecord[], SmithersError>}
+     */
     listStaleRunningRunsEffect(staleBeforeMs: number, limit?: number): RunnableEffect<StaleRunRecord[], SmithersError$1>;
     /**
-   * @param {Parameters<SmithersDb["claimRunForResume"]>[0]} params
-   * @returns {RunnableEffect<boolean, SmithersError>}
-   */
+     * @param {Parameters<SmithersDb["claimRunForResume"]>[0]} params
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
     claimRunForResumeEffect(params: Parameters<SmithersDb["claimRunForResume"]>[0]): RunnableEffect<boolean, SmithersError$1>;
     /**
-   * @param {Parameters<SmithersDb["releaseRunResumeClaim"]>[0]} params
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {Parameters<SmithersDb["releaseRunResumeClaim"]>[0]} params
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     releaseRunResumeClaimEffect(params: Parameters<SmithersDb["releaseRunResumeClaim"]>[0]): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {string} nodeId
-   * @returns {RunnableEffect<NodeRow[], SmithersError>}
-   */
+     * @param {string} runId
+     * @param {string} nodeId
+     * @returns {RunnableEffect<NodeRow[], SmithersError>}
+     */
     listNodeIterationsEffect(runId: string, nodeId: string): RunnableEffect<NodeRow[], SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<NodeRow[], SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<NodeRow[], SmithersError>}
+     */
     listNodesEffect(runId: string): RunnableEffect<NodeRow[], SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {string} nodeId
-   * @param {number} iteration
-   * @returns {RunnableEffect<AttemptRow[], SmithersError>}
-   */
+     * @param {string} runId
+     * @param {string} nodeId
+     * @param {number} iteration
+     * @returns {RunnableEffect<AttemptRow[], SmithersError>}
+     */
     listAttemptsEffect(runId: string, nodeId: string, iteration: number): RunnableEffect<AttemptRow[], SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<AttemptRow[], SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<AttemptRow[], SmithersError>}
+     */
     listAttemptsForRunEffect(runId: string): RunnableEffect<AttemptRow[], SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {string} nodeId
-   * @param {number} iteration
-   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {string} nodeId
+     * @param {number} iteration
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+     */
     listToolCallsEffect(runId: string, nodeId: string, iteration: number): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
-   * @param {string} tableName
-   * @param {string} runId
-   * @param {string} nodeId
-   * @param {number} iteration
-   * @returns {RunnableEffect<Record<string, unknown> | null, SmithersError>}
-   */
+     * @param {string} tableName
+     * @param {string} runId
+     * @param {string} nodeId
+     * @param {number} iteration
+     * @returns {RunnableEffect<Record<string, unknown> | null, SmithersError>}
+     */
     getRawNodeOutputForIterationEffect(tableName: string, runId: string, nodeId: string, iteration: number): RunnableEffect<Record<string, unknown> | null, SmithersError$1>;
     /**
-   * @param {Parameters<SmithersDb["insertEventWithNextSeq"]>[0]} row
-   * @returns {RunnableEffect<number, SmithersError>}
-   */
+     * @param {Parameters<SmithersDb["insertEventWithNextSeq"]>[0]} row
+     * @returns {RunnableEffect<number, SmithersError>}
+     */
     insertEventWithNextSeqEffect(row: Parameters<SmithersDb["insertEventWithNextSeq"]>[0]): RunnableEffect<number, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<number | undefined, SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<number | undefined, SmithersError>}
+     */
     getLastEventSeqEffect(runId: string): RunnableEffect<number | undefined, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {EventHistoryQuery} [query]
-   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {EventHistoryQuery} [query]
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+     */
     listEventHistoryEffect(runId: string, query?: EventHistoryQuery): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {EventHistoryQuery} [query]
-   * @returns {RunnableEffect<number, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {EventHistoryQuery} [query]
+     * @returns {RunnableEffect<number, SmithersError>}
+     */
     countEventHistoryEffect(runId: string, query?: EventHistoryQuery): RunnableEffect<number, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {string} type
-   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {string} type
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+     */
     listEventsByTypeEffect(runId: string, type: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+     */
     listPendingApprovalsEffect(runId: string): RunnableEffect<ApprovalRow[], SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+     */
     listDecidedApprovalsEffect(runId: string): RunnableEffect<ApprovalRow[], SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+     */
     listAllDecidedApprovalsEffect(runId: string): RunnableEffect<ApprovalRow[], SmithersError$1>;
     /**
-   * @param {string} runId
-   * @returns {RunnableEffect<FrameRow | undefined, SmithersError>}
-   */
+     * @param {string} runId
+     * @returns {RunnableEffect<FrameRow | undefined, SmithersError>}
+     */
     getLastFrameEffect(runId: string): RunnableEffect<FrameRow | undefined, SmithersError$1>;
     /**
-   * @param {string} nodeId
-   * @param {string} [outputTable]
-   * @returns {RunnableEffect<CacheRow[], SmithersError>}
-   */
+     * @param {string} nodeId
+     * @param {string} [outputTable]
+     * @returns {RunnableEffect<CacheRow[], SmithersError>}
+     */
     listCacheByNodeEffect(nodeId: string, outputTable?: string, limit?: number): RunnableEffect<CacheRow[], SmithersError$1>;
     /**
-    * @param {boolean} [enabledOnly]
-    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
-    */
+     * @param {boolean} [enabledOnly]
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+     */
     listCronsEffect(enabledOnly?: boolean): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
-   * @param {string} cronId
-   * @param {number} lastRunAtMs
-   * @param {number} nextRunAtMs
-   * @param {string | null} [errorJson]
-   * @returns {RunnableEffect<void, SmithersError>}
-   */
+     * @param {string} cronId
+     * @param {number} lastRunAtMs
+     * @param {number} nextRunAtMs
+     * @param {string | null} [errorJson]
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     updateCronRunTimeEffect(cronId: string, lastRunAtMs: number, nextRunAtMs: number, errorJson?: string | null): RunnableEffect<void, SmithersError$1>;
     /**
-   * @param {string} cronId
-   * @param {number | null} expectedNextRunAtMs
-   * @param {number} lastRunAtMs
-   * @param {number} nextRunAtMs
-   * @returns {RunnableEffect<boolean, SmithersError>}
-   */
+     * @param {string} cronId
+     * @param {number | null} expectedNextRunAtMs
+     * @param {number} lastRunAtMs
+     * @param {number} nextRunAtMs
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
     claimCronRunEffect(cronId: string, expectedNextRunAtMs: number | null, lastRunAtMs: number, nextRunAtMs: number): RunnableEffect<boolean, SmithersError$1>;
     /**
-   * @param {string} runId
-   * @param {string} [nodeId]
-   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
-   */
+     * @param {string} runId
+     * @param {string} [nodeId]
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+     */
     listScorerResultsEffect(runId: string, nodeId?: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
 }
 type AlertSeverity = AlertSeverity$1;
 type ApprovalRow = ApprovalRow$1;
 type CacheRow = CacheRow$1;
+type EvalCaseResultRow = EvalCaseResultRow$1;
+type EvalSuiteRow = EvalSuiteRow$1;
+type IntegrationDeliveryClaim = IntegrationDeliveryClaim$1;
 type NodeRow = NodeRow$1;
 type PendingHumanRequestRow = PendingHumanRequestRow$1;
 type RunAncestryRow = RunAncestryRow$1;
@@ -1863,11 +2083,12 @@ type StaleRunRecord = StaleRunRecord$1;
 type AlertRow = AlertRow$1;
 type AlertStatus = AlertStatus$1;
 type AttemptRow = AttemptRow$1;
+type AgentCheckpointContentRow$1 = AgentCheckpointContentRow$2;
+type AgentCheckpointRefRow$1 = AgentCheckpointRefRow$2;
 type BunSQLiteDatabase$2 = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
 type Table = drizzle_orm.Table;
 type EventHistoryQuery = EventHistoryQuery$1;
 type HumanRequestRow = HumanRequestRow$1;
-type IntegrationDeliveryClaim = IntegrationDeliveryClaim$1;
 type OutputKey = OutputKey$1;
 type RunnableEffect<A, E> = Effect.Effect<A, E> & PromiseLike<A>;
 type SignalQuery = SignalQuery$1;
@@ -1916,7 +2137,7 @@ type DocRow = {
 };
 type SqliteTransactionState = {
     depth: number;
-    ownerThread: string | null;
+    ownerAdapter: SmithersDb | null;
     tail: Promise<unknown>;
 };
 
@@ -1952,15 +2173,6 @@ declare function ensureSmithersTablesEffect(db: _BunSQLiteDatabase<Record<string
 declare function ensureSmithersTables(db: _BunSQLiteDatabase<Record<string, unknown>>): void;
 type _BunSQLiteDatabase = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
 type _SmithersError = _smithers_orchestrator_errors_SmithersError.SmithersError;
-
-/**
- * Open the standard durable local SQLite connection used by Smithers sidecars.
- * @param path SQLite database path.
- */
-declare function openDurableSqliteDatabase(path: string): {
-    db: drizzle_orm_bun_sqlite.BunSQLiteDatabase<Record<string, never>>;
-    close: () => void;
-};
 
 type JsonBounds$2 = {
     maxArrayLength?: number;
@@ -2131,6 +2343,585 @@ declare function validateInput(table: _Table$3, payload: unknown): {
 };
 type _Table$3 = drizzle_orm.Table;
 type ZodError = zod.ZodError;
+
+declare const smithersToolCallArchive: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
+    name: "_smithers_tool_call_archive";
+    schema: undefined;
+    columns: {
+        runId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "run_id";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        nodeId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "node_id";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        iteration: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "iteration";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        attempt: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "attempt";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        seq: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "seq";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        callToken: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "call_token";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        toolName: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "tool_name";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        inputJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "input_json";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        outputJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "output_json";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        startedAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "started_at_ms";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        finishedAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "finished_at_ms";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        status: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "status";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        errorJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "error_json";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        kind: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "kind";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        sideEffect: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "side_effect";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "boolean";
+            columnType: "SQLiteBoolean";
+            data: boolean;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        idempotent: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "idempotent";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "boolean";
+            columnType: "SQLiteBoolean";
+            data: boolean;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        acceptsIdempotencyKey: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "accepts_idempotency_key";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "boolean";
+            columnType: "SQLiteBoolean";
+            data: boolean;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        hasRevert: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "has_revert";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "boolean";
+            columnType: "SQLiteBoolean";
+            data: boolean;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        idempotencyKey: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "idempotency_key";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        revertStatus: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "revert_status";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: "reverting" | "reverted" | "revert-failed" | "revert-stale";
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: ["reverting", "reverted", "revert-failed", "revert-stale"];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        revertedAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "reverted_at_ms";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        revertErrorJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "revert_error_json";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        forcedPastJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "forced_past_json";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        archivedByOp: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "archived_by_op";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        archivedAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "archived_at_ms";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        archiveReason: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "archive_reason";
+            tableName: "_smithers_tool_call_archive";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+    };
+    dialect: "sqlite";
+}>;
+
+declare const smithersOutputProvenance: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
+    name: "_smithers_output_provenance";
+    schema: undefined;
+    columns: {
+        runId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "run_id";
+            tableName: "_smithers_output_provenance";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        outputTable: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "output_table";
+            tableName: "_smithers_output_provenance";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        nodeId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "node_id";
+            tableName: "_smithers_output_provenance";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        iteration: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "iteration";
+            tableName: "_smithers_output_provenance";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        seq: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "seq";
+            tableName: "_smithers_output_provenance";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+    };
+    dialect: "sqlite";
+}>;
 
 declare const smithersScorers: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
     name: "_smithers_scorers";
@@ -3347,8 +4138,6 @@ declare const smithersWorkspaceStates: drizzle_orm_sqlite_core.SQLiteTableWithCo
     dialect: "sqlite";
 }>;
 
-declare const smithersAgentCheckpointContents: drizzle_orm_sqlite_core.SQLiteTableWithColumns<any>;
-declare const smithersAgentCheckpoints: drizzle_orm_sqlite_core.SQLiteTableWithColumns<any>;
 declare const smithersWorkspaceCheckpoints: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
     name: "_smithers_workspace_checkpoints";
     schema: undefined;
@@ -3557,6 +4346,293 @@ declare const smithersWorkspaceCheckpoints: drizzle_orm_sqlite_core.SQLiteTableW
         createdAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
             name: "created_at_ms";
             tableName: "_smithers_workspace_checkpoints";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+    };
+    dialect: "sqlite";
+}>;
+
+declare const smithersAgentCheckpointContents: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
+    name: "_smithers_agent_checkpoint_contents";
+    schema: undefined;
+    columns: {
+        contentHash: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "content_hash";
+            tableName: "_smithers_agent_checkpoint_contents";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: true;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        checkpointJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "checkpoint_json";
+            tableName: "_smithers_agent_checkpoint_contents";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        sizeBytes: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "size_bytes";
+            tableName: "_smithers_agent_checkpoint_contents";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        createdAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "created_at_ms";
+            tableName: "_smithers_agent_checkpoint_contents";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+    };
+    dialect: "sqlite";
+}>;
+
+declare const smithersAgentCheckpoints: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
+    name: "_smithers_agent_checkpoints";
+    schema: undefined;
+    columns: {
+        runId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "run_id";
+            tableName: "_smithers_agent_checkpoints";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        nodeId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "node_id";
+            tableName: "_smithers_agent_checkpoints";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        iteration: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "iteration";
+            tableName: "_smithers_agent_checkpoints";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        attempt: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "attempt";
+            tableName: "_smithers_agent_checkpoints";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        sequence: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "sequence";
+            tableName: "_smithers_agent_checkpoints";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        contentHash: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "content_hash";
+            tableName: "_smithers_agent_checkpoints";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        codec: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "codec";
+            tableName: "_smithers_agent_checkpoints";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        version: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "version";
+            tableName: "_smithers_agent_checkpoints";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        agentId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "agent_id";
+            tableName: "_smithers_agent_checkpoints";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        purpose: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "purpose";
+            tableName: "_smithers_agent_checkpoints";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        createdAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "created_at_ms";
+            tableName: "_smithers_agent_checkpoints";
             dataType: "number";
             columnType: "SQLiteInteger";
             data: number;
@@ -3973,6 +5049,531 @@ declare const smithersIntegrationCursors: drizzle_orm_sqlite_core.SQLiteTableWit
     dialect: "sqlite";
 }>;
 
+/**
+ * `_smithers_eval_suites` — saved eval suites authored through the `evals`
+ * gateway extension (`ext.evals.saveSuite`). A suite names a target workflow
+ * and carries the canonical, already-parsed dataset (`EvalCaseInput[]`) the
+ * `eval-suite-run` parent workflow fans out over when the suite is launched.
+ *
+ *  - `suiteId`        PK; minted on first save, stable across edits.
+ *  - `name`           human-readable suite name.
+ *  - `workflowKey`    the target workflow's discovered id (e.g. `hello`).
+ *  - `workflowPath`   absolute path to the target workflow's entry file at
+ *                     save time — pinned so a later suite edit or workflow
+ *                     move cannot silently repoint an in-flight run.
+ *  - `workflowRoot`   the approved root (`packDir ?? workspace root`) the
+ *                     child workflow file must resolve inside of.
+ *  - `datasetJson`    the canonical parsed dataset (`EvalCaseInput[]`), NOT
+ *                     the raw authored text — the extension re-parses on
+ *                     every save so a stored suite is always valid.
+ *  - `caseCount`      `datasetJson`'s length, denormalized for `listSuites`.
+ *  - `createdAtMs` / `updatedAtMs` — Unix epoch ms.
+ */
+declare const smithersEvalSuites: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
+    name: "_smithers_eval_suites";
+    schema: undefined;
+    columns: {
+        suiteId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "suite_id";
+            tableName: "_smithers_eval_suites";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: true;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        name: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "name";
+            tableName: "_smithers_eval_suites";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        workflowKey: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "workflow_key";
+            tableName: "_smithers_eval_suites";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        workflowPath: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "workflow_path";
+            tableName: "_smithers_eval_suites";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        workflowRoot: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "workflow_root";
+            tableName: "_smithers_eval_suites";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        datasetJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "dataset_json";
+            tableName: "_smithers_eval_suites";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        caseCount: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "case_count";
+            tableName: "_smithers_eval_suites";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        createdAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "created_at_ms";
+            tableName: "_smithers_eval_suites";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        updatedAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "updated_at_ms";
+            tableName: "_smithers_eval_suites";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+    };
+    dialect: "sqlite";
+}>;
+
+/**
+ * `_smithers_eval_cases` — live per-case results for one `eval-suite-run`
+ * parent run. The `plan` task seeds one `queued` row per dataset case up
+ * front (so the results table is live from second zero); each case's own
+ * `<Task>` upserts it to `running` then to a terminal status as its backing
+ * child run settles. This is the honest, stable contract between the
+ * WORKFLOW (writer) and the `evals` gateway extension (reader) — the
+ * extension never reads a workflow's own output tables directly.
+ *
+ *  - `id`             PK; `${evalRunId}:${caseId}` (unique per parent run).
+ *  - `evalRunId`      the parent `eval-suite-run` run's id.
+ *  - `suiteId`        the suite this case belongs to (denormalized).
+ *  - `caseId`         the dataset case id (stable across a suite's runs).
+ *  - `caseIndex`      the case's position in the authored dataset — orders
+ *                     `listCases` deterministically regardless of finish order.
+ *  - `name`           optional case name (from `EvalCaseInput.name`).
+ *  - `status`         `"queued" | "running" | "ok" | "failed" | "cancelled"` —
+ *                     the CASE's own lifecycle (did its child run complete
+ *                     without crashing), independent of whether its
+ *                     assertions/scorers passed.
+ *  - `caseRunId`      the real gateway run id backing this ONE case, once
+ *                     its child workflow has been launched.
+ *  - `inputJson` / `expectedJson` / `actualJson` / `assertionsJson` — JSON
+ *                     blobs decoded by the `evals` extension's `listCases`.
+ *  - `error`          a CASE-LEVEL failure message (the child run itself
+ *                     errored/crashed) — distinct from a failed assertion.
+ *  - `startedAtMs` / `finishedAtMs` / `durationMs`.
+ */
+declare const smithersEvalCases: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
+    name: "_smithers_eval_cases";
+    schema: undefined;
+    columns: {
+        id: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "id";
+            tableName: "_smithers_eval_cases";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: true;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        evalRunId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "eval_run_id";
+            tableName: "_smithers_eval_cases";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        suiteId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "suite_id";
+            tableName: "_smithers_eval_cases";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        caseId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "case_id";
+            tableName: "_smithers_eval_cases";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        caseIndex: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "case_index";
+            tableName: "_smithers_eval_cases";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        name: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "name";
+            tableName: "_smithers_eval_cases";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        status: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "status";
+            tableName: "_smithers_eval_cases";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        caseRunId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "case_run_id";
+            tableName: "_smithers_eval_cases";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        inputJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "input_json";
+            tableName: "_smithers_eval_cases";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        expectedJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "expected_json";
+            tableName: "_smithers_eval_cases";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        actualJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "actual_json";
+            tableName: "_smithers_eval_cases";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        assertionsJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "assertions_json";
+            tableName: "_smithers_eval_cases";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        error: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "error";
+            tableName: "_smithers_eval_cases";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        startedAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "started_at_ms";
+            tableName: "_smithers_eval_cases";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        finishedAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "finished_at_ms";
+            tableName: "_smithers_eval_cases";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        durationMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "duration_ms";
+            tableName: "_smithers_eval_cases";
+            dataType: "number";
+            columnType: "SQLiteReal";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+    };
+    dialect: "sqlite";
+}>;
+
 declare const smithersRuns: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
     name: "_smithers_runs";
     schema: undefined;
@@ -4180,80 +5781,6 @@ declare const smithersRuns: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
         }>;
         cancelRequestedAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
             name: "cancel_requested_at_ms";
-            tableName: "_smithers_runs";
-            dataType: "number";
-            columnType: "SQLiteInteger";
-            data: number;
-            driverParam: number;
-            notNull: false;
-            hasDefault: false;
-            isPrimaryKey: false;
-            isAutoincrement: false;
-            hasRuntimeDefault: false;
-            enumValues: undefined;
-            baseColumn: never;
-            identity: undefined;
-            generated: undefined;
-        }, {}, {}>;
-        cancelRequestId: drizzle_orm_sqlite_core.SQLiteColumn<{
-            name: "cancel_request_id";
-            tableName: "_smithers_runs";
-            dataType: "string";
-            columnType: "SQLiteText";
-            data: string;
-            driverParam: string;
-            notNull: false;
-            hasDefault: false;
-            isPrimaryKey: false;
-            isAutoincrement: false;
-            hasRuntimeDefault: false;
-            enumValues: [string, ...string[]];
-            baseColumn: never;
-            identity: undefined;
-            generated: undefined;
-        }, {}, {
-            length: number | undefined;
-        }>;
-        cancelRequestSource: drizzle_orm_sqlite_core.SQLiteColumn<{
-            name: "cancel_request_source";
-            tableName: "_smithers_runs";
-            dataType: "string";
-            columnType: "SQLiteText";
-            data: string;
-            driverParam: string;
-            notNull: false;
-            hasDefault: false;
-            isPrimaryKey: false;
-            isAutoincrement: false;
-            hasRuntimeDefault: false;
-            enumValues: [string, ...string[]];
-            baseColumn: never;
-            identity: undefined;
-            generated: undefined;
-        }, {}, {
-            length: number | undefined;
-        }>;
-        cancelRequestClientIdentity: drizzle_orm_sqlite_core.SQLiteColumn<{
-            name: "cancel_request_client_identity";
-            tableName: "_smithers_runs";
-            dataType: "string";
-            columnType: "SQLiteText";
-            data: string;
-            driverParam: string;
-            notNull: false;
-            hasDefault: false;
-            isPrimaryKey: false;
-            isAutoincrement: false;
-            hasRuntimeDefault: false;
-            enumValues: [string, ...string[]];
-            baseColumn: never;
-            identity: undefined;
-            generated: undefined;
-        }, {}, {
-            length: number | undefined;
-        }>;
-        cancelRequestClientPid: drizzle_orm_sqlite_core.SQLiteColumn<{
-            name: "cancel_request_client_pid";
             tableName: "_smithers_runs";
             dataType: "number";
             columnType: "SQLiteInteger";
@@ -6717,6 +8244,23 @@ declare const smithersSandboxes: drizzle_orm_sqlite_core.SQLiteTableWithColumns<
         }, {}, {
             length: number | undefined;
         }>;
+        heartbeatAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "heartbeat_at_ms";
+            tableName: "_smithers_sandboxes";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
         shippedAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
             name: "shipped_at_ms";
             tableName: "_smithers_sandboxes";
@@ -6773,114 +8317,6 @@ declare const smithersSandboxes: drizzle_orm_sqlite_core.SQLiteTableWithColumns<
     };
     dialect: "sqlite";
 }>;
-type SmithersInternalNullableTextColumn<Name extends string, TableName extends string> = drizzle_orm_sqlite_core.SQLiteColumn<{
-    name: Name;
-    tableName: TableName;
-    dataType: "string";
-    columnType: "SQLiteText";
-    data: string;
-    driverParam: string;
-    notNull: false;
-    hasDefault: false;
-    isPrimaryKey: false;
-    isAutoincrement: false;
-    hasRuntimeDefault: false;
-    enumValues: [string, ...string[]];
-    baseColumn: never;
-    identity: undefined;
-    generated: undefined;
-}, {}, {
-    length: number | undefined;
-}>;
-type SmithersInternalNullableRevertStatusColumn<Name extends string, TableName extends string> = drizzle_orm_sqlite_core.SQLiteColumn<{
-    name: Name;
-    tableName: TableName;
-    dataType: "string";
-    columnType: "SQLiteText";
-    data: "reverting" | "reverted" | "revert-failed" | "revert-stale";
-    driverParam: string;
-    notNull: false;
-    hasDefault: false;
-    isPrimaryKey: false;
-    isAutoincrement: false;
-    hasRuntimeDefault: false;
-    enumValues: ["reverting", "reverted", "revert-failed", "revert-stale"];
-    baseColumn: never;
-    identity: undefined;
-    generated: undefined;
-}, {}, {
-    length: number | undefined;
-}>;
-type SmithersInternalRequiredTextColumn<Name extends string, TableName extends string> = drizzle_orm_sqlite_core.SQLiteColumn<{
-    name: Name;
-    tableName: TableName;
-    dataType: "string";
-    columnType: "SQLiteText";
-    data: string;
-    driverParam: string;
-    notNull: true;
-    hasDefault: false;
-    isPrimaryKey: false;
-    isAutoincrement: false;
-    hasRuntimeDefault: false;
-    enumValues: [string, ...string[]];
-    baseColumn: never;
-    identity: undefined;
-    generated: undefined;
-}, {}, {
-    length: number | undefined;
-}>;
-type SmithersInternalNullableIntegerColumn<Name extends string, TableName extends string> = drizzle_orm_sqlite_core.SQLiteColumn<{
-    name: Name;
-    tableName: TableName;
-    dataType: "number";
-    columnType: "SQLiteInteger";
-    data: number;
-    driverParam: number;
-    notNull: false;
-    hasDefault: false;
-    isPrimaryKey: false;
-    isAutoincrement: false;
-    hasRuntimeDefault: false;
-    enumValues: undefined;
-    baseColumn: never;
-    identity: undefined;
-    generated: undefined;
-}, {}, {}>;
-type SmithersInternalRequiredIntegerColumn<Name extends string, TableName extends string, HasDefault extends boolean = false> = drizzle_orm_sqlite_core.SQLiteColumn<{
-    name: Name;
-    tableName: TableName;
-    dataType: "number";
-    columnType: "SQLiteInteger";
-    data: number;
-    driverParam: number;
-    notNull: true;
-    hasDefault: HasDefault;
-    isPrimaryKey: false;
-    isAutoincrement: false;
-    hasRuntimeDefault: false;
-    enumValues: undefined;
-    baseColumn: never;
-    identity: undefined;
-    generated: undefined;
-}, {}, {}>;
-type SmithersInternalNullableBooleanColumn<Name extends string, TableName extends string> = drizzle_orm_sqlite_core.SQLiteColumn<{
-    name: Name;
-    tableName: TableName;
-    dataType: "boolean";
-    columnType: "SQLiteBoolean";
-    data: boolean;
-    driverParam: number;
-    notNull: false;
-    hasDefault: false;
-    isPrimaryKey: false;
-    isAutoincrement: false;
-    hasRuntimeDefault: false;
-    enumValues: undefined;
-    baseColumn: never;
-    identity: undefined;
-    generated: undefined;
-}, {}, {}>;
 declare const smithersToolCalls: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
     name: "_smithers_tool_calls";
     schema: undefined;
@@ -6974,7 +8410,25 @@ declare const smithersToolCalls: drizzle_orm_sqlite_core.SQLiteTableWithColumns<
             identity: undefined;
             generated: undefined;
         }, {}, {}>;
-        callToken: SmithersInternalNullableTextColumn<"call_token", "_smithers_tool_calls">;
+        callToken: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "call_token";
+            tableName: "_smithers_tool_calls";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
         toolName: drizzle_orm_sqlite_core.SQLiteColumn<{
             name: "tool_name";
             tableName: "_smithers_tool_calls";
@@ -7104,52 +8558,190 @@ declare const smithersToolCalls: drizzle_orm_sqlite_core.SQLiteTableWithColumns<
         }, {}, {
             length: number | undefined;
         }>;
-        kind: SmithersInternalNullableTextColumn<"kind", "_smithers_tool_calls">;
-        sideEffect: SmithersInternalNullableBooleanColumn<"side_effect", "_smithers_tool_calls">;
-        idempotent: SmithersInternalNullableBooleanColumn<"idempotent", "_smithers_tool_calls">;
-        acceptsIdempotencyKey: SmithersInternalNullableBooleanColumn<"accepts_idempotency_key", "_smithers_tool_calls">;
-        hasRevert: SmithersInternalNullableBooleanColumn<"has_revert", "_smithers_tool_calls">;
-        idempotencyKey: SmithersInternalNullableTextColumn<"idempotency_key", "_smithers_tool_calls">;
-        revertStatus: SmithersInternalNullableRevertStatusColumn<"revert_status", "_smithers_tool_calls">;
-        revertedAtMs: SmithersInternalNullableIntegerColumn<"reverted_at_ms", "_smithers_tool_calls">;
-        revertErrorJson: SmithersInternalNullableTextColumn<"revert_error_json", "_smithers_tool_calls">;
-        forcedPastJson: SmithersInternalNullableTextColumn<"forced_past_json", "_smithers_tool_calls">;
+        kind: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "kind";
+            tableName: "_smithers_tool_calls";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        sideEffect: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "side_effect";
+            tableName: "_smithers_tool_calls";
+            dataType: "boolean";
+            columnType: "SQLiteBoolean";
+            data: boolean;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        idempotent: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "idempotent";
+            tableName: "_smithers_tool_calls";
+            dataType: "boolean";
+            columnType: "SQLiteBoolean";
+            data: boolean;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        acceptsIdempotencyKey: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "accepts_idempotency_key";
+            tableName: "_smithers_tool_calls";
+            dataType: "boolean";
+            columnType: "SQLiteBoolean";
+            data: boolean;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        hasRevert: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "has_revert";
+            tableName: "_smithers_tool_calls";
+            dataType: "boolean";
+            columnType: "SQLiteBoolean";
+            data: boolean;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        idempotencyKey: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "idempotency_key";
+            tableName: "_smithers_tool_calls";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        revertStatus: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "revert_status";
+            tableName: "_smithers_tool_calls";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: "reverting" | "reverted" | "revert-failed" | "revert-stale";
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: ["reverting", "reverted", "revert-failed", "revert-stale"];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        revertedAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "reverted_at_ms";
+            tableName: "_smithers_tool_calls";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        revertErrorJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "revert_error_json";
+            tableName: "_smithers_tool_calls";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        forcedPastJson: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "forced_past_json";
+            tableName: "_smithers_tool_calls";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
     };
     dialect: "sqlite";
 }>;
-declare const smithersToolCallArchive: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
-    name: "_smithers_tool_call_archive";
-    schema: undefined;
-    columns: {
-        runId: SmithersInternalRequiredTextColumn<"run_id", "_smithers_tool_call_archive">;
-        nodeId: SmithersInternalRequiredTextColumn<"node_id", "_smithers_tool_call_archive">;
-        iteration: SmithersInternalRequiredIntegerColumn<"iteration", "_smithers_tool_call_archive", true>;
-        attempt: SmithersInternalRequiredIntegerColumn<"attempt", "_smithers_tool_call_archive">;
-        seq: SmithersInternalRequiredIntegerColumn<"seq", "_smithers_tool_call_archive">;
-        callToken: SmithersInternalNullableTextColumn<"call_token", "_smithers_tool_call_archive">;
-        toolName: SmithersInternalRequiredTextColumn<"tool_name", "_smithers_tool_call_archive">;
-        inputJson: SmithersInternalNullableTextColumn<"input_json", "_smithers_tool_call_archive">;
-        outputJson: SmithersInternalNullableTextColumn<"output_json", "_smithers_tool_call_archive">;
-        startedAtMs: SmithersInternalRequiredIntegerColumn<"started_at_ms", "_smithers_tool_call_archive">;
-        finishedAtMs: SmithersInternalNullableIntegerColumn<"finished_at_ms", "_smithers_tool_call_archive">;
-        status: SmithersInternalRequiredTextColumn<"status", "_smithers_tool_call_archive">;
-        errorJson: SmithersInternalNullableTextColumn<"error_json", "_smithers_tool_call_archive">;
-        kind: SmithersInternalNullableTextColumn<"kind", "_smithers_tool_call_archive">;
-        sideEffect: SmithersInternalNullableBooleanColumn<"side_effect", "_smithers_tool_call_archive">;
-        idempotent: SmithersInternalNullableBooleanColumn<"idempotent", "_smithers_tool_call_archive">;
-        acceptsIdempotencyKey: SmithersInternalNullableBooleanColumn<"accepts_idempotency_key", "_smithers_tool_call_archive">;
-        hasRevert: SmithersInternalNullableBooleanColumn<"has_revert", "_smithers_tool_call_archive">;
-        idempotencyKey: SmithersInternalNullableTextColumn<"idempotency_key", "_smithers_tool_call_archive">;
-        revertStatus: SmithersInternalNullableRevertStatusColumn<"revert_status", "_smithers_tool_call_archive">;
-        revertedAtMs: SmithersInternalNullableIntegerColumn<"reverted_at_ms", "_smithers_tool_call_archive">;
-        revertErrorJson: SmithersInternalNullableTextColumn<"revert_error_json", "_smithers_tool_call_archive">;
-        forcedPastJson: SmithersInternalNullableTextColumn<"forced_past_json", "_smithers_tool_call_archive">;
-        archivedByOp: SmithersInternalRequiredTextColumn<"archived_by_op", "_smithers_tool_call_archive">;
-        archivedAtMs: SmithersInternalRequiredIntegerColumn<"archived_at_ms", "_smithers_tool_call_archive">;
-        archiveReason: SmithersInternalRequiredTextColumn<"archive_reason", "_smithers_tool_call_archive">;
-    };
-    dialect: "sqlite";
-}>;
+
 declare const smithersEvents: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
     name: "_smithers_events";
     schema: undefined;
@@ -7248,6 +8840,7 @@ declare const smithersEvents: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
     };
     dialect: "sqlite";
 }>;
+
 declare const smithersRalph: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
     name: "_smithers_ralph";
     schema: undefined;
@@ -7885,6 +9478,20 @@ type _OutputKey = OutputKey$1;
 type _Table$2 = drizzle_orm.Table;
 type BunSQLiteDatabase$1 = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
 
+/**
+ * Open the standard durable local SQLite connection used by Smithers sidecars.
+ * Keeping the raw constructor in the DB package preserves the repository's
+ * storage ownership boundary.
+ *
+ * @param {string} path
+ */
+declare function openDurableSqliteDatabase(path: string): {
+    db: drizzle_orm_bun_sqlite.BunSQLiteDatabase<Record<string, never>> & {
+        $client: Database$1;
+    };
+    close: () => void;
+};
+
 /** @typedef {import("drizzle-orm").Table} _Table */
 /**
  * @param {_Table} table
@@ -7949,6 +9556,17 @@ declare function loadOutputsEffect(db: BunSQLiteDatabase<Record<string, unknown>
  */
 declare function loadOutputs(db: BunSQLiteDatabase<Record<string, unknown>>, schema: Record<string, _Table | unknown>, runId: string): Promise<OutputSnapshot>;
 /**
+ * Coerce one freshly-selected output row into the exact shape loadOutputs
+ * returns for that table (boolean-mode columns coerced to JS booleans; json
+ * columns are already decoded by the select paths). Lets callers that maintain
+ * an incremental outputs snapshot keep patched rows byte-equivalent to a full
+ * loadOutputs reload.
+ * @param {_Table} table
+ * @param {Record<string, unknown>} row
+ * @returns {Record<string, unknown>}
+ */
+declare function coerceOutputRowForSnapshot(table: _Table, row: Record<string, unknown>): Record<string, unknown>;
+/**
  * Read every row of a single output table for a run, returning Drizzle-shaped
  * rows (camelCase keys, boolean columns coerced to JS booleans). Dialect-aware:
  * Drizzle for bun:sqlite, a raw `$n` query for the Postgres descriptor.
@@ -7958,9 +9576,11 @@ declare function loadOutputs(db: BunSQLiteDatabase<Record<string, unknown>>, sch
  * @returns {Effect.Effect<Array<Record<string, unknown>>, SmithersError>}
  */
 declare function loadRunOutputRowsEffect(db: unknown, table: _Table, runId?: string): Effect.Effect<Array<Record<string, unknown>>, SmithersError$2>;
-type OutputSnapshot = Record<string, Array<unknown>>;
+/** @typedef {Record<string, Array<unknown>>} OutputSnapshot */
+declare const OUTPUT_PROVENANCE_SEQ: "__smithersProvenanceSeq";
 type BunSQLiteDatabase = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
 type _Table = drizzle_orm.Table;
+type OutputSnapshot = Record<string, Array<unknown>>;
 
 type NodeDiffCacheRow = {
     runId: string;
@@ -8255,6 +9875,8 @@ declare function zodToTable(tableName: any, schema: any, opts: any): drizzle_orm
  */
 declare function camelToSnake(str: string): string;
 
+type AgentCheckpointContentRow = AgentCheckpointContentRow$2;
+type AgentCheckpointRefRow = AgentCheckpointRefRow$2;
 type SchemaRegistryEntry = SchemaRegistryEntry$1;
 
-export { type AgentCheckpointContentRow, type AgentCheckpointRefRow, type AlertRow, type AlertSeverity, type AlertStatus, type AnyColumn, type ApprovalRow, type AttemptRow, type CacheRow, type CacheRowLike, type CountRow, DB_ALERT_ALLOWED_SEVERITIES, DB_ALERT_ALLOWED_STATUSES, DB_ALERT_ID_MAX_LENGTH, DB_ALERT_MESSAGE_MAX_LENGTH, DB_ALERT_POLICY_NAME_MAX_LENGTH, DB_RUN_ALLOWED_STATUSES, DB_RUN_ID_MAX_LENGTH, DB_RUN_WORKFLOW_NAME_MAX_LENGTH, type Database, type Dialect, type DocRow, type EventHistoryQuery, type ExternalSqliteDescriptor, FRAME_KEYFRAME_INTERVAL, type FrameDelta, type FrameDeltaOp, type FrameEncoding, type FrameRow, type HumanRequestRow, type IntegrationDeliveryClaim, type JsonBounds, type JsonPath, type JsonPathSegment, NODE_DIFF_MAX_BYTES, NodeDiffCache, type NodeDiffCacheResult, type NodeDiffCacheRow$1 as NodeDiffCacheRow, NodeDiffTooLargeError, type NodeRow, type OutputKey, type OutputSnapshot, POSTGRES, type PendingHumanRequestRow, type RalphRow, type RunAncestryRow, type RunRow, type RunnableEffect, SQLITE, type SchemaRegistryEntry, type SignalQuery, type SignalRow, SmithersDb, type SmithersError$1 as SmithersError, SqlMessageStorage, type SqlMessageStorageEventHistoryQuery, type SqliteParam, type SqliteTransactionState, type SqliteWriteRetryOptions, type StaleRunRecord, type Table, type TxidCapture, type ZodError, type _BunSQLiteDatabase, type _NodeDiffCacheRow, type _OutputKey, type _SmithersDb, type _SmithersError, applyFrameDelta, applyFrameDeltaJson, assertJsonPayloadWithinBounds, assertMaxBytes, assertMaxJsonDepth, assertMaxStringLength, assertNoReservedColumns, assertOptionalArrayMaxLength, assertOptionalStringMaxLength, assertPositiveFiniteInteger, assertPositiveFiniteNumber, beginTransactionSql, buildKeyWhere, buildOutputRow, camelToSnake, capturePostgresTransactionTxid, captureTxid, columnType, createTxidCapture, describeSchemaShape, encodeFrameDelta, ensureSmithersTables, ensureSmithersTablesEffect, ensureSqlMessageStorage, ensureSqlMessageStorageEffect, getAgentOutputSchema, getJsonColumnKeys, getKeyColumns, getSmithersSchemaSignature, getSqlMessageStorage, hasActiveTxidCapture, isPostgresDb, isRealPostgresAdapter, isRetryableSqliteWriteError, jsonExtractText, loadInput, loadInputEffect, loadOutputs, loadOutputsEffect, loadRunOutputRowsEffect, normalizeFrameEncoding, openDurableSqliteDatabase, parseFrameDelta, pgRowToDrizzle, quoteIdentifier, recordCommittedTxid, runWithTxidCapture, schemaSignature, selectOutputRow, selectOutputRowEffect, serializeFrameDelta, shouldCapturePostgresTxid, smithersAgentCheckpointContents, smithersAgentCheckpoints, smithersAlerts, smithersApprovals, smithersAttempts, smithersCache, smithersCron, smithersDocs, smithersEvents, smithersFrames, smithersHumanRequests, smithersIntegrationCursors, smithersIntegrationDeliveries, smithersMemoryFacts, smithersMemoryMessages, smithersMemoryNoteSupersessions, smithersMemoryNotes, smithersMemoryThreads, smithersNodeDiffs, smithersNodes, smithersRalph, smithersRuns, smithersSandboxes, smithersSchemaMigrations, smithersScorers, smithersSignals, smithersTimeTravelAudit, smithersToolCallArchive, smithersToolCalls, smithersVectors, smithersWorkspaceCheckpoints, smithersWorkspaceStates, stripAutoColumns, syncZodTableSchema, syncZodTableSchemaPostgres, translateDdl, translatePlaceholders, unwrapZodType, upsertOutputRow, upsertOutputRowEffect, validateExistingOutput, validateInput, validateOutput, withSqliteWriteRetry, withSqliteWriteRetryEffect, zodSchemaColumns, zodToCreateTableSQL, zodToTable };
+export { type AgentCheckpointContentRow, type AgentCheckpointRefRow, type AlertRow, type AlertSeverity, type AlertStatus, type AnyColumn, type ApprovalRow, type AttemptRow, type CacheRow, type CacheRowLike, type CountRow, DB_ALERT_ALLOWED_SEVERITIES, DB_ALERT_ALLOWED_STATUSES, DB_ALERT_ID_MAX_LENGTH, DB_ALERT_MESSAGE_MAX_LENGTH, DB_ALERT_POLICY_NAME_MAX_LENGTH, DB_RUN_ALLOWED_STATUSES, DB_RUN_ID_MAX_LENGTH, DB_RUN_WORKFLOW_NAME_MAX_LENGTH, type Database, type Dialect, type DocRow, type EvalCaseResultRow, type EvalSuiteRow, type EventHistoryQuery, type ExternalSqliteDescriptor, FRAME_KEYFRAME_INTERVAL, type FrameDelta, type FrameDeltaOp, type FrameEncoding, type FrameRow, type HumanRequestRow, type IntegrationDeliveryClaim, type JsonBounds, type JsonPath, type JsonPathSegment, NODE_DIFF_MAX_BYTES, NodeDiffCache, type NodeDiffCacheResult, type NodeDiffCacheRow$1 as NodeDiffCacheRow, NodeDiffTooLargeError, type NodeRow, OUTPUT_PROVENANCE_SEQ, type OutputKey, type OutputSnapshot, POSTGRES, type PendingHumanRequestRow, type RalphRow, type RunAncestryRow, type RunRow, type RunnableEffect, SQLITE, type SchemaRegistryEntry, type SignalQuery, type SignalRow, SmithersDb, type SmithersError$1 as SmithersError, SqlMessageStorage, type SqlMessageStorageEventHistoryQuery, type SqliteParam, type SqliteTransactionState, type SqliteWriteRetryOptions, type StaleRunRecord, type Table, type TxidCapture, type ZodError, type _BunSQLiteDatabase, type _NodeDiffCacheRow, type _OutputKey, type _SmithersDb, type _SmithersError, applyFrameDelta, applyFrameDeltaJson, assertJsonPayloadWithinBounds, assertMaxBytes, assertMaxJsonDepth, assertMaxStringLength, assertNoReservedColumns, assertOptionalArrayMaxLength, assertOptionalStringMaxLength, assertPositiveFiniteInteger, assertPositiveFiniteNumber, beginTransactionSql, buildKeyWhere, buildOutputRow, camelToSnake, capturePostgresTransactionTxid, captureTxid, coerceOutputRowForSnapshot, columnType, createTxidCapture, describeSchemaShape, encodeFrameDelta, ensureSmithersTables, ensureSmithersTablesEffect, ensureSqlMessageStorage, ensureSqlMessageStorageEffect, getAgentOutputSchema, getJsonColumnKeys, getKeyColumns, getSmithersSchemaSignature, getSqlMessageStorage, hasActiveTxidCapture, isPostgresDb, isRealPostgresAdapter, isRetryableSqliteWriteError, jsonExtractText, loadInput, loadInputEffect, loadOutputs, loadOutputsEffect, loadRunOutputRowsEffect, normalizeFrameEncoding, openDurableSqliteDatabase, parseFrameDelta, pgRowToDrizzle, quoteIdentifier, recordCommittedTxid, runWithTxidCapture, schemaSignature, selectOutputRow, selectOutputRowEffect, serializeFrameDelta, shouldCapturePostgresTxid, smithersAgentCheckpointContents, smithersAgentCheckpoints, smithersAlerts, smithersApprovals, smithersAttempts, smithersCache, smithersCron, smithersDocs, smithersEvalCases, smithersEvalSuites, smithersEvents, smithersFrames, smithersHumanRequests, smithersIntegrationCursors, smithersIntegrationDeliveries, smithersMemoryFacts, smithersMemoryMessages, smithersMemoryNoteSupersessions, smithersMemoryNotes, smithersMemoryThreads, smithersNodeDiffs, smithersNodes, smithersOutputProvenance, smithersRalph, smithersRuns, smithersSandboxes, smithersSchemaMigrations, smithersScorers, smithersSignals, smithersTimeTravelAudit, smithersToolCallArchive, smithersToolCalls, smithersVectors, smithersWorkspaceCheckpoints, smithersWorkspaceStates, stripAutoColumns, syncZodTableSchema, syncZodTableSchemaPostgres, translateDdl, translatePlaceholders, unwrapZodType, upsertOutputRow, upsertOutputRowEffect, validateExistingOutput, validateInput, validateOutput, withSqliteWriteRetry, withSqliteWriteRetryEffect, zodSchemaColumns, zodToCreateTableSQL, zodToTable };

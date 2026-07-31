@@ -179,6 +179,12 @@ describe("DB migration edges", () => {
       ).toBeDefined();
       expect(
         sqlite
+          .query('PRAGMA table_info("_smithers_agent_checkpoint_contents")')
+          .all()
+          .find((column) => column.name === "content_hash")?.notnull,
+      ).toBe(1);
+      expect(
+        sqlite
           .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_agent_checkpoints'")
           .get(),
       ).toBeDefined();

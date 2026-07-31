@@ -1,5 +1,4 @@
 import { Effect, Metric } from "effect";
-import { createHash } from "node:crypto";
 import { toSmithersError } from "@smthrs/errors/toSmithersError";
 import { nowMs } from "@smthrs/scheduler/nowMs";
 import { SmithersError } from "@smthrs/errors/SmithersError";
@@ -7,8 +6,18 @@ import { smithersBranches } from "../schema.js";
 import { persistSnapshotRow, snapshotContentHashFromJson } from "../snapshot/captureSnapshotEffect.js";
 import { loadSnapshot } from "../snapshot/loadSnapshotEffect.js";
 import { parseSnapshot } from "../snapshot/parseSnapshot.js";
-import { agentCheckpointHorizonKey, parseAgentCheckpointHorizons } from "../snapshot/agentCheckpointHorizons.js";
-import { parseAgentCheckpointProvenance } from "../snapshot/agentCheckpointProvenance.js";
+import { agentCheckpointHorizonKey, parseAgentCheckpointSnapshot } from "../snapshot/agentCheckpointSnapshot.js";
+import {
+  MAX_SNAPSHOT_CHECKPOINT_ATTEMPT_BYTES,
+  MAX_SNAPSHOT_CHECKPOINT_ATTEMPTS,
+  MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES,
+  MAX_SNAPSHOT_CHECKPOINT_REFS,
+} from "../snapshot/agentCheckpointProvenance.js";
+import {
+  agentCheckpointAttemptRow,
+  agentCheckpointReferenceRow,
+  persistAgentCheckpointRows,
+} from "../snapshot/agentCheckpointPersistence.js";
 import { parseSnapshotJson } from "../snapshot/parseSnapshotJson.js";
 import { runForksCreated } from "../runForksCreated.js";
 import { acquireRewindLock } from "../acquireRewindLock.js";
@@ -144,6 +153,68 @@ function liveParentForkError(parentRun, parentRunId, params) {
 }
 
 /**
+ * Project private checkpoint metadata onto the child node set. A reset fork
+ * removes attempt history from reset nodes, so copying the parent envelope
+ * verbatim would make the child frame internally inconsistent and unreadable
+ * by strict fork/rewind validation.
+ *
+ * @param {string} sourceOutputsJson
+ * @param {string} childNodesJson
+ * @param {{ mode: string; provenance: object | null; horizons: Map<string, number> | null }} checkpointSnapshot
+ * @param {number} childCreatedAtMs
+ */
+function projectChildCheckpointOutputs(sourceOutputsJson, childNodesJson, checkpointSnapshot, childCreatedAtMs) {
+  if (checkpointSnapshot.mode === "legacy") return sourceOutputsJson;
+
+  const outputs = JSON.parse(sourceOutputsJson);
+  const childNodes = JSON.parse(childNodesJson);
+  const nodeLimits = new Map(
+    childNodes
+      .filter(
+        (node) =>
+          node &&
+          typeof node === "object" &&
+          typeof node.nodeId === "string" &&
+          Number.isSafeInteger(node.iteration) &&
+          Number.isSafeInteger(node.lastAttempt) &&
+          node.lastAttempt >= 0,
+      )
+      .map((node) => [JSON.stringify([node.nodeId, node.iteration]), node.lastAttempt]),
+  );
+
+  if (checkpointSnapshot.provenance) {
+    const attempts = checkpointSnapshot.provenance.attempts.filter((tuple) => {
+      const limit = nodeLimits.get(JSON.stringify(tuple.slice(0, 2)));
+      return limit !== undefined && tuple[2] <= limit;
+    });
+    const attemptKeys = new Set(attempts.map((tuple) => JSON.stringify(tuple.slice(0, 3))));
+    const checkpoints = checkpointSnapshot.provenance.checkpoints.filter((tuple) =>
+      attemptKeys.has(JSON.stringify(tuple.slice(0, 3))),
+    );
+    outputs.__smithersAgentCheckpointProvenance = {
+      version: checkpointSnapshot.provenance.version,
+      attempts,
+      checkpoints,
+    };
+  }
+
+  if (checkpointSnapshot.horizons) {
+    outputs.__smithersAgentCheckpointHorizons = {
+      version: 1,
+      attempts: [...checkpointSnapshot.horizons]
+        .map(([key, sequence]) => [...JSON.parse(key), sequence])
+        .filter(([nodeId, iteration, attempt]) => {
+          const limit = nodeLimits.get(JSON.stringify([nodeId, iteration]));
+          return limit !== undefined && attempt === limit;
+        }),
+    };
+  }
+
+  parseAgentCheckpointSnapshot(outputs, childNodes, childCreatedAtMs);
+  return JSON.stringify(outputs);
+}
+
+/**
  * Copy the attempt history and checkpoint references visible to finished nodes
  * inherited unchanged from the selected snapshot. Reset nodes deliberately
  * have no child attempt history, preserving reset's attempt-1 contract.
@@ -157,8 +228,8 @@ function liveParentForkError(parentRun, parentRunId, params) {
  * @param {number} parentFrameNo
  * @param {string} sourceNodesJson
  * @param {string} childNodesJson
- * @param {string} sourceOutputsJson
  * @param {number} sourceCreatedAtMs
+ * @param {{ mode: string; provenance: object | null; horizons: Map<string, number> | null }} checkpointSnapshot
  */
 async function copyInheritedAgentCheckpoints(
   adapter,
@@ -167,8 +238,8 @@ async function copyInheritedAgentCheckpoints(
   parentFrameNo,
   sourceNodesJson,
   childNodesJson,
-  sourceOutputsJson,
   sourceCreatedAtMs,
+  checkpointSnapshot,
 ) {
   const nodes = JSON.parse(sourceNodesJson);
   const childNodes = JSON.parse(childNodesJson);
@@ -186,6 +257,7 @@ async function copyInheritedAgentCheckpoints(
       .map((node) => `${node.nodeId}::${node.iteration}::${node.lastAttempt}`),
   );
   const horizons = new Map();
+  const inheritedTargets = [];
   for (const node of nodes) {
     // Fork inherits only finished nodes that survived reset expansion.
     if (
@@ -199,62 +271,29 @@ async function copyInheritedAgentCheckpoints(
       inherited.has(`${node.nodeId}::${node.iteration}::${node.lastAttempt}`)
     ) {
       horizons.set(`${node.nodeId}::${node.iteration}`, node.lastAttempt);
+      inheritedTargets.push([node.nodeId, Number(node.iteration), Number(node.lastAttempt)]);
     }
   }
   if (horizons.size === 0) return;
 
-  const sourceOutputs = JSON.parse(sourceOutputsJson);
-  const exactHorizons = parseAgentCheckpointHorizons(sourceOutputs);
-  const snapshotProvenance = parseAgentCheckpointProvenance(sourceOutputs);
+  const exactHorizons = checkpointSnapshot.horizons;
+  const snapshotProvenance = checkpointSnapshot.provenance;
   const refs = [];
   let attempts;
   if (snapshotProvenance) {
-    for (const tuple of snapshotProvenance.checkpoints) {
-      refs.push({
-        nodeId: tuple[0],
-        iteration: tuple[1],
-        attempt: tuple[2],
-        sequence: tuple[3],
-        contentHash: tuple[4],
-        codec: tuple[5],
-        version: tuple[6],
-        agentId: tuple[7],
-        purpose: tuple[8],
-        createdAtMs: tuple[9],
-        checkpointJson: tuple[10],
-        sizeBytes: tuple[11],
-        contentCreatedAtMs: tuple[12],
-      });
-    }
-    attempts = snapshotProvenance.attempts.map((tuple) => ({
-      nodeId: tuple[0],
-      iteration: tuple[1],
-      attempt: tuple[2],
-      state: tuple[3],
-      startedAtMs: tuple[4],
-      finishedAtMs: tuple[5],
-      heartbeatAtMs: tuple[6],
-      heartbeatDataJson: tuple[7],
-      errorJson: tuple[8],
-      jjPointer: tuple[9],
-      cached: tuple[10],
-      metaJson: tuple[11],
-      responseText: tuple[12],
-      jjCwd: tuple[13],
-    }));
+    refs.push(...snapshotProvenance.checkpoints.map((tuple) => agentCheckpointReferenceRow(tuple, childRunId)));
+    attempts = snapshotProvenance.attempts.map((tuple) => agentCheckpointAttemptRow(tuple, parentRunId));
   } else if (exactHorizons) {
-    const targets = nodes
-      .filter((node) => horizons.get(`${node.nodeId}::${Number(node.iteration)}`) === node.lastAttempt)
-      .map((node) => [
-        node.nodeId,
-        Number(node.iteration),
-        Number(node.lastAttempt),
-        exactHorizons.get(agentCheckpointHorizonKey(node.nodeId, Number(node.iteration), Number(node.lastAttempt))) ??
-          -1,
-      ]);
+    const targets = inheritedTargets.map(([nodeId, iteration, lastAttempt]) => [
+      nodeId,
+      iteration,
+      lastAttempt,
+      exactHorizons.get(agentCheckpointHorizonKey(nodeId, iteration, lastAttempt)) ?? -1,
+    ]);
     for (let offset = 0; offset < targets.length; offset += CHECKPOINT_COPY_TUPLES_PER_QUERY) {
       const chunk = targets.slice(offset, offset + CHECKPOINT_COPY_TUPLES_PER_QUERY);
       const valuesSql = chunk.map(() => "(?, CAST(? AS BIGINT), CAST(? AS BIGINT), CAST(? AS BIGINT))").join(", ");
+      const remaining = MAX_SNAPSHOT_CHECKPOINT_REFS - refs.length + 1;
       refs.push(
         ...(await adapter.internalStorage.queryAll(
           `WITH inherited(node_id, iteration, last_attempt, sequence) AS (VALUES ${valuesSql})
@@ -266,20 +305,40 @@ async function copyInheritedAgentCheckpoints(
             WHERE checkpoint.run_id = ?
               AND (checkpoint.attempt < inherited.last_attempt OR
                    (checkpoint.attempt = inherited.last_attempt AND checkpoint.sequence <= inherited.sequence))
-            ORDER BY checkpoint.node_id, checkpoint.iteration, checkpoint.attempt, checkpoint.sequence`,
-          [...chunk.flat(), parentRunId],
+            ORDER BY checkpoint.node_id, checkpoint.iteration, checkpoint.attempt, checkpoint.sequence
+            LIMIT ?`,
+          [...chunk.flat(), parentRunId, remaining],
         )),
       );
+      if (refs.length > MAX_SNAPSHOT_CHECKPOINT_REFS) {
+        throw new Error(`Snapshot agent checkpoint reference count exceeds limit ${MAX_SNAPSHOT_CHECKPOINT_REFS}`);
+      }
     }
   } else {
-    refs.push(
-      ...(await adapter.internalStorage.queryAll(
-        `SELECT * FROM _smithers_agent_checkpoints
-          WHERE run_id = ? AND created_at_ms <= ?
-          ORDER BY node_id, iteration, attempt, sequence`,
-        [parentRunId, sourceCreatedAtMs],
-      )),
-    );
+    for (let offset = 0; offset < inheritedTargets.length; offset += CHECKPOINT_COPY_TUPLES_PER_QUERY) {
+      const chunk = inheritedTargets.slice(offset, offset + CHECKPOINT_COPY_TUPLES_PER_QUERY);
+      const valuesSql = chunk.map(() => "(?, CAST(? AS BIGINT), CAST(? AS BIGINT))").join(", ");
+      const remaining = MAX_SNAPSHOT_CHECKPOINT_REFS - refs.length + 1;
+      refs.push(
+        ...(await adapter.internalStorage.queryAll(
+          `WITH inherited(node_id, iteration, last_attempt) AS (VALUES ${valuesSql})
+           SELECT checkpoint.*
+             FROM _smithers_agent_checkpoints checkpoint
+             JOIN inherited
+               ON inherited.node_id = checkpoint.node_id
+              AND inherited.iteration = checkpoint.iteration
+            WHERE checkpoint.run_id = ?
+              AND checkpoint.attempt <= inherited.last_attempt
+              AND checkpoint.created_at_ms <= ?
+            ORDER BY checkpoint.node_id, checkpoint.iteration, checkpoint.attempt, checkpoint.sequence
+            LIMIT ?`,
+          [...chunk.flat(), parentRunId, sourceCreatedAtMs, remaining],
+        )),
+      );
+      if (refs.length > MAX_SNAPSHOT_CHECKPOINT_REFS) {
+        throw new Error(`Snapshot agent checkpoint reference count exceeds limit ${MAX_SNAPSHOT_CHECKPOINT_REFS}`);
+      }
+    }
   }
   const inheritedRefs = refs.filter((ref) => {
     const nodeId = ref.nodeId ?? ref.node_id;
@@ -291,12 +350,37 @@ async function copyInheritedAgentCheckpoints(
     const sequenceHorizon = exactHorizons.get(agentCheckpointHorizonKey(nodeId, iteration, attemptNo));
     return sequenceHorizon !== undefined && Number(ref.sequence) <= sequenceHorizon;
   });
-  attempts ??= await adapter.internalStorage.queryAll(
-    `SELECT * FROM _smithers_attempts WHERE run_id = ? ORDER BY node_id, iteration, attempt`,
-    [parentRunId],
-    { booleanColumns: ["cached"] },
-  );
+  if (!attempts) {
+    attempts = [];
+    for (let offset = 0; offset < inheritedTargets.length; offset += CHECKPOINT_COPY_TUPLES_PER_QUERY) {
+      const chunk = inheritedTargets.slice(offset, offset + CHECKPOINT_COPY_TUPLES_PER_QUERY);
+      const valuesSql = chunk.map(() => "(?, CAST(? AS BIGINT), CAST(? AS BIGINT))").join(", ");
+      const remaining = MAX_SNAPSHOT_CHECKPOINT_ATTEMPTS - attempts.length + 1;
+      attempts.push(
+        ...(await adapter.internalStorage.queryAll(
+          `WITH inherited(node_id, iteration, last_attempt) AS (VALUES ${valuesSql})
+           SELECT attempt.*
+             FROM _smithers_attempts attempt
+             JOIN inherited
+               ON inherited.node_id = attempt.node_id
+              AND inherited.iteration = attempt.iteration
+            WHERE attempt.run_id = ?
+              AND attempt.attempt <= inherited.last_attempt
+              AND attempt.started_at_ms <= ?
+            ORDER BY attempt.node_id, attempt.iteration, attempt.attempt
+            LIMIT ?`,
+          [...chunk.flat(), parentRunId, sourceCreatedAtMs, remaining],
+          { booleanColumns: ["cached"] },
+        )),
+      );
+      if (attempts.length > MAX_SNAPSHOT_CHECKPOINT_ATTEMPTS) {
+        throw new Error(`Snapshot agent checkpoint attempt count exceeds limit ${MAX_SNAPSHOT_CHECKPOINT_ATTEMPTS}`);
+      }
+    }
+  }
   const copiedAttempts = new Set();
+  const inheritedAttempts = [];
+  let attemptTextBytes = 0;
   for (const attempt of attempts) {
     const nodeId = attempt.nodeId ?? attempt.node_id;
     const iteration = Number(attempt.iteration);
@@ -317,7 +401,7 @@ async function copyInheritedAgentCheckpoints(
         parentMeta = { inheritedParentMetaJson: attempt.metaJson ?? attempt.meta_json };
       }
     }
-    await adapter.internalStorage.insertIgnore("_smithers_attempts", {
+    const inheritedAttempt = {
       runId: childRunId,
       nodeId,
       iteration,
@@ -342,46 +426,37 @@ async function copyInheritedAgentCheckpoints(
       }),
       responseText: attempt.responseText ?? attempt.response_text ?? null,
       jjCwd: attempt.jjCwd ?? attempt.jj_cwd ?? null,
-    });
+    };
+    const rowBytes = [
+      inheritedAttempt.heartbeatDataJson,
+      inheritedAttempt.errorJson,
+      inheritedAttempt.jjPointer,
+      inheritedAttempt.metaJson,
+      inheritedAttempt.responseText,
+      inheritedAttempt.jjCwd,
+    ].reduce((total, value) => total + (typeof value === "string" ? Buffer.byteLength(value, "utf8") : 0), 0);
+    if (rowBytes > MAX_SNAPSHOT_CHECKPOINT_ATTEMPT_BYTES) {
+      throw new Error(
+        `Snapshot agent checkpoint attempt text size exceeds limit ${MAX_SNAPSHOT_CHECKPOINT_ATTEMPT_BYTES}`,
+      );
+    }
+    attemptTextBytes += rowBytes;
+    if (attemptTextBytes > MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES) {
+      throw new Error(
+        `Snapshot agent checkpoint attempt text bytes exceeds limit ${MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES}`,
+      );
+    }
+    inheritedAttempts.push(inheritedAttempt);
     copiedAttempts.add(attemptKey);
   }
 
+  const inheritedCheckpoints = [];
   for (const ref of inheritedRefs) {
     const nodeId = ref.nodeId ?? ref.node_id;
     const iteration = Number(ref.iteration);
     const attemptNo = Number(ref.attempt);
     if (!copiedAttempts.has(`${nodeId}::${iteration}::${attemptNo}`)) continue;
-    const checkpointJson = ref.checkpointJson ?? ref.checkpoint_json;
-    if (typeof checkpointJson === "string") {
-      const contentHash = ref.contentHash ?? ref.content_hash;
-      const sizeBytes = Number(ref.sizeBytes ?? ref.size_bytes);
-      if (
-        Buffer.byteLength(checkpointJson, "utf8") !== sizeBytes ||
-        createHash("sha256").update(checkpointJson).digest("hex") !== contentHash
-      ) {
-        throw new Error(`Checkpoint content hash mismatch in snapshot: ${contentHash}`);
-      }
-      await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoint_contents", {
-        contentHash,
-        checkpointJson,
-        sizeBytes,
-        createdAtMs: Number(ref.contentCreatedAtMs ?? ref.content_created_at_ms),
-      });
-      const storedContent = await adapter.internalStorage.queryOne(
-        `SELECT checkpoint_json, size_bytes
-           FROM _smithers_agent_checkpoint_contents
-          WHERE content_hash = ? LIMIT 1`,
-        [contentHash],
-      );
-      if (
-        !storedContent ||
-        (storedContent.checkpointJson ?? storedContent.checkpoint_json) !== checkpointJson ||
-        Number(storedContent.sizeBytes ?? storedContent.size_bytes) !== sizeBytes
-      ) {
-        throw new Error(`Checkpoint content hash collision or corruption: ${contentHash}`);
-      }
-    }
-    await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoints", {
+    inheritedCheckpoints.push({
       runId: childRunId,
       nodeId,
       iteration,
@@ -393,8 +468,30 @@ async function copyInheritedAgentCheckpoints(
       agentId: ref.agentId ?? ref.agent_id ?? null,
       purpose: ref.purpose,
       createdAtMs: Number(ref.createdAtMs ?? ref.created_at_ms),
+      checkpointJson: ref.checkpointJson ?? ref.checkpoint_json,
+      sizeBytes: (ref.sizeBytes ?? ref.size_bytes) == null ? undefined : Number(ref.sizeBytes ?? ref.size_bytes),
+      contentCreatedAtMs:
+        (ref.contentCreatedAtMs ?? ref.content_created_at_ms) == null
+          ? undefined
+          : Number(ref.contentCreatedAtMs ?? ref.content_created_at_ms),
     });
   }
+  const checkpointBytes = inheritedCheckpoints.reduce(
+    (total, row) =>
+      total + (typeof row.checkpointJson === "string" ? Buffer.byteLength(row.checkpointJson, "utf8") : 0),
+    0,
+  );
+  if (attemptTextBytes + checkpointBytes > MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES) {
+    throw new Error(
+      `Snapshot agent checkpoint materialized bytes exceeds limit ${MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES}`,
+    );
+  }
+  await persistAgentCheckpointRows(adapter, {
+    runId: childRunId,
+    attempts: inheritedAttempts,
+    checkpoints: inheritedCheckpoints,
+    replaceCheckpointRefs: false,
+  });
 }
 
 /**
@@ -415,6 +512,15 @@ function forkRunWhileLocked(adapter, params, rewindLock) {
         }),
       );
     }
+    const sourceCheckpointSnapshot = yield* Effect.try({
+      try: () =>
+        parseAgentCheckpointSnapshot(JSON.parse(source.outputsJson), JSON.parse(source.nodesJson), source.createdAtMs),
+      catch: (cause) =>
+        toSmithersError(cause, "parse snapshot agent checkpoint provenance", {
+          code: "DB_QUERY_FAILED",
+          details: { runId: parentRunId, frameNo },
+        }),
+    });
     let boundary = yield* Effect.tryPromise({
       try: () =>
         guardEffectBoundary(adapter, {
@@ -488,12 +594,28 @@ function forkRunWhileLocked(adapter, params, rewindLock) {
     const childWorkflowPath =
       params.workflowPath !== undefined ? params.workflowPath : (parentRun?.workflowPath ?? null);
     const childConfigJson = patchDurabilityConfigJson(parentRun?.configJson ?? null, params.entryWorkflowHash);
-    const childContentHash = snapshotContentHashFromJson(nodesJson, source.outputsJson, source.ralphJson, inputJson);
+    const outputsJson = yield* Effect.try({
+      try: () => projectChildCheckpointOutputs(source.outputsJson, nodesJson, sourceCheckpointSnapshot, ts),
+      catch: (cause) =>
+        toSmithersError(cause, "project forked snapshot agent checkpoint provenance", {
+          code: "DB_QUERY_FAILED",
+          details: { runId: parentRunId, frameNo },
+        }),
+    });
+    const childCheckpointSnapshot = yield* Effect.try({
+      try: () => parseAgentCheckpointSnapshot(JSON.parse(outputsJson), JSON.parse(nodesJson), ts),
+      catch: (cause) =>
+        toSmithersError(cause, "validate forked snapshot agent checkpoint provenance", {
+          code: "DB_QUERY_FAILED",
+          details: { runId: parentRunId, frameNo },
+        }),
+    });
+    const childContentHash = snapshotContentHashFromJson(nodesJson, outputsJson, source.ralphJson, inputJson);
     const childSnapshot = {
       runId: childRunId,
       frameNo: 0,
       nodesJson,
-      outputsJson: source.outputsJson,
+      outputsJson,
       ralphJson: source.ralphJson,
       inputJson,
       vcsPointer: source.vcsPointer,
@@ -643,8 +765,8 @@ function forkRunWhileLocked(adapter, params, rewindLock) {
               frameNo,
               lockedSource.nodesJson,
               nodesJson,
-              lockedSource.outputsJson,
               lockedSource.createdAtMs,
+              childCheckpointSnapshot,
             ),
           catch: (cause) =>
             toSmithersError(cause, "copy inherited agent checkpoints", {

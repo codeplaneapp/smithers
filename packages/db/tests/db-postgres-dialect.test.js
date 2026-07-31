@@ -110,6 +110,20 @@ async function waitForBlockedPostgresClients(observer, applicationNames) {
   throw new Error(`Timed out waiting for blocked PostgreSQL clients: ${applicationNames.join(", ")}`);
 }
 
+async function waitForTestSignal(signal, label) {
+  let timeout;
+  try {
+    await Promise.race([
+      signal,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), 5_000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 // PGlite's socket server currently desyncs node-postgres on Windows CI. The
 // real Postgres dialect still runs through the separate test-postgres job.
 describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage postgres dialect", () => {
@@ -155,7 +169,8 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
     const result = await client.query(`
             SELECT column_name
             FROM information_schema.columns
-            WHERE table_name = '_smithers_scorers'
+            WHERE table_schema = current_schema()
+              AND table_name = '_smithers_scorers'
               AND column_name IN ('ground_truth_json', 'context_json')
             ORDER BY column_name
         `);
@@ -221,6 +236,68 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
       "SELECT COUNT(*)::int AS count FROM _smithers_schema_migrations WHERE id = '0037_agent_checkpoints'",
     );
     expect(ledger.rows).toEqual([{ count: 1 }]);
+  });
+
+  test("0035 enforces checkpoint nullability without making agent_id required", async () => {
+    const contents = await client.query(`
+      SELECT column_name, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = '_smithers_agent_checkpoint_contents'
+        AND column_name = 'content_hash'
+    `);
+    expect(contents.rows).toEqual([{ column_name: "content_hash", is_nullable: "NO" }]);
+
+    const refs = await client.query(`
+      SELECT column_name, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = '_smithers_agent_checkpoints'
+        AND column_name = 'agent_id'
+    `);
+    expect(refs.rows).toEqual([{ column_name: "agent_id", is_nullable: "YES" }]);
+
+    await client.query("ALTER TABLE _smithers_agent_checkpoint_contents ALTER COLUMN checkpoint_json DROP NOT NULL");
+    await expect(storage.ensureSchema()).rejects.toThrow(/Failed to initialize Postgres schema/);
+    await client.query("ALTER TABLE _smithers_agent_checkpoint_contents ALTER COLUMN checkpoint_json SET NOT NULL");
+
+    await client.query("ALTER TABLE _smithers_agent_checkpoints ALTER COLUMN agent_id SET NOT NULL");
+    await expect(storage.ensureSchema()).rejects.toThrow(/Failed to initialize Postgres schema/);
+    await client.query("ALTER TABLE _smithers_agent_checkpoints ALTER COLUMN agent_id DROP NOT NULL");
+    await storage.ensureSchema();
+  });
+
+  test.skipIf(!PG_URL)("concurrent startup atomically repairs the checkpoint ref-delete trigger", async () => {
+    await client.query("DROP TRIGGER IF EXISTS _smithers_agent_checkpoint_refs_delete ON _smithers_agent_checkpoints");
+    const leftClient = await connectPeerClient();
+    const rightClient = await connectPeerClient();
+    const waitForPeer = twoPartyBarrier();
+    // Release both callers immediately before they request the same schema
+    // advisory lock. One initializer proceeds while PostgreSQL blocks the
+    // other, preventing concurrent system-catalog DDL updates.
+    const pattern = /pg_advisory_xact_lock/;
+    try {
+      await Promise.all([
+        new SqlMessageStorage({
+          dialect: "postgres",
+          connection: blockFirstMatchingQuery(leftClient, pattern, waitForPeer),
+        }).ensureSchema(),
+        new SqlMessageStorage({
+          dialect: "postgres",
+          connection: blockFirstMatchingQuery(rightClient, pattern, waitForPeer),
+        }).ensureSchema(),
+      ]);
+      const triggers = await client.query(`
+        SELECT COUNT(*)::int AS count
+        FROM information_schema.triggers
+        WHERE trigger_schema = current_schema()
+          AND trigger_name = '_smithers_agent_checkpoint_refs_delete'
+      `);
+      expect(triggers.rows).toEqual([{ count: 1 }]);
+    } finally {
+      await leftClient.end();
+      await rightClient.end();
+    }
   });
 
   test("independent same-attempt checkpoint appends allocate distinct sequences", async () => {
@@ -305,29 +382,33 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
       },
     );
     try {
-      const checkpoint = postgresAdapter(blockedWriter).putAgentCheckpoint({
-        runId,
-        nodeId: "agent",
-        iteration: 0,
-        attempt: 1,
-        checkpointJson: '{"overlap":true}',
-        codec: "json",
-        version: 1,
-        purpose: "resume",
-        createdAtMs: 2,
-        runtimeOwnerId: "owner-before",
-      });
-      await writerHasRunLock;
-      const takeover = postgresAdapter(takeoverClient).claimRunForResume({
-        runId,
-        expectedRuntimeOwnerId: "owner-before",
-        expectedHeartbeatAtMs: 1,
-        staleBeforeMs: 2,
-        claimOwnerId: "owner-after",
-        claimHeartbeatAtMs: 3,
-        requireStale: false,
-      });
-      const cancellation = postgresAdapter(cancelClient).requestRunCancel(runId, 4);
+      const checkpoint = Effect.runPromise(
+        postgresAdapter(blockedWriter).putAgentCheckpoint({
+          runId,
+          nodeId: "agent",
+          iteration: 0,
+          attempt: 1,
+          checkpointJson: '{"overlap":true}',
+          codec: "json",
+          version: 1,
+          purpose: "resume",
+          createdAtMs: 2,
+          runtimeOwnerId: "owner-before",
+        }),
+      );
+      await waitForTestSignal(writerHasRunLock, "checkpoint writer to acquire the run lock");
+      const takeover = Effect.runPromise(
+        postgresAdapter(takeoverClient).claimRunForResume({
+          runId,
+          expectedRuntimeOwnerId: "owner-before",
+          expectedHeartbeatAtMs: 1,
+          staleBeforeMs: 2,
+          claimOwnerId: "owner-after",
+          claimHeartbeatAtMs: 3,
+          requireStale: false,
+        }),
+      );
+      const cancellation = Effect.runPromise(postgresAdapter(cancelClient).requestRunCancel(runId, 4));
       await waitForBlockedPostgresClients(client, ["smithers_checkpoint_takeover", "smithers_checkpoint_cancel"]);
       releaseWriter();
       const [stored, claimed, cancelled] = await Promise.all([checkpoint, takeover, cancellation]);
@@ -356,7 +437,7 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
     }
   });
 
-  test.skipIf(!PG_URL)("checkpoint writer wins a forced overlap with orphan GC", async () => {
+  test.skipIf(!PG_URL)("checkpoint writer recovers after orphan GC wins a forced overlap", async () => {
     const adapter = postgresAdapter(client);
     await adapter.insertRun({
       runId: "checkpoint-gc-overlap",
@@ -384,6 +465,7 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
 
     const gcClient = await connectPeerClient();
     const writerClient = await connectPeerClient();
+    await writerClient.query("SET application_name = 'smithers_checkpoint_gc_writer'");
     let releaseGc;
     const gcBlocked = new Promise((resolve) => {
       releaseGc = resolve;
@@ -397,23 +479,27 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
       await gcBlocked;
     });
     try {
-      const gc = postgresAdapter(blockedGc).pruneOrphanedAgentCheckpointContents();
-      await deleteReached;
-      const stored = await postgresAdapter(writerClient).putAgentCheckpoint({
-        runId: "checkpoint-gc-overlap",
-        nodeId: "agent",
-        iteration: 0,
-        attempt: 1,
-        checkpointJson,
-        codec: "json",
-        version: 1,
-        purpose: "resume",
-        createdAtMs: 2,
-        runtimeOwnerId: null,
-      });
+      const gc = Effect.runPromise(postgresAdapter(blockedGc).pruneOrphanedAgentCheckpointContents());
+      await waitForTestSignal(deleteReached, "orphan GC delete barrier");
+      const stored = Effect.runPromise(
+        postgresAdapter(writerClient).putAgentCheckpoint({
+          runId: "checkpoint-gc-overlap",
+          nodeId: "agent",
+          iteration: 0,
+          attempt: 1,
+          checkpointJson,
+          codec: "json",
+          version: 1,
+          purpose: "resume",
+          createdAtMs: 2,
+          runtimeOwnerId: null,
+        }),
+      );
+      await waitForBlockedPostgresClients(client, ["smithers_checkpoint_gc_writer"]);
       releaseGc();
-      expect(await gc).toEqual({ deletedCount: 0, nextCursor: null });
-      expect(stored.contentHash).toBe(contentHash);
+      const [gcResult, storedResult] = await Promise.all([gc, stored]);
+      expect(gcResult).toEqual({ deletedCount: 1, nextCursor: null });
+      expect(storedResult.contentHash).toBe(contentHash);
       expect(await adapter.getAgentCheckpoint(contentHash)).not.toBeNull();
     } finally {
       releaseGc();

@@ -21,6 +21,7 @@ import {
   MAX_SNAPSHOT_CHECKPOINT_BYTES,
   parseAgentCheckpointProvenance,
 } from "../src/snapshot/agentCheckpointProvenance.js";
+import { parseAgentCheckpointSnapshot } from "../src/snapshot/agentCheckpointSnapshot.js";
 function createTestDb() {
   const sqlite = new Database(":memory:");
   const db = drizzle(sqlite);
@@ -171,6 +172,95 @@ describe("captureSnapshot", () => {
         },
       }),
     ).toThrow(/content is corrupt/);
+  });
+
+  test("distinguishes absent legacy provenance from corrupt modern envelopes and enforces parser limits", () => {
+    expect(parseAgentCheckpointProvenance({})).toBeNull();
+    for (const encoded of [
+      null,
+      { version: 2, attempts: [], checkpoints: [] },
+      { version: 1, attempts: {}, checkpoints: [] },
+    ]) {
+      expect(() => parseAgentCheckpointProvenance({ __smithersAgentCheckpointProvenance: encoded })).toThrow(
+        /provenance envelope is corrupt/,
+      );
+    }
+
+    const attempt = (heartbeatDataJson) => [
+      "agent",
+      0,
+      1,
+      "finished",
+      1,
+      2,
+      null,
+      heartbeatDataJson,
+      null,
+      null,
+      false,
+      null,
+      null,
+      null,
+    ];
+    expect(() =>
+      parseAgentCheckpointProvenance({
+        __smithersAgentCheckpointProvenance: {
+          version: 1,
+          attempts: [attempt("x".repeat(MAX_SNAPSHOT_CHECKPOINT_ATTEMPT_BYTES + 1))],
+          checkpoints: [],
+        },
+      }),
+    ).toThrow(/attempt text size exceeds limit/);
+    expect(
+      parseAgentCheckpointProvenance({
+        __smithersAgentCheckpointProvenance: {
+          version: 1,
+          attempts: [attempt("x".repeat(MAX_SNAPSHOT_CHECKPOINT_ATTEMPT_BYTES))],
+          checkpoints: [],
+        },
+      }).attempts,
+    ).toHaveLength(1);
+  });
+
+  test("cross-checks high-cardinality checkpoint horizons in linear time", () => {
+    const count = 20_000;
+    const checkpointJson = JSON.stringify({ codec: "test.snapshot", version: 1, payload: {} });
+    const contentHash = createHash("sha256").update(checkpointJson).digest("hex");
+    const nodes = [];
+    const attempts = [];
+    const checkpoints = [];
+    const horizons = [];
+    for (let index = 0; index < count; index += 1) {
+      const nodeId = `agent:${index}`;
+      nodes.push({ nodeId, iteration: 0, lastAttempt: 1 });
+      attempts.push([nodeId, 0, 1, "finished", 1, 2, null, null, null, null, false, null, null, null]);
+      checkpoints.push([
+        nodeId,
+        0,
+        1,
+        0,
+        contentHash,
+        "test.snapshot",
+        1,
+        null,
+        "turn",
+        2,
+        checkpointJson,
+        Buffer.byteLength(checkpointJson),
+        1,
+      ]);
+      horizons.push([nodeId, 0, 1, 0]);
+    }
+    expect(
+      parseAgentCheckpointSnapshot(
+        {
+          __smithersAgentCheckpointProvenance: { version: 1, attempts, checkpoints },
+          __smithersAgentCheckpointHorizons: { version: 1, attempts: horizons },
+        },
+        nodes,
+        2,
+      ).mode,
+    ).toBe("exact");
   });
 
   test("deduplicates bounded checkpoint provenance and keeps it private from parsed outputs", async () => {

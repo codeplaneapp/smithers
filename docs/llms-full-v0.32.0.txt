@@ -4266,13 +4266,13 @@ A task inside a `<Loop>` can depend on a task outside it: the upstream resolves 
 
 ## Fork
 
-Every agent task produces a reusable session snapshot; use `fork` to start a new task from any previous task's context.
+Checkpoint-aware and conversation-recording agent tasks produce reusable state; use `fork` to start a new task from a compatible previous task context.
 
 `<Task id={B} fork={A}>` means:
 
 - `B` depends on `A` and cannot run until `A` has completed.
-- `B` starts from a **copy** of `A`'s final agent session context, then submits its own prompt into that copy.
-- `B` produces its own output and its own session snapshot.
+- `B` starts from a **copy** of `A`'s final agent checkpoint when the target declares an exact codec/version/`"fork"` match in `checkpointCapabilities`. Otherwise Smithers falls back only when that same source attempt recorded forkable conversation messages.
+- `B` produces its own output and independent continuation state when its agent supports it.
 
 `fork` never mutates or continues the source task; multiple tasks may fork the same source safely, and a forked task may itself be forked.
 
@@ -4329,13 +4329,14 @@ const implementer = new CodexAgent({ model: "gpt-5.6-terra", config: { model_rea
 
 - **`TASK_FORK_SOURCE_NOT_FOUND`**: `fork` points to a task id absent from the graph (including one that exists only in an unselected `<Branch>`).
 - **`TASK_FORK_CYCLE`**: `fork` creates a cycle, directly or indirectly.
-- **`TASK_FORK_SESSION_UNAVAILABLE`**: the forking task isn't an agent task, or its source completed with no usable session snapshot (e.g. a compute/static source, or one skipped/cancelled).
+- **`TASK_FORK_SESSION_UNAVAILABLE`**: the forking task isn't an agent task, or its source completed with neither a checkpoint nor forkable conversation messages (e.g. a compute/static source, or one skipped/cancelled).
+- **`TASK_FORK_CHECKPOINT_INCOMPATIBLE`**: the source has only a native checkpoint and the target agent does not support its codec, version, or isolated-fork mode.
 - **`TASK_FORK_SOURCE_NOT_COMPLETE`**: the source exists but hasn't completed; the forked task waits rather than running.
 
 ## Notes
 
 - `memory` overrides the nearest `<Memory>` provider for this task. Recall and primer failures log a warning and run the original prompt.
-- Forking never reuses a native session id; it always copies into a new one (see Fork, error cases).
+- Native checkpoints are supplied as the discriminated pair `{ resumeCheckpoint, checkpointMode: "fork" }`, never with `resumeSession`; adapters must create an isolated branch and never mutate the source. CLI session ids are never reused for forks. An incompatible native checkpoint falls back only to conversation messages recorded by the same source attempt; checkpoint-only sources fail with `TASK_FORK_CHECKPOINT_INCOMPATIBLE`.
 - When `outputSchema` is set, JSON is extracted from agent text. Missing or invalid JSON triggers up to `maxSchemaRetries` correction calls before the attempt fails; corrections resume the agent's own CLI session (`claude --resume`, `codex exec resume`) when a session id was captured, so the fix runs with full task context instead of a fresh session. Correction calls don't consume `retries`.
 - Auth errors short-circuit retries; non-idempotent tool reuse warns on the next attempt.
 
@@ -8637,6 +8638,7 @@ type RunOptions = {
   logDir?: string | null;
   allowNetwork?: boolean;           // default false; bash tool egress (loopback always allowed)
   maxOutputBytes?: number;          // default 200000
+  maxAgentCheckpointBytes?: number; // default and hard ceiling 16777216; may only be lowered
   toolTimeoutMs?: number;           // default 60000
   hot?: boolean | HotReloadOptions;
   annotations?: Record<string, string | number | boolean>;
@@ -8834,13 +8836,47 @@ type AgentCapabilityRegistry = {
   builtIns: string[];
 };
 
+type AgentCheckpointJsonPrimitive = null | boolean | number | string;
+type AgentCheckpointJsonArray = AgentCheckpointJsonValue[];
+type AgentCheckpointJsonObject = { [key: string]: AgentCheckpointJsonValue };
+type AgentCheckpointJsonValue =
+  | AgentCheckpointJsonPrimitive
+  | AgentCheckpointJsonArray
+  | AgentCheckpointJsonObject;
+
+type AgentCheckpoint = {
+  codec: string;
+  version: number;
+  payload: AgentCheckpointJsonValue;
+};
+
+type AgentCheckpointMode = "resume" | "fork";
+
+type AgentCheckpointCapability = {
+  codec: string;
+  versions: readonly number[];
+  modes: readonly AgentCheckpointMode[];
+};
+
+type AgentCheckpointFormat = {
+  codec: string;
+  versions: readonly number[];
+};
+
+type AgentCheckpointPublisher = (checkpoint: AgentCheckpoint) => Promise<void>;
+
+type AgentCheckpointResult = {
+  checkpoint?: AgentCheckpoint;
+};
+
 type AgentGenerateOptions = {
   prompt?: unknown;
   messages?: unknown;
   timeout?: unknown;
   abortSignal?: AbortSignal;
   rootDir?: string;
-  resumeSession?: string;
+  onCheckpoint?: AgentCheckpointPublisher;
+  maxAgentCheckpointBytes?: number; // effective per-run ceiling, at most 16777216
   maxOutputBytes?: number;
   onStdout?: (text: string) => void;
   onStderr?: (text: string) => void;
@@ -8856,13 +8892,28 @@ type AgentGenerateOptions = {
     attempt?: number;
   };
   [key: string]: unknown;
-};
+} & AgentCheckpointContinuationOptions;
+
+type AgentCheckpointContinuationOptions =
+  | {
+      resumeCheckpoint: AgentCheckpoint;
+      checkpointMode: AgentCheckpointMode;
+      resumeSession?: never;
+    }
+  | {
+      resumeCheckpoint?: never;
+      checkpointMode?: never;
+      resumeSession?: string;
+    };
 
 type AgentLike = {
   id?: string;
   tools?: Record<string, unknown>;
   supportsNativeStructuredOutput?: boolean;
   capabilities?: AgentCapabilityRegistry;
+  checkpointCapabilities?: readonly AgentCheckpointCapability[];
+  checkpointFormats?: readonly AgentCheckpointFormat[];
+  preflight?: (args?: AgentGenerateOptions) => Promise<void>;
   generate: (args?: AgentGenerateOptions) => Promise<unknown>;
 };
 
@@ -9970,10 +10021,14 @@ declare class SmithersError extends Error {
 type SmithersErrorCode = KnownSmithersErrorCode | (string & {});
 type KnownSmithersErrorCode =
   | "INVALID_INPUT" | "MISSING_INPUT" | "MISSING_INPUT_TABLE" | "RESUME_METADATA_MISMATCH"
-  | "UNKNOWN_OUTPUT_SCHEMA" | "INVALID_OUTPUT" | "WORKTREE_CREATE_FAILED" | "VCS_NOT_FOUND"
+  | "UNKNOWN_OUTPUT_SCHEMA" | "INVALID_OUTPUT" | "AGENT_CHECKPOINT_INVALID"
+  | "AGENT_CHECKPOINT_CAPABILITY_UNDECLARED" | "AGENT_CHECKPOINT_HISTORY_EXHAUSTED"
+  | "AGENT_CHECKPOINT_MISSING" | "AGENT_CHECKPOINT_CORRUPT"
+  | "WORKTREE_CREATE_FAILED" | "VCS_NOT_FOUND"
   | "SNAPSHOT_NOT_FOUND" | "VCS_WORKSPACE_CREATE_FAILED" | "TASK_TIMEOUT"
   | "TASK_HIJACK_UNSUPPORTED" | "TASK_FORK_SOURCE_NOT_FOUND" | "TASK_FORK_SOURCE_NOT_COMPLETE"
-  | "TASK_FORK_SESSION_UNAVAILABLE" | "TASK_FORK_CYCLE" | "RUN_NOT_FOUND" | "NODE_NOT_FOUND" | "INVALID_EVENTS_OPTIONS"
+  | "TASK_FORK_SESSION_UNAVAILABLE" | "TASK_FORK_CHECKPOINT_INCOMPATIBLE" | "TASK_FORK_CYCLE"
+  | "RUN_NOT_FOUND" | "NODE_NOT_FOUND" | "INVALID_EVENTS_OPTIONS"
   | "SANDBOX_BUNDLE_INVALID" | "SANDBOX_BUNDLE_TOO_LARGE" | "WORKFLOW_EXECUTION_FAILED"
   | "SANDBOX_EXECUTION_FAILED" | "TASK_HEARTBEAT_TIMEOUT" | "HEARTBEAT_PAYLOAD_TOO_LARGE"
   | "HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE" | "TASK_ABORTED" | "RUN_CANCELLED" | "RUN_NOT_RESUMABLE"
@@ -10670,6 +10725,11 @@ try {
 | `RESUME_METADATA_MISMATCH` | Stored run metadata no longer matches the workflow being resumed. Editing the workflow file or an imported module between stop and resume triggers this (resume hashes file content, not git; no commit required). Fork/replay onto the edit or start fresh; revert the file to resume the original run. | `mismatches`, `existing`, `current` |
 | `UNKNOWN_OUTPUT_SCHEMA` | A task references an output table not present in the schema registry. | -- |
 | `INVALID_OUTPUT` | Agent output cannot be parsed or validated against the declared output schema. | -- |
+| `AGENT_CHECKPOINT_INVALID` | An agent returned or published a malformed, non-JSON, or oversized checkpoint. | `{ nodeId, attempt }` |
+| `AGENT_CHECKPOINT_CAPABILITY_UNDECLARED` | An agent returned or published a checkpoint codec/version absent from its `checkpointFormats` production declaration. | `{ nodeId, codec, version, checkpointFormats }` |
+| `AGENT_CHECKPOINT_HISTORY_EXHAUSTED` | More than 1,000 newer incompatible checkpoint references prevent a safe same-task resume. | `{ nodeId, iteration, scanned }` |
+| `AGENT_CHECKPOINT_MISSING` | A durable checkpoint reference points to missing content. | `{ contentHash }` |
+| `AGENT_CHECKPOINT_CORRUPT` | Stored checkpoint bytes are invalid or disagree with reference metadata. | `{ contentHash }` |
 | `WORKTREE_CREATE_FAILED` | Smithers fails to create or hydrate a git or jj worktree for a task. | `{ worktreePath, vcsType, branch? }` |
 | `VCS_NOT_FOUND` | No supported git or jj repository root is found for the workflow. | `{ rootDir }` |
 | `SNAPSHOT_NOT_FOUND` | A requested time-travel snapshot or frame does not exist. | `{ runId, frameNo }` |
@@ -10680,7 +10740,8 @@ try {
 | `TASK_TIMEOUT` | A task compute callback exceeds its configured timeout. | `{ nodeId, attempt, timeoutMs }` |
 | `TASK_HIJACK_UNSUPPORTED` | A task requests auto-hijack but its agent cannot provide a resumable session or conversation. | `{ nodeId, agentId? }` |
 | `TASK_FORK_SOURCE_NOT_COMPLETE` | A forked task began executing but its fork source hasn't completed, so no session snapshot exists yet. | `{ nodeId, forkSource }` |
-| `TASK_FORK_SESSION_UNAVAILABLE` | A `<Task fork>` cannot obtain a usable agent session snapshot: either the forking task isn't an agent task, or the source completed without producing a forkable conversation (e.g. a compute/static, skipped, or cancelled source). | `{ nodeId, forkSource }` |
+| `TASK_FORK_SESSION_UNAVAILABLE` | A `<Task fork>` source produced neither a compatible checkpoint nor a forkable conversation. | `{ nodeId, forkSource }` |
+| `TASK_FORK_CHECKPOINT_INCOMPATIBLE` | A `<Task fork>` source has only a native checkpoint whose codec, version, or fork mode the target cannot consume. | `{ nodeId, forkSource, codec, version, mode }` |
 | `TASK_ABORTED` | A running task is aborted through an AbortSignal or shutdown path. | -- |
 | `RUN_NOT_FOUND` | A CLI or engine command references a run ID missing from the database. | `{ runId }` |
 | `NODE_NOT_FOUND` | A CLI command references a node ID missing for the given run. | `{ runId, nodeId }` |

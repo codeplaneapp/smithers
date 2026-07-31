@@ -32,7 +32,7 @@ function assertExactCheckpoint(args) {
   }
 }
 
-export async function buildAgentCheckpointRestartWorkflow({ connectionString, markerDir, mode, blockMs = 60_000 }) {
+export async function buildAgentCheckpointRestartWorkflow({ connectionString, markerDir, mode }) {
   const api = await createSmithersPostgres(
     { result: z.object({ value: z.number() }) },
     { provider: "postgres", connectionString },
@@ -58,7 +58,13 @@ export async function buildAgentCheckpointRestartWorkflow({ connectionString, ma
       );
       if (mode === "initial") {
         writeFileSync(join(markerDir, MARKERS.retryReady), "ready");
-        await new Promise((resolve) => setTimeout(resolve, blockMs));
+        // This process is the deliberate SIGKILL cutpoint. Keep an event-loop
+        // handle alive until the parent kills the process; a fixed timer races
+        // the verifier on slow CI and can turn the expected signal into a
+        // normal exit.
+        await new Promise(() => {
+          setInterval(() => {}, 60_000);
+        });
       }
       return { text: JSON.stringify({ value: OUTPUT_VALUE }) };
     },

@@ -711,6 +711,73 @@ describe("engine internals: durability, options and graph helpers", () => {
     ).toBe(false);
   });
 
+  test("reset resume boundaries veto stale state once without poisoning fresh retries", () => {
+    const reset = (attempt, resetAtMs, startedAtMs = resetAtMs - 100) => ({
+      attempt,
+      state: "cancelled",
+      startedAtMs,
+      finishedAtMs: resetAtMs - 50,
+      metaJson: JSON.stringify({
+        resetCancelled: true,
+        resetResumeBoundaryMs: resetAtMs,
+      }),
+    });
+    const failed = (attempt, startedAtMs, discardResumeSession = false) => ({
+      attempt,
+      state: "failed",
+      startedAtMs,
+      metaJson: JSON.stringify({ discardResumeSession }),
+    });
+
+    expect(I.shouldDiscardResumeSession([reset(3, 1_000), reset(2, 1_000), reset(1, 1_000)])).toBe(true);
+    expect(I.shouldDiscardResumeSession([reset(3, 1_000), reset(2, 1_000), failed(1, 1_100)])).toBe(false);
+    expect(I.shouldDiscardResumeSession([reset(3, 1_000), failed(1, 1_100, true)])).toBe(true);
+    expect(I.shouldDiscardResumeSession([reset(3, 1_000), failed(2, 1_100, true), failed(1, 1_200, false)])).toBe(
+      false,
+    );
+    expect(I.shouldDiscardResumeSession([failed(2, 900, false), failed(1, 800, true)])).toBe(false);
+    // A legacy reset row has no trustworthy reset timestamp. Even a newer
+    // unmarked crash-cancelled row may still predate the reset, so upgrades
+    // retain the historical fail-closed behavior instead of reusing it.
+    expect(
+      I.shouldDiscardResumeSession([
+        {
+          attempt: 2,
+          state: "cancelled",
+          startedAtMs: 100,
+          finishedAtMs: 200,
+          metaJson: JSON.stringify({ resetCancelled: true, discardResumeSession: true }),
+        },
+        { attempt: 3, state: "cancelled", startedAtMs: 300, finishedAtMs: 400, metaJson: null },
+      ]),
+    ).toBe(true);
+
+    const staleReset = {
+      attempt: 2,
+      state: "cancelled",
+      startedAtMs: 800,
+      heartbeatDataJson: JSON.stringify({ agentResume: "stale-session" }),
+      metaJson: JSON.stringify({
+        resetCancelled: true,
+        resetResumeBoundaryMs: 1_000,
+        agentEngine: "cli",
+        agentResume: "stale-session",
+      }),
+    };
+    const fresh = {
+      attempt: 1,
+      state: "failed",
+      startedAtMs: 1_100,
+      heartbeatDataJson: JSON.stringify({ agentResume: "fresh-session" }),
+      metaJson: JSON.stringify({ agentEngine: "cli", agentResume: "fresh-session" }),
+    };
+    expect(I.resumeEligibleAttempts([staleReset, fresh])).toEqual([fresh]);
+    expect(I.findHijackContinuation(I.resumeEligibleAttempts([staleReset, fresh]), "cli")).toEqual({
+      mode: "native-cli",
+      resume: "fresh-session",
+    });
+  });
+
   test("retry hydration accepts current durable state and ignores stale or legacy deadlines", () => {
     const attempt = (number, state, meta = {}) => ({
       runId: "run",

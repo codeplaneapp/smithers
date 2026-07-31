@@ -172,9 +172,12 @@ describe("agent checkpoint persistence", () => {
           "INSERT INTO _smithers_agent_checkpoint_contents (content_hash, checkpoint_json, size_bytes, created_at_ms) VALUES (?, ?, ?, ?)",
         )
         .run(sha256Hex(checkpointJson), '{"corrupt":true}', 16, 1);
-      await expect(Effect.runPromise(adapter.putAgentCheckpoint(checkpoint({ checkpointJson })))).rejects.toThrow(
-        /collision or corruption/,
-      );
+      const error = await Effect.runPromise(Effect.flip(adapter.putAgentCheckpoint(checkpoint({ checkpointJson }))));
+      expect(error).toMatchObject({
+        code: "AGENT_CHECKPOINT_CORRUPT",
+        summary: expect.stringMatching(/collision or corruption/),
+        details: { contentHash: sha256Hex(checkpointJson), failureRetryable: false },
+      });
       expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_agent_checkpoints").get().count).toBe(0);
     } finally {
       sqlite.close();
@@ -259,19 +262,99 @@ describe("agent checkpoint persistence", () => {
     }
   });
 
+  test("retries a typed SQLite busy failure during reset checkpoint cleanup", async () => {
+    const { sqlite, adapter } = setup();
+    const deleteWhere = adapter.internalStorage.deleteWhere.bind(adapter.internalStorage);
+    let busyFailures = 0;
+    adapter.internalStorage.deleteWhere = async (table, where, params) => {
+      if (table === "_smithers_agent_checkpoints" && busyFailures === 0) {
+        busyFailures += 1;
+        throw Object.assign(new Error("database is busy"), { code: "SQLITE_BUSY" });
+      }
+      return deleteWhere(table, where, params);
+    };
+    try {
+      await insertAttempt(adapter);
+      await adapter.putAgentCheckpoint(checkpoint());
+      await adapter.updateAttempt("run-1", "agent", 0, 1, {
+        state: "cancelled",
+        metaJson: JSON.stringify({ resetCancelled: true }),
+      });
+      expect(await adapter.deleteResetAgentCheckpoints("run-1", "agent", 0, 1, "owner-1")).toBe(true);
+      expect(busyFailures).toBe(1);
+      expect(await adapter.listAgentCheckpointRefs("run-1")).toEqual([]);
+    } finally {
+      adapter.internalStorage.deleteWhere = deleteWhere;
+      sqlite.close();
+    }
+  });
+
+  test("reset cleanup and orphan GC remain reentrant inside an existing transaction", async () => {
+    const { sqlite, adapter } = setup();
+    try {
+      await insertAttempt(adapter);
+      await adapter.putAgentCheckpoint(checkpoint());
+      await adapter.updateAttempt("run-1", "agent", 0, 1, {
+        state: "cancelled",
+        metaJson: JSON.stringify({ resetCancelled: true }),
+      });
+      const result = await adapter.withTransaction(
+        "nested agent checkpoint cleanup",
+        Effect.gen(function* () {
+          const reset = yield* adapter.deleteResetAgentCheckpoints("run-1", "agent", 0, 1, "owner-1");
+          const gc = yield* adapter.pruneOrphanedAgentCheckpointContents();
+          return { reset, gc };
+        }),
+      );
+      expect(result).toEqual({ reset: true, gc: { deletedCount: 0, nextCursor: null } });
+      expect(await adapter.listAgentCheckpointRefs("run-1")).toEqual([]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("same reference is idempotent but cannot be rebound to different content", async () => {
     const { sqlite, adapter } = setup();
     try {
       await insertAttempt(adapter);
       await adapter.putAgentCheckpoint(checkpoint());
       await adapter.putAgentCheckpoint(checkpoint());
-      await expect(
-        Effect.runPromise(adapter.putAgentCheckpoint(checkpoint({ checkpointJson: '{"cursor":2}' }))),
-      ).rejects.toThrow(/reference conflict/);
+      const error = await Effect.runPromise(
+        Effect.flip(adapter.putAgentCheckpoint(checkpoint({ checkpointJson: '{"cursor":2}' }))),
+      );
+      expect(error).toMatchObject({
+        code: "AGENT_CHECKPOINT_CORRUPT",
+        summary: expect.stringMatching(/reference conflict/),
+        details: { failureRetryable: false },
+      });
       expect(await adapter.listAgentCheckpointRefs("run-1")).toHaveLength(1);
       expect(await adapter.pruneOrphanedAgentCheckpointContents()).toEqual({ deletedCount: 0, nextCursor: null });
       expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_agent_checkpoint_contents").get().count).toBe(1);
     } finally {
+      sqlite.close();
+    }
+  });
+
+  test("retries a typed SQLite busy failure while publishing checkpoint content", async () => {
+    const { sqlite, adapter } = setup();
+    const insertIgnore = adapter.internalStorage.insertIgnore.bind(adapter.internalStorage);
+    let busyFailures = 0;
+    adapter.internalStorage.insertIgnore = async (table, row) => {
+      if (table === "_smithers_agent_checkpoint_contents" && busyFailures === 0) {
+        busyFailures += 1;
+        throw Object.assign(new Error("database is busy"), { code: "SQLITE_BUSY" });
+      }
+      return insertIgnore(table, row);
+    };
+    try {
+      await insertAttempt(adapter);
+      expect(await adapter.putAgentCheckpoint(checkpoint())).toMatchObject({ sequence: 0 });
+      expect(busyFailures).toBe(1);
+      expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_agent_checkpoint_contents").get()).toEqual({
+        count: 1,
+      });
+    } finally {
+      adapter.internalStorage.insertIgnore = insertIgnore;
       sqlite.close();
     }
   });
@@ -291,6 +374,31 @@ describe("agent checkpoint persistence", () => {
         nextCursor: null,
       });
     } finally {
+      sqlite.close();
+    }
+  });
+
+  test("retries a typed SQLite busy failure during orphan checkpoint GC", async () => {
+    const { sqlite, adapter } = setup();
+    const queryAll = adapter.internalStorage.queryAll.bind(adapter.internalStorage);
+    let busyFailures = 0;
+    adapter.internalStorage.queryAll = async (sql, params, options) => {
+      if (sql.includes("SELECT content_hash FROM _smithers_agent_checkpoint_contents") && busyFailures === 0) {
+        busyFailures += 1;
+        throw Object.assign(new Error("database is busy"), { code: "SQLITE_BUSY" });
+      }
+      return queryAll(sql, params, options);
+    };
+    try {
+      sqlite
+        .query(
+          "INSERT INTO _smithers_agent_checkpoint_contents (content_hash, checkpoint_json, size_bytes, created_at_ms) VALUES ('orphan', '{}', 2, 1)",
+        )
+        .run();
+      expect(await adapter.pruneOrphanedAgentCheckpointContents()).toEqual({ deletedCount: 1, nextCursor: null });
+      expect(busyFailures).toBe(1);
+    } finally {
+      adapter.internalStorage.queryAll = queryAll;
       sqlite.close();
     }
   });

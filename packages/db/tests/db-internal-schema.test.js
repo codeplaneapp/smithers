@@ -46,6 +46,12 @@ describe("internal schema table definitions", () => {
     expect(modularAgentCheckpointContents).toBe(smithersAgentCheckpointContents);
     expect(modularAgentCheckpoints).toBe(smithersAgentCheckpoints);
   });
+  test("agent checkpoint hashes are required while agent ids remain optional", () => {
+    const contentColumns = getTableConfig(smithersAgentCheckpointContents).columns;
+    const refColumns = getTableConfig(smithersAgentCheckpoints).columns;
+    expect(contentColumns.find((column) => column.name === "content_hash")?.notNull).toBe(true);
+    expect(refColumns.find((column) => column.name === "agent_id")?.notNull).toBe(false);
+  });
   test("smithersRuns table name is _smithers_runs", () => {
     expect(getTableName(smithersRuns)).toBe("_smithers_runs");
   });
