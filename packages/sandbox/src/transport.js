@@ -8,21 +8,27 @@
 import { Context, Effect, Layer } from "effect";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { CodeplaneSandboxExecutorLive, DockerSandboxExecutorLive } from "./effect/http-runner.js";
-import { makeSandboxTransportServiceEffect } from "./effect/sandbox-entity.js";
+import { makeSandboxTransportServiceEffect, SandboxEntityExecutor } from "./effect/sandbox-entity.js";
 import { BubblewrapSandboxExecutorLive } from "./effect/socket-runner.js";
 /** @typedef {import("./SandboxRuntime.ts").SandboxRuntime} SandboxRuntime */
 
+export { SandboxEntityExecutor };
+
+/** @typedef {Context.ServiceClass.Shape<"SandboxTransport", SandboxTransportService>} SandboxTransport */
+/** @typedef {Context.ServiceClass<SandboxTransport, "SandboxTransport", SandboxTransportService> & { new(): SandboxTransport }} SandboxTransportClass */
 const SandboxTransportTag =
-  /** @type {Context.TagClass<SandboxTransport, "SandboxTransport", SandboxTransportService>} */ (
-    Context.Service("SandboxTransport")
+  /** @type {Context.ServiceClass<SandboxTransport, "SandboxTransport", SandboxTransportService>} */ (
+    Context.Service()("SandboxTransport")
   );
-export class SandboxTransport extends SandboxTransportTag {
-  // Explicit constructor (identical to the implicit one) so runtime
-  // construction is observable; JSC never records implicit constructors.
-  constructor(...args) {
-    super(...args);
+export const SandboxTransport = /** @type {SandboxTransportClass} */ (
+  class SandboxTransport extends SandboxTransportTag {
+    // Explicit constructor (identical to the implicit one) so runtime
+    // construction is observable; JSC never records implicit constructors.
+    constructor(...args) {
+      super(...args);
+    }
   }
-}
+);
 /**
  * @template R, E
  * @param {Layer.Layer<SandboxEntityExecutor, E, R>} executorLayer

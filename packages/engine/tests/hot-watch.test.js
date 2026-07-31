@@ -138,4 +138,26 @@ describe("WatchTree", () => {
     tree.advancePollBackoff(true);
     expect(tree.currentPollIntervalMs).toBe(first);
   });
+  test("does not buffer changes or recreate timers when closed during a poll", async () => {
+    const dir = makeTempDir();
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    const tree = new WatchTree(dir, { debounceMs: 50 });
+    cleanups.push(() => tree.close());
+    let finishScan;
+    tree.scanFileSignatures = () =>
+      new Promise((resolve) => {
+        finishScan = () => resolve(new Map([[join(dir, "late.ts"), "1:1"]]));
+      });
+    const polling = tree.pollOnce();
+    for (let i = 0; i < 10 && !finishScan; i += 1) {
+      await Bun.sleep(0);
+    }
+    tree.close();
+    finishScan();
+    expect(await polling).toBe(false);
+    tree.onFileChange(join(dir, "after-close.ts"));
+    expect(tree.changedFiles.size).toBe(0);
+    expect(tree.debounceTimer).toBeNull();
+    expect(tree.pollTimer).toBeNull();
+  });
 });

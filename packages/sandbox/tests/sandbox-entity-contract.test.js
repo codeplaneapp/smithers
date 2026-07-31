@@ -5,16 +5,18 @@ import { SandboxTransport, makeSandboxTransportLayer } from "../src/transport.js
 const config = {
   runId: "run-entity-contract",
   sandboxId: "sb-1",
-  runtime: "bubblewrap",
+  runtime: "codeplane",
   rootDir: "/tmp/smithers",
+  workspace: { name: "contract-workspace", persistence: "sticky" },
 };
 const handle = {
-  runtime: "bubblewrap",
+  runtime: "codeplane",
   runId: config.runId,
   sandboxId: config.sandboxId,
   sandboxRoot: "/tmp/smithers/.smithers/sandboxes/run-entity-contract/sb-1",
   requestPath: "/tmp/smithers/.smithers/sandboxes/run-entity-contract/sb-1/request",
   resultPath: "/tmp/smithers/.smithers/sandboxes/run-entity-contract/sb-1/result",
+  workspace: config.workspace,
 };
 describe("sandbox entity contract", () => {
   test("exposes constructable service tag classes", () => {
@@ -83,7 +85,7 @@ describe("sandbox entity contract", () => {
     expect(calls).toEqual([
       {
         op: "create",
-        runtime: "bubblewrap",
+        runtime: "codeplane",
         sandboxId: "sb-1",
       },
       {
@@ -115,7 +117,7 @@ describe("sandbox entity contract", () => {
         create: () => Effect.succeed(handle),
         ship: () => Effect.void,
         execute: (_command, _currentHandle, signal) =>
-          Effect.async(() => {
+          Effect.callback(() => {
             resolveSignal(signal);
             // never resumes on its own; only the abort should end the call
           }),
@@ -135,7 +137,7 @@ describe("sandbox entity contract", () => {
     expect(executorSignal.aborted).toBe(false);
     controller.abort();
     const exit = await exitPromise;
-    expect(Exit.isFailure(exit) && Cause.isInterruptedOnly(exit.cause)).toBe(true);
+    expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
     expect(executorSignal.aborted).toBe(true);
   });
 

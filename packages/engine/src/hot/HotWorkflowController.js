@@ -117,7 +117,7 @@ export class HotWorkflowController {
     return Effect.runPromise(this.reloadEffect(changedFiles));
   }
   initEffect() {
-    return Effect.gen(this, function* () {
+    return Effect.gen({ self: this }, function* () {
       yield* Effect.tryPromise({
         try: () => mkdir(this.outDir, { recursive: true }),
         catch: (cause) => toSmithersError(cause, "create hot reload output dir"),
@@ -162,7 +162,7 @@ export class HotWorkflowController {
     const hotRoot = this.hotRoot;
     const outDir = this.outDir;
     const maxGenerations = this.maxGenerations;
-    return Effect.gen(this, function* () {
+    return Effect.gen({ self: this }, function* () {
       const reloadStart = performance.now();
       const genDir = yield* buildOverlayEffect(hotRoot, outDir, gen);
       const overlayEntry = resolveOverlayEntry(entryPath, hotRoot, genDir);

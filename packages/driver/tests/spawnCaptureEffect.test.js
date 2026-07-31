@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Exit, Cause, Fiber } from "effect";
+import { ChildProcess } from "node:child_process";
 import { spawnCaptureEffect } from "../src/child-process.js";
 
 const tmpDir = process.cwd();
@@ -19,6 +20,79 @@ async function run(command, args, options) {
   const failureOption = Cause.findErrorOption(exit.cause);
   if (failureOption._tag === "Some") throw failureOption.value;
   throw new Error(Cause.pretty(exit.cause));
+}
+
+/** @param {number | undefined} pid */
+function isPidAlive(pid) {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** @param {number | undefined} pid */
+function killPid(pid) {
+  if (!pid) return;
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    // already exited
+  }
+}
+
+const descendantHoldingStdoutScript = [
+  'const { spawn } = require("node:child_process");',
+  'const descendant = spawn(process.execPath, ["-e", "setTimeout(() => {}, 5000)"], {',
+  '  stdio: ["ignore", "inherit", "inherit"],',
+  "});",
+  'process.stdout.write(String(descendant.pid) + "\\n");',
+  "setTimeout(() => {}, 30000);",
+].join("\n");
+
+/**
+ * @param {(pid: number) => void} onPid
+ */
+function descendantPidCollector(onPid) {
+  let buffered = "";
+  return (chunk) => {
+    buffered += chunk;
+    const lineEnd = buffered.indexOf("\n");
+    if (lineEnd < 0) return;
+    const pid = Number(buffered.slice(0, lineEnd));
+    if (Number.isInteger(pid) && pid > 0) onPid(pid);
+  };
+}
+
+function installTimerSpy() {
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  const created = new Map();
+  const cleared = new Set();
+  globalThis.setTimeout = /** @type {any} */ (
+    (fn, ms, ...rest) => {
+      const timer = realSetTimeout(fn, ms, ...rest);
+      created.set(timer, ms);
+      return timer;
+    }
+  );
+  globalThis.clearTimeout = /** @type {any} */ (
+    (timer) => {
+      cleared.add(timer);
+      return realClearTimeout(timer);
+    }
+  );
+  return {
+    created,
+    cleared,
+    realSetTimeout,
+    restore() {
+      globalThis.setTimeout = realSetTimeout;
+      globalThis.clearTimeout = realClearTimeout;
+    },
+  };
 }
 
 describe("spawnCaptureEffect — happy path", () => {
@@ -122,6 +196,31 @@ describe("spawnCaptureEffect — timeouts and cancellation", () => {
     });
   });
 
+  test.skipIf(process.platform === "win32")(
+    "hard timeout does not wait for a descendant-held stdout pipe",
+    { timeout: 5_000 },
+    async () => {
+      let descendantPid;
+      const cleanupTimer = setTimeout(() => killPid(descendantPid), 1_500);
+      const startedAt = Date.now();
+      try {
+        await expect(
+          run("node", ["-e", descendantHoldingStdoutScript], {
+            timeoutMs: 200,
+            onStdout: descendantPidCollector((pid) => {
+              descendantPid = pid;
+            }),
+          }),
+        ).rejects.toMatchObject({ code: "PROCESS_TIMEOUT" });
+      } finally {
+        clearTimeout(cleanupTimer);
+        killPid(descendantPid);
+      }
+      expect(descendantPid).toBeGreaterThan(0);
+      expect(Date.now() - startedAt).toBeLessThan(1_000);
+    },
+  );
+
   test("idle timeout fires with PROCESS_IDLE_TIMEOUT", { timeout: 10_000 }, async () => {
     await expect(
       run("node", ["-e", "process.stdout.write('hi'); setTimeout(()=>{}, 10_000)"], { idleTimeoutMs: 1_000 }),
@@ -172,6 +271,74 @@ describe("spawnCaptureEffect — timeouts and cancellation", () => {
     ).rejects.toMatchObject({ code: "PROCESS_ABORTED" });
   });
 
+  test.skipIf(process.platform === "win32")(
+    "failed signal delivery is bounded and is not reported as process exit",
+    { timeout: 5_000 },
+    async () => {
+      const processEvents = [];
+      let pid;
+      const originalKill = ChildProcess.prototype.kill;
+      ChildProcess.prototype.kill = function () {
+        queueMicrotask(() => this.emit("error", Object.assign(new Error("kill EPERM"), { code: "EPERM" })));
+        return false;
+      };
+      const startedAt = Date.now();
+      try {
+        await expect(
+          run("node", ["-e", "setTimeout(() => {}, 10_000)"], {
+            timeoutMs: 30,
+            onProcess: (event) => {
+              processEvents.push(event);
+              if (event.phase === "started") pid = event.pid;
+            },
+          }),
+        ).rejects.toMatchObject({ code: "PROCESS_TIMEOUT" });
+        expect(Date.now() - startedAt).toBeLessThan(2_000);
+        expect(processEvents.map(({ phase }) => phase)).toEqual(["started"]);
+        expect(isPidAlive(pid)).toBe(true);
+      } finally {
+        ChildProcess.prototype.kill = originalKill;
+        killPid(pid);
+      }
+    },
+  );
+
+  test("external abort and timeout terminal paths clear every configured deadline", async () => {
+    const cases = [
+      {
+        expectedCode: "PROCESS_ABORTED",
+        options: (timers) => {
+          const controller = new AbortController();
+          timers.realSetTimeout(() => controller.abort(), 30);
+          return { signal: controller.signal, timeoutMs: 1_000_000, idleTimeoutMs: 1_000_000 };
+        },
+      },
+      {
+        expectedCode: "PROCESS_TIMEOUT",
+        options: () => ({ timeoutMs: 50, idleTimeoutMs: 1_000_000 }),
+      },
+      {
+        expectedCode: "PROCESS_IDLE_TIMEOUT",
+        options: () => ({ timeoutMs: 1_000_000, idleTimeoutMs: 50 }),
+      },
+    ];
+    for (const testCase of cases) {
+      const timers = installTimerSpy();
+      try {
+        await expect(run("node", ["-e", "setTimeout(()=>{}, 10_000)"], testCase.options(timers))).rejects.toMatchObject(
+          { code: testCase.expectedCode },
+        );
+        const configured = [...timers.created].filter(([, ms]) => ms === 50 || ms === 1_000_000);
+        expect(configured.length).toBeGreaterThanOrEqual(2);
+        for (const [timer] of configured) {
+          expect(timers.cleared.has(timer)).toBe(true);
+        }
+      } finally {
+        timers.restore();
+      }
+    }
+  });
+
   test("detached timeout kills the process group", async () => {
     await expect(
       run("node", ["-e", "setTimeout(()=>{}, 10_000)"], { detached: true, timeoutMs: 80 }),
@@ -196,22 +363,63 @@ describe("spawnCaptureEffect — timeouts and cancellation", () => {
   });
 
   test("interrupting the Effect runs the non-detached cleanup finalizer", async () => {
+    const processEvents = [];
     const fiber = Effect.runFork(
       spawnCaptureEffect("node", ["-e", "setTimeout(()=>{}, 10_000)"], {
         cwd: tmpDir,
         timeoutMs: 10_000,
         idleTimeoutMs: 10_000,
+        onProcess: (event) => processEvents.push(event),
       }),
     );
     await new Promise((resolve) => setTimeout(resolve, 30));
-    const exit = await Effect.runPromise(Fiber.interrupt(fiber));
+    await Effect.runPromise(Fiber.interrupt(fiber));
+    const exit = await Effect.runPromise(Fiber.await(fiber));
     expect(Exit.isFailure(exit)).toBe(true);
+    expect(processEvents.map(({ phase }) => phase)).toEqual(["started", "exited"]);
+    expect(isPidAlive(processEvents[0]?.pid)).toBe(false);
   });
 
+  test.skipIf(process.platform === "win32")(
+    "interrupting does not wait for a descendant-held stdout pipe",
+    { timeout: 5_000 },
+    async () => {
+      let descendantPid;
+      /** @type {(pid: number) => void} */
+      let resolveDescendantPid = () => {};
+      const observedDescendantPid = new Promise((resolve) => {
+        resolveDescendantPid = resolve;
+      });
+      const fiber = Effect.runFork(
+        spawnCaptureEffect("node", ["-e", descendantHoldingStdoutScript], {
+          cwd: tmpDir,
+          onStdout: descendantPidCollector((pid) => {
+            descendantPid = pid;
+            resolveDescendantPid(pid);
+          }),
+        }),
+      );
+      await observedDescendantPid;
+      const cleanupTimer = setTimeout(() => killPid(descendantPid), 1_500);
+      const startedAt = Date.now();
+      try {
+        await Effect.runPromise(Fiber.interrupt(fiber));
+      } finally {
+        clearTimeout(cleanupTimer);
+        killPid(descendantPid);
+      }
+      expect(Date.now() - startedAt).toBeLessThan(1_000);
+    },
+  );
+
   test("interrupting a detached Effect uses kill fallback when group kill throws", async () => {
+    const ac = new AbortController();
+    const processEvents = [];
+    const groupKills = [];
     const originalKill = process.kill;
     process.kill = (pid, signal) => {
       if (typeof pid === "number" && pid < 0) {
+        groupKills.push({ pid, signal });
         throw new Error("process group unavailable");
       }
       return originalKill(pid, signal);
@@ -223,11 +431,19 @@ describe("spawnCaptureEffect — timeouts and cancellation", () => {
           detached: true,
           timeoutMs: 10_000,
           idleTimeoutMs: 10_000,
+          signal: ac.signal,
+          onProcess: (event) => processEvents.push(event),
         }),
       );
       await new Promise((resolve) => setTimeout(resolve, 30));
-      const exit = await Effect.runPromise(Fiber.interrupt(fiber));
+      await Effect.runPromise(Fiber.interrupt(fiber));
+      const exit = await Effect.runPromise(Fiber.await(fiber));
       expect(Exit.isFailure(exit)).toBe(true);
+      ac.abort();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(groupKills).toHaveLength(1);
+      expect(processEvents.map(({ phase }) => phase)).toEqual(["started", "exited"]);
+      expect(isPidAlive(processEvents[0]?.pid)).toBe(false);
     } finally {
       process.kill = originalKill;
     }
@@ -235,6 +451,20 @@ describe("spawnCaptureEffect — timeouts and cancellation", () => {
 });
 
 describe("spawnCaptureEffect — abort after a successful close (issue #683)", () => {
+  test("an exited callback that aborts cannot replace a successful result", async () => {
+    const ac = new AbortController();
+    const processEvents = [];
+    const result = await run("node", ["-e", "process.stdout.write('ok')"], {
+      signal: ac.signal,
+      onProcess: (event) => {
+        processEvents.push(event);
+        if (event.phase === "exited") ac.abort();
+      },
+    });
+    expect(result).toMatchObject({ exitCode: 0, stdout: "ok" });
+    expect(processEvents.map(({ phase }) => phase)).toEqual(["started", "exited"]);
+  });
+
   test("a late abort on a detached child does not kill the (possibly reused) process group", async () => {
     const ac = new AbortController();
     /** @type {(number | string)[]} */
@@ -303,6 +533,24 @@ describe("spawnCaptureEffect — external kill / spawn errors", () => {
       expect(serialized).not.toContain("opaque-driver-canary");
       expect(serialized).not.toContain("spawnargs");
     }
+  });
+
+  test("an exited callback that aborts cannot replace a spawn failure", async () => {
+    const ac = new AbortController();
+    const processEvents = [];
+    try {
+      await run("/nonexistent/binary-does-not-exist", [], {
+        signal: ac.signal,
+        onProcess: (event) => {
+          processEvents.push(event);
+          if (event.phase === "exited") ac.abort();
+        },
+      });
+      throw new Error("expected spawn failure");
+    } catch (error) {
+      expect(error.code).toBe("PROCESS_SPAWN_FAILED");
+    }
+    expect(processEvents.map(({ phase }) => phase)).toEqual(["started", "exited"]);
   });
 });
 

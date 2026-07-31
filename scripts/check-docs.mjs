@@ -2632,9 +2632,9 @@ function checkVcsHelperDocsMatchCurrentExports() {
       VCS_HELPERS_REFERENCE,
       "The lower-level VCS package also exports repository discovery, binary resolution, tooling preflight, and snapshot capture helpers:",
     ],
-    [VCS_HELPERS_REFERENCE, 'import type * as CommandExecutor from "effect/unstable/process/ChildProcessSpawner";'],
-    [VCS_HELPERS_REFERENCE, 'import * as BunContext from "@effect/platform-bun/BunServices";'],
-    [VCS_HELPERS_REFERENCE, "type VcsEffect<A> = Effect.Effect<A, never, CommandExecutor.CommandExecutor>;"],
+    [VCS_HELPERS_REFERENCE, 'import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";'],
+    [VCS_HELPERS_REFERENCE, 'import * as BunServices from "@effect/platform-bun/BunServices";'],
+    [VCS_HELPERS_REFERENCE, "type VcsEffect<A> = Effect.Effect<A, never, ChildProcessSpawner.ChildProcessSpawner>;"],
     [VCS_HELPERS_REFERENCE, 'const result = await runVcs(runJj(["status"], { cwd: "/path/to/repo" }));'],
     [VCS_HELPERS_REFERENCE, "function runJj(args: string[], opts?: RunJjOptions): VcsEffect<RunJjResult>;"],
     [VCS_HELPERS_REFERENCE, "function getJjPointer(cwd?: string): VcsEffect<string | null>;"],
@@ -2658,7 +2658,7 @@ function checkVcsHelperDocsMatchCurrentExports() {
     [VCS_JJ_SOURCE, "export function captureWorkspaceSnapshot(cwd)"],
     [
       VCS_DECLARATIONS,
-      "declare function captureWorkspaceSnapshot(cwd?: string): Effect.Effect<WorkspaceSnapshot | null, never, _effect_platform_CommandExecutor.CommandExecutor>;",
+      "declare function captureWorkspaceSnapshot(cwd?: string): Effect.Effect<WorkspaceSnapshot | null, never, effect_unstable_process_ChildProcessSpawner.ChildProcessSpawner>;",
     ],
     [VCS_DECLARATIONS, "type WorkspaceSnapshot = {"],
     [

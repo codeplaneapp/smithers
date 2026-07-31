@@ -2,7 +2,7 @@ import { Entity, ShardingConfig } from "effect/unstable/cluster";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import { Context, Effect, Layer, Schema } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-const SandboxRuntimeSchema = Schema.Literal("bubblewrap", "docker", "codeplane", "cloudflare");
+const SandboxRuntimeSchema = Schema.Literals(["bubblewrap", "docker", "codeplane", "cloudflare"]);
 const SandboxEnvSchema = Schema.Record(Schema.String, Schema.String);
 const SandboxEgressSchema = Schema.Struct({
   env: Schema.optional(SandboxEnvSchema),
@@ -26,7 +26,7 @@ const SandboxWorkspaceSchema = Schema.Struct({
   name: Schema.String,
   snapshotId: Schema.optional(Schema.String),
   idleTimeoutSecs: Schema.optional(Schema.Number),
-  persistence: Schema.optional(Schema.Literal("ephemeral", "sticky")),
+  persistence: Schema.optional(Schema.Literals(["ephemeral", "sticky"])),
 });
 const SandboxTransportConfigSchema = Schema.Struct({
   runId: Schema.String,
@@ -112,17 +112,21 @@ export const SandboxEntity = Entity.make("Sandbox", [
   SandboxCleanupRpc,
 ]);
 /** @typedef {import("../SandboxTransportService.ts").SandboxTransportService} SandboxTransportService */
+/** @typedef {Context.ServiceClass.Shape<"SandboxEntityExecutor", SandboxTransportService>} SandboxEntityExecutor */
+/** @typedef {Context.ServiceClass<SandboxEntityExecutor, "SandboxEntityExecutor", SandboxTransportService> & { new(): SandboxEntityExecutor }} SandboxEntityExecutorClass */
 const SandboxEntityExecutorTag =
-  /** @type {Context.TagClass<SandboxEntityExecutor, "SandboxEntityExecutor", SandboxTransportService>} */ (
-    Context.Service("SandboxEntityExecutor")
+  /** @type {Context.ServiceClass<SandboxEntityExecutor, "SandboxEntityExecutor", SandboxTransportService>} */ (
+    Context.Service()("SandboxEntityExecutor")
   );
-export class SandboxEntityExecutor extends SandboxEntityExecutorTag {
-  // Explicit constructor (identical to the implicit one) so runtime
-  // construction is observable; JSC never records implicit constructors.
-  constructor(...args) {
-    super(...args);
+export const SandboxEntityExecutor = /** @type {SandboxEntityExecutorClass} */ (
+  class SandboxEntityExecutor extends SandboxEntityExecutorTag {
+    // Explicit constructor (identical to the implicit one) so runtime
+    // construction is observable; JSC never records implicit constructors.
+    constructor(...args) {
+      super(...args);
+    }
   }
-}
+);
 /**
  * @param {{ runId: string; sandboxId: string; }} input
  * @returns {string}
@@ -177,7 +181,7 @@ const interruptibleBySignal = (effect, signal) => {
   if (signal.aborted) return Effect.interrupt;
   return Effect.raceFirst(
     effect,
-    Effect.async((resume) => {
+    Effect.callback((resume) => {
       const onAbort = () => resume(Effect.interrupt);
       signal.addEventListener("abort", onAbort, { once: true });
       return Effect.sync(() => signal.removeEventListener("abort", onAbort));

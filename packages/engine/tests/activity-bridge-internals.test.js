@@ -1,14 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import * as Activity from "effect/unstable/workflow/Activity";
-import { Context, Effect } from "effect";
+import * as WorkflowEngine from "effect/unstable/workflow/WorkflowEngine";
+import { Effect } from "effect";
 import {
   executeTaskActivity,
   makeTaskActivity,
   makeTaskBridgeKey,
   RetriableTaskFailure,
 } from "../src/effect/activity-bridge.js";
-
-const WorkflowInstanceTag = Context.Service("effect/unstable/workflow/WorkflowEngine/WorkflowInstance");
 
 const desc = {
   nodeId: "activity-node",
@@ -20,7 +19,7 @@ function runActivity(activity, attempt = 1) {
   return Effect.runPromise(
     activity.execute.pipe(
       Effect.provideService(Activity.CurrentAttempt, attempt),
-      Effect.provideService(WorkflowInstanceTag, { executionId: "activity-exec" }),
+      Effect.provideService(WorkflowEngine.WorkflowInstance, { executionId: "activity-exec" }),
     ),
   );
 }

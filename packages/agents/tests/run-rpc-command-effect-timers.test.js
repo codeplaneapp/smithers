@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
 import { runRpcCommandEffect } from "../src/BaseCliAgent/runRpcCommandEffect.js";
 
 /**
@@ -144,6 +144,28 @@ describe("runRpcCommandEffect timer cleanup", () => {
     await expect(run).rejects.toThrow(/boom from extension handler/);
 
     // handleError() must clear both created timers on this settle path.
+    expect(timers?.created.size).toBeGreaterThan(0);
+    for (const id of timers?.created ?? []) {
+      expect(timers?.cleared.has(id)).toBe(true);
+    }
+  });
+
+  test("clears total-timeout and inactivity timers when the Effect is interrupted", async () => {
+    nextChild = () => makeFakeChild();
+    const fiber = Effect.runFork(
+      runRpcCommandEffect("fake-cli", [], {
+        cwd: process.cwd(),
+        env: /** @type {any} */ ({}),
+        prompt: "hello",
+        timeoutMs: 1_000_000,
+        idleTimeoutMs: 1_000_000,
+        spawnFn,
+      }),
+    );
+
+    await new Promise((resolve) => timers?.realSetTimeout(resolve, 10));
+    await Effect.runPromise(Fiber.interrupt(fiber));
+
     expect(timers?.created.size).toBeGreaterThan(0);
     for (const id of timers?.created ?? []) {
       expect(timers?.cleared.has(id)).toBe(true);

@@ -1,6 +1,4 @@
 import { Effect, Metric } from 'effect';
-import * as effect_MetricState from 'effect/MetricState';
-import * as effect_MetricKeyType from 'effect/MetricKeyType';
 
 type MetricLabels = Readonly<Record<string, string | number | boolean>>;
 
@@ -810,7 +808,7 @@ type SmithersMetricUnit = "count" | "milliseconds" | "seconds" | "bytes" | "toke
 
 type SmithersMetricDefinition = {
     readonly key: string;
-    readonly metric: Metric.Metric<any, any, any>;
+    readonly metric: Metric.Metric<any, any>;
     readonly name: string;
     readonly prometheusName: string;
     readonly type: SmithersMetricType;
@@ -846,170 +844,170 @@ declare const smithersMetricCatalog: SmithersMetricDefinition[];
 declare const metricsServiceAdapter: MetricsServiceShape;
 type MetricsServiceShape = MetricsServiceShape$1;
 
-declare const runsTotal: Metric.Metric.Counter<number>;
+declare const runsTotal: Metric.Counter<number>;
 
-declare const nodesStarted: Metric.Metric.Counter<number>;
+declare const nodesStarted: Metric.Counter<number>;
 
-declare const nodesFinished: Metric.Metric.Counter<number>;
+declare const nodesFinished: Metric.Counter<number>;
 
-declare const nodesFailed: Metric.Metric.Counter<number>;
+declare const nodesFailed: Metric.Counter<number>;
 
-declare const toolCallsTotal: Metric.Metric.Counter<number>;
+declare const toolCallsTotal: Metric.Counter<number>;
 
-declare const cacheHits: Metric.Metric.Counter<number>;
+declare const cacheHits: Metric.Counter<number>;
 
-declare const cacheMisses: Metric.Metric.Counter<number>;
+declare const cacheMisses: Metric.Counter<number>;
 
-declare const dbRetries: Metric.Metric.Counter<number>;
+declare const dbRetries: Metric.Counter<number>;
 
-declare const dbTransactionRollbacks: Metric.Metric.Counter<number>;
+declare const dbTransactionRollbacks: Metric.Counter<number>;
 
-declare const dbTransactionRetries: Metric.Metric.Counter<number>;
+declare const dbTransactionRetries: Metric.Counter<number>;
 
-declare const hotReloads: Metric.Metric.Counter<number>;
+declare const hotReloads: Metric.Counter<number>;
 
-declare const hotReloadFailures: Metric.Metric.Counter<number>;
+declare const hotReloadFailures: Metric.Counter<number>;
 
-declare const httpRequests: Metric.Metric.Counter<number>;
+declare const httpRequests: Metric.Counter<number>;
 
-declare const approvalsRequested: Metric.Metric.Counter<number>;
+declare const approvalsRequested: Metric.Counter<number>;
 
-declare const approvalsGranted: Metric.Metric.Counter<number>;
+declare const approvalsGranted: Metric.Counter<number>;
 
-declare const approvalsDenied: Metric.Metric.Counter<number>;
+declare const approvalsDenied: Metric.Counter<number>;
 
-declare const timersCreated: Metric.Metric.Counter<number>;
+declare const timersCreated: Metric.Counter<number>;
 
-declare const timersFired: Metric.Metric.Counter<number>;
+declare const timersFired: Metric.Counter<number>;
 
-declare const timersCancelled: Metric.Metric.Counter<number>;
+declare const timersCancelled: Metric.Counter<number>;
 
-declare const sandboxCreatedTotal: Metric.Metric.Counter<number>;
+declare const sandboxCreatedTotal: Metric.Counter<number>;
 
-declare const sandboxCompletedTotal: Metric.Metric.Counter<number>;
+declare const sandboxCompletedTotal: Metric.Counter<number>;
 
-declare const scorerEventsStarted: Metric.Metric.Counter<number>;
+declare const scorerEventsStarted: Metric.Counter<number>;
 
-declare const scorerEventsFinished: Metric.Metric.Counter<number>;
+declare const scorerEventsFinished: Metric.Counter<number>;
 
-declare const scorerEventsFailed: Metric.Metric.Counter<number>;
+declare const scorerEventsFailed: Metric.Counter<number>;
 
-declare const tokensInputTotal: Metric.Metric.Counter<number>;
+declare const tokensInputTotal: Metric.Counter<number>;
 
-declare const tokensOutputTotal: Metric.Metric.Counter<number>;
+declare const tokensOutputTotal: Metric.Counter<number>;
 
-declare const tokensCacheReadTotal: Metric.Metric.Counter<number>;
+declare const tokensCacheReadTotal: Metric.Counter<number>;
 
-declare const tokensCacheWriteTotal: Metric.Metric.Counter<number>;
+declare const tokensCacheWriteTotal: Metric.Counter<number>;
 
-declare const tokensReasoningTotal: Metric.Metric.Counter<number>;
+declare const tokensReasoningTotal: Metric.Counter<number>;
 
-declare const tokensContextWindowBucketTotal: Metric.Metric.Counter<number>;
+declare const tokensContextWindowBucketTotal: Metric.Counter<number>;
 
-declare const runsFinishedTotal: Metric.Metric.Counter<number>;
+declare const runsFinishedTotal: Metric.Counter<number>;
 
-declare const runsFailedTotal: Metric.Metric.Counter<number>;
+declare const runsFailedTotal: Metric.Counter<number>;
 
-declare const runsCancelledTotal: Metric.Metric.Counter<number>;
+declare const runsCancelledTotal: Metric.Counter<number>;
 
-declare const runsResumedTotal: Metric.Metric.Counter<number>;
+declare const runsResumedTotal: Metric.Counter<number>;
 
-declare const runsContinuedTotal: Metric.Metric.Counter<number>;
+declare const runsContinuedTotal: Metric.Counter<number>;
 
-declare const errorsTotal: Metric.Metric.Counter<number>;
+declare const errorsTotal: Metric.Counter<number>;
 
-declare const nodeRetriesTotal: Metric.Metric.Counter<number>;
+declare const nodeRetriesTotal: Metric.Counter<number>;
 
-declare const toolCallErrorsTotal: Metric.Metric.Counter<number>;
+declare const toolCallErrorsTotal: Metric.Counter<number>;
 
-declare const toolOutputTruncatedTotal: Metric.Metric.Counter<number>;
+declare const toolOutputTruncatedTotal: Metric.Counter<number>;
 
-declare const eventsEmittedTotal: Metric.Metric.Counter<number>;
+declare const eventsEmittedTotal: Metric.Counter<number>;
 
-declare const snapshotsCaptured: Metric.Metric.Counter<number>;
+declare const snapshotsCaptured: Metric.Counter<number>;
 
-declare const runForksCreated: Metric.Metric.Counter<number>;
+declare const runForksCreated: Metric.Counter<number>;
 
-declare const replaysStarted: Metric.Metric.Counter<number>;
+declare const replaysStarted: Metric.Counter<number>;
 
-declare const activeRuns: Metric.Metric.Gauge<number>;
+declare const activeRuns: Metric.Gauge<number>;
 
-declare const activeNodes: Metric.Metric.Gauge<number>;
+declare const activeNodes: Metric.Gauge<number>;
 
-declare const schedulerQueueDepth: Metric.Metric.Gauge<number>;
+declare const schedulerQueueDepth: Metric.Gauge<number>;
 
-declare const sandboxActive: Metric.Metric.Gauge<number>;
+declare const sandboxActive: Metric.Gauge<number>;
 
-declare const approvalPending: Metric.Metric.Gauge<number>;
+declare const approvalPending: Metric.Gauge<number>;
 
-declare const externalWaitAsyncPending: Metric.Metric.Gauge<number>;
+declare const externalWaitAsyncPending: Metric.Gauge<number>;
 
-declare const timersPending: Metric.Metric.Gauge<number>;
+declare const timersPending: Metric.Gauge<number>;
 
-declare const schedulerConcurrencyUtilization: Metric.Metric.Gauge<number>;
+declare const schedulerConcurrencyUtilization: Metric.Gauge<number>;
 
-declare const processUptimeSeconds: Metric.Metric.Gauge<number>;
+declare const processUptimeSeconds: Metric.Gauge<number>;
 
-declare const processMemoryRssBytes: Metric.Metric.Gauge<number>;
+declare const processMemoryRssBytes: Metric.Gauge<number>;
 
-declare const processHeapUsedBytes: Metric.Metric.Gauge<number>;
+declare const processHeapUsedBytes: Metric.Gauge<number>;
 
-declare const nodeDuration: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const nodeDuration: Metric.Histogram<number>;
 
-declare const attemptDuration: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const attemptDuration: Metric.Histogram<number>;
 
-declare const toolDuration: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const toolDuration: Metric.Histogram<number>;
 
-declare const dbQueryDuration: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const dbQueryDuration: Metric.Histogram<number>;
 
-declare const dbTransactionDuration: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const dbTransactionDuration: Metric.Histogram<number>;
 
-declare const httpRequestDuration: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const httpRequestDuration: Metric.Histogram<number>;
 
-declare const hotReloadDuration: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const hotReloadDuration: Metric.Histogram<number>;
 
-declare const vcsDuration: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const vcsDuration: Metric.Histogram<number>;
 
-declare const tokensInputPerCall: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const tokensInputPerCall: Metric.Histogram<number>;
 
-declare const tokensOutputPerCall: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const tokensOutputPerCall: Metric.Histogram<number>;
 
-declare const tokensContextWindowPerCall: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const tokensContextWindowPerCall: Metric.Histogram<number>;
 
-declare const runDuration: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const runDuration: Metric.Histogram<number>;
 
-declare const promptSizeBytes: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const promptSizeBytes: Metric.Histogram<number>;
 
-declare const responseSizeBytes: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const responseSizeBytes: Metric.Histogram<number>;
 
-declare const approvalWaitDuration: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const approvalWaitDuration: Metric.Histogram<number>;
 
-declare const timerDelayDuration: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const timerDelayDuration: Metric.Histogram<number>;
 
-declare const schedulerWaitDuration: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const schedulerWaitDuration: Metric.Histogram<number>;
 
-declare const runsAncestryDepth: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const runsAncestryDepth: Metric.Histogram<number>;
 
-declare const runsCarriedStateBytes: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const runsCarriedStateBytes: Metric.Histogram<number>;
 
-declare const sandboxDurationMs: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const sandboxDurationMs: Metric.Histogram<number>;
 
-declare const sandboxBundleSizeBytes: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const sandboxBundleSizeBytes: Metric.Histogram<number>;
 
-declare const sandboxTransportDurationMs: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const sandboxTransportDurationMs: Metric.Histogram<number>;
 
-declare const sandboxPatchCount: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const sandboxPatchCount: Metric.Histogram<number>;
 
-declare const snapshotDuration: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const snapshotDuration: Metric.Histogram<number>;
 
-declare const rewindTotal: Metric.Metric.Counter<number>;
+declare const rewindTotal: Metric.Counter<number>;
 
-declare const rewindRollbackTotal: Metric.Metric.Counter<number>;
+declare const rewindRollbackTotal: Metric.Counter<number>;
 
-declare const rewindDurationMs: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const rewindDurationMs: Metric.Histogram<number>;
 
-declare const rewindFramesDeleted: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const rewindFramesDeleted: Metric.Histogram<number>;
 
-declare const rewindSandboxesReverted: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const rewindSandboxesReverted: Metric.Histogram<number>;
 
 export { runsResumedTotal as $, metricsServiceAdapter as A, nodeDuration as B, nodeRetriesTotal as C, nodesFailed as D, nodesFinished as E, nodesStarted as F, processHeapUsedBytes as G, processMemoryRssBytes as H, processUptimeSeconds as I, promptSizeBytes as J, replaysStarted as K, responseSizeBytes as L, type MetricsServiceShape$1 as M, rewindDurationMs as N, rewindFramesDeleted as O, rewindRollbackTotal as P, rewindSandboxesReverted as Q, rewindTotal as R, type SmithersEvent$1 as S, runDuration as T, runForksCreated as U, runsAncestryDepth as V, runsCancelledTotal as W, runsCarriedStateBytes as X, runsContinuedTotal as Y, runsFailedTotal as Z, runsFinishedTotal as _, type MetricLabels as a, runsTotal as a0, sandboxActive as a1, sandboxBundleSizeBytes as a2, sandboxCompletedTotal as a3, sandboxCreatedTotal as a4, sandboxDurationMs as a5, sandboxPatchCount as a6, sandboxTransportDurationMs as a7, schedulerConcurrencyUtilization as a8, schedulerQueueDepth as a9, trackEvent as aA, updateProcessMetrics as aB, vcsDuration as aC, type SmithersMetricDefinition as aD, type SmithersMetricType$1 as aE, type SmithersMetricUnit$1 as aF, schedulerWaitDuration as aa, scorerEventsFailed as ab, scorerEventsFinished as ac, scorerEventsStarted as ad, smithersMetricCatalog as ae, snapshotDuration as af, snapshotsCaptured as ag, timerDelayDuration as ah, timersCancelled as ai, timersCreated as aj, timersFired as ak, timersPending as al, toPrometheusMetricName as am, tokensCacheReadTotal as an, tokensCacheWriteTotal as ao, tokensContextWindowBucketTotal as ap, tokensContextWindowPerCall as aq, tokensInputPerCall as ar, tokensInputTotal as as, tokensOutputPerCall as at, tokensOutputTotal as au, tokensReasoningTotal as av, toolCallErrorsTotal as aw, toolCallsTotal as ax, toolDuration as ay, toolOutputTruncatedTotal as az, type MetricsSnapshot as b, type SmithersMetricDefinition$1 as c, activeNodes as d, activeRuns as e, approvalPending as f, approvalWaitDuration as g, approvalsDenied as h, approvalsGranted as i, approvalsRequested as j, attemptDuration as k, cacheHits as l, cacheMisses as m, dbQueryDuration as n, dbRetries as o, dbTransactionDuration as p, dbTransactionRetries as q, dbTransactionRollbacks as r, errorsTotal as s, eventsEmittedTotal as t, externalWaitAsyncPending as u, hotReloadDuration as v, hotReloadFailures as w, hotReloads as x, httpRequestDuration as y, httpRequests as z };

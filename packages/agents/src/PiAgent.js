@@ -463,7 +463,7 @@ export class PiAgent extends BaseCliAgent {
         },
         catch: (cause) => toSmithersError(cause, "enrich diagnostics"),
       }).pipe(Effect.ignore);
-    const rpcProgram = Effect.gen(this, function* () {
+    const rpcProgram = Effect.gen({ self: this }, function* () {
       const rpcResult = yield* runRpcCommandEffect("pi", args, {
         cwd,
         env,
