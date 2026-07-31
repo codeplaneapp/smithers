@@ -2666,7 +2666,7 @@ Open a run's custom browser UI with:
 bunx smithers-orchestrator ui RUN_ID
 ```
 
-`bunx smithers-orchestrator ui` discovers the workspace singleton, verifies that the answering process serves this workspace, and uses its advertised URL. Discovery refuses gateways that advertise another workspace; use `--gateway <url>` or `--no-autostart` when you need to be explicit. When none is running it starts `smithers gateway` automatically (one per workspace: concurrent autostarts race on a lock and share the winner) and then opens the UI. `smithers gateway` serves workspace run state and workflow-owned `<UI>` declarations, with entry files resolved relative to the workflow that declared them. A workspace with no local `.smithers` pack and no prior run store still boots and serves the global pack alone. That is the headless sandbox shape: provision a VM with `bunx smithers-orchestrator init --global --yes --no-skill` (the default `bun install` inside `~/.smithers` is required for pack workflows to import) and `smithers gateway` serves the full pack, UIs included, from any bare cloned repo. Manage the daemon with `smithers gateway status` and `smithers gateway stop`. Use `bunx smithers-orchestrator ui RUN_ID --no-autostart` to fail fast when no Gateway is already running, or `--gateway <url>` for a remote Gateway.
+`bunx smithers-orchestrator ui` discovers the workspace singleton, verifies that the answering process serves this workspace, and uses its advertised URL. Discovery refuses gateways that advertise another workspace; use `--gateway <url>` or `--no-autostart` when you need to be explicit. When none is running it starts `smithers gateway` automatically (one per workspace: concurrent autostarts race on a lock and share the winner) and then opens the UI. `smithers gateway` serves workspace run state and workflow-owned `<UI>` declarations, with entry files resolved relative to the workflow that declared them. A workspace with no local `.smithers` pack and no prior run store still boots and serves the global pack alone. That is the headless sandbox shape: provision a VM with `bunx smithers-orchestrator init --global --yes --no-skill` (the default `bun install` inside `~/.smithers` is required for pack workflows to import) and `smithers gateway` serves the full pack, UIs included, from any bare cloned repo. Manage the daemon with `smithers gateway status` and `smithers gateway stop`. Use `bunx smithers-orchestrator ui RUN_ID --no-autostart` to fail fast when no Gateway is already running, or `--gateway <url>` for a remote Gateway. When the Gateway requires a bearer token, `ui`/`monitor`/`gui` route the browser through its [session handoff](/integrations/gateway#browser-session-handoff) so the printed URL opens cleanly; pass `--host 0.0.0.0` (or `SMITHERS_GATEWAY_HOST`) for [Tailscale/LAN access](/integrations/gateway#remote-access-tailscale--ssh--lan), which auto-mints a token and prints dialable interface URLs.
 
 ## Troubleshooting
 
@@ -2923,9 +2923,10 @@ commands[102]:
     purpose: Open the Smithers Monitor. A built-in oneshot opens its dedicated live transcript, honest steering delivery, restart, and attachment-scoped cheap narrator controls. Other runs use the all-runs workspace view. Resolves the workspace's singleton gateway (--gateway probe, then runtime-state discovery, then legacy port probe, then autostart) and opens the browser
     args[1]{name,type,required,desc}:
       runId,string,false,Focus this run; built-in oneshots open their dedicated monitor
-    flags[5]{name,short,type,default,desc}:
+    flags[6]{name,short,type,default,desc}:
       gateway,g,string,,Gateway base URL (default http://127.0.0.1:<port>)
       port,,number,7331,Gateway port when --gateway is not set
+      host,,string,,Gateway bind host when autostarting (or SMITHERS_GATEWAY_HOST); use 0.0.0.0 for Tailscale/LAN access; a bearer token is minted automatically for non-loopback binds
       open,,boolean,true,Open a browser; use --no-open to just print the URL
       autostart,,boolean,true,Start a local Gateway automatically when no Gateway is reachable; --no-autostart fails fast instead
       daemon,,boolean,true,Autostart the Gateway as a background daemon; --no-daemon (or SMITHERS_NO_DAEMON=1) disables daemonized autostart
@@ -3151,9 +3152,10 @@ commands[102]:
     purpose: Open a directory as a workspace in Smithers UI
     args[1]{name,type,required,desc}:
       path,string,false,Directory path (defaults to current working directory)
-    flags[5]{name,short,type,default,desc}:
+    flags[6]{name,short,type,default,desc}:
       gateway,g,string,,Gateway base URL (default http://127.0.0.1:<port>)
       port,,number,7331,Gateway port when --gateway is not set
+      host,,string,,Gateway bind host when autostarting (or SMITHERS_GATEWAY_HOST); use 0.0.0.0 for Tailscale/LAN access; a bearer token is minted automatically for non-loopback binds
       workflow,w,string,,Open this workflow's UI directly skipping run lookup
       open,,boolean,true,Open a browser; use --no-open to just print the URL
       autostart,,boolean,true,Start a local Gateway automatically when no Gateway is reachable
@@ -3161,9 +3163,10 @@ commands[102]:
     purpose: Open the custom UI for a workflow run in your browser
     args[1]{name,type,required,desc}:
       runId,string,false,Run to open. Defaults to the most recent run.
-    flags[4]{name,short,type,default,desc}:
+    flags[5]{name,short,type,default,desc}:
       gateway,g,string,,Gateway base URL (default http://127.0.0.1:<port>)
       port,,number,7331,Gateway port when --gateway is not set
+      host,,string,,Gateway bind host when autostarting (or SMITHERS_GATEWAY_HOST); use 0.0.0.0 for Tailscale/LAN access; a bearer token is minted automatically for non-loopback binds
       workflow,w,string,,Open this workflow's UI directly skipping run lookup
       open,,boolean,true,Open a browser; use --no-open to just print the URL
   - name: revert
@@ -13776,7 +13779,25 @@ bunx smithers-orchestrator monitor --no-open    # print the URL instead of openi
 bunx smithers-orchestrator monitor --gateway http://127.0.0.1:7331   # use an explicit Gateway
 ```
 
-The command resolves the workspace's singleton gateway like `bunx smithers-orchestrator ui` does: explicit `--gateway` probe, then runtime-state discovery, then the legacy port probe on `--port` (default 7331). It **autostarts** `smithers gateway` when none is running (disable with `--no-autostart`; `--no-daemon` or `SMITHERS_NO_DAEMON=1` disables daemonized autostart), opens `/workflows/oneshot?runId=` for a built-in oneshot or `/monitor?runId=` otherwise, and prints a `{ opened, url, gateway, runId, view }` envelope.
+The command resolves the workspace's singleton gateway like `bunx smithers-orchestrator ui` does: explicit `--gateway` probe, then runtime-state discovery, then the legacy port probe on `--port` (default 7331). It **autostarts** `bunx smithers-orchestrator gateway` when none is running (disable with `--no-autostart`; `--no-daemon` or `SMITHERS_NO_DAEMON=1` disables daemonized autostart), opens `/workflows/oneshot?runId=` for a built-in oneshot or `/monitor?runId=` otherwise, and prints a `{ opened, url, gateway, runId, view }` envelope.
+
+When the resolved gateway requires a bearer token, the printed/opened URL
+routes through the gateway's [browser session handoff](/integrations/gateway#browser-session-handoff)
+(`/v1/auth/session`), which swaps the token for an HttpOnly cookie and lands
+on the clean URL; no more 401s from browser navigations. When nothing is
+reachable, the error names the runtime state file checked, the port probed,
+and the exact `bunx smithers-orchestrator gateway --host <host> --port <port>`
+command to start one.
+
+## Remote access (Tailscale / SSH / LAN)
+
+A gateway bound to loopback is unreachable from another machine. Pass
+`--host 0.0.0.0` (or `SMITHERS_GATEWAY_HOST=0.0.0.0`) and the autostarted
+gateway binds every interface with an auto-minted bearer token (a
+non-loopback bind is never served unauthenticated). The CLI then prints one
+handoff URL per dialable interface (Tailscale `100.x` first, then LAN), so
+the `--no-open` output is copy-pasteable to another machine. See
+[Remote access](/integrations/gateway#remote-access-tailscale--ssh--lan).
 
 See [Watching and steering a oneshot](/guides/oneshot#watching-and-steering-a-oneshot)
 for the steering engine matrix, durable delivery states, restart semantics, and

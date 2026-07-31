@@ -99,13 +99,12 @@ Workflow code hot-reloads under `RunOptions.hot` (schema-shape changes are block
 
 ## Guarantees and limits
 
-**Guaranteed:** every surface is a stateless client over durable state - closing it never affects the run; reconnecting WebSocket streams resume via `afterSeq`; approvals and signals are durable RPCs that survive the deciding tab. Scoped tokens gate every method.
+**Guaranteed:** every surface is a stateless client over durable state - closing it never affects the run; reconnecting WebSocket streams resume via `afterSeq`; approvals and signals are durable RPCs that survive the deciding tab. Scoped tokens gate every method. Token-protected gateways serve browser UIs through the [session handoff](/integrations/gateway#browser-session-handoff): `monitor`/`ui`/`gui` exchange the bearer for an HttpOnly cookie before the browser lands, so a `--mint-token` gateway's UI URLs open cleanly.
 
 **Honest limits, verified in source and the tracker:**
 
 - **Pack-extension UIs have no domain-data path.** The client side of the Gateway extension surface ships (`SmithersGatewayClient.extensionRpc`, `useGatewayExtensionResource` / `useGatewayExtensionAction` / `useGatewayExtensionStream`), but `smithers gateway` cannot load pack-declared extension *servers*, so a custom UI cannot yet read pack-specific domain data through the Gateway ([smithers#1438](https://github.com/smithersai/smithers/issues/1438), open). Workaround: ship the data as node outputs and read them with `useGatewayNodeOutput`.
 - **UI bundle caching is build-once by default.** Without `SMITHERS_GATEWAY_UI_NO_CACHE=1` a long-lived Gateway serves the cached bundle, so UI edits do not appear on refresh ([smithers#1440](https://github.com/smithersai/smithers/issues/1440), open).
-- **`--mint-token` gateways can't serve browser UIs yet.** The CLI reads the minted bearer from the runtime state file, but plain browser navigation cannot send it; run the local Gateway without `--mint-token` when you need browser-served workflow UIs.
 - The Monitor is workspace-local by design; multi-workspace fleet views are not a shipped surface.
 
 ## Operating it

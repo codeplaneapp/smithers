@@ -1,6 +1,6 @@
 import { randomBytes, createHash } from "node:crypto";
 import { lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, networkInterfaces } from "node:os";
 import { join, resolve } from "node:path";
 
 /**
@@ -175,6 +175,114 @@ export function mintGatewayToken() {
   return randomBytes(32).toString("hex");
 }
 
+const GATEWAY_WILDCARD_HOSTS = new Set(["0.0.0.0", "::", "[::]", ""]);
+
+/**
+ * Is `host` a wildcard bind (0.0.0.0 / ::)? A wildcard URL is listenable but
+ * not dialable — printed URLs must name a real interface address instead.
+ *
+ * @param {string} host
+ * @returns {boolean}
+ */
+export function isWildcardGatewayHost(host) {
+  return GATEWAY_WILDCARD_HOSTS.has(host.trim().toLowerCase());
+}
+
+/**
+ * Tailscale's carrier-grade NAT range (100.64.0.0/10): preferred for remote
+ * access URLs because it is reachable from every tailnet device.
+ *
+ * @param {string} address
+ * @returns {boolean}
+ */
+function isTailscaleAddress(address) {
+  const parts = address.split(".");
+  if (parts.length !== 4) return false;
+  const first = Number(parts[0]);
+  const second = Number(parts[1]);
+  return first === 100 && second >= 64 && second <= 127;
+}
+
+/**
+ * @param {string} address
+ * @returns {boolean}
+ */
+function isPrivateLanAddress(address) {
+  const parts = address.split(".");
+  if (parts.length !== 4) return false;
+  const first = Number(parts[0]);
+  const second = Number(parts[1]);
+  if (first === 10) return true;
+  if (first === 172 && second >= 16 && second <= 31) return true;
+  if (first === 192 && second === 168) return true;
+  return false;
+}
+
+/**
+ * Candidate dialable addresses for a wildcard-bound gateway, best first:
+ * Tailscale 100.x, then private LAN IPv4, then anything else non-internal.
+ *
+ * @returns {string[]}
+ */
+export function gatewayCandidateAddresses() {
+  /** @type {string[]} */
+  const all = [];
+  for (const entries of Object.values(networkInterfaces())) {
+    for (const entry of entries ?? []) {
+      if (entry.family !== "IPv4" || entry.internal) continue;
+      all.push(entry.address);
+    }
+  }
+  return [...new Set(all)].sort((a, b) => rankGatewayAddress(a) - rankGatewayAddress(b));
+}
+
+/**
+ * @param {string} address
+ * @returns {number}
+ */
+function rankGatewayAddress(address) {
+  if (isTailscaleAddress(address)) return 0;
+  if (isPrivateLanAddress(address)) return 1;
+  return 2;
+}
+
+/**
+ * URLs a browser can actually dial for a gateway base URL. A wildcard-bound
+ * gateway (http://0.0.0.0:7331) expands to one URL per candidate interface
+ * address (Tailscale first); any other base is returned unchanged.
+ *
+ * @param {string} base
+ * @returns {string[]}
+ */
+export function reachableGatewayUrls(base) {
+  let url;
+  try {
+    url = new URL(base);
+  } catch {
+    return [base];
+  }
+  const hostname = url.hostname.replace(/^\[(.*)\]$/, "$1");
+  if (!isWildcardGatewayHost(hostname)) return [base];
+  const candidates = gatewayCandidateAddresses();
+  if (candidates.length === 0) return [base];
+  return candidates.map((address) => {
+    const candidate = new URL(url);
+    candidate.hostname = address;
+    return candidate.toString().replace(/\/+$/, "");
+  });
+}
+
+/**
+ * True when this shell is almost certainly remote (SSH/mosh), so a printed
+ * loopback URL is useless to the human reading it on another machine.
+ *
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {boolean}
+ */
+export function isRemoteSession(env = process.env) {
+  return Boolean(env.SSH_CONNECTION || env.SSH_CLIENT || env.SSH_TTY || env.MOSH_CONNECTION);
+}
+
 /**
  * @param {number} pid
  */
@@ -344,7 +452,13 @@ export async function probeGatewayHealthIdentity(url, workspace, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? HEALTH_TIMEOUT_MS;
   let health;
   try {
-    const response = await fetchGatewayHealth(`${url.replace(/\/+$/, "")}/health`, timeoutMs);
+    // A wildcard-bound (0.0.0.0) state URL is not dialable everywhere; the
+    // daemon is local by construction (its state file is), so probe loopback.
+    const probeUrl = new URL(url);
+    if (isWildcardGatewayHost(probeUrl.hostname.replace(/^\[(.*)\]$/, "$1"))) {
+      probeUrl.hostname = "127.0.0.1";
+    }
+    const response = await fetchGatewayHealth(`${probeUrl.toString().replace(/\/+$/, "")}/health`, timeoutMs);
     if (!response.ok) return { ok: false, reason: "transient" };
     health = response.health;
   } catch (error) {

@@ -70,8 +70,11 @@ import {
   gatewayAutostartWaitMs,
   gatewayRuntimePaths,
   isGatewayPidAlive,
+  isRemoteSession,
+  isWildcardGatewayHost,
   mintGatewayToken,
   probeGatewayHealthIdentity,
+  reachableGatewayUrls,
   readGatewayRuntimeState,
   resolveGatewayBearer,
   verifyGatewayHealthIdentity,
@@ -3634,11 +3637,61 @@ function formatGatewayAutostartDiagnostics(workspace, failure) {
   return `${headline}\nGateway autostart log: ${logFile}${tail ? `\nLast gateway stderr:\n${tail}` : "\nNo gateway stderr has been written yet."}`;
 }
 
-function warnIfBrowserUiNeedsBearer(token) {
-  if (!token) return;
-  process.stderr.write(
-    "[smithers] Warning: this Gateway requires a bearer token. CLI RPC calls use the state-file/env token, but browser navigations cannot send that header yet, so the workflow UI URL may return 401. Start `smithers gateway` without --mint-token for browser UI access until UI token injection ships.\n",
-  );
+/**
+ * The URL a browser should open for a gateway page. Browsers cannot send the
+ * Authorization header on navigations, so when the gateway requires a bearer
+ * the CLI routes the first navigation through the gateway's session handoff:
+ * it exchanges the token for an HttpOnly cookie and lands on the clean URL
+ * (token stripped from the address bar and history).
+ *
+ * @param {string} base
+ * @param {string} targetUrl
+ * @param {string | null} token
+ * @returns {string}
+ */
+function gatewayBrowserHandoffUrl(base, targetUrl, token) {
+  if (!token) return targetUrl;
+  const target = new URL(targetUrl);
+  const next = `${target.pathname}${target.search}${target.hash}`;
+  return `${base}/v1/auth/session?token=${encodeURIComponent(token)}&next=${encodeURIComponent(next)}`;
+}
+
+/**
+ * @param {string} url
+ * @param {string} newBase
+ * @returns {string}
+ */
+function rebaseGatewayUrl(url, newBase) {
+  const target = new URL(url);
+  const base = new URL(newBase);
+  target.protocol = base.protocol;
+  target.host = base.host;
+  return target.toString();
+}
+
+/**
+ * Print (and return) the browser-openable URL for a gateway page. A
+ * wildcard-bound gateway (0.0.0.0) expands to one URL per dialable interface
+ * (Tailscale first) so a `--no-open` line is copy-pasteable from another
+ * machine; a bearer token routes every one through the session handoff.
+ *
+ * @param {{ label: string; base: string; url: string; token: string | null; opened: boolean }} args
+ * @returns {string} the primary URL
+ */
+function printBrowserGatewayUrl({ label, base, url, token, opened }) {
+  const bases = reachableGatewayUrls(base);
+  const urls = bases.map((candidate) => gatewayBrowserHandoffUrl(candidate, rebaseGatewayUrl(url, candidate), token));
+  const primary = urls[0] ?? url;
+  console.log(`${opened ? "Opening" : label} ${primary}`);
+  for (const alternate of urls.slice(1)) {
+    console.log(`  Also reachable at: ${alternate}`);
+  }
+  if (bases.length === 1 && isRemoteSession() && GATEWAY_LOOPBACK_HOSTS.has(new URL(base).hostname)) {
+    process.stderr.write(
+      "[smithers] This gateway is bound to loopback, so this URL is only usable on the gateway host itself. Over SSH/Tailscale, restart it with `smithers gateway --host 0.0.0.0 --mint-token` (or pass --host 0.0.0.0 to autostart one) and use the printed interface URL.\n",
+    );
+  }
+  return primary;
 }
 
 /**
@@ -3650,9 +3703,11 @@ function warnIfBrowserUiNeedsBearer(token) {
  *
  * @param {string} workspace
  * @param {number} preferredPort
+ * @param {{ host?: string }} [opts]
  * @returns {Promise<{ base: string; token: string | null; started: boolean } | { failed: true; message: string } | null>}
  */
-async function ensureWorkspaceGateway(workspace, preferredPort) {
+async function ensureWorkspaceGateway(workspace, preferredPort, opts = {}) {
+  const host = opts.host ?? "127.0.0.1";
   const discovered = await discoverWorkspaceGateway(workspace);
   if (discovered) {
     return { base: discovered.state.url, token: discovered.state.token, started: false };
@@ -3683,11 +3738,16 @@ async function ensureWorkspaceGateway(workspace, preferredPort) {
         process.argv[1],
         "gateway",
         "--host",
-        "127.0.0.1",
+        host,
         "--port",
         String(preferredPort),
         "--idle-timeout",
         autostartIdleMs,
+        // The gateway refuses an unauthenticated non-loopback bind (it would
+        // be a full-control open control plane), so autostart on a remote-
+        // reachable host always mints a token; the state file hands it to
+        // this client, which passes it through the browser session handoff.
+        ...(GATEWAY_LOOPBACK_HOSTS.has(host) ? [] : ["--mint-token"]),
       ],
       {
         stdio: ["ignore", stderrFd, stderrFd],
@@ -3736,11 +3796,12 @@ async function ensureWorkspaceGateway(workspace, preferredPort) {
  * discovery → legacy port probe (refused on workspace-identity mismatch) →
  * autostart, unless the daemon escape hatch disables it.
  *
- * @param {{ gateway?: string; port: number; autostart?: boolean; daemon?: boolean }} options
+ * @param {{ gateway?: string; port: number; host?: string; autostart?: boolean; daemon?: boolean }} options
  * @returns {Promise<{ ok: true; base: string; token: string | null; workspace: string | undefined } | { ok: false; message: string }>}
  */
 async function resolveBrowserGateway(options) {
   const workspace = options.gateway ? undefined : resolveGatewayWorkspace();
+  const host = options.host ?? process.env.SMITHERS_GATEWAY_HOST?.trim() ?? "127.0.0.1";
   let base = options.gateway ? options.gateway.replace(/\/+$/, "") : null;
   let token = base ? resolveGatewayBearer(workspace, base) : null;
   let reachable = false;
@@ -3766,7 +3827,8 @@ async function resolveBrowserGateway(options) {
     // Legacy probe: a gateway started by an older CLI or the SDK on the
     // conventional port, with no runtime state file. An explicit identity
     // mismatch is refused; identity-less legacy gateways are trusted.
-    const legacyBase = `http://127.0.0.1:${options.port}`;
+    const probeHost = GATEWAY_LOOPBACK_HOSTS.has(host) || isWildcardGatewayHost(host) ? "127.0.0.1" : host;
+    const legacyBase = `http://${formatHttpHost(probeHost)}:${options.port}`;
     const health = await fetch(`${legacyBase}/health`).then(
       (r) => (r.ok ? r.json() : null),
       () => null,
@@ -3792,7 +3854,7 @@ async function resolveBrowserGateway(options) {
   if (!reachable && options.autostart && workspace && !daemonDisabled) {
     process.stderr.write(`[smithers] No gateway for ${workspace}; starting one (smithers gateway)…\n`);
     autostartAttempted = true;
-    const ensured = await ensureWorkspaceGateway(workspace, options.port);
+    const ensured = await ensureWorkspaceGateway(workspace, options.port, { host });
     if (ensured?.failed) {
       autostartFailureMessage = ensured.message;
     } else if (ensured) {
@@ -3807,9 +3869,20 @@ async function resolveBrowserGateway(options) {
       : autostartAttempted && workspace
         ? `\n\n${autostartFailureMessage ?? formatGatewayAutostartDiagnostics(workspace)}`
         : "";
+    const probed = workspace
+      ? (() => {
+          const { stateFile } = gatewayRuntimePaths(workspace);
+          return (
+            `\n\nChecked gateway runtime state file: ${stateFile}` +
+            `\nProbed legacy port: http://127.0.0.1:${options.port}/health` +
+            `\nStart a gateway with: smithers gateway --host ${host} --port ${options.port}` +
+            (host !== "127.0.0.1" ? ` (or set SMITHERS_GATEWAY_HOST=${host} for every command)` : "")
+          );
+        })()
+      : "";
     return {
       ok: false,
-      message: `No Smithers Gateway reachable${base ? ` at ${base}` : " for this workspace"}. Start one with \`smithers gateway\` (it serves workflow-owned UIs declared with <UI>), or pass --gateway <url> to point at a running one. Note: \`smithers up --serve\` is a per-run server, not a full Gateway.${detail}`,
+      message: `No Smithers Gateway reachable${base ? ` at ${base}` : " for this workspace"}. Start one with \`smithers gateway\` (it serves workflow-owned UIs declared with <UI>), or pass --gateway <url> to point at a running one. Note: \`smithers up --serve\` is a per-run server, not a full Gateway.${probed}${detail}`,
     };
   }
   return { ok: true, base, token, workspace };
@@ -3850,11 +3923,12 @@ async function runMonitorCommand(c) {
   const url = oneshot
     ? `${base}/workflows/oneshot?runId=${encodeURIComponent(runId)}`
     : `${base}${MONITOR_UI_MOUNT_PATH}${runId ? `?runId=${encodeURIComponent(runId)}` : ""}`;
-  warnIfBrowserUiNeedsBearer(token);
-  const opened = c.options.open ? openInBrowser(url) : false;
-  console.log(`${opened ? "Opening" : "Monitor URL:"} ${url}`);
+  const primaryBase = reachableGatewayUrls(base)[0] ?? base;
+  const browserUrl = gatewayBrowserHandoffUrl(primaryBase, rebaseGatewayUrl(url, primaryBase), token);
+  const opened = c.options.open ? openInBrowser(browserUrl) : false;
+  const printedUrl = printBrowserGatewayUrl({ label: "Monitor URL:", base, url, token, opened });
   return c.ok(
-    { opened, url, gateway: base, runId: runId ?? null, view: oneshot ? "oneshot" : "all-runs" },
+    { opened, url: printedUrl, gateway: base, runId: runId ?? null, view: oneshot ? "oneshot" : "all-runs" },
     {
       cta: {
         description: "The monitor shows every run this gateway owns, live.",
@@ -3910,8 +3984,7 @@ async function runUiCommand(c) {
   // single workflow-run UI. Build the bundle if needed, then serve it from a
   // static server that reverse-proxies the gateway so the app is same-origin.
   if (c.options.app) {
-    warnIfBrowserUiNeedsBearer(token);
-    return runFullUiCommand(c, base, fail);
+    return runFullUiCommand(c, base, token, fail);
   }
   const rpc = async (method, params = {}) => {
     const res = await fetch(`${base}/v1/rpc/${method}`, {
@@ -3987,11 +4060,12 @@ async function runUiCommand(c) {
       );
     }
     const url = `${base}${summary.uiPath}${runId ? `?runId=${encodeURIComponent(runId)}` : ""}`;
-    warnIfBrowserUiNeedsBearer(token);
-    const opened = c.options.open ? openInBrowser(url) : false;
-    console.log(`${opened ? "Opening" : "UI URL:"} ${url}`);
+    const primaryBase = reachableGatewayUrls(base)[0] ?? base;
+    const browserUrl = gatewayBrowserHandoffUrl(primaryBase, rebaseGatewayUrl(url, primaryBase), token);
+    const opened = c.options.open ? openInBrowser(browserUrl) : false;
+    const printedUrl = printBrowserGatewayUrl({ label: "UI URL:", base, url, token, opened });
     return c.ok(
-      { opened: c.options.open, url, runId: runId ?? null, workflow: workflowKey },
+      { opened: c.options.open, url: printedUrl, runId: runId ?? null, workflow: workflowKey },
       {
         cta: buildAgentNextSteps({
           workflowId: workflowKey,
@@ -4010,11 +4084,12 @@ async function runUiCommand(c) {
  * Builds the bundle on first use, then keeps a static+proxy server alive so the
  * single-page app runs same-origin with the gateway (its WebSocket needs it).
  */
-async function runFullUiCommand(c, base, fail) {
+async function runFullUiCommand(c, base, token, fail) {
   const { serveLocalUi } = await import("./localUiServer.js");
   try {
     const { server, url } = await serveLocalUi({
       gatewayBase: base,
+      gatewayToken: token ?? undefined,
       port: c.options.appPort,
       rebuild: c.options.rebuild,
     });
@@ -4560,6 +4635,11 @@ async function runGatewayCommand(options) {
     backgroundWorkflowLoad = Promise.all(discoveredWorkflows.map((discovered) => loadWorkflowByKey(discovered.id)));
   }
   process.stderr.write(`[smithers] Gateway listening on ${url}\n`);
+  if (isWildcardGatewayHost(options.host)) {
+    for (const reachable of reachableGatewayUrls(url)) {
+      process.stderr.write(`[smithers] Reachable at ${reachable}\n`);
+    }
+  }
   process.stderr.write(`[smithers] Workspace: ${workspace}\n`);
   process.stderr.write(`[smithers] Database: ${dbPath}\n`);
   process.stderr.write(`[smithers] Workflow loading: ${workflowsLoaded}/${workflowsTotal}\n`);
@@ -10233,6 +10313,12 @@ const cli = Cli.create({
     options: z.object({
       gateway: z.string().optional().describe("Gateway base URL (default http://127.0.0.1:<port>)."),
       port: z.number().int().min(1).max(65535).default(7331).describe("Gateway port when --gateway is not set."),
+      host: z
+        .string()
+        .optional()
+        .describe(
+          "Gateway bind host when autostarting (or set SMITHERS_GATEWAY_HOST). Use 0.0.0.0 for Tailscale/LAN access; a bearer token is minted automatically for non-loopback binds.",
+        ),
       workflow: z.string().optional().describe("Open this workflow's UI directly, skipping run lookup."),
       open: z.boolean().default(true).describe("Open a browser. Use --no-open to just print the URL."),
       autostart: z
@@ -10284,6 +10370,12 @@ const cli = Cli.create({
     options: z.object({
       gateway: z.string().optional().describe("Gateway base URL (default http://127.0.0.1:<port>)."),
       port: z.number().int().min(1).max(65535).default(7331).describe("Gateway port when --gateway is not set."),
+      host: z
+        .string()
+        .optional()
+        .describe(
+          "Gateway bind host when autostarting (or set SMITHERS_GATEWAY_HOST). Use 0.0.0.0 for Tailscale/LAN access; a bearer token is minted automatically for non-loopback binds.",
+        ),
       workflow: z.string().optional().describe("Open this workflow's UI directly, skipping run lookup."),
       app: z
         .boolean()
@@ -10333,6 +10425,12 @@ const cli = Cli.create({
     options: z.object({
       gateway: z.string().optional().describe("Gateway base URL (default http://127.0.0.1:<port>)."),
       port: z.number().int().min(1).max(65535).default(7331).describe("Gateway port when --gateway is not set."),
+      host: z
+        .string()
+        .optional()
+        .describe(
+          "Gateway bind host when autostarting (or set SMITHERS_GATEWAY_HOST). Use 0.0.0.0 for Tailscale/LAN access; a bearer token is minted automatically for non-loopback binds.",
+        ),
       open: z.boolean().default(true).describe("Open a browser. Use --no-open to just print the URL."),
       autostart: z
         .boolean()

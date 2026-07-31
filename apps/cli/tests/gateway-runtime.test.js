@@ -12,8 +12,11 @@ import {
   discoverWorkspaceGateway,
   gatewayAutostartWaitMs,
   gatewayRuntimePaths,
+  isRemoteSession,
+  isWildcardGatewayHost,
   mintGatewayToken,
   probeGatewayHealthIdentity,
+  reachableGatewayUrls,
   readGatewayRuntimeState,
   readGatewayStartProgress,
   resolveGatewayBearer,
@@ -472,6 +475,53 @@ describe("probeGatewayHealthIdentity", () => {
     const outcome = await probeGatewayHealthIdentity(target.url, workspace);
     expect(outcome.ok).toBe(true);
     expect(outcome.identity?.pid).toBe(process.pid);
+  });
+
+  test("probes a wildcard (0.0.0.0) state URL over loopback", async () => {
+    const workspace = makeWorkspace();
+    const target = await serveHealth({
+      workspaceRoot: workspace,
+      backend: "sqlite",
+      version: "1",
+      pid: process.pid,
+      startedAtMs: 1,
+    });
+    const outcome = await probeGatewayHealthIdentity(`http://0.0.0.0:${target.port}`, workspace);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.identity?.pid).toBe(process.pid);
+  });
+});
+
+describe("reachableGatewayUrls", () => {
+  test("passes a loopback or named-host base through unchanged", () => {
+    expect(reachableGatewayUrls("http://127.0.0.1:7331")).toEqual(["http://127.0.0.1:7331"]);
+    expect(reachableGatewayUrls("http://100.64.1.2:7331")).toEqual(["http://100.64.1.2:7331"]);
+  });
+
+  test("expands a wildcard base to dialable interface URLs, Tailscale first", () => {
+    const urls = reachableGatewayUrls("http://0.0.0.0:7331");
+    expect(urls.length).toBeGreaterThan(0);
+    for (const url of urls) {
+      const parsed = new URL(url);
+      expect(parsed.port).toBe("7331");
+      expect(isWildcardGatewayHost(parsed.hostname)).toBe(false);
+      expect(parsed.hostname).not.toBe("127.0.0.1");
+    }
+    const ranks = urls.map((url) => (new URL(url).hostname.startsWith("100.") ? 0 : 1));
+    expect([...ranks].sort()).toEqual(ranks);
+  });
+
+  test("falls back to the raw base when the URL is unparseable", () => {
+    expect(reachableGatewayUrls("not a url")).toEqual(["not a url"]);
+  });
+});
+
+describe("isRemoteSession", () => {
+  test("detects SSH and mosh shells only", () => {
+    expect(isRemoteSession({ SSH_CONNECTION: "1" })).toBe(true);
+    expect(isRemoteSession({ SSH_TTY: "/dev/ttys1" })).toBe(true);
+    expect(isRemoteSession({ MOSH_CONNECTION: "1" })).toBe(true);
+    expect(isRemoteSession({})).toBe(false);
   });
 });
 
