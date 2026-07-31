@@ -9107,7 +9107,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
       }
       await cancelStaleAttempts(adapter, runId);
       if (opts.resume) {
-        void Effect.runPromise(Metric.increment(runsResumedTotal));
+        void Effect.runPromise(Metric.update(runsResumedTotal, 1));
         const staleInProgress = await Effect.runPromise(adapter.listInProgressAttempts(runId));
         const now = nowMs();
         for (const attempt of staleInProgress) {
