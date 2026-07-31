@@ -1,7 +1,7 @@
 // smithers-source: authored
 // smithers-display-name: PR Polish Panel (Fable + Sol)
 /** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Sequence, Parallel, Loop } from "smithers-orchestrator";
+import { createSmithers, Sequence, Parallel, Loop, UI } from "smithers-orchestrator";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -152,6 +152,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="pr-polish-panel">
+      <UI entry="../ui/pr-polish-panel.tsx" />
       <Loop id="panel" until={lgtm} maxIterations={maxIterations} onMaxReached="return-last">
         <Sequence>
           {/* Two independent reviewers, in parallel, read-only. */}

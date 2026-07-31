@@ -3,6 +3,7 @@ import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { discoverWorkflows } from "@smithers-orchestrator/cli/workflows";
+import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smithers-orchestrator/components";
 import { renderWorkflow } from "smithers-orchestrator/testing";
 import "./whole-foods-meal-planner.test";
 
@@ -418,6 +419,14 @@ describe("federation workflow smoke coverage", () => {
       input: { pr: 1449 },
       outputs: {},
     });
+    const hasUiEntry = (node: any): boolean => {
+      if (Array.isArray(node)) return node.some(hasUiEntry);
+      if (!node || typeof node !== "object") return false;
+      if (node.type?.[SMITHERS_WORKFLOW_VIEW_KIND] === "ui" && node.props?.entry === "../ui/pr-polish-panel.tsx") {
+        return true;
+      }
+      return hasUiEntry(node.props?.children);
+    };
     const nodeIds = frame.tasks.map((task) => task.nodeId);
 
     expect(nodeIds).toContain("review-fable");
@@ -426,6 +435,7 @@ describe("federation workflow smoke coverage", () => {
     expect(nodeIds.indexOf("review-sol")).toBeLessThan(nodeIds.indexOf("polish"));
     expect(frame.toXml()).toContain("git fetch origin main");
     expect(frame.toXml()).toContain("never merge the PR");
+    expect(hasUiEntry(module.default.build(frame.ctx))).toBe(true);
   }, 30_000);
 
   test("pr-polish-panel derives deterministic run-isolated clone paths", async () => {
