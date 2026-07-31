@@ -115,7 +115,7 @@ describe("sandbox entity contract", () => {
         create: () => Effect.succeed(handle),
         ship: () => Effect.void,
         execute: (_command, _currentHandle, signal) =>
-          Effect.async(() => {
+          Effect.callback(() => {
             resolveSignal(signal);
             // never resumes on its own; only the abort should end the call
           }),

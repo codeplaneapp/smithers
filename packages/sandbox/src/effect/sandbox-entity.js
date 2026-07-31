@@ -2,7 +2,7 @@ import { Entity, ShardingConfig } from "effect/unstable/cluster";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import { Context, Effect, Layer, Schema } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-const SandboxRuntimeSchema = Schema.Literal("bubblewrap", "docker", "codeplane", "cloudflare");
+const SandboxRuntimeSchema = Schema.Literals(["bubblewrap", "docker", "codeplane", "cloudflare"]);
 const SandboxEnvSchema = Schema.Record(Schema.String, Schema.String);
 const SandboxEgressSchema = Schema.Struct({
   env: Schema.optional(SandboxEnvSchema),
@@ -26,7 +26,7 @@ const SandboxWorkspaceSchema = Schema.Struct({
   name: Schema.String,
   snapshotId: Schema.optional(Schema.String),
   idleTimeoutSecs: Schema.optional(Schema.Number),
-  persistence: Schema.optional(Schema.Literal("ephemeral", "sticky")),
+  persistence: Schema.optional(Schema.Literals(["ephemeral", "sticky"])),
 });
 const SandboxTransportConfigSchema = Schema.Struct({
   runId: Schema.String,
@@ -177,7 +177,7 @@ const interruptibleBySignal = (effect, signal) => {
   if (signal.aborted) return Effect.interrupt;
   return Effect.raceFirst(
     effect,
-    Effect.async((resume) => {
+    Effect.callback((resume) => {
       const onAbort = () => resume(Effect.interrupt);
       signal.addEventListener("abort", onAbort, { once: true });
       return Effect.sync(() => signal.removeEventListener("abort", onAbort));

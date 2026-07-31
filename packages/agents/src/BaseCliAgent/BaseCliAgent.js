@@ -1072,7 +1072,7 @@ export class BaseCliAgent {
             flushBufferedLines(stream, false);
           };
           diagnosticsPromise = launchDiagnostics(commandSpec.command, commandEnv, cwd, this.diagnosticHints?.());
-          return Effect.gen(this, function* () {
+          return Effect.gen({ self: this }, function* () {
             const result = yield* runCommandEffect(commandSpec.command, commandSpec.args, {
               cwd,
               env: commandEnv,

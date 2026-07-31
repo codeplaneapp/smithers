@@ -1,3 +1,8 @@
+// Effect 4 makes the cluster stack (SingleRunner, SqlMessageStorage) depend on
+// the effect/Crypto service; without it every dispatch dies with
+// "Service not found: effect/Crypto". BunCrypto.layer is NodeCrypto.layer under
+// the hood (node:crypto), so it is safe on the plain-Node path too.
+import * as BunCrypto from "@effect/platform-bun/BunCrypto";
 import * as MessageStorage from "effect/unstable/cluster/MessageStorage";
 import * as RunnerHealth from "effect/unstable/cluster/RunnerHealth";
 import * as Runners from "effect/unstable/cluster/Runners";
@@ -362,6 +367,7 @@ async function buildRunnerLayer() {
           }),
         ),
       ),
+      Layer.provide(BunCrypto.layer),
     );
   }
   // Mirrors SingleRunner.layer({ runnerStorage: "memory" }) with
@@ -371,6 +377,7 @@ async function buildRunnerLayer() {
     Layer.provideMerge(MessageStorage.layerMemory),
     Layer.provide([RunnerStorage.layerMemory, RunnerHealth.layerNoop]),
     Layer.provide(ShardingConfig.layerFromEnv()),
+    Layer.provide(BunCrypto.layer),
   );
 }
 /**
@@ -388,7 +395,7 @@ async function buildSingleRunnerRuntime() {
   // handle this function used to build and then drop on the floor (#1378).
   // Precedent: packages/integrations/src/core/IntegrationRuntime.js.
   const managed = ManagedRuntime.make(layer);
-  const context = (await managed.runtime()).context;
+  const context = await managed.context();
   const client = await managed.runPromise(TaskWorkerEntity.client);
   return {
     client: client,
