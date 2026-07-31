@@ -18240,7 +18240,7 @@ const inputSchema = Schema.Struct({
 
 const analysisSchema = Schema.Struct({
   summary: Schema.String,
-  risk: Schema.Literal("low", "medium", "high"),
+  risk: Schema.Literals(["low", "medium", "high"]),
 });
 
 const reportSchema = Schema.Struct({
