@@ -642,7 +642,9 @@ function processTimerCandidateEffect(options, run, staleBeforeMs) {
           }),
       }).pipe(Effect.result);
       if (spawnResult._tag === "Failure") {
-        yield* Effect.logWarning(`[supervisor] failed to resume timer run ${run.runId}: ${spawnResult.failure.message}`);
+        yield* Effect.logWarning(
+          `[supervisor] failed to resume timer run ${run.runId}: ${spawnResult.failure.message}`,
+        );
         yield* options.adapter
           .releaseRunResumeClaimEffect({
             runId: run.runId,

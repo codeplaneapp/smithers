@@ -33,9 +33,7 @@ import {
 } from "@smithers-orchestrator/observability/metrics";
 
 function incrementGauge(metric, delta) {
-  return Metric.value(metric).pipe(
-    Effect.flatMap((state) => Metric.update(metric, Number(state.value) + delta)),
-  );
+  return Metric.value(metric).pipe(Effect.flatMap((state) => Metric.update(metric, Number(state.value) + delta)));
 }
 import {
   assertOptionalStringMaxLength,
@@ -2840,7 +2838,12 @@ export class SmithersDb {
         yield* self.write(`insert alert ${row.alertId}`, () =>
           self.internalStorage.insertIgnore("_smithers_alerts", row),
         );
-        yield* Metric.update(Metric.withAttributes(Metric.withAttributes(alertsFiredTotal, { ["policy"]: String(row.policyName) }), { ["severity"]: String(row.severity) }), 1);
+        yield* Metric.update(
+          Metric.withAttributes(Metric.withAttributes(alertsFiredTotal, { ["policy"]: String(row.policyName) }), {
+            ["severity"]: String(row.severity),
+          }),
+          1,
+        );
         if (isAlertActiveStatus(row.status)) {
           yield* incrementGauge(alertsActive, 1);
         }
@@ -2929,7 +2932,10 @@ export class SmithersDb {
             [alertId, "firing"],
           ),
         );
-        yield* Metric.update(Metric.withAttributes(alertsAcknowledgedTotal, { ["policy"]: String(alert.policyName) }), 1);
+        yield* Metric.update(
+          Metric.withAttributes(alertsAcknowledgedTotal, { ["policy"]: String(alert.policyName) }),
+          1,
+        );
         return yield* self.getAlert(alertId);
       }),
     );

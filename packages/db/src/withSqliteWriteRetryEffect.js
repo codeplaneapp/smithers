@@ -118,11 +118,7 @@ export function withSqliteWriteRetryEffect(operation, opts = {}) {
     }),
   );
   return Effect.suspend(operation).pipe(
-    Effect.retry(
-      sleep
-        ? retrySchedule.pipe(Schedule.modifyDelay(() => Effect.succeed(Duration.zero)))
-        : retrySchedule,
-    ),
+    Effect.retry(sleep ? retrySchedule.pipe(Schedule.modifyDelay(() => Effect.succeed(Duration.zero))) : retrySchedule),
     Effect.withLogSpan("sqlite-write-retry"),
   );
 }

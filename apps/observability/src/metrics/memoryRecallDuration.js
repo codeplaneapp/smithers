@@ -6,4 +6,6 @@ const durationBuckets = Metric.exponentialBoundaries({
   count: 14,
 }); // ~1ms to ~8s
 
-export const memoryRecallDuration = Metric.histogram("smithers.memory.recall_duration_ms", { boundaries: durationBuckets });
+export const memoryRecallDuration = Metric.histogram("smithers.memory.recall_duration_ms", {
+  boundaries: durationBuckets,
+});

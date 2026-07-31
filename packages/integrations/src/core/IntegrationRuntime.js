@@ -11,10 +11,7 @@ import { makeWebhookSource } from "./EventSource.js";
 
 // Restart back-off for crashed source streams: exponential from 1s, capped at
 // a 30s spacing, retrying forever (an integration source should never die).
-const SOURCE_RESTART_SCHEDULE = Schedule.min([
-  Schedule.exponential("1 second"),
-  Schedule.spaced("30 seconds"),
-]);
+const SOURCE_RESTART_SCHEDULE = Schedule.min([Schedule.exponential("1 second"), Schedule.spaced("30 seconds")]);
 
 /**
  * Start the process-wide integration runtime: forks one supervised delivery
