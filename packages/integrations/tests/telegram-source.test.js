@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { Chunk, Effect, Schedule, Stream } from "effect";
+import { Effect, Schedule, Stream } from "effect";
 import { makeDbCursorStore } from "../src/core/CursorStore.js";
 import {
   makeTelegramSource,
@@ -135,7 +135,7 @@ describe("makeTelegramSource (long-poll against real fixture)", () => {
     const { fixture, makeSource } = makeFixture();
     const updateId = fixture.pushUpdate(messageUpdate(42, "hello"));
     const before = fixture.calls("getUpdates").length;
-    const [batch] = Chunk.toReadonlyArray(
+    const [batch] = Array.from(
       await Effect.runPromise(Stream.runCollect(Stream.take(makeSource({ sourceId: "tg-a" }).events, 1))),
     );
     const events = batch.events;
@@ -155,7 +155,7 @@ describe("makeTelegramSource (long-poll against real fixture)", () => {
     const { fixture, makeSource } = makeFixture();
     fixture.pushUpdate(messageUpdate(666, "spam"));
     const okId = fixture.pushUpdate(messageUpdate(42, "legit"));
-    const [batch] = Chunk.toReadonlyArray(
+    const [batch] = Array.from(
       await Effect.runPromise(
         Stream.runCollect(Stream.take(makeSource({ sourceId: "tg-gate", allowedChatIds: [42] }).events, 1)),
       ),
@@ -171,7 +171,7 @@ describe("makeTelegramSource (long-poll against real fixture)", () => {
     const { adapter } = createTestAdapter();
     const cursorStore = makeDbCursorStore(adapter);
     const firstId = fixture.pushUpdate(messageUpdate(42, "before restart"));
-    const [firstBatch] = Chunk.toReadonlyArray(
+    const [firstBatch] = Array.from(
       await Effect.runPromise(
         Stream.runCollect(Stream.take(makeSource({ sourceId: "tg-restart", cursorStore }).events, 1)),
       ),
@@ -183,7 +183,7 @@ describe("makeTelegramSource (long-poll against real fixture)", () => {
     // "Restart": a brand-new source instance over the same db cursor store.
     const secondId = fixture.pushUpdate(messageUpdate(42, "after restart"));
     const beforePolls = fixture.calls("getUpdates").length;
-    const [secondBatch] = Chunk.toReadonlyArray(
+    const [secondBatch] = Array.from(
       await Effect.runPromise(
         Stream.runCollect(Stream.take(makeSource({ sourceId: "tg-restart", cursorStore }).events, 1)),
       ),

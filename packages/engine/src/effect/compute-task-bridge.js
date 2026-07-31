@@ -824,7 +824,7 @@ export const executeComputeTaskBridge = async (
     if (timeoutMs) {
       computeEffect = computeEffect.pipe(
         Effect.timeout(Duration.millis(timeoutMs)),
-        Effect.catchIf(Cause.isTimeoutException, () =>
+        Effect.catchIf(Cause.isTimeoutError, () =>
           Effect.fail(
             new TaskTimeout({
               message: `Compute callback timed out after ${timeoutMs}ms`,

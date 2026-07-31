@@ -122,11 +122,24 @@ const settleKernel = async <T>(
     // user continuations may legally cross many host microtasks. The caller's
     // bounded-wait budget is the guard; virtual time is advanced only after
     // this bounded quiescence pass.
+    const progressBefore = kernel.trace.snapshot().length + kernel.controls.consumed();
     for (let microtask = 0; microtask < Math.min(64, Math.max(1, budget)); microtask++) await Promise.resolve();
+    // Effect 4 resumes forked/raced fibers on the macrotask queue, so a
+    // microtask-only drain never lets runReadySet's race settle. One cheap
+    // host macrotask per turn (setImmediate, no timer clamp) keeps a hung
+    // scenario's full wait budget affordable while letting fibers run.
+    if (!done) await new Promise((resolve) => setImmediate(resolve));
     if (!done) {
-      const advance = kernel.controls.takeAdvanceClock();
-      if (advance) kernel.clock.advance(advance.ms);
-      else if (kernel.clock.pending().length) kernel.clock.advanceToNextTimer();
+      // Advance virtual time only on a quiescent turn. If the drained turn
+      // made progress (trace or control activity), newly-ready work may still
+      // be forking; firing a timer now would let a sleeping sibling overtake
+      // it and change the schedule.
+      const progressAfter = kernel.trace.snapshot().length + kernel.controls.consumed();
+      if (progressAfter === progressBefore) {
+        const advance = kernel.controls.takeAdvanceClock();
+        if (advance) kernel.clock.advance(advance.ms);
+        else if (kernel.clock.pending().length) kernel.clock.advanceToNextTimer();
+      }
     }
   }
   if (!done)
