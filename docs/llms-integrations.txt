@@ -121,7 +121,7 @@ export default smithers((ctx) => (
 ## Available agents
 
 ```toon
-agents[15]{class,cli,modelDefault,hijack,notes}:
+agents[16]{class,cli,modelDefault,hijack,notes}:
   CodexAgent,codex,CLI default,native thread id,OpenAI Codex CLI (codex exec via stdin + JSON stream)
   ClaudeCodeAgent,claude,CLI default,native session id,Anthropic Claude Code CLI
   CursorAgent,cursor-agent,CLI default,not yet,Cursor CLI (cursor-agent --print stream-json)
@@ -137,9 +137,10 @@ agents[15]{class,cli,modelDefault,hijack,notes}:
   OpenCodeAgent,opencode,CLI default,not yet,OpenCode CLI (opencode run --format json)
   OpenClawAgent,openclaw,CLI default,session id,OpenClaw CLI (openclaw agent --json)
   PoolAgent,pool,CLI default,not yet,Poolside Pool CLI (ACP + NDJSON stream)
+  NanocodexAgent,smithers-nanocodex,gpt-5.6-sol,checkpoint resume,Nanocodex bridge (Linux x64)
 ```
 
-CLI binaries must be on `PATH`: `codex`, `cursor-agent`, `claude`, `agy`, `gemini`, `pi`, `omp`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`, `pool`.
+CLI binaries must be on `PATH`: `codex`, `cursor-agent`, `claude`, `agy`, `gemini`, `pi`, `omp`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`, `pool`, `smithers-nanocodex`.
 
 `HermesCliAgent` drives the Hermes *agent* CLI. It is distinct from `HermesAgent`,
 which talks to the Hermes *model* over an OpenAI-compatible HTTP API. Use
