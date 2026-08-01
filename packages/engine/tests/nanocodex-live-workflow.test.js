@@ -11,6 +11,7 @@ import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Effect } from "effect";
+import { nanocodexTestSupported } from "./nanocodex-host-support.js";
 
 const RUN_LIVE = process.env.SMITHERS_RUN_NANOCODEX_LIVE === "1";
 const LIVE_TIMEOUT_MS = 300_000;
@@ -48,18 +49,15 @@ afterEach(async () => {
   tempRoots.clear();
 });
 
-describe.skipIf(process.platform !== "linux" || process.arch !== "x64")(
-  "Nanocodex provider-free Smithers cold restart",
-  () => {
-    test(
-      "resumes an exact fake checkpoint from durable SQLite in a fresh process",
-      async () => {
-        await runColdRestartScenario({ kind: "fake", childTimeoutMs: FAKE_CHILD_TIMEOUT_MS });
-      },
-      FAKE_CHILD_TIMEOUT_MS * 2,
-    );
-  },
-);
+describe.skipIf(!nanocodexTestSupported)("Nanocodex provider-free Smithers cold restart", () => {
+  test(
+    "resumes an exact fake checkpoint from durable SQLite in a fresh process",
+    async () => {
+      await runColdRestartScenario({ kind: "fake", childTimeoutMs: FAKE_CHILD_TIMEOUT_MS });
+    },
+    FAKE_CHILD_TIMEOUT_MS * 2,
+  );
+});
 
 /**
  * This remains separate from provider-free qualification and makes exactly
