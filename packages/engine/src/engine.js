@@ -1665,14 +1665,13 @@ const RUN_HEARTBEAT_MS = 1_000;
 const RUN_HEARTBEAT_STALE_MS = 30_000;
 const RUN_ABORT_SETTLE_POLL_MS = 10;
 const RUN_ABORT_SETTLE_TIMEOUT_MS = 5_000;
-// Process-backed agent adapters may need to finish process-group termination
-// and publish final process/checkpoint callbacks after the task abort signal
-// fires. Once an adapter has identified a started process through onProcess,
-// keep its generate promise attached for this bounded grace period. Four
-// seconds accommodates the existing bounded terminate-and-verify adapters and
-// remains below the run's five-second abort-settlement ceiling. Agents that do
-// not report a process do not impose this delay on cancellation.
-const AGENT_PROCESS_ABORT_CLEANUP_GRACE_MS = 4_000;
+// Agent adapters may need to publish a final checkpoint after the task abort
+// signal fires. Process-backed adapters also need to finish process-group
+// termination. Keep generate attached for this bounded grace period whenever
+// either cleanup protocol is declared. Four seconds accommodates the existing
+// bounded terminate-and-verify adapters and remains below the run's five-second
+// abort-settlement ceiling.
+const AGENT_ABORT_CLEANUP_GRACE_MS = 4_000;
 const RUN_CANCEL_POLL_MS = 250;
 const TASK_HEARTBEAT_THROTTLE_MS = 500;
 const TASK_HEARTBEAT_MAX_PAYLOAD_BYTES = 1_000_000;
@@ -4583,7 +4582,9 @@ async function legacyExecuteTask(
     try {
       return await Promise.race([agentCall, getTaskAbortPromise()]);
     } catch (error) {
-      if (taskSignal.aborted && agentProcessObserved) {
+      const checkpointCleanupCapable =
+        Array.isArray(effectiveAgent?.checkpointFormats) && effectiveAgent.checkpointFormats.length > 0;
+      if (taskSignal.aborted && (agentProcessObserved || checkpointCleanupCapable)) {
         let cleanupTimer;
         try {
           await Promise.race([
@@ -4592,7 +4593,7 @@ async function legacyExecuteTask(
               () => undefined,
             ),
             new Promise((resolve) => {
-              cleanupTimer = setTimeout(resolve, AGENT_PROCESS_ABORT_CLEANUP_GRACE_MS);
+              cleanupTimer = setTimeout(resolve, AGENT_ABORT_CLEANUP_GRACE_MS);
             }),
           ]);
         } finally {
@@ -5585,6 +5586,7 @@ async function legacyExecuteTask(
         )?.attempt;
         let resumeCheckpoint = null;
         let resumeCheckpointRef = null;
+        let resumeCheckpointRefConsumed = false;
         let checkpointMode = "resume";
         // Walk newest-to-oldest with a stable attempt/sequence cursor. An
         // incompatible newest ref must not hide an older compatible one, and
@@ -5625,6 +5627,7 @@ async function legacyExecuteTask(
           if (agentSupportsCheckpoint(effectiveAgent, loaded, "resume")) {
             resumeCheckpoint = loaded;
             resumeCheckpointRef = candidate;
+            resumeCheckpointRefConsumed = true;
             checkpointScanStopped = true;
             break;
           }
@@ -5672,6 +5675,7 @@ async function legacyExecuteTask(
         if (!resumeSession && resumeCheckpointRef && !resumeCheckpoint) {
           const stored = await loadAgentCheckpoint(adapter, resumeCheckpointRef, toolConfig.maxAgentCheckpointBytes);
           resumeSession = resumeSessionFromCheckpoint(stored, currentAgentEngine);
+          resumeCheckpointRefConsumed = Boolean(resumeSession);
         }
         // Fallback: we should be resuming (the same agent ran before) but
         // no session id was captured. Continue the latest session in this
@@ -6372,6 +6376,12 @@ async function legacyExecuteTask(
             runId,
             nodeId: desc.nodeId,
             iteration: desc.iteration,
+            ...(checkpointMode === "resume" && resumeCheckpointRefConsumed && resumeCheckpointRef
+              ? {
+                  checkpointAttempt: resumeCheckpointRef.attempt,
+                  checkpointCreatedAtMs: resumeCheckpointRef.createdAtMs,
+                }
+              : {}),
           });
           // A failed restore means the agent is about to resume against a
           // stale or half-written tree. Never swallow it: surface a

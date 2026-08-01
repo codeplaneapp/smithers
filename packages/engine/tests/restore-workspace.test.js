@@ -76,6 +76,36 @@ describe("restoreWorkspaceToLatestCheckpoint logic (fakes)", () => {
     expect(reverted).toEqual([["new", "/wt"]]);
   });
 
+  test("does not restore workspace state newer than the selected agent checkpoint", async () => {
+    const reverted = [];
+    const res = await restoreWorkspaceToLatestCheckpoint({
+      adapter: fakeAdapter([
+        { nodeId: "n1", iteration: 0, attempt: 1, seq: 0, jjCommitId: "matching", jjCwd: "/wt", createdAtMs: 20 },
+        {
+          nodeId: "n1",
+          iteration: 0,
+          attempt: 1,
+          seq: 1,
+          jjCommitId: "later-same-attempt",
+          jjCwd: "/wt",
+          createdAtMs: 30,
+        },
+        { nodeId: "n1", iteration: 0, attempt: 2, seq: 0, jjCommitId: "later-attempt", jjCwd: "/wt", createdAtMs: 25 },
+      ]),
+      runId: "r1",
+      nodeId: "n1",
+      iteration: 0,
+      checkpointAttempt: 1,
+      checkpointCreatedAtMs: 20,
+      revert: async (commitId, cwd) => {
+        reverted.push([commitId, cwd]);
+        return { success: true };
+      },
+    });
+    expect(res).toMatchObject({ restored: true, commitId: "matching" });
+    expect(reverted).toEqual([["matching", "/wt"]]);
+  });
+
   test("surfaces a failed revert without throwing", async () => {
     const res = await restoreWorkspaceToLatestCheckpoint({
       adapter: fakeAdapter([

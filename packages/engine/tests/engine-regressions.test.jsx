@@ -244,6 +244,65 @@ describe("Engine regressions", () => {
     }
   });
 
+  test("heartbeat timeout awaits a process-free agent's final checkpoint before retrying", async () => {
+    const { smithers, outputs, db, cleanup } = buildSmithers();
+    const adapter = new SmithersDb(db);
+    const codec = "test.library-abort-cleanup";
+    const finalCheckpoint = { codec, version: 1, payload: { cursor: "after-timeout" } };
+    const calls = [];
+    const libraryAgent = {
+      id: "library-abort-cleanup-checkpoint",
+      checkpointFormats: [{ codec, versions: [1] }],
+      checkpointCapabilities: [{ codec, versions: [1], modes: ["resume"] }],
+      async generate(args) {
+        calls.push(args);
+        if (calls.length > 1) return { text: '{"value":45}' };
+        await new Promise((_, reject) => {
+          const abort = () => {
+            setTimeout(async () => {
+              try {
+                await args.onCheckpoint(finalCheckpoint);
+                const error = new Error("timed out after final checkpoint");
+                error.name = "AbortError";
+                reject(error);
+              } catch (error) {
+                reject(error);
+              }
+            }, 50);
+          };
+          if (args.abortSignal?.aborted) abort();
+          else args.abortSignal?.addEventListener("abort", abort, { once: true });
+        });
+      },
+    };
+    const workflow = smithers(() => (
+      <Workflow name="library-abort-cleanup-checkpoint">
+        <Task
+          id="work"
+          output={outputs.outputA}
+          agent={libraryAgent}
+          retries={1}
+          maxSchemaRetries={0}
+          heartbeatTimeoutMs={150}
+          retryPolicy={{ backoff: "fixed", initialDelayMs: 0 }}
+        >
+          run task
+        </Task>
+      </Workflow>
+    ));
+
+    try {
+      const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+      expect(result.status).toBe("finished");
+      expect(calls).toHaveLength(2);
+      expect(calls[1].resumeCheckpoint).toEqual(finalCheckpoint);
+      const refs = await adapter.listAgentCheckpointRefs(result.runId, { nodeId: "work" });
+      expect(refs.map((ref) => [ref.attempt, ref.purpose])).toEqual([[1, "progress"]]);
+    } finally {
+      cleanup();
+    }
+  }, 15_000);
+
   test("cancellation interrupts retry backoff without starting another attempt", async () => {
     const { smithers, outputs, db, cleanup } = buildSmithers();
     const runId = "abort-retry-backoff";
