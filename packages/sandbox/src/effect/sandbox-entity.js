@@ -113,7 +113,7 @@ export const SandboxEntity = Entity.make("Sandbox", [
 ]);
 /** @typedef {import("../SandboxTransportService.ts").SandboxTransportService} SandboxTransportService */
 const SandboxEntityExecutorTag =
-  /** @type {Context.TagClass<SandboxEntityExecutor, "SandboxEntityExecutor", SandboxTransportService>} */ (
+  /** @type {Context.ServiceClass<SandboxEntityExecutor, "SandboxEntityExecutor", SandboxTransportService>} */ (
     Context.Service("SandboxEntityExecutor")
   );
 export class SandboxEntityExecutor extends SandboxEntityExecutorTag {

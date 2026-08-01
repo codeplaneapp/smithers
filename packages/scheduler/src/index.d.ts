@@ -408,7 +408,7 @@ declare function isTerminalState(state: TaskState$1, descriptor?: Pick<TaskDescr
 type TaskDescriptor$2 = _smithers_orchestrator_graph.TaskDescriptor;
 type TaskState$1 = TaskState$2;
 
-declare class Scheduler extends Context.TagClassShape<"Scheduler", SchedulerService> {
+declare class Scheduler extends Context.ServiceClass.Shape<"Scheduler", SchedulerService> {
 }
 type TaskDescriptor$1 = _smithers_orchestrator_graph.TaskDescriptor;
 type TaskStateMap$2 = TaskStateMap$4;
@@ -457,7 +457,7 @@ type ScheduleResult$1 = ScheduleResult$3;
 type TaskDescriptor = _smithers_orchestrator_graph.TaskDescriptor;
 type TaskStateMap$1 = TaskStateMap$4;
 
-declare class WorkflowSession extends Context.TagClassShape<"WorkflowSession", WorkflowSessionService$2> {
+declare class WorkflowSession extends Context.ServiceClass.Shape<"WorkflowSession", WorkflowSessionService$2> {
 }
 
 /**

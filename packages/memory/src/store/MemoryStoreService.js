@@ -1,4 +1,6 @@
 import { Context } from "effect";
-export class MemoryStoreService /** @type {Context.TagClass<MemoryStoreService, "MemoryStoreService", import("./MemoryStore.ts").MemoryStore>} */
-  /** @type {unknown} */
-  extends Context.Service("MemoryStoreService") {}
+
+/** @typedef {import("./MemoryStoreServiceClass.ts").MemoryStoreService} MemoryStoreService */
+
+/** @type {import("./MemoryStoreServiceClass.ts").MemoryStoreServiceClass} */
+export const MemoryStoreService = /** @type {never} */ (Context.Service("MemoryStoreService"));

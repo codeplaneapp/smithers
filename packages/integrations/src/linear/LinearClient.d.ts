@@ -8,7 +8,7 @@ import '@smithers-orchestrator/errors/SmithersError';
  * `configureLinear` > env).
  * @param {LinearConfig} [config]
  */
-declare function LinearClientLive(config?: LinearConfig): Layer.Layer<any, never, never>;
+declare function LinearClientLive(config?: LinearConfig): Layer.Layer<LinearClientService$1, never, never>;
 /**
  * Normalize a priority name or number to Linear's 0–4 scale.
  * @param {LinearPriority | undefined} priority
@@ -30,7 +30,7 @@ declare function normalizeLinearPriority(priority: LinearPriority | undefined): 
  */
 declare function makeLinearClient(config?: LinearConfig): LinearClientService;
 /** Context tag for the Linear GraphQL client service. */
-declare const LinearClient: Context.Tag<LinearClientService, LinearClientService>;
+declare const LinearClient: Context.Service<LinearClientService, LinearClientService>;
 type CreateIssueInput = CreateIssueInput$1;
 type LinearClientService = LinearClientService$1;
 type LinearCommentResult = LinearCommentResult$1;

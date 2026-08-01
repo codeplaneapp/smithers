@@ -28,14 +28,19 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 const scriptPath = fileURLToPath(import.meta.url);
 const defaultRepoRoot = resolve(dirname(scriptPath), "..");
 export const DEFAULT_DECLARATION_PACKAGES = [
+  "apps/observability",
   "packages/agents",
   "packages/cloudflare",
+  "packages/engine",
   "packages/gateway",
   "packages/gateway-react",
   "packages/graph",
   "packages/integrations",
+  "packages/memory",
   "packages/microsandbox",
   "packages/protocol",
+  "packages/sandbox",
+  "packages/scheduler",
   "packages/smithers",
   "packages/xstate",
 ];

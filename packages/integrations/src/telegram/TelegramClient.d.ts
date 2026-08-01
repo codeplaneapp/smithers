@@ -25,7 +25,7 @@ declare function makeTelegramClient(config: TelegramClientConfig): TelegramClien
  * Live Layer for {@link TelegramClient}.
  * @param {TelegramClientConfig} config
  */
-declare function TelegramClientLive(config: TelegramClientConfig): Layer.Layer<any, never, never>;
+declare function TelegramClientLive(config: TelegramClientConfig): Layer.Layer<TelegramClientService$1, never, never>;
 declare const DEFAULT_TELEGRAM_API_BASE_URL: "https://api.telegram.org";
 /**
  * Error from the Telegram Bot API. Carries the Bot API `error_code` and
@@ -52,9 +52,9 @@ declare class TelegramApiError extends SmithersError {
 /**
  * `Context.Tag` for the Telegram Bot API client service. Provide it with
  * `TelegramClientLive(config)` or `Layer.succeed(TelegramClient, service)`.
- * @type {Context.Tag<TelegramClientService, TelegramClientService>}
+ * @type {Context.Service<TelegramClientService, TelegramClientService>}
  */
-declare const TelegramClient: Context.Tag<TelegramClientService, TelegramClientService>;
+declare const TelegramClient: Context.Service<TelegramClientService, TelegramClientService>;
 type TelegramClientConfig = TelegramClientConfig$1;
 type TelegramClientService = TelegramClientService$1;
 type SendMessageSmartOptions = SendMessageSmartOptions$1;

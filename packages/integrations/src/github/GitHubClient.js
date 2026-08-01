@@ -21,9 +21,9 @@ const MAX_RETRY_AFTER_MS = 60_000;
 /**
  * Context tag for the GitHub REST client. Provide it with
  * `githubClientLayer(config)` (or `Layer.succeed(GitHubClient, makeGitHubClient(...))`).
- * @type {Context.TagClass<GitHubClientTag, "GitHubClient", GitHubClientService>}
+ * @type {Context.ServiceClass<GitHubClientTag, "GitHubClient", GitHubClientService>}
  */
-export const GitHubClient = /** @type {Context.TagClass<GitHubClientTag, "GitHubClient", GitHubClientService>} */ (
+export const GitHubClient = /** @type {Context.ServiceClass<GitHubClientTag, "GitHubClient", GitHubClientService>} */ (
   /** @type {unknown} */ (Context.Service("GitHubClient"))
 );
 /** @typedef {{ readonly _: unique symbol }} GitHubClientTag */

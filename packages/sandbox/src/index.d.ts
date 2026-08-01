@@ -367,7 +367,7 @@ declare function layerForSandboxRuntime(runtime: SandboxRuntime): Layer.Layer<Sa
  * @returns {SandboxRuntime}
  */
 declare function resolveSandboxRuntime(requested: SandboxRuntime): SandboxRuntime;
-declare class SandboxTransport extends Context.TagClassShape<"SandboxTransport", SandboxTransportService> {
+declare class SandboxTransport extends Context.ServiceClass.Shape<"SandboxTransport", SandboxTransportService> {
 }
 type SandboxBundleResult = SandboxBundleResult$1;
 type SandboxTransportConfig = SandboxTransportConfig$1;
