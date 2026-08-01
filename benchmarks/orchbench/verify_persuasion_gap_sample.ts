@@ -9,6 +9,11 @@ const sample = JSON.parse(readFileSync(samplePath, "utf8")) as {
   study: string;
   datasetRevision: string;
   pilotExcluded: string[];
+  targetTasks: number;
+  targetPerLanguage: number;
+  minimumPerLanguage: number;
+  overflowLanguageOrder: string[];
+  tasksPerLanguage: number;
   candidates: Record<string, string[]>;
 };
 const treePath = resolve(
@@ -34,6 +39,17 @@ const prefixes: Record<string, string[]> = {
   Rust: ["dsl", "rat", "ruf", "slt"],
   TypeScript: ["mko", "prm", "vbt"],
 };
+if (
+  sample.targetTasks !== 30 ||
+  sample.targetPerLanguage !== 6 ||
+  sample.tasksPerLanguage !== sample.targetPerLanguage ||
+  sample.minimumPerLanguage !== 3
+) {
+  throw new Error("sample-size or language-floor amendment is invalid");
+}
+if (JSON.stringify(sample.overflowLanguageOrder) !== JSON.stringify(["C++", "Go", "Python", "TypeScript", "Rust"])) {
+  throw new Error("overflow language order is invalid");
+}
 const hash = (task: string) => createHash("sha256").update(`${sample.study}:${task}`).digest("hex");
 for (const [language, languagePrefixes] of Object.entries(prefixes)) {
   const expected = tasks

@@ -35,6 +35,8 @@ const eventsDir = join(workDir, "events");
 mkdirSync(eventsDir, { recursive: true });
 const eventsRaw = cli(["events", runId, "--raw", "--json", "--limit", "100000"], 300_000);
 writeFileSync(join(eventsDir, "events.jsonl"), eventsRaw);
+const eventLineCount = eventsRaw.split("\n").filter((line) => line.trim().startsWith("{")).length;
+const eventsTruncated = eventLineCount >= 100_000;
 
 type Ev = { seq: number; timestampMs: number; type: string; payload: Record<string, unknown> };
 const events: Ev[] = eventsRaw
@@ -52,7 +54,7 @@ const events: Ev[] = eventsRaw
 // ---- status + wall clock -------------------------------------------------
 const started = events.find((e) => e.type === "RunStarted");
 const terminal = [...events].reverse().find((e) => ["RunFinished", "RunFailed", "RunCancelled"].includes(e.type));
-const status = terminal?.type ?? "unknown";
+const status = eventsTruncated ? "events-truncated" : (terminal?.type ?? "unknown");
 const startMs = started?.timestampMs ?? 0;
 const endMs = terminal?.timestampMs ?? events.at(-1)?.timestampMs ?? startMs;
 
@@ -79,17 +81,18 @@ let quotaStallMs = 0;
 }
 
 // ---- per-stage timings ---------------------------------------------------
-const stages: Record<string, { startMs: number; endMs: number; attempts: number }> = {};
+const stages: Record<string, { startMs: number; endMs: number; attempts: number; terminal: string | null }> = {};
 for (const e of events) {
   const nodeId = (e.payload as { nodeId?: string }).nodeId;
   if (!nodeId) continue;
   if (e.type === "NodeStarted") {
-    stages[nodeId] ??= { startMs: e.timestampMs, endMs: e.timestampMs, attempts: 0 };
+    stages[nodeId] ??= { startMs: e.timestampMs, endMs: e.timestampMs, attempts: 0, terminal: null };
     stages[nodeId].startMs = Math.min(stages[nodeId].startMs, e.timestampMs);
     stages[nodeId].attempts += 1;
   }
   if (["NodeFinished", "NodeFailed", "NodeCancelled"].includes(e.type) && stages[nodeId]) {
     stages[nodeId].endMs = Math.max(stages[nodeId].endMs, e.timestampMs);
+    stages[nodeId].terminal = e.type;
   }
 }
 
@@ -102,6 +105,7 @@ const usageByModel: Record<
   string,
   { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; events: number }
 > = {};
+const stageExecution: Record<string, { models: Set<string>; agents: Set<string> }> = {};
 let costUsd = 0;
 for (const e of events) {
   if (e.type !== "TokenUsageReported") continue;
@@ -113,10 +117,17 @@ for (const e of events) {
     cacheWriteTokens?: number;
   };
   const model = String(p.model ?? "unknown");
+  const nodeId = String((e.payload as { nodeId?: string }).nodeId ?? "unknown");
+  const agent = String((e.payload as { agent?: string }).agent ?? "unknown");
+  const execution = (stageExecution[nodeId] ??= { models: new Set(), agents: new Set() });
+  execution.models.add(model);
+  execution.agents.add(agent);
   const rawInput = Number(p.inputTokens ?? 0);
   const cacheRead = Number(p.cacheReadTokens ?? 0);
   const cacheWrite = Number(p.cacheWriteTokens ?? 0);
-  const inclusive = cacheRead > 0 && rawInput >= cacheRead;
+  // Codex reports input inclusive of cache reads; Claude reports uncached
+  // input separately. A magnitude heuristic misclassifies large Claude turns.
+  const inclusive = model.startsWith("gpt-5.6-") && cacheRead > 0 && rawInput >= cacheRead;
   const uncachedInput = inclusive ? rawInput - cacheRead - Math.min(cacheWrite, rawInput - cacheRead) : rawInput;
   const outputTokens = Number(p.outputTokens ?? 0);
   const m = (usageByModel[model] ??= {
@@ -143,19 +154,35 @@ for (const e of events) {
 // ---- reward --------------------------------------------------------------
 let reward = 0;
 let rewardMeta: Record<string, unknown> = {};
+let rewardError: string | null = null;
+let checkpointError: string | null = null;
 let implementationReward: number | null = null;
 let implementationRewardMeta: Record<string, unknown> | null = null;
+const parseReward = (value: unknown, label: string): number => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error(`${label} is not a finite reward in [0,1]: ${String(value)}`);
+  }
+  return value;
+};
 const implementationScoreJson = join(workDir, "score-implementation.json");
 if (existsSync(implementationScoreJson)) {
-  const s = JSON.parse(readFileSync(implementationScoreJson, "utf8"));
-  implementationReward = Number(s.reward ?? 0);
-  implementationRewardMeta = s;
+  try {
+    const s = JSON.parse(readFileSync(implementationScoreJson, "utf8"));
+    implementationReward = parseReward(s.reward, "implementation reward");
+    implementationRewardMeta = s;
+  } catch (err) {
+    checkpointError = String(err).slice(0, 2000);
+  }
 }
 const scoreJson = join(workDir, "score.json");
 if (existsSync(scoreJson)) {
-  const s = JSON.parse(readFileSync(scoreJson, "utf8"));
-  reward = Number(s.reward ?? 0);
-  rewardMeta = s;
+  try {
+    const s = JSON.parse(readFileSync(scoreJson, "utf8"));
+    reward = parseReward(s.reward, "final reward");
+    rewardMeta = s;
+  } catch (err) {
+    rewardError = String(err).slice(0, 2000);
+  }
 } else {
   // scorer never ran (run failed/cancelled before the terminal task) — score
   // the workspace directly through the identical official path.
@@ -165,15 +192,43 @@ if (existsSync(scoreJson)) {
       [join(HARNESS, "score.sh"), manifest.image, manifest.repoDir, manifest.testsDir, join(workDir, "score")],
       { encoding: "utf8", timeout: 30 * 60_000, maxBuffer: 64 * 1024 * 1024 },
     );
-    reward = Number.parseFloat(out.trim().split("\n").pop() ?? "0") || 0;
-    try {
-      rewardMeta = JSON.parse(readFileSync(join(workDir, "score", "reward.json"), "utf8"));
-    } catch {
-      /* keep {} */
+    const parsedReward = Number.parseFloat(out.trim().split("\n").pop() ?? "");
+    reward = parseReward(parsedReward, "grader stdout reward");
+    rewardMeta = JSON.parse(readFileSync(join(workDir, "score", "reward.json"), "utf8"));
+    const metadataReward = parseReward(rewardMeta.reward, "grader metadata reward");
+    if (Math.abs(metadataReward - reward) > 1e-12) {
+      throw new Error(`grader stdout/metadata mismatch: ${reward} != ${metadataReward}`);
     }
-  } catch {
-    reward = 0;
+  } catch (err) {
+    rewardError = String(err).slice(0, 2000);
   }
+}
+
+const pipelinePatterns = new Set([
+  "sol-sol-sol",
+  "sol-terra-sol",
+  "plan-impl-review",
+  "plan-impl-review-blind",
+  "sol-work-sol-review",
+  "sol-work-fable-review",
+  "fable-fable-fable",
+  "fable-plan-impl-review",
+]);
+if (status === "RunFinished" && pipelinePatterns.has(pattern) && implementationReward === null) {
+  checkpointError ??= "finished pipeline has no valid implementation checkpoint reward";
+}
+
+const expectedStages = pattern.startsWith("solo-")
+  ? ["solo"]
+  : pattern.startsWith("sol-work-")
+    ? ["work", "implementation-score", "review"]
+    : pipelinePatterns.has(pattern)
+      ? ["plan", "implement", "implementation-score", "review"]
+      : [];
+let protocolError: string | null = null;
+if (status === "RunFinished") {
+  const invalidStages = expectedStages.filter((id) => !stages[id] || stages[id].attempts !== 1);
+  if (invalidStages.length > 0) protocolError = `missing or repeated stages: ${invalidStages.join(", ")}`;
 }
 
 // ---- diff + audit --------------------------------------------------------
@@ -187,6 +242,7 @@ try {
   /* best effort */
 }
 let audit: Record<string, unknown> = { tainted: null, error: "audit not run" };
+let auditError: string | null = null;
 try {
   execFileSync(
     "python3",
@@ -201,14 +257,26 @@ try {
   );
   audit = JSON.parse(readFileSync(join(workDir, "audit.json"), "utf8"));
 } catch (err) {
-  audit = { tainted: null, error: String(err).slice(0, 500) };
+  auditError = String(err).slice(0, 500);
+  try {
+    audit = JSON.parse(readFileSync(join(workDir, "audit.json"), "utf8"));
+  } catch {
+    audit = { tainted: null, error: auditError };
+  }
 }
 
 // ---- foreign contention flag ---------------------------------------------
-// The driver snapshots foreign engine processes into workDir at launch time.
+// The driver records foreign workflows/provider clients and host-pressure
+// violations into workDir at launch and during execution.
 let foreignContention: string[] = [];
 try {
   foreignContention = readFileSync(join(workDir, "foreign-at-launch.txt"), "utf8").split("\n").filter(Boolean);
+} catch {
+  /* none recorded */
+}
+try {
+  foreignContention.push(...readFileSync(join(workDir, "foreign-during-run.txt"), "utf8").split("\n").filter(Boolean));
+  foreignContention = [...new Set(foreignContention)];
 } catch {
   /* none recorded */
 }
@@ -218,7 +286,13 @@ const result = {
   runId,
   slug,
   pattern,
-  status,
+  status: rewardError
+    ? "scorer-failed"
+    : checkpointError
+      ? "checkpoint-failed"
+      : protocolError
+        ? "protocol-invalid"
+        : status,
   reward,
   implementationReward,
   reviewDelta: implementationReward === null ? null : reward - implementationReward,
@@ -239,17 +313,42 @@ const result = {
   quotaPoisoned: quotaStallMs > 0,
   costUsd: Math.round(costUsd * 10000) / 10000,
   foreignContention,
+  timingClean: foreignContention.length === 0,
   usageByModel,
+  stageExecution: Object.fromEntries(
+    Object.entries(stageExecution).map(([id, execution]) => [
+      id,
+      { models: [...execution.models].sort(), agents: [...execution.agents].sort() },
+    ]),
+  ),
   stages: Object.fromEntries(
     Object.entries(stages).map(([id, s]) => [
       id,
-      { durS: Math.round((s.endMs - s.startMs) / 1000), attempts: s.attempts },
+      { durS: Math.round((s.endMs - s.startMs) / 1000), attempts: s.attempts, terminal: s.terminal },
     ]),
   ),
   tainted: (audit as { tainted?: boolean | null }).tainted ?? null,
   auditSignals: (audit as { signals?: unknown[] }).signals ?? [],
+  auditError,
+  smoke: manifest.smoke === true,
+  panelThird: manifest.panelThird ?? null,
+  balancedOrder: manifest.balancedOrder === true,
+  eventsTruncated,
+  eventLineCount,
   rewardMeta,
+  rewardError,
+  checkpointError,
+  protocolError,
   implementationRewardMeta,
+  resultSchemaVersion: 2,
+  workflowHash: manifest.workflowHash ?? null,
+  protocolHash: manifest.protocolHash ?? null,
+  taskOrdinal: manifest.taskOrdinal ?? null,
+  plannedPatternOrder: manifest.plannedPatternOrder ?? null,
+  patternPosition: manifest.patternPosition ?? null,
+  launchStartedAt: manifest.launchStartedAt ?? null,
+  validationReceiptSha256: manifest.validationReceiptSha256 ?? null,
+  selectedSampleSha256: manifest.selectedSampleSha256 ?? null,
   collectedAt: new Date().toISOString(),
 };
 mkdirSync(dirname(outPath), { recursive: true });

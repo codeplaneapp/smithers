@@ -29,8 +29,9 @@ set -euo pipefail
 TASK_DIR="$(cd "${1:?task_dir}" && pwd)"
 CONTROL="${2:?control_dir}"
 TASK_ID="$(basename "$TASK_DIR")"
-IMAGE="$(awk -F'"' '/docker_image/{print $2; exit}' "$TASK_DIR/task.toml")"
-CONTAINER="rmb_$(echo "$TASK_ID" | tr -c 'a-zA-Z0-9_.-' '_')"
+IMAGE="${RMB_IMAGE_OVERRIDE:-$(awk -F'"' '/docker_image/{print $2; exit}' "$TASK_DIR/task.toml")}"
+CONTROL_ID="$(basename "$CONTROL" | tr -c 'a-zA-Z0-9_.-' '_')"
+CONTAINER="rmb_$(echo "${TASK_ID}_${CONTROL_ID}" | cut -c1-120)"
 
 rm -rf "$CONTROL"; mkdir -p "$CONTROL"
 CONTROL="$(cd "$CONTROL" && pwd)"

@@ -1,11 +1,11 @@
 // smithers-source: authored
 // smithers-display-name: OrchBench — orchestration-pattern benchmark
-// smithers-description: Runs ONE RoadmapBench task under ONE orchestration pattern (solo-sol, solo-fable, solo-luna, plan-impl-review, fable-plan-impl-review, research-first, panel-review) with single-model agents and the official hidden-test scorer, so patterns can be compared on quality/speed/cost. See benchmarks/orchbench/DESIGN.md.
-/** @jsxImportSource smithers-orchestrator */
+// smithers-description: Runs ONE RoadmapBench task under ONE orchestration pattern, including solo, matched middle-model substitutions, and combined Sol-work→review controls, with the official hidden-test scorer. See benchmarks/orchbench/DESIGN.md.
+/** @jsxImportSource smthrs */
 import { readFileSync } from "node:fs";
-import { ClaudeCodeAgent, CodexAgent, KimiAgent, UI, createSmithers } from "smithers-orchestrator";
+import { ClaudeCodeAgent, CodexAgent, KimiAgent, UI, createSmithers } from "smthrs";
 import { z } from "zod/v4";
-import { roadmapScorer, runRoadmapScore } from "../lib/roadmapScorer";
+import { runRoadmapScore } from "../lib/roadmapScorer";
 
 const MIN = 60_000;
 
@@ -23,7 +23,13 @@ const inputSchema = z.object({
       "solo-fable",
       "solo-luna",
       "plan-impl-review",
+      "plan-impl-review-blind",
+      "sol-sol-sol",
+      "sol-terra-sol",
+      "sol-work-sol-review",
+      "sol-work-fable-review",
       "fable-plan-impl-review",
+      "fable-fable-fable",
       "research-first",
       "panel-review",
     ])
@@ -149,6 +155,10 @@ export default smithers((ctx) => {
     smoke
       ? lunaLow(timeoutMs)
       : new CodexAgent({ ...common, timeoutMs, model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
+  const terra = (timeoutMs: number) =>
+    smoke
+      ? lunaLow(timeoutMs)
+      : new CodexAgent({ ...common, timeoutMs, model: "gpt-5.6-terra", config: { model_reasoning_effort: "high" } });
   const fable = (timeoutMs: number) =>
     smoke ? lunaLow(timeoutMs) : new ClaudeCodeAgent({ ...common, timeoutMs, model: "claude-fable-5" });
   const third = (timeoutMs: number) =>
@@ -157,19 +167,6 @@ export default smithers((ctx) => {
       : input.panelThird === "kimi"
         ? new KimiAgent({ ...common, timeoutMs })
         : new ClaudeCodeAgent({ ...common, timeoutMs, model: "claude-opus-4-8" });
-
-  const reward = {
-    reward: {
-      scorer: roadmapScorer({
-        taskId: input.taskId,
-        image: input.image,
-        repoDir: input.repoDir,
-        testsDir: input.testsDir,
-        workDir: input.workDir,
-      }),
-      sampling: { type: "all" as const },
-    },
-  };
 
   const scoreImplementation = async () => {
     const result = await runRoadmapScore(
@@ -297,6 +294,7 @@ sanity checks pass. Report exactly what you changed.`;
 
   const reviewFixPrompt = (deps: {
     implement?: z.infer<typeof implementSchema>;
+    solo?: z.infer<typeof soloSchema>;
   }) => `You are an independent senior reviewer (a DIFFERENT engineer and model)
 auditing the implementation for task "${input.taskId}". Be adversarial and precise.
 
@@ -304,8 +302,35 @@ ${ENV}
 
 ${ROADMAP}
 
+# Evidence policy
+First reconstruct what was attempted from the original roadmap, repository
+state, and diff before consulting any implementation narrative. Treat narrative
+claims as unverified leads, never as evidence.
+
 # What the implementer reported
-${JSON.stringify(deps.implement ?? {}, null, 2)}
+${JSON.stringify(deps.implement ?? deps.solo ?? {}, null, 2)}
+
+# Your job
+Independently verify each target against the spec. Look hard for: missing
+classes/methods, wrong signatures or defaults, wrong import paths, missing
+exception/warning behavior, half-finished refactors, leftover old API that the
+roadmap said to remove, and broken backward compatibility. Use docker exec to
+import every documented symbol and run the project's own tests. When you find a
+defect, FIX IT directly in the code. Re-verify after fixing. Do a final
+completeness pass over every target before you finish. Report the issues you
+found and the fixes you applied.`;
+
+  const reviewFixBlindPrompt = `You are an independent senior reviewer (a DIFFERENT engineer and model)
+auditing the implementation for task "${input.taskId}". Be adversarial and precise.
+
+${ENV}
+
+${ROADMAP}
+
+# Evidence policy
+First reconstruct what was attempted from the original roadmap, repository
+state, and diff before consulting any implementation narrative. Treat narrative
+claims as unverified leads, never as evidence.
 
 # Your job
 Independently verify each target against the spec. Look hard for: missing
@@ -374,10 +399,10 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
         <Task
           id="solo"
           output={outputs.solo}
+          retries={0}
           agent={sol(150 * MIN)}
           timeoutMs={155 * MIN}
           heartbeatTimeoutMs={15 * MIN}
-          scorers={reward}
         >
           {soloPrompt}
         </Task>
@@ -387,10 +412,10 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
         <Task
           id="solo"
           output={outputs.solo}
+          retries={0}
           agent={fable(150 * MIN)}
           timeoutMs={155 * MIN}
           heartbeatTimeoutMs={15 * MIN}
-          scorers={reward}
         >
           {soloPrompt}
         </Task>
@@ -400,10 +425,10 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
         <Task
           id="solo"
           output={outputs.solo}
+          retries={0}
           agent={luna(150 * MIN)}
           timeoutMs={155 * MIN}
           heartbeatTimeoutMs={15 * MIN}
-          scorers={reward}
         >
           {soloPrompt}
         </Task>
@@ -414,6 +439,7 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
           <Task
             id="plan"
             output={outputs.plan}
+            retries={0}
             agent={sol(75 * MIN)}
             timeoutMs={80 * MIN}
             heartbeatTimeoutMs={15 * MIN}
@@ -423,6 +449,7 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
           <Task
             id="implement"
             output={outputs.implement}
+            retries={0}
             agent={luna(75 * MIN)}
             timeoutMs={80 * MIN}
             heartbeatTimeoutMs={15 * MIN}
@@ -436,11 +463,190 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
           <Task
             id="review"
             output={outputs.reviewFix}
+            retries={0}
             agent={sol(75 * MIN)}
             timeoutMs={80 * MIN}
             heartbeatTimeoutMs={15 * MIN}
             deps={{ implement: outputs.implement }}
-            scorers={reward}
+          >
+            {reviewFixPrompt}
+          </Task>
+        </Sequence>
+      ) : null}
+
+      {pattern === "plan-impl-review-blind" ? (
+        <Sequence>
+          <Task
+            id="plan"
+            output={outputs.plan}
+            retries={0}
+            agent={sol(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+          >
+            {planPrompt()}
+          </Task>
+          <Task
+            id="implement"
+            output={outputs.implement}
+            retries={0}
+            agent={luna(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+            deps={{ plan: outputs.plan }}
+          >
+            {implementPrompt}
+          </Task>
+          <Task id="implementation-score" output={outputs.checkpoint} retries={0}>
+            {scoreImplementation}
+          </Task>
+          <Task
+            id="review"
+            output={outputs.reviewFix}
+            retries={0}
+            agent={sol(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+          >
+            {reviewFixBlindPrompt}
+          </Task>
+        </Sequence>
+      ) : null}
+
+      {pattern === "sol-sol-sol" ? (
+        <Sequence>
+          <Task
+            id="plan"
+            output={outputs.plan}
+            retries={0}
+            agent={sol(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+          >
+            {planPrompt()}
+          </Task>
+          <Task
+            id="implement"
+            output={outputs.implement}
+            retries={0}
+            agent={sol(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+            deps={{ plan: outputs.plan }}
+          >
+            {implementPrompt}
+          </Task>
+          <Task id="implementation-score" output={outputs.checkpoint} retries={0}>
+            {scoreImplementation}
+          </Task>
+          <Task
+            id="review"
+            output={outputs.reviewFix}
+            retries={0}
+            agent={sol(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+            deps={{ implement: outputs.implement }}
+          >
+            {reviewFixPrompt}
+          </Task>
+        </Sequence>
+      ) : null}
+
+      {pattern === "sol-terra-sol" ? (
+        <Sequence>
+          <Task
+            id="plan"
+            output={outputs.plan}
+            retries={0}
+            agent={sol(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+          >
+            {planPrompt()}
+          </Task>
+          <Task
+            id="implement"
+            output={outputs.implement}
+            retries={0}
+            agent={terra(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+            deps={{ plan: outputs.plan }}
+          >
+            {implementPrompt}
+          </Task>
+          <Task id="implementation-score" output={outputs.checkpoint} retries={0}>
+            {scoreImplementation}
+          </Task>
+          <Task
+            id="review"
+            output={outputs.reviewFix}
+            retries={0}
+            agent={sol(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+            deps={{ implement: outputs.implement }}
+          >
+            {reviewFixPrompt}
+          </Task>
+        </Sequence>
+      ) : null}
+
+      {pattern === "sol-work-sol-review" ? (
+        <Sequence>
+          <Task
+            id="work"
+            output={outputs.solo}
+            retries={0}
+            agent={sol(150 * MIN)}
+            timeoutMs={155 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+          >
+            {soloPrompt}
+          </Task>
+          <Task id="implementation-score" output={outputs.checkpoint} retries={0}>
+            {scoreImplementation}
+          </Task>
+          <Task
+            id="review"
+            output={outputs.reviewFix}
+            retries={0}
+            agent={sol(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+            deps={{ solo: outputs.solo }}
+            needs={{ solo: "work" }}
+          >
+            {reviewFixPrompt}
+          </Task>
+        </Sequence>
+      ) : null}
+
+      {pattern === "sol-work-fable-review" ? (
+        <Sequence>
+          <Task
+            id="work"
+            output={outputs.solo}
+            retries={0}
+            agent={sol(150 * MIN)}
+            timeoutMs={155 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+          >
+            {soloPrompt}
+          </Task>
+          <Task id="implementation-score" output={outputs.checkpoint} retries={0}>
+            {scoreImplementation}
+          </Task>
+          <Task
+            id="review"
+            output={outputs.reviewFix}
+            retries={0}
+            agent={fable(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+            deps={{ solo: outputs.solo }}
+            needs={{ solo: "work" }}
           >
             {reviewFixPrompt}
           </Task>
@@ -452,6 +658,7 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
           <Task
             id="plan"
             output={outputs.plan}
+            retries={0}
             agent={fable(75 * MIN)}
             timeoutMs={80 * MIN}
             heartbeatTimeoutMs={15 * MIN}
@@ -461,6 +668,7 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
           <Task
             id="implement"
             output={outputs.implement}
+            retries={0}
             agent={luna(75 * MIN)}
             timeoutMs={80 * MIN}
             heartbeatTimeoutMs={15 * MIN}
@@ -474,11 +682,51 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
           <Task
             id="review"
             output={outputs.reviewFix}
+            retries={0}
             agent={fable(75 * MIN)}
             timeoutMs={80 * MIN}
             heartbeatTimeoutMs={15 * MIN}
             deps={{ implement: outputs.implement }}
-            scorers={reward}
+          >
+            {reviewFixPrompt}
+          </Task>
+        </Sequence>
+      ) : null}
+
+      {pattern === "fable-fable-fable" ? (
+        <Sequence>
+          <Task
+            id="plan"
+            output={outputs.plan}
+            retries={0}
+            agent={fable(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+          >
+            {planPrompt()}
+          </Task>
+          <Task
+            id="implement"
+            output={outputs.implement}
+            retries={0}
+            agent={fable(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+            deps={{ plan: outputs.plan }}
+          >
+            {implementPrompt}
+          </Task>
+          <Task id="implementation-score" output={outputs.checkpoint} retries={0}>
+            {scoreImplementation}
+          </Task>
+          <Task
+            id="review"
+            output={outputs.reviewFix}
+            retries={0}
+            agent={fable(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+            deps={{ implement: outputs.implement }}
           >
             {reviewFixPrompt}
           </Task>
@@ -490,6 +738,7 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
           <Task
             id="research"
             output={outputs.research}
+            retries={0}
             agent={luna(30 * MIN)}
             timeoutMs={35 * MIN}
             heartbeatTimeoutMs={15 * MIN}
@@ -499,6 +748,7 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
           <Task
             id="plan"
             output={outputs.plan}
+            retries={0}
             agent={sol(60 * MIN)}
             timeoutMs={65 * MIN}
             heartbeatTimeoutMs={15 * MIN}
@@ -509,6 +759,7 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
           <Task
             id="implement"
             output={outputs.implement}
+            retries={0}
             agent={luna(75 * MIN)}
             timeoutMs={80 * MIN}
             heartbeatTimeoutMs={15 * MIN}
@@ -519,11 +770,11 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
           <Task
             id="review"
             output={outputs.reviewFix}
+            retries={0}
             agent={sol(75 * MIN)}
             timeoutMs={80 * MIN}
             heartbeatTimeoutMs={15 * MIN}
             deps={{ implement: outputs.implement }}
-            scorers={reward}
           >
             {reviewFixPrompt}
           </Task>
@@ -535,6 +786,7 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
           <Task
             id="plan"
             output={outputs.plan}
+            retries={0}
             agent={sol(75 * MIN)}
             timeoutMs={80 * MIN}
             heartbeatTimeoutMs={15 * MIN}
@@ -544,6 +796,7 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
           <Task
             id="implement"
             output={outputs.implement}
+            retries={0}
             agent={luna(75 * MIN)}
             timeoutMs={80 * MIN}
             heartbeatTimeoutMs={15 * MIN}
@@ -555,6 +808,7 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
             <Task
               id="panel-sol"
               output={outputs.panelSol}
+              retries={0}
               agent={sol(45 * MIN)}
               timeoutMs={50 * MIN}
               heartbeatTimeoutMs={15 * MIN}
@@ -565,6 +819,7 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
             <Task
               id="panel-fable"
               output={outputs.panelFable}
+              retries={0}
               agent={fable(45 * MIN)}
               timeoutMs={50 * MIN}
               heartbeatTimeoutMs={15 * MIN}
@@ -575,6 +830,7 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
             <Task
               id="panel-third"
               output={outputs.panelThird}
+              retries={0}
               agent={third(45 * MIN)}
               timeoutMs={50 * MIN}
               heartbeatTimeoutMs={15 * MIN}
@@ -586,12 +842,12 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
           <Task
             id="fix"
             output={outputs.fix}
+            retries={0}
             agent={luna(60 * MIN)}
             timeoutMs={65 * MIN}
             heartbeatTimeoutMs={15 * MIN}
             deps={{ panelSol: outputs.panelSol, panelFable: outputs.panelFable, panelThird: outputs.panelThird }}
             needs={{ panelSol: "panel-sol", panelFable: "panel-fable", panelThird: "panel-third" }}
-            scorers={reward}
           >
             {fixPrompt}
           </Task>

@@ -61,9 +61,19 @@ docker run --rm --network "$SCORER_NETWORK" \
 cp -f "$LOGS_DIR/reward.json" "$OUT_DIR/reward.json" 2>/dev/null || true
 
 if [[ -f "$OUT_DIR/reward.json" ]]; then
-  python3 -c "import json,sys; print(json.load(open('$OUT_DIR/reward.json'))['reward'])"
+  python3 - "$OUT_DIR/reward.json" <<'PY'
+import json, math, sys
+
+reward = json.load(open(sys.argv[1]))["reward"]
+if isinstance(reward, bool) or not isinstance(reward, (int, float)):
+    raise SystemExit("reward.json has a nonnumeric reward")
+reward = float(reward)
+if not math.isfinite(reward) or not 0.0 <= reward <= 1.0:
+    raise SystemExit(f"reward.json has an out-of-range reward: {reward!r}")
+print(reward)
+PY
 else
   echo "[score] NO reward.json produced; see $OUT_DIR/test_output.log" >&2
   tail -25 "$OUT_DIR/test_output.log" >&2 || true
-  echo "0.0"
+  exit 1
 fi

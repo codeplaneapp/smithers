@@ -36,14 +36,18 @@ The whole point of this exercise was a *fair* benchmark. Three independent legs:
    oracle patch are **never** placed in, or adjacent to, the agent's workspace —
    the repo lives in an isolated temp dir with nothing else around it, so there is
    no on-disk breadcrumb to the answer key (`harness/prepare_task.sh`). Both the
-   agent container and the scoring container run with **`--network none`**, so it
-   is physically impossible to `pip install`/`git fetch` the upstream target
-   release to obtain the answer (all build & test deps are baked into the image).
+   agent container runs with **`--network none`**. Scoring also defaults to
+   `--network none`; experiments may opt the uncredentialed post-run grader into
+   a Docker bridge when an official image omitted a target dependency. That
+   policy is recorded in the validation receipt and the command/diff audit still
+   rejects code that fetches an upstream answer.
 
 2. **Validation.** Before any agent score is trusted, `harness/validate_task.sh`
    proves the grader is sound for that task by running it through the *identical*
    scoring path: the **oracle patch must score 1.0** and an **untouched repo must
-   score < 1.0**. If either fails, the task is not reported.
+   score < 1.0**. If either fails, the task is not reported. A passing run emits
+   a receipt binding the decision to the dataset revision, task/test/oracle
+   hashes, scorer, network policy, and immutable Docker image digest.
 
 3. **Verification.** Because the agents run on the host (where the LLM APIs are
    reachable), we do not merely *trust* them. `harness/audit_run.py` inspects
@@ -57,7 +61,8 @@ The whole point of this exercise was a *fair* benchmark. Three independent legs:
 
 The reward itself is produced by the task's own `tests/test.sh` weighted scoring
 (`harness/score.sh` just runs it in a fresh container) — we never reinterpret or
-inflate it.
+inflate it. A missing, nonnumeric, or out-of-range `reward.json` is an
+infrastructure failure, not an imputed zero.
 
 ### Threat model / known limitations
 
