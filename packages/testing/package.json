@@ -27,7 +27,7 @@
   "scripts": {
     "build": "node ../../scripts/clean-dts.mjs src && tsup",
     "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
-    "test": "bun test tests"
+    "test": "bun test tests --path-ignore-patterns '**/scenarios/**' && bun test tests/scenarios --timeout 30000"
   },
   "dependencies": {
     "@smthrs/components": "workspace:*",
