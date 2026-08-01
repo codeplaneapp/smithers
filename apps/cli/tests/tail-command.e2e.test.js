@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { spawn } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { resolve } from "node:path";
 import { drizzle } from "drizzle-orm/bun-sqlite";
@@ -21,6 +22,26 @@ const QUIET_ENV = {
 
 const ALPHA_TEXT = "ALPHA_OUTPUT_LINE\n";
 const BETA_TEXT = "BETA_OUTPUT_LINE\n";
+
+/**
+ * Give Incur a deliberately stale installed command-skill hash. A raw JSONL
+ * command must bypass the generated stale-skills CTA instead of appending a
+ * non-event object to stdout.
+ *
+ * @param {ReturnType<typeof createTempRepo>} repo
+ */
+function staleCommandSkillsEnv(repo) {
+  const dataHome = repo.path("xdg-data");
+  const skillDir = repo.path("installed-command-skill");
+  mkdirSync(resolve(dataHome, "incur"), { recursive: true });
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(resolve(skillDir, "SKILL.md"), "---\nname: smithers\ndescription: stale test skill\n---\n");
+  writeFileSync(
+    resolve(dataHome, "incur/smithers.json"),
+    `${JSON.stringify({ hash: "deliberately-stale", skills: ["smithers"], paths: [skillDir] })}\n`,
+  );
+  return { ...QUIET_ENV, XDG_DATA_HOME: dataHome };
+}
 
 /**
  * @param {ReturnType<typeof createTempRepo>} repo
@@ -265,7 +286,7 @@ test("tail --format jsonl emits parseable JSON lines matching persisted events",
     await seedCompletedRun(adapter, "tail-jsonl-run");
     const result = runSmithers(["tail", "tail-jsonl-run", "--format", "jsonl"], {
       cwd: repo.dir,
-      env: QUIET_ENV,
+      env: staleCommandSkillsEnv(repo),
       timeoutMs: 30_000,
     });
     expect(result.exitCode).toBe(0);

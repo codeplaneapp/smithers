@@ -13021,6 +13021,96 @@ async function runRawJsonTimelineCommandIfMatched(argv) {
   }
 }
 /**
+ * Run `tail --format jsonl` outside Incur so stdout remains an event-only
+ * JSONL stream. Incur appends its generated stale-skills CTA after a command
+ * result when command skills are installed but outdated; that extra JSON
+ * object is valid JSON but is not a run event and corrupts the stream contract.
+ *
+ * This parser intentionally accepts only tail's registered flags. Unknown or
+ * malformed arguments fall through to Incur for its normal validation/error
+ * rendering.
+ *
+ * @param {string[]} argv
+ * @returns {Promise<boolean>}
+ */
+async function runRawJsonlTailCommandIfMatched(argv) {
+  const commandIndex = findFirstPositionalIndex(argv);
+  if (commandIndex < 0 || argv[commandIndex] !== "tail") return false;
+  const options = {
+    node: undefined,
+    follow: true,
+    format: "jsonl",
+    linger: false,
+    overview: false,
+    hud: undefined,
+  };
+  const positionals = [];
+  let jsonl = false;
+  for (let index = 0; index < argv.length; index++) {
+    if (index === commandIndex) continue;
+    const arg = argv[index];
+    if (arg === "--format") {
+      if (argv[index + 1] !== "jsonl") return false;
+      jsonl = true;
+      index += 1;
+      continue;
+    }
+    if (arg === "--format=jsonl" || arg === "--json") {
+      jsonl = true;
+      continue;
+    }
+    if (arg === "--node" || arg === "-n") {
+      const value = argv[index + 1];
+      if (!value || value.startsWith("-")) return false;
+      options.node = value;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--node=")) {
+      const value = arg.slice("--node=".length);
+      if (!value) return false;
+      options.node = value;
+      continue;
+    }
+    if (arg === "--follow") {
+      options.follow = true;
+      continue;
+    }
+    if (arg === "--no-follow") {
+      options.follow = false;
+      continue;
+    }
+    if (arg === "--linger" || arg === "--overview" || arg === "--hud") {
+      options[arg.slice(2)] = true;
+      continue;
+    }
+    if (arg === "--no-linger" || arg === "--no-overview" || arg === "--no-hud") {
+      options[arg.slice(5)] = false;
+      continue;
+    }
+    if (arg === "--full-output") continue;
+    if (arg.startsWith("-")) return false;
+    positionals.push(arg);
+  }
+  if (!jsonl || positionals.length !== 1) return false;
+  await runTailCommand({
+    args: { runId: positionals[0] },
+    options,
+    format: "jsonl",
+    ok(value) {
+      return value;
+    },
+    error(error) {
+      writeStdoutSync(`${JSON.stringify({ code: error.code, message: error.message })}\n`);
+      return error;
+    },
+  });
+  // Match main's normal post-Incur path: imported Smithers modules may retain
+  // background handles, so a completed one-shot CLI command exits explicitly.
+  process.exit(commandExitOverride ?? 0);
+  return true;
+}
+/**
  * @param {string[]} argv
  */
 function rewriteWorkflowCommandArgv(argv) {
@@ -13384,6 +13474,9 @@ async function main() {
   }
   argv = rewriteBareResumeFlagArgv(argv);
   argv = rewriteBareHerdrFlagArgv(argv);
+  if (await runRawJsonlTailCommandIfMatched(argv)) {
+    return;
+  }
   if (await runMcpModeIfRequested(argv, { cli, version: readPackageVersion() })) {
     return;
   }
