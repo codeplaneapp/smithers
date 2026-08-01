@@ -575,9 +575,10 @@ function formatStatusExitCode(status) {
  * @param {SmithersDb} adapter
  * @param {any} run  the run row read AFTER the decision was recorded
  * @param {string} runId
+ * @param {{ executable?: string }} [resumeOptions]
  * @returns {Promise<{ resumed: true; pid: number } | { resumed: false; reason: "run-missing" | "not-parked" | "no-workflow-path" | "workflow-missing" | "owner-alive" | "claim-lost" | "spawn-failed" }>}
  */
-async function maybeResumeDecidedDetachedRun(adapter, run, runId) {
+async function maybeResumeDecidedDetachedRun(adapter, run, runId, resumeOptions) {
   if (!run) return { resumed: false, reason: "run-missing" };
   if (run.status !== "waiting-approval" && run.status !== "waiting-event")
     return { resumed: false, reason: "not-parked" };
@@ -616,7 +617,7 @@ async function maybeResumeDecidedDetachedRun(adapter, run, runId) {
   const claim = { claimOwnerId, claimHeartbeatAtMs, restoreRuntimeOwnerId, restoreHeartbeatAtMs };
   let pid = null;
   try {
-    pid = resumeRunDetached(run.workflowPath, runId, claim);
+    pid = resumeRunDetached(run.workflowPath, runId, claim, resumeOptions);
   } catch {
     // Spawn threw synchronously.
     pid = null;
