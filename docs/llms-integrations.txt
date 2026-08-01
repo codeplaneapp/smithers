@@ -1059,7 +1059,7 @@ export const claude = useCli
 `NanocodexAgent` connects Smithers to the external
 [`smithers-nanocodex`](https://github.com/N0xMare/smithers-nanocodex)
 bridge. The adapter does not bundle or download the executable at runtime. You
-build and install the qualified artifact separately, then select it with
+build, qualify, and install the pinned-source artifact separately, then select it with
 `binary` or `PATH`.
 
 The v0.0.1 integration is deliberately fixed: one fresh `serve` worker and one
@@ -1095,26 +1095,30 @@ Do not install it in a deployment that relies on this integration.
 
 The qualified consumer pin is:
 
-| Field            | Value                                        |
-| ---------------- | -------------------------------------------- |
-| Release          | `v0.0.1`                                     |
-| Source repo      | `N0xMare/smithers-nanocodex`                 |
-| Source commit    | `56d8b4fd54bf14e9f2874e5a010b8e301f8f695b`   |
-| Source tree      | `b8a092569e579c21e2ae288a470a6881022b61f2`   |
-| `Cargo.lock` blob | `808504efe6b6ea6c43705205ca3182be0dee1afe`  |
-| Rust toolchain   | `1.97.0`                                     |
-| Target           | `x86_64-unknown-linux-gnu`                   |
-| Maximum archive bytes | `8388608`                               |
+| Field                 | Value                                      |
+| --------------------- | ------------------------------------------ |
+| Release               | `v0.0.1`                                   |
+| Source repo           | `N0xMare/smithers-nanocodex`               |
+| Source commit         | `56d8b4fd54bf14e9f2874e5a010b8e301f8f695b` |
+| Source tree           | `b8a092569e579c21e2ae288a470a6881022b61f2` |
+| `Cargo.lock` blob     | `808504efe6b6ea6c43705205ca3182be0dee1afe` |
+| Rust toolchain        | `1.97.0`                                   |
+| Target                | `x86_64-unknown-linux-gnu`                 |
+| Maximum archive bytes | `8388608`                                  |
 
 Build and install that artifact:
 
 ```bash
 target=x86_64-unknown-linux-gnu
 package="smithers-nanocodex-v0.0.1-${target}"
+archive="${package}.tar.gz"
+artifact_dir="$(mktemp -d)"
+smithers_checkout=/absolute/path/to/smithers
 
 git clone https://github.com/N0xMare/smithers-nanocodex
 cd smithers-nanocodex
 git checkout 56d8b4fd54bf14e9f2874e5a010b8e301f8f695b
+test "$(git rev-parse HEAD)" = 56d8b4fd54bf14e9f2874e5a010b8e301f8f695b
 test "$(git rev-parse 'HEAD^{tree}')" = b8a092569e579c21e2ae288a470a6881022b61f2
 test "$(git hash-object Cargo.lock)" = 808504efe6b6ea6c43705205ca3182be0dee1afe
 
@@ -1122,18 +1126,29 @@ rustup toolchain install 1.97.0 --profile minimal
 RUSTUP_TOOLCHAIN=1.97.0 cargo build --locked --release --target "$target"
 
 # Package exactly as CI does, so the qualification command can inspect it.
-install -d -m 0755 "/tmp/$package" "/tmp/$package/docs" "/tmp/$package/third-party"
-install -m 0755 "target/${target}/release/smithers-nanocodex" "/tmp/$package/"
-install -m 0644 README.md LICENSE "/tmp/$package/"
-cp -R docs/. "/tmp/$package/docs/"
+install -d -m 0755 \
+  "$artifact_dir/$package" \
+  "$artifact_dir/$package/docs" \
+  "$artifact_dir/$package/third-party"
+install -m 0755 "target/${target}/release/smithers-nanocodex" "$artifact_dir/$package/"
+install -m 0644 README.md LICENSE "$artifact_dir/$package/"
+cp -R docs/. "$artifact_dir/$package/docs/"
+find "$artifact_dir/$package/docs" -type d -exec chmod 0755 {} +
+find "$artifact_dir/$package/docs" -type f -exec chmod 0644 {} +
 install -m 0644 third-party/README.md third-party/THIRD-PARTY-LICENSES.html \
-  "/tmp/$package/third-party/"
-tar --sort=name --mtime="@$(git log -1 --format=%ct)" \
+  "$artifact_dir/$package/third-party/"
+source_date_epoch="$(git log -1 --format=%ct)"
+tar --sort=name --mtime="@${source_date_epoch}" \
   --owner=0 --group=0 --numeric-owner \
   --pax-option=delete=atime,delete=ctime \
-  -C /tmp -cf - "$package" | gzip -n -9 > "/tmp/${package}.tar.gz"
+  -C "$artifact_dir" -cf - "$package" | gzip -n -9 > "$artifact_dir/$archive"
 
-sudo install -m 0755 "/tmp/$package/smithers-nanocodex" \
+# From a Smithers checkout with dependencies installed, qualify this exact archive.
+node "$smithers_checkout/scripts/qualify-nanocodex-release.mjs" \
+  --archive "$artifact_dir/$archive"
+
+# Install only after qualification succeeds.
+sudo install -m 0755 "$artifact_dir/$package/smithers-nanocodex" \
   /usr/local/bin/smithers-nanocodex
 ```
 
@@ -1293,7 +1308,7 @@ preflight:
 
 ```bash
 node scripts/qualify-nanocodex-release.mjs \
-  --archive /tmp/smithers-nanocodex-v0.0.1-x86_64-unknown-linux-gnu.tar.gz
+  --archive /absolute/path/to/smithers-nanocodex-v0.0.1-x86_64-unknown-linux-gnu.tar.gz
 ```
 
 `--archive` is required and must point at an archive built from the pinned
@@ -1301,8 +1316,8 @@ source commit above. The command never downloads anything: it performs no
 network access at all, and it never fetches or executes a contributor-hosted
 release artifact. It reads the archive, rejects it unless it is a non-empty
 regular file no larger than `artifact.maximumSizeBytes` (8 MiB), then computes
-its SHA-256 for the report — the digest is recorded as provenance output, not
-compared against a pinned expected value — and safely inspects archive layout.
+its SHA-256 for the report; the digest is recorded as provenance output, not
+compared against a pinned expected value, and safely inspects archive layout.
 In a temporary scratch workspace, it materializes only the
 verified archive executable and bounded local probe launchers. It runs the
 contained exact-version and full-capability probes, and only after those pass
