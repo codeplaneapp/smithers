@@ -1,8 +1,9 @@
 /**
  * Select generator arguments for `check:llms`.
  *
- * Versioned artifacts are immutable after publication. Before publication,
- * they are generated and compared like every other committed bundle.
+ * Versioned artifacts are immutable after a release tag or publication.
+ * Before release, they are generated and compared like every other committed
+ * bundle.
  *
  * @param {"published" | "unpublished" | "unavailable"} publication
  * @param {string} version

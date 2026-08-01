@@ -36,6 +36,29 @@ export function checkNpmPublication(version: string): NpmPublicationStatus {
   return "unavailable";
 }
 
+/**
+ * Treat a local release tag as authoritative even when the matching npm
+ * package has not been published. Versioned docs are release snapshots, so a
+ * tagged version must not be regenerated from later source documentation.
+ */
+export function checkVersionRelease(
+  version: string,
+  options: {
+    hasReleaseTag?: (version: string) => boolean;
+    checkPublication?: NpmPublicationChecker;
+  } = {},
+): NpmPublicationStatus {
+  const hasReleaseTag =
+    options.hasReleaseTag ??
+    ((candidate: string) =>
+      spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/tags/v${candidate}`], {
+        cwd: REPO_ROOT,
+        stdio: "ignore",
+      }).status === 0);
+  if (hasReleaseTag(version)) return "published";
+  return (options.checkPublication ?? checkNpmPublication)(version);
+}
+
 type VersionedArtifactGuardOptions = {
   checkPublication?: NpmPublicationChecker;
   warn?: (message: string) => void;
@@ -51,7 +74,7 @@ type VersionedArtifactGuardOptions = {
  * whole generation run, keeping both versioned files on one decision.
  */
 export function createVersionedArtifactGuard(version: string, options: VersionedArtifactGuardOptions = {}) {
-  const checkPublication = options.checkPublication ?? checkNpmPublication;
+  const checkPublication = options.checkPublication ?? checkVersionRelease;
   const warn = options.warn ?? console.warn;
   const error = options.error ?? console.error;
   const skipVersioned = options.skipVersioned ?? false;
@@ -79,7 +102,7 @@ export function createVersionedArtifactGuard(version: string, options: Versioned
     if (currentStatus === "published") {
       const message =
         `Refusing to overwrite ${path}: ${PUBLISHED_PACKAGE_NAME}@${version} is already ` +
-        "published on npm. Bump the package version first before regenerating versioned docs.";
+        "released (tagged or published). Bump the package version first before regenerating versioned docs.";
       if (refusedPaths.length === 0) error(message);
       refusedPaths.push(path);
       return "refused";
@@ -99,7 +122,7 @@ export function createVersionedArtifactGuard(version: string, options: Versioned
     if (refusedPaths.length === 0) return;
     throw new Error(
       `Refused to modify versioned docs for ${PUBLISHED_PACKAGE_NAME}@${version} because ` +
-        "that version is already published on npm. " +
+        "that version is already released. " +
         "Bump the package version first, then regenerate the docs bundles.",
     );
   }

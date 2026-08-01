@@ -38,6 +38,12 @@ function run(command, args) {
  * @returns {"published" | "unpublished" | "unavailable"}
  */
 function checkNpmPublication(version) {
+  const tag = spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/tags/v${version}`], {
+    cwd: root,
+    stdio: "ignore",
+  });
+  if (tag.status === 0) return "published";
+
   // npm is npm.cmd on Windows; .cmd files only spawn through a shell.
   const result = spawnSync("npm", ["view", `smthrs@${version}`, "version"], {
     cwd: root,
