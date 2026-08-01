@@ -28,6 +28,11 @@ export const smithersErrorDefinitions = {
     category: "engine",
     when: "Agent output cannot be parsed or validated against the declared output schema.",
   },
+  INVALID_RETRY_STATE: {
+    category: "engine",
+    when: "A resumed task has malformed or inconsistent durable retry metadata, so Smithers cannot safely reconstruct its retry state.",
+    details: "{ nodeId, iteration, attempt }",
+  },
   AGENT_CHECKPOINT_INVALID: {
     category: "engine",
     when: "An agent returns a checkpoint that is not strict JSON, has an invalid envelope, or exceeds the size limit.",
