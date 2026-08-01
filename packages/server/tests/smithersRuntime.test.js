@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Context, Effect } from "effect";
+import { Context, Effect, Fiber } from "effect";
 import { smithersTraceSpanStorage } from "@smithers-orchestrator/observability/_smithersTraceSpanStorage";
 import { runFork, runPromise, runSync } from "../src/smithersRuntime.js";
 
@@ -13,11 +13,12 @@ describe("smithersRuntime", () => {
     expect(runSync(Effect.succeed("sync-value"))).toBe("sync-value");
   });
 
-  test("runFork returns a running fiber", () => {
+  test("runFork returns a running fiber", async () => {
     const fiber = runFork(Effect.succeed(7));
     expect(fiber).toBeDefined();
     // An Effect 4 fiber exposes its id as a numeric property.
     expect(typeof fiber.id).toBe("number");
+    expect(await Effect.runPromise(Fiber.join(fiber))).toBe(7);
   });
 
   test("runPromise throws a SmithersError on a typed failure", async () => {
