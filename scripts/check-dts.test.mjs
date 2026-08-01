@@ -18,7 +18,7 @@ const affectedDeclarationPackages = [
   "packages/scheduler",
 ];
 
-test("the affected public declarations compile for a skipLibCheck:false consumer", (context) => {
+test("the committed package declarations compile for a skipLibCheck:false consumer", (context) => {
   for (const pkg of affectedDeclarationPackages) {
     assert.ok(DEFAULT_DECLARATION_PACKAGES.includes(pkg), `${pkg} must be gated by the declaration freshness check`);
     assert.doesNotMatch(
@@ -28,96 +28,32 @@ test("the affected public declarations compile for a skipLibCheck:false consumer
     );
   }
 
+  // Inside the repo so the consumer resolves the real workspace packages and the
+  // real `effect` types, not a hand-written stand-in for them.
   const fixtureRoot = mkdtempSync(join(repoRoot, ".smithers-dts-consumer-"));
   context.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
 
   writeFileSync(
-    join(fixtureRoot, "context.d.ts"),
-    `export interface Service<Identifier, Shape> {
-  readonly Identifier: Identifier;
-  readonly Service: Shape;
-}
-
-export interface ServiceClass<Self, Identifier extends string, Shape> extends Service<Self, Shape> {
-  new (_: never): ServiceClass.Shape<Identifier, Shape>;
-}
-
-export declare namespace ServiceClass {
-  interface Shape<Identifier extends string, Shape> {
-    readonly key: Identifier;
-    readonly Service: Shape;
-  }
-}
-`,
-  );
-  writeFileSync(
-    join(fixtureRoot, "affected.d.ts"),
-    `import * as Context from "./context.js";
-
-interface EmptyService {}
-
-export interface CorrelationContextService
-  extends Context.ServiceClass.Shape<"CorrelationContextService", EmptyService> {}
-export declare const CorrelationContextService: Context.ServiceClass<
-  CorrelationContextService,
-  "CorrelationContextService",
-  EmptyService
->;
-
-export interface MetricsService extends Context.ServiceClass.Shape<"MetricsService", EmptyService> {}
-export declare const MetricsService: Context.ServiceClass<MetricsService, "MetricsService", EmptyService>;
-
-export interface SmithersObservability
-  extends Context.ServiceClass.Shape<"SmithersObservability", EmptyService> {}
-export declare const SmithersObservability: Context.ServiceClass<
-  SmithersObservability,
-  "SmithersObservability",
-  EmptyService
->;
-
-export interface TracingService extends Context.ServiceClass.Shape<"TracingService", EmptyService> {}
-export declare const TracingService: Context.ServiceClass<TracingService, "TracingService", EmptyService>;
-
-export declare const SmithersSqlite: Context.Service<unknown, unknown>;
-
-export interface MemoryService extends Context.ServiceClass.Shape<"MemoryService", EmptyService> {}
-export declare const MemoryService: Context.ServiceClass<MemoryService, "MemoryService", EmptyService>;
-
-export interface SandboxTransport extends Context.ServiceClass.Shape<"SandboxTransport", EmptyService> {}
-export declare const SandboxTransport: Context.ServiceClass<SandboxTransport, "SandboxTransport", EmptyService>;
-
-export interface Scheduler extends Context.ServiceClass.Shape<"Scheduler", EmptyService> {}
-export declare const Scheduler: Context.ServiceClass<Scheduler, "Scheduler", EmptyService>;
-
-export interface WorkflowSession extends Context.ServiceClass.Shape<"WorkflowSession", EmptyService> {}
-export declare const WorkflowSession: Context.ServiceClass<WorkflowSession, "WorkflowSession", EmptyService>;
-`,
-  );
-  writeFileSync(
     join(fixtureRoot, "consumer.ts"),
-    `import type {
-  CorrelationContextService,
-  MetricsService,
-  SmithersObservability,
-  TracingService,
-  SmithersSqlite,
-  MemoryService,
-  SandboxTransport,
-  Scheduler,
-  WorkflowSession,
-} from "./affected.js";
+    `import { Effect, Layer } from "effect";
+import { MemoryService, createMemoryLayer } from "@smithers-orchestrator/memory";
+import type { MemoryServiceApi, MemoryNamespace } from "@smithers-orchestrator/memory";
 
-export type AffectedServices = [
-  typeof CorrelationContextService,
-  typeof MetricsService,
-  typeof SmithersObservability,
-  typeof TracingService,
-  typeof SmithersSqlite,
-  typeof MemoryService,
-  typeof SandboxTransport,
-  typeof Scheduler,
-  typeof WorkflowSession,
-];
+// \`yield*\` must surface the service API, so a declaration that lost its
+// Context.ServiceClass base (\`declare class MemoryService {}\`) fails here.
+export const readFact = Effect.gen(function* () {
+  const memory = yield* MemoryService;
+  return yield* memory.getFact({ kind: "global", id: "test" } satisfies MemoryNamespace, "k");
+});
+
+// The class must still work as a Layer service key.
+declare const api: MemoryServiceApi;
+export const layer: Layer.Layer<MemoryService> = Layer.succeed(MemoryService, api);
+
+// The shipped layer factory must produce the same service key.
+export const provided: Effect.Effect<Awaited<unknown> | undefined, unknown, never> = readFact.pipe(
+  Effect.provide(createMemoryLayer({} as Parameters<typeof createMemoryLayer>[0])),
+) as never;
 `,
   );
 
@@ -128,12 +64,14 @@ export type AffectedServices = [
       {
         compilerOptions: {
           lib: ["ESNext", "DOM"],
-          module: "NodeNext",
-          moduleResolution: "NodeNext",
+          module: "Preserve",
+          moduleResolution: "Bundler",
           noEmit: true,
           skipLibCheck: false,
           strict: true,
           target: "ES2022",
+          types: ["node", "bun"],
+          typeRoots: [join(repoRoot, "node_modules/@types")],
         },
         files: [join(fixtureRoot, "consumer.ts")],
       },
@@ -150,7 +88,19 @@ export type AffectedServices = [
       encoding: "utf8",
     },
   );
-  assert.equal(tsc.status, 0, `strict declaration consumer failed\n${tsc.stdout}${tsc.stderr}`);
+  // `skipLibCheck: false` type-checks everything the entrypoints reach, so the
+  // raw output also carries third-party diagnostics (drizzle-orm, effect) and
+  // one pre-existing packages/db defect: its declaration writes
+  // `BunSQLiteDatabase<typeof schema>` but drizzle-orm 0.45's type is not
+  // generic. Neither is this gate's business, so both are excluded by name
+  // rather than silently — narrow the exclusion as those get fixed.
+  const knownUnrelatedDeclarations = ["node_modules/", "packages/db/src/index.d.ts"];
+  const errors = `${tsc.stdout}${tsc.stderr}`
+    .split("\n")
+    .filter((line) => /error TS\d+/.test(line))
+    .filter((line) => !knownUnrelatedDeclarations.some((known) => line.includes(known)));
+
+  assert.deepEqual(errors, [], `committed declarations failed a strict consumer:\n${errors.join("\n")}`);
 });
 
 test("the declaration gate covers gateway bundle drift and restores the tree", (context) => {
