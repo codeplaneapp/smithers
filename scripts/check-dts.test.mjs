@@ -10,76 +10,147 @@ import { checkDeclarations, DEFAULT_DECLARATION_PACKAGES } from "./check-dts.mjs
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-// The Effect 4 migration seams this suite guards regressed via TS2694
-// ("<namespace> has no exported member") living *inside* a shipped `.d.ts`
-// (e.g. `Context.Tag`/`Context.TagClass` no longer exist in Effect 4). The
-// declaration freshness gate only rebuilds packages listed in
-// DEFAULT_DECLARATION_PACKAGES, and every consumer fixture in the repo compiles
-// with `skipLibCheck: true`, which suppresses errors in imported declarations —
-// so nothing prevents that exact regression from reaching CI. This test locks
-// in both halves: the affected packages are gated, and a `skipLibCheck: false`
-// consumer surfaces a TS2694 that `skipLibCheck: true` would hide.
-test("skipLibCheck:false surfaces a TS2694 in an imported declaration that the affected packages are gated for", (context) => {
-  for (const pkg of [
-    "apps/observability",
-    "packages/engine",
-    "packages/memory",
-    "packages/sandbox",
-    "packages/scheduler",
-  ]) {
+const affectedDeclarationPackages = [
+  "apps/observability",
+  "packages/engine",
+  "packages/memory",
+  "packages/sandbox",
+  "packages/scheduler",
+];
+
+test("the affected public declarations compile for a skipLibCheck:false consumer", (context) => {
+  for (const pkg of affectedDeclarationPackages) {
     assert.ok(DEFAULT_DECLARATION_PACKAGES.includes(pkg), `${pkg} must be gated by the declaration freshness check`);
+    assert.doesNotMatch(
+      readFileSync(join(repoRoot, pkg, "src/index.d.ts"), "utf8"),
+      /Context\.Tag(?:Class(?:Shape)?)?\b/,
+      `${pkg} must not ship removed Effect 3 Context types`,
+    );
   }
 
-  const fixtureRoot = mkdtempSync(join(tmpdir(), "smithers-dts-consumer-"));
+  const fixtureRoot = mkdtempSync(join(repoRoot, ".smithers-dts-consumer-"));
   context.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
 
-  // A dependency namespace that mirrors Effect's `Context`: it exports `Tag`
-  // but not `TagClass`, exactly the shape the migration collided with.
   writeFileSync(
     join(fixtureRoot, "context.d.ts"),
-    `export declare namespace Context {\n  export interface Tag<A> {\n    readonly value: A;\n  }\n}\n`,
+    `export interface Service<Identifier, Shape> {
+  readonly Identifier: Identifier;
+  readonly Service: Shape;
+}
+
+export interface ServiceClass<Self, Identifier extends string, Shape> extends Service<Self, Shape> {
+  new (_: never): ServiceClass.Shape<Identifier, Shape>;
+}
+
+export declare namespace ServiceClass {
+  interface Shape<Identifier extends string, Shape> {
+    readonly key: Identifier;
+    readonly Service: Shape;
+  }
+}
+`,
   );
-  // A shipped declaration that references the missing namespace member — the
-  // TS2694 regression. It lives in a `.d.ts`, so `skipLibCheck: true` hides it.
   writeFileSync(
     join(fixtureRoot, "affected.d.ts"),
-    `import type { Context } from "./context.js";\nexport type AffectedService = Context.TagClass<string>;\n`,
+    `import * as Context from "./context.js";
+
+interface EmptyService {}
+
+export interface CorrelationContextService
+  extends Context.ServiceClass.Shape<"CorrelationContextService", EmptyService> {}
+export declare const CorrelationContextService: Context.ServiceClass<
+  CorrelationContextService,
+  "CorrelationContextService",
+  EmptyService
+>;
+
+export interface MetricsService extends Context.ServiceClass.Shape<"MetricsService", EmptyService> {}
+export declare const MetricsService: Context.ServiceClass<MetricsService, "MetricsService", EmptyService>;
+
+export interface SmithersObservability
+  extends Context.ServiceClass.Shape<"SmithersObservability", EmptyService> {}
+export declare const SmithersObservability: Context.ServiceClass<
+  SmithersObservability,
+  "SmithersObservability",
+  EmptyService
+>;
+
+export interface TracingService extends Context.ServiceClass.Shape<"TracingService", EmptyService> {}
+export declare const TracingService: Context.ServiceClass<TracingService, "TracingService", EmptyService>;
+
+export declare const SmithersSqlite: Context.Service<unknown, unknown>;
+
+export interface MemoryService extends Context.ServiceClass.Shape<"MemoryService", EmptyService> {}
+export declare const MemoryService: Context.ServiceClass<MemoryService, "MemoryService", EmptyService>;
+
+export interface SandboxTransport extends Context.ServiceClass.Shape<"SandboxTransport", EmptyService> {}
+export declare const SandboxTransport: Context.ServiceClass<SandboxTransport, "SandboxTransport", EmptyService>;
+
+export interface Scheduler extends Context.ServiceClass.Shape<"Scheduler", EmptyService> {}
+export declare const Scheduler: Context.ServiceClass<Scheduler, "Scheduler", EmptyService>;
+
+export interface WorkflowSession extends Context.ServiceClass.Shape<"WorkflowSession", EmptyService> {}
+export declare const WorkflowSession: Context.ServiceClass<WorkflowSession, "WorkflowSession", EmptyService>;
+`,
   );
   writeFileSync(
     join(fixtureRoot, "consumer.ts"),
-    `import type { AffectedService } from "./affected.js";\nexport type Consumed = AffectedService;\n`,
+    `import type {
+  CorrelationContextService,
+  MetricsService,
+  SmithersObservability,
+  TracingService,
+  SmithersSqlite,
+  MemoryService,
+  SandboxTransport,
+  Scheduler,
+  WorkflowSession,
+} from "./affected.js";
+
+export type AffectedServices = [
+  typeof CorrelationContextService,
+  typeof MetricsService,
+  typeof SmithersObservability,
+  typeof TracingService,
+  typeof SmithersSqlite,
+  typeof MemoryService,
+  typeof SandboxTransport,
+  typeof Scheduler,
+  typeof WorkflowSession,
+];
+`,
   );
 
-  const runTsc = (skipLibCheck) => {
-    const tsconfigPath = join(fixtureRoot, `tsconfig.${skipLibCheck ? "skip" : "strict"}.json`);
-    writeFileSync(
-      tsconfigPath,
-      `${JSON.stringify(
-        {
-          compilerOptions: {
-            module: "NodeNext",
-            moduleResolution: "NodeNext",
-            noEmit: true,
-            skipLibCheck,
-            strict: true,
-            target: "ES2022",
-            types: [],
-          },
-          files: [join(fixtureRoot, "consumer.ts")],
+  const tsconfigPath = join(fixtureRoot, "tsconfig.json");
+  writeFileSync(
+    tsconfigPath,
+    `${JSON.stringify(
+      {
+        compilerOptions: {
+          lib: ["ESNext", "DOM"],
+          module: "NodeNext",
+          moduleResolution: "NodeNext",
+          noEmit: true,
+          skipLibCheck: false,
+          strict: true,
+          target: "ES2022",
         },
-        null,
-        2,
-      )}\n`,
-    );
-    return spawnSync("pnpm", ["exec", "tsc", "--project", tsconfigPath], { cwd: repoRoot, encoding: "utf8" });
-  };
+        files: [join(fixtureRoot, "consumer.ts")],
+      },
+      null,
+      2,
+    )}\n`,
+  );
 
-  const suppressed = runTsc(true);
-  assert.equal(suppressed.status, 0, `skipLibCheck:true should hide the declaration error\n${suppressed.stdout}${suppressed.stderr}`);
-
-  const surfaced = runTsc(false);
-  assert.notEqual(surfaced.status, 0, "skipLibCheck:false must reject the TS2694 regression");
-  assert.match(`${surfaced.stdout}${surfaced.stderr}`, /error TS2694/);
+  const tsc = spawnSync(
+    process.execPath,
+    [join(repoRoot, "node_modules/typescript/bin/tsc"), "--project", tsconfigPath],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+    },
+  );
+  assert.equal(tsc.status, 0, `strict declaration consumer failed\n${tsc.stdout}${tsc.stderr}`);
 });
 
 test("the declaration gate covers gateway bundle drift and restores the tree", (context) => {

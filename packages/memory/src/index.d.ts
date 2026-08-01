@@ -1,7 +1,7 @@
 import * as zod from 'zod';
 import { z } from 'zod';
 import * as zod_v4_core from 'zod/v4/core';
-import { Effect, Context, Layer } from 'effect';
+import { Effect, Layer } from 'effect';
 import { SmithersError } from '@smithers-orchestrator/errors';
 import * as _vectorize_io_hindsight_client from '@vectorize-io/hindsight-client';
 import { HindsightClient } from '@vectorize-io/hindsight-client';
@@ -321,7 +321,7 @@ declare function Summarizer(agent: {
 }): MemoryProcessor$1;
 type MemoryProcessor$1 = MemoryProcessor$4;
 
-declare class MemoryService extends Context.ServiceClass.Shape<"MemoryService", any> {
+declare class MemoryService {
 }
 
 /** @typedef {import("./MemoryLayerConfig.ts").MemoryLayerConfig} MemoryLayerConfig */
