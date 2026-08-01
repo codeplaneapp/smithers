@@ -1279,12 +1279,8 @@ var init_runScenario = __esm({
       );
       for (let turn = 0; !done && turn < budget; turn++) {
         const progressBefore = kernel.trace.snapshot().length + kernel.controls.consumed();
-        for (let dispatcherTurn = 0; dispatcherTurn < Math.min(64, Math.max(1, budget)); dispatcherTurn++) {
-          await Promise.resolve();
-          await new Promise((resolve4) => setImmediate(resolve4));
-          if (done) break;
-        }
-        if (!done) await new Promise((resolve3) => setImmediate(resolve3));
+        for (let microtask = 0; microtask < Math.min(64, Math.max(1, budget)); microtask++) await Promise.resolve();
+        if (!done) await new Promise((resolve4) => setImmediate(resolve4));
         if (!done) {
           const progressAfter = kernel.trace.snapshot().length + kernel.controls.consumed();
           if (progressAfter === progressBefore) {
