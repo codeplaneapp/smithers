@@ -349,7 +349,9 @@ describe("smithers monitor", () => {
       const handoff = await fetch(`http://127.0.0.1:${port}${printed.pathname}${printed.search}`);
       expect(handoff.status).toBe(200);
       const cookie = (handoff.headers.get("set-cookie") ?? "").split(";")[0];
-      expect(cookie).toContain("smithers_session=");
+      // The session cookie is scoped per gateway port so concurrent workspace
+      // gateways on one host do not clobber each other's session.
+      expect(cookie).toMatch(new RegExp(`^smithers_session_${port}=`));
       const page = await fetch(`http://127.0.0.1:${port}/monitor`, { headers: { cookie } });
       expect(page.status).toBe(200);
     } finally {
