@@ -64,7 +64,7 @@ function parseApprovalRestriction(value, field) {
  * @param {string | null} fallbackTitle
  * @returns {ApprovalRequestRecord}
  */
-export function parseApprovalRequest(value, fallbackTitle) {
+function parseApprovalRequest(value, fallbackTitle) {
   const record = asObject(value);
   const allowedScopes = parseApprovalRestriction(record?.allowedScopes, "allowedScopes");
   const allowedUsers = parseApprovalRestriction(record?.allowedUsers, "allowedUsers");
@@ -98,7 +98,7 @@ export function parseApprovalRequest(value, fallbackTitle) {
  * @param {ApprovalRequestRecord} request
  * @param {unknown} decision
  */
-export function validateApprovalDecision(request, decision) {
+function validateApprovalDecision(request, decision) {
   if (request.mode === "select") {
     // Fail closed: a select request whose options were all malformed (dropped
     // by parseApprovalRequest) must not accept an arbitrary selection.
@@ -142,7 +142,7 @@ export function validateApprovalDecision(request, decision) {
  * @param {unknown} value
  * @param {unknown} explicitNote
  */
-export function normalizeDecision(value, explicitNote) {
+function normalizeDecision(value, explicitNote) {
   const stableDecision = asObject(value);
   return {
     decision: stableDecision && "value" in stableDecision ? stableDecision.value : value,
