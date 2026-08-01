@@ -10,6 +10,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { WebSocket } from "ws";
 import { Gateway, GATEWAY_SESSION_COOKIE } from "../src/gateway.js";
 
+// The gateway scopes the session cookie by port so concurrent workspace
+// gateways on one host do not clobber each other. Requests to 127.0.0.1:<port>
+// therefore carry `smithers_session_<port>`.
+const cookieName = (port) => `${GATEWAY_SESSION_COOKIE}_${port}`;
+
 const TOKEN = "session-token";
 
 const TOKEN_AUTH = {
@@ -55,7 +60,7 @@ describe("gateway browser session handoff", () => {
     );
     expect(response.status).toBe(200);
     const setCookie = response.headers.get("set-cookie") ?? "";
-    expect(setCookie).toContain(`${GATEWAY_SESSION_COOKIE}=${TOKEN}`);
+    expect(setCookie).toContain(`${cookieName(port)}=${TOKEN}`);
     expect(setCookie).toContain("HttpOnly");
     expect(setCookie).toContain("SameSite=Lax");
     const html = await response.text();
@@ -71,12 +76,12 @@ describe("gateway browser session handoff", () => {
       headers: { authorization: `Bearer ${TOKEN}` },
     });
     expect(viaHeader.status).toBe(200);
-    expect(viaHeader.headers.get("set-cookie") ?? "").toContain(`${GATEWAY_SESSION_COOKIE}=${TOKEN}`);
+    expect(viaHeader.headers.get("set-cookie") ?? "").toContain(`${cookieName(port)}=${TOKEN}`);
     // Plain HTTP must NOT carry Secure, or the browser drops the cookie.
     expect(viaHeader.headers.get("set-cookie") ?? "").not.toContain("Secure");
 
     const viaCookie = await fetch(`http://127.0.0.1:${port}/v1/auth/session?next=%2Fconsole`, {
-      headers: { cookie: `${GATEWAY_SESSION_COOKIE}=${TOKEN}` },
+      headers: { cookie: `${cookieName(port)}=${TOKEN}` },
     });
     expect(viaCookie.status).toBe(200);
   });
@@ -103,7 +108,7 @@ describe("gateway browser session handoff", () => {
 
   test("the session cookie unlocks UI pages, assets, and the HTTP RPC", async () => {
     const port = await listenWithAuth();
-    const cookie = `${GATEWAY_SESSION_COOKIE}=${TOKEN}`;
+    const cookie = `${cookieName(port)}=${TOKEN}`;
 
     const page = await fetch(`http://127.0.0.1:${port}/console`, { headers: { cookie } });
     expect(page.status).toBe(200);
@@ -127,7 +132,7 @@ describe("gateway browser session handoff", () => {
   test("a bad cookie does not authenticate", async () => {
     const port = await listenWithAuth();
     const response = await fetch(`http://127.0.0.1:${port}/console`, {
-      headers: { cookie: `${GATEWAY_SESSION_COOKIE}=wrong` },
+      headers: { cookie: `${cookieName(port)}=wrong` },
     });
     expect(response.status).toBe(401);
   });
@@ -135,7 +140,7 @@ describe("gateway browser session handoff", () => {
   test("WS connect authenticates from the session cookie when the frame carries no token", async () => {
     const port = await listenWithAuth();
     const ws = new WebSocket(`ws://127.0.0.1:${port}`, {
-      headers: { cookie: `${GATEWAY_SESSION_COOKIE}=${TOKEN}` },
+      headers: { cookie: `${cookieName(port)}=${TOKEN}` },
     });
     ws.on("error", () => {});
     await new Promise((resolve, reject) => {
@@ -215,7 +220,7 @@ describe("gateway session handoff — security regressions", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        cookie: `${GATEWAY_SESSION_COOKIE}=${TOKEN}`,
+        cookie: `${cookieName(port)}=${TOKEN}`,
         origin: "http://evil.example.com",
       },
       body: JSON.stringify({}),
@@ -230,12 +235,48 @@ describe("gateway session handoff — security regressions", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        cookie: `${GATEWAY_SESSION_COOKIE}=${TOKEN}`,
+        cookie: `${cookieName(port)}=${TOKEN}`,
         origin: `http://127.0.0.1:${port}`,
       },
       body: JSON.stringify({}),
     });
     const frame = await res.json().catch(() => null);
     expect(frame?.ok).toBe(true);
+  });
+});
+
+describe("gateway session handoff — per-port cookie isolation", () => {
+  test("two gateways on different ports keep independent session cookies", async () => {
+    const authB = {
+      mode: "token",
+      tokens: { "token-b": { role: "operator", scopes: ["*"], userId: "user:b" } },
+    };
+    const gwA = new Gateway({ ui: true, auth: TOKEN_AUTH });
+    const gwB = new Gateway({ ui: true, auth: authB });
+    try {
+      const portA = getPort(await gwA.listen({ port: 0, host: "127.0.0.1" }));
+      const portB = getPort(await gwB.listen({ port: 0, host: "127.0.0.1" }));
+      const setA = (await fetch(`http://127.0.0.1:${portA}/v1/auth/session?token=${TOKEN}&next=%2F`)).headers.get(
+        "set-cookie",
+      );
+      const setB = (await fetch(`http://127.0.0.1:${portB}/v1/auth/session?token=token-b&next=%2F`)).headers.get(
+        "set-cookie",
+      );
+      // Distinct cookie names -> the browser stores both; neither clobbers the other.
+      expect(setA).toContain(`${GATEWAY_SESSION_COOKIE}_${portA}=`);
+      expect(setB).toContain(`${GATEWAY_SESSION_COOKIE}_${portB}=`);
+      expect(setA).not.toContain(`${GATEWAY_SESSION_COOKIE}_${portB}=`);
+      // A request to A carrying BOTH cookies still authenticates with A's token.
+      const both = `${GATEWAY_SESSION_COOKIE}_${portA}=${TOKEN}; ${GATEWAY_SESSION_COOKIE}_${portB}=token-b`;
+      const res = await fetch(`http://127.0.0.1:${portA}/v1/rpc/listRuns`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: both, origin: `http://127.0.0.1:${portA}` },
+        body: JSON.stringify({}),
+      });
+      expect((await res.json())?.ok).toBe(true);
+    } finally {
+      await gwA.close();
+      await gwB.close();
+    }
   });
 });
