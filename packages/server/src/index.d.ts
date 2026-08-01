@@ -1772,6 +1772,16 @@ declare class Gateway {
      */
     isRequestOriginAllowed(req: IncomingMessage): boolean;
     /**
+     * For cookie-authenticated requests, whether the browser `Origin` is trusted:
+     * absent/"null" (non-browser), on the configured allow-list, or same-host as
+     * the request `Host` (the gateway's own origin). Cross-origin cookie auth is
+     * refused even with an empty allow-list, because the SameSite=Lax cookie is
+     * an ambient credential a sibling same-site origin can trigger.
+     * @param {IncomingMessage} req
+     * @returns {boolean}
+     */
+    isCookieOriginTrusted(req: IncomingMessage): boolean;
+    /**
      * DNS-rebinding defense (spec decision 16a). An unauthenticated daemon grants
      * operator scope to every request, so a browser page at a name rebound to
      * 127.0.0.1 could drive `launchRun` (real compute/shell). Browsers send the

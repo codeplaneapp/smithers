@@ -2843,7 +2843,7 @@ type ApprovalPayload$1 = {
 };
 
 type RunStatusSchema = RunStatusSchema$1;
-declare const RunStatusSchema: Schema.Literal<"running">;
+declare const RunStatusSchema: Schema.Literals<readonly ["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "finished", "continued", "failed", "cancelled"]>;
 declare const ApprovalPayloadSchema: Schema.Struct<{
     readonly runId: Schema.String;
     readonly nodeId: Schema.String;
@@ -2882,7 +2882,7 @@ declare const SignalResultSchema: Schema.Struct<{
 }>;
 declare const ListRunsPayloadSchema: Schema.Struct<{
     readonly limit: Schema.optional<Schema.Number>;
-    readonly status: Schema.optional<Schema.Literal<"running">>;
+    readonly status: Schema.optional<Schema.Literals<readonly ["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "finished", "continued", "failed", "cancelled"]>>;
 }>;
 declare const RunSummarySchema: Schema.Struct<{
     readonly runId: Schema.String;
@@ -2890,7 +2890,7 @@ declare const RunSummarySchema: Schema.Struct<{
     readonly workflowName: Schema.String;
     readonly workflowPath: Schema.NullOr<Schema.String>;
     readonly workflowHash: Schema.NullOr<Schema.String>;
-    readonly status: Schema.Literal<"running">;
+    readonly status: Schema.Literals<readonly ["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "finished", "continued", "failed", "cancelled"]>;
     readonly createdAtMs: Schema.Number;
     readonly startedAtMs: Schema.NullOr<Schema.Number>;
     readonly finishedAtMs: Schema.NullOr<Schema.Number>;
@@ -2914,7 +2914,7 @@ declare const GetRunResultSchema: Schema.NullOr<Schema.Struct<{
     readonly workflowName: Schema.String;
     readonly workflowPath: Schema.NullOr<Schema.String>;
     readonly workflowHash: Schema.NullOr<Schema.String>;
-    readonly status: Schema.Literal<"running">;
+    readonly status: Schema.Literals<readonly ["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "finished", "continued", "failed", "cancelled"]>;
     readonly createdAtMs: Schema.Number;
     readonly startedAtMs: Schema.NullOr<Schema.Number>;
     readonly finishedAtMs: Schema.NullOr<Schema.Number>;
@@ -2964,14 +2964,14 @@ declare const signal: Rpc.Rpc<"signal", Schema.Struct<{
 }>, Schema.Never, never, never>;
 declare const listRuns: Rpc.Rpc<"listRuns", Schema.Struct<{
     readonly limit: Schema.optional<Schema.Number>;
-    readonly status: Schema.optional<Schema.Literal<"running">>;
+    readonly status: Schema.optional<Schema.Literals<readonly ["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "finished", "continued", "failed", "cancelled"]>>;
 }>, Schema.$Array<Schema.Struct<{
     readonly runId: Schema.String;
     readonly parentRunId: Schema.NullOr<Schema.String>;
     readonly workflowName: Schema.String;
     readonly workflowPath: Schema.NullOr<Schema.String>;
     readonly workflowHash: Schema.NullOr<Schema.String>;
-    readonly status: Schema.Literal<"running">;
+    readonly status: Schema.Literals<readonly ["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "finished", "continued", "failed", "cancelled"]>;
     readonly createdAtMs: Schema.Number;
     readonly startedAtMs: Schema.NullOr<Schema.Number>;
     readonly finishedAtMs: Schema.NullOr<Schema.Number>;
@@ -2994,7 +2994,7 @@ declare const getRun: Rpc.Rpc<"getRun", Schema.Struct<{
     readonly workflowName: Schema.String;
     readonly workflowPath: Schema.NullOr<Schema.String>;
     readonly workflowHash: Schema.NullOr<Schema.String>;
-    readonly status: Schema.Literal<"running">;
+    readonly status: Schema.Literals<readonly ["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "finished", "continued", "failed", "cancelled"]>;
     readonly createdAtMs: Schema.Number;
     readonly startedAtMs: Schema.NullOr<Schema.Number>;
     readonly finishedAtMs: Schema.NullOr<Schema.Number>;
@@ -3041,14 +3041,14 @@ declare const SmithersRpcGroup: RpcGroup.RpcGroup<Rpc.Rpc<"approve", Schema.Stru
     readonly status: Schema.Literals<readonly ["signalled", "ignored"]>;
 }>, Schema.Never, never, never> | Rpc.Rpc<"listRuns", Schema.Struct<{
     readonly limit: Schema.optional<Schema.Number>;
-    readonly status: Schema.optional<Schema.Literal<"running">>;
+    readonly status: Schema.optional<Schema.Literals<readonly ["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "finished", "continued", "failed", "cancelled"]>>;
 }>, Schema.$Array<Schema.Struct<{
     readonly runId: Schema.String;
     readonly parentRunId: Schema.NullOr<Schema.String>;
     readonly workflowName: Schema.String;
     readonly workflowPath: Schema.NullOr<Schema.String>;
     readonly workflowHash: Schema.NullOr<Schema.String>;
-    readonly status: Schema.Literal<"running">;
+    readonly status: Schema.Literals<readonly ["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "finished", "continued", "failed", "cancelled"]>;
     readonly createdAtMs: Schema.Number;
     readonly startedAtMs: Schema.NullOr<Schema.Number>;
     readonly finishedAtMs: Schema.NullOr<Schema.Number>;
@@ -3070,7 +3070,7 @@ declare const SmithersRpcGroup: RpcGroup.RpcGroup<Rpc.Rpc<"approve", Schema.Stru
     readonly workflowName: Schema.String;
     readonly workflowPath: Schema.NullOr<Schema.String>;
     readonly workflowHash: Schema.NullOr<Schema.String>;
-    readonly status: Schema.Literal<"running">;
+    readonly status: Schema.Literals<readonly ["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "finished", "continued", "failed", "cancelled"]>;
     readonly createdAtMs: Schema.Number;
     readonly startedAtMs: Schema.NullOr<Schema.Number>;
     readonly finishedAtMs: Schema.NullOr<Schema.Number>;
