@@ -23,10 +23,7 @@ describe("validateApprovalDecision option-bearing modes", () => {
   });
 
   test("rank rejects mixed-type ranked arrays instead of silently sanitizing", () => {
-    const request = parseApprovalRequest(
-      { mode: "rank", options: [{ key: "canary", label: "Canary" }] },
-      null,
-    );
+    const request = parseApprovalRequest({ mode: "rank", options: [{ key: "canary", label: "Canary" }] }, null);
     // The ORIGINAL decision object is what approveNode persists, so a
     // non-string entry must be rejected, not stripped from a validation copy.
     const result = validateApprovalDecision(request, { ranked: ["canary", 7] });
@@ -35,10 +32,7 @@ describe("validateApprovalDecision option-bearing modes", () => {
   });
 
   test("valid select and rank decisions still pass", () => {
-    const select = parseApprovalRequest(
-      { mode: "select", options: [{ key: "safe", label: "Safe" }] },
-      null,
-    );
+    const select = parseApprovalRequest({ mode: "select", options: [{ key: "safe", label: "Safe" }] }, null);
     expect(validateApprovalDecision(select, { selected: "safe" }).ok).toBe(true);
     const rank = parseApprovalRequest(
       {
