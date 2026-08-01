@@ -567,17 +567,23 @@ export class CodexAgent extends BaseCliAgent {
       (typeof this.opts.effort === "string" && this.opts.effort) ||
       (typeof this.effort === "string" && this.effort) ||
       null;
-    /** @type {Record<string, unknown> | undefined} */
+    /** @type {CodexConfigOverrides | undefined} */
     let configForNorm = this.opts.config;
     if (effort) {
-      const base =
-        configForNorm && typeof configForNorm === "object" && !Array.isArray(configForNorm)
-          ? { .../** @type {Record<string, unknown>} */ (configForNorm) }
-          : {};
-      if (base.model_reasoning_effort == null) {
-        base.model_reasoning_effort = effort;
+      if (Array.isArray(configForNorm)) {
+        const entries = configForNorm.map(String);
+        const hasExplicitEffort = entries.some((entry) => /^\s*model_reasoning_effort\s*=/.test(entry));
+        configForNorm = hasExplicitEffort ? entries : [...entries, `model_reasoning_effort=${effort}`];
+      } else {
+        const base =
+          configForNorm && typeof configForNorm === "object"
+            ? { .../** @type {Record<string, unknown>} */ (configForNorm) }
+            : {};
+        if (base.model_reasoning_effort == null) {
+          base.model_reasoning_effort = effort;
+        }
+        configForNorm = base;
       }
-      configForNorm = base;
     }
     const configOverrides = normalizeCodexConfig(configForNorm);
     for (const entry of configOverrides) {

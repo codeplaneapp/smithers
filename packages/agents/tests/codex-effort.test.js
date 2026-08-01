@@ -52,4 +52,45 @@ describe("CodexAgent first-class effort", () => {
       await cmd.cleanup?.();
     }
   });
+
+  test("array config entries are preserved when effort supplies the default", async () => {
+    const cmd = await new CodexAgent({
+      effort: "high",
+      config: ["sandbox_workspace_write.network_access=true", "features.web_search=true"],
+    }).buildCommand({
+      prompt: "go",
+      cwd: process.cwd(),
+      options: {},
+    });
+    try {
+      expect(configOverride(cmd.args, "sandbox_workspace_write.network_access")).toBe("true");
+      expect(configOverride(cmd.args, "features.web_search")).toBe("true");
+      expect(configOverride(cmd.args, "model_reasoning_effort")).toBe("high");
+    } finally {
+      await cmd.cleanup?.();
+    }
+  });
+
+  test("explicit array model_reasoning_effort wins without dropping sibling entries", async () => {
+    const cmd = await new CodexAgent({
+      effort: "high",
+      config: ["sandbox_workspace_write.network_access=true", "model_reasoning_effort=low"],
+    }).buildCommand({
+      prompt: "go",
+      cwd: process.cwd(),
+      options: {},
+    });
+    try {
+      expect(configOverride(cmd.args, "sandbox_workspace_write.network_access")).toBe("true");
+      expect(configOverride(cmd.args, "model_reasoning_effort")).toBe("low");
+      expect(
+        cmd.args.filter(
+          (a, i) =>
+            a === "-c" && typeof cmd.args[i + 1] === "string" && cmd.args[i + 1].startsWith("model_reasoning_effort="),
+        ),
+      ).toHaveLength(1);
+    } finally {
+      await cmd.cleanup?.();
+    }
+  });
 });

@@ -5633,6 +5633,28 @@ async function legacyExecuteTask(
           }
           return null;
         };
+        /**
+         * @param {unknown} config
+         * @returns {string | null}
+         */
+        const effortFromCodexConfig = (config) => {
+          if (!Array.isArray(config)) return null;
+          let effort = null;
+          for (const rawEntry of config) {
+            const match = /^\s*model_reasoning_effort\s*=\s*(.*?)\s*$/.exec(String(rawEntry));
+            if (!match || !match[1]) continue;
+            const rawValue = match[1];
+            if (
+              (rawValue.startsWith('"') && rawValue.endsWith('"')) ||
+              (rawValue.startsWith("'") && rawValue.endsWith("'"))
+            ) {
+              effort = rawValue.slice(1, -1);
+            } else {
+              effort = rawValue;
+            }
+          }
+          return effort;
+        };
         const configObj =
           agentOpts && agentOpts.config && typeof agentOpts.config === "object" && !Array.isArray(agentOpts.config)
             ? /** @type {Record<string, unknown>} */ (agentOpts.config)
@@ -5657,6 +5679,7 @@ async function legacyExecuteTask(
           (agentOpts && typeof agentOpts.variant === "string" && agentOpts.variant) ||
           (agentOpts ? effortFromExtraArgs(agentOpts.extraArgs) : null) ||
           (agentOpts ? effortFromSettings(agentOpts.settings) : null) ||
+          (agentOpts ? effortFromCodexConfig(agentOpts.config) : null) ||
           (configObj && typeof configObj.model_reasoning_effort === "string"
             ? configObj.model_reasoning_effort
             : null) ||
