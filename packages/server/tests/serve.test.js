@@ -512,13 +512,21 @@ export default smithers(() => (
       await waitForServeRunStatus(["waiting-approval"]);
       const { status } = await request("/approve/task1", {
         method: "POST",
-        body: { decision: { approved: true, value: { selected: "balanced", notes: "best fit" } } },
+        body: {
+          decision: {
+            approved: true,
+            value: { selected: "balanced", notes: "best fit" },
+            note: "lgtm",
+          },
+        },
       });
       expect(status).toBe(200);
-      expect(JSON.parse((await adapter.getApproval(runId, "task1", 0))?.decisionJson ?? "null")).toEqual({
+      const approval = await adapter.getApproval(runId, "task1", 0);
+      expect(JSON.parse(approval?.decisionJson ?? "null")).toEqual({
         selected: "balanced",
         notes: "best fit",
       });
+      expect(approval?.note).toBe("lgtm");
     });
   });
   describe("POST /deny/:nodeId", () => {
@@ -527,7 +535,7 @@ export default smithers(() => (
       const workflowPath = writeTestWorkflow("deny", dbPath, {
         needsApproval: true,
       });
-      const { runId } = await startServeApp(workflowPath, {
+      const { adapter, runId } = await startServeApp(workflowPath, {
         needsApproval: true,
       });
       await waitForServeRunStatus(["waiting-approval"]);
@@ -535,12 +543,15 @@ export default smithers(() => (
         method: "POST",
         body: {
           iteration: 0,
-          note: "denied by test",
+          decision: { approved: false, value: { reason: "unsafe" }, note: "denied by test" },
           decidedBy: "test-user",
         },
       });
       expect(status).toBe(200);
       expect(data.runId).toBe(runId);
+      const approval = await adapter.getApproval(runId, "task1", 0);
+      expect(approval?.note).toBe("denied by test");
+      expect(JSON.parse(approval?.decisionJson ?? "null")).toEqual({ reason: "unsafe" });
     });
   });
   // =========================================================================

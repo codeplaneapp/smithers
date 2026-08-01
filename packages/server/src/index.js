@@ -46,7 +46,7 @@ export * from "./gatewayRoutes/getNodeOutput.js";
 export * from "./gatewayRoutes/jumpToFrame.js";
 export * from "./gatewayRoutes/streamDevTools.js";
 export * from "./browser.js";
-export { approvalDecision } from "./approvalDecision.js";
+export * from "./approvalDecision.js";
 // Type-only stubs reachable via `./*` that are NOT already transitively
 // re-exported through the JS modules above.
 export * from "./ServerOptions.js";
@@ -1357,7 +1357,7 @@ function startServerInternal(opts = {}) {
         try {
           requestJson = approval?.requestJson ? JSON.parse(approval.requestJson) : null;
         } catch {}
-        const decision = approvalDecision.unwrapDecision(body.decision);
+        const { decision, note } = approvalDecision.normalizeDecision(body.decision, body.note);
         const request = approvalDecision.parseApprovalRequest(requestJson, nodeId);
         if (request.restrictionError) {
           throw new HttpError(400, "INVALID_REQUEST", `Malformed approval request: ${request.restrictionError}`);
@@ -1366,7 +1366,7 @@ function startServerInternal(opts = {}) {
         if (!validation.ok) {
           throw new HttpError(400, validation.code, validation.message);
         }
-        await Effect.runPromise(approveNode(adapter, runId, nodeId, iteration, body.note, body.decidedBy, decision));
+        await Effect.runPromise(approveNode(adapter, runId, nodeId, iteration, note, body.decidedBy, decision));
         return sendJson(res, 200, { runId });
       }
       const denyMatch = url.pathname.match(/^\/v1\/runs\/([^/]+)\/nodes\/([^/]+)\/deny$/);
@@ -1384,17 +1384,8 @@ function startServerInternal(opts = {}) {
           return sendJson(res, 404, {
             error: { code: "NOT_FOUND", message: "Run not found" },
           });
-        await Effect.runPromise(
-          denyNode(
-            adapter,
-            runId,
-            nodeId,
-            body.iteration ?? 0,
-            body.note,
-            body.decidedBy,
-            approvalDecision.unwrapDecision(body.decision),
-          ),
-        );
+        const { decision, note } = approvalDecision.normalizeDecision(body.decision, body.note);
+        await Effect.runPromise(denyNode(adapter, runId, nodeId, body.iteration ?? 0, note, body.decidedBy, decision));
         return sendJson(res, 200, { runId });
       }
       const signalMatch =

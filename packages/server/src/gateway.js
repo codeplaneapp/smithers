@@ -1823,7 +1823,7 @@ function parseJwtScopes(value) {
   }
   return parseStringArray(value);
 }
-const { parseApprovalRequest, validateApprovalDecision, unwrapDecision } = approvalDecision;
+const { parseApprovalRequest, validateApprovalDecision, normalizeDecision } = approvalDecision;
 /**
  * @param {string} pattern
  */
@@ -9814,8 +9814,7 @@ a { color: var(--brand); }</style>
         ) {
           return responseError(frame.id, "FORBIDDEN", "Connection is missing required approval scope");
         }
-        const decision = unwrapDecision(params.decision);
-        const note = asString(params.note) ?? asString(stableDecision?.note);
+        const { decision, note } = normalizeDecision(params.decision, params.note);
         if (approved) {
           const validation = validateApprovalDecision(request, decision);
           if (!validation.ok) {

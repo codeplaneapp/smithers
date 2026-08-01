@@ -306,7 +306,7 @@ export function createServeApp(opts) {
     try {
       requestJson = approval?.requestJson ? JSON.parse(approval.requestJson) : null;
     } catch {}
-    const decision = approvalDecision.unwrapDecision(body.decision);
+    const { decision, note } = approvalDecision.normalizeDecision(body.decision, body.note);
     const request = approvalDecision.parseApprovalRequest(requestJson, nodeId);
     if (request.restrictionError) {
       throw new HttpError(400, "INVALID_REQUEST", `Malformed approval request: ${request.restrictionError}`);
@@ -315,24 +315,15 @@ export function createServeApp(opts) {
     if (!validation.ok) {
       throw new HttpError(400, validation.code, validation.message);
     }
-    await Effect.runPromise(approveNode(adapter, runId, nodeId, iteration, body.note, body.decidedBy, decision));
+    await Effect.runPromise(approveNode(adapter, runId, nodeId, iteration, note, body.decidedBy, decision));
     return c.json({ runId });
   });
   // POST /deny/:nodeId
   app.post("/deny/:nodeId", async (c) => {
     const nodeId = c.req.param("nodeId");
     const body = await c.req.json().catch(() => ({}));
-    await Effect.runPromise(
-      denyNode(
-        adapter,
-        runId,
-        nodeId,
-        body.iteration ?? 0,
-        body.note,
-        body.decidedBy,
-        approvalDecision.unwrapDecision(body.decision),
-      ),
-    );
+    const { decision, note } = approvalDecision.normalizeDecision(body.decision, body.note);
+    await Effect.runPromise(denyNode(adapter, runId, nodeId, body.iteration ?? 0, note, body.decidedBy, decision));
     return c.json({ runId });
   });
   // POST /cancel

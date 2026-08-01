@@ -685,7 +685,7 @@ export default smithers(() => (
       expect(status).toBe(200);
       expect(data.runId).toBe(startData.runId);
     });
-    test("persists and validates a select decision", async () => {
+    test("persists a stable select decision and audit note", async () => {
       const dbPath = resolve(testDir, "approval-select.db");
       const workflowPath = writeSelectApprovalWorkflow("approval-select", dbPath);
       startTestServer();
@@ -699,13 +699,21 @@ export default smithers(() => (
       try {
         const accepted = await request(`/v1/runs/${startData.runId}/nodes/task1/approve`, {
           method: "POST",
-          body: { decision: { selected: "balanced", notes: "best fit" } },
+          body: {
+            decision: {
+              approved: true,
+              value: { selected: "balanced", notes: "best fit" },
+              note: "lgtm",
+            },
+          },
         });
         expect(accepted.status).toBe(200);
-        expect(JSON.parse((await adapter.getApproval(startData.runId, "task1", 0))?.decisionJson ?? "null")).toEqual({
+        const approval = await adapter.getApproval(startData.runId, "task1", 0);
+        expect(JSON.parse(approval?.decisionJson ?? "null")).toEqual({
           selected: "balanced",
           notes: "best fit",
         });
+        expect(approval?.note).toBe("lgtm");
       } finally {
         adapterDb.close();
       }
@@ -766,12 +774,25 @@ export default smithers(() => (
         body: { workflowPath },
       });
       await waitForRunStatus(startData.runId, ["waiting-approval"]);
-      const { status, data } = await request(`/v1/runs/${startData.runId}/nodes/task1/deny`, {
-        method: "POST",
-        body: { iteration: 0, note: "denied by test", decidedBy: "test-user" },
-      });
-      expect(status).toBe(200);
-      expect(data.runId).toBe(startData.runId);
+      const adapterDb = new Database(dbPath, { readonly: true });
+      const adapter = new SmithersDb(adapterDb);
+      try {
+        const { status, data } = await request(`/v1/runs/${startData.runId}/nodes/task1/deny`, {
+          method: "POST",
+          body: {
+            iteration: 0,
+            decision: { approved: false, value: { reason: "unsafe" }, note: "denied by test" },
+            decidedBy: "test-user",
+          },
+        });
+        expect(status).toBe(200);
+        expect(data.runId).toBe(startData.runId);
+        const approval = await adapter.getApproval(startData.runId, "task1", 0);
+        expect(approval?.note).toBe("denied by test");
+        expect(JSON.parse(approval?.decisionJson ?? "null")).toEqual({ reason: "unsafe" });
+      } finally {
+        adapterDb.close();
+      }
     });
     test("returns 404 for non-existent run", async () => {
       startTestServer();

@@ -64,7 +64,7 @@ function parseApprovalRestriction(value, field) {
  * @param {string | null} fallbackTitle
  * @returns {ApprovalRequestRecord}
  */
-function parseApprovalRequest(value, fallbackTitle) {
+export function parseApprovalRequest(value, fallbackTitle) {
   const record = asObject(value);
   const allowedScopes = parseApprovalRestriction(record?.allowedScopes, "allowedScopes");
   const allowedUsers = parseApprovalRestriction(record?.allowedUsers, "allowedUsers");
@@ -98,7 +98,7 @@ function parseApprovalRequest(value, fallbackTitle) {
  * @param {ApprovalRequestRecord} request
  * @param {unknown} decision
  */
-function validateApprovalDecision(request, decision) {
+export function validateApprovalDecision(request, decision) {
   if (request.mode === "select") {
     // Fail closed: a select request whose options were all malformed (dropped
     // by parseApprovalRequest) must not accept an arbitrary selection.
@@ -139,13 +139,25 @@ function validateApprovalDecision(request, decision) {
 }
 
 /**
+ * @param {unknown} value
+ * @param {unknown} explicitNote
+ */
+export function normalizeDecision(value, explicitNote) {
+  const stableDecision = asObject(value);
+  return {
+    decision: stableDecision && "value" in stableDecision ? stableDecision.value : value,
+    note: asString(explicitNote) ?? asString(stableDecision?.note),
+  };
+}
+
+/**
  * Shared approval request parsing and decision validation for all transports.
  */
 export const approvalDecision = {
   parseApprovalRequest,
   validateApprovalDecision,
+  normalizeDecision,
   unwrapDecision(value) {
-    const decision = asObject(value);
-    return decision && "value" in decision ? decision.value : value;
+    return normalizeDecision(value, undefined).decision;
   },
 };
