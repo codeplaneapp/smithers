@@ -1,9 +1,8 @@
-import * as node_fs_promises from 'node:fs/promises';
+import { lstat } from 'node:fs/promises';
 import * as _smithers_orchestrator_observability_SmithersEvent from '@smithers-orchestrator/observability/SmithersEvent';
 import { SmithersDb } from '@smithers-orchestrator/db/adapter';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { Context, Effect, Layer } from 'effect';
-import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
+import { Layer } from 'effect';
 
 type SandboxRuntime$1 = "bubblewrap" | "docker" | "codeplane" | "cloudflare";
 
@@ -144,7 +143,7 @@ type ValidatedSandboxBundle$1 = {
  * @returns {Promise<ValidatedSandboxBundle>}
  */
 declare function validateSandboxBundle(bundlePath: string, fsOverrides?: {
-    lstatLogs?: typeof node_fs_promises.lstat;
+    lstatLogs?: typeof lstat;
 }): Promise<ValidatedSandboxBundle>;
 /**
  * @param {{ bundlePath: string; output: unknown; status: "finished" | "failed" | "cancelled"; runId?: string; streamLogPath?: string | null; patches?: Array<{ path: string; content: string }>; artifacts?: Array<{ path: string; content: string }>; diffBundle?: unknown; }} params
@@ -260,16 +259,6 @@ type SandboxBundleResult$1 = {
     bundlePath: string;
 };
 
-type SandboxTransportService = {
-    readonly create: (config: SandboxTransportConfig$1) => Effect.Effect<SandboxHandle$1, SmithersError>;
-    readonly ship: (bundlePath: string, handle: SandboxHandle$1) => Effect.Effect<void, SmithersError>;
-    readonly execute: (command: string, handle: SandboxHandle$1, signal?: AbortSignal) => Effect.Effect<{
-        exitCode: number;
-    }, SmithersError>;
-    readonly collect: (handle: SandboxHandle$1) => Effect.Effect<SandboxBundleResult$1, SmithersError>;
-    readonly cleanup: (handle: SandboxHandle$1) => Effect.Effect<void, SmithersError>;
-};
-
 /**
  * @param {SandboxProvider} provider
  * @returns {() => void}
@@ -322,9 +311,10 @@ declare function isDiffBundleLike(bundle: unknown): bundle is SandboxDiffBundleL
 /**
  * @param {SandboxProviderResult} result
  * @param {string} defaultBundlePath
+ * @param {string} rootDir
  * @returns {Promise<{ bundlePath: string; remoteRunId: string | null; workspaceId: string | null; containerId: string | null; }>}
  */
-declare function materializeProviderResult(result: SandboxProviderResult, defaultBundlePath: string): Promise<{
+declare function materializeProviderResult(result: SandboxProviderResult, defaultBundlePath: string, rootDir: string): Promise<{
     bundlePath: string;
     remoteRunId: string | null;
     workspaceId: string | null;
@@ -367,7 +357,8 @@ declare function layerForSandboxRuntime(runtime: SandboxRuntime): Layer.Layer<Sa
  * @returns {SandboxRuntime}
  */
 declare function resolveSandboxRuntime(requested: SandboxRuntime): SandboxRuntime;
-declare class SandboxTransport extends Context.TagClassShape<"SandboxTransport", SandboxTransportService> {
+declare class SandboxTransport {
+    constructor(...args: any[]);
 }
 type SandboxBundleResult = SandboxBundleResult$1;
 type SandboxTransportConfig = SandboxTransportConfig$1;
@@ -435,12 +426,13 @@ declare function writeSandboxProviderRequestFile(session: SandboxSession$1, requ
  *
  * @param {string} raw
  * @param {string} remoteId
- * @param {{ provider?: string; resultPath?: string }} [context]
+ * @param {{ provider?: string; resultPath?: string; secrets?: string[] }} [context]
  * @returns {import("../SandboxProvider.ts").SandboxProviderResult & Record<string, unknown>}
  */
 declare function parseSandboxProviderResult(raw: string, remoteId: string, context?: {
     provider?: string;
     resultPath?: string;
+    secrets?: string[];
 }): SandboxProviderResult$1 & Record<string, unknown>;
 
 /**

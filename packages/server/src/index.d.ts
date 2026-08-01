@@ -11,6 +11,8 @@ import * as ws from 'ws';
 import { WebSocketServer } from 'ws';
 import * as node_stream from 'node:stream';
 import * as _smithers_orchestrator_db_runState from '@smithers-orchestrator/db/runState';
+import * as effect_Record from 'effect/Record';
+import * as effect_LogLevel from 'effect/LogLevel';
 import * as hono from 'hono';
 import { Hono } from 'hono';
 import * as hono_types from 'hono/types';
@@ -782,6 +784,15 @@ declare const GATEWAY_METHOD_NAME_MAX_LENGTH: 64;
 declare const GATEWAY_FRAME_ID_MAX_LENGTH: 128;
 declare const GATEWAY_RPC_INPUT_MAX_BYTES: 1048576;
 declare const GATEWAY_RPC_INPUT_MAX_DEPTH: 32;
+/**
+ * Browser session cookie carrying the gateway bearer token. Browsers cannot
+ * send an Authorization header on top-level navigations (or WebSocket
+ * upgrades), so `GET /v1/auth/session` exchanges a bearer for this HttpOnly
+ * cookie and every authenticated path accepts it as an alternative. SameSite=Lax
+ * keeps it off cross-site subrequests (CSRF), matching the Origin allow-list
+ * model.
+ */
+declare const GATEWAY_SESSION_COOKIE: "smithers_session";
 declare class Gateway {
     /** Map a stored `_smithers_docs` row (camel-cased) onto the wire `GatewayTicketRow`. */
     static toTicketRow(row: any): {
@@ -893,6 +904,11 @@ declare class Gateway {
                 message: string;
                 stack?: string;
                 cause?: unknown;
+                readonly "~effect/Runtime/errorExitCode"?: number;
+                readonly "~effect/Runtime/errorReported"?: boolean;
+                readonly "~effect/ErrorReporter/ignore"?: boolean;
+                readonly "~effect/ErrorReporter/severity"?: effect_LogLevel.Severity;
+                readonly "~effect/ErrorReporter/attributes"?: effect_Record.ReadonlyRecord<string, unknown>;
             };
             isError(error: unknown): error is Error;
             isError(value: unknown): value is Error;
@@ -1155,6 +1171,19 @@ declare class Gateway {
         body: string;
         contentType: string;
     } | null>;
+    /**
+     * Browser session handoff: `GET /v1/auth/session?token=<bearer>&next=<path>`
+     * exchanges a valid bearer for an HttpOnly session cookie and lands the
+     * browser on `next` via an HTML `location.replace` (not a 30x), so the
+     * token never stays in the address bar or browser history. `next` is
+     * constrained to a same-origin absolute path — this must never become an
+     * open redirect. With no auth configured there is nothing to exchange and
+     * the browser goes straight to `next`.
+     *
+     * @param {IncomingMessage} req
+     * @param {ServerResponse} res
+     */
+    handleAuthSession(req: IncomingMessage, res: ServerResponse$1): Promise<void>;
     /**
      * @param {IncomingMessage} req
      * @param {ServerResponse} res
@@ -2430,7 +2459,7 @@ declare function runPromise<A, E, R>(effect: Effect.Effect<A, E, R>, options?: {
  * @template A, E, R
  * @param {Effect.Effect<A, E, R>} effect
  */
-declare function runFork<A, E, R>(effect: Effect.Effect<A, E, R>): effect_Fiber.RuntimeFiber<A, E>;
+declare function runFork<A, E, R>(effect: Effect.Effect<A, E, R>): effect_Fiber.Fiber<A, E>;
 /**
  * @template A, E, R
  * @param {Effect.Effect<A, E, R>} effect
@@ -2906,4 +2935,4 @@ declare function scheduleRunCleanup(runRegistry: Map<string, RunRecord>, runId: 
  */
 declare function clearRunCleanupTimer(record: RunRecord | undefined): void;
 
-export { type ApprovalRequestRecord, type AttemptRow, type ConnectRequest, type ConnectionEventWriterState, type ConnectionState, DEVTOOLS_BACKPRESSURE_LIMIT, DEVTOOLS_EMPTY_ROOT_ID, DEVTOOLS_MAX_FRAME_NO, DEVTOOLS_POLL_INTERVAL_MS, DEVTOOLS_REBASELINE_INTERVAL, DEVTOOLS_RUN_ID_PATTERN, DEVTOOLS_TASK_PROMPT_MAX_CHARS, DEVTOOLS_TREE_MAX_DEPTH, type DevToolsAgentRef, type DevToolsAgentSummary, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, DevToolsRouteError, type DiffSummary, EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_METHOD_PREFIX, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_METHOD_PREFIX, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, type EventFrame, GATEWAY_FRAME_ID_MAX_LENGTH, GATEWAY_METHOD_NAME_MAX_LENGTH, GATEWAY_RPC_INPUT_MAX_BYTES, GATEWAY_RPC_INPUT_MAX_DEPTH, GATEWAY_RPC_MAX_ARRAY_LENGTH, GATEWAY_RPC_MAX_DEPTH, GATEWAY_RPC_MAX_PAYLOAD_BYTES, GATEWAY_RPC_MAX_STRING_LENGTH, Gateway, type GatewayAuthConfig, type GatewayDefaults, type GatewayExtensionAction, type GatewayExtensionContext, type GatewayExtensionDefinition, type GatewayExtensionResource, type GatewayExtensionStream, type GatewayExtensionStreamContext, GatewayExtensions, type GatewayMetricLabels, type GatewayOperatorUiConfig, type GatewayOptions, type GatewayRegisterOptions, type GatewayRequestContext, type GatewayScope, type GatewayTokenGrant, type GatewayTransport, type GatewayUiConfig, type GatewayUiMount, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GetNodeDiffRouteResult, type HelloResponse, ITERATION_MAX, type IncomingMessage, type IntegrationsConfig, type IntegrationsWebhookSourceConfig, type JumpResult, NODE_ID_PATTERN, NODE_OUTPUT_MAX_BYTES, NODE_OUTPUT_WARN_BYTES, type NodeOutputErrorCode, type NodeOutputResponse, NodeOutputRouteError, RUN_DIFF_MAX_BYTES, RUN_ID_PATTERN, type RegisteredWorkflow, type RequestFrame, type ResolvedExtension, type ResolvedGatewayUiConfig, type ResolvedRun, type ResolvedWorkflowTuiConfig, type ResponseFrame, type RunEventStreamState, type RunStartAuthContext, type ServeOptions, type ServerOptions, type ServerResponse, type SmithersWorkflow, type UsageReport, __serverTestInternals, assertGatewayInputDepthWithinBounds, attachAgentAttemptsToDevToolsRoot, attachNodeStatesToDevToolsRoot, clampFrameStartedByPrompt, createBrowserSessionRegistry, createServeApp, emptyDevToolsRoot, extensionMethodName, getDevToolsSnapshotRoute, getGatewayInputDepth, getNodeDiffRoute, getNodeOutputRoute, getRunDiffRoute, isExtensionMethod, jumpToFrameRoute, parseGatewayRequestFrame, parseXmlToDevToolsRoot, resolveCommitPointer, runFork, runPromise, runSync, snapshotFromFrameRow, startServer, startServerEffect, statusForRpcError, streamDevToolsRoute, summarizeBundle, validateFrameNoInput, validateFromSeqInput, validateGatewayMethodName, validateRequestedFrameNo, validateRunId };
+export { type ApprovalRequestRecord, type AttemptRow, type ConnectRequest, type ConnectionEventWriterState, type ConnectionState, DEVTOOLS_BACKPRESSURE_LIMIT, DEVTOOLS_EMPTY_ROOT_ID, DEVTOOLS_MAX_FRAME_NO, DEVTOOLS_POLL_INTERVAL_MS, DEVTOOLS_REBASELINE_INTERVAL, DEVTOOLS_RUN_ID_PATTERN, DEVTOOLS_TASK_PROMPT_MAX_CHARS, DEVTOOLS_TREE_MAX_DEPTH, type DevToolsAgentRef, type DevToolsAgentSummary, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, DevToolsRouteError, type DiffSummary, EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_METHOD_PREFIX, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_METHOD_PREFIX, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, type EventFrame, GATEWAY_FRAME_ID_MAX_LENGTH, GATEWAY_METHOD_NAME_MAX_LENGTH, GATEWAY_RPC_INPUT_MAX_BYTES, GATEWAY_RPC_INPUT_MAX_DEPTH, GATEWAY_RPC_MAX_ARRAY_LENGTH, GATEWAY_RPC_MAX_DEPTH, GATEWAY_RPC_MAX_PAYLOAD_BYTES, GATEWAY_RPC_MAX_STRING_LENGTH, GATEWAY_SESSION_COOKIE, Gateway, type GatewayAuthConfig, type GatewayDefaults, type GatewayExtensionAction, type GatewayExtensionContext, type GatewayExtensionDefinition, type GatewayExtensionResource, type GatewayExtensionStream, type GatewayExtensionStreamContext, GatewayExtensions, type GatewayMetricLabels, type GatewayOperatorUiConfig, type GatewayOptions, type GatewayRegisterOptions, type GatewayRequestContext, type GatewayScope, type GatewayTokenGrant, type GatewayTransport, type GatewayUiConfig, type GatewayUiMount, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GetNodeDiffRouteResult, type HelloResponse, ITERATION_MAX, type IncomingMessage, type IntegrationsConfig, type IntegrationsWebhookSourceConfig, type JumpResult, NODE_ID_PATTERN, NODE_OUTPUT_MAX_BYTES, NODE_OUTPUT_WARN_BYTES, type NodeOutputErrorCode, type NodeOutputResponse, NodeOutputRouteError, RUN_DIFF_MAX_BYTES, RUN_ID_PATTERN, type RegisteredWorkflow, type RequestFrame, type ResolvedExtension, type ResolvedGatewayUiConfig, type ResolvedRun, type ResolvedWorkflowTuiConfig, type ResponseFrame, type RunEventStreamState, type RunStartAuthContext, type ServeOptions, type ServerOptions, type ServerResponse, type SmithersWorkflow, type UsageReport, __serverTestInternals, assertGatewayInputDepthWithinBounds, attachAgentAttemptsToDevToolsRoot, attachNodeStatesToDevToolsRoot, clampFrameStartedByPrompt, createBrowserSessionRegistry, createServeApp, emptyDevToolsRoot, extensionMethodName, getDevToolsSnapshotRoute, getGatewayInputDepth, getNodeDiffRoute, getNodeOutputRoute, getRunDiffRoute, isExtensionMethod, jumpToFrameRoute, parseGatewayRequestFrame, parseXmlToDevToolsRoot, resolveCommitPointer, runFork, runPromise, runSync, snapshotFromFrameRow, startServer, startServerEffect, statusForRpcError, streamDevToolsRoute, summarizeBundle, validateFrameNoInput, validateFromSeqInput, validateGatewayMethodName, validateRequestedFrameNo, validateRunId };
