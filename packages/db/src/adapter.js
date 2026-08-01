@@ -4331,7 +4331,7 @@ export class SmithersDb {
    * @param {string} runId
    * @param {string} nodeId Validated upstream (no quotes/percent — node id charset).
    * @param {{ afterSeq?: number; limit?: number }} [query]
-   * @returns {RunnableEffect<EventRow[], SmithersError>}
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
   listNodeEvents(runId, nodeId, query = {}) {
     const limit = Math.max(1, Math.min(500, Math.floor(query.limit ?? 100)));
