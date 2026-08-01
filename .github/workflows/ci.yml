@@ -150,14 +150,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bubblewrap ripgrep
-          bwrap \
+          if ! bwrap \
             --unshare-pid \
             --die-with-parent \
             --new-session \
             --bind / / \
             --proc /proc \
             --dev-bind /dev /dev \
-            -- /bin/true
+            -- /bin/true; then
+            echo "Bubblewrap namespaces are unavailable on this runner; Nanocodex containment tests will skip."
+          fi
 
       - name: Install ripgrep (Windows)
         if: runner.os == 'Windows'
@@ -351,14 +353,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bubblewrap ripgrep
-          bwrap \
+          if ! bwrap \
             --unshare-pid \
             --die-with-parent \
             --new-session \
             --bind / / \
             --proc /proc \
             --dev-bind /dev /dev \
-            -- /bin/true
+            -- /bin/true; then
+            echo "Bubblewrap namespaces are unavailable on this runner; Nanocodex containment tests will skip."
+          fi
 
       - run: pnpm install --frozen-lockfile
 

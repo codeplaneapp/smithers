@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -22,6 +22,27 @@ import {
 } from "../internal/nanocodex/process.js";
 
 const NODE_EXECUTABLE = Bun.which("node") ?? process.execPath;
+const bubblewrapAvailable =
+  process.platform === "linux" &&
+  spawnSync(
+    "/usr/bin/bwrap",
+    [
+      "--unshare-pid",
+      "--die-with-parent",
+      "--new-session",
+      "--bind",
+      "/",
+      "/",
+      "--proc",
+      "/proc",
+      "--dev-bind",
+      "/dev",
+      "/dev",
+      "--",
+      "/bin/true",
+    ],
+    { stdio: "ignore", timeout: 5_000 },
+  ).status === 0;
 
 const RAPID_DAEMON_SOURCE = String.raw`
 const fs = require("node:fs");
@@ -303,7 +324,7 @@ function socketIsListening(path) {
 /** @param {number} milliseconds */
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-describe("runNanocodexProcess", () => {
+describe.skipIf(!bubblewrapAvailable)("runNanocodexProcess", () => {
   test("waits for a validated hello, serializes records, and returns the marked terminal", async () => {
     const order = [];
     const validated = [];

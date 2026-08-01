@@ -51,7 +51,33 @@ const CAPABILITIES = {
   },
 };
 
-describe("NanocodexAgent", () => {
+const runtimeGlibc = process.report?.getReport?.().header?.glibcVersionRuntime;
+const [glibcMajor = 0, glibcMinor = 0] = typeof runtimeGlibc === "string" ? runtimeGlibc.split(".").map(Number) : [];
+const bubblewrapAvailable =
+  process.platform === "linux" &&
+  spawnSync(
+    "/usr/bin/bwrap",
+    [
+      "--unshare-pid",
+      "--die-with-parent",
+      "--new-session",
+      "--bind",
+      "/",
+      "/",
+      "--proc",
+      "/proc",
+      "--dev-bind",
+      "/dev",
+      "/dev",
+      "--",
+      "/bin/true",
+    ],
+    { stdio: "ignore", timeout: 5_000 },
+  ).status === 0;
+const supportedNanocodexHost =
+  process.arch === "x64" && (glibcMajor > 2 || (glibcMajor === 2 && glibcMinor >= 35)) && bubblewrapAvailable;
+
+describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
   let directory;
   let binary;
   let capture;
