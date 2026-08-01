@@ -16,9 +16,7 @@ describe("README public examples", () => {
 
   test("component primer promotes Loop instead of deprecated Ralph", () => {
     expect(readme).toContain("| `<Loop>`     | Repeat tasks until a condition is met  |");
-    expect(readme).toContain(
-      '<Loop until={ctx.latest(outputs.review, "validate")?.approved} maxIterations={5}>',
-    );
+    expect(readme).toContain('<Loop until={ctx.latest(outputs.review, "validate")?.approved} maxIterations={5}>');
     expect(readme).toContain("</Loop>");
     expect(readme).not.toContain("| `<Ralph>`    | Loop until a condition is met  |");
     expect(readme).not.toContain("<Ralph until=");
