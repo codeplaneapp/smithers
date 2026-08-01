@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "baselineId": "smithers-nanocodex-source-build/v0.0.1/x86_64-unknown-linux-gnu",
+  "status": "qualified",
+  "source": {
+    "repository": "N0xMare/smithers-nanocodex",
+    "commit": "56d8b4fd54bf14e9f2874e5a010b8e301f8f695b",
+    "tree": "b8a092569e579c21e2ae288a470a6881022b61f2",
+    "cargoLockBlob": "808504efe6b6ea6c43705205ca3182be0dee1afe",
+    "rustVersion": "1.97.0"
+  },
+  "artifact": {
+    "target": "x86_64-unknown-linux-gnu",
+    "fileName": "smithers-nanocodex-v0.0.1-x86_64-unknown-linux-gnu.tar.gz",
+    "sha256": "3348b8a7818b4c759748e2cf0ecc9e0e4857f33ef6c3a92417655bfc0c73fdff",
+    "sizeBytes": 6286499,
+    "maximumSizeBytes": 8388608,
+    "minimumGlibcVersion": "2.35"
+  },
+  "contract": {
+    "bridgeVersion": "0.0.1",
+    "nanocodexVersion": "0.3.0",
+    "protocol": "smithers.nanocodex/1",
+    "checkpointCodec": "nanocodex.session-snapshot/1",
+    "snapshotVersion": 1,
+    "policyFingerprint": "smithers.nanocodex.policy-fingerprint/1"
+  },
+  "qualification": {
+    "date": "2026-08-01",
+    "providerFreeAdapterPreflight": true,
+    "checks": [
+      "source commit, tree, and Cargo.lock identity before build",
+      "reproduced archive SHA-256, exact size, version, capabilities, and file layout",
+      "Ubuntu 22.04 glibc compatibility smoke test",
+      "network-isolated public Smithers adapter preflight"
+    ]
+  }
+}

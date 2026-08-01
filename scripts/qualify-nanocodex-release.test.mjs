@@ -8,7 +8,8 @@ import { describe, test } from "node:test";
 
 import {
   EXPECTED_CAPABILITIES,
-  PINNED_RELEASE,
+  PINNED_SOURCE_BUILD,
+  PRODUCER_RELEASE_PATH,
   compareVersions,
   downloadArchive,
   inspectReleaseArchive,
@@ -26,26 +27,34 @@ import {
 const ROOT = "smithers-nanocodex-v0.0.1-x86_64-unknown-linux-gnu";
 
 describe("Nanocodex release qualification", () => {
-  test("the checked-in manifest is the immutable exact consumer pin", async () => {
+  test("keeps the producer record separate from the immutable source-build pin", async () => {
     const manifest = await loadReleaseManifest();
-    assert.deepEqual(manifest, PINNED_RELEASE);
-    assert.equal(manifest.release.tagCommit, "56d8b4fd54bf14e9f2874e5a010b8e301f8f695b");
+    const producerRelease = JSON.parse(await readFile(PRODUCER_RELEASE_PATH, "utf8"));
+    assert.deepEqual(manifest, PINNED_SOURCE_BUILD);
+    assert.equal(manifest.source.commit, "56d8b4fd54bf14e9f2874e5a010b8e301f8f695b");
+    assert.equal(manifest.source.tree, "b8a092569e579c21e2ae288a470a6881022b61f2");
+    assert.equal(manifest.artifact.sha256, "3348b8a7818b4c759748e2cf0ecc9e0e4857f33ef6c3a92417655bfc0c73fdff");
+    assert.equal(manifest.artifact.sizeBytes, 6_286_499);
     assert.equal(manifest.artifact.maximumSizeBytes, 8 * 1024 * 1024);
     assert.equal(manifest.artifact.minimumGlibcVersion, "2.35");
-    assert.equal(manifest.qualification.smithersAdapter, false);
+    assert.equal(manifest.qualification.providerFreeAdapterPreflight, true);
+    assert.equal("source" in producerRelease, false);
+    assert.equal(producerRelease.artifact.sha256, "0e14425b3e0af5c3b1663b4db2a15302cbaa7c03e917babd841ae7fde2a1ab73");
+    assert.equal(producerRelease.artifact.sizeBytes, 6_286_271);
+    assert.equal(producerRelease.qualification.smithersAdapter, false);
   });
 
   test("deep-freezes every nested release and capability value", () => {
-    assert.equal(Object.isFrozen(PINNED_RELEASE), true);
+    assert.equal(Object.isFrozen(PINNED_SOURCE_BUILD), true);
     assert.equal(Object.isFrozen(EXPECTED_CAPABILITIES), true);
-    assert.equal(Object.isFrozen(PINNED_RELEASE.release), true);
-    assert.equal(Object.isFrozen(PINNED_RELEASE.qualification.checks), true);
+    assert.equal(Object.isFrozen(PINNED_SOURCE_BUILD.source), true);
+    assert.equal(Object.isFrozen(PINNED_SOURCE_BUILD.qualification.checks), true);
     assert.equal(Object.isFrozen(EXPECTED_CAPABILITIES.protocol.versions), true);
     assert.equal(Object.isFrozen(EXPECTED_CAPABILITIES.features), true);
     assert.throws(() => {
-      PINNED_RELEASE.release.version = "tampered";
+      PINNED_SOURCE_BUILD.source.commit = "tampered";
     }, TypeError);
-    assert.throws(() => PINNED_RELEASE.qualification.checks.push("tampered"), TypeError);
+    assert.throws(() => PINNED_SOURCE_BUILD.qualification.checks.push("tampered"), TypeError);
     assert.throws(() => {
       EXPECTED_CAPABILITIES.features.codeMode = false;
     }, TypeError);
@@ -228,12 +237,18 @@ describe("Nanocodex release qualification", () => {
     }
   });
 
-  test("bounds a CI-built archive and reports its SHA-256", () => {
+  test("bounds and digests an archive without inventing source provenance", () => {
     const archive = Buffer.from("archive");
     const sha256 = createHash("sha256").update(archive).digest("hex");
-    assert.equal(verifyArchiveIdentity(archive, { maximumSizeBytes: archive.length }), sha256);
-    assert.throws(() => verifyArchiveIdentity(Buffer.alloc(0), { maximumSizeBytes: archive.length }), /1-7 bytes/);
-    assert.throws(() => verifyArchiveIdentity(archive, { maximumSizeBytes: archive.length - 1 }), /1-6 bytes/);
+    const artifact = { maximumSizeBytes: archive.length, sha256, sizeBytes: archive.length };
+    assert.equal(verifyArchiveIdentity(archive, artifact), sha256);
+    assert.throws(() => verifyArchiveIdentity(Buffer.alloc(0), artifact), /1-7 bytes/);
+    assert.throws(
+      () => verifyArchiveIdentity(archive, { ...artifact, maximumSizeBytes: archive.length - 1 }),
+      /1-6 bytes/,
+    );
+    assert.equal(verifyArchiveIdentity(archive, { ...artifact, sizeBytes: archive.length - 1 }), sha256);
+    assert.equal(verifyArchiveIdentity(archive, { ...artifact, sha256: "0".repeat(64) }), sha256);
   });
 
   test("pins exact version and capability surface", () => {
@@ -523,7 +538,7 @@ exit 64
     await assert.rejects(
       withQualificationScratch(binaryBytes, async ({ binary, scratch }) => {
         failedScratch = scratch;
-        await preflightVerifiedBinary(binary, scratch, PINNED_RELEASE, {
+        await preflightVerifiedBinary(binary, scratch, PINNED_SOURCE_BUILD, {
           NanocodexAgentImpl: FailingPublicNanocodexAgent,
           probeRuntimeMetadataImpl: async (metadataBinary, metadataScratch) => {
             calls.push({ binary: metadataBinary, scratch: metadataScratch, type: "metadata" });
@@ -570,37 +585,48 @@ exit 64
     const result = qualificationResult({
       archivePath,
       glibcVersion: "2.35",
-      manifest: PINNED_RELEASE,
-      sha256: "a".repeat(64),
-      sizeBytes: 6_286_335,
+      manifest: PINNED_SOURCE_BUILD,
+      sha256: PINNED_SOURCE_BUILD.artifact.sha256,
+      sizeBytes: 6_286_499,
     });
     assert.deepEqual(Object.keys(result), [
       "archive",
+      "artifactProvenance",
       "bridgeVersion",
       "glibcVersion",
       "providerFreePreflight",
       "sha256",
       "sizeBytes",
-      "tag",
-      "tagCommit",
-      "tagCommitProvenance",
+      "sourceCommit",
+      "sourceTree",
       "target",
     ]);
     assert.equal(
       JSON.stringify(result, null, 2),
       `{
   "archive": ${JSON.stringify(archivePath)},
+        "artifactProvenance": "pinned-source-build-sha256",
         "bridgeVersion": "0.0.1",
         "glibcVersion": "2.35",
         "providerFreePreflight": true,
-        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "sizeBytes": 6286335,
-        "tag": "v0.0.1",
-        "tagCommit": "56d8b4fd54bf14e9f2874e5a010b8e301f8f695b",
-        "tagCommitProvenance": "asserted-pinned-manifest",
+        "sha256": "3348b8a7818b4c759748e2cf0ecc9e0e4857f33ef6c3a92417655bfc0c73fdff",
+        "sizeBytes": 6286499,
+        "sourceCommit": "56d8b4fd54bf14e9f2874e5a010b8e301f8f695b",
+        "sourceTree": "b8a092569e579c21e2ae288a470a6881022b61f2",
         "target": "x86_64-unknown-linux-gnu"
       }`,
     );
+
+    const unverified = qualificationResult({
+      archivePath,
+      glibcVersion: "2.35",
+      manifest: PINNED_SOURCE_BUILD,
+      sha256: "0".repeat(64),
+      sizeBytes: 123,
+    });
+    assert.equal(unverified.artifactProvenance, "unverified-input");
+    assert.equal(unverified.sourceCommit, null);
+    assert.equal(unverified.sourceTree, null);
   });
 
   test("compares glibc versions numerically", () => {

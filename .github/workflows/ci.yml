@@ -277,19 +277,18 @@ jobs:
 
   nanocodex-release-qualification:
     name: Nanocodex v0.0.1 release qualification (Ubuntu 22.04 x64)
+    needs: nanocodex-source-build
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     permissions:
       contents: read
 
-    # This lane is provider-free and receives no provider or managed-ChatGPT
-    # secret. Managed-auth live turns remain explicit trusted/manual tests so a
-    # fork pull request can never cause secret-bearing Nanocodex execution.
-    # persist-credentials: false so the unaudited binary this lane executes
-    # cannot read a GITHUB_TOKEN left in .git/config by actions/checkout.
+    # This clean job receives only the digest-pinned archive, never the external
+    # source tree. The executable has no network or credential access.
     steps:
       - uses: actions/checkout@v6.0.2
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - uses: pnpm/action-setup@v6.0.8
@@ -301,17 +300,32 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - name: Install dependencies and Bubblewrap
+      - name: Install verifier dependencies and Bubblewrap
         run: |
           sudo apt-get update
           sudo apt-get install -y bubblewrap
           pnpm install --frozen-lockfile
 
-      - name: Probe exact Nanocodex PID namespace profile
+      - name: Download isolated source-built archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: nanocodex-v0.0.1-source-build
+          path: ${{ runner.temp }}/nanocodex-source-build
+
+      - name: Probe nested Nanocodex namespace profile
         shell: bash
         run: |
           test "$(uname -m)" = "x86_64"
           test "$(getconf GNU_LIBC_VERSION)" = "glibc 2.35"
+          bwrap \
+            --unshare-net \
+            --die-with-parent \
+            --new-session \
+            --ro-bind / / \
+            --tmpfs /tmp \
+            --proc /proc \
+            --dev-bind /dev /dev \
+            -- \
           bwrap \
             --unshare-pid \
             --die-with-parent \
@@ -321,8 +335,20 @@ jobs:
             --dev-bind /dev /dev \
             -- /bin/true
 
-      - name: Download, verify, and preflight pinned Nanocodex release
-        run: node scripts/qualify-nanocodex-release.mjs
+      - name: Verify and preflight the pinned source-built archive
+        shell: bash
+        run: |
+          bwrap \
+            --unshare-net \
+            --die-with-parent \
+            --new-session \
+            --ro-bind / / \
+            --tmpfs /tmp \
+            --proc /proc \
+            --dev-bind /dev /dev \
+            -- \
+          node scripts/qualify-nanocodex-release.mjs \
+            --archive "$RUNNER_TEMP/nanocodex-source-build/smithers-nanocodex-v0.0.1-x86_64-unknown-linux-gnu.tar.gz"
 
   coverage:
     runs-on: ubuntu-22.04

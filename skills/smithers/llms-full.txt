@@ -19714,11 +19714,10 @@ sudo apt-get install -y bubblewrap
 
 ## Build the pinned release from source
 
-The only artifact Smithers qualifies is the one built from the pinned source
-commit, exactly as the `nanocodex-release-qualification` CI lane builds it. The
-contributor-hosted `v0.0.1` release binary is **not** qualified by Smithers: no
-Smithers check downloads it, and no Smithers check asserts its size or digest.
-Do not install it in a deployment that relies on this integration.
+The only artifact to which Smithers assigns source-build provenance is the one
+built from the pinned source commit by the isolated CI lane. The historical
+producer record separately retains the published `v0.0.1` artifact digest; that
+published binary is **not** executed or qualified by Smithers CI.
 
 The qualified consumer pin is:
 
@@ -19731,6 +19730,8 @@ The qualified consumer pin is:
 | `Cargo.lock` blob     | `808504efe6b6ea6c43705205ca3182be0dee1afe` |
 | Rust toolchain        | `1.97.0`                                   |
 | Target                | `x86_64-unknown-linux-gnu`                 |
+| Source-build bytes    | `6286499`                                  |
+| Source-build SHA-256  | `3348b8a7818b4c759748e2cf0ecc9e0e4857f33ef6c3a92417655bfc0c73fdff` |
 | Maximum archive bytes | `8388608`                                  |
 
 Build and install that artifact:
@@ -19750,7 +19751,9 @@ test "$(git rev-parse 'HEAD^{tree}')" = b8a092569e579c21e2ae288a470a6881022b61f2
 test "$(git hash-object Cargo.lock)" = 808504efe6b6ea6c43705205ca3182be0dee1afe
 
 rustup toolchain install 1.97.0 --profile minimal
-RUSTUP_TOOLCHAIN=1.97.0 cargo build --locked --release --target "$target"
+RUSTUP_TOOLCHAIN=1.97.0 \
+RUSTFLAGS="--remap-path-prefix=$PWD=/usr/src/smithers-nanocodex" \
+  cargo build --locked --release --target "$target"
 
 # Package exactly as CI does, so the qualification command can inspect it.
 install -d -m 0755 \
@@ -19770,18 +19773,21 @@ tar --sort=name --mtime="@${source_date_epoch}" \
   --pax-option=delete=atime,delete=ctime \
   -C "$artifact_dir" -cf - "$package" | gzip -n -9 > "$artifact_dir/$archive"
 
-# From a Smithers checkout with dependencies installed, qualify this exact archive.
+# From a Smithers checkout with dependencies installed, inspect this archive.
 node "$smithers_checkout/scripts/qualify-nanocodex-release.mjs" \
   --archive "$artifact_dir/$archive"
 
-# Install only after qualification succeeds.
+# Install only if the report says artifactProvenance is
+# "pinned-source-build-sha256".
 sudo install -m 0755 "$artifact_dir/$package/smithers-nanocodex" \
   /usr/local/bin/smithers-nanocodex
 ```
 
-Smithers qualification additionally validates every tar header and rejects path
-traversal, links, devices, extended headers, duplicate paths, and anything
-outside the exact package root before using the executable.
+Smithers validates every tar header and rejects path traversal, links, devices,
+extended headers, duplicate paths, and anything outside the exact package root
+before using the executable. A locally built archive that differs from the CI
+pin can still receive the provider-free behavioral report, but its
+`artifactProvenance` is `unverified-input` and its source fields are `null`.
 
 ## Configure the adapter
 
@@ -19922,37 +19928,41 @@ your deployment requires those boundaries.
 
 ## Qualify the release
 
-Smithers keeps
-`packages/agents/tests/fixtures/nanocodex/release-v0.0.1.json` byte-identical to
-the historical producer release record. The `false` value of
-`qualification.smithersAdapter` is intentionally retained: the producer record
-qualifies the bridge artifact, while downstream Smithers adapter qualification
-is a separate consumer check. Its tag commit is asserted pinned-manifest
-provenance; qualification deliberately performs no live GitHub tag-to-commit
-lookup. From a Smithers checkout on a supported host, this reusable
-provider-free command qualifies a locally built archive plus the public adapter
-preflight:
+Smithers preserves two distinct records. The historical producer record at
+`packages/agents/tests/fixtures/nanocodex/release-v0.0.1.json` includes the
+published artifact's `0e1442...a1ab73` digest and 6,286,271-byte size, while
+retaining `qualification.smithersAdapter: false`. The separate
+`source-build-v0.0.1.json` records only Smithers' isolated source build and
+provider-free adapter preflight, including its different digest and size.
+
+From a Smithers checkout on a supported host, this command inspects a local
+archive and runs the public adapter preflight:
 
 ```bash
 node scripts/qualify-nanocodex-release.mjs \
   --archive /absolute/path/to/smithers-nanocodex-v0.0.1-x86_64-unknown-linux-gnu.tar.gz
 ```
 
-`--archive` is required and must point at an archive built from the pinned
-source commit above. The command never downloads anything: it performs no
-network access at all, and it never fetches or executes a contributor-hosted
-release artifact. It reads the archive, rejects it unless it is a non-empty
-regular file no larger than `artifact.maximumSizeBytes` (8 MiB), then computes
-its SHA-256 for the report; the digest is recorded as provenance output, not
-compared against a pinned expected value, and safely inspects archive layout.
-In a temporary scratch workspace, it materializes only the
-verified archive executable and bounded local probe launchers. It runs the
-contained exact-version and full-capability probes, and only after those pass
-invokes public `NanocodexAgent.preflight()` against that same extracted path.
-The adapter receives the explicit scratch workspace, `inheritEnv: false`, and
-an empty environment; no credential is supplied. Both probe paths run under
-Bubblewrap, perform no model turn, and need no provider credential. The scratch
-workspace is removed on success or failure.
+`--archive` is required. The command reads no remote source, rejects the input
+unless it is a non-empty regular file no larger than 8 MiB, computes its
+SHA-256, and safely inspects its layout. Only the pinned source-build digest and
+size receive `pinned-source-build-sha256` provenance; every other input is
+explicitly reported as `unverified-input`, with no source commit or tree claim.
+
+CI builds the external source in a separate credential-free container with no
+Smithers checkout, verifies the resulting pinned digest, and passes only that
+archive to a clean verification job. The verification job wraps the command in
+a network namespace. A direct local invocation does not itself initiate a
+network request, but the probed executable retains the PID-only adapter
+profile's host networking; add an external network boundary when running an
+untrusted local input.
+
+In a temporary scratch workspace, the verifier materializes the archive
+executable and bounded probe launchers. It runs exact-version and
+full-capability probes, then invokes public `NanocodexAgent.preflight()` against
+the same path with `inheritEnv: false` and an empty environment. Neither probe
+performs a model turn or needs a provider credential. Scratch state is removed
+on success or failure.
 
 **See also:** `NanocodexAgent` reference ·
 `NanocodexAgentOptions` ·

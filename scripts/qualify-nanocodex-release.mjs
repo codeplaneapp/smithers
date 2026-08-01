@@ -14,6 +14,10 @@ import { runNanocodexCapabilities } from "../packages/agents/internal/nanocodex/
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_MANIFEST_PATH = resolve(
   SCRIPT_DIR,
+  "../packages/agents/tests/fixtures/nanocodex/source-build-v0.0.1.json",
+);
+export const PRODUCER_RELEASE_PATH = resolve(
+  SCRIPT_DIR,
   "../packages/agents/tests/fixtures/nanocodex/release-v0.0.1.json",
 );
 const MAX_UNCOMPRESSED_ARCHIVE_BYTES = 64 * 1024 * 1024;
@@ -29,22 +33,17 @@ const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 const POSIX_USTAR_MAGIC = Buffer.from("ustar\0", "ascii");
 const POSIX_USTAR_VERSION = Buffer.from("00", "ascii");
 
-export const PINNED_RELEASE = deepFreeze({
+export const PINNED_SOURCE_BUILD = deepFreeze({
   schemaVersion: 1,
-  baselineId: "smithers-nanocodex/v0.0.1/x86_64-unknown-linux-gnu",
-  status: "qualified",
-  release: {
-    version: "0.0.1",
-    tag: "v0.0.1",
-    tagCommit: "56d8b4fd54bf14e9f2874e5a010b8e301f8f695b",
-    publishedAt: "2026-07-29T23:57:32Z",
-    url: "https://github.com/N0xMare/smithers-nanocodex/releases/tag/v0.0.1",
-  },
+  baselineId: "smithers-nanocodex-source-build/v0.0.1/x86_64-unknown-linux-gnu",
+  status: "qualified",,
   artifact: {
     target: "x86_64-unknown-linux-gnu",
     fileName: "smithers-nanocodex-v0.0.1-x86_64-unknown-linux-gnu.tar.gz",
     downloadUrl:
       "https://github.com/N0xMare/smithers-nanocodex/releases/download/v0.0.1/smithers-nanocodex-v0.0.1-x86_64-unknown-linux-gnu.tar.gz",
+    sha256: "3348b8a7818b4c759748e2cf0ecc9e0e4857f33ef6c3a92417655bfc0c73fdff",
+    sizeBytes: 6_286_499,
     maximumSizeBytes: 8 * 1024 * 1024,
     minimumGlibcVersion: "2.35",
   },
@@ -57,16 +56,13 @@ export const PINNED_RELEASE = deepFreeze({
     policyFingerprint: "smithers.nanocodex.policy-fingerprint/1",
   },
   qualification: {
-    date: "2026-07-29",
-    bridgeArtifact: true,
-    smithersAdapter: false,
+    date: "2026-08-01",
+    providerFreeAdapterPreflight: true,
     checks: [
-      "pinned source identity plus CI-built archive digest, version, capabilities, and file layout",
+      "source commit, tree, and Cargo.lock identity before build",
+      "reproduced archive SHA-256, exact size, version, capabilities, and file layout",
       "Ubuntu 22.04 glibc compatibility smoke test",
-      "exact Bubblewrap PID-containment profile",
-      "managed-ChatGPT turn using stock workspace tools",
-      "snapshot resume in a second fresh bridge process",
-      "detached descendant cleanup after bridge exit",
+      "network-isolated public Smithers adapter preflight",
     ],
   },
 });
@@ -122,14 +118,14 @@ export async function loadReleaseManifest(path = DEFAULT_MANIFEST_PATH) {
   } catch (error) {
     throw new Error(`Could not read Nanocodex release manifest at ${path}.`, { cause: error });
   }
-  if (stableJson(manifest) !== stableJson(PINNED_RELEASE)) {
+  if (stableJson(manifest) !== stableJson(PINNED_SOURCE_BUILD)) {
     throw new Error("Nanocodex release manifest does not match the immutable v0.0.1 consumer pin.");
   }
   return manifest;
 }
 
 /** Bound and digest the CI-built artifact before any archive member is used. */
-export function verifyArchiveIdentity(archive, artifact = PINNED_RELEASE.artifact) {
+export function verifyArchiveIdentity(archive, artifact = PINNED_SOURCE_BUILD.artifact) {
   if (!Buffer.isBuffer(archive)) throw new TypeError("Nanocodex release archive must be a Buffer.");
   if (archive.byteLength === 0 || archive.byteLength > artifact.maximumSizeBytes) {
     throw new Error(
@@ -145,7 +141,7 @@ export function verifyArchiveIdentity(archive, artifact = PINNED_RELEASE.artifac
  * type are rejected; the qualified archive needs only POSIX regular files and
  * directories under one exact package root.
  */
-export function inspectReleaseArchive(archive, manifest = PINNED_RELEASE) {
+export function inspectReleaseArchive(archive, manifest = PINNED_SOURCE_BUILD) {
   let tar;
   try {
     tar = gunzipSync(archive, { maxOutputLength: MAX_UNCOMPRESSED_ARCHIVE_BYTES });
@@ -231,8 +227,8 @@ export function inspectReleaseArchive(archive, manifest = PINNED_RELEASE) {
   return { binary, binaryMember, entries: [...entries.entries()] };
 }
 
-export function validateRuntimeMetadata(versionOutput, capabilities, manifest = PINNED_RELEASE) {
-  const expectedVersionOutput = `smithers-nanocodex ${manifest.release.version}\n`;
+export function validateRuntimeMetadata(versionOutput, capabilities, manifest = PINNED_SOURCE_BUILD) {
+  const expectedVersionOutput = `smithers-nanocodex ${manifest.contract.bridgeVersion}\n`;
   if (versionOutput !== expectedVersionOutput) {
     throw new Error(`Nanocodex version mismatch: expected ${JSON.stringify(expectedVersionOutput)}.`);
   }
@@ -387,7 +383,7 @@ export async function qualifyNanocodexRelease({ archivePath, fetchImpl = globalT
 export async function preflightVerifiedBinary(
   binary,
   scratch,
-  manifest = PINNED_RELEASE,
+  manifest = PINNED_SOURCE_BUILD,
   { probeRuntimeMetadataImpl = probeRuntimeMetadata, NanocodexAgentImpl = NanocodexAgent } = {},
 ) {
   const { capabilities, versionOutput } = await probeRuntimeMetadataImpl(binary, scratch);
@@ -412,16 +408,17 @@ export async function preflightPublicNanocodexAdapter(binary, scratch, Nanocodex
 
 /** Preserve the existing stable success JSON surface and key order. */
 export function qualificationResult({ archivePath, glibcVersion, manifest, sha256, sizeBytes }) {
+  const pinnedSourceBuild = sha256 === manifest.artifact.sha256 && sizeBytes === manifest.artifact.sizeBytes;
   return {
     archive: archivePath ? resolve(archivePath) : manifest.artifact.downloadUrl,
+    artifactProvenance: pinnedSourceBuild ? "pinned-source-build-sha256" : "unverified-input",
     bridgeVersion: manifest.contract.bridgeVersion,
     glibcVersion,
     providerFreePreflight: true,
     sha256,
     sizeBytes,
-    tag: manifest.release.tag,
-    tagCommit: manifest.release.tagCommit,
-    tagCommitProvenance: "asserted-pinned-manifest",
+    sourceCommit: pinnedSourceBuild ? manifest.source.commit : null,
+    sourceTree: pinnedSourceBuild ? manifest.source.tree : null,
     target: manifest.artifact.target,
   };
 }
@@ -660,11 +657,11 @@ function deepFreeze(value, seen = new WeakSet()) {
 }
 
 function usage() {
-  return `Usage: node ${basename(fileURLToPath(import.meta.url))} [--archive /path/to/${PINNED_RELEASE.artifact.fileName}]
+  return `Usage: node ${basename(fileURLToPath(import.meta.url))} [--archive /path/to/${PINNED_SOURCE_BUILD.artifact.fileName}]
 
-Without --archive, the command explicitly downloads the immutable v0.0.1 pin,
-then verifies and provider-independently preflights it. Runtime code never calls
-this qualification/download command.`;
+  
+  Only the pinned SHA-256 receives source-build provenance; other bounded inputs
+  are reported as unverified. This command never downloads release artifacts.`;
 }
 
 async function main() {
