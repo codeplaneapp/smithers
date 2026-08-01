@@ -6013,8 +6013,6 @@ async function legacyExecuteTask(
           ? [...forkSeedMessages, { role: "user", content: effectivePrompt }]
           : null;
         latestAgentCheckpoint = resumeCheckpoint;
-        let latestAgentCheckpointJson = resumeCheckpoint ? JSON.stringify(resumeCheckpoint) : null;
-        let latestAgentCheckpointOwnedByAttempt = false;
         let checkpointWriteChain = Promise.resolve();
         /**
          * @param {unknown} candidate
@@ -6047,36 +6045,6 @@ async function legacyExecuteTask(
             );
           }
           const checkpointJson = JSON.stringify(checkpoint);
-          if (checkpointJson === latestAgentCheckpointJson && latestAgentCheckpointOwnedByAttempt) {
-            // Identical publication is a content/ref no-op, but never an
-            // authority no-op. Re-run the same durable run-owner,
-            // cancellation, and in-progress-attempt fence used by checkpoint
-            // writes so a stale, cancelled, or post-terminal callback cannot
-            // report success merely because its bytes were seen earlier.
-            if (heartbeatOwnerLost) {
-              throw new SmithersError("HEARTBEAT_FENCE_LOST", "Agent checkpoint ownership was lost.");
-            }
-            const fencedAtMs = nowMs();
-            const owned = await Effect.runPromise(
-              adapter.heartbeatAttempt(
-                runId,
-                desc.nodeId,
-                desc.iteration,
-                attemptNo,
-                fencedAtMs,
-                heartbeatPendingDataJson,
-                executionOwnerId,
-              ),
-            );
-            if (!owned) {
-              heartbeatOwnerLost = true;
-              throw new SmithersError("HEARTBEAT_FENCE_LOST", "Agent checkpoint ownership was lost.");
-            }
-            heartbeatEvidenceAtMs = fencedAtMs;
-            heartbeatLastPersistedWriteAtMs = fencedAtMs;
-            heartbeatLastWriteSucceeded = true;
-            return attemptMeta.agentCheckpoint ?? null;
-          }
           // Abort starts a bounded cleanup window for process-backed agents;
           // it does not itself revoke checkpoint publication authority. The
           // durable write atomically fences runtime ownership, cancellation
@@ -6111,8 +6079,6 @@ async function legacyExecuteTask(
             version: ref.version,
           };
           latestAgentCheckpoint = checkpoint;
-          latestAgentCheckpointJson = checkpointJson;
-          latestAgentCheckpointOwnedByAttempt = true;
           attemptMeta.agentCheckpoint = compactRef;
           return compactRef;
         };

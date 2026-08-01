@@ -1,9 +1,9 @@
 /** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { Effect } from "effect";
 import { runWorkflow, Task, Workflow } from "smthrs";
 import { SmithersDb } from "@smthrs/db/adapter";
@@ -18,6 +18,82 @@ const jjAvailable = (() => {
   }
 })();
 const describeIfJj = jjAvailable ? describe : describe.skip;
+
+function spawnCheckpointCrashRun({ dbPath, markerPath, rootDir, runId }) {
+  const smithersPath = resolve(import.meta.dir, "../../smithers/src/index.js");
+  const schemaPath = resolve(import.meta.dir, "../../smithers/tests/schema.js");
+  const dbPathModule = resolve(import.meta.dir, "../../db/src/adapter.js");
+  const script = `
+import React from "react";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { createSmithers, Task, Workflow, runWorkflow } from ${JSON.stringify(smithersPath)};
+import { outputSchemas } from ${JSON.stringify(schemaPath)};
+import { SmithersDb } from ${JSON.stringify(dbPathModule)};
+import { Effect } from "effect";
+
+const api = createSmithers(outputSchemas, { dbPath: ${JSON.stringify(dbPath)} });
+const adapter = new SmithersDb(api.db);
+const stable = {
+  codec: "smithers.cli-session",
+  version: 1,
+  payload: { engine: "fake-cli", resume: "stable-session" },
+};
+const waitForWorkspaceCheckpoints = async (count) => {
+  for (let poll = 0; poll < 200; poll += 1) {
+    if ((await adapter.listWorkspaceCheckpoints(${JSON.stringify(runId)})).length >= count) return;
+    await Bun.sleep(25);
+  }
+  throw new Error("timed out waiting for workspace checkpoint " + count);
+};
+const agent = {
+  id: "checkpoint-identical-crash-resume",
+  cliEngine: "fake-cli",
+  checkpointFormats: [{ codec: stable.codec, versions: [1] }],
+  checkpointCapabilities: [{ codec: stable.codec, versions: [1], modes: ["resume"] }],
+  async generate(args) {
+    const file = join(args.rootDir, "agent-output.txt");
+    writeFileSync(file, "before republish\\n");
+    await waitForWorkspaceCheckpoints(1);
+    await args.onCheckpoint(stable);
+    writeFileSync(file, "after republish\\n");
+    await waitForWorkspaceCheckpoints(2);
+    await args.onCheckpoint(stable);
+    writeFileSync(${JSON.stringify(markerPath)}, "ready\\n");
+    return new Promise(() => {});
+  },
+};
+const workflow = api.smithers(() => React.createElement(
+  Workflow,
+  { name: "checkpoint-identical-crash-resume" },
+  React.createElement(
+    Task,
+    { id: "work", output: api.outputs.outputA, agent },
+    "update a file",
+  ),
+));
+await Effect.runPromise(runWorkflow(workflow, {
+  input: {},
+  runId: ${JSON.stringify(runId)},
+  rootDir: ${JSON.stringify(rootDir)},
+}));
+`;
+  const child = spawn(process.execPath, ["-e", script], {
+    cwd: process.cwd(),
+    env: { ...process.env, SMITHERS_DURABILITY_SNAPSHOTS: "1" },
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  let stderr = "";
+  child.stderr?.setEncoding("utf8");
+  child.stderr?.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const exited = new Promise((resolveExit, rejectExit) => {
+    child.once("error", rejectExit);
+    child.once("close", (code, signal) => resolveExit({ exitCode: code, signal }));
+  });
+  return { child, exited, readStderr: () => stderr };
+}
 
 /** An agent that writes a file into its worktree (taskRoot) during the turn. */
 function writingAgent() {
@@ -156,6 +232,66 @@ describeIfJj("durability snapshots wired into the engine", () => {
     } finally {
       if (prev === undefined) delete process.env.SMITHERS_DURABILITY_SNAPSHOTS;
       else process.env.SMITHERS_DURABILITY_SNAPSHOTS = prev;
+      cleanup();
+      rmSync(jjDir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test("crash resume keeps workspace changes preceding an identical checkpoint republish", async () => {
+    const jjDir = mkdtempSync(join(tmpdir(), "dur-snap-identical-republish-"));
+    expect(spawnSync("jj", ["git", "init"], { cwd: jjDir, encoding: "utf8" }).status).toBe(0);
+    const { smithers, outputs, db, dbPath, cleanup } = createTestSmithers(outputSchemas);
+    const adapter = new SmithersDb(db);
+    const runId = "dur-snap-identical-republish";
+    const markerPath = `${dbPath}.checkpoint-ready`;
+    const child = spawnCheckpointCrashRun({ dbPath, markerPath, rootDir: jjDir, runId });
+    let resumedWorkspace;
+    let resumedSession;
+    const stable = {
+      codec: "smithers.cli-session",
+      version: 1,
+      payload: { engine: "fake-cli", resume: "stable-session" },
+    };
+    const agent = {
+      id: "checkpoint-identical-crash-resume",
+      cliEngine: "fake-cli",
+      checkpointFormats: [{ codec: stable.codec, versions: [1] }],
+      checkpointCapabilities: [{ codec: stable.codec, versions: [1], modes: ["resume"] }],
+      async generate(args) {
+        resumedSession = args.resumeSession;
+        const file = join(args.rootDir, "agent-output.txt");
+        resumedWorkspace = existsSync(file) ? readFileSync(file, "utf8") : null;
+        return { text: '{"value":47}' };
+      },
+    };
+    try {
+      for (let poll = 0; poll < 400 && !existsSync(markerPath); poll += 1) await Bun.sleep(25);
+      if (!existsSync(markerPath)) throw new Error(`child did not publish checkpoints: ${child.readStderr()}`);
+
+      const refs = await adapter.listAgentCheckpointRefs(runId, { nodeId: "work" });
+      expect(refs.map((ref) => ref.sequence)).toEqual([0, 1]);
+      expect(new Set(refs.map((ref) => ref.contentHash)).size).toBe(1);
+
+      child.child.kill("SIGKILL");
+      await child.exited;
+      const workflow = smithers(() => (
+        <Workflow name="checkpoint-identical-crash-resume">
+          <Task id="work" output={outputs.outputA} agent={agent}>
+            update a file
+          </Task>
+        </Workflow>
+      ));
+      const resumed = await Effect.runPromise(
+        runWorkflow(workflow, { input: {}, runId, rootDir: jjDir, resume: true, force: true }),
+      );
+      expect(resumed.status).toBe("finished");
+      expect(resumedSession).toBe("stable-session");
+      expect(resumedWorkspace).toBe("after republish\n");
+    } finally {
+      if (child.child.exitCode === null && !child.child.killed) {
+        child.child.kill("SIGKILL");
+        await child.exited.catch(() => undefined);
+      }
       cleanup();
       rmSync(jjDir, { recursive: true, force: true });
     }
