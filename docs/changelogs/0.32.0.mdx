@@ -1,16 +1,13 @@
 ---
 title: "0.32.0"
-description: "Smithers 0.32.0 fixes silently broken task dispatch by finishing the Effect 4 migration, adds a gateway browser session handoff so monitor and UI links open without 401s, lets the gateway bind non-loopback hosts, and lands a large hardening batch."
+description: "Smithers 0.32.0 opens the Monitor from any browser and over Tailscale, right-sizes how oneshot and the authoring loop pick their approach, makes review and eval verdicts honest, lets you resume a run whose workflow you edited, and ships a batch of new pack workflows on an Effect 4 runtime."
 ---
 
-**Smithers 0.32.0 is a hardening release.** Of its 512 commits, 251 are fixes,
-plus 83 test commits and a run of security fixes, against 41 feature commits. The
-biggest fix matters to everyone: a runtime-wide migration to Effect 4 had
-silently broken task dispatch, and this release finishes the migration and
-adds the tests that would have caught it. Alongside the fixes, the gateway
-gains a browser session handoff and remote-host binding, so opening the
-Monitor from another machine finally just works. The release touches 1,459
-files, with 114,562 insertions and 23,468 deletions.
+**Smithers 0.32.0 is a big feature release.** The Monitor opens from any
+browser and from another machine, `oneshot` and the authoring loop right-size
+the approach before doing work, review and eval verdicts stop conflating
+"blocked" with "rejected," and a run whose workflow you edited can resume
+instead of forking. Underneath, the runtime moved to Effect 4.
 
 ## Upgrading
 
@@ -31,7 +28,8 @@ a valid bearer for an HttpOnly session cookie and redirects to the page you
 asked for. Every URL the CLI prints goes through it, so monitor, UI, and GUI
 links open signed in.
 
-The launch commands also stop assuming loopback:
+The launch commands also stop assuming loopback, so the Monitor works over
+Tailscale, a LAN, or an SSH tunnel:
 
 ```bash
 bunx smithers-orchestrator monitor --host 0.0.0.0
@@ -42,71 +40,45 @@ bunx smithers-orchestrator monitor --host 0.0.0.0
   <img src="/images/0.32.0/monitor-live.gif" alt="The Smithers Monitor following a live release-canary run from running to completed" />
 </Frame>
 
-- A non-loopback bind adds `--mint-token` automatically, and a wildcard bind
+- A non-loopback bind mints a login token automatically, and a wildcard bind
   prints one dialable URL per interface, Tailscale first, then LAN.
+- The session cookie is `SameSite=Lax`, scoped to the gateway's own port, and
+  the `next` redirect is constrained to a same-origin path, so the cookie
+  stays yours: a cross-origin page cannot reuse it, and two workspace gateways
+  on one host keep separate sessions.
 - Review printed URLs before sharing them: they carry a login token.
-- When no gateway is reachable, the CLI error now names the runtime state
-  file it checked, the legacy port it probed, and the exact
-  `smithers gateway --host/--port` command to start one.
+- When no gateway is reachable, the CLI error names the runtime state file it
+  checked, the port it probed, and the exact `smithers gateway --host/--port`
+  command to start one.
 
-The handoff is locked down so the new cookie cannot be turned against you:
+## oneshot and authoring right-size the work first
 
-- The `next` redirect target is constrained to a same-origin path. Authority
-  forms like `//host` and `/\host` are rejected, so the endpoint can never
-  bounce a browser to another site.
-- The session cookie is `SameSite=Lax`, and a cross-origin page that carries
-  it is refused on both the RPC and the WebSocket paths, so a sibling origin
-  cannot drive your gateway with operator scope.
-- The cookie name is scoped per gateway port, so two workspace gateways on the
-  same host keep separate sessions instead of overwriting each other.
+`smithers oneshot` now routes a goal by its shape. A trivial edit is applied
+directly, a well-scoped goal runs as a single strong agent, and only
+genuinely multi-stage work expands into a full workflow, so a one-line change
+no longer turns into a multi-node run.
 
-## Task dispatch works again after the Effect 4 migration
+- `create-workflow`'s clarify stage does the same before it builds anything:
+  it routes a trivial edit directly, points a well-scoped goal at
+  `smithers oneshot` with the exact command, and scaffolds a workflow only for
+  work that needs ordered stages.
+- `oneshot` warns on a dirty working copy and has the agent triage the tree
+  before starting the goal, so pre-existing edits are not swept into its
+  commits.
+- `smithers monitor <runId>` is now steerable: a built-in oneshot opens its
+  dedicated transcript, steer, and restart surface, while other runs open the
+  all-runs Monitor.
 
-`bunx smithers-orchestrator up hello` on the previous development builds registered its nodes
-as pending and then hung forever with no error. The cause was a runtime-wide
-migration to Effect 4.0.0-beta.102 that left stale Effect 3 idioms behind:
-dispatch died before it could report. 0.32.0 completes the migration across
-the engine, scheduler, server, db, vcs, time-travel, sandbox, memory, and
-observability packages and fixes every seam that survived it.
+## Honest review and eval verdicts
 
-- The faults e2e suite went from 8 failures to 0, and its runtime from 143s
-  to 12s, once dispatch stopped dying mid-flight.
-- 13 call sites still using the removed `Effect.either` were moved to
-  `Effect.result`; they had left `bunx smithers-orchestrator graph`, `bunx smithers-orchestrator up`, the hot
-  reloader, the supervisor, and the sandbox path resolver dead.
+Review verdicts distinguish `blocked` (required verification could not run for
+an environmental reason, such as a missing service) from `approved: false` (a
+real rejection), so infrastructure trouble no longer reads as rejected work.
 
-## Local services stay reachable in the network sandbox
-
-`allowNetwork: false` used to cut off everything, including the local dev
-server or Postgres your task was testing against. It now means no egress:
-loopback traffic, loopback binds, and unix sockets stay allowed while remote
-endpoints stay denied.
-
-```tsx
-<Task id="test" agent={agents.coder} sandbox={{ allowNetwork: false }}>
-  Run the integration tests against the local Postgres.
-</Task>
-```
-
-- Denial errors now name the `--allow-network` escape hatch instead of
-  failing opaquely.
-
-## Right-sized authoring and honest verdicts
-
-Two authoring-loop changes reduce wasted runs:
-
-- `create-workflow`'s clarify stage right-sizes the request before building
-  anything: a trivial edit routes directly, a well-scoped goal routes to
-  `smithers oneshot` with the exact command, and only genuinely multi-stage
-  work gets a full workflow scaffold.
-- Review verdicts distinguish `blocked` (required verification could not run
-  for an environmental reason) from `approved: false` (a real rejection), so
-  a missing service no longer reads as rejected work.
-
-Eval runs get the same honesty: a case that fails on a known harness
+Eval runs get the same treatment. A case that fails on a known harness
 signature is graded `INCONCLUSIVE` instead of failed, and `bunx smithers-orchestrator eval`
 exits 5 (instead of 1) when every red case is inconclusive, so CI can tell
-"the work regressed" from "the harness fell over".
+"the work regressed" from "the harness fell over."
 
 ```bash
 bunx smithers-orchestrator eval suite.jsonl   # exit 5 = only inconclusive reds
@@ -123,69 +95,96 @@ bunx smithers-orchestrator retry-task RUN_ID TASK_ID --accept-workflow-change
 bunx smithers-orchestrator up --resume RUN_ID --accept-workflow-change
 ```
 
-- The mismatch error names the flag, so the fix is in the message.
+The mismatch error names the flag, so the fix is in the message.
 
-## Hardening and reliability
+## Local services stay reachable in the network sandbox
 
-251 of this release's 512 commits are fixes and 83 are test commits, most
-aimed at the seams the Effect 4 migration exposed: the engine module itself,
-CLI entry points, the hot reloader, and the sandbox. What got more reliable:
+`allowNetwork: false` used to cut off everything, including the local dev
+server or Postgres your task was testing against. It now means no egress:
+loopback traffic, loopback binds, and unix sockets stay allowed while remote
+endpoints stay denied, and a denial names the `--allow-network` escape hatch.
 
-- Every CLI entry point imports again: `packages/engine` had shipped with
-  committed merge-conflict markers that made the module fail to parse.
-- Runtime logging works again. The observability layer resolved its minimum
-  level through Effect 3 constants that are `undefined` in Effect 4, which
-  left the level unset and dropped every `logInfo`/`logError` line. Levels are
-  resolved by name now, so run and gateway logs come through.
-- Run status filtering is honest again. The RPC status schema had collapsed to
-  a single literal under Effect 4, so a `listRuns` filter for anything other
-  than `running`, or a response carrying a finished or failed run, failed
-  validation. All nine statuses are accepted again.
-- `supervise` resumes orphaned one-shot runs again instead of skipping them
-  forever: the descriptor fetch had called a helper that Effect 4 renamed and
-  crashed on every attempt.
-- The `coverWorkflow` test harness clamps its loop cap instead of overwriting
-  lower `maxIterations`, and no longer reports its own injected catch-all
-  mock as unused; three quarantined stacked-ship simulations came back green
-  once the harness, not the workflows, was fixed.
-- A new zmux-based real-PTY e2e harness (`e2e/tui/zmux`) drives the TUI runs
-  list and the Monitor mirror end to end.
-- A new repo check fails the build when an internal script invokes the
-  published CLI instead of the working tree.
+```tsx
+<Task id="test" agent={agents.coder} sandbox={{ allowNetwork: false }}>
+  Run the integration tests against the local Postgres.
+</Task>
+```
+
+## Approvals and the run UI
+
+- Approval decisions bind to durable proofs, so a granted or denied decision
+  is recorded against the exact attempt it answered and survives replay.
+- A review panel's seats are configurable, so you choose which models sit on a
+  panel instead of taking a fixed roster.
+- The gateway approval panel gains accessibility fixes, loading skeletons, and
+  richer decision feedback.
+
+## New workflows in the pack
+
+Each ships with its own live UI:
+
+- `pr-polish-panel` and `review-since-publish` for reviewing and polishing work
+  before it lands.
+- `whole-foods-meal-planner` as an MCP-tool example and
+  `smithers-repo-federation` as a federation example.
+- `api-ab-benchmark`, which compares the Effect and JSX authoring surfaces on
+  the same task.
+- Merge-train workflows (`sol-issue-train`, `xcombo-fix-train`,
+  `stacked-ship`) that route issues through green-gated pushes.
+- First-class monitor workflows: drop a `.smithers/monitor/<workflowId>.tsx`
+  and the CLI launches it as a sibling run that watches, and can heal, each run
+  of that workflow. The background monitor also breaks silence on retry churn
+  and otherwise-quiet runs.
 
 <Frame caption="Touring a finished run in the Monitor: the execution tree with per-node ok pills and durations, the Timeline and Usage panels with rate-limit gauges, the Debug XML view of the workflow, the Frames scrubber, and the Notable/All/Activity event tabs.">
   <img src="/images/0.32.0/monitor-tour.gif" alt="Touring a completed release-canary run in the Smithers Monitor, including the debug XML view and frames scrubber" />
 </Frame>
 
-Two packages that came out of this work are directly reusable:
-`packages/ui-core` extracts the runs domain (list filtering and sorting, tree
-building, event frames, diff parsing, health, view models) into one shared
-home, and `packages/tui-ui` holds the pure TUI leaves (run tree, event log,
-status glyphs) built on it.
+## Reliability fixes
 
-## Other improvements
+- Resume honors ownership precedence and validates its metadata before
+  reactivating a run, and registered accounts survive a resume.
+- The run UI subscribes to live approval, run-event, and run-list feeds
+  instead of stale snapshots, surfaces run-list transport failures, and
+  decodes persisted UltraGrill and durable event frames correctly.
+- Monitor health no longer goes stale, and a run's durable sidecar identity is
+  preserved across reads.
+- `bunx smithers-orchestrator usage` reports Kimi Code subscription quota alongside the other
+  providers.
+- The VCS layer rejects mutable jj pointers so a revert or time-travel lands on
+  a stable revision.
+- Studio toggles crons through idempotent upserts and hides cached runs after
+  an unauthorized response.
 
-- New `pr-polish-panel` and `review-since-publish` workflows ship in the
-  pack, each with its own live UI.
-- New `whole-foods-meal-planner` and `smithers-repo-federation` workflows
-  land as MCP-tool and federation examples with custom UIs.
-- The committed `.d.ts` declaration bundle for `packages/integrations` was
-  regenerated after the Effect 4 call-shape changes.
-- 71 docs commits, including corrected Effect `Schema.Literal` examples.
+## Under the hood
+
+- The runtime moved to Effect 4.0.0-beta.102 across the engine, scheduler,
+  server, db, vcs, time-travel, sandbox, memory, and observability packages.
+  Workflow and engine behavior is unchanged; the migration is a dependency and
+  internals update.
+- `packages/ui-core` extracts the runs domain (list filtering and sorting, tree
+  building, event frames, diff parsing, health, view models) into one shared
+  home, and `packages/tui-ui` holds the pure TUI leaves (run tree, event log,
+  status glyphs) built on it.
+- A new `coverWorkflow` testing helper drives component-level coverage with
+  schema mocks, and a new zmux-based real-PTY e2e harness drives the TUI runs
+  list and the Monitor mirror end to end.
+- Internal scripts and plugins now execute the working-tree Smithers, enforced
+  by a repo check, so a checkout never silently runs a published build.
 
 ## Upgrade notes
 
 - Passing `--host` (or `SMITHERS_GATEWAY_HOST`) to `monitor`, `ui`, or `gui`
-  now mints a login token automatically and prints one URL per dialable
-  interface instead of the old loopback-only warning. Review printed URLs
-  before sharing them.
+  mints a login token automatically and prints one URL per dialable interface
+  instead of the old loopback-only warning. Review printed URLs before sharing
+  them.
 - `allowNetwork: false` now permits loopback and unix-socket traffic. If you
-  relied on it to isolate a task from local services, that isolation no
-  longer holds; remote egress stays denied.
-- `bunx smithers-orchestrator eval` exits 5 when every red case is inconclusive. CI scripts
-  that treat any nonzero exit as regression should special-case 5.
-- Runs stuck on `RESUME_METADATA_MISMATCH` after an in-flight workflow edit
-  can resume with `--accept-workflow-change` instead of forking.
+  relied on it to isolate a task from local services, that isolation no longer
+  holds; remote egress stays denied.
+- `bunx smithers-orchestrator eval` exits 5 when every red case is inconclusive. CI scripts that
+  treat any nonzero exit as regression should special-case 5.
+- Runs stuck on `RESUME_METADATA_MISMATCH` after an in-flight workflow edit can
+  resume with `--accept-workflow-change` instead of forking.
 
 ## The full changelog
 
