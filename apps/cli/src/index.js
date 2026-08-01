@@ -5390,7 +5390,7 @@ async function runFullUiCommand(c, base, token, fail) {
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
     await new Promise(() => {});
-    return c.ok({ opened: c.options.open, url, gateway: base });
+    return c.ok({ opened, url, gateway: base });
   } catch (err) {
     // A taken --app-port rejects with EADDRINUSE out of the listen; name the
     // port and the flag to change it instead of surfacing the raw listen error.
