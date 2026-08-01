@@ -11612,11 +11612,24 @@ pure `buildNodeChatTranscript(frames, nodeId)` fold behind `NodeChatStream`,
 and `gatewayApprovalKey(row)` (the canonical `runId:nodeId:iteration` id for a
 pending approval row, used to key `GatewayApprovalConfirmation` instances).
 
+**Node status vocabulary:** a run-tree row's `status` is always one of six
+tones — `ok`, `running`, `queued`, `failed`, `waiting`, `cancelled`. The engine
+records richer lifecycle states (`finished`, `succeeded`, `completed`,
+`in-progress`, `pending`, `waiting-approval`, …), but `toRunStatus` normalizes
+them away before a UI ever sees them. Comparing against an engine state is
+therefore silently always false: the classic symptom is a phase strip where
+finished work keeps rendering as un-started, because `status === "completed"`
+never matches `"ok"`. Prefer `nodeStatusIndex` + `rollupNodeStatus` over
+matching literals at all; `gradeWorkflowUiSource` flags the engine words under
+the `node-status-vocabulary` rule. A node's *output payload* may of course
+define any `status` vocabulary it likes — this applies only to run-tree rows.
+
 **Live-feedback rule:** every agent node a UI surfaces should get a
 `NodeChatStream` so humans can watch the agent work in real time; the
 `create-ui` workflow's deterministic compliance gate
 (`gradeWorkflowUiSource` from `smithers-orchestrator/scorers`) rejects
-generated UIs that hand-roll pills/tables/colors or omit live agent chat.
+generated UIs that hand-roll pills/tables/colors, match node statuses against
+engine states, or omit live agent chat.
 The gate also requires the author's verified result and independently checks
 that both `/workflows/<key>` and `/workflows/<key>/__smithers_ui/client.js`
 return HTTP 200. It retries authoring for at most three rounds and fails with

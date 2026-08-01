@@ -2,8 +2,6 @@ import * as effect from 'effect';
 import { Effect } from 'effect';
 import { z } from 'zod';
 import { Tool } from 'ai';
-import * as effect_MetricState from 'effect/MetricState';
-import * as effect_MetricKeyType from 'effect/MetricKeyType';
 
 type HttpMethod = "get" | "post" | "put" | "delete" | "patch";
 
@@ -306,8 +304,8 @@ type OpenApiSpec$1 = OpenApiSpec$b;
 declare const openApiToolCallsTotal: effect.Metric.Metric.Counter<number>;
 /** @type {import("effect").Metric.Metric.Counter<number>} */
 declare const openApiToolCallErrorsTotal: effect.Metric.Metric.Counter<number>;
-/** @type {import("effect").Metric.Metric<import("effect/MetricKeyType").MetricKeyType.Histogram, number, import("effect/MetricState").MetricState.Histogram>} */
-declare const openApiToolDuration: effect.Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+/** @type {import("effect").Metric.Metric.Histogram<number>} */
+declare const openApiToolDuration: effect.Metric.Metric.Histogram<number>;
 
 type OpenApiAuth = OpenApiAuth$1;
 type OpenApiSpec = OpenApiSpec$b;

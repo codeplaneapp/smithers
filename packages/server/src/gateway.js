@@ -1292,6 +1292,28 @@ function headerValue(req, name) {
  * model.
  */
 export const GATEWAY_SESSION_COOKIE = "smithers_session";
+/**
+ * Browsers do NOT scope cookies by port, so two gateways on the same host but
+ * different ports would clobber each other's `smithers_session` (workspace B's
+ * handoff overwrites workspace A's cookie -> A then 401s). Derive a per-port
+ * cookie NAME from the request Host so concurrent workspace gateways keep
+ * distinct sessions. A host with no explicit port (default 80/443) keeps the
+ * bare name.
+ * @param {IncomingMessage} req
+ * @returns {string}
+ */
+function sessionCookieName(req) {
+  const host = headerValue(req, "host");
+  if (host) {
+    const colon = host.lastIndexOf(":");
+    // Guard against IPv6 literals like [::1] with no port.
+    const port = colon !== -1 && !host.slice(colon + 1).includes("]") ? host.slice(colon + 1) : "";
+    if (/^[0-9]+$/.test(port)) {
+      return `${GATEWAY_SESSION_COOKIE}_${port}`;
+    }
+  }
+  return GATEWAY_SESSION_COOKIE;
+}
 
 /**
  * Whether the request reached us over TLS (directly or through a terminating
@@ -1318,12 +1340,13 @@ function sessionTokenFromCookies(req) {
   if (!header) {
     return null;
   }
+  const cookieName = sessionCookieName(req);
   for (const part of header.split(";")) {
     const eq = part.indexOf("=");
     if (eq === -1) {
       continue;
     }
-    if (part.slice(0, eq).trim() !== GATEWAY_SESSION_COOKIE) {
+    if (part.slice(0, eq).trim() !== cookieName) {
       continue;
     }
     const raw = part.slice(eq + 1).trim();
@@ -3133,7 +3156,7 @@ export class Gateway {
     if (token) {
       res.setHeader(
         "set-cookie",
-        `${GATEWAY_SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax${
+        `${sessionCookieName(req)}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax${
           isSecureRequest(req) ? "; Secure" : ""
         }`,
       );

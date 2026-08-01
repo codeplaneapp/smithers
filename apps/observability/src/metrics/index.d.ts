@@ -2,8 +2,6 @@ import { aD as SmithersMetricDefinition$1, c as SmithersMetricDefinition$2, aE a
 export { d as activeNodes, e as activeRuns, f as approvalPending, g as approvalWaitDuration, h as approvalsDenied, i as approvalsGranted, j as approvalsRequested, k as attemptDuration, l as cacheHits, m as cacheMisses, n as dbQueryDuration, o as dbRetries, p as dbTransactionDuration, q as dbTransactionRetries, r as dbTransactionRollbacks, s as errorsTotal, t as eventsEmittedTotal, u as externalWaitAsyncPending, v as hotReloadDuration, w as hotReloadFailures, x as hotReloads, y as httpRequestDuration, z as httpRequests, A as metricsServiceAdapter, B as nodeDuration, C as nodeRetriesTotal, D as nodesFailed, E as nodesFinished, F as nodesStarted, G as processHeapUsedBytes, H as processMemoryRssBytes, I as processUptimeSeconds, J as promptSizeBytes, K as replaysStarted, L as responseSizeBytes, N as rewindDurationMs, O as rewindFramesDeleted, P as rewindRollbackTotal, Q as rewindSandboxesReverted, R as rewindTotal, T as runDuration, U as runForksCreated, V as runsAncestryDepth, W as runsCancelledTotal, X as runsCarriedStateBytes, Y as runsContinuedTotal, Z as runsFailedTotal, _ as runsFinishedTotal, $ as runsResumedTotal, a0 as runsTotal, a1 as sandboxActive, a2 as sandboxBundleSizeBytes, a3 as sandboxCompletedTotal, a4 as sandboxCreatedTotal, a5 as sandboxDurationMs, a6 as sandboxPatchCount, a7 as sandboxTransportDurationMs, a8 as schedulerConcurrencyUtilization, a9 as schedulerQueueDepth, aa as schedulerWaitDuration, ab as scorerEventsFailed, ac as scorerEventsFinished, ad as scorerEventsStarted, ae as smithersMetricCatalog, af as snapshotDuration, ag as snapshotsCaptured, ah as timerDelayDuration, ai as timersCancelled, aj as timersCreated, ak as timersFired, al as timersPending, am as toPrometheusMetricName, an as tokensCacheReadTotal, ao as tokensCacheWriteTotal, ap as tokensContextWindowBucketTotal, aq as tokensContextWindowPerCall, ar as tokensInputPerCall, as as tokensInputTotal, at as tokensOutputPerCall, au as tokensOutputTotal, av as tokensReasoningTotal, aw as toolCallErrorsTotal, ax as toolCallsTotal, ay as toolDuration, az as toolOutputTruncatedTotal, aA as trackEvent, aB as updateProcessMetrics, aC as vcsDuration } from '../rewindSandboxesReverted-DNiqPX1B.js';
 import * as effect from 'effect';
 import { Effect, Metric } from 'effect';
-import * as effect_MetricState from 'effect/MetricState';
-import * as effect_MetricKeyType from 'effect/MetricKeyType';
 
 /**
  * @param {"approval" | "event"} kind
@@ -126,30 +124,30 @@ declare const gatewayConnectionsActive: Metric.Metric.Gauge<number>;
 
 declare const devtoolsActiveSubscribers: Metric.Metric.Gauge<number>;
 
-declare const agentDurationMs: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const agentDurationMs: Metric.Metric.Histogram<number>;
 
-declare const gatewayRpcDuration: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const gatewayRpcDuration: Metric.Metric.Histogram<number>;
 
-declare const supervisorPollDuration: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const supervisorPollDuration: Metric.Metric.Histogram<number>;
 
-declare const supervisorResumeLag: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const supervisorResumeLag: Metric.Metric.Histogram<number>;
 
-declare const heartbeatDataSizeBytes: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const heartbeatDataSizeBytes: Metric.Metric.Histogram<number>;
 
-declare const heartbeatIntervalMs: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const heartbeatIntervalMs: Metric.Metric.Histogram<number>;
 
-declare const memoryRecallDuration: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const memoryRecallDuration: Metric.Metric.Histogram<number>;
 
-/** @type {import("effect").Metric.Metric<import("effect/MetricKeyType").MetricKeyType.Histogram, number, import("effect/MetricState").MetricState.Histogram>} */
-declare const openApiToolDuration: effect.Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+/** @type {import("effect").Metric.Metric.Histogram<number>} */
+declare const openApiToolDuration: effect.Metric.Metric.Histogram<number>;
 
-declare const scorerDuration: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const scorerDuration: Metric.Metric.Histogram<number>;
 
-declare const devtoolsSnapshotBuildMs: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const devtoolsSnapshotBuildMs: Metric.Metric.Histogram<number>;
 
-declare const devtoolsDeltaBuildMs: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const devtoolsDeltaBuildMs: Metric.Metric.Histogram<number>;
 
-declare const devtoolsEventBytes: Metric.Metric<effect_MetricKeyType.MetricKeyType.Histogram, number, effect_MetricState.MetricState.Histogram>;
+declare const devtoolsEventBytes: Metric.Metric.Histogram<number>;
 
 type SmithersMetricDefinition = SmithersMetricDefinition$2;
 type SmithersMetricType = SmithersMetricType$1;
