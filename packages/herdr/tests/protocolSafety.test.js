@@ -43,7 +43,7 @@ async function startFakeHerdr(respond) {
   return socketPath;
 }
 
-describe("createHerdrClient protocol safety (fake socket server)", () => {
+describe.skipIf(process.platform === "win32")("createHerdrClient protocol safety (fake socket server)", () => {
   test("strict ping exposes a protocol mismatch while default ping remains inspectable", async () => {
     const socketPath = await startFakeHerdr((socket) => {
       socket.end(`${JSON.stringify({ id: "fake", result: { type: "pong", version: "future", protocol: 999 } })}\n`);
