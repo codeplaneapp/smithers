@@ -9,19 +9,25 @@
 #   driver.sh --tasks vbt-1.2.0-roadmap --patterns panel-review --smoke
 #   driver.sh --round r2 --tasks ... --patterns ...
 set -uo pipefail
+# RoadmapBench target releases can introduce dependencies absent from their
+# official images. Agent execution remains offline; only the uncredentialed,
+# post-run grader receives dependency access for this experiment.
+export RMB_SCORER_NETWORK="${RMB_SCORER_NETWORK:-bridge}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 HARNESS="$ROOT/benchmarks/roadmapbench/harness"
 DATA="$ROOT/.context/roadmapbench/data"
 OUT="$ROOT/.context/orchbench"
+INVALIDATED="$OUT/invalidated"
 CLI=(bun run "$ROOT/apps/cli/src/index.js")
 WF="$ROOT/.smithers/workflows/orchbench.tsx"
-mkdir -p "$OUT/results" "$OUT/runs" "$OUT/validated"
+mkdir -p "$OUT/results" "$OUT/runs" "$OUT/validated" "$INVALIDATED"
 
 ROUND="r1"
 TASKS=(vbt-1.2.0-roadmap opt-4.4.0-roadmap fbr-2.42.0-roadmap rat-0.21.0-roadmap)
 PATTERNS=(solo-sol solo-luna plan-impl-review research-first panel-review)
 SMOKE=0
 VALIDATE_ONLY=0
+BALANCED_ORDER=0
 PANEL_THIRD="${ORCHBENCH_PANEL_THIRD:-opus}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -30,6 +36,7 @@ while [[ $# -gt 0 ]]; do
     --patterns) IFS=',' read -r -a PATTERNS <<< "$2"; shift 2 ;;
     --smoke) SMOKE=1; shift ;;
     --validate-only) VALIDATE_ONLY=1; shift ;;
+    --balanced-order) BALANCED_ORDER=1; shift ;;
     *) echo "unknown arg $1"; exit 2 ;;
   esac
 done
@@ -37,19 +44,30 @@ done
 log() { printf '[driver %s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 
 download_task() {
-  local slug="$1"; [[ -f "$DATA/$slug/task.toml" ]] && return 0
+  local slug="$1"
+  # A task.toml can arrive before an interrupted snapshot is complete. Only
+  # trust local data once its grader has reached a terminal fairness decision;
+  # otherwise snapshot_download resumes and verifies the partial download.
+  if [[ -f "$DATA/$slug/task.toml" && ( -f "$OUT/validated/$slug" || -f "$INVALIDATED/$slug" ) ]]; then
+    return 0
+  fi
   log "downloading $slug ..."
-  ( cd "$ROOT/.context/roadmapbench" && uv run --with huggingface_hub python3 - "$slug" <<'PY'
+  # Resolve the downloader from uv's local cache. Network here is for the
+  # pinned dataset only; a transient package-index outage must not prevent a
+  # resumable snapshot download.
+  ( cd "$ROOT/.context/roadmapbench" && uv run --offline --with huggingface_hub python3 - "$slug" <<'PY'
 import sys; from huggingface_hub import snapshot_download
 snapshot_download(repo_id='UnipatAI/RoadmapBench', repo_type='dataset', local_dir='./data',
-                  allow_patterns=[f'{sys.argv[1]}/*']); print('ok')
+                  revision='59184e779909300a5a0150b06b945d39da81a099',
+                  allow_patterns=[f'{sys.argv[1]}/*'], max_workers=4); print('ok')
 PY
   )
 }
 
 validate_task() {
-  local slug="$1" marker="$OUT/validated/$slug"
+  local slug="$1" marker="$OUT/validated/$slug" invalid="$INVALIDATED/$slug"
   [[ -f "$marker" ]] && return 0
+  [[ -f "$invalid" ]] && { log "skip invalid grader $slug ($(cat "$invalid"))"; return 1; }
   log "validating grader fairness for $slug (oracle=1.0, no-op<1.0) ..."
   local vlog="$OUT/runs/$slug-validate.log"
   if RMB_WORK="$OUT/runs/$slug-validate" bash "$HARNESS/validate_task.sh" "$DATA/$slug" > "$vlog" 2>&1; then
@@ -59,9 +77,23 @@ validate_task() {
     echo "$noop $oracle" > "$marker"; rm -rf "$OUT/runs/$slug-validate"
     log "fairness OK $slug: noop=$noop oracle=$oracle"
   else
-    log "SCORER VALIDATION FAILED $slug — excluded (see $vlog)"
+    local noop oracle
+    noop="$(grep 'no-op reward' "$vlog" | tail -1 | grep -oE '[0-9.]+$')"
+    oracle="$(grep 'oracle reward' "$vlog" | tail -1 | grep -oE '[0-9.]+$')"
+    if [[ -n "$noop" && -n "$oracle" ]]; then
+      printf 'noop=%s oracle=%s\n' "$noop" "$oracle" > "$invalid"
+      log "SCORER VALIDATION FAILED $slug — excluded (see $vlog)"
+    else
+      log "VALIDATION INFRASTRUCTURE FAILED $slug — not excluded; retry required (see $vlog)"
+    fi
     return 1
   fi
+}
+
+prune_task_image() {
+  local slug="$1" image
+  image="$(awk -F'"' '/docker_image/{print $2; exit}' "$DATA/$slug/task.toml")"
+  [[ -n "${image:-}" ]] && docker rmi "$image" >/dev/null 2>&1 || true
 }
 
 # Gate 1: never launch while ANY other run is actively RUNNING (foreign
@@ -110,11 +142,33 @@ wait_codex_quota() {
   done
 }
 
+result_is_clean() {
+  python3 - "$1" <<'PY' 2>/dev/null
+import json, sys
+try:
+    r = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+sys.exit(0 if r.get("status") == "RunFinished"
+         and r.get("quotaPoisoned") is False
+         and r.get("tainted") is False else 1)
+PY
+}
+
 run_cell() {
   local slug="$1" pattern="$2"
-  local cell="$ROUND-$pattern-$slug"
+  local base_cell="$ROUND-$pattern-$slug" cell="$ROUND-$pattern-$slug" attempt=0
   local resfile="$OUT/results/$cell.json"
-  [[ -f "$resfile" ]] && { log "skip $cell (result exists)"; return 0; }
+  while [[ -f "$resfile" ]]; do
+    if result_is_clean "$resfile"; then
+      log "skip $cell (clean result exists)"
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    cell="$base_cell-retry$attempt"
+    resfile="$OUT/results/$cell.json"
+  done
+  [[ $attempt -gt 0 ]] && log "retrying invalid $base_cell as $cell (raw attempts retained)"
   local run_id="orchb-$cell"
   local work="$OUT/runs/$cell"
 
@@ -190,14 +244,31 @@ print(f"RESULT {r['pattern']} {r['slug']} reward={r['reward']:.3f} wall={r['wall
 PY
 }
 
-log "OrchBench $ROUND: ${#TASKS[@]} task(s) x ${#PATTERNS[@]} pattern(s), smoke=$SMOKE, panelThird=$PANEL_THIRD"
+log "OrchBench $ROUND: ${#TASKS[@]} task(s) x ${#PATTERNS[@]} pattern(s), smoke=$SMOKE, panelThird=$PANEL_THIRD, balancedOrder=$BALANCED_ORDER"
+task_index=0
 for slug in "${TASKS[@]}"; do
   download_task "$slug" || { log "download FAILED $slug — skipping task"; continue; }
-  validate_task "$slug" || continue
-  [[ "$VALIDATE_ONLY" -eq 1 ]] && { log "validate-only: $slug done"; continue; }
-  for pattern in "${PATTERNS[@]}"; do
+  if ! validate_task "$slug"; then
+    [[ "$VALIDATE_ONLY" -eq 1 ]] && prune_task_image "$slug"
+    continue
+  fi
+  if [[ "$VALIDATE_ONLY" -eq 1 ]]; then
+    prune_task_image "$slug"
+    log "validate-only: $slug done; image pruned"
+    continue
+  fi
+  ORDERED_PATTERNS=("${PATTERNS[@]}")
+  if [[ "$BALANCED_ORDER" -eq 1 && "${#PATTERNS[@]}" -gt 1 ]]; then
+    ORDERED_PATTERNS=()
+    offset=$((task_index % ${#PATTERNS[@]}))
+    for ((pattern_index=0; pattern_index<${#PATTERNS[@]}; pattern_index++)); do
+      ORDERED_PATTERNS+=("${PATTERNS[$(((pattern_index + offset) % ${#PATTERNS[@]}))]}")
+    done
+  fi
+  for pattern in "${ORDERED_PATTERNS[@]}"; do
     run_cell "$slug" "$pattern"
   done
+  task_index=$((task_index + 1))
   # task finished all its cells: reclaim the (qemu, multi-GB) image
   image="$(awk -F'"' '/docker_image/{print $2; exit}' "$DATA/$slug/task.toml")"
   [[ -n "${image:-}" ]] && docker rmi "$image" >/dev/null 2>&1 || true
