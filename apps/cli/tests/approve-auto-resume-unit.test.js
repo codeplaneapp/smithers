@@ -154,6 +154,25 @@ describe("maybeResumeDecidedDetachedRun", () => {
     expect(spawnArgs).not.toHaveLength(0);
   });
 
+  test("resumes a parked built-in oneshot from its recorded config", async () => {
+    const adapter = makeAdapter();
+    const result = await maybeResume(
+      adapter,
+      parkedGateRun({
+        workflowPath: null,
+        configJson: JSON.stringify({
+          builtinResume: { command: "oneshot", args: ["finish the patch", "--agent", "codex"], cwd: harnessDir },
+        }),
+      }),
+      "run-1",
+    );
+    expect(result.resumed).toBe(true);
+    expect(spawnArgs).toContain("oneshot");
+    expect(spawnArgs).toContain("finish the patch");
+    expect(spawnArgs).toContain("--resume");
+    expect(spawnArgs).toContain("run-1");
+  });
+
   test("resumes when the recorded owner pid is verifiably dead", async () => {
     const adapter = makeAdapter();
     const result = await maybeResume(adapter, parkedGateRun({ runtimeOwnerId: "pid:11111:dead-driver" }), "run-1");

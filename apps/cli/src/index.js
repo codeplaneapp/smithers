@@ -587,12 +587,10 @@ async function maybeResumeDecidedDetachedRun(adapter, run, runId, resumeOptions)
   if (!run) return { resumed: false, reason: "run-missing" };
   if (run.status !== "waiting-approval" && run.status !== "waiting-event")
     return { resumed: false, reason: "not-parked" };
-  if (!run.workflowPath) return { resumed: false, reason: "no-workflow-path" };
-  // The workflow file must exist to resume against (mirrors the supervisor's
-  // workflowExists gate): never spawn a doomed `up --resume` for a moved or
-  // missing workflow file.
-  const workflowPath = isAbsolute(run.workflowPath) ? run.workflowPath : resolve(process.cwd(), run.workflowPath);
-  if (!existsSync(workflowPath)) return { resumed: false, reason: "workflow-missing" };
+  const resumeTarget = resolveResumeTarget(run, { workflowExists: existsSync });
+  if (!resumeTarget) {
+    return { resumed: false, reason: run.workflowPath ? "workflow-missing" : "no-workflow-path" };
+  }
   const ownerPid = parseRuntimeOwnerPid(run.runtimeOwnerId);
   const ownerAlive = ownerPid !== null && isPidAlive(ownerPid);
   if (ownerAlive || isRunHeartbeatFresh(run)) return { resumed: false, reason: "owner-alive" };
@@ -622,7 +620,7 @@ async function maybeResumeDecidedDetachedRun(adapter, run, runId, resumeOptions)
   const claim = { claimOwnerId, claimHeartbeatAtMs, restoreRuntimeOwnerId, restoreHeartbeatAtMs };
   let pid = null;
   try {
-    pid = resumeRunDetached(run.workflowPath, runId, claim, resumeOptions);
+    pid = resumeRunDetached(resumeTarget, runId, claim, resumeOptions);
   } catch {
     // Spawn threw synchronously.
     pid = null;
