@@ -29,6 +29,9 @@ import { prometheusContentType, renderPrometheusMetrics } from "@smithers-orches
 import { approvalDecision } from "./approvalDecision.js";
 /** @typedef {import("node:http").ServerResponse} ServerResponse */
 /** @typedef {import("./ServerOptions.js").ServerOptions} ServerOptions */
+// @smithers-type-exports-begin
+/** @typedef {import("./approvalDecision.js").ApprovalRequestRecord} ApprovalRequestRecord */
+// @smithers-type-exports-end
 
 // Re-export the full public surface so the tsup-bundled `src/index.d.ts`
 // covers every module reachable via the `./*` wildcard export.

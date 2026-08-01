@@ -1,3 +1,4 @@
+// @smithers-type-exports-begin
 /**
  * @typedef {{
  *   mode: "gate" | "select" | "rank" | "decision";
@@ -10,6 +11,7 @@
  *   autoApprove: Record<string, unknown> | null;
  * }} ApprovalRequestRecord
  */
+// @smithers-type-exports-end
 
 /**
  * @param {unknown} value
