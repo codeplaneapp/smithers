@@ -253,11 +253,11 @@ describe("PACKAGE_AND_BUILD contracts", () => {
     );
 
     expect(linuxTestRows).toHaveLength(4);
-    expect(linuxTestRows.every(({ os }) => os === "ubuntu-22.04")).toBe(true);
+    expect(linuxTestRows.every(({ os }) => os === "ubuntu-latest")).toBe(true);
     expect(linuxTestSetup.if).toBe("runner.os == 'Linux'");
     expect(linuxTestSetup.run).toContain("sudo apt-get install -y bubblewrap ripgrep");
     expect(linuxTestSetup.run).toContain("--unshare-pid");
-    expect(ci.jobs.coverage["runs-on"]).toBe("ubuntu-22.04");
+    expect(ci.jobs.coverage["runs-on"]).toBe("ubuntu-latest");
     expect(coverageSetup.run).toContain("sudo apt-get install -y bubblewrap ripgrep");
     expect(coverageSetup.run).toContain("--unshare-pid");
     expect(ci.jobs["nanocodex-release-qualification"]["runs-on"]).toBe("ubuntu-22.04");
