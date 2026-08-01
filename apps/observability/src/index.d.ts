@@ -48,10 +48,10 @@ type CorrelationContext$5 = {
 
 type CorrelationPatch$5 = Partial<CorrelationContext$5> | undefined | null;
 
-declare class MetricsService extends Context.TagClassShape<"MetricsService", MetricsServiceShape$1> {
+declare class MetricsService extends Context.ServiceClass.Shape<"MetricsService", MetricsServiceShape$1> {
 }
 
-declare class SmithersObservability extends Context.TagClassShape<"SmithersObservability", SmithersObservabilityService$1> {
+declare class SmithersObservability extends Context.ServiceClass.Shape<"SmithersObservability", SmithersObservabilityService$1> {
 }
 
 declare const prometheusContentType: "text/plain; version=0.0.4; charset=utf-8";
@@ -134,7 +134,7 @@ type TracingServiceShape = {
     readonly withCorrelation: <A, E, R>(context: CorrelationPatch$5, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
 };
 
-declare class TracingService extends Context.TagClassShape<"TracingService", TracingServiceShape> {
+declare class TracingService extends Context.ServiceClass.Shape<"TracingService", TracingServiceShape> {
 }
 /** @type {Layer.Layer<TracingService, never, never>} */
 declare const TracingServiceLive: Layer.Layer<TracingService, never, never>;
@@ -155,7 +155,7 @@ type CorrelationContextServiceShape = {
     readonly toLogAnnotations: (context?: CorrelationContext$5 | null) => Record<string, unknown> | undefined;
 };
 
-declare class CorrelationContextService extends Context.TagClassShape<"CorrelationContextService", CorrelationContextServiceShape> {
+declare class CorrelationContextService extends Context.ServiceClass.Shape<"CorrelationContextService", CorrelationContextServiceShape> {
 }
 
 /** @type {Layer.Layer<CorrelationContextService, never, never>} */

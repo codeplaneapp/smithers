@@ -3,7 +3,7 @@
 The Linear integration surface:
 
 - `LinearClient.js` — plain-fetch GraphQL client as an Effect service
-  (Context.Tag `LinearClient` + `LinearClientLive` layer): per-client caches
+  (`Context.Service` `LinearClient` + `LinearClientLive` layer): per-client caches
   for team/workflow-state/label lookups, `ENG-123` identifier resolution,
   429/5xx retry honoring rate-limit headers. No `@linear/sdk` dependency —
   behaviors are ports of eliza plugin-linear over raw GraphQL.

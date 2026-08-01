@@ -321,7 +321,7 @@ declare function Summarizer(agent: {
 }): MemoryProcessor$1;
 type MemoryProcessor$1 = MemoryProcessor$4;
 
-declare class MemoryService extends Context.TagClassShape<"MemoryService", any> {
+declare class MemoryService extends Context.ServiceClass.Shape<"MemoryService", any> {
 }
 
 /** @typedef {import("./MemoryLayerConfig.ts").MemoryLayerConfig} MemoryLayerConfig */

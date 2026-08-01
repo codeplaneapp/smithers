@@ -106,9 +106,9 @@ function isParseEntityError(error) {
 /**
  * `Context.Tag` for the Telegram Bot API client service. Provide it with
  * `TelegramClientLive(config)` or `Layer.succeed(TelegramClient, service)`.
- * @type {Context.Tag<TelegramClientService, TelegramClientService>}
+ * @type {Context.Service<TelegramClientService, TelegramClientService>}
  */
-export const TelegramClient = /** @type {Context.Tag<TelegramClientService, TelegramClientService>} */ (
+export const TelegramClient = /** @type {Context.Service<TelegramClientService, TelegramClientService>} */ (
   Context.Service("@smithers-orchestrator/integrations/TelegramClient")
 );
 

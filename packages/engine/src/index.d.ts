@@ -2103,7 +2103,7 @@ declare class ApprovalDecision {
 /**
  * @typedef {{ build: (buildGraph: ($: BuilderApi, params?: Record<string, unknown>) => BuilderNode) => ComponentDefinition }} ComponentDefinitionBuilder
  */
-declare const SmithersSqlite: Context.Tag<any, any>;
+declare const SmithersSqlite: Context.Service<any, any>;
 /**
  * @param {BuilderNode} node
  * @param {string} [activeLoopId]

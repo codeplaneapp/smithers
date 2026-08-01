@@ -13,7 +13,7 @@ import { BubblewrapSandboxExecutorLive } from "./effect/socket-runner.js";
 /** @typedef {import("./SandboxRuntime.ts").SandboxRuntime} SandboxRuntime */
 
 const SandboxTransportTag =
-  /** @type {Context.TagClass<SandboxTransport, "SandboxTransport", SandboxTransportService>} */ (
+  /** @type {Context.ServiceClass<SandboxTransport, "SandboxTransport", SandboxTransportService>} */ (
     Context.Service("SandboxTransport")
   );
 export class SandboxTransport extends SandboxTransportTag {

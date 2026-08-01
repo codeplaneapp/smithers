@@ -2,7 +2,7 @@
 
 The GitHub integration surface:
 
-- `GitHubClient.js` — Effect Context.Tag REST client: rate-limit-aware
+- `GitHubClient.js` — Effect Context.Service REST client: rate-limit-aware
   retries (honors `Retry-After` / `x-ratelimit-reset`, capped at 60s),
   Link-header pagination, optional Effect Schema decoding per request.
 - `GitHubWebhookSource.js` — `X-Hub-Signature-256` verification and

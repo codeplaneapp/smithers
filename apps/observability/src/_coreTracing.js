@@ -18,7 +18,7 @@ export const smithersSpanNames = {
   agent: "smithers.agent",
   tool: "smithers.tool",
 };
-const _TracingServiceBase = /** @type {Context.TagClass<TracingService, "TracingService", TracingServiceShape>} */ (
+const _TracingServiceBase = /** @type {Context.ServiceClass<TracingService, "TracingService", TracingServiceShape>} */ (
   /** @type {unknown} */ (Context.Service("TracingService"))
 );
 export class TracingService extends _TracingServiceBase {}
