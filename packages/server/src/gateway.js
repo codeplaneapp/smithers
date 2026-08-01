@@ -1337,6 +1337,23 @@ function sessionTokenFromCookies(req) {
 }
 
 /**
+ * Whether the request's ONLY credential is the ambient session cookie: no
+ * explicit `x-smithers-key` and no `Authorization` header, but a session
+ * cookie is present. Such requests are CSRF-shaped (the browser attaches the
+ * cookie automatically) and get the stricter cookie-origin gate.
+ * @param {IncomingMessage} req
+ * @returns {boolean}
+ */
+function requestUsesAmbientCookieAuth(req) {
+  if (headerValue(req, "x-smithers-key")) {
+    return false;
+  }
+  if (headerValue(req, "authorization")) {
+    return false;
+  }
+  return sessionTokenFromCookies(req) !== null;
+}
+/**
  * @param {IncomingMessage} req
  * @returns {string | null}
  */
@@ -3088,7 +3105,12 @@ export class Gateway {
     const host = headerValue(req, "host") ?? "127.0.0.1";
     const url = new URL(`http://${host}${req.url ?? "/"}`);
     const rawNext = url.searchParams.get("next") ?? "/";
-    const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/";
+    // `next` must resolve to a same-origin PATH and nothing else. A leading
+    // `//` OR `/\` (browsers treat backslash as a path separator for special
+    // schemes, so `/\evil.tld` resolves to `http://evil.tld`) is an authority
+    // form, i.e. an open redirect. Resolve against a throwaway origin and keep
+    // it only if the origin did not change; fall back to "/" otherwise.
+    const next = sameOriginNextPath(rawNext);
     if (gatewayAuthMode(this.auth) === "none") {
       sendText(res, 200, renderSessionHandoffPage(next), "text/html; charset=utf-8");
       return;
@@ -5497,7 +5519,12 @@ a { color: var(--brand); }</style>
       // `handleUpgrade` opens the socket — otherwise a drive-by page could
       // open and hold connections (consuming maxConnections) by never
       // sending the `connect` RPC. (#446)
-      if (!this.isRequestOriginAllowed(req) || !this.isHostAllowed(req)) {
+      // The ambient session cookie is SameSite=Lax, so a same-site sibling
+      // origin's page can drive this upgrade with the browser attaching the
+      // cookie; reject a cross-origin cookie-only upgrade even when the
+      // allow-list is empty. Explicit-token WS clients are unaffected.
+      const cookieOriginRejected = !!this.auth && requestUsesAmbientCookieAuth(req) && !this.isCookieOriginTrusted(req);
+      if (!this.isRequestOriginAllowed(req) || !this.isHostAllowed(req) || cookieOriginRejected) {
         emitGatewayEffect(
           incrementMetric(gatewayErrorsTotal, {
             kind: "auth",
@@ -6919,6 +6946,31 @@ a { color: var(--brand); }</style>
     return host !== "" && isLoopbackHost(host);
   }
   /**
+   * For cookie-authenticated requests, whether the browser `Origin` is trusted:
+   * absent/"null" (non-browser), on the configured allow-list, or same-host as
+   * the request `Host` (the gateway's own origin). Cross-origin cookie auth is
+   * refused even with an empty allow-list, because the SameSite=Lax cookie is
+   * an ambient credential a sibling same-site origin can trigger.
+   * @param {IncomingMessage} req
+   * @returns {boolean}
+   */
+  isCookieOriginTrusted(req) {
+    const origin = asString(req.headers.origin);
+    if (origin === undefined || origin === "" || origin === "null") {
+      return true;
+    }
+    const allowedOrigins = this.auth?.allowedOrigins ?? [];
+    if (allowedOrigins.includes(origin)) {
+      return true;
+    }
+    const host = asString(req.headers.host);
+    try {
+      return host !== undefined && host !== "" && new URL(origin).host === host;
+    } catch {
+      return false;
+    }
+  }
+  /**
    * DNS-rebinding defense (spec decision 16a). An unauthenticated daemon grants
    * operator scope to every request, so a browser page at a name rebound to
    * 127.0.0.1 could drive `launchRun` (real compute/shell). Browsers send the
@@ -6976,6 +7028,21 @@ a { color: var(--brand); }</style>
         ok: false,
         code: "UNAUTHORIZED",
         message: "Origin is not allowed",
+      };
+    }
+    // Ambient-cookie CSRF gate. The session cookie is SameSite=Lax, so a
+    // same-site but cross-ORIGIN page (evil.example.com vs the gateway's
+    // smithers.example.com) still has the browser attach it to a GET/WS
+    // handshake. Unlike an explicit Authorization/x-smithers-key header,
+    // that credential is ambient, so a permissive (empty) allow-list must
+    // NOT trust it: when the request authenticates ONLY via the cookie,
+    // require a same-host or allow-listed Origin. Header/token clients
+    // (CLI, server-to-server) are unaffected.
+    if (this.auth && requestUsesAmbientCookieAuth(req) && !this.isCookieOriginTrusted(req)) {
+      return {
+        ok: false,
+        code: "UNAUTHORIZED",
+        message: "Origin is not allowed for cookie-authenticated requests",
       };
     }
     if (!this.auth) {
@@ -10627,5 +10694,20 @@ a { color: var(--brand); }</style>
       }
     }
     await Promise.allSettled(Array.from(map.values()).map(({ cleanup }) => Promise.resolve().then(() => cleanup())));
+  }
+}
+function sameOriginNextPath(rawNext) {
+  if (typeof rawNext !== "string" || !rawNext.startsWith("/")) return "/";
+  // Reject any authority form: second char "/" or "\\", or an embedded
+  // backslash anywhere (a browser rewrites "\\" to "/" before parsing).
+  if (rawNext.length >= 2 && (rawNext[1] === "/" || rawNext[1] === "\\")) return "/";
+  if (rawNext.includes("\\")) return "/";
+  try {
+    const base = "http://smithers.invalid";
+    const resolved = new URL(rawNext, base);
+    if (resolved.origin !== base) return "/";
+    return `${resolved.pathname}${resolved.search}${resolved.hash}`;
+  } catch {
+    return "/";
   }
 }

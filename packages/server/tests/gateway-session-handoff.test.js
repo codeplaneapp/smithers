@@ -182,3 +182,60 @@ describe("gateway browser session handoff", () => {
     expect(await response.text()).toContain('location.replace("/console")');
   });
 });
+
+describe("gateway session handoff — security regressions", () => {
+  test("rejects a backslash-authority `next` as an open redirect (lands on /)", async () => {
+    const port = await listenWithAuth();
+    // /%5Cevil.tld decodes to /\evil.tld, which a browser resolves to
+    // http://evil.tld. The handoff must never emit it.
+    const response = await fetch(
+      `http://127.0.0.1:${port}/v1/auth/session?token=${TOKEN}&next=${encodeURIComponent("/\\evil.example.com/x")}`,
+    );
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).not.toContain("evil.example.com");
+    expect(html).toContain('location.replace("/")');
+  });
+
+  test("rejects a protocol-relative `next` (//evil) as an open redirect", async () => {
+    const port = await listenWithAuth();
+    const response = await fetch(
+      `http://127.0.0.1:${port}/v1/auth/session?token=${TOKEN}&next=${encodeURIComponent("//evil.example.com/x")}`,
+    );
+    const html = await response.text();
+    expect(html).not.toContain("evil.example.com");
+    expect(html).toContain('location.replace("/")');
+  });
+
+  test("refuses a cross-origin cookie-authenticated RPC even with an empty allow-list", async () => {
+    const port = await listenWithAuth();
+    // Simulate a same-site sibling origin's browser page: the SameSite=Lax
+    // cookie rides along, but there is no Authorization header.
+    const res = await fetch(`http://127.0.0.1:${port}/v1/rpc/listRuns`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: `${GATEWAY_SESSION_COOKIE}=${TOKEN}`,
+        origin: "http://evil.example.com",
+      },
+      body: JSON.stringify({}),
+    });
+    const frame = await res.json().catch(() => null);
+    expect(frame?.ok).toBe(false);
+  });
+
+  test("still accepts a cookie-authenticated request from the gateway's own origin", async () => {
+    const port = await listenWithAuth();
+    const res = await fetch(`http://127.0.0.1:${port}/v1/rpc/listRuns`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: `${GATEWAY_SESSION_COOKIE}=${TOKEN}`,
+        origin: `http://127.0.0.1:${port}`,
+      },
+      body: JSON.stringify({}),
+    });
+    const frame = await res.json().catch(() => null);
+    expect(frame?.ok).toBe(true);
+  });
+});
