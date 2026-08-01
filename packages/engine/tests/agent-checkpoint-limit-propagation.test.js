@@ -14,6 +14,8 @@ import { jsx } from "smthrs/jsx-runtime";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 
 const CONFIGURED_CHECKPOINT_LIMIT = 4_096;
+const NANOCODEX_TEST_SUPPORTED = process.platform === "linux" && process.arch === "x64";
+const nTest = NANOCODEX_TEST_SUPPORTED ? test : test.skip;
 
 const NANOCODEX_CAPABILITIES = {
   bridgeVersion: "0.0.1",
@@ -211,274 +213,290 @@ describe("agent checkpoint limit propagation", () => {
     }
   }, 30_000);
 
-  test("runs a normal Nanocodex workflow and preserves its same-workspace checkpoint across replay", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "smithers-nanocodex-normal-"));
-    const binary = join(directory, "fake-nanocodex-normal.mjs");
-    const capture = join(directory, "captures.jsonl");
-    const state = join(directory, "state.txt");
-    await writeFile(binary, nanocodexCorrectionBridgeSource(), "utf8");
-    await chmod(binary, 0o755);
-    const { smithers, outputs, db, cleanup } = createTestSmithers({
-      result: z.object({ value: z.number() }),
-    });
-    const adapter = new SmithersDb(db);
-    const agent = new NanocodexAgent({
-      binary,
-      auth: { mode: "api-key-env", environmentVariable: "FAKE_NANOCODEX_KEY" },
-      inheritEnv: false,
-      env: {
-        FAKE_NANOCODEX_KEY: "never-on-the-wire",
-        FAKE_CAPTURE: capture,
-        FAKE_STATE: state,
-        FAKE_SCENARIO: "normal",
-      },
-    });
-    const workflow = smithers(() =>
-      jsx(Workflow, {
-        name: "nanocodex-normal-replay",
-        children: jsx(Task, {
-          id: "work",
-          output: outputs.result,
-          agent,
-          noRetry: true,
-          maxSchemaRetries: 0,
-          children: "Return a numeric value",
-        }),
-      }),
-    );
-    const parentRunId = "nanocodex-normal-replay-parent";
-
-    try {
-      const first = await Effect.runPromise(
-        runWorkflow(workflow, { input: {}, runId: parentRunId, rootDir: directory }),
-      );
-      expect(first.status).toBe("finished");
-      const captures = (await readFile(capture, "utf8"))
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line));
-      expect(captures).toHaveLength(1);
-      expect(captures[0].command.data.continuation).toBeNull();
-      expect(captures[0].command.data.workspace).toBe(await realpath(directory));
-
-      const parentSnapshot = await loadLatestSnapshot(adapter, parentRunId);
-      expect(parentSnapshot).toBeDefined();
-      const replay = await replayFromCheckpoint(adapter, {
-        parentRunId,
-        frameNo: parentSnapshot.frameNo,
+  nTest(
+    "runs a normal Nanocodex workflow and preserves its same-workspace checkpoint across replay",
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), "smithers-nanocodex-normal-"));
+      const binary = join(directory, "fake-nanocodex-normal.mjs");
+      const capture = join(directory, "captures.jsonl");
+      const state = join(directory, "state.txt");
+      await writeFile(binary, nanocodexCorrectionBridgeSource(), "utf8");
+      await chmod(binary, 0o755);
+      const { smithers, outputs, db, cleanup } = createTestSmithers({
+        result: z.object({ value: z.number() }),
       });
-      const resumed = await Effect.runPromise(
-        runWorkflow(workflow, { input: {}, runId: replay.runId, resume: true, rootDir: directory }),
-      );
-      expect(resumed.status).toBe("finished");
-      // The completed task is inherited, so replay must not invoke another
-      // bridge or relocate the canonical workspace-bound snapshot.
-      expect((await readFile(capture, "utf8")).trim().split("\n")).toHaveLength(1);
-
-      const rows = db.$client
-        .query(`SELECT refs.run_id, refs.content_hash, contents.checkpoint_json
-                  FROM _smithers_agent_checkpoints refs
-                  JOIN _smithers_agent_checkpoint_contents contents
-                    ON contents.content_hash = refs.content_hash
-                 WHERE refs.run_id IN (?, ?)
-                 ORDER BY refs.run_id`)
-        .all(parentRunId, replay.runId);
-      expect(rows).toHaveLength(2);
-      expect(new Set(rows.map((row) => row.content_hash)).size).toBe(1);
-      for (const row of rows) {
-        const checkpoint = JSON.parse(row.checkpoint_json);
-        expect(checkpoint.payload.canonicalWorkspace).toBe(await realpath(directory));
-        expect(checkpoint.payload.nanocodexSnapshot).toEqual({ version: 1, turns: [1] });
-      }
-    } finally {
-      cleanup();
-      await rm(directory, { recursive: true, force: true });
-    }
-  }, 30_000);
-
-  test("runs Nanocodex JSON and schema corrections in fresh bridges from exact durable checkpoints", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "smithers-nanocodex-engine-"));
-    const binary = join(directory, "fake-nanocodex-engine.mjs");
-    const capture = join(directory, "captures.jsonl");
-    const state = join(directory, "state.txt");
-    await writeFile(binary, nanocodexCorrectionBridgeSource(), "utf8");
-    await chmod(binary, 0o755);
-
-    const { smithers, outputs, db, cleanup } = createTestSmithers({
-      result: z.object({ value: z.number() }),
-    });
-    const agent = new NanocodexAgent({
-      binary,
-      auth: { mode: "api-key-env", environmentVariable: "FAKE_NANOCODEX_KEY" },
-      inheritEnv: false,
-      env: {
-        FAKE_NANOCODEX_KEY: "never-on-the-wire",
-        FAKE_CAPTURE: capture,
-        FAKE_STATE: state,
-      },
-    });
-
-    try {
+      const adapter = new SmithersDb(db);
+      const agent = new NanocodexAgent({
+        binary,
+        auth: { mode: "api-key-env", environmentVariable: "FAKE_NANOCODEX_KEY" },
+        inheritEnv: false,
+        env: {
+          FAKE_NANOCODEX_KEY: "never-on-the-wire",
+          FAKE_CAPTURE: capture,
+          FAKE_STATE: state,
+          FAKE_SCENARIO: "normal",
+        },
+      });
       const workflow = smithers(() =>
         jsx(Workflow, {
-          name: "nanocodex-correction-resume",
+          name: "nanocodex-normal-replay",
           children: jsx(Task, {
             id: "work",
             output: outputs.result,
             agent,
             noRetry: true,
-            maxSchemaRetries: 2,
+            maxSchemaRetries: 0,
             children: "Return a numeric value",
           }),
         }),
       );
-      const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
-      expect(result.status).toBe("finished");
+      const parentRunId = "nanocodex-normal-replay-parent";
 
-      const captures = (await readFile(capture, "utf8"))
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line));
-      expect(captures).toHaveLength(3);
-      expect(new Set(captures.map((entry) => entry.instance)).size).toBe(3);
-      expect(captures.map((entry) => entry.command.data.continuation)).toEqual([
-        null,
-        { mode: "resume", snapshot: { version: 1, turns: [1] } },
-        { mode: "resume", snapshot: { version: 1, turns: [1, 2] } },
-      ]);
-      expect(captures[0].command.data.prompt).toContain("Return a numeric value");
-      expect(captures[1].command.data.prompt).toContain("valid JSON object");
-      expect(captures[2].command.data.prompt).toContain("required schema");
-      expect(JSON.stringify(captures)).not.toContain("never-on-the-wire");
+      try {
+        const first = await Effect.runPromise(
+          runWorkflow(workflow, { input: {}, runId: parentRunId, rootDir: directory }),
+        );
+        expect(first.status).toBe("finished");
+        const captures = (await readFile(capture, "utf8"))
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line));
+        expect(captures).toHaveLength(1);
+        expect(captures[0].command.data.continuation).toBeNull();
+        expect(captures[0].command.data.workspace).toBe(await realpath(directory));
 
-      const rows = db.$client
-        .query(`SELECT contents.checkpoint_json
+        const parentSnapshot = await loadLatestSnapshot(adapter, parentRunId);
+        expect(parentSnapshot).toBeDefined();
+        const replay = await replayFromCheckpoint(adapter, {
+          parentRunId,
+          frameNo: parentSnapshot.frameNo,
+        });
+        const resumed = await Effect.runPromise(
+          runWorkflow(workflow, { input: {}, runId: replay.runId, resume: true, rootDir: directory }),
+        );
+        expect(resumed.status).toBe("finished");
+        // The completed task is inherited, so replay must not invoke another
+        // bridge or relocate the canonical workspace-bound snapshot.
+        expect((await readFile(capture, "utf8")).trim().split("\n")).toHaveLength(1);
+
+        const rows = db.$client
+          .query(`SELECT refs.run_id, refs.content_hash, contents.checkpoint_json
+                  FROM _smithers_agent_checkpoints refs
+                  JOIN _smithers_agent_checkpoint_contents contents
+                    ON contents.content_hash = refs.content_hash
+                 WHERE refs.run_id IN (?, ?)
+                 ORDER BY refs.run_id`)
+          .all(parentRunId, replay.runId);
+        expect(rows).toHaveLength(2);
+        expect(new Set(rows.map((row) => row.content_hash)).size).toBe(1);
+        for (const row of rows) {
+          const checkpoint = JSON.parse(row.checkpoint_json);
+          expect(checkpoint.payload.canonicalWorkspace).toBe(await realpath(directory));
+          expect(checkpoint.payload.nanocodexSnapshot).toEqual({ version: 1, turns: [1] });
+        }
+      } finally {
+        cleanup();
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+
+  nTest(
+    "runs Nanocodex JSON and schema corrections in fresh bridges from exact durable checkpoints",
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), "smithers-nanocodex-engine-"));
+      const binary = join(directory, "fake-nanocodex-engine.mjs");
+      const capture = join(directory, "captures.jsonl");
+      const state = join(directory, "state.txt");
+      await writeFile(binary, nanocodexCorrectionBridgeSource(), "utf8");
+      await chmod(binary, 0o755);
+
+      const { smithers, outputs, db, cleanup } = createTestSmithers({
+        result: z.object({ value: z.number() }),
+      });
+      const agent = new NanocodexAgent({
+        binary,
+        auth: { mode: "api-key-env", environmentVariable: "FAKE_NANOCODEX_KEY" },
+        inheritEnv: false,
+        env: {
+          FAKE_NANOCODEX_KEY: "never-on-the-wire",
+          FAKE_CAPTURE: capture,
+          FAKE_STATE: state,
+        },
+      });
+
+      try {
+        const workflow = smithers(() =>
+          jsx(Workflow, {
+            name: "nanocodex-correction-resume",
+            children: jsx(Task, {
+              id: "work",
+              output: outputs.result,
+              agent,
+              noRetry: true,
+              maxSchemaRetries: 2,
+              children: "Return a numeric value",
+            }),
+          }),
+        );
+        const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+        expect(result.status).toBe("finished");
+
+        const captures = (await readFile(capture, "utf8"))
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line));
+        expect(captures).toHaveLength(3);
+        expect(new Set(captures.map((entry) => entry.instance)).size).toBe(3);
+        expect(captures.map((entry) => entry.command.data.continuation)).toEqual([
+          null,
+          { mode: "resume", snapshot: { version: 1, turns: [1] } },
+          { mode: "resume", snapshot: { version: 1, turns: [1, 2] } },
+        ]);
+        expect(captures[0].command.data.prompt).toContain("Return a numeric value");
+        expect(captures[1].command.data.prompt).toContain("valid JSON object");
+        expect(captures[2].command.data.prompt).toContain("required schema");
+        expect(JSON.stringify(captures)).not.toContain("never-on-the-wire");
+
+        const rows = db.$client
+          .query(`SELECT contents.checkpoint_json
                 FROM _smithers_agent_checkpoints refs
                 JOIN _smithers_agent_checkpoint_contents contents
                   ON contents.content_hash = refs.content_hash
                 ORDER BY refs.sequence`)
-        .all();
-      expect(rows).toHaveLength(3);
-      expect(JSON.parse(rows.at(-1).checkpoint_json).payload.nanocodexSnapshot).toEqual({
-        version: 1,
-        turns: [1, 2, 3],
+          .all();
+        expect(rows).toHaveLength(3);
+        expect(JSON.parse(rows.at(-1).checkpoint_json).payload.nanocodexSnapshot).toEqual({
+          version: 1,
+          turns: [1, 2, 3],
+        });
+      } finally {
+        cleanup();
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+
+  nTest(
+    "retries after forced bridge death from the exact prior durable Nanocodex snapshot",
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), "smithers-nanocodex-retry-"));
+      const binary = join(directory, "fake-nanocodex-retry.mjs");
+      const capture = join(directory, "captures.jsonl");
+      const state = join(directory, "state.txt");
+      await writeFile(binary, nanocodexCorrectionBridgeSource(), "utf8");
+      await chmod(binary, 0o755);
+      const { smithers, outputs, cleanup } = createTestSmithers({
+        result: z.object({ value: z.number() }),
       });
-    } finally {
-      cleanup();
-      await rm(directory, { recursive: true, force: true });
-    }
-  }, 30_000);
-
-  test("retries after forced bridge death from the exact prior durable Nanocodex snapshot", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "smithers-nanocodex-retry-"));
-    const binary = join(directory, "fake-nanocodex-retry.mjs");
-    const capture = join(directory, "captures.jsonl");
-    const state = join(directory, "state.txt");
-    await writeFile(binary, nanocodexCorrectionBridgeSource(), "utf8");
-    await chmod(binary, 0o755);
-    const { smithers, outputs, cleanup } = createTestSmithers({
-      result: z.object({ value: z.number() }),
-    });
-    const agent = new NanocodexAgent({
-      binary,
-      auth: { mode: "api-key-env", environmentVariable: "FAKE_NANOCODEX_KEY" },
-      inheritEnv: false,
-      env: {
-        FAKE_NANOCODEX_KEY: "never-on-the-wire",
-        FAKE_CAPTURE: capture,
-        FAKE_STATE: state,
-        FAKE_SCENARIO: "crash-retry",
-      },
-    });
-
-    try {
-      const workflow = smithers(() =>
-        jsx(Workflow, {
-          name: "nanocodex-forced-death-retry",
-          children: jsx(Task, {
-            id: "work",
-            output: outputs.result,
-            agent,
-            retries: 1,
-            maxSchemaRetries: 1,
-            retryPolicy: { backoff: "fixed", initialDelayMs: 0 },
-            children: "Return a numeric value",
-          }),
-        }),
-      );
-      const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
-      expect(result.status).toBe("finished");
-      const captures = (await readFile(capture, "utf8"))
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line));
-      expect(captures).toHaveLength(3);
-      expect(new Set(captures.map((entry) => entry.instance)).size).toBe(3);
-      const durableSnapshot = { version: 1, turns: [1] };
-      expect(captures.map((entry) => entry.command.data.continuation)).toEqual([
-        null,
-        { mode: "resume", snapshot: durableSnapshot },
-        { mode: "resume", snapshot: durableSnapshot },
-      ]);
-    } finally {
-      cleanup();
-      await rm(directory, { recursive: true, force: true });
-    }
-  }, 30_000);
-
-  test("durably publishes cleanup-failed completion before retrying from that Nanocodex snapshot", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "smithers-nanocodex-cleanup-"));
-    const binary = join(directory, "fake-nanocodex-cleanup.mjs");
-    const capture = join(directory, "captures.jsonl");
-    const state = join(directory, "state.txt");
-    await writeFile(binary, nanocodexCorrectionBridgeSource(), "utf8");
-    await chmod(binary, 0o755);
-    const { smithers, outputs, cleanup } = createTestSmithers({
-      result: z.object({ value: z.number() }),
-    });
-    const agent = new NanocodexAgent({
-      binary,
-      auth: { mode: "api-key-env", environmentVariable: "FAKE_NANOCODEX_KEY" },
-      inheritEnv: false,
-      env: {
-        FAKE_NANOCODEX_KEY: "never-on-the-wire",
-        FAKE_CAPTURE: capture,
-        FAKE_STATE: state,
-        FAKE_SCENARIO: "cleanup-retry",
-      },
-    });
-
-    try {
-      const workflow = smithers(() =>
-        jsx(Workflow, {
-          name: "nanocodex-cleanup-retry",
-          children: jsx(Task, {
-            id: "work",
-            output: outputs.result,
-            agent,
-            retries: 1,
-            retryPolicy: { backoff: "fixed", initialDelayMs: 0 },
-            children: "Return a numeric value",
-          }),
-        }),
-      );
-      const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
-      expect(result.status).toBe("finished");
-      const captures = (await readFile(capture, "utf8"))
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line));
-      expect(captures).toHaveLength(2);
-      expect(captures[0].command.data.continuation).toBeNull();
-      expect(captures[1].command.data.continuation).toEqual({
-        mode: "resume",
-        snapshot: { version: 1, turns: [1] },
+      const agent = new NanocodexAgent({
+        binary,
+        auth: { mode: "api-key-env", environmentVariable: "FAKE_NANOCODEX_KEY" },
+        inheritEnv: false,
+        env: {
+          FAKE_NANOCODEX_KEY: "never-on-the-wire",
+          FAKE_CAPTURE: capture,
+          FAKE_STATE: state,
+          FAKE_SCENARIO: "crash-retry",
+        },
       });
-    } finally {
-      cleanup();
-      await rm(directory, { recursive: true, force: true });
-    }
-  }, 30_000);
+
+      try {
+        const workflow = smithers(() =>
+          jsx(Workflow, {
+            name: "nanocodex-forced-death-retry",
+            children: jsx(Task, {
+              id: "work",
+              output: outputs.result,
+              agent,
+              retries: 1,
+              maxSchemaRetries: 1,
+              retryPolicy: { backoff: "fixed", initialDelayMs: 0 },
+              children: "Return a numeric value",
+            }),
+          }),
+        );
+        const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+        expect(result.status).toBe("finished");
+        const captures = (await readFile(capture, "utf8"))
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line));
+        expect(captures).toHaveLength(3);
+        expect(new Set(captures.map((entry) => entry.instance)).size).toBe(3);
+        const durableSnapshot = { version: 1, turns: [1] };
+        expect(captures.map((entry) => entry.command.data.continuation)).toEqual([
+          null,
+          { mode: "resume", snapshot: durableSnapshot },
+          { mode: "resume", snapshot: durableSnapshot },
+        ]);
+      } finally {
+        cleanup();
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+
+  nTest(
+    "durably publishes cleanup-failed completion before retrying from that Nanocodex snapshot",
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), "smithers-nanocodex-cleanup-"));
+      const binary = join(directory, "fake-nanocodex-cleanup.mjs");
+      const capture = join(directory, "captures.jsonl");
+      const state = join(directory, "state.txt");
+      await writeFile(binary, nanocodexCorrectionBridgeSource(), "utf8");
+      await chmod(binary, 0o755);
+      const { smithers, outputs, cleanup } = createTestSmithers({
+        result: z.object({ value: z.number() }),
+      });
+      const agent = new NanocodexAgent({
+        binary,
+        auth: { mode: "api-key-env", environmentVariable: "FAKE_NANOCODEX_KEY" },
+        inheritEnv: false,
+        env: {
+          FAKE_NANOCODEX_KEY: "never-on-the-wire",
+          FAKE_CAPTURE: capture,
+          FAKE_STATE: state,
+          FAKE_SCENARIO: "cleanup-retry",
+        },
+      });
+
+      try {
+        const workflow = smithers(() =>
+          jsx(Workflow, {
+            name: "nanocodex-cleanup-retry",
+            children: jsx(Task, {
+              id: "work",
+              output: outputs.result,
+              agent,
+              retries: 1,
+              retryPolicy: { backoff: "fixed", initialDelayMs: 0 },
+              children: "Return a numeric value",
+            }),
+          }),
+        );
+        const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+        expect(result.status).toBe("finished");
+        const captures = (await readFile(capture, "utf8"))
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line));
+        expect(captures).toHaveLength(2);
+        expect(captures[0].command.data.continuation).toBeNull();
+        expect(captures[1].command.data.continuation).toEqual({
+          mode: "resume",
+          snapshot: { version: 1, turns: [1] },
+        });
+      } finally {
+        cleanup();
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
 });
 
 function nanocodexCorrectionBridgeSource() {
