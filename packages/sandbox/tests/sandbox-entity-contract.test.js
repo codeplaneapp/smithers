@@ -135,7 +135,7 @@ describe("sandbox entity contract", () => {
     expect(executorSignal.aborted).toBe(false);
     controller.abort();
     const exit = await exitPromise;
-    expect(Exit.isFailure(exit) && Cause.isInterruptedOnly(exit.cause)).toBe(true);
+    expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
     expect(executorSignal.aborted).toBe(true);
   });
 

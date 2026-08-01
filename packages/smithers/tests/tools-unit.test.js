@@ -636,8 +636,14 @@ describe("process helpers and bash tool", () => {
 
   test("emits a structured observability warning when isolation is unenforced", async () => {
     const lines = [];
+    // Effect 4's console logger passes the annotations as an object argument;
+    // serialize object parts so the assertion can see the annotation values.
     const spy = spyOn(console, "log").mockImplementation((...parts) => {
-      lines.push(parts.join(" "));
+      lines.push(
+        parts
+          .map((part) => (typeof part === "object" && part !== null ? JSON.stringify(part) : String(part)))
+          .join(" "),
+      );
     });
     try {
       await warnNetworkIsolationUnenforced();
@@ -646,7 +652,9 @@ describe("process helpers and bash tool", () => {
     }
     const warning = lines.find((line) => line.includes("network_isolation_unenforced"));
     expect(warning).toBeDefined();
-    expect(warning).toContain("level=WARN");
+    // Effect 4's default logger renders "[time] WARN (#fiber)" instead of
+    // logfmt "level=WARN"; assert the level token format-agnostically.
+    expect(warning).toMatch(/level=WARN|\bWARN\b/);
     expect(warning).toContain("TOOL_NETWORK_ISOLATION_UNENFORCED");
   });
 

@@ -16,8 +16,8 @@ describe("smithersRuntime", () => {
   test("runFork returns a running fiber", () => {
     const fiber = runFork(Effect.succeed(7));
     expect(fiber).toBeDefined();
-    // A RuntimeFiber exposes the Fiber protocol (id() accessor).
-    expect(typeof fiber.id).toBe("function");
+    // An Effect 4 fiber exposes its id as a numeric property.
+    expect(typeof fiber.id).toBe("number");
   });
 
   test("runPromise throws a SmithersError on a typed failure", async () => {
