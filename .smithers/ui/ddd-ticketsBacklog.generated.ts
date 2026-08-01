@@ -310,5 +310,15 @@ export const ticketsBacklog: { path: string; kind: string; status: string; prior
     "featureId": "schedules-alerts",
     "featureTitle": "Schedules and durable alerts",
     "content": "# Alert policy is stored and an AlertRuntime wrapper exists, but core does not yet evaluate rules, poll approval age, deliver notifications, or execute pause, cancel, and approval reactions automatically.\n\nFeature: Schedules and durable alerts (schedules-alerts)\nStatus: todo · Kind: issue · Priority: P1 · Feature status: partial\n\n## Gap\n\nAlert policy is stored and an AlertRuntime wrapper exists, but core does not yet evaluate rules, poll approval age, deliver notifications, or execute pause, cancel, and approval reactions automatically.\n"
+  },
+  {
+    "path": "tickets/herdr-supervision--01-mid-turn-steer-injection-landing-an-instruction-between-an-a-fac60fa6.md",
+    "kind": "issue",
+    "status": "todo",
+    "priority": "p1",
+    "updatedAtMs": 0,
+    "featureId": "herdr-supervision",
+    "featureTitle": "Herdr supervision, steer, and hijack",
+    "content": "# Mid-turn steer injection (landing an instruction between an agent's tool calls) is deferred; steers apply at the next generate() boundary.\n\nFeature: Herdr supervision, steer, and hijack (herdr-supervision)\nStatus: todo · Kind: issue · Priority: P1 · Feature status: partial\n\n## Gap\n\nMid-turn steer injection (landing an instruction between an agent's tool calls) is deferred; steers apply at the next generate() boundary.\n"
   }
 ];

@@ -2772,7 +2772,7 @@ export const featuresData = [
     ],
     "tests": [
       "packages/testing/tests/simulate.test.ts",
-      "packages/testing/tests/fakeAgent.test.ts",
+      "packages/testing/tests/unit/fakeAgent.test.ts",
       "packages/testing/tests/runtimeConformance.test.ts",
       "packages/testing/tests/replay-identity-fresh-process.test.ts",
       "e2e/testing-framework/real-db-integration.test.ts",
@@ -2976,6 +2976,96 @@ export const featuresData = [
     ],
     "missing": [
       "Alert policy is stored and an AlertRuntime wrapper exists, but core does not yet evaluate rules, poll approval age, deliver notifications, or execute pause, cancel, and approval reactions automatically."
+    ]
+  },
+  {
+    "id": "herdr-supervision",
+    "title": "Herdr supervision, steer, and hijack",
+    "summary": "Mirror a run into a herdr terminal workspace and supervise it beside your coding agent: a pane per agent node, a cockpit outline, one-key steer, live hijack, first-class reasoning effort, and approve/deny auto-resume. Fully degradable.",
+    "status": "partial",
+    "priority": "p1",
+    "owner": "smithers-maintainers",
+    "tier": "feature",
+    "group": "Recover & replay",
+    "userValue": "Watch and steer long-running agent workflows from the same terminal as the agent driving them, without leaving the CLI.",
+    "capabilities": [
+      {
+        "title": "Herdr workspace mirroring",
+        "detail": "Mirror any run into a Herdr workspace with smithers up --herdr or smithers herdr attach."
+      },
+      {
+        "title": "Portable workflow supervisor",
+        "detail": "Inspect live workflow state with smithers supervisor and its top alias."
+      },
+      {
+        "title": "Durable steer queue",
+        "detail": "Queue an instruction against a running node with smithers steer."
+      },
+      {
+        "title": "Live session handoff",
+        "detail": "Hand off a live agent session with smithers hijack and resume the workflow afterward."
+      },
+      {
+        "title": "In-pane approvals",
+        "detail": "Answer approval gates with smithers approve --watch and auto-resume parked detached runs."
+      }
+    ],
+    "endpoints": [
+      {
+        "method": "CLI",
+        "path": "smithers herdr",
+        "doc": "docs/integrations/herdr.mdx"
+      }
+    ],
+    "links": [
+      {
+        "label": "herdr integration",
+        "href": "docs/integrations/herdr.mdx"
+      },
+      {
+        "label": "workflow supervisor",
+        "href": "docs/guide/workflow-supervisor.mdx"
+      },
+      {
+        "label": "watch and steer",
+        "href": "docs/guide/watch-and-steer.mdx"
+      }
+    ],
+    "tests": [
+      "packages/herdr/tests/createHerdrRunSurface.test.js",
+      "packages/herdr/tests/cockpitPolicy.test.js",
+      "apps/cli/tests/herdr-cli.e2e.test.js",
+      "apps/cli/tests/herdr-full-loop.e2e.test.js",
+      "apps/cli/tests/smithers-top.test.js",
+      "apps/cli/tests/steer-command.e2e.test.js",
+      "apps/cli/tests/tail-steer-keys.test.js",
+      "apps/cli/tests/approve-watch.e2e.test.js"
+    ],
+    "observability": [
+      "SteerQueued / SteerConsumed / SteerExpired events carry runId, nodeId, steerId, and attempt/iteration attribution.",
+      "RunHijackRequested / RunHijacked mark the park-and-hand-off transition; attempt effort is queryable on _smithers_attempts.effort."
+    ],
+    "debug": [
+      "smithers herdr status reports server version, protocol, and client compatibility; a missing server makes --herdr a silent no-op.",
+      "smithers inspect <runId> lists queued/consumed/expired steers; smithers why <runId> shows steers alongside blockers."
+    ],
+    "architecture": [
+      "packages/herdr owns the herdr client and HerdrRunSurface; it renders and relays only — Smithers keeps execution, isolation, and durability.",
+      "apps/cli/src/herdr.js mirrors runs into workspaces/panes; smithers-top.js is the portable workflow supervisor (gateway-sourced by default, --direct for local store).",
+      "packages/engine/src/steers.js queues and expires steers; the engine consumes them at the next generate() boundary."
+    ],
+    "changes": [
+      "2026-07-26 initial record: herdr supervision, steer, hijack, first-class effort, and approve/deny auto-resume shipped in 0.32.0."
+    ],
+    "diffHints": [
+      "packages/herdr/src/HerdrRunSurface.ts",
+      "apps/cli/src/herdr.js",
+      "apps/cli/src/smithers-top.js",
+      "apps/cli/src/steer.js",
+      "packages/engine/src/steers.js"
+    ],
+    "missing": [
+      "Mid-turn steer injection (landing an instruction between an agent's tool calls) is deferred; steers apply at the next generate() boundary."
     ]
   }
 ];
