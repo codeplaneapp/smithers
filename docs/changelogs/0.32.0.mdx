@@ -9,8 +9,8 @@ biggest fix matters to everyone: a runtime-wide migration to Effect 4 had
 silently broken task dispatch, and this release finishes the migration and
 adds the tests that would have caught it. Alongside the fixes, the gateway
 gains a browser session handoff and remote-host binding, so opening the
-Monitor from another machine finally just works. The release touches 1,423
-files, with 111,979 insertions and 23,211 deletions.
+Monitor from another machine finally just works. The release touches 1,459
+files, with 114,562 insertions and 23,468 deletions.
 
 ## Upgrading
 
@@ -61,8 +61,6 @@ The handoff is locked down so the new cookie cannot be turned against you:
   same host keep separate sessions instead of overwriting each other.
 
 ## Task dispatch works again after the Effect 4 migration
-
-<!-- MEDIA GAP: Effect 4 dispatch fix needs a recording (before/after of `bunx smithers-orchestrator up hello`) -->
 
 `bunx smithers-orchestrator up hello` on the previous development builds registered its nodes
 as pending and then hung forever with no error. The cause was a runtime-wide
@@ -173,7 +171,7 @@ status glyphs) built on it.
   land as MCP-tool and federation examples with custom UIs.
 - The committed `.d.ts` declaration bundle for `packages/integrations` was
   regenerated after the Effect 4 call-shape changes.
-- 67 docs commits, including corrected Effect `Schema.Literal` examples.
+- 71 docs commits, including corrected Effect `Schema.Literal` examples.
 
 ## Upgrade notes
 
