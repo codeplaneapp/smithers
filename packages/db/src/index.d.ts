@@ -5796,6 +5796,80 @@ declare const smithersRuns: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
             identity: undefined;
             generated: undefined;
         }, {}, {}>;
+        cancelRequestId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "cancel_request_id";
+            tableName: "_smithers_runs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        cancelRequestSource: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "cancel_request_source";
+            tableName: "_smithers_runs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        cancelRequestClientIdentity: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "cancel_request_client_identity";
+            tableName: "_smithers_runs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        cancelRequestClientPid: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "cancel_request_client_pid";
+            tableName: "_smithers_runs";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
         pauseRequestedAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
             name: "pause_requested_at_ms";
             tableName: "_smithers_runs";
