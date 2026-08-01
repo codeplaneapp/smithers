@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync, chmodSync, rmSync, existsSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { killChildTree } from "../src/child-process.js";
@@ -93,6 +94,24 @@ describe.skipIf(process.platform === "win32")("killChildTree — win32 taskkill 
     return marker;
   }
 
+  /**
+   * Install a Node-based taskkill shim that records startup and exits later.
+   * @param {number} delayMs
+   * @param {number} exitCode
+   * @returns {string}
+   */
+  function installDelayedTaskkill(delayMs, exitCode) {
+    const script = join(binDir, "taskkill");
+    const marker = join(binDir, "started.marker");
+    writeFileSync(
+      script,
+      `#!/usr/bin/env node\nrequire("node:fs").writeFileSync(${JSON.stringify(marker)}, "started");\nsetTimeout(() => process.exit(${exitCode}), ${delayMs});\n`,
+    );
+    chmodSync(script, 0o755);
+    process.env.PATH = `${binDir}:${originalPath}`;
+    return marker;
+  }
+
   test("taskkill exits 0: does not fall back to child.kill", async () => {
     const marker = installTaskkill(0);
     const signals = [];
@@ -152,5 +171,28 @@ describe.skipIf(process.platform === "win32")("killChildTree — win32 taskkill 
     killChildTree(/** @type {any} */ (child), false);
     await waitFor(() => attempts > 0);
     expect(attempts).toBe(1);
+  });
+
+  test("hung taskkill is bounded and terminates the live target", async () => {
+    const marker = installDelayedTaskkill(10_000, 1);
+    const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 10_000)"], { stdio: "ignore" });
+    try {
+      killChildTree(child, false);
+      await waitFor(() => existsSync(marker));
+      await waitFor(() => child.exitCode != null || child.signalCode != null);
+      expect(child.signalCode).toBe("SIGKILL");
+    } finally {
+      if (child.exitCode == null && child.signalCode == null) child.kill("SIGKILL");
+    }
+  });
+
+  test("late taskkill failure does not kill an already-exited target", async () => {
+    installDelayedTaskkill(100, 1);
+    const signals = [];
+    const child = { pid: 999999, exitCode: null, signalCode: null, kill: (s) => signals.push(s) };
+    killChildTree(/** @type {any} */ (child), false);
+    child.exitCode = 0;
+    await new Promise((r) => setTimeout(r, 250));
+    expect(signals).toEqual([]);
   });
 });

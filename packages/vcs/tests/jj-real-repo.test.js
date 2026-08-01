@@ -10,7 +10,7 @@ import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import { spawnSync } from "node:child_process";
-import { Effect, HashMap, Logger, Option } from "effect";
+import { Effect, Logger, References } from "effect";
 import * as BunContext from "@effect/platform-bun/BunServices";
 import * as vcsEffects from "../src/jj.js";
 
@@ -42,17 +42,19 @@ function runVcs(effect) {
  * @returns {Promise<{ value: A, records: Array<{ level: string, message: string, annotations: HashMap.HashMap<string, unknown> }> }>}
  */
 function runVcsCapturingLogs(effect) {
-  /** @type {Array<{ level: string, message: string, annotations: HashMap.HashMap<string, unknown> }>} */
+  /** @type {Array<{ level: string, message: string, annotations: Record<string, unknown> }>} */
   const records = [];
+  // Effect 4: logger options carry the fiber; level is a plain string and
+  // annotations live in the fiber's CurrentLogAnnotations reference.
   const testLogger = Logger.make((opts) => {
     records.push({
-      level: opts.logLevel.label,
+      level: String(opts.logLevel).toUpperCase(),
       message: Array.isArray(opts.message) ? opts.message.join(" ") : String(opts.message),
-      annotations: opts.annotations,
+      annotations: { ...opts.fiber.getRef(References.CurrentLogAnnotations) },
     });
   });
   return Effect.runPromise(
-    effect.pipe(Effect.provide(BunContext.layer), Effect.provide(Logger.replace(Logger.defaultLogger, testLogger))),
+    effect.pipe(Effect.provide(BunContext.layer), Effect.provide(Logger.layer([testLogger]))),
   ).then((value) => ({ value, records }));
 }
 const vcs = {
@@ -401,11 +403,11 @@ describeIfJj("captureWorkspaceSnapshot against real jj", () => {
       const gap = records.find((r) => r.level === "WARN" && r.message.includes("durability gap"));
       expect(gap).toBeDefined();
       // The reason must be a concrete, non-empty attribution (jj's error).
-      const reason = Option.getOrNull(HashMap.get(gap.annotations, "reason"));
+      const reason = gap.annotations.reason ?? null;
       expect(typeof reason).toBe("string");
       expect((reason ?? "").length).toBeGreaterThan(0);
       // And the failing step is annotated so the gap is attributable.
-      const step = Option.getOrNull(HashMap.get(gap.annotations, "snapshotStep"));
+      const step = gap.annotations.snapshotStep ?? null;
       expect(step).toBe("log");
     } finally {
       await fs.rm(dir, { recursive: true, force: true }).catch(() => {});

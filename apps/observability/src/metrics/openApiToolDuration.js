@@ -6,5 +6,4 @@ const toolBuckets = Metric.exponentialBoundaries({
   count: 14,
 }); // ~10ms to ~80s
 
-/** @type {import("effect").Metric.Metric<import("effect/MetricKeyType").MetricKeyType.Histogram, number, import("effect/MetricState").MetricState.Histogram>} */
 export const openApiToolDuration = Metric.histogram("smithers.openapi.tool_duration_ms", { boundaries: toolBuckets });

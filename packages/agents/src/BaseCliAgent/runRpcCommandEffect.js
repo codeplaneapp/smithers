@@ -108,7 +108,7 @@ export function runRpcCommandEffect(command, args, options) {
     timeoutMs: timeoutMs ?? null,
     idleTimeoutMs: idleTimeoutMs ?? null,
   };
-  return Effect.async((resume) => {
+  return Effect.callback((resume) => {
     let stderr = "";
     let settled = false;
     let exitCode = null;

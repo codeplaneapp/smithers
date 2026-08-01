@@ -624,6 +624,30 @@ function sendText(res, status, payload, contentType = "text/plain; charset=utf-8
   res.end(payload);
 }
 /**
+ * The session-handoff landing page: navigates to `next` with
+ * `location.replace` so the token-carrying handoff URL is replaced in the
+ * address bar AND dropped from browser history. A noscript meta refresh
+ * covers JS-off browsers (it still replaces the address bar, just not
+ * history). `next` is already constrained to a same-origin absolute path.
+ *
+ * @param {string} next
+ * @returns {string}
+ */
+function renderSessionHandoffPage(next) {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="refresh" content="0; url=${escapeHtml(next)}">
+    <title>Opening Smithers…</title>
+    <script>location.replace(${safeJsonScript(next)});</script>
+  </head>
+  <body>
+    <p>Opening <a href="${escapeHtml(next)}">Smithers</a>…</p>
+  </body>
+</html>`;
+}
+/**
  * @param {unknown} value
  * @returns {Record<string, unknown> | null}
  */
@@ -1261,6 +1285,99 @@ function headerValue(req, name) {
   return typeof value === "string" ? value : null;
 }
 /**
+ * Browser session cookie carrying the gateway bearer token. Browsers cannot
+ * send an Authorization header on top-level navigations (or WebSocket
+ * upgrades), so `GET /v1/auth/session` exchanges a bearer for this HttpOnly
+ * cookie and every authenticated path accepts it as an alternative. SameSite=Lax
+ * keeps it off cross-site subrequests (CSRF), matching the Origin allow-list
+ * model.
+ */
+export const GATEWAY_SESSION_COOKIE = "smithers_session";
+/**
+ * Browsers do NOT scope cookies by port, so two gateways on the same host but
+ * different ports would clobber each other's `smithers_session` (workspace B's
+ * handoff overwrites workspace A's cookie -> A then 401s). Derive a per-port
+ * cookie NAME from the request Host so concurrent workspace gateways keep
+ * distinct sessions. A host with no explicit port (default 80/443) keeps the
+ * bare name.
+ * @param {IncomingMessage} req
+ * @returns {string}
+ */
+function sessionCookieName(req) {
+  const host = headerValue(req, "host");
+  if (host) {
+    const colon = host.lastIndexOf(":");
+    // Guard against IPv6 literals like [::1] with no port.
+    const port = colon !== -1 && !host.slice(colon + 1).includes("]") ? host.slice(colon + 1) : "";
+    if (/^[0-9]+$/.test(port)) {
+      return `${GATEWAY_SESSION_COOKIE}_${port}`;
+    }
+  }
+  return GATEWAY_SESSION_COOKIE;
+}
+
+/**
+ * Whether the request reached us over TLS (directly or through a terminating
+ * proxy that set `X-Forwarded-Proto`). Only then may the session cookie carry
+ * `Secure` — setting it on plain HTTP would make the browser drop it.
+ *
+ * @param {IncomingMessage} req
+ * @returns {boolean}
+ */
+function isSecureRequest(req) {
+  if (/** @type {{ encrypted?: boolean }} */ (req.socket).encrypted === true) {
+    return true;
+  }
+  const forwarded = headerValue(req, "x-forwarded-proto");
+  return forwarded !== null && forwarded.split(",")[0].trim().toLowerCase() === "https";
+}
+
+/**
+ * @param {IncomingMessage} req
+ * @returns {string | null}
+ */
+function sessionTokenFromCookies(req) {
+  const header = headerValue(req, "cookie");
+  if (!header) {
+    return null;
+  }
+  const cookieName = sessionCookieName(req);
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) {
+      continue;
+    }
+    if (part.slice(0, eq).trim() !== cookieName) {
+      continue;
+    }
+    const raw = part.slice(eq + 1).trim();
+    try {
+      return decodeURIComponent(raw) || null;
+    } catch {
+      return raw || null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Whether the request's ONLY credential is the ambient session cookie: no
+ * explicit `x-smithers-key` and no `Authorization` header, but a session
+ * cookie is present. Such requests are CSRF-shaped (the browser attaches the
+ * cookie automatically) and get the stricter cookie-origin gate.
+ * @param {IncomingMessage} req
+ * @returns {boolean}
+ */
+function requestUsesAmbientCookieAuth(req) {
+  if (headerValue(req, "x-smithers-key")) {
+    return false;
+  }
+  if (headerValue(req, "authorization")) {
+    return false;
+  }
+  return sessionTokenFromCookies(req) !== null;
+}
+/**
  * @param {IncomingMessage} req
  * @returns {string | null}
  */
@@ -1270,10 +1387,10 @@ function bearerTokenFromHeaders(req) {
     return smithersKey;
   }
   const authHeader = headerValue(req, "authorization");
-  if (!authHeader) {
-    return null;
+  if (authHeader) {
+    return authHeader.slice(0, 7).toLowerCase() === "bearer " ? authHeader.slice(7) : authHeader;
   }
-  return authHeader.slice(0, 7).toLowerCase() === "bearer " ? authHeader.slice(7) : authHeader;
+  return sessionTokenFromCookies(req);
 }
 /**
  * @param {string} id
@@ -2904,6 +3021,57 @@ export class Gateway {
       body,
       contentType: "text/javascript; charset=utf-8",
     };
+  }
+  /**
+   * Browser session handoff: `GET /v1/auth/session?token=<bearer>&next=<path>`
+   * exchanges a valid bearer for an HttpOnly session cookie and lands the
+   * browser on `next` via an HTML `location.replace` (not a 30x), so the
+   * token never stays in the address bar or browser history. `next` is
+   * constrained to a same-origin absolute path — this must never become an
+   * open redirect. With no auth configured there is nothing to exchange and
+   * the browser goes straight to `next`.
+   *
+   * @param {IncomingMessage} req
+   * @param {ServerResponse} res
+   */
+  async handleAuthSession(req, res) {
+    const host = headerValue(req, "host") ?? "127.0.0.1";
+    const url = new URL(`http://${host}${req.url ?? "/"}`);
+    const rawNext = url.searchParams.get("next") ?? "/";
+    // `next` must resolve to a same-origin PATH and nothing else. A leading
+    // `//` OR `/\` (browsers treat backslash as a path separator for special
+    // schemes, so `/\evil.tld` resolves to `http://evil.tld`) is an authority
+    // form, i.e. an open redirect. Resolve against a throwaway origin and keep
+    // it only if the origin did not change; fall back to "/" otherwise.
+    const next = sameOriginNextPath(rawNext);
+    if (gatewayAuthMode(this.auth) === "none") {
+      sendText(res, 200, renderSessionHandoffPage(next), "text/html; charset=utf-8");
+      return;
+    }
+    // `?token=` is the browser handoff, but a re-navigation (or a curl with a
+    // header) may carry the bearer the normal way — fall back to it so an
+    // already-authenticated client refreshes its cookie instead of 401-ing.
+    const token = url.searchParams.get("token") ?? bearerTokenFromHeaders(req);
+    const authResult = await this.authenticateRequest(req, token);
+    if (authResult.ok === false) {
+      sendJson(
+        res,
+        statusForRpcError(authResult.code),
+        responseError(randomUUID(), authResult.code, authResult.message, authResult.details),
+      );
+      return;
+    }
+    // Header-authenticated modes (trusted-proxy, mTLS) carry no token to store;
+    // writing an empty/"null" cookie would only poison later requests.
+    if (token) {
+      res.setHeader(
+        "set-cookie",
+        `${sessionCookieName(req)}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax${
+          isSecureRequest(req) ? "; Secure" : ""
+        }`,
+      );
+    }
+    sendText(res, 200, renderSessionHandoffPage(next), "text/html; charset=utf-8");
   }
   /**
    * @param {IncomingMessage} req
@@ -5208,6 +5376,9 @@ a { color: var(--brand); }</style>
           workflows: this.listWorkflowSummaries(undefined),
         });
       }
+      if ((req.method ?? "GET") === "GET" && url.pathname === "/v1/auth/session") {
+        return this.handleAuthSession(req, res);
+      }
       if ((req.method ?? "GET") === "POST" && webhookMatch) {
         return this.handleWebhook(req, res, decodeURIComponent(webhookMatch[1]));
       }
@@ -5281,7 +5452,12 @@ a { color: var(--brand); }</style>
       // `handleUpgrade` opens the socket — otherwise a drive-by page could
       // open and hold connections (consuming maxConnections) by never
       // sending the `connect` RPC. (#446)
-      if (!this.isRequestOriginAllowed(req) || !this.isHostAllowed(req)) {
+      // The ambient session cookie is SameSite=Lax, so a same-site sibling
+      // origin's page can drive this upgrade with the browser attaching the
+      // cookie; reject a cross-origin cookie-only upgrade even when the
+      // allow-list is empty. Explicit-token WS clients are unaffected.
+      const cookieOriginRejected = !!this.auth && requestUsesAmbientCookieAuth(req) && !this.isCookieOriginTrusted(req);
+      if (!this.isRequestOriginAllowed(req) || !this.isHostAllowed(req) || cookieOriginRejected) {
         emitGatewayEffect(
           incrementMetric(gatewayErrorsTotal, {
             kind: "auth",
@@ -6641,7 +6817,11 @@ a { color: var(--brand); }</style>
    */
   async authenticate(req, request) {
     const tokenFromRequest = "token" in (request.auth ?? {}) ? request.auth.token : null;
-    return this.authenticateRequest(req, typeof tokenFromRequest === "string" ? tokenFromRequest : null);
+    // Browser WebSocket clients cannot set headers and (after the session
+    // handoff) carry no explicit token: fall back to the Authorization header
+    // or the HttpOnly session cookie the upgrade request already sent.
+    const token = typeof tokenFromRequest === "string" ? tokenFromRequest : bearerTokenFromHeaders(req);
+    return this.authenticateRequest(req, token);
   }
   /**
    * Whether `req`'s browser `Origin` is permitted by the configured auth-mode
@@ -6697,6 +6877,31 @@ a { color: var(--brand); }</style>
       return false;
     }
     return host !== "" && isLoopbackHost(host);
+  }
+  /**
+   * For cookie-authenticated requests, whether the browser `Origin` is trusted:
+   * absent/"null" (non-browser), on the configured allow-list, or same-host as
+   * the request `Host` (the gateway's own origin). Cross-origin cookie auth is
+   * refused even with an empty allow-list, because the SameSite=Lax cookie is
+   * an ambient credential a sibling same-site origin can trigger.
+   * @param {IncomingMessage} req
+   * @returns {boolean}
+   */
+  isCookieOriginTrusted(req) {
+    const origin = asString(req.headers.origin);
+    if (origin === undefined || origin === "" || origin === "null") {
+      return true;
+    }
+    const allowedOrigins = this.auth?.allowedOrigins ?? [];
+    if (allowedOrigins.includes(origin)) {
+      return true;
+    }
+    const host = asString(req.headers.host);
+    try {
+      return host !== undefined && host !== "" && new URL(origin).host === host;
+    } catch {
+      return false;
+    }
   }
   /**
    * DNS-rebinding defense (spec decision 16a). An unauthenticated daemon grants
@@ -6756,6 +6961,21 @@ a { color: var(--brand); }</style>
         ok: false,
         code: "UNAUTHORIZED",
         message: "Origin is not allowed",
+      };
+    }
+    // Ambient-cookie CSRF gate. The session cookie is SameSite=Lax, so a
+    // same-site but cross-ORIGIN page (evil.example.com vs the gateway's
+    // smithers.example.com) still has the browser attach it to a GET/WS
+    // handshake. Unlike an explicit Authorization/x-smithers-key header,
+    // that credential is ambient, so a permissive (empty) allow-list must
+    // NOT trust it: when the request authenticates ONLY via the cookie,
+    // require a same-host or allow-listed Origin. Header/token clients
+    // (CLI, server-to-server) are unaffected.
+    if (this.auth && requestUsesAmbientCookieAuth(req) && !this.isCookieOriginTrusted(req)) {
+      return {
+        ok: false,
+        code: "UNAUTHORIZED",
+        message: "Origin is not allowed for cookie-authenticated requests",
       };
     }
     if (!this.auth) {
@@ -10407,5 +10627,20 @@ a { color: var(--brand); }</style>
       }
     }
     await Promise.allSettled(Array.from(map.values()).map(({ cleanup }) => Promise.resolve().then(() => cleanup())));
+  }
+}
+function sameOriginNextPath(rawNext) {
+  if (typeof rawNext !== "string" || !rawNext.startsWith("/")) return "/";
+  // Reject any authority form: second char "/" or "\\", or an embedded
+  // backslash anywhere (a browser rewrites "\\" to "/" before parsing).
+  if (rawNext.length >= 2 && (rawNext[1] === "/" || rawNext[1] === "\\")) return "/";
+  if (rawNext.includes("\\")) return "/";
+  try {
+    const base = "http://smithers.invalid";
+    const resolved = new URL(rawNext, base);
+    if (resolved.origin !== base) return "/";
+    return `${resolved.pathname}${resolved.search}${resolved.hash}`;
+  } catch {
+    return "/";
   }
 }

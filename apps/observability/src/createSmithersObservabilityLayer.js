@@ -46,10 +46,7 @@ function makeService(options) {
 export function createSmithersObservabilityLayer(options = {}) {
   const resolved = resolveSmithersObservabilityOptions(options);
   const loggerLayers = resolved.installLogger
-    ? [
-        Logger.layer([resolveLogger(resolved.logFormat)]),
-        Layer.succeed(References.MinimumLogLevel, resolved.logLevel),
-      ]
+    ? [Logger.layer([resolveLogger(resolved.logFormat)]), Layer.succeed(References.MinimumLogLevel, resolved.logLevel)]
     : [];
   return Layer.mergeAll(
     BunContext.layer,

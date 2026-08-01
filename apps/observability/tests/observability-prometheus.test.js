@@ -37,7 +37,12 @@ describe("renderPrometheusMetrics", () => {
   });
   test("renders async external wait gauges with labels", () => {
     Effect.runSync(
-      Metric.update(Metric.withAttributes(Metric.withAttributes(externalWaitAsyncPending, { ["kind"]: String("event") }), { ["case"]: String("render") }), 2),
+      Metric.update(
+        Metric.withAttributes(Metric.withAttributes(externalWaitAsyncPending, { ["kind"]: String("event") }), {
+          ["case"]: String("render"),
+        }),
+        2,
+      ),
     );
     const result = renderPrometheusMetrics();
     expect(result).toContain('smithers_external_wait_async_pending{case="render",kind="event"} 2');

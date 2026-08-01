@@ -1,8 +1,15 @@
 import { Context } from "effect";
 /** @typedef {import("./SmithersObservabilityService.ts").SmithersObservabilityService} SmithersObservabilityService */
 
-const _SmithersObservabilityBase =
-  /** @type {Context.TagClass<SmithersObservability, "SmithersObservability", SmithersObservabilityService>} */ (
-    /** @type {unknown} */ (Context.Service("SmithersObservability"))
+/** @typedef {Context.ServiceClass.Shape<"SmithersObservability", SmithersObservabilityService>} SmithersObservability */
+const SmithersObservabilityTag =
+  /** @type {Context.ServiceClass<SmithersObservability, "SmithersObservability", SmithersObservabilityService>} */ (
+    Context.Service()("SmithersObservability")
   );
-export class SmithersObservability extends _SmithersObservabilityBase {}
+export const SmithersObservability = /** @type {Context.ServiceClass<SmithersObservability, "SmithersObservability", SmithersObservabilityService>} */ (
+  class SmithersObservability extends SmithersObservabilityTag {
+    constructor(...args) {
+      super(...args);
+    }
+  }
+);

@@ -118,10 +118,10 @@ export class EventBus extends EventEmitter {
     return withCurrentCorrelationContext(
       Effect.gen(function* () {
         yield* self.persistDb(event);
-        const persistedLog = yield* Effect.either(self.persistLog(event));
-        if (persistedLog._tag === "Left") {
+        const persistedLog = yield* Effect.result(self.persistLog(event));
+        if (persistedLog._tag === "Failure") {
           yield* Effect.logWarning(
-            `[smithers] failed to append event log: ${persistedLog.left instanceof Error ? persistedLog.left.message : String(persistedLog.left)}`,
+            `[smithers] failed to append event log: ${persistedLog.failure instanceof Error ? persistedLog.failure.message : String(persistedLog.failure)}`,
           );
         }
       }).pipe(Effect.annotateLogs(this.eventLogAnnotations(event)), Effect.withLogSpan("event:persist")),

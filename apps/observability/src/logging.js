@@ -107,15 +107,15 @@ export function setSmithersLogRunner(runner) {
 export function toEffectLogLevel(level) {
   switch (level) {
     case LOG_LEVEL_DEBUG:
-      return LogLevel.Debug;
+      return "Debug";
     case LOG_LEVEL_INFO:
-      return LogLevel.Info;
+      return "Info";
     case LOG_LEVEL_WARNING:
-      return LogLevel.Warn;
+      return "Warn";
     case LOG_LEVEL_ERROR:
-      return LogLevel.Error;
+      return "Error";
     default:
-      return LogLevel.All;
+      return "All";
   }
 }
 

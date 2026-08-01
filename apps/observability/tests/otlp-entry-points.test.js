@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, LogLevel } from "effect";
+import { Effect } from "effect";
 import {
   createSmithersOtelLayer,
   createSmithersObservabilityLayer,
@@ -70,7 +70,7 @@ describe("createSmithersObservabilityLayer", () => {
     expect(result.enabled).toBe(false);
     expect(result.serviceName).toBe("test-svc");
     expect(result.logFormat).toBe("json");
-    expect(result.logLevel).toBe(LogLevel.Debug);
+    expect(result.logLevel).toBe("Debug");
   });
 
   test("provides SmithersObservability with default options when called with no arguments", async () => {
@@ -84,7 +84,7 @@ describe("createSmithersObservabilityLayer", () => {
     expect(result.serviceName).toBe("smithers");
     expect(result.enabled).toBe(false);
     expect(result.logFormat).toBe("logfmt");
-    expect(result.logLevel).toBe(LogLevel.Info);
+    expect(result.logLevel).toBe("Info");
   });
 
   test("installLogger:false is reflected in the service options", async () => {

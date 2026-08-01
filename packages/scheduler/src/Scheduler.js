@@ -20,7 +20,7 @@ import { Context } from "effect";
  * }} SchedulerService
  */
 
-const SchedulerBase = /** @type {Context.TagClass<Scheduler, "Scheduler", SchedulerService>} */ (
+const SchedulerBase = /** @type {Context.ServiceClass<Scheduler, "Scheduler", SchedulerService>} */ (
   /** @type {unknown} */ (Context.Service("Scheduler"))
 );
 

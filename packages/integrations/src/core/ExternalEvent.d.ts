@@ -1,6 +1,6 @@
 import { ExternalEvent as ExternalEvent$1 } from './ExternalEventTypes.js';
 import * as effect_Effect from 'effect/Effect';
-import * as effect_ParseResult from 'effect/ParseResult';
+import * as effect_SchemaIssue from 'effect/SchemaIssue';
 import * as effect_SchemaAST from 'effect/SchemaAST';
 import { Schema } from 'effect';
 
@@ -10,21 +10,28 @@ import { Schema } from 'effect';
  * the ingress boundary instead of surfacing as a broken signal later.
  */
 declare const ExternalEventSchema: Schema.Struct<{
-    source: typeof Schema.String;
-    eventName: typeof Schema.String;
-    correlationId: Schema.NullOr<typeof Schema.String>;
-    payload: typeof Schema.Unknown;
-    dedupeKey: typeof Schema.String;
-    receivedAtMs: typeof Schema.Number;
+    readonly source: Schema.String;
+    readonly eventName: Schema.String;
+    readonly correlationId: Schema.NullOr<Schema.String>;
+    readonly payload: Schema.Unknown;
+    readonly dedupeKey: Schema.String;
+    readonly receivedAtMs: Schema.Number;
 }>;
-declare const decodeExternalEvent: (u: unknown, overrideOptions?: effect_SchemaAST.ParseOptions) => effect_Effect.Effect<{
+declare const decodeExternalEvent: (input: {
     readonly source: string;
     readonly eventName: string;
     readonly correlationId: string | null;
     readonly payload: unknown;
     readonly dedupeKey: string;
     readonly receivedAtMs: number;
-}, effect_ParseResult.ParseError, never>;
+}, options?: effect_SchemaAST.ParseOptions) => effect_Effect.Effect<{
+    readonly source: string;
+    readonly eventName: string;
+    readonly correlationId: string | null;
+    readonly payload: unknown;
+    readonly dedupeKey: string;
+    readonly receivedAtMs: number;
+}, effect_SchemaIssue.Issue, never>;
 type ExternalEvent = ExternalEvent$1;
 
 export { type ExternalEvent, ExternalEventSchema, decodeExternalEvent };

@@ -124,7 +124,7 @@ function mirrorTreeEffect(src, dest, exclude) {
           yield* copyFileEffect;
           continue;
         }
-        const linked = yield* Effect.either(
+        const linked = yield* Effect.result(
           Effect.tryPromise({
             try: () => link(srcPath, destPath),
             catch: hotOverlayErrorMapper("hardlink overlay file", {
@@ -133,7 +133,7 @@ function mirrorTreeEffect(src, dest, exclude) {
             }),
           }),
         );
-        if (linked._tag === "Left") {
+        if (linked._tag === "Failure") {
           yield* Effect.tryPromise({
             try: () => mkdir(dirname(destPath), { recursive: true }),
             catch: hotOverlayErrorMapper("create overlay file parent dir", {
@@ -174,7 +174,7 @@ export function cleanupGenerationsEffect(outDir, keepLast) {
       .sort((a, b) => a.num - b.num);
     const toRemove = genDirs.slice(0, Math.max(0, genDirs.length - keepLast));
     for (const dir of toRemove) {
-      yield* Effect.either(
+      yield* Effect.result(
         Effect.tryPromise({
           try: () => rm(join(outDir, dir.name), { recursive: true, force: true }),
           catch: hotOverlayErrorMapper("remove stale hot overlay generation", {

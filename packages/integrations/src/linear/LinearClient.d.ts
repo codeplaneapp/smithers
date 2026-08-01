@@ -30,7 +30,7 @@ declare function normalizeLinearPriority(priority: LinearPriority | undefined): 
  */
 declare function makeLinearClient(config?: LinearConfig): LinearClientService;
 /** Context tag for the Linear GraphQL client service. */
-declare const LinearClient: Context.Tag<LinearClientService, LinearClientService>;
+declare const LinearClient: Context.Service<LinearClientService, LinearClientService>;
 type CreateIssueInput = CreateIssueInput$1;
 type LinearClientService = LinearClientService$1;
 type LinearCommentResult = LinearCommentResult$1;

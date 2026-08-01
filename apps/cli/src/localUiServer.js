@@ -1226,6 +1226,7 @@ function resolveStaticFile(distDir, pathname) {
 export function startLocalUiServer({
   distDir,
   gatewayBase,
+  gatewayToken,
   port,
   host = "127.0.0.1",
   conciergePort,
@@ -1239,6 +1240,10 @@ export function startLocalUiServer({
   const proxyTo = (req, res, targetHost, targetPort, onError) => {
     const headers = { ...req.headers, host: `${targetHost}:${targetPort}` };
     if (headers.origin) headers.origin = `http://${targetHost}:${targetPort}`;
+    // The browser cannot attach a bearer to every same-origin subrequest the
+    // app makes, so this trusted loopback proxy authenticates upstream on its
+    // behalf (the gateway also honors its session cookie when present).
+    if (gatewayToken && !headers.authorization) headers.authorization = `Bearer ${gatewayToken}`;
     const proxyReq = httpRequest(
       {
         host: targetHost,
@@ -1378,14 +1383,17 @@ export function startLocalUiServer({
     }
     const upstream = netConnect(gatewayPort, gatewayHost, () => {
       let headerLines = `${req.method} ${req.url} HTTP/1.1\r\n`;
+      let sawAuthorization = false;
       for (let i = 0; i < req.rawHeaders.length; i += 2) {
         const name = req.rawHeaders[i];
         let value = req.rawHeaders[i + 1];
         const lower = name.toLowerCase();
         if (lower === "host") value = `${gatewayHost}:${gatewayPort}`;
         if (lower === "origin") value = `http://${gatewayHost}:${gatewayPort}`;
+        if (lower === "authorization") sawAuthorization = true;
         headerLines += `${name}: ${value}\r\n`;
       }
+      if (gatewayToken && !sawAuthorization) headerLines += `authorization: Bearer ${gatewayToken}\r\n`;
       upstream.write(headerLines + "\r\n");
       if (head && head.length) upstream.write(head);
       upstream.pipe(clientSocket);
@@ -1423,7 +1431,7 @@ export function allocateConciergePort() {
  * Ensure the bundle is built (building from source if needed), then serve it.
  * Returns `{ server, url }`. Throws on unrecoverable errors.
  */
-export async function serveLocalUi({ gatewayBase, port, rebuild = false }) {
+export async function serveLocalUi({ gatewayBase, gatewayToken, port, rebuild = false }) {
   const ui = resolveLocalUi();
   if (!ui) {
     throw new Error(
@@ -1484,6 +1492,7 @@ export async function serveLocalUi({ gatewayBase, port, rebuild = false }) {
     server = await startLocalUiServer({
       distDir,
       gatewayBase,
+      gatewayToken,
       port,
       conciergePort,
       workspaceRoot: process.cwd(),

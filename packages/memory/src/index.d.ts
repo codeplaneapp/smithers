@@ -6,7 +6,7 @@ import { SmithersError } from '@smithers-orchestrator/errors';
 import * as _vectorize_io_hindsight_client from '@vectorize-io/hindsight-client';
 import { HindsightClient } from '@vectorize-io/hindsight-client';
 import * as drizzle_orm_bun_sqlite from 'drizzle-orm/bun-sqlite';
-import { BunSQLiteDatabase as BunSQLiteDatabase$1 } from 'drizzle-orm/bun-sqlite';
+import { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite';
 export { memoryFactReads, memoryFactWrites, memoryMessageSaves, memoryRecallDuration, memoryRecallQueries } from '@smithers-orchestrator/observability/metrics';
 import * as _smithers_orchestrator_errors_toSmithersError from '@smithers-orchestrator/errors/toSmithersError';
 export { smithersMemoryFacts, smithersMemoryMessages, smithersMemoryNoteSupersessions, smithersMemoryNotes, smithersMemoryThreads } from '@smithers-orchestrator/db/internal-schema';
@@ -268,7 +268,7 @@ type HindsightMemoryStoreOptions$2 = {
 };
 
 type MemoryLayerConfig$2 = {
-    db: BunSQLiteDatabase$1<Record<string, unknown>>;
+    db: BunSQLiteDatabase<Record<string, unknown>>;
 };
 
 /** @typedef {import("./MemoryNamespace.ts").MemoryNamespace} MemoryNamespace */
@@ -286,14 +286,12 @@ type MemoryNamespace$3 = MemoryNamespace$4;
 declare function parseNamespace(str: string): MemoryNamespace$2;
 type MemoryNamespace$2 = MemoryNamespace$4;
 
-/** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} BunSQLiteDatabase */
 /** @typedef {import("./MemoryStore.ts").MemoryStore} MemoryStore */
 /**
- * @param {BunSQLiteDatabase<any>} db
+ * @param {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<any>} db
  * @returns {MemoryStore}
  */
-declare function createMemoryStore(db: BunSQLiteDatabase<any>): MemoryStore$3;
-type BunSQLiteDatabase = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
+declare function createMemoryStore(db: drizzle_orm_bun_sqlite.BunSQLiteDatabase<any>): MemoryStore$3;
 type MemoryStore$3 = MemoryStore$4;
 
 /** @typedef {import("./MemoryProcessor.ts").MemoryProcessor} MemoryProcessor */
@@ -321,8 +319,22 @@ declare function Summarizer(agent: {
 }): MemoryProcessor$1;
 type MemoryProcessor$1 = MemoryProcessor$4;
 
-declare class MemoryService extends Context.TagClassShape<"MemoryService", any> {
+/**
+ * The instance shape of the {@link MemoryServiceClass} service key.
+ *
+ * Declared as an interface rather than a class so the generated
+ * `index.d.ts` stays valid for `skipLibCheck: false` consumers: a
+ * declaration file cannot `extends` the `Context.ServiceClass.Shape`
+ * interface, which is what a class declaration rolls up to.
+ */
+interface MemoryService$1 extends Context.ServiceClass.Shape<"MemoryService", MemoryServiceApi$1> {
 }
+type MemoryServiceClass = Context.ServiceClass<MemoryService$1, "MemoryService", MemoryServiceApi$1>;
+
+type MemoryService = MemoryService$1;
+/** @typedef {import("./MemoryServiceClass.ts").MemoryService} MemoryService */
+/** @type {import("./MemoryServiceClass.ts").MemoryServiceClass} */
+declare const MemoryService: MemoryServiceClass;
 
 /** @typedef {import("./MemoryLayerConfig.ts").MemoryLayerConfig} MemoryLayerConfig */
 /**

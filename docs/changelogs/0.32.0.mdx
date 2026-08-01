@@ -1,14 +1,13 @@
 ---
 title: "0.32.0"
-description: "Smithers 0.32.0 adds monitor workflows that watch and heal runs, task-shaped oneshot routing, release review automation, safer workflow recovery, and a broad child-run durability hardening pass."
+description: "Smithers 0.32.0 opens the Monitor from any browser and over Tailscale, right-sizes how oneshot and the authoring loop pick their approach, makes review and eval verdicts honest, lets you resume a run whose workflow you edited, and ships a batch of new pack workflows on an Effect 4 runtime."
 ---
 
-**Smithers 0.32.0 is a durability and operations release.** Most changes target
-the places durable runs break in production: resumed runs, child workflows,
-sandboxed networks, monitors, and time travel. It also adds task-shaped
-oneshot routing, a release-review workflow, monitor workflows that can heal a
-run, and a resume path that accepts an edited workflow instead of refusing to
-continue.
+**Smithers 0.32.0 is a big feature release.** The Monitor opens from any
+browser and from another machine, `oneshot` and the authoring loop right-size
+the approach before doing work, review and eval verdicts stop conflating
+"blocked" with "rejected," and a run whose workflow you edited can resume
+instead of forking. Underneath, the runtime moved to Effect 4.
 
 ## Upgrading
 
@@ -20,153 +19,177 @@ bunx smithers-orchestrator packs update  # refresh installed workflow packs
 
 Behavior changes are collected in the [upgrade notes](#upgrade-notes).
 
-## Task-shaped oneshots and release review
+## Open the Monitor from any browser, on any machine
 
-`smithers oneshot` now chooses its first available model from the goal shape.
-UI and frontend goals lead with Kimi K3, while general implementation goals
-lead with Claude Opus 5. Explicit `--agent` and `--model` choices still win,
-and `smithers oneshot --status` reports the resolved task type and chain.
+Pasting a monitor URL into a browser used to hit a 401, because the browser
+had no way to present your bearer token. The gateway now serves a session
+handoff endpoint: `GET /v1/auth/session?token=<bearer>&next=<path>` exchanges
+a valid bearer for an HttpOnly session cookie and redirects to the page you
+asked for. Every URL the CLI prints goes through it, so monitor, UI, and GUI
+links open signed in.
 
-The built-in pack also gains `review-since-publish`, a three-model review panel
-that compares the working tree with the last published tag, merges verified
-findings, partitions fixes into file-disjoint lanes, and repeats until clean.
+The launch commands also stop assuming loopback, so the Monitor works over
+Tailscale, a LAN, or an SSH tunnel:
 
-## Monitor workflows: a workflow that watches your workflow
+```bash
+bunx smithers-orchestrator monitor --host 0.0.0.0
+# or: SMITHERS_GATEWAY_HOST=0.0.0.0 bunx smithers-orchestrator ui RUN_ID
+```
 
-Long runs fail in boring ways: a node wedges, an agent stalls, and nobody is
-watching at 3am. Now you can ship a monitor alongside any workflow. Drop a
-file at `.smithers/monitor/<workflowId>.tsx` and Smithers runs it against
-every run of that workflow: it observes health, applies the healing actions
-you define for stalled or wedged-node conditions, and escalates to a durable
-`HumanTask` when it cannot fix things itself.
+<Frame caption="The Monitor following a live run end to end: the run appears with a running status pill, the health banner reads Healthy while the execution tree progresses and events stream in, and it ends on Completed with 4/4 tasks done.">
+  <img src="/images/0.32.0/monitor-live.gif" alt="The Smithers Monitor following a live release-canary run from running to completed" />
+</Frame>
 
-- Healing actions are ordinary workflow code, so a monitor can retry a node,
-  resume a parked run, or gather diagnostics before waking you.
-- Escalations are durable human requests, so the question survives restarts
-  and shows up in `bunx smithers-orchestrator human` and the Monitor UI.
-- This is a first release of the surface; expect the condition vocabulary to
-  grow in coming versions.
+- A non-loopback bind mints a login token automatically, and a wildcard bind
+  prints one dialable URL per interface, Tailscale first, then LAN.
+- The session cookie is `SameSite=Lax`, scoped to the gateway's own port, and
+  the `next` redirect is constrained to a same-origin path, so the cookie
+  stays yours: a cross-origin page cannot reuse it, and two workspace gateways
+  on one host keep separate sessions.
+- Review printed URLs before sharing them: they carry a login token.
+- When no gateway is reachable, the CLI error names the runtime state file it
+  checked, the port it probed, and the exact `smithers gateway --host/--port`
+  command to start one.
+
+## oneshot and authoring right-size the work first
+
+`smithers oneshot` now routes a goal by its shape. A trivial edit is applied
+directly, a well-scoped goal runs as a single strong agent, and only
+genuinely multi-stage work expands into a full workflow, so a one-line change
+no longer turns into a multi-node run.
+
+- `create-workflow`'s clarify stage does the same before it builds anything:
+  it routes a trivial edit directly, points a well-scoped goal at
+  `smithers oneshot` with the exact command, and scaffolds a workflow only for
+  work that needs ordered stages.
+- `oneshot` warns on a dirty working copy and has the agent triage the tree
+  before starting the goal, so pre-existing edits are not swept into its
+  commits.
+- `smithers monitor <runId>` is now steerable: a built-in oneshot opens its
+  dedicated transcript, steer, and restart surface, while other runs open the
+  all-runs Monitor.
+
+## Honest review and eval verdicts
+
+Review verdicts distinguish `blocked` (required verification could not run for
+an environmental reason, such as a missing service) from `approved: false` (a
+real rejection), so infrastructure trouble no longer reads as rejected work.
+
+Eval runs get the same treatment. A case that fails on a known harness
+signature is graded `INCONCLUSIVE` instead of failed, and `bunx smithers-orchestrator eval`
+exits 5 (instead of 1) when every red case is inconclusive, so CI can tell
+"the work regressed" from "the harness fell over."
+
+```bash
+bunx smithers-orchestrator eval suite.jsonl   # exit 5 = only inconclusive reds
+```
 
 ## Resume a run whose workflow you edited
 
-Editing a workflow file while one of its runs was parked used to be a dead
-end: resuming failed with `RESUME_METADATA_MISMATCH` and your only option was
-forking a fresh run. Now you decide:
+`retry-task` and `up --resume` accept `--accept-workflow-change`, so a run
+parked on `RESUME_METADATA_MISMATCH` after an in-flight workflow edit can
+continue instead of forcing a fork:
 
 ```bash
 bunx smithers-orchestrator retry-task RUN_ID TASK_ID --accept-workflow-change
 bunx smithers-orchestrator up --resume RUN_ID --accept-workflow-change
 ```
 
-- The run carries the edited workflow forward from the resume point.
-- The mismatch error now names the flag, so the fix is in the message.
+The mismatch error names the flag, so the fix is in the message.
 
-## The CLI watcher speaks up sooner
+## Local services stay reachable in the network sandbox
 
-`smithers claude monitor` used to alert only on discrete bad transitions, so a
-run that was quietly retrying the same node forever, or emitting nothing at
-all, never broke the silence. It now fires on retry churn (`node-retrying`)
-and on long silence from a live run (`run-progress`), so a wedged detached run
-pings you instead of wasting an afternoon.
+`allowNetwork: false` used to cut off everything, including the local dev
+server or Postgres your task was testing against. It now means no egress:
+loopback traffic, loopback binds, and unix sockets stay allowed while remote
+endpoints stay denied, and a denial names the `--allow-network` escape hatch.
 
-Oneshots got the same attention: `smithers monitor <runId>` now serves a
-dedicated live UI for built-in oneshots where you can watch the transcript and
-steer the agent mid-run. The oneshot and hijack surfaces now share one
-`OneshotSurface` component, so steering works the same everywhere.
+```tsx
+<Task id="test" agent={agents.coder} sandbox={{ allowNetwork: false }}>
+  Run the integration tests against the local Postgres.
+</Task>
+```
 
-## Right-sized authoring and honest review verdicts
+## Approvals and the run UI
 
-Two authoring-loop fixes reduce wasted runs:
+- Approval decisions bind to durable proofs, so a granted or denied decision
+  is recorded against the exact attempt it answered and survives replay.
+- A review panel's seats are configurable, so you choose which models sit on a
+  panel instead of taking a fixed roster.
+- The gateway approval panel gains accessibility fixes, loading skeletons, and
+  richer decision feedback.
 
-- `create-workflow` now right-sizes the request before building anything. A
-  trivial edit is routed directly, a well-scoped goal goes to
-  `smithers oneshot`, and only genuinely multi-stage work gets a full
-  workflow scaffold.
-- Review verdicts now distinguish `blocked` (the verification could not run
-  for an environmental reason, such as a missing service) from
-  `approved: false` (a real rejection). Harness faults no longer read as
-  rejected work.
+## New workflows in the pack
 
-`smithers oneshot` also warns when the working copy is dirty and has the agent
-triage the leftover changes before starting on your goal, instead of silently
-building on top of them.
+Each ships with its own live UI:
 
-## Durability hardening
+- `pr-polish-panel` and `review-since-publish` for reviewing and polishing work
+  before it lands.
+- `whole-foods-meal-planner` as an MCP-tool example and
+  `smithers-repo-federation` as a federation example.
+- `api-ab-benchmark`, which compares the Effect and JSX authoring surfaces on
+  the same task.
+- Merge-train workflows (`sol-issue-train`, `xcombo-fix-train`,
+  `stacked-ship`) that route issues through green-gated pushes.
+- First-class monitor workflows: drop a `.smithers/monitor/<workflowId>.tsx`
+  and the CLI launches it as a sibling run that watches, and can heal, each run
+  of that workflow. The background monitor also breaks silence on retry churn
+  and otherwise-quiet runs.
 
-This is where much of the release's hardening work went.
+<Frame caption="Touring a finished run in the Monitor: the execution tree with per-node ok pills and durations, the Timeline and Usage panels with rate-limit gauges, the Debug XML view of the workflow, the Frames scrubber, and the Notable/All/Activity event tabs.">
+  <img src="/images/0.32.0/monitor-tour.gif" alt="Touring a completed release-canary run in the Smithers Monitor, including the debug XML view and frames scrubber" />
+</Frame>
 
-- **Async `deps` callbacks complete when they finish, not before.** A
-  `<Task deps>` async function child could be claimed complete while its
-  work, including a launched child run, was still pending, so downstream
-  tasks read an empty payload. The engine now awaits the callback before
-  claiming completion (#1415).
-- **Child runs behave like part of the run.** A large batch of subflow fixes
-  landed: cancel and pause now propagate to child runs, approvals keep the
-  right owner, signals are preserved across child waits (#1405), snapshot
-  lineage stays isolated, failed child branches all reset on retry (#1410),
-  subflow rewind leases are hardened (#1411), and child runs keep gateway
-  attribution (#1389) and appear in run lists.
-- **Time travel restores real bytes.** jj attempt pointers recorded the
-  change id, and since jj resolves a change id to its current commit,
-  `revert` and `timetravel` could resolve to the very state you were trying
-  to leave: a silent filesystem no-op. Pointers now pin the immutable commit
-  id.
-- **The network sandbox keeps loopback open.** `allowNetwork: false` was
-  cutting off local dev servers, local Postgres, and unix sockets along with
-  the internet. Loopback now stays reachable while remote egress is still
-  denied, and denial errors name the `--allow-network` escape hatch.
-- **Evals stop blaming your workflow for harness deaths.** A red case whose
-  failure matches a harness signature (network, DNS, OOM, rate limit) is now
-  graded INCONCLUSIVE instead of failed, and `bunx smithers-orchestrator eval` exits with code
-  5 when every red case is inconclusive, so CI can retry instead of
-  reverting good work.
-- **Subflow timers wake durably.** Parent subflows now persist their child
-  timer deadline, close stale waiting attempts, and resume through the gateway
-  timer sweep instead of parking forever.
-- **Event waits reject stale matches.** A new wait cannot consume an older
-  matching signal that predates the wait node.
+## Reliability fixes
 
-## Other improvements
+- Resume honors ownership precedence and validates its metadata before
+  reactivating a run, and registered accounts survive a resume.
+- The run UI subscribes to live approval, run-event, and run-list feeds
+  instead of stale snapshots, surfaces run-list transport failures, and
+  decodes persisted UltraGrill and durable event frames correctly.
+- Monitor health no longer goes stale, and a run's durable sidecar identity is
+  preserved across reads.
+- `bunx smithers-orchestrator usage` reports Kimi Code subscription quota alongside the other
+  providers.
+- The VCS layer rejects mutable jj pointers so a revert or time-travel lands on
+  a stable revision.
+- Studio toggles crons through idempotent upserts and hides cached runs after
+  an unauthorized response.
 
-- Gateway RPC, REST, SDK, and MCP surfaces gained typed queries for a run's
-  child-run descendants and direct children, with regenerated contracts and
-  docs (#1391).
-- New `packages/ui-core` and `packages/tui-ui` packages extract the shared
-  runs domain (run list, tree, event frames, health, and view models) used by
-  both the TUI and the web UI.
-- The approval panel gained accessibility improvements, loading skeletons,
-  and richer decision feedback.
-- A new `eval-driven-development` skill documents red-classify-first,
-  green-ratchet, and circuit-breaker discipline for automated repair loops.
-- Dependency ranges widened for effect, zod, and pglite, and mermaid is now
-  an optional peer dependency.
-- New docs: capability pages, a monitor workflows guide, and a compatibility
-  policy page.
-- Whole Foods ordering webhooks must match the server-configured HTTPS
-  endpoint and resolve only to public addresses, closing input-driven SSRF and
-  redirect paths.
-- The TUI run search now captures printable keys without triggering global
-  shortcuts, and unknown backend statuses stay out of active-run counts.
+## Under the hood
+
+- The runtime moved to Effect 4.0.0-beta.102 across the engine, scheduler,
+  server, db, vcs, time-travel, sandbox, memory, and observability packages.
+  Workflow and engine behavior is unchanged; the migration is a dependency and
+  internals update.
+- `packages/ui-core` extracts the runs domain (list filtering and sorting, tree
+  building, event frames, diff parsing, health, view models) into one shared
+  home, and `packages/tui-ui` holds the pure TUI leaves (run tree, event log,
+  status glyphs) built on it.
+- A new `coverWorkflow` testing helper drives component-level coverage with
+  schema mocks, and a new zmux-based real-PTY e2e harness drives the TUI runs
+  list and the Monitor mirror end to end.
+- Internal scripts and plugins now execute the working-tree Smithers, enforced
+  by a repo check, so a checkout never silently runs a published build.
 
 ## Upgrade notes
 
-- If a resumed run previously failed with `RESUME_METADATA_MISMATCH` after an
-  in-flight workflow edit, re-run with `retry-task --accept-workflow-change`
-  (or `up --resume --accept-workflow-change`) instead of forking a fresh run.
-- Workflows using `<Task deps>` with async function children should confirm
-  downstream consumers were not silently reading an empty `{}` payload before
-  this release; the compute bridge now awaits the callback before claiming
-  completion.
-- Sandboxed tasks with `allowNetwork: false` can now reach loopback services.
-  If you relied on loopback being blocked, that is no longer the case.
-- `bunx smithers-orchestrator eval` can now exit with code 5 (all red cases inconclusive).
-  CI scripts that treat any nonzero exit as a regression should handle it as
-  a retry signal.
+- Passing `--host` (or `SMITHERS_GATEWAY_HOST`) to `monitor`, `ui`, or `gui`
+  mints a login token automatically and prints one URL per dialable interface
+  instead of the old loopback-only warning. Review printed URLs before sharing
+  them.
+- `allowNetwork: false` now permits loopback and unix-socket traffic. If you
+  relied on it to isolate a task from local services, that isolation no longer
+  holds; remote egress stays denied.
+- `bunx smithers-orchestrator eval` exits 5 when every red case is inconclusive. CI scripts that
+  treat any nonzero exit as regression should special-case 5.
+- Runs stuck on `RESUME_METADATA_MISMATCH` after an in-flight workflow edit can
+  resume with `--accept-workflow-change` instead of forking.
 
 ## The full changelog
 
-This page is the tour, not the inventory. The complete commit-level list is in
-[CHANGELOG.md on GitHub](https://github.com/smithersai/smithers/blob/main/CHANGELOG.md).
+This page is the tour, not the inventory. The complete commit-level list is
+in [CHANGELOG.md on GitHub](https://github.com/smithersai/smithers/blob/main/CHANGELOG.md).
 
-Found a bug? `bunx smithers-orchestrator bug` files it with run context
+Found a bug? `bunx smithers-orchestrator bug` files it with your run context
 attached.

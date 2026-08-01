@@ -1,21 +1,24 @@
-import { defineConfig } from "tsup";
+import { build, defineConfig, type Options } from "tsup";
 
-export default defineConfig({
-  entry: {
-    index: "src/index.js",
-    // Emit real types for the ./metrics subpath (its exports map used to
-    // point at the top-level index.d.ts, which silently went stale).
-    "metrics/index": "src/metrics/index.js",
-  },
+const declarationEntry = (name: string, source: string): Options => ({
+  entry: { [name]: source },
   dts: { only: true, resolve: false },
   outDir: "src",
   clean: false,
   format: ["esm"],
-  // NOTE: multi-entry dts rollup emits a shared, content-hashed chunk
-  // (src/<name>-<hash>.d.ts). rollup-plugin-dts is non-deterministic for large
-  // declaration files, so the hash and index.d.ts import specifier can change
-  // across rebuilds even for identical source (see scripts/publish.mjs drift
-  // guard). The build script rm's src/*-*.d.ts first so a renamed chunk never
-  // leaves an orphan, and index.d.ts + its chunk are always regenerated together.
   silent: true,
+});
+
+// Build one entry at a time so each public subpath gets a deterministic,
+// self-contained declaration instead of a nondeterministic shared hash chunk.
+const declarationEntries = [
+  declarationEntry("index", "src/index.js"),
+  declarationEntry("metrics/index", "src/metrics/index.js"),
+];
+
+export default defineConfig(async () => {
+  for (const entry of declarationEntries.slice(0, -1)) {
+    await build({ ...entry, config: false });
+  }
+  return declarationEntries.at(-1)!;
 });

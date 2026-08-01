@@ -132,7 +132,7 @@ export class WatchTree {
     );
   }
   waitEffect() {
-    return Effect.async((resume) => {
+    return Effect.callback((resume) => {
       if (this.changedFiles.size > 0) {
         const files = [...this.changedFiles];
         this.changedFiles.clear();

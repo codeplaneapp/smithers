@@ -1,6 +1,6 @@
 // Shared RoadmapBench reward scorer: runs the task's own hidden weighted test
 // suite via the fair-validated harness (benchmarks/roadmapbench/harness) in a
-// fresh --network none container, and persists the authoritative score.json
+// fresh isolated container, and persists the authoritative score.json
 // into the run's workDir. Used by orchbench.tsx (and future benchmark
 // workflows); roadmapbench.tsx keeps its own inline copy for stability.
 import { readFileSync, writeFileSync } from "node:fs";
@@ -19,43 +19,62 @@ export type RoadmapScorerInput = {
   workDir: string;
 };
 
+export type RoadmapScoreResult = {
+  reward: number;
+  meta: Record<string, unknown>;
+  raw: string;
+};
+
+export async function runRoadmapScore(input: RoadmapScorerInput, checkpoint?: string): Promise<RoadmapScoreResult> {
+  const suffix = checkpoint ? `-${checkpoint}` : "";
+  const outDir = join(input.workDir, `score${suffix}`);
+  // score.sh snapshots every candidate before mounting it read-write, so both
+  // intermediate and final grading leave the submitted artifact untouched.
+  const reward = await new Promise<{ reward: number; raw: string }>((resolve) => {
+    execFile(
+      "bash",
+      [join(HARNESS, "score.sh"), input.image, input.repoDir, input.testsDir, outDir],
+      { timeout: 30 * 60_000, maxBuffer: 64 * 1024 * 1024 },
+      (_err, stdout) => {
+        const raw = String(stdout);
+        const last = raw.trim().split("\n").pop() ?? "0";
+        const n = Number.parseFloat(last);
+        resolve({ reward: Number.isFinite(n) ? n : 0, raw });
+      },
+    );
+  });
+  let meta: Record<string, unknown> = {};
+  try {
+    meta = JSON.parse(readFileSync(join(outDir, "reward.json"), "utf8"));
+  } catch {
+    /* reward.json absent → reward stays 0 */
+  }
+  try {
+    writeFileSync(
+      join(input.workDir, `score${suffix}.json`),
+      JSON.stringify(
+        { taskId: input.taskId, checkpoint: checkpoint ?? "final", ...meta, reward: reward.reward },
+        null,
+        2,
+      ),
+    );
+  } catch {
+    /* best effort */
+  }
+  return { reward: reward.reward, meta, raw: reward.raw };
+}
+
 export function roadmapScorer(input: RoadmapScorerInput) {
   return createScorer({
     id: "roadmapbench-reward",
     name: "RoadmapBench Reward",
     description: "Weighted fraction of per-target hidden tests that pass (the official RoadmapBench reward).",
     score: async () => {
-      const outDir = join(input.workDir, "score");
-      const reward = await new Promise<{ reward: number; raw: string }>((resolve) => {
-        execFile(
-          "bash",
-          [join(HARNESS, "score.sh"), input.image, input.repoDir, input.testsDir, outDir],
-          { timeout: 30 * 60_000, maxBuffer: 64 * 1024 * 1024 },
-          (_err, stdout) => {
-            const last = String(stdout).trim().split("\n").pop() ?? "0";
-            const n = Number.parseFloat(last);
-            resolve({ reward: Number.isFinite(n) ? n : 0, raw: String(stdout) });
-          },
-        );
-      });
-      let meta: Record<string, unknown> = {};
-      try {
-        meta = JSON.parse(readFileSync(join(outDir, "reward.json"), "utf8"));
-      } catch {
-        /* reward.json absent → reward stays 0 */
-      }
-      try {
-        writeFileSync(
-          join(input.workDir, "score.json"),
-          JSON.stringify({ taskId: input.taskId, ...meta, reward: reward.reward }, null, 2),
-        );
-      } catch {
-        /* best effort */
-      }
+      const result = await runRoadmapScore(input);
       return {
-        score: reward.reward,
-        reason: `RoadmapBench reward ${reward.reward} (${JSON.stringify(meta)})`,
-        meta,
+        score: result.reward,
+        reason: `RoadmapBench reward ${result.reward} (${JSON.stringify(result.meta)})`,
+        meta: result.meta,
       };
     },
   });

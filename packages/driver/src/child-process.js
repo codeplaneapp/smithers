@@ -15,6 +15,9 @@ const DEFAULT_MAX_OUTPUT_BYTES = 200_000;
 // under Bun so active CLI agents are not killed before their output reaches JS.
 const BUN_IDLE_FLOOR_MS = 5000;
 const BUN_IDLE_FLOOR_MIN_CONFIGURED_MS = 1000;
+// Bound the Windows taskkill helper so it cannot keep the host alive after the
+// target has exited or taskkill itself hangs.
+const PROCESS_EXIT_GRACE_MS = 1000;
 const SENSITIVE_FLAG = /(?:^|[-_])(api[-_]?key|token|secret|password)(?:$|[-_=])/i;
 
 /** @param {unknown} cause @returns {unknown} */
@@ -98,22 +101,52 @@ export function killChildTree(child, detached) {
       stdio: "ignore",
       windowsHide: true,
     });
-    killer.on("error", () => {
+    let active = true;
+    const stopWatching = () => {
+      if (!active) return false;
+      active = false;
+      clearTimeout(killerDeadline);
+      return true;
+    };
+    const fallback = () => {
+      if (!stopWatching()) return;
+      if (child.exitCode != null || child.signalCode != null) return;
       try {
         child.kill("SIGKILL");
       } catch {
         // ignore
       }
-    });
-    killer.on("exit", (code) => {
+    };
+    const killKiller = () => {
+      try {
+        killer.kill("SIGKILL");
+      } catch {
+        // The helper is already gone.
+      }
+      killer.unref();
+    };
+    const onKillerDeadline = () => {
+      if (!stopWatching()) return;
+      killKiller();
+      if (child.exitCode != null || child.signalCode != null) return;
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // ignore
+      }
+    };
+    const killerDeadline = setTimeout(onKillerDeadline, PROCESS_EXIT_GRACE_MS);
+    killerDeadline.unref?.();
+    // The helper is deliberately not cancelled when the root process exits:
+    // `taskkill /T` may still be terminating descendants after the root is
+    // gone. PROCESS_EXIT_GRACE_MS remains the only bound on its lifetime.
+    killer.once("error", fallback);
+    killer.once("exit", (code) => {
       if (code === 0) {
+        stopWatching();
         return;
       }
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        // ignore
-      }
+      fallback();
     });
     return;
   }
@@ -160,7 +193,7 @@ export function spawnCaptureEffect(command, args, options) {
     idleTimeoutMs: idleTimeoutMs ?? null,
   };
   const span = `process:${command}`;
-  return Effect.async((resume) => {
+  return Effect.callback((resume) => {
     let stdout = "";
     let stderr = "";
     let settled = false;

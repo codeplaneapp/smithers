@@ -398,10 +398,13 @@ function recordAgentTokenMetrics(tags, totals) {
   const pushMetric = (kind, value) => {
     if (!value || value <= 0) return;
     effects.push(
-      Metric.update(taggedMetric(agentTokensTotal, {
+      Metric.update(
+        taggedMetric(agentTokensTotal, {
           ...tags,
           kind,
-        }), value),
+        }),
+        value,
+      ),
     );
   };
   pushMetric("input", totals.inputTokens);
@@ -967,10 +970,13 @@ export class BaseCliAgent {
         Metric.update(taggedMetric(agentInvocationsTotal, metricTags), 1),
         ...(retryHint.isRetry
           ? [
-              Metric.update(taggedMetric(agentRetriesTotal, {
+              Metric.update(
+                taggedMetric(agentRetriesTotal, {
                   ...metricTags,
                   reason: retryHint.reason ?? "explicit",
-                }), 1),
+                }),
+                1,
+              ),
             ]
           : []),
         Effect.logDebug("agent invocation started").pipe(
@@ -1072,7 +1078,7 @@ export class BaseCliAgent {
             flushBufferedLines(stream, false);
           };
           diagnosticsPromise = launchDiagnostics(commandSpec.command, commandEnv, cwd, this.diagnosticHints?.());
-          return Effect.gen(this, function* () {
+          return Effect.gen({ self: this }, function* () {
             const result = yield* runCommandEffect(commandSpec.command, commandSpec.args, {
               cwd,
               env: commandEnv,

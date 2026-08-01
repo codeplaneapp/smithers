@@ -42,8 +42,7 @@ function getWorkflowNamespace(workflow) {
  * @param {string} runId
  */
 function makeBridgeWorkflow(workflow, runId) {
-  return Workflow.make({
-    name: `SmithersWorkflowBridge:${getWorkflowNamespace(workflow)}:${runId}`,
+  return Workflow.make(`SmithersWorkflowBridge:${getWorkflowNamespace(workflow)}:${runId}`, {
     payload: {
       executionId: Schema.String,
     },

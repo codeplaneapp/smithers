@@ -15,7 +15,7 @@ describe("workflow make bridge internals", () => {
     const workflowB = {};
     expect(I.getWorkflowNamespace(workflowA)).toBe(I.getWorkflowNamespace(workflowA));
     expect(I.getWorkflowNamespace(workflowA)).not.toBe(I.getWorkflowNamespace(workflowB));
-    expect(I.makeBridgeWorkflow(workflowA, "run").name).toContain("SmithersWorkflowBridge");
+    expect(I.makeBridgeWorkflow(workflowA, "run")._tag).toContain("SmithersWorkflowBridge");
     expect(I.isSuspendingStatus("waiting-approval")).toBe(true);
     expect(I.isSuspendingStatus("waiting-event")).toBe(true);
     expect(I.isSuspendingStatus("waiting-timer")).toBe(true);
