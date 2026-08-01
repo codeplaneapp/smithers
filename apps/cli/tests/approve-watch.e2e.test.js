@@ -258,12 +258,17 @@ test("approve --watch: 'y' approves the gate, then lingers on the terminal run",
   }
 }, 30_000);
 
-test("approve --watch: a committed decision invokes the resumeDetached auto-resume seam", async () => {
+test("approve --watch: a committed built-in decision preserves its recorded auto-resume target", async () => {
   const repo = createTempRepo();
   const { sqlite, adapter } = openRepoDb(repo);
   try {
     const runId = "watch-resume-run";
     await seedApprovalGate(adapter, runId, "gate");
+    const builtinResume = { command: "oneshot", args: ["watch built-in", "--agent", "codex"], cwd: repo.dir };
+    await adapter.updateRun(runId, {
+      workflowPath: null,
+      configJson: JSON.stringify({ builtinResume }),
+    });
     const stdin = new PassThrough();
     /** @type {string[]} */
     const out = [];
@@ -276,7 +281,9 @@ test("approve --watch: a committed decision invokes the resumeDetached auto-resu
       emit: (t) => out.push(t),
       pollIntervalMs: 40,
       linger: async () => {},
-      resumeDetached: async (_adapter, _run, id) => {
+      resumeDetached: async (_adapter, run, id) => {
+        expect(run.workflowPath).toBeNull();
+        expect(JSON.parse(run.configJson).builtinResume).toEqual(builtinResume);
         resumeCalls.push(id);
         return { resumed: true };
       },
