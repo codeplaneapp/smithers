@@ -2021,6 +2021,8 @@ function buildMigrations(context) {
         return { table: "_smithers_runs", addedColumns };
       },
     },
+    // 0034 is already the inline cancellation-attribution migration above;
+    // this file-backed checkpoint migration follows it.
     {
       id: "0035_ralph_exhausted",
       name: "Add loop-exhaustion flag to ralph state",
