@@ -3731,6 +3731,17 @@ function isQuotaTaskFailure(attempt) {
   return meta?.failureQuota === true;
 }
 
+const HUMAN_REQUEST_REOPEN_ERROR_CODES = new Set(["HUMAN_TASK_INVALID_JSON", "HUMAN_TASK_VALIDATION_FAILED"]);
+
+/**
+ * A rejected human answer is terminal for that answer, but the next resume
+ * reopens the durable request so the human can submit a correction.
+ * @param {{ errorJson?: string | null } | null} [attempt]
+ */
+function isHumanRequestReopenTaskFailure(attempt) {
+  return HUMAN_REQUEST_REOPEN_ERROR_CODES.has(parseAttemptErrorCode(attempt?.errorJson) ?? "");
+}
+
 /**
  * Rebuild the scheduler's retry rung and absolute wait from durable attempts.
  * Only the newest live attempt may contribute a deadline: a later finished or
@@ -3762,10 +3773,20 @@ function retrySessionStateFromAttempts(attempts) {
       return attempt.attempt > candidate.attempt ? attempt : candidate;
     }, /** @type {AttemptRow | null} */ (null));
     // A later successful attempt makes every older failure rung irrelevant.
+    // Quota parking grants the next dispatch without consuming the restored
+    // rung. A rejected human answer similarly reopens for a corrected answer.
     // Cancelled crash-recovery attempts retain the prior rung; they do not
     // consume it, but the next failure must still advance it.
-    if (failed.length > 0 && latest?.state !== "finished") retryCounts.set(key, failed.length);
-    if (!latest || latest.state !== "failed" || isQuotaTaskFailure(latest)) continue;
+    if (
+      !latest ||
+      latest.state === "finished" ||
+      isQuotaTaskFailure(latest) ||
+      isHumanRequestReopenTaskFailure(latest)
+    ) {
+      continue;
+    }
+    if (failed.length > 0) retryCounts.set(key, failed.length);
+    if (latest.state !== "failed") continue;
     const meta = parseAttemptMetaJson(latest.metaJson);
     if (!Object.prototype.hasOwnProperty.call(meta, RETRY_STATE_META_KEY)) continue;
     const retryState = parseDurableRetryState(meta[RETRY_STATE_META_KEY]);
