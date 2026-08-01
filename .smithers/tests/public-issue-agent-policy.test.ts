@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 
@@ -589,7 +590,20 @@ describe("public issue agent policy", () => {
     },
   );
 
-  test.skipIf(!Bun.which("codex"))(
+  // A corepack-shim pnpm (nvm hosts) resolves its cache under $HOME, which the
+  // public-issue policy denies by design, so the toolchain canary can only run
+  // where pnpm is a standalone binary (CI installs one). Environment gate, not
+  // a policy defect.
+  const pnpmIsCorepackShim = (() => {
+    const pnpmPath = Bun.which("pnpm");
+    if (!pnpmPath) return true;
+    try {
+      return readFileSync(pnpmPath, "utf8").includes("corepack");
+    } catch {
+      return false;
+    }
+  })();
+  test.skipIf(!Bun.which("codex") || pnpmIsCorepackShim)(
     "runs the required toolchain inside the real Codex sandbox without home or network access",
     async () => {
       const sandboxRoot = join(repoRoot, ".smithers", "sandboxes");
