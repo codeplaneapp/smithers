@@ -13,7 +13,7 @@ import { IntegrationError } from "../core/IntegrationError.js";
 import { resolveLinearConfig } from "./config.js";
 
 /** Context tag for the Linear GraphQL client service. */
-export const LinearClient = /** @type {Context.Tag<LinearClientService, LinearClientService>} */ (
+export const LinearClient = /** @type {Context.Service<LinearClientService, LinearClientService>} */ (
   Context.Service("@smithers-orchestrator/integrations/linear/LinearClient")
 );
 

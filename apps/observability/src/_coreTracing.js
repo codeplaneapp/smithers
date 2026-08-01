@@ -18,17 +18,10 @@ export const smithersSpanNames = {
   agent: "smithers.agent",
   tool: "smithers.tool",
 };
-/** @typedef {Context.ServiceClass.Shape<"TracingService", TracingServiceShape>} TracingService */
-const TracingServiceTag = /** @type {Context.ServiceClass<TracingService, "TracingService", TracingServiceShape>} */ (
-  Context.Service()("TracingService")
+const _TracingServiceBase = /** @type {Context.ServiceClass<TracingService, "TracingService", TracingServiceShape>} */ (
+  /** @type {unknown} */ (Context.Service("TracingService"))
 );
-export const TracingService = /** @type {Context.ServiceClass<TracingService, "TracingService", TracingServiceShape>} */ (
-  class TracingService extends TracingServiceTag {
-    constructor(...args) {
-      super(...args);
-    }
-  }
-);
+export class TracingService extends _TracingServiceBase {}
 /**
  * @param {SmithersSpanAttributesInput} [attributes]
  * @returns {Record<string, unknown>}

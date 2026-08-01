@@ -1,14 +1,7 @@
 import { Context } from "effect";
 /** @typedef {import("./_coreMetricsShape.ts").MetricsServiceShape} MetricsServiceShape */
 
-/** @typedef {Context.ServiceClass.Shape<"MetricsService", MetricsServiceShape>} MetricsService */
-const MetricsServiceTag = /** @type {Context.ServiceClass<MetricsService, "MetricsService", MetricsServiceShape>} */ (
-  Context.Service()("MetricsService")
+const _MetricsServiceBase = /** @type {Context.ServiceClass<MetricsService, "MetricsService", MetricsServiceShape>} */ (
+  /** @type {unknown} */ (Context.Service("MetricsService"))
 );
-export const MetricsService = /** @type {Context.ServiceClass<MetricsService, "MetricsService", MetricsServiceShape>} */ (
-  class MetricsService extends MetricsServiceTag {
-    constructor(...args) {
-      super(...args);
-    }
-  }
-);
+export class MetricsService extends _MetricsServiceBase {}
