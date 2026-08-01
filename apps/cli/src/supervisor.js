@@ -182,7 +182,7 @@ function resolveResumeTargetEffect(options, run) {
     if (direct) return direct;
     if (run.configJson !== undefined) return null;
     const full = yield* Effect.promise(() => Promise.resolve(options.adapter.getRun(run.runId))).pipe(
-      Effect.catchAllDefect(() => Effect.succeed(null)),
+      Effect.catchDefect(() => Effect.succeed(null)),
     );
     if (!full) return null;
     return resolveResumeTarget(
