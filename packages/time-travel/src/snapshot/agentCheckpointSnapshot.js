@@ -1,5 +1,6 @@
 import { parseAgentCheckpointHorizons, agentCheckpointHorizonKey } from "./agentCheckpointHorizons.js";
 import {
+  materializeAgentCheckpointReferences,
   MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES,
   parseAgentCheckpointProvenance,
 } from "./agentCheckpointProvenance.js";
@@ -66,7 +67,7 @@ export function parseAgentCheckpointSnapshot(outputs, nodes, snapshotCreatedAtMs
       }
     }
     const attemptsByKey = new Map(provenance.attempts.map((tuple) => [JSON.stringify(tuple.slice(0, 3)), tuple]));
-    for (const tuple of provenance.checkpoints) {
+    for (const tuple of materializeAgentCheckpointReferences(provenance)) {
       const attempt = attemptsByKey.get(JSON.stringify(tuple.slice(0, 3)));
       if (
         !attempt ||

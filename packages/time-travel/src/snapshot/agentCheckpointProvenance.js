@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
-const PROVENANCE_VERSION = 1;
+const LEGACY_PROVENANCE_VERSION = 1;
+const PROVENANCE_VERSION = 2;
 const CAPTURE_NODES_PER_QUERY = 200;
 export const MAX_SNAPSHOT_CHECKPOINT_BYTES = 16 * 1024 * 1024;
 export const MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES = 64 * 1024 * 1024;
@@ -41,6 +42,7 @@ export async function captureAgentCheckpointProvenance(adapter, runId, nodes) {
   const targets = [...targetMap.values()];
   const attempts = [];
   const checkpoints = [];
+  const contentsByHash = new Map();
   const horizonRows = [];
   let visibleAttemptCount = 0;
   let visibleAttemptBytes = 0;
@@ -91,8 +93,7 @@ export async function captureAgentCheckpointProvenance(adapter, runId, nodes) {
         : "length(CAST(content.checkpoint_json AS BLOB))";
     const checkpointStats = await adapter.internalStorage.queryOne(
       `WITH target(node_id, iteration, last_attempt) AS (VALUES ${valuesSql})
-       SELECT COUNT(*) AS count, COALESCE(SUM(${checkpointTextBytes}), 0) AS bytes,
-              COALESCE(MAX(${checkpointTextBytes}), 0) AS max_bytes,
+       SELECT COUNT(*) AS count, COALESCE(MAX(${checkpointTextBytes}), 0) AS max_bytes,
               COALESCE(SUM(CASE WHEN content.size_bytes <> ${checkpointTextBytes} THEN 1 ELSE 0 END), 0)
                 AS size_mismatches
          FROM _smithers_agent_checkpoints checkpoint
@@ -106,14 +107,7 @@ export async function captureAgentCheckpointProvenance(adapter, runId, nodes) {
       params,
     );
     visibleCheckpointCount += Number(checkpointStats?.count ?? 0);
-    visibleCheckpointBytes += Number(checkpointStats?.bytes ?? 0);
     assertWithinLimit(visibleCheckpointCount, MAX_SNAPSHOT_CHECKPOINT_REFS, "reference count");
-    assertWithinLimit(visibleCheckpointBytes, MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES, "content bytes");
-    assertWithinLimit(
-      visibleAttemptBytes + visibleCheckpointBytes,
-      MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES,
-      "materialized bytes",
-    );
     assertWithinLimit(
       Number(checkpointStats?.maxBytes ?? checkpointStats?.max_bytes ?? 0),
       MAX_SNAPSHOT_CHECKPOINT_BYTES,
@@ -200,10 +194,27 @@ export async function captureAgentCheckpointProvenance(adapter, runId, nodes) {
         row.agentId ?? row.agent_id ?? null,
         row.purpose,
         Number(row.createdAtMs ?? row.created_at_ms),
+      ]);
+      const contentTuple = [
+        contentHash,
         checkpointJson,
         sizeBytes,
         Number(row.contentCreatedAtMs ?? row.content_created_at_ms),
-      ]);
+      ];
+      const priorContent = contentsByHash.get(contentHash);
+      if (priorContent && JSON.stringify(priorContent) !== JSON.stringify(contentTuple)) {
+        throw new Error(`Snapshot agent checkpoint content metadata conflicts for ${contentHash}`);
+      }
+      if (!priorContent) {
+        contentsByHash.set(contentHash, contentTuple);
+        visibleCheckpointBytes += sizeBytes;
+        assertWithinLimit(visibleCheckpointBytes, MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES, "content bytes");
+        assertWithinLimit(
+          visibleAttemptBytes + visibleCheckpointBytes,
+          MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES,
+          "materialized bytes",
+        );
+      }
     }
     for (const [nodeId, iteration, lastAttempt] of chunk) {
       horizonRows.push([
@@ -214,7 +225,12 @@ export async function captureAgentCheckpointProvenance(adapter, runId, nodes) {
       ]);
     }
   }
-  const provenance = { version: PROVENANCE_VERSION, attempts, checkpoints };
+  const provenance = {
+    version: PROVENANCE_VERSION,
+    attempts,
+    checkpoints,
+    contents: [...contentsByHash.values()],
+  };
   assertWithinLimit(
     Buffer.byteLength(JSON.stringify(provenance), "utf8"),
     MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES,
@@ -241,10 +257,12 @@ export function parseAgentCheckpointProvenance(outputs) {
     return null;
   }
   const encoded = outputs?.__smithersAgentCheckpointProvenance;
+  const isLegacy = encoded?.version === LEGACY_PROVENANCE_VERSION;
+  const isSeparated = encoded?.version === PROVENANCE_VERSION && Array.isArray(encoded?.contents);
   if (
     !encoded ||
     typeof encoded !== "object" ||
-    encoded.version !== PROVENANCE_VERSION ||
+    (!isLegacy && !isSeparated) ||
     !Array.isArray(encoded.attempts) ||
     !Array.isArray(encoded.checkpoints)
   ) {
@@ -298,10 +316,42 @@ export function parseAgentCheckpointProvenance(outputs) {
   let checkpointBytes = 0;
   const checkpointKeys = new Set();
   const contents = new Map();
+  if (isSeparated) {
+    assertWithinLimit(encoded.contents.length, MAX_SNAPSHOT_CHECKPOINT_REFS, "content count");
+    for (const tuple of encoded.contents) {
+      if (
+        !Array.isArray(tuple) ||
+        tuple.length !== 4 ||
+        typeof tuple[0] !== "string" ||
+        !/^[0-9a-f]{64}$/.test(tuple[0]) ||
+        typeof tuple[1] !== "string" ||
+        !isNonnegativeSafeInteger(tuple[2]) ||
+        !isNonnegativeSafeInteger(tuple[3])
+      ) {
+        throw new Error("Snapshot agent checkpoint content provenance is corrupt");
+      }
+      const sizeBytes = Buffer.byteLength(tuple[1], "utf8");
+      if (
+        sizeBytes !== tuple[2] ||
+        sizeBytes > MAX_SNAPSHOT_CHECKPOINT_BYTES ||
+        createHash("sha256").update(tuple[1]).digest("hex") !== tuple[0]
+      ) {
+        throw new Error(`Snapshot agent checkpoint content is corrupt: ${tuple[0]}`);
+      }
+      if (contents.has(tuple[0])) {
+        throw new Error(`Snapshot agent checkpoint content provenance has duplicate hash ${tuple[0]}`);
+      }
+      contents.set(tuple[0], tuple);
+      checkpointBytes += sizeBytes;
+      assertWithinLimit(checkpointBytes, MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES, "content bytes");
+      assertWithinLimit(attemptBytes + checkpointBytes, MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES, "materialized bytes");
+    }
+  }
+  const referencedHashes = new Set();
   for (const tuple of encoded.checkpoints) {
     if (
       !Array.isArray(tuple) ||
-      tuple.length !== 13 ||
+      tuple.length !== (isLegacy ? 13 : 10) ||
       typeof tuple[0] !== "string" ||
       !Number.isSafeInteger(tuple[1]) ||
       tuple[1] < 0 ||
@@ -317,19 +367,37 @@ export function parseAgentCheckpointProvenance(outputs) {
       !isNullableString(tuple[7]) ||
       typeof tuple[8] !== "string" ||
       !isNonnegativeSafeInteger(tuple[9]) ||
-      typeof tuple[10] !== "string" ||
-      !isNonnegativeSafeInteger(tuple[11]) ||
-      !isNonnegativeSafeInteger(tuple[12])
+      (isLegacy &&
+        (typeof tuple[10] !== "string" || !isNonnegativeSafeInteger(tuple[11]) || !isNonnegativeSafeInteger(tuple[12])))
     ) {
       throw new Error("Snapshot agent checkpoint reference provenance is corrupt");
     }
-    const sizeBytes = Buffer.byteLength(tuple[10], "utf8");
-    if (
-      sizeBytes !== tuple[11] ||
-      sizeBytes > MAX_SNAPSHOT_CHECKPOINT_BYTES ||
-      createHash("sha256").update(tuple[10]).digest("hex") !== tuple[4]
-    ) {
-      throw new Error(`Snapshot agent checkpoint content is corrupt: ${tuple[4]}`);
+    if (isLegacy) {
+      const sizeBytes = Buffer.byteLength(tuple[10], "utf8");
+      if (
+        sizeBytes !== tuple[11] ||
+        sizeBytes > MAX_SNAPSHOT_CHECKPOINT_BYTES ||
+        createHash("sha256").update(tuple[10]).digest("hex") !== tuple[4]
+      ) {
+        throw new Error(`Snapshot agent checkpoint content is corrupt: ${tuple[4]}`);
+      }
+      const contentMetadata = JSON.stringify([tuple[10], tuple[11], tuple[12]]);
+      const priorContentMetadata = contents.get(tuple[4]);
+      if (priorContentMetadata !== undefined && priorContentMetadata !== contentMetadata) {
+        throw new Error(`Snapshot agent checkpoint content metadata conflicts for ${tuple[4]}`);
+      }
+      if (priorContentMetadata === undefined) {
+        contents.set(tuple[4], contentMetadata);
+        checkpointBytes += sizeBytes;
+        assertWithinLimit(checkpointBytes, MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES, "content bytes");
+        assertWithinLimit(
+          attemptBytes + checkpointBytes,
+          MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES,
+          "materialized bytes",
+        );
+      }
+    } else if (!contents.has(tuple[4])) {
+      throw new Error(`Snapshot agent checkpoint reference content is missing: ${tuple[4]}`);
     }
     const attemptKey = JSON.stringify(tuple.slice(0, 3));
     if (!attemptKeys.has(attemptKey)) {
@@ -340,17 +408,27 @@ export function parseAgentCheckpointProvenance(outputs) {
       throw new Error(`Snapshot agent checkpoint reference provenance has duplicate key ${checkpointKey}`);
     }
     checkpointKeys.add(checkpointKey);
-    const contentMetadata = JSON.stringify([tuple[10], tuple[11], tuple[12]]);
-    const priorContentMetadata = contents.get(tuple[4]);
-    if (priorContentMetadata !== undefined && priorContentMetadata !== contentMetadata) {
-      throw new Error(`Snapshot agent checkpoint content metadata conflicts for ${tuple[4]}`);
+    referencedHashes.add(tuple[4]);
+  }
+  if (isSeparated) {
+    for (const contentHash of contents.keys()) {
+      if (!referencedHashes.has(contentHash)) {
+        throw new Error(`Snapshot agent checkpoint content is unreferenced: ${contentHash}`);
+      }
     }
-    contents.set(tuple[4], contentMetadata);
-    checkpointBytes += sizeBytes;
-    assertWithinLimit(checkpointBytes, MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES, "content bytes");
-    assertWithinLimit(attemptBytes + checkpointBytes, MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES, "materialized bytes");
   }
   return encoded;
+}
+
+/** Materialize reference tuples for persistence and timestamp validation. */
+export function materializeAgentCheckpointReferences(provenance) {
+  if (provenance.version === LEGACY_PROVENANCE_VERSION) return provenance.checkpoints;
+  const contents = new Map(provenance.contents.map((tuple) => [tuple[0], tuple]));
+  return provenance.checkpoints.map((tuple) => {
+    const content = contents.get(tuple[4]);
+    if (!content) throw new Error(`Snapshot agent checkpoint reference content is missing: ${tuple[4]}`);
+    return [...tuple, content[1], content[2], content[3]];
+  });
 }
 
 function isNonnegativeSafeInteger(value) {

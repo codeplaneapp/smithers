@@ -159,7 +159,7 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("jumpToFrame rewind (po
         input: {},
       });
       const snapshotOutputs = JSON.parse(snapshot.outputsJson);
-      expect(snapshotOutputs.__smithersAgentCheckpointProvenance.version).toBe(1);
+      expect(snapshotOutputs.__smithersAgentCheckpointProvenance.version).toBe(2);
       expect(
         snapshotOutputs.__smithersAgentCheckpointProvenance.attempts.map((tuple: unknown[]) => tuple.slice(0, 3)),
       ).toEqual([["agent", 0, 1]]);
