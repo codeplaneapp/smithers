@@ -1,4 +1,4 @@
-import * as _effect_platform_CommandExecutor from 'effect/unstable/process/ChildProcessSpawner';
+import * as effect_unstable_process_ChildProcessSpawner from 'effect/unstable/process/ChildProcessSpawner';
 import { Effect } from 'effect';
 import { accessSync, existsSync } from 'node:fs';
 
@@ -55,9 +55,9 @@ type JjRevertResult$1 = {
  *
  * @param {string[]} args
  * @param {RunJjOptions} [opts]
- * @returns {Effect.Effect<RunJjResult, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
+ * @returns {Effect.Effect<RunJjResult, never, import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner>}
  */
-declare function runJj(args: string[], opts?: RunJjOptions): Effect.Effect<RunJjResult, never, _effect_platform_CommandExecutor.CommandExecutor>;
+declare function runJj(args: string[], opts?: RunJjOptions): Effect.Effect<RunJjResult, never, effect_unstable_process_ChildProcessSpawner.ChildProcessSpawner>;
 /**
  * Returns an immutable pointer to the current working-copy state (jj
  * `commit_id`, forcing one snapshot) or null on failure. Accepts optional
@@ -73,7 +73,7 @@ declare function runJj(args: string[], opts?: RunJjOptions): Effect.Effect<RunJj
  * @param {string} [cwd]
  * @returns {Effect.Effect<string | null, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
  */
-declare function getJjPointer(cwd?: string): Effect.Effect<string | null, never, _effect_platform_CommandExecutor.CommandExecutor>;
+declare function getJjPointer(cwd?: string): Effect.Effect<string | null, never, effect_unstable_process_ChildProcessSpawner.CommandExecutor>;
 /**
  * Parse the snapshot values returned by the two jj commands in
  * {@link captureWorkspaceSnapshot}.
@@ -95,7 +95,7 @@ declare function parseWorkspaceSnapshot(logStdout: string, opStdout: string): Wo
  * @param {string} [cwd]
  * @returns {Effect.Effect<WorkspaceSnapshot | null, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
  */
-declare function captureWorkspaceSnapshot(cwd?: string): Effect.Effect<WorkspaceSnapshot | null, never, _effect_platform_CommandExecutor.CommandExecutor>;
+declare function captureWorkspaceSnapshot(cwd?: string): Effect.Effect<WorkspaceSnapshot | null, never, effect_unstable_process_ChildProcessSpawner.CommandExecutor>;
 /**
  * Restore the working copy to a previously recorded jj pointer (a `commit_id`
  * from {@link getJjPointer} or {@link captureWorkspaceSnapshot}). Used by the
@@ -113,21 +113,21 @@ declare function captureWorkspaceSnapshot(cwd?: string): Effect.Effect<Workspace
  * @param {string} [cwd]
  * @returns {Effect.Effect<JjRevertResult, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
  */
-declare function revertToJjPointer(pointer: string, cwd?: string): Effect.Effect<JjRevertResult, never, _effect_platform_CommandExecutor.CommandExecutor>;
+declare function revertToJjPointer(pointer: string, cwd?: string): Effect.Effect<JjRevertResult, never, effect_unstable_process_ChildProcessSpawner.CommandExecutor>;
 /**
  * Quick repo detection by executing a read-only jj command.
  *
  * @param {string} [cwd]
  * @returns {Effect.Effect<boolean, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
  */
-declare function isJjRepo(cwd?: string): Effect.Effect<boolean, never, _effect_platform_CommandExecutor.CommandExecutor>;
+declare function isJjRepo(cwd?: string): Effect.Effect<boolean, never, effect_unstable_process_ChildProcessSpawner.CommandExecutor>;
 declare function workspaceAdd(name: any, path: any, opts?: {}): Effect.Effect<{
     success: boolean;
     error: string;
 } | {
     success: boolean;
     error?: undefined;
-}, never, _effect_platform_CommandExecutor.CommandExecutor>;
+}, never, effect_unstable_process_ChildProcessSpawner.ChildProcessSpawner>;
 /**
  * List existing workspaces using a JJ template for structured output.
  * Falls back to parsing human output if `-T` is unavailable.
@@ -135,7 +135,7 @@ declare function workspaceAdd(name: any, path: any, opts?: {}): Effect.Effect<{
  * @param {string} [cwd]
  * @returns {Effect.Effect<WorkspaceInfo[], never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
  */
-declare function workspaceList(cwd?: string): Effect.Effect<WorkspaceInfo[], never, _effect_platform_CommandExecutor.CommandExecutor>;
+declare function workspaceList(cwd?: string): Effect.Effect<WorkspaceInfo[], never, effect_unstable_process_ChildProcessSpawner.CommandExecutor>;
 /**
  * Close the given workspace by name.
  *
@@ -145,7 +145,7 @@ declare function workspaceList(cwd?: string): Effect.Effect<WorkspaceInfo[], nev
  */
 declare function workspaceClose(name: string, opts?: {
     cwd?: string;
-}): Effect.Effect<WorkspaceResult, never, _effect_platform_CommandExecutor.CommandExecutor>;
+}): Effect.Effect<WorkspaceResult, never, effect_unstable_process_ChildProcessSpawner.CommandExecutor>;
 type JjRevertResult = JjRevertResult$1;
 type RunJjOptions = RunJjOptions$1;
 type RunJjResult = RunJjResult$1;

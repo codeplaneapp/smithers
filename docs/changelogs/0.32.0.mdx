@@ -51,9 +51,9 @@ bunx smithers-orchestrator monitor --host 0.0.0.0
 
 ## Task dispatch works again after the Effect 4 migration
 
-<!-- MEDIA GAP: Effect 4 dispatch fix needs a recording (before/after of `smithers up hello`) -->
+<!-- MEDIA GAP: Effect 4 dispatch fix needs a recording (before/after of `bunx smithers-orchestrator up hello`) -->
 
-`smithers up hello` on the previous development builds registered its nodes
+`bunx smithers-orchestrator up hello` on the previous development builds registered its nodes
 as pending and then hung forever with no error. The cause was a runtime-wide
 migration to Effect 4.0.0-beta.102 that left stale Effect 3 idioms behind:
 dispatch died before it could report. 0.32.0 completes the migration across
@@ -63,7 +63,7 @@ observability packages and fixes every seam that survived it.
 - The faults e2e suite went from 8 failures to 0, and its runtime from 143s
   to 12s, once dispatch stopped dying mid-flight.
 - 13 call sites still using the removed `Effect.either` were moved to
-  `Effect.result`; they had left `smithers graph`, `smithers up`, the hot
+  `Effect.result`; they had left `bunx smithers-orchestrator graph`, `bunx smithers-orchestrator up`, the hot
   reloader, the supervisor, and the sandbox path resolver dead.
 
 ## Local services stay reachable in the network sandbox
@@ -95,7 +95,7 @@ Two authoring-loop changes reduce wasted runs:
   a missing service no longer reads as rejected work.
 
 Eval runs get the same honesty: a case that fails on a known harness
-signature is graded `INCONCLUSIVE` instead of failed, and `smithers eval`
+signature is graded `INCONCLUSIVE` instead of failed, and `bunx smithers-orchestrator eval`
 exits 5 (instead of 1) when every red case is inconclusive, so CI can tell
 "the work regressed" from "the harness fell over".
 
@@ -162,7 +162,7 @@ status glyphs) built on it.
 - `allowNetwork: false` now permits loopback and unix-socket traffic. If you
   relied on it to isolate a task from local services, that isolation no
   longer holds; remote egress stays denied.
-- `smithers eval` exits 5 when every red case is inconclusive. CI scripts
+- `bunx smithers-orchestrator eval` exits 5 when every red case is inconclusive. CI scripts
   that treat any nonzero exit as regression should special-case 5.
 - Runs stuck on `RESUME_METADATA_MISMATCH` after an in-flight workflow edit
   can resume with `--accept-workflow-change` instead of forking.
