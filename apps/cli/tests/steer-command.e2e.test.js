@@ -384,6 +384,30 @@ test("smithers steer --node naming an unknown node errors (NODE_NOT_IN_RUN) and 
   }
 }, 60_000);
 
+test("smithers steer rejects an existing node once its run is terminal", async () => {
+  const repo = createTempRepo();
+  const { sqlite, adapter } = openRepoDb(repo);
+  try {
+    await seedRunningWave(repo, adapter, { runId: "steer-terminal", nodes: [{ nodeId: "impl" }] });
+    await adapter.updateRun("steer-terminal", { status: "finished", finishedAtMs: Date.now() });
+    const result = runSmithers(["steer", "steer-terminal", "--node", "impl", "too late"], {
+      cwd: repo.dir,
+      format: "json",
+      env: {
+        SMITHERS_NO_SKILL_REFRESH: "1",
+        SMITHERS_NO_UPDATE_CHECK: "1",
+        HERDR_SOCKET_PATH: "/nonexistent/herdr.sock",
+      },
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(`${result.stdout}${result.stderr}`).toContain("RUN_NOT_ACTIVE");
+    expect(await adapter.listSteers("steer-terminal")).toHaveLength(0);
+  } finally {
+    sqlite.close();
+  }
+}, 30_000);
+
 test("smithers steer RUN_ID MESSAGE (no --node) targets the run's current in-flight agent node", async () => {
   const repo = createTempRepo();
   const { sqlite, adapter } = openRepoDb(repo);

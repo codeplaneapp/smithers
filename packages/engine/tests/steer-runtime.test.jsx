@@ -15,7 +15,7 @@ import { describe, expect, test } from "bun:test";
 import { Workflow, Task, Sequence, Loop, runWorkflow } from "smithers-orchestrator";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { enqueueSteer } from "../src/steers.js";
+import { enqueueSteer, expireQueuedSteersForRun } from "../src/steers.js";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";
@@ -437,6 +437,16 @@ describe("steer runtime", () => {
     const originalInsertEvent = adapter.insertEventWithNextSeq.bind(adapter);
     try {
       await adapter.insertRun({ runId, workflowName: "steer-test", status: "running", createdAtMs: 1 });
+      await adapter.insertNode({
+        runId,
+        nodeId: "task",
+        iteration: 0,
+        state: "pending",
+        lastAttempt: 0,
+        updatedAtMs: 1,
+        outputTable: "",
+        label: null,
+      });
       adapter.insertEventWithNextSeq = () =>
         Effect.fail(new SmithersError("DB_WRITE_FAILED", "deterministic SteerQueued insert failure"));
 
@@ -474,6 +484,16 @@ describe("steer runtime", () => {
     });
     try {
       await publisher.insertRun({ runId, workflowName: "steer-test", status: "running", createdAtMs: 1 });
+      await publisher.insertNode({
+        runId,
+        nodeId: "task",
+        iteration: 0,
+        state: "pending",
+        lastAttempt: 0,
+        updatedAtMs: 1,
+        outputTable: "",
+        label: null,
+      });
       publisher.insertEventWithNextSeq = (row) =>
         Effect.gen(function* () {
           signalEventEntered();
@@ -515,6 +535,105 @@ describe("steer runtime", () => {
       expect(observed.queued).toHaveLength(1);
       expect(observed.queuedEvents).toHaveLength(1);
       expect((await Effect.runPromise(consumer.listSteers(runId)))[0].status).toBe("consumed");
+    } finally {
+      releaseEvent?.();
+      publisher.insertEventWithNextSeq = originalInsertEvent;
+      cleanup();
+    }
+  });
+
+  test("rejects terminal runs and node ids that do not belong to the run", async () => {
+    const { db, cleanup } = createTestSmithers({ a: z.object({ v: z.number() }) });
+    const adapter = new SmithersDb(db);
+    try {
+      await adapter.insertRun({
+        runId: "terminal-steer",
+        workflowName: "steer-test",
+        status: "finished",
+        createdAtMs: 1,
+      });
+      await adapter.insertNode({
+        runId: "terminal-steer",
+        nodeId: "task",
+        iteration: 0,
+        state: "finished",
+        lastAttempt: 1,
+        updatedAtMs: 2,
+        outputTable: "",
+        label: null,
+      });
+      await expect(
+        Effect.runPromise(enqueueSteer(adapter, "terminal-steer", "task", "too late")),
+      ).rejects.toMatchObject({ code: "RUN_NOT_ACTIVE" });
+
+      await adapter.insertRun({
+        runId: "unknown-node-steer",
+        workflowName: "steer-test",
+        status: "running",
+        createdAtMs: 1,
+      });
+      await expect(
+        Effect.runPromise(enqueueSteer(adapter, "unknown-node-steer", "missing", "nowhere")),
+      ).rejects.toMatchObject({ code: "NODE_NOT_IN_RUN" });
+      expect(await Effect.runPromise(adapter.listSteers("terminal-steer"))).toHaveLength(0);
+      expect(await Effect.runPromise(adapter.listSteers("unknown-node-steer"))).toHaveLength(0);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("concurrent finalization cannot strand a queued steer after the run turns terminal", async () => {
+    const { db, cleanup } = createTestSmithers({ a: z.object({ v: z.number() }) });
+    const publisher = new SmithersDb(db);
+    const finalizer = new SmithersDb(db);
+    const runId = "steer-finalization-race";
+    const originalInsertEvent = publisher.insertEventWithNextSeq.bind(publisher);
+    let releaseEvent;
+    let signalEventEntered;
+    const eventEntered = new Promise((resolve) => {
+      signalEventEntered = resolve;
+    });
+    const eventRelease = new Promise((resolve) => {
+      releaseEvent = resolve;
+    });
+    try {
+      await publisher.insertRun({
+        runId,
+        workflowName: "steer-test",
+        status: "running",
+        runtimeOwnerId: "owner",
+        createdAtMs: 1,
+      });
+      await publisher.insertNode({
+        runId,
+        nodeId: "task",
+        iteration: 0,
+        state: "in-progress",
+        lastAttempt: 1,
+        updatedAtMs: 1,
+        outputTable: "",
+        label: null,
+      });
+      publisher.insertEventWithNextSeq = (row) =>
+        Effect.gen(function* () {
+          signalEventEntered();
+          yield* Effect.promise(() => eventRelease);
+          return yield* originalInsertEvent(row);
+        });
+
+      const publication = Effect.runPromise(enqueueSteer(publisher, runId, "task", "race-safe"));
+      await eventEntered;
+      const finalization = Effect.runPromise(finalizer.completeRun(runId, "owner", 5000)).then(async (completed) => {
+        expect(completed).toBe(true);
+        await expireQueuedSteersForRun(finalizer, { emitEventWithPersist: () => Effect.void }, runId, 5001);
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      releaseEvent();
+      await publication;
+      await finalization;
+
+      expect((await Effect.runPromise(finalizer.getRun(runId)))?.status).toBe("finished");
+      expect((await Effect.runPromise(finalizer.listSteers(runId)))[0]?.status).toBe("expired");
     } finally {
       releaseEvent?.();
       publisher.insertEventWithNextSeq = originalInsertEvent;
