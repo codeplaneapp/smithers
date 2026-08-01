@@ -13,7 +13,7 @@ export type VersionedArtifactWriteResult = "written" | "refused" | "skipped";
 const REPO_ROOT = resolve(import.meta.dir, "..");
 
 /**
- * Check whether an exact package version is present on npm.
+ * Check whether an exact package version is published or has a release tag.
  *
  * npm uses the same non-zero exit status for a missing version and a registry
  * failure, so only the documented not-found responses are treated as an
@@ -31,7 +31,15 @@ export function checkNpmPublication(version: string): NpmPublicationStatus {
 
   const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
   if (/\bE404\b|404\s+(?:Not Found|No match)|No match found for version/i.test(output)) {
-    return "unpublished";
+    const ref = `refs/tags/v${version}`;
+    const localTag = spawnSync("git", ["show-ref", "--verify", "--quiet", ref], { cwd: REPO_ROOT });
+    if (localTag.status === 0) return "published";
+    const remoteTag = spawnSync("git", ["ls-remote", "--exit-code", "--tags", "origin", ref], {
+      cwd: REPO_ROOT,
+      stdio: "ignore",
+    });
+    if (remoteTag.status === 0) return "published";
+    if (remoteTag.status === 2) return "unpublished";
   }
   return "unavailable";
 }
@@ -121,7 +129,7 @@ export function createVersionedArtifactGuard(version: string, options: Versioned
     }
     if (currentStatus === "unavailable") {
       warn(
-        `Warning: npm registry status for ${PUBLISHED_PACKAGE_NAME}@${version} is unavailable; ` +
+        `Warning: release status for ${PUBLISHED_PACKAGE_NAME}@${version} is unavailable; ` +
           `skipping versioned docs artifact ${path}.`,
       );
       return "skipped";
