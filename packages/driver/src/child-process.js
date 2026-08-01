@@ -106,7 +106,6 @@ export function killChildTree(child, detached) {
       if (!active) return false;
       active = false;
       clearTimeout(killerDeadline);
-      child.removeListener?.("exit", cancelKiller);
       return true;
     };
     const fallback = () => {
@@ -126,10 +125,6 @@ export function killChildTree(child, detached) {
       }
       killer.unref();
     };
-    const cancelKiller = () => {
-      if (!stopWatching()) return;
-      killKiller();
-    };
     const onKillerDeadline = () => {
       if (!stopWatching()) return;
       killKiller();
@@ -142,7 +137,9 @@ export function killChildTree(child, detached) {
     };
     const killerDeadline = setTimeout(onKillerDeadline, PROCESS_EXIT_GRACE_MS);
     killerDeadline.unref?.();
-    child.once?.("exit", cancelKiller);
+    // The helper is deliberately not cancelled when the root process exits:
+    // `taskkill /T` may still be terminating descendants after the root is
+    // gone. PROCESS_EXIT_GRACE_MS remains the only bound on its lifetime.
     killer.once("error", fallback);
     killer.once("exit", (code) => {
       if (code === 0) {
