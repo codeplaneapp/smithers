@@ -50,8 +50,14 @@ describe("useAutosaveDoc", () => {
     expect(api!.state).toBe("dirty");
     expect(api!.statusText).toBe("Unsaved");
 
+    // Poll the real (5ms-debounce) timer to completion instead of a fixed
+    // sleep: a loaded CI runner (Windows especially) can exceed a hard 25ms
+    // window, which flaked this test. Bounded so a genuine hang still fails.
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      const deadline = Date.now() + 2000;
+      while (saved.length === 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
     });
     expect(saved).toEqual(["hello world"]);
     expect(api!.state).toBe("saved");
@@ -124,7 +130,10 @@ describe("useAutosaveDoc", () => {
     });
     await act(async () => {
       api!.setValue("strict edit");
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      const deadline = Date.now() + 2000;
+      while (saved.length === 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
     });
 
     expect(api!.value).toBe("strict edit");
