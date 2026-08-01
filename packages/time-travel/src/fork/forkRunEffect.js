@@ -514,7 +514,11 @@ function forkRunWhileLocked(adapter, params, rewindLock) {
     }
     const sourceCheckpointSnapshot = yield* Effect.try({
       try: () =>
-        parseAgentCheckpointSnapshot(JSON.parse(source.outputsJson), JSON.parse(source.nodesJson), source.createdAtMs),
+        parseAgentCheckpointSnapshot(
+          parseSnapshotJson(source.outputsJson, "outputsJson", { runId: parentRunId, frameNo }),
+          parseSnapshotJson(source.nodesJson, "nodesJson", { runId: parentRunId, frameNo }),
+          source.createdAtMs,
+        ),
       catch: (cause) =>
         toSmithersError(cause, "parse snapshot agent checkpoint provenance", {
           code: "DB_QUERY_FAILED",
