@@ -13,7 +13,8 @@
     "target": "x86_64-unknown-linux-gnu",
     "fileName": "smithers-nanocodex-v0.0.1-x86_64-unknown-linux-gnu.tar.gz",
     "downloadUrl": "https://github.com/N0xMare/smithers-nanocodex/releases/download/v0.0.1/smithers-nanocodex-v0.0.1-x86_64-unknown-linux-gnu.tar.gz",
-    "maximumSizeBytes": 8388608,
+    "sha256": "0e14425b3e0af5c3b1663b4db2a15302cbaa7c03e917babd841ae7fde2a1ab73",
+    "sizeBytes": 6286271,
     "minimumGlibcVersion": "2.35"
   },
   "contract": {
@@ -29,7 +30,7 @@
     "bridgeArtifact": true,
     "smithersAdapter": false,
     "checks": [
-      "pinned source identity plus CI-built archive digest, version, capabilities, and file layout",
+      "published archive checksum, version, capabilities, and file layout",
       "Ubuntu 22.04 glibc compatibility smoke test",
       "exact Bubblewrap PID-containment profile",
       "managed-ChatGPT turn using stock workspace tools",
