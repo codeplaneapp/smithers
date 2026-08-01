@@ -732,7 +732,7 @@ describe("DB migration edges", () => {
     sqlite.close();
   });
 
-  test("0037 creates the steer inbox under its stable non-preview ledger id", () => {
+  test("the migration runner tolerates the reserved 0035 gap before effort and steer migrations", () => {
     const sqlite = new Database(":memory:");
     sqlite.exec(`
       CREATE TABLE _smithers_schema_migrations (
@@ -794,6 +794,9 @@ describe("DB migration edges", () => {
       .get();
     expect(index).toBeTruthy();
     const ledger = migrationRows(sqlite).map((row) => row.id);
+    // Migration ids are opaque ledger keys, not a contiguous counter. Leaving
+    // 0035 permanently unused must not block later migrations or their repair.
+    expect(ledger.some((id) => id.startsWith("0035_"))).toBe(false);
     expect(ledger).toContain("0036_attempt_effort_column");
     expect(ledger).toContain("0037_add_steers");
     sqlite.close();

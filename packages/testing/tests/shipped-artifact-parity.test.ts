@@ -78,6 +78,23 @@ describe("published artifact parity", () => {
     expect(result.status, result.stderr || result.stdout).toBe(0);
   });
 
+  test(
+    "the published tarball includes campaign tooling and its trace fixtures",
+    () => {
+      const result = spawnSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
+        cwd: join(import.meta.dir, ".."),
+        encoding: "utf8",
+      });
+      expect(result.status, result.stderr || result.stdout).toBe(0);
+      const paths = new Set(JSON.parse(result.stdout)[0].files.map((file: { path: string }) => file.path));
+      expect(paths).toContain("scripts/core-campaign.mjs");
+      expect(paths).toContain("scripts/cleanup-herdr-session.mjs");
+      expect(paths).toContain("fixtures/agent-traces/README.md");
+      expect(paths).toContain("fixtures/agent-traces/hello-ok.v1.json");
+    },
+    { timeout: 15_000 },
+  );
+
   test("shipped serializeBoundaryError carries family-specific native fields identically to source", () => {
     const cause = Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY", errno: 5, byteOffset: -1 });
     const error = Object.assign(new Error("write failed. See https://smithers.sh/reference/errors"), {
