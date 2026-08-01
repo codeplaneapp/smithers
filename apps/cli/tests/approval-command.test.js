@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { chmodSync, existsSync, readFileSync } from "node:fs";
+import { delimiter } from "node:path";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { SmithersDb } from "@smthrs/db/adapter";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
@@ -90,7 +92,7 @@ describe("smithers approval commands", () => {
     }
   });
 
-  test("approve resolves a descendant gate when invoked with the parent run id", async () => {
+  test("approve resumes the detached descendant gate resolved from a parent run id", async () => {
     const repo = createTempRepo();
     const { sqlite, adapter } = openRepoDb(repo);
     try {
@@ -107,19 +109,35 @@ describe("smithers approval commands", () => {
         parentRunId: "approval-parent",
       });
       await insertApprovalRow(adapter, "approval-child");
+      repo.write("workflow.tsx", "export default {};\n");
+      const spawnRecord = repo.path("resume-argv.txt");
+      const stub = repo.write("bin/bun", '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$SMITHERS_TEST_SPAWN_RECORD"\n');
+      chmodSync(stub, 0o755);
 
       const result = runSmithers(["approve", "approval-parent", "--by", "tester"], {
         cwd: repo.dir,
         format: "json",
+        env: {
+          PATH: `${repo.path("bin")}${delimiter}${process.env.PATH ?? ""}`,
+          SMITHERS_TEST_SPAWN_RECORD: spawnRecord,
+        },
       });
 
       expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(result.json).toMatchObject({ runId: "approval-child", status: "approved", resumed: true });
       expect(await adapter.getApproval("approval-parent", "gate", 0)).toBeUndefined();
       expect(await adapter.getApproval("approval-child", "gate", 0)).toMatchObject({
         status: "approved",
         decidedBy: "tester",
       });
       expect((await adapter.getNode("approval-child", "gate", 0))?.state).toBe("pending");
+      for (let attempt = 0; attempt < 100 && !existsSync(spawnRecord); attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 2));
+      }
+      expect(existsSync(spawnRecord)).toBe(true);
+      const resumeArgv = readFileSync(spawnRecord, "utf8").trimEnd().split("\n");
+      expect(resumeArgv).toContain("approval-child");
+      expect(resumeArgv).not.toContain("approval-parent");
     } finally {
       sqlite.close();
     }

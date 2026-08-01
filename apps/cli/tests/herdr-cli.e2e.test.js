@@ -57,8 +57,10 @@ describe("herdr option / label / tail-command helpers", () => {
     expect(resolveHerdrOption("flagsession", { SMITHERS_HERDR: "envsession" })).toBe("flagsession");
   });
 
-  test("herdrWorkspaceLabel is the deterministic <workflowId> <fullRunId> key", () => {
-    expect(herdrWorkspaceLabel("my-workflow", "run-1783720000000-abcd")).toBe("my-workflow run-1783720000000-abcd");
+  test("herdrWorkspaceLabel includes the versioned Smithers ownership marker", () => {
+    expect(herdrWorkspaceLabel("my-workflow", "run-1783720000000-abcd")).toBe(
+      "my-workflow [smithers:v1:run-1783720000000-abcd]",
+    );
   });
 
   test("buildTailCommand runs the real `smithers tail` via this interpreter + entry, with --linger", () => {
@@ -101,12 +103,15 @@ describe("herdr option / label / tail-command helpers", () => {
 
   test("herdrRunIdFromWorkspaceLabel inverts herdrWorkspaceLabel and tolerates the outcome-marker prefix", () => {
     expect(herdrRunIdFromWorkspaceLabel(herdrWorkspaceLabel("my-wf", "run-1"))).toBe("run-1");
-    expect(herdrRunIdFromWorkspaceLabel("my-wf run-1783720000000-abcd")).toBe("run-1783720000000-abcd");
+    expect(herdrRunIdFromWorkspaceLabel("my-wf [smithers:v1:run-1783720000000-abcd]")).toBe("run-1783720000000-abcd");
     // A finished/failed/cancelled workspace keeps the run id after its marker.
-    expect(herdrRunIdFromWorkspaceLabel("✓ my-wf run-1")).toBe("run-1");
-    expect(herdrRunIdFromWorkspaceLabel("✗ my-wf run-1")).toBe("run-1");
-    expect(herdrRunIdFromWorkspaceLabel("◻ my-wf run-1")).toBe("run-1");
-    // Not a smithers run workspace (single token / empty / non-string) → undefined.
+    expect(herdrRunIdFromWorkspaceLabel("✓ my-wf [smithers:v1:run-1]")).toBe("run-1");
+    expect(herdrRunIdFromWorkspaceLabel("✗ my-wf [smithers:v1:run-1]")).toBe("run-1");
+    expect(herdrRunIdFromWorkspaceLabel("◻ my-wf [smithers:v1:run-1]")).toBe("run-1");
+    expect(herdrRunIdFromWorkspaceLabel(herdrWorkspaceLabel("my-wf", "run/with spaces"))).toBe("run/with spaces");
+    // Ordinary multi-word labels and malformed markers never establish ownership.
+    expect(herdrRunIdFromWorkspaceLabel("my-wf run-1783720000000-abcd")).toBeUndefined();
+    expect(herdrRunIdFromWorkspaceLabel("my-wf [smithers:v1:%not-encoded]")).toBeUndefined();
     expect(herdrRunIdFromWorkspaceLabel("just-a-name")).toBeUndefined();
     expect(herdrRunIdFromWorkspaceLabel("")).toBeUndefined();
     expect(herdrRunIdFromWorkspaceLabel(/** @type {any} */ (undefined))).toBeUndefined();
@@ -1293,7 +1298,10 @@ describe.skipIf(!herdrInstalled)("smithers herdr against a real herdr server", (
     const finishedLabel = herdrWorkspaceLabel("clean-wf", finishedRun);
     const activeLabel = herdrWorkspaceLabel("clean-wf", activeRun);
     // C) a workspace whose label maps to NO known run → never touched.
-    const ghostLabel = `clean-wf clean-ghost-${randomSessionName()}`;
+    const ghostLabel = herdrWorkspaceLabel("clean-wf", `clean-ghost-${randomSessionName()}`);
+    // D) an operator workspace that mentions a known terminal run id but lacks
+    // the ownership marker → never touched.
+    const collisionLabel = `operator notes ${finishedRun}`;
     try {
       // Create the finished- and active-run workspaces via `herdr open` (overview).
       const openFin = runSmithers(["herdr", "open", finishedRun], {
@@ -1316,6 +1324,11 @@ describe.skipIf(!herdrInstalled)("smithers herdr against a real herdr server", (
         encoding: "utf8",
       });
       expect(ghostCreate.status ?? ghostCreate.exitCode ?? 0).toBe(0);
+      const collisionCreate = spawnSync("herdr", ["workspace", "create", "--label", collisionLabel], {
+        env: herdrCliEnv(server.session),
+        encoding: "utf8",
+      });
+      expect(collisionCreate.status ?? collisionCreate.exitCode ?? 0).toBe(0);
 
       const sawFin = await waitFor(
         () => Boolean(listWorkspaces(server.session).find(workspaceMatches(finishedLabel, finishedRun))),
@@ -1335,6 +1348,9 @@ describe.skipIf(!herdrInstalled)("smithers herdr against a real herdr server", (
       expect(
         await waitFor(() => Boolean(listWorkspaces(server.session).find((w) => w.label === ghostLabel)), 30_000),
       ).toBe(true);
+      expect(
+        await waitFor(() => Boolean(listWorkspaces(server.session).find((w) => w.label === collisionLabel)), 30_000),
+      ).toBe(true);
 
       const clean = runSmithers(["herdr", "clean"], { cwd: repo.dir, env, format: "json", timeoutMs: 30_000 });
       expect(clean.exitCode).toBe(0);
@@ -1347,11 +1363,13 @@ describe.skipIf(!herdrInstalled)("smithers herdr against a real herdr server", (
       expect(listWorkspaces(server.session).some(workspaceMatches(finishedLabel, finishedRun))).toBe(false);
       expect(listWorkspaces(server.session).some(workspaceMatches(activeLabel, activeRun))).toBe(true);
       expect(listWorkspaces(server.session).some((w) => w.label === ghostLabel)).toBe(true);
+      expect(listWorkspaces(server.session).some((w) => w.label === collisionLabel)).toBe(true);
     } finally {
       for (const [label, runId] of [
         [finishedLabel, finishedRun],
         [activeLabel, activeRun],
         [ghostLabel, undefined],
+        [collisionLabel, undefined],
       ]) {
         const ws = listWorkspaces(server.session).find(
           runId ? workspaceMatches(label, runId) : (w) => w.label === label,

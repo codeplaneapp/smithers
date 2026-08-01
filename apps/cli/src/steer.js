@@ -59,9 +59,9 @@ export async function listActiveRunsForSteer(adapter, limit = 50) {
  * herdr session-resolution contract (explicit `session` → `HERDR_SOCKET_PATH` /
  * `HERDR_SESSION` env → default socket), so a steer fired from inside a herdr
  * tail pane — where herdr exports `HERDR_SOCKET_PATH` — auto-targets that very
- * session. Matching is by RUN ID (tolerant of the terminal outcome-marker
- * prefix), so an active run's workspace `<workflowId> <runId>` is found
- * regardless of its workflow id.
+ * session. Matching requires the complete deterministic workspace identity,
+ * tolerating only the terminal outcome-marker prefix, so an operator workspace
+ * that happens to mention the same run id is never adopted.
  *
  * Fully soft and read-only: any failure (no server reachable, malformed
  * response) resolves to `{ mirrored: false }`, and the caller falls back to a
@@ -89,7 +89,7 @@ export async function detectHerdrMirrorForRun(params) {
     if (!ws || typeof ws.label !== "string") {
       continue;
     }
-    if (workspaceLabelMatches(ws.label, params.label, params.runId)) {
+    if (workspaceLabelMatches(ws.label, params.label)) {
       return {
         mirrored: true,
         socketPath,

@@ -130,22 +130,18 @@ export function stripOutcomeMarker(label) {
 
 /**
  * Whether a candidate workspace label identifies the run whose deterministic
- * find-or-create label is `targetLabel` (and, when known, whose id is `runId`).
+ * find-or-create label is `targetLabel`.
  * Tolerant of the terminal-state OUTCOME MARKER prefix: a workspace renamed
  * `✓ <label>` / `✗ <label>` / `◻ <label>` must still be found (and re-adopted,
- * not duplicated) by a later `up --herdr` / `herdr attach`. Matching is on the
- * run id (a high-entropy token), NOT brittle full-label equality:
- *   1. exact match, or the label with a leading marker stripped equals the target;
- *   2. failing that, the (marker-stripped) label carries `runId` as its trailing
- *      space-delimited token (the deterministic label is `<workflowId> <runId>`),
- *      which stays collision-safe between e.g. `run-1` and `run-12`.
+ * not duplicated) by a later `up --herdr` / `herdr attach`. The normalized
+ * labels must otherwise be exactly equal: a matching run-id-like suffix alone
+ * never grants Smithers ownership of an operator-created workspace.
  *
  * @param {string} candidateLabel
  * @param {string} targetLabel
- * @param {string} [runId]
  * @returns {boolean}
  */
-export function workspaceLabelMatches(candidateLabel, targetLabel, runId) {
+export function workspaceLabelMatches(candidateLabel, targetLabel) {
   if (typeof candidateLabel !== "string") {
     return false;
   }
@@ -153,13 +149,7 @@ export function workspaceLabelMatches(candidateLabel, targetLabel, runId) {
     return true;
   }
   const stripped = stripOutcomeMarker(candidateLabel);
-  if (stripped === targetLabel) {
-    return true;
-  }
-  if (typeof runId === "string" && runId !== "") {
-    return stripped === runId || stripped.endsWith(` ${runId}`) || candidateLabel.endsWith(` ${runId}`);
-  }
-  return false;
+  return stripped === targetLabel;
 }
 
 /**
@@ -1161,12 +1151,7 @@ export function createHerdrRunSurface(opts = {}) {
       /** @param {{ workspaces?: any[] } | undefined} result */
       const findExisting = (result) =>
         result && Array.isArray(result.workspaces)
-          ? result.workspaces.find(
-              (w) =>
-                w &&
-                typeof w.label === "string" &&
-                workspaceLabelMatches(w.label, label, /** @type {string} */ (runId)),
-            )
+          ? result.workspaces.find((w) => w && typeof w.label === "string" && workspaceLabelMatches(w.label, label))
           : undefined;
       const list = /** @type {{ workspaces?: any[] } | undefined} */ (await client.tryCall("workspace.list", {}));
       const existing = findExisting(list);
@@ -1225,7 +1210,7 @@ export function createHerdrRunSurface(opts = {}) {
                     w &&
                     typeof w.workspace_id === "string" &&
                     typeof w.label === "string" &&
-                    workspaceLabelMatches(w.label, label, /** @type {string} */ (runId)),
+                    workspaceLabelMatches(w.label, label),
                 )
                 .sort((a, b) => {
                   if (typeof a.number === "number" && typeof b.number === "number" && a.number !== b.number) {

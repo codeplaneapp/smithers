@@ -260,12 +260,12 @@ export function outcomeMarkerFor(kind: string): string | undefined;
 export function stripOutcomeMarker(label: string): string;
 
 /**
- * Whether a candidate workspace label identifies the run whose deterministic
- * label is `targetLabel` (and, when known, whose id is `runId`), tolerant of the
- * terminal-state outcome-marker prefix — so a renamed workspace is still found
- * (and re-adopted, not duplicated) by a later `up --herdr` / `herdr attach`.
+ * Whether a candidate workspace label exactly matches the deterministic
+ * `targetLabel`, tolerating only the terminal-state outcome-marker prefix — so
+ * a renamed workspace is still found without adopting an operator label that
+ * merely shares a run-id-like suffix.
  */
-export function workspaceLabelMatches(candidateLabel: string, targetLabel: string, runId?: string): boolean;
+export function workspaceLabelMatches(candidateLabel: string, targetLabel: string): boolean;
 
 
 // ── cockpit policy / digest / session (presentation helpers) ─────────────────
