@@ -3017,23 +3017,39 @@
     "id": "herdr-supervision",
     "title": "Herdr supervision, steer, and hijack",
     "summary": "Mirror a run into a herdr terminal workspace and supervise it beside your coding agent: a pane per agent node, a cockpit outline, one-key steer, live hijack, first-class reasoning effort, and approve/deny auto-resume. Fully degradable.",
-    "status": "shipped",
+    "status": "partial",
     "priority": "p1",
     "owner": "smithers-maintainers",
     "tier": "feature",
     "group": "Recover & replay",
     "userValue": "Watch and steer long-running agent workflows from the same terminal as the agent driving them, without leaving the CLI.",
     "capabilities": [
-      "Mirror any run into a herdr workspace (smithers up --herdr / herdr attach).",
-      "Portable workflow supervisor board (smithers supervisor, alias top).",
-      "Queue a durable steer against a running node (smithers steer).",
-      "Hand off a live agent session and resume afterwards (smithers hijack).",
-      "Answer approval gates in-pane with auto-resume (smithers approve --watch)."
+      {
+        "title": "Herdr workspace mirroring",
+        "detail": "Mirror any run into a Herdr workspace with smithers up --herdr or smithers herdr attach."
+      },
+      {
+        "title": "Portable workflow supervisor",
+        "detail": "Inspect live workflow state with smithers supervisor and its top alias."
+      },
+      {
+        "title": "Durable steer queue",
+        "detail": "Queue an instruction against a running node with smithers steer."
+      },
+      {
+        "title": "Live session handoff",
+        "detail": "Hand off a live agent session with smithers hijack and resume the workflow afterward."
+      },
+      {
+        "title": "In-pane approvals",
+        "detail": "Answer approval gates with smithers approve --watch and auto-resume parked detached runs."
+      }
     ],
     "endpoints": [
       {
-        "doc": "docs/integrations/herdr.mdx",
-        "name": "herdr integration"
+        "method": "CLI",
+        "path": "smithers herdr",
+        "doc": "docs/integrations/herdr.mdx"
       }
     ],
     "links": [
