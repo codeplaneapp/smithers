@@ -31,14 +31,25 @@ export function shouldRestoreWorkspaceForResume(state) {
 }
 
 /**
- * Pick the chronologically latest checkpoint, breaking ties by attempt then seq.
- * (seq resets per attempt, so it can't order across attempts on its own.)
+ * Pick the chronologically latest checkpoint within an optional agent
+ * checkpoint horizon, breaking ties by attempt then seq. The attempt fence is
+ * authoritative across retries; the timestamp fence keeps a later workspace
+ * snapshot from the selected attempt from outrunning the agent state it will
+ * resume.
  *
  * @param {Array<Record<string, any>>} rows
+ * @param {{ attempt: number; createdAtMs: number } | null} horizon
  */
-function latestCheckpoint(rows) {
+function latestCheckpoint(rows, horizon) {
   let best = null;
   for (const row of rows) {
+    if (
+      horizon &&
+      (Number(row.attempt) > horizon.attempt ||
+        (Number(row.attempt) === horizon.attempt && Number(row.createdAtMs) > horizon.createdAtMs))
+    ) {
+      continue;
+    }
     if (best == null) {
       best = row;
       continue;
@@ -58,6 +69,8 @@ function latestCheckpoint(rows) {
  * @property {string} runId
  * @property {string} nodeId
  * @property {number} [iteration]
+ * @property {number} [checkpointAttempt]
+ * @property {number} [checkpointCreatedAtMs]
  * @property {(commitId: string, cwd: string) => Promise<{ success: boolean, error?: string }>} [revert]
  */
 
@@ -66,7 +79,15 @@ function latestCheckpoint(rows) {
  * @returns {Promise<{ restored: boolean, reason?: string, commitId?: string, cwd?: string, seq?: number, error?: string }>}
  */
 export async function restoreWorkspaceToLatestCheckpoint(opts) {
-  const { adapter, runId, nodeId, iteration = 0, revert = defaultRevert } = opts;
+  const {
+    adapter,
+    runId,
+    nodeId,
+    iteration = 0,
+    checkpointAttempt,
+    checkpointCreatedAtMs,
+    revert = defaultRevert,
+  } = opts;
 
   let rows;
   try {
@@ -76,7 +97,11 @@ export async function restoreWorkspaceToLatestCheckpoint(opts) {
   }
 
   const mine = (rows ?? []).filter((row) => row.nodeId === nodeId && Number(row.iteration) === Number(iteration));
-  const latest = latestCheckpoint(mine);
+  const horizon =
+    Number.isSafeInteger(checkpointAttempt) && Number.isSafeInteger(checkpointCreatedAtMs)
+      ? { attempt: checkpointAttempt, createdAtMs: checkpointCreatedAtMs }
+      : null;
+  const latest = latestCheckpoint(mine, horizon);
   if (!latest) return { restored: false, reason: "no-checkpoint" };
 
   let result;

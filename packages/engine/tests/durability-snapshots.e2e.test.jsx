@@ -1,6 +1,6 @@
 /** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -92,6 +92,70 @@ describeIfJj("durability snapshots wired into the engine", () => {
       expect(await adapter.listWorkspaceStates(runId)).toHaveLength(0);
     } finally {
       if (prev !== undefined) process.env.SMITHERS_DURABILITY_SNAPSHOTS = prev;
+      cleanup();
+      rmSync(jjDir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test("checkpoint fallback restores the workspace at the selected checkpoint horizon", async () => {
+    const jjDir = mkdtempSync(join(tmpdir(), "dur-snap-checkpoint-horizon-"));
+    expect(spawnSync("jj", ["git", "init"], { cwd: jjDir, encoding: "utf8" }).status).toBe(0);
+    const prev = process.env.SMITHERS_DURABILITY_SNAPSHOTS;
+    process.env.SMITHERS_DURABILITY_SNAPSHOTS = "1";
+    const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);
+    const adapter = new SmithersDb(db);
+    const runId = "dur-snap-checkpoint-horizon";
+    const compatible = { codec: "test.compatible", version: 1, payload: { cursor: "matching" } };
+    const incompatible = { codec: "test.incompatible", version: 1, payload: { cursor: "later" } };
+    const calls = [];
+    let resumedWorkspace;
+    const waitForWorkspaceCheckpoints = async (count) => {
+      for (let poll = 0; poll < 60; poll += 1) {
+        if ((await adapter.listWorkspaceCheckpoints(runId)).length >= count) return;
+        await Bun.sleep(50);
+      }
+      throw new Error(`timed out waiting for ${count} workspace checkpoints`);
+    };
+    const agent = {
+      id: "durability-checkpoint-horizon",
+      checkpointFormats: [
+        { codec: compatible.codec, versions: [1] },
+        { codec: incompatible.codec, versions: [1] },
+      ],
+      checkpointCapabilities: [{ codec: compatible.codec, versions: [1], modes: ["resume"] }],
+      async generate(args) {
+        calls.push(args);
+        const file = join(args.rootDir, "agent-output.txt");
+        if (calls.length === 1) {
+          writeFileSync(file, "matching checkpoint\n");
+          await waitForWorkspaceCheckpoints(1);
+          await args.onCheckpoint(compatible);
+          await Bun.sleep(5);
+          writeFileSync(file, "newer incompatible checkpoint\n");
+          await waitForWorkspaceCheckpoints(2);
+          return { text: '{"wrong":true}', checkpoint: incompatible };
+        }
+        resumedWorkspace = readFileSync(file, "utf8");
+        return { text: '{"value":46}' };
+      },
+    };
+
+    try {
+      const workflow = smithers(() => (
+        <Workflow name="durability-checkpoint-horizon">
+          <Task id="task" output={outputs.outputA} agent={agent} retries={1} maxSchemaRetries={0}>
+            update a file
+          </Task>
+        </Workflow>
+      ));
+      const result = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId, rootDir: jjDir }));
+      expect(result.status).toBe("finished");
+      expect(calls).toHaveLength(2);
+      expect(calls[1].resumeCheckpoint).toEqual(compatible);
+      expect(resumedWorkspace).toBe("matching checkpoint\n");
+    } finally {
+      if (prev === undefined) delete process.env.SMITHERS_DURABILITY_SNAPSHOTS;
+      else process.env.SMITHERS_DURABILITY_SNAPSHOTS = prev;
       cleanup();
       rmSync(jjDir, { recursive: true, force: true });
     }
