@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 
 import { accountToProviderEnv, listAccounts } from "@smithers-orchestrator/accounts";
+import { registeredAgentId } from "./registered-agent-id.js";
 import { SOTA_DEPRECATED_MODELS, SOTA_SLOTS } from "./sota-models.generated.js";
 /** @typedef {import("./AgentAvailability.ts").AgentAvailability} AgentAvailability */
 /** @typedef {import("./AgentAvailabilityStatus.ts").AgentAvailabilityStatus} AgentAvailabilityStatus */
@@ -1307,6 +1308,7 @@ function renderAccountProviderVariantLine(account, homeDir, providerId, modelOve
   if (account.provider === "gemini-api") {
     opts.push('baseURL: "https://generativelanguage.googleapis.com/v1beta/openai"');
   }
+  opts.push(`id: ${JSON.stringify(registeredAgentId(account.label))}`);
   return `  ${providerId}: new Smithers${cls}({ ${opts.join(", ")} }),`;
 }
 

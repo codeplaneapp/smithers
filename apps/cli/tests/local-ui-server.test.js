@@ -160,13 +160,13 @@ describe("bundleIsFresh", () => {
     const appDir = join(root, "app");
     const distDir = join(appDir, "dist");
     const directDir = join(root, "gateway-ui");
-    const transitiveDir = join(root, "ui-styleguide");
+    const transitiveDir = join(root, "workspace-theme");
     await mkdir(join(appDir, "src"), { recursive: true });
     await mkdir(distDir);
     await mkdir(join(directDir, "src"), { recursive: true });
     await mkdir(join(transitiveDir, "src"), { recursive: true });
     await mkdir(join(appDir, "node_modules", "@smithers-orchestrator"), { recursive: true });
-    await mkdir(join(directDir, "node_modules", "@smithers-orchestrator"), { recursive: true });
+    await mkdir(join(directDir, "node_modules"), { recursive: true });
     await writeFile(join(appDir, "src", "main.tsx"), "");
     await writeFile(
       join(appDir, "package.json"),
@@ -177,19 +177,19 @@ describe("bundleIsFresh", () => {
       JSON.stringify({
         name: "@smithers-orchestrator/gateway-ui",
         exports: { ".": "./src/index.ts" },
-        dependencies: { "@smithers-orchestrator/ui-styleguide": "workspace:*" },
+        dependencies: { "workspace-theme": "workspace:*" },
       }),
     );
     await writeFile(join(directDir, "src", "index.ts"), "");
     const transitiveManifest = join(transitiveDir, "package.json");
     await writeFile(
       transitiveManifest,
-      JSON.stringify({ name: "@smithers-orchestrator/ui-styleguide", exports: { ".": "./src/index.ts" } }),
+      JSON.stringify({ name: "workspace-theme", exports: { ".": "./src/index.ts" } }),
     );
     const transitiveSource = join(transitiveDir, "src", "index.ts");
     await writeFile(transitiveSource, "");
     await symlink(directDir, join(appDir, "node_modules", "@smithers-orchestrator", "gateway-ui"));
-    await symlink(transitiveDir, join(directDir, "node_modules", "@smithers-orchestrator", "ui-styleguide"));
+    await symlink(transitiveDir, join(directDir, "node_modules", "workspace-theme"));
     const bundle = join(distDir, "index.html");
     await writeFile(bundle, "");
 

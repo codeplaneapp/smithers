@@ -7,5 +7,5 @@ import { correlationStorage } from "./_correlationStorage.js";
  */
 export function withCurrentCorrelationContext(effect) {
   const current = correlationStorage.getStore();
-  return current ? effect.pipe(Effect.locally(correlationContextFiberRef, current)) : effect;
+  return current ? effect.pipe(Effect.provideService(correlationContextFiberRef, current)) : effect;
 }

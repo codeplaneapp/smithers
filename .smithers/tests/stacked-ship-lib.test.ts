@@ -112,16 +112,17 @@ describe("planFromRow", () => {
 
 describe("naming", () => {
   test("stackKeyFromRunId sanitizes and never returns empty", () => {
-    expect(stackKeyFromRunId("run 1234/abc!!")).toMatch(/^run-1234-abc--[a-f0-9]{12}$/);
-    expect(stackKeyFromRunId("!!!")).toMatch(/^--[a-f0-9]{12}$/);
-    expect(stackKeyFromRunId("")).toMatch(/^run-[a-f0-9]{12}$/);
-    expect(stackKeyFromRunId("a".repeat(80))).toHaveLength(40);
+    expect(stackKeyFromRunId("run 1234/abc!!")).toMatch(/^run-1234-abc--[a-f0-9]{64}$/);
+    expect(stackKeyFromRunId("!!!")).toMatch(/^--[a-f0-9]{64}$/);
+    expect(stackKeyFromRunId("")).toMatch(/^run-[a-f0-9]{64}$/);
+    expect(stackKeyFromRunId("a".repeat(80))).toHaveLength(92);
   });
 
-  test("stack keys distinguish long run IDs and ownership markers verify the full ID", () => {
+  test("stack keys include a collision-resistant digest of the full run ID", () => {
     const prefix = "shared-prefix-".repeat(5);
     const first = prefix + "one";
     const second = prefix + "two";
+    expect(stackKeyFromRunId(first).slice(28)).toHaveLength(64);
     expect(stackKeyFromRunId(first)).not.toBe(stackKeyFromRunId(second));
     const marker = stackOwnerMarker(first);
     expect(stackOwnerMatches(marker, first)).toBe(true);

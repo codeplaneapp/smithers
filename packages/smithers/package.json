@@ -1,6 +1,6 @@
 {
   "name": "smithers-orchestrator",
-  "version": "0.31.1",
+  "version": "0.32.0",
   "description": "Multi-agent workflows with full observability and time travel: watch every step live, rewind, fork, and replay any run. Claude Code, Codex, Gemini, any model or harness.",
   "license": "MIT",
   "homepage": "https://smithers.sh",
@@ -191,7 +191,7 @@
     "smithers": "./src/bin/smithers.js"
   },
   "scripts": {
-    "test": "bun test tests",
+    "test": "bun test tests/barrels.test.js && bun test '--path-ignore-patterns=**/barrels.test.js' tests",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "rm -f src/index.d.ts src/index-*.d.ts && tsup --dts-only"
   },
@@ -233,7 +233,7 @@
     "ai": "^7.0.10",
     "diff": "^9.0.0",
     "drizzle-orm": "^0.45.2",
-    "effect": "^3.21.4",
+    "effect": "4.0.0-beta.102",
     "incur": "^0.4.10",
     "react": "^19.2.7",
     "zod": "^4.4.3"

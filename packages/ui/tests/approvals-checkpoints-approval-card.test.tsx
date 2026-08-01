@@ -4,7 +4,7 @@ import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { ApprovalCard, ApprovalNote, ApprovalResources, ApprovalRisk } from "../src/approvals/ApprovalCard";
 import { SMITHERS_UI_STYLE_ATTR } from "../src/styles";
-import { safeHref } from "../src/agentic/safeHref";
+import { safeHref } from "../src/internal/safeHref";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

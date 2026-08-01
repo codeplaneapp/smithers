@@ -172,7 +172,7 @@ function App() {
   const activeSummary = researchRuns.find((r) => r.runId === activeRunId);
 
   const runQuery = useGatewayRun(activeRunId);
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined });
   const researchOutput = useGatewayNodeOutput({ runId: activeRunId, nodeId: "research", iteration: 0 });
   const research = useMemo(() => extractResearch(researchOutput.data), [researchOutput.data]);
 

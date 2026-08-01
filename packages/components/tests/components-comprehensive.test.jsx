@@ -421,13 +421,28 @@ describe("Approval component", () => {
     expect(result.success).toBe(false);
   });
   test("renders as compute task with approval flags", async () => {
+    const binding = {
+      table: "reviewed_revision",
+      nodeId: "capture-reviewed-revision",
+      iteration: 0,
+      digest: "sha256:reviewed",
+    };
     const result = await render(
-      <Approval id="approve-deploy" output="approval_out" request={{ title: "Deploy to prod?" }} />,
+      <Approval id="approve-deploy" output="approval_out" bind={binding} request={{ title: "Deploy to prod?" }} />,
     );
     expect(result.tasks).toHaveLength(1);
     expect(result.tasks[0].nodeId).toBe("approve-deploy");
     expect(result.tasks[0].needsApproval).toBe(true);
     expect(result.tasks[0].approvalMode).toBe("decision");
+    expect(result.tasks[0].proofBindingRequired).toBe(true);
+    expect(result.tasks[0].proofBindings).toEqual([binding]);
+  });
+  test("does not require proof binding when bind is omitted", async () => {
+    const result = await render(
+      <Approval id="approve-deploy" output="approval_out" request={{ title: "Deploy to prod?" }} />,
+    );
+    expect(result.tasks[0].proofBindingRequired).toBeUndefined();
+    expect(result.tasks[0].proofBindings).toBeUndefined();
   });
   test("skipIf returns null", async () => {
     const result = await render(

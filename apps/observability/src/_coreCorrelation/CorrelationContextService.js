@@ -3,6 +3,6 @@ import { Context } from "effect";
 
 const _CorrelationContextServiceBase =
   /** @type {Context.TagClass<CorrelationContextService, "CorrelationContextService", CorrelationContextServiceShape>} */ (
-    /** @type {unknown} */ (Context.Tag("CorrelationContextService")())
+    /** @type {unknown} */ (Context.Service("CorrelationContextService"))
   );
 export class CorrelationContextService extends _CorrelationContextServiceBase {}

@@ -158,7 +158,7 @@ function App() {
   const activeRun = runs.find((r) => r.runId === activeRunId);
   const runStatusClass = statusClass(activeRun?.status);
 
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined });
   const implementOut = useGatewayNodeOutput({
     runId: activeRunId,
     nodeId: "improve-test-coverage:implement",

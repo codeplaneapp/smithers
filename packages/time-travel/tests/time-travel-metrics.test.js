@@ -4,13 +4,13 @@ import { snapshotsCaptured, runForksCreated, replaysStarted, snapshotDuration } 
 describe("time-travel metrics", () => {
   test("snapshotsCaptured is a counter metric", async () => {
     // Incrementing should not throw
-    await Effect.runPromise(Metric.increment(snapshotsCaptured));
+    await Effect.runPromise(Metric.update(snapshotsCaptured, 1));
   });
   test("runForksCreated is a counter metric", async () => {
-    await Effect.runPromise(Metric.increment(runForksCreated));
+    await Effect.runPromise(Metric.update(runForksCreated, 1));
   });
   test("replaysStarted is a counter metric", async () => {
-    await Effect.runPromise(Metric.increment(replaysStarted));
+    await Effect.runPromise(Metric.update(replaysStarted, 1));
   });
   test("snapshotDuration is a histogram metric", async () => {
     // Should accept a duration value
@@ -19,9 +19,9 @@ describe("time-travel metrics", () => {
   test("metrics can be updated multiple times", async () => {
     await Effect.runPromise(
       Effect.all([
-        Metric.increment(snapshotsCaptured),
-        Metric.increment(snapshotsCaptured),
-        Metric.increment(runForksCreated),
+        Metric.update(snapshotsCaptured, 1),
+        Metric.update(snapshotsCaptured, 1),
+        Metric.update(runForksCreated, 1),
         Metric.update(snapshotDuration, 10),
         Metric.update(snapshotDuration, 50),
       ]),

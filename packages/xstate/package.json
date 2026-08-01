@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/xstate",
-  "version": "0.31.1",
+  "version": "0.32.0",
   "description": "XState v5 machines as durable derived control state for Smithers workflows: pure folds over output and signal rows",
   "type": "module",
   "sideEffects": false,
@@ -48,7 +48,7 @@
     "@smithers-orchestrator/time-travel": "workspace:*",
     "@types/bun": "latest",
     "drizzle-orm": "^0.45.2",
-    "effect": "^3.21.4",
+    "effect": "4.0.0-beta.102",
     "smithers-orchestrator": "workspace:*",
     "typescript": "~6.0.3",
     "xstate": "5.32.5",

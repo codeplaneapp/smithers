@@ -17,7 +17,7 @@ function loadBunDrizzle() {
   return (bunDrizzle ??= requireBun("drizzle-orm/bun-sqlite").drizzle);
 }
 import { and, desc, eq } from "drizzle-orm";
-import { Context, Duration, Effect, Exit, Layer, Schedule, Schema } from "effect";
+import { Context, Duration, Effect, Layer, Result, Schedule, Schema, SchemaParser } from "effect";
 import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import React from "react";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
@@ -87,7 +87,7 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
  * @typedef {{ build: (buildGraph: ($: BuilderApi, params?: Record<string, unknown>) => BuilderNode) => ComponentDefinition }} ComponentDefinitionBuilder
  */
 
-const SmithersSqlite = Context.GenericTag("smithers/effect/sqlite");
+const SmithersSqlite = Context.Service("smithers/effect/sqlite");
 class ApprovalDecision extends Schema.Class("ApprovalDecision")({
   approved: Schema.Boolean,
   // `note` is omitted entirely when no note was provided so optional-string
@@ -271,7 +271,7 @@ function durationToMs(input) {
     return Math.max(0, Math.floor(input));
   }
   try {
-    return Math.max(0, Math.floor(Duration.toMillis(Duration.decode(input))));
+    return Math.max(0, Math.floor(Duration.toMillis(input)));
   } catch {
     return null;
   }
@@ -307,11 +307,12 @@ function deriveRetryCount(retry) {
       return Math.max(0, Math.floor(maxAttempts - 1));
     }
   }
-  const driver = Effect.runSync(Schedule.driver(retry));
+  if (!Schedule.isSchedule(retry)) return 0;
+  const step = Effect.runSync(Schedule.toStep(retry));
   let count = 0;
   while (count < 100) {
-    const exit = Effect.runSyncExit(driver.next(undefined));
-    if (Exit.isFailure(exit)) {
+    const result = Effect.runSync(Effect.result(step(count, undefined)));
+    if (Result.isFailure(result)) {
       return count;
     }
     count += 1;
@@ -325,14 +326,14 @@ function deriveRetryCount(retry) {
  * @returns {T}
  */
 function decodeSchema(schema, value) {
-  return Schema.decodeUnknownSync(schema)(value);
+  return SchemaParser.decodeSync(schema)(value);
 }
 /**
  * @param {AnySchema} schema
  * @param {unknown} value
  */
 function encodeSchema(schema, value) {
-  return Schema.encodeSync(schema)(value);
+  return SchemaParser.encodeSync(schema)(value);
 }
 /**
  * @param {BuilderStepHandle} handle
@@ -468,14 +469,17 @@ async function executeStepHandle(handle, ctx, decodedInput, env) {
   if (handle.kind === "approval") {
     const adapter = new SmithersDb(runtime.db);
     const approval = await adapter.getApproval(runtime.runId, handle.id, runtime.iteration);
-    return encodeSchema(ApprovalDecision, {
-      approved: approval?.status === "approved",
-      // Only include `note` when a string was provided; omitting the key
-      // keeps note-less decisions valid against optional string schemas.
-      ...(typeof approval?.note === "string" ? { note: approval.note } : {}),
-      decidedBy: approval?.decidedBy ?? null,
-      decidedAt: null,
-    });
+    return encodeSchema(
+      ApprovalDecision,
+      new ApprovalDecision({
+        approved: approval?.status === "approved",
+        // Only include `note` when a string was provided; omitting the key
+        // keeps note-less decisions valid against optional string schemas.
+        ...(typeof approval?.note === "string" ? { note: approval.note } : {}),
+        decidedBy: approval?.decidedBy ?? null,
+        decidedAt: null,
+      }),
+    );
   }
   const userCtx = buildUserContext(handle, ctx, decodedInput, runtime);
   const output = await resolveEffectResult(handle.run?.(userCtx), env, runtime.signal);

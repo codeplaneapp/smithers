@@ -19,7 +19,7 @@ export const smithersSpanNames = {
   tool: "smithers.tool",
 };
 const _TracingServiceBase = /** @type {Context.TagClass<TracingService, "TracingService", TracingServiceShape>} */ (
-  /** @type {unknown} */ (Context.Tag("TracingService")())
+  /** @type {unknown} */ (Context.Service("TracingService"))
 );
 export class TracingService extends _TracingServiceBase {}
 /**
@@ -73,7 +73,7 @@ export function annotateSmithersTrace(attributes = {}) {
   let program = Effect.void;
   if (Object.keys(spanAttributes).length > 0) {
     program = program.pipe(
-      Effect.tap(() => Effect.annotateCurrentSpan(spanAttributes).pipe(Effect.catchAll(() => Effect.void))),
+      Effect.tap(() => Effect.annotateCurrentSpan(spanAttributes).pipe(Effect.catch(() => Effect.void))),
     );
   }
   if (hasAttributes(attributes)) {
@@ -118,7 +118,7 @@ export const TracingServiceLive = Layer.succeed(TracingService, {
   annotate: (attributes) => {
     const spanAttributes = makeSmithersSpanAttributes(attributes);
     return Object.keys(spanAttributes).length > 0
-      ? Effect.annotateCurrentSpan(spanAttributes).pipe(Effect.catchAll(() => Effect.void))
+      ? Effect.annotateCurrentSpan(spanAttributes).pipe(Effect.catch(() => Effect.void))
       : Effect.void;
   },
   withCorrelation: (context, effect) => withCorrelationContext(effect, context),

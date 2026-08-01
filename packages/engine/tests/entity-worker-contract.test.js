@@ -1,6 +1,6 @@
 /** @jsxImportSource smithers-orchestrator */
 import { describe, expect, test } from "bun:test";
-import { Effect, Schema } from "effect";
+import { Effect, SchemaParser } from "effect";
 import { z } from "zod";
 import { jsx, jsxs } from "smithers-orchestrator/jsx-runtime";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
@@ -21,8 +21,8 @@ function buildContractSmithers() {
 }
 describe("entity worker contract", () => {
   test("worker schemas round-trip serializable payloads", () => {
-    const decodeWorkerTask = Schema.decodeSync(WorkerTask);
-    const decodeTaskResult = Schema.decodeSync(TaskResult);
+    const decodeWorkerTask = SchemaParser.decodeSync(WorkerTask);
+    const decodeTaskResult = SchemaParser.decodeSync(TaskResult);
     expect(
       decodeWorkerTask({
         executionId: "exec-1",

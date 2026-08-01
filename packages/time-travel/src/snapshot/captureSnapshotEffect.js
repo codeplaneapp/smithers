@@ -249,7 +249,7 @@ export function captureSnapshot(adapter, runId, frameNo, data, options = {}) {
       catch: (cause) =>
         toSmithersError(cause, "insert snapshot", { code: "DB_WRITE_FAILED", details: { frameNo, runId } }),
     });
-    yield* Metric.increment(snapshotsCaptured);
+    yield* Metric.update(snapshotsCaptured, 1);
     yield* Metric.update(snapshotDuration, performance.now() - start);
     return row;
   }).pipe(Effect.annotateLogs({ runId, frameNo: String(frameNo) }), Effect.withLogSpan("time-travel:capture-snapshot"));

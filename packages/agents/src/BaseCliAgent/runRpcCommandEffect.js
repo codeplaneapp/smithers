@@ -108,7 +108,7 @@ export function runRpcCommandEffect(command, args, options) {
     timeoutMs: timeoutMs ?? null,
     idleTimeoutMs: idleTimeoutMs ?? null,
   };
-  return Effect.async((resume) => {
+  return Effect.callback((resume) => {
     let stderr = "";
     let settled = false;
     let exitCode = null;
@@ -407,7 +407,7 @@ export function runRpcCommandEffect(command, args, options) {
       const nextStderr = stderr + text;
       if (!stderrTruncated && maxOutputBytes && Buffer.byteLength(nextStderr, "utf8") > maxOutputBytes) {
         stderrTruncated = true;
-        void Effect.runPromise(Metric.increment(toolOutputTruncatedTotal));
+        void Effect.runPromise(Metric.update(toolOutputTruncatedTotal, 1));
         logWarning(
           "agent RPC stderr truncated",
           {

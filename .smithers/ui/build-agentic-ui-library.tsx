@@ -419,7 +419,7 @@ export function AgenticUiProgramApp() {
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? programRuns[0]?.runId;
   const runDetail = useGatewayRun(activeRunId);
   const activeRun = (runDetail.data as RunSummary | undefined) ?? programRuns.find((run) => run.runId === activeRunId);
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined });
   const events = stream.events;
   const eventCount = events?.length ?? 0;
   const ledger = useMemo(() => buildLedger(events ?? []), [events]);

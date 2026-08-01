@@ -1,17 +1,14 @@
-import { Entity, ShardingConfig } from "@effect/cluster";
-import * as Rpc from "@effect/rpc/Rpc";
+import { Entity, ShardingConfig } from "effect/unstable/cluster";
+import * as Rpc from "effect/unstable/rpc/Rpc";
 import { Context, Effect, Layer, Schema } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-const SandboxRuntimeSchema = Schema.Literal("bubblewrap", "docker", "codeplane", "cloudflare");
-const SandboxEnvSchema = Schema.Record({
-  key: Schema.String,
-  value: Schema.String,
-});
+const SandboxRuntimeSchema = Schema.Literals(["bubblewrap", "docker", "codeplane", "cloudflare"]);
+const SandboxEnvSchema = Schema.Record(Schema.String, Schema.String);
 const SandboxEgressSchema = Schema.Struct({
   env: Schema.optional(SandboxEnvSchema),
   httpProxy: Schema.optional(Schema.String),
   httpsProxy: Schema.optional(Schema.String),
-  noProxy: Schema.optional(Schema.Union(Schema.String, Schema.Array(Schema.String))),
+  noProxy: Schema.optional(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
   caCertPem: Schema.optional(Schema.String),
   caCertPath: Schema.optional(Schema.String),
   secretBindings: Schema.optional(SandboxEnvSchema),
@@ -29,7 +26,7 @@ const SandboxWorkspaceSchema = Schema.Struct({
   name: Schema.String,
   snapshotId: Schema.optional(Schema.String),
   idleTimeoutSecs: Schema.optional(Schema.Number),
-  persistence: Schema.optional(Schema.Literal("ephemeral", "sticky")),
+  persistence: Schema.optional(Schema.Literals(["ephemeral", "sticky"])),
 });
 const SandboxTransportConfigSchema = Schema.Struct({
   runId: Schema.String,
@@ -117,7 +114,7 @@ export const SandboxEntity = Entity.make("Sandbox", [
 /** @typedef {import("../SandboxTransportService.ts").SandboxTransportService} SandboxTransportService */
 const SandboxEntityExecutorTag =
   /** @type {Context.TagClass<SandboxEntityExecutor, "SandboxEntityExecutor", SandboxTransportService>} */ (
-    Context.Tag("SandboxEntityExecutor")()
+    Context.Service("SandboxEntityExecutor")
   );
 export class SandboxEntityExecutor extends SandboxEntityExecutorTag {
   // Explicit constructor (identical to the implicit one) so runtime
@@ -180,7 +177,7 @@ const interruptibleBySignal = (effect, signal) => {
   if (signal.aborted) return Effect.interrupt;
   return Effect.raceFirst(
     effect,
-    Effect.async((resume) => {
+    Effect.callback((resume) => {
       const onAbort = () => resume(Effect.interrupt);
       signal.addEventListener("abort", onAbort, { once: true });
       return Effect.sync(() => signal.removeEventListener("abort", onAbort));

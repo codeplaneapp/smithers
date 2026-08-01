@@ -354,7 +354,7 @@ export {
 export { createSmithers, createSmithersCloudflare, createSmithersPostgres } from "./create.js";
 export { openSmithersBackend } from "./openSmithersBackend.js";
 export { openSmithersStore } from "./openSmithersStore.js";
-export { resolveSmithersBackendChoice } from "./resolveSmithersBackendChoice.js";
+export { resolveSmithersBackendChoice, resolveSmithersBackendPreference } from "./resolveSmithersBackendChoice.js";
 export { migrateSmithersStore } from "./migrateSmithersStore.js";
 export {
   approveNode,

@@ -313,7 +313,7 @@ describe("poll batch delivery durability", () => {
         if (prop === "findRunsAwaitingEvent") {
           return (eventName, correlationId) =>
             correlationId === "interrupt-2"
-              ? Effect.sync(() => enteredSecond()).pipe(Effect.zipRight(Effect.never))
+              ? Effect.sync(() => enteredSecond()).pipe(Effect.andThen(Effect.never))
               : target.findRunsAwaitingEvent(eventName, correlationId);
         }
         const original = Reflect.get(target, prop, receiver);
@@ -364,7 +364,7 @@ describe("poll batch delivery durability", () => {
     const gatedAdapter = new Proxy(adapter, {
       get(target, prop, receiver) {
         if (prop === "findRunsAwaitingEvent") {
-          return () => Effect.sync(() => enteredDelivery()).pipe(Effect.zipRight(Effect.never));
+          return () => Effect.sync(() => enteredDelivery()).pipe(Effect.andThen(Effect.never));
         }
         const original = Reflect.get(target, prop, receiver);
         return typeof original === "function" ? original.bind(target) : original;

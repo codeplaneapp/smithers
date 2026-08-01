@@ -6,7 +6,7 @@ export type GitHubRequestMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
 export type GitHubRequestOptions<A = unknown> = {
   /** Effect Schema to validate/decode the response body with. */
-  schema?: Schema.Schema<A, any>;
+  schema?: Schema.Schema<A>;
   /** Extra query params appended to the path. */
   query?: Record<string, string | number | boolean | undefined>;
 };

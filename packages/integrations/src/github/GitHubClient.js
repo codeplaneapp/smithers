@@ -7,7 +7,7 @@
  */
 // @smithers-type-exports-end
 
-import { Context, Duration, Effect, Layer, Schedule, Schema } from "effect";
+import { Context, Duration, Effect, Layer, Schedule, Schema, SchemaParser } from "effect";
 import { logWarning } from "@smithers-orchestrator/observability/logging";
 import { IntegrationError } from "../core/IntegrationError.js";
 import { resolveGitHubConfig } from "./config.js";
@@ -24,7 +24,7 @@ const MAX_RETRY_AFTER_MS = 60_000;
  * @type {Context.TagClass<GitHubClientTag, "GitHubClient", GitHubClientService>}
  */
 export const GitHubClient = /** @type {Context.TagClass<GitHubClientTag, "GitHubClient", GitHubClientService>} */ (
-  /** @type {unknown} */ (Context.Tag("GitHubClient")())
+  /** @type {unknown} */ (Context.Service("GitHubClient"))
 );
 /** @typedef {{ readonly _: unique symbol }} GitHubClientTag */
 
@@ -231,16 +231,14 @@ export function makeGitHubClient(config) {
    * @param {unknown} [body]
    */
   const requestUrl = (method, url, body) => {
-    const retrySchedule = Schedule.intersect(
-      Schedule.exponential("250 millis"),
-      Schedule.recurs(resolved.maxRetries),
-    ).pipe(
-      Schedule.whileInput(isRetryableGitHubError),
+    const retrySchedule = Schedule.exponential("250 millis").pipe(
+      Schedule.upTo({ times: resolved.maxRetries }),
+      Schedule.while(({ input }) => isRetryableGitHubError(input)),
       Schedule.passthrough,
       Schedule.addDelay(
-        /** @param {unknown} error */ (error) => {
+        /** @param {{ input: unknown }} metadata */ ({ input: error }) => {
           if (!isRetryableGitHubError(error)) {
-            return Duration.zero;
+            return Effect.succeed(Duration.zero);
           }
           const details = /** @type {{ retryAfterMs?: number | null; status?: number }} */ (error.details ?? {});
           logWarning(
@@ -253,9 +251,11 @@ export function makeGitHubClient(config) {
             },
             "integrations:github",
           );
-          return typeof details.retryAfterMs === "number" && details.retryAfterMs > 0
-            ? Duration.millis(details.retryAfterMs)
-            : Duration.zero;
+          return Effect.succeed(
+            typeof details.retryAfterMs === "number" && details.retryAfterMs > 0
+              ? Duration.millis(details.retryAfterMs)
+              : Duration.zero,
+          );
         },
       ),
     );
@@ -266,7 +266,7 @@ export function makeGitHubClient(config) {
     requestUrl(method, buildUrl(path, options?.query), body).pipe(
       Effect.flatMap(({ json }) =>
         options?.schema
-          ? Schema.decodeUnknown(options.schema)(json).pipe(
+          ? SchemaParser.decodeEffect(options.schema)(json).pipe(
               Effect.mapError(
                 (cause) =>
                   new IntegrationError(

@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
+import { accountToProviderEnv, getAccount } from "@smithers-orchestrator/accounts";
 import { SmithersError } from "@smithers-orchestrator/errors";
+import { registeredAgentLabel } from "./registered-agent-id.js";
 /** @typedef {import("./HijackCandidate.ts").HijackCandidate} HijackCandidate */
 /** @typedef {import("./HijackLaunchSpec.ts").HijackLaunchSpec} HijackLaunchSpec */
 /** @typedef {import("./NativeHijackEngine.ts").NativeHijackEngine} NativeHijackEngine */
@@ -51,21 +53,23 @@ function extractContinuationFromMeta(meta) {
     const mode = handoff.mode === "conversation" ? "conversation" : "native-cli";
     const resume = typeof handoff.resume === "string" ? handoff.resume : undefined;
     const messages = asConversationMessages(handoff.messages);
+    const accountLabel = registeredAgentLabel(handoff.agentId) ?? registeredAgentLabel(meta.agentId);
     if (engine && mode === "native-cli" && resume) {
-      return { engine, mode: "native-cli", resume };
+      return { engine, mode: "native-cli", resume, accountLabel };
     }
     if (engine && mode === "conversation" && messages?.length) {
-      return { engine, mode: "conversation", messages };
+      return { engine, mode: "conversation", messages, accountLabel };
     }
   }
   const engine = typeof meta.agentEngine === "string" ? meta.agentEngine : undefined;
   const resume = typeof meta.agentResume === "string" ? meta.agentResume : undefined;
+  const accountLabel = registeredAgentLabel(meta.agentId);
   if (engine && resume) {
-    return { engine, mode: "native-cli", resume };
+    return { engine, mode: "native-cli", resume, accountLabel };
   }
   const messages = asConversationMessages(meta.agentConversation);
   if (engine && messages?.length) {
-    return { engine, mode: "conversation", messages };
+    return { engine, mode: "conversation", messages, accountLabel };
   }
   return null;
 }
@@ -98,6 +102,7 @@ export async function resolveHijackCandidate(adapter, runId, target) {
       mode: extracted.mode,
       resume: extracted.mode === "native-cli" ? extracted.resume : undefined,
       messages: extracted.mode === "conversation" ? extracted.messages : undefined,
+      accountLabel: extracted.accountLabel,
       cwd: attempt.jjCwd ?? process.cwd(),
     };
   }
@@ -105,7 +110,8 @@ export async function resolveHijackCandidate(adapter, runId, target) {
   // load, run shutdown can return before the final attempt metadata is flushed,
   // so recover native CLI handoffs from the event instead of falsely reporting
   // CHAT_CREATE_UNAVAILABLE.
-  const hijackEvents = await adapter.listEventsByType(runId, "RunHijacked");
+  const hijackEvents =
+    typeof adapter.listEventsByType === "function" ? await adapter.listEventsByType(runId, "RunHijacked") : [];
   for (const event of [...hijackEvents].reverse()) {
     const payload = parseAttemptMeta(event.payloadJson ?? event.payload_json);
     const engine = typeof payload.engine === "string" ? payload.engine : undefined;
@@ -120,18 +126,69 @@ export async function resolveHijackCandidate(adapter, runId, target) {
             : undefined;
     if (!engine || !resume || !nodeId) continue;
     if (target && target !== engine && target !== nodeId) continue;
+    const iteration = typeof payload.iteration === "number" ? payload.iteration : 0;
+    const attemptNumber = typeof payload.attempt === "number" ? payload.attempt : 1;
+    const matchingAttempt = sortedAttempts.find(
+      (attempt) =>
+        attempt.nodeId === nodeId && (attempt.iteration ?? 0) === iteration && attempt.attempt === attemptNumber,
+    );
+    const matchingMeta = parseAttemptMeta(matchingAttempt?.metaJson);
     return {
       runId,
       nodeId,
-      iteration: typeof payload.iteration === "number" ? payload.iteration : 0,
-      attempt: typeof payload.attempt === "number" ? payload.attempt : 1,
+      iteration,
+      attempt: attemptNumber,
       engine,
       mode: "native-cli",
       resume,
+      accountLabel: registeredAgentLabel(payload.agentId) ?? registeredAgentLabel(matchingMeta.agentId),
       cwd: typeof payload.cwd === "string" ? payload.cwd : process.cwd(),
     };
   }
   return null;
+}
+
+const ACCOUNT_PROVIDERS_BY_ENGINE = {
+  "claude-code": new Set(["claude-code", "anthropic-api"]),
+  antigravity: new Set(["antigravity"]),
+  codex: new Set(["codex", "openai-api"]),
+  kimi: new Set(["kimi"]),
+};
+
+/**
+ * Rehydrate the registered account chosen by the original agent without
+ * persisting its credential. The durable candidate stores only the account
+ * label; the current registry remains the source of the config dir/API key.
+ *
+ * @param {{ engine: string; accountLabel?: string }} candidate
+ * @param {NodeJS.ProcessEnv} [baseEnv]
+ * @returns {Record<string, string>}
+ */
+export function buildHijackEnvironment(candidate, baseEnv = process.env) {
+  const env = { ...baseEnv };
+  if (!candidate.accountLabel) return env;
+  const account = getAccount(candidate.accountLabel, env);
+  if (!account) {
+    throw new SmithersError(
+      "HIJACK_ACCOUNT_NOT_FOUND",
+      `Registered agent account "${candidate.accountLabel}" is no longer available`,
+      { accountLabel: candidate.accountLabel, engine: candidate.engine },
+    );
+  }
+  if (!ACCOUNT_PROVIDERS_BY_ENGINE[candidate.engine]?.has(account.provider)) {
+    throw new SmithersError(
+      "HIJACK_ACCOUNT_MISMATCH",
+      `Registered agent account "${candidate.accountLabel}" does not match ${candidate.engine}`,
+      { accountLabel: candidate.accountLabel, engine: candidate.engine, provider: account.provider },
+    );
+  }
+  Object.assign(env, accountToProviderEnv(account));
+  // ClaudeCodeAgent clears ambient API billing for subscription accounts.
+  // Preserve the original authentication choice in the resumed CLI too.
+  if (candidate.engine === "claude-code" && account.provider === "claude-code") {
+    env.ANTHROPIC_API_KEY = "";
+  }
+  return env;
 }
 /**
  * @param {SmithersDb} adapter
@@ -157,9 +214,10 @@ export async function waitForHijackCandidate(adapter, runId, options = {}) {
 }
 /**
  * @param {HijackCandidate} candidate
+ * @param {NodeJS.ProcessEnv} [baseEnv]
  * @returns {HijackLaunchSpec}
  */
-export function buildHijackLaunchSpec(candidate) {
+export function buildHijackLaunchSpec(candidate, baseEnv = process.env) {
   if (candidate.mode !== "native-cli" || !candidate.resume) {
     throw new SmithersError(
       "HIJACK_LAUNCH_MODE",
@@ -167,7 +225,7 @@ export function buildHijackLaunchSpec(candidate) {
       candidate,
     );
   }
-  const env = { ...process.env };
+  const env = buildHijackEnvironment(candidate, baseEnv);
   if (candidate.engine === "claude-code") {
     if (env.CLAUDE_CODE_ENTRYPOINT) env.CLAUDE_CODE_ENTRYPOINT = "";
     if (env.CLAUDECODE) env.CLAUDECODE = "";

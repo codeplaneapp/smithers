@@ -703,7 +703,7 @@ function App() {
   );
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? runs[0]?.runId;
   const runQuery = useGatewayRun(activeRunId);
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0, maxEvents: 1000 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined, maxEvents: 1000 });
   const approvalsQuery = useGatewayApprovals({ filter: { runId: activeRunId ?? "" } });
 
   const clarifyOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "clarify", iteration: 0 });

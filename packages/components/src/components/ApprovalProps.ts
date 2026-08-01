@@ -1,6 +1,7 @@
 import type React from "react";
 import type { z } from "zod";
 import type { SmithersCtx } from "@smithers-orchestrator/driver";
+import type { ProofBinding } from "@smithers-orchestrator/graph/ProofBinding";
 import type { ApprovalMode } from "./ApprovalMode.ts";
 import type { ApprovalOption } from "./ApprovalOption.ts";
 import type { ApprovalRequest } from "./ApprovalRequest.ts";
@@ -26,6 +27,8 @@ export type ApprovalProps<_Row = ApprovalDecision, Output extends OutputTarget =
   dependsOn?: string[];
   /** Named dependencies on other tasks. Keys become context keys, values are task node IDs. */
   needs?: Record<string, string>;
+  /** Accept a decision only while every bound authority row still has the proved content digest. */
+  bind?: ProofBinding | ProofBinding[];
   skipIf?: boolean;
   timeoutMs?: number;
   heartbeatTimeoutMs?: number;

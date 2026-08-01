@@ -2,7 +2,7 @@
 /** @typedef {import("./ExternalEventTypes.ts").ExternalEvent} ExternalEvent */
 // @smithers-type-exports-end
 
-import { Schema } from "effect";
+import { Schema, SchemaParser } from "effect";
 
 /**
  * Runtime schema for {@link ExternalEvent}. Webhook sources decode incoming
@@ -18,4 +18,4 @@ export const ExternalEventSchema = Schema.Struct({
   receivedAtMs: Schema.Number,
 });
 
-export const decodeExternalEvent = Schema.decodeUnknown(ExternalEventSchema);
+export const decodeExternalEvent = SchemaParser.decodeEffect(ExternalEventSchema);

@@ -836,8 +836,8 @@ var init_Harness = __esm({
 });
 
 // src/kernel/boundary.ts
-import { Cause, Effect as Effect3, Exit, Fiber, Option } from "effect";
-var toHarnessError, runAtBoundaryFork;
+import { Cause, Effect as Effect3, Exit, Fiber, Option, Result } from "effect";
+var toHarnessError, squashCause, runAtBoundaryFork;
 var init_boundary = __esm({
   "src/kernel/boundary.ts"() {
     "use strict";
@@ -859,15 +859,17 @@ var init_boundary = __esm({
       }
       return { name: "Error", code: "HARNESS_ERROR", message: String(error) };
     };
+    squashCause = (cause) => {
+      const failure2 = Cause.findErrorOption(cause);
+      if (Option.isSome(failure2)) return failure2.value;
+      const defect = Cause.findDefect(cause);
+      return Result.isSuccess(defect) ? defect.success : new Error("kernel program failed");
+    };
     runAtBoundaryFork = (program) => {
       const fiber = Effect3.runFork(Effect3.exit(program));
       const promise = Effect3.runPromise(Fiber.join(fiber)).then((exit) => {
         if (Exit.isSuccess(exit)) return { ok: true, value: exit.value };
-        const cause = Option.getOrElse(
-          Cause.failureOption(exit.cause),
-          () => Option.getOrElse(Cause.dieOption(exit.cause), () => new Error("kernel program failed"))
-        );
-        return { ok: false, error: toHarnessError(cause) };
+        return { ok: false, error: toHarnessError(squashCause(exit.cause)) };
       });
       return { promise, interrupt: () => Effect3.runPromise(Fiber.interrupt(fiber)) };
     };
@@ -875,7 +877,7 @@ var init_boundary = __esm({
 });
 
 // src/kernel/KernelRuntime.ts
-import { Context, Effect as Effect4, Either, Fiber as Fiber2, Layer } from "effect";
+import { Context, Effect as Effect4, Fiber as Fiber2, Layer, Result as Result2 } from "effect";
 var KernelRuntimeService, kernelLayer, makeKernel;
 var init_KernelRuntime = __esm({
   "src/kernel/KernelRuntime.ts"() {
@@ -884,7 +886,7 @@ var init_KernelRuntime = __esm({
     init_SeededScheduler();
     init_TraceCollector();
     init_VirtualClock();
-    KernelRuntimeService = class extends Context.Tag("@smithers/testing/KernelRuntime")() {
+    KernelRuntimeService = class extends Context.Service()("@smithers/testing/KernelRuntime") {
     };
     kernelLayer = (kernel) => Layer.succeed(KernelRuntimeService, kernel);
     makeKernel = (seed, controls = []) => {
@@ -898,23 +900,23 @@ var init_KernelRuntime = __esm({
         // task fibers or implements a Promise race itself.
         runReadySet: (tasks) => Effect4.gen(function* () {
           const fresh = tasks.filter(({ stepId }) => !active.has(stepId));
-          for (const { stepId, effect } of fresh) active.set(stepId, yield* Effect4.fork(effect));
+          for (const { stepId, effect } of fresh) active.set(stepId, yield* Effect4.forkChild(effect));
           if (!active.size) throw new Error("KERNEL_NO_ACTIVE_FIBERS");
           const winner = yield* Effect4.raceAll(
             [...active.entries()].map(
               ([stepId, fiber]) => Fiber2.join(fiber).pipe(
-                Effect4.either,
+                Effect4.result,
                 Effect4.map((exit) => ({ stepId, exit }))
               )
             )
           );
           active.delete(winner.stepId);
-          if (Either.isLeft(winner.exit)) {
+          if (Result2.isFailure(winner.exit)) {
             yield* Effect4.all([...active.values()].map((fiber) => Fiber2.interrupt(fiber)));
             active.clear();
-            return yield* Effect4.fail(winner.exit.left);
+            return yield* Effect4.fail(winner.exit.failure);
           }
-          return { stepId: winner.stepId, value: winner.exit.right };
+          return { stepId: winner.stepId, value: winner.exit.success };
         })
       });
       return Object.freeze({ ...runtime, executor });
@@ -1145,7 +1147,7 @@ var runScenario_exports = {};
 __export(runScenario_exports, {
   runScenario: () => runScenario
 });
-import { Effect as Effect5, Fiber as Fiber3, Option as Option2 } from "effect";
+import { Effect as Effect5, Fiber as Fiber3 } from "effect";
 var faultFor, dbOperationKind, processOperationKind, faultError, adapterFailure, settleKernel, runScenario;
 var init_runScenario = __esm({
   "src/runScenario.ts"() {
@@ -1200,11 +1202,16 @@ var init_runScenario = __esm({
         }
       );
       for (let turn = 0; !done && turn < budget; turn++) {
+        const progressBefore = kernel.trace.snapshot().length + kernel.controls.consumed();
         for (let microtask = 0; microtask < Math.min(64, Math.max(1, budget)); microtask++) await Promise.resolve();
+        if (!done) await new Promise((resolve3) => setImmediate(resolve3));
         if (!done) {
-          const advance = kernel.controls.takeAdvanceClock();
-          if (advance) kernel.clock.advance(advance.ms);
-          else if (kernel.clock.pending().length) kernel.clock.advanceToNextTimer();
+          const progressAfter = kernel.trace.snapshot().length + kernel.controls.consumed();
+          if (progressAfter === progressBefore) {
+            const advance = kernel.controls.takeAdvanceClock();
+            if (advance) kernel.clock.advance(advance.ms);
+            else if (kernel.clock.pending().length) kernel.clock.advanceToNextTimer();
+          }
         }
       }
       if (!done)
@@ -2066,11 +2073,11 @@ var init_runScenario = __esm({
                 return pending;
               };
               if (runner && duringFault && harness.kind === "unit-sim") {
-                const child = yield* Effect5.fork(Effect5.tryPromise({ try: () => runTask2(), catch: (e) => e }));
-                yield* Effect5.yieldNow();
+                const child = yield* Effect5.forkChild(Effect5.tryPromise({ try: () => runTask2(), catch: (e) => e }));
+                yield* Effect5.yieldNow;
                 yield* Effect5.tryPromise({ try: () => Promise.resolve(), catch: (cause) => cause });
-                const completedExit = yield* Fiber3.poll(child);
-                if (Option2.isSome(completedExit)) {
+                const completedExit = child.pollUnsafe();
+                if (completedExit !== void 0) {
                   value = yield* Fiber3.join(child);
                 } else {
                   yield* Fiber3.interrupt(child);
@@ -2191,7 +2198,10 @@ var init_runScenario = __esm({
           );
           for (const selected of executableOrdered) activeTaskIds.add(selected.id);
           const winner = yield* runtimeKernel.executor.runReadySet(
-            tasks.map((effect, index) => ({ stepId: executableOrdered[index].id, effect }))
+            tasks.map((effect, index) => ({
+              stepId: executableOrdered[index].id,
+              effect
+            }))
           );
           activeTaskIds.delete(winner.stepId);
           const winnerBarrier = ast.barriers.find(
@@ -2361,16 +2371,153 @@ function stringForFormat(format) {
       return "string";
   }
 }
-function numberFromSchema(schema) {
-  let value = schema.minimum ?? 0;
-  if (schema.exclusiveMinimum !== void 0 && value <= schema.exclusiveMinimum) {
-    value = schema.exclusiveMinimum + 1;
+function nextRepresentable(value, direction) {
+  if (!Number.isFinite(value)) return value;
+  if (value === 0) return direction === 1 ? Number.MIN_VALUE : -Number.MIN_VALUE;
+  const buffer = new ArrayBuffer(8);
+  const view = new DataView(buffer);
+  view.setFloat64(0, value);
+  let bits = view.getBigUint64(0);
+  bits += (value >= 0 ? direction : -direction) === 1 ? 1n : -1n;
+  view.setBigUint64(0, bits);
+  return view.getFloat64(0);
+}
+function greatestCommonDivisor(left, right) {
+  while (right !== 0n) {
+    const remainder = left % right;
+    left = right;
+    right = remainder;
   }
-  if (schema.maximum !== void 0 && value > schema.maximum) value = schema.maximum;
-  if (schema.exclusiveMaximum !== void 0 && value >= schema.exclusiveMaximum) {
-    value = schema.exclusiveMaximum - 1;
+  return left < 0n ? -left : left;
+}
+function integerStepFromMultiple(multiple) {
+  const [mantissa, exponentText] = multiple.toString().toLowerCase().split("e");
+  const exponent = Number(exponentText ?? 0);
+  const [whole, fraction = ""] = mantissa.split(".");
+  const digits = `${whole}${fraction}`.replace(/^\+/, "");
+  let numerator = BigInt(digits);
+  let denominator = 1n;
+  const scale = fraction.length - exponent;
+  if (scale > 0) denominator = 10n ** BigInt(scale);
+  else if (scale < 0) numerator *= 10n ** BigInt(-scale);
+  const divisor = greatestCommonDivisor(numerator, denominator);
+  return Number((numerator < 0n ? -numerator : numerator) / divisor);
+}
+function numberFromSchema(schema, integer) {
+  let lower = schema.minimum ?? Number.NEGATIVE_INFINITY;
+  let upper = schema.maximum ?? Number.POSITIVE_INFINITY;
+  if (schema.exclusiveMinimum !== void 0) {
+    lower = Math.max(
+      lower,
+      integer ? Math.floor(schema.exclusiveMinimum) + 1 : nextRepresentable(schema.exclusiveMinimum, 1)
+    );
   }
-  return value;
+  if (schema.exclusiveMaximum !== void 0) {
+    upper = Math.min(
+      upper,
+      integer ? Math.ceil(schema.exclusiveMaximum) - 1 : nextRepresentable(schema.exclusiveMaximum, -1)
+    );
+  }
+  if (integer) {
+    lower = Math.ceil(lower);
+    upper = Math.floor(upper);
+  }
+  const multiple = schema.multipleOf && schema.multipleOf > 0 ? Math.abs(schema.multipleOf) : integer ? 1 : null;
+  if (multiple !== null) {
+    if (integer) {
+      const step2 = integerStepFromMultiple(multiple);
+      if (!Number.isFinite(step2) || step2 <= 0) {
+        throw new TypeError("JSON Schema multipleOf cannot produce a representable integer");
+      }
+      const firstMultiplier2 = Number.isFinite(lower) ? Math.ceil(lower / step2) : 0;
+      const lastMultiplier2 = Number.isFinite(upper) ? Math.floor(upper / step2) : Infinity;
+      const multiplier2 = firstMultiplier2 <= 0 && lastMultiplier2 >= 0 ? 0 : firstMultiplier2;
+      const value2 = multiplier2 * step2;
+      if (firstMultiplier2 > lastMultiplier2 || value2 < lower || value2 > upper || !Number.isInteger(value2)) {
+        throw new TypeError("JSON Schema numeric constraints have no representable integer multiple");
+      }
+      return value2;
+    }
+    let firstMultiplier = Number.isFinite(lower) ? Math.ceil(lower / multiple) : 0;
+    let lastMultiplier = Number.isFinite(upper) ? Math.floor(upper / multiple) : Infinity;
+    if (Number.isFinite(lower) && (firstMultiplier - 1) * multiple >= lower) firstMultiplier -= 1;
+    if (Number.isFinite(upper) && (lastMultiplier + 1) * multiple <= upper) lastMultiplier += 1;
+    let multiplier = firstMultiplier <= 0 && lastMultiplier >= 0 ? 0 : firstMultiplier;
+    let value = multiplier * multiple;
+    if (firstMultiplier > lastMultiplier || value < lower || value > upper) {
+      throw new TypeError("JSON Schema numeric constraints have no representable multiple");
+    }
+    return value;
+  }
+  if (lower > upper) throw new TypeError("JSON Schema numeric constraints describe an empty interval");
+  if (lower <= 0 && upper >= 0) return 0;
+  if (Number.isFinite(lower) && Number.isFinite(upper)) {
+    const midpoint = lower + (upper - lower) / 2;
+    return midpoint >= lower && midpoint <= upper ? midpoint : lower;
+  }
+  return Number.isFinite(lower) ? lower : Number.isFinite(upper) ? upper : 0;
+}
+function characterFromClass(source) {
+  const negated = source.startsWith("^");
+  const body = negated ? source.slice(1) : source;
+  const candidates = ["a", "A", "0", "_", "-", " "];
+  let expression;
+  try {
+    expression = new RegExp(`^[${source}]$`);
+  } catch {
+    return "a";
+  }
+  return candidates.find((candidate) => expression.test(candidate)) ?? (negated ? "a" : body[0] ?? "a");
+}
+function stringForPattern(pattern) {
+  const source = pattern.replace(/^\^/, "").replace(/\$$/, "");
+  const pieces = [];
+  for (let index = 0; index < source.length; ) {
+    let token = "";
+    const char = source[index];
+    if (char === "\\") {
+      const escaped = source[index + 1];
+      token = escaped === "d" ? "0" : escaped === "w" ? "a" : escaped === "s" ? " " : escaped ?? "";
+      index += 2;
+    } else if (char === "[") {
+      const end = source.indexOf("]", index + 1);
+      if (end < 0) return null;
+      token = characterFromClass(source.slice(index + 1, end));
+      index = end + 1;
+    } else if (char === ".") {
+      token = "a";
+      index += 1;
+    } else if ("()|".includes(char)) {
+      index += 1;
+      continue;
+    } else {
+      token = char;
+      index += 1;
+    }
+    let count = 1;
+    if (source[index] === "*") {
+      count = 0;
+      index += 1;
+    } else if (source[index] === "?") {
+      count = 0;
+      index += 1;
+    } else if (source[index] === "+") {
+      index += 1;
+    } else if (source[index] === "{") {
+      const end = source.indexOf("}", index + 1);
+      const minimum = end < 0 ? NaN : Number(source.slice(index + 1, end).split(",")[0]);
+      if (!Number.isFinite(minimum)) return null;
+      count = minimum;
+      index = end + 1;
+    }
+    pieces.push(token.repeat(count));
+  }
+  const value = pieces.join("");
+  try {
+    return new RegExp(pattern).test(value) ? value : null;
+  } catch {
+    return null;
+  }
 }
 function jsonSchemaExample(schema, depth = 0) {
   if (depth > 12) return null;
@@ -2394,9 +2541,9 @@ function jsonSchemaExample(schema, depth = 0) {
     case "boolean":
       return false;
     case "integer":
-      return Math.trunc(numberFromSchema(schema));
+      return numberFromSchema(schema, true);
     case "number":
-      return numberFromSchema(schema);
+      return numberFromSchema(schema, false);
     case "array": {
       if (schema.prefixItems?.length) {
         return schema.prefixItems.map((item) => jsonSchemaExample(item, depth + 1));
@@ -2413,7 +2560,7 @@ function jsonSchemaExample(schema, depth = 0) {
     }
     case "string":
     default: {
-      let value = stringForFormat(schema.format);
+      let value = (schema.pattern ? stringForPattern(schema.pattern) : null) ?? stringForFormat(schema.format);
       const minimum = schema.minLength ?? 0;
       if (value.length < minimum) value += "a".repeat(minimum - value.length);
       if (schema.maxLength !== void 0 && value.length > schema.maxLength) {
@@ -2429,9 +2576,12 @@ function formatIssues(issues) {
   ).join("; ");
 }
 function schemaMock(schema) {
-  const first = JSON.parse(zodSchemaToJsonExample(schema));
-  const firstResult = schema.safeParse(first);
-  if (firstResult.success) return firstResult.data;
+  try {
+    const first = JSON.parse(zodSchemaToJsonExample(schema));
+    const firstResult = schema.safeParse(first);
+    if (firstResult.success) return firstResult.data;
+  } catch {
+  }
   const jsonSchema = toJSONSchema(schema);
   const candidate = jsonSchemaExample(jsonSchema);
   const result = schema.safeParse(candidate);

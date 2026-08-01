@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/gateway-react",
-  "version": "0.31.1",
+  "version": "0.32.0",
   "description": "React hooks and root helpers for Smithers Gateway UIs",
   "type": "module",
   "sideEffects": false,
@@ -28,7 +28,7 @@
     "@smithers-orchestrator/gateway-client": "workspace:*",
     "@tanstack/react-db": "0.1.91",
     "@tanstack/react-query": "5.101.2",
-    "effect": "^3.21.4"
+    "effect": "4.0.0-beta.102"
   },
   "peerDependencies": {
     "react": "^19.0.0",

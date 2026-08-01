@@ -3,7 +3,7 @@ import { Context } from "effect";
 
 const WorkflowSessionBase =
   /** @type {Context.TagClass<WorkflowSession, "WorkflowSession", WorkflowSessionService>} */ (
-    /** @type {unknown} */ (Context.Tag("WorkflowSession")())
+    /** @type {unknown} */ (Context.Service("WorkflowSession"))
   );
 
 export class WorkflowSession extends WorkflowSessionBase {}

@@ -1941,6 +1941,8 @@ type ApprovalProps$2<_Row = ApprovalDecision$1, Output extends OutputTarget$1 = 
     dependsOn?: string[];
     /** Named dependencies on other tasks. Keys become context keys, values are task node IDs. */
     needs?: Record<string, string>;
+    /** Accept a decision only while every bound authority row still has the proved content digest. */
+    bind?: ProofBinding | ProofBinding[];
     skipIf?: boolean;
     timeoutMs?: number;
     heartbeatTimeoutMs?: number;
@@ -2280,12 +2282,12 @@ type PollerProps$1 = PollerProps$2;
  * which is precisely `<DecisionTable strategy="first-match">`. Routing here is
  * deterministic: the agent names a condition, the table picks the handler.
  *
- * The healing half is deliberately timid. Only `stalled` and `wedged-node` heal
- * without a human by default, because resuming a run and retrying a node are
- * the two repairs that are both idempotent and reversible. Everything else
- * escalates through a durable `<HumanTask>`. Put a condition in `autoHeal` to
- * grant broader authority; pass `handlers` to replace any element outright, or
- * map one to `null` to make it a no-op.
+ * The healing half is deliberately timid. Only ownerless `stalled` and
+ * `wedged-node` runs heal without a human by default. A live owner is never
+ * taken over by the monitor; that condition escalates through a durable
+ * `<HumanTask>`. Put a condition in `autoHeal` to grant broader authority; pass
+ * `handlers` to replace any element outright, or map one to `null` to make it a
+ * no-op.
  *
  * The monitor never reads the store: its prompt binds it to the Gateway client
  * and the public CLI surface.
@@ -2353,7 +2355,6 @@ type ComputeSidecarDeltaOptions = {
  */
 declare function Subflow(props: SubflowProps$1): React__default.ReactElement<{
     id: string;
-    key: string | undefined;
     workflow: WorkflowFileRef$1 | _smithers_orchestrator_driver.WorkflowDefinition<unknown>;
     input: unknown;
     mode: "childRun" | "inline";
@@ -2384,7 +2385,6 @@ type SubflowProps$1 = SubflowProps$2;
  */
 declare function Sandbox(props: SandboxProps$1): React__default.ReactElement<{
     id: string;
-    key: string | undefined;
     output: OutputTarget$1;
     provider: unknown;
     runtime: SandboxRuntime$1 | undefined;
@@ -2433,7 +2433,6 @@ type SandboxProps$1 = SandboxProps$2;
  */
 declare function WaitForEvent(props: WaitForEventProps$1): React__default.ReactElement<{
     id: string;
-    key: string | undefined;
     event: string;
     correlationId: string | undefined;
     output: OutputTarget$1;
@@ -2475,7 +2474,6 @@ type SignalProps$1<Schema> = SignalProps$2<Schema>;
  */
 declare function Timer(props: TimerProps$1): React__default.ReactElement<{
     id: string;
-    key: string | undefined;
     duration: string | undefined;
     until: string | undefined;
     dependsOn: string[] | undefined;
@@ -3924,9 +3922,9 @@ declare const MONITOR_CONDITIONS: readonly MonitorCondition$1[];
 /** Run statuses that mean the watched run is over and the monitor should stop. */
 declare const MONITOR_TERMINAL_STATUSES: readonly ["finished", "failed", "cancelled", "continued"];
 /**
- * The conditions a monitor may repair on its own by default: the only two whose
- * repair is both idempotent (running it twice equals running it once) and
- * reversible (the run's durable state is unchanged if it was the wrong call).
+ * The conditions a monitor may repair on its own by default when no active
+ * runtime owner exists. Retry remains a bounded reset, so the prompt requires
+ * reporting its effects and never applying it twice.
  * @type {readonly MonitorCondition[]}
  */
 declare const MONITOR_DEFAULT_AUTO_HEAL: readonly MonitorCondition$1[];

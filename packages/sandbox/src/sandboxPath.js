@@ -35,20 +35,20 @@ function assertPathWithinRootEffect(rootDir, resolvedPath) {
     // the target outside the root. ENOENT/ENOTDIR mean "keep walking up";
     // any other realpath error is fatal.
     while (true) {
-      const result = yield* Effect.either(
+      const result = yield* Effect.result(
         Effect.tryPromise({
           try: () => realpath(current),
           catch: (cause) => toSmithersError(cause, "realpath check"),
         }),
       );
-      if (result._tag === "Right") {
-        const target = result.right;
+      if (result._tag === "Success") {
+        const target = result.success;
         if (target !== root && !target.startsWith(root + sep)) {
           return yield* Effect.fail(new SmithersError("TOOL_PATH_ESCAPE", "Path escapes sandbox root (via symlink)"));
         }
         return;
       }
-      const err = result.left;
+      const err = result.failure;
       const cause = err?.cause ?? err;
       const code = cause?.code;
       if (code && code !== "ENOENT" && code !== "ENOTDIR") {

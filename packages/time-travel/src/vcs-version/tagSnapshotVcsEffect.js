@@ -3,7 +3,7 @@ import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
 import { smithersVcsTags } from "../schema.js";
 import { getJjPointer, runJj } from "@smithers-orchestrator/vcs/jj";
-/** @typedef {import("@effect/platform/CommandExecutor").CommandExecutor} CommandExecutor */
+/** @typedef {import("effect/unstable/process/ChildProcessSpawner").CommandExecutor} CommandExecutor */
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
 /** @typedef {import("./VcsTag.ts").VcsTag} VcsTag */

@@ -1,4 +1,5 @@
 import { Effect, Metric } from "effect";
+import { incrementGauge } from "./_incrementGauge.js";
 import { memoryFactWrites } from "./memoryFactWrites.js";
 import { memoryRecallQueries } from "./memoryRecallQueries.js";
 import { memoryMessageSaves } from "./memoryMessageSaves.js";
@@ -88,7 +89,7 @@ function tagMetricWithTags(metric, tags) {
   let tagged = metric;
   for (const [key, value] of Object.entries(tags)) {
     if (!value) continue;
-    tagged = Metric.tagged(tagged, key, value);
+    tagged = Metric.withAttributes(tagged, { [key]: String(value) });
   }
   return tagged;
 }
@@ -183,7 +184,7 @@ function recordAgentUsageMetrics(tags, usage) {
   const pushMetric = (kind, value) => {
     if (!value || value <= 0) return;
     effects.push(
-      Metric.incrementBy(
+      Metric.update(
         tagMetricWithTags(agentTokensTotal, {
           ...tags,
           kind,
@@ -232,7 +233,7 @@ function hasAgentRetrySignal(event) {
  */
 export function trackEvent(event) {
   // Always count the event by type
-  const countEvent = Metric.increment(eventsEmittedTotal);
+  const countEvent = Metric.update(eventsEmittedTotal, 1);
   switch (event.type) {
     case "SupervisorStarted":
       return countEvent;
@@ -240,8 +241,8 @@ export function trackEvent(event) {
       return Effect.all(
         [
           countEvent,
-          Metric.increment(supervisorPollsTotal),
-          Metric.incrementBy(supervisorStaleDetected, event.staleCount),
+          Metric.update(supervisorPollsTotal, 1),
+          Metric.update(supervisorStaleDetected, event.staleCount),
           Metric.update(supervisorPollDuration, event.durationMs),
         ],
         { discard: true },
@@ -250,29 +251,38 @@ export function trackEvent(event) {
       return Effect.all(
         [
           countEvent,
-          Metric.increment(supervisorResumedTotal),
+          Metric.update(supervisorResumedTotal, 1),
           Metric.update(supervisorResumeLag, event.staleDurationMs),
         ],
         { discard: true },
       );
     case "RunAutoResumeSkipped":
-      return Effect.all([countEvent, Metric.increment(Metric.tagged(supervisorSkippedTotal, "reason", event.reason))], {
-        discard: true,
-      });
+      return Effect.all(
+        [
+          countEvent,
+          Metric.update(Metric.withAttributes(supervisorSkippedTotal, { ["reason"]: String(event.reason) }), 1),
+        ],
+        {
+          discard: true,
+        },
+      );
     case "RunStarted":
-      return Effect.all([countEvent, Metric.increment(runsTotal), Metric.incrementBy(activeRuns, 1)], {
+      return Effect.all([countEvent, Metric.update(runsTotal, 1), incrementGauge(activeRuns, 1)], {
         discard: true,
       });
     case "SandboxCreated": {
       const byRuntime =
         event.runtime && event.runtime.length > 0
-          ? Metric.tagged(sandboxCreatedTotal, "runtime", event.runtime)
+          ? Metric.withAttributes(sandboxCreatedTotal, { ["runtime"]: String(event.runtime) })
           : sandboxCreatedTotal;
       return Effect.all(
         [
           countEvent,
-          Metric.increment(byRuntime),
-          Metric.incrementBy(event.runtime ? Metric.tagged(sandboxActive, "runtime", event.runtime) : sandboxActive, 1),
+          Metric.update(byRuntime, 1),
+          incrementGauge(
+            event.runtime ? Metric.withAttributes(sandboxActive, { runtime: String(event.runtime) }) : sandboxActive,
+            1,
+          ),
         ],
         { discard: true },
       );
@@ -289,15 +299,17 @@ export function trackEvent(event) {
         { discard: true },
       );
     case "SandboxCompleted": {
-      const byStatus = Metric.tagged(sandboxCompletedTotal, "status", event.status);
+      const byStatus = Metric.withAttributes(sandboxCompletedTotal, { ["status"]: String(event.status) });
       const byRuntime =
-        event.runtime && event.runtime.length > 0 ? Metric.tagged(byStatus, "runtime", event.runtime) : byStatus;
+        event.runtime && event.runtime.length > 0
+          ? Metric.withAttributes(byStatus, { ["runtime"]: String(event.runtime) })
+          : byStatus;
       return Effect.all(
         [
           countEvent,
-          Metric.increment(byRuntime),
-          Metric.incrementBy(
-            event.runtime ? Metric.tagged(sandboxActive, "runtime", event.runtime) : sandboxActive,
+          Metric.update(byRuntime, 1),
+          incrementGauge(
+            event.runtime ? Metric.withAttributes(sandboxActive, { runtime: String(event.runtime) }) : sandboxActive,
             -1,
           ),
           Metric.update(sandboxDurationMs, event.durationMs),
@@ -306,107 +318,102 @@ export function trackEvent(event) {
       );
     }
     case "SandboxFailed":
-      return Effect.all([countEvent, Metric.increment(errorsTotal)], { discard: true });
+      return Effect.all([countEvent, Metric.update(errorsTotal, 1)], { discard: true });
     case "SandboxDiffReviewRequested":
       return Effect.all([countEvent, Metric.update(sandboxPatchCount, event.patchCount)], { discard: true });
     case "SandboxDiffAccepted":
       return Effect.all([countEvent, Metric.update(sandboxPatchCount, event.patchCount)], { discard: true });
     case "SandboxDiffRejected":
-      return Effect.all([countEvent, Metric.increment(errorsTotal)], { discard: true });
+      return Effect.all([countEvent, Metric.update(errorsTotal, 1)], { discard: true });
     case "RunFinished":
-      return Effect.all([countEvent, Metric.incrementBy(activeRuns, -1), Metric.increment(runsFinishedTotal)], {
+      return Effect.all([countEvent, incrementGauge(activeRuns, -1), Metric.update(runsFinishedTotal, 1)], {
         discard: true,
       });
     case "RunFailed":
       return Effect.all(
-        [
-          countEvent,
-          Metric.incrementBy(activeRuns, -1),
-          Metric.increment(runsFailedTotal),
-          Metric.increment(errorsTotal),
-        ],
+        [countEvent, incrementGauge(activeRuns, -1), Metric.update(runsFailedTotal, 1), Metric.update(errorsTotal, 1)],
         { discard: true },
       );
     case "RunCancelled":
-      return Effect.all([countEvent, Metric.incrementBy(activeRuns, -1), Metric.increment(runsCancelledTotal)], {
+      return Effect.all([countEvent, incrementGauge(activeRuns, -1), Metric.update(runsCancelledTotal, 1)], {
         discard: true,
       });
     case "RunContinuedAsNew":
       return Effect.all(
         [
           countEvent,
-          Metric.incrementBy(activeRuns, -1),
-          Metric.increment(runsContinuedTotal),
+          incrementGauge(activeRuns, -1),
+          Metric.update(runsContinuedTotal, 1),
           Metric.update(runsCarriedStateBytes, event.carriedStateSize),
           ...(typeof event.ancestryDepth === "number" ? [Metric.update(runsAncestryDepth, event.ancestryDepth)] : []),
         ],
         { discard: true },
       );
     case "NodeStarted":
-      return Effect.all([countEvent, Metric.increment(nodesStarted), Metric.incrementBy(activeNodes, 1)], {
+      return Effect.all([countEvent, Metric.update(nodesStarted, 1), incrementGauge(activeNodes, 1)], {
         discard: true,
       });
     case "TaskHeartbeat":
       return Effect.all(
         [
           countEvent,
-          Metric.increment(taskHeartbeatsTotal),
+          Metric.update(taskHeartbeatsTotal, 1),
           Metric.update(heartbeatDataSizeBytes, event.dataSizeBytes),
           ...(typeof event.intervalMs === "number" ? [Metric.update(heartbeatIntervalMs, event.intervalMs)] : []),
         ],
         { discard: true },
       );
     case "TaskHeartbeatTimeout":
-      return Effect.all([countEvent, Metric.increment(taskHeartbeatTimeoutTotal)], { discard: true });
+      return Effect.all([countEvent, Metric.update(taskHeartbeatTimeoutTotal, 1)], { discard: true });
     case "NodeFinished":
-      return Effect.all([countEvent, Metric.increment(nodesFinished), Metric.incrementBy(activeNodes, -1)], {
+      return Effect.all([countEvent, Metric.update(nodesFinished, 1), incrementGauge(activeNodes, -1)], {
         discard: true,
       });
     case "NodeFailed":
       return Effect.all(
-        [countEvent, Metric.increment(nodesFailed), Metric.incrementBy(activeNodes, -1), Metric.increment(errorsTotal)],
+        [countEvent, Metric.update(nodesFailed, 1), incrementGauge(activeNodes, -1), Metric.update(errorsTotal, 1)],
         { discard: true },
       );
     case "NodeCancelled":
-      return Effect.all([countEvent, Metric.incrementBy(activeNodes, -1)], { discard: true });
+      return Effect.all([countEvent, incrementGauge(activeNodes, -1)], { discard: true });
     case "NodeRetrying":
-      return Effect.all([countEvent, Metric.increment(nodeRetriesTotal)], { discard: true });
+      return Effect.all([countEvent, Metric.update(nodeRetriesTotal, 1)], { discard: true });
     case "ToolCallStarted":
-      return Effect.all([countEvent, Metric.increment(toolCallsTotal)], { discard: true });
+      return Effect.all([countEvent, Metric.update(toolCallsTotal, 1)], { discard: true });
     case "ToolCallFinished":
       return event.status === "error"
-        ? Effect.all([countEvent, Metric.increment(toolCallErrorsTotal)], { discard: true })
+        ? Effect.all([countEvent, Metric.update(toolCallErrorsTotal, 1)], { discard: true })
         : countEvent;
     case "ApprovalRequested":
-      return Effect.all([countEvent, Metric.increment(approvalsRequested), Metric.incrementBy(approvalPending, 1)], {
+      return Effect.all([countEvent, Metric.update(approvalsRequested, 1), incrementGauge(approvalPending, 1)], {
         discard: true,
       });
     case "ApprovalGranted":
-      return Effect.all([countEvent, Metric.increment(approvalsGranted), Metric.incrementBy(approvalPending, -1)], {
+      return Effect.all([countEvent, Metric.update(approvalsGranted, 1), incrementGauge(approvalPending, -1)], {
         discard: true,
       });
     case "ApprovalAutoApproved":
-      return Effect.all([countEvent, Metric.increment(approvalsGranted)], { discard: true });
+      return Effect.all([countEvent, Metric.update(approvalsGranted, 1)], { discard: true });
     case "ApprovalDenied":
-      return Effect.all([countEvent, Metric.increment(approvalsDenied), Metric.incrementBy(approvalPending, -1)], {
+      return Effect.all([countEvent, Metric.update(approvalsDenied, 1), incrementGauge(approvalPending, -1)], {
         discard: true,
       });
     case "TimerCreated":
-      return Effect.all([countEvent, Metric.increment(timersCreated), Metric.incrementBy(timersPending, 1)], {
+      return Effect.all([countEvent, Metric.update(timersCreated, 1), incrementGauge(timersPending, 1)], {
         discard: true,
       });
     case "TimerFired":
       return Effect.all(
         [
           countEvent,
-          Metric.increment(timersFired),
-          Metric.incrementBy(timersPending, -1),
+          Metric.update(timersFired, 1),
+          incrementGauge(timersPending, -1),
           Metric.update(timerDelayDuration, event.delayMs),
         ],
         { discard: true },
       );
     case "TimerCancelled":
-      return Effect.all([countEvent, Metric.increment(timersCancelled), Metric.incrementBy(timersPending, -1)], {
+      return Effect.all([countEvent, Metric.update(timersCancelled, 1), incrementGauge(timersPending, -1)], {
         discard: true,
       });
     case "TokenUsageReported": {
@@ -419,33 +426,36 @@ export function trackEvent(event) {
       const tagMetric = (m) => tagMetricWithTags(m, tags);
       if (event.inputTokens > 0) {
         effects.push(
-          Metric.incrementBy(tagMetric(tokensInputTotal), event.inputTokens),
+          Metric.update(tagMetric(tokensInputTotal), event.inputTokens),
           Metric.update(tagMetric(tokensInputPerCall), event.inputTokens),
         );
       }
       if (event.outputTokens > 0) {
         effects.push(
-          Metric.incrementBy(tagMetric(tokensOutputTotal), event.outputTokens),
+          Metric.update(tagMetric(tokensOutputTotal), event.outputTokens),
           Metric.update(tagMetric(tokensOutputPerCall), event.outputTokens),
         );
       }
       if (event.cacheReadTokens && event.cacheReadTokens > 0) {
-        effects.push(Metric.incrementBy(tagMetric(tokensCacheReadTotal), event.cacheReadTokens));
+        effects.push(Metric.update(tagMetric(tokensCacheReadTotal), event.cacheReadTokens));
       }
       if (event.cacheWriteTokens && event.cacheWriteTokens > 0) {
-        effects.push(Metric.incrementBy(tagMetric(tokensCacheWriteTotal), event.cacheWriteTokens));
+        effects.push(Metric.update(tagMetric(tokensCacheWriteTotal), event.cacheWriteTokens));
       }
       if (event.reasoningTokens && event.reasoningTokens > 0) {
-        effects.push(Metric.incrementBy(tagMetric(tokensReasoningTotal), event.reasoningTokens));
+        effects.push(Metric.update(tagMetric(tokensReasoningTotal), event.reasoningTokens));
       }
       const contextWindowTokens = resolveContextWindowTokens(event);
       if (contextWindowTokens) {
         effects.push(
           Metric.update(tagMetric(tokensContextWindowPerCall), contextWindowTokens),
-          Metric.increment(
+          Metric.update(
             tagMetric(
-              Metric.tagged(tokensContextWindowBucketTotal, "bucket", classifyContextWindowBucket(contextWindowTokens)),
+              Metric.withAttributes(tokensContextWindowBucketTotal, {
+                ["bucket"]: String(classifyContextWindowBucket(contextWindowTokens)),
+              }),
             ),
+            1,
           ),
         );
       }
@@ -460,28 +470,30 @@ export function trackEvent(event) {
       };
       const effects = [
         countEvent,
-        Metric.increment(
+        Metric.update(
           tagMetricWithTags(agentEventsTotal, {
             ...baseTags,
             event_type: agentEvent.type,
           }),
+          1,
         ),
       ];
       switch (agentEvent.type) {
         case "started":
           effects.push(
-            Metric.increment(
+            Metric.update(
               tagMetricWithTags(agentSessionsTotal, {
                 ...baseTags,
                 status: "started",
                 resume: agentEvent.resume ? "true" : "false",
               }),
+              1,
             ),
           );
           break;
         case "action":
           effects.push(
-            Metric.increment(
+            Metric.update(
               tagMetricWithTags(agentActionsTotal, {
                 ...baseTags,
                 action_kind: agentEvent.action.kind,
@@ -490,58 +502,64 @@ export function trackEvent(event) {
                 entry_type: agentEvent.entryType,
                 ok: typeof agentEvent.ok === "boolean" ? String(agentEvent.ok) : undefined,
               }),
+              1,
             ),
           );
           if (agentEvent.level === "error" || agentEvent.ok === false) {
             effects.push(
-              Metric.increment(
+              Metric.update(
                 tagMetricWithTags(agentErrorsTotal, {
                   ...baseTags,
                   event_type: agentEvent.type,
                   action_kind: agentEvent.action.kind,
                 }),
+                1,
               ),
             );
           }
           if (hasAgentRetrySignal(agentEvent)) {
             effects.push(
-              Metric.increment(
+              Metric.update(
                 tagMetricWithTags(agentRetriesTotal, {
                   ...baseTags,
                   reason: "event_signal",
                 }),
+                1,
               ),
             );
           }
           break;
         case "completed":
           effects.push(
-            Metric.increment(
+            Metric.update(
               tagMetricWithTags(agentSessionsTotal, {
                 ...baseTags,
                 status: agentEvent.ok ? "completed" : "failed",
                 resume: agentEvent.resume ? "true" : "false",
               }),
+              1,
             ),
           );
           effects.push(recordAgentUsageMetrics(baseTags, agentEvent.usage));
           if (!agentEvent.ok) {
             effects.push(
-              Metric.increment(
+              Metric.update(
                 tagMetricWithTags(agentErrorsTotal, {
                   ...baseTags,
                   event_type: agentEvent.type,
                 }),
+                1,
               ),
             );
           }
           if (hasAgentRetrySignal(agentEvent)) {
             effects.push(
-              Metric.increment(
+              Metric.update(
                 tagMetricWithTags(agentRetriesTotal, {
                   ...baseTags,
                   reason: "event_signal",
                 }),
+                1,
               ),
             );
           }
@@ -550,11 +568,11 @@ export function trackEvent(event) {
       return Effect.all(effects, { discard: true });
     }
     case "ScorerStarted":
-      return Effect.all([countEvent, Metric.increment(scorerEventsStarted)], { discard: true });
+      return Effect.all([countEvent, Metric.update(scorerEventsStarted, 1)], { discard: true });
     case "ScorerFinished":
-      return Effect.all([countEvent, Metric.increment(scorerEventsFinished)], { discard: true });
+      return Effect.all([countEvent, Metric.update(scorerEventsFinished, 1)], { discard: true });
     case "ScorerFailed":
-      return Effect.all([countEvent, Metric.increment(scorerEventsFailed), Metric.increment(errorsTotal)], {
+      return Effect.all([countEvent, Metric.update(scorerEventsFailed, 1), Metric.update(errorsTotal, 1)], {
         discard: true,
       });
     case "SnapshotCaptured":
@@ -564,24 +582,24 @@ export function trackEvent(event) {
     case "ReplayStarted":
       return countEvent;
     case "MemoryFactSet":
-      return Effect.all([countEvent, Metric.increment(memoryFactWrites)], { discard: true });
+      return Effect.all([countEvent, Metric.update(memoryFactWrites, 1)], { discard: true });
     case "MemoryRecalled":
-      return Effect.all([countEvent, Metric.increment(memoryRecallQueries)], { discard: true });
+      return Effect.all([countEvent, Metric.update(memoryRecallQueries, 1)], { discard: true });
     case "MemoryMessageSaved":
-      return Effect.all([countEvent, Metric.increment(memoryMessageSaves)], { discard: true });
+      return Effect.all([countEvent, Metric.update(memoryMessageSaves, 1)], { discard: true });
     case "OpenApiToolCalled":
       return event.status === "error"
         ? Effect.all(
             [
               countEvent,
-              Metric.increment(openApiToolCallsTotal),
-              Metric.increment(openApiToolCallErrorsTotal),
+              Metric.update(openApiToolCallsTotal, 1),
+              Metric.update(openApiToolCallErrorsTotal, 1),
               Metric.update(openApiToolDuration, event.durationMs),
             ],
             { discard: true },
           )
         : Effect.all(
-            [countEvent, Metric.increment(openApiToolCallsTotal), Metric.update(openApiToolDuration, event.durationMs)],
+            [countEvent, Metric.update(openApiToolCallsTotal, 1), Metric.update(openApiToolDuration, event.durationMs)],
             { discard: true },
           );
     default:

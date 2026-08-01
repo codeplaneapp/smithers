@@ -5,7 +5,7 @@
 // actually tearing down the connection.
 
 import { describe, expect, test } from "bun:test";
-import { Effect, Exit, Fiber } from "effect";
+import { Cause, Effect, Exit, Fiber } from "effect";
 import { makeLinearClient } from "../src/linear/LinearClient.js";
 
 const API_KEY = "lin_api_test_key_do_not_log";
@@ -51,8 +51,9 @@ describe("LinearClient interruption", () => {
       const client = makeLinearClient({ apiKey: API_KEY, apiBaseUrl: `http://localhost:${server.port}` });
       const fiber = Effect.runFork(client.query("query { viewer { id } }"));
       await withTimeout(arrived.promise, 2000, "the request to reach the server");
-      const exit = await Effect.runPromise(Fiber.interrupt(fiber));
-      expect(Exit.isInterrupted(exit)).toBe(true);
+      await Effect.runPromise(Fiber.interrupt(fiber));
+      const exit = await Effect.runPromise(Fiber.await(fiber));
+      expect(Exit.isFailure(exit) && exit.cause.reasons.some(Cause.isInterruptReason)).toBe(true);
       await withTimeout(disconnected.promise, 2000, "the server to observe the disconnect");
     } finally {
       server.stop(true);
@@ -86,8 +87,9 @@ describe("LinearClient interruption", () => {
       await withTimeout(headersSent.promise, 2000, "the response headers to be sent");
       // Give the fiber a beat to move from the fetch step into json().
       await new Promise((resolve) => setTimeout(resolve, 50));
-      const exit = await Effect.runPromise(Fiber.interrupt(fiber));
-      expect(Exit.isInterrupted(exit)).toBe(true);
+      await Effect.runPromise(Fiber.interrupt(fiber));
+      const exit = await Effect.runPromise(Fiber.await(fiber));
+      expect(Exit.isFailure(exit) && exit.cause.reasons.some(Cause.isInterruptReason)).toBe(true);
       await withTimeout(disconnected.promise, 2000, "the server to observe the disconnect");
     } finally {
       server.stop(true);

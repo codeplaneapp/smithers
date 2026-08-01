@@ -524,7 +524,7 @@ describe("smithers ui", () => {
     expect(envelope.message).toContain("smithers gateway");
   }, 30_000);
 
-  test("warns when a state-file token can authenticate CLI RPC but not browser UI navigation", async () => {
+  test("hands the browser a session URL when a state-file token protects the gateway", async () => {
     const repo = createTempRepo();
     repo.write(".smithers/smithers.config.ts", "export default {};\n");
     const token = "state-file-token";
@@ -565,11 +565,12 @@ describe("smithers ui", () => {
         env,
       });
       expect(result.exitCode).toBe(0);
-      expect(result.stderr).toContain("requires a bearer token");
-      expect(result.stderr).toContain("browser navigations cannot send that header");
+      const printed = new URL(result.json.url);
+      expect(printed.pathname).toBe("/v1/auth/session");
+      expect(printed.searchParams.get("token")).toBe(token);
+      expect(printed.searchParams.get("next")).toBe("/ui/alpha");
       expect(result.json).toMatchObject({
         opened: false,
-        url: `${gateway.base}/ui/alpha`,
         workflow: "alpha",
       });
       expect(gateway.requests.find((request) => request.method === "listWorkflows")?.authorization).toBe(

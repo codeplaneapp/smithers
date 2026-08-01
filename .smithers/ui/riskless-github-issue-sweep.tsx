@@ -298,7 +298,7 @@ function App() {
   const runId = selected ?? candidates[0]?.runId;
   const selectedRun = candidates.find((candidate: any) => candidate.runId === runId);
   const actualRunStatus = text(selectedRun?.status || "unknown");
-  const events = useGatewayRunEvents(runId, { afterSeq: 0 });
+  const events = useGatewayRunEvents(runId, { afterSeq: undefined });
   const tree = useGatewayRunTree(runId);
   const actions = useGatewayActions();
   const [busy, setBusy] = useState(false);

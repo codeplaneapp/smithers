@@ -3,6 +3,7 @@ import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { discoverWorkflows } from "@smithers-orchestrator/cli/workflows";
+import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smithers-orchestrator/components";
 import { renderWorkflow } from "smithers-orchestrator/testing";
 import "./whole-foods-meal-planner.test";
 
@@ -173,6 +174,7 @@ const workflowOwners = {
     "federation-static-import-audit.tsx",
     "federation-static-import-hardening.tsx",
     "federation-workflow-hardening-2.tsx",
+    "pr-polish-panel.tsx",
     "smithers-repo-federation.tsx",
     "sol-issue-train-pinned.tsx",
     "whole-foods-meal-planner.tsx",
@@ -407,5 +409,116 @@ describe("federation workflow smoke coverage", () => {
     });
     const train = await renderWorkflow(module.default, { workflowPath, input: {}, outputs: {} });
     expect(train.tasks.map((task) => task.nodeId)).toContain("setup");
+  }, 30_000);
+
+  test("pr-polish-panel opens with independent reviews before the isolated polish step", async () => {
+    const workflowPath = join(workflowRoot, "pr-polish-panel.tsx");
+    const module = await import(workflowPath);
+    const frame = await renderWorkflow(module.default, {
+      workflowPath,
+      input: { pr: 1449 },
+      outputs: {},
+    });
+    const hasUiEntry = (node: any): boolean => {
+      if (Array.isArray(node)) return node.some(hasUiEntry);
+      if (!node || typeof node !== "object") return false;
+      if (node.type?.[SMITHERS_WORKFLOW_VIEW_KIND] === "ui" && node.props?.entry === "../ui/pr-polish-panel.tsx") {
+        return true;
+      }
+      return hasUiEntry(node.props?.children);
+    };
+    const nodeIds = frame.tasks.map((task) => task.nodeId);
+
+    expect(nodeIds).toContain("review-fable");
+    expect(nodeIds).toContain("review-sol");
+    expect(nodeIds.indexOf("review-fable")).toBeLessThan(nodeIds.indexOf("polish"));
+    expect(nodeIds.indexOf("review-sol")).toBeLessThan(nodeIds.indexOf("polish"));
+    expect(frame.toXml()).toContain("git fetch origin main");
+    expect(frame.toXml()).toContain("never merge the PR");
+    expect(hasUiEntry(module.default.build(frame.ctx))).toBe(true);
+  }, 30_000);
+
+  test("pr-polish-panel derives deterministic run-isolated clone paths", async () => {
+    const module = await import(join(workflowRoot, "pr-polish-panel.tsx"));
+    const first = module.prPolishClonePath("run/with unsafe chars", 1449);
+    const repeat = module.prPolishClonePath("run/with unsafe chars", 1449);
+    const otherRun = module.prPolishClonePath("another-run", 1449);
+
+    expect(first).toBe(repeat);
+    expect(first).toEndWith("/pr-1449");
+    expect(first).not.toContain("unsafe chars");
+    expect(otherRun).not.toBe(first);
+  });
+
+  test("the publish approval is proof-bound to the reviewed release revision", async () => {
+    const file = "smithers-repo-federation.tsx";
+    const workflowPath = join(workflowRoot, file);
+    const module = await import(workflowPath);
+    const lanes = [
+      "smithers-examples",
+      "smithers-agents",
+      "smithers-sandboxes",
+      "smithers-integrations",
+      "smithers-plugins",
+      "smithers-packs",
+      "smithers-observability",
+      "smithers-review",
+      "smithers-evals",
+      "smithers-signal",
+      "multi",
+      "plue",
+      "awesome-smithers",
+    ];
+    const binding = {
+      nodeId: "releaseApprovalBinding",
+      iteration: 0,
+      laneRevisions: lanes.map((lane) => ({
+        lane,
+        headSha: `${lane}-reviewed`,
+        remote: `https://github.com/smithersai/${lane}.git`,
+        branch: `federation/${lane}`,
+      })),
+      releasePlanSha256: "reviewed-plan",
+      coordinatorSha256: "reviewed-coordinator",
+      summary: "Exact release revision captured for approval.",
+    };
+    const frame = await renderWorkflow(module.default, {
+      workflowPath,
+      input: {},
+      outputs: {
+        manifestReview: [
+          {
+            nodeId: "manifestReviewFinalApproved",
+            approvable: true,
+            summary: "reviewed",
+            boundaryIssues: [],
+            ambiguousUtilities: [],
+            licenseGaps: [],
+          },
+        ],
+        gateManifest: [{ nodeId: "gate-manifest", approved: true }],
+        lanePush: lanes.map((lane) => ({ nodeId: `push-${lane}`, lane, pushed: true })),
+        updateSmithers: [{ nodeId: "updateSmithers" }],
+        releaseDryRun: [
+          { nodeId: "releaseDryRun", ok: true },
+          { nodeId: "releaseDryRunPostFix", ok: true },
+        ],
+        releaseReadiness: [{ nodeId: "releaseReadiness", ok: true, issues: [], summary: "ready" }],
+        finalVerify: [{ nodeId: "finalVerify", approvable: true, fixList: [], summary: "reviewed" }],
+        releaseApprovalBinding: [binding],
+      },
+    });
+    const gate = frame.tasks.find((task) => task.nodeId === "gate-publish");
+
+    expect(gate?.needsApproval).toBe(true);
+    expect(gate?.proofBindingRequired).toBe(true);
+    expect(gate?.proofBindings).toEqual([
+      expect.objectContaining({
+        table: "releaseApprovalBinding",
+        nodeId: "releaseApprovalBinding",
+        iteration: 0,
+        digest: expect.stringMatching(/^sha256:/),
+      }),
+    ]);
   }, 30_000);
 });

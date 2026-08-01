@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/cli",
-  "version": "0.31.1",
+  "version": "0.32.0",
   "description": "Smithers command-line interface, MCP server, and local workflow tools",
   "type": "module",
   "sideEffects": false,
@@ -23,7 +23,7 @@
     "ui-dist/"
   ],
   "scripts": {
-    "test": "bun test --timeout=120000 --max-concurrency=1 tests/monitor-shell-controls.test.tsx && bun test --preload ./tests/preload-ui-chain.ts --timeout=120000 --max-concurrency=1 --path-ignore-patterns=\"**/monitor-shell-controls.test.tsx\" tests",
+    "test": "bun test --timeout=120000 --max-concurrency=1 tests/monitor-shell-controls.test.tsx && bun ./scripts/run-test-shards.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsup --dts-only",
     "build:ui": "node scripts/build-ui.mjs",
@@ -32,7 +32,6 @@
   "dependencies": {
     "@clack/core": "^1.4.2",
     "@clack/prompts": "^1.6.0",
-    "@effect/workflow": "^0.18.2",
     "@mdx-js/esbuild": "^3.1.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@pierre/diffs": "^1.2.11",
@@ -64,7 +63,7 @@
     "@xterm/xterm": "^6.0.0",
     "cron-parser": "^5.6.1",
     "drizzle-orm": "^0.45.2",
-    "effect": "^3.21.4",
+    "effect": "4.0.0-beta.102",
     "incur": "^0.4.10",
     "picocolors": "^1.1.1",
     "react": "^19.2.7",

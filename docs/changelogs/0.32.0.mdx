@@ -1,0 +1,176 @@
+---
+title: "0.32.0"
+description: "Smithers 0.32.0 fixes silently broken task dispatch by finishing the Effect 4 migration, adds a gateway browser session handoff so monitor and UI links open without 401s, lets the gateway bind non-loopback hosts, and lands a large hardening batch."
+---
+
+**Smithers 0.32.0 is a hardening release.** Of its 497 commits, 229 are fixes,
+plus 47 test commits and 12 security commits, against 41 feature commits. The
+biggest fix matters to everyone: a runtime-wide migration to Effect 4 had
+silently broken task dispatch, and this release finishes the migration and
+adds the tests that would have caught it. Alongside the fixes, the gateway
+gains a browser session handoff and remote-host binding, so opening the
+Monitor from another machine finally just works. The release touches 1,423
+files, with 111,979 insertions and 23,211 deletions.
+
+## Upgrading
+
+```bash
+bunx smithers-orchestrator update        # upgrade the CLI
+bunx smithers-orchestrator upgrade       # agent-assisted: reads the changelogs and applies what your project needs
+bunx smithers-orchestrator packs update  # refresh installed workflow packs
+```
+
+Behavior changes are collected in the [upgrade notes](#upgrade-notes).
+
+## Open the Monitor from any browser, on any machine
+
+Pasting a monitor URL into a browser used to hit a 401, because the browser
+had no way to present your bearer token. The gateway now serves a session
+handoff endpoint: `GET /v1/auth/session?token=<bearer>&next=<path>` exchanges
+a valid bearer for an HttpOnly session cookie and redirects to the page you
+asked for. Every URL the CLI prints goes through it, so monitor, UI, and GUI
+links open signed in.
+
+The launch commands also stop assuming loopback:
+
+```bash
+bunx smithers-orchestrator monitor --host 0.0.0.0
+# or: SMITHERS_GATEWAY_HOST=0.0.0.0 bunx smithers-orchestrator ui RUN_ID
+```
+
+<Frame caption="The Monitor following a live run end to end: the run appears with a running status pill, the health banner reads Healthy while the execution tree progresses and events stream in, and it ends on Completed with 4/4 tasks done.">
+  <img src="/images/0.32.0/monitor-live.gif" alt="The Smithers Monitor following a live release-canary run from running to completed" />
+</Frame>
+
+- A non-loopback bind adds `--mint-token` automatically, and a wildcard bind
+  prints one dialable URL per interface, Tailscale first, then LAN.
+- Review printed URLs before sharing them: they carry a login token.
+- When no gateway is reachable, the CLI error now names the runtime state
+  file it checked, the legacy port it probed, and the exact
+  `smithers gateway --host/--port` command to start one.
+
+## Task dispatch works again after the Effect 4 migration
+
+<!-- MEDIA GAP: Effect 4 dispatch fix needs a recording (before/after of `bunx smithers-orchestrator up hello`) -->
+
+`bunx smithers-orchestrator up hello` on the previous development builds registered its nodes
+as pending and then hung forever with no error. The cause was a runtime-wide
+migration to Effect 4.0.0-beta.102 that left stale Effect 3 idioms behind:
+dispatch died before it could report. 0.32.0 completes the migration across
+the engine, scheduler, server, db, vcs, time-travel, sandbox, memory, and
+observability packages and fixes every seam that survived it.
+
+- The faults e2e suite went from 8 failures to 0, and its runtime from 143s
+  to 12s, once dispatch stopped dying mid-flight.
+- 13 call sites still using the removed `Effect.either` were moved to
+  `Effect.result`; they had left `bunx smithers-orchestrator graph`, `bunx smithers-orchestrator up`, the hot
+  reloader, the supervisor, and the sandbox path resolver dead.
+
+## Local services stay reachable in the network sandbox
+
+`allowNetwork: false` used to cut off everything, including the local dev
+server or Postgres your task was testing against. It now means no egress:
+loopback traffic, loopback binds, and unix sockets stay allowed while remote
+endpoints stay denied.
+
+```tsx
+<Task id="test" agent={agents.coder} sandbox={{ allowNetwork: false }}>
+  Run the integration tests against the local Postgres.
+</Task>
+```
+
+- Denial errors now name the `--allow-network` escape hatch instead of
+  failing opaquely.
+
+## Right-sized authoring and honest verdicts
+
+Two authoring-loop changes reduce wasted runs:
+
+- `create-workflow`'s clarify stage right-sizes the request before building
+  anything: a trivial edit routes directly, a well-scoped goal routes to
+  `smithers oneshot` with the exact command, and only genuinely multi-stage
+  work gets a full workflow scaffold.
+- Review verdicts distinguish `blocked` (required verification could not run
+  for an environmental reason) from `approved: false` (a real rejection), so
+  a missing service no longer reads as rejected work.
+
+Eval runs get the same honesty: a case that fails on a known harness
+signature is graded `INCONCLUSIVE` instead of failed, and `bunx smithers-orchestrator eval`
+exits 5 (instead of 1) when every red case is inconclusive, so CI can tell
+"the work regressed" from "the harness fell over".
+
+```bash
+bunx smithers-orchestrator eval suite.jsonl   # exit 5 = only inconclusive reds
+```
+
+## Resume a run whose workflow you edited
+
+`retry-task` and `up --resume` accept `--accept-workflow-change`, so a run
+parked on `RESUME_METADATA_MISMATCH` after an in-flight workflow edit can
+continue instead of forcing a fork:
+
+```bash
+bunx smithers-orchestrator retry-task RUN_ID TASK_ID --accept-workflow-change
+bunx smithers-orchestrator up --resume RUN_ID --accept-workflow-change
+```
+
+- The mismatch error names the flag, so the fix is in the message.
+
+## Hardening and reliability
+
+229 of this release's 497 commits are fixes and 47 are test commits, most
+aimed at the seams the Effect 4 migration exposed: the engine module itself,
+CLI entry points, the hot reloader, and the sandbox. What got more reliable:
+
+- Every CLI entry point imports again: `packages/engine` had shipped with
+  committed merge-conflict markers that made the module fail to parse.
+- The `coverWorkflow` test harness clamps its loop cap instead of overwriting
+  lower `maxIterations`, and no longer reports its own injected catch-all
+  mock as unused; three quarantined stacked-ship simulations came back green
+  once the harness, not the workflows, was fixed.
+- A new zmux-based real-PTY e2e harness (`e2e/tui/zmux`) drives the TUI runs
+  list and the Monitor mirror end to end.
+- A new repo check fails the build when an internal script invokes the
+  published CLI instead of the working tree.
+
+<Frame caption="Touring a finished run in the Monitor: the execution tree with per-node ok pills and durations, the Timeline and Usage panels with rate-limit gauges, the Debug XML view of the workflow, the Frames scrubber, and the Notable/All/Activity event tabs.">
+  <img src="/images/0.32.0/monitor-tour.gif" alt="Touring a completed release-canary run in the Smithers Monitor, including the debug XML view and frames scrubber" />
+</Frame>
+
+Two packages that came out of this work are directly reusable:
+`packages/ui-core` extracts the runs domain (list filtering and sorting, tree
+building, event frames, diff parsing, health, view models) into one shared
+home, and `packages/tui-ui` holds the pure TUI leaves (run tree, event log,
+status glyphs) built on it.
+
+## Other improvements
+
+- New `pr-polish-panel` and `review-since-publish` workflows ship in the
+  pack, each with its own live UI.
+- New `whole-foods-meal-planner` and `smithers-repo-federation` workflows
+  land as MCP-tool and federation examples with custom UIs.
+- The committed `.d.ts` declaration bundle for `packages/integrations` was
+  regenerated after the Effect 4 call-shape changes.
+- 67 docs commits, including corrected Effect `Schema.Literal` examples.
+
+## Upgrade notes
+
+- Passing `--host` (or `SMITHERS_GATEWAY_HOST`) to `monitor`, `ui`, or `gui`
+  now mints a login token automatically and prints one URL per dialable
+  interface instead of the old loopback-only warning. Review printed URLs
+  before sharing them.
+- `allowNetwork: false` now permits loopback and unix-socket traffic. If you
+  relied on it to isolate a task from local services, that isolation no
+  longer holds; remote egress stays denied.
+- `bunx smithers-orchestrator eval` exits 5 when every red case is inconclusive. CI scripts
+  that treat any nonzero exit as regression should special-case 5.
+- Runs stuck on `RESUME_METADATA_MISMATCH` after an in-flight workflow edit
+  can resume with `--accept-workflow-change` instead of forking.
+
+## The full changelog
+
+This page is the tour, not the inventory. The complete commit-level list is
+in [CHANGELOG.md on GitHub](https://github.com/smithersai/smithers/blob/main/CHANGELOG.md).
+
+Found a bug? `bunx smithers-orchestrator bug` files it with your run context
+attached.

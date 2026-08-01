@@ -3,7 +3,7 @@
 // @smithers-type-exports-end
 
 import { Cause, Effect, Exit } from "effect";
-import * as BunContext from "@effect/platform-bun/BunContext";
+import * as BunContext from "@effect/platform-bun/BunServices";
 import { replayFromCheckpoint as replayFromCheckpointEffect } from "./replayFromCheckpointEffect.js";
 export { replayFromCheckpointEffect };
 

@@ -1,9 +1,9 @@
 /** @jsxImportSource react */
-// Milkdown Crepe WYSIWYG markdown editor wrapper. The parent injects the
-// generated Crepe CSS string; this component only owns lifecycle and read-only
-// state.
 import { useEffect, useRef } from "react";
-import { Crepe } from "@milkdown/crepe";
+import {
+  MarkdownEditor as ShippedMarkdownEditor,
+  type MarkdownEditorHandle,
+} from "smithers-orchestrator/ui/adapters/markdown-editor";
 
 export function MarkdownEditor({
   value,
@@ -18,35 +18,23 @@ export function MarkdownEditor({
   resetKey?: string;
   compact?: boolean;
 }) {
-  const hostRef = useRef<HTMLDivElement | null>(null);
-  const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
-  const key = resetKey ?? (readOnly ? value : "editor");
+  const editorRef = useRef<MarkdownEditorHandle | null>(null);
 
   useEffect(() => {
-    const host = hostRef.current;
-    if (!host) return;
-    let destroyed = false;
-    const crepe = new Crepe({ root: host, defaultValue: value });
-    crepe.on((listener) => {
-      listener.markdownUpdated((_ctx, markdown) => {
-        if (!readOnly) onChangeRef.current?.(markdown);
-      });
-    });
-    void crepe.create().then(() => {
-      if (destroyed) return;
-      if (readOnly) crepe.setReadonly(true);
-    });
-    return () => {
-      destroyed = true;
-      void crepe.destroy();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, readOnly]);
+    if (readOnly) editorRef.current?.setMarkdown(value);
+  }, [readOnly, value]);
 
   return (
     <div className={"editor-frame" + (compact ? " compact" : "") + (readOnly ? " readonly" : "")}>
-      <div className="crepe-host" data-testid="cw-editor" ref={hostRef} />
+      <ShippedMarkdownEditor
+        ref={editorRef}
+        className="crepe-host"
+        aria-label="markdown editor"
+        value={value}
+        readOnly={readOnly}
+        onChange={onChange}
+        resetKey={resetKey}
+      />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Metric, MetricBoundaries } from "effect";
+import { Effect, Metric } from "effect";
 import { createSmithersOtelLayer } from "../src/createSmithersOtelLayer.js";
 import { renderPrometheusMetrics } from "../src/renderPrometheusMetrics.js";
 
@@ -24,19 +24,19 @@ describe("renderPrometheusMetrics coverage of metric-state paths", () => {
   test("renders counters, gauges, histograms, summaries and frequencies together", () => {
     Effect.runSync(
       Effect.all([
-        Metric.increment(Metric.counter("smithers.render_cov.counter")),
-        Metric.set(Metric.gauge("smithers.render_cov.gauge"), 3),
+        Metric.update(Metric.counter("smithers.render_cov.counter"), 1),
+        Metric.update(Metric.gauge("smithers.render_cov.gauge"), 3),
         Metric.update(
-          Metric.histogram("smithers.render_cov.hist", MetricBoundaries.linear({ start: 0, width: 10, count: 5 })),
+          Metric.histogram("smithers.render_cov.hist", {
+            boundaries: Metric.linearBoundaries({ start: 0, width: 10, count: 5 }),
+          }),
           5,
         ),
       ]),
     );
-    const summary = Metric.summary({
-      name: "smithers.render_cov.summary",
+    const summary = Metric.summary("smithers.render_cov.summary", {
       maxAge: "1 minutes",
       maxSize: 100,
-      error: 0.01,
       quantiles: [0.5, 0.9],
     });
     Effect.runSync(Metric.update(summary, 2));

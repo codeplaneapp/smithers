@@ -154,6 +154,9 @@ packages/server/.smithers-root-landing-ui-*/
 # Stray local screenshots
 /output-fields.png
 
+# Local Python environment for the marketing technical deck.
+/marketing/technical-deck/.venv/
+
 # Claude plugin mirror runtime state
 .smithers/claude-mirror-subscriptions.json
 .docs-package-import-check.runtime.mjs

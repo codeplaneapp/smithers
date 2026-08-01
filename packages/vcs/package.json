@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/vcs",
-  "version": "0.31.1",
+  "version": "0.32.0",
   "description": "VCS discovery and jj workspace operations for Smithers",
   "type": "module",
   "sideEffects": false,
@@ -25,12 +25,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@effect/platform": "^0.96.2",
     "@smithers-orchestrator/observability": "workspace:*",
-    "effect": "^3.21.4"
+    "effect": "4.0.0-beta.102"
   },
   "devDependencies": {
-    "@effect/platform-bun": "^0.90.0",
+    "@effect/platform-bun": "4.0.0-beta.102",
     "@types/bun": "latest",
     "typescript": "~6.0.3"
   },

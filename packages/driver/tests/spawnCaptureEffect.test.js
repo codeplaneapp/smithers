@@ -16,7 +16,7 @@ const tmpDir = process.cwd();
 async function run(command, args, options) {
   const exit = await Effect.runPromiseExit(spawnCaptureEffect(command, args, { cwd: tmpDir, ...options }));
   if (Exit.isSuccess(exit)) return exit.value;
-  const failureOption = Cause.failureOption(exit.cause);
+  const failureOption = Cause.findErrorOption(exit.cause);
   if (failureOption._tag === "Some") throw failureOption.value;
   throw new Error(Cause.pretty(exit.cause));
 }
@@ -204,7 +204,8 @@ describe("spawnCaptureEffect — timeouts and cancellation", () => {
       }),
     );
     await new Promise((resolve) => setTimeout(resolve, 30));
-    const exit = await Effect.runPromise(Fiber.interrupt(fiber));
+    await Effect.runPromise(Fiber.interrupt(fiber));
+    const exit = await Effect.runPromise(Fiber.await(fiber));
     expect(Exit.isFailure(exit)).toBe(true);
   });
 
@@ -226,7 +227,8 @@ describe("spawnCaptureEffect — timeouts and cancellation", () => {
         }),
       );
       await new Promise((resolve) => setTimeout(resolve, 30));
-      const exit = await Effect.runPromise(Fiber.interrupt(fiber));
+      await Effect.runPromise(Fiber.interrupt(fiber));
+      const exit = await Effect.runPromise(Fiber.await(fiber));
       expect(Exit.isFailure(exit)).toBe(true);
     } finally {
       process.kill = originalKill;

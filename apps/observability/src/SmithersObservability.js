@@ -3,6 +3,6 @@ import { Context } from "effect";
 
 const _SmithersObservabilityBase =
   /** @type {Context.TagClass<SmithersObservability, "SmithersObservability", SmithersObservabilityService>} */ (
-    /** @type {unknown} */ (Context.Tag("SmithersObservability")())
+    /** @type {unknown} */ (Context.Service("SmithersObservability"))
   );
 export class SmithersObservability extends _SmithersObservabilityBase {}

@@ -13,7 +13,7 @@ import { cn } from "../cn";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
 import { useInjectUiCss } from "../styles";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../tooltip";
-import { safeHref } from "./safeHref";
+import { safeHref } from "../internal/safeHref";
 import { SOURCES_CITATIONS_CSS_ID, sourcesCitationsCss } from "./sourcesCitationsCss";
 
 export type CitationSource = {

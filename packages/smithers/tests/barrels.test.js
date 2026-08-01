@@ -12,6 +12,15 @@ async function importBarrel(path) {
 }
 
 describe("public re-export barrels", () => {
+  test("root backend resolver exports stay aligned with their declarations", async () => {
+    const facade = await importBarrel("../src/index.js");
+    expect(typeof facade.resolveSmithersBackendPreference).toBe("function");
+
+    const declarations = await Bun.file(new URL("../src/index.d.ts", import.meta.url)).text();
+    expect(declarations).toContain("declare function resolveSmithersBackendPreference");
+    expect(declarations).toContain("resolveSmithersBackendPreference,");
+  });
+
   test("sandbox-provider barrels re-export their provider ids and factories", async () => {
     const aws = await importBarrel("../src/aws.js");
     expect(aws.AWS_SANDBOX_PROVIDER_ID).toBe("aws-sandbox");

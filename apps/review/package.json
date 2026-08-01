@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/review",
-  "version": "0.31.1",
+  "version": "0.32.0",
   "description": "Code review plus story-form HTML walkthrough, built on the OpenCodeReview-derived review flow",
   "license": "MIT",
   "type": "module",
@@ -30,7 +30,7 @@
     "@smithers-orchestrator/db": "workspace:*",
     "@smithers-orchestrator/engine": "workspace:*",
     "@smithers-orchestrator/ui-styleguide": "workspace:*",
-    "effect": "^3.21.4",
+    "effect": "4.0.0-beta.102",
     "mermaid": "^11.16.0",
     "smithers-orchestrator": "workspace:*",
     "zod": "^4.4.3"

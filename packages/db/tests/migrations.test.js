@@ -915,7 +915,9 @@ describe("DB migration edges", () => {
       expect(warnings).toHaveLength(0);
       const notices = destructiveNotices();
       expect(notices).toHaveLength(1);
-      expect(notices[0]).toContain("level=WARN");
+      // Effect 4's default logger renders "[time] WARN (#fiber)" instead of
+      // logfmt "level=WARN"; assert the level token format-agnostically.
+      expect(notices[0]).toMatch(/level=WARN|\bWARN\b/);
       expect(notices[0]).toContain("0013_run_owned_foreign_keys");
       expect(notices[0]).toContain("db:schema-migration");
 

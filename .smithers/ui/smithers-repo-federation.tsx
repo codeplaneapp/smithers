@@ -165,7 +165,7 @@ function App() {
   );
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? runs[0]?.runId;
   const activeRun = runs.find((r) => r.runId === activeRunId);
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0, maxEvents: 6000 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined, maxEvents: 6000 });
   const latestIterations = useMemo(() => latestNodeIterations(stream.events), [stream.events]);
   const iterationFor = (nodeId: string) => latestIterations.get(nodeId) ?? 0;
 

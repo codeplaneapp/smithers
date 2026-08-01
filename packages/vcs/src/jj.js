@@ -13,7 +13,7 @@
  */
 // @smithers-type-exports-end
 
-import * as Command from "@effect/platform/Command";
+import * as Command from "effect/unstable/process/ChildProcess";
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
 import { Duration, Effect, Fiber, Metric, Stream } from "effect";
@@ -29,9 +29,11 @@ const JJ_PROBE_TIMEOUT_MS = 1_500;
  */
 function collectUtf8(stream) {
   const decoder = new TextDecoder("utf-8");
-  return Stream.runFold(stream, "", (acc, chunk) => acc + decoder.decode(chunk, { stream: true })).pipe(
-    Effect.map((acc) => acc + decoder.decode()),
-  );
+  return Stream.runFold(
+    stream,
+    () => "",
+    (acc, chunk) => acc + decoder.decode(chunk, { stream: true }),
+  ).pipe(Effect.map((acc) => acc + decoder.decode()));
 }
 /**
  * Run a `jj` command and capture output.
@@ -39,21 +41,21 @@ function collectUtf8(stream) {
  *
  * @param {string[]} args
  * @param {RunJjOptions} [opts]
- * @returns {Effect.Effect<RunJjResult, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
+ * @returns {Effect.Effect<RunJjResult, never, import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner>}
  */
 export function runJj(args, opts = {}) {
-  let command = Command.make(resolveJjBinary().path, ...args);
+  let command = Command.make(resolveJjBinary().path, args);
   if (opts.cwd) {
-    command = Command.workingDirectory(command, opts.cwd);
+    command = Command.setCwd(command, opts.cwd);
   }
   return Effect.scoped(
     Effect.suspend(() => {
       const start = performance.now();
       return Effect.gen(function* () {
         yield* Effect.logDebug(`jj ${args.join(" ")}`);
-        const process = yield* Command.start(command);
-        const stdoutFiber = yield* Effect.fork(collectUtf8(process.stdout));
-        const stderrFiber = yield* Effect.fork(collectUtf8(process.stderr));
+        const process = yield* command;
+        const stdoutFiber = yield* Effect.forkChild(collectUtf8(process.stdout));
+        const stderrFiber = yield* Effect.forkChild(collectUtf8(process.stderr));
         const exitCode = yield* process.exitCode;
         const stdout = yield* Fiber.join(stdoutFiber);
         const stderr = yield* Fiber.join(stderrFiber);
@@ -71,7 +73,7 @@ export function runJj(args, opts = {}) {
       args: args.join(" "),
     }),
     Effect.withLogSpan("vcs:jj"),
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       Effect.succeed({
         code: 127,
         stdout: "",
@@ -100,7 +102,7 @@ function jjError(res) {
  * state-discriminating cache-key component.
  *
  * @param {string} [cwd]
- * @returns {Effect.Effect<string | null, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
+ * @returns {Effect.Effect<string | null, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
  */
 export function getJjPointer(cwd) {
   return withJjTimeout(runJj(["log", "-r", "@", "--no-graph", "--template", "commit_id"], { cwd }), "jj pointer").pipe(
@@ -120,23 +122,24 @@ export function getJjPointer(cwd) {
  * rather than a value, and logs a warning so the silent downgrade is
  * diagnosable.
  *
- * @param {Effect.Effect<RunJjResult, never, import("@effect/platform/CommandExecutor").CommandExecutor>} effect
+ * @param {Effect.Effect<RunJjResult, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>} effect
  * @param {string} label
- * @returns {Effect.Effect<RunJjResult, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
+ * @returns {Effect.Effect<RunJjResult, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
  */
 function withJjTimeout(effect, label) {
   return effect.pipe(
-    Effect.timeoutTo({
+    Effect.map((res) => ({ res, timedOut: false })),
+    Effect.timeoutOrElse({
       duration: Duration.millis(JJ_PROBE_TIMEOUT_MS),
-      onSuccess: (res) => ({ res, timedOut: false }),
-      onTimeout: () => ({
-        res: {
-          code: 124,
-          stdout: "",
-          stderr: `${label} timed out after ${JJ_PROBE_TIMEOUT_MS}ms`,
-        },
-        timedOut: true,
-      }),
+      orElse: () =>
+        Effect.succeed({
+          res: {
+            code: 124,
+            stdout: "",
+            stderr: `${label} timed out after ${JJ_PROBE_TIMEOUT_MS}ms`,
+          },
+          timedOut: true,
+        }),
     }),
     Effect.tap(({ timedOut }) =>
       timedOut
@@ -174,7 +177,7 @@ export function parseWorkspaceSnapshot(logStdout, opStdout) {
  * durability gap the caller records); it never throws into the agent path.
  *
  * @param {string} [cwd]
- * @returns {Effect.Effect<WorkspaceSnapshot | null, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
+ * @returns {Effect.Effect<WorkspaceSnapshot | null, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
  */
 export function captureWorkspaceSnapshot(cwd) {
   return Effect.gen(function* () {
@@ -237,7 +240,7 @@ function isJjChangeIdPointer(pointer) {
  *
  * @param {string} pointer
  * @param {string} [cwd]
- * @returns {Effect.Effect<JjRevertResult, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
+ * @returns {Effect.Effect<JjRevertResult, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
  */
 export function revertToJjPointer(pointer, cwd) {
   if (isJjChangeIdPointer(pointer)) {
@@ -259,7 +262,7 @@ export function revertToJjPointer(pointer, cwd) {
  * Quick repo detection by executing a read-only jj command.
  *
  * @param {string} [cwd]
- * @returns {Effect.Effect<boolean, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
+ * @returns {Effect.Effect<boolean, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
  */
 export function isJjRepo(cwd) {
   return withJjTimeout(
@@ -280,7 +283,7 @@ export function isJjRepo(cwd) {
  * @param {string} name
  * @param {string} path
  * @param {WorkspaceAddOptions} [opts]
- * @returns {Effect.Effect<WorkspaceResult, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
+ * @returns {Effect.Effect<WorkspaceResult, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
  */
 /** Transient shared-lock failures worth retrying (holders live for ms–s). */
 const LOCK_CONTENTION_PATTERN =
@@ -401,7 +404,7 @@ export function workspaceAdd(name, path, opts = {}) {
  * Falls back to parsing human output if `-T` is unavailable.
  *
  * @param {string} [cwd]
- * @returns {Effect.Effect<WorkspaceInfo[], never, import("@effect/platform/CommandExecutor").CommandExecutor>}
+ * @returns {Effect.Effect<WorkspaceInfo[], never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
  */
 export function workspaceList(cwd) {
   return Effect.gen(function* () {
@@ -442,7 +445,7 @@ export function workspaceList(cwd) {
  *
  * @param {string} name
  * @param {{ cwd?: string }} [opts]
- * @returns {Effect.Effect<WorkspaceResult, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
+ * @returns {Effect.Effect<WorkspaceResult, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
  */
 export function workspaceClose(name, opts = {}) {
   return runJj(["workspace", "forget", name], { cwd: opts.cwd }).pipe(

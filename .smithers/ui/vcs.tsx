@@ -169,7 +169,7 @@ function App() {
   );
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? vcsRuns[0]?.runId;
   const activeRun = vcsRuns.find((r) => r.runId === activeRunId);
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined });
   const eventCount = (stream.events ?? []).length;
 
   const statusOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "vcs:status", iteration: 0 });

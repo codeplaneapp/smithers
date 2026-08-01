@@ -243,7 +243,7 @@ function App() {
   }, [runs.data]);
   const activeRunId = selectedRunId ?? kanbanRuns[0]?.runId;
   const activeRun = kanbanRuns.find((run) => run.runId === activeRunId);
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined });
   const ticketsOutput = useGatewayNodeOutput({ runId: activeRunId, nodeId: "tickets", iteration: 0 });
   const streamEvents = useMemo(() => {
     return collectStreamEvents(stream.events as Array<Record<string, unknown>>).filter(

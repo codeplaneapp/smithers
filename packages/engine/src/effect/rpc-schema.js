@@ -12,8 +12,8 @@
 /** @typedef {import("./SignalResult.ts").SignalResult} SignalResult */
 // @smithers-type-exports-end
 
-import * as Rpc from "@effect/rpc/Rpc";
-import * as RpcGroup from "@effect/rpc/RpcGroup";
+import * as Rpc from "effect/unstable/rpc/Rpc";
+import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import { Schema } from "effect";
 export const RunStatusSchema = Schema.Literal(
   "running",
@@ -44,7 +44,7 @@ export const CancelPayloadSchema = Schema.Struct({
 });
 export const CancelResultSchema = Schema.Struct({
   runId: Schema.String,
-  status: Schema.Literal("cancelling", "cancelled", "already-terminal", "not-found"),
+  status: Schema.Literals(["cancelling", "cancelled", "already-terminal", "not-found"]),
   won: Schema.Boolean,
   terminalStatus: Schema.optional(Schema.String),
   repaired: Schema.Boolean,
@@ -60,7 +60,7 @@ export const SignalResultSchema = Schema.Struct({
   runId: Schema.String,
   signalName: Schema.String,
   delivered: Schema.Boolean,
-  status: Schema.Literal("signalled", "ignored"),
+  status: Schema.Literals(["signalled", "ignored"]),
 });
 export const ListRunsPayloadSchema = Schema.Struct({
   limit: Schema.optional(Schema.Number),

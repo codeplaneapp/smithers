@@ -67,6 +67,13 @@ function laneDir(migrationRoot: string, lane: string) {
   return join(migrationRoot, "lanes", lane);
 }
 
+function requireProofBinding<T>(binding: T | undefined, nodeId: string): T {
+  if (binding === undefined) {
+    throw new Error(`Missing required proof binding for ${nodeId}.`);
+  }
+  return binding;
+}
+
 const UPDATE_SMITHERS_BRANCH = "federation/update-smithers-kernel";
 const KERNEL_CLONE_DIR = "smithers-kernel-clone";
 const SOURCE_CLONE_DIR = "source-clone";
@@ -1487,6 +1494,7 @@ export default smithers((ctx) => {
                 <Approval
                   id="gate-publish"
                   output={outputs.gatePublish}
+                  bind={ctx.prove(outputs.releaseApprovalBinding, { nodeId: "releaseApprovalBinding" })}
                   request={{
                     title: "Publish the 10 federated PUBLIC repos?",
                     summary: `${postFixReleaseDryRun?.summary ?? ""}\nRevision readiness: ${releaseReadinessResult?.summary ?? ""}\nApproval binding: ${releaseApprovalBindingResult.summary}\nFinal verification: ${lastFinalVerify?.summary ?? ""}\n\nApproving invokes the validated root release coordinator (publishes every publishable package in the release plan, in package-DAG order) and creates tags + GitHub releases for each of the 10 new repos.`,
@@ -1510,8 +1518,11 @@ export default smithers((ctx) => {
                   id="executeReleases"
                   output={outputs.executeReleases}
                   bind={[
-                    ctx.prove(outputs.gatePublish, { nodeId: "gate-publish" })!,
-                    ctx.prove(outputs.releaseApprovalBinding, { nodeId: "releaseApprovalBinding" })!,
+                    requireProofBinding(ctx.prove(outputs.gatePublish, { nodeId: "gate-publish" }), "gate-publish"),
+                    requireProofBinding(
+                      ctx.prove(outputs.releaseApprovalBinding, { nodeId: "releaseApprovalBinding" }),
+                      "releaseApprovalBinding",
+                    ),
                   ]}
                   timeoutMs={30 * 60_000}
                 >

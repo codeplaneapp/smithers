@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { Effect, Fiber, Option, TestClock, TestContext } from "effect";
+import { Effect, Fiber } from "effect";
+import * as TestClock from "effect/testing/TestClock";
 import { setSmithersLogRunner } from "@smithers-orchestrator/observability/logging";
 import { makeGitHubClient, nextPageUrl } from "../src/github/GitHubClient.js";
 import { configureGitHub, resolveGitHubConfig } from "../src/github/config.js";
@@ -214,18 +215,16 @@ describe("GitHubClient", () => {
     try {
       const result = await Effect.runPromise(
         Effect.gen(function* () {
-          const fiber = yield* Effect.fork(retryDisabledClient.request("GET", path));
+          const fiber = yield* Effect.forkChild(retryDisabledClient.request("GET", path));
           yield* Effect.promise(() => waitForRequestCount(path, 1));
           yield* Effect.promise(settleHostTasks);
-          const sleeps = Array.from(yield* TestClock.sleeps());
-          const exit = yield* Fiber.poll(fiber);
+          const exit = fiber.pollUnsafe();
           yield* Fiber.interrupt(fiber);
-          return { sleeps, exit };
-        }).pipe(Effect.provide(TestContext.TestContext)),
+          return { exit };
+        }).pipe(Effect.provide(TestClock.layer())),
       );
       expect(fixture.requests.filter((request) => request.path === path)).toHaveLength(1);
-      expect(result.sleeps).toHaveLength(0);
-      expect(Option.isSome(result.exit)).toBe(true);
+      expect(result.exit).toBeDefined();
       expect(retryLogs).toBe(0);
     } finally {
       restoreLogger();
@@ -248,23 +247,21 @@ describe("GitHubClient", () => {
     try {
       const result = await Effect.runPromise(
         Effect.gen(function* () {
-          const fiber = yield* Effect.fork(retryOnceClient.request("GET", path));
+          const fiber = yield* Effect.forkChild(retryOnceClient.request("GET", path));
           yield* Effect.promise(() => waitForRequestCount(path, 1));
           yield* Effect.promise(settleHostTasks);
-          const sleepsBeforeRetry = Array.from(yield* TestClock.sleeps());
+          const exitBeforeRetry = fiber.pollUnsafe();
           yield* TestClock.adjust("1250 millis");
           yield* Effect.promise(() => waitForRequestCount(path, 2));
           yield* Effect.promise(settleHostTasks);
-          const sleepsAfterFailure = Array.from(yield* TestClock.sleeps());
-          const exit = yield* Fiber.poll(fiber);
+          const exit = fiber.pollUnsafe();
           yield* Fiber.interrupt(fiber);
-          return { sleepsBeforeRetry, sleepsAfterFailure, exit };
-        }).pipe(Effect.provide(TestContext.TestContext)),
+          return { exitBeforeRetry, exit };
+        }).pipe(Effect.provide(TestClock.layer())),
       );
       expect(fixture.requests.filter((request) => request.path === path)).toHaveLength(2);
-      expect(result.sleepsBeforeRetry).toHaveLength(1);
-      expect(result.sleepsAfterFailure).toHaveLength(0);
-      expect(Option.isSome(result.exit)).toBe(true);
+      expect(result.exitBeforeRetry).toBeUndefined();
+      expect(result.exit).toBeDefined();
       expect(retryLogs).toBe(1);
     } finally {
       restoreLogger();

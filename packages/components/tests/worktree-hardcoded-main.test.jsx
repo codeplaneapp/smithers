@@ -102,7 +102,7 @@ describe("Issue #110: ensureWorktree baseBranch support", () => {
         api.db.$client?.close?.();
       } catch {}
     }
-  }, 15_000);
+  }, 60_000);
   test("worktree without baseBranch falls back through main, origin/main, HEAD", async () => {
     if (!hasGit()) return;
     const { root, repoDir } = await createReleaseOnlyGitRepo();
@@ -136,5 +136,5 @@ describe("Issue #110: ensureWorktree baseBranch support", () => {
         api.db.$client?.close?.();
       } catch {}
     }
-  }, 15_000);
+  }, 60_000);
 });

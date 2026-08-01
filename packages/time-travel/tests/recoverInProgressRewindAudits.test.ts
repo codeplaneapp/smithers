@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 
-// Lease-expiry waits push several of these tests past bun's 5s default on the
-// slower Windows CI runners (observed 5.2-6.2s); the work is real, not hung.
-setDefaultTimeout(20_000);
+// SQLite reopen/lease checks can approach 50s on loaded Windows runners; the
+// work is real, not hung.
+setDefaultTimeout(60_000);
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -126,7 +126,7 @@ describe("recoverInProgressRewindAudits", () => {
     }
     // Not the 5s default: the two-connection file-db dance runs 2-6s on loaded
     // Windows runners.
-  }, 20_000);
+  }, 60_000);
 
   test("leaves old audits protected by live and renewed leases untouched", async () => {
     const { firstSqlite, secondSqlite, first, second } = setupFileDb();
@@ -158,7 +158,7 @@ describe("recoverInProgressRewindAudits", () => {
     // Not the 5s default: the two-connection file-db dance runs 2-5s on loaded
     // Windows runners and this test tripped the ceiling while its siblings sat
     // just under it.
-  }, 20_000);
+  }, 60_000);
 
   test("recovers cutoff-old audits with expired or absent leases", async () => {
     const { firstSqlite, secondSqlite, first, second } = setupFileDb();

@@ -116,7 +116,7 @@ function App() {
   );
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? ralphRuns[0]?.runId;
   const activeRun = ralphRuns.find((r) => r.runId === activeRunId);
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined });
   const ralphOutput = useGatewayNodeOutput({ runId: activeRunId, nodeId: "ralph", iteration: 0 });
 
   const events = stream.events ?? [];

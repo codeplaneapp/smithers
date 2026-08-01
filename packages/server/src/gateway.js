@@ -623,6 +623,30 @@ function sendText(res, status, payload, contentType = "text/plain; charset=utf-8
   res.end(payload);
 }
 /**
+ * The session-handoff landing page: navigates to `next` with
+ * `location.replace` so the token-carrying handoff URL is replaced in the
+ * address bar AND dropped from browser history. A noscript meta refresh
+ * covers JS-off browsers (it still replaces the address bar, just not
+ * history). `next` is already constrained to a same-origin absolute path.
+ *
+ * @param {string} next
+ * @returns {string}
+ */
+function renderSessionHandoffPage(next) {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="refresh" content="0; url=${escapeHtml(next)}">
+    <title>Opening Smithers…</title>
+    <script>location.replace(${safeJsonScript(next)});</script>
+  </head>
+  <body>
+    <p>Opening <a href="${escapeHtml(next)}">Smithers</a>…</p>
+  </body>
+</html>`;
+}
+/**
  * @param {unknown} value
  * @returns {Record<string, unknown> | null}
  */
@@ -746,7 +770,7 @@ function taggedMetric(metric, labels = {}) {
     if (value === undefined || value === null) {
       continue;
     }
-    tagged = Metric.tagged(tagged, key, String(value));
+    tagged = Metric.withAttributes(tagged, { [key]: String(String(value)) });
   }
   return tagged;
 }
@@ -756,7 +780,7 @@ function taggedMetric(metric, labels = {}) {
  * @param {GatewayMetricLabels} [labels]
  */
 function incrementMetric(metric, labels = {}) {
-  return Metric.increment(taggedMetric(metric, labels));
+  return Metric.update(taggedMetric(metric, labels), 1);
 }
 /**
  * @template M
@@ -1260,6 +1284,59 @@ function headerValue(req, name) {
   return typeof value === "string" ? value : null;
 }
 /**
+ * Browser session cookie carrying the gateway bearer token. Browsers cannot
+ * send an Authorization header on top-level navigations (or WebSocket
+ * upgrades), so `GET /v1/auth/session` exchanges a bearer for this HttpOnly
+ * cookie and every authenticated path accepts it as an alternative. SameSite=Lax
+ * keeps it off cross-site subrequests (CSRF), matching the Origin allow-list
+ * model.
+ */
+export const GATEWAY_SESSION_COOKIE = "smithers_session";
+
+/**
+ * Whether the request reached us over TLS (directly or through a terminating
+ * proxy that set `X-Forwarded-Proto`). Only then may the session cookie carry
+ * `Secure` — setting it on plain HTTP would make the browser drop it.
+ *
+ * @param {IncomingMessage} req
+ * @returns {boolean}
+ */
+function isSecureRequest(req) {
+  if (/** @type {{ encrypted?: boolean }} */ (req.socket).encrypted === true) {
+    return true;
+  }
+  const forwarded = headerValue(req, "x-forwarded-proto");
+  return forwarded !== null && forwarded.split(",")[0].trim().toLowerCase() === "https";
+}
+
+/**
+ * @param {IncomingMessage} req
+ * @returns {string | null}
+ */
+function sessionTokenFromCookies(req) {
+  const header = headerValue(req, "cookie");
+  if (!header) {
+    return null;
+  }
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) {
+      continue;
+    }
+    if (part.slice(0, eq).trim() !== GATEWAY_SESSION_COOKIE) {
+      continue;
+    }
+    const raw = part.slice(eq + 1).trim();
+    try {
+      return decodeURIComponent(raw) || null;
+    } catch {
+      return raw || null;
+    }
+  }
+  return null;
+}
+
+/**
  * @param {IncomingMessage} req
  * @returns {string | null}
  */
@@ -1269,10 +1346,10 @@ function bearerTokenFromHeaders(req) {
     return smithersKey;
   }
   const authHeader = headerValue(req, "authorization");
-  if (!authHeader) {
-    return null;
+  if (authHeader) {
+    return authHeader.slice(0, 7).toLowerCase() === "bearer " ? authHeader.slice(7) : authHeader;
   }
-  return authHeader.slice(0, 7).toLowerCase() === "bearer " ? authHeader.slice(7) : authHeader;
+  return sessionTokenFromCookies(req);
 }
 /**
  * @param {string} id
@@ -2996,6 +3073,52 @@ export class Gateway {
     };
   }
   /**
+   * Browser session handoff: `GET /v1/auth/session?token=<bearer>&next=<path>`
+   * exchanges a valid bearer for an HttpOnly session cookie and lands the
+   * browser on `next` via an HTML `location.replace` (not a 30x), so the
+   * token never stays in the address bar or browser history. `next` is
+   * constrained to a same-origin absolute path — this must never become an
+   * open redirect. With no auth configured there is nothing to exchange and
+   * the browser goes straight to `next`.
+   *
+   * @param {IncomingMessage} req
+   * @param {ServerResponse} res
+   */
+  async handleAuthSession(req, res) {
+    const host = headerValue(req, "host") ?? "127.0.0.1";
+    const url = new URL(`http://${host}${req.url ?? "/"}`);
+    const rawNext = url.searchParams.get("next") ?? "/";
+    const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/";
+    if (gatewayAuthMode(this.auth) === "none") {
+      sendText(res, 200, renderSessionHandoffPage(next), "text/html; charset=utf-8");
+      return;
+    }
+    // `?token=` is the browser handoff, but a re-navigation (or a curl with a
+    // header) may carry the bearer the normal way — fall back to it so an
+    // already-authenticated client refreshes its cookie instead of 401-ing.
+    const token = url.searchParams.get("token") ?? bearerTokenFromHeaders(req);
+    const authResult = await this.authenticateRequest(req, token);
+    if (authResult.ok === false) {
+      sendJson(
+        res,
+        statusForRpcError(authResult.code),
+        responseError(randomUUID(), authResult.code, authResult.message, authResult.details),
+      );
+      return;
+    }
+    // Header-authenticated modes (trusted-proxy, mTLS) carry no token to store;
+    // writing an empty/"null" cookie would only poison later requests.
+    if (token) {
+      res.setHeader(
+        "set-cookie",
+        `${GATEWAY_SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax${
+          isSecureRequest(req) ? "; Secure" : ""
+        }`,
+      );
+    }
+    sendText(res, 200, renderSessionHandoffPage(next), "text/html; charset=utf-8");
+  }
+  /**
    * @param {IncomingMessage} req
    * @param {ServerResponse} res
    */
@@ -3181,7 +3304,7 @@ a { color: var(--brand); }</style>
    * @param {"ok" | "error"} result
    */
   recordDevToolsSubscribeAttempt(result) {
-    emitGatewayEffect(Metric.increment(taggedMetric(devtoolsSubscribeTotal, { result })));
+    emitGatewayEffect(Metric.update(taggedMetric(devtoolsSubscribeTotal, { result }), 1));
   }
   /**
    * Push the absolute active-subscriber count to the Prometheus gauge. The
@@ -3644,7 +3767,7 @@ a { color: var(--brand); }</style>
     }
     stream.backpressureDisconnected = true;
     stream.outboundQueue.length = 0;
-    emitGatewayEffect(Metric.increment(gatewayRunEventBackpressureDisconnectTotal));
+    emitGatewayEffect(Metric.update(gatewayRunEventBackpressureDisconnectTotal, 1));
     emitGatewayLog(
       "warning",
       "run event stream disconnected for backpressure",
@@ -5298,6 +5421,9 @@ a { color: var(--brand); }</style>
           workflows: this.listWorkflowSummaries(undefined),
         });
       }
+      if ((req.method ?? "GET") === "GET" && url.pathname === "/v1/auth/session") {
+        return this.handleAuthSession(req, res);
+      }
       if ((req.method ?? "GET") === "POST" && webhookMatch) {
         return this.handleWebhook(req, res, decodeURIComponent(webhookMatch[1]));
       }
@@ -6731,7 +6857,11 @@ a { color: var(--brand); }</style>
    */
   async authenticate(req, request) {
     const tokenFromRequest = "token" in (request.auth ?? {}) ? request.auth.token : null;
-    return this.authenticateRequest(req, typeof tokenFromRequest === "string" ? tokenFromRequest : null);
+    // Browser WebSocket clients cannot set headers and (after the session
+    // handoff) carry no explicit token: fall back to the Authorization header
+    // or the HttpOnly session cookie the upgrade request already sent.
+    const token = typeof tokenFromRequest === "string" ? tokenFromRequest : bearerTokenFromHeaders(req);
+    return this.authenticateRequest(req, token);
   }
   /**
    * Whether `req`'s browser `Origin` is permitted by the configured auth-mode
@@ -7419,7 +7549,7 @@ a { color: var(--brand); }</style>
     writer.disconnected = true;
     writer.queue.length = 0;
     writer.queuedBytes = 0;
-    emitGatewayEffect(Metric.increment(gatewayRunEventBackpressureDisconnectTotal));
+    emitGatewayEffect(Metric.update(gatewayRunEventBackpressureDisconnectTotal, 1));
     emitGatewayLog(
       "warning",
       "Gateway connection disconnected for event backpressure",
@@ -9386,7 +9516,7 @@ a { color: var(--brand); }</style>
                   emitGatewayEffect(
                     Effect.all(
                       [
-                        Metric.increment(taggedMetric(devtoolsEventTotal, { kind })),
+                        Metric.update(taggedMetric(devtoolsEventTotal, { kind }), 1),
                         Metric.update(devtoolsEventBytes, stats.bytes),
                         ...(kind === "snapshot"
                           ? [Metric.update(devtoolsSnapshotBuildMs, stats.durationMs)]
@@ -9398,7 +9528,7 @@ a { color: var(--brand); }</style>
                 },
                 onClose: ({ errorCode }) => {
                   if (errorCode === "BackpressureDisconnect") {
-                    emitGatewayEffect(Metric.increment(devtoolsBackpressureDisconnectTotal));
+                    emitGatewayEffect(Metric.update(devtoolsBackpressureDisconnectTotal, 1));
                   }
                 },
               })) {
@@ -9412,7 +9542,7 @@ a { color: var(--brand); }</style>
             } catch (error) {
               const code = error?.code ?? "SERVER_ERROR";
               if (code === "BackpressureDisconnect") {
-                emitGatewayEffect(Metric.increment(devtoolsBackpressureDisconnectTotal));
+                emitGatewayEffect(Metric.update(devtoolsBackpressureDisconnectTotal, 1));
               }
               emitGatewayLog(
                 "error",

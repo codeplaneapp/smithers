@@ -277,6 +277,86 @@ describe("smithers monitor", () => {
     expect(envelope.message).toContain("smithers gateway");
   }, 30_000);
 
+  test("unreachable failures name the state file checked, the port probed, and the exact start command", async () => {
+    const repo = createTempRepo();
+    writeTestWorkflow(repo, ".smithers/workflows/basic.tsx");
+    const port = await findOpenPort();
+    const result = runSmithers(["monitor", "--port", String(port), "--no-autostart"], {
+      cwd: repo.dir,
+      format: "json",
+      timeoutMs: 10_000,
+    });
+    expect(result.exitCode).toBe(4);
+    expect(result.json.message).toContain("Checked gateway runtime state file:");
+    expect(result.json.message).toContain(`Probed legacy port: http://127.0.0.1:${port}/health`);
+    expect(result.json.message).toContain(`smithers gateway --host 127.0.0.1 --port ${port}`);
+  }, 30_000);
+
+  test("routes the browser through the session handoff when the gateway needs a bearer", async () => {
+    const repo = createTempRepo();
+    const gateway = await startFakeGateway();
+    try {
+      const result = await runSmithersAsync(["monitor", "--gateway", gateway.base, "--no-open"], {
+        cwd: repo.dir,
+        format: "json",
+        env: { SMITHERS_TOKEN: "test-bearer" },
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.json).toMatchObject({ opened: false, gateway: gateway.base });
+      const url = new URL(result.json.url);
+      expect(url.pathname).toBe("/v1/auth/session");
+      expect(url.searchParams.get("token")).toBe("test-bearer");
+      expect(url.searchParams.get("next")).toBe("/monitor");
+    } finally {
+      await gateway.close();
+    }
+  }, 30_000);
+
+  test("autostarts on 0.0.0.0 with an auto-minted token and prints a dialable URL", async () => {
+    const repo = createTempRepo();
+    writeTestWorkflow(repo, ".smithers/workflows/basic.tsx");
+    const port = await findOpenPort();
+    try {
+      const { child, closePromise } = spawnSmithers(
+        ["monitor", "--port", String(port), "--host", "0.0.0.0", "--no-open", "--format", "json"],
+        { cwd: repo.dir },
+      );
+      let stdout = "";
+      let stderr = "";
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk;
+      });
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk;
+      });
+      const exitCode = await Promise.race([
+        closePromise,
+        waitFor(() => stdout.includes("/v1/auth/session")).then(() => 0),
+      ]);
+      expect(exitCode).toBe(0);
+      const envelope = parseEnvelope(stdout);
+      const printed = new URL(envelope.url);
+      expect(printed.pathname).toBe("/v1/auth/session");
+      expect(printed.searchParams.get("next")).toBe("/monitor");
+      const token = printed.searchParams.get("token");
+      expect(token).toBeTruthy();
+      // The handoff works end-to-end: exchange the token for the cookie,
+      // then reach /monitor with it (a plain navigation 401s without it).
+      const anonymous = await fetch(`http://127.0.0.1:${port}/monitor`);
+      expect(anonymous.status).toBe(401);
+      const handoff = await fetch(`http://127.0.0.1:${port}${printed.pathname}${printed.search}`);
+      expect(handoff.status).toBe(200);
+      const cookie = (handoff.headers.get("set-cookie") ?? "").split(";")[0];
+      expect(cookie).toContain("smithers_session=");
+      const page = await fetch(`http://127.0.0.1:${port}/monitor`, { headers: { cookie } });
+      expect(page.status).toBe(200);
+    } finally {
+      await stopGatewayOnPort(port);
+    }
+  }, 90_000);
+
   test("respects SMITHERS_NO_DAEMON: refuses to autostart and says why", async () => {
     const repo = createTempRepo();
     const port = await findOpenPort();

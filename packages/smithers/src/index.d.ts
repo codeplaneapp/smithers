@@ -324,32 +324,6 @@ type OpenSmithersStoreOptions = OpenSmithersBackendOptions$1 & {
  */
 declare function openSmithersStore(opts?: OpenSmithersStoreOptions): Promise<OpenSmithersStoreResult>;
 
-type ResolveSmithersBackendChoiceOptions = {
-    backend?: "sqlite" | "pglite" | "postgres";
-    cwd?: string;
-    dbPath?: string;
-    pgliteDataDir?: string;
-    connectionString?: string;
-    connection?: {
-        query?: (...args: any[]) => Promise<any>;
-    };
-    configPath?: string;
-    env?: Record<string, string | undefined>;
-};
-
-/**
- * Resolve the storage backend (explicit → env → `.smithers/smithers.config.ts` →
- * default `sqlite`) and enforce the fail-loud migration gate shared by every
- * Smithers boot path (the async backend factory and the CLI read commands). A
- * legacy bun:sqlite store that still holds run data with no `migrated.json`
- * marker is never silently switched onto pglite/postgres: it throws
- * SMITHERS_MIGRATION_REQUIRED so the caller can migrate or pin `--backend sqlite`.
- *
- * @param {import("./ResolveSmithersBackendChoiceOptions.ts").ResolveSmithersBackendChoiceOptions} [opts]
- * @returns {Promise<import("./SmithersBackendChoice.ts").SmithersBackendChoice>}
- */
-declare function resolveSmithersBackendChoice(opts?: ResolveSmithersBackendChoiceOptions): Promise<SmithersBackendChoice>;
-
 /**
  * One-shot copy from the legacy bun:sqlite Smithers store to PGlite/Postgres.
  *
@@ -444,6 +418,68 @@ declare function createSmithersPostgres<Schemas extends Record<string, zod.ZodOb
     close: () => Promise<void>;
 }>;
 type CreateSmithersOptions$1 = CreateSmithersOptions$2;
+
+/**
+ * The backend a workspace selects and the precedence level that chose it,
+ * resolved without booting or probing any store.
+ */
+type SmithersBackendPreference = {
+    backend: "sqlite" | "pglite" | "postgres";
+    source: "options" | "env" | "config" | "marker" | "default";
+    workspaceRoot: string;
+    /** Set when `options.backend` supplied the answer. */
+    explicitBackend?: "sqlite" | "pglite" | "postgres";
+    /** Set when `SMITHERS_BACKEND` supplied the answer. */
+    envBackend?: "sqlite" | "pglite" | "postgres";
+    /** Set when `.smithers/smithers.config.ts` supplied the answer. */
+    configBackend?: "sqlite" | "pglite" | "postgres";
+    migratedMarker: {
+        exists: boolean;
+        backend?: "sqlite" | "pglite" | "postgres";
+    };
+};
+
+type ResolveSmithersBackendChoiceOptions = {
+    backend?: "sqlite" | "pglite" | "postgres";
+    cwd?: string;
+    dbPath?: string;
+    pgliteDataDir?: string;
+    connectionString?: string;
+    connection?: {
+        query?: (...args: any[]) => Promise<any>;
+    };
+    configPath?: string;
+    env?: Record<string, string | undefined>;
+};
+
+/**
+ * Which backend this workspace selects, and why, without touching a single
+ * store. `resolveSmithersBackendChoice` boots and probes the physical stores to
+ * describe them; callers that only need to know "sqlite or not" must use this
+ * instead, so an operator's `--backend` / `SMITHERS_BACKEND` / config pin is
+ * honored everywhere rather than only on the paths that happen to call the full
+ * resolver. Reading a marker file directly is what let a stale `migrated.json`
+ * override an explicit pin and lock `smithers oneshot` out of a workspace.
+ *
+ * Precedence is the same as the full resolver: explicit → env → config →
+ * `.smithers/backend.json` → `.smithers/migrated.json` → `sqlite`.
+ *
+ * @param {import("./ResolveSmithersBackendChoiceOptions.ts").ResolveSmithersBackendChoiceOptions} [opts]
+ * @returns {Promise<import("./SmithersBackendPreference.ts").SmithersBackendPreference>}
+ */
+declare function resolveSmithersBackendPreference(opts?: ResolveSmithersBackendChoiceOptions): Promise<SmithersBackendPreference>;
+/**
+ * Resolve the storage backend (explicit → env → `.smithers/smithers.config.ts` →
+ * default `sqlite`) and enforce the fail-loud migration gate shared by every
+ * Smithers boot path (the async backend factory and the CLI read commands). A
+ * legacy bun:sqlite store that still holds run data with no `migrated.json`
+ * marker is never silently switched onto pglite/postgres: it throws
+ * SMITHERS_MIGRATION_REQUIRED so the caller can migrate or pin `--backend sqlite`.
+ *
+ * @param {import("./ResolveSmithersBackendChoiceOptions.ts").ResolveSmithersBackendChoiceOptions} [opts]
+ * @returns {Promise<import("./SmithersBackendChoice.ts").SmithersBackendChoice>}
+ */
+declare function resolveSmithersBackendChoice(opts?: ResolveSmithersBackendChoiceOptions): Promise<SmithersBackendChoice>;
 
 type ToolContext = {
   db: SmithersDb;
@@ -707,4 +743,4 @@ type InferDeps<D extends DepsSpec$2> = InferDeps$1<D>;
 type SignalProps<Schema extends z.ZodObject<z.ZodRawShape> = z.ZodObject<z.ZodRawShape>> = SignalProps$2<Schema>;
 type TaskProps<Row, Output extends OutputTarget$1 = OutputTarget$1, D extends DepsSpec$2 = {}> = TaskProps$2<Row, Output, D>;
 
-export { type AgentCapabilityRegistry, type AgentLike, type AgentToolDescriptor, type AggregateOptions, type AggregateScore, type AnthropicAgentOptions, type ApprovalAutoApprove, type ApprovalDecision, type ApprovalMode, type ApprovalOption, type ApprovalProps, type ApprovalRanking, type ApprovalRequest, type ApprovalSelection, type ColumnDef, type ConnectRequest, type ContinueAsNewProps, type CreateScorerConfig, type CreateSmithersApi, type CreateSmithersOptions, type CursorAgentOptions, type DepsSpec, type EventFrame, type ExternalSmithersConfig, type GatewayAuthConfig, type GatewayDefaults, type GatewayOperatorUiConfig, type GatewayOptions, type GatewayRegisterOptions, type GatewayTokenGrant, type GatewayUiConfig, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GraphSnapshot, type HelloResponse, type HermesAgentOptions, type HermesCliAgentOptions, type HindsightMemoryStoreOptions, type HostContainer, type HostNodeJson, type InferDeps, type InferOutputEntry, type InferRow, type JjRevertResult, type KanbanProps, type KnownSmithersErrorCode, type LlmJudgeConfig, type MemoryFact, type MemoryLayerConfig, type MemoryMessage, type MemoryNamespace, type MemoryNamespaceKind, type MemoryProcessor, type MemoryProcessorConfig, type MemoryProps, type MemoryServiceApi, type MemoryStore, type MemoryThread, type MessageHistoryConfig, type MigrateSmithersStoreOptions, type MonitorCondition, type MonitorProps, type OmpAgentOptions, type OpenAIAgentOptions, type OpenApiAuth, type OpenApiSpec, type OpenApiToolsOptions, type OpenClawAgentOptions, type OpenCodeAgentOptions, type OpenSmithersBackendOptions, type OutputAccessor, type OutputKey, type OutputTarget, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type PollerProps, type PoolAgentOptions, type ProofBinding, type RequestFrame, type ResolvedSmithersObservabilityOptions, type ResponseFrame, type RevertOptions, type RevertResult, type RunJjOptions, type RunJjResult, type RunOptions, type RunResult, type RunStartedBy, type RunStatus, type SagaProps, type SagaStepDef, type SagaStepProps, type SamplingConfig, type SandboxProps, type SandboxRuntime, type SandboxVolumeMount, type SandboxWorkspaceSpec, type SchemaRegistryEntry, type ScoreResult, type ScoreRow, type Scorer, type ScorerBinding, type ScorerContext, type ScorerFn, type ScorerInput, type ScorersMap, type SemanticRecallConfig, type SerializedCtx, type ServeOptions, type ServerOptions, type SignalProps, type SmithersAlertLabels, type SmithersAlertPolicy, type SmithersAlertPolicyDefaults, type SmithersAlertPolicyRule, type SmithersAlertReaction, type SmithersAlertReactionKind, type SmithersAlertReactionRef, type SmithersAlertSeverity, type SmithersCtx, type SmithersError, type SmithersErrorCode, type SmithersErrorReport, type SmithersEvent, type SmithersLogFormat, type SmithersMigrationResult, type SmithersObservabilityOptions, type SmithersObservabilityService, type SmithersWorkflow, type SmithersWorkflowOptions, type TUIProps, type TaskDescriptor, type TaskMemoryConfig, type TaskProps, type TimeTravelOptions, type TimeTravelResult, type TimerProps, type TrellisProps, type TryCatchFinallyProps, type UIProps, type VibeAgentOptions, type WaitForEventProps, type WorkflowViewBootProps, type WorkflowViewProps, type WorkingMemoryConfig, type WorkspaceAddOptions, type WorkspaceInfo, type WorkspaceResult, type XmlElement, type XmlNode, type XmlText, bash, createExternalSmithers, createSmithers, createSmithersCloudflare, createSmithersPostgres, defineTool, edit, getDefinedToolMetadata, grep, mdxPlugin, migrateSmithersStore, openSmithersBackend, openSmithersStore, read, resolveSmithersBackendChoice, tools, write };
+export { type AgentCapabilityRegistry, type AgentLike, type AgentToolDescriptor, type AggregateOptions, type AggregateScore, type AnthropicAgentOptions, type ApprovalAutoApprove, type ApprovalDecision, type ApprovalMode, type ApprovalOption, type ApprovalProps, type ApprovalRanking, type ApprovalRequest, type ApprovalSelection, type ColumnDef, type ConnectRequest, type ContinueAsNewProps, type CreateScorerConfig, type CreateSmithersApi, type CreateSmithersOptions, type CursorAgentOptions, type DepsSpec, type EventFrame, type ExternalSmithersConfig, type GatewayAuthConfig, type GatewayDefaults, type GatewayOperatorUiConfig, type GatewayOptions, type GatewayRegisterOptions, type GatewayTokenGrant, type GatewayUiConfig, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GraphSnapshot, type HelloResponse, type HermesAgentOptions, type HermesCliAgentOptions, type HindsightMemoryStoreOptions, type HostContainer, type HostNodeJson, type InferDeps, type InferOutputEntry, type InferRow, type JjRevertResult, type KanbanProps, type KnownSmithersErrorCode, type LlmJudgeConfig, type MemoryFact, type MemoryLayerConfig, type MemoryMessage, type MemoryNamespace, type MemoryNamespaceKind, type MemoryProcessor, type MemoryProcessorConfig, type MemoryProps, type MemoryServiceApi, type MemoryStore, type MemoryThread, type MessageHistoryConfig, type MigrateSmithersStoreOptions, type MonitorCondition, type MonitorProps, type OmpAgentOptions, type OpenAIAgentOptions, type OpenApiAuth, type OpenApiSpec, type OpenApiToolsOptions, type OpenClawAgentOptions, type OpenCodeAgentOptions, type OpenSmithersBackendOptions, type OutputAccessor, type OutputKey, type OutputTarget, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type PollerProps, type PoolAgentOptions, type ProofBinding, type RequestFrame, type ResolvedSmithersObservabilityOptions, type ResponseFrame, type RevertOptions, type RevertResult, type RunJjOptions, type RunJjResult, type RunOptions, type RunResult, type RunStartedBy, type RunStatus, type SagaProps, type SagaStepDef, type SagaStepProps, type SamplingConfig, type SandboxProps, type SandboxRuntime, type SandboxVolumeMount, type SandboxWorkspaceSpec, type SchemaRegistryEntry, type ScoreResult, type ScoreRow, type Scorer, type ScorerBinding, type ScorerContext, type ScorerFn, type ScorerInput, type ScorersMap, type SemanticRecallConfig, type SerializedCtx, type ServeOptions, type ServerOptions, type SignalProps, type SmithersAlertLabels, type SmithersAlertPolicy, type SmithersAlertPolicyDefaults, type SmithersAlertPolicyRule, type SmithersAlertReaction, type SmithersAlertReactionKind, type SmithersAlertReactionRef, type SmithersAlertSeverity, type SmithersCtx, type SmithersError, type SmithersErrorCode, type SmithersErrorReport, type SmithersEvent, type SmithersLogFormat, type SmithersMigrationResult, type SmithersObservabilityOptions, type SmithersObservabilityService, type SmithersWorkflow, type SmithersWorkflowOptions, type TUIProps, type TaskDescriptor, type TaskMemoryConfig, type TaskProps, type TimeTravelOptions, type TimeTravelResult, type TimerProps, type TrellisProps, type TryCatchFinallyProps, type UIProps, type VibeAgentOptions, type WaitForEventProps, type WorkflowViewBootProps, type WorkflowViewProps, type WorkingMemoryConfig, type WorkspaceAddOptions, type WorkspaceInfo, type WorkspaceResult, type XmlElement, type XmlNode, type XmlText, bash, createExternalSmithers, createSmithers, createSmithersCloudflare, createSmithersPostgres, defineTool, edit, getDefinedToolMetadata, grep, mdxPlugin, migrateSmithersStore, openSmithersBackend, openSmithersStore, read, resolveSmithersBackendChoice, resolveSmithersBackendPreference, tools, write };

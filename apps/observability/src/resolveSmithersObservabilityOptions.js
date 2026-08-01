@@ -25,7 +25,7 @@ function resolveLogLevel(value) {
       return LogLevel.Debug;
     case "warning":
     case "warn":
-      return LogLevel.Warning;
+      return LogLevel.Warn;
     case "error":
       return LogLevel.Error;
     case "fatal":

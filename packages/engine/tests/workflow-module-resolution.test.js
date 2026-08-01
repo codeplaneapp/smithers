@@ -1,4 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -39,6 +40,21 @@ test("package fixture copies exclude workspace-local Smithers runtime state", ()
 
   expect(existsSync(join(destination, "package.json"))).toBe(true);
   expect(existsSync(join(destination, ".smithers"))).toBe(false);
+});
+
+test("preloaded React remains require-compatible after workflow aliases install", () => {
+  const resolutionUrl = new URL("../src/workflow-module-resolution.js", import.meta.url).href;
+  const script = [
+    'await import("react");',
+    `await import(${JSON.stringify(resolutionUrl)});`,
+    'await import("data:text/javascript,import React from %22react%22; export default React;");',
+    'await import("react-dom/client");',
+  ].join("\n");
+  const child = spawnSync(process.execPath, ["-e", script], {
+    cwd: dirname(require.resolve("react/package.json")),
+    encoding: "utf8",
+  });
+  expect(child.status, child.stderr).toBe(0);
 });
 
 test("workflow imports use the engine React and Smithers modules over pack-local copies", async () => {

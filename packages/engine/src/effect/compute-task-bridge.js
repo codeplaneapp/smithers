@@ -1,4 +1,4 @@
-import { Cause, Duration, Effect, Either, Exit, Metric, Schedule } from "effect";
+import { Cause, Duration, Effect, Exit, Metric, Result, Schedule } from "effect";
 import { buildOutputRow, stripAutoColumns, validateOutput } from "@smithers-orchestrator/db/output";
 import { TaskHeartbeatTimeout } from "@smithers-orchestrator/errors/TaskHeartbeatTimeout";
 import { TaskTimeout } from "@smithers-orchestrator/errors/TaskTimeout";
@@ -687,13 +687,13 @@ export const executeComputeTaskBridge = async (
       checkHeartbeat,
       Schedule.spaced(Duration.millis(TASK_HEARTBEAT_TIMEOUT_CHECK_MS)),
     ).pipe(Effect.flatMap(() => Effect.never));
-    const raced = await Effect.runPromise(Effect.race(Effect.either(taskEffect), Effect.either(watchdog)), {
+    const raced = await Effect.runPromise(Effect.race(Effect.result(taskEffect), Effect.result(watchdog)), {
       signal: taskSignal,
     });
-    if (Either.isLeft(raced)) {
-      throw raced.left;
+    if (Result.isFailure(raced)) {
+      throw raced.failure;
     }
-    return raced.right;
+    return raced.success;
   };
   const attemptMeta = {
     kind: "compute",
@@ -824,7 +824,7 @@ export const executeComputeTaskBridge = async (
     if (timeoutMs) {
       computeEffect = computeEffect.pipe(
         Effect.timeout(Duration.millis(timeoutMs)),
-        Effect.catchIf(Cause.isTimeoutException, () =>
+        Effect.catchIf(Cause.isTimeoutError, () =>
           Effect.fail(
             new TaskTimeout({
               message: `Compute callback timed out after ${timeoutMs}ms`,

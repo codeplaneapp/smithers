@@ -3,7 +3,7 @@ import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
 import { parseSubflowChildRunId } from "@smithers-orchestrator/graph/subflow-run-lineage";
 import { revertToJjPointer } from "@smithers-orchestrator/vcs/jj";
 import { markResetCancelledMeta } from "./resetCancelMarker.js";
-import * as BunContext from "@effect/platform-bun/BunContext";
+import * as BunContext from "@effect/platform-bun/BunServices";
 import { acquireRewindLock, resolveRewindLeaseRunId } from "./acquireRewindLock.js";
 import { writeRewindAuditRow } from "./writeRewindAuditRow.js";
 import { updateRewindAuditRow } from "./updateRewindAuditRow.js";

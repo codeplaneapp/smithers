@@ -17,7 +17,7 @@ import { getTableName } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm/utils";
 import { createHash } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { Effect, Exit, FiberId, Metric } from "effect";
+import { Effect, Exit, Metric } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { getSqlMessageStorage } from "./sql-message-storage.js";
@@ -31,6 +31,10 @@ import {
   dbTransactionDuration,
   dbTransactionRollbacks,
 } from "@smithers-orchestrator/observability/metrics";
+
+function incrementGauge(metric, delta) {
+  return Metric.value(metric).pipe(Effect.flatMap((state) => Metric.update(metric, Number(state.value) + delta)));
+}
 import {
   assertOptionalStringMaxLength,
   assertPositiveFiniteInteger,
@@ -521,7 +525,10 @@ function isAlertActiveStatus(status) {
  * @returns {RunnableEffect<A, E>}
  */
 function runnableEffect(effect) {
-  const runnable = effect;
+  // Keep the thenable wrapper distinct from the Effect. Fast-path Effects such
+  // as Effect.succeed are also Exit values; mutating one with `.then` makes
+  // Effect.runPromise resolve the Exit as a thenable and recurse forever.
+  const runnable = Effect.suspend(() => effect);
   if (typeof runnable.then !== "function") {
     Object.defineProperty(runnable, "then", {
       configurable: true,
@@ -665,7 +672,7 @@ function recoverOutputRead(operation, error) {
       dbOperation: operation,
       errorCode: /** @type {{ code?: unknown }} */ (error)?.code ?? "UNKNOWN",
     }),
-    Effect.zipRight(Effect.fail(error)),
+    Effect.andThen(Effect.fail(error)),
   );
 }
 /**
@@ -914,10 +921,8 @@ export class SmithersDb {
               details: { operation: label },
             }),
         });
-        const currentFiberId = yield* Effect.fiberId;
-        const currentFiberThread = FiberId.threadName(currentFiberId);
         let result;
-        if (self.ownsActiveTransaction(currentFiberThread)) {
+        if (self.ownsActiveTransaction()) {
           result = yield* readOperation;
         } else {
           // Acquire the turn and install its release atomically under
@@ -956,10 +961,8 @@ export class SmithersDb {
               details: { operation: label },
             }),
         });
-        const currentFiberId = yield* Effect.fiberId;
-        const currentFiberThread = FiberId.threadName(currentFiberId);
         let result;
-        if (self.ownsActiveTransaction(currentFiberThread)) {
+        if (self.ownsActiveTransaction()) {
           result = yield* writeOperation;
         } else {
           result = yield* Effect.acquireUseRelease(
@@ -999,7 +1002,7 @@ export class SmithersDb {
                           recordCommittedTxid(self, capturedTxid);
                           return value;
                         }).pipe(
-                          Effect.catchAll((error) =>
+                          Effect.catch((error) =>
                             Effect.gen(function* () {
                               yield* Effect.promise(() =>
                                 self.internalStorage.execute("ROLLBACK").then(
@@ -1088,9 +1091,7 @@ export class SmithersDb {
       withSqliteWriteRetryEffect(
         () =>
           Effect.gen(function* () {
-            const currentFiberId = yield* Effect.fiberId;
-            const currentFiberThread = FiberId.threadName(currentFiberId);
-            if (self.ownsActiveTransaction(currentFiberThread)) {
+            if (self.ownsActiveTransaction()) {
               return yield* Effect.fail(
                 toSmithersError(
                   new Error(`Nested sqlite transactions are not supported (writeGroup: ${writeGroup}).`),
@@ -1165,7 +1166,7 @@ export class SmithersDb {
                      */
                     const rollback = (phase, error) =>
                       Effect.gen(function* () {
-                        yield* Metric.increment(dbTransactionRollbacks);
+                        yield* Metric.update(dbTransactionRollbacks, 1);
                         yield* Effect.logWarning("transaction rollback").pipe(
                           Effect.annotateLogs({
                             writeGroup,
@@ -2179,7 +2180,7 @@ export class SmithersDb {
         );
         const row = stmt.get(runId, nodeId);
         return Promise.resolve(coerceRawBooleanColumns(row ?? null, boolColumns) ?? null);
-      }).pipe(Effect.catchAll((error) => recoverOutputRead(`get raw node output ${tableName}`, error))),
+      }).pipe(Effect.catch((error) => recoverOutputRead(`get raw node output ${tableName}`, error))),
     );
   }
   /**
@@ -2210,7 +2211,7 @@ export class SmithersDb {
         const client = this.db.session.client;
         const stmt = client.query(`SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1`);
         return Promise.resolve(stmt.get(tableName) != null);
-      }).pipe(Effect.catchAll(() => Effect.succeed(false))),
+      }).pipe(Effect.catch(() => Effect.succeed(false))),
     );
   }
   getRawNodeOutputForIteration(tableName, runId, nodeId, iteration) {
@@ -2249,7 +2250,7 @@ export class SmithersDb {
         const row = stmt.get(runId, nodeId, iteration);
         return Promise.resolve(coerceRawBooleanColumns(row ?? null, boolColumns) ?? null);
       }).pipe(
-        Effect.catchAll((error) => recoverOutputRead(`get raw node output ${tableName} iteration ${iteration}`, error)),
+        Effect.catch((error) => recoverOutputRead(`get raw node output ${tableName} iteration ${iteration}`, error)),
       ),
     );
   }
@@ -2362,11 +2363,12 @@ export class SmithersDb {
     // only updating the attempt would leave stale-owner evidence visible to
     // the monitor.
     const ownerId = runtimeOwnerId ?? null;
+    const self = this;
     return this.withTransactionEffect(
       `heartbeat attempt ${nodeId}#${attempt}`,
-      Effect.gen(this, function* () {
+      Effect.gen(function* () {
         const runUpdated = yield* Effect.tryPromise(() =>
-          this.internalStorage
+          self.internalStorage
             .updateWhere(
               "_smithers_runs",
               { heartbeatAtMs },
@@ -2378,7 +2380,7 @@ export class SmithersDb {
         if (!runUpdated)
           return yield* Effect.fail(new SmithersError("HEARTBEAT_FENCE_LOST", "Task heartbeat run fence lost."));
         const updated = yield* Effect.tryPromise(() =>
-          this.internalStorage
+          self.internalStorage
             .updateWhere(
               "_smithers_attempts",
               {
@@ -2395,7 +2397,7 @@ export class SmithersDb {
         return true;
       }),
     ).pipe(
-      Effect.catchAll((error) => {
+      Effect.catch((error) => {
         if (error instanceof SmithersError && error.code === "HEARTBEAT_FENCE_LOST") return Effect.succeed(false);
         return Effect.fail(error);
       }),
@@ -2836,11 +2838,14 @@ export class SmithersDb {
         yield* self.write(`insert alert ${row.alertId}`, () =>
           self.internalStorage.insertIgnore("_smithers_alerts", row),
         );
-        yield* Metric.increment(
-          Metric.tagged(Metric.tagged(alertsFiredTotal, "policy", row.policyName), "severity", row.severity),
+        yield* Metric.update(
+          Metric.withAttributes(Metric.withAttributes(alertsFiredTotal, { ["policy"]: String(row.policyName) }), {
+            ["severity"]: String(row.severity),
+          }),
+          1,
         );
         if (isAlertActiveStatus(row.status)) {
-          yield* Metric.update(alertsActive, 1);
+          yield* incrementGauge(alertsActive, 1);
         }
         return yield* self.getAlert(row.alertId);
       }),
@@ -2927,7 +2932,10 @@ export class SmithersDb {
             [alertId, "firing"],
           ),
         );
-        yield* Metric.increment(Metric.tagged(alertsAcknowledgedTotal, "policy", alert.policyName));
+        yield* Metric.update(
+          Metric.withAttributes(alertsAcknowledgedTotal, { ["policy"]: String(alert.policyName) }),
+          1,
+        );
         return yield* self.getAlert(alertId);
       }),
     );
@@ -2961,7 +2969,7 @@ export class SmithersDb {
           ),
         );
         if (isAlertActiveStatus(alert.status)) {
-          yield* Metric.update(alertsActive, -1);
+          yield* incrementGauge(alertsActive, -1);
         }
         return yield* self.getAlert(alertId);
       }),
@@ -3113,7 +3121,7 @@ export class SmithersDb {
                       }
                       return seq;
                     }).pipe(
-                      Effect.catchAll((error) =>
+                      Effect.catch((error) =>
                         Effect.gen(function* () {
                           if (captureTxidForWrite) {
                             yield* Effect.promise(() =>
@@ -3645,7 +3653,7 @@ export class SmithersDb {
                       }
                       return seq;
                     }).pipe(
-                      Effect.catchAll((error) =>
+                      Effect.catch((error) =>
                         Effect.gen(function* () {
                           if (captureTxidForWrite) {
                             yield* Effect.promise(() =>

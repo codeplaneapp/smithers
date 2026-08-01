@@ -1,5 +1,5 @@
 import { format, inspect } from "node:util";
-import { Cause, Layer, Logger, LogLevel } from "effect";
+import { Cause, Layer, Logger, LogLevel, References } from "effect";
 import pc from "picocolors";
 
 type JsonModeState = {
@@ -9,7 +9,11 @@ type JsonModeState = {
 
 const STATE_KEY = Symbol.for("smithers.cli.jsonMode");
 const ANSI_RE = /\x1B\[[0-9;]*m/g;
-type CliLoggerOptions = Parameters<typeof Logger.stringLogger.log>[0];
+type CliLoggerOptions = Parameters<typeof Logger.formatLogFmt.log>[0];
+type LegacyCliLoggerOptions = CliLoggerOptions & {
+  readonly annotations?: ReadonlyMap<string, unknown>;
+  readonly spans?: Iterable<{ readonly label: string; readonly startTime: number }>;
+};
 
 function getState(): JsonModeState {
   const globalState = globalThis as typeof globalThis & {
@@ -37,26 +41,26 @@ function writeConsoleArgsToStderr(args: ReadonlyArray<unknown>): void {
 export function resolveCliLogLevel(value: string | undefined = process.env.SMITHERS_LOG_LEVEL): LogLevel.LogLevel {
   switch ((value ?? "info").toLowerCase()) {
     case "all":
-      return LogLevel.All;
+      return "All";
     case "trace":
-      return LogLevel.Trace;
+      return "Trace";
     case "debug":
-      return LogLevel.Debug;
+      return "Debug";
     case "info":
-      return LogLevel.Info;
+      return "Info";
     case "warning":
     case "warn":
-      return LogLevel.Warning;
+      return "Warn";
     case "error":
-      return LogLevel.Error;
+      return "Error";
     case "fatal":
-      return LogLevel.Fatal;
+      return "Fatal";
     case "none":
     case "off":
     case "silent":
-      return LogLevel.None;
+      return "None";
     default:
-      return LogLevel.Warning;
+      return "Warn";
   }
 }
 
@@ -64,7 +68,7 @@ export function shouldEmitLogLevel(
   logLevel: LogLevel.LogLevel,
   minimum: LogLevel.LogLevel = resolveCliLogLevel(),
 ): boolean {
-  return logLevel.ordinal >= minimum.ordinal;
+  return LogLevel.isGreaterThanOrEqualTo(logLevel, minimum);
 }
 
 function visibleLength(value: string): number {
@@ -127,13 +131,13 @@ function formatDetailValue(value: unknown): string {
 }
 
 function styleLevel(logLevel: LogLevel.LogLevel): string {
-  const label = (logLevel.label === "WARN" ? "warn" : logLevel.label.toLowerCase()).padEnd(5);
-  switch (logLevel._tag) {
+  const label = logLevel.toLowerCase().padEnd(5);
+  switch (logLevel) {
     case "Fatal":
       return pc.bgRed(pc.white(label));
     case "Error":
       return pc.red(label);
-    case "Warning":
+    case "Warn":
       return pc.yellow(label);
     case "Info":
       return pc.cyan(label);
@@ -148,15 +152,19 @@ function styleLevel(logLevel: LogLevel.LogLevel): string {
 function formatLogDetails(options: CliLoggerOptions): string[] {
   const details: string[] = [];
   const now = options.date.getTime();
-  for (const span of options.spans) {
-    details.push(`${span.label}=${Math.max(0, now - span.startTime)}ms`);
+  const legacy = options as LegacyCliLoggerOptions;
+  const spans = legacy.spans ?? options.fiber.getRef(References.CurrentLogSpans);
+  const annotations = legacy.annotations ?? Object.entries(options.fiber.getRef(References.CurrentLogAnnotations));
+  for (const span of spans) {
+    const [label, startTime] = Array.isArray(span) ? span : [span.label, span.startTime];
+    details.push(`${label}=${Math.max(0, now - startTime)}ms`);
   }
-  for (const [key, value] of options.annotations) {
+  for (const [key, value] of annotations) {
     if (key === "service" && value === "smithers") continue;
     details.push(`${key}=${formatDetailValue(value)}`);
   }
-  if (!Cause.isEmpty(options.cause)) {
-    details.push(`cause=${Cause.pretty(options.cause, { renderErrorCause: true }).replace(/\s+/g, " ")}`);
+  if (options.cause.reasons.length > 0) {
+    details.push(`cause=${Cause.pretty(options.cause).replace(/\s+/g, " ")}`);
   }
   return details;
 }
@@ -218,14 +226,14 @@ export function installJsonModeConsoleRouting(): void {
 
 export const smithersEffectLogger = Logger.make<unknown, void>((options) => {
   if (!shouldEmitLogLevel(options.logLevel)) return;
-  const line = isJsonMode() ? Logger.stringLogger.log(options) : formatCliLogLine(options);
+  const line = isJsonMode() ? Logger.formatLogFmt.log(options) : formatCliLogLine(options);
   const stream = isJsonMode() ? process.stderr : process.stdout;
   stream.write(`${line}\n`);
 });
 
 export const SmithersLoggerLayer = Layer.mergeAll(
-  Logger.replace(Logger.defaultLogger, smithersEffectLogger),
-  Logger.minimumLogLevel(resolveCliLogLevel()),
+  Logger.layer([smithersEffectLogger]),
+  Layer.succeed(References.MinimumLogLevel, resolveCliLogLevel()),
 );
 
 installJsonModeConsoleRouting();

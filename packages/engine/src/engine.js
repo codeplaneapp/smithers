@@ -679,7 +679,7 @@ async function runPromisePreservingFailure(effect) {
   if (Exit.isSuccess(exit)) {
     return exit.value;
   }
-  const failure = Cause.failureOption(exit.cause);
+  const failure = Cause.findErrorOption(exit.cause);
   if (failure._tag === "Some") {
     throw failure.value;
   }
@@ -3666,7 +3666,7 @@ export function applyConcurrencyLimits(runnable, stateMap, maxConcurrency, allTa
     }
   }
   void Effect.runPromise(
-    Metric.set(schedulerConcurrencyUtilization, maxConcurrency > 0 ? inProgressTotal / maxConcurrency : 0),
+    Metric.update(schedulerConcurrencyUtilization, maxConcurrency > 0 ? inProgressTotal / maxConcurrency : 0),
   );
   const capacity = Math.max(0, maxConcurrency - inProgressTotal);
   const ordered = runnable.some((desc) => descriptorPriority(desc) !== 0)
@@ -4752,7 +4752,7 @@ async function legacyExecuteTask(
           const expired =
             cachePolicyTtlMs !== null && Number.isFinite(createdAtMs) && nowMs() - createdAtMs >= cachePolicyTtlMs;
           if (expired) {
-            void Effect.runPromise(Metric.increment(cacheMisses));
+            void Effect.runPromise(Metric.update(cacheMisses, 1));
             logInfo(
               "cache entry expired for task output",
               {
@@ -4790,7 +4790,7 @@ async function legacyExecuteTask(
             if (valid.ok) {
               payload = valid.data;
               cached = true;
-              void Effect.runPromise(Metric.increment(cacheHits));
+              void Effect.runPromise(Metric.update(cacheHits, 1));
               logInfo(
                 "cache hit for task output",
                 {
@@ -4803,7 +4803,7 @@ async function legacyExecuteTask(
                 "engine:task-cache",
               );
             } else {
-              void Effect.runPromise(Metric.increment(cacheMisses));
+              void Effect.runPromise(Metric.update(cacheMisses, 1));
             }
           }
         } else {
@@ -4821,7 +4821,7 @@ async function legacyExecuteTask(
               "engine:task-cache",
             );
           }
-          void Effect.runPromise(Metric.increment(cacheMisses));
+          void Effect.runPromise(Metric.update(cacheMisses, 1));
         }
       }
     }
@@ -7144,23 +7144,14 @@ async function releaseResumeClaimQuietly(adapter, runId, cleanup) {
   }
 }
 /**
- * @param {SmithersDb} adapter
+ * Validate the read-only resume preconditions before rendering a candidate
+ * workflow graph. Activation repeats these checks immediately before claiming
+ * the run so ownership changes during the render still fail closed.
+ *
  * @param {RunRow | null | undefined} existingRun
  * @param {RunOptions} opts
- * @param {string} runtimeOwnerId
- * @param {string} runConfigJson
- * @param {RunDurabilityMetadata} runMetadata
- * @param {string | null} workflowPath
  */
-async function activateRunForResume(
-  adapter,
-  existingRun,
-  opts,
-  runtimeOwnerId,
-  runConfigJson,
-  runMetadata,
-  workflowPath,
-) {
+function assertResumeActivationPreconditions(existingRun, opts) {
   if (!isResumableRunStatus(existingRun?.status)) {
     throw new SmithersError(
       "RUN_NOT_RESUMABLE",
@@ -7179,6 +7170,32 @@ async function activateRunForResume(
       ownerPid,
     });
   }
+  if (!opts.resumeClaim && existingRun.status === "running" && isRunHeartbeatFresh(existingRun) && !opts.force) {
+    throw new SmithersError("RUN_STILL_RUNNING", `Run ${existingRun.runId} is still actively running.`, {
+      runId: existingRun.runId,
+      heartbeatAtMs: existingRun.heartbeatAtMs ?? null,
+    });
+  }
+}
+/**
+ * @param {SmithersDb} adapter
+ * @param {RunRow | null | undefined} existingRun
+ * @param {RunOptions} opts
+ * @param {string} runtimeOwnerId
+ * @param {string} runConfigJson
+ * @param {RunDurabilityMetadata} runMetadata
+ * @param {string | null} workflowPath
+ */
+async function activateRunForResume(
+  adapter,
+  existingRun,
+  opts,
+  runtimeOwnerId,
+  runConfigJson,
+  runMetadata,
+  workflowPath,
+) {
+  assertResumeActivationPreconditions(existingRun, opts);
   const claimOwnerId = opts.resumeClaim?.claimOwnerId ?? runtimeOwnerId;
   const claimHeartbeatAtMs = opts.resumeClaim?.claimHeartbeatAtMs ?? nowMs();
   const cleanup = {
@@ -7207,15 +7224,6 @@ async function activateRunForResume(
       }
       claimHeld = true;
     } else {
-      if (existingRun.status === "running") {
-        const fresh = isRunHeartbeatFresh(existingRun);
-        if (fresh && !opts.force) {
-          throw new SmithersError("RUN_STILL_RUNNING", `Run ${existingRun.runId} is still actively running.`, {
-            runId: existingRun.runId,
-            heartbeatAtMs: existingRun.heartbeatAtMs ?? null,
-          });
-        }
-      }
       const claimed = await Effect.runPromise(
         adapter.claimRunForResume({
           runId: existingRun.runId,
@@ -8990,6 +8998,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
     } else if (opts.resume && !existingRun) {
       throw new SmithersError("RUN_NOT_FOUND", `Cannot resume run ${runId} because it does not exist.`, { runId });
     }
+    if (opts.resume && existingRun) {
+      assertResumeActivationPreconditions(existingRun, opts);
+    }
     if (!opts.resume) {
       assertInputObject(opts.input);
       if ("runId" in opts.input && opts.input.runId !== runId) {
@@ -9096,7 +9107,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
       }
       await cancelStaleAttempts(adapter, runId);
       if (opts.resume) {
-        void Effect.runPromise(Metric.increment(runsResumedTotal));
+        void Effect.runPromise(Metric.update(runsResumedTotal, 1));
         const staleInProgress = await Effect.runPromise(adapter.listInProgressAttempts(runId));
         const now = nowMs();
         for (const attempt of staleInProgress) {

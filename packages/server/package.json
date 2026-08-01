@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/server",
-  "version": "0.31.1",
+  "version": "0.32.0",
   "description": "HTTP, WebSocket, gateway, cron, webhook, and metrics servers for Smithers",
   "type": "module",
   "sideEffects": false,
@@ -25,7 +25,6 @@
     "build": "rm -f src/index.d.ts && node ../../node_modules/tsup/dist/cli-default.js --dts-only"
   },
   "dependencies": {
-    "@effect/workflow": "^0.18.2",
     "@smithers-orchestrator/accounts": "workspace:*",
     "@smithers-orchestrator/components": "workspace:*",
     "@smithers-orchestrator/db": "workspace:*",
@@ -44,7 +43,7 @@
     "@smithers-orchestrator/usage": "workspace:*",
     "cron-parser": "^5.6.1",
     "drizzle-orm": "^0.45.2",
-    "effect": "^3.21.4",
+    "effect": "4.0.0-beta.102",
     "hono": "^4.12.27",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

@@ -356,7 +356,7 @@ function App() {
   const activeRun = missionRuns.find((r) => r.runId === activeRunId);
 
   const runDetail = useGatewayRun(activeRunId);
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined });
   const approvalsQuery = useGatewayApprovals(activeRunId ? { filter: { runId: activeRunId } } : {});
 
   const planOutput = useGatewayNodeOutput({ runId: activeRunId, nodeId: "mission:plan", iteration: 0 });

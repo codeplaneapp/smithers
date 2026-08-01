@@ -1,9 +1,9 @@
-import { Metric, MetricBoundaries } from "effect";
+import { Metric } from "effect";
 
-const scorerBuckets = MetricBoundaries.exponential({
+const scorerBuckets = Metric.exponentialBoundaries({
   start: 10,
   factor: 2,
   count: 14,
 }); // ~10ms to ~80s
 
-export const scorerDuration = Metric.histogram("smithers.scorer.duration_ms", scorerBuckets);
+export const scorerDuration = Metric.histogram("smithers.scorer.duration_ms", { boundaries: scorerBuckets });

@@ -168,7 +168,7 @@ function App() {
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? skillRuns[0]?.runId;
   const activeRun = skillRuns.find((r) => r.runId === activeRunId);
 
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined });
   const collectQuery = useGatewayNodeOutput({ runId: activeRunId, nodeId: "collect", iteration: 0 });
   const writeQuery = useGatewayNodeOutput({ runId: activeRunId, nodeId: "write-skills", iteration: 0 });
 

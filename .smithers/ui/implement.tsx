@@ -208,7 +208,7 @@ function App() {
   );
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? implementRuns[0]?.runId;
   const activeRun = implementRuns.find((r) => r.runId === activeRunId);
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined });
 
   const implementOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "impl:implement", iteration: 0 });
   const validateOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "impl:validate", iteration: 0 });

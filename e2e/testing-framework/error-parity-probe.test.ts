@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { spawnCaptureEffect } from "@smithers-orchestrator/driver/child-process";
 import { isRetryableSqliteWriteError, withSqliteWriteRetry, withSqliteWriteRetryEffect } from "@smithers-orchestrator/db/write-retry";
 import * as engineModule from "@smithers-orchestrator/engine/engine";
@@ -73,9 +73,9 @@ describe("testing framework production error parity", () => {
       });
     };
     const production = async () => {
-      const result = await Effect.runPromise(Effect.either(spawnCaptureEffect(command, [], { cwd: process.cwd() })));
-      if (Either.isLeft(result)) throw result.left;
-      return result.right;
+      const result = await Effect.runPromise(Effect.result(spawnCaptureEffect(command, [], { cwd: process.cwd() })));
+      if (Result.isFailure(result)) throw result.failure;
+      return result.success;
     };
     const report = await contractProbe("driver.spawnCaptureEffect.missing-binary", production, () => { throw simulatedSpawnError(); }, probeOptions);
     expect(report.differences).toEqual([]);
@@ -299,15 +299,15 @@ describe("testing framework production error parity", () => {
       });
     try {
       const production = async () => {
-        const result = await Effect.runPromise(Effect.either(withSqliteWriteRetryEffect(
+        const result = await Effect.runPromise(Effect.result(withSqliteWriteRetryEffect(
           () => Effect.tryPromise({
             try: async () => { attempts++; victim.exec("INSERT INTO probe (v) VALUES ('blocked')"); },
             catch: (cause) => toSmithersError(cause, label, { code: "DB_WRITE_FAILED", details: { operation: label } }),
           }),
           { label, maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 2 },
         )));
-        if (Either.isLeft(result)) throw result.left;
-        return result.right;
+        if (Result.isFailure(result)) throw result.failure;
+        return result.success;
       };
       const report = await contractProbe(
         "db.smithersdb-write-boundary.held-lock-exhaustion",
@@ -394,7 +394,7 @@ describe("testing framework production error parity", () => {
     let pid: number | undefined;
     const spawnAndKill = async () => {
       pid = undefined;
-      const pending = Effect.runPromise(Effect.either(spawnCaptureEffect("sleep", ["30"], {
+      const pending = Effect.runPromise(Effect.result(spawnCaptureEffect("sleep", ["30"], {
         cwd: process.cwd(),
         onProcess: (event: { phase: string; pid?: number }) => { if (event.phase === "started") pid = event.pid; },
       })));
@@ -403,8 +403,8 @@ describe("testing framework production error parity", () => {
       expect(pid).toBeGreaterThan(0);
       process.kill(pid!, "SIGKILL");
       const result = await pending;
-      if (Either.isLeft(result)) throw result.left;
-      return result.right;
+      if (Result.isFailure(result)) throw result.failure;
+      return result.success;
     };
     const killedResult = { stdout: "", stderr: "", exitCode: null, stdoutTruncated: false, stderrTruncated: false };
     const report = await contractProbe("driver.spawnCaptureEffect.external-sigkill", spawnAndKill, () => killedResult, probeOptions);
@@ -445,13 +445,13 @@ describe("testing framework production error parity", () => {
   test("timeout family (retained, distinct from external SIGKILL): the production timeout path kills its own child", async () => {
     let pid: number | undefined;
     const production = async () => {
-      const result = await Effect.runPromise(Effect.either(spawnCaptureEffect("sleep", ["30"], {
+      const result = await Effect.runPromise(Effect.result(spawnCaptureEffect("sleep", ["30"], {
         cwd: process.cwd(),
         timeoutMs: 150,
         onProcess: (event: { phase: string; pid?: number }) => { if (event.phase === "started") pid = event.pid; },
       })));
-      if (Either.isLeft(result)) throw result.left;
-      return result.right;
+      if (Result.isFailure(result)) throw result.failure;
+      return result.success;
     };
     const simulatedTimeout = () => simulationSmithersError("PROCESS_TIMEOUT", "CLI timed out after 150ms", { details: { command: "sleep", args: ["30"], cwd: process.cwd(), timeoutMs: 150, idleTimeoutMs: undefined } });
     const report = await contractProbe(

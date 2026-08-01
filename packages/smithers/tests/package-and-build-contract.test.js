@@ -264,10 +264,12 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "node scripts/check-dts.mjs",
       "pnpm -C .smithers test:ddd",
       // Linux and Windows both run the weighted shard balancer; Linux package
-      // shards use the generous per-package timeout, the extras lane (shard 0)
-      // owns the serial gates.
+      // shards skip the graph smoke so it can run in a fresh, serialized Bun
+      // process, while the extras lane (shard 0) owns the serial gates.
       "node scripts/run-workspace-tests.mjs --shard",
       "--timeout-minutes 30",
+      'SMITHERS_SKIP_EXAMPLE_GRAPH_SMOKE: "1"',
+      "bun test --timeout=900000 --max-concurrency=1 apps/cli/tests/examples-graph-smoke.test.js",
       "matrix.shard == 0",
       "bun test examples/bun-port-smithers/components/porting-rules.test.ts examples/context-handoff/workflow.test.ts",
       "bun test --timeout=120000 apps/cli/tests/tui-zmux.e2e.test.js",

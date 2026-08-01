@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/time-travel",
-  "version": "0.31.1",
+  "version": "0.32.0",
   "description": "Smithers snapshots, diffs, forks, replay, timelines, and VCS-tagged run history",
   "type": "module",
   "sideEffects": false,
@@ -50,8 +50,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@effect/platform": "^0.96.2",
-    "@effect/platform-bun": "^0.90.0",
+    "@effect/platform-bun": "4.0.0-beta.102",
     "@smithers-orchestrator/db": "workspace:*",
     "@smithers-orchestrator/driver": "workspace:*",
     "@smithers-orchestrator/errors": "workspace:*",
@@ -61,7 +60,7 @@
     "@smithers-orchestrator/scheduler": "workspace:*",
     "@smithers-orchestrator/vcs": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "effect": "^3.21.4",
+    "effect": "4.0.0-beta.102",
     "picocolors": "^1.1.1"
   },
   "devDependencies": {

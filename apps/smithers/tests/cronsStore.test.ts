@@ -24,7 +24,7 @@ beforeEach(() => {
 });
 
 describe("crons store toggle", () => {
-  test("ignores a second toggle while the same cron replacement is in flight", async () => {
+  test("upserts the existing cron once while the same toggle is in flight", async () => {
     const created: unknown[] = [];
     const removed: unknown[] = [];
     let releaseCreate!: () => void;
@@ -44,29 +44,29 @@ describe("crons store toggle", () => {
     useCronsStore.getState().toggle(enabledCron.id);
     useCronsStore.getState().toggle(enabledCron.id);
 
-    expect(created).toEqual([{ workflow: "nightly", pattern: "0 3 * * *", enabled: false }]);
+    expect(created).toEqual([{ workflow: "nightly", pattern: "0 3 * * *", cronId: "cron-old", enabled: false }]);
     expect(useCronsStore.getState().pendingToggleKeys).toHaveLength(1);
     releaseCreate();
     for (let index = 0; index < 100 && useCronsStore.getState().pendingToggleKeys.length > 0; index += 1) {
       await Bun.sleep(1);
     }
 
-    expect(removed).toEqual([{ cronId: "cron-old" }]);
+    expect(removed).toEqual([]);
     expect(useCronsStore.getState().crons).toEqual([expect.objectContaining({ id: "cron-old", enabled: false })]);
     expect(useCronsStore.getState().pendingToggleKeys).toEqual([]);
   });
 
-  test("does not claim an enabled cron was disabled when deleting the old row fails", async () => {
+  test("rolls back and does not claim success when the upsert fails", async () => {
     const created: unknown[] = [];
     const removed: unknown[] = [];
     let refetches = 0;
     bindCronActions({
       create: async (vars) => {
         created.push(vars);
+        throw new Error("write unavailable");
       },
       remove: async (vars) => {
         removed.push(vars);
-        throw new Error("delete unavailable");
       },
       refetch: async () => {
         refetches += 1;
@@ -78,17 +78,12 @@ describe("crons store toggle", () => {
       await Bun.sleep(1);
     }
 
-    expect(created).toEqual([{ workflow: "nightly", pattern: "0 3 * * *", enabled: false }]);
-    expect(removed).toEqual([{ cronId: "cron-old" }]);
+    expect(created).toEqual([{ workflow: "nightly", pattern: "0 3 * * *", cronId: "cron-old", enabled: false }]);
+    expect(removed).toEqual([]);
     expect(refetches).toBe(1);
-    expect(useCronsStore.getState().actionError).toContain("old schedule is still active");
-    expect(useNotificationsStore.getState().notifications).toEqual([
-      expect.objectContaining({
-        title: "Trigger still active",
-        detail: "nightly · 0 3 * * *",
-        status: "failed",
-      }),
-    ]);
+    expect(useCronsStore.getState().actionError).toContain("write unavailable");
+    expect(useCronsStore.getState().crons).toEqual([expect.objectContaining({ id: "cron-old", enabled: true })]);
+    expect(useNotificationsStore.getState().notifications).toEqual([]);
     expect(useNotificationsStore.getState().notifications.some((item) => item.title === "Trigger disabled")).toBe(
       false,
     );

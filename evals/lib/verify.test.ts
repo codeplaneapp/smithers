@@ -7,7 +7,8 @@
 // was scored as correct, silently corrupting the scorecard. These exercise the
 // fix end-to-end against a real bun:sqlite fixture (no mocks).
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
@@ -245,6 +246,102 @@ import { z } from "zod/v4";`,
     );
     expect(verdict.passed).toBe(false);
     expect(verdict.checks.find((check) => check.name === "graph-renders")?.passed).toBe(false);
+  }, 30_000);
+
+  test("does not inherit credentials from the verifier process", async () => {
+    const credential = "SMITHERS_EVAL_TEST_CREDENTIAL";
+    process.env[credential] = "must-not-reach-candidate";
+    const credentialReadingWorkflow = workflow.replace(
+      'import { z } from "zod/v4";',
+      `if (process.env.${credential}) throw new Error("inherited verifier credential");
+import { z } from "zod/v4";`,
+    );
+    try {
+      const verdict = await computeVerdict(
+        workflowFilesSpec,
+        report(bundle({ ".smithers/workflows/hello.tsx": credentialReadingWorkflow })),
+      );
+      expect(verdict.passed, JSON.stringify(verdict, null, 2)).toBe(true);
+    } finally {
+      delete process.env[credential];
+    }
+  }, 30_000);
+
+  test("cannot write outside its private runtime directory", async () => {
+    const externalDir = mkdtempSync(join(tmpdir(), "verify-external-"));
+    const target = join(externalDir, "owned");
+    const writingWorkflow = workflow.replace(
+      'import { z } from "zod/v4";',
+      `import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(target)}, "owned");
+import { z } from "zod/v4";`,
+    );
+    try {
+      const verdict = await computeVerdict(
+        workflowFilesSpec,
+        report(bundle({ ".smithers/workflows/hello.tsx": writingWorkflow })),
+      );
+      expect(verdict.passed).toBe(false);
+      expect(existsSync(target)).toBe(false);
+    } finally {
+      rmSync(externalDir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test("cannot reach a listening network service", async () => {
+    const server = spawn(
+      process.execPath,
+      [
+        "-e",
+        'const server = Bun.serve({ port: 0, fetch: () => new Response("reachable") }); console.log(server.port); await new Promise(() => {});',
+      ],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    try {
+      const port = await new Promise<number>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("test server did not start")), 5_000);
+        server.once("error", reject);
+        server.stdout.once("data", (chunk) => {
+          clearTimeout(timer);
+          resolve(Number(String(chunk).trim()));
+        });
+      });
+      const networkingWorkflow = workflow.replace(
+        'import { z } from "zod/v4";',
+        `try {
+  await fetch("http://127.0.0.1:${port}");
+  throw new Error("candidate reached the network");
+} catch (error) {
+  if (error instanceof Error && error.message === "candidate reached the network") throw error;
+}
+import { z } from "zod/v4";`,
+      );
+      const verdict = await computeVerdict(
+        workflowFilesSpec,
+        report(bundle({ ".smithers/workflows/hello.tsx": networkingWorkflow })),
+      );
+      expect(verdict.passed, JSON.stringify(verdict, null, 2)).toBe(true);
+    } finally {
+      server.kill();
+    }
+  }, 30_000);
+
+  test("graph verification applies the same isolation to model-authored modules", async () => {
+    const externalDir = mkdtempSync(join(tmpdir(), "verify-graph-external-"));
+    const target = join(externalDir, "owned");
+    const writingWorkflow = workflow.replace(
+      'import { z } from "zod/v4";',
+      `import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(target)}, "owned");
+import { z } from "zod/v4";`,
+    );
+    try {
+      const verdict = await computeVerdict(spec({ kind: "graph" }), report(writingWorkflow));
+      expect(verdict.passed).toBe(false);
+      expect(existsSync(target)).toBe(false);
+    } finally {
+      rmSync(externalDir, { recursive: true, force: true });
+    }
   }, 30_000);
 });
 

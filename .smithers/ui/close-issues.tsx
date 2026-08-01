@@ -160,7 +160,7 @@ export function App() {
   const activeRun = runs.find((r) => r.runId === activeRunId);
 
   const runDetail = useGatewayRun(activeRunId);
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined });
   const approvalsQuery = useGatewayApprovals(activeRunId ? { filter: { runId: activeRunId } } : {});
   const discoverOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "discover", iteration: 0 });
 

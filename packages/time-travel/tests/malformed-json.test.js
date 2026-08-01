@@ -121,7 +121,7 @@ describe("forkRun with malformed JSON", () => {
     // The fork Effect must FAIL with a typed SmithersError, never DIE with a
     // raw SyntaxError defect.
     expect(Exit.isFailure(exit)).toBe(true);
-    const failure = Exit.isFailure(exit) ? Cause.failureOption(exit.cause) : undefined;
+    const failure = Exit.isFailure(exit) ? Cause.findErrorOption(exit.cause) : undefined;
     const err = failure && failure._tag === "Some" ? failure.value : undefined;
     expect(err).toBeInstanceOf(SmithersError);
     expect(err.summary).toContain("Corrupt snapshot data");
@@ -138,7 +138,7 @@ describe("forkRun with malformed JSON", () => {
       }),
     );
     expect(Exit.isFailure(exit)).toBe(true);
-    const failure = Exit.isFailure(exit) ? Cause.failureOption(exit.cause) : undefined;
+    const failure = Exit.isFailure(exit) ? Cause.findErrorOption(exit.cause) : undefined;
     const err = failure && failure._tag === "Some" ? failure.value : undefined;
     expect(err).toBeInstanceOf(SmithersError);
     expect(err.summary).toContain("Corrupt snapshot data");

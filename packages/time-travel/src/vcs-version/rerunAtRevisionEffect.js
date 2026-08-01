@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { revertToJjPointer } from "@smithers-orchestrator/vcs/jj";
 import { loadVcsTag } from "./loadVcsTagEffect.js";
-/** @typedef {import("@effect/platform/CommandExecutor").CommandExecutor} CommandExecutor */
+/** @typedef {import("effect/unstable/process/ChildProcessSpawner").CommandExecutor} CommandExecutor */
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
 

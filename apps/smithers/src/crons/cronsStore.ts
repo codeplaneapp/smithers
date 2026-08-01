@@ -11,10 +11,8 @@ import { createCron, deleteCron, toggleCron, validateCreate, type Cron } from ".
  *
  * Mutations drive the REAL gateway RPCs via the `rpc` seam (`bindCronActions`,
  * mirroring `bindApprovalActions`): create → `cronCreate`, delete → `cronDelete`,
- * and toggle → `cronCreate` (flipped `enabled`) FIRST, then `cronDelete` of the
- * old id (the gateway has NO enable/disable RPC, so an in-place toggle is a
- * recreate-then-drop). A failed drop is surfaced explicitly because the old
- * schedule may still be active. Each action updates the list OPTIMISTICALLY,
+ * and toggle → `cronCreate` with the existing cron id and flipped `enabled`
+ * (the gateway upserts by id). Each action updates the list OPTIMISTICALLY,
  * then the bridge re-pulls `cronList` so the canonical server rows reconcile. Feedback
  * (chat line + transient toast) is posted the same way the issues/vcs stores do.
  */
@@ -27,7 +25,7 @@ import { createCron, deleteCron, toggleCron, validateCreate, type Cron } from ".
  */
 type CronRpc = {
   /** `cronCreate` — registers/replaces a schedule for the workflow KEY. */
-  create: (vars: { workflow: string; pattern: string; enabled: boolean }) => Promise<unknown>;
+  create: (vars: { workflow: string; pattern: string; cronId?: string; enabled: boolean }) => Promise<unknown>;
   /** `cronDelete` — removes the schedule by id. */
   remove: (vars: { cronId: string }) => Promise<unknown>;
   /** Re-pull the live `crons` collection after a mutation lands. */
@@ -142,41 +140,24 @@ export const useCronsStore = create<CronsState>((set, get) => ({
     if (pendingToggleKeys.includes(toggleKey)) return;
     const willEnable = !target.enabled;
 
-    // Optimistic in-place flip; the gateway has no enable/disable RPC, so the
-    // real change is a recreate (flipped `enabled`) then a drop of the old id.
+    // The gateway has no dedicated toggle RPC, but cronCreate upserts by id.
+    // Reusing the id makes retries idempotent; the per-key guard serializes
+    // rapid clicks until this write settles.
     set({ crons: toggleCron(crons, id), pendingToggleKeys: [...pendingToggleKeys, toggleKey] });
 
-    // CREATE-FIRST is data-loss safe, but the toggle is not complete until the
-    // old row is gone. In particular, a failed enabled→disabled delete leaves
-    // the original schedule firing, so that failure must never announce
-    // "disabled".
     void (async () => {
       try {
-        await rpc.create({ workflow: target.workflowPath, pattern: target.pattern, enabled: willEnable });
+        await rpc.create({
+          workflow: target.workflowPath,
+          pattern: target.pattern,
+          cronId: target.id,
+          enabled: willEnable,
+        });
       } catch (error) {
         set((state) => ({
           crons: toggleCron(state.crons, id),
           actionError: `Could not toggle trigger: ${errorText(error)}`,
         }));
-        void rpc.refetch();
-        return;
-      }
-
-      try {
-        await rpc.remove({ cronId: target.id });
-      } catch (error) {
-        const activeWarning = willEnable
-          ? `Could not finish enabling ${target.name}: the old disabled row could not be removed`
-          : `Could not disable ${target.name}: the old schedule is still active`;
-        set({ actionError: `${activeWarning}: ${errorText(error)}` });
-        useChatStore.getState().say(`${activeWarning}.`);
-        useNotificationsStore.getState().notify({
-          title: willEnable ? "Trigger update incomplete" : "Trigger still active",
-          detail: `${target.name} · ${target.pattern}`,
-          kind: "transient",
-          status: "failed",
-          command: "chat",
-        });
         void rpc.refetch();
         return;
       }

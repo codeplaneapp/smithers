@@ -122,11 +122,24 @@ const settleKernel = async <T>(
     // user continuations may legally cross many host microtasks. The caller's
     // bounded-wait budget is the guard; virtual time is advanced only after
     // this bounded quiescence pass.
+    const progressBefore = kernel.trace.snapshot().length + kernel.controls.consumed();
     for (let microtask = 0; microtask < Math.min(64, Math.max(1, budget)); microtask++) await Promise.resolve();
+    // Effect 4 resumes forked/raced fibers on the macrotask queue, so a
+    // microtask-only drain never lets runReadySet's race settle. One cheap
+    // host macrotask per turn (setImmediate, no timer clamp) keeps a hung
+    // scenario's full wait budget affordable while letting fibers run.
+    if (!done) await new Promise((resolve) => setImmediate(resolve));
     if (!done) {
-      const advance = kernel.controls.takeAdvanceClock();
-      if (advance) kernel.clock.advance(advance.ms);
-      else if (kernel.clock.pending().length) kernel.clock.advanceToNextTimer();
+      // Advance virtual time only on a quiescent turn. If the drained turn
+      // made progress (trace or control activity), newly-ready work may still
+      // be forking; firing a timer now would let a sleeping sibling overtake
+      // it and change the schedule.
+      const progressAfter = kernel.trace.snapshot().length + kernel.controls.consumed();
+      if (progressAfter === progressBefore) {
+        const advance = kernel.controls.takeAdvanceClock();
+        if (advance) kernel.clock.advance(advance.ms);
+        else if (kernel.clock.pending().length) kernel.clock.advanceToNextTimer();
+      }
     }
   }
   if (!done)
@@ -1194,18 +1207,18 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
             return pending;
           };
           if (runner && duringFault && harness.kind === "unit-sim") {
-            const child = yield* Effect.fork(Effect.tryPromise({ try: () => runTask(), catch: (e) => e }));
+            const child = yield* Effect.forkChild(Effect.tryPromise({ try: () => runTask(), catch: (e) => e }));
             // Let the child cross the callback boundary before interrupting it;
             // an immediate interrupt is a cancellation-before-start, not a
             // cancellation race during a running task.
-            yield* Effect.yieldNow();
+            yield* Effect.yieldNow;
             // Effect scheduling and a Promise-returning synchronous callback use
             // separate queues. Give the callback one host continuation to reach
             // its terminal state before polling; otherwise a completed callback
             // is misclassified as an interrupted race.
             yield* Effect.tryPromise({ try: () => Promise.resolve(), catch: (cause) => cause });
-            const completedExit = yield* Fiber.poll(child);
-            if (Option.isSome(completedExit)) {
+            const completedExit = child.pollUnsafe();
+            if (completedExit !== undefined) {
               // The callback reached its terminal state before the crash window
               // opened: the in-flight transition never occurred, so the fault
               // stays inert and the completed value stands.
@@ -1354,7 +1367,10 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
       // scheduled immediately, rather than waiting for an unrelated ready
       // task (for example a sleeping sibling) to finish.
       const winner = yield* runtimeKernel.executor.runReadySet(
-        tasks.map((effect, index) => ({ stepId: executableOrdered[index]!.id, effect })),
+        tasks.map((effect, index) => ({
+          stepId: executableOrdered[index]!.id,
+          effect: effect as Effect.Effect<unknown, unknown, never>,
+        })),
       );
       activeTaskIds.delete(winner.stepId);
       const winnerBarrier = ast.barriers.find(

@@ -41,7 +41,7 @@ const styles = [
 
 function App() {
   const runId = runIdFromUrl();
-  const stream = useGatewayRunEvents(runId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(runId, { afterSeq: undefined });
   const output = useGatewayNodeOutput({
     runId,
     nodeId: PROBE_NODE_ID,

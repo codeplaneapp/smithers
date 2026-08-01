@@ -17,6 +17,7 @@ import { Terminal, type TerminalWriter } from "../src/adapters/terminal";
 
 const STYLE_ATTR = "data-smithers-ui-terminal";
 const originalMatchMedia = window.matchMedia;
+const originalMutationObserver = globalThis.MutationObserver;
 
 let container: HTMLElement | undefined;
 let root: Root | undefined;
@@ -32,6 +33,7 @@ afterEach(async () => {
   document.querySelectorAll(`style[${STYLE_ATTR}]`).forEach((el) => el.remove());
   document.documentElement.removeAttribute("data-theme");
   window.matchMedia = originalMatchMedia;
+  globalThis.MutationObserver = originalMutationObserver;
 });
 
 async function render(element: ReactElement): Promise<void> {
@@ -121,36 +123,36 @@ describe("<Terminal> headless rendering", () => {
     expect(style?.textContent).toContain(".sui-terminal");
   });
 
-  // bun 1.3.x: happy-dom's MutationObserver delivery is unreliable under CI
-  // load (the data-theme flip is sometimes never observed within 8s, even
-  // when re-stamped every poll). bun 1.4+ delivers dependably, so local dev
-  // and the eventual CI pin bump keep the regression net.
-  const bunPre14 = Bun.version.localeCompare("1.4.0", undefined, { numeric: true }) < 0;
-  test.skipIf(bunPre14)(
-    "the default palette follows root data-theme toggles",
-    async () => {
-      document.documentElement.setAttribute("data-theme", "light");
-      let term: XTerminal | null = null;
-      await render(<Terminal lines={["theme"]} onReady={(next) => (term = next)} />);
-      let ready = await waitFor(() => term);
-      expect(container?.querySelector('[data-slot="terminal"]')?.getAttribute("data-theme-mode")).toBe("light");
-      expect(ready.options.theme?.background).toBe("#fbfcfd");
+  test("the default palette follows root data-theme toggles", async () => {
+    let notifyThemeChange: (() => void) | undefined;
+    globalThis.MutationObserver = class {
+      constructor(callback: MutationCallback) {
+        notifyThemeChange = () => callback([], this as unknown as MutationObserver);
+      }
+      disconnect() {}
+      observe() {}
+      takeRecords(): MutationRecord[] {
+        return [];
+      }
+    } as unknown as typeof MutationObserver;
 
-      await act(async () => {
-        document.documentElement.setAttribute("data-theme", "dark");
-        await Promise.resolve();
-      });
-      await waitFor(() => {
-        // Re-stamp each poll: bun 1.3.x's happy-dom can drop a MutationObserver
-        // delivery under CI load; a repeated setAttribute queues a fresh record.
-        document.documentElement.setAttribute("data-theme", "dark");
-        return ready.options.theme?.background === "#07090d";
-      });
-      expect(container?.querySelector('[data-slot="terminal"]')?.getAttribute("data-theme-mode")).toBe("dark");
-      expect(ready.options.theme?.background).toBe("#07090d");
-    },
-    20_000,
-  );
+    document.documentElement.setAttribute("data-theme", "light");
+    let term: XTerminal | null = null;
+    await render(<Terminal lines={["theme"]} onReady={(next) => (term = next)} />);
+    const ready = await waitFor(() => term);
+    const notify = await waitFor(() => notifyThemeChange);
+    expect(container?.querySelector('[data-slot="terminal"]')?.getAttribute("data-theme-mode")).toBe("light");
+    expect(ready.options.theme?.background).toBe("#fbfcfd");
+
+    await act(async () => {
+      document.documentElement.setAttribute("data-theme", "dark");
+      notify();
+      await Promise.resolve();
+    });
+    await waitFor(() => ready.options.theme?.background === "#07090d");
+    expect(container?.querySelector('[data-slot="terminal"]')?.getAttribute("data-theme-mode")).toBe("dark");
+    expect(ready.options.theme?.background).toBe("#07090d");
+  });
 
   test("disables xterm cursor blinking when reduced motion is preferred", async () => {
     window.matchMedia = ((query: string) => ({
