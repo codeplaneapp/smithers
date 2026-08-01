@@ -774,15 +774,16 @@ var settleKernel = async (promise, kernel, budget) => {
     }
   );
   for (let turn = 0; !done && turn < budget; turn++) {
-    for (let dispatcherTurn = 0; dispatcherTurn < Math.min(64, Math.max(1, budget)); dispatcherTurn++) {
-      await Promise.resolve();
-      await new Promise((resolve) => setImmediate(resolve));
-      if (done) break;
-    }
+    const progressBefore = kernel.trace.snapshot().length + kernel.controls.consumed();
+    for (let microtask = 0; microtask < Math.min(64, Math.max(1, budget)); microtask++) await Promise.resolve();
+    if (!done) await new Promise((resolve) => setImmediate(resolve));
     if (!done) {
-      const advance = kernel.controls.takeAdvanceClock();
-      if (advance) kernel.clock.advance(advance.ms);
-      else if (kernel.clock.pending().length) kernel.clock.advanceToNextTimer();
+      const progressAfter = kernel.trace.snapshot().length + kernel.controls.consumed();
+      if (progressAfter === progressBefore) {
+        const advance = kernel.controls.takeAdvanceClock();
+        if (advance) kernel.clock.advance(advance.ms);
+        else if (kernel.clock.pending().length) kernel.clock.advanceToNextTimer();
+      }
     }
   }
   if (!done)
