@@ -720,9 +720,17 @@ function attemptMatchesSnapshotTuple(attempt, tuple) {
  * @param {number} cutoffMs
  * @param {(cwd?: string) => Promise<string | null>} getCurrentPointerImpl
  * @param {ReadonlyArray<AttemptRow> | null} snapshotAttempts
+ * @param {{ cwd: string; pointer: string } | null} runBaseline
  * @returns {Promise<Array<{ cwd: string; targetPointer: string; previousPointer: string | null }>>}
  */
-async function planSandboxReverts(attemptsForRun, attemptsToDelete, cutoffMs, getCurrentPointerImpl, snapshotAttempts) {
+async function planSandboxReverts(
+  attemptsForRun,
+  attemptsToDelete,
+  cutoffMs,
+  getCurrentPointerImpl,
+  snapshotAttempts,
+  runBaseline,
+) {
   /** @type {Map<string, { cwd: string; targetPointer: string; previousPointer: string | null }>} */
   const byCwd = new Map();
   const affectedCwds = new Set(
@@ -751,7 +759,13 @@ async function planSandboxReverts(attemptsForRun, attemptsToDelete, cutoffMs, ge
         return timeDelta || Number(left.attempt ?? 0) - Number(right.attempt ?? 0);
       });
     const targetAttempt = beforeAttempts.at(-1);
-    if (!targetAttempt || typeof targetAttempt.jjPointer !== "string") {
+    const baselinePointer =
+      snapshotAttempts !== null && runBaseline?.cwd === cwd && runBaseline.pointer.length > 0
+        ? runBaseline.pointer
+        : null;
+    const targetPointer =
+      targetAttempt && typeof targetAttempt.jjPointer === "string" ? targetAttempt.jjPointer : baselinePointer;
+    if (!targetPointer) {
       // Every attempt records its jjCwd unconditionally at insert time, but
       // jjPointer only fills in once a jj snapshot succeeds for that cwd
       // (packages/engine/src/engine.js). In a plain-git checkout (linked
@@ -772,7 +786,7 @@ async function planSandboxReverts(attemptsForRun, attemptsToDelete, cutoffMs, ge
     const previousPointer = await getCurrentPointerImpl(cwd);
     byCwd.set(cwd, {
       cwd,
-      targetPointer: targetAttempt.jjPointer,
+      targetPointer,
       previousPointer,
     });
   }
@@ -965,6 +979,9 @@ export async function jumpToFrame(input) {
           targetFrame.createdAtMs,
           getCurrentPointerImpl,
           snapshotAttempts,
+          run.vcsType === "jj" && typeof run.vcsRoot === "string" && typeof run.vcsRevision === "string"
+            ? { cwd: run.vcsRoot, pointer: run.vcsRevision }
+            : null,
         );
 
         const reconcilerSnapshot = await withSpan(
