@@ -10061,7 +10061,7 @@ declare class SmithersError extends Error {
 type SmithersErrorCode = KnownSmithersErrorCode | (string & {});
 type KnownSmithersErrorCode =
   | "INVALID_INPUT" | "MISSING_INPUT" | "MISSING_INPUT_TABLE" | "RESUME_METADATA_MISMATCH"
-  | "UNKNOWN_OUTPUT_SCHEMA" | "INVALID_OUTPUT" | "AGENT_CHECKPOINT_INVALID"
+  | "UNKNOWN_OUTPUT_SCHEMA" | "INVALID_OUTPUT" | "INVALID_RETRY_STATE" | "AGENT_CHECKPOINT_INVALID"
   | "AGENT_CHECKPOINT_CAPABILITY_UNDECLARED" | "AGENT_CHECKPOINT_HISTORY_EXHAUSTED"
   | "AGENT_CHECKPOINT_MISSING" | "AGENT_CHECKPOINT_CORRUPT"
   | "WORKTREE_CREATE_FAILED" | "VCS_NOT_FOUND"
@@ -10765,6 +10765,7 @@ try {
 | `RESUME_METADATA_MISMATCH` | Stored run metadata no longer matches the workflow being resumed. Editing the workflow file or an imported module between stop and resume triggers this (resume hashes file content, not git; no commit required). Fork/replay onto the edit or start fresh; revert the file to resume the original run. | `mismatches`, `existing`, `current` |
 | `UNKNOWN_OUTPUT_SCHEMA` | A task references an output table not present in the schema registry. | -- |
 | `INVALID_OUTPUT` | Agent output cannot be parsed or validated against the declared output schema. | -- |
+| `INVALID_RETRY_STATE` | A resumed task has malformed or inconsistent durable retry metadata, so Smithers cannot safely reconstruct its retry state. | `{ nodeId, iteration, attempt }` |
 | `AGENT_CHECKPOINT_INVALID` | An agent returned or published a malformed, non-JSON, or oversized checkpoint. | `{ nodeId, attempt }` |
 | `AGENT_CHECKPOINT_CAPABILITY_UNDECLARED` | An agent returned or published a checkpoint codec/version absent from its `checkpointFormats` production declaration. | `{ nodeId, codec, version, checkpointFormats }` |
 | `AGENT_CHECKPOINT_HISTORY_EXHAUSTED` | More than 1,000 newer incompatible checkpoint references prevent a safe same-task resume. | `{ nodeId, iteration, scanned }` |
