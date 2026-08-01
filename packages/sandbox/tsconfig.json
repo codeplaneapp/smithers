@@ -22,6 +22,7 @@
     "noFallthroughCasesInSwitch": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
+    "ignoreDeprecations": "6.0",
     "allowJs": true,
     "allowImportingTsExtensions": true,
     "rootDir": "src"

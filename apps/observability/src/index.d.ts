@@ -15,7 +15,7 @@ type ResolvedSmithersObservabilityOptions$2 = {
     readonly installLogger: boolean;
 };
 
-type SmithersObservabilityService$1 = {
+type SmithersObservabilityService$2 = {
     readonly options: ResolvedSmithersObservabilityOptions$2;
     readonly annotate: (attributes: Readonly<Record<string, unknown>>) => Effect.Effect<void>;
     readonly withSpan: <A, E, R>(name: string, effect: Effect.Effect<A, E, R>, attributes?: Readonly<Record<string, unknown>>) => Effect.Effect<A, E, Exclude<R, effect_Tracer.ParentSpan>>;
@@ -821,7 +821,7 @@ type HistogramEntry = {
 };
 type MetricEntry = CounterEntry | GaugeEntry | HistogramEntry;
 type MetricsSnapshot$1 = ReadonlyMap<string, MetricEntry>;
-type MetricsServiceShape$2 = {
+type MetricsServiceShape$3 = {
     readonly increment: (name: MetricName, labels?: MetricLabels$1) => Effect.Effect<void>;
     readonly incrementBy: (name: MetricName, value: number, labels?: MetricLabels$1) => Effect.Effect<void>;
     readonly gauge: (name: MetricName, value: number, labels?: MetricLabels$1) => Effect.Effect<void>;
@@ -846,11 +846,13 @@ type CorrelationContext$5 = {
 
 type CorrelationPatch$5 = Partial<CorrelationContext$5> | undefined | null;
 
-declare class MetricsService extends Context.ServiceClass.Shape<"MetricsService", MetricsServiceShape$2> {
-}
+type MetricsService = Context.ServiceClass.Shape<"MetricsService", MetricsServiceShape$2>;
+declare const MetricsService: Context.ServiceClass<MetricsService, "MetricsService", MetricsServiceShape$2>;
+type MetricsServiceShape$2 = MetricsServiceShape$3;
 
-declare class SmithersObservability extends Context.ServiceClass.Shape<"SmithersObservability", SmithersObservabilityService$1> {
-}
+type SmithersObservability = Context.ServiceClass.Shape<"SmithersObservability", SmithersObservabilityService$1>;
+declare const SmithersObservability: Context.ServiceClass<SmithersObservability, "SmithersObservability", SmithersObservabilityService$1>;
+type SmithersObservabilityService$1 = SmithersObservabilityService$2;
 
 declare const prometheusContentType: "text/plain; version=0.0.4; charset=utf-8";
 
@@ -944,16 +946,17 @@ declare const MetricsServiceLive: Layer.Layer<MetricsService, never, never>;
 declare function createSmithersOtelLayer(options?: SmithersObservabilityOptions$2): Layer.Layer<never, never, never>;
 type SmithersObservabilityOptions$2 = SmithersObservabilityOptions$4;
 
-type TracingServiceShape = {
+type TracingServiceShape$1 = {
     readonly withSpan: <A, E, R>(name: string, effect: Effect.Effect<A, E, R>, attributes?: Record<string, unknown>) => Effect.Effect<A, E, R>;
     readonly annotate: (attributes: Record<string, unknown>) => Effect.Effect<void>;
     readonly withCorrelation: <A, E, R>(context: CorrelationPatch$5, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
 };
 
-declare class TracingService extends Context.ServiceClass.Shape<"TracingService", TracingServiceShape> {
-}
+type TracingService = Context.ServiceClass.Shape<"TracingService", TracingServiceShape>;
+declare const TracingService: Context.ServiceClass<TracingService, "TracingService", TracingServiceShape>;
 /** @type {Layer.Layer<TracingService, never, never>} */
 declare const TracingServiceLive: Layer.Layer<TracingService, never, never>;
+type TracingServiceShape = TracingServiceShape$1;
 
 /**
  * @param {SmithersObservabilityOptions} [options]
@@ -985,7 +988,7 @@ declare const smithersMetricCatalog: SmithersMetricDefinition$1[];
 
 /** @type {MetricsServiceShape} */
 declare const metricsServiceAdapter: MetricsServiceShape$1;
-type MetricsServiceShape$1 = MetricsServiceShape$2;
+type MetricsServiceShape$1 = MetricsServiceShape$3;
 
 declare const runsTotal: Metric.Counter<number>;
 
@@ -1155,14 +1158,15 @@ declare const rewindSandboxesReverted: Metric.Histogram<number>;
 
 declare const correlationContextFiberRef: Context.Reference<undefined>;
 
-type CorrelationContextServiceShape = {
+type CorrelationContextServiceShape$1 = {
     readonly current: () => Effect.Effect<CorrelationContext$5 | undefined>;
     readonly withCorrelation: <A, E, R>(patch: CorrelationPatch$5, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
     readonly toLogAnnotations: (context?: CorrelationContext$5 | null) => Record<string, unknown> | undefined;
 };
 
-declare class CorrelationContextService extends Context.ServiceClass.Shape<"CorrelationContextService", CorrelationContextServiceShape> {
-}
+type CorrelationContextService = Context.ServiceClass.Shape<"CorrelationContextService", CorrelationContextServiceShape>;
+declare const CorrelationContextService: Context.ServiceClass<CorrelationContextService, "CorrelationContextService", CorrelationContextServiceShape>;
+type CorrelationContextServiceShape = CorrelationContextServiceShape$1;
 
 /** @type {Layer.Layer<CorrelationContextService, never, never>} */
 declare const CorrelationContextLive: Layer.Layer<CorrelationContextService, never, never>;
@@ -1305,13 +1309,13 @@ type CorrelationContext = CorrelationContext$5;
 type CorrelationPatch = CorrelationPatch$5;
 type CorrelationContextPatch = CorrelationPatch;
 type MetricLabels = MetricLabels$1;
-type MetricsServiceShape = MetricsServiceShape$2;
+type MetricsServiceShape = MetricsServiceShape$3;
 type MetricsSnapshot = MetricsSnapshot$1;
 type ResolvedSmithersObservabilityOptions = ResolvedSmithersObservabilityOptions$2;
 type SmithersEvent = SmithersEvent$2;
 type SmithersLogFormat = SmithersLogFormat$1;
 type SmithersMetricDefinition = SmithersMetricDefinition$2;
 type SmithersObservabilityOptions = SmithersObservabilityOptions$4;
-type SmithersObservabilityService = SmithersObservabilityService$1;
+type SmithersObservabilityService = SmithersObservabilityService$2;
 
 export { type CorrelationContext, CorrelationContextLive, type CorrelationContextPatch, CorrelationContextService, type CorrelationPatch, type MetricLabels, MetricsService, MetricsServiceLive, type MetricsServiceShape, type MetricsSnapshot, type ResolvedSmithersObservabilityOptions, type SmithersEvent, type SmithersLogFormat, type SmithersMetricDefinition, SmithersObservability, type SmithersObservabilityOptions, type SmithersObservabilityService, TracingService, TracingServiceLive, activeNodes, activeRuns, annotateSmithersTrace, approvalPending, approvalWaitDuration, approvalsDenied, approvalsGranted, approvalsRequested, attemptDuration, cacheHits, cacheMisses, correlationContextFiberRef, correlationContextToLogAnnotations, createSmithersObservabilityLayer, createSmithersOtelLayer, createSmithersRuntimeLayer, dbQueryDuration, dbRetries, dbTransactionDuration, dbTransactionRetries, dbTransactionRollbacks, errorsTotal, eventsEmittedTotal, externalWaitAsyncPending, getCurrentCorrelationContext, getCurrentCorrelationContextEffect, getCurrentSmithersTraceAnnotations, getCurrentSmithersTraceSpan, hotReloadDuration, hotReloadFailures, hotReloads, httpRequestDuration, httpRequests, logDebug, logError, logInfo, logWarning, makeSmithersSpanAttributes, mergeCorrelationContext, metricsServiceAdapter, nodeDuration, nodeRetriesTotal, nodesFailed, nodesFinished, nodesStarted, processHeapUsedBytes, processMemoryRssBytes, processUptimeSeconds, prometheusContentType, promptSizeBytes, renderPrometheusMetrics, replaysStarted, resolveSmithersObservabilityOptions, responseSizeBytes, rewindDurationMs, rewindFramesDeleted, rewindRollbackTotal, rewindSandboxesReverted, rewindTotal, runDuration, runForksCreated, runWithCorrelationContext, runsAncestryDepth, runsCancelledTotal, runsCarriedStateBytes, runsContinuedTotal, runsFailedTotal, runsFinishedTotal, runsResumedTotal, runsTotal, sandboxActive, sandboxBundleSizeBytes, sandboxCompletedTotal, sandboxCreatedTotal, sandboxDurationMs, sandboxPatchCount, sandboxTransportDurationMs, schedulerConcurrencyUtilization, schedulerQueueDepth, schedulerWaitDuration, scorerEventsFailed, scorerEventsFinished, scorerEventsStarted, setSmithersLogRunner, smithersMetricCatalog, smithersMetrics, smithersSpanNames, snapshotDuration, snapshotsCaptured, timerDelayDuration, timersCancelled, timersCreated, timersFired, timersPending, toPrometheusMetricName, tokensCacheReadTotal, tokensCacheWriteTotal, tokensContextWindowBucketTotal, tokensContextWindowPerCall, tokensInputPerCall, tokensInputTotal, tokensOutputPerCall, tokensOutputTotal, tokensReasoningTotal, toolCallErrorsTotal, toolCallsTotal, toolDuration, toolOutputTruncatedTotal, trackEvent as trackSmithersEvent, updateCurrentCorrelationContext, updateProcessMetrics, vcsDuration, withCorrelationContext, withCurrentCorrelationContext, withSmithersSpan };

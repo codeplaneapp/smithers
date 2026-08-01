@@ -11247,7 +11247,7 @@ Smithers exports a small VCS helper surface for applications that inspect or man
 - every helper accepts an optional `cwd` to target a specific repository
 - spawn failures are normalized instead of thrown, safe to call even without `jj` installed
 - workspace helpers try a few command shapes to tolerate JJ version drift
-- JJ command helpers return `Effect` values; direct callers must supply an Effect `CommandExecutor` layer
+- JJ command helpers return `Effect` values; direct callers must supply an Effect `ChildProcessSpawner` service
 
 ## Import
 
@@ -11280,17 +11280,17 @@ import {
 Direct JJ helper calls need a platform layer:
 
 ```ts
-import type * as CommandExecutor from "effect/unstable/process/ChildProcessSpawner";
-import * as BunContext from "@effect/platform-bun/BunServices";
+import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as BunServices from "@effect/platform-bun/BunServices";
 import { Effect } from "effect";
 
-type VcsEffect<A> = Effect.Effect<A, never, CommandExecutor.CommandExecutor>;
+type VcsEffect<A> = Effect.Effect<A, never, ChildProcessSpawner.ChildProcessSpawner>;
 
 const runVcs = <A,>(effect: VcsEffect<A>) =>
-  Effect.runPromise(effect.pipe(Effect.provide(BunContext.layer)));
+  Effect.runPromise(effect.pipe(Effect.provide(BunServices.layer)));
 ```
 
-Install `@effect/platform-bun` for the Bun snippet, or use an equivalent `CommandExecutor` layer for another runtime.
+Install `@effect/platform-bun` for the Bun snippet, or provide the equivalent `ChildProcessSpawner` service for another runtime.
 
 ## `runJj(args, opts?)`
 

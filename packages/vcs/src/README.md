@@ -9,7 +9,8 @@ synchronous tooling preflight used by `smithers doctor`.
 - `resolveGitBinary.js` — same for `git` (override → PATH; git is never bundled).
 - `jj.js` — `runJj` plus the operations built on it: pointer capture/revert,
   workspace add/list/close, `captureWorkspaceSnapshot`, `isJjRepo`. Effect-land;
-  requires a `CommandExecutor` (callers typically provide `BunContext.layer`).
+  requires a `ChildProcessSpawner` service (callers provide the matching
+  platform services layer).
 - `find-root.js` — `findVcsRoot` walks up to the nearest `.jj`/`.git`, preferring
   `.jj` so colocated repos use jj semantics.
 - `vcsToolingStatus.js` — plain synchronous `--version` probes for doctor/run

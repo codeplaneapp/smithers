@@ -23,6 +23,10 @@ import { resolveJjBinary } from "./resolveJjBinary.js";
 // Bounds every jj probe/snapshot call (getJjPointer, isJjRepo, captureWorkspaceSnapshot):
 // a hung jj must degrade to a failed probe, never stall the agent path — see withJjTimeout.
 const JJ_PROBE_TIMEOUT_MS = 1_500;
+// Effect's process finalizer sends SIGTERM and otherwise waits indefinitely.
+// Bound teardown too, so a jj process that ignores SIGTERM cannot turn a
+// 1.5-second probe timeout into an unbounded caller stall.
+const JJ_FORCE_KILL_AFTER_MS = 500;
 /**
  * @param {Stream.Stream<Uint8Array, unknown, never>} stream
  * @returns {Effect.Effect<string, unknown, never>}
@@ -44,7 +48,9 @@ function collectUtf8(stream) {
  * @returns {Effect.Effect<RunJjResult, never, import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner>}
  */
 export function runJj(args, opts = {}) {
-  let command = Command.make(resolveJjBinary().path, args);
+  let command = Command.make(resolveJjBinary().path, args, {
+    forceKillAfter: Duration.millis(JJ_FORCE_KILL_AFTER_MS),
+  });
   if (opts.cwd) {
     command = Command.setCwd(command, opts.cwd);
   }
@@ -102,7 +108,7 @@ function jjError(res) {
  * state-discriminating cache-key component.
  *
  * @param {string} [cwd]
- * @returns {Effect.Effect<string | null, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
+ * @returns {Effect.Effect<string | null, never, import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner>}
  */
 export function getJjPointer(cwd) {
   return withJjTimeout(runJj(["log", "-r", "@", "--no-graph", "--template", "commit_id"], { cwd }), "jj pointer").pipe(
@@ -122,9 +128,9 @@ export function getJjPointer(cwd) {
  * rather than a value, and logs a warning so the silent downgrade is
  * diagnosable.
  *
- * @param {Effect.Effect<RunJjResult, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>} effect
+ * @param {Effect.Effect<RunJjResult, never, import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner>} effect
  * @param {string} label
- * @returns {Effect.Effect<RunJjResult, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
+ * @returns {Effect.Effect<RunJjResult, never, import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner>}
  */
 function withJjTimeout(effect, label) {
   return effect.pipe(
@@ -177,7 +183,7 @@ export function parseWorkspaceSnapshot(logStdout, opStdout) {
  * durability gap the caller records); it never throws into the agent path.
  *
  * @param {string} [cwd]
- * @returns {Effect.Effect<WorkspaceSnapshot | null, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
+ * @returns {Effect.Effect<WorkspaceSnapshot | null, never, import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner>}
  */
 export function captureWorkspaceSnapshot(cwd) {
   return Effect.gen(function* () {
@@ -240,7 +246,7 @@ function isJjChangeIdPointer(pointer) {
  *
  * @param {string} pointer
  * @param {string} [cwd]
- * @returns {Effect.Effect<JjRevertResult, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
+ * @returns {Effect.Effect<JjRevertResult, never, import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner>}
  */
 export function revertToJjPointer(pointer, cwd) {
   if (isJjChangeIdPointer(pointer)) {
@@ -262,7 +268,7 @@ export function revertToJjPointer(pointer, cwd) {
  * Quick repo detection by executing a read-only jj command.
  *
  * @param {string} [cwd]
- * @returns {Effect.Effect<boolean, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
+ * @returns {Effect.Effect<boolean, never, import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner>}
  */
 export function isJjRepo(cwd) {
   return withJjTimeout(
@@ -283,7 +289,7 @@ export function isJjRepo(cwd) {
  * @param {string} name
  * @param {string} path
  * @param {WorkspaceAddOptions} [opts]
- * @returns {Effect.Effect<WorkspaceResult, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
+ * @returns {Effect.Effect<WorkspaceResult, never, import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner>}
  */
 /** Transient shared-lock failures worth retrying (holders live for ms–s). */
 const LOCK_CONTENTION_PATTERN =
@@ -404,7 +410,7 @@ export function workspaceAdd(name, path, opts = {}) {
  * Falls back to parsing human output if `-T` is unavailable.
  *
  * @param {string} [cwd]
- * @returns {Effect.Effect<WorkspaceInfo[], never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
+ * @returns {Effect.Effect<WorkspaceInfo[], never, import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner>}
  */
 export function workspaceList(cwd) {
   return Effect.gen(function* () {
@@ -445,7 +451,7 @@ export function workspaceList(cwd) {
  *
  * @param {string} name
  * @param {{ cwd?: string }} [opts]
- * @returns {Effect.Effect<WorkspaceResult, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
+ * @returns {Effect.Effect<WorkspaceResult, never, import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner>}
  */
 export function workspaceClose(name, opts = {}) {
   return runJj(["workspace", "forget", name], { cwd: opts.cwd }).pipe(

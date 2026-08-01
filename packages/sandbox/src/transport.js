@@ -12,17 +12,18 @@ import { makeSandboxTransportServiceEffect } from "./effect/sandbox-entity.js";
 import { BubblewrapSandboxExecutorLive } from "./effect/socket-runner.js";
 /** @typedef {import("./SandboxRuntime.ts").SandboxRuntime} SandboxRuntime */
 
+/** @typedef {Context.ServiceClass.Shape<"SandboxTransport", SandboxTransportService>} SandboxTransport */
 const SandboxTransportTag =
   /** @type {Context.ServiceClass<SandboxTransport, "SandboxTransport", SandboxTransportService>} */ (
-    Context.Service("SandboxTransport")
+    Context.Service()("SandboxTransport")
   );
-export class SandboxTransport extends SandboxTransportTag {
-  // Explicit constructor (identical to the implicit one) so runtime
-  // construction is observable; JSC never records implicit constructors.
-  constructor(...args) {
-    super(...args);
+export const SandboxTransport = /** @type {Context.ServiceClass<SandboxTransport, "SandboxTransport", SandboxTransportService>} */ (
+  class SandboxTransport extends SandboxTransportTag {
+    constructor(...args) {
+      super(...args);
+    }
   }
-}
+);
 /**
  * @template R, E
  * @param {Layer.Layer<SandboxEntityExecutor, E, R>} executorLayer

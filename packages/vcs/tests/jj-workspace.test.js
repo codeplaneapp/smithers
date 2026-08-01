@@ -145,6 +145,15 @@ describe("runJj", () => {
       expect(vcsDurationSum() - beforeSum).toBeGreaterThanOrEqual(1_000);
     });
   });
+  test("force-kills a timed-out jj process that ignores SIGTERM", async () => {
+    await withFakeJj(`trap '' TERM; while :; do :; done`, async () => {
+      const startedAt = performance.now();
+      expect(await vcs.getJjPointer()).toBe(null);
+      const elapsedMs = performance.now() - startedAt;
+      expect(elapsedMs).toBeGreaterThanOrEqual(1_000);
+      expect(elapsedMs).toBeLessThan(4_000);
+    });
+  }, 10_000);
 });
 describe("isJjRepo", () => {
   test("true when log command succeeds with --no-graph", async () => {
