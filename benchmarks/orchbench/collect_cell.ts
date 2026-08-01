@@ -51,9 +51,7 @@ const events: Ev[] = eventsRaw
 
 // ---- status + wall clock -------------------------------------------------
 const started = events.find((e) => e.type === "RunStarted");
-const terminal = [...events].reverse().find((e) =>
-  ["RunFinished", "RunFailed", "RunCancelled"].includes(e.type),
-);
+const terminal = [...events].reverse().find((e) => ["RunFinished", "RunFailed", "RunCancelled"].includes(e.type));
 const status = terminal?.type ?? "unknown";
 const startMs = started?.timestampMs ?? 0;
 const endMs = terminal?.timestampMs ?? events.at(-1)?.timestampMs ?? startMs;
@@ -145,6 +143,14 @@ for (const e of events) {
 // ---- reward --------------------------------------------------------------
 let reward = 0;
 let rewardMeta: Record<string, unknown> = {};
+let implementationReward: number | null = null;
+let implementationRewardMeta: Record<string, unknown> | null = null;
+const implementationScoreJson = join(workDir, "score-implementation.json");
+if (existsSync(implementationScoreJson)) {
+  const s = JSON.parse(readFileSync(implementationScoreJson, "utf8"));
+  implementationReward = Number(s.reward ?? 0);
+  implementationRewardMeta = s;
+}
 const scoreJson = join(workDir, "score.json");
 if (existsSync(scoreJson)) {
   const s = JSON.parse(readFileSync(scoreJson, "utf8"));
@@ -184,7 +190,13 @@ let audit: Record<string, unknown> = { tainted: null, error: "audit not run" };
 try {
   execFileSync(
     "python3",
-    [join(HARNESS, "audit_run.py"), eventsDir, manifest.repoDir, resolve(manifest.testsDir, ".."), join(workDir, "audit.json")],
+    [
+      join(HARNESS, "audit_run.py"),
+      eventsDir,
+      manifest.repoDir,
+      resolve(manifest.testsDir, ".."),
+      join(workDir, "audit.json"),
+    ],
     { encoding: "utf8", timeout: 10 * 60_000, maxBuffer: 64 * 1024 * 1024 },
   );
   audit = JSON.parse(readFileSync(join(workDir, "audit.json"), "utf8"));
@@ -208,8 +220,20 @@ const result = {
   pattern,
   status,
   reward,
+  implementationReward,
+  reviewDelta: implementationReward === null ? null : reward - implementationReward,
   resolved: Math.abs(reward - 1.0) < 1e-9,
   wallS: Math.max(0, Math.round((endMs - startMs - quotaStallMs) / 1000)),
+  modelWallS: Math.max(
+    0,
+    Math.round(
+      (endMs -
+        startMs -
+        quotaStallMs -
+        ((stages["implementation-score"]?.endMs ?? 0) - (stages["implementation-score"]?.startMs ?? 0))) /
+        1000,
+    ),
+  ),
   wallRawS: Math.max(0, Math.round((endMs - startMs) / 1000)),
   quotaStallS: Math.round(quotaStallMs / 1000),
   quotaPoisoned: quotaStallMs > 0,
@@ -225,6 +249,7 @@ const result = {
   tainted: (audit as { tainted?: boolean | null }).tainted ?? null,
   auditSignals: (audit as { signals?: unknown[] }).signals ?? [],
   rewardMeta,
+  implementationRewardMeta,
   collectedAt: new Date().toISOString(),
 };
 mkdirSync(dirname(outPath), { recursive: true });

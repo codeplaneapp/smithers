@@ -8,8 +8,9 @@
 # It performs NO interpretation of results beyond extracting reward.json.
 #
 # Fairness guarantees:
-#   - The candidate repo is mounted read-write at /app (so `pip install -e .`
-#     and the test runner behave identically to the upstream harness).
+#   - A private snapshot of the candidate repo is mounted read-write at /app
+#     (so mutating test/build steps behave like the upstream harness without
+#     contaminating the submitted artifact or a later checkpoint).
 #   - The hidden tests live OUTSIDE the repo and are only introduced here, at
 #     scoring time. The agent never sees them.
 #   - reward.json is produced by the task's own test.sh weighted scoring.
@@ -28,25 +29,31 @@ OUT_DIR="${4:?out_dir}"
 mkdir -p "$OUT_DIR"
 OUT_DIR="$(cd "$OUT_DIR" && pwd)"
 
-# Copy tests to a throwaway dir so the container can mutate /tests (test.sh
-# does `rm -rf /tests/tests` and writes __pycache__) without touching the
-# canonical dataset copy.
+# Copy both the candidate and tests to throwaway directories. Official test
+# scripts can run go mod commands, editable installs, code generation, or copy
+# hidden test files into /app; none of that may alter the caller's artifact.
+REPO_TMP="$(mktemp -d)"
+TESTS_TMP=""
+trap 'rm -rf "$REPO_TMP" ${TESTS_TMP:+"$TESTS_TMP"}' EXIT
+cp -a "$REPO_DIR"/. "$REPO_TMP"/
 TESTS_TMP="$(mktemp -d)"
 cp -R "$TESTS_DIR"/. "$TESTS_TMP"/
-trap 'rm -rf "$TESTS_TMP"' EXIT
 
 # /logs/verifier is where test.sh writes reward.json / reward.txt.
 LOGS_DIR="$OUT_DIR/logs_verifier"
 rm -rf "$LOGS_DIR"; mkdir -p "$LOGS_DIR"
 
 echo "[score] image=$IMAGE repo=$REPO_DIR" >&2
-# --network none during scoring too: test.sh runs `pip install -e .` on the
-# CANDIDATE repo, so a malicious build script (setup.py / pyproject hook) must
-# not be able to fetch the upstream answer at install time. All deps are baked
-# into the image, so offline install + tests work (validated: oracle=1.0).
-docker run --rm --network none \
+# Agents run offline, but several official images omit dependencies introduced
+# by the target release and their test.sh legitimately downloads them. Scoring
+# can therefore opt into an uncredentialed Docker bridge, matching the official
+# suite. The secure default remains offline. The post-run diff/command audit is
+# the integrity gate against code added only to fetch an upstream answer during
+# grading when access is enabled.
+SCORER_NETWORK="${RMB_SCORER_NETWORK:-none}"
+docker run --rm --network "$SCORER_NETWORK" \
   --cpus "${RMB_CPUS:-2}" --memory "${RMB_MEMORY:-4096m}" \
-  -v "$REPO_DIR":/app \
+  -v "$REPO_TMP":/app \
   -v "$TESTS_TMP":/tests \
   -v "$LOGS_DIR":/logs/verifier \
   "$IMAGE" bash /tests/test.sh >"$OUT_DIR/test_output.log" 2>&1 || true

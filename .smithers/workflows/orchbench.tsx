@@ -1,11 +1,11 @@
 // smithers-source: authored
 // smithers-display-name: OrchBench — orchestration-pattern benchmark
-// smithers-description: Runs ONE RoadmapBench task under ONE orchestration pattern (solo-sol, solo-luna, plan-impl-review, research-first, panel-review) with single-model agents and the official hidden-test scorer, so patterns can be compared on quality/speed/cost. See benchmarks/orchbench/DESIGN.md.
+// smithers-description: Runs ONE RoadmapBench task under ONE orchestration pattern (solo-sol, solo-fable, solo-luna, plan-impl-review, fable-plan-impl-review, research-first, panel-review) with single-model agents and the official hidden-test scorer, so patterns can be compared on quality/speed/cost. See benchmarks/orchbench/DESIGN.md.
 /** @jsxImportSource smithers-orchestrator */
 import { readFileSync } from "node:fs";
 import { ClaudeCodeAgent, CodexAgent, KimiAgent, UI, createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { roadmapScorer } from "../lib/roadmapScorer";
+import { roadmapScorer, runRoadmapScore } from "../lib/roadmapScorer";
 
 const MIN = 60_000;
 
@@ -17,7 +17,17 @@ const inputSchema = z.object({
   instructionPath: z.string(),
   testsDir: z.string(),
   workDir: z.string(),
-  pattern: z.enum(["solo-sol", "solo-luna", "plan-impl-review", "research-first", "panel-review"]).default("solo-sol"),
+  pattern: z
+    .enum([
+      "solo-sol",
+      "solo-fable",
+      "solo-luna",
+      "plan-impl-review",
+      "fable-plan-impl-review",
+      "research-first",
+      "panel-review",
+    ])
+    .default("solo-sol"),
   panelThird: z.enum(["opus", "kimi"]).default("opus"),
   smoke: z.boolean().default(false),
 });
@@ -98,6 +108,11 @@ const fixSchema = z.object({
   filesChanged: z.array(z.string()).default([]),
 });
 
+const checkpointSchema = z.object({
+  reward: z.number().min(0).max(1),
+  meta: z.record(z.string(), z.unknown()),
+});
+
 const { Workflow, Task, Sequence, Parallel, smithers, outputs } = createSmithers({
   input: inputSchema,
   solo: soloSchema,
@@ -109,6 +124,7 @@ const { Workflow, Task, Sequence, Parallel, smithers, outputs } = createSmithers
   panelFable: panelFindingSchema,
   panelThird: panelFindingSchema,
   fix: fixSchema,
+  checkpoint: checkpointSchema,
 });
 
 export default smithers((ctx) => {
@@ -153,6 +169,20 @@ export default smithers((ctx) => {
       }),
       sampling: { type: "all" as const },
     },
+  };
+
+  const scoreImplementation = async () => {
+    const result = await runRoadmapScore(
+      {
+        taskId: input.taskId,
+        image: input.image,
+        repoDir: input.repoDir,
+        testsDir: input.testsDir,
+        workDir: input.workDir,
+      },
+      "implementation",
+    );
+    return { reward: result.reward, meta: result.meta };
   };
 
   const ENV = `## Working environment
@@ -353,6 +383,19 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
         </Task>
       ) : null}
 
+      {pattern === "solo-fable" ? (
+        <Task
+          id="solo"
+          output={outputs.solo}
+          agent={fable(150 * MIN)}
+          timeoutMs={155 * MIN}
+          heartbeatTimeoutMs={15 * MIN}
+          scorers={reward}
+        >
+          {soloPrompt}
+        </Task>
+      ) : null}
+
       {pattern === "solo-luna" ? (
         <Task
           id="solo"
@@ -387,10 +430,51 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
           >
             {implementPrompt}
           </Task>
+          <Task id="implementation-score" output={outputs.checkpoint} retries={0}>
+            {scoreImplementation}
+          </Task>
           <Task
             id="review"
             output={outputs.reviewFix}
             agent={sol(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+            deps={{ implement: outputs.implement }}
+            scorers={reward}
+          >
+            {reviewFixPrompt}
+          </Task>
+        </Sequence>
+      ) : null}
+
+      {pattern === "fable-plan-impl-review" ? (
+        <Sequence>
+          <Task
+            id="plan"
+            output={outputs.plan}
+            agent={fable(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+          >
+            {planPrompt()}
+          </Task>
+          <Task
+            id="implement"
+            output={outputs.implement}
+            agent={luna(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+            deps={{ plan: outputs.plan }}
+          >
+            {implementPrompt}
+          </Task>
+          <Task id="implementation-score" output={outputs.checkpoint} retries={0}>
+            {scoreImplementation}
+          </Task>
+          <Task
+            id="review"
+            output={outputs.reviewFix}
+            agent={fable(75 * MIN)}
             timeoutMs={80 * MIN}
             heartbeatTimeoutMs={15 * MIN}
             deps={{ implement: outputs.implement }}

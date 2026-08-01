@@ -15,7 +15,8 @@
 # relative traversal (../, ../../, ...) from the agent never reaches the dataset,
 # the manifest, the hidden tests, or the oracle. There is no on-disk breadcrumb
 # to the answer key. (Defense in depth: every command + the final diff are
-# scanned afterwards by audit_run.py, and both containers run --network none.)
+# scanned afterwards by audit_run.py, and the agent container runs with
+# `--network none`.)
 #
 # Steps:
 #   1. extract pristine V_old repo from the official image -> AGENT_HOME/repo
@@ -50,15 +51,21 @@ echo "[prepare] $TASK_ID image=$IMAGE agent_home=$AGENT_HOME" >&2
 cid="$(docker create --platform linux/amd64 "$IMAGE")"
 docker cp "$cid:/app" "$AGENT_HOME/_app" >/dev/null
 docker rm "$cid" >/dev/null
-if [[ -d "$AGENT_HOME/_app/app" ]]; then mv "$AGENT_HOME/_app/app" "$REPO"; rm -rf "$AGENT_HOME/_app";
-else mv "$AGENT_HOME/_app" "$REPO"; fi
+if [[ -d "$AGENT_HOME/_app/.git" || -f "$AGENT_HOME/_app/go.mod" || -f "$AGENT_HOME/_app/Cargo.toml" \
+   || -f "$AGENT_HOME/_app/package.json" || -f "$AGENT_HOME/_app/pyproject.toml" \
+   || -f "$AGENT_HOME/_app/setup.py" || -f "$AGENT_HOME/_app/CMakeLists.txt" ]]; then
+  mv "$AGENT_HOME/_app" "$REPO"
+elif [[ -d "$AGENT_HOME/_app/app" ]]; then
+  mv "$AGENT_HOME/_app/app" "$REPO"; rm -rf "$AGENT_HOME/_app"
+else
+  mv "$AGENT_HOME/_app" "$REPO"
+fi
 
 # instruction copy lives in CONTROL (read by the smithers process only)
 cp "$TASK_DIR/instruction.md" "$CONTROL/instruction.md"
 
-# 2. start agent container (offline). All build/test deps are baked into the
-#    image, so --network none is fully functional and makes it physically
-#    impossible to fetch/install the upstream target release for the answer.
+# 2. start agent container offline, making it physically impossible for the
+#    agent to fetch/install the upstream target release for the answer.
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 docker run -d --name "$CONTAINER" --platform linux/amd64 --network none \
   --cpus "${RMB_CPUS:-2}" --memory "${RMB_MEMORY:-4096m}" \
