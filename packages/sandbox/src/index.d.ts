@@ -2,7 +2,8 @@ import { lstat } from 'node:fs/promises';
 import * as _smithers_orchestrator_observability_SmithersEvent from '@smithers-orchestrator/observability/SmithersEvent';
 import { SmithersDb } from '@smithers-orchestrator/db/adapter';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { Layer } from 'effect';
+import { Effect, Context, Layer } from 'effect';
+import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
 
 type SandboxRuntime$1 = "bubblewrap" | "docker" | "codeplane" | "cloudflare";
 
@@ -259,6 +260,16 @@ type SandboxBundleResult$1 = {
     bundlePath: string;
 };
 
+type SandboxTransportService$1 = {
+    readonly create: (config: SandboxTransportConfig$1) => Effect.Effect<SandboxHandle$1, SmithersError>;
+    readonly ship: (bundlePath: string, handle: SandboxHandle$1) => Effect.Effect<void, SmithersError>;
+    readonly execute: (command: string, handle: SandboxHandle$1, signal?: AbortSignal) => Effect.Effect<{
+        exitCode: number;
+    }, SmithersError>;
+    readonly collect: (handle: SandboxHandle$1) => Effect.Effect<SandboxBundleResult$1, SmithersError>;
+    readonly cleanup: (handle: SandboxHandle$1) => Effect.Effect<void, SmithersError>;
+};
+
 /**
  * @param {SandboxProvider} provider
  * @returns {() => void}
@@ -357,11 +368,11 @@ declare function layerForSandboxRuntime(runtime: SandboxRuntime): Layer.Layer<Sa
  * @returns {SandboxRuntime}
  */
 declare function resolveSandboxRuntime(requested: SandboxRuntime): SandboxRuntime;
-declare class SandboxTransport {
-    constructor(...args: any[]);
-}
+type SandboxTransport = Context.ServiceClass.Shape<"SandboxTransport", SandboxTransportService>;
+declare const SandboxTransport: Context.ServiceClass<SandboxTransport, "SandboxTransport", SandboxTransportService>;
 type SandboxBundleResult = SandboxBundleResult$1;
 type SandboxTransportConfig = SandboxTransportConfig$1;
+type SandboxTransportService = SandboxTransportService$1;
 type SandboxRuntime = SandboxRuntime$1;
 
 type SandboxExecOptions$1 = {

@@ -1,7 +1,7 @@
 import * as zod from 'zod';
 import { z } from 'zod';
 import * as zod_v4_core from 'zod/v4/core';
-import { Effect, Layer } from 'effect';
+import { Effect, Context, Layer } from 'effect';
 import { SmithersError } from '@smithers-orchestrator/errors';
 import * as _vectorize_io_hindsight_client from '@vectorize-io/hindsight-client';
 import { HindsightClient } from '@vectorize-io/hindsight-client';
@@ -221,7 +221,7 @@ type MemoryStore$4 = {
     searchNotesEffect: (kind: string, query: string, limit?: number, filter?: NoteReadFilter$2) => Effect.Effect<MemoryNote$2[], SmithersError>;
 };
 
-type MemoryServiceApi$1 = {
+type MemoryServiceApi$2 = {
     readonly getFact: (ns: MemoryNamespace$4, key: string) => Effect.Effect<MemoryFact$2 | undefined, SmithersError>;
     readonly setFact: (ns: MemoryNamespace$4, key: string, value: unknown, ttlMs?: number, provenance?: MemoryProvenance$2) => Effect.Effect<void, SmithersError>;
     readonly deleteFact: (ns: MemoryNamespace$4, key: string) => Effect.Effect<void, SmithersError>;
@@ -321,8 +321,9 @@ declare function Summarizer(agent: {
 }): MemoryProcessor$1;
 type MemoryProcessor$1 = MemoryProcessor$4;
 
-declare class MemoryService {
-}
+type MemoryService = Context.ServiceClass.Shape<"MemoryService", MemoryServiceApi$1>;
+declare const MemoryService: Context.ServiceClass<MemoryService, "MemoryService", MemoryServiceApi$1>;
+type MemoryServiceApi$1 = MemoryServiceApi$2;
 
 /** @typedef {import("./MemoryLayerConfig.ts").MemoryLayerConfig} MemoryLayerConfig */
 /**
@@ -612,7 +613,7 @@ type NoteReadFilter = NoteReadFilter$2;
 type MemoryProvenance = MemoryProvenance$2;
 type MemoryProcessor = MemoryProcessor$4;
 type MemoryProcessorConfig = MemoryProcessorConfig$1;
-type MemoryServiceApi = MemoryServiceApi$1;
+type MemoryServiceApi = MemoryServiceApi$2;
 type MemoryStore = MemoryStore$4;
 type MemoryThread = MemoryThread$2;
 type MessageHistoryConfig = MessageHistoryConfig$1;
