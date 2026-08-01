@@ -18,7 +18,7 @@ type WorkflowUiComplianceOptions$2 = {
 };
 /** One broken rule occurrence. */
 type WorkflowUiViolation$1 = {
-    rule: "imports" | "shell" | "mount" | "live-chat" | "hand-rolled-colors" | "hand-rolled-pills" | "hand-rolled-table";
+    rule: "imports" | "shell" | "mount" | "live-chat" | "hand-rolled-colors" | "hand-rolled-pills" | "hand-rolled-table" | "node-status-vocabulary";
     detail: string;
 };
 /** The grader's result. */
@@ -730,6 +730,12 @@ declare function estimateCostUsd(usage: {
  * - `hand-rolled-pills`  — no `borderRadius: 999` pill re-implementations;
  *                      that's `StatusPill` / `Badge`.
  * - `hand-rolled-table`  — no raw `<table>` markup; use `Table` / `FleetTable`.
+ * - `node-status-vocabulary` — status values derived from `useGatewayRunTree`
+ *                      may only be compared with tones the gateway emits
+ *                      (`ok`/`running`/`queued`/`failed`/`waiting`/`cancelled`);
+ *                      engine lifecycle words like `finished` or `completed`
+ *                      are normalized away by `toRunStatus` before a UI sees
+ *                      them, so comparing against one is silently always false.
  *
  * Pure and deterministic: feed it source text (no filesystem access) so it
  * runs identically in unit tests, create-ui gate tasks, and `smithers eval`
