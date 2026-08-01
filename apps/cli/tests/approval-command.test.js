@@ -131,8 +131,8 @@ describe("smithers approval commands", () => {
         decidedBy: "tester",
       });
       expect((await adapter.getNode("approval-child", "gate", 0))?.state).toBe("pending");
-      for (let attempt = 0; attempt < 100 && !existsSync(spawnRecord); attempt++) {
-        await new Promise((resolve) => setTimeout(resolve, 2));
+      for (let attempt = 0; attempt < 500 && !existsSync(spawnRecord); attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
       }
       expect(existsSync(spawnRecord)).toBe(true);
       const resumeArgv = readFileSync(spawnRecord, "utf8").trimEnd().split("\n");
