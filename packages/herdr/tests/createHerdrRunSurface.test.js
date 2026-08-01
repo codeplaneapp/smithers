@@ -180,7 +180,7 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface against a real herdr ser
     await client.call("workspace.close", { workspace_id: matching[0].workspace_id }).catch(() => {});
   });
 
-  test("renames the workspace with the finished marker on RunFinished, then re-finds it prefix-tolerantly", async () => {
+  test("renames the workspace with the finished marker on RunFinished, then re-finds it outcome-tolerantly", async () => {
     const runId = makeRunId();
     const label = `smithers-test-outcome-fin-${randomSessionName()}`;
     const s1 = createHerdrRunSurface({

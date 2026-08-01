@@ -53,6 +53,53 @@ describe("openTabPane ownership safety (fake client)", () => {
 });
 
 describe("createHerdrRunSurface workspace barrier (fake client)", () => {
+  test("does not adopt an operator workspace whose label only shares the run marker", async () => {
+    const runId = "run-collision-0000000000";
+    const targetLabel = `workflow [smithers:v1:${runId}]`;
+    const operatorWorkspace = {
+      workspace_id: "operator-workspace",
+      number: 1,
+      label: `operator notes [smithers:v1:${runId}]`,
+    };
+    /** @type {any[]} */
+    const workspaces = [operatorWorkspace];
+    let createCalls = 0;
+    const route = async (method, params = {}) => {
+      if (method === "workspace.list") return { workspaces: [...workspaces] };
+      if (method === "workspace.create") {
+        createCalls += 1;
+        const workspace = { workspace_id: "smithers-workspace", number: 2, label: params.label };
+        workspaces.push(workspace);
+        return {
+          workspace,
+          tab: { tab_id: "smithers-tab", workspace_id: workspace.workspace_id },
+          root_pane: { pane_id: "smithers-root" },
+        };
+      }
+      if (method === "agent.list") return { agents: [] };
+      return { type: "ok" };
+    };
+    const client = {
+      socketPath: "/fake/ownership-herdr.sock",
+      call: route,
+      tryCall: route,
+      subscribe: () => ({ close() {} }),
+      ping: async () => undefined,
+    };
+    const surface = createHerdrRunSurface({
+      client,
+      workspaceLabel: targetLabel,
+      overviewCommand: () => [],
+      logger: () => {},
+    });
+
+    await surface.attach(runId);
+    expect(createCalls).toBe(1);
+    expect(await surface.workspaceId()).toBe("smithers-workspace");
+    expect(workspaces).toContainEqual(operatorWorkspace);
+    await surface.close();
+  });
+
   test("a protocol mismatch disables the surface before any mutation", async () => {
     /** @type {Array<{ method: string, params: Record<string, any> }>} */
     const calls = [];

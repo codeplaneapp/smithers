@@ -131,7 +131,12 @@ import { createNodeHud } from "./node-hud.js";
 import { runTopCommand } from "./smithers-top.js";
 import { SmithersGatewayClient } from "smithers-orchestrator/gateway-client";
 import { resolveGatewaySource, resolveSupervisorGatewayTarget } from "./supervisor-observation.js";
-import { HERDR_PROTOCOL, createHerdrClient, createHerdrRunSurface } from "@smithers-orchestrator/herdr";
+import {
+  HERDR_PROTOCOL,
+  createHerdrClient,
+  createHerdrRunSurface,
+  workspaceLabelMatches,
+} from "@smithers-orchestrator/herdr";
 import {
   buildAgentNodeFilter,
   buildGateCommand,
@@ -1864,7 +1869,7 @@ async function runHerdrAttachCommand(c) {
  * pane for a run — a specific node's lingering tail, or (no node id) the run-level
  * overview — into the run's mirror workspace. Gives a pane to a node the adaptive
  * mirror never paned (an unpaned swarm worker past the tab cap) or re-surfaces a
- * finished node's output on demand. Find-or-create is prefix-tolerant (a terminal
+ * finished node's output on demand. Find-or-create is outcome-tolerant (a terminal
  * workspace renamed with an outcome marker is re-adopted, not duplicated) and a
  * node with a live pane is adopted, not duplicated.
  *
@@ -1954,11 +1959,10 @@ async function runHerdrOpenCommand(c) {
 }
 /**
  * `smithers herdr clean [--session <s>]`: close herdr workspaces that mirror a
- * smithers run whose run is TERMINAL in the DB. Only workspaces whose label maps
- * (via {@link herdrRunIdFromWorkspaceLabel}, tolerating the outcome-marker prefix)
- * to a KNOWN run are considered — a workspace with no matching run is never
- * touched — and a run still active (running / waiting) is left open. Prints what
- * it closed.
+ * smithers run whose run is TERMINAL in the DB. A workspace must carry the
+ * versioned Smithers ownership marker and its complete label must exactly match
+ * the identity reconstructed from the known run row. A run still active
+ * (running / waiting) is left open. Prints what it closed.
  *
  * @param {any} c
  */
@@ -2012,7 +2016,14 @@ async function runHerdrCleanCommand(c) {
         run = undefined;
       }
       if (!run) {
-        // Label parsed to a run id we do not know — leave the workspace alone.
+        // Ownership marker names a run id we do not know — leave it alone.
+        continue;
+      }
+      const workflowId = run.workflowPath ? workflowIdFromPath(run.workflowPath) : (run.workflowName ?? "smithers");
+      const expectedLabel = herdrWorkspaceLabel(workflowId, wsRunId);
+      if (!workspaceLabelMatches(ws.label, expectedLabel)) {
+        // A marker alone is insufficient for destructive ownership: the full
+        // workflow + run identity must be the one Smithers would have created.
         continue;
       }
       const status = deriveTailStatus(await computeRunStateFromRow(adapter, run));
@@ -10755,7 +10766,7 @@ const cli = Cli.create({
           }
           const { runId: targetRunId, nodeId, iteration } = target;
           await Effect.runPromise(approveNode(adapter, targetRunId, nodeId, iteration, c.options.note, c.options.by));
-          const runAfterApproval = await adapter.getRun(c.args.runId);
+          const runAfterApproval = await adapter.getRun(targetRunId);
           const isDetached =
             !runAfterApproval ||
             runAfterApproval.status === "waiting-event" ||
@@ -10767,15 +10778,15 @@ const cli = Cli.create({
           // engine from being double-driven.
           const resumeResult =
             c.options.resume !== false
-              ? await maybeResumeDecidedDetachedRun(adapter, runAfterApproval, c.args.runId)
+              ? await maybeResumeDecidedDetachedRun(adapter, runAfterApproval, targetRunId)
               : { resumed: false, reason: "opted-out" };
           const ctaCommands = [
-            { command: `logs ${c.args.runId}`, description: "Tail run logs" },
+            { command: `logs ${targetRunId}`, description: "Tail run logs" },
             { command: `ps`, description: "List all runs" },
           ];
           if (isDetached && !resumeResult.resumed && runAfterApproval?.workflowPath) {
             ctaCommands.unshift({
-              command: `up ${runAfterApproval.workflowPath} --resume --run-id ${c.args.runId}`,
+              command: `up ${runAfterApproval.workflowPath} --resume --run-id ${targetRunId}`,
               description: "Resume the paused run",
             });
           }
@@ -10784,14 +10795,14 @@ const cli = Cli.create({
           // and fails WORKFLOW_REQUIRED, so mirror the runnable form the
           // ctaCommands / signal / hijack paths already use. (#24)
           const resumeNote = runAfterApproval?.workflowPath
-            ? `smithers up ${runAfterApproval.workflowPath} --resume --run-id ${c.args.runId}`
-            : `smithers up <workflow-file> --resume --run-id ${c.args.runId}`;
+            ? `smithers up ${runAfterApproval.workflowPath} --resume --run-id ${targetRunId}`
+            : `smithers up <workflow-file> --resume --run-id ${targetRunId}`;
           const approvedNote = resumeResult.resumed
             ? `Approval recorded; relaunched the engine detached${resumeResult.pid ? ` (pid ${resumeResult.pid})` : ""} to continue the run.`
             : `Approval recorded. If running detached, resume the run to continue: ${resumeNote}`;
           return c.ok(
             {
-              runId: c.args.runId,
+              runId: targetRunId,
               nodeId,
               status: "approved",
               ...(resumeResult.resumed ? { resumed: true, resumePid: resumeResult.pid ?? null } : {}),

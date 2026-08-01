@@ -42,9 +42,11 @@ Smithers maps a run onto herdr's own hierarchy (workspace, then tabs, then panes
 so the workspace reads like a run and each tab reads like one thing you might need
 to look at.
 
-- One **workspace** per attached run, labelled `WORKFLOW_ID RUN_ID` (the workflow
-  id followed by the full run id). This label is the find-or-create key, so a
-  re-attach or resume reuses the same workspace instead of duplicating it.
+- One **workspace** per attached run, labelled
+  `WORKFLOW_ID [smithers:v1:ENCODED_RUN_ID]`. The versioned suffix is Smithers'
+  ownership marker. The complete label is the find-or-create key, so a re-attach
+  or resume reuses the same workspace without adopting an operator-created label
+  that merely mentions the same run id.
 - The workspace's **first tab is the cockpit**. By default it is a **split**: left
   = your harness shell (or a spawned harness), right = portable **`smithers supervisor`**
   (`top --db <store>` - long-lived fleet board; see [The overview board](#the-overview-board)
@@ -141,9 +143,9 @@ glance:
 
 | Marker | Terminal state |
 |---|---|
-| `✓ WORKFLOW_ID RUN_ID` | finished |
-| `✗ WORKFLOW_ID RUN_ID` | failed |
-| `◻ WORKFLOW_ID RUN_ID` | cancelled |
+| `✓ WORKFLOW_ID [smithers:v1:ENCODED_RUN_ID]` | finished |
+| `✗ WORKFLOW_ID [smithers:v1:ENCODED_RUN_ID]` | failed |
+| `◻ WORKFLOW_ID [smithers:v1:ENCODED_RUN_ID]` | cancelled |
 
 The rename is derived from the clean label and never stacks markers on replay, and
 find-or-create/attach re-adopt a renamed workspace (the marker prefix is tolerated
@@ -275,7 +277,7 @@ bunx smithers-orchestrator herdr open RUN_ID              # the run-level overvi
 ```
 
 `herdr open` places one full-size pane into the run's mirror workspace. It is
-find-or-create and prefix-tolerant: an outcome-marked (`✓`/`✗`/`◻`) workspace is
+find-or-create and outcome-tolerant: an outcome-marked (`✓`/`✗`/`◻`) workspace is
 re-adopted, and a node that already has a pane is adopted rather than duplicated,
 so opening the same node twice is idempotent. This is the escape valve for
 "the mirror never paned that worker, but I need to see it now" and works whether
@@ -291,9 +293,10 @@ bunx smithers-orchestrator herdr clean
 ```
 
 `herdr clean` closes every herdr workspace that mirrors a Smithers run **whose run
-is terminal in the local store**. The DB lookup is the safety gate: a workspace
-whose label maps to no known run is never touched, and a workspace for a run that
-is still active is left open. It prints each workspace it closed.
+is terminal in the local store**. Before closing anything, it requires the
+versioned ownership marker and an exact match with the workflow and run identity
+reconstructed from the DB row. Unknown, mismatched, and active-run workspaces are
+left open. It prints each workspace it closed.
 
 ## Supervision profiles
 

@@ -173,26 +173,25 @@ export function herdrSessionOf(option) {
 
 /**
  * The deterministic herdr workspace label for a run. This is the find-or-create
- * key, so `up --herdr` and `herdr attach` MUST derive it identically:
- * `<workflowId> <full runId>`.
+ * key, so `up --herdr` and `herdr attach` MUST derive it identically. The
+ * versioned, encoded suffix is the ownership marker used before Smithers adopts
+ * or destroys a workspace; ordinary multi-word Herdr labels never qualify.
  *
  * @param {string} workflowId
  * @param {string} runId
  * @returns {string}
  */
 export function herdrWorkspaceLabel(workflowId, runId) {
-  return `${workflowId} ${runId}`;
+  return `${workflowId} [smithers:v1:${encodeURIComponent(runId)}]`;
 }
 
 /**
  * The inverse of {@link herdrWorkspaceLabel}: pull the run id back out of a herdr
- * workspace label (`<workflowId> <runId>`), tolerating the terminal-state outcome
- * marker prefix (`✓`/`✗`/`◻`) the surface prepends on finish. Returns the run id
- * (everything after the first space of the marker-stripped label) or `undefined`
- * when the label does not look like a smithers run workspace. Used by `smithers
- * herdr clean` to map a workspace back to a DB run before deciding whether to
- * close it — the run lookup is the real safety gate, so a mis-parsed label simply
- * fails to resolve a run and the workspace is left untouched.
+ * workspace label, tolerating the terminal-state outcome marker prefix
+ * (`✓`/`✗`/`◻`) the surface prepends on finish. Only the canonical, versioned
+ * Smithers ownership marker is accepted. Callers performing destructive work
+ * must additionally compare the complete label with the identity reconstructed
+ * from the run row.
  *
  * @param {string} label
  * @returns {string | undefined}
@@ -202,12 +201,22 @@ export function herdrRunIdFromWorkspaceLabel(label) {
     return undefined;
   }
   const base = stripOutcomeMarker(label);
-  const sp = base.indexOf(" ");
-  if (sp < 0) {
+  const marker = " [smithers:v1:";
+  const markerStart = base.lastIndexOf(marker);
+  if (markerStart <= 0 || !base.endsWith("]")) {
     return undefined;
   }
-  const runId = base.slice(sp + 1).trim();
-  return runId === "" ? undefined : runId;
+  const encodedRunId = base.slice(markerStart + marker.length, -1);
+  if (encodedRunId === "") {
+    return undefined;
+  }
+  try {
+    const runId = decodeURIComponent(encodedRunId);
+    const workflowId = base.slice(0, markerStart);
+    return runId !== "" && herdrWorkspaceLabel(workflowId, runId) === base ? runId : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -1060,7 +1069,7 @@ export async function launchHerdrHijackPane(params) {
  * `smithers herdr open`: it gives a pane to a node the adaptive mirror never
  * paned (e.g. an unpaned swarm worker past the tab cap), or re-surfaces a finished
  * node's lingering output tail on demand. Reuses the run surface's find-or-create
- * (prefix-tolerant, so a terminal workspace renamed with an outcome marker is
+ * (outcome-tolerant, so a terminal workspace renamed with an outcome marker is
  * re-adopted, not duplicated) plus the shared {@link openTabPane} placement/adopt
  * helper, so a node that already has a live pane is adopted (never duplicated) and
  * its tail is not re-run. Assumes the server was already probed reachable by the
@@ -1096,7 +1105,7 @@ export async function openHerdrNodePane(params) {
     return null;
   }
   // Find-or-create the run's workspace via the surface API (same deterministic
-  // label + prefix-tolerant matching `up --herdr` / `herdr attach` use), so an
+  // label + outcome-tolerant exact matching `up --herdr` / `herdr attach` use), so an
   // on-demand pane lands in the run's own workspace instead of a stray one.
   /** @type {string | undefined} */
   let workspaceId;

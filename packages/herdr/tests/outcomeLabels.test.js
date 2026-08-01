@@ -37,36 +37,34 @@ describe("outcome-marker helpers", () => {
   });
 });
 
-describe("workspaceLabelMatches (prefix-tolerant find-or-create)", () => {
-  const target = "my-wf run-1783720000000-abcd";
+describe("workspaceLabelMatches (outcome-tolerant exact identity)", () => {
+  const target = "my-wf [smithers:v1:run-1783720000000-abcd]";
   const runId = "run-1783720000000-abcd";
 
   test("exact label matches", () => {
-    expect(workspaceLabelMatches(target, target, runId)).toBe(true);
+    expect(workspaceLabelMatches(target, target)).toBe(true);
   });
 
   test("an outcome-prefixed label still matches (finished / failed / cancelled)", () => {
-    expect(workspaceLabelMatches(`✓ ${target}`, target, runId)).toBe(true);
-    expect(workspaceLabelMatches(`✗ ${target}`, target, runId)).toBe(true);
-    expect(workspaceLabelMatches(`◻ ${target}`, target, runId)).toBe(true);
+    expect(workspaceLabelMatches(`✓ ${target}`, target)).toBe(true);
+    expect(workspaceLabelMatches(`✗ ${target}`, target)).toBe(true);
+    expect(workspaceLabelMatches(`◻ ${target}`, target)).toBe(true);
   });
 
   test("a workspace for a DIFFERENT run does not match", () => {
-    const otherLabel = "my-wf run-1783720000000-zzzz";
-    expect(workspaceLabelMatches(otherLabel, target, runId)).toBe(false);
-    expect(workspaceLabelMatches(`✓ ${otherLabel}`, target, runId)).toBe(false);
+    const otherLabel = "my-wf [smithers:v1:run-1783720000000-zzzz]";
+    expect(workspaceLabelMatches(otherLabel, target)).toBe(false);
+    expect(workspaceLabelMatches(`✓ ${otherLabel}`, target)).toBe(false);
   });
 
-  test("run-id token match is collision-safe between run-1 and run-12", () => {
-    // A workspace labeled with the longer run id must NOT match the shorter target.
-    expect(workspaceLabelMatches("wf run-12", "wf run-1", "run-1")).toBe(false);
-    // The correct workspace matches by its trailing run-id token, even renamed.
-    expect(workspaceLabelMatches("✓ wf run-1", "wf run-1", "run-1")).toBe(true);
+  test("a matching run marker under another label never grants ownership", () => {
+    expect(workspaceLabelMatches(`operator notes [smithers:v1:${runId}]`, target)).toBe(false);
+    expect(workspaceLabelMatches(`✓ operator notes [smithers:v1:${runId}]`, target)).toBe(false);
   });
 
   test("non-string candidate labels are rejected", () => {
-    expect(workspaceLabelMatches(/** @type {any} */ (undefined), target, runId)).toBe(false);
-    expect(workspaceLabelMatches(/** @type {any} */ (null), target, runId)).toBe(false);
+    expect(workspaceLabelMatches(/** @type {any} */ (undefined), target)).toBe(false);
+    expect(workspaceLabelMatches(/** @type {any} */ (null), target)).toBe(false);
   });
 });
 
