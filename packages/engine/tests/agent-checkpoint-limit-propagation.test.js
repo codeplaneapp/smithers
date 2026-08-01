@@ -12,10 +12,10 @@ import { z } from "zod";
 import { runWorkflow, Task, Workflow } from "smthrs";
 import { jsx } from "smthrs/jsx-runtime";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
+import { nanocodexTestSupported } from "./nanocodex-host-support.js";
 
 const CONFIGURED_CHECKPOINT_LIMIT = 4_096;
-const NANOCODEX_TEST_SUPPORTED = process.platform === "linux" && process.arch === "x64";
-const nTest = NANOCODEX_TEST_SUPPORTED ? test : test.skip;
+const nTest = nanocodexTestSupported ? test : test.skip;
 
 const NANOCODEX_CAPABILITIES = {
   bridgeVersion: "0.0.1",
@@ -280,12 +280,14 @@ describe("agent checkpoint limit propagation", () => {
         expect((await readFile(capture, "utf8")).trim().split("\n")).toHaveLength(1);
 
         const rows = db.$client
-          .query(`SELECT refs.run_id, refs.content_hash, contents.checkpoint_json
+          .query(
+            `SELECT refs.run_id, refs.content_hash, contents.checkpoint_json
                   FROM _smithers_agent_checkpoints refs
                   JOIN _smithers_agent_checkpoint_contents contents
                     ON contents.content_hash = refs.content_hash
                  WHERE refs.run_id IN (?, ?)
-                 ORDER BY refs.run_id`)
+                 ORDER BY refs.run_id`,
+          )
           .all(parentRunId, replay.runId);
         expect(rows).toHaveLength(2);
         expect(new Set(rows.map((row) => row.content_hash)).size).toBe(1);
@@ -360,11 +362,13 @@ describe("agent checkpoint limit propagation", () => {
         expect(JSON.stringify(captures)).not.toContain("never-on-the-wire");
 
         const rows = db.$client
-          .query(`SELECT contents.checkpoint_json
+          .query(
+            `SELECT contents.checkpoint_json
                 FROM _smithers_agent_checkpoints refs
                 JOIN _smithers_agent_checkpoint_contents contents
                   ON contents.content_hash = refs.content_hash
-                ORDER BY refs.sequence`)
+                ORDER BY refs.sequence`,
+          )
           .all();
         expect(rows).toHaveLength(3);
         expect(JSON.parse(rows.at(-1).checkpoint_json).payload.nanocodexSnapshot).toEqual({
