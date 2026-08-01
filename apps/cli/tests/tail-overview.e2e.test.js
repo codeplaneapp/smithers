@@ -21,12 +21,15 @@ test("buildOverviewBlock renders a header, per-node board, and approve/steer CTA
     ],
     pendingApprovals: [{ nodeId: "ship-gate", iteration: 0 }],
   });
+  // Renderer cells include ANSI color resets between the padded state and
+  // attempt columns. Assert layout against visible text, independent of color.
+  const plainBlock = block.replace(/\x1B\[[0-9;]*m/g, "");
   expect(block).toContain("overview · run r1 · waiting-approval · 3 nodes");
   // Board is columnar: node · state · attempt
   expect(block).toContain("implement");
-  expect(block).toMatch(/implement\s+done\s+2/);
+  expect(plainBlock).toMatch(/implement\s+done\s+2/);
   expect(block).toContain("blocked · approval");
-  expect(block).toMatch(/deploy\s+failed\s+3/);
+  expect(plainBlock).toMatch(/deploy\s+failed\s+3/);
   // CTAs: the exact approve command for the gate, and the one-key steer/takeover
   // affordance + full machine commands for the failure.
   expect(block).toContain("smithers approve r1 --node ship-gate --iteration 0");

@@ -14,8 +14,8 @@ describe("cockpitLayout", () => {
     expect(DEFAULT_HARNESS_CANDIDATES).toContain("claude");
   });
 
-  test("isExecutableOnPath finds sh", () => {
-    expect(isExecutableOnPath("sh")).toBe(true);
+  test("isExecutableOnPath finds the current runtime", () => {
+    expect(isExecutableOnPath(process.execPath)).toBe(true);
     expect(isExecutableOnPath("definitely-not-a-bin-xyzzy")).toBe(false);
   });
 

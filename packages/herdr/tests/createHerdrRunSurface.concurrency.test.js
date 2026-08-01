@@ -20,6 +20,8 @@ import { createHerdrRunSurface } from "../src/index.js";
 import { isHerdrInstalled, randomSessionName, startHerdrServer } from "./herdr-server.js";
 
 const herdrInstalled = isHerdrInstalled();
+const describeUnixSocket = process.platform === "win32" ? describe.skip : describe;
+const describeRealHerdr = process.platform === "win32" || !herdrInstalled ? describe.skip : describe;
 
 /** herdr's own default (fixed at 5000ms in the surface) - the wait between workspace retries. */
 const WORKSPACE_RETRY_INTERVAL_MS = 5000;
@@ -161,7 +163,7 @@ afterAll(async () => {
   expect(suiteRejections).toEqual([]);
 });
 
-describe("createHerdrRunSurface circuit breaker (silent real-socket fixture)", () => {
+describeUnixSocket("createHerdrRunSurface circuit breaker (silent real-socket fixture)", () => {
   test("trips after threshold consecutive timeouts and fast-drops further pushes", async () => {
     const silent = await startSilentServer();
     try {
@@ -256,7 +258,7 @@ describe("createHerdrRunSurface circuit breaker (silent real-socket fixture)", (
   }, 20000);
 });
 
-describe.skipIf(!herdrInstalled)("createHerdrRunSurface breaker reset + workspace retry (real herdr server)", () => {
+describeRealHerdr("createHerdrRunSurface breaker reset + workspace retry (real herdr server)", () => {
   /** @type {Awaited<ReturnType<typeof startHerdrServer>>} */
   let server;
   /** @type {import("../src/HerdrClientOptions.ts").HerdrClient} */
@@ -364,7 +366,7 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface breaker reset + workspac
   }, 30000);
 });
 
-describe("createHerdrRunSurface cross-run event drop (silent real-socket fixture)", () => {
+describeUnixSocket("createHerdrRunSurface cross-run event drop (silent real-socket fixture)", () => {
   test("an event for a run other than the one the surface bound issues zero RPCs", async () => {
     const silent = await startSilentServer();
     try {

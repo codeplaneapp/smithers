@@ -14,7 +14,7 @@ describe("resolveSocketPath precedence", () => {
 
   test("session option beats HERDR_SOCKET_PATH and HERDR_SESSION", () => {
     const env = { ...baseEnv, HERDR_SOCKET_PATH: "/env/sock", HERDR_SESSION: "envsess" };
-    expect(resolveSocketPath({ session: "opt" }, env)).toBe(`${CONFIG}/herdr/sessions/opt/herdr.sock`);
+    expect(resolveSocketPath({ session: "opt" }, env)).toBe(join(CONFIG, "herdr", "sessions", "opt", "herdr.sock"));
   });
 
   test("HERDR_SOCKET_PATH beats HERDR_SESSION", () => {
@@ -24,11 +24,11 @@ describe("resolveSocketPath precedence", () => {
 
   test("HERDR_SESSION beats the default when no socket path is set", () => {
     const env = { ...baseEnv, HERDR_SESSION: "envsess" };
-    expect(resolveSocketPath({}, env)).toBe(`${CONFIG}/herdr/sessions/envsess/herdr.sock`);
+    expect(resolveSocketPath({}, env)).toBe(join(CONFIG, "herdr", "sessions", "envsess", "herdr.sock"));
   });
 
   test("falls back to the default session socket", () => {
-    expect(resolveSocketPath({}, { ...baseEnv })).toBe(`${CONFIG}/herdr/herdr.sock`);
+    expect(resolveSocketPath({}, { ...baseEnv })).toBe(join(CONFIG, "herdr", "herdr.sock"));
   });
 
   test("uses the OS home ~/.config when XDG_CONFIG_HOME is unset", () => {
@@ -38,6 +38,6 @@ describe("resolveSocketPath precedence", () => {
   });
 
   test("sessionSocketPath builds the documented named-session path", () => {
-    expect(sessionSocketPath("my-run", baseEnv)).toBe(`${CONFIG}/herdr/sessions/my-run/herdr.sock`);
+    expect(sessionSocketPath("my-run", baseEnv)).toBe(join(CONFIG, "herdr", "sessions", "my-run", "herdr.sock"));
   });
 });
