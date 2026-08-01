@@ -74,15 +74,17 @@ createGatewayReactRoot(<App />);
 `;
 
 // A ticket/agent-output `status` has its own vocabulary and must not be
-// flagged — the rule only applies to UIs that read the run tree.
+// flagged, including in a UI that also reads the run tree.
 const TICKET_STATUS_UI = `/** @jsxImportSource react */
-import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";
+import { createGatewayReactRoot, useGatewayRunTree } from "smithers-orchestrator/gateway-react";
 import { RunMeta, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
 
 function App({ ticket }) {
+  const tree = useGatewayRunTree("run-1");
   return (
     <WorkflowUiShell title="Tickets" meta={<RunMeta runId="run-1" />}>
-      <span>{ticket.status === "closed" ? "done" : "open"}</span>
+      <span>{tree.status}</span>
+      <span>{ticket.status === "pending" ? "queued" : "ready"}</span>
     </WorkflowUiShell>
   );
 }
@@ -164,6 +166,53 @@ describe("gradeWorkflowUiSource", () => {
 
   test("leaves a non-run-tree status vocabulary alone", () => {
     const report = gradeWorkflowUiSource(TICKET_STATUS_UI, { workflowSource: DETERMINISTIC_WORKFLOW });
+    expect(report.violations.map((violation) => violation.rule)).not.toContain("node-status-vocabulary");
+  });
+
+  test("covers every authoritative engine TaskState", () => {
+    const taskStates = [
+      "pending",
+      "waiting-approval",
+      "waiting-event",
+      "waiting-timer",
+      "waiting-quota",
+      "waiting-bound",
+      "bound-stale",
+      "in-progress",
+      "finished",
+      "failed",
+      "cancelled",
+      "skipped",
+    ];
+    const source = TICKET_STATUS_UI.replace(
+      '  const tree = useGatewayRunTree("run-1");',
+      `  const tree = useGatewayRunTree("run-1");\n${taskStates
+        .map((state) => `  void (tree.status === ${JSON.stringify(state)});`)
+        .join("\n")}`,
+    );
+    const violations = gradeWorkflowUiSource(source, {
+      workflowSource: DETERMINISTIC_WORKFLOW,
+    }).violations.filter((violation) => violation.rule === "node-status-vocabulary");
+
+    expect(violations).toHaveLength(10);
+    for (const state of taskStates.filter((state) => state !== "failed" && state !== "cancelled")) {
+      expect(
+        violations.some((violation) => violation.detail.includes(JSON.stringify(state))),
+        state,
+      ).toBe(true);
+    }
+  });
+
+  test("ignores status comparisons shown as text", () => {
+    const source = TICKET_STATUS_UI.replace(
+      "function App({ ticket }) {",
+      'const quotedExample = \'node.status === "finished"\';\nconst templateExample = `node.status === "completed"`;\nfunction App({ ticket }) {',
+    ).replace(
+      "      <span>{tree.status}</span>",
+      "      <span>{tree.status}</span><pre>{quotedExample}{templateExample}</pre>",
+    );
+    const report = gradeWorkflowUiSource(source, { workflowSource: DETERMINISTIC_WORKFLOW });
+
     expect(report.violations.map((violation) => violation.rule)).not.toContain("node-status-vocabulary");
   });
 
