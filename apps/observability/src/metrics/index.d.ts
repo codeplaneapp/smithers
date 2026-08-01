@@ -1,5 +1,5 @@
-import { aD as SmithersMetricDefinition$1, c as SmithersMetricDefinition$2, aE as SmithersMetricType$1, aF as SmithersMetricUnit$1 } from '../rewindSandboxesReverted-DcBmlYff.js';
-export { d as activeNodes, e as activeRuns, f as approvalPending, g as approvalWaitDuration, h as approvalsDenied, i as approvalsGranted, j as approvalsRequested, k as attemptDuration, l as cacheHits, m as cacheMisses, n as dbQueryDuration, o as dbRetries, p as dbTransactionDuration, q as dbTransactionRetries, r as dbTransactionRollbacks, s as errorsTotal, t as eventsEmittedTotal, u as externalWaitAsyncPending, v as hotReloadDuration, w as hotReloadFailures, x as hotReloads, y as httpRequestDuration, z as httpRequests, A as metricsServiceAdapter, B as nodeDuration, C as nodeRetriesTotal, D as nodesFailed, E as nodesFinished, F as nodesStarted, G as processHeapUsedBytes, H as processMemoryRssBytes, I as processUptimeSeconds, J as promptSizeBytes, K as replaysStarted, L as responseSizeBytes, N as rewindDurationMs, O as rewindFramesDeleted, P as rewindRollbackTotal, Q as rewindSandboxesReverted, R as rewindTotal, T as runDuration, U as runForksCreated, V as runsAncestryDepth, W as runsCancelledTotal, X as runsCarriedStateBytes, Y as runsContinuedTotal, Z as runsFailedTotal, _ as runsFinishedTotal, $ as runsResumedTotal, a0 as runsTotal, a1 as sandboxActive, a2 as sandboxBundleSizeBytes, a3 as sandboxCompletedTotal, a4 as sandboxCreatedTotal, a5 as sandboxDurationMs, a6 as sandboxPatchCount, a7 as sandboxTransportDurationMs, a8 as schedulerConcurrencyUtilization, a9 as schedulerQueueDepth, aa as schedulerWaitDuration, ab as scorerEventsFailed, ac as scorerEventsFinished, ad as scorerEventsStarted, ae as smithersMetricCatalog, af as snapshotDuration, ag as snapshotsCaptured, ah as timerDelayDuration, ai as timersCancelled, aj as timersCreated, ak as timersFired, al as timersPending, am as toPrometheusMetricName, an as tokensCacheReadTotal, ao as tokensCacheWriteTotal, ap as tokensContextWindowBucketTotal, aq as tokensContextWindowPerCall, ar as tokensInputPerCall, as as tokensInputTotal, at as tokensOutputPerCall, au as tokensOutputTotal, av as tokensReasoningTotal, aw as toolCallErrorsTotal, ax as toolCallsTotal, ay as toolDuration, az as toolOutputTruncatedTotal, aA as trackEvent, aB as updateProcessMetrics, aC as vcsDuration } from '../rewindSandboxesReverted-DcBmlYff.js';
+import { aD as SmithersMetricDefinition$1, c as SmithersMetricDefinition$2, aE as SmithersMetricType$1, aF as SmithersMetricUnit$1 } from '../rewindSandboxesReverted-DNiqPX1B.js';
+export { d as activeNodes, e as activeRuns, f as approvalPending, g as approvalWaitDuration, h as approvalsDenied, i as approvalsGranted, j as approvalsRequested, k as attemptDuration, l as cacheHits, m as cacheMisses, n as dbQueryDuration, o as dbRetries, p as dbTransactionDuration, q as dbTransactionRetries, r as dbTransactionRollbacks, s as errorsTotal, t as eventsEmittedTotal, u as externalWaitAsyncPending, v as hotReloadDuration, w as hotReloadFailures, x as hotReloads, y as httpRequestDuration, z as httpRequests, A as metricsServiceAdapter, B as nodeDuration, C as nodeRetriesTotal, D as nodesFailed, E as nodesFinished, F as nodesStarted, G as processHeapUsedBytes, H as processMemoryRssBytes, I as processUptimeSeconds, J as promptSizeBytes, K as replaysStarted, L as responseSizeBytes, N as rewindDurationMs, O as rewindFramesDeleted, P as rewindRollbackTotal, Q as rewindSandboxesReverted, R as rewindTotal, T as runDuration, U as runForksCreated, V as runsAncestryDepth, W as runsCancelledTotal, X as runsCarriedStateBytes, Y as runsContinuedTotal, Z as runsFailedTotal, _ as runsFinishedTotal, $ as runsResumedTotal, a0 as runsTotal, a1 as sandboxActive, a2 as sandboxBundleSizeBytes, a3 as sandboxCompletedTotal, a4 as sandboxCreatedTotal, a5 as sandboxDurationMs, a6 as sandboxPatchCount, a7 as sandboxTransportDurationMs, a8 as schedulerConcurrencyUtilization, a9 as schedulerQueueDepth, aa as schedulerWaitDuration, ab as scorerEventsFailed, ac as scorerEventsFinished, ad as scorerEventsStarted, ae as smithersMetricCatalog, af as snapshotDuration, ag as snapshotsCaptured, ah as timerDelayDuration, ai as timersCancelled, aj as timersCreated, ak as timersFired, al as timersPending, am as toPrometheusMetricName, an as tokensCacheReadTotal, ao as tokensCacheWriteTotal, ap as tokensContextWindowBucketTotal, aq as tokensContextWindowPerCall, ar as tokensInputPerCall, as as tokensInputTotal, at as tokensOutputPerCall, au as tokensOutputTotal, av as tokensReasoningTotal, aw as toolCallErrorsTotal, ax as toolCallsTotal, ay as toolDuration, az as toolOutputTruncatedTotal, aA as trackEvent, aB as updateProcessMetrics, aC as vcsDuration } from '../rewindSandboxesReverted-DNiqPX1B.js';
 import * as effect from 'effect';
 import { Effect, Metric } from 'effect';
 
@@ -16,138 +16,138 @@ declare const smithersMetricCatalogByName: Map<string, SmithersMetricDefinition$
 
 declare const smithersMetricCatalogByPrometheusName: Map<string, SmithersMetricDefinition$1>;
 
-declare const alertsFiredTotal: Metric.Counter<number>;
+declare const alertsFiredTotal: Metric.Metric.Counter<number>;
 
-declare const alertsAcknowledgedTotal: Metric.Counter<number>;
+declare const alertsAcknowledgedTotal: Metric.Metric.Counter<number>;
 
-declare const alertsResolvedTotal: Metric.Counter<number>;
+declare const alertsResolvedTotal: Metric.Metric.Counter<number>;
 
-declare const alertsSilencedTotal: Metric.Counter<number>;
+declare const alertsSilencedTotal: Metric.Metric.Counter<number>;
 
-declare const alertsReopenedTotal: Metric.Counter<number>;
+declare const alertsReopenedTotal: Metric.Metric.Counter<number>;
 
-declare const alertsEscalatedTotal: Metric.Counter<number>;
+declare const alertsEscalatedTotal: Metric.Metric.Counter<number>;
 
-declare const alertDeliveriesAttempted: Metric.Counter<number>;
+declare const alertDeliveriesAttempted: Metric.Metric.Counter<number>;
 
-declare const alertDeliveriesSuppressed: Metric.Counter<number>;
+declare const alertDeliveriesSuppressed: Metric.Metric.Counter<number>;
 
-declare const supervisorPollsTotal: Metric.Counter<number>;
+declare const supervisorPollsTotal: Metric.Metric.Counter<number>;
 
-declare const supervisorStaleDetected: Metric.Counter<number>;
+declare const supervisorStaleDetected: Metric.Metric.Counter<number>;
 
-declare const supervisorResumedTotal: Metric.Counter<number>;
+declare const supervisorResumedTotal: Metric.Metric.Counter<number>;
 
-declare const supervisorSkippedTotal: Metric.Counter<number>;
+declare const supervisorSkippedTotal: Metric.Metric.Counter<number>;
 
-declare const agentInvocationsTotal: Metric.Counter<number>;
+declare const agentInvocationsTotal: Metric.Metric.Counter<number>;
 
-declare const agentTokensTotal: Metric.Counter<number>;
+declare const agentTokensTotal: Metric.Metric.Counter<number>;
 
-declare const agentErrorsTotal: Metric.Counter<number>;
+declare const agentErrorsTotal: Metric.Metric.Counter<number>;
 
-declare const agentRetriesTotal: Metric.Counter<number>;
+declare const agentRetriesTotal: Metric.Metric.Counter<number>;
 
-declare const agentEventsTotal: Metric.Counter<number>;
+declare const agentEventsTotal: Metric.Metric.Counter<number>;
 
-declare const agentSessionsTotal: Metric.Counter<number>;
+declare const agentSessionsTotal: Metric.Metric.Counter<number>;
 
-declare const agentActionsTotal: Metric.Counter<number>;
+declare const agentActionsTotal: Metric.Metric.Counter<number>;
 
-declare const gatewayConnectionsTotal: Metric.Counter<number>;
+declare const gatewayConnectionsTotal: Metric.Metric.Counter<number>;
 
-declare const gatewayConnectionsClosedTotal: Metric.Counter<number>;
+declare const gatewayConnectionsClosedTotal: Metric.Metric.Counter<number>;
 
-declare const gatewayMessagesReceivedTotal: Metric.Counter<number>;
+declare const gatewayMessagesReceivedTotal: Metric.Metric.Counter<number>;
 
-declare const gatewayMessagesSentTotal: Metric.Counter<number>;
+declare const gatewayMessagesSentTotal: Metric.Metric.Counter<number>;
 
-declare const gatewayRpcCallsTotal: Metric.Counter<number>;
+declare const gatewayRpcCallsTotal: Metric.Metric.Counter<number>;
 
-declare const gatewayErrorsTotal: Metric.Counter<number>;
+declare const gatewayErrorsTotal: Metric.Metric.Counter<number>;
 
-declare const gatewayRunsStartedTotal: Metric.Counter<number>;
+declare const gatewayRunsStartedTotal: Metric.Metric.Counter<number>;
 
-declare const gatewayRunsCompletedTotal: Metric.Counter<number>;
+declare const gatewayRunsCompletedTotal: Metric.Metric.Counter<number>;
 
-declare const gatewayApprovalDecisionsTotal: Metric.Counter<number>;
+declare const gatewayApprovalDecisionsTotal: Metric.Metric.Counter<number>;
 
-declare const gatewaySignalsTotal: Metric.Counter<number>;
+declare const gatewaySignalsTotal: Metric.Metric.Counter<number>;
 
-declare const gatewayAuthEventsTotal: Metric.Counter<number>;
+declare const gatewayAuthEventsTotal: Metric.Metric.Counter<number>;
 
-declare const gatewayHeartbeatTicksTotal: Metric.Counter<number>;
+declare const gatewayHeartbeatTicksTotal: Metric.Metric.Counter<number>;
 
-declare const gatewayCronTriggersTotal: Metric.Counter<number>;
+declare const gatewayCronTriggersTotal: Metric.Metric.Counter<number>;
 
-declare const gatewayWebhooksReceivedTotal: Metric.Counter<number>;
+declare const gatewayWebhooksReceivedTotal: Metric.Metric.Counter<number>;
 
-declare const gatewayWebhooksVerifiedTotal: Metric.Counter<number>;
+declare const gatewayWebhooksVerifiedTotal: Metric.Metric.Counter<number>;
 
-declare const gatewayWebhooksRejectedTotal: Metric.Counter<number>;
+declare const gatewayWebhooksRejectedTotal: Metric.Metric.Counter<number>;
 
-declare const devtoolsSubscribeTotal: Metric.Counter<number>;
+declare const devtoolsSubscribeTotal: Metric.Metric.Counter<number>;
 
-declare const devtoolsEventTotal: Metric.Counter<number>;
+declare const devtoolsEventTotal: Metric.Metric.Counter<number>;
 
-declare const devtoolsBackpressureDisconnectTotal: Metric.Counter<number>;
+declare const devtoolsBackpressureDisconnectTotal: Metric.Metric.Counter<number>;
 
-declare const gatewayRunEventBackpressureDisconnectTotal: Metric.Counter<number>;
+declare const gatewayRunEventBackpressureDisconnectTotal: Metric.Metric.Counter<number>;
 
-declare const taskHeartbeatsTotal: Metric.Counter<number>;
+declare const taskHeartbeatsTotal: Metric.Metric.Counter<number>;
 
-declare const taskHeartbeatTimeoutTotal: Metric.Counter<number>;
+declare const taskHeartbeatTimeoutTotal: Metric.Metric.Counter<number>;
 
-declare const memoryFactReads: Metric.Counter<number>;
+declare const memoryFactReads: Metric.Metric.Counter<number>;
 
-declare const memoryFactWrites: Metric.Counter<number>;
+declare const memoryFactWrites: Metric.Metric.Counter<number>;
 
-declare const memoryRecallQueries: Metric.Counter<number>;
+declare const memoryRecallQueries: Metric.Metric.Counter<number>;
 
-declare const memoryMessageSaves: Metric.Counter<number>;
+declare const memoryMessageSaves: Metric.Metric.Counter<number>;
 
-declare const openApiToolCallsTotal: Metric.Counter<number>;
+declare const openApiToolCallsTotal: Metric.Metric.Counter<number>;
 
-declare const openApiToolCallErrorsTotal: Metric.Counter<number>;
+declare const openApiToolCallErrorsTotal: Metric.Metric.Counter<number>;
 
-declare const scorersStarted: Metric.Counter<number>;
+declare const scorersStarted: Metric.Metric.Counter<number>;
 
-declare const scorersFinished: Metric.Counter<number>;
+declare const scorersFinished: Metric.Metric.Counter<number>;
 
-declare const scorersFailed: Metric.Counter<number>;
+declare const scorersFailed: Metric.Metric.Counter<number>;
 
-declare const alertsActive: Metric.Gauge<number>;
+declare const alertsActive: Metric.Metric.Gauge<number>;
 
-declare const attentionBacklog: Metric.Gauge<number>;
+declare const attentionBacklog: Metric.Metric.Gauge<number>;
 
-declare const gatewayConnectionsActive: Metric.Gauge<number>;
+declare const gatewayConnectionsActive: Metric.Metric.Gauge<number>;
 
-declare const devtoolsActiveSubscribers: Metric.Gauge<number>;
+declare const devtoolsActiveSubscribers: Metric.Metric.Gauge<number>;
 
-declare const agentDurationMs: Metric.Histogram<number>;
+declare const agentDurationMs: Metric.Metric.Histogram<number>;
 
-declare const gatewayRpcDuration: Metric.Histogram<number>;
+declare const gatewayRpcDuration: Metric.Metric.Histogram<number>;
 
-declare const supervisorPollDuration: Metric.Histogram<number>;
+declare const supervisorPollDuration: Metric.Metric.Histogram<number>;
 
-declare const supervisorResumeLag: Metric.Histogram<number>;
+declare const supervisorResumeLag: Metric.Metric.Histogram<number>;
 
-declare const heartbeatDataSizeBytes: Metric.Histogram<number>;
+declare const heartbeatDataSizeBytes: Metric.Metric.Histogram<number>;
 
-declare const heartbeatIntervalMs: Metric.Histogram<number>;
+declare const heartbeatIntervalMs: Metric.Metric.Histogram<number>;
 
-declare const memoryRecallDuration: Metric.Histogram<number>;
+declare const memoryRecallDuration: Metric.Metric.Histogram<number>;
 
-/** @type {import("effect").Metric.Metric<import("effect/MetricKeyType").MetricKeyType.Histogram, number, import("effect/MetricState").MetricState.Histogram>} */
-declare const openApiToolDuration: effect.Metric.Metric<any, number, any>;
+/** @type {import("effect").Metric.Metric.Histogram<number>} */
+declare const openApiToolDuration: effect.Metric.Metric.Histogram<number>;
 
-declare const scorerDuration: Metric.Histogram<number>;
+declare const scorerDuration: Metric.Metric.Histogram<number>;
 
-declare const devtoolsSnapshotBuildMs: Metric.Histogram<number>;
+declare const devtoolsSnapshotBuildMs: Metric.Metric.Histogram<number>;
 
-declare const devtoolsDeltaBuildMs: Metric.Histogram<number>;
+declare const devtoolsDeltaBuildMs: Metric.Metric.Histogram<number>;
 
-declare const devtoolsEventBytes: Metric.Histogram<number>;
+declare const devtoolsEventBytes: Metric.Metric.Histogram<number>;
 
 type SmithersMetricDefinition = SmithersMetricDefinition$2;
 type SmithersMetricType = SmithersMetricType$1;

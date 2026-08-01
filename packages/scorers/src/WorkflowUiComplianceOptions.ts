@@ -11,7 +11,15 @@ export type WorkflowUiComplianceOptions = {
 
 /** One broken rule occurrence. */
 export type WorkflowUiViolation = {
-  rule: "imports" | "shell" | "mount" | "live-chat" | "hand-rolled-colors" | "hand-rolled-pills" | "hand-rolled-table";
+  rule:
+    | "imports"
+    | "shell"
+    | "mount"
+    | "live-chat"
+    | "hand-rolled-colors"
+    | "hand-rolled-pills"
+    | "hand-rolled-table"
+    | "node-status-vocabulary";
   detail: string;
 };
 

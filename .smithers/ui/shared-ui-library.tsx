@@ -104,7 +104,7 @@ function TicketCard({ runId, slug, nodes }: { runId: string; slug: string; nodes
   const row = isRecord(resultQuery.data) && isRecord(resultQuery.data.row) ? resultQuery.data.row : undefined;
   const lgtm = row?.lgtm === true || row?.lgtm === 1;
   const settled = row !== undefined;
-  const verdict = merge.status === "finished" ? "merged" : settled ? (lgtm ? "lgtm" : "not lgtm") : undefined;
+  const verdict = merge.status === "ok" ? "merged" : settled ? (lgtm ? "lgtm" : "not lgtm") : undefined;
   return (
     <div style={panelStyle}>
       <div

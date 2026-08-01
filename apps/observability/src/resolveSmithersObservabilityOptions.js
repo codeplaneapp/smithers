@@ -14,27 +14,27 @@ const DEFAULT_OTLP_HTTP_ENDPOINT = "http://localhost:4318";
  */
 function resolveLogLevel(value) {
   if (typeof value !== "string") {
-    return value ?? LogLevel.Info;
+    return value ?? "Info";
   }
   switch (value.toLowerCase()) {
     case "none":
-      return LogLevel.None;
+      return "None";
     case "trace":
-      return LogLevel.Trace;
+      return "Trace";
     case "debug":
-      return LogLevel.Debug;
+      return "Debug";
     case "warning":
     case "warn":
-      return LogLevel.Warn;
+      return "Warn";
     case "error":
-      return LogLevel.Error;
+      return "Error";
     case "fatal":
-      return LogLevel.Fatal;
+      return "Fatal";
     case "all":
-      return LogLevel.All;
+      return "All";
     case "info":
     default:
-      return LogLevel.Info;
+      return "Info";
   }
 }
 /**

@@ -1,4 +1,45 @@
 import { createScorer } from "./createScorer.js";
+import ts from "typescript";
+
+/**
+ * The only statuses a run-tree row can carry. `toRunStatus` (gateway-client)
+ * collapses every engine lifecycle state onto one of these before it reaches a
+ * UI, so these six are the entire vocabulary a workflow UI can match against.
+ */
+const NODE_STATUSES = new Set(["ok", "running", "queued", "failed", "waiting", "cancelled"]);
+
+/**
+ * Engine lifecycle states `toRunStatus` maps onto a *different* tone. A run
+ * tree row can never carry one, so a UI comparing against one is silently
+ * always false — the bug this rule exists to catch.
+ *
+ * Deliberately only these: a node's own output payload may define any
+ * `status` vocabulary it likes (`merged`, `conflict-aborted`, …), and those
+ * must not be flagged.
+ */
+const NORMALIZED_AWAY = new Set([
+  "pending",
+  "waiting-approval",
+  "waiting-event",
+  "waiting-timer",
+  "waiting-quota",
+  "waiting-bound",
+  "bound-stale",
+  "in-progress",
+  "finished",
+  "skipped",
+  // Non-TaskState aliases that toRunStatus also accepts.
+  "retrying",
+  "succeeded",
+  "completed",
+  "canceled",
+  "errored",
+  "blocked",
+  "paused",
+]);
+
+/** Bindings the grader resolves against gateway-react; everything else is gateway-ui. */
+const GATEWAY_REACT_EXPORTS = new Set(["createGatewayReactRoot", "useGatewayRunTree"]);
 
 /** @typedef {import("./WorkflowUiComplianceOptions.ts").WorkflowUiComplianceOptions} WorkflowUiComplianceOptions */
 /** @typedef {import("./WorkflowUiComplianceOptions.ts").WorkflowUiComplianceReport} WorkflowUiComplianceReport */
@@ -24,6 +65,12 @@ import { createScorer } from "./createScorer.js";
  * - `hand-rolled-pills`  — no `borderRadius: 999` pill re-implementations;
  *                      that's `StatusPill` / `Badge`.
  * - `hand-rolled-table`  — no raw `<table>` markup; use `Table` / `FleetTable`.
+ * - `node-status-vocabulary` — status values derived from `useGatewayRunTree`
+ *                      may only be compared with tones the gateway emits
+ *                      (`ok`/`running`/`queued`/`failed`/`waiting`/`cancelled`);
+ *                      engine lifecycle words like `finished` or `completed`
+ *                      are normalized away by `toRunStatus` before a UI sees
+ *                      them, so comparing against one is silently always false.
  *
  * Pure and deterministic: feed it source text (no filesystem access) so it
  * runs identically in unit tests, create-ui gate tasks, and `smithers eval`
@@ -101,13 +148,311 @@ export function gradeWorkflowUiSource(uiSource, options = {}) {
     });
   }
 
-  const rules = 7;
+  // Follow values derived from useGatewayRunTree instead of applying the rule
+  // to every `.status` in the file. Ticket and node-output payloads define
+  // independent status vocabularies even when the same UI also reads a tree.
+  const runTreeBindings = importedBindings(code, ["useGatewayRunTree"]);
+  for (const state of runTreeStatusComparisons(uiSource, syntax, runTreeBindings)) {
+    if (NORMALIZED_AWAY.has(state)) {
+      violations.push({
+        rule: "node-status-vocabulary",
+        detail: `Comparing a run-tree status against the engine state "${state}". toRunStatus normalizes that to one of ${[...NODE_STATUSES].join("/")} before a UI sees it, so this test is always false and finished nodes render as un-started. Roll phases up with nodeStatusIndex + rollupNodeStatus (gateway-ui) instead of matching literals.`,
+      });
+    }
+  }
+
+  const rules = 8;
   const failedRules = new Set(violations.map((violation) => violation.rule)).size;
   return {
     passed: violations.length === 0,
     score: (rules - failedRules) / rules,
     violations,
   };
+}
+
+const RUN_TREE = 1;
+const RUN_TREE_NODE = 2;
+const RUN_TREE_NODES = 4;
+const RUN_TREE_STATUS = 8;
+const RUN_TREE_STATUSES = 16;
+
+/**
+ * Return engine-state literals compared with a status proven to originate at
+ * useGatewayRunTree. TypeScript's parser keeps prose strings, JSX text, and
+ * comments out of the executable comparison walk.
+ *
+ * @param {string} source
+ * @param {string} syntax
+ * @param {Array<{local: string, member?: string}>} hookBindings
+ * @returns {string[]}
+ */
+function runTreeStatusComparisons(source, syntax, hookBindings) {
+  if (hookBindings.length === 0) return [];
+
+  const file = ts.createSourceFile("workflow-ui.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  /** @type {Map<string, ts.FunctionLikeDeclaration[]>} */
+  const functions = new Map();
+  /** @type {Map<ts.FunctionLikeDeclaration, number[]>} */
+  const parameterProvenance = new Map();
+  /** @type {Map<ts.FunctionLikeDeclaration, number>} */
+  const returnProvenance = new Map();
+
+  const addFunction = (name, node) => {
+    const entries = functions.get(name) ?? [];
+    entries.push(node);
+    functions.set(name, entries);
+  };
+  const collectFunctions = (node) => {
+    if (ts.isFunctionDeclaration(node) && node.name) addFunction(node.name.text, node);
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer &&
+      (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
+    ) {
+      addFunction(node.name.text, node.initializer);
+    }
+    ts.forEachChild(node, collectFunctions);
+  };
+  collectFunctions(file);
+
+  let changed = false;
+  const mergeParameter = (fn, index, provenance) => {
+    if (!provenance) return;
+    const parameters = parameterProvenance.get(fn) ?? [];
+    const next = (parameters[index] ?? 0) | provenance;
+    if (next === parameters[index]) return;
+    parameters[index] = next;
+    parameterProvenance.set(fn, parameters);
+    changed = true;
+  };
+  const mergeReturn = (fn, provenance) => {
+    if (!provenance) return;
+    const next = (returnProvenance.get(fn) ?? 0) | provenance;
+    if (next === returnProvenance.get(fn)) return;
+    returnProvenance.set(fn, next);
+    changed = true;
+  };
+  const functionsFor = (expression) => {
+    if (ts.isArrowFunction(expression) || ts.isFunctionExpression(expression)) return [expression];
+    if (ts.isIdentifier(expression)) return functions.get(expression.text) ?? [];
+    return [];
+  };
+  const methodName = (expression) => {
+    if (ts.isPropertyAccessExpression(expression)) return expression.name.text;
+    if (ts.isElementAccessExpression(expression) && expression.argumentExpression) {
+      return literalText(expression.argumentExpression);
+    }
+    return undefined;
+  };
+  const receiverOf = (expression) =>
+    ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)
+      ? expression.expression
+      : undefined;
+
+  /** @param {ts.Expression | undefined} expression @param {Map<string, number>} environment */
+  const provenanceOf = (expression, environment) => {
+    if (!expression) return 0;
+    if (ts.isIdentifier(expression)) return environment.get(expression.text) ?? 0;
+    if (
+      ts.isParenthesizedExpression(expression) ||
+      ts.isAsExpression(expression) ||
+      ts.isTypeAssertionExpression(expression) ||
+      ts.isNonNullExpression(expression) ||
+      ts.isSatisfiesExpression(expression) ||
+      ts.isAwaitExpression(expression)
+    ) {
+      return provenanceOf(expression.expression, environment);
+    }
+    if (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) {
+      const property = methodName(expression);
+      const receiver = provenanceOf(expression.expression, environment);
+      if (receiver & RUN_TREE) {
+        if (property === "root") return RUN_TREE_NODE;
+        if (property === "nodes") return RUN_TREE_NODES;
+        if (property === "status") return RUN_TREE_STATUS;
+      }
+      if (receiver & RUN_TREE_NODE) {
+        if (property === "children") return RUN_TREE_NODES;
+        if (property === "status") return RUN_TREE_STATUS;
+      }
+      return 0;
+    }
+    if (ts.isCallExpression(expression)) {
+      if (isRunTreeHookCall(expression, syntax, hookBindings)) return RUN_TREE;
+      const receiverExpression = receiverOf(expression.expression);
+      const receiver = provenanceOf(receiverExpression, environment);
+      const method = methodName(expression.expression);
+      if (method === "find" || method === "findLast" || method === "at") {
+        if (receiver & RUN_TREE_NODES) return RUN_TREE_NODE;
+        if (receiver & RUN_TREE_STATUSES) return RUN_TREE_STATUS;
+      }
+      if (["filter", "slice", "toReversed", "toSorted", "toSpliced", "with"].includes(method)) {
+        return receiver & (RUN_TREE_NODES | RUN_TREE_STATUSES);
+      }
+      if (method === "map" || method === "flatMap") {
+        const callbackReturns = functionsFor(expression.arguments[0]).reduce(
+          (result, fn) => result | (returnProvenance.get(fn) ?? 0),
+          0,
+        );
+        if (callbackReturns & (RUN_TREE_NODE | RUN_TREE_NODES)) return RUN_TREE_NODES;
+        if (callbackReturns & (RUN_TREE_STATUS | RUN_TREE_STATUSES)) return RUN_TREE_STATUSES;
+      }
+      if (ts.isIdentifier(expression.expression)) {
+        return (functions.get(expression.expression.text) ?? []).reduce(
+          (result, fn) => result | (returnProvenance.get(fn) ?? 0),
+          0,
+        );
+      }
+      return 0;
+    }
+    if (ts.isConditionalExpression(expression)) {
+      return provenanceOf(expression.whenTrue, environment) | provenanceOf(expression.whenFalse, environment);
+    }
+    if (ts.isBinaryExpression(expression)) {
+      return provenanceOf(expression.left, environment) | provenanceOf(expression.right, environment);
+    }
+    if (ts.isArrayLiteralExpression(expression)) {
+      const entries = expression.elements.reduce((result, entry) => result | provenanceOf(entry, environment), 0);
+      if (entries & (RUN_TREE_NODE | RUN_TREE_NODES)) return RUN_TREE_NODES;
+      if (entries & (RUN_TREE_STATUS | RUN_TREE_STATUSES)) return RUN_TREE_STATUSES;
+    }
+    return 0;
+  };
+
+  const propertyProvenance = (provenance, property) => {
+    if (provenance & RUN_TREE) {
+      if (property === "root") return RUN_TREE_NODE;
+      if (property === "nodes") return RUN_TREE_NODES;
+      if (property === "status") return RUN_TREE_STATUS;
+    }
+    if (provenance & RUN_TREE_NODE) {
+      if (property === "children") return RUN_TREE_NODES;
+      if (property === "status") return RUN_TREE_STATUS;
+    }
+    return 0;
+  };
+  const bindPattern = (pattern, provenance, environment) => {
+    if (ts.isIdentifier(pattern)) {
+      environment.set(pattern.text, provenance);
+      return;
+    }
+    if (ts.isObjectBindingPattern(pattern)) {
+      for (const element of pattern.elements) {
+        const property = element.propertyName ? bindingName(element.propertyName) : bindingName(element.name);
+        bindPattern(element.name, propertyProvenance(provenance, property), environment);
+      }
+      return;
+    }
+    if (ts.isArrayBindingPattern(pattern)) {
+      for (const element of pattern.elements) {
+        if (ts.isOmittedExpression(element)) continue;
+        const item = provenance & RUN_TREE_NODES ? RUN_TREE_NODE : provenance & RUN_TREE_STATUSES ? RUN_TREE_STATUS : 0;
+        bindPattern(element.name, item, environment);
+      }
+    }
+  };
+
+  const seedCallback = (call, receiver) => {
+    const method = methodName(call.expression);
+    const item = receiver & RUN_TREE_NODES ? RUN_TREE_NODE : receiver & RUN_TREE_STATUSES ? RUN_TREE_STATUS : 0;
+    if (!item) return;
+    for (const callback of functionsFor(call.arguments[0])) {
+      mergeParameter(callback, method === "reduce" || method === "reduceRight" ? 1 : 0, item);
+    }
+  };
+
+  const analyze = (node, environment, currentFunction, comparisons) => {
+    if (ts.isFunctionLike(node)) {
+      const child = new Map(environment);
+      const parameters = parameterProvenance.get(node) ?? [];
+      node.parameters.forEach((parameter, index) => bindPattern(parameter.name, parameters[index] ?? 0, child));
+      if (ts.isArrowFunction(node) && !ts.isBlock(node.body)) {
+        mergeReturn(node, provenanceOf(node.body, child));
+      }
+      analyze(node.body, child, node, comparisons);
+      return;
+    }
+    if (ts.isBlock(node)) {
+      const child = new Map(environment);
+      ts.forEachChild(node, (statement) => analyze(statement, child, currentFunction, comparisons));
+      return;
+    }
+    if (ts.isVariableDeclaration(node)) {
+      bindPattern(node.name, provenanceOf(node.initializer, environment), environment);
+    } else if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      if (ts.isIdentifier(node.left)) environment.set(node.left.text, provenanceOf(node.right, environment));
+    } else if (ts.isReturnStatement(node) && currentFunction) {
+      mergeReturn(currentFunction, provenanceOf(node.expression, environment));
+    } else if (ts.isCallExpression(node)) {
+      if (ts.isIdentifier(node.expression)) {
+        for (const fn of functions.get(node.expression.text) ?? []) {
+          node.arguments.forEach((argument, index) => mergeParameter(fn, index, provenanceOf(argument, environment)));
+        }
+      }
+      const receiver = provenanceOf(receiverOf(node.expression), environment);
+      seedCallback(node, receiver);
+    }
+
+    if (comparisons && ts.isBinaryExpression(node) && isEqualityOperator(node.operatorToken.kind)) {
+      const leftLiteral = literalText(node.left);
+      const rightLiteral = literalText(node.right);
+      if (leftLiteral !== undefined && provenanceOf(node.right, environment) & RUN_TREE_STATUS) {
+        comparisons.push(leftLiteral);
+      } else if (rightLiteral !== undefined && provenanceOf(node.left, environment) & RUN_TREE_STATUS) {
+        comparisons.push(rightLiteral);
+      }
+    }
+    ts.forEachChild(node, (child) => analyze(child, environment, currentFunction, comparisons));
+  };
+
+  for (let iteration = 0; iteration < 20; iteration += 1) {
+    changed = false;
+    analyze(file, new Map(), undefined, undefined);
+    if (!changed) break;
+  }
+  const comparisons = [];
+  analyze(file, new Map(), undefined, comparisons);
+  return comparisons;
+}
+
+function isRunTreeHookCall(call, syntax, bindings) {
+  return bindings.some((binding) => {
+    if (
+      !binding.member &&
+      ts.isIdentifier(call.expression) &&
+      call.expression.text === binding.local &&
+      !isShadowedAt(syntax, binding.local, call.expression.getStart())
+    ) {
+      return true;
+    }
+    return (
+      binding.member &&
+      ts.isPropertyAccessExpression(call.expression) &&
+      ts.isIdentifier(call.expression.expression) &&
+      call.expression.expression.text === binding.local &&
+      call.expression.name.text === binding.member &&
+      !isShadowedAt(syntax, binding.local, call.expression.expression.getStart())
+    );
+  });
+}
+
+function isEqualityOperator(kind) {
+  return [
+    ts.SyntaxKind.EqualsEqualsToken,
+    ts.SyntaxKind.EqualsEqualsEqualsToken,
+    ts.SyntaxKind.ExclamationEqualsToken,
+    ts.SyntaxKind.ExclamationEqualsEqualsToken,
+  ].includes(kind);
+}
+
+function literalText(node) {
+  return ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) ? node.text : undefined;
+}
+
+function bindingName(node) {
+  if (ts.isIdentifier(node) || ts.isStringLiteral(node) || ts.isNumericLiteral(node)) return node.text;
+  return undefined;
 }
 
 /**
@@ -146,7 +491,7 @@ function importedBindings(source, names) {
   const bindings = [];
   const syntax = maskStringsAndComments(source);
   const modulesFor = (name) =>
-    name === "createGatewayReactRoot"
+    GATEWAY_REACT_EXPORTS.has(name)
       ? ["smithers-orchestrator/gateway-react", "@smithers-orchestrator/gateway-react"]
       : ["smithers-orchestrator/gateway-ui", "@smithers-orchestrator/gateway-ui"];
   for (const match of source.matchAll(/\bimport\s*\{([\s\S]*?)\}\s*from\s*["']([^"']+)["']/g)) {
