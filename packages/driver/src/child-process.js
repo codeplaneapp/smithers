@@ -118,8 +118,7 @@ export function killChildTree(child, detached) {
         // ignore
       }
     };
-    const cancelKiller = () => {
-      if (!stopWatching()) return;
+    const killKiller = () => {
       try {
         killer.kill("SIGKILL");
       } catch {
@@ -127,7 +126,21 @@ export function killChildTree(child, detached) {
       }
       killer.unref();
     };
-    const killerDeadline = setTimeout(cancelKiller, PROCESS_EXIT_GRACE_MS);
+    const cancelKiller = () => {
+      if (!stopWatching()) return;
+      killKiller();
+    };
+    const onKillerDeadline = () => {
+      if (!stopWatching()) return;
+      killKiller();
+      if (child.exitCode != null || child.signalCode != null) return;
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // ignore
+      }
+    };
+    const killerDeadline = setTimeout(onKillerDeadline, PROCESS_EXIT_GRACE_MS);
     killerDeadline.unref?.();
     child.once?.("exit", cancelKiller);
     killer.once("error", fallback);
