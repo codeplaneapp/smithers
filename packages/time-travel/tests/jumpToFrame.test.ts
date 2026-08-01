@@ -1006,6 +1006,72 @@ describe("jumpToFrame", () => {
     }
   });
 
+  test("exact snapshots before the first attempt restore the run baseline", async () => {
+    const { adapter, sqlite } = setupDb();
+    try {
+      const runId = "run-baseline";
+      await adapter.insertRun({
+        runId,
+        workflowName: "wf",
+        status: "finished",
+        createdAtMs: 1,
+        vcsType: "jj",
+        vcsRoot: "/tmp/baseline",
+        vcsRevision: "ptr-baseline",
+      });
+      await adapter.insertFrame({
+        runId,
+        frameNo: 0,
+        createdAtMs: 100,
+        xmlJson: "{}",
+        xmlHash: "h0",
+      });
+      await adapter.insertFrame({
+        runId,
+        frameNo: 1,
+        createdAtMs: 200,
+        xmlJson: "{}",
+        xmlHash: "h1",
+      });
+      await captureSnapshot(adapter, runId, 0, {
+        nodes: [],
+        outputs: {},
+        ralph: [],
+        input: {},
+      } as never);
+      await adapter.insertAttempt({
+        runId,
+        nodeId: "task:after",
+        iteration: 0,
+        attempt: 1,
+        state: "finished",
+        startedAtMs: 150,
+        finishedAtMs: 180,
+        jjPointer: "ptr-after",
+        jjCwd: "/tmp/baseline",
+      });
+
+      const reverted = [] as Array<[string, string | undefined]>;
+      const result = await jumpToFrame({
+        adapter,
+        runId,
+        frameNo: 0,
+        confirm: true,
+        caller: "user:owner",
+        getCurrentPointerImpl: async () => "ptr-current",
+        revertToPointerImpl: async (pointer, cwd) => {
+          reverted.push([pointer, cwd]);
+          return { success: true };
+        },
+      });
+
+      expect(result.revertedSandboxes).toBe(1);
+      expect(reverted).toEqual([["ptr-baseline", "/tmp/baseline"]]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("rate limit: 11th rewind in one hour returns RateLimited", async () => {
     const { adapter, sqlite } = setupDb();
     try {
