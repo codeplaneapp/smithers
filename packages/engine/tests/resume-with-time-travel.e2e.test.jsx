@@ -127,7 +127,13 @@ describe("resume with time travel", () => {
       const analyzeAttempts = await adapter.listAttempts(replay.runId, "analyze", 0);
       const implementAttempts = await adapter.listAttempts(replay.runId, "implement", 0);
       const testAttempts = await adapter.listAttempts(replay.runId, "test", 0);
-      expect(analyzeAttempts).toHaveLength(0);
+      expect(analyzeAttempts).toHaveLength(1);
+      expect(analyzeAttempts[0]).toMatchObject({
+        nodeId: "analyze",
+        iteration: 0,
+        attempt: 1,
+        state: "finished",
+      });
       expect(implementAttempts).toHaveLength(1);
       expect(testAttempts).toHaveLength(1);
       const analyzeRows = await db.select().from(tables.outputA).where(eq(tables.outputA.runId, replay.runId));
