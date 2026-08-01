@@ -36,10 +36,28 @@ export function checkNpmPublication(version: string): NpmPublicationStatus {
   return "unavailable";
 }
 
+/** Check local and remote refs so shallow CI checkouts recognize releases. */
+export function hasReleaseTag(version: string): boolean {
+  const tagRef = `refs/tags/v${version}`;
+  const localTag = spawnSync("git", ["rev-parse", "--verify", "--quiet", tagRef], {
+    cwd: REPO_ROOT,
+    stdio: "ignore",
+  });
+  if (localTag.status === 0) return true;
+
+  return (
+    spawnSync("git", ["ls-remote", "--exit-code", "--tags", "origin", tagRef], {
+      cwd: REPO_ROOT,
+      stdio: "ignore",
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    }).status === 0
+  );
+}
+
 /**
- * Treat a local release tag as authoritative even when the matching npm
- * package has not been published. Versioned docs are release snapshots, so a
- * tagged version must not be regenerated from later source documentation.
+ * Treat a release tag as authoritative even when the matching npm package has
+ * not been published. Versioned docs are release snapshots, so a tagged
+ * version must not be regenerated from later source documentation.
  */
 export function checkVersionRelease(
   version: string,
@@ -48,14 +66,8 @@ export function checkVersionRelease(
     checkPublication?: NpmPublicationChecker;
   } = {},
 ): NpmPublicationStatus {
-  const hasReleaseTag =
-    options.hasReleaseTag ??
-    ((candidate: string) =>
-      spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/tags/v${candidate}`], {
-        cwd: REPO_ROOT,
-        stdio: "ignore",
-      }).status === 0);
-  if (hasReleaseTag(version)) return "published";
+  const releaseTagExists = options.hasReleaseTag ?? hasReleaseTag;
+  if (releaseTagExists(version)) return "published";
   return (options.checkPublication ?? checkNpmPublication)(version);
 }
 

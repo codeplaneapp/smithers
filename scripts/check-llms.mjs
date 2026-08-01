@@ -38,11 +38,22 @@ function run(command, args) {
  * @returns {"published" | "unpublished" | "unavailable"}
  */
 function checkNpmPublication(version) {
-  const tag = spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/tags/v${version}`], {
+  const tagRef = `refs/tags/v${version}`;
+  const localTag = spawnSync("git", ["rev-parse", "--verify", "--quiet", tagRef], {
     cwd: root,
     stdio: "ignore",
   });
-  if (tag.status === 0) return "published";
+  if (localTag.status === 0) return "published";
+
+  // actions/checkout fetches a shallow, tagless clone by default. Check the
+  // canonical remote before falling back to npm so tagged snapshots stay
+  // immutable in CI too.
+  const remoteTag = spawnSync("git", ["ls-remote", "--exit-code", "--tags", "origin", tagRef], {
+    cwd: root,
+    stdio: "ignore",
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+  });
+  if (remoteTag.status === 0) return "published";
 
   // npm is npm.cmd on Windows; .cmd files only spawn through a shell.
   const result = spawnSync("npm", ["view", `smthrs@${version}`, "version"], {
