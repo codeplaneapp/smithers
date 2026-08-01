@@ -18,6 +18,24 @@ const affectedDeclarationPackages = [
   "packages/scheduler",
 ];
 
+function isKnownUnrelatedDeclarationError(line) {
+  const normalized = line.replaceAll("\\", "/");
+  const isKnownDbError =
+    normalized.includes("packages/db/src/index.d.ts") &&
+    ((normalized.includes("TS2315") &&
+      normalized.includes("BunSQLiteDatabase") &&
+      normalized.includes("not generic")) ||
+      (normalized.includes("TS2304") && normalized.includes("Connection")));
+  return (
+    /node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?drizzle-orm\//.test(normalized) ||
+    (/node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?effect\/dist\/Schema\.d\.ts/.test(normalized) &&
+      normalized.includes("TS2694") &&
+      normalized.includes("SchemaAST") &&
+      normalized.includes("Sentinel")) ||
+    isKnownDbError
+  );
+}
+
 test("the committed package declarations compile for a skipLibCheck:false consumer", (context) => {
   for (const pkg of affectedDeclarationPackages) {
     assert.ok(DEFAULT_DECLARATION_PACKAGES.includes(pkg), `${pkg} must be gated by the declaration freshness check`);
@@ -51,9 +69,9 @@ declare const api: MemoryServiceApi;
 export const layer: Layer.Layer<MemoryService> = Layer.succeed(MemoryService, api);
 
 // The shipped layer factory must produce the same service key.
-export const provided: Effect.Effect<Awaited<unknown> | undefined, unknown, never> = readFact.pipe(
-  Effect.provide(createMemoryLayer({} as Parameters<typeof createMemoryLayer>[0])),
-) as never;
+const requiresNoServices = <A, E>(effect: Effect.Effect<A, E, never>) => effect;
+declare const config: Parameters<typeof createMemoryLayer>[0];
+export const provided = requiresNoServices(readFact.pipe(Effect.provide(createMemoryLayer(config))));
 `,
   );
 
@@ -88,17 +106,16 @@ export const provided: Effect.Effect<Awaited<unknown> | undefined, unknown, neve
       encoding: "utf8",
     },
   );
+  assert.ifError(tsc.error);
+  assert.notEqual(tsc.status, null, "strict declaration consumer TypeScript process did not exit");
   // `skipLibCheck: false` type-checks everything the entrypoints reach, so the
-  // raw output also carries third-party diagnostics (drizzle-orm, effect) and
-  // one pre-existing packages/db defect: its declaration writes
-  // `BunSQLiteDatabase<typeof schema>` but drizzle-orm 0.45's type is not
-  // generic. Neither is this gate's business, so both are excluded by name
-  // rather than silently — narrow the exclusion as those get fixed.
-  const knownUnrelatedDeclarations = ["node_modules/", "packages/db/src/index.d.ts"];
+  // raw output also carries drizzle-orm diagnostics, one exact Effect Schema
+  // defect, and pre-existing packages/db defects. Match only those known
+  // sources so new Effect or dependency declaration regressions still fail.
   const errors = `${tsc.stdout}${tsc.stderr}`
     .split("\n")
     .filter((line) => /error TS\d+/.test(line))
-    .filter((line) => !knownUnrelatedDeclarations.some((known) => line.includes(known)));
+    .filter((line) => !isKnownUnrelatedDeclarationError(line));
 
   assert.deepEqual(errors, [], `committed declarations failed a strict consumer:\n${errors.join("\n")}`);
 });
