@@ -1,8 +1,15 @@
 import { Context } from "effect";
 /** @typedef {import("./CorrelationContextServiceShape.ts").CorrelationContextServiceShape} CorrelationContextServiceShape */
 
-const _CorrelationContextServiceBase =
+/** @typedef {Context.ServiceClass.Shape<"CorrelationContextService", CorrelationContextServiceShape>} CorrelationContextService */
+const CorrelationContextServiceTag =
   /** @type {Context.ServiceClass<CorrelationContextService, "CorrelationContextService", CorrelationContextServiceShape>} */ (
-    /** @type {unknown} */ (Context.Service("CorrelationContextService"))
+    Context.Service()("CorrelationContextService")
   );
-export class CorrelationContextService extends _CorrelationContextServiceBase {}
+export const CorrelationContextService = /** @type {Context.ServiceClass<CorrelationContextService, "CorrelationContextService", CorrelationContextServiceShape>} */ (
+  class CorrelationContextService extends CorrelationContextServiceTag {
+    constructor(...args) {
+      super(...args);
+    }
+  }
+);
