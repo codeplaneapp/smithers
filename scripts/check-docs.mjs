@@ -3713,7 +3713,7 @@ function checkCliAgentDocsMatchCurrentModelDefaults() {
   ]);
   const required = [
     [BASE_CLI_AGENT_SOURCE, "this.model = opts.model;"],
-    [CLI_AGENTS_INTEGRATION, "agents[15]{class,cli,modelDefault,hijack,notes}:"],
+    [CLI_AGENTS_INTEGRATION, "agents[16]{class,cli,modelDefault,hijack,notes}:"],
     [CLI_AGENTS_INTEGRATION, "ClaudeCodeAgent,claude,CLI default,native session id"],
     [CLI_AGENTS_INTEGRATION, "CodexAgent,codex,CLI default,native thread id"],
     [CLI_AGENTS_INTEGRATION, "PiAgent,pi,CLI default,native session id"],
