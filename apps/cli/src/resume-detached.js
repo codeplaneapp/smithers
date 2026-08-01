@@ -53,9 +53,10 @@ export function buildResumeArgs(target, runId) {
  * @param {string | ResumeTarget} targetOrWorkflowPath
  * @param {string} runId
  * @param {SupervisorSpawnClaim} [claim]
+ * @param {{ executable?: string }} [options]
  * @returns {number | null}
  */
-export function resumeRunDetached(targetOrWorkflowPath, runId, claim) {
+export function resumeRunDetached(targetOrWorkflowPath, runId, claim, options = {}) {
   const target = normalizeResumeTarget(targetOrWorkflowPath);
   const cliPath = fileURLToPath(new URL("./index.js", import.meta.url));
   const args = [cliPath, ...buildResumeArgs(target, runId)];
@@ -87,7 +88,7 @@ export function resumeRunDetached(targetOrWorkflowPath, runId, claim) {
     logFd = null;
   }
   try {
-    const child = spawn("bun", args, {
+    const child = spawn(options.executable ?? "bun", args, {
       cwd,
       stdio: logFd === null ? "ignore" : ["ignore", logFd, logFd],
       env: process.env,
