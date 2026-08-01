@@ -11601,7 +11601,7 @@ and `gatewayApprovalKey(row)` (the canonical `runId:nodeId:iteration` id for a
 pending approval row, used to key `GatewayApprovalConfirmation` instances).
 
 **Node status vocabulary:** a run-tree row's `status` is always one of six
-tones — `ok`, `running`, `queued`, `failed`, `waiting`, `cancelled`. The engine
+tones: `ok`, `running`, `queued`, `failed`, `waiting`, `cancelled`. The engine
 records richer lifecycle states (`finished`, `succeeded`, `completed`,
 `in-progress`, `pending`, `waiting-approval`, …), but `toRunStatus` normalizes
 them away before a UI ever sees them. Comparing against an engine state is
@@ -11610,7 +11610,7 @@ finished work keeps rendering as un-started, because `status === "completed"`
 never matches `"ok"`. Prefer `nodeStatusIndex` + `rollupNodeStatus` over
 matching literals at all; `gradeWorkflowUiSource` flags the engine words under
 the `node-status-vocabulary` rule. A node's *output payload* may of course
-define any `status` vocabulary it likes — this applies only to run-tree rows.
+define any `status` vocabulary it likes; this applies only to run-tree rows.
 
 **Live-feedback rule:** every agent node a UI surfaces should get a
 `NodeChatStream` so humans can watch the agent work in real time; the
