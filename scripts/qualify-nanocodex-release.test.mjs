@@ -29,8 +29,7 @@ describe("Nanocodex release qualification", () => {
     const manifest = await loadReleaseManifest();
     assert.deepEqual(manifest, PINNED_RELEASE);
     assert.equal(manifest.release.tagCommit, "56d8b4fd54bf14e9f2874e5a010b8e301f8f695b");
-    assert.equal(manifest.artifact.sha256, "0e14425b3e0af5c3b1663b4db2a15302cbaa7c03e917babd841ae7fde2a1ab73");
-    assert.equal(manifest.artifact.sizeBytes, 6_286_271);
+    assert.equal(manifest.artifact.maximumSizeBytes, 8 * 1024 * 1024);
     assert.equal(manifest.artifact.minimumGlibcVersion, "2.35");
     assert.equal(manifest.qualification.smithersAdapter, false);
   });
@@ -228,15 +227,12 @@ describe("Nanocodex release qualification", () => {
     }
   });
 
-  test("requires both exact archive size and SHA-256", () => {
+  test("bounds a CI-built archive and reports its SHA-256", () => {
     const archive = Buffer.from("archive");
     const sha256 = createHash("sha256").update(archive).digest("hex");
-    assert.equal(verifyArchiveIdentity(archive, { sizeBytes: archive.length, sha256 }), sha256);
-    assert.throws(() => verifyArchiveIdentity(archive, { sizeBytes: archive.length + 1, sha256 }), /size mismatch/);
-    assert.throws(
-      () => verifyArchiveIdentity(archive, { sizeBytes: archive.length, sha256: "0".repeat(64) }),
-      /SHA-256 mismatch/,
-    );
+    assert.equal(verifyArchiveIdentity(archive, { maximumSizeBytes: archive.length }), sha256);
+    assert.throws(() => verifyArchiveIdentity(Buffer.alloc(0), { maximumSizeBytes: archive.length }), /1-7 bytes/);
+    assert.throws(() => verifyArchiveIdentity(archive, { maximumSizeBytes: archive.length - 1 }), /1-6 bytes/);
   });
 
   test("pins exact version and capability surface", () => {
@@ -551,8 +547,8 @@ exit 64
       archivePath: undefined,
       glibcVersion: "2.35",
       manifest: PINNED_RELEASE,
-      sha256: PINNED_RELEASE.artifact.sha256,
-      sizeBytes: PINNED_RELEASE.artifact.sizeBytes,
+      sha256: "a".repeat(64),
+      sizeBytes: 6_286_335,
     });
     assert.deepEqual(Object.keys(result), [
       "archive",
@@ -573,8 +569,8 @@ exit 64
   "bridgeVersion": "0.0.1",
   "glibcVersion": "2.35",
   "providerFreePreflight": true,
-  "sha256": "0e14425b3e0af5c3b1663b4db2a15302cbaa7c03e917babd841ae7fde2a1ab73",
-  "sizeBytes": 6286271,
+  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "sizeBytes": 6286335,
   "tag": "v0.0.1",
   "tagCommit": "56d8b4fd54bf14e9f2874e5a010b8e301f8f695b",
   "tagCommitProvenance": "asserted-pinned-manifest",
