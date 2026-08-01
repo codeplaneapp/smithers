@@ -12,6 +12,7 @@ import {
   MAX_SNAPSHOT_CHECKPOINT_ATTEMPTS,
   MAX_SNAPSHOT_CHECKPOINT_PROVENANCE_BYTES,
   MAX_SNAPSHOT_CHECKPOINT_REFS,
+  materializeAgentCheckpointReferences,
 } from "../snapshot/agentCheckpointProvenance.js";
 import {
   agentCheckpointAttemptRow,
@@ -191,10 +192,16 @@ function projectChildCheckpointOutputs(sourceOutputsJson, childNodesJson, checkp
     const checkpoints = checkpointSnapshot.provenance.checkpoints.filter((tuple) =>
       attemptKeys.has(JSON.stringify(tuple.slice(0, 3))),
     );
+    const checkpointContentHashes = new Set(checkpoints.map((tuple) => tuple[4]));
     outputs.__smithersAgentCheckpointProvenance = {
       version: checkpointSnapshot.provenance.version,
       attempts,
       checkpoints,
+      ...(checkpointSnapshot.provenance.version === 2
+        ? {
+            contents: checkpointSnapshot.provenance.contents.filter((tuple) => checkpointContentHashes.has(tuple[0])),
+          }
+        : {}),
     };
   }
 
@@ -281,7 +288,11 @@ async function copyInheritedAgentCheckpoints(
   const refs = [];
   let attempts;
   if (snapshotProvenance) {
-    refs.push(...snapshotProvenance.checkpoints.map((tuple) => agentCheckpointReferenceRow(tuple, childRunId)));
+    refs.push(
+      ...materializeAgentCheckpointReferences(snapshotProvenance).map((tuple) =>
+        agentCheckpointReferenceRow(tuple, childRunId),
+      ),
+    );
     attempts = snapshotProvenance.attempts.map((tuple) => agentCheckpointAttemptRow(tuple, parentRunId));
   } else if (exactHorizons) {
     const targets = inheritedTargets.map(([nodeId, iteration, lastAttempt]) => [
@@ -476,7 +487,8 @@ async function copyInheritedAgentCheckpoints(
           : Number(ref.contentCreatedAtMs ?? ref.content_created_at_ms),
     });
   }
-  const checkpointBytes = inheritedCheckpoints.reduce(
+  const uniqueCheckpointContents = [...new Map(inheritedCheckpoints.map((row) => [row.contentHash, row])).values()];
+  const checkpointBytes = uniqueCheckpointContents.reduce(
     (total, row) =>
       total + (typeof row.checkpointJson === "string" ? Buffer.byteLength(row.checkpointJson, "utf8") : 0),
     0,

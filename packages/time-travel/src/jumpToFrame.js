@@ -22,6 +22,7 @@ import { loadSnapshot } from "./snapshot/index.js";
 import { guardEffectBoundary } from "./guardEffectBoundary.js";
 import { archiveDiscardedEffects } from "./archiveDiscardedEffects.js";
 import { agentCheckpointAttemptKeys, parseAgentCheckpointSnapshot } from "./snapshot/agentCheckpointSnapshot.js";
+import { materializeAgentCheckpointReferences } from "./snapshot/agentCheckpointProvenance.js";
 import {
   agentCheckpointAttemptRow,
   agentCheckpointReferenceRow,
@@ -524,7 +525,9 @@ async function rehydrateAgentCheckpointProvenance(adapter, runId, checkpointSnap
   await persistAgentCheckpointRows(adapter, {
     runId,
     attempts: provenance.attempts.map((tuple) => agentCheckpointAttemptRow(tuple, runId)),
-    checkpoints: provenance.checkpoints.map((tuple) => agentCheckpointReferenceRow(tuple, runId)),
+    checkpoints: materializeAgentCheckpointReferences(provenance).map((tuple) =>
+      agentCheckpointReferenceRow(tuple, runId),
+    ),
     replaceCheckpointRefs: true,
   });
 }

@@ -145,6 +145,64 @@ describe("captureSnapshot", () => {
     }
   });
 
+  test("stores repeated large checkpoint contents once while preserving every reference", async () => {
+    const { adapter, sqlite } = createTestDb();
+    try {
+      const runId = "repeated-large-checkpoint";
+      const checkpointJson = JSON.stringify({
+        codec: "test.snapshot",
+        version: 1,
+        payload: "x".repeat(13 * 1024 * 1024),
+      });
+      const contentHash = createHash("sha256").update(checkpointJson).digest("hex");
+      await adapter.insertAttempt({
+        runId,
+        nodeId: "analyze",
+        iteration: 0,
+        attempt: 1,
+        state: "finished",
+        startedAtMs: 1,
+        finishedAtMs: 20,
+        cached: false,
+      });
+      await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoint_contents", {
+        contentHash,
+        checkpointJson,
+        sizeBytes: Buffer.byteLength(checkpointJson, "utf8"),
+        createdAtMs: 2,
+      });
+      for (let sequence = 0; sequence < 5; sequence += 1) {
+        await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoints", {
+          runId,
+          nodeId: "analyze",
+          iteration: 0,
+          attempt: 1,
+          sequence,
+          contentHash,
+          codec: "test.snapshot",
+          version: 1,
+          agentId: "snapshot-test",
+          purpose: "progress",
+          createdAtMs: 10 + sequence,
+        });
+      }
+
+      const { provenance } = await captureAgentCheckpointProvenance(adapter, runId, sampleData().nodes);
+      expect(provenance.version).toBe(2);
+      expect(provenance.checkpoints).toHaveLength(5);
+      expect(provenance.checkpoints.every((tuple) => tuple.length === 10)).toBe(true);
+      expect(provenance.contents).toHaveLength(1);
+      expect(provenance.contents[0].slice(0, 3)).toEqual([
+        contentHash,
+        checkpointJson,
+        Buffer.byteLength(checkpointJson, "utf8"),
+      ]);
+      expect(() => parseAgentCheckpointProvenance({ __smithersAgentCheckpointProvenance: provenance })).not.toThrow();
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("rejects malformed or hash-invalid embedded checkpoint provenance", () => {
     const checkpointJson = JSON.stringify({ codec: "test.snapshot", version: 1, payload: { cursor: 1 } });
     expect(() =>
@@ -301,7 +359,9 @@ describe("captureSnapshot", () => {
     await captureSnapshot(adapter, runId, 2, sampleData());
     expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_snapshot_contents").get().count).toBe(1);
     const loaded = await loadSnapshot(adapter, runId, 2);
-    expect(JSON.parse(loaded.outputsJson).__smithersAgentCheckpointProvenance.checkpoints).toHaveLength(1);
+    const provenance = JSON.parse(loaded.outputsJson).__smithersAgentCheckpointProvenance;
+    expect(provenance.checkpoints).toHaveLength(1);
+    expect(provenance.contents).toHaveLength(1);
     expect(parseSnapshot(loaded).outputs).toEqual(sampleData().outputs);
 
     sqlite
