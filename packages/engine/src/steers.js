@@ -60,10 +60,6 @@ export function enqueueSteer(adapter, runId, nodeId, message, options = {}) {
   const author = options.author ?? null;
   const steerId = options.steerId ?? `steer-${randomUUID()}`;
   return Effect.gen(function* () {
-    const run = yield* adapter.getRun(runId);
-    if (!run) {
-      throw new SmithersError("RUN_NOT_FOUND", `Run not found: ${runId}`, { runId });
-    }
     const event = {
       type: "SteerQueued",
       runId,
@@ -89,6 +85,7 @@ export function enqueueSteer(adapter, runId, nodeId, message, options = {}) {
         type: "SteerQueued",
         payloadJson: JSON.stringify(event),
       },
+      { requireActiveTarget: true },
     );
     if (inserted) yield* trackEvent(/** @type {any} */ (event));
     return { steerId, runId, nodeId, message: normalizedMessage, author, createdAtMs };

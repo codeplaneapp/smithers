@@ -1368,6 +1368,8 @@ declare class SmithersDb {
         timestampMs: number;
         type: "SteerQueued";
         payloadJson: string;
+    }, options?: {
+        requireActiveTarget?: boolean;
     }): RunnableEffect<boolean, SmithersError$1>;
     listQueuedSteers(runId: string, nodeId: string): RunnableEffect<SteerRow[], SmithersError$1>;
     listSteers(runId: string, query?: {

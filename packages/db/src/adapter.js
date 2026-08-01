@@ -90,6 +90,7 @@ import { normalizeWaitForEventCorrelationId, parseWaitForEventAttemptSnapshot } 
 
 export const DB_ALERT_ID_MAX_LENGTH = 256;
 const DB_RUN_CANCEL_ATTRIBUTION_MAX_LENGTH = 1024;
+const STEER_ACTIVE_RUN_STATUSES = new Set(["running", "waiting-approval", "waiting-event", "waiting-timer"]);
 export const DB_ALERT_POLICY_NAME_MAX_LENGTH = 256;
 export const DB_ALERT_MESSAGE_MAX_LENGTH = 4096;
 export const DB_ALERT_ALLOWED_SEVERITIES = ["info", "warning", "critical"];
@@ -3921,11 +3922,57 @@ export class SmithersDb {
    * next retry can publish both facts together.
    * @param {{ steerId: string; runId: string; nodeId: string; message: string; author?: string | null; createdAtMs: number; status?: string; }} row
    * @param {{ runId: string; timestampMs: number; type: "SteerQueued"; payloadJson: string; }} eventRow
+   * @param {{ requireActiveTarget?: boolean }} [options]
    * @returns {RunnableEffect<boolean, SmithersError>}
    */
-  enqueueSteerWithEvent(row, eventRow) {
+  enqueueSteerWithEvent(row, eventRow, options = {}) {
     const self = this;
     const operation = Effect.gen(function* () {
+      if (options.requireActiveTarget) {
+        // SQLite's BEGIN IMMEDIATE already excludes a concurrent terminal
+        // update. PostgreSQL needs the row lock explicitly so finalization
+        // cannot pass this fence and strand a newly queued steer afterward.
+        const lockSuffix = self.internalStorage.dialect === POSTGRES ? " FOR UPDATE" : "";
+        const run = yield* self.read(`lock steer run ${row.runId}`, () =>
+          self.internalStorage.queryOne(
+            `SELECT status
+             FROM _smithers_runs
+             WHERE run_id = ?
+             LIMIT 1${lockSuffix}`,
+            [row.runId],
+          ),
+        );
+        if (!run) {
+          return yield* Effect.fail(
+            new SmithersError("RUN_NOT_FOUND", `Run not found: ${row.runId}`, { runId: row.runId }),
+          );
+        }
+        if (!STEER_ACTIVE_RUN_STATUSES.has(run.status)) {
+          return yield* Effect.fail(
+            new SmithersError("RUN_NOT_ACTIVE", `Run is not active (status: ${run.status})`, {
+              runId: row.runId,
+              status: run.status,
+            }),
+          );
+        }
+        const node = yield* self.read(`check steer node ${row.nodeId}`, () =>
+          self.internalStorage.queryOne(
+            `SELECT 1 AS present
+             FROM _smithers_nodes
+             WHERE run_id = ? AND node_id = ?
+             LIMIT 1`,
+            [row.runId, row.nodeId],
+          ),
+        );
+        if (!node) {
+          return yield* Effect.fail(
+            new SmithersError("NODE_NOT_IN_RUN", `No node "${row.nodeId}" in run ${row.runId}`, {
+              runId: row.runId,
+              nodeId: row.nodeId,
+            }),
+          );
+        }
+      }
       const inserted = yield* self.write(`enqueue steer ${row.steerId}`, () =>
         self.internalStorage.insertIgnoreReturningInserted("_smithers_steers", {
           steerId: row.steerId,
