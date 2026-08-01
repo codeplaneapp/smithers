@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { access, readFile, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
@@ -345,15 +346,37 @@ describe("Nanocodex release qualification", () => {
 
   test("runs both metadata commands through the real Bubblewrap supervisor", async (context) => {
     if (process.platform !== "linux") return context.skip("Nanocodex containment is Linux-only.");
+    let bubblewrap = "/usr/bin/bwrap";
     try {
-      await access("/usr/bin/bwrap");
+      await access(bubblewrap);
     } catch {
+      bubblewrap = "/bin/bwrap";
       try {
-        await access("/bin/bwrap");
+        await access(bubblewrap);
       } catch {
         return context.skip("Bubblewrap is not installed.");
       }
     }
+    const containmentProbe = spawnSync(
+      bubblewrap,
+      [
+        "--unshare-pid",
+        "--die-with-parent",
+        "--new-session",
+        "--bind",
+        "/",
+        "/",
+        "--proc",
+        "/proc",
+        "--dev-bind",
+        "/dev",
+        "/dev",
+        "--",
+        "/bin/true",
+      ],
+      { stdio: "ignore", timeout: 5_000 },
+    );
+    if (containmentProbe.status !== 0) return context.skip("Bubblewrap namespaces are unavailable.");
 
     const capabilitiesOutput = `${JSON.stringify(EXPECTED_CAPABILITIES)}\n`;
     const fakeBridge = Buffer.from(`#!/bin/sh
