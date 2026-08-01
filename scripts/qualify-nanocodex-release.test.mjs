@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { access, readFile, stat } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 import { describe, test } from "node:test";
 
@@ -566,8 +566,9 @@ exit 64
   });
 
   test("preserves the exact provider-free qualification success JSON", () => {
+    const archivePath = resolve("/ci-built/smithers-nanocodex-v0.0.1-x86_64-unknown-linux-gnu.tar.gz");
     const result = qualificationResult({
-      archivePath: undefined,
+      archivePath,
       glibcVersion: "2.35",
       manifest: PINNED_RELEASE,
       sha256: "a".repeat(64),
@@ -588,17 +589,17 @@ exit 64
     assert.equal(
       JSON.stringify(result, null, 2),
       `{
-  "archive": "https://github.com/N0xMare/smithers-nanocodex/releases/download/v0.0.1/smithers-nanocodex-v0.0.1-x86_64-unknown-linux-gnu.tar.gz",
-  "bridgeVersion": "0.0.1",
-  "glibcVersion": "2.35",
-  "providerFreePreflight": true,
-  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "sizeBytes": 6286335,
-  "tag": "v0.0.1",
-  "tagCommit": "56d8b4fd54bf14e9f2874e5a010b8e301f8f695b",
-  "tagCommitProvenance": "asserted-pinned-manifest",
-  "target": "x86_64-unknown-linux-gnu"
-}`,
+  "archive": ${JSON.stringify(archivePath)},
+        "bridgeVersion": "0.0.1",
+        "glibcVersion": "2.35",
+        "providerFreePreflight": true,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sizeBytes": 6286335,
+        "tag": "v0.0.1",
+        "tagCommit": "56d8b4fd54bf14e9f2874e5a010b8e301f8f695b",
+        "tagCommitProvenance": "asserted-pinned-manifest",
+        "target": "x86_64-unknown-linux-gnu"
+      }`,
     );
   });
 

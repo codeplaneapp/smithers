@@ -163,6 +163,9 @@ function makeEmptyEffectStorage() {
         return [{ owner_token: params[1] }];
       }
       if (sql.includes("UPDATE _smithers_rewind_leases")) {
+        if (sql.includes("SET expires_at_ms = expires_at_ms")) {
+          return leases.get(params[0]) === params[1] ? [{ owner_token: params[1] }] : [];
+        }
         return leases.get(params[1]) === params[2] ? [{ owner_token: params[2] }] : [];
       }
       if (sql.includes("DELETE FROM _smithers_rewind_leases")) {
@@ -550,18 +553,18 @@ function makeHarness(adapterState = {}) {
 function makePostgresTimeTravelStorage({ snapshots = [], branches = [], contents = [], refs = [], upserts = [] } = {}) {
   const rewindLeases = new Map();
   const joinedSnapshot = (snapshot) => {
-    if (!snapshot) return null;
-    const ref = refs.find((entry) => entry.runId === snapshot.runId && entry.frameNo === snapshot.frameNo);
-    const content = ref && contents.find((entry) => entry.contentHash === ref.contentHash);
-    return {
-      ...snapshot,
-      referencedContentHash: ref?.contentHash ?? null,
-      payloadNodesJson: content?.nodesJson ?? null,
-      payloadOutputsJson: content?.outputsJson ?? null,
-      payloadRalphJson: content?.ralphJson ?? null,
-      payloadInputJson: content?.inputJson ?? null,
-    };
+  if (!snapshot) return null;
+  const ref = refs.find((entry) => entry.runId === snapshot.runId && entry.frameNo === snapshot.frameNo);
+  const content = ref && contents.find((entry) => entry.contentHash === ref.contentHash);
+  return {
+    ...snapshot,
+    referencedContentHash: ref?.contentHash ?? null,
+    payloadNodesJson: content?.nodesJson ?? null,
+    payloadOutputsJson: content?.outputsJson ?? null,
+    payloadRalphJson: content?.ralphJson ?? null,
+    payloadInputJson: content?.inputJson ?? null,
   };
+};
   return {
     dialect: "postgres",
     queryAllRaw: async (sql, params) => {
@@ -600,27 +603,27 @@ function makePostgresTimeTravelStorage({ snapshots = [], branches = [], contents
       throw new Error(`unexpected queryAllRaw: ${sql}`);
     },
     queryAll: async (sql, params) => {
-      if (sql.includes("_smithers_tool_calls") || sql.includes("_smithers_tool_call_archive")) {
-        return [];
-      }
-      if (sql.includes("_smithers_output_provenance")) {
-        return [];
-      }
-      if (sql.includes("_smithers_agent_checkpoints") || sql.includes("_smithers_attempts")) {
+    if (sql.includes("_smithers_tool_calls") || sql.includes("_smithers_tool_call_archive")) {
+      return [];
+    }
+    if (sql.includes("_smithers_output_provenance")) {
+      return [];
+    }
+    if (sql.includes("_smithers_agent_checkpoints") || sql.includes("_smithers_attempts")) {
         return [];
       }
       if (sql.includes("_smithers_snapshots")) {
-        const runId = params[0];
-        return snapshots
-          .filter((snapshot) => snapshot.runId === runId)
-          .sort((left, right) => left.frameNo - right.frameNo);
-      }
-      if (sql.includes("_smithers_branches")) {
-        const parentRunId = params[0];
-        return branches.filter((branch) => branch.parentRunId === parentRunId);
-      }
-      throw new Error(`unexpected queryAll: ${sql}`);
-    },
+    const runId = params[0];
+    return snapshots
+      .filter((snapshot) => snapshot.runId === runId)
+      .sort((left, right) => left.frameNo - right.frameNo);
+  }
+    if (sql.includes("_smithers_branches")) {
+      const parentRunId = params[0];
+      return branches.filter((branch) => branch.parentRunId === parentRunId);
+    }
+    throw new Error(`unexpected queryAll: ${sql}`);
+  },
     queryOne: async (sql, params) => {
       if (sql.includes("INSERT INTO _smithers_snapshot_contents")) {
         // Postgres path: upsert-lock in one statement, RETURNING the stored bytes.
