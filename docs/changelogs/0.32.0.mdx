@@ -3,8 +3,8 @@ title: "0.32.0"
 description: "Smithers 0.32.0 fixes silently broken task dispatch by finishing the Effect 4 migration, adds a gateway browser session handoff so monitor and UI links open without 401s, lets the gateway bind non-loopback hosts, and lands a large hardening batch."
 ---
 
-**Smithers 0.32.0 is a hardening release.** Of its 497 commits, 229 are fixes,
-plus 47 test commits and 12 security commits, against 41 feature commits. The
+**Smithers 0.32.0 is a hardening release.** Of its 512 commits, 251 are fixes,
+plus 83 test commits and a run of security fixes, against 41 feature commits. The
 biggest fix matters to everyone: a runtime-wide migration to Effect 4 had
 silently broken task dispatch, and this release finishes the migration and
 adds the tests that would have caught it. Alongside the fixes, the gateway
@@ -48,6 +48,17 @@ bunx smithers-orchestrator monitor --host 0.0.0.0
 - When no gateway is reachable, the CLI error now names the runtime state
   file it checked, the legacy port it probed, and the exact
   `smithers gateway --host/--port` command to start one.
+
+The handoff is locked down so the new cookie cannot be turned against you:
+
+- The `next` redirect target is constrained to a same-origin path. Authority
+  forms like `//host` and `/\host` are rejected, so the endpoint can never
+  bounce a browser to another site.
+- The session cookie is `SameSite=Lax`, and a cross-origin page that carries
+  it is refused on both the RPC and the WebSocket paths, so a sibling origin
+  cannot drive your gateway with operator scope.
+- The cookie name is scoped per gateway port, so two workspace gateways on the
+  same host keep separate sessions instead of overwriting each other.
 
 ## Task dispatch works again after the Effect 4 migration
 
@@ -118,12 +129,23 @@ bunx smithers-orchestrator up --resume RUN_ID --accept-workflow-change
 
 ## Hardening and reliability
 
-229 of this release's 497 commits are fixes and 47 are test commits, most
+251 of this release's 512 commits are fixes and 83 are test commits, most
 aimed at the seams the Effect 4 migration exposed: the engine module itself,
 CLI entry points, the hot reloader, and the sandbox. What got more reliable:
 
 - Every CLI entry point imports again: `packages/engine` had shipped with
   committed merge-conflict markers that made the module fail to parse.
+- Runtime logging works again. The observability layer resolved its minimum
+  level through Effect 3 constants that are `undefined` in Effect 4, which
+  left the level unset and dropped every `logInfo`/`logError` line. Levels are
+  resolved by name now, so run and gateway logs come through.
+- Run status filtering is honest again. The RPC status schema had collapsed to
+  a single literal under Effect 4, so a `listRuns` filter for anything other
+  than `running`, or a response carrying a finished or failed run, failed
+  validation. All nine statuses are accepted again.
+- `supervise` resumes orphaned one-shot runs again instead of skipping them
+  forever: the descriptor fetch had called a helper that Effect 4 renamed and
+  crashed on every attempt.
 - The `coverWorkflow` test harness clamps its loop cap instead of overwriting
   lower `maxIterations`, and no longer reports its own injected catch-all
   mock as unused; three quarantined stacked-ship simulations came back green
