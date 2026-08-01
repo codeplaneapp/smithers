@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { LogLevel } from "effect";
 import {
   resolveMinLevel,
   toEffectLogLevel,
@@ -29,14 +30,14 @@ describe("resolveMinLevel", () => {
 
 describe("toEffectLogLevel", () => {
   test("maps numeric levels to Effect LogLevels", () => {
-    expect(toEffectLogLevel(1)).toBe("Debug");
-    expect(toEffectLogLevel(2)).toBe("Info");
-    expect(toEffectLogLevel(3)).toBe("Warn");
-    expect(toEffectLogLevel(4)).toBe("Error");
+    expect(toEffectLogLevel(1)).toBe(LogLevel.Debug);
+    expect(toEffectLogLevel(2)).toBe(LogLevel.Info);
+    expect(toEffectLogLevel(3)).toBe(LogLevel.Warn);
+    expect(toEffectLogLevel(4)).toBe(LogLevel.Error);
   });
-  test("falls back to All for out-of-range levels", () => {
-    expect(toEffectLogLevel(0)).toBe("All");
-    expect(toEffectLogLevel(99)).toBe("All");
+  test("falls back to LogLevel.All for out-of-range levels", () => {
+    expect(toEffectLogLevel(0)).toBe(LogLevel.All);
+    expect(toEffectLogLevel(99)).toBe(LogLevel.All);
   });
 });
 

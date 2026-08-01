@@ -1,8 +1,8 @@
-import { lstat } from 'node:fs/promises';
+import * as node_fs_promises from 'node:fs/promises';
 import * as _smithers_orchestrator_observability_SmithersEvent from '@smithers-orchestrator/observability/SmithersEvent';
 import { SmithersDb } from '@smithers-orchestrator/db/adapter';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { Effect, Context, Layer } from 'effect';
+import { Context, Effect, Layer } from 'effect';
 import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
 
 type SandboxRuntime$1 = "bubblewrap" | "docker" | "codeplane" | "cloudflare";
@@ -144,7 +144,7 @@ type ValidatedSandboxBundle$1 = {
  * @returns {Promise<ValidatedSandboxBundle>}
  */
 declare function validateSandboxBundle(bundlePath: string, fsOverrides?: {
-    lstatLogs?: typeof lstat;
+    lstatLogs?: typeof node_fs_promises.lstat;
 }): Promise<ValidatedSandboxBundle>;
 /**
  * @param {{ bundlePath: string; output: unknown; status: "finished" | "failed" | "cancelled"; runId?: string; streamLogPath?: string | null; patches?: Array<{ path: string; content: string }>; artifacts?: Array<{ path: string; content: string }>; diffBundle?: unknown; }} params
@@ -260,7 +260,7 @@ type SandboxBundleResult$1 = {
     bundlePath: string;
 };
 
-type SandboxTransportService$2 = {
+type SandboxTransportService = {
     readonly create: (config: SandboxTransportConfig$1) => Effect.Effect<SandboxHandle$1, SmithersError>;
     readonly ship: (bundlePath: string, handle: SandboxHandle$1) => Effect.Effect<void, SmithersError>;
     readonly execute: (command: string, handle: SandboxHandle$1, signal?: AbortSignal) => Effect.Effect<{
@@ -322,10 +322,9 @@ declare function isDiffBundleLike(bundle: unknown): bundle is SandboxDiffBundleL
 /**
  * @param {SandboxProviderResult} result
  * @param {string} defaultBundlePath
- * @param {string} rootDir
  * @returns {Promise<{ bundlePath: string; remoteRunId: string | null; workspaceId: string | null; containerId: string | null; }>}
  */
-declare function materializeProviderResult(result: SandboxProviderResult, defaultBundlePath: string, rootDir: string): Promise<{
+declare function materializeProviderResult(result: SandboxProviderResult, defaultBundlePath: string): Promise<{
     bundlePath: string;
     remoteRunId: string | null;
     workspaceId: string | null;
@@ -353,13 +352,6 @@ declare function resolveRuntimeDbAdapter(db: ConstructorParameters<typeof Smithe
 declare function resolveSandboxCommand(command: unknown): string;
 declare const sandboxExecutionContext: AsyncLocalStorage<any>;
 
-type SandboxEntityExecutor = Context.ServiceClass.Shape<"SandboxEntityExecutor", SandboxTransportService$1>;
-declare const SandboxEntityExecutor: SandboxEntityExecutorClass;
-type SandboxTransportService$1 = SandboxTransportService$2;
-type SandboxEntityExecutorClass = Context.ServiceClass<SandboxEntityExecutor, "SandboxEntityExecutor", SandboxTransportService$1> & {
-    new (): SandboxEntityExecutor;
-};
-
 /**
  * @template R, E
  * @param {Layer.Layer<SandboxEntityExecutor, E, R>} executorLayer
@@ -375,16 +367,11 @@ declare function layerForSandboxRuntime(runtime: SandboxRuntime): Layer.Layer<Sa
  * @returns {SandboxRuntime}
  */
 declare function resolveSandboxRuntime(requested: SandboxRuntime): SandboxRuntime;
-
-type SandboxTransport = Context.ServiceClass.Shape<"SandboxTransport", SandboxTransportService>;
-declare const SandboxTransport: SandboxTransportClass;
+declare class SandboxTransport extends Context.TagClassShape<"SandboxTransport", SandboxTransportService> {
+}
 type SandboxBundleResult = SandboxBundleResult$1;
 type SandboxTransportConfig = SandboxTransportConfig$1;
-type SandboxTransportService = SandboxTransportService$2;
 type SandboxRuntime = SandboxRuntime$1;
-type SandboxTransportClass = Context.ServiceClass<SandboxTransport, "SandboxTransport", SandboxTransportService> & {
-    new (): SandboxTransport;
-};
 
 type SandboxExecOptions$1 = {
     cwd: string;
@@ -448,13 +435,12 @@ declare function writeSandboxProviderRequestFile(session: SandboxSession$1, requ
  *
  * @param {string} raw
  * @param {string} remoteId
- * @param {{ provider?: string; resultPath?: string; secrets?: string[] }} [context]
+ * @param {{ provider?: string; resultPath?: string }} [context]
  * @returns {import("../SandboxProvider.ts").SandboxProviderResult & Record<string, unknown>}
  */
 declare function parseSandboxProviderResult(raw: string, remoteId: string, context?: {
     provider?: string;
     resultPath?: string;
-    secrets?: string[];
 }): SandboxProviderResult$1 & Record<string, unknown>;
 
 /**
@@ -517,4 +503,4 @@ type SandboxExecResult = SandboxExecResult$1;
 type SandboxSession = SandboxSession$1;
 type SandboxProviderCommandOptions = SandboxProviderCommandOptions$1;
 
-export { type ExecuteSandboxOptions, SANDBOX_BUNDLE_OUTPUT_MAX_ARRAY_LENGTH, SANDBOX_BUNDLE_OUTPUT_MAX_DEPTH, SANDBOX_BUNDLE_OUTPUT_MAX_STRING_LENGTH, SANDBOX_BUNDLE_PATH_MAX_LENGTH, SANDBOX_BUNDLE_RUN_ID_MAX_LENGTH, SANDBOX_EGRESS_CA_BUNDLE_RELATIVE_PATH, SANDBOX_EGRESS_CA_WORKSPACE_PATH, SANDBOX_MAX_BUNDLE_BYTES, SANDBOX_MAX_PATCH_FILES, SANDBOX_MAX_README_BYTES, SANDBOX_PROVIDER_REQUEST_ENV, SANDBOX_PROVIDER_RESULT_ENV, type SandboxBundleManifest, type SandboxBundleResult, SandboxEntityExecutor, type SandboxExecOptions, type SandboxExecResult, type SandboxProvider, type SandboxProviderCommandOptions, type SandboxProviderRequest, type SandboxProviderResult, type SandboxSession, SandboxTransport, type SandboxTransportClass, type SandboxTransportConfig, type SmithersEvent, type ValidatedSandboxBundle, __executeSandboxInternals, createCommandSandboxProvider, createSandboxProviderContractSuite, executeSandbox, layerForSandboxRuntime, makeSandboxTransportLayer, normalizeSandboxEgressConfig, parseSandboxProviderResult, redactSandboxEgressConfig, redactSandboxProviderValue, registerSandboxProvider, resolveSandboxProvider, resolveSandboxRuntime, sandboxEgressEnv, uploadEgressCaToSession, validateSandboxBundle, writeSandboxBundle, writeSandboxEgressFiles, writeSandboxProviderRequestFile };
+export { type ExecuteSandboxOptions, SANDBOX_BUNDLE_OUTPUT_MAX_ARRAY_LENGTH, SANDBOX_BUNDLE_OUTPUT_MAX_DEPTH, SANDBOX_BUNDLE_OUTPUT_MAX_STRING_LENGTH, SANDBOX_BUNDLE_PATH_MAX_LENGTH, SANDBOX_BUNDLE_RUN_ID_MAX_LENGTH, SANDBOX_EGRESS_CA_BUNDLE_RELATIVE_PATH, SANDBOX_EGRESS_CA_WORKSPACE_PATH, SANDBOX_MAX_BUNDLE_BYTES, SANDBOX_MAX_PATCH_FILES, SANDBOX_MAX_README_BYTES, SANDBOX_PROVIDER_REQUEST_ENV, SANDBOX_PROVIDER_RESULT_ENV, type SandboxBundleManifest, type SandboxBundleResult, type SandboxExecOptions, type SandboxExecResult, type SandboxProvider, type SandboxProviderCommandOptions, type SandboxProviderRequest, type SandboxProviderResult, type SandboxSession, SandboxTransport, type SandboxTransportConfig, type SmithersEvent, type ValidatedSandboxBundle, __executeSandboxInternals, createCommandSandboxProvider, createSandboxProviderContractSuite, executeSandbox, layerForSandboxRuntime, makeSandboxTransportLayer, normalizeSandboxEgressConfig, parseSandboxProviderResult, redactSandboxEgressConfig, redactSandboxProviderValue, registerSandboxProvider, resolveSandboxProvider, resolveSandboxRuntime, sandboxEgressEnv, uploadEgressCaToSession, validateSandboxBundle, writeSandboxBundle, writeSandboxEgressFiles, writeSandboxProviderRequestFile };

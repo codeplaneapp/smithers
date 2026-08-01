@@ -39,7 +39,7 @@ function tagMetricWithLabels(metric, labels) {
 /**
  * @param {string} name
  * @param {MetricLabels} [labels]
- * @returns {Metric.Metric<any, any>}
+ * @returns {Metric.Metric<any, number, any>}
  */
 function counterOrGaugeMetric(name, labels) {
   const definition = resolveMetricDefinition(name);
@@ -50,7 +50,7 @@ function counterOrGaugeMetric(name, labels) {
 /**
  * @param {string} name
  * @param {MetricLabels} [labels]
- * @returns {Metric.Metric<any, any>}
+ * @returns {Metric.Metric<any, number, any>}
  */
 function gaugeMetric(name, labels) {
   const definition = resolveMetricDefinition(name);
@@ -60,7 +60,7 @@ function gaugeMetric(name, labels) {
 /**
  * @param {string} name
  * @param {MetricLabels} [labels]
- * @returns {Metric.Metric<any, any>}
+ * @returns {Metric.Metric<any, number, any>}
  */
 function histogramMetric(name, labels) {
   const definition = resolveMetricDefinition(name);

@@ -181,10 +181,9 @@ function resolveResumeTargetEffect(options, run) {
     const direct = resolveResumeTarget(run, { workflowExists: options.deps.workflowExists });
     if (direct) return direct;
     if (run.configJson !== undefined) return null;
-    const full = yield* Effect.tryPromise({
-      try: () => Promise.resolve(options.adapter.getRun(run.runId)),
-      catch: () => null,
-    }).pipe(Effect.catch(() => Effect.succeed(null)));
+    const full = yield* Effect.promise(() => Promise.resolve(options.adapter.getRun(run.runId))).pipe(
+      Effect.catchDefect(() => Effect.succeed(null)),
+    );
     if (!full) return null;
     return resolveResumeTarget(
       { runId: run.runId, workflowPath: run.workflowPath ?? full.workflowPath, configJson: full.configJson },

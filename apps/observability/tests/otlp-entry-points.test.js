@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, LogLevel } from "effect";
 import {
   createSmithersOtelLayer,
   createSmithersObservabilityLayer,
@@ -54,36 +54,6 @@ describe("createSmithersOtelLayer", () => {
 });
 
 describe("createSmithersObservabilityLayer", () => {
-  test("installs the configured minimum log level", async () => {
-    const output = [];
-    const originalLog = console.log;
-    console.log = (...args) => output.push(args.join(" "));
-    try {
-      await Effect.runPromise(
-        Effect.all([
-          Effect.logDebug("filtered-debug"),
-          Effect.logInfo("filtered-info"),
-          Effect.logWarning("included-warning"),
-          Effect.logError("included-error"),
-        ]).pipe(
-          Effect.provide(
-            createSmithersObservabilityLayer({
-              enabled: false,
-              logLevel: "warn",
-            }),
-          ),
-        ),
-      );
-    } finally {
-      console.log = originalLog;
-    }
-    const rendered = output.join("\n");
-    expect(rendered).not.toContain("filtered-debug");
-    expect(rendered).not.toContain("filtered-info");
-    expect(rendered).toContain("included-warning");
-    expect(rendered).toContain("included-error");
-  });
-
   test("provides SmithersObservability with resolved options", async () => {
     const layer = createSmithersObservabilityLayer({
       enabled: false,
@@ -100,7 +70,7 @@ describe("createSmithersObservabilityLayer", () => {
     expect(result.enabled).toBe(false);
     expect(result.serviceName).toBe("test-svc");
     expect(result.logFormat).toBe("json");
-    expect(result.logLevel).toBe("Debug");
+    expect(result.logLevel).toBe(LogLevel.Debug);
   });
 
   test("provides SmithersObservability with default options when called with no arguments", async () => {
@@ -114,7 +84,7 @@ describe("createSmithersObservabilityLayer", () => {
     expect(result.serviceName).toBe("smithers");
     expect(result.enabled).toBe(false);
     expect(result.logFormat).toBe("logfmt");
-    expect(result.logLevel).toBe("Info");
+    expect(result.logLevel).toBe(LogLevel.Info);
   });
 
   test("installLogger:false is reflected in the service options", async () => {

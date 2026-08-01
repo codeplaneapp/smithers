@@ -1,10 +1,11 @@
-import * as effect from 'effect';
-import { LogLevel, Effect, Context, Layer } from 'effect';
+import { LogLevel, Effect, Context, Layer, FiberRef } from 'effect';
 import * as effect_Tracer from 'effect/Tracer';
-import { M as MetricsServiceShape$2, a as MetricLabels$1, b as MetricsSnapshot$1, S as SmithersEvent$1, c as SmithersMetricDefinition$1 } from './rewindSandboxesReverted-DcBmlYff.js';
-export { d as activeNodes, e as activeRuns, f as approvalPending, g as approvalWaitDuration, h as approvalsDenied, i as approvalsGranted, j as approvalsRequested, k as attemptDuration, l as cacheHits, m as cacheMisses, n as dbQueryDuration, o as dbRetries, p as dbTransactionDuration, q as dbTransactionRetries, r as dbTransactionRollbacks, s as errorsTotal, t as eventsEmittedTotal, u as externalWaitAsyncPending, v as hotReloadDuration, w as hotReloadFailures, x as hotReloads, y as httpRequestDuration, z as httpRequests, A as metricsServiceAdapter, B as nodeDuration, C as nodeRetriesTotal, D as nodesFailed, E as nodesFinished, F as nodesStarted, G as processHeapUsedBytes, H as processMemoryRssBytes, I as processUptimeSeconds, J as promptSizeBytes, K as replaysStarted, L as responseSizeBytes, N as rewindDurationMs, O as rewindFramesDeleted, P as rewindRollbackTotal, Q as rewindSandboxesReverted, R as rewindTotal, T as runDuration, U as runForksCreated, V as runsAncestryDepth, W as runsCancelledTotal, X as runsCarriedStateBytes, Y as runsContinuedTotal, Z as runsFailedTotal, _ as runsFinishedTotal, $ as runsResumedTotal, a0 as runsTotal, a1 as sandboxActive, a2 as sandboxBundleSizeBytes, a3 as sandboxCompletedTotal, a4 as sandboxCreatedTotal, a5 as sandboxDurationMs, a6 as sandboxPatchCount, a7 as sandboxTransportDurationMs, a8 as schedulerConcurrencyUtilization, a9 as schedulerQueueDepth, aa as schedulerWaitDuration, ab as scorerEventsFailed, ac as scorerEventsFinished, ad as scorerEventsStarted, ae as smithersMetricCatalog, af as snapshotDuration, ag as snapshotsCaptured, ah as timerDelayDuration, ai as timersCancelled, aj as timersCreated, ak as timersFired, al as timersPending, am as toPrometheusMetricName, an as tokensCacheReadTotal, ao as tokensCacheWriteTotal, ap as tokensContextWindowBucketTotal, aq as tokensContextWindowPerCall, ar as tokensInputPerCall, as as tokensInputTotal, at as tokensOutputPerCall, au as tokensOutputTotal, av as tokensReasoningTotal, aw as toolCallErrorsTotal, ax as toolCallsTotal, ay as toolDuration, az as toolOutputTruncatedTotal, aA as trackSmithersEvent, aB as updateProcessMetrics, aC as vcsDuration } from './rewindSandboxesReverted-DcBmlYff.js';
+import { M as MetricsServiceShape$1, a as MetricLabels$1, b as MetricsSnapshot$1, S as SmithersEvent$1, c as SmithersMetricDefinition$1 } from './rewindSandboxesReverted-DNiqPX1B.js';
+export { d as activeNodes, e as activeRuns, f as approvalPending, g as approvalWaitDuration, h as approvalsDenied, i as approvalsGranted, j as approvalsRequested, k as attemptDuration, l as cacheHits, m as cacheMisses, n as dbQueryDuration, o as dbRetries, p as dbTransactionDuration, q as dbTransactionRetries, r as dbTransactionRollbacks, s as errorsTotal, t as eventsEmittedTotal, u as externalWaitAsyncPending, v as hotReloadDuration, w as hotReloadFailures, x as hotReloads, y as httpRequestDuration, z as httpRequests, A as metricsServiceAdapter, B as nodeDuration, C as nodeRetriesTotal, D as nodesFailed, E as nodesFinished, F as nodesStarted, G as processHeapUsedBytes, H as processMemoryRssBytes, I as processUptimeSeconds, J as promptSizeBytes, K as replaysStarted, L as responseSizeBytes, N as rewindDurationMs, O as rewindFramesDeleted, P as rewindRollbackTotal, Q as rewindSandboxesReverted, R as rewindTotal, T as runDuration, U as runForksCreated, V as runsAncestryDepth, W as runsCancelledTotal, X as runsCarriedStateBytes, Y as runsContinuedTotal, Z as runsFailedTotal, _ as runsFinishedTotal, $ as runsResumedTotal, a0 as runsTotal, a1 as sandboxActive, a2 as sandboxBundleSizeBytes, a3 as sandboxCompletedTotal, a4 as sandboxCreatedTotal, a5 as sandboxDurationMs, a6 as sandboxPatchCount, a7 as sandboxTransportDurationMs, a8 as schedulerConcurrencyUtilization, a9 as schedulerQueueDepth, aa as schedulerWaitDuration, ab as scorerEventsFailed, ac as scorerEventsFinished, ad as scorerEventsStarted, ae as smithersMetricCatalog, af as snapshotDuration, ag as snapshotsCaptured, ah as timerDelayDuration, ai as timersCancelled, aj as timersCreated, ak as timersFired, al as timersPending, am as toPrometheusMetricName, an as tokensCacheReadTotal, ao as tokensCacheWriteTotal, ap as tokensContextWindowBucketTotal, aq as tokensContextWindowPerCall, ar as tokensInputPerCall, as as tokensInputTotal, at as tokensOutputPerCall, au as tokensOutputTotal, av as tokensReasoningTotal, aw as toolCallErrorsTotal, ax as toolCallsTotal, ay as toolDuration, az as toolOutputTruncatedTotal, aA as trackSmithersEvent, aB as updateProcessMetrics, aC as vcsDuration } from './rewindSandboxesReverted-DNiqPX1B.js';
 import * as effect_Metric from 'effect/Metric';
 import * as BunContext from '@effect/platform-bun/BunServices';
+import 'effect/MetricState';
+import 'effect/MetricKeyType';
 
 type SmithersLogFormat$1 = "json" | "pretty" | "string" | "logfmt";
 
@@ -18,7 +19,7 @@ type ResolvedSmithersObservabilityOptions$2 = {
     readonly installLogger: boolean;
 };
 
-type SmithersObservabilityService$2 = {
+type SmithersObservabilityService$1 = {
     readonly options: ResolvedSmithersObservabilityOptions$2;
     readonly annotate: (attributes: Readonly<Record<string, unknown>>) => Effect.Effect<void>;
     readonly withSpan: <A, E, R>(name: string, effect: Effect.Effect<A, E, R>, attributes?: Readonly<Record<string, unknown>>) => Effect.Effect<A, E, Exclude<R, effect_Tracer.ParentSpan>>;
@@ -47,13 +48,11 @@ type CorrelationContext$5 = {
 
 type CorrelationPatch$5 = Partial<CorrelationContext$5> | undefined | null;
 
-type MetricsService = Context.ServiceClass.Shape<"MetricsService", MetricsServiceShape$1>;
-declare const MetricsService: Context.ServiceClass<MetricsService, "MetricsService", MetricsServiceShape$1>;
-type MetricsServiceShape$1 = MetricsServiceShape$2;
+declare class MetricsService extends Context.TagClassShape<"MetricsService", MetricsServiceShape$1> {
+}
 
-type SmithersObservability = Context.ServiceClass.Shape<"SmithersObservability", SmithersObservabilityService$1>;
-declare const SmithersObservability: Context.ServiceClass<SmithersObservability, "SmithersObservability", SmithersObservabilityService$1>;
-type SmithersObservabilityService$1 = SmithersObservabilityService$2;
+declare class SmithersObservability extends Context.TagClassShape<"SmithersObservability", SmithersObservabilityService$1> {
+}
 
 declare const prometheusContentType: "text/plain; version=0.0.4; charset=utf-8";
 
@@ -116,7 +115,7 @@ type ResolvedSmithersObservabilityOptions$1 = ResolvedSmithersObservabilityOptio
 type SmithersObservabilityOptions$3 = SmithersObservabilityOptions$4;
 
 declare const smithersMetrics: {
-    [k: string]: effect_Metric.Metric<any, any>;
+    [k: string]: effect_Metric.Metric<any, any, any>;
 };
 
 /** @type {Layer.Layer<MetricsService, never, never>} */
@@ -129,37 +128,35 @@ declare const MetricsServiceLive: Layer.Layer<MetricsService, never, never>;
 declare function createSmithersOtelLayer(options?: SmithersObservabilityOptions$2): Layer.Layer<never, never, never>;
 type SmithersObservabilityOptions$2 = SmithersObservabilityOptions$4;
 
-type TracingServiceShape$1 = {
+type TracingServiceShape = {
     readonly withSpan: <A, E, R>(name: string, effect: Effect.Effect<A, E, R>, attributes?: Record<string, unknown>) => Effect.Effect<A, E, R>;
     readonly annotate: (attributes: Record<string, unknown>) => Effect.Effect<void>;
     readonly withCorrelation: <A, E, R>(context: CorrelationPatch$5, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
 };
 
-type TracingService = Context.ServiceClass.Shape<"TracingService", TracingServiceShape>;
-declare const TracingService: Context.ServiceClass<TracingService, "TracingService", TracingServiceShape>;
+declare class TracingService extends Context.TagClassShape<"TracingService", TracingServiceShape> {
+}
 /** @type {Layer.Layer<TracingService, never, never>} */
 declare const TracingServiceLive: Layer.Layer<TracingService, never, never>;
-type TracingServiceShape = TracingServiceShape$1;
 
 /**
  * @param {SmithersObservabilityOptions} [options]
  */
-declare function createSmithersObservabilityLayer(options?: SmithersObservabilityOptions$1): Layer.Layer<MetricsService | TracingService | SmithersObservability | BunContext.BunServices, never, never>;
+declare function createSmithersObservabilityLayer(options?: SmithersObservabilityOptions$1): Layer.Layer<MetricsService | TracingService | SmithersObservability | BunContext.BunContext, never, never>;
 type SmithersObservabilityOptions$1 = SmithersObservabilityOptions$4;
 
 declare const createSmithersRuntimeLayer: typeof createSmithersObservabilityLayer;
 
-declare const correlationContextFiberRef: Context.Reference<undefined>;
+declare const correlationContextFiberRef: FiberRef.FiberRef<undefined>;
 
-type CorrelationContextServiceShape$1 = {
+type CorrelationContextServiceShape = {
     readonly current: () => Effect.Effect<CorrelationContext$5 | undefined>;
     readonly withCorrelation: <A, E, R>(patch: CorrelationPatch$5, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
     readonly toLogAnnotations: (context?: CorrelationContext$5 | null) => Record<string, unknown> | undefined;
 };
 
-type CorrelationContextService = Context.ServiceClass.Shape<"CorrelationContextService", CorrelationContextServiceShape>;
-declare const CorrelationContextService: Context.ServiceClass<CorrelationContextService, "CorrelationContextService", CorrelationContextServiceShape>;
-type CorrelationContextServiceShape = CorrelationContextServiceShape$1;
+declare class CorrelationContextService extends Context.TagClassShape<"CorrelationContextService", CorrelationContextServiceShape> {
+}
 
 /** @type {Layer.Layer<CorrelationContextService, never, never>} */
 declare const CorrelationContextLive: Layer.Layer<CorrelationContextService, never, never>;
@@ -261,16 +258,6 @@ declare function updateCurrentCorrelationContext(patch: CorrelationPatch$1): voi
 type CorrelationPatch$1 = CorrelationPatch$5;
 
 /**
- * Resolve the minimum imperative log level. The environment value is an
- * injectable parameter (defaulting to `SMITHERS_LOG_LEVEL`) so the mapping is
- * testable without re-importing the module; module state still captures the
- * env-derived value once at load time.
- *
- * @param {string | undefined} [env]
- * @returns {number}
- */
-declare function resolveMinLevel(env?: string | undefined): number;
-/**
  * Install the Effect runtime used by fire-and-forget observability logs.
  * Returns a restore function so tests and embedded hosts can scope overrides.
  *
@@ -278,16 +265,6 @@ declare function resolveMinLevel(env?: string | undefined): number;
  * @returns {() => void}
  */
 declare function setSmithersLogRunner(runner: SmithersLogRunner | null): () => void;
-/**
- * Map an imperative smithers log level to the Effect log level used when
- * running the log program. Exported alongside {@link resolveMinLevel} so the
- * level mapping (including the catch-all `All` fallback) can be
- * exercised directly with injected level values.
- *
- * @param {number} level
- * @returns {import("effect").LogLevel.LogLevel}
- */
-declare function toEffectLogLevel(level: number): effect.LogLevel.LogLevel;
 /**
  * @param {string} message
  * @param {LogAnnotations} [annotations]
@@ -312,34 +289,6 @@ declare function logWarning(message: string, annotations?: LogAnnotations, span?
  * @param {string} [span]
  */
 declare function logError(message: string, annotations?: LogAnnotations, span?: string): void;
-/**
- * @param {string} message
- * @param {LogAnnotations} [annotations]
- * @param {string} [span]
- * @returns {Promise<void>}
- */
-declare function logDebugAwait(message: string, annotations?: LogAnnotations, span?: string): Promise<void>;
-/**
- * @param {string} message
- * @param {LogAnnotations} [annotations]
- * @param {string} [span]
- * @returns {Promise<void>}
- */
-declare function logInfoAwait(message: string, annotations?: LogAnnotations, span?: string): Promise<void>;
-/**
- * @param {string} message
- * @param {LogAnnotations} [annotations]
- * @param {string} [span]
- * @returns {Promise<void>}
- */
-declare function logWarningAwait(message: string, annotations?: LogAnnotations, span?: string): Promise<void>;
-/**
- * @param {string} message
- * @param {LogAnnotations} [annotations]
- * @param {string} [span]
- * @returns {Promise<void>}
- */
-declare function logErrorAwait(message: string, annotations?: LogAnnotations, span?: string): Promise<void>;
 type SmithersLogRunner = {
     runFork: (effect: Effect.Effect<void, never, never>) => unknown;
     runPromise: (effect: Effect.Effect<void, never, never>) => Promise<void>;
@@ -350,13 +299,13 @@ type CorrelationContext = CorrelationContext$5;
 type CorrelationPatch = CorrelationPatch$5;
 type CorrelationContextPatch = CorrelationPatch;
 type MetricLabels = MetricLabels$1;
-type MetricsServiceShape = MetricsServiceShape$2;
+type MetricsServiceShape = MetricsServiceShape$1;
 type MetricsSnapshot = MetricsSnapshot$1;
 type ResolvedSmithersObservabilityOptions = ResolvedSmithersObservabilityOptions$2;
 type SmithersEvent = SmithersEvent$1;
 type SmithersLogFormat = SmithersLogFormat$1;
 type SmithersMetricDefinition = SmithersMetricDefinition$1;
 type SmithersObservabilityOptions = SmithersObservabilityOptions$4;
-type SmithersObservabilityService = SmithersObservabilityService$2;
+type SmithersObservabilityService = SmithersObservabilityService$1;
 
-export { type CorrelationContext, CorrelationContextLive, type CorrelationContextPatch, CorrelationContextService, type CorrelationPatch, type MetricLabels, MetricsService, MetricsServiceLive, type MetricsServiceShape, type MetricsSnapshot, type ResolvedSmithersObservabilityOptions, type SmithersEvent, type SmithersLogFormat, type SmithersMetricDefinition, SmithersObservability, type SmithersObservabilityOptions, type SmithersObservabilityService, TracingService, TracingServiceLive, annotateSmithersTrace, correlationContextFiberRef, correlationContextToLogAnnotations, createSmithersObservabilityLayer, createSmithersOtelLayer, createSmithersRuntimeLayer, getCurrentCorrelationContext, getCurrentCorrelationContextEffect, getCurrentSmithersTraceAnnotations, getCurrentSmithersTraceSpan, logDebug, logDebugAwait, logError, logErrorAwait, logInfo, logInfoAwait, logWarning, logWarningAwait, makeSmithersSpanAttributes, mergeCorrelationContext, prometheusContentType, renderPrometheusMetrics, resolveMinLevel, resolveSmithersObservabilityOptions, runWithCorrelationContext, setSmithersLogRunner, smithersMetrics, smithersSpanNames, toEffectLogLevel, updateCurrentCorrelationContext, withCorrelationContext, withCurrentCorrelationContext, withSmithersSpan };
+export { type CorrelationContext, CorrelationContextLive, type CorrelationContextPatch, CorrelationContextService, type CorrelationPatch, type MetricLabels, MetricsService, MetricsServiceLive, type MetricsServiceShape, type MetricsSnapshot, type ResolvedSmithersObservabilityOptions, type SmithersEvent, type SmithersLogFormat, type SmithersMetricDefinition, SmithersObservability, type SmithersObservabilityOptions, type SmithersObservabilityService, TracingService, TracingServiceLive, annotateSmithersTrace, correlationContextFiberRef, correlationContextToLogAnnotations, createSmithersObservabilityLayer, createSmithersOtelLayer, createSmithersRuntimeLayer, getCurrentCorrelationContext, getCurrentCorrelationContextEffect, getCurrentSmithersTraceAnnotations, getCurrentSmithersTraceSpan, logDebug, logError, logInfo, logWarning, makeSmithersSpanAttributes, mergeCorrelationContext, prometheusContentType, renderPrometheusMetrics, resolveSmithersObservabilityOptions, runWithCorrelationContext, setSmithersLogRunner, smithersMetrics, smithersSpanNames, updateCurrentCorrelationContext, withCorrelationContext, withCurrentCorrelationContext, withSmithersSpan };

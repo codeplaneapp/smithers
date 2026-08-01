@@ -112,21 +112,17 @@ export const SandboxEntity = Entity.make("Sandbox", [
   SandboxCleanupRpc,
 ]);
 /** @typedef {import("../SandboxTransportService.ts").SandboxTransportService} SandboxTransportService */
-/** @typedef {Context.ServiceClass.Shape<"SandboxEntityExecutor", SandboxTransportService>} SandboxEntityExecutor */
-/** @typedef {Context.ServiceClass<SandboxEntityExecutor, "SandboxEntityExecutor", SandboxTransportService> & { new(): SandboxEntityExecutor }} SandboxEntityExecutorClass */
 const SandboxEntityExecutorTag =
-  /** @type {Context.ServiceClass<SandboxEntityExecutor, "SandboxEntityExecutor", SandboxTransportService>} */ (
-    Context.Service()("SandboxEntityExecutor")
+  /** @type {Context.TagClass<SandboxEntityExecutor, "SandboxEntityExecutor", SandboxTransportService>} */ (
+    Context.Service("SandboxEntityExecutor")
   );
-export const SandboxEntityExecutor = /** @type {SandboxEntityExecutorClass} */ (
-  class SandboxEntityExecutor extends SandboxEntityExecutorTag {
-    // Explicit constructor (identical to the implicit one) so runtime
-    // construction is observable; JSC never records implicit constructors.
-    constructor(...args) {
-      super(...args);
-    }
+export class SandboxEntityExecutor extends SandboxEntityExecutorTag {
+  // Explicit constructor (identical to the implicit one) so runtime
+  // construction is observable; JSC never records implicit constructors.
+  constructor(...args) {
+    super(...args);
   }
-);
+}
 /**
  * @param {{ runId: string; sandboxId: string; }} input
  * @returns {string}

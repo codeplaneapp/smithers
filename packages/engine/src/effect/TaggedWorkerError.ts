@@ -1,10 +1,8 @@
-import type { Schema } from "effect";
-
 export type TaggedWorkerError =
   | {
       _tag: "TaskAborted";
       message: string;
-      details?: Schema.JsonObject;
+      details?: Record<string, unknown>;
       name?: string;
     }
   | {
@@ -28,21 +26,21 @@ export type TaggedWorkerError =
   | {
       _tag: "InvalidInput";
       message: string;
-      details?: Schema.JsonObject;
+      details?: Record<string, unknown>;
     }
   | {
       _tag: "DbWriteFailed";
       message: string;
-      details?: Schema.JsonObject;
+      details?: Record<string, unknown>;
     }
   | {
       _tag: "AgentCliError";
       message: string;
-      details?: Schema.JsonObject;
+      details?: Record<string, unknown>;
     }
   | {
       _tag: "WorkflowFailed";
       message: string;
-      details?: Schema.JsonObject;
+      details?: Record<string, unknown>;
       status?: number;
     };

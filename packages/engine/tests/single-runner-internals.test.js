@@ -1,11 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { Context, Effect, Schema, SchemaParser } from "effect";
+import { Context, Effect } from "effect";
 import {
   __singleRunnerInternals as I,
   dispatchWorkerTask,
   subscribeTaskWorkerDispatches,
 } from "../src/effect/single-runner.js";
-import { TaskResult } from "../src/effect/entity-worker.js";
 
 function makeTask(overrides = {}) {
   return {
@@ -76,34 +75,6 @@ describe("single runner internals", () => {
         },
       }).message,
     ).toBe("missing fallback");
-  });
-
-  test("normalizes tagged error details for the serialized worker wire", () => {
-    const circular = {};
-    circular.self = circular;
-    const error = I.toWorkerTaskError("json-details", {
-      _tag: "InvalidInput",
-      message: "invalid",
-      details: {
-        cause: new Error("nested"),
-        missing: undefined,
-        infinite: Infinity,
-        bigint: 42n,
-        circular,
-      },
-    });
-    expect(error).toMatchObject({
-      _tag: "InvalidInput",
-      details: {
-        cause: { name: "Error", message: "nested" },
-        infinite: "Infinity",
-        bigint: "42",
-        circular: { self: "[Circular]" },
-      },
-    });
-    expect(error.details).not.toHaveProperty("missing");
-    const result = { _tag: "Failure", executionId: "json-details", error };
-    expect(() => SchemaParser.encodeSync(Schema.toCodecJson(TaskResult))(result)).not.toThrow();
   });
 
   test("runs registered executions through success, failure and missing paths", async () => {

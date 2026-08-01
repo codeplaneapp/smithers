@@ -1,5 +1,5 @@
+import { LogLevel } from "effect";
 /** @typedef {import("./SmithersLogFormat.ts").SmithersLogFormat} SmithersLogFormat */
-/** @typedef {import("effect").LogLevel.LogLevel} EffectLogLevel */
 
 /** @typedef {import("./ResolvedSmithersObservabilityOptions.ts").ResolvedSmithersObservabilityOptions} ResolvedSmithersObservabilityOptions */
 /** @typedef {import("./SmithersObservabilityOptions.ts").SmithersObservabilityOptions} SmithersObservabilityOptions */
@@ -9,32 +9,32 @@
 const DEFAULT_OTLP_HTTP_ENDPOINT = "http://localhost:4318";
 
 /**
- * @param {EffectLogLevel | string | undefined} value
- * @returns {EffectLogLevel}
+ * @param {LogLevel.LogLevel | string | undefined} value
+ * @returns {LogLevel.LogLevel}
  */
 function resolveLogLevel(value) {
   if (typeof value !== "string") {
-    return "Info";
+    return value ?? LogLevel.Info;
   }
   switch (value.toLowerCase()) {
     case "none":
-      return "None";
+      return LogLevel.None;
     case "trace":
-      return "Trace";
+      return LogLevel.Trace;
     case "debug":
-      return "Debug";
+      return LogLevel.Debug;
     case "warning":
     case "warn":
-      return "Warn";
+      return LogLevel.Warn;
     case "error":
-      return "Error";
+      return LogLevel.Error;
     case "fatal":
-      return "Fatal";
+      return LogLevel.Fatal;
     case "all":
-      return "All";
+      return LogLevel.All;
     case "info":
     default:
-      return "Info";
+      return LogLevel.Info;
   }
 }
 /**

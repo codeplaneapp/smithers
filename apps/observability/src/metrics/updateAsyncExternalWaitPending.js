@@ -10,5 +10,9 @@ export function updateAsyncExternalWaitPending(kind, delta) {
   return Effect.sync(() => {
     asyncExternalWaitCounts[kind] = Math.max(0, asyncExternalWaitCounts[kind] + delta);
     return asyncExternalWaitCounts[kind];
-  }).pipe(Effect.flatMap((value) => Metric.update(Metric.withAttributes(externalWaitAsyncPending, { ["kind"]: String(kind) }), value)));
+  }).pipe(
+    Effect.flatMap((value) =>
+      Metric.update(Metric.withAttributes(externalWaitAsyncPending, { ["kind"]: String(kind) }), value),
+    ),
+  );
 }

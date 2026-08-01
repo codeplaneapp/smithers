@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { Effect, Metric } from "effect";
+import { ignoreSyncError } from "./interop.js";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { toolOutputTruncatedTotal } from "@smithers-orchestrator/observability/metrics";
@@ -14,9 +15,8 @@ const DEFAULT_MAX_OUTPUT_BYTES = 200_000;
 // under Bun so active CLI agents are not killed before their output reaches JS.
 const BUN_IDLE_FLOOR_MS = 5000;
 const BUN_IDLE_FLOOR_MIN_CONFIGURED_MS = 1000;
-// SIGKILL normally produces an `exit` event immediately. Bound the wait so a
-// failed signal delivery cannot make timeout or interruption cleanup hang
-// forever while still allowing a loaded host time to reap a killed process.
+// Bound the Windows taskkill helper so it cannot keep the host alive after the
+// target has exited or taskkill itself hangs.
 const PROCESS_EXIT_GRACE_MS = 1000;
 const SENSITIVE_FLAG = /(?:^|[-_])(api[-_]?key|token|secret|password)(?:$|[-_=])/i;
 
@@ -90,11 +90,11 @@ function truncateToBytes(text, maxBytes, keep = "head") {
 /**
  * @param {import("node:child_process").ChildProcess} child
  * @param {boolean} detached
- * @returns {boolean} Whether a termination request was dispatched.
  */
 export function killChildTree(child, detached) {
   if (!child.pid) {
-    return child.kill("SIGKILL");
+    child.kill("SIGKILL");
+    return;
   }
   if (process.platform === "win32") {
     const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
@@ -111,8 +111,6 @@ export function killChildTree(child, detached) {
     };
     const fallback = () => {
       if (!stopWatching()) return;
-      // taskkill can finish after the target. Avoid a stale direct kill once
-      // Node has observed that the original child is already terminal.
       if (child.exitCode != null || child.signalCode != null) return;
       try {
         child.kill("SIGKILL");
@@ -131,8 +129,6 @@ export function killChildTree(child, detached) {
     };
     const killerDeadline = setTimeout(cancelKiller, PROCESS_EXIT_GRACE_MS);
     killerDeadline.unref?.();
-    // Stop the helper as soon as Node confirms the target exited; otherwise
-    // the grace deadline bounds how long taskkill may keep the host referenced.
     child.once?.("exit", cancelKiller);
     killer.once("error", fallback);
     killer.once("exit", (code) => {
@@ -142,12 +138,13 @@ export function killChildTree(child, detached) {
       }
       fallback();
     });
-    return true;
+    return;
   }
   if (detached) {
-    return process.kill(-child.pid, "SIGKILL");
+    process.kill(-child.pid, "SIGKILL");
+  } else {
+    child.kill("SIGKILL");
   }
-  return child.kill("SIGKILL");
 }
 /**
  * @param {string} command
@@ -200,94 +197,8 @@ export function spawnCaptureEffect(command, args, options) {
       stdio: ["pipe", "pipe", "pipe"],
     });
     onProcess?.({ phase: "started", pid: child.pid });
-    let directProcessExited = false;
-    let processExitNotified = false;
-    /** @type {() => void} */
-    let resolveDirectProcessExit = () => {};
-    const directProcessExit = new Promise((resolve) => {
-      resolveDirectProcessExit = resolve;
-    });
-    const markDirectProcessExited = () => {
-      if (directProcessExited) return;
-      directProcessExited = true;
-      resolveDirectProcessExit();
-    };
-    const notifyProcessExited = () => {
-      if (processExitNotified) return;
-      processExitNotified = true;
-      onProcess?.({ phase: "exited", pid: child.pid });
-    };
     /** @type {(() => void) | undefined} Detaches the abort listener once the effect has settled. */
     let detachAbort;
-    let totalTimer;
-    let idleTimer;
-    const clearTimers = () => {
-      if (totalTimer) clearTimeout(totalTimer);
-      if (idleTimer) clearTimeout(idleTimer);
-      totalTimer = undefined;
-      idleTimer = undefined;
-    };
-    const closeCaptureStreams = () => {
-      // A descendant can inherit the direct child's stdout/stderr descriptors.
-      // Node delays the ChildProcess `close` event until those descriptors close,
-      // even after the direct child has exited. Killed paths no longer consume
-      // output, so release our pipe ends rather than letting a descendant keep
-      // this invocation (and potentially the host process) alive indefinitely.
-      for (const stream of [child.stdin, child.stdout, child.stderr]) {
-        try {
-          stream?.destroy();
-        } catch {
-          // best effort
-        }
-      }
-    };
-    const requestTermination = () => {
-      let dispatched = false;
-      try {
-        dispatched = killChildTree(child, detached) !== false;
-      } catch {
-        // Fall through to a direct-process kill when group termination fails.
-      }
-      if (!dispatched) {
-        try {
-          dispatched = child.kill("SIGKILL") !== false;
-        } catch {
-          // Best effort. The bounded exit wait below prevents a cleanup hang.
-        }
-      }
-      return dispatched;
-    };
-    const awaitDirectProcessExit = async () => {
-      if (directProcessExited) {
-        notifyProcessExited();
-        return true;
-      }
-      /** @type {ReturnType<typeof setTimeout> | undefined} */
-      let graceTimer;
-      const exited = await Promise.race([
-        directProcessExit.then(() => true),
-        new Promise((resolve) => {
-          graceTimer = setTimeout(() => resolve(false), PROCESS_EXIT_GRACE_MS);
-        }),
-      ]);
-      if (graceTimer) clearTimeout(graceTimer);
-      if (exited) {
-        notifyProcessExited();
-      } else {
-        // If the OS rejected termination, do not let the still-live process
-        // handle keep this host alive. Crucially, do not claim it has exited.
-        child.unref();
-        logWarning(
-          "child process termination was not confirmed",
-          {
-            ...logAnnotations,
-            pid: child.pid ?? null,
-          },
-          span,
-        );
-      }
-      return exited;
-    };
     /**
      * @param {string} reason
      * @param {"PROCESS_ABORTED" | "PROCESS_TIMEOUT" | "PROCESS_IDLE_TIMEOUT"} code
@@ -307,19 +218,26 @@ export function spawnCaptureEffect(command, args, options) {
       );
       settled = true;
       detachAbort?.();
-      clearTimers();
-      requestTermination();
-      closeCaptureStreams();
-      const error = new SmithersError(code, reason, errorDetails);
-      resume(Effect.promise(awaitDirectProcessExit).pipe(Effect.andThen(Effect.fail(error))));
+      try {
+        killChildTree(child, detached);
+      } catch {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // ignore
+        }
+      }
+      onProcess?.({ phase: "exited", pid: child.pid });
+      resume(Effect.fail(new SmithersError(code, reason, errorDetails)));
     };
+    let totalTimer;
+    let idleTimer;
     let idleGeneration = 0;
     const effectiveIdleTimeoutMs =
       typeof process.versions.bun === "string" && idleTimeoutMs >= BUN_IDLE_FLOOR_MIN_CONFIGURED_MS
         ? Math.max(idleTimeoutMs, BUN_IDLE_FLOOR_MS)
         : idleTimeoutMs;
     const resetIdle = () => {
-      if (settled) return;
       if (idleTimer) clearTimeout(idleTimer);
       if (effectiveIdleTimeoutMs) {
         idleGeneration += 1;
@@ -345,8 +263,9 @@ export function spawnCaptureEffect(command, args, options) {
       if (settled) return;
       settled = true;
       detachAbort?.();
-      clearTimers();
-      notifyProcessExited();
+      onProcess?.({ phase: "exited", pid: child.pid });
+      if (totalTimer) clearTimeout(totalTimer);
+      if (idleTimer) clearTimeout(idleTimer);
       logDebug(
         "child process completed",
         {
@@ -410,10 +329,11 @@ export function spawnCaptureEffect(command, args, options) {
       onStderr?.(text);
     });
     child.on("error", (error) => {
+      if (totalTimer) clearTimeout(totalTimer);
+      if (idleTimer) clearTimeout(idleTimer);
       if (!settled) {
         settled = true;
         detachAbort?.();
-        clearTimers();
         const smithersError = toSmithersError(sanitizeSpawnCause(error), `spawn ${command}`, {
           code: "PROCESS_SPAWN_FAILED",
           details: errorDetails,
@@ -426,27 +346,10 @@ export function spawnCaptureEffect(command, args, options) {
           },
           span,
         );
-        if (child.pid) {
-          requestTermination();
-          closeCaptureStreams();
-          resume(Effect.promise(awaitDirectProcessExit).pipe(Effect.andThen(Effect.fail(smithersError))));
-        } else {
-          // A process that never spawned has no future `exit` event, but its
-          // lifecycle is terminal and must release termination waiters.
-          markDirectProcessExited();
-          notifyProcessExited();
-          resume(Effect.fail(smithersError));
-        }
+        resume(Effect.fail(smithersError));
       }
     });
-    child.on("exit", () => {
-      markDirectProcessExited();
-      // Killed/error paths settle before requesting termination. Normal
-      // success waits for `close` so all captured output has drained.
-      if (settled) notifyProcessExited();
-    });
     child.on("close", (code) => {
-      markDirectProcessExited();
       finalize({ stdout, stderr, exitCode: code ?? null, stdoutTruncated, stderrTruncated });
     });
     child.stdin?.on("error", (error) => {
@@ -464,13 +367,19 @@ export function spawnCaptureEffect(command, args, options) {
     }
     child.stdin?.end();
     return Effect.gen(function* () {
-      clearTimers();
+      if (totalTimer) clearTimeout(totalTimer);
+      if (idleTimer) clearTimeout(idleTimer);
       if (!settled) {
-        settled = true;
-        detachAbort?.();
-        requestTermination();
-        closeCaptureStreams();
-        yield* Effect.promise(awaitDirectProcessExit);
+        yield* Effect.try({
+          try: () => {
+            killChildTree(child, detached);
+          },
+          catch: (cause) =>
+            toSmithersError(cause, "kill process group", {
+              code: "PROCESS_ABORTED",
+              details: errorDetails,
+            }),
+        }).pipe(Effect.catch(() => ignoreSyncError("kill fallback", () => child.kill("SIGKILL"))));
       }
     });
   }).pipe(

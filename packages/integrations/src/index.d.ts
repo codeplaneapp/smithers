@@ -14,6 +14,6 @@ import '@smithers-orchestrator/db/adapter';
 import './core/EventSourceTypes.js';
 import './core/ExternalEventTypes.js';
 import 'effect/Effect';
-import 'effect/ParseResult';
+import 'effect/SchemaIssue';
 import 'effect/SchemaAST';
 import './core/IntegrationRuntimeTypes.js';

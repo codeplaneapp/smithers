@@ -5,18 +5,16 @@ import { SandboxTransport, makeSandboxTransportLayer } from "../src/transport.js
 const config = {
   runId: "run-entity-contract",
   sandboxId: "sb-1",
-  runtime: "codeplane",
+  runtime: "bubblewrap",
   rootDir: "/tmp/smithers",
-  workspace: { name: "contract-workspace", persistence: "sticky" },
 };
 const handle = {
-  runtime: "codeplane",
+  runtime: "bubblewrap",
   runId: config.runId,
   sandboxId: config.sandboxId,
   sandboxRoot: "/tmp/smithers/.smithers/sandboxes/run-entity-contract/sb-1",
   requestPath: "/tmp/smithers/.smithers/sandboxes/run-entity-contract/sb-1/request",
   resultPath: "/tmp/smithers/.smithers/sandboxes/run-entity-contract/sb-1/result",
-  workspace: config.workspace,
 };
 describe("sandbox entity contract", () => {
   test("exposes constructable service tag classes", () => {
@@ -85,7 +83,7 @@ describe("sandbox entity contract", () => {
     expect(calls).toEqual([
       {
         op: "create",
-        runtime: "codeplane",
+        runtime: "bubblewrap",
         sandboxId: "sb-1",
       },
       {

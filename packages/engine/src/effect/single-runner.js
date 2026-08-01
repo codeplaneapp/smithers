@@ -1,3 +1,8 @@
+// Effect 4 makes the cluster stack (SingleRunner, SqlMessageStorage) depend on
+// the effect/Crypto service; without it every dispatch dies with
+// "Service not found: effect/Crypto". BunCrypto.layer is NodeCrypto.layer under
+// the hood (node:crypto), so it is safe on the plain-Node path too.
+import * as BunCrypto from "@effect/platform-bun/BunCrypto";
 import * as MessageStorage from "effect/unstable/cluster/MessageStorage";
 import * as RunnerHealth from "effect/unstable/cluster/RunnerHealth";
 import * as Runners from "effect/unstable/cluster/Runners";
@@ -59,10 +64,6 @@ let singleRunnerState = "idle";
  * @type {Promise<void> | undefined}
  */
 let singleRunnerClosePromise;
-// This runtime is process-local and has exactly one runner, so a single shard
-// preserves routing semantics without acquiring Effect Cluster's production
-// default of 300 shard locks during startup.
-const SINGLE_RUNNER_SHARDING_CONFIG = { shardsPerGroup: 1 };
 /**
  * Live `runWorkflow` calls. A run lease spans validation, every task attempt,
  * driver retry backoff between attempts, and cleanup. `workerExecutions` is
@@ -285,42 +286,6 @@ function storeWorkerError(executionId, error) {
   return errorId;
 }
 /**
- * Normalize tagged-error details before they cross Effect's JSON entity wire.
- * Error instances retain their useful fields, non-finite numbers and bigints
- * become strings, and cycles become an explicit marker instead of making the
- * entire worker response fail to encode.
- *
- * @param {Record<string, unknown> | undefined} details
- * @returns {import("effect").Schema.JsonObject | undefined}
- */
-function toWorkerErrorDetails(details) {
-  if (!details) return undefined;
-  const seen = new WeakSet();
-  try {
-    const serialized = JSON.stringify(details, (_key, value) => {
-      if (typeof value === "bigint") return value.toString();
-      if (typeof value === "number" && !Number.isFinite(value)) return String(value);
-      if (value instanceof Error) {
-        return {
-          name: value.name,
-          message: value.message,
-          ...(value.stack ? { stack: value.stack } : {}),
-        };
-      }
-      if (value && typeof value === "object") {
-        if (seen.has(value)) return "[Circular]";
-        seen.add(value);
-      }
-      return value;
-    });
-    if (serialized === undefined) return undefined;
-    const parsed = JSON.parse(serialized);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
-}
-/**
  * @param {string} executionId
  * @param {unknown} error
  * @returns {WorkerTaskError}
@@ -328,12 +293,7 @@ function toWorkerErrorDetails(details) {
 function toWorkerTaskError(executionId, error) {
   const taggedError = toTaggedErrorPayload(error);
   if (taggedError) {
-    return "details" in taggedError
-      ? {
-          ...taggedError,
-          details: toWorkerErrorDetails(taggedError.details),
-        }
-      : taggedError;
+    return taggedError;
   }
   return {
     _tag: "UnknownWorkerError",
@@ -397,20 +357,17 @@ async function runRegisteredExecution(task) {
  */
 async function buildRunnerLayer() {
   if (typeof Bun !== "undefined") {
-    const [SqliteClient, BunCrypto] = await Promise.all([loadSqliteClient(), import("@effect/platform-bun/BunCrypto")]);
-    return SingleRunner.layer({
-      runnerStorage: "memory",
-      shardingConfig: SINGLE_RUNNER_SHARDING_CONFIG,
-    }).pipe(
-      Layer.provide([
+    const SqliteClient = await loadSqliteClient();
+    return SingleRunner.layer({ runnerStorage: "memory" }).pipe(
+      Layer.provide(
         Layer.orDie(
           SqliteClient.layer({
             filename: ":memory:",
             disableWAL: true,
           }),
         ),
-        BunCrypto.layer,
-      ]),
+      ),
+      Layer.provide(BunCrypto.layer),
     );
   }
   // Mirrors SingleRunner.layer({ runnerStorage: "memory" }) with
@@ -419,7 +376,8 @@ async function buildRunnerLayer() {
     Layer.provideMerge(Runners.layerNoop),
     Layer.provideMerge(MessageStorage.layerMemory),
     Layer.provide([RunnerStorage.layerMemory, RunnerHealth.layerNoop]),
-    Layer.provide(ShardingConfig.layerFromEnv(SINGLE_RUNNER_SHARDING_CONFIG)),
+    Layer.provide(ShardingConfig.layerFromEnv()),
+    Layer.provide(BunCrypto.layer),
   );
 }
 /**
@@ -437,18 +395,13 @@ async function buildSingleRunnerRuntime() {
   // handle this function used to build and then drop on the floor (#1378).
   // Precedent: packages/integrations/src/core/IntegrationRuntime.js.
   const managed = ManagedRuntime.make(layer);
-  try {
-    const context = await managed.context();
-    const client = await managed.runPromise(TaskWorkerEntity.client);
-    return {
-      client: client,
-      context,
-      dispose: () => managed.dispose(),
-    };
-  } catch (error) {
-    await managed.dispose().catch(() => {});
-    throw error;
-  }
+  const context = await managed.context();
+  const client = await managed.runPromise(TaskWorkerEntity.client);
+  return {
+    client: client,
+    context,
+    dispose: () => managed.dispose(),
+  };
 }
 /**
  * @returns {Promise<SingleRunnerRuntime>}
@@ -559,7 +512,6 @@ export const __singleRunnerInternals = {
   notifyDispatchSubscribers,
   runRegisteredExecution,
   storeWorkerError,
-  toWorkerErrorDetails,
   toWorkerTaskError,
   workerErrors,
   workerExecutions,

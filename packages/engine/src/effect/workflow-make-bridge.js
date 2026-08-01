@@ -18,7 +18,7 @@ import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 /** @typedef {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow} SmithersWorkflow */
 /** @typedef {import("effect").Context.Context<WorkflowEngine.WorkflowEngine>} WorkflowEngineContext */
 /**
- * @typedef {{ readonly engineContext: WorkflowEngineContext; readonly scope: Scope.Closeable; readonly parentInstance: WorkflowEngine.WorkflowInstance["Service"]; readonly executeBody: RunBodyExecutor; executeChildWorkflow: <Schema>(workflow: SmithersWorkflow<Schema>, opts: RunOptions & { runId: string; bridgeExecutionId?: string; }) => Promise<RunResult>; }} WorkflowMakeBridgeRuntime
+ * @typedef {{ readonly engineContext: WorkflowEngineContext; readonly scope: Scope.CloseableScope; readonly parentInstance: WorkflowEngine.WorkflowInstance["Type"]; readonly executeBody: RunBodyExecutor; executeChildWorkflow: <Schema>(workflow: SmithersWorkflow<Schema>, opts: RunOptions & { runId: string; bridgeExecutionId?: string; }) => Promise<RunResult>; }} WorkflowMakeBridgeRuntime
  */
 
 const runtimeStorage = new AsyncLocalStorage();
@@ -73,7 +73,7 @@ function statusAfterWorkflowSuspended(status) {
 }
 /**
  * @param {ReturnType<typeof makeBridgeWorkflow>} workflowBridge
- * @param {Scope.Closeable} scope
+ * @param {Scope.CloseableScope} scope
  * @param {WorkflowEngineContext} engineContext
  * @param {Effect.Effect<RunResult, unknown, any>} execute
  */
@@ -88,7 +88,7 @@ async function registerBridgeWorkflow(workflowBridge, scope, engineContext, exec
 /**
  * @param {ReturnType<typeof makeBridgeWorkflow>} workflowBridge
  * @param {string} runId
- * @param {Scope.Closeable} scope
+ * @param {Scope.CloseableScope} scope
  * @param {WorkflowEngineContext} engineContext
  * @param {WorkflowMakeBridgeRuntime["parentInstance"]} parentInstance
  */

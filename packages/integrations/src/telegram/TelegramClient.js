@@ -131,8 +131,7 @@ export function makeTelegramClient(config) {
   // Retry only 429s, waiting the (capped) server-supplied retry_after.
   const rateLimitSchedule = Schedule.forever.pipe(
     Schedule.while(
-      /** @param {{ input: unknown }} metadata */ ({ input }) =>
-        isTelegramApiError(input) && input.errorCode === 429,
+      /** @param {{ input: unknown }} metadata */ ({ input }) => isTelegramApiError(input) && input.errorCode === 429,
     ),
     Schedule.addDelay(
       /** @param {{ input: unknown }} metadata */ ({ input: error }) => {

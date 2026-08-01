@@ -474,11 +474,6 @@ export function runRpcCommandEffect(command, args, options) {
       child.stdin.write(`${JSON.stringify(promptPayload)}\n`, () => {});
     }
     return Effect.sync(() => {
-      if (settled) return;
-      settled = true;
-      inactivity.clear();
-      totalTimeout.clear();
-      terminationStarted = true;
       try {
         rl.close();
       } catch {
@@ -488,7 +483,6 @@ export function runRpcCommandEffect(command, args, options) {
         signal.removeEventListener("abort", onAbort);
       }
       killProcessGroup("SIGKILL");
-      notifyProcessExited();
     });
   }).pipe(Effect.annotateLogs(logAnnotations), Effect.withLogSpan(span));
 }

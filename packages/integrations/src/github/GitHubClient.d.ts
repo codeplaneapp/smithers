@@ -22,7 +22,7 @@ declare function makeGitHubClient(config?: GitHubConfig): GitHubClientService;
  * Live Layer for {@link GitHubClient}.
  * @param {GitHubConfig} [config]
  */
-declare function githubClientLayer(config?: GitHubConfig): Layer.Layer<GitHubClientTag, never, never>;
+declare function githubClientLayer(config?: GitHubConfig): Layer.Layer<any, never, never>;
 /**
  * Context tag for the GitHub REST client. Provide it with
  * `githubClientLayer(config)` (or `Layer.succeed(GitHubClient, makeGitHubClient(...))`).

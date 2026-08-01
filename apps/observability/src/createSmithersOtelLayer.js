@@ -18,8 +18,6 @@ export function createSmithersOtelLayer(options = {}) {
     ...(resolved.headers && Object.keys(resolved.headers).length > 0 ? { headers: resolved.headers } : {}),
     resource: { serviceName: resolved.serviceName },
     tracerContext: (primitive, span) =>
-      smithersTraceSpanStorage.run(span, () =>
-        primitive["~effect/Effect/evaluate"](Fiber.getCurrent()),
-      ),
+      smithersTraceSpanStorage.run(span, () => primitive["~effect/Effect/evaluate"](Fiber.getCurrent())),
   }).pipe(Layer.provide(FetchHttpClient.layer));
 }

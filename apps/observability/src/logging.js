@@ -1,4 +1,4 @@
-import { Effect, Logger } from "effect";
+import { Effect, Logger, LogLevel } from "effect";
 import { getCurrentSmithersTraceAnnotations } from "./getCurrentSmithersTraceAnnotations.js";
 import {
   correlationContextToLogAnnotations,
@@ -99,24 +99,23 @@ export function setSmithersLogRunner(runner) {
 /**
  * Map an imperative smithers log level to the Effect log level used when
  * running the log program. Exported alongside {@link resolveMinLevel} so the
- * level mapping (including the catch-all `All` fallback) can be
+ * level mapping (including the catch-all `LogLevel.All` fallback) can be
  * exercised directly with injected level values.
  *
  * @param {number} level
- * @returns {import("effect").LogLevel.LogLevel}
  */
 export function toEffectLogLevel(level) {
   switch (level) {
     case LOG_LEVEL_DEBUG:
-      return "Debug";
+      return LogLevel.Debug;
     case LOG_LEVEL_INFO:
-      return "Info";
+      return LogLevel.Info;
     case LOG_LEVEL_WARNING:
-      return "Warn";
+      return LogLevel.Warn;
     case LOG_LEVEL_ERROR:
-      return "Error";
+      return LogLevel.Error;
     default:
-      return "All";
+      return LogLevel.All;
   }
 }
 

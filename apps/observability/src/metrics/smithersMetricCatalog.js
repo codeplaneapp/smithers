@@ -151,7 +151,7 @@ function metricBoundaryValues(boundaries) {
   return Array.from(boundaries?.values ?? []).sort((left, right) => left - right);
 }
 /**
- * @param {Metric.Metric<any, any>} metric
+ * @param {Metric.Metric<any, any, any>} metric
  * @returns {readonly number[]}
  */
 function metricHistogramBoundaries(metric) {
@@ -161,7 +161,7 @@ function metricHistogramBoundaries(metric) {
 }
 /**
  * @param {string} key
- * @param {Metric.Metric<any, any>} metric
+ * @param {Metric.Metric<any, any, any>} metric
  * @param {string} name
  * @param {SmithersMetricType} type
  * @param {Omit< SmithersMetricDefinition, "key" | "metric" | "name" | "prometheusName" | "type" >} options

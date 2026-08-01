@@ -27,7 +27,7 @@ export const WorkerTask = Schema.Struct({
   taskKind: WorkerTaskKind,
   dispatchKind: WorkerDispatchKind,
 });
-const WorkerErrorDetails = Schema.Record(Schema.String, Schema.Json);
+const WorkerErrorDetails = Schema.Record(Schema.String, Schema.Unknown);
 const TaskAbortedError = Schema.Struct({
   _tag: Schema.Literal("TaskAborted"),
   message: Schema.String,

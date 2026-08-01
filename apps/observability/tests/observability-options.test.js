@@ -1,6 +1,7 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { resolveSmithersObservabilityOptions, renderPrometheusMetrics } from "../src/index.js";
 import { parseOtlpHeaders } from "../src/resolveSmithersObservabilityOptions.js";
+import { LogLevel } from "effect";
 describe("resolveSmithersObservabilityOptions", () => {
   const savedEnv = {};
   const envKeys = [
@@ -33,7 +34,7 @@ describe("resolveSmithersObservabilityOptions", () => {
     expect(result.headers).toBeUndefined();
     expect(result.serviceName).toBe("smithers");
     expect(result.logFormat).toBe("logfmt");
-    expect(result.logLevel).toBe("Info");
+    expect(result.logLevel).toBe(LogLevel.Info);
     expect(result.installLogger).toBe(true);
   });
   test("explicit options override defaults", () => {
@@ -49,7 +50,7 @@ describe("resolveSmithersObservabilityOptions", () => {
     expect(result.endpoint).toBe("http://custom:4317");
     expect(result.serviceName).toBe("my-service");
     expect(result.logFormat).toBe("json");
-    expect(result.logLevel).toBe("Debug");
+    expect(result.logLevel).toBe(LogLevel.Debug);
     expect(result.installLogger).toBe(false);
   });
   test("parses simple OTLP header pairs", () => {
@@ -105,7 +106,7 @@ describe("resolveSmithersObservabilityOptions", () => {
     expect(result.endpoint).toBe("http://env:4318");
     expect(result.serviceName).toBe("env-service");
     expect(result.logFormat).toBe("pretty");
-    expect(result.logLevel).toBe("Warn");
+    expect(result.logLevel).toBe(LogLevel.Warn);
   });
   test("SMITHERS_OTEL_ENABLED=1 enables", () => {
     process.env.SMITHERS_OTEL_ENABLED = "1";
@@ -119,15 +120,15 @@ describe("resolveSmithersObservabilityOptions", () => {
   });
   test("resolves all log levels", () => {
     const levels = [
-      ["none", "None"],
-      ["trace", "Trace"],
-      ["debug", "Debug"],
-      ["info", "Info"],
-      ["warning", "Warn"],
-      ["warn", "Warn"],
-      ["error", "Error"],
-      ["fatal", "Fatal"],
-      ["all", "All"],
+      ["none", LogLevel.None],
+      ["trace", LogLevel.Trace],
+      ["debug", LogLevel.Debug],
+      ["info", LogLevel.Info],
+      ["warning", LogLevel.Warn],
+      ["warn", LogLevel.Warn],
+      ["error", LogLevel.Error],
+      ["fatal", LogLevel.Fatal],
+      ["all", LogLevel.All],
     ];
     for (const [input, expected] of levels) {
       const result = resolveSmithersObservabilityOptions({ logLevel: input });
@@ -136,7 +137,7 @@ describe("resolveSmithersObservabilityOptions", () => {
   });
   test("unknown log level defaults to Info", () => {
     const result = resolveSmithersObservabilityOptions({ logLevel: "banana" });
-    expect(result.logLevel).toBe("Info");
+    expect(result.logLevel).toBe(LogLevel.Info);
   });
   test("resolves all log formats", () => {
     const formats = [

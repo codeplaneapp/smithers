@@ -2,9 +2,6 @@
   "name": "@smithers-orchestrator/sandbox",
   "version": "0.32.0",
   "description": "Sandbox bundle, execution, and transport integration for Smithers",
-  "files": [
-    "src/"
-  ],
   "type": "module",
   "sideEffects": false,
   "exports": {
@@ -22,8 +19,11 @@
       "default": "./src/*.js"
     }
   },
+  "files": [
+    "src/"
+  ],
   "scripts": {
-    "build": "rm -f src/index.d.ts && tsup --dts-only",
+    "build": "node -e \"const fs=require('node:fs');fs.rmSync('src/index.d.ts',{force:true})\" && tsup --dts-only",
     "test": "bun test tests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

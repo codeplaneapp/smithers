@@ -36,7 +36,7 @@ import {
 import { camelToSnake } from "@smithers-orchestrator/db/utils/camelToSnake";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 /**
- * @typedef {import("effect").Schema.Schema<any>} AnySchema
+ * @typedef {import("effect").Schema.Schema<any, any, never>} AnySchema
  */
 /**
  * @typedef {unknown | Promise<unknown> | import("effect").Effect.Effect<unknown, unknown, unknown>} AnyEffect
@@ -271,7 +271,7 @@ function durationToMs(input) {
     return Math.max(0, Math.floor(input));
   }
   try {
-    return Math.max(0, Math.floor(Duration.toMillis(Duration.fromInputUnsafe(input))));
+    return Math.max(0, Math.floor(Duration.toMillis(input)));
   } catch {
     return null;
   }

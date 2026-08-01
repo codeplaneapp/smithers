@@ -32,7 +32,7 @@ describe("entity worker contract", () => {
         nodeId: "task-1",
         iteration: 0,
         retries: 2,
-        taskKind: "static",
+        taskKind: "agent",
         dispatchKind: "legacy",
       }),
     ).toEqual({
@@ -43,7 +43,7 @@ describe("entity worker contract", () => {
       nodeId: "task-1",
       iteration: 0,
       retries: 2,
-      taskKind: "static",
+      taskKind: "agent",
       dispatchKind: "legacy",
     });
     expect(

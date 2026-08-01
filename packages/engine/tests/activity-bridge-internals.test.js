@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import * as Activity from "effect/unstable/workflow/Activity";
-import * as WorkflowEngine from "effect/unstable/workflow/WorkflowEngine";
+import { WorkflowInstance } from "effect/unstable/workflow/WorkflowEngine";
 import { Effect } from "effect";
 import {
   executeTaskActivity,
@@ -19,7 +19,7 @@ function runActivity(activity, attempt = 1) {
   return Effect.runPromise(
     activity.execute.pipe(
       Effect.provideService(Activity.CurrentAttempt, attempt),
-      Effect.provideService(WorkflowEngine.WorkflowInstance, { executionId: "activity-exec" }),
+      Effect.provideService(WorkflowInstance, { executionId: "activity-exec" }),
     ),
   );
 }

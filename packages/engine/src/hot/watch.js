@@ -67,9 +67,6 @@ export class WatchTree {
     this.closed = true;
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     if (this.pollTimer) clearTimeout(this.pollTimer);
-    this.debounceTimer = null;
-    this.pollTimer = null;
-    this.changedFiles.clear();
     for (const w of this.watchers) {
       try {
         w.close();
@@ -195,7 +192,6 @@ export class WatchTree {
     this.polling = true;
     try {
       const next = await this.scanFileSignatures(this.rootDir);
-      if (this.closed) return false;
       const changed = this.recordScanChanges(next);
       this.advancePollBackoff(changed);
       return changed;
@@ -318,7 +314,6 @@ export class WatchTree {
    * @param {string} filePath
    */
   onFileChange(filePath) {
-    if (this.closed) return;
     this.changedFiles.add(filePath);
     // Debounce: reset timer on each change
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
