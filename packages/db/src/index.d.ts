@@ -1471,12 +1471,12 @@ declare class SmithersDb {
      * @param {string} runId
      * @param {string} nodeId Validated upstream (no quotes/percent — node id charset).
      * @param {{ afterSeq?: number; limit?: number }} [query]
-     * @returns {RunnableEffect<EventRow[], SmithersError>}
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
      */
     listNodeEvents(runId: string, nodeId: string, query?: {
         afterSeq?: number;
         limit?: number;
-    }): RunnableEffect<EventRow[], SmithersError$1>;
+    }): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
      * @param {string} runId
      * @param {EventHistoryQuery} [query]
