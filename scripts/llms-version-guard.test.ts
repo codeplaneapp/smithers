@@ -57,7 +57,7 @@ describe("versioned llms artifact guard", () => {
     });
   });
 
-  test("refuses to overwrite a version already published on npm", () => {
+  test("refuses to overwrite an already released version", () => {
     withFixture((dir) => {
       const path = join(dir, "llms-full-v0.28.0.txt");
       writeFileSync(path, "historic bundle\n");
@@ -103,7 +103,7 @@ describe("versioned llms artifact guard", () => {
 
       expect(guard.write(path, "unchecked bundle\n")).toBe("skipped");
       expect(existsSync(path)).toBe(false);
-      expect(warnings[0]).toMatch(/npm registry status .* unavailable/);
+      expect(warnings[0]).toMatch(/release status .* unavailable/);
       expect(warnings[0]).toContain(path);
       guard.assertNoPublishedVersion();
     });

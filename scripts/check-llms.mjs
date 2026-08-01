@@ -34,6 +34,9 @@ function run(command, args) {
 }
 
 /**
+ * A git release tag freezes the historical bundle even when npm publication
+ * is intentionally delayed.
+ *
  * @param {string} version
  * @returns {"published" | "unpublished" | "unavailable"}
  */
@@ -65,7 +68,15 @@ function checkNpmPublication(version) {
   if (result.status === 0) return "published";
   const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
   if (/\bE404\b|404\s+(?:Not Found|No match)|No match found for version/i.test(output)) {
-    return "unpublished";
+    const ref = `refs/tags/v${version}`;
+    const localTag = spawnSync("git", ["show-ref", "--verify", "--quiet", ref], { cwd: root });
+    if (localTag.status === 0) return "published";
+    const remoteTag = spawnSync("git", ["ls-remote", "--exit-code", "--tags", "origin", ref], {
+      cwd: root,
+      stdio: "ignore",
+    });
+    if (remoteTag.status === 0) return "published";
+    if (remoteTag.status === 2) return "unpublished";
   }
   return "unavailable";
 }
