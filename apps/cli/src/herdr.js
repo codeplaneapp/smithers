@@ -31,6 +31,11 @@ const HERDR_FOLLOW_POLL_INTERVAL_MS = 500;
 /** Page size for draining new events into an attached surface. */
 const HERDR_EVENT_PAGE_SIZE = 500;
 
+/** @param {string} value */
+function quotePosixShellArgument(value) {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
 /**
  * Close the herdr detail tab/pane this process is running in (soft).
  * herdr injects HERDR_TAB_ID / HERDR_PANE_ID into agent panes; without an
@@ -580,7 +585,7 @@ export async function ensureSessionStubWorkspace(params) {
       });
       await client.tryCall("pane.send_text", {
         pane_id: paneId,
-        text: `echo ${JSON.stringify(hint)}\n`,
+        text: `printf '%s\\n' ${quotePosixShellArgument(hint)}\n`,
       });
     }
   } catch (err) {
