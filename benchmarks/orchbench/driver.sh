@@ -73,6 +73,7 @@ PROTOCOL_HASH="$({ shasum -a 256 "$ROOT/benchmarks/orchbench/driver.sh" "$WF" "$
   [[ -f "$SELECTED" ]] && shasum -a 256 "$SELECTED"; } | shasum -a 256 | awk '{print $1}')"
 
 log() { printf '[driver %s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
+GATE_REFUSED=0
 
 download_task() {
   local slug="$1"
@@ -263,6 +264,7 @@ PY
 
 run_cell() {
   local slug="$1" pattern="$2"
+  GATE_REFUSED=0
   local base_cell="$ROUND-$pattern-$slug" cell="$ROUND-$pattern-$slug" attempt=0
   local resfile="$OUT/results/$cell.json"
   while [[ -f "$resfile" ]]; do
@@ -290,7 +292,7 @@ run_cell() {
   if [[ -z "$known_status" ]]; then
     # ORCHBENCH_SKIP_GATES=1 is for unmeasured smoke cells only.
     if [[ "${ORCHBENCH_SKIP_GATES:-0}" != "1" ]]; then
-      wait_no_active_runs || return 1
+      wait_no_active_runs || { GATE_REFUSED=1; return 1; }
       wait_codex_quota
     fi
     log "prepare $cell"
@@ -501,7 +503,13 @@ PY
   pattern_position=0
   for pattern in "${ORDERED_PATTERNS[@]}"; do
     CURRENT_PATTERN_POSITION="$pattern_position"
-    run_cell "$slug" "$pattern" || FAILURES=$((FAILURES + 1))
+    if ! run_cell "$slug" "$pattern"; then
+      if [[ "$ROUND" == "pg-confirm" && "$GATE_REFUSED" -eq 1 ]]; then
+        log "confirm launch aborted cleanly after isolation-gate timeout; no condition consumed"
+        exit 75
+      fi
+      FAILURES=$((FAILURES + 1))
+    fi
     pattern_position=$((pattern_position + 1))
   done
   task_index=$((task_index + 1))

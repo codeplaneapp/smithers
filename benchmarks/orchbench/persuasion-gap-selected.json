@@ -1,0 +1,687 @@
+{
+  "schemaVersion": 1,
+  "study": "persuasion-gap-v1",
+  "datasetRevision": "59184e779909300a5a0150b06b945d39da81a099",
+  "targetTasks": 30,
+  "targetPerLanguage": 6,
+  "minimumPerLanguage": 3,
+  "overflowLanguageOrder": [
+    "C++",
+    "Go",
+    "Python",
+    "TypeScript",
+    "Rust"
+  ],
+  "languageSelection": {
+    "C++": {
+      "initialCount": 6,
+      "deficit": 0,
+      "overflowSelections": [
+        "tpl-3.2.0-roadmap"
+      ],
+      "finalCount": 7
+    },
+    "Go": {
+      "initialCount": 6,
+      "deficit": 0,
+      "overflowSelections": [],
+      "finalCount": 6
+    },
+    "Python": {
+      "initialCount": 6,
+      "deficit": 0,
+      "overflowSelections": [],
+      "finalCount": 6
+    },
+    "Rust": {
+      "initialCount": 5,
+      "deficit": 1,
+      "overflowSelections": [],
+      "finalCount": 5
+    },
+    "TypeScript": {
+      "initialCount": 6,
+      "deficit": 0,
+      "overflowSelections": [],
+      "finalCount": 6
+    }
+  },
+  "decisions": [
+    {
+      "language": "C++",
+      "slug": "glz-6.5.1-roadmap",
+      "candidateRank": 1,
+      "status": "pass",
+      "decisionReceiptSha256": "2d2b0cfe1e4a4406a67d4c2f890cb503b6095546101b9686a1bf38b1bcfa20c0",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "C++",
+      "slug": "tpl-5.1.0-roadmap",
+      "candidateRank": 2,
+      "status": "pass",
+      "decisionReceiptSha256": "647c872b1ef06a5bc218474729b55467e8a79ff3e410754ef874c6dbb0784cef",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "C++",
+      "slug": "glz-6.1.0-roadmap",
+      "candidateRank": 3,
+      "status": "pass",
+      "decisionReceiptSha256": "7507ef565e0295181b3b0e73d138007aee8bdad34b7a92c91968267f3c4a9ce2",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "C++",
+      "slug": "glz-7.0.1-roadmap",
+      "candidateRank": 4,
+      "status": "pass",
+      "decisionReceiptSha256": "9e08b8b9255bb49a4364f08f46a7804936d86d5a84057294e53bf08e2c5b4e3a",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "C++",
+      "slug": "glz-6.5.0-roadmap",
+      "candidateRank": 5,
+      "status": "pass",
+      "decisionReceiptSha256": "e4362b5beaea3265e4e21c28bb93d0679b92714756adb6f3dcf8684065b11985",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "C++",
+      "slug": "glz-6.0.0-roadmap",
+      "candidateRank": 6,
+      "status": "pass",
+      "decisionReceiptSha256": "f963fee618f357ce653b76f923bad5beedd869d0458680806948034e5615d1ef",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "Go",
+      "slug": "ktx-0.10.0-roadmap",
+      "candidateRank": 1,
+      "status": "pass",
+      "decisionReceiptSha256": "2c8bd280f62610d8bef3efcf828dcf1d2efab538670317463d874f2232edaf04",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "Go",
+      "slug": "fyn-2.2.0-roadmap",
+      "candidateRank": 2,
+      "status": "pass",
+      "decisionReceiptSha256": "7f35e500012da872eb7f2b59469b6ad4b8584c67ecd77fa01fef1303fa2e157a",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "Go",
+      "slug": "fyn-2.5.0-roadmap",
+      "candidateRank": 3,
+      "status": "pass",
+      "decisionReceiptSha256": "caaf5d16455e586373442753f931caa3a3e27ada25fb6f58514953af75db3ee6",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "Go",
+      "slug": "ktx-0.12.0-roadmap",
+      "candidateRank": 4,
+      "status": "pass",
+      "decisionReceiptSha256": "34d286e1891438232a5e2f094f3e488930dcd65ccbe74207b6aeb7b5cff67ce5",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "Go",
+      "slug": "fyn-2.7.0-roadmap",
+      "candidateRank": 5,
+      "status": "invalid",
+      "decisionReceiptSha256": "f53dd70eccb05c5932a560f39c4c40bacbe6acce98d1498007fc79b45f56aea6",
+      "reason": "noop=0 oracle=0"
+    },
+    {
+      "language": "Go",
+      "slug": "fbr-3.0.0-roadmap",
+      "candidateRank": 6,
+      "status": "pass",
+      "decisionReceiptSha256": "ee9f10b18a3aa0dd8329d30da72a8a038962cf9e1cad58b837cb06d7596e11a3",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "Go",
+      "slug": "fyn-2.1.0-roadmap",
+      "candidateRank": 7,
+      "status": "invalid",
+      "decisionReceiptSha256": "2ebd5c76595613fcd3d626f407edefbc0dc91c6cc4599be7706bf31ce72a849b",
+      "reason": "noop=0 oracle=0.9"
+    },
+    {
+      "language": "Go",
+      "slug": "fbr-2.43.0-roadmap",
+      "candidateRank": 8,
+      "status": "pass",
+      "decisionReceiptSha256": "02da89ecc41e16d9eaad687ac82d59a3d653b255b28353ca4c249d35331c57bc",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "Python",
+      "slug": "plr-1.10.0-roadmap",
+      "candidateRank": 1,
+      "status": "pass",
+      "decisionReceiptSha256": "a29e67b177b612f828cda019f8143dd405fdab6cc3b2d1d0a4e7fc138ff886a7",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "Python",
+      "slug": "plr-1.30.0-roadmap",
+      "candidateRank": 2,
+      "status": "invalid",
+      "decisionReceiptSha256": "40b4f2ae8a65ffc5bebe10d89de0b0a9e55fc3eca7ab06c94727a4d15a34051f",
+      "reason": "noop=0 oracle=0.6666666666666666"
+    },
+    {
+      "language": "Python",
+      "slug": "spc-3.3.0-roadmap",
+      "candidateRank": 3,
+      "status": "pass",
+      "decisionReceiptSha256": "5efbbfaa66ab19f4d25e72cf46ae808495974b2769da045bd80cbfe9da01c546",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "Python",
+      "slug": "plr-1.36.0-roadmap",
+      "candidateRank": 4,
+      "status": "invalid",
+      "decisionReceiptSha256": "d620b1f587c1fb2370300ce985d9409ebd056f0185806e59e218bd9e65e9e860",
+      "reason": "noop=0 oracle=0"
+    },
+    {
+      "language": "Python",
+      "slug": "pyg-1.6.3-roadmap",
+      "candidateRank": 5,
+      "status": "pass",
+      "decisionReceiptSha256": "d41582234c0c67fdd4763dd08a0a7447a6ace44191060a077fd286d4f13de337",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "Python",
+      "slug": "plr-1.7.0-roadmap",
+      "candidateRank": 6,
+      "status": "pass",
+      "decisionReceiptSha256": "33fda050d577e1194224cad957c8e47952d5bc6331c36f87271c2f35d6d58d61",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "Python",
+      "slug": "plr-1.22.0-roadmap",
+      "candidateRank": 7,
+      "status": "pass",
+      "decisionReceiptSha256": "dea2f8c25ce6183c4666420a06b3ee8044c48294548cf86e0fd3bd28edd94a67",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "Python",
+      "slug": "opt-2.0.0-roadmap",
+      "candidateRank": 8,
+      "status": "pass",
+      "decisionReceiptSha256": "18c429d28aa11f159ca6684a38e6727f8e602b26146829663bedd9c690ca8160",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "Rust",
+      "slug": "slt-1.14.0-roadmap",
+      "candidateRank": 1,
+      "status": "invalid",
+      "decisionReceiptSha256": "c87ea89c41d91e076fb9600e2d688796d78b6920466418d053871afea3edabda",
+      "reason": "noop=0 oracle=0"
+    },
+    {
+      "language": "Rust",
+      "slug": "rat-0.22.0-roadmap",
+      "candidateRank": 2,
+      "status": "invalid",
+      "decisionReceiptSha256": "00c55ba0257158abc6d98c7f09e0a7010fbfa6183e017195d80f508f10fb6147",
+      "reason": "noop=0 oracle=0"
+    },
+    {
+      "language": "Rust",
+      "slug": "rat-0.27.0-roadmap",
+      "candidateRank": 3,
+      "status": "pass",
+      "decisionReceiptSha256": "4f3f93ecdd976ebe1db15308537c958be207159fcdede015480b241c2e8668d5",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "Rust",
+      "slug": "dsl-2.3.0-roadmap",
+      "candidateRank": 4,
+      "status": "invalid",
+      "decisionReceiptSha256": "6920bd8e8fe9872739173d2b5161ef65df0a50a2f998689b8004d42695056116",
+      "reason": "noop=0 oracle=0"
+    },
+    {
+      "language": "Rust",
+      "slug": "slt-1.9.0-roadmap",
+      "candidateRank": 5,
+      "status": "pass",
+      "decisionReceiptSha256": "c05a51cea2c0a7818bf5b796ad0bc5382e7063e3bace1e2a08751ec352260ff9",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "Rust",
+      "slug": "ruf-0.3.0-roadmap",
+      "candidateRank": 6,
+      "status": "pass",
+      "decisionReceiptSha256": "6143661b9f985cfe60d315e00c87123acf17dd74303076a8e258e95d44d5adc5",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "Rust",
+      "slug": "ruf-0.12.0-roadmap",
+      "candidateRank": 7,
+      "status": "invalid",
+      "decisionReceiptSha256": "083dd43992b1cdcef61fe0095532c448c9723a7044e3699f3c0ed1ec7060a29c",
+      "reason": "noop=0 oracle=0"
+    },
+    {
+      "language": "Rust",
+      "slug": "rat-0.28.0-roadmap",
+      "candidateRank": 8,
+      "status": "invalid",
+      "decisionReceiptSha256": "441c6aa8a05f208db3db110b81b08ebec72b163673c31b1038455092643ed9df",
+      "reason": "noop=0 oracle=0"
+    },
+    {
+      "language": "Rust",
+      "slug": "dsl-2.2.0-roadmap",
+      "candidateRank": 9,
+      "status": "invalid",
+      "decisionReceiptSha256": "18b8b7de7b9861116415be91d3806c169bc9c87f2a705ece40fa643a1b6bec82",
+      "reason": "noop=0 oracle=0"
+    },
+    {
+      "language": "Rust",
+      "slug": "rat-0.25.0-roadmap",
+      "candidateRank": 10,
+      "status": "invalid",
+      "decisionReceiptSha256": "3095a34c033b468bc4a74e3a87ec3da2d005996ce52a88fde142a963b9d4dcf8",
+      "reason": "noop=0 oracle=0"
+    },
+    {
+      "language": "Rust",
+      "slug": "dsl-2.1.0-roadmap",
+      "candidateRank": 11,
+      "status": "invalid",
+      "decisionReceiptSha256": "02b8c2005c05ffce454e6030ab7a3c26786d895693674857a1b1793720dff5f8",
+      "reason": "noop=0 oracle=0"
+    },
+    {
+      "language": "Rust",
+      "slug": "ruf-0.2.0-roadmap",
+      "candidateRank": 12,
+      "status": "pass",
+      "decisionReceiptSha256": "bd50f5301eaa29dba1ae4148eaca8b0fbf6d9733619242b45e553aadb4c910cb",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "Rust",
+      "slug": "slt-1.0.0-roadmap",
+      "candidateRank": 13,
+      "status": "pass",
+      "decisionReceiptSha256": "100b351e6e9b884dca925232eaa2f1a0b30920c1cc4e32a2d21f5317af4e4c40",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "Rust",
+      "slug": "rat-0.24.0-roadmap",
+      "candidateRank": 14,
+      "status": "invalid",
+      "decisionReceiptSha256": "96857ef3125e7a1591ea421ae909d41dc9309dc1dd9a831b73b8bd938a73566e",
+      "reason": "noop=0 oracle=0"
+    },
+    {
+      "language": "TypeScript",
+      "slug": "vbt-1.3.0-roadmap",
+      "candidateRank": 1,
+      "status": "pass",
+      "decisionReceiptSha256": "190694258b7c8a0aa98ac89625d631c9c77bf9cf86d423ea6ab9ccbaff79e379",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "TypeScript",
+      "slug": "mko-5.0.0-roadmap",
+      "candidateRank": 2,
+      "status": "pass",
+      "decisionReceiptSha256": "5d0712f8bf086b028733c24be16e500eec580b74398ebd28a7a0d758249bb2e0",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "TypeScript",
+      "slug": "prm-6.16.0-roadmap",
+      "candidateRank": 3,
+      "status": "invalid",
+      "decisionReceiptSha256": "daa55912d4c8a88be64f633a9ff7671be9b2e637b3d8746c95ff6ee5bddd5322",
+      "reason": "noop=0 oracle=0.8629"
+    },
+    {
+      "language": "TypeScript",
+      "slug": "mko-6.5.0-roadmap",
+      "candidateRank": 4,
+      "status": "pass",
+      "decisionReceiptSha256": "df3738663546df7a0073308dfbb2d95b582fcb2d65874211ac4b190c62e8ab57",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "TypeScript",
+      "slug": "vbt-1.1.0-roadmap",
+      "candidateRank": 5,
+      "status": "pass",
+      "decisionReceiptSha256": "3a3cbc6aa3f89f8326aeef4749e0775e07a65902e81ca6d02186d6faa2096e19",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "TypeScript",
+      "slug": "mko-4.1.0-roadmap",
+      "candidateRank": 6,
+      "status": "pass",
+      "decisionReceiptSha256": "398e67fb8a70a34b0a961755742da9f87f2270689d652631d0e386b866dde055",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "TypeScript",
+      "slug": "mko-6.4.0-roadmap",
+      "candidateRank": 7,
+      "status": "pass",
+      "decisionReceiptSha256": "349277280786114595a286be64e399c63812f0f4d8465d740b31479b3d58ad83",
+      "reason": "noop=0 oracle=1"
+    },
+    {
+      "language": "C++",
+      "slug": "tpl-3.2.0-roadmap",
+      "candidateRank": 7,
+      "status": "pass",
+      "decisionReceiptSha256": "9d1384e7e0645816f4a9f334b4e0768f4a744709fb98d2b3343f15930d7b0cf5",
+      "reason": "noop=0 oracle=1"
+    }
+  ],
+  "conditionOrder": [
+    "solo-sol",
+    "sol-sol-sol",
+    "sol-terra-sol",
+    "plan-impl-review",
+    "plan-impl-review-blind",
+    "sol-work-sol-review",
+    "sol-work-fable-review",
+    "solo-fable",
+    "fable-fable-fable",
+    "fable-plan-impl-review"
+  ],
+  "tasks": [
+    {
+      "ordinal": 0,
+      "language": "C++",
+      "slug": "glz-6.5.1-roadmap",
+      "project": "glz",
+      "candidateRank": 1,
+      "validationReceiptSha256": "2d2b0cfe1e4a4406a67d4c2f890cb503b6095546101b9686a1bf38b1bcfa20c0",
+      "imagePinnedRef": "znpt/roadmapbench-glz-6.5.1-roadmap@sha256:3770d0e5e97a85467c9604ba5dcf7757f0cbe04085ca8629a0f1d70d7992e19a"
+    },
+    {
+      "ordinal": 1,
+      "language": "C++",
+      "slug": "tpl-5.1.0-roadmap",
+      "project": "tpl",
+      "candidateRank": 2,
+      "validationReceiptSha256": "647c872b1ef06a5bc218474729b55467e8a79ff3e410754ef874c6dbb0784cef",
+      "imagePinnedRef": "znpt/roadmapbench-tpl-5.1.0-roadmap@sha256:049ef3d98a806cddc26077c69e71f23dc6cb6c1fee081141c241b5a9ab1562d6"
+    },
+    {
+      "ordinal": 2,
+      "language": "C++",
+      "slug": "glz-6.1.0-roadmap",
+      "project": "glz",
+      "candidateRank": 3,
+      "validationReceiptSha256": "7507ef565e0295181b3b0e73d138007aee8bdad34b7a92c91968267f3c4a9ce2",
+      "imagePinnedRef": "znpt/roadmapbench-glz-6.1.0-roadmap@sha256:795f92e3d7c807f0609a02b60fe7e3ed15803348f50abb7ff18a50cb966a73c7"
+    },
+    {
+      "ordinal": 3,
+      "language": "C++",
+      "slug": "glz-7.0.1-roadmap",
+      "project": "glz",
+      "candidateRank": 4,
+      "validationReceiptSha256": "9e08b8b9255bb49a4364f08f46a7804936d86d5a84057294e53bf08e2c5b4e3a",
+      "imagePinnedRef": "znpt/roadmapbench-glz-7.0.1-roadmap@sha256:eba33086ded869834edca47c3874a53ef0ab2f5bf5a0a141d1f538645f81b601"
+    },
+    {
+      "ordinal": 4,
+      "language": "C++",
+      "slug": "glz-6.5.0-roadmap",
+      "project": "glz",
+      "candidateRank": 5,
+      "validationReceiptSha256": "e4362b5beaea3265e4e21c28bb93d0679b92714756adb6f3dcf8684065b11985",
+      "imagePinnedRef": "znpt/roadmapbench-glz-6.5.0-roadmap@sha256:c4218321d72543dcb0e8e713d0c607cd5e6d42fb5ed4bc4cc1b38be5dc1671f7"
+    },
+    {
+      "ordinal": 5,
+      "language": "C++",
+      "slug": "glz-6.0.0-roadmap",
+      "project": "glz",
+      "candidateRank": 6,
+      "validationReceiptSha256": "f963fee618f357ce653b76f923bad5beedd869d0458680806948034e5615d1ef",
+      "imagePinnedRef": "znpt/roadmapbench-glz-6.0.0-roadmap@sha256:5b886c688251150feaac7809028ea7d143986d84b552128e0d32322a8c99182d"
+    },
+    {
+      "ordinal": 6,
+      "language": "C++",
+      "slug": "tpl-3.2.0-roadmap",
+      "project": "tpl",
+      "candidateRank": 7,
+      "validationReceiptSha256": "9d1384e7e0645816f4a9f334b4e0768f4a744709fb98d2b3343f15930d7b0cf5",
+      "imagePinnedRef": "znpt/roadmapbench-tpl-3.2.0-roadmap@sha256:62768daacc7b7ebff77da8700d1b0b2156c0fef649567735bbdd279deee48072"
+    },
+    {
+      "ordinal": 7,
+      "language": "Go",
+      "slug": "ktx-0.10.0-roadmap",
+      "project": "ktx",
+      "candidateRank": 1,
+      "validationReceiptSha256": "2c8bd280f62610d8bef3efcf828dcf1d2efab538670317463d874f2232edaf04",
+      "imagePinnedRef": "znpt/roadmapbench-ktx-0.10.0-roadmap@sha256:575b593008c776ae862f040e7944a2f3d77d65d9ff48029460c5f711d218fbc0"
+    },
+    {
+      "ordinal": 8,
+      "language": "Go",
+      "slug": "fyn-2.2.0-roadmap",
+      "project": "fyn",
+      "candidateRank": 2,
+      "validationReceiptSha256": "7f35e500012da872eb7f2b59469b6ad4b8584c67ecd77fa01fef1303fa2e157a",
+      "imagePinnedRef": "znpt/roadmapbench-fyn-2.2.0-roadmap@sha256:b0da1cb31d367df38d05b81f98e68a94b0f7114efd3c82537633d1d92325efe1"
+    },
+    {
+      "ordinal": 9,
+      "language": "Go",
+      "slug": "fyn-2.5.0-roadmap",
+      "project": "fyn",
+      "candidateRank": 3,
+      "validationReceiptSha256": "caaf5d16455e586373442753f931caa3a3e27ada25fb6f58514953af75db3ee6",
+      "imagePinnedRef": "znpt/roadmapbench-fyn-2.5.0-roadmap@sha256:939c99ca13d9bd9118f4362d57570e7360cc3638fe6bea59a8a7e6c59c0df393"
+    },
+    {
+      "ordinal": 10,
+      "language": "Go",
+      "slug": "ktx-0.12.0-roadmap",
+      "project": "ktx",
+      "candidateRank": 4,
+      "validationReceiptSha256": "34d286e1891438232a5e2f094f3e488930dcd65ccbe74207b6aeb7b5cff67ce5",
+      "imagePinnedRef": "znpt/roadmapbench-ktx-0.12.0-roadmap@sha256:79bd1095cdac991243b954712b3ed5cb1a00067e8c315a12f25b117204d11f64"
+    },
+    {
+      "ordinal": 11,
+      "language": "Go",
+      "slug": "fbr-3.0.0-roadmap",
+      "project": "fbr",
+      "candidateRank": 6,
+      "validationReceiptSha256": "ee9f10b18a3aa0dd8329d30da72a8a038962cf9e1cad58b837cb06d7596e11a3",
+      "imagePinnedRef": "znpt/roadmapbench-fbr-3.0.0-roadmap@sha256:1d3b3eab7774ec3406ca499a8cd851f426dbf173fceb05693e3d9590896619d5"
+    },
+    {
+      "ordinal": 12,
+      "language": "Go",
+      "slug": "fbr-2.43.0-roadmap",
+      "project": "fbr",
+      "candidateRank": 8,
+      "validationReceiptSha256": "02da89ecc41e16d9eaad687ac82d59a3d653b255b28353ca4c249d35331c57bc",
+      "imagePinnedRef": "znpt/roadmapbench-fbr-2.43.0-roadmap@sha256:ec14ff1dfcf49e75a9b4c611b3da4b71fc777cd533592512d447b4352b5082c8"
+    },
+    {
+      "ordinal": 13,
+      "language": "Python",
+      "slug": "plr-1.10.0-roadmap",
+      "project": "plr",
+      "candidateRank": 1,
+      "validationReceiptSha256": "a29e67b177b612f828cda019f8143dd405fdab6cc3b2d1d0a4e7fc138ff886a7",
+      "imagePinnedRef": "znpt/roadmapbench-plr-1.10.0-roadmap@sha256:8560b4a82f9d7ef76d67b53c3b63d2093eb1c8bccac02ec6411faa0d1347fbd9"
+    },
+    {
+      "ordinal": 14,
+      "language": "Python",
+      "slug": "spc-3.3.0-roadmap",
+      "project": "spc",
+      "candidateRank": 3,
+      "validationReceiptSha256": "5efbbfaa66ab19f4d25e72cf46ae808495974b2769da045bd80cbfe9da01c546",
+      "imagePinnedRef": "znpt/roadmapbench-spc-3.3.0-roadmap@sha256:a365dc7e70be89fca98ea07cb6ab4349a544abfb645abe1ce64c0db3567e344f"
+    },
+    {
+      "ordinal": 15,
+      "language": "Python",
+      "slug": "pyg-1.6.3-roadmap",
+      "project": "pyg",
+      "candidateRank": 5,
+      "validationReceiptSha256": "d41582234c0c67fdd4763dd08a0a7447a6ace44191060a077fd286d4f13de337",
+      "imagePinnedRef": "znpt/roadmapbench-pyg-1.6.3-roadmap@sha256:952404c452439d6ff7801d85c3a071f4933f1d77b8eae5b184a2d61e51c20d38"
+    },
+    {
+      "ordinal": 16,
+      "language": "Python",
+      "slug": "plr-1.7.0-roadmap",
+      "project": "plr",
+      "candidateRank": 6,
+      "validationReceiptSha256": "33fda050d577e1194224cad957c8e47952d5bc6331c36f87271c2f35d6d58d61",
+      "imagePinnedRef": "znpt/roadmapbench-plr-1.7.0-roadmap@sha256:5b7a0266c6dd36b0e4017fc25d78b10e2ee28f1d7041243984c51e3da5caf515"
+    },
+    {
+      "ordinal": 17,
+      "language": "Python",
+      "slug": "plr-1.22.0-roadmap",
+      "project": "plr",
+      "candidateRank": 7,
+      "validationReceiptSha256": "dea2f8c25ce6183c4666420a06b3ee8044c48294548cf86e0fd3bd28edd94a67",
+      "imagePinnedRef": "znpt/roadmapbench-plr-1.22.0-roadmap@sha256:83e36167ee563f18fc0fc236ef7f8971b2aa59f46ac31ed383a1a1963d7358ae"
+    },
+    {
+      "ordinal": 18,
+      "language": "Python",
+      "slug": "opt-2.0.0-roadmap",
+      "project": "opt",
+      "candidateRank": 8,
+      "validationReceiptSha256": "18c429d28aa11f159ca6684a38e6727f8e602b26146829663bedd9c690ca8160",
+      "imagePinnedRef": "znpt/roadmapbench-opt-2.0.0-roadmap@sha256:6cbe24c3b766a47dc99d4465d0fc7df4f37b9493561983115d34a1eb1c15bc28"
+    },
+    {
+      "ordinal": 19,
+      "language": "Rust",
+      "slug": "rat-0.27.0-roadmap",
+      "project": "rat",
+      "candidateRank": 3,
+      "validationReceiptSha256": "4f3f93ecdd976ebe1db15308537c958be207159fcdede015480b241c2e8668d5",
+      "imagePinnedRef": "znpt/roadmapbench-rat-0.27.0-roadmap@sha256:f432c849452b525b19b68662537e9ee625e0850415d11f96478c4eecbc7072d8"
+    },
+    {
+      "ordinal": 20,
+      "language": "Rust",
+      "slug": "slt-1.9.0-roadmap",
+      "project": "slt",
+      "candidateRank": 5,
+      "validationReceiptSha256": "c05a51cea2c0a7818bf5b796ad0bc5382e7063e3bace1e2a08751ec352260ff9",
+      "imagePinnedRef": "znpt/roadmapbench-slt-1.9.0-roadmap@sha256:3aa44fd5daa95d5328dc1546fd7c90345ba6a8470199e86342c9335687966ea3"
+    },
+    {
+      "ordinal": 21,
+      "language": "Rust",
+      "slug": "ruf-0.3.0-roadmap",
+      "project": "ruf",
+      "candidateRank": 6,
+      "validationReceiptSha256": "6143661b9f985cfe60d315e00c87123acf17dd74303076a8e258e95d44d5adc5",
+      "imagePinnedRef": "znpt/roadmapbench-ruf-0.3.0-roadmap@sha256:f05d0e482dfe5e18dfed9a78c911f49ba422dad6de181a72fa77a00185efbd93"
+    },
+    {
+      "ordinal": 22,
+      "language": "Rust",
+      "slug": "ruf-0.2.0-roadmap",
+      "project": "ruf",
+      "candidateRank": 12,
+      "validationReceiptSha256": "bd50f5301eaa29dba1ae4148eaca8b0fbf6d9733619242b45e553aadb4c910cb",
+      "imagePinnedRef": "znpt/roadmapbench-ruf-0.2.0-roadmap@sha256:8cee40960fafadd91b5051abd1a936324f9eef425164bade63afe0e2bcc83b81"
+    },
+    {
+      "ordinal": 23,
+      "language": "Rust",
+      "slug": "slt-1.0.0-roadmap",
+      "project": "slt",
+      "candidateRank": 13,
+      "validationReceiptSha256": "100b351e6e9b884dca925232eaa2f1a0b30920c1cc4e32a2d21f5317af4e4c40",
+      "imagePinnedRef": "znpt/roadmapbench-slt-1.0.0-roadmap@sha256:5b44542573339ece630c4e9d8cd9d07aa9dc88890ee1598cb6a4b67d770ac498"
+    },
+    {
+      "ordinal": 24,
+      "language": "TypeScript",
+      "slug": "vbt-1.3.0-roadmap",
+      "project": "vbt",
+      "candidateRank": 1,
+      "validationReceiptSha256": "190694258b7c8a0aa98ac89625d631c9c77bf9cf86d423ea6ab9ccbaff79e379",
+      "imagePinnedRef": "znpt/roadmapbench-vbt-1.3.0-roadmap@sha256:c7f65a0296b9c3d7c388dd044014994cecfb87ac4c92be14fe3b5196f7b5ef53"
+    },
+    {
+      "ordinal": 25,
+      "language": "TypeScript",
+      "slug": "mko-5.0.0-roadmap",
+      "project": "mko",
+      "candidateRank": 2,
+      "validationReceiptSha256": "5d0712f8bf086b028733c24be16e500eec580b74398ebd28a7a0d758249bb2e0",
+      "imagePinnedRef": "znpt/roadmapbench-mko-5.0.0-roadmap@sha256:3bff7d4adca3ae89898be0b6353524dd382006795757bea77c754b5ea32cd6b1"
+    },
+    {
+      "ordinal": 26,
+      "language": "TypeScript",
+      "slug": "mko-6.5.0-roadmap",
+      "project": "mko",
+      "candidateRank": 4,
+      "validationReceiptSha256": "df3738663546df7a0073308dfbb2d95b582fcb2d65874211ac4b190c62e8ab57",
+      "imagePinnedRef": "znpt/roadmapbench-mko-6.5.0-roadmap@sha256:0a76186b4ec3d6a20589c7f8c92e9877b22d5ad6286d23174fca8a49d5a9fd82"
+    },
+    {
+      "ordinal": 27,
+      "language": "TypeScript",
+      "slug": "vbt-1.1.0-roadmap",
+      "project": "vbt",
+      "candidateRank": 5,
+      "validationReceiptSha256": "3a3cbc6aa3f89f8326aeef4749e0775e07a65902e81ca6d02186d6faa2096e19",
+      "imagePinnedRef": "znpt/roadmapbench-vbt-1.1.0-roadmap@sha256:7c1527d72e39c14e99a9b37d846a0be5dd4724172c69208aaf4f5c045920a62d"
+    },
+    {
+      "ordinal": 28,
+      "language": "TypeScript",
+      "slug": "mko-4.1.0-roadmap",
+      "project": "mko",
+      "candidateRank": 6,
+      "validationReceiptSha256": "398e67fb8a70a34b0a961755742da9f87f2270689d652631d0e386b866dde055",
+      "imagePinnedRef": "znpt/roadmapbench-mko-4.1.0-roadmap@sha256:89416b06b424555f34b8d4bbc6f894ff699d4b903a0e5e5887258fdd9800639a"
+    },
+    {
+      "ordinal": 29,
+      "language": "TypeScript",
+      "slug": "mko-6.4.0-roadmap",
+      "project": "mko",
+      "candidateRank": 7,
+      "validationReceiptSha256": "349277280786114595a286be64e399c63812f0f4d8465d740b31479b3d58ad83",
+      "imagePinnedRef": "znpt/roadmapbench-mko-6.4.0-roadmap@sha256:d1bf5e151420ba33b960a5d00186136b1dbc6e13ec48980ef15b61590d227ae9"
+    }
+  ]
+}

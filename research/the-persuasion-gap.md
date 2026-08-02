@@ -32,9 +32,10 @@ the pilot does not measure that correlation directly.
 That pilot comparison also changed the execution graph, not only the
 implementer, so it cannot by itself attribute the gap to Luna. Because four
 tasks cannot support a strong general claim, we use them only as a
-hypothesis-generating pilot. A preregistered confirmatory study will use 30 new tasks
-drawn deterministically from the 115-task RoadmapBench train split, targeting balance
-across five programming languages. It adds Sol→Sol→Sol, Sol→Terra→Sol, and
+hypothesis-generating pilot. A preregistered confirmatory study will use 30 new
+tasks drawn deterministically from the 115-task RoadmapBench train split: seven
+C++, six Go, six Python, five Rust, and six TypeScript. It adds Sol→Sol→Sol,
+Sol→Terra→Sol, and
 Fable→Fable→Fable controls to test middle-stage model substitution,
 plus combined Sol-work→Sol/Fable-review controls. Every reviewed pipeline will be
 scored both before and after teacher review, and a blinded Sol-review arm will hide
@@ -271,8 +272,8 @@ The interpretation is deliberately asymmetric:
 
 ### Confirmatory study
 
-Before agent execution, the confirmatory sample will be frozen as 30 tasks not
-used in the pilot, targeting six each in C++, Go, Python, Rust, and TypeScript.
+Before agent execution, the confirmatory sample was frozen as 30 tasks not used
+in the pilot: seven C++, six Go, six Python, five Rust, and six TypeScript tasks.
 Within language, tasks are selected by a deterministic hash of task ID after excluding
 the four pilot tasks. A task enters only if the benchmark's oracle patch scores
 1.0 and an untouched repository scores below 1.0; failures are replaced in a
@@ -288,7 +289,9 @@ study aborts. Conditional on that floor and enough passing overflow tasks, any
 shortfall from six is filled cyclically from the other languages using their
 next passing tasks in the already-frozen rankings. This is designed to preserve
 30 tasks without selecting on agent performance, though language-stratified
-estimates may become unbalanced.
+estimates may become unbalanced. Five Rust graders ultimately passed, so the
+single remaining slot went to the seventh-ranked C++ candidate, which also
+passed its fairness check.
 
 Every task will run the same ten conditions:
 
@@ -351,11 +354,11 @@ sensitivity analyses. The complete frozen protocol appears in
 
 ### Reproducibility
 
-The study will be executable from the retained protocol and artifacts. The
-frozen sampling frame and reserve order live in
+The study is executable from the retained protocol and artifacts. The frozen
+sampling frame and reserve order live in
 `benchmarks/orchbench/persuasion-gap-sample.json`; a
 separate verifier recomputes every rank from the pinned 115-task dataset tree.
-Before model execution, a second machine-readable artifact freezes the exact 30
+Before model execution, a second machine-readable artifact froze the exact 30
 passing tasks, project IDs, order, validation-receipt hashes, and immutable
 Docker image digests. The artifact also retains the hashed pass/invalid decision
 ledger that determined every skip and overflow. Each receipt binds the grader decision to the dataset,
