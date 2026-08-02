@@ -1,0 +1,11 @@
+Review the upgrade commit in {props.clonePath} (repo {props.repo}, branch {props.branch}, top commit).
+
+Check:
+
+- {`\`git grep -n '${props.oldName}'\``} yourself — must be empty; a single hit is a critical issue.
+- `git show --stat HEAD` and read the diff: name/version changes plus any breaking-change migrations only, no unrelated logic changes, no corrupted files (watch for truncated lines and broken JSON).
+- Any breaking-change migration matches what the Smithers changelogs actually require.
+- The dependency version points at a real published {props.newName} version ({`\`npm view ${props.newName} version\`).`}
+- Lockfile changes (if any) match the manifest change and nothing else.
+
+Set approved=true only if you would merge it. Set repo="{props.repo}".

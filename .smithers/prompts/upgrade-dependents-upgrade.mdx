@@ -1,0 +1,18 @@
+Upgrade the GitHub repo {props.repo} from the old npm package name "{props.oldName}" to "{props.newName}" at the latest published version. Work happens on a branch that will later be pushed to a fork in the {props.forkOrg} org.
+
+Steps (do them exactly):
+
+1. Clone the UPSTREAM repo: {`\`gh repo clone ${props.repo} /tmp/upgrade-smthrs/${props.laneId} -- --depth 50\``} and cd there.
+2. Create a branch: {`\`git checkout -b ${props.branch}\`.`}
+3. Record the currently pinned version of "{props.oldName}" (from package.json / lockfile) in oldVersion; latest is {`\`npm view ${props.newName} version\``} — record in newVersion.
+4. Find every reference with {`\`git grep -l '${props.oldName}'\``} (git grep, NOT rg — rg silently skips files containing NUL bytes). Rename with {`\`git grep -lz '${props.oldName}' | xargs -0 perl -pi -e 's/${props.oldName}/${props.newName}/g'\`.`}
+   The whole string "{props.oldName}" becomes "{props.newName}", including the scoped form {`\`@${props.oldName}/x\` -> \`@${props.newName}/x\`.`} The CLI bin name "smithers" and prose "Smithers" stay unchanged.
+5. CHANGELOG SWEEP: read every Smithers changelog between oldVersion (exclusive) and newVersion (inclusive) — local files {`\`${props.changelogDir}/<version>.mdx\``}, or `https://raw.githubusercontent.com/smithersai/smithers/main/docs/changelogs/<version>.mdx` if not local.
+   - BREAKING changes (renamed/removed APIs, changed defaults, config moves): apply the required migration to this repo's code IN THIS BRANCH so the upgrade PR leaves the repo working. Summarize what you applied in breakingApplied.
+   - Non-breaking improvements (new features the repo could adopt, new idioms replacing workarounds it uses): DO NOT implement here. Record each as a one-line concrete idea in improvementIdeas (empty array if none genuinely apply to this repo's code).
+6. In every package.json that depends on {props.newName} (or {`\`@${props.newName}/*\``}), set the range to `^<newVersion>`. Regenerate lockfiles ONLY with the repo's own package manager if a lockfile exists (pnpm-lock.yaml -> `pnpm install --no-frozen-lockfile`; bun.lock -> `bun install --lockfile-only`; package-lock.json -> `npm install --package-lock-only`). If install fails for unrelated reasons, skip lockfile regeneration and say so in notes.
+7. MANDATORY VERIFICATION GATE: run {`\`git grep -n '${props.oldName}'\``} — it MUST output nothing. Put the literal (empty) output in grepOutput and set grepClean accordingly. If any hit remains, fix it and re-run; never report grepClean=true without the empty grep.
+8. Commit: {`\`git commit -am "upgrade ${props.oldName} to ${props.newName}"\`.`} Do NOT push yet.
+
+If {`\`git grep -l '${props.oldName}'\``} finds nothing at step 4, set status="no-hits" and stop (no commit).
+Set repo="{props.repo}", clonePath, branch, filesChanged from `git diff --stat HEAD~1`.
