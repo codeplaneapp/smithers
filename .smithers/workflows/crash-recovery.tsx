@@ -46,12 +46,14 @@ const COMMON = [
   "If a `smithers` binary is missing in a directory, use `bunx smthrs` there instead.",
 ].join("\n");
 
-const latest = <T,>(rows: readonly T[]): T | undefined => (rows.length > 0 ? rows[rows.length - 1] : undefined);
+// rows can be undefined when the gateway renders this workflow for UI discovery
+const latest = <T,>(rows: readonly T[] | undefined): T | undefined =>
+  rows && rows.length > 0 ? rows[rows.length - 1] : undefined;
 
 export default smithers((ctx) => {
   const tsyncPlan = latest(ctx.outputs.tsyncPlan);
   const tsyncApproval = latest(ctx.outputs.tsyncApproval);
-  const plueReport = latest(ctx.outputs.report.filter((r) => r.lane === "plue-assess"));
+  const plueReport = latest((ctx.outputs.report ?? []).filter((r) => r.lane === "plue-assess"));
   const plueApproval = latest(ctx.outputs.plueApproval);
 
   return (
