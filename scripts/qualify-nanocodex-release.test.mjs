@@ -9,7 +9,6 @@ import { describe, test } from "node:test";
 import {
   EXPECTED_CAPABILITIES,
   PINNED_SOURCE_BUILD,
-  PRODUCER_RELEASE_PATH,
   compareVersions,
   downloadArchive,
   inspectReleaseArchive,
@@ -27,9 +26,8 @@ import {
 const ROOT = "smithers-nanocodex-v0.0.1-x86_64-unknown-linux-gnu";
 
 describe("Nanocodex release qualification", () => {
-  test("keeps the producer record separate from the immutable source-build pin", async () => {
+  test("loads the immutable source-build pin without a published-release checksum claim", async () => {
     const manifest = await loadReleaseManifest();
-    const producerRelease = JSON.parse(await readFile(PRODUCER_RELEASE_PATH, "utf8"));
     assert.deepEqual(manifest, PINNED_SOURCE_BUILD);
     assert.equal(manifest.source.commit, "56d8b4fd54bf14e9f2874e5a010b8e301f8f695b");
     assert.equal(manifest.source.tree, "b8a092569e579c21e2ae288a470a6881022b61f2");
@@ -38,10 +36,6 @@ describe("Nanocodex release qualification", () => {
     assert.equal(manifest.artifact.maximumSizeBytes, 8 * 1024 * 1024);
     assert.equal(manifest.artifact.minimumGlibcVersion, "2.35");
     assert.equal(manifest.qualification.providerFreeAdapterPreflight, true);
-    assert.equal("source" in producerRelease, false);
-    assert.equal(producerRelease.artifact.sha256, "0e14425b3e0af5c3b1663b4db2a15302cbaa7c03e917babd841ae7fde2a1ab73");
-    assert.equal(producerRelease.artifact.sizeBytes, 6_286_271);
-    assert.equal(producerRelease.qualification.smithersAdapter, false);
   });
 
   test("deep-freezes every nested release and capability value", () => {

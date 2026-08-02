@@ -19714,10 +19714,9 @@ sudo apt-get install -y bubblewrap
 
 ## Build the pinned release from source
 
-The only artifact to which Smithers assigns source-build provenance is the one
-built from the pinned source commit by the isolated CI lane. The historical
-producer record separately retains the published `v0.0.1` artifact digest; that
-published binary is **not** executed or qualified by Smithers CI.
+Smithers assigns source-build provenance only to an artifact matching the
+checked-in pin produced from the exact source commit below. Smithers does not
+record, execute, or qualify the published `v0.0.1` binary.
 
 The qualified consumer pin is:
 
@@ -19755,7 +19754,7 @@ RUSTUP_TOOLCHAIN=1.97.0 \
 RUSTFLAGS="--remap-path-prefix=$PWD=/usr/src/smithers-nanocodex" \
   cargo build --locked --release --target "$target"
 
-# Package exactly as CI does, so the qualification command can inspect it.
+# Package deterministically so the qualification command can inspect it.
 install -d -m 0755 \
   "$artifact_dir/$package" \
   "$artifact_dir/$package/docs" \
@@ -19785,7 +19784,7 @@ sudo install -m 0755 "$artifact_dir/$package/smithers-nanocodex" \
 
 Smithers validates every tar header and rejects path traversal, links, devices,
 extended headers, duplicate paths, and anything outside the exact package root
-before using the executable. A locally built archive that differs from the CI
+before using the executable. A locally built archive that differs from the checked-in
 pin can still receive the provider-free behavioral report, but its
 `artifactProvenance` is `unverified-input` and its source fields are `null`.
 
@@ -19928,12 +19927,9 @@ your deployment requires those boundaries.
 
 ## Qualify the release
 
-Smithers preserves two distinct records. The historical producer record at
-`packages/agents/tests/fixtures/nanocodex/release-v0.0.1.json` includes the
-published artifact's `0e1442...a1ab73` digest and 6,286,271-byte size, while
-retaining `qualification.smithersAdapter: false`. The separate
-`source-build-v0.0.1.json` records only Smithers' isolated source build and
-provider-free adapter preflight, including its different digest and size.
+`packages/agents/tests/fixtures/nanocodex/source-build-v0.0.1.json` records the
+pinned source build and provider-free adapter preflight. It makes no checksum
+claim about the separately published release artifact.
 
 From a Smithers checkout on a supported host, this command inspects a local
 archive and runs the public adapter preflight:
@@ -19949,13 +19945,9 @@ SHA-256, and safely inspects its layout. Only the pinned source-build digest and
 size receive `pinned-source-build-sha256` provenance; every other input is
 explicitly reported as `unverified-input`, with no source commit or tree claim.
 
-CI builds the external source in a separate credential-free container with no
-Smithers checkout, verifies the resulting pinned digest, and passes only that
-archive to a clean verification job. The verification job wraps the command in
-a network namespace. A direct local invocation does not itself initiate a
-network request, but the probed executable retains the PID-only adapter
-profile's host networking; add an external network boundary when running an
-untrusted local input.
+A direct local invocation does not itself initiate a network request, but the
+probed executable retains the PID-only adapter profile's host networking. Add
+an external network boundary when running an untrusted local input.
 
 In a temporary scratch workspace, the verifier materializes the archive
 executable and bounded probe launchers. It runs exact-version and
