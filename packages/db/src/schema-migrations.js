@@ -2488,6 +2488,28 @@ export async function runSmithersSchemaInitSqliteAsync(storage, context) {
       await storage.execute(`ALTER TABLE _smithers_runs ADD COLUMN ${definition}`);
     }
   }
+  // External SQLite backends do not run the versioned migration ledger, so the
+  // additive column migrations (e.g. 0036 effort on _smithers_attempts) never
+  // upgrade a pre-existing table — CREATE TABLE IF NOT EXISTS above is a no-op
+  // once the table exists. Apply them explicitly so persisting those columns
+  // does not fail against stores created before the column was introduced.
+  for (const config of LEGACY_COLUMN_MIGRATIONS) {
+    const tableRows = await storage.queryAllRaw(
+      "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ?",
+      [config.table],
+    );
+    if (tableRows.length === 0) continue;
+    const existingColumns = new Set(
+      (await storage.queryAllRaw(`PRAGMA table_info(${quoteIdentifier(config.table)})`))
+        .map((row) => row.name)
+        .filter((name) => typeof name === "string"),
+    );
+    for (const [column, definition] of config.columns) {
+      if (!existingColumns.has(column)) {
+        await storage.execute(`ALTER TABLE ${quoteIdentifier(config.table)} ADD COLUMN ${definition}`);
+      }
+    }
+  }
   // External SQLite backends do not run the versioned migration ledger. Apply
   // the scorer identity repair explicitly so existing stores converge too.
   await storage.execute(DELETE_DUPLICATE_SCORER_ROWS_SQL);

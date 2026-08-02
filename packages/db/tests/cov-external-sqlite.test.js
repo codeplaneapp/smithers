@@ -195,6 +195,44 @@ describe("SqlMessageStorage external-sqlite connection", () => {
     await expect(storage.ensureSchema()).rejects.toThrow(/Failed to initialize SQLite schema/);
     raw.close();
   });
+
+  test("ensureSchema upgrades a pre-0036 _smithers_attempts table with the effort column", async () => {
+    const { raw, descriptor } = makeExternalDb();
+    // Simulate an existing external/Cloudflare store created before the 0036
+    // effort column landed: the attempts table exists WITHOUT effort, so the
+    // CREATE TABLE IF NOT EXISTS in ensureSchema cannot add it.
+    raw.run(`CREATE TABLE _smithers_attempts (
+      run_id TEXT NOT NULL,
+      node_id TEXT NOT NULL,
+      iteration INTEGER NOT NULL,
+      attempt INTEGER NOT NULL,
+      state TEXT NOT NULL,
+      started_at_ms INTEGER NOT NULL,
+      meta_json TEXT
+    )`);
+    const before = raw
+      .query('PRAGMA table_info("_smithers_attempts")')
+      .all()
+      .map((row) => row.name);
+    expect(before).not.toContain("effort");
+
+    const storage = new SqlMessageStorage(descriptor);
+    await storage.ensureSchema();
+
+    const after = raw
+      .query('PRAGMA table_info("_smithers_attempts")')
+      .all()
+      .map((row) => row.name);
+    expect(after).toContain("effort");
+
+    // The upgraded column is writable — persisting effort no longer fails.
+    raw.run(
+      `INSERT INTO _smithers_attempts (run_id, node_id, iteration, attempt, state, started_at_ms, effort)
+        VALUES ('r1', 'setup', 0, 1, 'running', 1, 'high')`,
+    );
+    expect(raw.query("SELECT effort FROM _smithers_attempts WHERE node_id = ?").get("setup").effort).toBe("high");
+    raw.close();
+  });
 });
 
 describe("SmithersDb over an external-sqlite descriptor", () => {
