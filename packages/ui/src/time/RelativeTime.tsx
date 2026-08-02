@@ -10,7 +10,7 @@ import { formatRelativeTime } from "./formatRelativeTime";
  * unmounts) instead of each owning a private timer. The snapshot is a tick
  * counter, so all subscribers re-render in the same pass with the same now.
  */
-const TICK_MS = 30_000;
+const TICK_MS = 1_000;
 const listeners = new Set<() => void>();
 let intervalId: ReturnType<typeof setInterval> | null = null;
 let tick = 0;
@@ -51,16 +51,21 @@ export type RelativeTimeProps = Omit<ComponentProps<"time">, "children" | "dateT
   ts: number;
   /** Hover title override; defaults to the full locale date+time string. */
   title?: string;
+  /** Switch to an absolute locale time after this many milliseconds. */
+  relativeUntilMs?: number;
 };
 
 /**
  * Ticking relative timestamp ("3m ago") with the absolute instant in
  * `dateTime`/`title`. Tabular-nums keeps the label from jittering as it ticks.
  */
-export function RelativeTime({ ts, title, className, ...props }: RelativeTimeProps) {
+export function RelativeTime({ ts, title, relativeUntilMs, className, ...props }: RelativeTimeProps) {
   useInjectUiCss();
   const label = useRelativeTime(ts);
   const date = new Date(ts);
+  const display = relativeUntilMs !== undefined && Date.now() - ts >= relativeUntilMs
+    ? date.toLocaleTimeString(undefined, { timeStyle: "medium" })
+    : label;
   return (
     <time
       data-slot="relative-time"
@@ -69,7 +74,7 @@ export function RelativeTime({ ts, title, className, ...props }: RelativeTimePro
       title={title ?? date.toLocaleString()}
       {...props}
     >
-      {label}
+      {display}
     </time>
   );
 }

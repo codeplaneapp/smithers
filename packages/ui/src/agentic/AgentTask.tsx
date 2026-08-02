@@ -107,18 +107,24 @@ export function AgentTaskTrigger({ className, children, onClick, ...props }: Com
   );
 }
 
-/** Body region of an AgentTask; mounted only while open. */
-export function AgentTaskContent({ className, ...props }: ComponentProps<"div">) {
+export type AgentTaskContentProps = ComponentProps<"div"> & {
+  forceMount?: boolean;
+};
+
+/** Body region of an AgentTask; optionally remains mounted for exit animations. */
+export function AgentTaskContent({ className, forceMount = false, ...props }: AgentTaskContentProps) {
   useInjectUiCss();
   useInjectLaneCss(PLANS_TASKS_QUEUES_CSS_ID, plansTasksQueuesCss);
   const { open, triggerId, contentId } = useAgentTaskContext();
-  if (!open) return null;
+  if (!open && !forceMount) return null;
   return (
     <div
       data-slot="agent-task-content"
       role="region"
       id={contentId}
       aria-labelledby={triggerId}
+      aria-hidden={!open}
+      data-state={open ? "open" : "closed"}
       className={cn("sui-agenttask-content", className)}
       {...props}
     />

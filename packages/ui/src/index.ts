@@ -348,6 +348,7 @@ export {
   AgentTaskTrigger,
   AgentTaskContent,
   AgentTaskGroup,
+  type AgentTaskContentProps,
   type AgentTaskProps,
 } from "./agentic/AgentTask";
 export {
