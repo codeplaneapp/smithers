@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { HERDR_PROTOCOL, HerdrError } from "@smithers-orchestrator/herdr";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -252,6 +252,35 @@ describe("CLI Herdr protocol safety", () => {
     expect(openFake.operations.some((entry) => entry.method === "workspace.create")).toBe(true);
     expect(openFake.operations.some((entry) => entry.method === "tab.create")).toBe(true);
     expect(openFake.operations.some((entry) => entry.method === "agent.start")).toBe(true);
+  });
+
+  test("session stub shell text treats command substitutions and quotes as literal text", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "smithers-herdr-stub-"));
+    const substitutionMarker = join(dir, "substitution-ran");
+    const backtickMarker = join(dir, "backtick-ran");
+    const sessionName = `session ' \$(touch ${substitutionMarker}) \`touch ${backtickMarker}\``;
+    const fake = fakeHerdrClient(HERDR_PROTOCOL);
+    try {
+      await ensureSessionStubWorkspace({
+        workflowId: "workflow",
+        runId: "run-$HOME",
+        sessionName,
+        client: fake.client,
+        logger: () => {},
+      });
+      const command = fake.operations.find((entry) => entry.method === "pane.send_text")?.params?.text;
+      expect(typeof command).toBe("string");
+
+      const result = spawnSync("/bin/sh", ["-c", command], { encoding: "utf8" });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(`\$(touch ${substitutionMarker})`);
+      expect(result.stdout).toContain(`\`touch ${backtickMarker}\``);
+      expect(result.stdout).toContain("run-$HOME");
+      expect(existsSync(substitutionMarker)).toBe(false);
+      expect(existsSync(backtickMarker)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("passive steer and top probes treat mismatch as unavailable without reads", async () => {
