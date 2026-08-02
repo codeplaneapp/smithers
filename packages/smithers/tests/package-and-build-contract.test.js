@@ -260,7 +260,9 @@ describe("PACKAGE_AND_BUILD contracts", () => {
     expect(ci.jobs.coverage["runs-on"]).toBe("ubuntu-latest");
     expect(coverageSetup.run).toContain("sudo apt-get install -y bubblewrap ripgrep");
     expect(coverageSetup.run).toContain("--unshare-pid");
-    expect(ci.jobs["nanocodex-release-qualification"]["runs-on"]).toBe("ubuntu-22.04");
+    expect(ci.jobs["nanocodex-source-build"]).toBeUndefined();
+    expect(ci.jobs["nanocodex-release-qualification"]).toBeUndefined();
+    expect(text(".github/workflows/ci.yml")).not.toContain("N0xMare/smithers-nanocodex");
 
     expectText(".github/workflows/ci.yml", [
       "  typecheck:",

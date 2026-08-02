@@ -16,10 +16,6 @@ export const DEFAULT_MANIFEST_PATH = resolve(
   SCRIPT_DIR,
   "../packages/agents/tests/fixtures/nanocodex/source-build-v0.0.1.json",
 );
-export const PRODUCER_RELEASE_PATH = resolve(
-  SCRIPT_DIR,
-  "../packages/agents/tests/fixtures/nanocodex/release-v0.0.1.json",
-);
 const MAX_UNCOMPRESSED_ARCHIVE_BYTES = 64 * 1024 * 1024;
 const TAR_BLOCK_BYTES = 512;
 const MAX_ARCHIVE_ENTRIES = 10_000;
@@ -124,12 +120,12 @@ export async function loadReleaseManifest(path = DEFAULT_MANIFEST_PATH) {
   return manifest;
 }
 
-/** Bound and digest the CI-built artifact before any archive member is used. */
+/** Bound and digest the pinned-source artifact before any archive member is used. */
 export function verifyArchiveIdentity(archive, artifact = PINNED_SOURCE_BUILD.artifact) {
   if (!Buffer.isBuffer(archive)) throw new TypeError("Nanocodex release archive must be a Buffer.");
   if (archive.byteLength === 0 || archive.byteLength > artifact.maximumSizeBytes) {
     throw new Error(
-      `Nanocodex CI-built archive must contain 1-${artifact.maximumSizeBytes} bytes; received ${archive.byteLength}.`,
+      `Nanocodex pinned-source archive must contain 1-${artifact.maximumSizeBytes} bytes; received ${archive.byteLength}.`,
     );
   }
   return createHash("sha256").update(archive).digest("hex");
@@ -353,19 +349,22 @@ export function parseArgs(argv) {
       throw new Error(`Unknown argument: ${argument}`);
     }
   }
-  return help ? { help: true } : { archivePath };
+  if (help) return { help: true };
+  if (!archivePath) throw new Error("--archive is required; build it from the pinned source commit.");
+  return { archivePath };
 }
 
-/** Download (or read), verify, inspect, and provider-independently preflight the pinned bridge. */
+/** Verify and provider-independently preflight the pinned-source bridge. */
 export async function qualifyNanocodexRelease({ archivePath, fetchImpl = globalThis.fetch } = {}) {
   if (process.platform !== "linux" || process.arch !== "x64") {
     throw new Error("Nanocodex release qualification requires Linux x64.");
   }
   const manifest = await loadReleaseManifest();
   const glibcVersion = assertSupportedGlibc(manifest.artifact.minimumGlibcVersion);
-  const archive = archivePath
-    ? await readPinnedArchive(archivePath, manifest.artifact.maximumSizeBytes)
-    : await downloadArchive(manifest.artifact.downloadUrl, manifest.artifact.sizeBytes, fetchImpl);
+  if (typeof archivePath !== "string" || archivePath.length === 0) {
+    throw new Error("Nanocodex qualification requires an archive built from the pinned source commit.");
+  }
+  const archive = await readPinnedArchive(archivePath, manifest.artifact.maximumSizeBytes);
   const sha256 = verifyArchiveIdentity(archive, manifest.artifact);
   const inspected = inspectReleaseArchive(archive, manifest);
   return await withQualificationScratch(inspected.binary, async ({ binary, scratch }) => {
@@ -441,7 +440,9 @@ async function readPinnedArchive(path, maximumBytes) {
     const metadata = await handle.stat();
     if (!metadata.isFile()) throw new Error("Nanocodex offline archive must be a regular file.");
     if (metadata.size === 0 || metadata.size > maximumBytes) {
-      throw new Error(`Nanocodex CI-built archive must contain 1-${maximumBytes} bytes; received ${metadata.size}.`);
+      throw new Error(
+        `Nanocodex pinned-source archive must contain 1-${maximumBytes} bytes; received ${metadata.size}.`,
+      );
     }
     return await handle.readFile();
   } finally {
