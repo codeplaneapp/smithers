@@ -1,5 +1,5 @@
 import * as ai from 'ai';
-import * as _smithers_orchestrator_errors_SmithersError from '@smthrs/errors/SmithersError';
+import * as _smthrs_errors_SmithersError from '@smthrs/errors/SmithersError';
 import { SmithersError as SmithersError$1 } from '@smthrs/errors/SmithersError';
 import { Effect } from 'effect';
 import { spawn } from 'node:child_process';
@@ -272,7 +272,7 @@ type RunCommandOptions = {
     }) => void;
 };
 type RunCommandResult$1 = RunCommandResult$2;
-type SmithersError = _smithers_orchestrator_errors_SmithersError.SmithersError;
+type SmithersError = _smthrs_errors_SmithersError.SmithersError;
 
 /**
  * @param {string} command

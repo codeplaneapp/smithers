@@ -1,4 +1,4 @@
-import * as _smithers_orchestrator_accounts from '@smthrs/accounts';
+import * as _smthrs_accounts from '@smthrs/accounts';
 import { AccountProvider } from '@smthrs/accounts';
 import { spawnSync } from 'node:child_process';
 
@@ -89,7 +89,7 @@ type UsageReport$5 = {
  * @returns {Promise<UsageReport>}
  */
 declare function getAccountUsage(account: Account$3): Promise<UsageReport$4>;
-type Account$3 = _smithers_orchestrator_accounts.Account;
+type Account$3 = _smthrs_accounts.Account;
 type UsageReport$4 = UsageReport$5;
 
 /**
@@ -106,7 +106,7 @@ declare function getUsageForAccounts(accounts: Account$2[], options?: {
     env?: NodeJS.ProcessEnv;
     nowMs?: number;
 }): Promise<UsageReport$3[]>;
-type Account$2 = _smithers_orchestrator_accounts.Account;
+type Account$2 = _smthrs_accounts.Account;
 type UsageReport$3 = UsageReport$5;
 
 /** @typedef {import("@smthrs/accounts").Account} Account */
@@ -136,7 +136,7 @@ type UsageReport$3 = UsageReport$5;
 declare function buildUsageReport(account: Account$1, probe: UsageProbe$6, options?: {
     nowIso?: string;
 }): UsageReport$2;
-type Account$1 = _smithers_orchestrator_accounts.Account;
+type Account$1 = _smthrs_accounts.Account;
 type UsageReport$2 = UsageReport$5;
 /**
  * The partial result an adapter returns. The dispatcher wraps it with the
@@ -535,7 +535,7 @@ declare function readUsageCache(env?: NodeJS.ProcessEnv): UsageCacheFile;
  */
 declare function writeUsageCache(contents: UsageCacheFile, env?: NodeJS.ProcessEnv): string;
 type UsageReport = UsageReport$5;
-type Account = _smithers_orchestrator_accounts.Account;
+type Account = _smthrs_accounts.Account;
 type UsageCacheAccountIdentity = {
     provider: Account["provider"];
     configDir?: string;

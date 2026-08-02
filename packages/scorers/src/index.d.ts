@@ -1,8 +1,8 @@
-import * as _smithers_orchestrator_agents_AgentLike from '@smthrs/agents/AgentLike';
+import * as _smthrs_agents_AgentLike from '@smthrs/agents/AgentLike';
 import { AgentLike as AgentLike$4 } from '@smthrs/agents/AgentLike';
 import { ZodObject } from 'zod';
 export { smithersScorers } from '@smthrs/db/internal-schema';
-import * as _smithers_orchestrator_db_adapter from '@smthrs/db/adapter';
+import * as _smthrs_db_adapter from '@smthrs/db/adapter';
 import * as effect from 'effect';
 export { scorerDuration, scorersFailed, scorersFinished, scorersStarted } from '@smthrs/observability/metrics';
 
@@ -435,7 +435,7 @@ type Scorer$c = Scorer$e;
  * @returns {Scorer}
  */
 declare function relevancyScorer(judge: AgentLike$3): Scorer$b;
-type AgentLike$3 = _smithers_orchestrator_agents_AgentLike.AgentLike;
+type AgentLike$3 = _smthrs_agents_AgentLike.AgentLike;
 type Scorer$b = Scorer$e;
 
 /** @typedef {import("@smthrs/agents/AgentLike").AgentLike} AgentLike */
@@ -448,7 +448,7 @@ type Scorer$b = Scorer$e;
  * @returns {Scorer}
  */
 declare function toxicityScorer(judge: AgentLike$2): Scorer$a;
-type AgentLike$2 = _smithers_orchestrator_agents_AgentLike.AgentLike;
+type AgentLike$2 = _smthrs_agents_AgentLike.AgentLike;
 type Scorer$a = Scorer$e;
 
 /** @typedef {import("@smthrs/agents/AgentLike").AgentLike} AgentLike */
@@ -461,7 +461,7 @@ type Scorer$a = Scorer$e;
  * @returns {Scorer}
  */
 declare function faithfulnessScorer(judge: AgentLike$1): Scorer$9;
-type AgentLike$1 = _smithers_orchestrator_agents_AgentLike.AgentLike;
+type AgentLike$1 = _smthrs_agents_AgentLike.AgentLike;
 type Scorer$9 = Scorer$e;
 
 /** @typedef {import("./types.js").Scorer} Scorer */
@@ -573,7 +573,7 @@ type Scorer$4 = Scorer$e;
  * @returns {Scorer}
  */
 declare function tierFitScorer(judge: AgentLike): Scorer$3;
-type AgentLike = _smithers_orchestrator_agents_AgentLike.AgentLike;
+type AgentLike = _smthrs_agents_AgentLike.AgentLike;
 type Scorer$3 = Scorer$e;
 
 /**
@@ -985,7 +985,7 @@ type EventBus = {
 type ScoreResult$2 = ScoreResult$3;
 type ScorerContext$1 = ScorerContext$2;
 type ScorersMap$1 = ScorersMap$2;
-type SmithersDb$1 = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb$1 = _smthrs_db_adapter.SmithersDb;
 
 /** @typedef {import("./AggregateOptions.js").AggregateOptions} AggregateOptions */
 /** @typedef {import("./types.js").AggregateScore} AggregateScore */
@@ -1036,7 +1036,7 @@ declare function weightedScore(results: Record<string, ScoreResult$1 | null | un
 declare function delegationRunScore(results: DelegationRunResults$1, opts?: DelegationRunScoreOptions$1): ScoreResult$1;
 type AggregateOptions$1 = AggregateOptions$2;
 type AggregateScore$1 = AggregateScore$2;
-type SmithersDb = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb = _smthrs_db_adapter.SmithersDb;
 type DelegationRunResults$1 = DelegationRunResults$2;
 type DelegationRunScoreOptions$1 = DelegationRunScoreOptions$2;
 type ScoreResult$1 = ScoreResult$3;

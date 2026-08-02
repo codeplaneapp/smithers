@@ -1,15 +1,15 @@
-import * as _smithers_orchestrator_graph_types from '@smthrs/graph/types';
+import * as _smthrs_graph_types from '@smthrs/graph/types';
 import { TaskDescriptor as TaskDescriptor$2, WorkflowGraph } from '@smthrs/graph/types';
 import { SmithersError } from '@smthrs/errors/SmithersError';
 import { SmithersEvent } from '@smthrs/observability/SmithersEvent';
 import { Layer } from 'effect';
-import * as _smithers_orchestrator_scheduler from '@smthrs/scheduler';
+import * as _smthrs_scheduler from '@smthrs/scheduler';
 import { WaitReason as WaitReason$1, EngineDecision as EngineDecision$1 } from '@smthrs/scheduler';
 import { z } from 'zod';
-import * as _smithers_orchestrator_graph_ProofBinding from '@smthrs/graph/ProofBinding';
+import * as _smthrs_graph_ProofBinding from '@smthrs/graph/ProofBinding';
 import { SmithersWorkflowOptions } from '@smthrs/scheduler/SmithersWorkflowOptions';
 import { SchemaRegistryEntry } from '@smthrs/db/SchemaRegistryEntry';
-import * as _smithers_orchestrator_graph from '@smthrs/graph';
+import * as _smthrs_graph from '@smthrs/graph';
 import { ExtractOptions, WorkflowGraph as WorkflowGraph$1 } from '@smthrs/graph';
 
 /**
@@ -290,7 +290,7 @@ type RuntimeAdapter$1 = {
     readonly signals?: RuntimeSignals$1;
 };
 
-type TaskDescriptor$1 = _smithers_orchestrator_graph_types.TaskDescriptor;
+type TaskDescriptor$1 = _smthrs_graph_types.TaskDescriptor;
 type TaskExecutorContext = TaskExecutorContext$1;
 type BrowserRuntimeOptions$1 = {
     clock?: RuntimeClock$1;
@@ -714,7 +714,7 @@ type OutputKey$1 = OutputKey$2;
 type SafeParser = SafeParser$1;
 type SmithersCtxOptions$1 = SmithersCtxOptions$2;
 type RunAuthContext$1 = RunAuthContext$2;
-type ProofBinding$1 = _smithers_orchestrator_graph_ProofBinding.ProofBinding;
+type ProofBinding$1 = _smthrs_graph_ProofBinding.ProofBinding;
 type SmithersRuntimeConfig = SmithersRuntimeConfig$1;
 type TableRef = unknown;
 /**
@@ -883,7 +883,7 @@ declare class WorkflowDriver<Schema extends unknown = unknown> {
     /** @type {RunOptions | undefined} */
     activeOptions: RunOptions$1 | undefined;
     /** @type {import("@smthrs/graph").WorkflowGraph | undefined} */
-    lastGraph: _smithers_orchestrator_graph.WorkflowGraph | undefined;
+    lastGraph: _smthrs_graph.WorkflowGraph | undefined;
     /** @type {{ nodeId: string; waitingOn: string[] }[]} Tasks that deferred on unresolved deps in the latest render. */
     lastDeferredDeps: {
         nodeId: string;
@@ -1035,11 +1035,11 @@ type SchedulerWaitHandler = SchedulerWaitHandler$1;
 type WaitHandler = WaitHandler$1;
 type ContinueAsNewHandler = ContinueAsNewHandler$1;
 type RunOptions$1 = RunOptions$2;
-type RunResult$1 = _smithers_orchestrator_scheduler.RunResult;
-type EngineDecision = _smithers_orchestrator_scheduler.EngineDecision;
-type RenderContext = _smithers_orchestrator_scheduler.RenderContext;
-type WaitReason = _smithers_orchestrator_scheduler.WaitReason;
-type TaskDescriptor = _smithers_orchestrator_graph_types.TaskDescriptor;
+type RunResult$1 = _smthrs_scheduler.RunResult;
+type EngineDecision = _smthrs_scheduler.EngineDecision;
+type RenderContext = _smthrs_scheduler.RenderContext;
+type WaitReason = _smthrs_scheduler.WaitReason;
+type TaskDescriptor = _smthrs_graph_types.TaskDescriptor;
 
 /**
  * Clamp a startedBy prompt to its persisted budget, surrogate-pair safe.
@@ -1069,7 +1069,7 @@ type InferOutputEntry<T> = InferOutputEntry$1<T>;
 type OutputKey = OutputKey$2;
 type OutputSnapshot = OutputSnapshot$2;
 type OutputRowsReader<Schema = unknown> = OutputRowsReader$2<Schema>;
-type ProofBinding = _smithers_orchestrator_graph_ProofBinding.ProofBinding;
+type ProofBinding = _smthrs_graph_ProofBinding.ProofBinding;
 type RunAuthContext = RunAuthContext$2;
 type RunStartedBy = RunStartedBy$1;
 type EffectPlatformRuntime = EffectPlatformRuntime$1;

@@ -1,6 +1,6 @@
 import * as react from 'react';
 import { ReactElement, ReactNode } from 'react';
-import * as _smithers_orchestrator_gateway_client from '@smthrs/gateway-client';
+import * as _smthrs_gateway_client from '@smthrs/gateway-client';
 import { SmithersGatewayClientOptions, WorkspaceMode, SmithersGatewayClient, SmithersDataClient, SmithersCollections, GatewayCronRow, GatewayMemoryFactRow, GatewayPromptRow, GatewayScoreRow, GatewayTicketRow, UsageReport, ListRunTokenUsageResponse, GatewayRpcPayload as GatewayRpcPayload$1, GatewayEventFrame, GatewayBackoffOptions, GatewayRunNode } from '@smthrs/gateway-client';
 import * as _tanstack_react_query from '@tanstack/react-query';
 import { QueryClient } from '@tanstack/react-query';
@@ -138,7 +138,7 @@ declare function useGatewayActions(): {
         pattern: string;
         cronId?: string;
         enabled?: boolean;
-    }) => Promise<_smithers_orchestrator_gateway_client.GatewayCronRow & {
+    }) => Promise<_smthrs_gateway_client.GatewayCronRow & {
         seq?: number;
         txid?: string;
     }>;
@@ -466,7 +466,7 @@ declare function useGatewayRuns(params?: ListRunsRequest): GatewayAsyncState<Gat
  */
 declare function useGatewayWorkflows(params?: ListWorkflowsRequest): GatewayAsyncState<ListWorkflowsResponse>;
 
-declare function useSmithersGateway(): _smithers_orchestrator_gateway_client.SmithersGatewayClient;
+declare function useSmithersGateway(): _smthrs_gateway_client.SmithersGatewayClient;
 
 /**
  * Declarative subscription to an extension resource/query. Same stale-response

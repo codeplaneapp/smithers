@@ -1,7 +1,7 @@
 import { EventSource as EventSource$1 } from './EventSourceTypes.js';
 import { ExternalEvent as ExternalEvent$1 } from './ExternalEventTypes.js';
-import * as _smithers_orchestrator_db_adapter from '@smthrs/db/adapter';
-import * as _smithers_orchestrator_errors_SmithersError from '@smthrs/errors/SmithersError';
+import * as _smthrs_db_adapter from '@smthrs/db/adapter';
+import * as _smthrs_errors_SmithersError from '@smthrs/errors/SmithersError';
 import { Effect } from 'effect';
 import './CursorStoreTypes.js';
 
@@ -20,7 +20,7 @@ import './CursorStoreTypes.js';
 declare function deliverEvent(adapter: SmithersDb, event: ExternalEvent): Effect.Effect<{
     deduped: boolean;
     runIds: string[];
-}, _smithers_orchestrator_errors_SmithersError.SmithersError>;
+}, _smthrs_errors_SmithersError.SmithersError>;
 /**
  * Drain an EventSource into the delivery pipeline. Poll batches are delivered
  * sequentially and acknowledged only after every event completes; an
@@ -34,8 +34,8 @@ declare function deliverEvent(adapter: SmithersDb, event: ExternalEvent): Effect
  * @param {EventSource} source
  * @returns {Effect.Effect<void, import("@smthrs/errors/SmithersError").SmithersError>}
  */
-declare function deliverEvents(adapter: SmithersDb, source: EventSource): Effect.Effect<void, _smithers_orchestrator_errors_SmithersError.SmithersError>;
-type SmithersDb = _smithers_orchestrator_db_adapter.SmithersDb;
+declare function deliverEvents(adapter: SmithersDb, source: EventSource): Effect.Effect<void, _smthrs_errors_SmithersError.SmithersError>;
+type SmithersDb = _smthrs_db_adapter.SmithersDb;
 type ExternalEvent = ExternalEvent$1;
 type EventSource = EventSource$1;
 

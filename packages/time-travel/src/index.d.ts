@@ -1,6 +1,6 @@
-import * as _smithers_orchestrator_observability_SmithersEvent from '@smthrs/observability/SmithersEvent';
+import * as _smthrs_observability_SmithersEvent from '@smthrs/observability/SmithersEvent';
 import { SmithersEvent as SmithersEvent$1 } from '@smthrs/observability/SmithersEvent';
-import * as _smithers_orchestrator_db_adapter from '@smthrs/db/adapter';
+import * as _smthrs_db_adapter from '@smthrs/db/adapter';
 import { SmithersDb as SmithersDb$g } from '@smthrs/db/adapter';
 export { replaysStarted, runForksCreated, snapshotDuration, snapshotsCaptured } from '@smthrs/observability/metrics';
 import * as drizzle_orm_sqlite_core from 'drizzle-orm/sqlite-core';
@@ -372,7 +372,7 @@ type ForkParams$2 = {
 declare function revertToAttempt(adapter: SmithersDb$f, opts: RevertOptions$1): Promise<RevertResult$1>;
 type RevertOptions$1 = RevertOptions$2;
 type RevertResult$1 = RevertResult$2;
-type SmithersDb$f = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb$f = _smthrs_db_adapter.SmithersDb;
 
 /**
  * @param {SmithersDb} adapter
@@ -380,7 +380,7 @@ type SmithersDb$f = _smithers_orchestrator_db_adapter.SmithersDb;
  * @returns {Promise<TimeTravelResult>}
  */
 declare function timeTravel(adapter: SmithersDb$e, opts: TimeTravelOptions$1): Promise<TimeTravelResult$1>;
-type SmithersDb$e = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb$e = _smthrs_db_adapter.SmithersDb;
 type TimeTravelOptions$1 = TimeTravelOptions$2;
 type TimeTravelResult$1 = TimeTravelResult$2;
 
@@ -394,7 +394,7 @@ type TimeTravelResult$1 = TimeTravelResult$2;
  * @returns {Promise<EffectBoundaryReport>}
  */
 declare function assessEffectBoundary(db: SmithersDb$d, params: EffectBoundaryParams$1): Promise<EffectBoundaryReport$3>;
-type SmithersDb$d = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb$d = _smthrs_db_adapter.SmithersDb;
 type EffectBoundaryParams$1 = EffectBoundaryParams$2;
 type EffectBoundaryReport$3 = EffectBoundaryReport$4;
 
@@ -436,8 +436,8 @@ declare function executeEffectReverts(db: SmithersDb$c, params: {
     checkStillHeld?: () => Promise<boolean>;
     onProgress?: (event: SmithersEvent) => void;
 }): Promise<EffectBoundaryReport$2>;
-type SmithersDb$c = _smithers_orchestrator_db_adapter.SmithersDb;
-type SmithersEvent = _smithers_orchestrator_observability_SmithersEvent.SmithersEvent;
+type SmithersDb$c = _smthrs_db_adapter.SmithersDb;
+type SmithersEvent = _smthrs_observability_SmithersEvent.SmithersEvent;
 type EffectBoundaryReport$2 = EffectBoundaryReport$4;
 type EffectHandlerRegistry = EffectHandlerRegistry$1;
 
@@ -452,7 +452,7 @@ type EffectHandlerRegistry = EffectHandlerRegistry$1;
  */
 declare function replayFromCheckpoint(adapter: SmithersDb$b, params: ReplayParams$1): Promise<ReplayResult$1>;
 
-type SmithersDb$b = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb$b = _smthrs_db_adapter.SmithersDb;
 type ReplayParams$1 = ReplayParams$2;
 type ReplayResult$1 = ReplayResult$2;
 
@@ -501,7 +501,7 @@ declare function loadLatestSnapshot(adapter: SmithersDb$a, runId: string): Promi
  */
 declare function listSnapshots(adapter: SmithersDb$a, runId: string): Promise<Array<Pick<Snapshot$3, "runId" | "frameNo" | "contentHash" | "createdAtMs" | "vcsPointer">>>;
 
-type SmithersDb$a = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb$a = _smthrs_db_adapter.SmithersDb;
 type Snapshot$3 = Snapshot$5;
 type SnapshotData$1 = SnapshotData$2;
 
@@ -578,7 +578,7 @@ declare function listBranches(adapter: SmithersDb$9, parentRunId: string): Promi
  * @returns {Promise<BranchInfo | undefined>}
  */
 declare function getBranchInfo(adapter: SmithersDb$9, runId: string): Promise<BranchInfo$1 | undefined>;
-type SmithersDb$9 = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb$9 = _smthrs_db_adapter.SmithersDb;
 type BranchInfo$1 = BranchInfo$2;
 type EffectBoundaryReport$1 = EffectBoundaryReport$4;
 type ForkParams$1 = ForkParams$2;
@@ -635,7 +635,7 @@ declare function rerunAtRevision(adapter: SmithersDb$8, runId: string, frameNo: 
     vcsPointer: string | null;
     error?: string;
 }>;
-type SmithersDb$8 = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb$8 = _smthrs_db_adapter.SmithersDb;
 type VcsTag$1 = VcsTag$2;
 
 /**
@@ -673,7 +673,7 @@ declare function buildTimeline(adapter: SmithersDb$7, runId: string): Promise<Ru
  */
 declare function buildTimelineTree(adapter: SmithersDb$7, runId: string): Promise<TimelineTree$1>;
 
-type SmithersDb$7 = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb$7 = _smthrs_db_adapter.SmithersDb;
 type RunTimeline$1 = RunTimeline$2;
 type TimelineTree$1 = TimelineTree$4;
 
@@ -1222,7 +1222,7 @@ declare function acquireRewindLock(adapter: SmithersDb$6, runId: string, options
 /** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./RewindLockHandle.ts").RewindLockHandle} RewindLockHandle */
 declare const REWIND_LEASE_TTL_MS: 60000;
-type SmithersDb$6 = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb$6 = _smthrs_db_adapter.SmithersDb;
 type RewindLockHandle$1 = RewindLockHandle$2;
 
 declare const REWIND_RATE_LIMIT_MAX: 10;
@@ -1257,7 +1257,7 @@ declare function evaluateRewindRateLimit(input: {
     windowMs: number;
     windowStartedAtMs: number;
 }>;
-type SmithersDb$5 = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb$5 = _smthrs_db_adapter.SmithersDb;
 
 /** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./RewindAuditResult.ts").RewindAuditResult} RewindAuditResult */
@@ -1285,7 +1285,7 @@ declare function writeRewindAuditRow(adapter: SmithersDb$4, row: {
     result: RewindAuditResult$3;
     durationMs?: number | null;
 }): Promise<number | null>;
-type SmithersDb$4 = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb$4 = _smthrs_db_adapter.SmithersDb;
 type RewindAuditResult$3 = RewindAuditResult$4;
 
 /** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
@@ -1303,7 +1303,7 @@ declare function updateRewindAuditRow(adapter: SmithersDb$3, row: {
     durationMs?: number | null;
     fromFrameNo?: number;
 }): Promise<void>;
-type SmithersDb$3 = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb$3 = _smthrs_db_adapter.SmithersDb;
 type RewindAuditResult$2 = RewindAuditResult$4;
 
 /** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
@@ -1323,7 +1323,7 @@ declare function countRecentRewindAuditRows(adapter: SmithersDb$2, input: {
     caller: string;
     sinceMs: number;
 }): Promise<number>;
-type SmithersDb$2 = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb$2 = _smthrs_db_adapter.SmithersDb;
 
 /**
  * Fetch audit rows for tests and diagnostics.
@@ -1336,7 +1336,7 @@ declare function listRewindAuditRows(adapter: SmithersDb$1, input?: {
     runId?: string;
     limit?: number;
 }): Promise<Array<RewindAuditRow>>;
-type SmithersDb$1 = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb$1 = _smthrs_db_adapter.SmithersDb;
 type RewindAuditResult$1 = RewindAuditResult$4;
 type RewindAuditRow = {
     id: number;
@@ -1367,7 +1367,7 @@ declare function recoverInProgressRewindAudits(adapter: SmithersDb, options?: {
         runId: string;
     }>;
 }>;
-type SmithersDb = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb = _smthrs_db_adapter.SmithersDb;
 
 type BranchInfo = BranchInfo$2;
 type ForkParams = ForkParams$2;

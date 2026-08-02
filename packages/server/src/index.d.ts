@@ -1,16 +1,16 @@
 import * as node_http from 'node:http';
 import { IncomingMessage as IncomingMessage$1, ServerResponse as ServerResponse$2 } from 'node:http';
-import * as _smithers_orchestrator_usage from '@smthrs/usage';
-import * as _smithers_orchestrator_observability_SmithersEvent from '@smthrs/observability/SmithersEvent';
-import * as _smithers_orchestrator_components_SmithersWorkflow from '@smthrs/components/SmithersWorkflow';
+import * as _smthrs_usage from '@smthrs/usage';
+import * as _smthrs_observability_SmithersEvent from '@smthrs/observability/SmithersEvent';
+import * as _smthrs_components_SmithersWorkflow from '@smthrs/components/SmithersWorkflow';
 import { SmithersWorkflow as SmithersWorkflow$1 } from '@smthrs/components/SmithersWorkflow';
-import * as _smithers_orchestrator_db_adapter from '@smthrs/db/adapter';
+import * as _smthrs_db_adapter from '@smthrs/db/adapter';
 import { SmithersDb as SmithersDb$4 } from '@smthrs/db/adapter';
-import * as _smithers_orchestrator_driver_RunStartedBy from '@smthrs/driver/RunStartedBy';
+import * as _smthrs_driver_RunStartedBy from '@smthrs/driver/RunStartedBy';
 import * as ws from 'ws';
 import { WebSocketServer } from 'ws';
 import * as node_stream from 'node:stream';
-import * as _smithers_orchestrator_db_runState from '@smthrs/db/runState';
+import * as _smthrs_db_runState from '@smthrs/db/runState';
 import * as effect_Record from 'effect/Record';
 import * as effect_LogLevel from 'effect/LogLevel';
 import * as hono from 'hono';
@@ -18,14 +18,14 @@ import { Hono } from 'hono';
 import * as hono_types from 'hono/types';
 import { Effect } from 'effect';
 import * as effect_Fiber from 'effect/Fiber';
-import * as _smithers_orchestrator_protocol_errors from '@smthrs/protocol/errors';
-import * as _smithers_orchestrator_devtools_snapshotSerializer from '@smthrs/devtools/snapshotSerializer';
-import * as _smithers_orchestrator_protocol_devtools from '@smthrs/protocol/devtools';
-import * as _smithers_orchestrator_engine_effect_DiffBundle from '@smthrs/engine/effect/DiffBundle';
+import * as _smthrs_protocol_errors from '@smthrs/protocol/errors';
+import * as _smthrs_devtools_snapshotSerializer from '@smthrs/devtools/snapshotSerializer';
+import * as _smthrs_protocol_devtools from '@smthrs/protocol/devtools';
+import * as _smthrs_engine_effect_DiffBundle from '@smthrs/engine/effect/DiffBundle';
 import { DiffBundle } from '@smthrs/engine/effect/DiffBundle';
 import { computeDiffBundleBetweenRefs } from '@smthrs/engine/effect/diff-bundle';
 import { selectOutputRow } from '@smthrs/db/output';
-import * as _smithers_orchestrator_time_travel_jumpToFrame from '@smthrs/time-travel/jumpToFrame';
+import * as _smthrs_time_travel_jumpToFrame from '@smthrs/time-travel/jumpToFrame';
 export { JumpToFrameError } from '@smthrs/time-travel/jumpToFrame';
 
 /**
@@ -1402,7 +1402,7 @@ declare class Gateway {
     buildRunSnapshot(runId: string): Promise<{
         failedChildren?: number;
         failedChildKeys?: string[];
-        runState?: _smithers_orchestrator_db_runState.RunStateView | undefined;
+        runState?: _smthrs_db_runState.RunStateView | undefined;
         workflowKey: string;
         summary: {};
         runId: string;
@@ -1685,7 +1685,7 @@ declare class Gateway {
         allowNetwork?: boolean;
         maxOutputBytes?: number;
         toolTimeoutMs?: number;
-        startedBy?: _smithers_orchestrator_driver_RunStartedBy.RunStartedBy;
+        startedBy?: _smthrs_driver_RunStartedBy.RunStartedBy;
     }): Promise<{
         runId: string;
         workflow: string;
@@ -2097,7 +2097,7 @@ declare class Gateway {
      * consistent. Returns `null` only when no workflow is registered yet.
      * @returns {import("@smthrs/db/adapter").SmithersDb | null}
      */
-    primaryDocsAdapter(): _smithers_orchestrator_db_adapter.SmithersDb | null;
+    primaryDocsAdapter(): _smthrs_db_adapter.SmithersDb | null;
     /**
      * Live work docs for the `listTickets` RPC. `_smithers_docs` is global, so
      * read across every DISTINCT adapter (mirrors `listMemoryFactsAcrossWorkflows`)
@@ -2348,9 +2348,9 @@ type IncomingMessage = node_http.IncomingMessage;
 type RequestFrame = RequestFrame$1;
 type ResponseFrame = ResponseFrame$1;
 type ServerResponse$1 = node_http.ServerResponse;
-type SmithersWorkflow = _smithers_orchestrator_components_SmithersWorkflow.SmithersWorkflow<unknown>;
-type SmithersEvent$1 = _smithers_orchestrator_observability_SmithersEvent.SmithersEvent;
-type UsageReport = _smithers_orchestrator_usage.UsageReport;
+type SmithersWorkflow = _smthrs_components_SmithersWorkflow.SmithersWorkflow<unknown>;
+type SmithersEvent$1 = _smthrs_observability_SmithersEvent.SmithersEvent;
+type UsageReport = _smthrs_usage.UsageReport;
 type GatewayMetricLabels = Record<string, string | number | null | undefined>;
 type GatewayTransport = "ws" | "http";
 type GatewayRequestContext = {
@@ -2490,7 +2490,7 @@ declare class NodeOutputRouteError extends Error {
     /** @type {NodeOutputErrorCode} */
     code: NodeOutputErrorCode;
 }
-type NodeOutputErrorCode = _smithers_orchestrator_protocol_errors.NodeOutputErrorCode;
+type NodeOutputErrorCode = _smthrs_protocol_errors.NodeOutputErrorCode;
 
 /**
  * @returns {DevToolsNode}
@@ -2622,13 +2622,13 @@ declare const DEVTOOLS_EMPTY_ROOT_ID: 0;
  * subscribed client, so unbounded prompts are not allowed through.
  */
 declare const DEVTOOLS_TASK_PROMPT_MAX_CHARS: 4000;
-type DevToolsAgentRef = _smithers_orchestrator_protocol_devtools.DevToolsAgentRef;
-type DevToolsAgentSummary = _smithers_orchestrator_protocol_devtools.DevToolsAgentSummary;
-type SmithersDb$3 = _smithers_orchestrator_db_adapter.SmithersDb;
-type DevToolsNode = _smithers_orchestrator_protocol_devtools.DevToolsNode;
-type DevToolsSnapshot = _smithers_orchestrator_protocol_devtools.DevToolsSnapshot;
-type DevToolsNodeType = _smithers_orchestrator_protocol_devtools.DevToolsNodeType;
-type SnapshotSerializerWarning$1 = _smithers_orchestrator_devtools_snapshotSerializer.SnapshotSerializerWarning;
+type DevToolsAgentRef = _smthrs_protocol_devtools.DevToolsAgentRef;
+type DevToolsAgentSummary = _smthrs_protocol_devtools.DevToolsAgentSummary;
+type SmithersDb$3 = _smthrs_db_adapter.SmithersDb;
+type DevToolsNode = _smthrs_protocol_devtools.DevToolsNode;
+type DevToolsSnapshot = _smthrs_protocol_devtools.DevToolsSnapshot;
+type DevToolsNodeType = _smthrs_protocol_devtools.DevToolsNodeType;
+type SnapshotSerializerWarning$1 = _smthrs_devtools_snapshotSerializer.SnapshotSerializerWarning;
 
 type DiffSummary$1 = {
     filesChanged: number;
@@ -2689,14 +2689,14 @@ declare function getNodeDiffRoute({ runId: rawRunId, nodeId: rawNodeId, iteratio
         adapter: SmithersDb$2;
     } | null>;
     emitEffect?: (effect: Effect.Effect<void>) => Promise<unknown>;
-    computeDiffBundleImpl?: (baseRef: string, cwd: string, seq?: number) => Promise<_smithers_orchestrator_engine_effect_DiffBundle.DiffBundle>;
-    computeDiffBundleBetweenRefsImpl?: (baseRef: string, targetRef: string, cwd: string, seq?: number) => Promise<_smithers_orchestrator_engine_effect_DiffBundle.DiffBundle>;
+    computeDiffBundleImpl?: (baseRef: string, cwd: string, seq?: number) => Promise<_smthrs_engine_effect_DiffBundle.DiffBundle>;
+    computeDiffBundleBetweenRefsImpl?: (baseRef: string, targetRef: string, cwd: string, seq?: number) => Promise<_smthrs_engine_effect_DiffBundle.DiffBundle>;
     resolveCommitPointerImpl?: (pointer: string, cwd: string) => Promise<string | null>;
     nowMs?: () => number;
     stat?: boolean;
 }): Promise<GetNodeDiffRouteResult>;
-type SmithersDb$2 = _smithers_orchestrator_db_adapter.SmithersDb;
-type AttemptRow = _smithers_orchestrator_db_adapter.AttemptRow;
+type SmithersDb$2 = _smthrs_db_adapter.SmithersDb;
+type AttemptRow = _smthrs_db_adapter.AttemptRow;
 type GetNodeDiffRouteResult = GetNodeDiffRouteResult$1;
 type DiffSummary = DiffSummary$1;
 
@@ -2787,8 +2787,8 @@ declare function getNodeOutputRoute(params: {
     nodeId: unknown;
     iteration: unknown;
     resolveRun: (runId: string) => Promise<{
-        workflow: _smithers_orchestrator_components_SmithersWorkflow.SmithersWorkflow<unknown>;
-        adapter: _smithers_orchestrator_db_adapter.SmithersDb;
+        workflow: _smthrs_components_SmithersWorkflow.SmithersWorkflow<unknown>;
+        adapter: _smthrs_db_adapter.SmithersDb;
     } | null>;
     selectOutputRowImpl?: typeof selectOutputRow;
     emitEffect?: (effect: Effect.Effect<void>) => Promise<unknown>;
@@ -2842,9 +2842,9 @@ declare function jumpToFrameRoute(input: {
     onLog?: (level: "info" | "warn" | "error", message: string, fields?: Record<string, unknown>) => Promise<void> | void;
 }): Promise<JumpResult>;
 
-type SmithersDb$1 = _smithers_orchestrator_db_adapter.SmithersDb;
-type SmithersEvent = _smithers_orchestrator_observability_SmithersEvent.SmithersEvent;
-type JumpResult = _smithers_orchestrator_time_travel_jumpToFrame.JumpResult;
+type SmithersDb$1 = _smthrs_db_adapter.SmithersDb;
+type SmithersEvent = _smthrs_observability_SmithersEvent.SmithersEvent;
+type JumpResult = _smthrs_time_travel_jumpToFrame.JumpResult;
 
 /**
  * @param {{
@@ -2893,9 +2893,9 @@ declare function streamDevToolsRoute(input: {
 declare const DEVTOOLS_REBASELINE_INTERVAL: 50;
 declare const DEVTOOLS_BACKPRESSURE_LIMIT: 1000;
 declare const DEVTOOLS_POLL_INTERVAL_MS: 25;
-type SmithersDb = _smithers_orchestrator_db_adapter.SmithersDb;
-type DevToolsEvent = _smithers_orchestrator_protocol_devtools.DevToolsEvent;
-type SnapshotSerializerWarning = _smithers_orchestrator_devtools_snapshotSerializer.SnapshotSerializerWarning;
+type SmithersDb = _smthrs_db_adapter.SmithersDb;
+type DevToolsEvent = _smthrs_protocol_devtools.DevToolsEvent;
+type SnapshotSerializerWarning = _smthrs_devtools_snapshotSerializer.SnapshotSerializerWarning;
 
 /**
  * @param {ServerOptions} [opts]

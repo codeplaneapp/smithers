@@ -1,8 +1,5 @@
 // src/browser.ts
-import {
-  RuntimeCapabilityError as RuntimeCapabilityError2,
-  RUNTIME_CAPABILITY_UNAVAILABLE as RUNTIME_CAPABILITY_UNAVAILABLE2
-} from "@smthrs/driver/RuntimeCapabilityError";
+import { RuntimeCapabilityError as RuntimeCapabilityError2, RUNTIME_CAPABILITY_UNAVAILABLE as RUNTIME_CAPABILITY_UNAVAILABLE2 } from "@smthrs/driver/RuntimeCapabilityError";
 
 // src/runtimeConformance.js
 import {

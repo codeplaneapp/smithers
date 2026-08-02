@@ -1,4 +1,4 @@
-import * as _smithers_orchestrator_db_adapter from '@smthrs/db/adapter';
+import * as _smthrs_db_adapter from '@smthrs/db/adapter';
 import { WebhookRequest, EventSource, MakeWebhookSourceOptions } from './EventSourceTypes.js';
 import './CursorStoreTypes.js';
 import 'effect';
@@ -12,7 +12,7 @@ import './ExternalEventTypes.js';
  * route incoming HTTP deliveries to them.
  */
 type MakeIntegrationRuntimeOptions = {
-    adapter: _smithers_orchestrator_db_adapter.SmithersDb;
+    adapter: _smthrs_db_adapter.SmithersDb;
     sources?: EventSource[];
     webhookSources?: MakeWebhookSourceOptions[];
 };

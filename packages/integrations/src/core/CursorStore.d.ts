@@ -1,5 +1,5 @@
 import { CursorStore as CursorStore$1 } from './CursorStoreTypes.js';
-import * as _smithers_orchestrator_db_adapter from '@smthrs/db/adapter';
+import * as _smthrs_db_adapter from '@smthrs/db/adapter';
 import 'effect';
 import '@smthrs/errors/SmithersError';
 
@@ -16,7 +16,7 @@ declare function makeDbCursorStore(adapter: SmithersDb): CursorStore;
  * @returns {CursorStore}
  */
 declare function makeInMemoryCursorStore(): CursorStore;
-type SmithersDb = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb = _smthrs_db_adapter.SmithersDb;
 type CursorStore = CursorStore$1;
 
 export { type CursorStore, type SmithersDb, makeDbCursorStore, makeInMemoryCursorStore };

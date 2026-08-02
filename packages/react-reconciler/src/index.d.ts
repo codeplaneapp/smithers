@@ -1,9 +1,8 @@
-import * as _smithers_orchestrator_graph_types from '@smthrs/graph/types';
+import * as _smthrs_graph_types from '@smthrs/graph/types';
 import { ExtractGraph as ExtractGraph$1, HostNode as HostNode$1 } from '@smthrs/graph/types';
 import * as React$1 from 'react';
 import React__default from 'react';
 import { WorkflowDriver } from '@smthrs/driver';
-import { SmithersCtx } from '@smthrs/driver/SmithersCtx';
 export { SmithersCtx } from '@smthrs/driver/SmithersCtx';
 
 type SmithersRendererOptions$1 = {
@@ -38,13 +37,13 @@ declare class SmithersRenderer {
     getRoot(): HostNode | null;
     #private;
 }
-type ExtractGraph = _smithers_orchestrator_graph_types.ExtractGraph;
-type ExtractOptions = _smithers_orchestrator_graph_types.ExtractOptions;
+type ExtractGraph = _smthrs_graph_types.ExtractGraph;
+type ExtractOptions = _smthrs_graph_types.ExtractOptions;
 type HostContainer = HostContainer$1;
-type HostNode = _smithers_orchestrator_graph_types.HostNode;
+type HostNode = _smthrs_graph_types.HostNode;
 type React = React$1.default;
 type SmithersRendererOptions = SmithersRendererOptions$1;
-type WorkflowGraph = _smithers_orchestrator_graph_types.WorkflowGraph;
+type WorkflowGraph = _smthrs_graph_types.WorkflowGraph;
 
 /**
  * @template [Schema=unknown]

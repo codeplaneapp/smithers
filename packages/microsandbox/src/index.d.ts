@@ -1,4 +1,4 @@
-import * as _smithers_orchestrator_sandbox from '@smthrs/sandbox';
+import * as _smthrs_sandbox from '@smthrs/sandbox';
 import { SandboxProviderRequest } from '@smthrs/sandbox';
 
 type MicrosandboxExecOptionsBuilderLike = {
@@ -148,7 +148,7 @@ declare const MICROSANDBOX_PROVIDER_ID: "microsandbox";
  * @param {import("./MicrosandboxSandboxProviderOptions.ts").MicrosandboxSandboxProviderOptions} [options]
  * @returns {import("@smthrs/sandbox").SandboxProvider}
  */
-declare function createMicrosandboxSandboxProvider(options?: MicrosandboxSandboxProviderOptions$1): _smithers_orchestrator_sandbox.SandboxProvider;
+declare function createMicrosandboxSandboxProvider(options?: MicrosandboxSandboxProviderOptions$1): _smthrs_sandbox.SandboxProvider;
 
 /**
  * Build and register a Microsandbox provider in Smithers' global registry.

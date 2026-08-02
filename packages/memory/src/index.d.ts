@@ -8,7 +8,7 @@ import { HindsightClient } from '@vectorize-io/hindsight-client';
 import * as drizzle_orm_bun_sqlite from 'drizzle-orm/bun-sqlite';
 import { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite';
 export { memoryFactReads, memoryFactWrites, memoryMessageSaves, memoryRecallDuration, memoryRecallQueries } from '@smthrs/observability/metrics';
-import * as _smithers_orchestrator_errors_toSmithersError from '@smthrs/errors/toSmithersError';
+import * as _smthrs_errors_toSmithersError from '@smthrs/errors/toSmithersError';
 export { smithersMemoryFacts, smithersMemoryMessages, smithersMemoryNoteSupersessions, smithersMemoryNotes, smithersMemoryThreads } from '@smthrs/db/internal-schema';
 
 type MemoryNamespaceKind$1 = "workflow" | "agent" | "user" | "global";
@@ -487,26 +487,26 @@ declare class HindsightMemoryStore implements MemoryStore$2 {
      * @param {HindsightRetainInput} input
      */
     retainMemory(input: HindsightRetainInput): Promise<void>;
-    getFactEffect(ns: any, key: any): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
-    setFactEffect(ns: any, key: any, value: any, ttlMs: any, provenance: any): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
-    deleteFactEffect(ns: any, key: any): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
-    listFactsEffect(ns: any): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
-    listAllFactsEffect(): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
-    createThreadEffect(ns: any, title: any): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
-    getThreadEffect(threadId: any): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
-    listThreadsEffect(): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
-    deleteThreadEffect(threadId: any): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
-    saveMessageEffect(msg: any): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
-    listMessagesEffect(threadId: any, limit: any): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
-    countMessagesEffect(threadId: any): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
-    deleteMessagesEffect(threadId: any, messageIds: any): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
-    deleteExpiredFactsEffect(): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
-    saveNoteEffect(input: any): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
-    getNoteEffect(id: any): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
-    listNotesEffect(ns: any, filter: any): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
-    setNoteStatusEffect(id: any, status: any): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
-    enableNoteSearchEffect(kind: any): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
-    searchNotesEffect(kind: any, query: any, limit: any, filter: any): Effect.Effect<any, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
+    getFactEffect(ns: any, key: any): Effect.Effect<any, _smthrs_errors_toSmithersError.SmithersError, never>;
+    setFactEffect(ns: any, key: any, value: any, ttlMs: any, provenance: any): Effect.Effect<any, _smthrs_errors_toSmithersError.SmithersError, never>;
+    deleteFactEffect(ns: any, key: any): Effect.Effect<any, _smthrs_errors_toSmithersError.SmithersError, never>;
+    listFactsEffect(ns: any): Effect.Effect<any, _smthrs_errors_toSmithersError.SmithersError, never>;
+    listAllFactsEffect(): Effect.Effect<any, _smthrs_errors_toSmithersError.SmithersError, never>;
+    createThreadEffect(ns: any, title: any): Effect.Effect<any, _smthrs_errors_toSmithersError.SmithersError, never>;
+    getThreadEffect(threadId: any): Effect.Effect<any, _smthrs_errors_toSmithersError.SmithersError, never>;
+    listThreadsEffect(): Effect.Effect<any, _smthrs_errors_toSmithersError.SmithersError, never>;
+    deleteThreadEffect(threadId: any): Effect.Effect<any, _smthrs_errors_toSmithersError.SmithersError, never>;
+    saveMessageEffect(msg: any): Effect.Effect<any, _smthrs_errors_toSmithersError.SmithersError, never>;
+    listMessagesEffect(threadId: any, limit: any): Effect.Effect<any, _smthrs_errors_toSmithersError.SmithersError, never>;
+    countMessagesEffect(threadId: any): Effect.Effect<any, _smthrs_errors_toSmithersError.SmithersError, never>;
+    deleteMessagesEffect(threadId: any, messageIds: any): Effect.Effect<any, _smthrs_errors_toSmithersError.SmithersError, never>;
+    deleteExpiredFactsEffect(): Effect.Effect<any, _smthrs_errors_toSmithersError.SmithersError, never>;
+    saveNoteEffect(input: any): Effect.Effect<any, _smthrs_errors_toSmithersError.SmithersError, never>;
+    getNoteEffect(id: any): Effect.Effect<any, _smthrs_errors_toSmithersError.SmithersError, never>;
+    listNotesEffect(ns: any, filter: any): Effect.Effect<any, _smthrs_errors_toSmithersError.SmithersError, never>;
+    setNoteStatusEffect(id: any, status: any): Effect.Effect<any, _smthrs_errors_toSmithersError.SmithersError, never>;
+    enableNoteSearchEffect(kind: any): Effect.Effect<any, _smthrs_errors_toSmithersError.SmithersError, never>;
+    searchNotesEffect(kind: any, query: any, limit: any, filter: any): Effect.Effect<any, _smthrs_errors_toSmithersError.SmithersError, never>;
     #private;
 }
 type SmithersRecordEnvelope = {

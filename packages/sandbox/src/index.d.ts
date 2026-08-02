@@ -1,5 +1,5 @@
 import { lstat } from 'node:fs/promises';
-import * as _smithers_orchestrator_observability_SmithersEvent from '@smthrs/observability/SmithersEvent';
+import * as _smthrs_observability_SmithersEvent from '@smthrs/observability/SmithersEvent';
 import { SmithersDb } from '@smthrs/db/adapter';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { Effect, Context, Layer } from 'effect';
@@ -302,7 +302,7 @@ type SandboxHandle = SandboxHandle$1;
 type SandboxProvider = SandboxProvider$1;
 type SandboxProviderRequest = SandboxProviderRequest$1;
 type SandboxProviderResult = SandboxProviderResult$1;
-type SmithersEvent = _smithers_orchestrator_observability_SmithersEvent.SmithersEvent;
+type SmithersEvent = _smthrs_observability_SmithersEvent.SmithersEvent;
 /**
  * Size in bytes of a single file path (0 if missing or not a regular file).
  * @param {string} path
