@@ -4,6 +4,34 @@ This is the complete, commit-level changelog. For the guided tour of each
 release (what changed and why it matters, with screenshots and examples), see
 the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
+## 0.33.0 (2026-08-02)
+
+12 commits since [v0.32.0](https://github.com/smithersai/smithers/compare/v0.32.0...v0.33.0): 3029 files changed, +26424 / -22589 lines. Release notes: [smithers.sh/changelogs/0.33.0](https://smithers.sh/changelogs/0.33.0).
+
+### Breaking (1)
+
+- refactor!: rename npm package smithers-orchestrator to smthrs ([7c1e236e76](https://github.com/smithersai/smithers/commit/7c1e236e76))
+
+### Features (3)
+
+- feat(pack): rename-package workflow (parallel luna sweep + finalize) with live UI ([521d2ae97a](https://github.com/smithersai/smithers/commit/521d2ae97a))
+- feat(pack): rename-dependents workflow — luna rename lanes + grep gate + sol review + draft PRs ([a332473e6c](https://github.com/smithersai/smithers/commit/a332473e6c))
+- feat(ui): AgentTaskContentProps export + relative-time seconds granularity ([8dfb769ed8](https://github.com/smithersai/smithers/commit/8dfb769ed8))
+
+### Fixes (3)
+
+- fix(types): Context.Tag/TagClass do not exist in Effect 4 (#1467) ([8d7c599aff](https://github.com/smithersai/smithers/commit/8d7c599aff))
+- fix: complete Effect 4 runtime compatibility (#1463) ([c8a2077f40](https://github.com/smithersai/smithers/commit/c8a2077f40))
+- chore(cli): mark apps/cli/src/index.js executable ([2bb00cd0c2](https://github.com/smithersai/smithers/commit/2bb00cd0c2))
+
+### Tests, research, docs (5)
+
+- test(readme): pin the hero image src+alt and fix stale contract assertions (#1345) ([d69cc3e6a6](https://github.com/smithersai/smithers/commit/d69cc3e6a6))
+- research(bench): orchbench persuasion-gap follow-ups + roadmapbench validation receipts ([19dbebc78f](https://github.com/smithersai/smithers/commit/19dbebc78f))
+- research(orchbench): freeze the 30-task confirmatory sample + language-balance wording ([f60126d9ed](https://github.com/smithersai/smithers/commit/f60126d9ed))
+- docs(changelog): rewrite 0.32.0 as the net delta from v0.31.0 ([703d9b28af](https://github.com/smithersai/smithers/commit/703d9b28af))
+- docs(changelog): drop the media-gap TODO and refresh 0.32.0 tallies ([4014fda134](https://github.com/smithersai/smithers/commit/4014fda134))
+
 ## 0.31.0 (2026-07-26)
 
 43 commits since [v0.30.0](https://github.com/smithersai/smithers/compare/v0.30.0...v0.31.0): 446 files changed, +22934 / -899 lines. Release notes: [smithers.sh/changelogs/0.31.0](https://smithers.sh/changelogs/0.31.0).
