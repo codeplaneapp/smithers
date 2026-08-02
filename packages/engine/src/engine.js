@@ -43,7 +43,6 @@ import { resolveForkAgentState } from "./resolveForkSessionMessages.js";
 import { getDefinedToolMetadata } from "./getDefinedToolMetadata.js";
 import { captureSnapshotEffect, loadLatestSnapshot, parseSnapshot } from "@smthrs/time-travel/snapshot";
 import { EventBus } from "./events.js";
-import { expireQueuedSteersForRun } from "./steers.js";
 import { AgentTraceCollector } from "./AgentTraceCollector.js";
 import { getJjPointer, runJj, workspaceAdd } from "@smthrs/vcs/jj";
 import { findVcsRoot } from "@smthrs/vcs/find-root";
@@ -3023,8 +3022,11 @@ async function markUnattendedResumeFailed(adapter, eventBus, runId, error, onErr
   const errorInfo = errorToJson(error);
   await cancelPendingTimersBridge(adapter, runId, eventBus, "run-failed");
   const failedAtMs = nowMs();
-  const failed = await Effect.runPromise(
-    adapter.updateRunIfNotCancelled(runId, {
+  const failed = await commitTerminalRunWithSteerExpiry(adapter, eventBus, {
+    writeGroup: "unattended resume failure",
+    runId,
+    timestampMs: failedAtMs,
+    transition: adapter.updateRunIfNotCancelled(runId, {
       status: "failed",
       finishedAtMs: failedAtMs,
       heartbeatAtMs: null,
@@ -3034,7 +3036,13 @@ async function markUnattendedResumeFailed(adapter, eventBus, runId, error, onErr
       hijackTarget: null,
       errorJson: JSON.stringify(errorInfo),
     }),
-  );
+    terminalEvent: {
+      type: "RunFailed",
+      runId,
+      error: errorInfo,
+      timestampMs: failedAtMs,
+    },
+  });
   if (!failed) {
     const authoritative = await Effect.runPromise(adapter.getRun(runId));
     if (
@@ -3045,17 +3053,9 @@ async function markUnattendedResumeFailed(adapter, eventBus, runId, error, onErr
       await finalizeCancelledRun(adapter, runId, { eventBus });
       return;
     }
+    return;
   }
   reportSmithersError(onError, error, { phase: "run", runId });
-  await Effect.runPromise(
-    eventBus.emitEventWithPersist({
-      type: "RunFailed",
-      runId,
-      error: errorInfo,
-      timestampMs: failedAtMs,
-    }),
-  );
-  await expireQueuedSteersForRun(adapter, eventBus, runId, failedAtMs);
 }
 /**
  * @param {AbortController} controller
@@ -4382,6 +4382,86 @@ async function cancelPendingExternalWaits(
 }
 
 /**
+ * Atomically claim a finished/failed run, persist its terminal event, and
+ * expire every remaining steer with a matching event. If any event write
+ * fails, the terminal status and all steer mutations roll back together.
+ * Exported from this module for fault-injection coverage; it is not part of
+ * the package's public index.
+ *
+ * @param {SmithersDb} adapter
+ * @param {{
+ *   emitAndTrack: (event: unknown) => Effect.Effect<void, unknown>;
+ *   persistLog?: (event: unknown) => Effect.Effect<void, unknown>;
+ *   attachCorrelation?: (event: any) => unknown;
+ * }} eventBus
+ * @param {{
+ *   writeGroup: string;
+ *   runId: string;
+ *   timestampMs: number;
+ *   transition: Effect.Effect<boolean, unknown>;
+ *   terminalEvent: { type: string; runId: string; timestampMs: number; [key: string]: unknown };
+ * }} options
+ * @returns {Promise<boolean>}
+ */
+export async function commitTerminalRunWithSteerExpiry(adapter, eventBus, options) {
+  const result = await adapter.withTransaction(
+    options.writeGroup,
+    Effect.gen(function* () {
+      const transitioned = yield* options.transition;
+      if (!transitioned) return { claimed: false, persistedEvents: [] };
+      const persistedEvents = [];
+      const terminalEvent = eventBus.attachCorrelation
+        ? eventBus.attachCorrelation(options.terminalEvent)
+        : options.terminalEvent;
+      yield* adapter.insertEventWithNextSeq({
+        runId: options.runId,
+        timestampMs: options.timestampMs,
+        type: options.terminalEvent.type,
+        payloadJson: JSON.stringify(terminalEvent),
+      });
+      persistedEvents.push(terminalEvent);
+      const queuedSteers = (yield* adapter.listSteers(options.runId)).filter((steer) => steer.status === "queued");
+      for (const steer of queuedSteers) {
+        yield* adapter.markSteerExpired(steer.steerId, options.timestampMs);
+        const rawEvent = {
+          type: "SteerExpired",
+          runId: options.runId,
+          nodeId: steer.nodeId,
+          steerId: steer.steerId,
+          timestampMs: options.timestampMs,
+        };
+        const event = eventBus.attachCorrelation ? eventBus.attachCorrelation(rawEvent) : rawEvent;
+        yield* adapter.insertEventWithNextSeq({
+          runId: options.runId,
+          timestampMs: options.timestampMs,
+          type: rawEvent.type,
+          payloadJson: JSON.stringify(event),
+        });
+        persistedEvents.push(event);
+      }
+      return { claimed: true, persistedEvents };
+    }),
+  );
+  if (result.claimed) {
+    for (const event of result.persistedEvents) {
+      await Effect.runPromise(eventBus.emitAndTrack(event));
+      if (eventBus.persistLog) await Effect.runPromise(Effect.ignore(eventBus.persistLog(event)));
+    }
+  }
+  return result.claimed;
+}
+
+/** @param {string | null | undefined} errorJson */
+function isHijackCancellation(errorJson) {
+  if (!errorJson) return false;
+  try {
+    return JSON.parse(errorJson)?.code === "RUN_HIJACKED";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Complete a cancellation that is being applied by a caller that does not
  * have a live engine (CLI/Gateway waiting-run paths). Keeping this here makes
  * the durable wait cleanup and the cancellation event/metric inseparable.
@@ -4440,27 +4520,32 @@ export async function finalizeCancelledRun(adapter, runId, options = {}) {
         // makes it durable and atomic for every terminal cancel transition, and
         // it stays idempotent on replay because markSteerExpired only touches
         // rows still in the queued state.
-        const queuedSteers = (await Effect.runPromise(adapter.listSteers(runId))).filter(
-          (steer) => steer.status === "queued",
-        );
-        for (const steer of queuedSteers) {
-          await Effect.runPromise(adapter.markSteerExpired(steer.steerId, cancelledAtMs));
-          const steerExpired = {
-            type: "SteerExpired",
-            runId,
-            nodeId: steer.nodeId,
-            steerId: steer.steerId,
-            timestampMs: cancelledAtMs,
-          };
-          await Effect.runPromise(
-            adapter.insertEventWithNextSeq({
-              runId,
-              timestampMs: cancelledAtMs,
-              type: steerExpired.type,
-              payloadJson: JSON.stringify(steerExpired),
-            }),
+        // RUN_HIJACKED uses the cancelled status as a resumable handoff. Its
+        // queued steers belong to the resumed attempt and must survive.
+        const preserveSteers = isHijackCancellation(options.errorJson) || isHijackCancellation(current.errorJson);
+        if (!preserveSteers) {
+          const queuedSteers = (await Effect.runPromise(adapter.listSteers(runId))).filter(
+            (steer) => steer.status === "queued",
           );
-          persistedEvents.push(steerExpired);
+          for (const steer of queuedSteers) {
+            await Effect.runPromise(adapter.markSteerExpired(steer.steerId, cancelledAtMs));
+            const steerExpired = {
+              type: "SteerExpired",
+              runId,
+              nodeId: steer.nodeId,
+              steerId: steer.steerId,
+              timestampMs: cancelledAtMs,
+            };
+            await Effect.runPromise(
+              adapter.insertEventWithNextSeq({
+                runId,
+                timestampMs: cancelledAtMs,
+                type: steerExpired.type,
+                payloadJson: JSON.stringify(steerExpired),
+              }),
+            );
+            persistedEvents.push(steerExpired);
+          }
         }
       }
     }),
@@ -6215,6 +6300,7 @@ async function legacyExecuteTask(
           }
         }
         supportsNativeStructuredOutput = effectiveAgent.supportsNativeStructuredOutput === true;
+        let structuredOutputInstructions = null;
         if (desc.outputTable && !supportsNativeStructuredOutput) {
           const engineName =
             typeof attemptMeta.agentEngine === "string"
@@ -6239,6 +6325,7 @@ async function legacyExecuteTask(
             "The first character of your response must be `{` and the last character must be `}`.",
             "The workflow will fail unless the entire response is the JSON object.",
           ].join("\n");
+          structuredOutputInstructions = jsonInstructions;
           effectivePrompt = [
             "IMPORTANT: After completing the task below, you MUST output ONLY a raw JSON object. Do NOT wrap it in markdown or add any prose — the workflow fails without it.",
             "",
@@ -6247,6 +6334,14 @@ async function legacyExecuteTask(
             "",
             jsonInstructions,
           ].join("\n");
+        }
+        if (guidedResumeMessages?.length && queuedSteers.length > 0 && structuredOutputInstructions) {
+          // In guided-resume mode generate() receives messages instead of
+          // effectivePrompt. Reissue the JSON contract after the new steer so
+          // the final user turn still constrains the resumed/retried response.
+          const contractMessage = { role: "user", content: structuredOutputInstructions };
+          guidedResumeMessages.push(contractMessage);
+          if (conversationMessages) conversationMessages.push(contractMessage);
         }
         effectivePrompt = prependToolResumeWarningMessage(effectivePrompt, toolResumeWarningMessage);
         // For a forked task, the conversation starts from the copied
@@ -9873,10 +9968,14 @@ async function runWorkflowBodyDriver(workflow, opts) {
       }
       if (runOwnedByCurrentProcess) {
         await cancelPendingTimersBridge(adapter, runId, eventBus, "run-failed");
-        const failed = await Effect.runPromise(
-          adapter.updateRunIfNotCancelledOwned(runId, runtimeOwnerId, {
+        const failedAtMs = nowMs();
+        const failed = await commitTerminalRunWithSteerExpiry(adapter, eventBus, {
+          writeGroup: "driver run failure",
+          runId,
+          timestampMs: failedAtMs,
+          transition: adapter.updateRunIfNotCancelledOwned(runId, runtimeOwnerId, {
             status: "failed",
-            finishedAtMs: nowMs(),
+            finishedAtMs: failedAtMs,
             heartbeatAtMs: null,
             runtimeOwnerId: null,
             cancelRequestedAtMs: null,
@@ -9884,7 +9983,13 @@ async function runWorkflowBodyDriver(workflow, opts) {
             hijackTarget: null,
             errorJson: JSON.stringify(errorInfo),
           }),
-        );
+          terminalEvent: {
+            type: "RunFailed",
+            runId,
+            error: errorInfo,
+            timestampMs: failedAtMs,
+          },
+        });
         if (!failed) {
           const authoritative = await Effect.runPromise(adapter.getRun(runId));
           if (
@@ -9898,25 +10003,11 @@ async function runWorkflowBodyDriver(workflow, opts) {
           return { runId, status: authoritative?.status ?? "failed" };
         }
         reportSmithersError(opts.onError, rawError, { phase: "run", runId });
-        await Effect.runPromise(
-          eventBus.emitEventWithPersist({
-            type: "RunFailed",
-            runId,
-            error: errorInfo,
-            timestampMs: nowMs(),
-          }),
-        );
-        await expireQueuedSteersForRun(adapter, eventBus, runId);
       }
       await annotateRunSpan({ status: "failed" });
       return { runId, status: "failed", error: errorInfo };
     }
     const completedAtMs = nowMs();
-    const completed = await Effect.runPromise(adapter.completeRun(runId, runtimeOwnerId, completedAtMs));
-    if (!completed) {
-      const authoritativeRun = await Effect.runPromise(adapter.getRun(runId));
-      return { runId, status: authoritativeRun?.status ?? "cancelled" };
-    }
     // A `finished` run can still have tolerated child failures (continueOnFail
     // tasks, transient agent failures) that the binary status cannot express.
     // Carry the count onto the result and the RunFinished event row so callers
@@ -9927,16 +10018,23 @@ async function runWorkflowBodyDriver(workflow, opts) {
     // ever passing did not converge — carry them onto the event row and result
     // so status/why can report a degraded (non-done) verdict. (#1464 AWF-1)
     const exhaustedLoops = Array.isArray(result.exhaustedLoops) ? result.exhaustedLoops : [];
-    await Effect.runPromise(
-      eventBus.emitEventWithPersist({
+    const completed = await commitTerminalRunWithSteerExpiry(adapter, eventBus, {
+      writeGroup: "driver run completion",
+      runId,
+      timestampMs: completedAtMs,
+      transition: adapter.completeRun(runId, runtimeOwnerId, completedAtMs),
+      terminalEvent: {
         type: "RunFinished",
         runId,
-        timestampMs: nowMs(),
+        timestampMs: completedAtMs,
         ...(failedChildren > 0 ? { failedChildren, failedChildKeys } : {}),
         ...(exhaustedLoops.length > 0 ? { exhaustedLoops } : {}),
-      }),
-    );
-    await expireQueuedSteersForRun(adapter, eventBus, runId);
+      },
+    });
+    if (!completed) {
+      const authoritativeRun = await Effect.runPromise(adapter.getRun(runId));
+      return { runId, status: authoritativeRun?.status ?? "cancelled" };
+    }
     void Effect.runPromise(Metric.update(runDuration, performance.now() - runStartPerformanceMs));
     logInfo(
       "workflow run finished",
@@ -10638,10 +10736,14 @@ async function runWorkflowBodyDriver(workflow, opts) {
     const errorInfo = errorToJson(err);
     if (runOwnedByCurrentProcess) {
       await cancelPendingTimersBridge(adapter, runId, eventBus, "run-failed");
-      const failed = await Effect.runPromise(
-        adapter.updateRunIfNotCancelledOwned(runId, runtimeOwnerId, {
+      const failedAtMs = nowMs();
+      const failed = await commitTerminalRunWithSteerExpiry(adapter, eventBus, {
+        writeGroup: "unhandled run failure",
+        runId,
+        timestampMs: failedAtMs,
+        transition: adapter.updateRunIfNotCancelledOwned(runId, runtimeOwnerId, {
           status: "failed",
-          finishedAtMs: nowMs(),
+          finishedAtMs: failedAtMs,
           heartbeatAtMs: null,
           runtimeOwnerId: null,
           cancelRequestedAtMs: null,
@@ -10649,7 +10751,13 @@ async function runWorkflowBodyDriver(workflow, opts) {
           hijackTarget: null,
           errorJson: JSON.stringify(errorInfo),
         }),
-      );
+        terminalEvent: {
+          type: "RunFailed",
+          runId,
+          error: errorInfo,
+          timestampMs: failedAtMs,
+        },
+      });
       if (!failed) {
         const authoritative = await Effect.runPromise(adapter.getRun(runId));
         if (
@@ -10664,15 +10772,6 @@ async function runWorkflowBodyDriver(workflow, opts) {
         return { runId, status: authoritative?.status ?? "failed", error: errorInfo };
       }
       reportSmithersError(opts.onError, err, { phase: "run", runId });
-      await Effect.runPromise(
-        eventBus.emitEventWithPersist({
-          type: "RunFailed",
-          runId,
-          error: errorInfo,
-          timestampMs: nowMs(),
-        }),
-      );
-      await expireQueuedSteersForRun(adapter, eventBus, runId);
     }
     await annotateRunSpan({ status: "failed" });
     return { runId, status: "failed", error: errorInfo };
