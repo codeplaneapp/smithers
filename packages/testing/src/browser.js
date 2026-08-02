@@ -2,10 +2,7 @@
 import { RuntimeCapabilityError as RuntimeCapabilityError2, RUNTIME_CAPABILITY_UNAVAILABLE as RUNTIME_CAPABILITY_UNAVAILABLE2 } from "@smthrs/driver/RuntimeCapabilityError";
 
 // src/runtimeConformance.js
-import {
-  RuntimeCapabilityError,
-  RUNTIME_CAPABILITY_UNAVAILABLE
-} from "@smthrs/driver/RuntimeCapabilityError";
+import { RuntimeCapabilityError, RUNTIME_CAPABILITY_UNAVAILABLE } from "@smthrs/driver/RuntimeCapabilityError";
 function fail(message) {
   throw new Error(`runtime conformance: ${message}`);
 }
