@@ -15,8 +15,8 @@ import { describe, expect, test } from "bun:test";
 import { Workflow, Task, Sequence, Loop, runWorkflow } from "smithers-orchestrator";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { enqueueSteer, expireQueuedSteersForRun } from "../src/steers.js";
-import { finalizeCancelledRun } from "../src/engine.js";
+import { enqueueSteer } from "../src/steers.js";
+import { commitTerminalRunWithSteerExpiry, finalizeCancelledRun } from "../src/engine.js";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";
@@ -626,6 +626,75 @@ describe("steer runtime", () => {
     }
   });
 
+  test("terminal event failure rolls back run completion and steer expiry together", async () => {
+    const { db, cleanup } = createTestSmithers({ a: z.object({ v: z.number() }) });
+    const adapter = new SmithersDb(db);
+    const runId = "steer-terminal-fault";
+    const originalInsertEvent = adapter.insertEventWithNextSeq.bind(adapter);
+    const emitted = [];
+    const eventBus = {
+      emitAndTrack: (event) => Effect.sync(() => emitted.push(event)),
+    };
+    try {
+      await adapter.insertRun({
+        runId,
+        workflowName: "steer-test",
+        status: "running",
+        runtimeOwnerId: "owner",
+        createdAtMs: 1,
+      });
+      await adapter.insertNode({
+        runId,
+        nodeId: "task",
+        iteration: 0,
+        state: "in-progress",
+        lastAttempt: 1,
+        updatedAtMs: 1,
+        outputTable: "",
+        label: null,
+      });
+      await Effect.runPromise(enqueueSteer(adapter, runId, "task", "expire atomically"));
+      adapter.insertEventWithNextSeq = (row) =>
+        row.type === "SteerExpired"
+          ? Effect.fail(new SmithersError("DB_WRITE_FAILED", "deterministic SteerExpired insert failure"))
+          : originalInsertEvent(row);
+
+      await expect(
+        commitTerminalRunWithSteerExpiry(adapter, eventBus, {
+          writeGroup: "test terminal fault",
+          runId,
+          timestampMs: 5000,
+          transition: adapter.completeRun(runId, "owner", 5000),
+          terminalEvent: { type: "RunFinished", runId, timestampMs: 5000 },
+        }),
+      ).rejects.toThrow("deterministic SteerExpired insert failure");
+      expect((await adapter.getRun(runId))?.status).toBe("running");
+      expect((await Effect.runPromise(adapter.listSteers(runId)))[0]?.status).toBe("queued");
+      expect(await eventsOfType(adapter, runId, "RunFinished")).toHaveLength(0);
+      expect(await eventsOfType(adapter, runId, "SteerExpired")).toHaveLength(0);
+      expect(emitted).toHaveLength(0);
+
+      adapter.insertEventWithNextSeq = originalInsertEvent;
+      expect(
+        await commitTerminalRunWithSteerExpiry(adapter, eventBus, {
+          writeGroup: "test terminal retry",
+          runId,
+          timestampMs: 5000,
+          transition: adapter.completeRun(runId, "owner", 5000),
+          terminalEvent: { type: "RunFinished", runId, timestampMs: 5000 },
+        }),
+      ).toBe(true);
+      expect((await adapter.getRun(runId))?.status).toBe("finished");
+      expect((await Effect.runPromise(adapter.listSteers(runId)))[0]?.status).toBe("expired");
+      expect(await eventsOfType(adapter, runId, "RunFinished")).toHaveLength(1);
+      expect(await eventsOfType(adapter, runId, "SteerExpired")).toHaveLength(1);
+      expect(emitted.map((event) => event.type)).toEqual(["RunFinished", "SteerExpired"]);
+    } finally {
+      adapter.insertEventWithNextSeq = originalInsertEvent;
+      cleanup();
+    }
+  });
+
   test("concurrent finalization cannot strand a queued steer after the run turns terminal", async () => {
     const { db, cleanup } = createTestSmithers({ a: z.object({ v: z.number() }) });
     const publisher = new SmithersDb(db);
@@ -667,14 +736,21 @@ describe("steer runtime", () => {
 
       const publication = Effect.runPromise(enqueueSteer(publisher, runId, "task", "race-safe"));
       await eventEntered;
-      const finalization = Effect.runPromise(finalizer.completeRun(runId, "owner", 5000)).then(async (completed) => {
-        expect(completed).toBe(true);
-        await expireQueuedSteersForRun(finalizer, { emitEventWithPersist: () => Effect.void }, runId, 5001);
-      });
+      const finalization = commitTerminalRunWithSteerExpiry(
+        finalizer,
+        { emitAndTrack: () => Effect.void },
+        {
+          writeGroup: "test concurrent finalization",
+          runId,
+          timestampMs: 5000,
+          transition: finalizer.completeRun(runId, "owner", 5000),
+          terminalEvent: { type: "RunFinished", runId, timestampMs: 5000 },
+        },
+      );
       await new Promise((resolve) => setImmediate(resolve));
       releaseEvent();
       await publication;
-      await finalization;
+      expect(await finalization).toBe(true);
 
       expect((await Effect.runPromise(finalizer.getRun(runId)))?.status).toBe("finished");
       expect((await Effect.runPromise(finalizer.listSteers(runId)))[0]?.status).toBe("expired");

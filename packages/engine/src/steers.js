@@ -93,6 +93,61 @@ export function enqueueSteer(adapter, runId, nodeId, message, options = {}) {
 }
 
 /**
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @param {number} expiredAtMs
+ * @returns {Effect.Effect<unknown[], unknown>}
+ */
+function expireQueuedSteersEffect(adapter, runId, expiredAtMs) {
+  return Effect.gen(function* () {
+    const persistedEvents = [];
+    const queued = (yield* adapter.listSteers(runId)).filter((steer) => steer.status === "queued");
+    for (const steer of queued) {
+      yield* adapter.markSteerExpired(steer.steerId, expiredAtMs);
+      const event = {
+        type: "SteerExpired",
+        runId,
+        nodeId: steer.nodeId,
+        steerId: steer.steerId,
+        timestampMs: expiredAtMs,
+      };
+      yield* adapter.insertEventWithNextSeq({
+        runId,
+        timestampMs: expiredAtMs,
+        type: event.type,
+        payloadJson: JSON.stringify(event),
+      });
+      persistedEvents.push(event);
+    }
+    return persistedEvents;
+  });
+}
+
+/**
+ * Emit events whose database rows were already committed by the surrounding
+ * terminal transaction.
+ *
+ * @param {{ emitEventWithPersist: (event: unknown) => Effect.Effect<void, unknown> }} eventBus
+ * @param {unknown[]} events
+ */
+async function emitPersistedEvents(eventBus, events) {
+  for (const event of events) {
+    const committedBus = /** @type {{
+     *   emitAndTrack?: (event: unknown) => Effect.Effect<void, unknown>;
+     *   persistLog?: (event: unknown) => Effect.Effect<void, unknown>;
+     * }} */ (eventBus);
+    if (typeof committedBus.emitAndTrack === "function") {
+      await Effect.runPromise(committedBus.emitAndTrack(event));
+      if (typeof committedBus.persistLog === "function") {
+        await Effect.runPromise(Effect.ignore(committedBus.persistLog(event)));
+      }
+    } else {
+      await Effect.runPromise(eventBus.emitEventWithPersist(event));
+    }
+  }
+}
+
+/**
  * Expire every still-queued steer for a run. Called when a run reaches a
  * terminal state (finished/failed): at that point every node has reached
  * terminal with no further generate call, so any un-consumed steer can never
@@ -100,7 +155,8 @@ export function enqueueSteer(adapter, runId, nodeId, message, options = {}) {
  * NodeFinished hook would prematurely expire steers destined for a `<Loop>`
  * node's next iteration (same nodeId, higher iteration), which has not run yet.
  *
- * Emits one `SteerExpired` per steer through the run's in-process event bus.
+ * The steer mutations and their `SteerExpired` rows commit atomically, then
+ * the committed events are published through the run's in-process event bus.
  *
  * @param {SmithersDb} adapter
  * @param {{ emitEventWithPersist: (event: unknown) => Effect.Effect<void, unknown> }} eventBus
@@ -109,22 +165,10 @@ export function enqueueSteer(adapter, runId, nodeId, message, options = {}) {
  * @returns {Promise<void>}
  */
 export async function expireQueuedSteersForRun(adapter, eventBus, runId, timestampMs) {
-  const all = await Effect.runPromise(adapter.listSteers(runId));
-  const queued = all.filter((steer) => steer.status === "queued");
-  if (queued.length === 0) {
-    return;
-  }
   const expiredAtMs = timestampMs ?? nowMs();
-  for (const steer of queued) {
-    await Effect.runPromise(adapter.markSteerExpired(steer.steerId, expiredAtMs));
-    await Effect.runPromise(
-      eventBus.emitEventWithPersist({
-        type: "SteerExpired",
-        runId,
-        nodeId: steer.nodeId,
-        steerId: steer.steerId,
-        timestampMs: expiredAtMs,
-      }),
-    );
-  }
+  const persistedEvents = await adapter.withTransaction(
+    "expire queued steers",
+    expireQueuedSteersEffect(adapter, runId, expiredAtMs),
+  );
+  await emitPersistedEvents(eventBus, persistedEvents);
 }
