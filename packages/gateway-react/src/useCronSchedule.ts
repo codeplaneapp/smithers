@@ -14,7 +14,7 @@ export type UseCronScheduleOptions = {
 
 /**
  * Expand every cron's upcoming occurrences within the window into calendar
- * events (`@smithers-orchestrator/ui/calendar`-shaped). Async state passes
+ * events (`@smthrs/ui/calendar`-shaped). Async state passes
  * straight through from {@link useGatewayCrons}; `data` stays undefined until
  * the first populated snapshot, then is a chronologically sorted event list.
  */

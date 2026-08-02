@@ -1,8 +1,8 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { SmithersDb, Task, Workflow, runWorkflow } from "smithers-orchestrator";
-import { Subflow } from "@smithers-orchestrator/components/components/index";
+import { SmithersDb, Task, Workflow, runWorkflow } from "smthrs";
+import { Subflow } from "@smthrs/components/components/index";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { Effect } from "effect";
 const END_TO_END_TIMEOUT_MS = 30_000;

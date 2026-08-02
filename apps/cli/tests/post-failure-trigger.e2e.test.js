@@ -23,8 +23,8 @@ setDefaultTimeout(240_000);
  */
 function failingWorkflowSource(name = "fail-demo") {
   return [
-    "/** @jsxImportSource smithers-orchestrator */",
-    'import { createSmithers, Workflow, Task } from "smithers-orchestrator";',
+    "/** @jsxImportSource smthrs */",
+    'import { createSmithers, Workflow, Task } from "smthrs";',
     'import { z } from "zod";',
     "",
     "const { smithers, outputs } = createSmithers({",

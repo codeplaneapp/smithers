@@ -6,11 +6,11 @@
  * Pattern: git diff/conflict parser -> mediator agent -> optional apply step -> human reviewer.
  * Use cases: merge conflict triage, automated resolution proposals, team code integration.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import ParsePrompt from "./prompts/merge-conflict-mediator/parse.mdx";
 import MediatePrompt from "./prompts/merge-conflict-mediator/mediate.mdx";

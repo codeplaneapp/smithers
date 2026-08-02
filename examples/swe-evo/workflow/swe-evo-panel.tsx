@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * SWE-EVO benchmark workflow — orchestration variant.
  *
@@ -28,12 +28,12 @@
  * reviewer's user-prompt.
  */
 
-import { createSmithers } from "smithers-orchestrator";
-// In-repo, "smithers-orchestrator" resolves to a limited examples entry that does
+import { createSmithers } from "smthrs";
+// In-repo, "smthrs" resolves to a limited examples entry that does
 // not re-export the composite components; import them from the components package
-// directly (end-user code can `import { Panel, ReviewLoop } from "smithers-orchestrator"`).
-import { Panel, ReviewLoop } from "@smithers-orchestrator/components";
-import { AntigravityAgent, ClaudeCodeAgent, CodexAgent } from "@smithers-orchestrator/agents";
+// directly (end-user code can `import { Panel, ReviewLoop } from "smthrs"`).
+import { Panel, ReviewLoop } from "@smthrs/components";
+import { AntigravityAgent, ClaudeCodeAgent, CodexAgent } from "@smthrs/agents";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod/v4";

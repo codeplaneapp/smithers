@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { spawnCaptureEffect } from "@smithers-orchestrator/driver/child-process";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { spawnCaptureEffect } from "@smthrs/driver/child-process";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { Effect } from "effect";
 import { normalizeSandboxEgressConfig, sandboxEgressEnv, SANDBOX_EGRESS_CA_BUNDLE_RELATIVE_PATH } from "../egress.js";
 

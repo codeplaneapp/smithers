@@ -14,8 +14,8 @@
  *   smithers workflow run examples/incident-runbook-memory.jsx \
  *     --input '{"incident": "deploys failing again, cache tier cold after scale-down", "topic": "deploys"}'
  */
-import { Sequence, Branch } from "smithers-orchestrator";
-import { createMemoryStore, ensureSmithersTables } from "smithers-orchestrator";
+import { Sequence, Branch } from "smthrs";
+import { createMemoryStore, ensureSmithersTables } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent, tool } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";

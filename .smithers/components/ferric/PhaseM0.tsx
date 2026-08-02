@@ -1,7 +1,7 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ContinueAsNew, Loop, Parallel, Sequence } from "smithers-orchestrator";
+import { ContinueAsNew, Loop, Parallel, Sequence } from "smthrs";
 import { Task, outputs } from "./ferricSmithers";
 import { CampaignGate, gateRow } from "./CampaignGate";
 import { Closeout } from "./Closeout";

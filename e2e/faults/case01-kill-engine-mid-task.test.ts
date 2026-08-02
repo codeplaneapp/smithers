@@ -4,11 +4,11 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import type { RunRow } from "@smithers-orchestrator/db/adapter/RunRow";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { deriveRunState } from "@smithers-orchestrator/db/runState/deriveRunState";
+import { createSmithers } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
+import type { RunRow } from "@smthrs/db/adapter/RunRow";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { deriveRunState } from "@smthrs/db/runState/deriveRunState";
 import { corruptHeartbeat } from "../harness/corruptHeartbeat.ts";
 
 // case01 - stale heartbeat and exclusive supervisor claim against the REAL DB.

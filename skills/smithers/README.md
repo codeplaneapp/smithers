@@ -23,7 +23,7 @@ whose skill directory it can write to today: Claude Code and Pi. To sync the
 generated Smithers CLI skill set manually:
 
 ```bash
-bunx smithers-orchestrator skills add
+bunx smthrs skills add
 ```
 
 Use `--no-global` to scope the skill to the current project, not the global agent
@@ -31,8 +31,8 @@ directory. `skills add` has no `--agent` target filter; use `mcp add --agent
 <name>` to target one MCP integration.
 
 For agents without a skills directory, point them at
-`bunx smithers-orchestrator docs-full` (prints the same `llms-full.txt`), or
-`bunx smithers-orchestrator ask "<question>"`.
+`bunx smthrs docs-full` (prints the same `llms-full.txt`), or
+`bunx smthrs ask "<question>"`.
 
 ## Keeping it fresh
 

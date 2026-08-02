@@ -1,5 +1,5 @@
 /**
- * Tests for `@smithers-orchestrator/agent-eliza/conventions`
+ * Tests for `@smthrs/agent-eliza/conventions`
  *
  * Uses bun:test — no mock frameworks. Uses real implementations throughout.
  * Frontmatter uses `---`-fenced YAML blocks (elizaOS convention).
@@ -21,7 +21,7 @@ import { formatWorkflowsForPrompt } from "../src/conventions/formatter.js";
 import { registerWorkflows, toSkill, pluginToElizaPlugin } from "../src/conventions/register.js";
 import { loadWorkflowsFromDir, loadWorkflows } from "../src/conventions/loader.js";
 import type { WorkflowDefinition } from "../src/conventions/types.js";
-import type { SmithersWorkflow } from "smithers-orchestrator";
+import type { SmithersWorkflow } from "smthrs";
 
 // ---------------------------------------------------------------------------
 // Helpers

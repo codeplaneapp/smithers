@@ -1,4 +1,4 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { computeRunStateFromRow } from "./computeRunStateFromRow.js";
 
 /** @typedef {import("../adapter/SmithersDb.js").SmithersDb} SmithersDb */

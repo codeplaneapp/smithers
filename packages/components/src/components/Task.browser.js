@@ -9,8 +9,8 @@ import { createTaskComponent } from "./taskCore.js";
 export { renderPromptToText } from "./taskCore.js";
 
 /**
- * @param {import("@smithers-orchestrator/agents/AgentLike").AgentLike} agent
- * @returns {import("@smithers-orchestrator/agents/AgentLike").AgentLike}
+ * @param {import("@smthrs/agents/AgentLike").AgentLike} agent
+ * @returns {import("@smthrs/agents/AgentLike").AgentLike}
  */
 function passthroughCliToolAllowlist(agent) {
   return agent;

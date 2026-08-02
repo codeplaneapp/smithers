@@ -1,6 +1,6 @@
 /**
  * Shared terminal status vocabulary. Tone names mirror
- * `@smithers-orchestrator/ui`'s canonical `StatusClass`; terminal-safe hex
+ * `@smthrs/ui`'s canonical `StatusClass`; terminal-safe hex
  * values mirror ui-core's node glyph palette.
  */
 export type TuiStatusTone = "ok" | "warn" | "bad" | "muted" | "run";

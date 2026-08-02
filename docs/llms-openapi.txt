@@ -15,7 +15,7 @@
 ```ts
 import { ToolLoopAgent } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { createOpenApiTools } from "smithers-orchestrator/openapi";
+import { createOpenApiTools } from "smthrs/openapi";
 
 const tools = await createOpenApiTools("./petstore.json", {
   baseUrl: "https://api.petstore.example.com",
@@ -83,13 +83,13 @@ Pass the spec itself as the first argument to `createOpenApiTools(input, options
 Generate a reusable AI SDK tools module:
 
 ```bash
-bunx smithers-orchestrator openapi generate ./api/openapi.yaml ./src/openapi-tools.js
+bunx smthrs openapi generate ./api/openapi.yaml ./src/openapi-tools.js
 ```
 
 The generated module imports `createOpenApiToolsSync`, creates the tools from the spec, and exports them as both `tools` and the default export.
 
 ```bash
-bunx smithers-orchestrator openapi list ./api/openapi.yaml
+bunx smthrs openapi list ./api/openapi.yaml
 ```
 
 `openapi list` previews every operationId, method, path, and summary: useful for auditing what an agent can call before wiring it up.

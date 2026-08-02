@@ -1,7 +1,7 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import React from "react";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { SmithersRenderer } from "@smthrs/react-reconciler";
 /**
  * @param {HostNode | null} root
  * @returns {WorkflowGraph}
@@ -19,7 +19,7 @@ describe("SmithersRenderer", () => {
     expect(hook).toBeDefined();
     expect(typeof hook.inject).toBe("function");
   });
-  it("uses @smithers-orchestrator/graph extractGraph by default", async () => {
+  it("uses @smthrs/graph extractGraph by default", async () => {
     const renderer = new SmithersRenderer();
     const graph = await renderer.render(
       React.createElement("smithers:task", {

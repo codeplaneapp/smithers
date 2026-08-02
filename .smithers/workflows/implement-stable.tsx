@@ -1,7 +1,7 @@
 // smithers-source: user
 // smithers-display-name: Implement Stable
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Sequence, Task } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, Sequence, Task } from "smthrs";
 import { z } from "zod/v4";
 import { implementer, panelists, synthesizer, validator } from "../components/roles";
 import {

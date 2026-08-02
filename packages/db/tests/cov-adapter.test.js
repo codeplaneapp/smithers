@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Effect } from "effect";
 import { z } from "zod";
-import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
+import { canonicalizeXml } from "@smthrs/graph/utils/xml";
 import { SmithersDb } from "../src/adapter.js";
 import { ensureSmithersTables } from "../src/ensure.js";
 import { zodToTable } from "../src/zodToTable.js";

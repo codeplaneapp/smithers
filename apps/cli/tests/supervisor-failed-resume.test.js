@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { parseSupervisorClaimAttempts, supervisorPollEffect } from "../src/supervisor.js";
 
 const START = Date.now();

@@ -1,10 +1,10 @@
-import * as _smithers_orchestrator_graph_types from '@smithers-orchestrator/graph/types';
-import { ExtractGraph as ExtractGraph$1, HostNode as HostNode$1 } from '@smithers-orchestrator/graph/types';
+import * as _smithers_orchestrator_graph_types from '@smthrs/graph/types';
+import { ExtractGraph as ExtractGraph$1, HostNode as HostNode$1 } from '@smthrs/graph/types';
 import * as React$1 from 'react';
 import React__default from 'react';
-import { WorkflowDriver } from '@smithers-orchestrator/driver';
-import { SmithersCtx } from '@smithers-orchestrator/driver/SmithersCtx';
-export { SmithersCtx } from '@smithers-orchestrator/driver/SmithersCtx';
+import { WorkflowDriver } from '@smthrs/driver';
+import { SmithersCtx } from '@smthrs/driver/SmithersCtx';
+export { SmithersCtx } from '@smthrs/driver/SmithersCtx';
 
 type SmithersRendererOptions$1 = {
     extractGraph?: ExtractGraph$1;

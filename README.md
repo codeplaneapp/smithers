@@ -2,7 +2,7 @@
 
 **Agent workflows you can watch live, rewind, fork, and replay.**
 
-[![npm](https://img.shields.io/npm/v/smithers-orchestrator?color=2563eb&label=npm)](https://www.npmjs.com/package/smithers-orchestrator)
+[![npm](https://img.shields.io/npm/v/smthrs?color=2563eb&label=npm)](https://www.npmjs.com/package/smthrs)
 [![CI](https://github.com/smithersai/smithers/actions/workflows/ci.yml/badge.svg)](https://github.com/smithersai/smithers/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-2563eb)](#license)
 [![Docs](https://img.shields.io/badge/docs-smithers.sh-2563eb)](https://smithers.sh)
@@ -86,7 +86,7 @@ approvals.
 One command sets everything up. From inside your project:
 
 ```bash
-bunx smithers-orchestrator init
+bunx smthrs init
 ```
 
 `init` does everything:
@@ -104,7 +104,7 @@ Then just ask:
 Your agent picks the right workflow, starts the run, and keeps going through retries and
 review loops until the work is actually done.
 
-To wire the MCP server into every detected agent too, run `bunx smithers-orchestrator mcp
+To wire the MCP server into every detected agent too, run `bunx smthrs mcp
 add`. See [Agent Support](https://smithers.sh/agents/overview) for the full per-agent
 matrix, and [`skills/smithers/`](./skills/smithers) for the onboarding skill itself.
 
@@ -126,7 +126,7 @@ This page is the 90-second version. The **[Tour](https://smithers.sh/tour)** is 
 > *"implement this request and keep iterating until a reviewer signs off"*
 
 ```tsx
-import { createSmithers, Loop, CodexAgent } from "smithers-orchestrator";
+import { createSmithers, Loop, CodexAgent } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, Task, smithers, outputs } = createSmithers({
@@ -192,11 +192,11 @@ re-runs, the run finishes. No recovery code.*
 <img src="./docs/images/why/crash-resume.gif" alt="A Smithers run is killed partway through, then resumes: the completed task is skipped, the in-flight task re-runs as a new attempt, and the run finishes" width="1032" />
 
 ```bash
-bunx smithers-orchestrator up workflow.tsx --input '{"description":"Fix bug"}'
-bunx smithers-orchestrator up workflow.tsx --run-id abc123 --resume true   # resume after a crash
-bunx smithers-orchestrator rewind abc123 --frame 4                          # time-travel to an earlier frame
-bunx smithers-orchestrator fork abc123                                      # branch an alternate timeline
-bunx smithers-orchestrator replay abc123                                    # replay from a checkpoint
+bunx smthrs up workflow.tsx --input '{"description":"Fix bug"}'
+bunx smthrs up workflow.tsx --run-id abc123 --resume true   # resume after a crash
+bunx smthrs rewind abc123 --frame 4                          # time-travel to an earlier frame
+bunx smthrs fork abc123                                      # branch an alternate timeline
+bunx smthrs replay abc123                                    # replay from a checkpoint
 ```
 
 ## Drive and watch your runs
@@ -205,21 +205,21 @@ Prefer the CLI? The seeded workflows run directly, and whether your agent starte
 you did, you can see exactly what's happening:
 
 ```bash
-bunx smithers-orchestrator workflow run create-workflow --prompt "build a small hello workflow"
+bunx smthrs workflow run create-workflow --prompt "build a small hello workflow"
 # plan is archived under examples/init-pack/; copy it into .smithers/workflows/ first
-bunx smithers-orchestrator workflow run plan --prompt "add rate limiting and API key rotation"
+bunx smthrs workflow run plan --prompt "add rate limiting and API key rotation"
 
-bunx smithers-orchestrator ps              # list active, paused, and recently completed runs
-bunx smithers-orchestrator inspect RUN_ID  # steps, agents, approvals, and outputs for one run
-bunx smithers-orchestrator logs RUN_ID     # tail the event log
-bunx smithers-orchestrator chat RUN_ID     # read the agent's chat output
+bunx smthrs ps              # list active, paused, and recently completed runs
+bunx smthrs inspect RUN_ID  # steps, agents, approvals, and outputs for one run
+bunx smthrs logs RUN_ID     # tail the event log
+bunx smthrs chat RUN_ID     # read the agent's chat output
 ```
 
 `ps` shows you what needs attention (a paused approval, a recent failure); `inspect` drills
 into a single run so you can follow each step and agent as it works. Run
-`bunx smithers-orchestrator starters` to browse plain-English starters.
+`bunx smthrs starters` to browse plain-English starters.
 
-Prefer a live page over every run? `bunx smithers-orchestrator monitor` opens the Smithers
+Prefer a live page over every run? `bunx smthrs monitor` opens the Smithers
 Monitor: the grouped run list, each run's execution tree with per-node status, and the
 structured event stream underneath.
 
@@ -247,17 +247,17 @@ The same `<Sandbox>` primitive runs an agent locally (Bubblewrap, Docker, or
 [Microsandbox](https://github.com/superradcompany/microsandbox)) or through any
 backend you implement against `SandboxProvider`.
 
-Beyond [`init`](#get-started), `bunx smithers-orchestrator mcp add` also wires the MCP
+Beyond [`init`](#get-started), `bunx smthrs mcp add` also wires the MCP
 server into Cursor, Copilot, Hermes, OpenClaw, and ~20 more coding agents.
 
 ## Built-in workflows
 
-`bunx smithers-orchestrator init` installs a focused pack: `create-workflow`, `create-skill`,
+`bunx smthrs init` installs a focused pack: `create-workflow`, `create-skill`,
 and `docs-driven-development`. Former starter workflows are preserved under
 `examples/init-pack/`.
 
 ```bash
-bunx smithers-orchestrator workflow run create-workflow --prompt "add rate limiting"
+bunx smthrs workflow run create-workflow --prompt "add rate limiting"
 ```
 
 See [`docs/workflows/`](./docs/workflows/overview.mdx) for the curated pack and
@@ -281,7 +281,7 @@ the runtime:
 - **Approvals**: gate risky steps behind a human approve or deny before they run.
 - **Isolation**: sandbox agents so edits never touch your host.
 - **Observability**: Prometheus metrics and OpenTelemetry traces out of the box, plus a
-  one-command local Grafana stack (`bunx smithers-orchestrator observability`).
+  one-command local Grafana stack (`bunx smthrs observability`).
 - **Evals and prompt optimization**: repeatable regression suites, and GEPA-style tuning
   that rewrites prompts only when the score improves.
 - **Cross-run memory**: durable facts, threads, and notes with keyword recall in local

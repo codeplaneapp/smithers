@@ -5,7 +5,7 @@ description: Run a Smithers <Sandbox> child workflow on AWS Fargate or CodeBuild
 
 # AWS Sandbox Provider
 
-`@smithers-orchestrator/aws` is a Smithers `SandboxProvider` that runs a
+`@smthrs/aws` is a Smithers `SandboxProvider` that runs a
 `<Sandbox>` child workflow's request on AWS: Fargate (ECS `RunTask`, the
 default) or CodeBuild. AWS shares no filesystem with the orchestrator, so the
 request/result bundle transports through an S3 bucket. The shared
@@ -20,7 +20,7 @@ import {
   createAwsSandboxProvider,
   registerAwsSandboxProvider,
   AWS_SANDBOX_PROVIDER_ID,
-} from "smithers-orchestrator/aws";
+} from "smthrs/aws";
 ```
 
 ## Credentials
@@ -54,7 +54,7 @@ The task or build role needs S3 read/write on the prefix.
 ## Usage
 
 ```tsx
-import { createAwsSandboxProvider } from "smithers-orchestrator/aws";
+import { createAwsSandboxProvider } from "smthrs/aws";
 
 // Fargate (default)
 const provider = createAwsSandboxProvider({

@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // Orchestration-behavior fluency: does a weak model, grounded in our docs/skill,
 // exhibit the long-lived-orchestrator disciplines? — protect its own context by
 // fanning big reads out to disposable sub-agents (the "lifeline" rule), fan out

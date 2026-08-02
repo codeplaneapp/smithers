@@ -1,8 +1,8 @@
 // Deterministic fixture workflow for phase1 issue-sweep eval suite. Demonstrates
 // parallel per-item correction loops, ctx.latest in loop conditions, and global
 // MergeQueue for landing. Compute nodes only: all lanes run locally without agent calls.
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 
 const inputSchema = z.object({

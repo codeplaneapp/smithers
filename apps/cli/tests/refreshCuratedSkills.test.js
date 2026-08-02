@@ -8,8 +8,7 @@ import { saveSkillDeselections } from "../src/installCuratedSkill.js";
 
 const CURRENT_SKILL = "---\nname: smithers\n---\n# Smithers\nDo it — don't describe it.\n";
 const CURRENT_BUNDLE = "LLMS-FULL BUNDLE v2\n";
-const RETIRED_SKILL =
-  "---\nname: smithers-orchestrator\nrecommend-plan-mode: true\n---\n# Smithers Orchestrator\nRalph Wiggum Loop\n";
+const RETIRED_SKILL = "---\nname: smthrs\nrecommend-plan-mode: true\n---\n# Smithers Orchestrator\nRalph Wiggum Loop\n";
 
 function tempDir(prefix) {
   const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -39,7 +38,7 @@ const refresh = (f) => refreshCuratedSkills({ homeDir: f.homeDir, sourceDir: f.s
 
 test("isRetiredCuratedSkill flags the orchestrator skill, not the current one", () => {
   expect(isRetiredCuratedSkill(RETIRED_SKILL)).toBe(true);
-  expect(isRetiredCuratedSkill("---\nname: smithers-orchestrator\n---\nx")).toBe(true);
+  expect(isRetiredCuratedSkill("---\nname: smthrs\n---\nx")).toBe(true);
   expect(isRetiredCuratedSkill("---\nname: smithers\nrecommend-plan-mode: true\n---\nx")).toBe(true);
   expect(isRetiredCuratedSkill(CURRENT_SKILL)).toBe(false);
 });
@@ -100,12 +99,12 @@ test("the retired skill is rewritten in place when it occupies the smithers dir"
 
 test("a retired skill dir is removed (by name and by content)", () => {
   const f = fixture();
-  writeSkillDir(f.claudeSkill("smithers-orchestrator"), RETIRED_SKILL); // by name
+  writeSkillDir(f.claudeSkill("smthrs"), RETIRED_SKILL); // by name
   writeSkillDir(f.claudeSkill("legacy-copy"), RETIRED_SKILL); // by content
 
   const result = refresh(f);
 
-  expect(existsSync(f.claudeSkill("smithers-orchestrator"))).toBe(false);
+  expect(existsSync(f.claudeSkill("smthrs"))).toBe(false);
   expect(existsSync(f.claudeSkill("legacy-copy"))).toBe(false);
   expect(result.legacyRemoved.length).toBe(2);
   expect(result.changed).toBe(true);
@@ -217,14 +216,14 @@ test("a deselected agent still has its harmful retired skill removed (deselectio
   const f = fixture();
   // Claude is deselected, and it carries the legacy retired skill.
   saveSkillDeselections(f.homeDir, ["claude"]);
-  writeSkillDir(f.claudeSkill("smithers-orchestrator"), RETIRED_SKILL);
+  writeSkillDir(f.claudeSkill("smthrs"), RETIRED_SKILL);
 
   const result = refresh(f);
 
   // The harmful retired skill must be removed even for a deselected agent —
   // deselection means "no smithers curated skill here", not "keep the retired one".
-  expect(existsSync(f.claudeSkill("smithers-orchestrator"))).toBe(false);
-  expect(result.legacyRemoved.some((r) => r.path.endsWith("smithers-orchestrator"))).toBe(true);
+  expect(existsSync(f.claudeSkill("smthrs"))).toBe(false);
+  expect(result.legacyRemoved.some((r) => r.path.endsWith("smthrs"))).toBe(true);
   // ...but the current skill must NOT be (re)installed on the deselected agent.
   expect(existsSync(f.claudeSkill("smithers"))).toBe(false);
   expect(result.updated).toHaveLength(0);

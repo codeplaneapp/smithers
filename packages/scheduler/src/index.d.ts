@@ -1,8 +1,8 @@
 import * as effect from 'effect';
 import { Context, Layer, Effect, Schedule } from 'effect';
-import * as _smithers_orchestrator_graph from '@smithers-orchestrator/graph';
-import { TaskDescriptor as TaskDescriptor$3, WorkflowGraph } from '@smithers-orchestrator/graph';
-import { TaskDescriptor as TaskDescriptor$4 } from '@smithers-orchestrator/graph/TaskDescriptor';
+import * as _smithers_orchestrator_graph from '@smthrs/graph';
+import { TaskDescriptor as TaskDescriptor$3, WorkflowGraph } from '@smthrs/graph';
+import { TaskDescriptor as TaskDescriptor$4 } from '@smthrs/graph/TaskDescriptor';
 
 type TaskState$2 = "pending" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "waiting-bound" | "bound-stale" | "in-progress" | "finished" | "failed" | "cancelled" | "skipped";
 
@@ -319,8 +319,8 @@ type SmithersAlertPolicy$1 = {
 };
 /**
  * Where a workflow's `RunResult.output` rows are read from. Mirrors the
- * component-level `OutputTarget` union (see `@smithers-orchestrator/components`
- * `OutputTarget`), restated locally because `@smithers-orchestrator/scheduler`
+ * component-level `OutputTarget` union (see `@smthrs/components`
+ * `OutputTarget`), restated locally because `@smthrs/scheduler`
  * is a pure decision engine that must not depend on zod or components:
  *
  * - a Zod schema object registered via `createSmithers(...).outputs.<key>` (recommended),
@@ -397,7 +397,7 @@ declare function cloneTaskStateMap(states: ReadonlyTaskStateMap$1): TaskStateMap
 type ReadonlyTaskStateMap$1 = ReadonlyTaskStateMap$2;
 type TaskStateMap$3 = TaskStateMap$4;
 
-/** @typedef {import("@smithers-orchestrator/graph").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("@smthrs/graph").TaskDescriptor} TaskDescriptor */
 /** @typedef {import("./TaskState.ts").TaskState} TaskState */
 /**
  * @param {TaskState} state

@@ -1,4 +1,4 @@
-import { createTranscriptionTool } from "@smithers-orchestrator/agents";
+import { createTranscriptionTool } from "@smthrs/agents";
 import type {
   AudioHostResolver,
   CreateTranscriptionToolOptions,
@@ -8,7 +8,7 @@ import type {
   TranscriptionProvider,
   TranscriptionToolInput,
   TranscriptionToolResult,
-} from "@smithers-orchestrator/agents";
+} from "@smthrs/agents";
 
 const resolver: AudioHostResolver = async (_hostname, { signal }) => {
   signal?.throwIfAborted();

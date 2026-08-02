@@ -2,9 +2,9 @@
 // smithers-metadata-version: 1
 // smithers-display-name: Docs Driven Development
 // smithers-description: Maintain a living product spec (features.json + WYSIWYG docs) and run an audit→triage→implement→review improvement loop over it.
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
-import { Approval, createSmithers, Loop, Sequence, Task } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
+import { Approval, createSmithers, Loop, Sequence, Task } from "smthrs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";

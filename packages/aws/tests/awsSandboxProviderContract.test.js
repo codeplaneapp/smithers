@@ -1,4 +1,4 @@
-import { createSandboxProviderContractSuite } from "@smithers-orchestrator/sandbox";
+import { createSandboxProviderContractSuite } from "@smthrs/sandbox";
 import { AWS_SANDBOX_PROVIDER_ID, createAwsSandboxProvider, createMockAwsSandboxEnvironment } from "../src/index.js";
 
 const FARGATE_OPTS = {

@@ -10,13 +10,13 @@ into a real Smithers workflow: it recommends one from your repo and recent
 sessions instead of a blank catalog, then delegates the build to [`create-workflow`](/workflows/create-workflow).
 
 ```bash
-bunx smithers-orchestrator workflow run make-workflow-tutorial
+bunx smthrs workflow run make-workflow-tutorial
 ```
 
 You can bias the recommendation step with a hint:
 
 ```bash
-bunx smithers-orchestrator workflow run make-workflow-tutorial \
+bunx smthrs workflow run make-workflow-tutorial \
   --input '{"hint":"Find a workflow for release prep and changelog publishing"}'
 ```
 

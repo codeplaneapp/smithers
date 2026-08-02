@@ -10,8 +10,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadOutputs } from "@smithers-orchestrator/db/snapshot";
-import { runWorkflow } from "@smithers-orchestrator/engine";
+import { loadOutputs } from "@smthrs/db/snapshot";
+import { runWorkflow } from "@smthrs/engine";
 import { Effect } from "effect";
 import { parseJsonColumn } from "../../apps/review/src/cli/parseJsonColumn";
 import { createReviewAgents } from "../../apps/review/src/workflow/createReviewAgents";

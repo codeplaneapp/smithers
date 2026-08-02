@@ -1,9 +1,9 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { Effect, Layer, Metric } from "effect";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-import { dbQueryDuration } from "@smithers-orchestrator/observability/metrics";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
+import { dbQueryDuration } from "@smthrs/observability/metrics";
+import { nowMs } from "@smthrs/scheduler/nowMs";
 import { namespaceToString } from "../namespaceToString.js";
 import { parseNamespace } from "../parseNamespace.js";
 import {
@@ -27,7 +27,7 @@ import { MemoryStoreService } from "./MemoryStoreService.js";
 /** @typedef {import("../MemoryProvenance.ts").MemoryProvenance} MemoryProvenance */
 /** @typedef {import("../MemoryMessage.ts").MemoryMessage} MemoryMessage */
 /** @typedef {import("../MemoryThread.ts").MemoryThread} MemoryThread */
-/** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
+/** @typedef {import("@smthrs/errors/SmithersError").SmithersError} SmithersError */
 
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} BunSQLiteDatabase */
 

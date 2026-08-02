@@ -16,13 +16,13 @@ import {
   realpathSync,
   renameSync,
 } from "node:fs";
-import { accountsRoot } from "@smithers-orchestrator/accounts";
+import { accountsRoot } from "@smthrs/accounts";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { decode, encode } from "@toon-format/toon";
 import { loadManifest, parseManifest, renderManifest } from "./manifest.js";
 import { evaluateEligibility, parseWorkflowFrontmatter } from "./workflows.js";
 
-const ALLOWED = new Set(["smithers-orchestrator", "react", "zod"]);
+const ALLOWED = new Set(["smthrs", "react", "zod"]);
 
 export function parsePackSpec(spec) {
   if (typeof spec !== "string" || !spec.trim()) throw new Error("Pack spec is required");
@@ -155,13 +155,13 @@ export function listLockedPacks(from = process.cwd()) {
 }
 
 function importAllowed(name) {
-  // smithers-orchestrator subpaths matter: every canonical pack UI imports
-  // "smithers-orchestrator/gateway-react" (and JSX emits ".../jsx-runtime").
+  // smthrs subpaths matter: every canonical pack UI imports
+  // "smthrs/gateway-react" (and JSX emits ".../jsx-runtime").
   return (
     name.startsWith(".") ||
     ALLOWED.has(name) ||
-    name.startsWith("smithers-orchestrator/") ||
-    name.startsWith("@smithers-orchestrator/") ||
+    name.startsWith("smthrs/") ||
+    name.startsWith("@smthrs/") ||
     name.startsWith("react/") ||
     name.startsWith("zod/")
   );
@@ -551,7 +551,7 @@ function workflowEntries(root) {
 
 function uiEntries(source) {
   const uiTags = new Set(["UI"]);
-  for (const match of source.matchAll(/import\s*\{([^}]+)\}\s*from\s*["']smithers-orchestrator["']/g)) {
+  for (const match of source.matchAll(/import\s*\{([^}]+)\}\s*from\s*["']smthrs["']/g)) {
     for (const specifier of match[1].split(",")) {
       const parts = specifier.trim().split(/\s+as\s+/);
       if (parts[0] === "UI") uiTags.add(parts[1] ?? "UI");

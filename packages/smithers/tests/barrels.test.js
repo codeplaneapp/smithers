@@ -164,8 +164,8 @@ describe("public re-export barrels", () => {
 });
 
 describe("xstate stays a subpath-only optional integration", () => {
-  test("the root barrel never references xstate, so importing smithers-orchestrator resolves with the peer absent", async () => {
-    // The real consumer scenario: smithers-orchestrator installed, the
+  test("the root barrel never references xstate, so importing smthrs resolves with the peer absent", async () => {
+    // The real consumer scenario: smthrs installed, the
     // optional `xstate` peer NOT installed. The root barrel (runtime and
     // types) must never touch the integration or the install breaks. The
     // subpath is the only doorway, and its peer is declared optional so

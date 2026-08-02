@@ -6,8 +6,8 @@ import {
   useGatewayNodeOutput,
   useGatewayRun,
   useGatewayRuns,
-} from "smithers-orchestrator/gateway-react";
-import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
+} from "smthrs/gateway-react";
+import { WorkflowUiStyles } from "smthrs/gateway-ui";
 
 const WORKFLOW_KEY = "telegram-daily-digest";
 

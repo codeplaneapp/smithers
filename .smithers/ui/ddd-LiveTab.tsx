@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { UseGatewayRunTreeResult } from "smithers-orchestrator/gateway-react";
+import type { UseGatewayRunTreeResult } from "smthrs/gateway-react";
 import {
   ErrorBanner,
   MarkdownPreview,

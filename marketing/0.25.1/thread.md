@@ -35,7 +35,7 @@ Characters: 218
 ### 3. Tweet 3
 **Media:** [Terminal showing accounts.json warning skip and flag parsing success → assets/tweet-03-terminal.png](assets/tweet-03-terminal.png)
 
-> Unknown/legacy provider entries in accounts.json are now skipped with a warning. Pre-0.25 files with a removed gemini entry no longer block bunx smithers-orchestrator init.
+> Unknown/legacy provider entries in accounts.json are now skipped with a warning. Pre-0.25 files with a removed gemini entry no longer block bunx smthrs init.
 >
 > The documented --no-vcs, --no-deps, and --no-mcp flags now parse correctly.
 >
@@ -63,7 +63,7 @@ Characters: 205
 
 > Dogfooded on 12 real stores: run-ID parity, inspect parity, fresh compute runs, gateway reads, and time-travel all verified on migrated PGlite.
 >
-> bunx smithers-orchestrator@0.25.1
+> bunx smthrs@0.25.1
 >
 > https://smithers.sh/changelogs/0.25.1
 >

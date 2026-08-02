@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // Spike acceptance criterion (b) for the durable-knowledge substrate
 // (upstream-memory RFC): the CONSOLIDATION flow — N observation notes are
 // superseded by ONE synthesis via an Approval-gated workflow — run end-to-end
@@ -14,8 +14,8 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { Sequence, Task, Workflow, runWorkflow, approveNode, denyNode, createMemoryStore } from "../src/index.js";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { Effect } from "effect";
 import { dirname } from "node:path";
 import { createTestSmithers } from "./helpers.js";

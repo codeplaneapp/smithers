@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { createTempRepo, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
 
-const WORKFLOW = `/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+const WORKFLOW = `/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, Task, smithers, outputs } = createSmithers({

@@ -12,8 +12,8 @@ if (typeof document === "undefined" || !document?.createElement) {
 import { afterEach, describe, expect, test } from "bun:test";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import type { DelegationGraph } from "smithers-orchestrator/gateway-react";
-import { dcGoalApprovalSchema } from "smithers-orchestrator";
+import type { DelegationGraph } from "smthrs/gateway-react";
+import { dcGoalApprovalSchema } from "smthrs";
 
 // DcMarkdownEditor drops to its textarea fallback under happy-dom (it sniffs
 // navigator.userAgent), which is what makes the edit flows testable.

@@ -1,11 +1,11 @@
 import { useState, useMemo, type ReactNode } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { useRunInspectorVm } from "@smithers-orchestrator/ui-core";
+import { useRunInspectorVm } from "@smthrs/ui-core";
 import { TUI_EVENT_CAP } from "../data.ts";
 import { useOverlayOpen } from "../OverlayContext.tsx";
 import { nodeGlyph, nodeGlyphColor, isModifiedKeyEvent } from "./treeUtils.ts";
 import { computeGraphLayout, connectorArrow, edgesForConnector, hasIncomingEdge } from "./graphUtils.ts";
-import { runNodeKey, type GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import { runNodeKey, type GatewayRunNode } from "@smthrs/gateway-client";
 
 const CARD_H = 3; // top border + 1 content row + bottom border
 const ROW_GAP = 1; // vertical space between cards in a column

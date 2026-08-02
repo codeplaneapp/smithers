@@ -133,7 +133,7 @@ Two specific traps:
 
 **This is a hard operator rule.** The workspace Gateway owns run discovery and
 control. Long-lived controllers, Bun cron jobs, health monitors, bots, and
-custom clients must use `smithers-orchestrator/gateway-client` (or the Gateway
+custom clients must use `smthrs/gateway-client` (or the Gateway
 RPC/REST surface) for `listRuns`, `getRun`, event streaming, launch, resume,
 cancel, approvals, signals, cron, scores, and node output. One-shot operator
 actions through the public `smithers ps` / `inspect` / `why` / `approve` CLI are
@@ -242,9 +242,9 @@ before every workflow you build, and the rest of this skill assumes them.
      `smithers workflow run <id> --interactive`) opens the interactive TUI
      monitor for a run.
    - A custom browser UI: author `.smithers/ui/<workflowId>.tsx` by composing
-     the `smithers-orchestrator/gateway-ui` run widgets and
-     `smithers-orchestrator/ui` primitives over the
-     `smithers-orchestrator/gateway-react` hooks, then `smithers ui <runId>`
+     the `smthrs/gateway-ui` run widgets and
+     `smthrs/ui` primitives over the
+     `smthrs/gateway-react` hooks, then `smithers ui <runId>`
      opens it live. **If a workflow has no UI yet, offer to build one.** See
      [Custom workflow UIs](#custom-workflow-uis).
    - `smithers ui --app` serves the full local control-plane UI when the user
@@ -345,8 +345,8 @@ improvement compounds.
 
 From inside the user's project (Bun ≥ 1.3, plus a model key like
 `ANTHROPIC_API_KEY` in the env). Run these yourself with your shell tool - every
-bare `smithers …` below is identical to `bunx smithers-orchestrator …` if there
-is no global install, so prefer `bunx smithers-orchestrator …` when unsure:
+bare `smithers …` below is identical to `bunx smthrs …` if there
+is no global install, so prefer `bunx smthrs …` when unsure:
 
 ```bash
 # 1. Scaffold .smithers/ with the focused authoring workflows (create-workflow,
@@ -421,8 +421,8 @@ Crash mid-run and the next render picks up exactly where it left off: completed
 nodes are never re-run.
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Sequence, Task } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, Sequence, Task } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, smithers, outputs } = createSmithers({
@@ -643,9 +643,9 @@ nobody watching. Give it a monitor: a workflow at
 sibling run, whenever `<workflowId>` starts.
 
 ```bash
-bunx smithers-orchestrator up .smithers/workflows/nightly.tsx    # auto-discovers .smithers/monitor/nightly.tsx
-bunx smithers-orchestrator up nightly.tsx --monitor ops/watch.tsx  # pick one explicitly
-bunx smithers-orchestrator up nightly.tsx --no-monitor             # opt out
+bunx smthrs up .smithers/workflows/nightly.tsx    # auto-discovers .smithers/monitor/nightly.tsx
+bunx smthrs up nightly.tsx --monitor ops/watch.tsx  # pick one explicitly
+bunx smthrs up nightly.tsx --no-monitor             # opt out
 ```
 
 The monitor is a child run (`parent_run_id` = the watched run), so `ps`,
@@ -660,13 +660,13 @@ condition (`healthy`, `stalled`, `wedged-node`, `runaway-loop`,
 through `<DecisionTable>`. Only `stalled` and `wedged-node` heal without a
 human, because resuming a run and retrying a node are idempotent and
 reversible; everything else escalates through a durable human request. The
-monitor reads run state through `smithers-orchestrator/gateway-client` or the
+monitor reads run state through `smthrs/gateway-client` or the
 public CLI, never the store. See
 [Monitor workflows](https://smithers.sh/guides/monitor-workflows).
 
 ## Operating runs
 
-Everything is a CLI verb (prefix with `bunx smithers-orchestrator` if it isn't on PATH):
+Everything is a CLI verb (prefix with `bunx smthrs` if it isn't on PATH):
 
 ```bash
 smithers up workflow.tsx --input '{"description":"Fix bug"}'   # start a run from a .tsx FILE (by path)
@@ -1019,7 +1019,7 @@ the seeded **`create-workflow`** workflow build it from a plain-English ask
 (`smithers make-workflow "<task>"` is the shorthand for the same thing):
 
 ```bash
-bunx smithers-orchestrator workflow run create-workflow \
+bunx smthrs workflow run create-workflow \
   --prompt "Watch a landing request and auto-land it once CI is green"
 ```
 
@@ -1051,7 +1051,7 @@ test as an optional follow-up.
 The rule, concretely, for a workflow at `.smithers/workflows/hello.tsx`:
 
 1. Write the test at `.smithers/tests/hello.test.tsx` using
-   `renderWorkflow` from `smithers-orchestrator/testing`. It must load and
+   `renderWorkflow` from `smthrs/testing`. It must load and
    render the **real** workflow module — a hand-built plan/graph object
    validates a stand-in that merely resembles the workflow and passes while
    the real file is broken.
@@ -1087,23 +1087,23 @@ gateway.register("my-workflow", workflow, {
 
 The bundle is one file. Two shipping shapes:
 
-- **React (recommended).** Compose from the shipped component libraries; hand-rolled markup and CSS is the last resort. `smithers-orchestrator/gateway-ui` ships run-shaped widgets that each connect to the Gateway by themselves: `SimpleWorkflowDashboard` (a complete launch/watch dashboard in one component), `WorkflowUiShell` (the page scaffold with house styles), `RunList`, `RunTree`, `RunEventLog`, `NodeOutputView`, `ApprovalPanel`, `LaunchButton`, `WorkflowPicker`, `ConnectionBadge`, `StatusPill`. `smithers-orchestrator/ui` ships the token-native primitives for everything around them (`Button`, `Card`, `Input`, `Tabs`, `Dialog`, `Table`, `StatusPill`, `EmptyState`, `KpiStat`, chat surfaces), correct in light and dark automatically. Under both sits `smithers-orchestrator/gateway-react`: one call to `createGatewayReactRoot(<App />)` reads the boot config, mounts a provider, and gives the tree live hooks for bespoke panes: `useGatewayRun`, `useGatewayRunEvents`, `useGatewayNodeOutput`, `useGatewayApprovals`, `useGatewayActions` (for `submitApproval`, `submitSignal`, `cancelRun`, `rewindRun`, etc.). The hooks are **stale-data-free by construction**: when `runId` (or any input) changes, the prior data clears synchronously and any late response from the old inputs is dropped. A custom UI that switches between runs never blinks the wrong data. It automatically manages subscriptions, pushed updates, metrics, and resilient reconnections.
-- **Vanilla.** `smithers-orchestrator/gateway-client`. One `SmithersGatewayClient` class with `getRun`, `getNodeOutput`, `getNodeDiff`, `submitApproval`, `submitSignal`, `cancelRun`, and a `streamRunEventsResilient` async generator that reconnects with backoff + jitter and resumes from the last per-run `seq`. This generator handles live pushed updates, metrics streaming, and subscriptions. Pick this when you want zero dependencies or already own your render layer.
+- **React (recommended).** Compose from the shipped component libraries; hand-rolled markup and CSS is the last resort. `smthrs/gateway-ui` ships run-shaped widgets that each connect to the Gateway by themselves: `SimpleWorkflowDashboard` (a complete launch/watch dashboard in one component), `WorkflowUiShell` (the page scaffold with house styles), `RunList`, `RunTree`, `RunEventLog`, `NodeOutputView`, `ApprovalPanel`, `LaunchButton`, `WorkflowPicker`, `ConnectionBadge`, `StatusPill`. `smthrs/ui` ships the token-native primitives for everything around them (`Button`, `Card`, `Input`, `Tabs`, `Dialog`, `Table`, `StatusPill`, `EmptyState`, `KpiStat`, chat surfaces), correct in light and dark automatically. Under both sits `smthrs/gateway-react`: one call to `createGatewayReactRoot(<App />)` reads the boot config, mounts a provider, and gives the tree live hooks for bespoke panes: `useGatewayRun`, `useGatewayRunEvents`, `useGatewayNodeOutput`, `useGatewayApprovals`, `useGatewayActions` (for `submitApproval`, `submitSignal`, `cancelRun`, `rewindRun`, etc.). The hooks are **stale-data-free by construction**: when `runId` (or any input) changes, the prior data clears synchronously and any late response from the old inputs is dropped. A custom UI that switches between runs never blinks the wrong data. It automatically manages subscriptions, pushed updates, metrics, and resilient reconnections.
+- **Vanilla.** `smthrs/gateway-client`. One `SmithersGatewayClient` class with `getRun`, `getNodeOutput`, `getNodeDiff`, `submitApproval`, `submitSignal`, `cancelRun`, and a `streamRunEventsResilient` async generator that reconnects with backoff + jitter and resumes from the last per-run `seq`. This generator handles live pushed updates, metrics streaming, and subscriptions. Pick this when you want zero dependencies or already own your render layer.
 
 **Match the situation to the shipped component - never hand-roll these.** Each is the single shared implementation; reaching for it is the default, not an option:
 
 | The situation | The component |
 | --- | --- |
-| The user edits a node's markdown output (spec, doc, report) | `MarkdownEditor` + `MarkdownEditorStyles` from `smithers-orchestrator/ui/adapters/markdown-editor` - the shared WYSIWYG (Milkdown Crepe); the user edits the rendered document, **never raw markdown in a `<textarea>`** |
-| Rendering a `DiffBundle` for review | `DiffHunks` from `smithers-orchestrator/ui` (`@@`-grouped hunks, dual gutters, add/remove/context coloring, pagination built in) |
-| A conversational workflow (agent questions ↔ user replies) | `ChatTranscript` + `ChatComposer` from `smithers-orchestrator/ui` |
+| The user edits a node's markdown output (spec, doc, report) | `MarkdownEditor` + `MarkdownEditorStyles` from `smthrs/ui/adapters/markdown-editor` - the shared WYSIWYG (Milkdown Crepe); the user edits the rendered document, **never raw markdown in a `<textarea>`** |
+| Rendering a `DiffBundle` for review | `DiffHunks` from `smthrs/ui` (`@@`-grouped hunks, dual gutters, add/remove/context coloring, pagination built in) |
+| A conversational workflow (agent questions ↔ user replies) | `ChatTranscript` + `ChatComposer` from `smthrs/ui` |
 | Headline counts on an overview | `KpiStat` |
 | Any run/node status badge | `StatusPill` (feed it `normalizeStatus`) |
 | A zero-data state ("no runs yet") | `EmptyState` |
-| Raw shell/test log output, live (ANSI, scrollback) | `Terminal` from `smithers-orchestrator/ui/adapters/terminal` - a real xterm surface, not a styled HTML list |
+| Raw shell/test log output, live (ANSI, scrollback) | `Terminal` from `smthrs/ui/adapters/terminal` - a real xterm surface, not a styled HTML list |
 | Where a run sits in a fixed pipeline of stages | `StageStrip` |
 | Browsing the files a run changed | `FileTree` |
-| Charting data (counts per category, trends, magnitudes) | `ChartContainer` + `ChartTooltipContent`/`ChartLegendContent` + `chartConfig` from `smithers-orchestrator/ui/adapters/chart` (Recharts elements as children, series colors via the validated palette slots) - never `<canvas>`, chart.js, or hand-rolled SVG bars |
+| Charting data (counts per category, trends, magnitudes) | `ChartContainer` + `ChartTooltipContent`/`ChartLegendContent` + `chartConfig` from `smthrs/ui/adapters/chart` (Recharts elements as children, series colors via the validated palette slots) - never `<canvas>`, chart.js, or hand-rolled SVG bars |
 
 The bundle reads `?runId=<id>` from `location.search` for the run to scope to, and optionally `__SMITHERS_GATEWAY_UI__` (a `GatewayUiBootConfig`) for the mount path, RPC path, WebSocket path, and free-form `props` you set at `gateway.register({ ui: { props } })`.
 
@@ -1112,9 +1112,9 @@ The bundle reads `?runId=<id>` from `location.search` for the run to scope to, a
 **Local dev.**
 
 ```bash
-bunx smithers-orchestrator up my-workflow -d         # boot the gateway with the workflow + UI
-bunx smithers-orchestrator ui                        # opens the UI for the most recent run
-bunx smithers-orchestrator ui <runId>                # specific run
+bunx smthrs up my-workflow -d         # boot the gateway with the workflow + UI
+bunx smthrs ui                        # opens the UI for the most recent run
+bunx smthrs ui <runId>                # specific run
 ```
 
 **Reference bundles in this repo:** `.smithers/ui/vcs.tsx`, `.smithers/ui/grill-me.tsx`, `.smithers/ui/ultragrill.tsx`, `.smithers/ui/workflow-skill.tsx`.
@@ -1147,15 +1147,15 @@ needed:
   are not separately resolvable from `smithers.sh`.
 
 ```bash
-bunx smithers-orchestrator docs           # prints llms.txt (the concise index)
-bunx smithers-orchestrator docs-full      # prints llms-full.txt
-bunx smithers-orchestrator ask "How do I add a human approval gate?"
+bunx smthrs docs           # prints llms.txt (the concise index)
+bunx smthrs docs-full      # prints llms-full.txt
+bunx smthrs ask "How do I add a human approval gate?"
 ```
 
 - Docs: **https://smithers.sh** (`/llms.txt` and `/llms-full.txt` are the
   served llms documents)
 - Repo: **https://github.com/smithersai/smithers**
-- npm package: `smithers-orchestrator`
+- npm package: `smthrs`
 
 **When in doubt, clone the repo** (`github.com/smithersai/smithers`) and read the
 source directly; the docs and `llms-*.txt` bundles can lag the code. The

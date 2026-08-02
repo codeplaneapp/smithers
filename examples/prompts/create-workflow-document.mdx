@@ -32,11 +32,11 @@ The body must tell an agent, in this order:
 1. What the workflow does and when to use it (1-2 sentences).
 2. Its inputs, especially `prompt` and any typed knobs from the design.
 3. How to start it:
-   `bunx smithers-orchestrator workflow run {props.workflowName} --prompt "..."`
+   `bunx smthrs workflow run {props.workflowName} --prompt "..."`
    (or `--input '{...}'` for structured inputs), or `smithers up {props.workflowFile}`.
 4. How to run it detached and watch it: `-d` to detach, then
    `smithers ps`, `smithers logs <runId> -f`, `smithers inspect <runId>`.
-5. How to visualize it: `bunx smithers-orchestrator graph {props.workflowFile}`
+5. How to visualize it: `bunx smthrs graph {props.workflowFile}`
    (add `--interactive` for the TUI), and, if the workflow declares a custom
    `<UI>` and the custom UI file exists, open it for a run with
    `smithers ui <runId>`.

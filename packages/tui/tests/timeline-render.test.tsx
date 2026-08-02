@@ -2,7 +2,7 @@
 import { it, expect } from "bun:test";
 import { describeHeadlessRender, renderForTest } from "./renderHelpers.tsx";
 import { act, useState } from "react";
-import type { GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
+import type { GatewayEventFrame } from "@smthrs/gateway-client";
 import { TimelineView } from "../src/modes/TimelineMode.tsx";
 
 /**

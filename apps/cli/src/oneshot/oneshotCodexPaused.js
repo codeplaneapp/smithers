@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { accountsRoot } from "@smithers-orchestrator/accounts";
+import { accountsRoot } from "@smthrs/accounts";
 
 /** @param {NodeJS.ProcessEnv} [env] */
 export function oneshotCodexPaused(env = process.env) {

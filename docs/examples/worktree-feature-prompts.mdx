@@ -189,7 +189,7 @@ The top-level system prompt uses custom MDX components to inject context:
 Components are injected at render time via `renderMdx()`:
 
 ```ts
-import { renderMdx } from "smithers-orchestrator";
+import { renderMdx } from "smthrs";
 import SystemPromptMdx from "./prompts/system-prompt.mdx";
 
 export const SYSTEM_PROMPT = renderMdx(SystemPromptMdx, {

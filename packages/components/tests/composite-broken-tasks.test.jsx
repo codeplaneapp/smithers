@@ -1,11 +1,11 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import { z } from "zod";
 import { CheckSuite, ScanFixVerify, Supervisor } from "../src/components/index.js";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
-import { SmithersContext, SmithersCtx } from "@smithers-orchestrator/react-reconciler/context";
-import { renderFrame } from "smithers-orchestrator";
+import { SmithersRenderer } from "@smthrs/react-reconciler/dom/renderer";
+import { SmithersContext, SmithersCtx } from "@smthrs/react-reconciler/context";
+import { renderFrame } from "smthrs";
 import { createTestSmithers } from "./helpers.js";
 import { Effect } from "effect";
 

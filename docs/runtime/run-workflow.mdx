@@ -1,10 +1,10 @@
 ---
 title: runWorkflow
-description: Programmatic entry point. Equivalent to `bunx smithers-orchestrator up`.
+description: Programmatic entry point. Equivalent to `bunx smthrs up`.
 ---
 
 ```ts
-import { runWorkflow } from "smithers-orchestrator";
+import { runWorkflow } from "smthrs";
 import { Effect } from "effect";
 
 const result = await Effect.runPromise(runWorkflow(workflow, {
@@ -82,14 +82,14 @@ All in-flight attempts are marked cancelled and `NodeCancelled` events are emitt
 
 ## Hijack handoff
 
-If a CLI hijack happens mid-run (`bunx smithers-orchestrator hijack RUN_ID`), the run ends `"cancelled"` and the latest attempt metadata stores `hijackHandoff`; on `resume: true`, Smithers waits for a safe handoff point and continues with the persisted CLI session id (see [CLI Agents](/integrations/cli-agents)) or message history (SDK agents).
+If a CLI hijack happens mid-run (`bunx smthrs hijack RUN_ID`), the run ends `"cancelled"` and the latest attempt metadata stores `hijackHandoff`; on `resume: true`, Smithers waits for a safe handoff point and continues with the persisted CLI session id (see [CLI Agents](/integrations/cli-agents)) or message history (SDK agents).
 
 ## `result.output`
 
 Populated only when the schema passed to `createSmithers()` has a key literally named `output`. Inside a workflow, consume other typed rows through `ctx.output`, `ctx.latest`, or `ctx.outputs`; outside it, expose the run through the workspace Gateway and fetch a node's typed output through `getNodeOutput`:
 
 ```ts
-import { SmithersGatewayClient } from "smithers-orchestrator/gateway-client";
+import { SmithersGatewayClient } from "smthrs/gateway-client";
 
 const gateway = new SmithersGatewayClient({
   baseUrl: process.env.SMITHERS_GATEWAY_URL,

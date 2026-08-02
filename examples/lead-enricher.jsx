@@ -5,11 +5,11 @@
  *
  * Shape: lead intake -> enrichment tools -> profiler agent -> CRM output.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import IntakePrompt from "./prompts/lead-enricher/intake.mdx";
 import EnrichPrompt from "./prompts/lead-enricher/enrich.mdx";

@@ -1,10 +1,10 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import { z } from "zod";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler";
+import { SmithersRenderer } from "@smthrs/react-reconciler";
 import { Memory, Task } from "../src/components/index.js";
-import { Memory as FacadeMemory } from "smithers-orchestrator";
+import { Memory as FacadeMemory } from "smthrs";
 
 const output = z.object({ value: z.string() });
 const agent = { generate: async () => ({ value: "ok" }) };

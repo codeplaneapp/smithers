@@ -7,6 +7,7 @@ settings:
 overrides:
   '@opentelemetry/propagator-jaeger': 2.9.0
   effect: 4.0.0-beta.102
+  '@smthrs/cli': link:apps/cli
 
 importers:
 
@@ -28,145 +29,145 @@ importers:
       '@mdx-js/esbuild':
         specifier: ^3.1.1
         version: 3.1.1(esbuild@0.28.1)
-      '@smithers-orchestrator/accounts':
+      '@smthrs/accounts':
         specifier: workspace:*
         version: link:packages/accounts
-      '@smithers-orchestrator/agent-eliza':
+      '@smthrs/agent-eliza':
         specifier: workspace:*
         version: link:packages/agent-eliza
-      '@smithers-orchestrator/agents':
+      '@smthrs/agents':
         specifier: workspace:*
         version: link:packages/agents
-      '@smithers-orchestrator/aws':
+      '@smthrs/aws':
         specifier: workspace:*
         version: link:packages/aws
-      '@smithers-orchestrator/cli':
-        specifier: workspace:*
+      '@smthrs/cli':
+        specifier: link:apps/cli
         version: link:apps/cli
-      '@smithers-orchestrator/cloudflare':
+      '@smthrs/cloudflare':
         specifier: workspace:*
         version: link:packages/cloudflare
-      '@smithers-orchestrator/components':
+      '@smthrs/components':
         specifier: workspace:*
         version: link:packages/components
-      '@smithers-orchestrator/control-plane':
+      '@smthrs/control-plane':
         specifier: workspace:*
         version: link:packages/control-plane
-      '@smithers-orchestrator/daytona':
+      '@smthrs/daytona':
         specifier: workspace:*
         version: link:packages/daytona
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:packages/db
-      '@smithers-orchestrator/devtools':
+      '@smthrs/devtools':
         specifier: workspace:*
         version: link:packages/devtools
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:packages/driver
-      '@smithers-orchestrator/electric-proxy':
+      '@smthrs/electric-proxy':
         specifier: workspace:*
         version: link:packages/electric-proxy
-      '@smithers-orchestrator/engine':
+      '@smthrs/engine':
         specifier: workspace:*
         version: link:packages/engine
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:packages/errors
-      '@smithers-orchestrator/gateway':
+      '@smthrs/gateway':
         specifier: workspace:*
         version: link:packages/gateway
-      '@smithers-orchestrator/gateway-client':
+      '@smthrs/gateway-client':
         specifier: workspace:*
         version: link:packages/gateway-client
-      '@smithers-orchestrator/gateway-react':
+      '@smthrs/gateway-react':
         specifier: workspace:*
         version: link:packages/gateway-react
-      '@smithers-orchestrator/gateway-ui':
+      '@smthrs/gateway-ui':
         specifier: workspace:*
         version: link:packages/gateway-ui
-      '@smithers-orchestrator/gcp':
+      '@smthrs/gcp':
         specifier: workspace:*
         version: link:packages/gcp
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:packages/graph
-      '@smithers-orchestrator/integrations':
+      '@smthrs/integrations':
         specifier: workspace:*
         version: link:packages/integrations
-      '@smithers-orchestrator/memory':
+      '@smthrs/memory':
         specifier: workspace:*
         version: link:packages/memory
-      '@smithers-orchestrator/microsandbox':
+      '@smthrs/microsandbox':
         specifier: workspace:*
         version: link:packages/microsandbox
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:apps/observability
-      '@smithers-orchestrator/openapi':
+      '@smthrs/openapi':
         specifier: workspace:*
         version: link:packages/openapi
-      '@smithers-orchestrator/pi-plugin':
+      '@smthrs/pi-plugin':
         specifier: workspace:*
         version: link:packages/pi-plugin
-      '@smithers-orchestrator/protocol':
+      '@smthrs/protocol':
         specifier: workspace:*
         version: link:packages/protocol
-      '@smithers-orchestrator/react-reconciler':
+      '@smthrs/react-reconciler':
         specifier: workspace:*
         version: link:packages/react-reconciler
-      '@smithers-orchestrator/review':
+      '@smthrs/review':
         specifier: workspace:*
         version: link:apps/review
-      '@smithers-orchestrator/sandbox':
+      '@smthrs/sandbox':
         specifier: workspace:*
         version: link:packages/sandbox
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:packages/scheduler
-      '@smithers-orchestrator/scorers':
+      '@smthrs/scorers':
         specifier: workspace:*
         version: link:packages/scorers
-      '@smithers-orchestrator/server':
+      '@smthrs/server':
         specifier: workspace:*
         version: link:packages/server
-      '@smithers-orchestrator/telegram':
+      '@smthrs/telegram':
         specifier: workspace:*
         version: link:packages/telegram
-      '@smithers-orchestrator/testing':
+      '@smthrs/testing':
         specifier: workspace:*
         version: link:packages/testing
-      '@smithers-orchestrator/time-travel':
+      '@smthrs/time-travel':
         specifier: workspace:*
         version: link:packages/time-travel
-      '@smithers-orchestrator/tool-context':
+      '@smthrs/tool-context':
         specifier: workspace:*
         version: link:packages/tool-context
-      '@smithers-orchestrator/tui':
+      '@smthrs/tui':
         specifier: workspace:*
         version: link:packages/tui
-      '@smithers-orchestrator/tui-ui':
+      '@smthrs/tui-ui':
         specifier: workspace:*
         version: link:packages/tui-ui
-      '@smithers-orchestrator/ui':
+      '@smthrs/ui':
         specifier: workspace:*
         version: link:packages/ui
-      '@smithers-orchestrator/ui-core':
+      '@smthrs/ui-core':
         specifier: workspace:*
         version: link:packages/ui-core
-      '@smithers-orchestrator/ui-styleguide':
+      '@smthrs/ui-styleguide':
         specifier: workspace:*
         version: link:packages/ui-styleguide
-      '@smithers-orchestrator/usage':
+      '@smthrs/usage':
         specifier: workspace:*
         version: link:packages/usage
-      '@smithers-orchestrator/vcs':
+      '@smthrs/vcs':
         specifier: workspace:*
         version: link:packages/vcs
-      '@smithers-orchestrator/vercel':
+      '@smthrs/vercel':
         specifier: workspace:*
         version: link:packages/vercel
-      '@smithers-orchestrator/xstate':
+      '@smthrs/xstate':
         specifier: workspace:*
         version: link:packages/xstate
       '@tanstack/react-query':
@@ -223,7 +224,7 @@ importers:
       react-dom:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
-      smithers-orchestrator:
+      smthrs:
         specifier: workspace:*
         version: link:packages/smithers
       tsup:
@@ -247,28 +248,28 @@ importers:
       '@milkdown/crepe':
         specifier: 7.21.2
         version: 7.21.2(prosemirror-model@1.25.9)(prosemirror-state@1.4.4)(prosemirror-view@1.41.9)(typescript@6.0.3)
-      '@smithers-orchestrator/accounts':
+      '@smthrs/accounts':
         specifier: workspace:*
         version: link:../packages/accounts
-      '@smithers-orchestrator/cli':
-        specifier: workspace:*
+      '@smthrs/cli':
+        specifier: link:../apps/cli
         version: link:../apps/cli
-      '@smithers-orchestrator/components':
+      '@smthrs/components':
         specifier: workspace:*
         version: link:../packages/components
-      '@smithers-orchestrator/gateway-client':
+      '@smthrs/gateway-client':
         specifier: workspace:*
         version: link:../packages/gateway-client
-      '@smithers-orchestrator/review':
+      '@smthrs/review':
         specifier: workspace:*
         version: link:../apps/review
-      '@smithers-orchestrator/scorers':
+      '@smthrs/scorers':
         specifier: workspace:*
         version: link:../packages/scorers
-      '@smithers-orchestrator/usage':
+      '@smthrs/usage':
         specifier: workspace:*
         version: link:../packages/usage
-      '@smithers-orchestrator/vcs':
+      '@smthrs/vcs':
         specifier: workspace:*
         version: link:../packages/vcs
       '@xyflow/react':
@@ -289,7 +290,7 @@ importers:
       react-dom:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
-      smithers-orchestrator:
+      smthrs:
         specifier: workspace:*
         version: link:../packages/smithers
       twitter-api-v2:
@@ -308,16 +309,16 @@ importers:
       '@happy-dom/global-registrator':
         specifier: ^20.10.6
         version: 20.10.6
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../packages/driver
-      '@smithers-orchestrator/gateway-react':
+      '@smthrs/gateway-react':
         specifier: workspace:*
         version: link:../packages/gateway-react
-      '@smithers-orchestrator/gateway-ui':
+      '@smthrs/gateway-ui':
         specifier: workspace:*
         version: link:../packages/gateway-ui
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../packages/graph
       '@statelyai/inspect':
@@ -403,67 +404,67 @@ importers:
       '@pierre/diffs':
         specifier: ^1.2.11
         version: 1.2.12(@shikijs/themes@3.23.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@smithers-orchestrator/accounts':
+      '@smthrs/accounts':
         specifier: workspace:*
         version: link:../../packages/accounts
-      '@smithers-orchestrator/agents':
+      '@smthrs/agents':
         specifier: workspace:*
         version: link:../../packages/agents
-      '@smithers-orchestrator/components':
+      '@smthrs/components':
         specifier: workspace:*
         version: link:../../packages/components
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@smithers-orchestrator/devtools':
+      '@smthrs/devtools':
         specifier: workspace:*
         version: link:../../packages/devtools
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../../packages/driver
-      '@smithers-orchestrator/engine':
+      '@smthrs/engine':
         specifier: workspace:*
         version: link:../../packages/engine
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../../packages/errors
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../../packages/graph
-      '@smithers-orchestrator/memory':
+      '@smthrs/memory':
         specifier: workspace:*
         version: link:../../packages/memory
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../observability
-      '@smithers-orchestrator/openapi':
+      '@smthrs/openapi':
         specifier: workspace:*
         version: link:../../packages/openapi
-      '@smithers-orchestrator/protocol':
+      '@smthrs/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
-      '@smithers-orchestrator/review':
+      '@smthrs/review':
         specifier: workspace:*
         version: link:../review
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../../packages/scheduler
-      '@smithers-orchestrator/scorers':
+      '@smthrs/scorers':
         specifier: workspace:*
         version: link:../../packages/scorers
-      '@smithers-orchestrator/server':
+      '@smthrs/server':
         specifier: workspace:*
         version: link:../../packages/server
-      '@smithers-orchestrator/time-travel':
+      '@smthrs/time-travel':
         specifier: workspace:*
         version: link:../../packages/time-travel
-      '@smithers-orchestrator/tui':
+      '@smthrs/tui':
         specifier: workspace:*
         version: link:../../packages/tui
-      '@smithers-orchestrator/usage':
+      '@smthrs/usage':
         specifier: workspace:*
         version: link:../../packages/usage
-      '@smithers-orchestrator/vcs':
+      '@smthrs/vcs':
         specifier: workspace:*
         version: link:../../packages/vcs
       '@toon-format/toon':
@@ -493,7 +494,7 @@ importers:
       react:
         specifier: ^19.2.7
         version: 19.2.7
-      smithers-orchestrator:
+      smthrs:
         specifier: workspace:*
         version: link:../../packages/smithers
       yaml:
@@ -660,16 +661,16 @@ importers:
       '@pierre/diffs':
         specifier: ^1.2.12
         version: 1.2.12(@shikijs/themes@3.23.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@smithers-orchestrator/agents':
+      '@smthrs/agents':
         specifier: workspace:*
         version: link:../../packages/agents
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@smithers-orchestrator/engine':
+      '@smthrs/engine':
         specifier: workspace:*
         version: link:../../packages/engine
-      '@smithers-orchestrator/ui-styleguide':
+      '@smthrs/ui-styleguide':
         specifier: workspace:*
         version: link:../../packages/ui-styleguide
       effect:
@@ -678,7 +679,7 @@ importers:
       mermaid:
         specifier: ^11.16.0
         version: 11.16.0
-      smithers-orchestrator:
+      smthrs:
         specifier: workspace:*
         version: link:../../packages/smithers
       zod:
@@ -736,7 +737,7 @@ importers:
       react-dom:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
-      smithers-orchestrator:
+      smthrs:
         specifier: workspace:*
         version: link:../../packages/smithers
       zod:
@@ -782,16 +783,16 @@ importers:
       '@pierre/trees':
         specifier: 1.0.0-beta.5
         version: 1.0.0-beta.5(@pierre/theme@1.1.0)(@shikijs/themes@3.23.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(shiki@3.23.0)
-      '@smithers-orchestrator/gateway-client':
+      '@smthrs/gateway-client':
         specifier: workspace:*
         version: link:../../packages/gateway-client
-      '@smithers-orchestrator/gateway-react':
+      '@smthrs/gateway-react':
         specifier: workspace:*
         version: link:../../packages/gateway-react
-      '@smithers-orchestrator/gateway-ui':
+      '@smthrs/gateway-ui':
         specifier: workspace:*
         version: link:../../packages/gateway-ui
-      '@smithers-orchestrator/ui':
+      '@smthrs/ui':
         specifier: workspace:*
         version: link:../../packages/ui
       '@tanstack/ai':
@@ -855,7 +856,7 @@ importers:
       bun-types:
         specifier: ^1.3.14
         version: 1.3.14
-      smithers-orchestrator:
+      smthrs:
         specifier: workspace:*
         version: link:../../packages/smithers
       typescript:
@@ -870,7 +871,7 @@ importers:
 
   apps/storybook-site:
     dependencies:
-      '@smithers-orchestrator/ui':
+      '@smthrs/ui':
         specifier: workspace:*
         version: link:../../packages/ui
       react:
@@ -928,7 +929,7 @@ importers:
 
   apps/telegram-summary:
     dependencies:
-      '@smithers-orchestrator/gateway-ui':
+      '@smthrs/gateway-ui':
         specifier: workspace:*
         version: link:../../packages/gateway-ui
     devDependencies:
@@ -967,40 +968,40 @@ importers:
 
   e2e:
     dependencies:
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../packages/db
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../packages/driver
-      '@smithers-orchestrator/engine':
+      '@smthrs/engine':
         specifier: workspace:*
         version: link:../packages/engine
-      '@smithers-orchestrator/gateway':
+      '@smthrs/gateway':
         specifier: workspace:*
         version: link:../packages/gateway
-      '@smithers-orchestrator/gateway-client':
+      '@smthrs/gateway-client':
         specifier: workspace:*
         version: link:../packages/gateway-client
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../apps/observability
-      '@smithers-orchestrator/sandbox':
+      '@smthrs/sandbox':
         specifier: workspace:*
         version: link:../packages/sandbox
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../packages/scheduler
-      '@smithers-orchestrator/server':
+      '@smthrs/server':
         specifier: workspace:*
         version: link:../packages/server
-      '@smithers-orchestrator/testing':
+      '@smthrs/testing':
         specifier: workspace:*
         version: link:../packages/testing
-      '@smithers-orchestrator/time-travel':
+      '@smthrs/time-travel':
         specifier: workspace:*
         version: link:../packages/time-travel
-      '@smithers-orchestrator/vcs':
+      '@smthrs/vcs':
         specifier: workspace:*
         version: link:../packages/vcs
       better-sqlite3:
@@ -1021,7 +1022,7 @@ importers:
       react:
         specifier: ^19.2.7
         version: 19.2.7
-      smithers-orchestrator:
+      smthrs:
         specifier: workspace:*
         version: link:../packages/smithers
       ws:
@@ -1037,7 +1038,7 @@ importers:
       '@effect/platform-bun':
         specifier: 4.0.0-beta.102
         version: 4.0.0-beta.102(effect@4.0.0-beta.102)
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../packages/errors
       '@types/better-sqlite3':
@@ -1061,7 +1062,7 @@ importers:
 
   packages/accounts:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
     devDependencies:
@@ -1077,13 +1078,13 @@ importers:
       '@elizaos/core':
         specifier: ~1.7.2
         version: 1.7.2(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.0))(openai@6.45.0(@aws-sdk/credential-provider-node@3.972.63)(@smithy/signature-v4@5.6.1)(ws@8.21.0)(zod@4.4.3))(ws@8.21.0)
-      '@smithers-orchestrator/agents':
+      '@smthrs/agents':
         specifier: workspace:*
         version: link:../agents
       ai:
         specifier: ^7.0.10
         version: 7.0.10(zod@4.4.3)
-      smithers-orchestrator:
+      smthrs:
         specifier: workspace:*
         version: link:../smithers
       yaml:
@@ -1111,13 +1112,13 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.4.3)
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../driver
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
       ai:
@@ -1142,10 +1143,10 @@ importers:
 
   packages/aws:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/sandbox':
+      '@smthrs/sandbox':
         specifier: workspace:*
         version: link:../sandbox
     devDependencies:
@@ -1170,14 +1171,14 @@ importers:
 
   packages/cloudflare:
     dependencies:
-      '@smithers-orchestrator/sandbox':
+      '@smthrs/sandbox':
         specifier: workspace:*
         version: link:../sandbox
     devDependencies:
       '@cloudflare/sandbox':
         specifier: ^0.12.3
         version: 0.12.3(@xterm/xterm@6.0.0)
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
       '@types/bun':
@@ -1189,31 +1190,31 @@ importers:
 
   packages/components:
     dependencies:
-      '@smithers-orchestrator/agents':
+      '@smthrs/agents':
         specifier: workspace:*
         version: link:../agents
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../driver
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
-      '@smithers-orchestrator/memory':
+      '@smthrs/memory':
         specifier: workspace:*
         version: link:../memory
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/react-reconciler':
+      '@smthrs/react-reconciler':
         specifier: workspace:*
         version: link:../react-reconciler
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
       bippy:
@@ -1247,7 +1248,7 @@ importers:
 
   packages/control-plane:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
     devDependencies:
@@ -1260,10 +1261,10 @@ importers:
 
   packages/daytona:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/sandbox':
+      '@smthrs/sandbox':
         specifier: workspace:*
         version: link:../sandbox
     devDependencies:
@@ -1279,16 +1280,16 @@ importers:
 
   packages/db:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
       drizzle-orm:
@@ -1331,19 +1332,19 @@ importers:
 
   packages/driver:
     dependencies:
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
       effect:
@@ -1362,7 +1363,7 @@ importers:
 
   packages/electric-proxy:
     dependencies:
-      '@smithers-orchestrator/gateway':
+      '@smthrs/gateway':
         specifier: workspace:*
         version: link:../gateway
     devDependencies:
@@ -1381,46 +1382,46 @@ importers:
       '@effect/sql-sqlite-bun':
         specifier: 4.0.0-beta.102
         version: 4.0.0-beta.102(effect@4.0.0-beta.102)
-      '@smithers-orchestrator/agents':
+      '@smthrs/agents':
         specifier: workspace:*
         version: link:../agents
-      '@smithers-orchestrator/components':
+      '@smthrs/components':
         specifier: workspace:*
         version: link:../components
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../driver
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/react-reconciler':
+      '@smthrs/react-reconciler':
         specifier: workspace:*
         version: link:../react-reconciler
-      '@smithers-orchestrator/sandbox':
+      '@smthrs/sandbox':
         specifier: workspace:*
         version: link:../sandbox
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
-      '@smithers-orchestrator/scorers':
+      '@smthrs/scorers':
         specifier: workspace:*
         version: link:../scorers
-      '@smithers-orchestrator/time-travel':
+      '@smthrs/time-travel':
         specifier: workspace:*
         version: link:../time-travel
-      '@smithers-orchestrator/tool-context':
+      '@smthrs/tool-context':
         specifier: workspace:*
         version: link:../tool-context
-      '@smithers-orchestrator/vcs':
+      '@smthrs/vcs':
         specifier: workspace:*
         version: link:../vcs
       diff:
@@ -1477,7 +1478,7 @@ importers:
 
   packages/gateway:
     dependencies:
-      '@smithers-orchestrator/protocol':
+      '@smthrs/protocol':
         specifier: workspace:*
         version: link:../protocol
     devDependencies:
@@ -1490,16 +1491,16 @@ importers:
 
   packages/gateway-client:
     dependencies:
-      '@smithers-orchestrator/electric-proxy':
+      '@smthrs/electric-proxy':
         specifier: workspace:^
         version: link:../electric-proxy
-      '@smithers-orchestrator/gateway':
+      '@smthrs/gateway':
         specifier: workspace:*
         version: link:../gateway
-      '@smithers-orchestrator/protocol':
+      '@smthrs/protocol':
         specifier: workspace:*
         version: link:../protocol
-      '@smithers-orchestrator/usage':
+      '@smthrs/usage':
         specifier: workspace:*
         version: link:../usage
       '@tanstack/db':
@@ -1515,13 +1516,13 @@ importers:
         specifier: 5.101.2
         version: 5.101.2(react@19.2.7)
     devDependencies:
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
       '@types/bun':
         specifier: latest
         version: 1.3.14
-      smithers-orchestrator:
+      smthrs:
         specifier: workspace:*
         version: link:../smithers
       typescript:
@@ -1530,7 +1531,7 @@ importers:
 
   packages/gateway-react:
     dependencies:
-      '@smithers-orchestrator/gateway-client':
+      '@smthrs/gateway-client':
         specifier: workspace:*
         version: link:../gateway-client
       '@tanstack/react-db':
@@ -1546,10 +1547,10 @@ importers:
       '@happy-dom/global-registrator':
         specifier: ^20.10.6
         version: 20.10.6
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/server':
+      '@smthrs/server':
         specifier: workspace:*
         version: link:../server
       '@types/bun':
@@ -1573,16 +1574,16 @@ importers:
 
   packages/gateway-ui:
     dependencies:
-      '@smithers-orchestrator/gateway-client':
+      '@smthrs/gateway-client':
         specifier: workspace:*
         version: link:../gateway-client
-      '@smithers-orchestrator/gateway-react':
+      '@smthrs/gateway-react':
         specifier: workspace:*
         version: link:../gateway-react
-      '@smithers-orchestrator/ui':
+      '@smthrs/ui':
         specifier: workspace:*
         version: link:../ui
-      '@smithers-orchestrator/ui-styleguide':
+      '@smthrs/ui-styleguide':
         specifier: workspace:*
         version: link:../ui-styleguide
       '@xyflow/react':
@@ -1619,10 +1620,10 @@ importers:
 
   packages/gcp:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/sandbox':
+      '@smthrs/sandbox':
         specifier: workspace:*
         version: link:../sandbox
     devDependencies:
@@ -1641,7 +1642,7 @@ importers:
 
   packages/graph:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
       drizzle-orm:
@@ -1660,25 +1661,25 @@ importers:
 
   packages/integrations:
     dependencies:
-      '@smithers-orchestrator/components':
+      '@smthrs/components':
         specifier: workspace:*
         version: link:../components
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/engine':
+      '@smthrs/engine':
         specifier: workspace:*
         version: link:../engine
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/react-reconciler':
+      '@smthrs/react-reconciler':
         specifier: workspace:*
         version: link:../react-reconciler
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
       effect:
@@ -1713,19 +1714,19 @@ importers:
 
   packages/memory:
     dependencies:
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
       '@vectorize-io/hindsight-client':
@@ -1750,10 +1751,10 @@ importers:
 
   packages/microsandbox:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/sandbox':
+      '@smthrs/sandbox':
         specifier: workspace:*
         version: link:../sandbox
     devDependencies:
@@ -1787,13 +1788,13 @@ importers:
 
   packages/openapi:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
       ai:
@@ -1824,19 +1825,19 @@ importers:
       '@sinclair/typebox':
         specifier: ^0.34.49
         version: 0.34.49
-      '@smithers-orchestrator/agents':
+      '@smthrs/agents':
         specifier: workspace:*
         version: link:../agents
-      '@smithers-orchestrator/cli':
-        specifier: workspace:*
+      '@smthrs/cli':
+        specifier: link:../../apps/cli
         version: link:../../apps/cli
-      '@smithers-orchestrator/devtools':
+      '@smthrs/devtools':
         specifier: workspace:*
         version: link:../devtools
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/protocol':
+      '@smthrs/protocol':
         specifier: workspace:*
         version: link:../protocol
       ws:
@@ -1870,16 +1871,16 @@ importers:
 
   packages/react-reconciler:
     dependencies:
-      '@smithers-orchestrator/devtools':
+      '@smthrs/devtools':
         specifier: workspace:*
         version: link:../devtools
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../driver
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
       bippy:
@@ -1907,19 +1908,19 @@ importers:
 
   packages/sandbox:
     dependencies:
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../driver
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
       effect:
@@ -1935,10 +1936,10 @@ importers:
 
   packages/scheduler:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
       effect:
@@ -1954,22 +1955,22 @@ importers:
 
   packages/scorers:
     dependencies:
-      '@smithers-orchestrator/agents':
+      '@smthrs/agents':
         specifier: workspace:*
         version: link:../agents
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
       drizzle-orm:
@@ -1991,52 +1992,52 @@ importers:
 
   packages/server:
     dependencies:
-      '@smithers-orchestrator/accounts':
+      '@smthrs/accounts':
         specifier: workspace:*
         version: link:../accounts
-      '@smithers-orchestrator/components':
+      '@smthrs/components':
         specifier: workspace:*
         version: link:../components
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/devtools':
+      '@smthrs/devtools':
         specifier: workspace:*
         version: link:../devtools
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../driver
-      '@smithers-orchestrator/engine':
+      '@smthrs/engine':
         specifier: workspace:*
         version: link:../engine
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/gateway':
+      '@smthrs/gateway':
         specifier: workspace:*
         version: link:../gateway
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
-      '@smithers-orchestrator/integrations':
+      '@smthrs/integrations':
         specifier: workspace:*
         version: link:../integrations
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/protocol':
+      '@smthrs/protocol':
         specifier: workspace:*
         version: link:../protocol
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
-      '@smithers-orchestrator/time-travel':
+      '@smthrs/time-travel':
         specifier: workspace:*
         version: link:../time-travel
-      '@smithers-orchestrator/ui-styleguide':
+      '@smthrs/ui-styleguide':
         specifier: workspace:*
         version: link:../ui-styleguide
-      '@smithers-orchestrator/usage':
+      '@smthrs/usage':
         specifier: workspace:*
         version: link:../usage
       cron-parser:
@@ -2082,103 +2083,103 @@ importers:
       '@mdx-js/esbuild':
         specifier: ^3.1.1
         version: 3.1.1(esbuild@0.28.1)
-      '@smithers-orchestrator/agents':
+      '@smthrs/agents':
         specifier: workspace:*
         version: link:../agents
-      '@smithers-orchestrator/aws':
+      '@smthrs/aws':
         specifier: workspace:*
         version: link:../aws
-      '@smithers-orchestrator/cli':
-        specifier: workspace:*
+      '@smthrs/cli':
+        specifier: link:../../apps/cli
         version: link:../../apps/cli
-      '@smithers-orchestrator/cloudflare':
+      '@smthrs/cloudflare':
         specifier: workspace:*
         version: link:../cloudflare
-      '@smithers-orchestrator/components':
+      '@smthrs/components':
         specifier: workspace:*
         version: link:../components
-      '@smithers-orchestrator/control-plane':
+      '@smthrs/control-plane':
         specifier: workspace:*
         version: link:../control-plane
-      '@smithers-orchestrator/daytona':
+      '@smthrs/daytona':
         specifier: workspace:*
         version: link:../daytona
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../driver
-      '@smithers-orchestrator/engine':
+      '@smthrs/engine':
         specifier: workspace:*
         version: link:../engine
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/gateway-client':
+      '@smthrs/gateway-client':
         specifier: workspace:*
         version: link:../gateway-client
-      '@smithers-orchestrator/gateway-react':
+      '@smthrs/gateway-react':
         specifier: workspace:*
         version: link:../gateway-react
-      '@smithers-orchestrator/gateway-ui':
+      '@smthrs/gateway-ui':
         specifier: workspace:*
         version: link:../gateway-ui
-      '@smithers-orchestrator/gcp':
+      '@smthrs/gcp':
         specifier: workspace:*
         version: link:../gcp
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
-      '@smithers-orchestrator/memory':
+      '@smthrs/memory':
         specifier: workspace:*
         version: link:../memory
-      '@smithers-orchestrator/microsandbox':
+      '@smthrs/microsandbox':
         specifier: workspace:*
         version: link:../microsandbox
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/openapi':
+      '@smthrs/openapi':
         specifier: workspace:*
         version: link:../openapi
-      '@smithers-orchestrator/react-reconciler':
+      '@smthrs/react-reconciler':
         specifier: workspace:*
         version: link:../react-reconciler
-      '@smithers-orchestrator/sandbox':
+      '@smthrs/sandbox':
         specifier: workspace:*
         version: link:../sandbox
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
-      '@smithers-orchestrator/scorers':
+      '@smthrs/scorers':
         specifier: workspace:*
         version: link:../scorers
-      '@smithers-orchestrator/server':
+      '@smthrs/server':
         specifier: workspace:*
         version: link:../server
-      '@smithers-orchestrator/telegram':
+      '@smthrs/telegram':
         specifier: workspace:*
         version: link:../telegram
-      '@smithers-orchestrator/testing':
+      '@smthrs/testing':
         specifier: workspace:*
         version: link:../testing
-      '@smithers-orchestrator/time-travel':
+      '@smthrs/time-travel':
         specifier: workspace:*
         version: link:../time-travel
-      '@smithers-orchestrator/tool-context':
+      '@smthrs/tool-context':
         specifier: workspace:*
         version: link:../tool-context
-      '@smithers-orchestrator/ui':
+      '@smthrs/ui':
         specifier: workspace:*
         version: link:../ui
-      '@smithers-orchestrator/vcs':
+      '@smthrs/vcs':
         specifier: workspace:*
         version: link:../vcs
-      '@smithers-orchestrator/vercel':
+      '@smthrs/vercel':
         specifier: workspace:*
         version: link:../vercel
-      '@smithers-orchestrator/xstate':
+      '@smthrs/xstate':
         specifier: workspace:*
         version: link:../xstate
       ai:
@@ -2231,25 +2232,25 @@ importers:
 
   packages/testing:
     dependencies:
-      '@smithers-orchestrator/components':
+      '@smthrs/components':
         specifier: workspace:*
         version: link:../components
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../driver
-      '@smithers-orchestrator/engine':
+      '@smthrs/engine':
         specifier: workspace:*
         version: link:../engine
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
-      '@smithers-orchestrator/react-reconciler':
+      '@smthrs/react-reconciler':
         specifier: workspace:*
         version: link:../react-reconciler
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
       effect:
@@ -2265,7 +2266,7 @@ importers:
       koffi:
         specifier: ^2.16.2
         version: 2.16.2
-      smithers-orchestrator:
+      smthrs:
         specifier: workspace:*
         version: link:../smithers
       typescript:
@@ -2277,28 +2278,28 @@ importers:
       '@effect/platform-bun':
         specifier: 4.0.0-beta.102
         version: 4.0.0-beta.102(effect@4.0.0-beta.102)
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../driver
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/react-reconciler':
+      '@smthrs/react-reconciler':
         specifier: workspace:*
         version: link:../react-reconciler
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
-      '@smithers-orchestrator/vcs':
+      '@smthrs/vcs':
         specifier: workspace:*
         version: link:../vcs
       drizzle-orm:
@@ -2345,16 +2346,16 @@ importers:
       '@opentui/react':
         specifier: ^0.4.2
         version: 0.4.2(react-devtools-core@7.0.1)(react@19.2.7)(typescript@6.0.3)(web-tree-sitter@0.25.10)(ws@8.21.0)
-      '@smithers-orchestrator/gateway-client':
+      '@smthrs/gateway-client':
         specifier: workspace:*
         version: link:../gateway-client
-      '@smithers-orchestrator/gateway-react':
+      '@smthrs/gateway-react':
         specifier: workspace:*
         version: link:../gateway-react
-      '@smithers-orchestrator/tui-ui':
+      '@smthrs/tui-ui':
         specifier: workspace:*
         version: link:../tui-ui
-      '@smithers-orchestrator/ui-core':
+      '@smthrs/ui-core':
         specifier: workspace:*
         version: link:../ui-core
       react:
@@ -2413,7 +2414,7 @@ importers:
       '@pierre/diffs':
         specifier: ^1.2.12
         version: 1.2.12(@shikijs/themes@3.23.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@smithers-orchestrator/ui-styleguide':
+      '@smthrs/ui-styleguide':
         specifier: workspace:*
         version: link:../ui-styleguide
       '@xterm/addon-fit':
@@ -2465,10 +2466,10 @@ importers:
 
   packages/ui-core:
     dependencies:
-      '@smithers-orchestrator/gateway-client':
+      '@smthrs/gateway-client':
         specifier: workspace:*
         version: link:../gateway-client
-      '@smithers-orchestrator/gateway-react':
+      '@smthrs/gateway-react':
         specifier: workspace:*
         version: link:../gateway-react
       zustand:
@@ -2492,7 +2493,7 @@ importers:
 
   packages/usage:
     dependencies:
-      '@smithers-orchestrator/accounts':
+      '@smthrs/accounts':
         specifier: workspace:*
         version: link:../accounts
     devDependencies:
@@ -2505,7 +2506,7 @@ importers:
 
   packages/vcs:
     dependencies:
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
       effect:
@@ -2522,28 +2523,28 @@ importers:
         specifier: ~6.0.3
         version: 6.0.3
     optionalDependencies:
-      '@smithers-orchestrator/jj-darwin-arm64':
+      '@smthrs/jj-darwin-arm64':
         specifier: workspace:*
         version: link:../jj-darwin-arm64
-      '@smithers-orchestrator/jj-darwin-x64':
+      '@smthrs/jj-darwin-x64':
         specifier: workspace:*
         version: link:../jj-darwin-x64
-      '@smithers-orchestrator/jj-linux-arm64':
+      '@smthrs/jj-linux-arm64':
         specifier: workspace:*
         version: link:../jj-linux-arm64
-      '@smithers-orchestrator/jj-linux-x64':
+      '@smthrs/jj-linux-x64':
         specifier: workspace:*
         version: link:../jj-linux-x64
-      '@smithers-orchestrator/jj-win32-x64':
+      '@smthrs/jj-win32-x64':
         specifier: workspace:*
         version: link:../jj-win32-x64
 
   packages/vercel:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/sandbox':
+      '@smthrs/sandbox':
         specifier: workspace:*
         version: link:../sandbox
     devDependencies:
@@ -2559,26 +2560,26 @@ importers:
 
   packages/xstate:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/react-reconciler':
+      '@smthrs/react-reconciler':
         specifier: workspace:*
         version: link:../react-reconciler
       react:
         specifier: ^19.2.7
         version: 19.2.7
     devDependencies:
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../driver
-      '@smithers-orchestrator/engine':
+      '@smthrs/engine':
         specifier: workspace:*
         version: link:../engine
-      '@smithers-orchestrator/time-travel':
+      '@smthrs/time-travel':
         specifier: workspace:*
         version: link:../time-travel
       '@types/bun':
@@ -2590,7 +2591,7 @@ importers:
       effect:
         specifier: 4.0.0-beta.102
         version: 4.0.0-beta.102
-      smithers-orchestrator:
+      smthrs:
         specifier: workspace:*
         version: link:../smithers
       typescript:
@@ -6396,31 +6397,26 @@ packages:
   '@superradcompany/microsandbox-darwin-arm64@0.6.6':
     resolution: {integrity: sha512-rw7cg0G9mj1c9/14K/K6PMg78H11rGRA5tDzRbx67kAeoKWpAJnFsIYLvOCHcD+6aM0Xdxote90FVVlt1Kknjw==}
     engines: {node: '>= 22'}
-    cpu: [arm64]
     os: [darwin]
 
   '@superradcompany/microsandbox-linux-arm64-gnu@0.6.6':
     resolution: {integrity: sha512-y4CdSPkSOtCwBNbG8Yhkahxg9yh/jpp4cBMOItCOj0JshU7luE2r4+6ceIrPNAkb8sF0fX7tNTXMDK4fJA8iFA==}
     engines: {node: '>= 22'}
-    cpu: [arm64]
     os: [linux]
 
   '@superradcompany/microsandbox-linux-x64-gnu@0.6.6':
     resolution: {integrity: sha512-9yo6/G454L8ebzZP1qMxjIXRD3zJqQ68w2p9Ust7B7MOj5hr+VyuVZ0kYjSJAc4GSI0fno2xQe5z2tp5ynk78A==}
     engines: {node: '>= 22'}
-    cpu: [x64]
     os: [linux]
 
   '@superradcompany/microsandbox-win32-arm64-msvc@0.6.6':
     resolution: {integrity: sha512-q22t1DVlB8FR90adjBxTf0i//f3yzm7QYsKbsar29zoUAHC/24h6R4LE6YfIDWtPKB8jvTSpCeMehFoyXyLN1Q==}
     engines: {node: '>= 22'}
-    cpu: [arm64]
     os: [win32]
 
   '@superradcompany/microsandbox-win32-x64-msvc@0.6.6':
     resolution: {integrity: sha512-m2ir3DNw+Sc7i2DEg1kgY9bFmFHCFt2KamnXzJMUL9qtkE2n11GqIUhQJtKXwcWyM7nH0AxooMmnbx7UDMG8Ww==}
     engines: {node: '>= 22'}
-    cpu: [x64]
     os: [win32]
 
   '@tanstack/ai-event-client@0.6.8':

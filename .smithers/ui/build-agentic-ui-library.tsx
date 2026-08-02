@@ -6,8 +6,8 @@ import {
   useGatewayRun,
   useGatewayRunEvents,
   useGatewayRuns,
-} from "smithers-orchestrator/gateway-react";
-import { ApprovalPanel, NodeOutputView, RunEventLog, RunTree, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
+} from "smthrs/gateway-react";
+import { ApprovalPanel, NodeOutputView, RunEventLog, RunTree, WorkflowUiShell } from "smthrs/gateway-ui";
 import {
   Badge,
   Button,
@@ -31,7 +31,7 @@ import {
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 
 const WORKFLOW_KEY = "build-agentic-ui-library";
 

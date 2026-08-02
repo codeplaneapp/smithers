@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import type { UsageReport } from "@smithers-orchestrator/gateway-client";
+import type { UsageReport } from "@smthrs/gateway-client";
 import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
 import { useGatewayRpc } from "./useGatewayRpc.ts";
 

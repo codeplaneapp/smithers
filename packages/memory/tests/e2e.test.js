@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { createMemoryStore } from "../src/store/index.js";
 import { TtlGarbageCollector } from "../src/processors.js";
 const WF_NS = { kind: "workflow", id: "e2e-test" };

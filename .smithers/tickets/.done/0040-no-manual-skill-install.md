@@ -13,13 +13,13 @@ curl -fsSL ....
 ```
 
 to install the skill. Users should not be asked to do this by hand — *"please
-dont make me do this kind of stuff"*. Running `smithers-orchestrator skills` is
+dont make me do this kind of stuff"*. Running `smthrs skills` is
 supposed to perform the install; the docs/output should state that **it does it
 for you**, not hand the user the raw mkdir/curl.
 
 ## Requirement
 
-- `smithers-orchestrator skills` installs the curated skill(s) into the correct
+- `smthrs skills` installs the curated skill(s) into the correct
   per-tool location automatically.
 - Remove the manual mkdir/curl recipe from get-started; replace with the single
   command.

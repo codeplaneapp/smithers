@@ -15,11 +15,11 @@
  * Use cases: long unattended runs, overnight fleets, anything that must not
  * silently wedge at 3am.
  */
-import { Monitor, monitorPrompt } from "smithers-orchestrator";
+import { Monitor, monitorPrompt } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { bash, read, grep } from "smithers-orchestrator/tools";
+import { bash, read, grep } from "smthrs/tools";
 import { z } from "zod";
 
 // The heartbeat's verdict. `condition` is the closed set <Monitor> routes on;
@@ -48,7 +48,7 @@ const { Workflow, smithers, outputs } = createExampleSmithers({
 // The monitor reads run state through the public CLI surface, never the store.
 // `bash` is enough: `smithers status`, `smithers inspect --format json`,
 // `smithers events`, `smithers node`. A monitor that needs typed access should
-// use `smithers-orchestrator/gateway-client` instead.
+// use `smthrs/gateway-client` instead.
 const watcher = new Agent({
   model: anthropic("claude-sonnet-5"),
   tools: { bash, read, grep },

@@ -1,1 +1,1 @@
-export * from "@smithers-orchestrator/memory";
+export * from "@smthrs/memory";

@@ -2,21 +2,14 @@
 // separate files so CI can run each in its own bun process: every PGlite
 // instance holds >1GB of WASM memory bun cannot reliably reclaim, and the
 // whole suite in one process dies with a Bus error near the ~2GB ceiling.
-import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { SmithersDb } from "../../db/src/adapter.js";
 import { ensureSmithersTables } from "../../db/src/ensure.js";
-import { forkRun, getBranchInfo, listBranches } from "@smithers-orchestrator/time-travel/fork";
-import { loadSnapshot } from "@smithers-orchestrator/time-travel/snapshot";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import pg from "pg";
 import { createSmithers } from "../src/create.js";
 import { migrateSmithersStore } from "../src/migrateSmithersStore.js";
-import { openSmithersBackend } from "../src/openSmithersBackend.js";
-import { createSmithersPostgres } from "../src/create.js";
-import { openSmithersStore } from "../src/openSmithersStore.js";
 import { resolveSmithersBackendChoice } from "../src/resolveSmithersBackendChoice.js";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";

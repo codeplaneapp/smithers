@@ -1,5 +1,5 @@
 /// <reference path="../types/bun-test-shim.d.ts" />
-import { RuntimeCapabilityError } from '@smithers-orchestrator/driver/RuntimeCapabilityError';
+import { RuntimeCapabilityError } from '@smthrs/driver/RuntimeCapabilityError';
 export { RuntimeConformanceLane, RuntimeConformanceResult, assertRuntimeConformance, isRuntimeCapabilityError } from './runtimeConformance.js';
 
 type BrowserConformanceSmithers = {

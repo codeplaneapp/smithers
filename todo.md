@@ -70,7 +70,7 @@ pre-existing breakage). Full recovery log: memory file
       `smithers ui tf-final-replay-identity-20260718` or `smithers status`.
 - [x] The last substantive blocker sol raised: root `pnpm test` red (8 failing workspaces —
       including the `apps/kimi-benchmarks-site` UI-inventory gate entry and the missing
-      `@smithers-orchestrator/microsandbox` workspace link, both judged outside the target diff).
+      `@smthrs/microsandbox` workspace link, both judged outside the target diff).
       If the run's improvement rounds don't clear them, fix/land these root-gate failures directly.
       _(2026-07-19: isolated the contaminated sweep failures and landed fixes for the genuine
       react-reconciler DevTools version, DB output-provenance leak, stale migration-head tests,
@@ -129,7 +129,7 @@ pre-existing breakage). Full recovery log: memory file
 # Shared UI library campaign — remaining work
 
 _Context: mission = every reusable UI component in this repo and ../multi importable from the
-shared packages (`smithers-orchestrator/ui` + `/gateway-ui`). Extraction run `run-1784418919774`
+shared packages (`smthrs/ui` + `/gateway-ui`). Extraction run `run-1784418919774`
 built 10 components in worktrees; recovery merge train `run-1784453941803` (land-shared-ui) FINISHED
 2026-07-19 with ALL 10 landed on local main: CollapsiblePanel, DiffHunks + diff domain, FileTree,
 Markdown, MarkdownEditor (Milkdown), NodeOutputCard (gateway-ui), PierreDiffView (@pierre/diffs),
@@ -177,7 +177,7 @@ regenerated in 7a915c63a9)._
       hand-rolls Chip + status color map; ship-pipeline + research-plan-implement define
       independent Panel cards.
 - [ ] Consumer migration in ../multi: 0 of ~333 tsx files import the shared packages despite
-      `@smithers-orchestrator/ui` being a declared dependency; two independent StatusPill
+      `@smthrs/ui` being a declared dependency; two independent StatusPill
       implementations; ~37 raw `.btn` buttons; ~20 hand-rolled tab strips + empty states.
 - [ ] Missing primitives the audits named: CommandPalette (multi src/palette + CommandMenu),
       shared icon set (multi src/icons), avatar/checkbox/dropdown-menu/popover/scroll-area
@@ -185,7 +185,7 @@ regenerated in 7a915c63a9)._
       ProgressBar/Meter + generic monospace LogView/CodeBlock, chat surface unification
       (multi src/chat vs packages/ui chat/*).
 - [ ] Facade drift: gateway-ui `NodeRow` exists but is not exported from its index;
-      `styleguide-css` subpath not reachable through the smithers-orchestrator facade.
+      `styleguide-css` subpath not reachable through the smthrs facade.
 - [ ] Burn down the 104 allowlisted legacy violations (was 94 at audit time, 104 after the six-lane recovery unioned its baseline entries) in `scripts/ui-architecture-baseline.json`
       (18 legacyPackageUsage, 12 heavyWidgetDependencies, 8 duplicate wrappers/icons, plus
       compatibility-facade + gateway-react-location entries).

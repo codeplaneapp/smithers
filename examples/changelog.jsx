@@ -4,11 +4,11 @@
  * Pattern: Read commits → classify → group → render formatted output.
  * Use cases: release notes, weekly digests, sprint summaries, contributor reports.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { bash, read, write } from "smithers-orchestrator/tools";
+import { bash, read, write } from "smthrs/tools";
 import { z } from "zod";
 import AnalyzePrompt from "./prompts/changelog/analyze.mdx";
 import GeneratePrompt from "./prompts/changelog/generate.mdx";

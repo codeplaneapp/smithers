@@ -1,9 +1,9 @@
 // smithers-source: authored
 // smithers-display-name: Build eliza-conventions wrapper
-// smithers-description: Add @smithers-orchestrator/agent-eliza/conventions — a TS wrapper over the normal Smithers API (createSmithers/Gateway) that matches elizaOS authoring+loading conventions (defineWorkflow/loadWorkflows/formatWorkflowsForPrompt, YAML frontmatter). Private repo workflow.
+// smithers-description: Add @smthrs/agent-eliza/conventions — a TS wrapper over the normal Smithers API (createSmithers/Gateway) that matches elizaOS authoring+loading conventions (defineWorkflow/loadWorkflows/formatWorkflowsForPrompt, YAML frontmatter). Private repo workflow.
 // smithers-tags: eliza, conventions, wrapper, private
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../../agents";
 import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../../components/ValidationLoop";
@@ -27,12 +27,12 @@ Add it to the existing opt-in eliza package as a NEW subpath module:
 - Files under \`packages/agent-eliza/src/conventions/\` (e.g. \`types.ts\`,
   \`frontmatter.ts\`, \`define.ts\`, \`loader.ts\`, \`formatter.ts\`, \`register.ts\`,
   \`index.ts\`).
-- Export it as a SUBPATH \`@smithers-orchestrator/agent-eliza/conventions\` — add
+- Export it as a SUBPATH \`@smthrs/agent-eliza/conventions\` — add
   an \`exports["./conventions"]\` entry in \`packages/agent-eliza/package.json\`
   pointing at \`./src/conventions/index.js\` + \`.d.ts\` (mirror how
-  \`@smithers-orchestrator/agents\` exposes subpaths like \`./BaseCliAgent\`).
+  \`@smthrs/agents\` exposes subpaths like \`./BaseCliAgent\`).
 - New deps this module needs, added to \`packages/agent-eliza/package.json\`
-  \`dependencies\`: \`smithers-orchestrator\` (\`workspace:*\` — for
+  \`dependencies\`: \`smthrs\` (\`workspace:*\` — for
   \`createSmithers\`, the JSX components, and \`Gateway\`) and \`yaml\`
   (\`^2.8.1\` — for frontmatter parsing; it is already a root dep). Keep
   \`@elizaos/core\` as-is (types only; do NOT add a hard runtime dep on
@@ -55,7 +55,7 @@ workflows:
     source?, workflow: SmithersWorkflow }\` where \`workflow\` is the value returned
     by the normal Smithers author path (the default export of a \`smithers(ctx =>
     <Workflow/>)\` module). Import the real workflow type from
-    \`smithers-orchestrator\` (find the exported \`SmithersWorkflow\` / workflow type;
+    \`smthrs\` (find the exported \`SmithersWorkflow\` / workflow type;
     read \`packages/smithers/src/create.js\` + index to get the correct type).
   - \`WorkflowEntry\` = \`{ workflow: WorkflowDefinition, frontmatter, metadata }\`.
   - \`LoadWorkflowsResult\` = \`{ workflows: WorkflowDefinition[], diagnostics:
@@ -109,8 +109,8 @@ workflows:
   shapes above are authoritative.
 - Smithers API being wrapped: \`packages/smithers/src/create.js\` (\`createSmithers\`
   signature + returned \`{ smithers, Workflow, Task, outputs }\`), the components
-  re-exported from \`smithers-orchestrator\`, and the \`Gateway\` (\`register\`) from
-  \`@smithers-orchestrator/server/gateway\`. Use the REAL exported types — do not
+  re-exported from \`smthrs\`, and the \`Gateway\` (\`register\`) from
+  \`@smthrs/server/gateway\`. Use the REAL exported types — do not
   invent them.
 - Convention parity reference: how Smithers already parses \`// smithers-*:\`
   workflow metadata lives in \`apps/cli/src/workflows.js\` (\`parseMetadata\`); your
@@ -145,14 +145,14 @@ package's existing test style). Cover with deterministic real fixtures:
 - \`pnpm -C packages/agent-eliza build\` succeeds and the new \`./conventions\`
   subpath resolves (types + js).
 - **\`pnpm install\` then \`pnpm install --frozen-lockfile\` BOTH succeed** — after
-  adding \`smithers-orchestrator\` + \`yaml\` deps, regenerate and commit
+  adding \`smthrs\` + \`yaml\` deps, regenerate and commit
   \`pnpm-lock.yaml\`, or CI's frozen install fails with
   \`ERR_PNPM_OUTDATED_LOCKFILE\` (this bug already bit us once — do not repeat).
 - \`pnpm test\` gate green: \`check-single-effect-version\`,
   \`check-dependency-boundaries\` (every import declared in
   \`packages/agent-eliza/package.json\`; no boundary violation, no dependency
-  cycle — agent-eliza may depend on \`smithers-orchestrator\` since
-  \`smithers-orchestrator\` does NOT depend on agent-eliza), \`check-docs\`,
+  cycle — agent-eliza may depend on \`smthrs\` since
+  \`smthrs\` does NOT depend on agent-eliza), \`check-docs\`,
   \`check-llms\`, \`check-smithers-test-script\`.
 
 Follow repo CLAUDE.md: atomic commits, emoji + conventional-commit subjects

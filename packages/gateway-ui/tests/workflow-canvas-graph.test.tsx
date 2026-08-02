@@ -31,7 +31,7 @@ import { workflowGraphChromeCss } from "../src/workflowGraphCss";
 /**
  * The workflow-canvas lane's gateway integration: SmithersNodeHandles is the
  * shared handle pair every smithersTask renderer must render, and
- * SmithersCanvasNode composes the renderer-neutral @smithers-orchestrator/ui
+ * SmithersCanvasNode composes the renderer-neutral @smthrs/ui
  * canvas anatomy inside it. happy-dom cannot paint canvases, so assertions
  * target the parsed model plus renderToStaticMarkup inside a
  * ReactFlowProvider (handles read the ReactFlow store).

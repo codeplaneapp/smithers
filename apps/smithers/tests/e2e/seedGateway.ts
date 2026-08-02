@@ -1,15 +1,15 @@
 /**
  * The e2e seed Gateway. Boots a real `smithers gateway` (the same
- * `@smithers-orchestrator/server/gateway` the CLI uses) over a hermetic, freshly
+ * `@smthrs/server/gateway` the CLI uses) over a hermetic, freshly
  * reset workspace DB in this directory, and registers the two no-agent seed
  * workflows. No mocks: the UI under test talks to this real gateway over RPC/WS.
  *
  * `globalSetup.ts` launches the seed runs against it via the real `launchRun`
  * RPC once it is listening.
  */
-import { Gateway, mdxPlugin } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { Gateway, mdxPlugin } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync, rmSync } from "node:fs";

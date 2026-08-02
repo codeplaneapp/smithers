@@ -3,8 +3,8 @@
 // smithers-display-name: Federation Release Plan Fix
 // smithers-description: Repair rejected package scopes and dependency rewrites in the federation release artifacts.
 // smithers-tags: maintenance, federation, release
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 
@@ -56,18 +56,18 @@ Preserve every passing invariant:
 
 Fix every rejection:
 
-1. Remove smithers-orchestrator from all initial externalPrerequisites. The
+1. Remove smthrs from all initial externalPrerequisites. The
    facade is never an upstream prerequisite; it is republished last.
 
 2. packages/agent-eliza currently imports the facade. Keep smithers-agents as
-   an initial repository and @smithers-orchestrator/agents as an initial npm
-   package, but make @smithers-orchestrator/agent-eliza future/deferred unless
+   an initial repository and @smthrs/agents as an initial npm
+   package, but make @smthrs/agent-eliza future/deferred unless
    you can specify a concrete, verified facade-free dependency rewrite. Model
    its source dependencies separately from its post-decoupling dependencies and
    a precise rewritePlan. It must not block the initial repo release.
 
-3. apps/review currently imports smithers-orchestrator and the future multi
-   package @smithers-orchestrator/ui-styleguide. Keep the smithers-review repo
+3. apps/review currently imports smthrs and the future multi
+   package @smthrs/ui-styleguide. Keep the smithers-review repo
    in the initial federation (GitHub release allowed), but move its npm package
    to future/deferred until multi's history-merge PR is merged AND the lane
    decoupling removes the facade dependency onto verified concrete core APIs.
@@ -80,7 +80,7 @@ Fix every rejection:
    It has zero packages and is never released to npm.
 
 5. apps/smithers moves to multi while apps/cli stays in Smithers and currently
-   builds it from source. Model the future @smithers-orchestrator/smithers-ui
+   builds it from source. Model the future @smthrs/smithers-ui
    package/bundle and a concrete CLI semver consumption rewrite after the
    history-merge. It must not be part of initial publication.
 
@@ -104,7 +104,7 @@ Run hard validations:
 - every initial npm package has only initial-planned or allowed concrete core
   prerequisites, never facade or future packages;
 - every future package has explicit blockers/order and post-decouple deps;
-- no smithers-orchestrator in externalPrerequisites;
+- no smthrs in externalPrerequisites;
 - awesome-smithers license record exists;
 - all repo license plans complete;
 - every dependsOn/rewrite target resolves.

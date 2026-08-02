@@ -1,4 +1,4 @@
-import { useGatewayWorkflows } from "@smithers-orchestrator/gateway-react";
+import { useGatewayWorkflows } from "@smthrs/gateway-react";
 import type { View } from "../app/routeStore";
 import type { Surface } from "../app/Surface";
 import { mapToStoreWorkflows } from "../store/workflowMetadata";

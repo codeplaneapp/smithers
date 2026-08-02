@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // deliverable-behavior — does a weak model, grounded in our docs/skill, choose
 // the right DELIVERABLE SHAPE without being told?
 //

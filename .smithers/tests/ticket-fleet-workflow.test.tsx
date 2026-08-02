@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import "../preload.ts";
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { execFileSync } from "node:child_process";
@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { devNull, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { renderWorkflow, runTask, type RenderedWorkflow } from "smithers-orchestrator/testing";
+import { renderWorkflow, runTask, type RenderedWorkflow } from "smthrs/testing";
 
 setDefaultTimeout(60_000);
 const source = join(import.meta.dir, "..", "workflows", "ticket-fleet.tsx");

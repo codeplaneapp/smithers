@@ -1,6 +1,6 @@
 # apps/cli/src
 
-Implementation of the `smithers` CLI (`@smithers-orchestrator/cli`): a flat set
+Implementation of the `smithers` CLI (`@smthrs/cli`): a flat set
 of `.js` command/helper modules with PascalCase type-only `.ts` sidecars
 (e.g. `diff.js` + `RunDiffCommandInput.ts`). `index.js` (~8.5k lines) is the
 bin entry (root `package.json` maps `smithers` to it) and also serves as the

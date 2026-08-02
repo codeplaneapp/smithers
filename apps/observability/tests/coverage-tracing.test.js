@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import * as coreTracing from "@smithers-orchestrator/observability/_coreTracing";
+import * as coreTracing from "@smthrs/observability/_coreTracing";
 import { withSmithersSpan, TracingService, TracingServiceLive } from "../src/_coreTracing.js";
 import { getCurrentSmithersTraceAnnotations as spanAnnotations } from "../src/getCurrentSmithersTraceAnnotations.js";
 import { smithersTraceSpanStorage } from "../src/_smithersTraceSpanStorage.js";

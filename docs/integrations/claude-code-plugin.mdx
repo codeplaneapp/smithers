@@ -5,7 +5,7 @@ description: Install the smithers Claude Code plugin and every Smithers run driv
 
 The repository ships a first-party Claude Code plugin at `claude-plugin/`. Installing it wires four things into every Claude Code session:
 
-1. **The `smithers` MCP server** (`bunx smithers-orchestrator --mcp`): `list_workflows`, `run_workflow`, `watch_run`, `resolve_approval`, `ask_human`, and the rest of the semantic tool surface.
+1. **The `smithers` MCP server** (`bunx smthrs --mcp`): `list_workflows`, `run_workflow`, `watch_run`, `resolve_approval`, `ask_human`, and the rest of the semantic tool surface.
 2. **The `smithers` skill**: teaches Claude to run durable, multi-step, or background work through Smithers instead of hand-rolled subagent trees, and to consult `https://smithers.sh/llms-full.txt` before writing any workflow code.
 3. **The `/workflows` mirror**: a generic Workflow-tool script, `workflows/smithers-run.mjs`, that launches or attaches to a Smithers run and mirrors it live into Claude Code's `/workflows` progress tree, with zero per-workflow setup.
 4. **A background monitor** (experimental): `smithers claude monitor` streams approval, human-input, failure, stalled-heartbeat, and retry-churn notifications into the session even with no mirror running, and emits a periodic `run-progress` digest whenever a followed run has produced no notification for a full window, so a detached run that stays alive but keeps retrying can never go hours without handing the session a status to relay. It follows only runs this session subscribed to, either automatically (`smithers claude tick`, or a Claude-launched detached `up`/`workflow run`/MCP `run_workflow`) or explicitly (`smithers claude subscribe RUN_ID`). The workspace store is shared across sessions, so skipping this scope would wake each session for every other session's runs and for pre-existing runs at startup (`--all-runs` restores that unscoped behavior); finished and cancelled runs also stay unbroadcast by default, since a followed run already reports completion through its `/workflows` mirror (`--transitions all` streams them anyway).
@@ -37,7 +37,7 @@ What the mirror renders:
 - **Continue-as-new**: the mirror switches to a run's new runId automatically.
 - **Caps**: at most 6 live watcher rows at once (the sync loop must never queue behind its own watchers), a 900-agent budget, and per-phase summary rows above 150 nodes; every cap logs when it engages.
 
-Stopping the mirror workflow never stops the Smithers run: cancelling is explicit, via `bunx smithers-orchestrator cancel RUN_ID` (or the gateway `cancelRun` RPC).
+Stopping the mirror workflow never stops the Smithers run: cancelling is explicit, via `bunx smthrs cancel RUN_ID` (or the gateway `cancelRun` RPC).
 
 ## The `smithers claude` protocol
 
@@ -80,7 +80,7 @@ From the repository checkout (or a marketplace once published):
 claude plugin install /path/to/smithers/claude-plugin
 ```
 
-Nothing else is required: the MCP server and CLI run through `bunx smithers-orchestrator`, and the first invocation bootstraps the CLI from npm. In a project without `.smithers/`, the skill initializes Smithers before the first run.
+Nothing else is required: the MCP server and CLI run through `bunx smthrs`, and the first invocation bootstraps the CLI from npm. In a project without `.smithers/`, the skill initializes Smithers before the first run.
 
 ## Failure modes
 

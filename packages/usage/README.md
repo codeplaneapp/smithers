@@ -1,4 +1,4 @@
-# @smithers-orchestrator/usage
+# @smthrs/usage
 
 Report how much rate limit or subscription quota each registered Smithers account
 has consumed. Powers `smithers usage`.
@@ -38,7 +38,7 @@ persists the rotated pair back (the kimi CLI's own client_id/grant).
 ## Design
 
 - `getAccountUsage(account)` is the dispatcher. It switches on `account.provider`,
-  mirroring `accountToProviderEnv` in `@smithers-orchestrator/accounts`.
+  mirroring `accountToProviderEnv` in `@smthrs/accounts`.
 - `getUsageForAccounts(accounts, opts)` fans out in parallel through an on-disk
   cache (`usage-cache.json`). Cached reports come back with `stale: true`. The
   cache enforces a hard 180s floor for `claude-code` because its usage endpoint

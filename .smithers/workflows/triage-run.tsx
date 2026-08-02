@@ -3,10 +3,10 @@
 // smithers-display-name: Triage Run
 // smithers-description: Diagnose one failed or stuck Smithers run: pull events/logs, find the root cause, propose a fix/rewind/retry.
 // smithers-tags: ops, debugging
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
 import { execFileSync } from "node:child_process";
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import DiagnosePrompt from "../prompts/triage-run-diagnose.mdx";

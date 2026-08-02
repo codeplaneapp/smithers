@@ -1,4 +1,4 @@
-import type { SandboxProvider } from "@smithers-orchestrator/sandbox";
+import type { SandboxProvider } from "@smthrs/sandbox";
 
 export const VERCEL_SANDBOX_PROVIDER_ID: "vercel-sandbox";
 

@@ -1,10 +1,10 @@
 import { describe, expect, test, afterEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { writeRewindAuditRow } from "@smithers-orchestrator/time-travel/writeRewindAuditRow";
-import { listRewindAuditRows } from "@smithers-orchestrator/time-travel/listRewindAuditRows";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { writeRewindAuditRow } from "@smthrs/time-travel/writeRewindAuditRow";
+import { listRewindAuditRows } from "@smthrs/time-travel/listRewindAuditRows";
 import { createServeApp } from "../src/serve.js";
 
 /**

@@ -16,7 +16,7 @@ assemble the rest.
 | **Context engineering** | what information, tools, memory, schemas, and state enter the model each step | the workflow graph + [memory](/how-it-works) + typed outputs |
 | **Harness engineering** | runtime, tools, conventions, permissions, retries, fresh-context loops | `agents.ts`, [sandboxes](/components/sandbox), tools, `repoCommands` |
 | **Workflow engineering** | order, parallelism, review loops, approvals, resumability, artifacts | the Smithers runtime itself |
-| **Backpressure** | every desired behavior becomes a gate, test, eval, schema, reviewer, approval, or loop condition | Zod outputs, `bunx smithers-orchestrator eval`, `<ReviewLoop>`, `<Approval>`, traces |
+| **Backpressure** | every desired behavior becomes a gate, test, eval, schema, reviewer, approval, or loop condition | Zod outputs, `bunx smthrs eval`, `<ReviewLoop>`, `<Approval>`, traces |
 
 The first four shape what the agent *can* do; **backpressure** decides whether it's
 allowed to move forward. A workflow that just tries its best and moves on has no
@@ -42,11 +42,11 @@ primitive that enforces it:
 
 - **Schema**: the step must return a shape: a Zod `output={...}` on the `<Task>`.
 - **Test**: generated code must pass: a function task shelling out to `repoCommands.test`.
-- **Eval**: an answer must satisfy examples/rubrics: `bunx smithers-orchestrator eval` + [scorers](/guides/evals-quickstart).
+- **Eval**: an answer must satisfy examples/rubrics: `bunx smthrs eval` + [scorers](/guides/evals-quickstart).
 - **Review**: another agent (or human) must approve: [`<ReviewLoop>`](/components/loop) / `<Panel>`.
 - **Approval**: a human signs off before a risky action: [`<Approval>`](/components/approval).
 - **Dependency**: step B can't start until step A produced a field: gate on `ctx.outputMaybe(...)`.
-- **Trace**: tool calls, retries, and handoffs must be visible: [observability](/guides/evals-quickstart) + `bunx smithers-orchestrator events`.
+- **Trace**: tool calls, retries, and handoffs must be visible: [observability](/guides/evals-quickstart) + `bunx smthrs events`.
 
 Loop until the gate passes (`<Loop>` / `<Ralph until={…}>`) rather than running once
 and hoping.
@@ -179,7 +179,7 @@ Smithers measures the zone so you are not guessing:
   size, bucketed at exactly `[50k, 100k, 200k, 500k, 1M]`.
 - `smithers.tokens.context_window_bucket_total` is a counter of how many calls
   landed in each bucket, so you can see drift toward the large buckets.
-- Per-node usage shows in `bunx smithers-orchestrator node`, and live as the
+- Per-node usage shows in `bunx smthrs node`, and live as the
   `TokenUsageReported` event (the 🧮 line in the event stream).
 
 The in-workflow guardrail is [`<Aspects tokenBudget>`](/components/aspects),
@@ -349,13 +349,13 @@ You can make that automatic and durable by composing three primitives:
 
 The code below is the real
 [`examples/context-handoff/workflow.tsx`](https://github.com/smithersai/smithers/blob/main/examples/context-handoff/workflow.tsx),
-so `bunx smithers-orchestrator graph examples/context-handoff/workflow.tsx --input '{}'`
+so `bunx smthrs graph examples/context-handoff/workflow.tsx --input '{}'`
 renders its graph (including the catch branch) and `check-docs` verifies every import
 here against the real package facade. That runnable file is the anti-rot teeth: if the
 API drifts, the graph render and the typecheck fail.
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * Durable "/clear": a context handoff.
  *
@@ -383,18 +383,18 @@ API drifts, the graph render and the typecheck fail.
  *
  * Run the graph without executing it:
  *
- *   bunx smithers-orchestrator graph examples/context-handoff/workflow.tsx --input '{}'
+ *   bunx smthrs graph examples/context-handoff/workflow.tsx --input '{}'
  *
  * The DAG includes the catch branch, so the render proves the whole handoff
  * wiring compiles.
  */
 
-import { createSmithers, ClaudeCodeAgent } from "smithers-orchestrator";
-// In-repo, "smithers-orchestrator" resolves to a limited examples entry that
+import { createSmithers, ClaudeCodeAgent } from "smthrs";
+// In-repo, "smthrs" resolves to a limited examples entry that
 // does not re-export <Aspects>/<TryCatchFinally>; import them from the
 // components package directly. End-user code can import both from
-// "smithers-orchestrator".
-import { Aspects, TryCatchFinally } from "@smithers-orchestrator/components";
+// "smthrs".
+import { Aspects, TryCatchFinally } from "@smthrs/components";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod/v4";
@@ -505,13 +505,13 @@ You should not need to know any of the above to get a workflow: the
 "context engineering for you" layer.
 
 ```bash
-bunx smithers-orchestrator workflow run create-workflow \
+bunx smthrs workflow run create-workflow \
   --prompt "Watch a landing request and auto-land it once CI is green"
 ```
 
 It clarifies your ask into a spec, **provisions the docs and skills the work needs**
 (pulls the relevant `llms-*.txt`, finds the closest `examples/` template, and
-installs worker skills via `bunx smithers-orchestrator skills add`), designs the graph, pauses for
+installs worker skills via `bunx smthrs skills add`), designs the graph, pauses for
 your approval, scaffolds the files, verifies the graph renders, and documents the
 result. You answer product questions; it produces the prompts, context, components,
 and gates.

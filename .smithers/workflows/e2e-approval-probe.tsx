@@ -1,8 +1,8 @@
 // smithers-source: e2e
 // smithers-display-name: E2E Approval Probe
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
-import { Approval, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
+import { Approval, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 
 const approvalSchema = z.object({

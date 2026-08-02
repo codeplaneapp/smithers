@@ -1,1 +1,1 @@
-export { memoryRecallDuration } from "@smithers-orchestrator/observability/metrics";
+export { memoryRecallDuration } from "@smthrs/observability/metrics";

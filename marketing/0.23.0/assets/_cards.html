@@ -92,7 +92,7 @@
     <span class="step">verify</span><span class="arrow">→</span>
     <span class="step">document</span>
   </div>
-  <div class="prompt"><span class="p">$</span> bunx smithers-orchestrator init &nbsp;<span class="c"># seeds create-workflow</span></div>
+  <div class="prompt"><span class="p">$</span> bunx smthrs init &nbsp;<span class="c"># seeds create-workflow</span></div>
   <div class="spacer"></div>
   <div class="brand"><span class="dot"></span>smithers.sh</div>
   <div class="ver">0.23.0</div>
@@ -119,7 +119,7 @@
 
 <!-- 3. USAGE -->
 <div class="card" id="usage">
-  <div class="kicker">New · bunx smithers-orchestrator usage</div>
+  <div class="kicker">New · bunx smthrs usage</div>
   <h2>See how much quota each account burned.</h2>
   <table class="tbl">
     <tr><th>account</th><th>window</th><th>consumed</th></tr>
@@ -192,7 +192,7 @@
     <span class="step on">resumes</span>
   </div>
   <div class="note">When an agent is blocked, uncertain, or about to do something irreversible, it raises a durable request and <b>blocks until a human answers</b>. Available as the <span style="font-family:var(--font-mono)">ask-human</span> CLI and the <span style="font-family:var(--font-mono)">ask_human</span> MCP tool.</div>
-  <div class="prompt"><span class="p">$</span> bunx smithers-orchestrator ask-human <span style="color:var(--text-secondary)">"Which DB should I target?"</span> --choices sqlite,postgres</div>
+  <div class="prompt"><span class="p">$</span> bunx smthrs ask-human <span style="color:var(--text-secondary)">"Which DB should I target?"</span> --choices sqlite,postgres</div>
   <div class="spacer"></div>
   <div class="brand"><span class="dot"></span>smithers.sh</div>
   <div class="ver">--choices · --context · --timeout</div>
@@ -210,7 +210,7 @@
     <span class="chip">win32-x64</span>
   </div>
   <div class="note">Smithers ships a jj binary per platform, so worktree snapshots and forks work with <b>no system install</b>. A package manager pulls only the one matching your host, and the doctor tells you up front when no usable git or jj is present.</div>
-  <div class="prompt"><span class="p">$</span> bunx smithers-orchestrator workflow doctor &nbsp;<span class="c"># vcs: ok</span></div>
+  <div class="prompt"><span class="p">$</span> bunx smthrs workflow doctor &nbsp;<span class="c"># vcs: ok</span></div>
   <div class="spacer"></div>
   <div class="brand"><span class="dot"></span>smithers.sh</div>
   <div class="ver">SMITHERS_JJ_PATH override · PATH fallback</div>

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
-import { isPidAlive, parseRuntimeOwnerPid } from "@smithers-orchestrator/engine/runtime-owner";
+import { isPidAlive, parseRuntimeOwnerPid } from "@smthrs/engine/runtime-owner";
 import { terminateRunOwner } from "../cancel-cascade.js";
 import { BUILTIN_RESUME_CONFIG_KEY, buildBuiltinRelaunch } from "../resume-target.js";
 import { buildHijackEnvironment, resolveHijackCandidate, waitForHijackCandidate } from "../hijack.js";

@@ -165,7 +165,7 @@ There is already a consumer-side seam for UI sync: `SyncTransport` plus `createG
 
 This is the default client path. Local now defaults to SQLite, and `createGatewayCollections()` defaults `syncSource` to `"gateway"` ([packages/gateway-react/src/sync/createGatewayCollections.ts](/Users/williamcory/smithers/packages/gateway-react/src/sync/createGatewayCollections.ts:84)). `createGatewayReactRoot()` constructs a `SmithersGatewayClient`, wraps it with `createSmithersGatewayTransport(client)`, and mounts `createGatewayCollections({ client: ... })` without `syncSource` or `electric` ([packages/gateway-react/src/createGatewayReactRoot.ts](/Users/williamcory/smithers/packages/gateway-react/src/createGatewayReactRoot.ts:20), [packages/gateway-react/src/createGatewayReactRoot.ts](/Users/williamcory/smithers/packages/gateway-react/src/createGatewayReactRoot.ts:25)). That means a one-call custom UI is gateway-WS-direct by default.
 
-The client connects to the `smithers gateway` HTTP+WebSocket server. The CLI imports `@smithers-orchestrator/server/gateway` and creates `new Gateway(...)` in the gateway command ([apps/cli/src/index.js](/Users/williamcory/smithers/apps/cli/src/index.js:2192), [apps/cli/src/index.js](/Users/williamcory/smithers/apps/cli/src/index.js:2195)). The gateway discovers and serves workflow UIs from `.smithers/ui/<id>.tsx` ([apps/cli/src/index.js](/Users/williamcory/smithers/apps/cli/src/index.js:2211)). The boot config carries endpoint paths: `GatewayUiBootConfig` includes `rpcPath`, `wsPath`, `mountPath`, `assetBasePath`, `kind`, and `workflowKey` ([packages/gateway-client/src/GatewayUiBootConfig.ts](/Users/williamcory/smithers/packages/gateway-client/src/GatewayUiBootConfig.ts:1)). The default operator UI calls RPC at `(boot.rpcPath ?? "/v1/rpc") + "/" + method` and opens WebSocket at `new URL(boot.wsPath ?? "/", window.location.href)` ([packages/server/src/gatewayUi/defaultOperatorUi.js](/Users/williamcory/smithers/packages/server/src/gatewayUi/defaultOperatorUi.js:482), [packages/server/src/gatewayUi/defaultOperatorUi.js](/Users/williamcory/smithers/packages/server/src/gatewayUi/defaultOperatorUi.js:495)).
+The client connects to the `smithers gateway` HTTP+WebSocket server. The CLI imports `@smthrs/server/gateway` and creates `new Gateway(...)` in the gateway command ([apps/cli/src/index.js](/Users/williamcory/smithers/apps/cli/src/index.js:2192), [apps/cli/src/index.js](/Users/williamcory/smithers/apps/cli/src/index.js:2195)). The gateway discovers and serves workflow UIs from `.smithers/ui/<id>.tsx` ([apps/cli/src/index.js](/Users/williamcory/smithers/apps/cli/src/index.js:2211)). The boot config carries endpoint paths: `GatewayUiBootConfig` includes `rpcPath`, `wsPath`, `mountPath`, `assetBasePath`, `kind`, and `workflowKey` ([packages/gateway-client/src/GatewayUiBootConfig.ts](/Users/williamcory/smithers/packages/gateway-client/src/GatewayUiBootConfig.ts:1)). The default operator UI calls RPC at `(boot.rpcPath ?? "/v1/rpc") + "/" + method` and opens WebSocket at `new URL(boot.wsPath ?? "/", window.location.href)` ([packages/server/src/gatewayUi/defaultOperatorUi.js](/Users/williamcory/smithers/packages/server/src/gatewayUi/defaultOperatorUi.js:482), [packages/server/src/gatewayUi/defaultOperatorUi.js](/Users/williamcory/smithers/packages/server/src/gatewayUi/defaultOperatorUi.js:495)).
 
 Live updates off a SQLite-backed engine store flow through the same gateway registry:
 
@@ -695,8 +695,8 @@ Add non-gated e2e/integration coverage for SQLite and PGlite, and service-backed
 Use a compute-only workflow fixture so CI does not need agent CLIs or browsers:
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 
 const result = z.object({ value: z.string() });

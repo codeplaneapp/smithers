@@ -1,9 +1,9 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { withTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { withTaskRuntime } from "@smthrs/driver/task-runtime";
+import { SmithersRenderer } from "@smthrs/react-reconciler/dom/renderer";
 import { z } from "zod";
 import { Approval } from "../src/components/index.js";
 import { createTestSmithers } from "./helpers.js";

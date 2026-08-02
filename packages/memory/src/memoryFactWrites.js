@@ -1,1 +1,1 @@
-export { memoryFactWrites } from "@smithers-orchestrator/observability/metrics";
+export { memoryFactWrites } from "@smthrs/observability/metrics";

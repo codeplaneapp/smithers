@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/tui",
+  "name": "@smthrs/tui",
   "version": "0.32.0",
   "description": "Terminal monitor UI for Smithers runs",
   "type": "module",
@@ -17,10 +17,10 @@
   "dependencies": {
     "@opentui/core": "^0.4.2",
     "@opentui/react": "^0.4.2",
-    "@smithers-orchestrator/gateway-client": "workspace:*",
-    "@smithers-orchestrator/gateway-react": "workspace:*",
-    "@smithers-orchestrator/tui-ui": "workspace:*",
-    "@smithers-orchestrator/ui-core": "workspace:*",
+    "@smthrs/gateway-client": "workspace:*",
+    "@smthrs/gateway-react": "workspace:*",
+    "@smthrs/tui-ui": "workspace:*",
+    "@smthrs/ui-core": "workspace:*",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },

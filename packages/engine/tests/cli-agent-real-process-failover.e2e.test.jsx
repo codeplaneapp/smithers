@@ -1,13 +1,13 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Effect } from "effect";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { CodexAgent } from "@smithers-orchestrator/agents";
-import { Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { CodexAgent } from "@smthrs/agents";
+import { Task, Workflow, runWorkflow } from "smthrs";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 

@@ -1,6 +1,6 @@
 // smithers-display-name: Sweep
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Sequence } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, Sequence } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import { ForEachFeature, forEachFeatureMergeSchema, forEachFeatureResultSchema } from "../components/ForEachFeature";

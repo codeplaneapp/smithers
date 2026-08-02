@@ -19,7 +19,7 @@ export const ticketsBacklog: { path: string; kind: string; status: string; prior
     "updatedAtMs": 0,
     "featureId": "init-workflow-pack",
     "featureTitle": "Init workflow pack and starters",
-    "content": "# 2026-07-06 review: apps/cli/tests/init.e2e.test.js workflow-pack smoke typecheck fails because seeded workflows import UI from smithers-orchestrator, but that facade export is missing.\n\nFeature: Init workflow pack and starters (init-workflow-pack)\nStatus: todo · Kind: e2e · Priority: P0 · Feature status: partial\n\n## Gap\n\n2026-07-06 review: apps/cli/tests/init.e2e.test.js workflow-pack smoke typecheck fails because seeded workflows import UI from smithers-orchestrator, but that facade export is missing.\n"
+    "content": "# 2026-07-06 review: apps/cli/tests/init.e2e.test.js workflow-pack smoke typecheck fails because seeded workflows import UI from smthrs, but that facade export is missing.\n\nFeature: Init workflow pack and starters (init-workflow-pack)\nStatus: todo · Kind: e2e · Priority: P0 · Feature status: partial\n\n## Gap\n\n2026-07-06 review: apps/cli/tests/init.e2e.test.js workflow-pack smoke typecheck fails because seeded workflows import UI from smthrs, but that facade export is missing.\n"
   },
   {
     "path": "tickets/cli--01-the-cli-surface-is-broad-keep-pglite-postgres-parity-covered-c81f0bd8.md",

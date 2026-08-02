@@ -19,9 +19,9 @@ Node.js and the browser.
 ## Upgrading
 
 ```bash
-bunx smithers-orchestrator update        # upgrade the CLI
-bunx smithers-orchestrator upgrade       # agent-assisted: reads the changelogs and applies what your project needs
-bunx smithers-orchestrator packs update  # refresh installed workflow packs
+bunx smthrs update        # upgrade the CLI
+bunx smthrs upgrade       # agent-assisted: reads the changelogs and applies what your project needs
+bunx smthrs packs update  # refresh installed workflow packs
 ```
 
 Behavior changes are collected in the [upgrade notes](#upgrade-notes) at the
@@ -55,7 +55,7 @@ it became the place you operate runs.
 </Frame>
 
 The CLI opens the Monitor when a run starts, and
-`bunx smithers-orchestrator monitor` opens it for any existing run or
+`bunx smthrs monitor` opens it for any existing run or
 workspace. See the [Monitor guide](/guides/monitor).
 
 ## Install workflow packs from GitHub or npm
@@ -64,12 +64,12 @@ Workflows you write are files in your repo. Workflows other people write used
 to be copy and paste. In 0.28.0 they are installable:
 
 ```bash
-bunx smithers-orchestrator add acme/review-pack --yes   # from a GitHub repo
-bunx smithers-orchestrator add npm:@acme/review-pack    # from npm
-bunx smithers-orchestrator packs update                 # refresh every locked pack
-bunx smithers-orchestrator eject review-pack:review     # make a local, editable copy
-bunx smithers-orchestrator share --dry-run              # publish your own pack
-bunx smithers-orchestrator remove review-pack           # uninstall
+bunx smthrs add acme/review-pack --yes   # from a GitHub repo
+bunx smthrs add npm:@acme/review-pack    # from npm
+bunx smthrs packs update                 # refresh every locked pack
+bunx smthrs eject review-pack:review     # make a local, editable copy
+bunx smthrs share --dry-run              # publish your own pack
+bunx smthrs remove review-pack           # uninstall
 ```
 
 - Installed packs are read-only, so updates never clobber your edits. `eject`
@@ -82,7 +82,7 @@ bunx smithers-orchestrator remove review-pack           # uninstall
 
 This is the first release of packs, and we are shipping it as an MVP: the
 lifecycle commands are real, the registry is young, and you will find rough
-edges. `bunx smithers-orchestrator bug` tells us what broke. See
+edges. `bunx smthrs bug` tells us what broke. See
 [Workflow packs](/reference/packs), [`add`](/workflows/add), and
 [`share-pack`](/workflows/share-pack).
 
@@ -103,7 +103,7 @@ const approval = ctx.prove("review", { nodeId: "lane:review" });
 re-checks it at schedule time. If the row changed, the task parks as
 `BOUND_STALE` instead of acting on stale authority. Workflow code sees the
 state through `ctx.boundStale()`, operators see it through
-`bunx smithers-orchestrator why`, and a correction loop can approve a new
+`bunx smthrs why`, and a correction loop can approve a new
 artifact without failing the run. See
 [Provenance binding](/concepts/provenance).
 
@@ -114,7 +114,7 @@ core also loads under plain Node.js, and a new browser entry point runs the
 real driver in a page:
 
 ```js
-import { runBrowserWorkflow } from "smithers-orchestrator/browser";
+import { runBrowserWorkflow } from "smthrs/browser";
 ```
 
 - The `WorkflowDriver`, renderer, and graph extraction now run behind a typed
@@ -188,7 +188,7 @@ view opens wherever the workflow runs:
 </Workflow>
 ```
 
-- `smithers-orchestrator/ui` is a new shared component library (shadcn
+- `smthrs/ui` is a new shared component library (shadcn
   anatomy, theme tokens) behind every seeded workflow UI.
 - The Monitor's **Create UI** button runs the `create-ui` system workflow: one
   agent writes and verifies a custom UI for any workflow you point it at.
@@ -202,12 +202,12 @@ See the [workflow-owned UI migration guide](/guides/workflow-owned-ui-migration)
 ## Ask the CLI what happened
 
 ```bash
-bunx smithers-orchestrator status RUN_ID   # health verdict, blockers, throughput
-bunx smithers-orchestrator what RUN_ID     # an agent narrates the recorded facts
-bunx smithers-orchestrator why RUN_ID      # why the run is blocked or paused
-bunx smithers-orchestrator pause RUN_ID    # finish in-flight work, park resumably
-bunx smithers-orchestrator worktree prune  # reclaim completed-run worktrees
-bunx smithers-orchestrator review          # code review + HTML walkthrough
+bunx smthrs status RUN_ID   # health verdict, blockers, throughput
+bunx smthrs what RUN_ID     # an agent narrates the recorded facts
+bunx smthrs why RUN_ID      # why the run is blocked or paused
+bunx smthrs pause RUN_ID    # finish in-flight work, park resumably
+bunx smthrs worktree prune  # reclaim completed-run worktrees
+bunx smthrs review          # code review + HTML walkthrough
 ```
 
 `worktree list` shows which run owns each worktree, and `prune` never touches
@@ -230,7 +230,7 @@ release before it.
 
 Two pieces of that work are directly usable:
 
-- **`@smithers-orchestrator/testing`** ships a workflow simulator plus a
+- **`@smthrs/testing`** ships a workflow simulator plus a
   deterministic scenario kernel with seeded scheduling, replay bundles, and
   real-database adapters, so you can test your own workflows the way we test
   the engine.
@@ -292,5 +292,5 @@ Two pieces of that work are directly usable:
 This page is the tour. The complete, dry list of every change in 0.28.0 lives
 in [CHANGELOG.md on GitHub](https://github.com/smithersai/smithers/blob/main/CHANGELOG.md).
 
-If you hit anything rough, `bunx smithers-orchestrator bug` files a report
+If you hit anything rough, `bunx smthrs bug` files a report
 with scrubbed run context straight to us. Happy shipping.

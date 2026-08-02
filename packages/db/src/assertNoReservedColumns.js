@@ -1,4 +1,4 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { camelToSnake } from "./utils/camelToSnake.js";
 
 const OUTPUT_RESERVED = new Set(["run_id", "node_id", "iteration"]);

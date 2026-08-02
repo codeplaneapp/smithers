@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { EventBus } from "../src/events.js";
 import { signalRun } from "../src/signals.js";
 import { cancelPendingTimersBridge, resolveDeferredTaskStateBridge } from "../src/effect/workflow-bridge.js";
-import { approvalDecisionSchema } from "@smithers-orchestrator/components/components/Approval";
+import { approvalDecisionSchema } from "@smthrs/components/components/Approval";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { Effect } from "effect";
 /**

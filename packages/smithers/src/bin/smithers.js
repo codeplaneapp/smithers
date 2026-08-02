@@ -57,7 +57,7 @@ function delegateToLocalCliIfPresent() {
 
 if (!delegateToLocalCliIfPresent()) {
   try {
-    await import("@smithers-orchestrator/cli");
+    await import("@smthrs/cli");
   } catch (error) {
     // A dangling workspace link (e.g. rewritten to point into a removed
     // git worktree) surfaces here as a bare ENOENT import error. Name the

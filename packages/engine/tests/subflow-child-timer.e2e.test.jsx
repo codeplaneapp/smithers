@@ -1,11 +1,11 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { dirname } from "node:path";
 import { z } from "zod";
 import { Effect } from "effect";
-import { Sequence, Task, Timer, Workflow, runWorkflow } from "smithers-orchestrator";
-import { Subflow } from "@smithers-orchestrator/components/components/index";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { Sequence, Task, Timer, Workflow, runWorkflow } from "smthrs";
+import { Subflow } from "@smthrs/components/components/index";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers.js";
 
 function runInTestRoot(workflow, dbPath, options) {

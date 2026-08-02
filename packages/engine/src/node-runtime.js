@@ -1,5 +1,5 @@
 // @smithers-type-exports-begin
-/** @typedef {import("@smithers-orchestrator/driver/RuntimeAdapter").RuntimeAdapter} RuntimeAdapter */
+/** @typedef {import("@smthrs/driver/RuntimeAdapter").RuntimeAdapter} RuntimeAdapter */
 // @smithers-type-exports-end
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -7,10 +7,9 @@ import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
-import { resolveWorktreePath } from "@smithers-orchestrator/graph";
-import { RuntimeCapabilityError } from "@smithers-orchestrator/driver/RuntimeCapabilityError";
-import { createUnsupportedCapability } from "@smithers-orchestrator/driver/unsupportedCapability";
-import { defaultTaskExecutor } from "@smithers-orchestrator/driver/defaultTaskExecutor";
+import { resolveWorktreePath } from "@smthrs/graph";
+import { createUnsupportedCapability } from "@smthrs/driver/unsupportedCapability";
+import { defaultTaskExecutor } from "@smthrs/driver/defaultTaskExecutor";
 
 // A run realistically never approaches this many delivered signals; it exists
 // only so `listSignals`'s query-level `LIMIT` (default 200, meant for
@@ -20,7 +19,7 @@ const SIGNAL_LOAD_LIMIT = 1_000_000;
 
 /**
  * @param {{ listSignals(runId: string, query?: Record<string, unknown>): unknown }} adapter
- * @returns {import("@smithers-orchestrator/driver/RuntimeAdapter").RuntimeSignals}
+ * @returns {import("@smthrs/driver/RuntimeAdapter").RuntimeSignals}
  */
 function createAdapterSignals(adapter) {
   return {
@@ -49,7 +48,7 @@ function createAdapterSignals(adapter) {
  * behavior. `RuntimeAdapter.storage` is a required field, so this adapter
  * still exposes a spec-conformant (present, callable, void-returning)
  * implementation — it is simply a deliberate no-op for Node.
- * @returns {import("@smithers-orchestrator/driver/RuntimeAdapter").RuntimeStorage}
+ * @returns {import("@smthrs/driver/RuntimeAdapter").RuntimeStorage}
  */
 function createNoopStorage() {
   return {
@@ -68,7 +67,7 @@ function createNoopStorage() {
  * @param {string} command
  * @param {readonly string[]} [args]
  * @param {{ cwd?: string; env?: Record<string, string> }} [opts]
- * @returns {Promise<import("@smithers-orchestrator/driver/RuntimeAdapter").RuntimeSubprocessResult>}
+ * @returns {Promise<import("@smthrs/driver/RuntimeAdapter").RuntimeSubprocessResult>}
  */
 function runSubprocess(command, args = [], opts) {
   return new Promise((resolvePromise, rejectPromise) => {
@@ -99,7 +98,7 @@ function runSubprocess(command, args = [], opts) {
  * filesystem and subprocess capabilities, `crypto.randomUUID`, and real
  * `Date`/`performance` timing. `storage` is a deliberate no-op (see
  * {@link createNoopStorage}) and `sandbox` is not yet bridged to
- * `@smithers-orchestrator/sandbox` from this seam, so it fails closed with a
+ * `@smthrs/sandbox` from this seam, so it fails closed with a
  * typed `RuntimeCapabilityError` rather than silently doing nothing.
  * @param {{ adapter?: { listSignals(runId: string, query?: Record<string, unknown>): unknown } }} [opts]
  *   `adapter` is the `SmithersDb` instance already open for this run — when
@@ -155,7 +154,7 @@ export function createNodeRuntime(opts = {}) {
     worktree: {
       resolve: (path, opts) => resolveWorktreePath(path, opts),
     },
-    sandbox: /** @type {import("@smithers-orchestrator/driver/RuntimeAdapter").RuntimeSandbox} */ (
+    sandbox: /** @type {import("@smthrs/driver/RuntimeAdapter").RuntimeSandbox} */ (
       createUnsupportedCapability(runtimeName, "sandbox", ["run"], "async")
     ),
     ...(opts.adapter ? { signals: createAdapterSignals(opts.adapter) } : {}),

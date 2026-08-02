@@ -8,7 +8,7 @@ Gateway transport and inspector state for the `/smithers` run inspector.
   resume/rewind) go over HTTP `/rpc` and surface `auditRowId` from
   loosely-shaped payloads.
 - `DevToolsStore.ts` — all inspector state: live snapshot/delta application
-  (via `@smithers-orchestrator/devtools` `applyDelta`), reconnect with
+  (via `@smthrs/devtools` `applyDelta`), reconnect with
   exponential backoff, historical frame scrubbing + rewind, ghost-node
   capture/eviction for unmounted subtrees, and stale-banner timing. Notifies
   subscribers synchronously via `emit()`.

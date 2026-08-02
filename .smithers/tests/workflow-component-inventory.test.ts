@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
-import { discoverWorkflows } from "@smithers-orchestrator/cli/workflows";
-import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smithers-orchestrator/components";
-import { renderWorkflow } from "smithers-orchestrator/testing";
+import { discoverWorkflows } from "@smthrs/cli/workflows";
+import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smthrs/components";
+import { renderWorkflow } from "smthrs/testing";
 import "./whole-foods-meal-planner.test";
 
 const packRoot = join(import.meta.dir, "..");

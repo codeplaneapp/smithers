@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSmithersGateway } from "@smithers-orchestrator/gateway-react";
+import { useSmithersGateway } from "@smthrs/gateway-react";
 import type { NodeStatus, RunNode } from "../runs/Run";
 import { snapshotToRunNode } from "../gateway/snapshotToRunNode";
 import { toNodeStatus } from "../gateway/toNodeStatus";

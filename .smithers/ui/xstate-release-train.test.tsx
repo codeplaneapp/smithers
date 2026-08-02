@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ReactFlowProvider, type NodeProps } from "@xyflow/react";
-import { SmithersTaskNode, type SmithersFlowNode } from "smithers-orchestrator/gateway-ui";
+import { SmithersTaskNode, type SmithersFlowNode } from "smthrs/gateway-ui";
 import { releaseTrainGraphSpec } from "./xstate-release-train";
 
 describe("XState release train UI", () => {

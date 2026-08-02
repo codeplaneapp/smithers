@@ -156,11 +156,8 @@ function createDocsSnippetProject() {
   onTestFinished(() => {
     rmSync(dir, { recursive: true, force: true });
   });
-  symlinkDir(resolve(REPO_ROOT, "packages/smithers"), join(dir, "node_modules/smithers-orchestrator"));
-  symlinkDir(
-    resolve(REPO_ROOT, "node_modules/@smithers-orchestrator"),
-    join(dir, "node_modules/@smithers-orchestrator"),
-  );
+  symlinkDir(resolve(REPO_ROOT, "packages/smithers"), join(dir, "node_modules/smthrs"));
+  symlinkDir(resolve(REPO_ROOT, "node_modules/@smthrs"), join(dir, "node_modules/@smthrs"));
   symlinkDir(resolve(REPO_ROOT, "node_modules/react"), join(dir, "node_modules/react"));
   symlinkDir(resolve(REPO_ROOT, "node_modules/react-dom"), join(dir, "node_modules/react-dom"));
   symlinkDir(resolve(REPO_ROOT, "node_modules/zod"), join(dir, "node_modules/zod"));

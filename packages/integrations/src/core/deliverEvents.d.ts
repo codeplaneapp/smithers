@@ -1,7 +1,7 @@
 import { EventSource as EventSource$1 } from './EventSourceTypes.js';
 import { ExternalEvent as ExternalEvent$1 } from './ExternalEventTypes.js';
-import * as _smithers_orchestrator_db_adapter from '@smithers-orchestrator/db/adapter';
-import * as _smithers_orchestrator_errors_SmithersError from '@smithers-orchestrator/errors/SmithersError';
+import * as _smithers_orchestrator_db_adapter from '@smthrs/db/adapter';
+import * as _smithers_orchestrator_errors_SmithersError from '@smthrs/errors/SmithersError';
 import { Effect } from 'effect';
 import './CursorStoreTypes.js';
 
@@ -15,7 +15,7 @@ import './CursorStoreTypes.js';
  *
  * @param {SmithersDb} adapter
  * @param {ExternalEvent} event
- * @returns {Effect.Effect<{ deduped: boolean; runIds: string[] }, import("@smithers-orchestrator/errors/SmithersError").SmithersError>}
+ * @returns {Effect.Effect<{ deduped: boolean; runIds: string[] }, import("@smthrs/errors/SmithersError").SmithersError>}
  */
 declare function deliverEvent(adapter: SmithersDb, event: ExternalEvent): Effect.Effect<{
     deduped: boolean;
@@ -32,7 +32,7 @@ declare function deliverEvent(adapter: SmithersDb, event: ExternalEvent): Effect
  *
  * @param {SmithersDb} adapter
  * @param {EventSource} source
- * @returns {Effect.Effect<void, import("@smithers-orchestrator/errors/SmithersError").SmithersError>}
+ * @returns {Effect.Effect<void, import("@smthrs/errors/SmithersError").SmithersError>}
  */
 declare function deliverEvents(adapter: SmithersDb, source: EventSource): Effect.Effect<void, _smithers_orchestrator_errors_SmithersError.SmithersError>;
 type SmithersDb = _smithers_orchestrator_db_adapter.SmithersDb;

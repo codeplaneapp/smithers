@@ -11,15 +11,15 @@ The release was dogfooded by migrating 12 real stores and checking run-ID parity
 
 ## Migration hardening
 
-`bunx smithers-orchestrator migrate` now wraps corrupt legacy SQLite source stores with actionable `DB_QUERY_FAILED` guidance instead of leaking raw SQLite engine errors. The source store is left untouched when these failures are reported.
+`bunx smthrs migrate` now wraps corrupt legacy SQLite source stores with actionable `DB_QUERY_FAILED` guidance instead of leaking raw SQLite engine errors. The source store is left untouched when these failures are reported.
 
 Migration also now wraps unopenable legacy SQLite source stores, including locked files, permission failures, and incomplete copies missing SQLite sidecar files, with Smithers guidance that points operators at the source-store problem.
 
-For PostgreSQL migrations, `bunx smithers-orchestrator migrate --to postgres` validates the target URL before opening the source store. Missing `--url`, `SMITHERS_POSTGRES_URL`, or `DATABASE_URL` configuration is now reported directly instead of being masked by unrelated source-store failures.
+For PostgreSQL migrations, `bunx smthrs migrate --to postgres` validates the target URL before opening the source store. Missing `--url`, `SMITHERS_POSTGRES_URL`, or `DATABASE_URL` configuration is now reported directly instead of being masked by unrelated source-store failures.
 
 ## Accounts loading
 
-Legacy or unknown `accounts.json` providers are now skipped with a warning instead of failing the entire accounts file. This keeps commands such as `bunx smithers-orchestrator init` working when an old account file still contains a removed provider entry, while valid accounts continue to load.
+Legacy or unknown `accounts.json` providers are now skipped with a warning instead of failing the entire accounts file. This keeps commands such as `bunx smthrs init` working when an old account file still contains a removed provider entry, while valid accounts continue to load.
 
 ## CLI flags
 
@@ -29,7 +29,7 @@ Documented negated flags now parse correctly. `--no-vcs`, `--no-deps`, and `--no
 
 Gateway JWT auth now rejects non-canonical base64url signature encodings. This closes an edge case where a mutated compact JWT signature segment could decode to the same HMAC bytes on some runtimes because of unused trailing base64url bits.
 
-The Gateway's `allowedOrigins` Origin allow-list now applies to the `token` and `jwt` auth modes, not just `trusted-proxy`. Those are the modes a browser-facing `bunx smithers-orchestrator ui` or operator-UI deployment actually uses, so operators running a localhost or LAN gateway can now restrict which web origins may connect as defense-in-depth. The check is enforced uniformly at both the HTTP RPC path and the WebSocket upgrade handler: a browser `Origin` not on the list is rejected before the socket opens, a missing `Origin` (server-to-server or CLI) is allowed, and an unset list keeps the previous allow-all behavior.
+The Gateway's `allowedOrigins` Origin allow-list now applies to the `token` and `jwt` auth modes, not just `trusted-proxy`. Those are the modes a browser-facing `bunx smthrs ui` or operator-UI deployment actually uses, so operators running a localhost or LAN gateway can now restrict which web origins may connect as defense-in-depth. The check is enforced uniformly at both the HTTP RPC path and the WebSocket upgrade handler: a browser `Origin` not on the list is rejected before the socket opens, a missing `Origin` (server-to-server or CLI) is allowed, and an unset list keeps the previous allow-all behavior.
 
 ## Codex subscription preflight
 
@@ -53,7 +53,7 @@ The new `failedChildren` and `failedChildKeys` fields are additive on the run re
 
 Gateway operators running `token` or `jwt` auth can now set `allowedOrigins` to restrict browser origins. Leaving it unset preserves the existing allow-all behavior.
 
-Smithers no longer commits PGlite runtime state: `bunx smithers-orchestrator init` now scaffolds `.smithers/.gitignore` rules for the `.smithers/pg` data dir and the `.smithers/migrated.json` marker. Existing repositories should add the same ignores and untrack any already-committed `pg/` cluster or `migrated.json`.
+Smithers no longer commits PGlite runtime state: `bunx smthrs init` now scaffolds `.smithers/.gitignore` rules for the `.smithers/pg` data dir and the `.smithers/migrated.json` marker. Existing repositories should add the same ignores and untrack any already-committed `pg/` cluster or `migrated.json`.
 
 Users migrating a legacy SQLite store to PostgreSQL must provide `--url`, `SMITHERS_POSTGRES_URL`, or `DATABASE_URL`. Smithers now reports that requirement before trying to open the source database.
 
@@ -63,4 +63,4 @@ If an old `accounts.json` contains a removed provider such as a legacy `gemini` 
 
 ## Verification
 
-Regression coverage was added or updated for migration error handling, account parsing with unknown providers, negated CLI flag parsing, Gateway JWT rejection cases, Gateway Origin allow-list rejection over WebSocket and HTTP for the token and JWT modes, Codex subscription auth resolution in `<Task>` preflight, the `failedChildren` signal on degraded finished runs, the `bunx smithers-orchestrator init` scaffold ignoring the PGlite data dir and migration marker, and Pi diagnostics provider mapping.
+Regression coverage was added or updated for migration error handling, account parsing with unknown providers, negated CLI flag parsing, Gateway JWT rejection cases, Gateway Origin allow-list rejection over WebSocket and HTTP for the token and JWT modes, Codex subscription auth resolution in `<Task>` preflight, the `failedChildren` signal on degraded finished runs, the `bunx smthrs init` scaffold ignoring the PGlite data dir and migration marker, and Pi diagnostics provider mapping.

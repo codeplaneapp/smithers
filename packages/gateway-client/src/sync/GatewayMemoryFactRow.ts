@@ -1,4 +1,4 @@
-import type { GatewayMemoryFact } from "@smithers-orchestrator/protocol/gateway-rpc";
+import type { GatewayMemoryFact } from "@smthrs/protocol/gateway-rpc";
 
 /**
  * One row of the `memoryFacts` collection — the live `listMemoryFacts` RPC
@@ -6,7 +6,7 @@ import type { GatewayMemoryFact } from "@smithers-orchestrator/protocol/gateway-
  *
  * The gateway builds each row from the `_smithers_memory_facts` table
  * (snake→camel cased by the storage layer) — the SAME table the
- * `@smithers-orchestrator/memory` MemoryStore writes via `setFact` and the
+ * `@smthrs/memory` MemoryStore writes via `setFact` and the
  * `smithers memory list` CLI reads. `listMemoryFacts` returns every namespace's
  * facts (or one namespace when filtered), so consumers key by the per-namespace
  * unique `key`.

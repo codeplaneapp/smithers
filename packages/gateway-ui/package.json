@@ -1,7 +1,7 @@
 {
-  "name": "@smithers-orchestrator/gateway-ui",
+  "name": "@smthrs/gateway-ui",
   "version": "0.32.0",
-  "description": "Reusable React components for Smithers Gateway UIs — drop-in run lists, approval panels, node trees, event logs and launch controls built on @smithers-orchestrator/gateway-react hooks. Use these to build a custom workflow UI under .smithers/ui/<workflow>.tsx.",
+  "description": "Reusable React components for Smithers Gateway UIs — drop-in run lists, approval panels, node trees, event logs and launch controls built on @smthrs/gateway-react hooks. Use these to build a custom workflow UI under .smithers/ui/<workflow>.tsx.",
   "type": "module",
   "sideEffects": false,
   "exports": {
@@ -30,10 +30,10 @@
     "test": "bun test tests"
   },
   "dependencies": {
-    "@smithers-orchestrator/gateway-client": "workspace:*",
-    "@smithers-orchestrator/gateway-react": "workspace:*",
-    "@smithers-orchestrator/ui": "workspace:*",
-    "@smithers-orchestrator/ui-styleguide": "workspace:*",
+    "@smthrs/gateway-client": "workspace:*",
+    "@smthrs/gateway-react": "workspace:*",
+    "@smthrs/ui": "workspace:*",
+    "@smthrs/ui-styleguide": "workspace:*",
     "@xyflow/react": "^12.10.2",
     "dagre": "^0.8.5"
   },

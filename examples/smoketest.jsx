@@ -4,11 +4,11 @@
  * Pattern: Provision → Execute checks → Aggregate pass/fail → Report.
  * Use cases: release validation, deploy verification, environment health checks.
  */
-import { Sequence, Parallel } from "smithers-orchestrator";
+import { Sequence, Parallel } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { bash, read } from "smithers-orchestrator/tools";
+import { bash, read } from "smthrs/tools";
 import { z } from "zod";
 import SetupPrompt from "./prompts/smoketest/setup.mdx";
 import CheckPrompt from "./prompts/smoketest/check.mdx";

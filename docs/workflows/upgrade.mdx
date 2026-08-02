@@ -3,7 +3,7 @@ title: Upgrade
 description: System workflow that gathers Smithers update context, runs the deterministic upgrade path, and escalates only when needed.
 ---
 
-`upgrade` is a hidden system workflow behind `bunx smithers-orchestrator
+`upgrade` is a hidden system workflow behind `bunx smthrs
 upgrade`. It checks the installed Smithers version, fetches relevant changelog
 entries, computes the package-manager-specific upgrade command, and asks a
 cheap agent to run it, escalating to the smart agent pool only if the cheap
@@ -12,7 +12,7 @@ attempt can't proceed safely.
 Run directly for the durable workflow form:
 
 ```bash
-bunx smithers-orchestrator workflow run upgrade --input '{"dryRun":true}'
+bunx smthrs workflow run upgrade --input '{"dryRun":true}'
 ```
 
 Output: whether an update was available, current/latest versions, the command

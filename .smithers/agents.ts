@@ -2,19 +2,19 @@
 // Account providers (camelCase labels) come from ~/.smithers/accounts.json — managed via `smithers agent add|list|remove`.
 import { homedir } from "node:os";
 import path from "node:path";
-import { type AgentLike } from "smithers-orchestrator";
-import { ClaudeCodeAgent as SmithersClaudeCodeAgent } from "smithers-orchestrator";
-import { CodexAgent as SmithersCodexAgent } from "smithers-orchestrator";
-import { AmpAgent as SmithersAmpAgent } from "smithers-orchestrator";
-import { KimiAgent as SmithersKimiAgent } from "smithers-orchestrator";
-import { OpenAIAgent as SmithersOpenAIAgent } from "smithers-orchestrator";
-import { AnthropicAgent as SmithersAnthropicAgent } from "smithers-orchestrator";
-import { OpenCodeAgent as SmithersOpenCodeAgent } from "smithers-orchestrator";
-// import { AntigravityAgent as SmithersAntigravityAgent } from "smithers-orchestrator";
-// import { PiAgent as SmithersPiAgent } from "smithers-orchestrator";
-// import { VibeAgent as SmithersVibeAgent } from "smithers-orchestrator";
-// import { HermesCliAgent as SmithersHermesCliAgent } from "smithers-orchestrator";
-// import { OpenClawAgent as SmithersOpenClawAgent } from "smithers-orchestrator";
+import { type AgentLike } from "smthrs";
+import { ClaudeCodeAgent as SmithersClaudeCodeAgent } from "smthrs";
+import { CodexAgent as SmithersCodexAgent } from "smthrs";
+import { AmpAgent as SmithersAmpAgent } from "smthrs";
+import { KimiAgent as SmithersKimiAgent } from "smthrs";
+import { OpenAIAgent as SmithersOpenAIAgent } from "smthrs";
+import { AnthropicAgent as SmithersAnthropicAgent } from "smthrs";
+import { OpenCodeAgent as SmithersOpenCodeAgent } from "smthrs";
+// import { AntigravityAgent as SmithersAntigravityAgent } from "smthrs";
+// import { PiAgent as SmithersPiAgent } from "smthrs";
+// import { VibeAgent as SmithersVibeAgent } from "smthrs";
+// import { HermesCliAgent as SmithersHermesCliAgent } from "smthrs";
+// import { OpenClawAgent as SmithersOpenClawAgent } from "smthrs";
 
 export { ClaudeCodeAgent } from "./agents/claude-code";
 export { CodexAgent } from "./agents/codex";

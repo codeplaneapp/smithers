@@ -3,7 +3,7 @@
 // @smithers-type-exports-end
 
 import React from "react";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
 import { Sequence } from "../Sequence.js";
 import { Task } from "../Task.js";
 import { HumanTask } from "../HumanTask.js";
@@ -32,7 +32,7 @@ import { pollPrompt } from "./delegationPrompts.js";
  * `humanPollScorer` sees the submitted poll instead of always skipping.
  *
  * The score task carries the caller's `scorers.run` (e.g. built from
- * `delegationRunScore` in `smithers-orchestrator/scorers`) and a `context`
+ * `delegationRunScore` in `smthrs/scorers`) and a `context`
  * synthesized to the exact shapes those scorers parse:
  * - `events` + `nodes` — a faithful DelegationEvent[] log derived from the
  *   dc* rows (see `synthesizeDelegationEvents`) for pocJudgment/planSolidity;

@@ -84,7 +84,7 @@ function extractCommand(...candidates: Array<string | undefined>): string | null
     if (!candidate) continue;
     const backticked = candidate.match(/`([^`]*bunx smithers[^`]*)`/i);
     if (backticked) return backticked[1].trim();
-    const bare = candidate.match(/\b(bunx smithers-orchestrator [a-z][\w -]*)/i);
+    const bare = candidate.match(/\b(bunx smthrs [a-z][\w -]*)/i);
     if (bare) return bare[1].trim();
     const anyBacktick = candidate.match(/`(\$?\s*[a-z][\w./-]+ [^`]+)`/);
     if (anyBacktick) return anyBacktick[1].replace(/^\$\s*/, "").trim();
@@ -346,7 +346,7 @@ function renderTerminalCard(spec: CardSpec): string {
   <circle cx="${winX + 94}" cy="${winY + 32}" r="9" fill="${TOKENS.success}"/>
   <text x="${winX + winW / 2}" y="${winY + 40}" font-size="24" font-family="${TOKENS.fontMono}" fill="${TOKENS.textTertiary}" text-anchor="middle">smithers</text>`);
 
-  const command = spec.command ?? "bunx smithers-orchestrator --help";
+  const command = spec.command ?? "bunx smthrs --help";
   const commandLines = wrap(command, 64, 3);
   parts.push(
     `<text font-size="32" font-family="${TOKENS.fontMono}" fill="${TOKENS.textPrimary}">` +

@@ -13,7 +13,7 @@ import {
   useGatewayRun,
   useGatewayRunEvents,
   useSmithersGateway,
-} from "smithers-orchestrator/gateway-react";
+} from "smthrs/gateway-react";
 import {
   Badge,
   Button,
@@ -22,7 +22,7 @@ import {
   ChatTranscript,
   SmithersUiStyles,
   StatusPill,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 import { PtyScreen } from "./ptyScreen";
 
 const WORKFLOW_KEY = "hijacked-chat-pipeline";

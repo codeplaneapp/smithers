@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { expect, test } from "bun:test";
 import { Effect } from "effect";
 import { mkdtempSync, rmSync } from "node:fs";

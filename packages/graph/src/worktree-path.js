@@ -1,5 +1,5 @@
 import { dirname, isAbsolute, resolve } from "node:path";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { WORKTREE_EMPTY_PATH_ERROR } from "./constants.js";
 
 /**

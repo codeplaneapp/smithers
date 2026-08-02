@@ -17,8 +17,8 @@ const SESSION_ID = "mirror-e2e-session";
 const SESSION_ENV = { CLAUDE_CODE_SESSION_ID: SESSION_ID };
 
 const APPROVAL_WORKFLOW = `
-/** @jsxImportSource smithers-orchestrator */
-import { Approval, createSmithers, Task, Workflow } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Approval, createSmithers, Task, Workflow } from "smthrs";
 import { z } from "zod";
 
 const { smithers, outputs } = createSmithers({

@@ -194,7 +194,7 @@ Fireworks exposes deployed LoRAs through its OpenAI-compatible chat endpoint.
 Register the full deployed model resource in `.smithers/agents.ts`:
 
 ```ts
-import { OpenAIAgent } from "smithers-orchestrator";
+import { OpenAIAgent } from "smthrs";
 
 const smithersKimi = new OpenAIAgent({
   model: "accounts/YOUR_ACCOUNT/models/smithers-kimi-k2p7-v1",

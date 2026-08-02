@@ -1,5 +1,5 @@
-import * as _smithers_orchestrator_accounts from '@smithers-orchestrator/accounts';
-import { AccountProvider } from '@smithers-orchestrator/accounts';
+import * as _smithers_orchestrator_accounts from '@smthrs/accounts';
+import { AccountProvider } from '@smthrs/accounts';
 import { spawnSync } from 'node:child_process';
 
 /**
@@ -75,7 +75,7 @@ type UsageReport$5 = {
     error?: string;
 };
 
-/** @typedef {import("@smithers-orchestrator/accounts").Account} Account */
+/** @typedef {import("@smthrs/accounts").Account} Account */
 /** @typedef {import("./UsageReport.ts").UsageReport} UsageReport */
 /**
  * Routes an account to its usage adapter and returns a normalized report. This
@@ -109,7 +109,7 @@ declare function getUsageForAccounts(accounts: Account$2[], options?: {
 type Account$2 = _smithers_orchestrator_accounts.Account;
 type UsageReport$3 = UsageReport$5;
 
-/** @typedef {import("@smithers-orchestrator/accounts").Account} Account */
+/** @typedef {import("@smthrs/accounts").Account} Account */
 /** @typedef {import("./UsageReport.ts").UsageReport} UsageReport */
 /** @typedef {import("./UsageWindow.ts").UsageWindow} UsageWindow */
 /**
@@ -507,7 +507,7 @@ declare const PUBLISHED_CAPS: Record<string, {
 }>;
 
 /** @typedef {import("./UsageReport.ts").UsageReport} UsageReport */
-/** @typedef {import("@smithers-orchestrator/accounts").Account} Account */
+/** @typedef {import("@smthrs/accounts").Account} Account */
 /** @typedef {{ provider: Account["provider"]; configDir?: string; model?: string; apiKeyHash?: string }} UsageCacheAccountIdentity */
 /** @typedef {{ version: 1; entries: Record<string, { identity?: UsageCacheAccountIdentity; report: UsageReport }> }} UsageCacheFile */
 /**

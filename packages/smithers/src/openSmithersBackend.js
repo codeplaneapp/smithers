@@ -1,10 +1,10 @@
 import { Effect } from "effect";
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { openDurableSqliteDatabase } from "@smithers-orchestrator/db/openDurableSqliteDatabase";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { createHindsightMemoryStore, createLocalMemoryRuntime, createMemoryStore } from "@smithers-orchestrator/memory";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { openDurableSqliteDatabase } from "@smthrs/db/openDurableSqliteDatabase";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { createHindsightMemoryStore, createLocalMemoryRuntime, createMemoryStore } from "@smthrs/memory";
 import { createSmithers, createSmithersPostgres } from "./create.js";
 import { findSmithersAnchorDir } from "./findSmithersAnchorDir.js";
 import { resolveSmithersBackendChoice } from "./resolveSmithersBackendChoice.js";
@@ -89,8 +89,8 @@ function attachMemoryBackend(api, env, localMemoryDbPath) {
  * @param {import("./OpenSmithersBackendOptions.ts").OpenSmithersBackendOptions} [opts]
  * @returns {Promise<import("./CreateSmithersApi.ts").CreateSmithersApi<Schemas> & {
  *   close?: () => Promise<void>;
- *   memoryStore: import("@smithers-orchestrator/memory").MemoryStore;
- *   memoryService: import("@smithers-orchestrator/driver/MemoryRuntimeService").MemoryRuntimeService;
+ *   memoryStore: import("@smthrs/memory").MemoryStore;
+ *   memoryService: import("@smthrs/driver/MemoryRuntimeService").MemoryRuntimeService;
  * }>}
  */
 export async function openSmithersBackend(schemas = /** @type {Schemas} */ ({}), opts = {}) {

@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { findSmithersAnchorDir } from "./findSmithersAnchorDir.js";
 
 const BACKENDS = new Set(["sqlite", "pglite", "postgres"]);

@@ -1,9 +1,9 @@
 import { Effect } from "effect";
 import { bridgeSignalResolve } from "./effect/durable-deferred-bridge.js";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { SUBFLOW_RUN_LINEAGE_MAX_ROWS, subflowRunLineage } from "@smithers-orchestrator/graph/subflow-run-lineage";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
-import { normalizeWaitForEventCorrelationId } from "@smithers-orchestrator/db/waitForEventAttempt";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { SUBFLOW_RUN_LINEAGE_MAX_ROWS, subflowRunLineage } from "@smthrs/graph/subflow-run-lineage";
+import { nowMs } from "@smthrs/scheduler/nowMs";
+import { normalizeWaitForEventCorrelationId } from "@smthrs/db/waitForEventAttempt";
 /** @typedef {import("./SignalRunOptions.ts").SignalRunOptions} SignalRunOptions */
 
 /**

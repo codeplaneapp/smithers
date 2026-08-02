@@ -48,7 +48,7 @@ mode: "custom"
           role="button"
           tabIndex={0}
           onClick={() => {
-            navigator.clipboard.writeText("bunx smithers-orchestrator init");
+            navigator.clipboard.writeText("bunx smthrs init");
             const c = document.getElementById("cmd-check");
             if (c) { c.style.opacity = "1"; setTimeout(() => { c.style.opacity = "0"; }, 1800); }
           }}
@@ -56,7 +56,7 @@ mode: "custom"
         >
           <span>
             <span className="landing-brass" style={{ fontWeight: 700 }}>$ </span>
-            bunx smithers-orchestrator init
+            bunx smthrs init
           </span>
           <span id="cmd-check" className="landing-brass" style={{ opacity: 0, transition: "opacity 0.2s", fontSize: "0.8rem" }}>copied ✓</span>
         </div>

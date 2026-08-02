@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { assertRuntimeConformance } from "@smithers-orchestrator/testing/runtimeConformance";
+import { assertRuntimeConformance } from "@smthrs/testing/runtimeConformance";
 import { terminateChild } from "./terminateChild.mjs";
 
 const port = 8787;

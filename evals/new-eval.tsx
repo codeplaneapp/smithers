@@ -1,7 +1,7 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // new-eval — turn a reported friction/issue into a runnable fluency eval.
 //
-//   bunx smithers-orchestrator up evals/new-eval.tsx \
+//   bunx smthrs up evals/new-eval.tsx \
 //     --input '{"issue":"Agent guessed <Human> for a human approval gate; that component does not exist.","area":"approvals"}'
 //
 // 1) draft  — a strong model turns the issue into ONE well-formed eval task
@@ -11,7 +11,7 @@
 import { spawnSync } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { models } from "./agents.js";
 import { type Task as GenTask, routeSuite } from "./harness/generate-cases.js";

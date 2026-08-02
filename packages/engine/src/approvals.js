@@ -1,12 +1,8 @@
 import { Effect, Metric } from "effect";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
-import {
-  approvalWaitDuration,
-  trackEvent,
-  updateAsyncExternalWaitPending,
-} from "@smithers-orchestrator/observability/metrics";
+import { nowMs } from "@smthrs/scheduler/nowMs";
+import { approvalWaitDuration, trackEvent, updateAsyncExternalWaitPending } from "@smthrs/observability/metrics";
 import { bridgeApprovalResolve } from "./effect/durable-deferred-bridge.js";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 /**
  * @param {string | null | undefined} currentStatus
  * @param {number} pendingApprovals

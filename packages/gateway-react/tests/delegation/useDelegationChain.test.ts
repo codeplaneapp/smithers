@@ -22,9 +22,9 @@ import { dirname, join } from "node:path";
 import React, { act, createElement, StrictMode, Suspense, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { z } from "zod";
-import { Gateway } from "@smithers-orchestrator/server";
-import { SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
-import { createSmithers } from "smithers-orchestrator";
+import { Gateway } from "@smthrs/server";
+import { SmithersGatewayClient } from "@smthrs/gateway-client";
+import { createSmithers } from "smthrs";
 import { SmithersGatewayProvider } from "../../src/index.ts";
 import { useDelegationChain } from "../../src/delegation/useDelegationChain.ts";
 

@@ -1,4 +1,4 @@
-import type { TaskDescriptor } from "@smithers-orchestrator/graph";
+import type { TaskDescriptor } from "@smthrs/graph";
 
 export type RunTaskOptions = {
   rootDir?: string;

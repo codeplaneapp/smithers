@@ -26,9 +26,9 @@
 // acceptance criteria one-by-one with evidence; the parity suite must run on
 // BOTH backends; reviews must reject mocked "e2e".
 // ─────────────────────────────────────────────────────────────────────────────
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
-import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
+import { ClaudeCodeAgent, createSmithers } from "smthrs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
@@ -342,7 +342,7 @@ PROJECT: smithersai/smithers monorepo — pnpm workspaces, bun for tests. You im
 GOAL: UI code talks ONLY to TanStack DB collections + useLiveQuery. The collection provider swaps by
 workspace mode: local = official QueryCollection over a new /v1/api REST surface + SSE invalidation
 (SQLite/PGlite/Postgres all served identically through SmithersDb); multiplayer = official
-ElectricCollection over Electric shapes through the EXISTING @smithers-orchestrator/electric-proxy.
+ElectricCollection over Electric shapes through the EXISTING @smthrs/electric-proxy.
 Writes go through the domain API in BOTH modes; postgres writes return txid for Electric transaction
 matching. BREAKING changes to gateway-client/gateway-react are expected and allowed.
 
@@ -380,7 +380,7 @@ GROUND TRUTH ON MAIN (verified 2026-07-01 — trust this over stale docs):
   (packages/db dialect seam) so one read path serves all three. NODE-POSTGRES GOTCHA: BIGINT returns
   as string — pg.types.setTypeParser(20, Number) is required where relevant.
 - NO write path returns txid today — M1 adds it.
-- @smithers-orchestrator/electric-proxy EXISTS and is maintained (createSmithersElectricProxy,
+- @smthrs/electric-proxy EXISTS and is maintained (createSmithersElectricProxy,
   smithersElectricShapeCatalog + output-table shapes, serveSmithersElectricProxy, metrics/observer).
   Extend its catalog only if a needed shape is missing; do not rebuild it.
 - Installed: @tanstack/db 0.6.13, @tanstack/react-db 0.1.91. NOT installed (add when the milestone
@@ -407,8 +407,8 @@ REPO CONVENTIONS (follow EXACTLY):
 - Anti-slop prose in docs: no em-dashes, no "not X but Y" constructions, no padding.
 
 VERIFY COMMANDS: pnpm --filter <pkg> typecheck && pnpm --filter <pkg> test for each of
-@smithers-orchestrator/{gateway,gateway-client,gateway-react,server,db,electric-proxy,components},
-smithers-orchestrator, @smithers-orchestrator/cli. Root: pnpm typecheck. e2e: pnpm -C e2e test.
+@smthrs/{gateway,gateway-client,gateway-react,server,db,electric-proxy,components},
+smthrs, @smthrs/cli. Root: pnpm typecheck. e2e: pnpm -C e2e test.
 
 IF BLOCKED, uncertain, or about to do something irreversible: run \`smithers ask-human "<question>"\`
 and WAIT — never guess.
@@ -449,7 +449,7 @@ const SPEC_M1: MilestoneSpec = {
     "Auth: /v1/api routes reject a missing/insufficient scope and honor trusted-proxy headers — existing auth tests extended to at least one read + one write /v1/api route.",
     "openapi.yaml updated and its gate green; pnpm docs:llms clean.",
   ],
-  packages: ["@smithers-orchestrator/gateway", "@smithers-orchestrator/server", "@smithers-orchestrator/db"],
+  packages: ["@smthrs/gateway", "@smthrs/server", "@smthrs/db"],
   commitSubject: "✨ feat(gateway): /v1/api REST domain surface + SSE invalidation stream + postgres txid",
 };
 
@@ -475,12 +475,7 @@ const SPEC_M2: MilestoneSpec = {
     "Retired modules are gone: no references anywhere in the monorepo; all listed packages typecheck; grep proves createGatewayCollection/SyncTransport/electricCollectionDefs have zero hits outside git history.",
     "docs updated; pnpm docs:llms and pnpm generate:init-pack gates green.",
   ],
-  packages: [
-    "@smithers-orchestrator/gateway-client",
-    "@smithers-orchestrator/gateway-react",
-    "@smithers-orchestrator/components",
-    "smithers-orchestrator",
-  ],
+  packages: ["@smthrs/gateway-client", "@smthrs/gateway-react", "@smthrs/components", "smthrs"],
   commitSubject:
     "✨ feat(sync)!: createSmithersCollections + local QueryCollection provider; retire bespoke WS collection stack",
 };
@@ -505,11 +500,7 @@ const SPEC_M3: MilestoneSpec = {
     "The local (kind:'local') path never imports @tanstack/electric-db-collection or @electric-sql/client (bundle/import test).",
     "Electric suite skips loudly (named skip, exit 0) when SMITHERS_TEST_ELECTRIC is unset.",
   ],
-  packages: [
-    "@smithers-orchestrator/gateway-client",
-    "@smithers-orchestrator/gateway-react",
-    "@smithers-orchestrator/electric-proxy",
-  ],
+  packages: ["@smthrs/gateway-client", "@smthrs/gateway-react", "@smthrs/electric-proxy"],
   commitSubject: "✨ feat(sync): Electric collection provider through electric-proxy with txid matching",
 };
 
@@ -692,8 +683,8 @@ function integratePrompt(runElectricE2e: boolean): string {
     "",
     "Steps:",
     "1. pnpm install, then the FULL gate, fixing until green:",
-    "   - pnpm typecheck (root), and per-package typecheck+test for @smithers-orchestrator/{gateway,",
-    "     gateway-client,gateway-react,server,db,electric-proxy,components,cli} and smithers-orchestrator.",
+    "   - pnpm typecheck (root), and per-package typecheck+test for @smthrs/{gateway,",
+    "     gateway-client,gateway-react,server,db,electric-proxy,components,cli} and smthrs.",
     "   - pnpm -C e2e test.",
     "   - the backend-parameterized suites on sqlite + pglite (and real Postgres if SMITHERS_TEST_PG_URL set" +
       (runElectricE2e

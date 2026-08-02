@@ -35,7 +35,7 @@ request and result types.
 ## The provider-kit
 
 First-class providers don't hand-roll `run()`: they call
-`createCommandSandboxProvider` from `smithers-orchestrator/sandbox`, which owns
+`createCommandSandboxProvider` from `smthrs/sandbox`, which owns
 the request/result-file protocol so every provider behaves the same:
 
 1. Create a vendor session and emit a `session-created` heartbeat.
@@ -116,12 +116,12 @@ heartbeat payload, and the persisted `configJson` audit row.
 
 | Provider | Package | Provider id | Compute | Bundle transport | Auth | Exit code |
 |---|---|---|---|---|---|---|
-| Microsandbox | `smithers-orchestrator/microsandbox` | `microsandbox` | Local microVM | Guest filesystem channel | None | numeric |
-| Daytona | `smithers-orchestrator/daytona` | `daytona-sandbox` | Daytona sandbox | Sandbox filesystem | `DAYTONA_API_KEY` | numeric |
-| Vercel | `smithers-orchestrator/vercel` | `vercel-sandbox` | Vercel Sandbox | Sandbox filesystem | OIDC or token trio | numeric |
-| AWS | `smithers-orchestrator/aws` | `aws-sandbox` | Fargate or CodeBuild | S3 bucket (BYO) | AWS credential chain | Fargate numeric, CodeBuild status |
-| GCP | `smithers-orchestrator/gcp` | `gcp-sandbox` | Cloud Run Jobs | GCS bucket (BYO) | Application Default Credentials | task status (0/1) |
-| Cloudflare | `smithers-orchestrator/cloudflare` | `cloudflare-sandbox` | Sandbox SDK container | Sandbox filesystem | Durable Object binding | numeric |
+| Microsandbox | `smthrs/microsandbox` | `microsandbox` | Local microVM | Guest filesystem channel | None | numeric |
+| Daytona | `smthrs/daytona` | `daytona-sandbox` | Daytona sandbox | Sandbox filesystem | `DAYTONA_API_KEY` | numeric |
+| Vercel | `smthrs/vercel` | `vercel-sandbox` | Vercel Sandbox | Sandbox filesystem | OIDC or token trio | numeric |
+| AWS | `smthrs/aws` | `aws-sandbox` | Fargate or CodeBuild | S3 bucket (BYO) | AWS credential chain | Fargate numeric, CodeBuild status |
+| GCP | `smthrs/gcp` | `gcp-sandbox` | Cloud Run Jobs | GCS bucket (BYO) | Application Default Credentials | task status (0/1) |
+| Cloudflare | `smthrs/cloudflare` | `cloudflare-sandbox` | Sandbox SDK container | Sandbox filesystem | Durable Object binding | numeric |
 
 Per-provider setup, options, and cost live on each provider page:
 

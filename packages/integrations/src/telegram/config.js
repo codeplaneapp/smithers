@@ -2,7 +2,7 @@
 /** @typedef {import("./TelegramClientTypes.ts").TelegramClientConfig} TelegramClientConfig */
 // @smithers-type-exports-end
 
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { makeTelegramClient } from "./TelegramClient.js";
 
 /**
@@ -36,7 +36,7 @@ export function configureTelegram(config) {
 export function resolveTelegramConfig(explicit) {
   const envToken = process.env.SMITHERS_TELEGRAM_BOT_TOKEN;
   const base = moduleConfig ?? (envToken ? { botToken: envToken } : null);
-  const merged = { ...(base ?? {}), ...(explicit ?? {}) };
+  const merged = { ...base, ...explicit };
   if (!merged.botToken) {
     throw new SmithersError(
       "INVALID_INPUT",

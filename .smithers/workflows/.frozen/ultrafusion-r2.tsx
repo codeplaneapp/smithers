@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * Ultrafusion — N diverse agents do the same task blind, a fusion agent merges
  * the best of all of them, and every lane is scored by how the fusion judged
@@ -33,7 +33,7 @@ import {
   Worktree,
   Aspects,
   UI,
-} from "smithers-orchestrator";
+} from "smthrs";
 import { z } from "zod";
 
 /* ────────────────────────────── schemas ──────────────────────────────── */

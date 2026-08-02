@@ -1,7 +1,7 @@
 // smithers-display-name: Implement Packs
 // smithers-description: Implement the "Share workflows like skills" packs feature end-to-end from research/packs-share-workflows-like-skills.md — five gated phases (manifest, add, eject, workflows+share, messaging), each a Luna-implement / Terra-validate / Sol-review loop, then a final Sol polish pass.
-/** @jsxImportSource smithers-orchestrator */
-import { UI, ClaudeCodeAgent, CodexAgent, createSmithers, Sequence, Task } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI, ClaudeCodeAgent, CodexAgent, createSmithers, Sequence, Task } from "smthrs";
 import { z } from "zod/v4";
 import { implementer, validator, panelists, polishReviewer } from "../components/roles";
 import {
@@ -81,7 +81,7 @@ Implement exactly the "Spec syntax & fetch", "Lifecycle commands", and "Discover
 1. Spec parser: 'user/repo' (GitHub shorthand), 'github:user/repo[/subdir][#ref]', 'npm:pkg[@version]', 'pkg@1.2.0'. Unit-test every form.
 2. 'smithers add <spec>': fetch (GitHub codeload tarball / npm registry tarball), extract into .smithers/packs/<name>/ (local default) or ~/.smithers/packs/<name>/ with -g/--global. Pack name from manifest 'name', spec-derived fallback (user-repo). Validate the manifest before extracting.
 3. Trust report + confirmation before install (skippable with --yes): render capabilities (bins/env/writes) from the manifest plus per-workflow frontmatter via the existing evaluateEligibility machinery.
-4. Add-time import scan: reject any bare import in pack TS/TSX outside smithers-orchestrator, @smithers-orchestrator/*, react, zod — fail with the file and import named.
+4. Add-time import scan: reject any bare import in pack TS/TSX outside smthrs, @smthrs/*, react, zod — fail with the file and import named.
 5. packs.lock.toon beside each packs dir (spec -> resolved commit/version/integrity). 'smithers update [name]' re-resolves per lock; 'smithers remove <name>' deletes pack + lock entry; 'smithers packs list' lists both scopes. 'smithers install' is a hidden alias of add.
 6. Discovery: resolveWorkflowDirs in apps/cli/src/workflows.js gains local-packs and global-packs tiers (env paths -> curated -> local workflows -> local packs -> global workflows -> global packs), scanning .smithers/packs/*/workflows/. Local workflows shadow pack workflows on id collision; 'workflow run <pack>:<id>' disambiguates; 'workflow list' shows a source tier column (local / pack:<name> / global).
 7. Tests with NO mocks: fixture pack as a real directory/tarball on disk (file-based fetch path is fine for tests as long as the extract/validate/lock pipeline is the real one); cover add -> list shows pack tier -> run resolves pack workflow -> remove. Network-dependent GitHub/npm fetch paths must degrade with a clear error when offline.

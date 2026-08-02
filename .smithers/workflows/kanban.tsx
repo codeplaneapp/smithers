@@ -1,7 +1,7 @@
 // smithers-display-name: Kanban
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
-import { createSmithers, Sequence, Parallel, Worktree } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
+import { createSmithers, Sequence, Parallel, Worktree } from "smthrs";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve, relative } from "node:path";
 import { z } from "zod/v4";

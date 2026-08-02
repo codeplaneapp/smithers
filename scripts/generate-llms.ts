@@ -26,7 +26,7 @@ const DOCS = resolve(import.meta.dir, "../docs");
 // skill is self-contained. Keep it generated here so it never drifts from docs.
 const SKILL_DIR = resolve(import.meta.dir, "../skills/smithers");
 // The CLI package carries the docs commands' default, version-matched output so
-// `bunx smithers-orchestrator@x docs-full` does not depend on the latest website.
+// `bunx smthrs@x docs-full` does not depend on the latest website.
 const CLI_DOCS_DIR = resolve(import.meta.dir, "../apps/cli/docs");
 const PACKAGE_DOCS = resolve(import.meta.dir, "../packages/smithers/docs");
 const ROOT_PACKAGE = resolve(import.meta.dir, "../package.json");
@@ -284,7 +284,7 @@ function renderManifest(name: string, pages: string[], header: string): string {
 const HEADERS = {
   core: [
     "> Smithers — durable AI workflow orchestration as a JSX runtime.",
-    "> Repo: github.com/smithersai/smithers · Package: smithers-orchestrator (npm)",
+    "> Repo: github.com/smithersai/smithers · Package: smthrs (npm)",
     "",
     "This file is the agent-facing core Smithers documentation. It is for Claude, Codex, and other AI harnesses operating Smithers for a human. Read top to bottom for the runtime, agent operating playbook, JSX surface, CLI, and components.",
     "",
@@ -358,7 +358,7 @@ for (const b of builds) {
     "# Smithers — full documentation",
     "",
     "> Durable AI workflow orchestration as a JSX runtime.",
-    "> Repo: github.com/smithersai/smithers · Package: smithers-orchestrator (npm)",
+    "> Repo: github.com/smithersai/smithers · Package: smthrs (npm)",
     "",
     "This is the complete agent-facing Smithers documentation in one file. It is the concatenation of every fragment listed in /llms.txt.",
     "",
@@ -467,7 +467,7 @@ Examples:
 
 ## Pointers
 
-- npm: smithers-orchestrator
+- npm: smthrs
 - github: github.com/smithersai/smithers
 - changelogs: docs/changelogs/ on the site (not duplicated in llms files)
 `;

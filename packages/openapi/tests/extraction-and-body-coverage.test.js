@@ -13,7 +13,7 @@ import { createOpenApiToolsSync, listOperations } from "../src/tool-factory.js";
 import { extractOperations } from "../src/extractOperations.js";
 import { loadSpecSync } from "../src/loadSpecSync.js";
 import { loadSpecEffect } from "../src/loadSpecEffect.js";
-import { isSmithersError } from "@smithers-orchestrator/errors/isSmithersError";
+import { isSmithersError } from "@smthrs/errors/isSmithersError";
 
 const originalFetch = globalThis.fetch;
 

@@ -50,12 +50,12 @@ function markerScript(label) {
 const POSIX_BIN_SHIM = [
   "#!/bin/sh",
   'basedir=$(dirname "$(echo "$0" | sed -e \'s,\\\\,/,g\')")',
-  'exec bun "$basedir/../smithers-orchestrator/src/bin/smithers.js" "$@"',
+  'exec bun "$basedir/../smthrs/src/bin/smithers.js" "$@"',
   "",
 ].join("\n");
 
 /**
- * Install a fake `smithers-orchestrator` package at <root>/node_modules/ whose
+ * Install a fake `smthrs` package at <root>/node_modules/ whose
  * bin entry prints `label`. Also drops the matching `.bin/smithers` shell shim
  * so the layout matches what npm/pnpm actually produce on disk.
  *
@@ -64,11 +64,11 @@ const POSIX_BIN_SHIM = [
  * @param {string} [version]
  */
 function installFakeSmithersPackage(root, label, version = "0.0.0-test") {
-  const pkgDir = join(root, "node_modules/smithers-orchestrator");
+  const pkgDir = join(root, "node_modules/smthrs");
   writeFile(
     join(pkgDir, "package.json"),
     JSON.stringify({
-      name: "smithers-orchestrator",
+      name: "smthrs",
       version,
       bin: { smithers: "./src/bin/smithers.js" },
     }) + "\n",
@@ -146,7 +146,7 @@ test("bin shim delegates to a project's own node_modules dependency", () => {
   onTestFinished(() => {
     rmSync(dir, { recursive: true, force: true });
   });
-  // No .smithers pack at all: the project depends on smithers-orchestrator
+  // No .smithers pack at all: the project depends on smthrs
   // directly, like a repo using the SDK.
   installFakeSmithersPackage(dir, "project-dep");
   const subdir = join(dir, "src");
@@ -163,7 +163,7 @@ test("describeProtocolCommandSkew names the pin and the fix when the local copy 
     rmSync(dir, { recursive: true, force: true });
   });
   installFakeSmithersPackage(join(dir, ".smithers"), "stale", "0.25.0");
-  const binPath = join(dir, ".smithers/node_modules/smithers-orchestrator/src/bin/smithers.js");
+  const binPath = join(dir, ".smithers/node_modules/smthrs/src/bin/smithers.js");
 
   const message = describeProtocolCommandSkew({ args: ["claude", "monitor"], binPath });
 
@@ -171,7 +171,7 @@ test("describeProtocolCommandSkew names the pin and the fix when the local copy 
   expect(message).toContain(">=0.27.0");
   expect(message).toContain("0.25.0");
   expect(message).toContain(join(dir, ".smithers/package.json"));
-  expect(message).toContain("bun add smithers-orchestrator@latest");
+  expect(message).toContain("bun add smthrs@latest");
 });
 
 test("describeProtocolCommandSkew stays quiet for a new-enough pin or a non-protocol command", () => {
@@ -180,7 +180,7 @@ test("describeProtocolCommandSkew stays quiet for a new-enough pin or a non-prot
     rmSync(dir, { recursive: true, force: true });
   });
   installFakeSmithersPackage(join(dir, ".smithers"), "current", "0.31.0");
-  const binPath = join(dir, ".smithers/node_modules/smithers-orchestrator/src/bin/smithers.js");
+  const binPath = join(dir, ".smithers/node_modules/smthrs/src/bin/smithers.js");
 
   expect(describeProtocolCommandSkew({ args: ["claude", "monitor"], binPath })).toBeNull();
   expect(describeProtocolCommandSkew({ args: ["ps"], binPath })).toBeNull();
@@ -193,7 +193,7 @@ test("describeProtocolCommandSkew treats a prerelease of the introducing version
     rmSync(dir, { recursive: true, force: true });
   });
   installFakeSmithersPackage(join(dir, ".smithers"), "pre", "0.27.0-next.4");
-  const binPath = join(dir, ".smithers/node_modules/smithers-orchestrator/src/bin/smithers.js");
+  const binPath = join(dir, ".smithers/node_modules/smthrs/src/bin/smithers.js");
 
   expect(describeProtocolCommandSkew({ args: ["claude", "tick"], binPath })).toBeNull();
 });
@@ -216,16 +216,16 @@ test("bin shim refuses to hand `claude` to a stale pin instead of delegating (re
 
   expect(result.status).toBe(4);
   expect(result.stderr).toContain(">=0.27.0");
-  expect(result.stderr).toContain("bun add smithers-orchestrator@latest");
+  expect(result.stderr).toContain("bun add smthrs@latest");
   // The stale copy must never have been spawned.
   expect(result.stdout).not.toContain("stale");
 });
 
 test("bin shim ignores a bare .bin/smithers shell shim with no local package (regression)", () => {
-  // Reproduces the user-reported crash: `bunx smithers-orchestrator agent --help`
+  // Reproduces the user-reported crash: `bunx smthrs agent --help`
   // found `.smithers/node_modules/.bin/smithers` (a `#!/bin/sh` shim) and tried
   // to re-exec it with `bun`, producing `Expected ")" but found ""$(echo ""`.
-  // After the fix we resolve via `node_modules/smithers-orchestrator/package.json`,
+  // After the fix we resolve via `node_modules/smthrs/package.json`,
   // so a bare `.bin/` shim must NOT trigger delegation.
   const dir = mkdtempSync(join(tmpdir(), "smithers-bin-delegation-shim-"));
   onTestFinished(() => {

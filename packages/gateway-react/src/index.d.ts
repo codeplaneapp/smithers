@@ -1,10 +1,10 @@
 import * as react from 'react';
 import { ReactElement, ReactNode } from 'react';
-import * as _smithers_orchestrator_gateway_client from '@smithers-orchestrator/gateway-client';
-import { SmithersGatewayClientOptions, WorkspaceMode, SmithersGatewayClient, SmithersDataClient, SmithersCollections, GatewayCronRow, GatewayMemoryFactRow, GatewayPromptRow, GatewayScoreRow, GatewayTicketRow, UsageReport, ListRunTokenUsageResponse, GatewayRpcPayload as GatewayRpcPayload$1, GatewayEventFrame, GatewayBackoffOptions, GatewayRunNode } from '@smithers-orchestrator/gateway-client';
+import * as _smithers_orchestrator_gateway_client from '@smthrs/gateway-client';
+import { SmithersGatewayClientOptions, WorkspaceMode, SmithersGatewayClient, SmithersDataClient, SmithersCollections, GatewayCronRow, GatewayMemoryFactRow, GatewayPromptRow, GatewayScoreRow, GatewayTicketRow, UsageReport, ListRunTokenUsageResponse, GatewayRpcPayload as GatewayRpcPayload$1, GatewayEventFrame, GatewayBackoffOptions, GatewayRunNode } from '@smthrs/gateway-client';
 import * as _tanstack_react_query from '@tanstack/react-query';
 import { QueryClient } from '@tanstack/react-query';
-import { ListApprovalsRequest, ListApprovalsResponse, CronListRequest, ListTicketsRequest, GatewayRpcMethod, GatewayRpcParams, GatewayRpcPayload, ListRunsRequest, ListWorkflowsRequest, ListWorkflowsResponse } from '@smithers-orchestrator/gateway-client/rpc';
+import { ListApprovalsRequest, ListApprovalsResponse, CronListRequest, ListTicketsRequest, GatewayRpcMethod, GatewayRpcParams, GatewayRpcPayload, ListRunsRequest, ListWorkflowsRequest, ListWorkflowsResponse } from '@smthrs/gateway-client/rpc';
 
 declare function createGatewayReactRoot(element: ReactElement, options?: SmithersGatewayClientOptions & {
     rootId?: string;
@@ -241,7 +241,7 @@ declare function useGatewayCrons(params?: CronListRequest): GatewayAsyncState<Ga
  */
 
 /**
- * Structural mirror of `@smithers-orchestrator/ui/calendar`'s CalendarEvent.
+ * Structural mirror of `@smthrs/ui/calendar`'s CalendarEvent.
  * gateway-react may not import UI packages (architecture rule), so the type
  * is redeclared; assignment to CalendarEvent is checked structurally at the
  * gateway-ui boundary.
@@ -297,7 +297,7 @@ type UseCronScheduleOptions = {
 };
 /**
  * Expand every cron's upcoming occurrences within the window into calendar
- * events (`@smithers-orchestrator/ui/calendar`-shaped). Async state passes
+ * events (`@smthrs/ui/calendar`-shaped). Async state passes
  * straight through from {@link useGatewayCrons}; `data` stays undefined until
  * the first populated snapshot, then is a chronologically sorted event list.
  */

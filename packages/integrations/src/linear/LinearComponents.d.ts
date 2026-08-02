@@ -3,7 +3,7 @@ import { ZodType } from 'zod';
 import { LinearConfig } from './LinearConfig.js';
 import { LinearPriority } from './LinearClientTypes.js';
 import 'effect';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 
 /** Props shared by the Linear listener components (Signal.js pattern). */
 type LinearListenerProps<Schema extends ZodType = ZodType> = {

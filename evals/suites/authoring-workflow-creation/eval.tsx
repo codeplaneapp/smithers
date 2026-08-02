@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // authoring-workflow-creation — the "did the agent actually build it?" suite.
 //
 // This is the LLM-tier counterpart to apps/cli/tests/workflow-create.e2e.test.js.

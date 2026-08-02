@@ -14,7 +14,7 @@ globalThis.fetch = nativeFetch;
 import { afterEach, describe, expect, test } from "bun:test";
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { SmithersCollectionsProvider } from "@smithers-orchestrator/gateway-react";
+import { SmithersCollectionsProvider } from "@smthrs/gateway-react";
 import { FleetTable, NodeChatStream, NodeStageStrip, RunMeta } from "../src/index.ts";
 import { startInMemoryGateway, type InMemoryGateway, type SeedState } from "./inMemoryGateway.ts";
 

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../../..");
 const CLI_ENTRY = resolve(REPO_ROOT, "apps/cli/src/index.js");
-// examples/ resolves `smithers-orchestrator` via the repo root's hoisted
+// examples/ resolves `smthrs` via the repo root's hoisted
 // workspace node_modules (see examples-graph-smoke.test.js), unlike an
 // arbitrary tmp directory outside the monorepo.
 const FIXTURE_PATH = resolve(REPO_ROOT, "examples", "_nested-loop-rejection-fixture.jsx");
@@ -21,8 +21,8 @@ const FIXTURE_PATH = resolve(REPO_ROOT, "examples", "_nested-loop-rejection-fixt
 // at packages/engine/tests/nested-loop-runtime.test.jsx — and must NOT be
 // rejected.)
 const NESTED_LOOP_FIXTURE = `
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, Loop, Task, smithers, outputs } = createSmithers({

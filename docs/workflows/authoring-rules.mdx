@@ -4,7 +4,7 @@ description: The rules that repeatedly cost authoring runs when learned at runti
 ---
 
 These five rules keep biting workflow-authoring agents at runtime, hours after
-writing a workflow, instead of surfacing at the first `bunx smithers-orchestrator graph`.
+writing a workflow, instead of surfacing at the first `bunx smthrs graph`.
 Each is documented elsewhere in full; this page collects all five in one read
 before you write JSX, instead of hitting them one at a time across failed
 runs. See
@@ -87,10 +87,10 @@ follow-up opportunity.
 
 Import the actual workflow module and drive it through
 [`renderWorkflow`](/reference/package-configuration#subpath-exports)
-(`smithers-orchestrator/testing`):
+(`smthrs/testing`):
 
 ```ts
-import { renderWorkflow } from "smithers-orchestrator/testing";
+import { renderWorkflow } from "smthrs/testing";
 
 const render = async (name, input = {}, outputs = {}) =>
   renderWorkflow(await load(name), { workflowPath: join(workflowsDir, name), input, outputs });
@@ -100,7 +100,7 @@ const render = async (name, input = {}, outputs = {}) =>
 `extractGraph`/`buildPlanTree`) can pass while the real workflow file has a
 typo, a `NESTED_LOOP`, or a reserved-column collision: it validates a stand-in
 that merely resembles the workflow. `renderWorkflow` exercises the same
-extraction path `bunx smithers-orchestrator graph`/`bunx smithers-orchestrator up` do, so a
+extraction path `bunx smthrs graph`/`bunx smthrs up` do, so a
 graph-level defect fails the test the same way it fails a real run.
 
 Assert real graph behavior: exact node ids and dependency order, representative

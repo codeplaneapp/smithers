@@ -1,4 +1,4 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 /**
  * Reserved prefix for integration-delivered signals. User signals must not

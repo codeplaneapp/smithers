@@ -1,4 +1,4 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { buildCurrentScopes } from "./buildCurrentScopes.js";
 import { filterRowsByNodeId } from "./filterRowsByNodeId.js";
 import { normalizeInputRow } from "./normalizeInputRow.js";
@@ -10,7 +10,7 @@ const OUTPUT_PROVENANCE_SEQ = "__smithersProvenanceSeq";
 /** @typedef {import("./SafeParser.ts").SafeParser} SafeParser */
 /** @typedef {import("./SmithersCtxOptions.ts").SmithersCtxOptions} SmithersCtxOptions */
 /** @typedef {import("./RunAuthContext.ts").RunAuthContext} RunAuthContext */
-/** @typedef {import("@smithers-orchestrator/graph/ProofBinding").ProofBinding} ProofBinding */
+/** @typedef {import("@smthrs/graph/ProofBinding").ProofBinding} ProofBinding */
 /** @typedef {import("./SmithersRuntimeConfig.ts").SmithersRuntimeConfig} SmithersRuntimeConfig */
 /** @typedef {unknown} TableRef */
 /** @typedef {Record<string, unknown>} OutputRow User-visible output row — harness metadata fields (runId, nodeId, iteration) are stripped. */
@@ -29,10 +29,10 @@ const OUTPUT_PROVENANCE_SEQ = "__smithersProvenanceSeq";
 
 /**
  * Strip harness metadata columns (runId/nodeId/iteration) from an output row
- * before handing it to user code. Mirrors `@smithers-orchestrator/db/output`'s
+ * before handing it to user code. Mirrors `@smthrs/db/output`'s
  * `stripAutoColumns` exactly (array values pass through unchanged; only plain
  * objects get the three keys omitted) — duplicated locally, rather than
- * imported, because `@smithers-orchestrator/db` pulls in sqlite/postgres
+ * imported, because `@smthrs/db` pulls in sqlite/postgres
  * modules this portable driver core must stay free of.
  * @param {unknown} row
  * @returns {unknown}

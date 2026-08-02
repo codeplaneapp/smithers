@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveJjBinary } from "@smithers-orchestrator/vcs";
+import { resolveJjBinary } from "@smthrs/vcs";
 
 import { currentHead } from "../workflows/codex-issue-merge-queue.tsx";
 
@@ -11,7 +11,7 @@ const run = (cwd: string, command: string, args: string[]) =>
   execFileSync(command, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 
 // CI runners have no jj on PATH; the vendored platform package
-// (@smithers-orchestrator/jj-<platform>) provides one. Skip only when even
+// (@smthrs/jj-<platform>) provides one. Skip only when even
 // that binary is unavailable or not executable.
 const jjBinary = resolveJjBinary().path;
 const jjAvailable = (() => {

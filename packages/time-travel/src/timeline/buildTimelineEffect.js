@@ -3,8 +3,8 @@ import { listSnapshots } from "../snapshot/listSnapshotsEffect.js";
 import { listBranches } from "../fork/listBranchesEffect.js";
 import { getBranchInfo } from "../fork/getBranchInfoEffect.js";
 /** @typedef {import("../RunTimeline.ts").RunTimeline} RunTimeline */
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/errors/SmithersError").SmithersError} SmithersError */
 
 const ONESHOT_CONTROL_EVENT_PREFIXES = ["OneshotSteer", "OneshotRestart"];
 

@@ -1,35 +1,35 @@
-import * as _smithers_orchestrator_driver_workflow_types from '@smithers-orchestrator/driver/workflow-types';
-import * as _smithers_orchestrator_driver_WorkflowDriverOptions from '@smithers-orchestrator/driver/WorkflowDriverOptions';
-import * as _smithers_orchestrator_driver_WorkflowDefinition from '@smithers-orchestrator/driver/WorkflowDefinition';
-import { WorkflowDefinition } from '@smithers-orchestrator/driver/WorkflowDefinition';
-import * as _smithers_orchestrator_errors_SmithersErrorCode from '@smithers-orchestrator/errors/SmithersErrorCode';
-import { SmithersErrorCode as SmithersErrorCode$1 } from '@smithers-orchestrator/errors/SmithersErrorCode';
-import * as _smithers_orchestrator_scheduler_SmithersWorkflowOptions from '@smithers-orchestrator/scheduler/SmithersWorkflowOptions';
-import * as _smithers_orchestrator_db_SchemaRegistryEntry from '@smithers-orchestrator/db/SchemaRegistryEntry';
-import * as _smithers_orchestrator_driver from '@smithers-orchestrator/driver';
-import { SmithersCtx as SmithersCtx$1 } from '@smithers-orchestrator/driver';
-import * as _smithers_orchestrator_driver_RunAuthContext from '@smithers-orchestrator/driver/RunAuthContext';
-import * as _smithers_orchestrator_scheduler_RetryPolicy from '@smithers-orchestrator/scheduler/RetryPolicy';
-import { RetryPolicy as RetryPolicy$1 } from '@smithers-orchestrator/scheduler/RetryPolicy';
-import * as _smithers_orchestrator_driver_OutputKey from '@smithers-orchestrator/driver/OutputKey';
-import * as _smithers_orchestrator_driver_OutputAccessor from '@smithers-orchestrator/driver/OutputAccessor';
-import { InferOutputEntry as InferOutputEntry$1 } from '@smithers-orchestrator/driver/OutputAccessor';
-import * as _smithers_orchestrator_graph from '@smithers-orchestrator/graph';
-import * as _smithers_orchestrator_scheduler from '@smithers-orchestrator/scheduler';
-import * as _smithers_orchestrator_scheduler_CachePolicy from '@smithers-orchestrator/scheduler/CachePolicy';
-import { CachePolicy as CachePolicy$1 } from '@smithers-orchestrator/scheduler/CachePolicy';
+import * as _smithers_orchestrator_driver_workflow_types from '@smthrs/driver/workflow-types';
+import * as _smithers_orchestrator_driver_WorkflowDriverOptions from '@smthrs/driver/WorkflowDriverOptions';
+import * as _smithers_orchestrator_driver_WorkflowDefinition from '@smthrs/driver/WorkflowDefinition';
+import { WorkflowDefinition } from '@smthrs/driver/WorkflowDefinition';
+import * as _smithers_orchestrator_errors_SmithersErrorCode from '@smthrs/errors/SmithersErrorCode';
+import { SmithersErrorCode as SmithersErrorCode$1 } from '@smthrs/errors/SmithersErrorCode';
+import * as _smithers_orchestrator_scheduler_SmithersWorkflowOptions from '@smthrs/scheduler/SmithersWorkflowOptions';
+import * as _smithers_orchestrator_db_SchemaRegistryEntry from '@smthrs/db/SchemaRegistryEntry';
+import * as _smithers_orchestrator_driver from '@smthrs/driver';
+import { SmithersCtx as SmithersCtx$1 } from '@smthrs/driver';
+import * as _smithers_orchestrator_driver_RunAuthContext from '@smthrs/driver/RunAuthContext';
+import * as _smithers_orchestrator_scheduler_RetryPolicy from '@smthrs/scheduler/RetryPolicy';
+import { RetryPolicy as RetryPolicy$1 } from '@smthrs/scheduler/RetryPolicy';
+import * as _smithers_orchestrator_driver_OutputKey from '@smthrs/driver/OutputKey';
+import * as _smithers_orchestrator_driver_OutputAccessor from '@smthrs/driver/OutputAccessor';
+import { InferOutputEntry as InferOutputEntry$1 } from '@smthrs/driver/OutputAccessor';
+import * as _smithers_orchestrator_graph from '@smthrs/graph';
+import * as _smithers_orchestrator_scheduler from '@smthrs/scheduler';
+import * as _smithers_orchestrator_scheduler_CachePolicy from '@smthrs/scheduler/CachePolicy';
+import { CachePolicy as CachePolicy$1 } from '@smthrs/scheduler/CachePolicy';
 import * as React$1 from 'react';
 import React__default from 'react';
 import * as zod from 'zod';
 import { z } from 'zod';
-import * as _smithers_orchestrator_agents_AgentLike from '@smithers-orchestrator/agents/AgentLike';
-import { AgentLike as AgentLike$2 } from '@smithers-orchestrator/agents/AgentLike';
-import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
-import * as _smithers_orchestrator_graph_types from '@smithers-orchestrator/graph/types';
-import { ScorersMap as ScorersMap$1 } from '@smithers-orchestrator/graph/types';
-import { ProofBinding } from '@smithers-orchestrator/graph/ProofBinding';
-import { TaskMemoryConfig } from '@smithers-orchestrator/memory/types';
-import * as _smithers_orchestrator_errors from '@smithers-orchestrator/errors';
+import * as _smithers_orchestrator_agents_AgentLike from '@smthrs/agents/AgentLike';
+import { AgentLike as AgentLike$2 } from '@smthrs/agents/AgentLike';
+import { SmithersError } from '@smthrs/errors/SmithersError';
+import * as _smithers_orchestrator_graph_types from '@smthrs/graph/types';
+import { ScorersMap as ScorersMap$1 } from '@smthrs/graph/types';
+import { ProofBinding } from '@smthrs/graph/ProofBinding';
+import { TaskMemoryConfig } from '@smthrs/memory/types';
+import * as _smithers_orchestrator_errors from '@smthrs/errors';
 import * as zod_v4_core from 'zod/v4/core';
 
 type WorktreeProps$2 = {
@@ -1639,7 +1639,7 @@ type DelegationSharedProps$1 = {
      *
      * WARNING: the delegation fold and the `smithers ui` delegation UI
      * (`foldDelegation`/`delegationTableForNodeId` in
-     * `@smithers-orchestrator/gateway-react`) only recognize the default
+     * `@smthrs/gateway-react`) only recognize the default
      * `"dc"` prefix. A custom prefix still executes correctly, but the run
      * renders NO delegation UI until the fold learns the new prefix — keep the
      * default unless you also extend the fold.
@@ -1663,7 +1663,7 @@ type DelegationSharedProps$1 = {
     poll?: boolean;
     /** Run budget, enforced from rolled-up dcExec actuals (and wall-clock via Aspects for maxMinutes). */
     budget?: DelegationBudget$1;
-    /** Delegation scorers (e.g. from `smithers-orchestrator/scorers`). */
+    /** Delegation scorers (e.g. from `smthrs/scorers`). */
     scorers?: DelegationScorers$1;
     skipIf?: boolean;
 };
@@ -2018,7 +2018,7 @@ type ApprovalGateProps$2 = {
 declare function Workflow(props: WorkflowProps$1): React__default.DOMElement<WorkflowProps$1, Element>;
 type WorkflowProps$1 = WorkflowProps$2;
 
-/** @typedef {import("@smithers-orchestrator/agents/AgentLike").AgentLike} AgentLike */
+/** @typedef {import("@smthrs/agents/AgentLike").AgentLike} AgentLike */
 /** @typedef {import("./DepsSpec.ts").DepsSpec} DepsSpec */
 /**
  * @template Row, Output, D
@@ -3058,7 +3058,7 @@ declare function executionComplete(opts: {
 declare function agentForTier(agents: Partial<Record<Tier$2, AgentLike$1 | AgentLike$1[]>>, tier: Tier$2, tierOrder?: readonly Tier$2[]): AgentLike$1 | AgentLike$1[] | undefined;
 /**
  * Synthesize the delegation event log the run scorers in
- * `smithers-orchestrator/scorers` fold (`DelegationEvent[]` — the simulation
+ * `smthrs/scorers` fold (`DelegationEvent[]` — the simulation
  * contract's vocabulary) from the dc* rows the run actually wrote. Output
  * rows carry no cross-table timestamps, so events are emitted in phase order
  * with one documented approximation: probe/user-edit replans are treated as
@@ -3178,7 +3178,7 @@ type DelegationExecutionProps$1 = DelegationExecutionProps$2;
  * `humanPollScorer` sees the submitted poll instead of always skipping.
  *
  * The score task carries the caller's `scorers.run` (e.g. built from
- * `delegationRunScore` in `smithers-orchestrator/scorers`) and a `context`
+ * `delegationRunScore` in `smthrs/scorers`) and a `context`
  * synthesized to the exact shapes those scorers parse:
  * - `events` + `nodes` — a faithful DelegationEvent[] log derived from the
  *   dc* rows (see `synthesizeDelegationEvents`) for pocJudgment/planSolidity;

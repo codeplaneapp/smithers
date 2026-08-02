@@ -20,7 +20,7 @@ import {
   edit,
   grep,
   tools,
-} from "smithers-orchestrator";
+} from "smthrs";
 ```
 
 ## defineTool
@@ -118,7 +118,7 @@ function defineTool<S extends ZodType>(options: DefineToolOptions<S>): Tool;
 </ResponseField>
 
 ```ts
-import { defineTool } from "smithers-orchestrator";
+import { defineTool } from "smthrs";
 import { z } from "zod";
 
 const placeOrder = defineTool({
@@ -179,7 +179,7 @@ function getDefinedToolMetadata(value: unknown):
 </ResponseField>
 
 ```ts
-import { getDefinedToolMetadata, write } from "smithers-orchestrator";
+import { getDefinedToolMetadata, write } from "smthrs";
 
 getDefinedToolMetadata(write);
 // { name: "write", sideEffect: true, idempotent: false }
@@ -195,7 +195,7 @@ rejected, and output truncates to `ctx.maxOutputBytes` (200KB). Import them
 individually or as the `tools` bundle:
 
 ```ts
-import { tools } from "smithers-orchestrator";
+import { tools } from "smthrs";
 // tools === { read, write, edit, bash, grep }
 const { read, write, edit, bash, grep } = tools;
 ```
@@ -312,7 +312,7 @@ provider with egress controls instead.
 ```tsx
 import { ToolLoopAgent as Agent } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { createSmithers, tools, Task } from "smithers-orchestrator";
+import { createSmithers, tools, Task } from "smthrs";
 import { z } from "zod";
 
 const codeAgent = new Agent({

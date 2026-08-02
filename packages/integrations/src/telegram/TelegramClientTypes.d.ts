@@ -1,5 +1,5 @@
 import { Effect } from 'effect';
-import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
+import { SmithersError } from '@smthrs/errors/SmithersError';
 
 /**
  * Configuration for the fetch-based Telegram Bot API client. `apiBaseUrl`

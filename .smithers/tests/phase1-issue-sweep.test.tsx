@@ -1,8 +1,8 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
-import { renderWorkflow, runTask } from "smithers-orchestrator/testing";
-import type { RenderedWorkflow } from "smithers-orchestrator/testing";
-import type { TaskDescriptor } from "@smithers-orchestrator/graph";
+import { renderWorkflow, runTask } from "smthrs/testing";
+import type { RenderedWorkflow } from "smthrs/testing";
+import type { TaskDescriptor } from "@smthrs/graph";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 

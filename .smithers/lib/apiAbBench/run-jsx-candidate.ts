@@ -16,7 +16,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { Effect } from "effect";
-import { runWorkflow } from "smithers-orchestrator";
+import { runWorkflow } from "smthrs";
 
 export const RESULT_SENTINEL = "__API_AB_RESULT__";
 

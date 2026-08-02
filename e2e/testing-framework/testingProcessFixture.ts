@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Effect } from "effect";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { buildKillResumeWorkflow } from "../harness/killResumeWorkflow.ts";
 
 /**

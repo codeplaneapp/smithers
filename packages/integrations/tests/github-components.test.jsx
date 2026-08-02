@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6,8 +6,8 @@ import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { Effect } from "effect";
 import { z } from "zod";
-import { createSmithers, renderFrame, runWorkflow } from "smithers-orchestrator";
-import { SmithersCtx } from "@smithers-orchestrator/react-reconciler/context";
+import { createSmithers, renderFrame, runWorkflow } from "smthrs";
+import { SmithersCtx } from "@smthrs/react-reconciler/context";
 import { OnPullRequest, OnWebhook } from "../src/github/components/OnWebhook.js";
 import {
   AddLabels,

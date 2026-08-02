@@ -33,7 +33,7 @@ ways:
 
 - **Assertion spec**: `expected` is absent, or an object whose keys are only
   `status` / `output` / `outputContains` / `errorContains` (the spec
-  `bunx smithers-orchestrator eval` has always supported).
+  `bunx smthrs eval` has always supported).
 - **Expected output**: any other `expected` value is the literal/subset
   expected output: objects and arrays match by subset, everything else by
   deep equality, plus the implicit "the case run finished" assertion.
@@ -52,7 +52,7 @@ and `outputContains` comparisons always see an empty `actual`.
 Useful for debugging a suite outside the Evals canvas:
 
 ```bash
-bunx smithers-orchestrator workflow run eval-suite-run \
+bunx smthrs workflow run eval-suite-run \
   --input '{"suiteId":"<suite-id>","maxConcurrency":4}'
 ```
 

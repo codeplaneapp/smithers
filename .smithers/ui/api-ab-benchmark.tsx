@@ -1,7 +1,7 @@
 /** @jsxImportSource react */
 import { useMemo } from "react";
-import { createGatewayReactRoot, useGatewayRun, useGatewayRunTree } from "smithers-orchestrator/gateway-react";
-import { RunEventLog, RunTree, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
+import { createGatewayReactRoot, useGatewayRun, useGatewayRunTree } from "smthrs/gateway-react";
+import { RunEventLog, RunTree, WorkflowUiShell } from "smthrs/gateway-ui";
 import {
   Badge,
   Card,
@@ -15,7 +15,7 @@ import {
   TableHeader,
   TableRow,
   SmithersUiStyles,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 
 const ARMS = ["effect", "jsx"] as const;
 const TASKS = ["pipeline", "fanout", "reuse"] as const;

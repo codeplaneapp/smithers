@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { WebSocketServer } from "ws";
-import { diffSnapshots } from "@smithers-orchestrator/devtools";
+import { diffSnapshots } from "@smthrs/devtools";
 import { DevToolsClient } from "../src/runtime/DevToolsClient.js";
 import { DevToolsStore } from "../src/runtime/DevToolsStore.js";
 import { RunInspector } from "../src/views/RunInspector.js";
-import type { DevToolsNode, DevToolsSnapshot } from "@smithers-orchestrator/protocol";
+import type { DevToolsNode, DevToolsSnapshot } from "@smthrs/protocol";
 
 function task(id: number, nodeId: string, state: string, extraProps: Record<string, unknown> = {}): DevToolsNode {
   return {

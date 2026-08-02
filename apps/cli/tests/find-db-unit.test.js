@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { openSmithersBackend } from "smithers-orchestrator/openSmithersBackend";
+import { openSmithersBackend } from "smthrs/openSmithersBackend";
 import { findAndOpenDb, findSmithersDb, waitForSmithersDb } from "../src/find-db.js";
 
 function tempDir(name) {

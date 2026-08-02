@@ -1,6 +1,6 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
-/** @typedef {import("@smithers-orchestrator/db/adapter/AttemptRow").AttemptRow} AttemptRow */
+/** @typedef {import("@smthrs/db/adapter/AttemptRow").AttemptRow} AttemptRow */
 
 /**
  * Strip the loop-scope suffix (`@@ralph=0,...`) from a node id to recover the

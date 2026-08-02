@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { createCommandSandboxProvider } from "@smithers-orchestrator/sandbox";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { createCommandSandboxProvider } from "@smthrs/sandbox";
 import { MICROSANDBOX_PROVIDER_ID } from "./MICROSANDBOX_PROVIDER_ID.js";
 
 const DEFAULT_IMAGE = "oven/bun:1";
@@ -19,7 +19,7 @@ const SECRET_KEY_RE = /token|secret|key|password|credential|authorization|passwd
  * seam onto the Microsandbox TypeScript SDK.
  *
  * @param {import("./MicrosandboxSandboxProviderOptions.ts").MicrosandboxSandboxProviderOptions} [options]
- * @returns {import("@smithers-orchestrator/sandbox").SandboxProvider}
+ * @returns {import("@smthrs/sandbox").SandboxProvider}
  */
 export function createMicrosandboxSandboxProvider(options = {}) {
   validateFactoryOptions(options);
@@ -184,7 +184,7 @@ function validateFactoryOptions(options) {
 /**
  * @param {import("./MicrosandboxSandboxProviderOptions.ts").MicrosandboxSandboxBuilderLike} builder
  * @param {import("./MicrosandboxSandboxProviderOptions.ts").MicrosandboxSandboxProviderOptions} options
- * @param {import("@smithers-orchestrator/sandbox").SandboxProviderRequest} request
+ * @param {import("@smthrs/sandbox").SandboxProviderRequest} request
  * @param {{
  *   config: Record<string, unknown>;
  *   workspace: { name?: string; snapshotId?: string; idleTimeoutSecs?: number; persistence?: "ephemeral" | "sticky" } | undefined;
@@ -446,9 +446,9 @@ async function disposeSandboxQuietly(sdk, name, sandbox, options) {
 }
 
 /**
- * @param {string | ((request: import("@smithers-orchestrator/sandbox").SandboxProviderRequest) => string) | undefined} configured
+ * @param {string | ((request: import("@smthrs/sandbox").SandboxProviderRequest) => string) | undefined} configured
  * @param {{ name?: string; persistence?: string } | undefined} workspace
- * @param {import("@smithers-orchestrator/sandbox").SandboxProviderRequest} request
+ * @param {import("@smthrs/sandbox").SandboxProviderRequest} request
  */
 function resolveSandboxName(configured, workspace, request) {
   const workspaceName = workspace?.name;

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { type AgentLike, CodexAgent } from "smithers-orchestrator";
+import { type AgentLike, CodexAgent } from "smthrs";
 
 type CodexOptions = NonNullable<ConstructorParameters<typeof CodexAgent>[0]>;
 

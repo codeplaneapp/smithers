@@ -1,12 +1,12 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
-import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { createSmithers } from "smthrs";
+import { canonicalizeXml } from "@smthrs/graph/utils/xml";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { Gateway } from "../src/gateway.js";
 
 /**

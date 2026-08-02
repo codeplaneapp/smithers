@@ -6,7 +6,7 @@ description: Add missing tests and validate the result.
 `improve-test-coverage` is archived (not installed by `init`): copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent. It runs the shared `ValidationLoop`, prompted to find and fill high-impact test gaps.
 
 ```bash
-bunx smithers-orchestrator workflow run improve-test-coverage --prompt "Add regression coverage for webhook signature failures"
+bunx smthrs workflow run improve-test-coverage --prompt "Add regression coverage for webhook signature failures"
 ```
 
 <Frame caption="The improve-test-coverage UI shows the high-impact gaps it fills and validates that the new tests pass.">

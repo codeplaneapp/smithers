@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import React from "react";
 import { SmithersRenderer } from "../src/dom/renderer.js";
@@ -18,12 +18,12 @@ describe("core peer resolution", () => {
     const specifiers = [];
     const extractGraph = await resolveExtractGraph(async (specifier) => {
       specifiers.push(specifier);
-      if (specifier === "@smithers-orchestrator/graph") return { extractGraph: packageExtractGraph };
+      if (specifier === "@smthrs/graph") return { extractGraph: packageExtractGraph };
       throw new Error(`Unexpected import: ${specifier}`);
     });
 
     expect(extractGraph).toBe(packageExtractGraph);
-    expect(specifiers).toEqual(["@smithers-orchestrator/graph"]);
+    expect(specifiers).toEqual(["@smthrs/graph"]);
   });
 
   test("falls back to the local graph module when the package import is unavailable", async () => {
@@ -31,22 +31,22 @@ describe("core peer resolution", () => {
     const specifiers = [];
     const extractGraph = await resolveExtractGraph(async (specifier) => {
       specifiers.push(specifier);
-      if (specifier === "@smithers-orchestrator/graph") return null;
+      if (specifier === "@smthrs/graph") return null;
       return { extractGraph: fallback };
     });
 
     expect(extractGraph).toBe(fallback);
-    expect(specifiers).toEqual(["@smithers-orchestrator/graph", "../../graph/src/index.js"]);
+    expect(specifiers).toEqual(["@smthrs/graph", "../../graph/src/index.js"]);
   });
 
   test("throws when neither core module exports extractGraph", async () => {
     await expect(resolveExtractGraph(async () => ({}))).rejects.toThrow(
-      "Unable to load extractGraph from @smithers-orchestrator/graph",
+      "Unable to load extractGraph from @smthrs/graph",
     );
   });
 
   test("importCoreModule returns null when dynamic import fails", async () => {
-    const mod = await importCoreModule("@smithers-orchestrator/definitely-missing");
+    const mod = await importCoreModule("@smthrs/definitely-missing");
 
     expect(mod).toBeNull();
   });

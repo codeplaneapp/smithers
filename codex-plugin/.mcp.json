@@ -2,7 +2,7 @@
   "mcpServers": {
     "smithers": {
       "command": "bunx",
-      "args": ["smithers-orchestrator", "--mcp"]
+      "args": ["smthrs", "--mcp"]
     }
   }
 }

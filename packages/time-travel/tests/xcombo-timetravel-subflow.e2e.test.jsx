@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // Cross-feature audit lane: time travel x <Subflow> (child runs).
 //
 // Every test here drives a REAL parent run that executes a real <Subflow>
@@ -7,8 +7,8 @@
 // today are pinning defects on purpose.
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { Subflow, Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { Subflow, Task, Workflow, runWorkflow } from "smthrs";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import { timeTravel } from "../src/timetravel.js";

@@ -9,8 +9,8 @@ scorers to a `Task` via its `scorers` prop; they run **after** the task
 completes and never block the workflow. Each result is persisted to the
 `_smithers_scorers` table so you can aggregate scores across runs.
 
-All scorer values and types are re-exported from the `smithers-orchestrator`
-facade, which is canonical. The `smithers-orchestrator/scorers` subpath exports
+All scorer values and types are re-exported from the `smthrs`
+facade, which is canonical. The `smthrs/scorers` subpath exports
 the same surface.
 
 ```ts
@@ -22,8 +22,8 @@ import {
   latencyScorer,
   aggregateScores,
   runScorersBatch,
-} from "smithers-orchestrator";
-import type { Scorer, ScoreResult, ScorersMap } from "smithers-orchestrator";
+} from "smthrs";
+import type { Scorer, ScoreResult, ScorersMap } from "smthrs";
 ```
 
 <Note>
@@ -303,7 +303,7 @@ import {
   normalizeExpected,
   parseEvalDataset,
   slugifyEvalToken,
-} from "smithers-orchestrator/scorers";
+} from "smthrs/scorers";
 ```
 
 `parseEvalDataset(text)` accepts a JSON array or JSONL rows, ignores blank and
@@ -365,13 +365,13 @@ shows the harness or environment failed before the workflow's own behavior
 could be observed: a Smithers tooling denial (`TOOL_NETWORK_DISABLED`,
 `TOOL_GIT_REMOTE_DISABLED`, `AGENT_CONFIG_INVALID`), a socket, DNS, or TLS
 fault, a missing binary or fatal signal, out of memory, or a provider rate
-limit. `bunx smithers-orchestrator eval` uses it to grade such cases INCONCLUSIVE and exit `5`
+limit. `bunx smthrs eval` uses it to grade such cases INCONCLUSIVE and exit `5`
 instead of `1`, so repair loops fix the harness rather than iterate on product
 code the suite never exercised. The pattern list is deliberately conservative:
 an unrecognized error stays a genuine failure.
 
 ```ts
-import { isEvalInfraFailure } from "smithers-orchestrator/scorers";
+import { isEvalInfraFailure } from "smthrs/scorers";
 
 isEvalInfraFailure("connect ECONNREFUSED 127.0.0.1:5432"); // true
 isEvalInfraFailure("expected 3 rows, received 2"); // false
@@ -499,7 +499,7 @@ const stats = await aggregateScores(adapter, { runId: "RUN_ID" });
 Scores for a run are also viewable from the CLI:
 
 ```bash
-bunx smithers-orchestrator scores RUN_ID
+bunx smthrs scores RUN_ID
 ```
 
 **Source** [`run-scorers.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/run-scorers.js) · [`aggregate.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/aggregate.js) · **Tests** [`run-scorers.test.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/tests/run-scorers.test.js) · [`aggregate.test.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/tests/aggregate.test.js) · **See also** [`ScorerContext`, `AggregateScore`](/reference/types#scorercontext)
@@ -525,7 +525,7 @@ genuine failure. Fail-closed is correct here, because an inconclusive verdict
 suppresses the strongest signal an eval suite produces.
 
 ```ts
-import { isEvalInfraFailure } from "smithers-orchestrator/scorers";
+import { isEvalInfraFailure } from "smthrs/scorers";
 
 const status = isEvalInfraFailure(caseError) ? "inconclusive" : "failed";
 ```

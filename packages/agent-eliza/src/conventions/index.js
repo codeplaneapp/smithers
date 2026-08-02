@@ -1,5 +1,5 @@
 /**
- * `@smithers-orchestrator/agent-eliza/conventions`
+ * `@smthrs/agent-eliza/conventions`
  *
  * elizaOS-conventions authoring layer for Smithers workflows.
  *

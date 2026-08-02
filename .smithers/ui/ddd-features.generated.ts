@@ -111,7 +111,7 @@ export const featuresData = [
       "Use smithers inspect <runId>, smithers output <runId> <nodeId>, and docs/how-it-works.mdx to debug ctx/output reads and conditional mounting."
     ],
     "architecture": [
-      "packages/smithers/src/index.js re-exports createSmithers plus all component primitives from @smithers-orchestrator/components.",
+      "packages/smithers/src/index.js re-exports createSmithers plus all component primitives from @smthrs/components.",
       "packages/components/src/index.js exports prompt rendering, zod examples, and component host elements; packages/engine/src/index.js and packages/driver/src/index.js run the rendered graph.",
       "docs/how-it-works.mdx documents the render -> extract -> schedule -> execute -> persist -> re-render loop."
     ],
@@ -450,7 +450,7 @@ export const featuresData = [
       "Tool annotations declare read-only, destructive, idempotent, and open-world behavior for MCP clients."
     ],
     "debug": [
-      "Run bunx smithers-orchestrator --mcp --surface semantic and inspect registered tools from the MCP client.",
+      "Run bunx smthrs --mcp --surface semantic and inspect registered tools from the MCP client.",
       "If mcp add fails due command word-splitting, docs/integrations/mcp-server.mdx documents the agent-specific fallback command with -- separators."
     ],
     "architecture": [
@@ -1448,7 +1448,7 @@ export const featuresData = [
       "For Cloudflare, read docs/integrations/cloudflare.mdx warning: Worker-native storage plus SDK agents works, but a Workers-native run driver for CLI workflows is not shipped."
     ],
     "architecture": [
-      "packages/cloudflare, packages/vercel, packages/aws, packages/gcp, packages/daytona, and packages/microsandbox are optional provider packages re-exported by smithers-orchestrator subpaths.",
+      "packages/cloudflare, packages/vercel, packages/aws, packages/gcp, packages/daytona, and packages/microsandbox are optional provider packages re-exported by smthrs subpaths.",
       "packages/sandbox/src/provider-kit supplies shared transport and provider contracts.",
       "Docs distinguish storage descriptors from remote execution providers, especially on Cloudflare."
     ],
@@ -2210,7 +2210,7 @@ export const featuresData = [
     "architecture": [
       "apps/observability/src/index.js exports observability layers, metrics, logging, tracing, Prometheus helpers, agent trace helpers, and correlation utilities.",
       "apps/observability/docker-compose.otel.yml, prometheus, tempo, loki, and collector configs ship the local stack assets.",
-      "packages/smithers/src/index.js re-exports observability through smithers-orchestrator/observability."
+      "packages/smithers/src/index.js re-exports observability through smthrs/observability."
     ],
     "changes": [
       "2026-07-06 refresh: read README.md, package exports, selected package entry points, docs/how-it-works.mdx, docs/cli/overview.mdx, docs/agents/overview.mdx, docs/integrations/custom-ui.mdx, docs/integrations/mcp-server.mdx, docs/deployment/production-hardening.mdx, docs/deployment/control-plane.mdx, and targeted test inventories.",
@@ -2640,7 +2640,7 @@ export const featuresData = [
     "capabilities": [
       {
         "title": "Browser facade",
-        "detail": "smithers-orchestrator/browser exports workflow definition, runtime construction, reusable and one-shot runners, and browser-safe primitives."
+        "detail": "smthrs/browser exports workflow definition, runtime construction, reusable and one-shot runners, and browser-safe primitives."
       },
       {
         "title": "RuntimeAdapter",
@@ -2832,22 +2832,22 @@ export const featuresData = [
     "endpoints": [
       {
         "method": "API",
-        "path": "@smithers-orchestrator/integrations/github",
+        "path": "@smthrs/integrations/github",
         "doc": "docs/integrations/integrations.mdx"
       },
       {
         "method": "API",
-        "path": "@smithers-orchestrator/integrations/linear",
+        "path": "@smthrs/integrations/linear",
         "doc": "docs/integrations/integrations.mdx"
       },
       {
         "method": "API",
-        "path": "@smithers-orchestrator/integrations/telegram",
+        "path": "@smthrs/integrations/telegram",
         "doc": "docs/integrations/telegram.mdx"
       },
       {
         "method": "API",
-        "path": "smithers-orchestrator/telegram",
+        "path": "smthrs/telegram",
         "doc": "docs/integrations/telegram.mdx"
       }
     ],

@@ -19,7 +19,7 @@ async function deploy() {
             await $ `bun run scripts/build.js`;
             // Load into minikube
             console.log("Loading images into minikube...");
-            await $ `minikube image load smithers-orchestrator:latest`;
+            await $ `minikube image load smthrs:latest`;
             await $ `minikube image load smithers-worker:latest`;
             // Apply manifests in order
             console.log("Applying Kubernetes manifests...");
@@ -32,7 +32,7 @@ async function deploy() {
             await $ `kubectl apply -f k8s/worker.yaml`;
             await $ `kubectl apply -f k8s/gateway.yaml`;
             console.log("Waiting for orchestrator...");
-            await $ `kubectl wait --for=condition=ready pod -l app=smithers-orchestrator -n smithers-system --timeout=120s`;
+            await $ `kubectl wait --for=condition=ready pod -l app=smthrs -n smithers-system --timeout=120s`;
             const url = await $ `minikube service smithers-gateway -n smithers-system --url`.text();
             console.log(`\nDeployed! Gateway available at: ${url.trim()}`);
             console.log(`\nRun a workflow:\n  smithers run workflow.tsx --gateway ${url.trim()}`);
@@ -50,7 +50,7 @@ async function deploy() {
             await $ `kubectl apply -f k8s/worker.yaml`;
             await $ `kubectl apply -f k8s/gateway.yaml`;
             console.log("Waiting for orchestrator...");
-            await $ `kubectl wait --for=condition=ready pod -l app=smithers-orchestrator -n smithers-system --timeout=120s`;
+            await $ `kubectl wait --for=condition=ready pod -l app=smthrs -n smithers-system --timeout=120s`;
             console.log("\nDeployed! Check status with:");
             console.log("  kubectl get pods -n smithers-system");
             break;

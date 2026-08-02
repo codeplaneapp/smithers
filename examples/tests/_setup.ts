@@ -1,6 +1,6 @@
 import { mock } from "bun:test";
-import type { WorkflowCoverageOptions } from "smithers-orchestrator/testing";
-import { coverWorkflow } from "smithers-orchestrator/testing";
+import type { WorkflowCoverageOptions } from "smthrs/testing";
+import { coverWorkflow } from "smthrs/testing";
 
 const ai = await import("../../packages/smithers/node_modules/ai");
 process.env.SMITHERS_EXAMPLE_DB_PATH = ":memory:";

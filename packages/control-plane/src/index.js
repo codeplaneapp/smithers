@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 /**
  * @typedef {import("./index.d.ts").ControlPlaneSqlite} ControlPlaneSqlite

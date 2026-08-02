@@ -1,5 +1,5 @@
 /**
- * @typedef {import("@smithers-orchestrator/graph/TaskAspects").TaskAspects} TaskAspects
+ * @typedef {import("@smthrs/graph/TaskAspects").TaskAspects} TaskAspects
  * @typedef {import("./createBudgetTracker.js").BudgetSnapshot} BudgetSnapshot
  */
 /**

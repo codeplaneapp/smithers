@@ -1,15 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { createSmithers } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { realDbAdapter, integrationHarness, runScenario } from "@smithers-orchestrator/testing";
+import { createSmithers } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { realDbAdapter, integrationHarness, runScenario } from "@smthrs/testing";
 import { z } from "zod";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { rmSync } from "node:fs";
 
 const realDbRunner = () => "real-db-observed";
-import { firstDivergence, makeReplayBundle, replayBundle, replayIdentity, scenario, serializeReplayBundle, step, loadReplayBundle } from "@smithers-orchestrator/testing";
+import { firstDivergence, makeReplayBundle, replayBundle, replayIdentity, scenario, serializeReplayBundle, step, loadReplayBundle } from "@smthrs/testing";
 
 describe("testing framework replay proof", () => {
   test("replays an executable bundle and reports the first control divergence", async () => {
@@ -29,7 +29,7 @@ describe("testing framework replay proof", () => {
     const ast = scenario("fresh-process", { steps: [step("a", { runnerBinding: "e2e:fresh:a:v1" })] });
     const captured = await replayBundle(makeReplayBundle({ ast, seed: 17, controlLog: [] }), { stepRunners: { a: () => "fresh" } });
     const bundle = makeReplayBundle({ ast, seed: 17, controlLog: captured.controlLog, trace: captured.trace });
-    const script = `import { replayBundle } from "@smithers-orchestrator/testing"; const b=JSON.parse(process.env.REPLAY_BUNDLE); const r=await replayBundle(b,{stepRunners:{a:()=>"fresh"}}); console.log(JSON.stringify({identity:r.replayIdentity,status:r.status,trace:r.trace,outputs:r.outputs,controlLog:r.controlLog}));`;
+    const script = `import { replayBundle } from "@smthrs/testing"; const b=JSON.parse(process.env.REPLAY_BUNDLE); const r=await replayBundle(b,{stepRunners:{a:()=>"fresh"}}); console.log(JSON.stringify({identity:r.replayIdentity,status:r.status,trace:r.trace,outputs:r.outputs,controlLog:r.controlLog}));`;
     const child = Bun.spawn(["bun", "-e", script], { env: { ...process.env, REPLAY_BUNDLE: JSON.stringify(bundle) }, stdout: "pipe", stderr: "pipe" });
     const output = await new Response(child.stdout).text();
     const error = await new Response(child.stderr).text();

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import React from "react";
 import { z } from "zod";
-import { createSmithers, createSmithersPostgres } from "smithers-orchestrator";
+import { createSmithers, createSmithersPostgres } from "smthrs";
 import { Gateway } from "../src/gateway.js";
 import { sleep } from "../../smithers/tests/helpers.js";
 

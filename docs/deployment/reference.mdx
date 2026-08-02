@@ -20,19 +20,19 @@ The Gateway listens on `7331` inside the compose network; Caddy exposes HTTP/TLS
 Issue a local token grant: by default it returns a scoped action handle and writes the bearer-keyed grant to the local token store without printing the bearer; use `--reveal-token` only for manual operator workflows that need the raw bearer.
 
 ```bash
-bunx smithers-orchestrator token issue --scopes run:read,run:write,approval:submit --ttl 1h --action-id gateway
+bunx smthrs token issue --scopes run:read,run:write,approval:submit --ttl 1h --action-id gateway
 ```
 
 Copy the resulting grant-store entry into the deployment's token store; revoking the bearer token also revokes its action handles and records the revocation in the audit trail:
 
 ```bash
-bunx smithers-orchestrator token revoke <token>
+bunx smthrs token revoke <token>
 ```
 
 Automation can hand a broker handle to an action without exposing the bearer in model-visible context: resolve it locally and inject the bearer only into the child-process environment.
 
 ```bash
-bunx smithers-orchestrator token exec --handle <action-handle> --action-id gateway --scopes run:read --command 'curl -H "Authorization: Bearer $SMITHERS_API_KEY" http://localhost:7331/v1/runs'
+bunx smthrs token exec --handle <action-handle> --action-id gateway --scopes run:read --command 'curl -H "Authorization: Bearer $SMITHERS_API_KEY" http://localhost:7331/v1/runs'
 ```
 
 ## Single Host

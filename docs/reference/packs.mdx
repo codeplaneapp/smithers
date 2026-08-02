@@ -12,7 +12,7 @@ id or `<pack>:<workflow>`.
 Copy a pack workflow into the local `.smithers/` tree to edit it:
 
 ```bash
-bunx smithers-orchestrator eject kanban-suite:kanban
+bunx smthrs eject kanban-suite:kanban
 ```
 
 Copies the workflow plus its relative UI, prompt, library, stylesheet, and
@@ -25,8 +25,8 @@ shadows the pack copy: `workflow run kanban` runs the ejected workflow,
 Pack updates are separate from the installation update command:
 
 ```bash
-bunx smithers-orchestrator packs update kanban-suite
-bunx smithers-orchestrator packs update
+bunx smthrs packs update kanban-suite
+bunx smthrs packs update
 ```
 
 First form refreshes one locked pack; bare form refreshes all. Updates
@@ -36,9 +36,9 @@ replace pack contents only; ejected files in local `.smithers/workflows`,
 Rest of the lifecycle:
 
 ```bash
-bunx smithers-orchestrator add user/repository --yes
-bunx smithers-orchestrator packs list
-bunx smithers-orchestrator remove kanban-suite
+bunx smthrs add user/repository --yes
+bunx smthrs packs list
+bunx smthrs remove kanban-suite
 ```
 
 ## Share a pack
@@ -47,7 +47,7 @@ Any initialized `.smithers/` directory can publish as a pack: set
 `repository` in `smithers.toon`, then preview the awesome-smithers entry:
 
 ```bash
-bunx smithers-orchestrator share --dry-run
+bunx smthrs share --dry-run
 ```
 
 The normal command uses authenticated `gh` to fork the registry, update its

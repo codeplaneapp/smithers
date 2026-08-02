@@ -1,4 +1,4 @@
-# @smithers-orchestrator/integrations — src
+# @smthrs/integrations — src
 
 External-service event sources and workflow components for Smithers. Four
 public entry points, mapped in package.json `exports`, each a re-export barrel

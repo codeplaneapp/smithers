@@ -34,16 +34,16 @@ Workflow commands resolved the tool sandbox root inconsistently, so a run launch
 
 ## Type declarations
 
-The published `@smithers-orchestrator/smithers` package now ships a declaration file that matches the actual dts build output.
+The published `@smthrs/smithers` package now ships a declaration file that matches the actual dts build output.
 
 - Regenerated `packages/smithers/src/index.d.ts` so type consumers get accurate declarations without a local rebuild.
-- Corrected the export ordering on the `@smithers-orchestrator/engine` re-export line that shipped out of date in 0.24.0.
+- Corrected the export ordering on the `@smthrs/engine` re-export line that shipped out of date in 0.24.0.
 - All exported symbols are identical to 0.24.0; only the generated file was refreshed.
 
 ## Upgrade
 
 ```sh
-bunx smithers-orchestrator@0.24.1
+bunx smthrs@0.24.1
 ```
 
 No configuration changes are required. Workflows that already set `Aspects` budgets will now have them enforced at dispatch.

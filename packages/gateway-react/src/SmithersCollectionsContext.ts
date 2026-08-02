@@ -1,6 +1,6 @@
 import { createContext } from "react";
 import type { QueryClient } from "@tanstack/react-query";
-import type { SmithersCollections, SmithersDataClient } from "@smithers-orchestrator/gateway-client";
+import type { SmithersCollections, SmithersDataClient } from "@smthrs/gateway-client";
 
 export type SmithersCollectionsContextValue = {
   client: SmithersDataClient;

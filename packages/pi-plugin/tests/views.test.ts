@@ -5,7 +5,7 @@ import { Header } from "../src/views/Header.js";
 import { NodeInspector } from "../src/views/NodeInspector.js";
 import { RunTree } from "../src/views/RunTree.js";
 import type { DevToolsClient } from "../src/runtime/DevToolsClient.js";
-import type { DevToolsNode, DevToolsSnapshot } from "@smithers-orchestrator/protocol";
+import type { DevToolsNode, DevToolsSnapshot } from "@smthrs/protocol";
 
 const theme = {
   fg: (color: string, value: string) => `<${color}>${value}</${color}>`,

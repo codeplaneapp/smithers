@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, statSync } from "node:fs";
-import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import type { GatewayRunNode } from "@smthrs/gateway-client";
 import { spawn as nodeSpawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
@@ -56,7 +56,7 @@ describe("resolveCliEntry", () => {
     expect(resolveCliEntry()).toBe("/custom/cli/entry.js");
   });
 
-  test("resolves the installed @smithers-orchestrator/cli entry to a filesystem path", () => {
+  test("resolves the installed @smthrs/cli entry to a filesystem path", () => {
     delete process.env.SMITHERS_CLI;
     const entry = resolveCliEntry();
     expect(entry).not.toBeNull();

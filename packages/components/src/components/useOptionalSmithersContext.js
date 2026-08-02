@@ -1,5 +1,5 @@
 import React from "react";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
 
 /**
  * Read the workflow context when React is rendering the component, but allow

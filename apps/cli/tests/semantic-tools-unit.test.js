@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { SmithersError } from "@smithers-orchestrator/errors";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { SmithersError } from "@smthrs/errors";
 import {
   SEMANTIC_TOOL_NAMES,
   createSemanticToolDefinitions,
@@ -986,8 +986,8 @@ describe("semantic tool definitions", () => {
     writeFileSync(
       quickWorkflowPath,
       [
-        "/** @jsxImportSource smithers-orchestrator */",
-        'import { createSmithers, Workflow, Task } from "smithers-orchestrator";',
+        "/** @jsxImportSource smthrs */",
+        'import { createSmithers, Workflow, Task } from "smthrs";',
         'import { z } from "zod";',
         `const { smithers, outputs } = createSmithers({ result: z.object({ value: z.number() }) }, { dbPath: ${JSON.stringify(quickDbPath)} });`,
         "export default smithers(() => (",

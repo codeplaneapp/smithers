@@ -23,10 +23,10 @@ import {
   createSmithersCollections,
   createSmithersDataClient,
   type GatewayCronRow,
-} from "@smithers-orchestrator/gateway-client";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { Gateway } from "@smithers-orchestrator/server";
-import { createSmithers, createSmithersPostgres } from "smithers-orchestrator";
+} from "@smthrs/gateway-client";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { Gateway } from "@smthrs/server";
+import { createSmithers, createSmithersPostgres } from "smthrs";
 import { SmithersGatewayProvider, useGatewayRun } from "../src/index.ts";
 import { runProviderParitySuite } from "./providerParitySuite.ts";
 

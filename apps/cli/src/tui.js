@@ -12,16 +12,16 @@ import {
 } from "./workflows.js";
 import { findSmithersDb } from "./find-db.js";
 import { mdxPlugin } from "./mdx-plugin.js";
-import { openSmithersStore } from "smithers-orchestrator/openSmithersStore";
+import { openSmithersStore } from "smthrs/openSmithersStore";
 import { parseJsonArgument } from "./json-args.js";
 import { parseAgentEvent, parseNodeOutputEvent } from "./chat.js";
 import { formatStreamText } from "./tui-format.js";
 import { fuzzySelect } from "./fuzzy-select.js";
-import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
+import { computeRunStateFromRow } from "@smthrs/db/runState";
 import { DETACHED_RUN_LOG_FILE_ENV } from "./detachedRunLogEnv.js";
 import { reapDetachedRunLogs } from "./reapDetachedRunLogs.js";
 import { resolveDetachedRunLogFile } from "./resolveDetachedRunLogFile.js";
-import { sanitizeTerminalText } from "@smithers-orchestrator/tui/src/sanitizeTerminalText.ts";
+import { sanitizeTerminalText } from "@smthrs/tui/src/sanitizeTerminalText.ts";
 
 export { formatStreamText } from "./tui-format.js";
 
@@ -384,7 +384,7 @@ export function buildNextStepsLines({ runId, workflowId, entryFile, uiExists }) 
     // AUTHORING it, mirroring buildAgentNextSteps (agentNextSteps.js) so the
     // two guidance surfaces cannot drift apart on this case again.
     lines.push(
-      `author .smithers/ui/${workflowId}.tsx with the smithers-orchestrator/gateway-react hooks, add \`<UI entry="../ui/${workflowId}.tsx" />\` to the workflow, then open it with \`smithers ui ${runId}\``,
+      `author .smithers/ui/${workflowId}.tsx with the smthrs/gateway-react hooks, add \`<UI entry="../ui/${workflowId}.tsx" />\` to the workflow, then open it with \`smithers ui ${runId}\``,
     );
   } else {
     // Without a workflow id we cannot name the UI file to author, and
@@ -452,7 +452,7 @@ export function renderRunCard(model) {
 
 /**
  * Read a run from the DB and shape it into a card model.
- * @param {import("@smithers-orchestrator/db/adapter").SmithersDb} adapter
+ * @param {import("@smthrs/db/adapter").SmithersDb} adapter
  * @param {string} runId
  * @param {string} name
  * @param {string} promptText
@@ -803,7 +803,7 @@ export function armLaunchCancellation({ runId, logFile, terminate, write, exit, 
  * parallel agents are easy to tell apart. Runs until the run reaches a terminal
  * state, pauses for approval, or the user hits Ctrl-C.
  *
- * @param {import("@smithers-orchestrator/db/adapter").SmithersDb} adapter
+ * @param {import("@smthrs/db/adapter").SmithersDb} adapter
  * @param {string} runId
  * @param {string} name
  * @param {string} promptText
@@ -1197,7 +1197,7 @@ async function askWorkflowInputs(workflow, supplied = {}) {
 
 /**
  * Resolve the full-screen TUI monitor entry point through the installed
- * `@smithers-orchestrator/tui` package (its `smithers-mon` bin), so it works for
+ * `@smthrs/tui` package (its `smithers-mon` bin), so it works for
  * published installs — not just from a relative path inside this monorepo.
  * Returns null when the package can't be resolved (e.g. it wasn't installed);
  * the caller then fails loudly with TUI_MONITOR_UNAVAILABLE (there is no inline
@@ -1206,7 +1206,7 @@ async function askWorkflowInputs(workflow, supplied = {}) {
  */
 export function resolveTuiEntry() {
   try {
-    const pkgUrl = import.meta.resolve("@smithers-orchestrator/tui/package.json");
+    const pkgUrl = import.meta.resolve("@smthrs/tui/package.json");
     const pkgPath = fileURLToPath(pkgUrl);
     const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
     const bin = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.["smithers-mon"];
@@ -1390,7 +1390,7 @@ export async function superviseTuiMonitor(monitor, childFailure, adapter, runId)
 /**
  * Failure descriptors for the two "the full-screen monitor cannot run" paths
  * in runTuiCommand: the monitor child failed to start (spawn error), or its
- * package (@smithers-orchestrator/tui) could not be resolved at all.
+ * package (@smthrs/tui) could not be resolved at all.
  *
  * Both happen AFTER the detached run launched, and the run is durable and
  * still executing — so the launcher must NOT kill it. (An earlier version
@@ -1430,7 +1430,7 @@ export function monitorUnavailableFailure(runId, logFile) {
   return {
     code: "TUI_MONITOR_UNAVAILABLE",
     message:
-      "The run monitor package (@smithers-orchestrator/tui) could not be resolved, so the full-screen monitor can't launch. " +
+      "The run monitor package (@smthrs/tui) could not be resolved, so the full-screen monitor can't launch. " +
       `The run is still running detached; watch it with \`smithers ps\` / \`smithers inspect ${runId}\` or see ${logFile}.`,
     exitCode: 1,
     runId,
@@ -1458,7 +1458,7 @@ export function resolveMonitorGatewayBase(env) {
 
 /**
  * Parse SMITHERS_GATEWAY_PORT for the parent-side monitor check, mirroring the
- * TUI's own validation (@smithers-orchestrator/tui `isValidGatewayPort`): a legal
+ * TUI's own validation (@smthrs/tui `isValidGatewayPort`): a legal
  * TCP port is an integer in 1..65535. Unset/blank falls back to the 7331 default;
  * a set-but-invalid value throws a clear error instead of yielding an unreachable
  * http://127.0.0.1:70000 the monitor's health probe can never connect to.
@@ -2177,7 +2177,7 @@ export async function runTuiCommand(
       }
     } else {
       // No silent fallback: the full-screen monitor is the interactive
-      // experience. If its package (@smithers-orchestrator/tui) can't be
+      // experience. If its package (@smthrs/tui) can't be
       // resolved, fail loudly instead of quietly running the old inline
       // stream — but leave the durable detached run RUNNING (and never
       // suggest `smithers-mon`, the bin of the very package that just

@@ -33,8 +33,8 @@ export type SmithersAlertPolicy = {
 
 /**
  * Where a workflow's `RunResult.output` rows are read from. Mirrors the
- * component-level `OutputTarget` union (see `@smithers-orchestrator/components`
- * `OutputTarget`), restated locally because `@smithers-orchestrator/scheduler`
+ * component-level `OutputTarget` union (see `@smthrs/components`
+ * `OutputTarget`), restated locally because `@smthrs/scheduler`
  * is a pure decision engine that must not depend on zod or components:
  *
  * - a Zod schema object registered via `createSmithers(...).outputs.<key>` (recommended),

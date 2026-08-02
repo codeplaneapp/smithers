@@ -4,9 +4,9 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { canonicalizeXml } from "@smthrs/graph/utils/xml";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { streamDevToolsRoute } from "../src/gatewayRoutes/streamDevTools.js";
 
 const soakEnabled = process.env.SMITHERS_SOAK === "1";

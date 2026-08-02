@@ -1,14 +1,14 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { Gateway } from "../src/gateway.js";
 
 /**
  * Live end-to-end proof for the shared component library
- * (@smithers-orchestrator/ui) through the REAL gateway pipeline: a workflow UI
+ * (@smthrs/ui) through the REAL gateway pipeline: a workflow UI
  * entry that imports the package is bundled by Bun.build (react + react-dom
  * deduped to the server's copy), served as client.js, and the host page
  * carries the theme system that makes the sui-* classes correct in light AND
@@ -52,7 +52,7 @@ function writeSharedComponentsUiEntry(dir) {
       "  DialogTrigger,",
       "  SmithersUiStyles,",
       "  StatusPill,",
-      '} from "@smithers-orchestrator/ui";',
+      '} from "@smthrs/ui";',
       "",
       "function App() {",
       '  return h("main", null,',
@@ -81,9 +81,9 @@ function writeGatewaySourceGraphUiEntry(dir) {
     [
       'import { createElement as h } from "react";',
       'import { createRoot } from "react-dom/client";',
-      'import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";',
-      'import { useGatewayActions } from "@smithers-orchestrator/gateway-react/useGatewayActions";',
-      'import { GatewayRpcError } from "@smithers-orchestrator/gateway-client/rpc";',
+      'import { createGatewayReactRoot } from "smthrs/gateway-react";',
+      'import { useGatewayActions } from "@smthrs/gateway-react/useGatewayActions";',
+      'import { GatewayRpcError } from "@smthrs/gateway-client/rpc";',
       "const graph = [createGatewayReactRoot, useGatewayActions, GatewayRpcError]",
       '  .map((value) => value.name).join(":");',
       'createRoot(document.getElementById("root")).render(',

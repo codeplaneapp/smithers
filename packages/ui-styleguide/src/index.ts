@@ -47,7 +47,7 @@ export const workflowUiThemeCss = [
   ".badge.info { color:var(--info); border-color:var(--info-border); background:var(--info-soft); }",
   ".badge.bad,.badge.failed { color:var(--danger); border-color:var(--danger-border); background:var(--danger-soft); }",
   // Neutral outcomes and not-started states are muted, matching the shared
-  // status vocabulary in @smithers-orchestrator/ui (a user cancel is not a
+  // status vocabulary in @smthrs/ui (a user cancel is not a
   // failure; pending/queued work has not started).
   ".badge.cancelled,.badge.canceled,.badge.skipped,.badge.pending,.badge.queued { color:var(--muted); border-color:var(--border); background:var(--hover-subtle); }",
   ".card,.panel,.kpi,.stat,.slot { min-width:0; border:1px solid var(--border); border-radius:var(--r-2); background:var(--surface); box-shadow:var(--shadow-2); }",

@@ -18,7 +18,7 @@ The API is declarative:
 import {
   createSmithers,
   type SmithersAlertPolicy,
-} from "smithers-orchestrator";
+} from "smthrs";
 import { z } from "zod";
 
 const platformAlerts: SmithersAlertPolicy = {
@@ -134,10 +134,10 @@ Alert rows live in `_smithers_alerts`. The row shape includes:
 ## CLI
 
 ```bash
-bunx smithers-orchestrator alerts list
-bunx smithers-orchestrator alerts ack <alert-id>
-bunx smithers-orchestrator alerts resolve <alert-id>
-bunx smithers-orchestrator alerts silence <alert-id>
+bunx smthrs alerts list
+bunx smthrs alerts ack <alert-id>
+bunx smthrs alerts resolve <alert-id>
+bunx smthrs alerts silence <alert-id>
 ```
 
 `list` returns active `firing`, `acknowledged`, and `silenced` alerts. Use `--format json` when another process needs to consume the rows.

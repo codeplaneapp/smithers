@@ -1,6 +1,6 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { retryTask } from "../src/retry-task.js";
 import { runWorkflow as runEngineWorkflow } from "../../engine/src/engine.js";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
@@ -361,8 +361,8 @@ describe("retry-task e2e", () => {
   test("CLI retry-task accepts an edited workflow only with --accept-workflow-change", () => {
     const repo = createTempRepo();
     pinSqliteBackend(repo.dir);
-    const source = (value) => `/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+    const source = (value) => `/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { smithers, Workflow, Task, outputs } = createSmithers({
@@ -461,8 +461,8 @@ export default smithers(() => (
     pinSqliteBackend(repo.dir);
     repo.write(
       "workflow.tsx",
-      `/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+      `/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { smithers, Workflow, Task, outputs } = createSmithers({
@@ -538,8 +538,8 @@ export default smithers(() => (
     pinSqliteBackend(repo.dir);
     repo.write(
       "workflow.tsx",
-      `/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+      `/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { smithers, Workflow, Task, outputs } = createSmithers({

@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * Regression tests for #1415.
  *
@@ -11,7 +11,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { SmithersDb, Subflow, Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { SmithersDb, Subflow, Task, Workflow, runWorkflow } from "smthrs";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { Effect } from "effect";
 

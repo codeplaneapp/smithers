@@ -15,16 +15,16 @@ Scope note for whoever posts this: the Aspects budget fields (costBudget, tokenB
 >
 > A headless Gateway command, workflow input schemas in inspect, parallel Loop that actually runs in parallel, and an event bridge so detached runs stream live.
 >
-> `bunx smithers-orchestrator gateway` 🧵
+> `bunx smthrs gateway` 🧵
 
 Leads with the most concrete new command and gives a reader something to run today. The 🧵 opens the thread.
 
 ---
 
 ### 2. Headless Gateway
-**Media:** terminal screenshot of `bunx smithers-orchestrator gateway` startup output showing workspace and DB paths → placeholder [`assets/tweet-02-terminal.png`](assets/tweet-02-terminal.png) (capture a real terminal before posting)
+**Media:** terminal screenshot of `bunx smthrs gateway` startup output showing workspace and DB paths → placeholder [`assets/tweet-02-terminal.png`](assets/tweet-02-terminal.png) (capture a real terminal before posting)
 
-> New: `bunx smithers-orchestrator gateway`.
+> New: `bunx smthrs gateway`.
 >
 > Starts the full `/v1/rpc/*` control plane headlessly, backed by the workspace database. Exposes `listRuns`, `streamRunEvents`, and `streamDevTools`. Prints the workspace and DB paths on startup.
 >
@@ -35,9 +35,9 @@ Names the command, lists what it exposes, and draws the line between gateway and
 ---
 
 ### 3. Inspect knows your schema
-**Media:** terminal screenshot of `bunx smithers-orchestrator inspect` output showing input schema fields alongside a run summary → placeholder [`assets/tweet-03-terminal.png`](assets/tweet-03-terminal.png) (capture a real terminal before posting)
+**Media:** terminal screenshot of `bunx smthrs inspect` output showing input schema fields alongside a run summary → placeholder [`assets/tweet-03-terminal.png`](assets/tweet-03-terminal.png) (capture a real terminal before posting)
 
-> `bunx smithers-orchestrator inspect` now returns the JSON schema for each workflow's input.
+> `bunx smthrs inspect` now returns the JSON schema for each workflow's input.
 >
 > Real field names, types, defaults, enums, and descriptions. The same schema surfaces in generated skill docs instead of a generic placeholder.
 
@@ -59,7 +59,7 @@ Pairs the inspect surface with the generated-skill benefit. One fix, two places 
 ### 5. Detached runs stream live
 **Media:** terminal screenshot showing a detached run's events arriving in a connected Gateway client → placeholder [`assets/tweet-05-terminal.png`](assets/tweet-05-terminal.png) (capture a real terminal before posting)
 
-> `bunx smithers-orchestrator up -d` runs now deliver real event frames to connected clients.
+> `bunx smthrs up -d` runs now deliver real event frames to connected clients.
 >
 > A built-in out-of-process event bridge tails `_smithers_events` for runs the Gateway host didn't execute. On by default. Configurable via `outOfProcessEventBridge` and `outOfProcessEventBridgePollMs`.
 
@@ -68,9 +68,9 @@ Pairs the inspect surface with the generated-skill benefit. One fix, two places 
 ---
 
 ### 6. Init generates working agents
-**Media:** terminal screenshot of `bunx smithers-orchestrator init` completing without errors → placeholder [`assets/tweet-06-terminal.png`](assets/tweet-06-terminal.png) (capture a real terminal before posting)
+**Media:** terminal screenshot of `bunx smthrs init` completing without errors → placeholder [`assets/tweet-06-terminal.png`](assets/tweet-06-terminal.png) (capture a real terminal before posting)
 
-> `bunx smithers-orchestrator init` no longer generates a broken `agents.ts`.
+> `bunx smthrs init` no longer generates a broken `agents.ts`.
 >
 > The default `smart` and `smartTool` pools now lead with a working Claude subscription provider. If no usable provider is found, init fails with `NO_USABLE_AGENTS` instead of writing a config that can't run.
 
@@ -79,9 +79,9 @@ Frames the fix as a DX guarantee: fail loud with a clear error, not cryptically 
 ---
 
 ### 7. Observability works out of the box
-**Media:** terminal screenshot of `bunx smithers-orchestrator observability` starting the Docker Compose stack → placeholder [`assets/tweet-07-terminal.png`](assets/tweet-07-terminal.png) (capture a real terminal before posting)
+**Media:** terminal screenshot of `bunx smthrs observability` starting the Docker Compose stack → placeholder [`assets/tweet-07-terminal.png`](assets/tweet-07-terminal.png) (capture a real terminal before posting)
 
-> `bunx smithers-orchestrator observability` now ships with its Docker Compose stack files.
+> `bunx smthrs observability` now ships with its Docker Compose stack files.
 >
 > The assets the command resolves at a known path were missing from the published package. They're included now. The prerequisite error names Docker Compose explicitly when it's absent.
 
@@ -94,7 +94,7 @@ Short. The fix is concrete and the improved error message is worth naming.
 
 > 0.24.0: two new surfaces and seven targeted fixes.
 >
-> Also inside: CLI agent answers that survive stdout truncation, camelCase output table resolution in `bunx smithers-orchestrator output`, observability dts build passing, CI gates back to green on main.
+> Also inside: CLI agent answers that survive stdout truncation, camelCase output table resolution in `bunx smthrs output`, observability dts build passing, CI gates back to green on main.
 >
 > Full changelog: https://smithers.sh/changelogs/0.24.0
 > GitHub: https://github.com/smithersai/smithers
@@ -110,12 +110,12 @@ Cards are generated by the `release-content` workflow's `render-media` step (Smi
 | Tweet | Asset file | Kind | Notes |
 |-------|------------|------|-------|
 | 1 Hook | [`assets/tweet-01-hero.png`](assets/tweet-01-hero.png) | hero | generated |
-| 2 Gateway | [`assets/tweet-02-terminal.png`](assets/tweet-02-terminal.png) | terminal | placeholder card — replace with a real capture of `bunx smithers-orchestrator gateway` |
-| 3 Inspect schemas | [`assets/tweet-03-terminal.png`](assets/tweet-03-terminal.png) | terminal | placeholder card — replace with a real capture of `bunx smithers-orchestrator inspect` |
+| 2 Gateway | [`assets/tweet-02-terminal.png`](assets/tweet-02-terminal.png) | terminal | placeholder card — replace with a real capture of `bunx smthrs gateway` |
+| 3 Inspect schemas | [`assets/tweet-03-terminal.png`](assets/tweet-03-terminal.png) | terminal | placeholder card — replace with a real capture of `bunx smthrs inspect` |
 | 4 Parallel Loop | [`assets/tweet-04-diagram.png`](assets/tweet-04-diagram.png) | diagram | generated (before/after) |
-| 5 Detached runs | [`assets/tweet-05-terminal.png`](assets/tweet-05-terminal.png) | terminal | placeholder card — replace with a real capture of `bunx smithers-orchestrator up -d` |
-| 6 Init fix | [`assets/tweet-06-terminal.png`](assets/tweet-06-terminal.png) | terminal | placeholder card — replace with a real capture of `bunx smithers-orchestrator init` |
-| 7 Observability | [`assets/tweet-07-terminal.png`](assets/tweet-07-terminal.png) | terminal | placeholder card — replace with a real capture of `bunx smithers-orchestrator observability` |
+| 5 Detached runs | [`assets/tweet-05-terminal.png`](assets/tweet-05-terminal.png) | terminal | placeholder card — replace with a real capture of `bunx smthrs up -d` |
+| 6 Init fix | [`assets/tweet-06-terminal.png`](assets/tweet-06-terminal.png) | terminal | placeholder card — replace with a real capture of `bunx smthrs init` |
+| 7 Observability | [`assets/tweet-07-terminal.png`](assets/tweet-07-terminal.png) | terminal | placeholder card — replace with a real capture of `bunx smthrs observability` |
 | 8 Proof/CTA | [`assets/tweet-08-changelog.png`](assets/tweet-08-changelog.png) | changelog | generated |
 
 **Regenerate PNGs from the SVG sources:** `node marketing/0.24.0/assets/render-pngs.mjs` (renders each card at 2x via Playwright). The structured manifest is `assets/media-manifest.json`. The terminal cards are honest placeholders showing the real command; capture a live terminal for the polished post.

@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/automate-site",
+  "name": "@smthrs/automate-site",
   "version": "0.0.1",
   "private": true,
   "description": "Cloudflare Worker deployment for the event-triggered durable workflows marketing site",

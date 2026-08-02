@@ -3,7 +3,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import * as gatewayReact from "@smithers-orchestrator/gateway-react";
+import * as gatewayReact from "@smthrs/gateway-react";
 
 GlobalRegistrator.register();
 const reactTestEnvironment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
@@ -14,7 +14,7 @@ let mockedApprovals: unknown[] = [];
 let mockedEvents: unknown[] = [];
 let mockedDiscoverOutput: unknown;
 
-mock.module("smithers-orchestrator/gateway-react", () => ({
+mock.module("smthrs/gateway-react", () => ({
   ...gatewayReact,
   createGatewayReactRoot: () => {},
   useGatewayActions: () => ({

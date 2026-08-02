@@ -1,10 +1,10 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fakeAgent, renderWorkflow, runTask, simulate } from "smithers-orchestrator/testing";
+import { fakeAgent, renderWorkflow, runTask, simulate } from "smthrs/testing";
 
 const workflows = join(import.meta.dir, "..", "workflows");
 const testingPackage = resolve(import.meta.dir, "../../packages/testing/src/index.js");

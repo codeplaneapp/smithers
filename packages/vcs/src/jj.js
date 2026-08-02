@@ -17,7 +17,7 @@ import * as Command from "effect/unstable/process/ChildProcess";
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
 import { Duration, Effect, Fiber, Metric, Stream } from "effect";
-import { vcsDuration } from "@smithers-orchestrator/observability/metrics";
+import { vcsDuration } from "@smthrs/observability/metrics";
 import { resolveJjBinary } from "./resolveJjBinary.js";
 
 // Bounds every jj probe/snapshot call (getJjPointer, isJjRepo, captureWorkspaceSnapshot):

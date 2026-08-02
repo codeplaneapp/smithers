@@ -1,8 +1,8 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import "../preload.ts";
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { join } from "node:path";
-import { simulate } from "smithers-orchestrator/testing";
+import { simulate } from "smthrs/testing";
 
 setDefaultTimeout(60_000);
 

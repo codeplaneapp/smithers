@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -10,9 +10,9 @@ import { Workflow } from "../../components/src/components/Workflow.js";
 import { runWorkflow } from "../src/engine.js";
 import { readWorkflowEntryHash, readWorkflowGraphHash } from "../src/workflow-hash.js";
 import { retryTask } from "../../time-travel/src/retry-task.js";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { nowMs } from "@smthrs/scheduler/nowMs";
 import { createTestDb, createTestSmithers, sleep } from "../../smithers/tests/helpers.js";
 import { ddl, outputSchemas, schema } from "../../smithers/tests/schema.js";
 import { Effect } from "effect";

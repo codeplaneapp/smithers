@@ -1,9 +1,8 @@
-import { makeWorkflowSession } from "@smithers-orchestrator/scheduler";
-import { ReactWorkflowDriver } from "@smithers-orchestrator/react-reconciler/driver";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
-import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
-import { normalizeRunStartedBy } from "@smithers-orchestrator/driver";
-import { resolveWorktreePath } from "@smithers-orchestrator/graph";
+import { makeWorkflowSession } from "@smthrs/scheduler";
+import { ReactWorkflowDriver } from "@smthrs/react-reconciler/driver";
+import { SmithersRenderer } from "@smthrs/react-reconciler/dom/renderer";
+import { normalizeRunStartedBy } from "@smthrs/driver";
+import { resolveWorktreePath } from "@smthrs/graph";
 import { createNodeRuntime } from "./node-runtime.js";
 import {
   coerceOutputRowForSnapshot,
@@ -11,42 +10,42 @@ import {
   loadOutputs,
   loadRunOutputRowsEffect,
   OUTPUT_PROVENANCE_SEQ,
-} from "@smithers-orchestrator/db/snapshot";
-import { FRAME_KEYFRAME_INTERVAL } from "@smithers-orchestrator/db/frame-codec";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+} from "@smthrs/db/snapshot";
+import { FRAME_KEYFRAME_INTERVAL } from "@smthrs/db/frame-codec";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
 import {
   selectOutputRow,
   validateOutput,
   describeSchemaShape,
   buildOutputRow,
   stripAutoColumns,
-} from "@smithers-orchestrator/db/output";
-import { validateInput } from "@smithers-orchestrator/db/input";
-import { schemaSignature } from "@smithers-orchestrator/db/schema-signature";
-import { withSqliteWriteRetry } from "@smithers-orchestrator/db/write-retry";
-import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
-import { classifyClaudeWorkflowNodeKind } from "@smithers-orchestrator/graph/classifyClaudeWorkflowNodeKind";
-import { escapeSmithersDir } from "@smithers-orchestrator/graph/escapeSmithersDir";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
-import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+} from "@smthrs/db/output";
+import { validateInput } from "@smthrs/db/input";
+import { schemaSignature } from "@smthrs/db/schema-signature";
+import { withSqliteWriteRetry } from "@smthrs/db/write-retry";
+import { canonicalizeXml } from "@smthrs/graph/utils/xml";
+import { classifyClaudeWorkflowNodeKind } from "@smthrs/graph/classifyClaudeWorkflowNodeKind";
+import { escapeSmithersDir } from "@smthrs/graph/escapeSmithersDir";
+import { nowMs } from "@smthrs/scheduler/nowMs";
+import { errorToJson } from "@smthrs/errors/errorToJson";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import {
   assertJsonPayloadWithinBounds,
   assertOptionalStringMaxLength,
   assertPositiveFiniteInteger,
-} from "@smithers-orchestrator/db/input-bounds";
+} from "@smthrs/db/input-bounds";
 import { buildPlanTree, buildStateKey } from "./scheduler.js";
 import { buildWorktreeIsolationNotice, WORKTREE_ISOLATION_NOTICE_MARKER } from "./buildWorktreeIsolationNotice.js";
 import { buildOutputValidationDiagnostics } from "./output-validation-diagnostics.js";
 import { isThenablePayload, makeThenablePayloadError } from "./thenable-payload.js";
 import { resolveForkSessionMessages } from "./resolveForkSessionMessages.js";
 import { getDefinedToolMetadata } from "./getDefinedToolMetadata.js";
-import { captureSnapshotEffect, loadLatestSnapshot, parseSnapshot } from "@smithers-orchestrator/time-travel/snapshot";
+import { captureSnapshotEffect, loadLatestSnapshot, parseSnapshot } from "@smthrs/time-travel/snapshot";
 import { EventBus } from "./events.js";
 import { AgentTraceCollector } from "./AgentTraceCollector.js";
-import { getJjPointer, runJj, workspaceAdd } from "@smithers-orchestrator/vcs/jj";
-import { findVcsRoot } from "@smithers-orchestrator/vcs/find-root";
+import { getJjPointer, runJj, workspaceAdd } from "@smthrs/vcs/jj";
+import { findVcsRoot } from "@smthrs/vcs/find-root";
 import { createSlotGovernor } from "./slotGovernor.js";
 import { createWorktreeSyncCache } from "./worktreeSyncCache.js";
 import { writeWorktreeOwner } from "./worktreeOwnerFile.js";
@@ -56,9 +55,9 @@ import { startDurability } from "./startDurability.js";
 import { startDocFileSync } from "./startDocFileSync.js";
 import { failedRestoreToSurface, restoreWorkspaceToLatestCheckpoint } from "./restoreWorkspace.js";
 import { appendGap, defaultGapSpoolPath } from "./durabilityGapSpool.js";
-import { runWithToolContext } from "@smithers-orchestrator/tool-context";
+import { runWithToolContext } from "@smthrs/tool-context";
 import { createToolJournalContext } from "./createToolJournalContext.js";
-import { vcsToolingStatus } from "@smithers-orchestrator/vcs/vcsToolingStatus";
+import { vcsToolingStatus } from "@smthrs/vcs/vcsToolingStatus";
 import { getDefaultPlatformLayer, getPlatformLayer, withPlatformLayer } from "./platform-layer.js";
 import { sleep } from "./sleep.js";
 import { getTableName, isTable } from "drizzle-orm";
@@ -78,19 +77,19 @@ import {
   schedulerWaitDuration,
   trackEvent,
   updateAsyncExternalWaitPending,
-} from "@smithers-orchestrator/observability/metrics";
-import { runScorersAsync } from "@smithers-orchestrator/scorers/run-scorers";
+} from "@smthrs/observability/metrics";
+import { runScorersAsync } from "@smthrs/scorers/run-scorers";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-import { logDebug, logError, logInfo, logWarning } from "@smithers-orchestrator/observability/logging";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
+import { logDebug, logError, logInfo, logWarning } from "@smthrs/observability/logging";
 import { isPidAlive, parseRuntimeOwnerPid } from "./runtime-owner.js";
 import { spawn as nodeSpawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { platform } from "node:os";
-import { annotateSmithersTrace, smithersSpanNames, withSmithersSpan } from "@smithers-orchestrator/observability";
-import { withTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
-import { hashCapabilityRegistry } from "@smithers-orchestrator/agents/capability-registry";
+import { annotateSmithersTrace, smithersSpanNames, withSmithersSpan } from "@smthrs/observability";
+import { withTaskRuntime } from "@smthrs/driver/task-runtime";
+import { hashCapabilityRegistry } from "@smthrs/agents/capability-registry";
 import {
   bridgeApprovalResolve,
   bridgeWaitForEventResolve,
@@ -100,10 +99,9 @@ import {
   resolveDeferredTaskStateBridge,
 } from "./effect/workflow-bridge.js";
 import { acquireSingleRunnerRunLease } from "./effect/single-runner.js";
-import { parseWaitForEventAttemptSnapshot } from "@smithers-orchestrator/db/waitForEventAttempt";
 import { AlertRuntime } from "./alert-runtime.js";
 import { attachSandboxComputeFns, attachSubflowComputeFns, getSubflowChildRunId } from "./task-compute-fns.js";
-import { SUBFLOW_RUN_LINEAGE_MAX_ROWS, subflowRunLineage } from "@smithers-orchestrator/graph/subflow-run-lineage";
+import { SUBFLOW_RUN_LINEAGE_MAX_ROWS, subflowRunLineage } from "@smthrs/graph/subflow-run-lineage";
 import { buildCacheScopeIdentity, isFreshCacheRow, normalizeCacheScope } from "./cache-policy.js";
 import { runWorkflowWithMakeBridge } from "./effect/workflow-make-bridge.js";
 import {
@@ -115,7 +113,7 @@ import {
   runWithCorrelationContext,
   updateCurrentCorrelationContext,
   withCorrelationContext,
-} from "@smithers-orchestrator/observability/correlation";
+} from "@smthrs/observability/correlation";
 import {
   extractWorkflowImportSpecifiers,
   getWorkflowImportScanLoader,
@@ -130,18 +128,18 @@ import { extractBalancedJson, extractLastBalancedJson } from "./json-extraction.
 import { setupBudgetTracker } from "./aspects/setupBudgetTracker.js";
 import { evaluateAspectBudget } from "./aspects/evaluateAspectBudget.js";
 import { buildMemoryPromptBlock, createTaskMemoryTools, retainTaskMemory } from "./memory-runtime.js";
-/** @typedef {import("@smithers-orchestrator/graph/GraphSnapshot").GraphSnapshot} GraphSnapshot */
+/** @typedef {import("@smthrs/graph/GraphSnapshot").GraphSnapshot} GraphSnapshot */
 /** @typedef {import("./HijackState.ts").HijackState} HijackState */
-/** @typedef {import("@smithers-orchestrator/driver/RunOptions").RunOptions} RunOptions */
-/** @typedef {import("@smithers-orchestrator/driver/SmithersErrorReport").SmithersErrorReport} SmithersErrorReport */
-/** @typedef {import("@smithers-orchestrator/driver/RunResult").RunResult} RunResult */
-/** @typedef {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow} SmithersWorkflow */
-/** @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
-/** @typedef {import("@smithers-orchestrator/scheduler").RenderContext} RenderContext */
-/** @typedef {import("@smithers-orchestrator/scheduler").TaskStateMap} TaskStateMap */
-/** @typedef {import("@smithers-orchestrator/db/adapter/ApprovalRow").ApprovalRow} ApprovalRow */
-/** @typedef {import("@smithers-orchestrator/db/adapter/RunRow").RunRow} RunRow */
-/** @typedef {import("@smithers-orchestrator/graph/XmlNode").XmlNode} XmlNode */
+/** @typedef {import("@smthrs/driver/RunOptions").RunOptions} RunOptions */
+/** @typedef {import("@smthrs/driver/SmithersErrorReport").SmithersErrorReport} SmithersErrorReport */
+/** @typedef {import("@smthrs/driver/RunResult").RunResult} RunResult */
+/** @typedef {import("@smthrs/components/SmithersWorkflow").SmithersWorkflow} SmithersWorkflow */
+/** @typedef {import("@smthrs/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("@smthrs/scheduler").RenderContext} RenderContext */
+/** @typedef {import("@smthrs/scheduler").TaskStateMap} TaskStateMap */
+/** @typedef {import("@smthrs/db/adapter/ApprovalRow").ApprovalRow} ApprovalRow */
+/** @typedef {import("@smthrs/db/adapter/RunRow").RunRow} RunRow */
+/** @typedef {import("@smthrs/graph/XmlNode").XmlNode} XmlNode */
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<Record<string, unknown>>} BunSQLiteDatabase */
 /** @typedef {import("drizzle-orm/sqlite-core").SQLiteTable} SQLiteTable */
 
@@ -249,7 +247,7 @@ const AGENT_SUMMARY_UUID_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-
  * whitelisted string fields only (label/engine/model) — never the adapter
  * object itself, which carries callbacks, options, and credentials.
  *
- * Mirrors `DevToolsAgentRef` in `@smithers-orchestrator/protocol/devtools`.
+ * Mirrors `DevToolsAgentRef` in `@smthrs/protocol/devtools`.
  *
  * @param {unknown} agent
  * @returns {{ label?: string; engine?: string; model?: string } | undefined}
@@ -302,7 +300,7 @@ function summarizeAgentLikeForIndex(agent) {
  * for QUEUED nodes. For a list, the top-level fields describe the primary and
  * `chain` preserves every declared entry in order.
  *
- * Mirrors `DevToolsAgentSummary` in `@smithers-orchestrator/protocol/devtools`.
+ * Mirrors `DevToolsAgentSummary` in `@smthrs/protocol/devtools`.
  *
  * @param {unknown} agent
  * @returns {{ label?: string; engine?: string; model?: string; chain?: Array<{ label?: string; engine?: string; model?: string }> } | undefined}
@@ -1351,7 +1349,7 @@ async function ensureWorktree(rootDir, worktreePath, branch, baseBranch, owner) 
     if (!vcsToolingStatus().ok) {
       throw new SmithersError(
         "VCS_NOT_FOUND",
-        `Cannot create worktree: no jj or git found. Smithers bundles jj via the optional @smithers-orchestrator/jj-<platform> package; if it could not install for your platform, install jj (https://github.com/jj-vcs/jj) or git, or set SMITHERS_JJ_PATH.`,
+        `Cannot create worktree: no jj or git found. Smithers bundles jj via the optional @smthrs/jj-<platform> package; if it could not install for your platform, install jj (https://github.com/jj-vcs/jj) or git, or set SMITHERS_JJ_PATH.`,
         { rootDir },
       );
     }
@@ -4133,7 +4131,7 @@ export async function finalizeCancelledRun(adapter, runId, options = {}) {
  * @param {Map<string, TaskDescriptor>} descriptorMap
  * @param {SQLiteTable} inputTable
  * @param {EventBus} eventBus
- * @param {{ rootDir: string; allowNetwork: boolean; maxOutputBytes: number; toolTimeoutMs: number; acceptWorkflowChange?: boolean; agentPreflightCache?: WeakMap<object, Promise<void>>; memoryService?: import("@smithers-orchestrator/driver/MemoryRuntimeService").MemoryRuntimeService; memoryPrefetchCache?: Map<string, Promise<string | null>>; traceContext?: { workflowPath: string | null; workflowHash: string | null; logDir?: string; annotations?: Record<string, string | number | boolean>; }; }} toolConfig
+ * @param {{ rootDir: string; allowNetwork: boolean; maxOutputBytes: number; toolTimeoutMs: number; acceptWorkflowChange?: boolean; agentPreflightCache?: WeakMap<object, Promise<void>>; memoryService?: import("@smthrs/driver/MemoryRuntimeService").MemoryRuntimeService; memoryPrefetchCache?: Map<string, Promise<string | null>>; traceContext?: { workflowPath: string | null; workflowHash: string | null; logDir?: string; annotations?: Record<string, string | number | boolean>; }; }} toolConfig
  * @param {string} workflowName
  * @param {boolean} cacheEnabled
  * @param {AbortSignal} [signal]
@@ -5875,7 +5873,7 @@ async function legacyExecuteTask(
             await docFileSync.stop();
           }
         }
-        await Promise.all([...pendingOwnershipChecks]);
+        await Promise.all(pendingOwnershipChecks);
         if (traceCollector) {
           traceCollector.observeResult(result);
           await traceCollector.flush();
@@ -6165,7 +6163,7 @@ async function legacyExecuteTask(
             // Flush deferred event handlers so a fresh session id
             // emitted by this correction call is visible before the
             // next iteration decides what to resume.
-            await Promise.all([...pendingOwnershipChecks]);
+            await Promise.all(pendingOwnershipChecks);
             const retryText = retryResult.text ?? "";
             responseText = retryText || responseText;
             latestNoJsonText = retryText || latestNoJsonText;
@@ -6506,7 +6504,7 @@ async function legacyExecuteTask(
       );
       // Flush deferred event handlers so a fresh session id emitted by
       // this correction call is visible to the next iteration.
-      await Promise.all([...pendingOwnershipChecks]);
+      await Promise.all(pendingOwnershipChecks);
       const retryText = (schemaRetryResult.text ?? "").trim();
       responseText = retryText || responseText;
       if (!(await confirmHeartbeatOwnership())) {
@@ -7704,7 +7702,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
   // resume/continue-as-new, not the next frame.
   const incrementalFrameSnapshotsEnabled = process.env.SMITHERS_INCREMENTAL_FRAME_SNAPSHOTS !== "0";
   /**
-   * @type {{ inputRow: Record<string, unknown> | undefined; outputs: import("@smithers-orchestrator/db/snapshot").OutputSnapshot; framesSinceFullLoad: number } | null}
+   * @type {{ inputRow: Record<string, unknown> | undefined; outputs: import("@smthrs/db/snapshot").OutputSnapshot; framesSinceFullLoad: number } | null}
    */
   let frameSnapshotCache = null;
   // Monotonic count of output-row read-backs (noteTaskOutputRowForFrameCache
@@ -7722,11 +7720,11 @@ async function runWorkflowBodyDriver(workflow, opts) {
    * lists. loadOutputs registers each table's rows under BOTH the sql table
    * name and the schema key as the SAME array, and patches rely on that
    * aliasing — so aliased entries stay aliased in the copy.
-   * @param {import("@smithers-orchestrator/db/snapshot").OutputSnapshot} outputs
-   * @returns {import("@smithers-orchestrator/db/snapshot").OutputSnapshot}
+   * @param {import("@smthrs/db/snapshot").OutputSnapshot} outputs
+   * @returns {import("@smthrs/db/snapshot").OutputSnapshot}
    */
   const copyOutputSnapshot = (outputs) => {
-    /** @type {import("@smithers-orchestrator/db/snapshot").OutputSnapshot} */
+    /** @type {import("@smthrs/db/snapshot").OutputSnapshot} */
     const copy = {};
     /** @type {Map<Array<unknown>, Array<unknown>>} */
     const copiedRows = new Map();
@@ -7751,8 +7749,8 @@ async function runWorkflowBodyDriver(workflow, opts) {
    * caller must fall back to a full load. Node rows naming tables outside the
    * outputs snapshot are skipped — loadOutputs never scans those, so the
    * full-load path would not include them either.
-   * @param {import("@smithers-orchestrator/db/adapter/NodeRow").NodeRow[]} frameNodeRows
-   * @param {import("@smithers-orchestrator/db/snapshot").OutputSnapshot} outputs
+   * @param {import("@smthrs/db/adapter/NodeRow").NodeRow[]} frameNodeRows
+   * @param {import("@smthrs/db/snapshot").OutputSnapshot} outputs
    * @returns {Record<string, unknown> | null} details of the first finished node missing its cached output row, or null when the invariant holds
    */
   const findFinishedNodeMissingCachedOutput = (frameNodeRows, outputs) => {
@@ -8431,7 +8429,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
   /**
    * @param {WorkflowGraph} graph
    * @param {RenderContext["trigger"]} [trigger]
-   * @param {import("@smithers-orchestrator/db/adapter/NodeRow").NodeRow[]} [frameNodeRows] this frame's node rows, shared from the listing persistDriverGraphTaskStates just took (plus the rows it wrote) so the incremental snapshot path can skip a second listNodes scan
+   * @param {import("@smthrs/db/adapter/NodeRow").NodeRow[]} [frameNodeRows] this frame's node rows, shared from the listing persistDriverGraphTaskStates just took (plus the rows it wrote) so the incremental snapshot path can skip a second listNodes scan
    */
   const persistDriverFrame = async (graph, trigger, frameNodeRows) => {
     const xmlJson = canonicalizeXml(graph.xml);
@@ -8483,13 +8481,13 @@ async function runWorkflowBodyDriver(workflow, opts) {
         snapshotCache = null;
       }
     }
-    /** @type {import("@smithers-orchestrator/db/adapter/NodeRow").NodeRow[]} */
+    /** @type {import("@smthrs/db/adapter/NodeRow").NodeRow[]} */
     let snapNodes;
     /** @type {Array<Record<string, unknown>>} */
     let snapRalph;
     /** @type {Record<string, unknown> | undefined} */
     let snapInputRow;
-    /** @type {import("@smithers-orchestrator/db/snapshot").OutputSnapshot} */
+    /** @type {import("@smthrs/db/snapshot").OutputSnapshot} */
     let snapOutputs;
     if (snapshotCache && frameNodeRows) {
       // Incremental path: reuse the cache seeded by the last full load.
@@ -8599,13 +8597,13 @@ async function runWorkflowBodyDriver(workflow, opts) {
   };
   /**
    * @param {WorkflowGraph} graph
-   * @returns {Promise<import("@smithers-orchestrator/db/adapter/NodeRow").NodeRow[]>} the run's node rows as of this frame — the listing taken above plus every row written below, mirrored the way insertNode upserts them (replace by (nodeId, iteration) in place, append when new) so persistDriverFrame can snapshot nodes without a second listNodes scan
+   * @returns {Promise<import("@smthrs/db/adapter/NodeRow").NodeRow[]>} the run's node rows as of this frame — the listing taken above plus every row written below, mirrored the way insertNode upserts them (replace by (nodeId, iteration) in place, append when new) so persistDriverFrame can snapshot nodes without a second listNodes scan
    */
   const persistDriverGraphTaskStates = async (graph) => {
     const existingRows = await Effect.runPromise(adapter.listNodes(runId));
     const frameNodeRows = existingRows.slice();
     /**
-     * @param {import("@smithers-orchestrator/db/adapter/NodeRow").NodeRow} row
+     * @param {import("@smthrs/db/adapter/NodeRow").NodeRow} row
      */
     const applyFrameNodeRow = (row) => {
       const index = frameNodeRows.findIndex(

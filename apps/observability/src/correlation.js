@@ -35,7 +35,7 @@ export {
  *
  * @deprecated Prefer the Effect-returning
  * `updateCurrentCorrelationContext` from
- * `@smithers-orchestrator/observability` (the `_coreCorrelation` version),
+ * `@smthrs/observability` (the `_coreCorrelation` version),
  * which does not mutate shared state. This shim will be removed once legacy
  * callers migrate.
  *

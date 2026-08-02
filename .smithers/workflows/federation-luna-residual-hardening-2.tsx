@@ -3,8 +3,8 @@
 // smithers-display-name: Federation Luna Residual Hardening 2
 // smithers-description: Repair the exact residual consistency defects found by the fresh post-polish Luna audit.
 // smithers-tags: maintenance, federation, architecture
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 
@@ -79,25 +79,25 @@ approvable:false only for:
    stale line/range evidence. Preserve source/target identity, classification,
    planId, row count 179, readsScanned 224, and unresolved [].
 
-3. Make the @smithers-orchestrator/gateway-react package facts consistent
+3. Make the @smthrs/gateway-react package facts consistent
    between release-plan.json packages and futureAggregate.movedPackages. The
-   source package.json keeps @smithers-orchestrator/db and
-   @smithers-orchestrator/server as devDependencies, not runtime dependencies.
-   Runtime dependsOn must contain only @smithers-orchestrator/gateway-client;
+   source package.json keeps @smthrs/db and
+   @smthrs/server as devDependencies, not runtime dependencies.
+   Runtime dependsOn must contain only @smthrs/gateway-client;
    devDependsOn must contain db and server in every machine-readable package
    record. Preserve future package ordering.
 
 4. Complete dag.json scopes.initial.externalPrerequisites to include every
    published external package referenced by the initial generated root
    manifests in release-plan.json. Luna identified these omissions:
-   - smithers-orchestrator
-   - @smithers-orchestrator/accounts
-   - @smithers-orchestrator/review
-   - @smithers-orchestrator/testing
-   - @smithers-orchestrator/usage
-   - @smithers-orchestrator/vcs
-   - @smithers-orchestrator/gateway-react
-   - @smithers-orchestrator/gateway-ui
+   - smthrs
+   - @smthrs/accounts
+   - @smthrs/review
+   - @smthrs/testing
+   - @smthrs/usage
+   - @smthrs/vcs
+   - @smthrs/gateway-react
+   - @smthrs/gateway-ui
    Inspect schema and existing externalPrerequisites records; add or synchronize
    exact semver/source/scope metadata rather than bare strings. These are
    external prerequisites, never initial repo-DAG edges. Ensure dag.json and

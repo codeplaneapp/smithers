@@ -10,8 +10,8 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { getTableConfig } from "drizzle-orm/sqlite-core";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
 import * as timeTravelBarrel from "../src/index.js";
 import * as rewindRateLimitBarrel from "../src/rewindRateLimit.js";
 import { diffSnapshots, formatDiffForTui, formatDiffAsJson } from "../src/diff.js";
@@ -700,8 +700,8 @@ describe("retryTask branches", () => {
     pinSqliteBackend(repo.dir);
     repo.write(
       "workflow.tsx",
-      `/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Subflow } from "smithers-orchestrator";
+      `/** @jsxImportSource smthrs */
+import { createSmithers, Subflow } from "smthrs";
 import { z } from "zod";
 
 const { smithers, Workflow, Task, outputs } = createSmithers({
@@ -1147,8 +1147,8 @@ describe("oneshot resume preflight", () => {
     chmodSync(repo.path("bin/codex"), 0o755);
     repo.write(
       ".smithers/workflows/oneshot.tsx",
-      `/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+      `/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 const { Workflow, Task, smithers, outputs } = createSmithers({
   input: z.object({ goal: z.string(), review: z.enum(["on", "off"]), model: z.string() }),

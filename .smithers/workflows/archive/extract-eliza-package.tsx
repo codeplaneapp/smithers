@@ -1,9 +1,9 @@
 // smithers-source: authored
 // smithers-display-name: Extract Eliza into opt-in package
-// smithers-description: Move the ElizaAgent harness out of packages/agents into its own opt-in package @smithers-orchestrator/agent-eliza so @elizaos/core is installable but not installed by default. Private repo workflow (archived).
+// smithers-description: Move the ElizaAgent harness out of packages/agents into its own opt-in package @smthrs/agent-eliza so @elizaos/core is installable but not installed by default. Private repo workflow (archived).
 // smithers-tags: agents, integration, eliza, refactor, private
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../../agents";
 import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../../components/ValidationLoop";
@@ -21,18 +21,18 @@ The ElizaAgent harness currently lives in \`packages/agents\` with
 workspace has \`auto-install-peers\` on, so a clean \`pnpm install\` STILL
 materializes \`@elizaos/core\` (and its ~779 lines of transitive deps) under
 \`packages/agents\` → \`dependencies\` in \`pnpm-lock.yaml\`. Confirm with
-\`pnpm why @elizaos/core\` (today it reports it under \`@smithers-orchestrator/agents\`).
+\`pnpm why @elizaos/core\` (today it reports it under \`@smthrs/agents\`).
 
 Goal: make Eliza support **installable but not installed by default**. Move the
 harness into a NEW standalone workspace package so \`@elizaos/core\` is a real
 dependency of *that* package only. Downstream consumers of
-\`@smithers-orchestrator/agents\` (and the published \`smithers-orchestrator\`)
+\`@smthrs/agents\` (and the published \`smthrs\`)
 must NOT pull elizaOS unless they explicitly install the new package.
 
 ## Ground truth (verified — do not re-derive)
 
 - Package conventions: copy the shape of \`packages/errors\` — it has
-  \`package.json\` (name \`@smithers-orchestrator/errors\`, \`exports\` map with
+  \`package.json\` (name \`@smthrs/errors\`, \`exports\` map with
   \`.\` → \`./src/index.d.ts\` / \`./src/index.js\`, scripts \`test\` =
   \`bun test tests\`, \`typecheck\` = \`tsc -p tsconfig.json --noEmit\`,
   \`build\` = \`tsup --dts-only\`), \`tsconfig.json\`, \`tsup.config.ts\`,
@@ -42,21 +42,21 @@ must NOT pull elizaOS unless they explicitly install the new package.
   \`scripts/check-dependency-boundaries.mjs\` also auto-discovers it and will
   FAIL if the new package imports something not declared in its \`package.json\`.
 - The shared helpers ElizaAgent needs are PUBLICLY exported from the agents
-  package subpath \`@smithers-orchestrator/agents/BaseCliAgent\`:
+  package subpath \`@smthrs/agents/BaseCliAgent\`:
   \`export { extractPrompt }\` and \`export { buildGenerateResult }\`. The
   \`AgentLike\` / \`AgentGenerateOptions\` types are exported from
-  \`@smithers-orchestrator/agents\` (typedef block in its \`index.js\`).
+  \`@smthrs/agents\` (typedef block in its \`index.js\`).
 - Nothing in the repo references \`ElizaAgent\` yet except its own test, so
   removing it from \`packages/agents\` is safe.
 
 ## What to do
 
 1. Create \`packages/agent-eliza/\` mirroring \`packages/errors\`:
-   - \`package.json\`: name \`@smithers-orchestrator/agent-eliza\`; \`exports\`
+   - \`package.json\`: name \`@smthrs/agent-eliza\`; \`exports\`
      map \`.\` → src/index; scripts \`test\`/\`typecheck\`/\`build\` like errors.
      **dependencies**: \`@elizaos/core\`: \`~1.7.2\` (a REAL dependency now — this
      package is the opt-in that owns elizaOS) and
-     \`@smithers-orchestrator/agents\`: \`workspace:*\` (for the shared helpers +
+     \`@smthrs/agents\`: \`workspace:*\` (for the shared helpers +
      types). Add \`zod\` if the code/tests need it. devDependencies:
      \`@types/bun\`, \`typescript\` (match errors). NO \`@elizaos/core\` as a peer
      anywhere now — it is a direct dep of this package only.
@@ -70,9 +70,9 @@ must NOT pull elizaOS unless they explicitly install the new package.
    Then rewrite imports inside the moved files:
    - \`./BaseCliAgent/buildGenerateResult.js\` and
      \`./BaseCliAgent/extractPrompt.js\` → import both from
-     \`@smithers-orchestrator/agents/BaseCliAgent\`.
+     \`@smthrs/agents/BaseCliAgent\`.
    - The \`AgentGenerateOptions\` type import → from
-     \`@smithers-orchestrator/agents\` (typedef import path the package exposes).
+     \`@smthrs/agents\` (typedef import path the package exposes).
    - Fix any other now-broken relative import in the test (the test injects a
      fake runtime factory — keep that seam, no mocking frameworks).
 
@@ -92,8 +92,8 @@ must NOT pull elizaOS unless they explicitly install the new package.
 
 5. Run \`pnpm install\` to update the lockfile, then VERIFY the key outcome:
    \`pnpm why @elizaos/core\` must NO LONGER list it under
-   \`@smithers-orchestrator/agents\` — only under
-   \`@smithers-orchestrator/agent-eliza\`. The agents importer block in
+   \`@smthrs/agents\` — only under
+   \`@smthrs/agent-eliza\`. The agents importer block in
    \`pnpm-lock.yaml\` must have no \`@elizaos/core\` entry.
 
 ## Definition of done (hard gates — validate MUST confirm)
@@ -108,7 +108,7 @@ must NOT pull elizaOS unless they explicitly install the new package.
   package must not violate dependency boundaries (every import declared in its
   package.json).
 - \`pnpm why @elizaos/core\` confirms it resolves ONLY through
-  \`@smithers-orchestrator/agent-eliza\`, not \`@smithers-orchestrator/agents\`.
+  \`@smthrs/agent-eliza\`, not \`@smthrs/agents\`.
 
 Follow repo CLAUDE.md: atomic commits with emoji + conventional-commit subjects
 (e.g. \`✨ feat(agent-eliza): extract ElizaAgent into opt-in package\` and

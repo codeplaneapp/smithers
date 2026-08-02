@@ -29,7 +29,7 @@ import { withSqliteWriteRetryEffect } from "../src/withSqliteWriteRetryEffect.js
 import { buildOutputSchemaDescriptor } from "../src/output-schema-descriptor.js";
 import { syncZodTableSchema } from "../src/zodToCreateTableSQL.js";
 import { ensureSmithersTables, ensureSmithersTablesEffect } from "../src/ensure.js";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 describe("assert helpers", () => {
   test("assertMaxStringLength: ok, non-string throws, too-long throws", () => {

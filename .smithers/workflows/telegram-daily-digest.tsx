@@ -3,11 +3,11 @@
 // smithers-display-name: Telegram Daily Digest
 // smithers-description: Summarize a Telegram group transcript or bot update queue, write a daily digest, and optionally post it back to Telegram.
 // smithers-tags: telegram, digest, cron, community
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 
 const DEFAULT_STATE_PATH = ".smithers/state/telegram-daily-digest/state.json";

@@ -3,8 +3,8 @@
 // the vcs revert (jj restore --from <commit_id>). DI seam on `revert` for tests.
 
 import { spawn } from "node:child_process";
-import { resolveJjBinary } from "@smithers-orchestrator/vcs/resolveJjBinary";
-import { retryTask } from "@smithers-orchestrator/time-travel/retry-task";
+import { resolveJjBinary } from "@smthrs/vcs/resolveJjBinary";
+import { retryTask } from "@smthrs/time-travel/retry-task";
 import { Effect } from "effect";
 import { listScopedWorkspaceSnapshots } from "./snapshot-scope.js";
 

@@ -1,6 +1,6 @@
 // Resolve a case's `input.model` string to a real agent, with clear errors so a
 // typo in a case fails loudly instead of silently running the wrong model.
-import type { AgentLike } from "smithers-orchestrator";
+import type { AgentLike } from "smthrs";
 import { MODEL_TIER, type ModelName, models } from "../agents.js";
 
 const KNOWN = Object.keys(models) as ModelName[];

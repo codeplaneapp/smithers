@@ -3,7 +3,7 @@
  * registration helper.
  *
  * The helper (`add-mcp`) requires the launch command as a single quoted
- * positional. When a runner or shell word-splits `bunx smithers-orchestrator
+ * positional. When a runner or shell word-splits `bunx smthrs
  * --mcp`, the helper's argument parser sees a bare `--mcp` token and aborts with
  * `unknown option '--mcp'` (older paths) or `too many arguments`. The reliable
  * recovery is to register with the agent's own CLI using a `--` separator, so
@@ -13,7 +13,7 @@
  * @returns {string}
  */
 export function mcpAddFallbackMessage(opts = {}) {
-  const launchCommand = opts.launchCommand ?? "bunx smithers-orchestrator --mcp";
+  const launchCommand = opts.launchCommand ?? "bunx smthrs --mcp";
   // Show the agent(s) the user targeted; otherwise the two most common CLIs.
   const targets = opts.agents?.length ? opts.agents : ["codex", "claude"];
   const directCommands = targets.map((agent) => `  ${agent} mcp add smithers -- ${launchCommand}`);

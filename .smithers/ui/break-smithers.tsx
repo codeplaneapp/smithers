@@ -1,15 +1,8 @@
 /** @jsxImportSource react */
 import { useEffect, useMemo, useState } from "react";
-import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";
-import { useGatewayNodeOutput, useGatewayRuns, useGatewayRunTree } from "smithers-orchestrator/gateway-react";
-import {
-  ConnectionBadge,
-  RunEventLog,
-  RunTree,
-  StatusPill,
-  WorkflowUiShell,
-  theme,
-} from "smithers-orchestrator/gateway-ui";
+import { createGatewayReactRoot } from "smthrs/gateway-react";
+import { useGatewayNodeOutput, useGatewayRuns, useGatewayRunTree } from "smthrs/gateway-react";
+import { ConnectionBadge, RunEventLog, RunTree, StatusPill, WorkflowUiShell, theme } from "smthrs/gateway-ui";
 
 const WORKFLOW = "break-smithers";
 

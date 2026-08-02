@@ -7,4 +7,4 @@
 // Imported from the narrow `components/Task` module rather than the package
 // barrel: the barrel transitively pulls Bun-only modules (`bun:sqlite`), which
 // would make this helper unloadable under Node.
-export { renderPromptToText as renderPrompt } from "@smithers-orchestrator/components/components/Task";
+export { renderPromptToText as renderPrompt } from "@smthrs/components/components/Task";

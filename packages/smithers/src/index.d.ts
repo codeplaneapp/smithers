@@ -1,94 +1,94 @@
-import * as _smithers_orchestrator_components from '@smithers-orchestrator/components';
-import { Sequence, Parallel, MergeQueue, Branch, Loop, Ralph, ContinueAsNew, continueAsNew, Worktree, Timer, UI, TUI, ApprovalDecision as ApprovalDecision$1, OutputTarget as OutputTarget$1, ApprovalProps as ApprovalProps$2, DepsSpec as DepsSpec$2, InferDeps as InferDeps$1, SignalProps as SignalProps$2, TaskProps as TaskProps$2 } from '@smithers-orchestrator/components';
-export { Approval, ApprovalGate, Aspects, BackpressurePlanning, Branch, CheckSuite, ClassifyAndRoute, ContentPipeline, ContinueAsNew, DC_EDIT_SIGNAL, DC_SKIP_PREVIEW_SIGNAL, DEFAULT_DELEGATION_V2_LIMITS, DEFAULT_TIER_ORDER, DELEGATION_V2_COMPILER_VERSION, DELEGATION_V2_PROGRAM_VERSION, DELEGATION_V2_PROTOCOL_VERSION, DELEGATION_V2_REGISTRY_VERSION, DELEGATION_V2_RUNTIME_VERSION, DELEGATION_V2_SETTLEMENT_VERSION, Debate, DecisionTable, DelegationChain, DelegationEditListener, DelegationExecution, DelegationPlanning, DelegationPreview, DelegationScoring, DeriskLoop, DriftDetector, EscalationChain, GatherAndSynthesize, GoalRefinement, HumanTask, Kanban, Loop, MONITOR_CONDITIONS, MONITOR_DEFAULT_AUTO_HEAL, MONITOR_TERMINAL_STATUSES, Memory, MergeQueue, Monitor, Optimizer, Panel, Parallel, Poller, Ralph, ReviewLoop, Runbook, Saga, SagaStep, Sandbox, ScanFixVerify, Sequence, Sidecar, Signal, Subflow, SuperSmithers, Supervisor, TUI, Task, Timer, Trellis, TryCatchFinally, UI, WaitForEvent, Workflow, Worktree, approvalDecisionSchema, approvalRankingSchema, approvalSelectionSchema, captureWorkingCopyCommit, compileDelegationV2Program, computeSidecarDelta, continueAsNew, dcApprovalSchema, dcBudgetSchema, dcDevPreviewSchema, dcEditSchema, dcExecSchema, dcForecastSchema, dcGatesSchema, dcGoalApprovalSchema, dcGoalSchema, dcPlanSchema, dcPollSchema, dcPreviewSchema, dcProbeSchema, dcQuestionSchema, dcReplanSchema, dcReviewSchema, dcScoreSchema, dcSkipSchema, delegationPrompts, delegationSchemas, delegationV2AssignmentDigest, delegationV2ProgramDigest, delegationV2Schemas, devPreviewKindSchema, enforceDelegationV2AuthorFuel, estimateSchema, gateSchema, monitorAuthorityRules, monitorEvidenceRules, monitorHealthSignals, monitorPrompt, monitorReadPathRules, partitionDelegationV2AuthorFuel, settleDelegationV2Envelope, tierSchema, trellisPrompts, validateWorkflowProgram, withCommitRange } from '@smithers-orchestrator/components';
+import * as _smithers_orchestrator_components from '@smthrs/components';
+import { Sequence, Parallel, MergeQueue, Branch, Loop, Ralph, ContinueAsNew, continueAsNew, Worktree, Timer, UI, TUI, ApprovalDecision as ApprovalDecision$1, OutputTarget as OutputTarget$1, ApprovalProps as ApprovalProps$2, DepsSpec as DepsSpec$2, InferDeps as InferDeps$1, SignalProps as SignalProps$2, TaskProps as TaskProps$2 } from '@smthrs/components';
+export { Approval, ApprovalGate, Aspects, BackpressurePlanning, Branch, CheckSuite, ClassifyAndRoute, ContentPipeline, ContinueAsNew, DC_EDIT_SIGNAL, DC_SKIP_PREVIEW_SIGNAL, DEFAULT_DELEGATION_V2_LIMITS, DEFAULT_TIER_ORDER, DELEGATION_V2_COMPILER_VERSION, DELEGATION_V2_PROGRAM_VERSION, DELEGATION_V2_PROTOCOL_VERSION, DELEGATION_V2_REGISTRY_VERSION, DELEGATION_V2_RUNTIME_VERSION, DELEGATION_V2_SETTLEMENT_VERSION, Debate, DecisionTable, DelegationChain, DelegationEditListener, DelegationExecution, DelegationPlanning, DelegationPreview, DelegationScoring, DeriskLoop, DriftDetector, EscalationChain, GatherAndSynthesize, GoalRefinement, HumanTask, Kanban, Loop, MONITOR_CONDITIONS, MONITOR_DEFAULT_AUTO_HEAL, MONITOR_TERMINAL_STATUSES, Memory, MergeQueue, Monitor, Optimizer, Panel, Parallel, Poller, Ralph, ReviewLoop, Runbook, Saga, SagaStep, Sandbox, ScanFixVerify, Sequence, Sidecar, Signal, Subflow, SuperSmithers, Supervisor, TUI, Task, Timer, Trellis, TryCatchFinally, UI, WaitForEvent, Workflow, Worktree, approvalDecisionSchema, approvalRankingSchema, approvalSelectionSchema, captureWorkingCopyCommit, compileDelegationV2Program, computeSidecarDelta, continueAsNew, dcApprovalSchema, dcBudgetSchema, dcDevPreviewSchema, dcEditSchema, dcExecSchema, dcForecastSchema, dcGatesSchema, dcGoalApprovalSchema, dcGoalSchema, dcPlanSchema, dcPollSchema, dcPreviewSchema, dcProbeSchema, dcQuestionSchema, dcReplanSchema, dcReviewSchema, dcScoreSchema, dcSkipSchema, delegationPrompts, delegationSchemas, delegationV2AssignmentDigest, delegationV2ProgramDigest, delegationV2Schemas, devPreviewKindSchema, enforceDelegationV2AuthorFuel, estimateSchema, gateSchema, monitorAuthorityRules, monitorEvidenceRules, monitorHealthSignals, monitorPrompt, monitorReadPathRules, partitionDelegationV2AuthorFuel, settleDelegationV2Envelope, tierSchema, trellisPrompts, validateWorkflowProgram, withCommitRange } from '@smthrs/components';
 import * as zod from 'zod';
 import { z } from 'zod';
-import * as _smithers_orchestrator_graph_XmlNode from '@smithers-orchestrator/graph/XmlNode';
-import * as _smithers_orchestrator_time_travel_timetravel from '@smithers-orchestrator/time-travel/timetravel';
-export { timeTravel } from '@smithers-orchestrator/time-travel/timetravel';
-import * as _smithers_orchestrator_graph_TaskDescriptor from '@smithers-orchestrator/graph/TaskDescriptor';
-import * as _smithers_orchestrator_components_SmithersWorkflow from '@smithers-orchestrator/components/SmithersWorkflow';
-import { SmithersWorkflow as SmithersWorkflow$1 } from '@smithers-orchestrator/components/SmithersWorkflow';
-import * as _smithers_orchestrator_observability_SmithersEvent from '@smithers-orchestrator/observability/SmithersEvent';
-import { SmithersEvent as SmithersEvent$1 } from '@smithers-orchestrator/observability/SmithersEvent';
-import * as _smithers_orchestrator_errors_SmithersErrorCode from '@smithers-orchestrator/errors/SmithersErrorCode';
-import * as _smithers_orchestrator_errors_SmithersError from '@smithers-orchestrator/errors/SmithersError';
-export { SmithersError as SmithersErrorInstance } from '@smithers-orchestrator/errors/SmithersError';
-import * as _smithers_orchestrator_driver_SmithersCtx from '@smithers-orchestrator/driver/SmithersCtx';
-import { SmithersCtx as SmithersCtx$1 } from '@smithers-orchestrator/driver/SmithersCtx';
-import * as _smithers_orchestrator_scheduler_SmithersWorkflowOptions from '@smithers-orchestrator/scheduler/SmithersWorkflowOptions';
-import { SmithersAlertPolicy as SmithersAlertPolicy$1, SmithersWorkflowOptions as SmithersWorkflowOptions$1 } from '@smithers-orchestrator/scheduler/SmithersWorkflowOptions';
-import * as _smithers_orchestrator_server from '@smithers-orchestrator/server';
-export { startServer } from '@smithers-orchestrator/server';
-import * as _smithers_orchestrator_server_serve from '@smithers-orchestrator/server/serve';
-export { createServeApp } from '@smithers-orchestrator/server/serve';
-import { OutputSnapshot } from '@smithers-orchestrator/driver/OutputSnapshot';
-import * as _smithers_orchestrator_db_SchemaRegistryEntry from '@smithers-orchestrator/db/SchemaRegistryEntry';
-import * as _smithers_orchestrator_driver_RunStatus from '@smithers-orchestrator/driver/RunStatus';
-import * as _smithers_orchestrator_driver_RunResult from '@smithers-orchestrator/driver/RunResult';
-import * as _smithers_orchestrator_driver_SmithersErrorReport from '@smithers-orchestrator/driver/SmithersErrorReport';
-import * as _smithers_orchestrator_driver_RunStartedBy from '@smithers-orchestrator/driver/RunStartedBy';
-import * as _smithers_orchestrator_driver_RunOptions from '@smithers-orchestrator/driver/RunOptions';
-import * as _smithers_orchestrator_time_travel_revert from '@smithers-orchestrator/time-travel/revert';
-export { revertToAttempt } from '@smithers-orchestrator/time-travel/revert';
-import * as _smithers_orchestrator_observability from '@smithers-orchestrator/observability';
-export { SmithersObservability, activeNodes, activeRuns, approvalsDenied, approvalsGranted, approvalsRequested, attemptDuration, cacheHits, cacheMisses, createSmithersObservabilityLayer, createSmithersOtelLayer, createSmithersRuntimeLayer, dbQueryDuration, dbRetries, dbTransactionDuration, dbTransactionRetries, dbTransactionRollbacks, externalWaitAsyncPending, hotReloadDuration, hotReloadFailures, hotReloads, httpRequestDuration, httpRequests, nodeDuration, nodesFailed, nodesFinished, nodesStarted, prometheusContentType, renderPrometheusMetrics, resolveSmithersObservabilityOptions, runsTotal, sandboxActive, sandboxBundleSizeBytes, sandboxCompletedTotal, sandboxCreatedTotal, sandboxDurationMs, sandboxPatchCount, sandboxTransportDurationMs, schedulerQueueDepth, smithersMetrics, timerDelayDuration, timersCancelled, timersCreated, timersFired, timersPending, toolCallsTotal, toolDuration, trackSmithersEvent, vcsDuration } from '@smithers-orchestrator/observability';
-import * as _smithers_orchestrator_graph_ProofBinding from '@smithers-orchestrator/graph/ProofBinding';
-import * as _smithers_orchestrator_driver_OutputKey from '@smithers-orchestrator/driver/OutputKey';
-import * as _smithers_orchestrator_openapi from '@smithers-orchestrator/openapi';
-export { createOpenApiTool, createOpenApiToolSync, createOpenApiTools, createOpenApiToolsSync, listOperations, openApiToolCallErrorsTotal, openApiToolCallsTotal, openApiToolDuration } from '@smithers-orchestrator/openapi';
+import * as _smithers_orchestrator_graph_XmlNode from '@smthrs/graph/XmlNode';
+import * as _smithers_orchestrator_time_travel_timetravel from '@smthrs/time-travel/timetravel';
+export { timeTravel } from '@smthrs/time-travel/timetravel';
+import * as _smithers_orchestrator_graph_TaskDescriptor from '@smthrs/graph/TaskDescriptor';
+import * as _smithers_orchestrator_components_SmithersWorkflow from '@smthrs/components/SmithersWorkflow';
+import { SmithersWorkflow as SmithersWorkflow$1 } from '@smthrs/components/SmithersWorkflow';
+import * as _smithers_orchestrator_observability_SmithersEvent from '@smthrs/observability/SmithersEvent';
+import { SmithersEvent as SmithersEvent$1 } from '@smthrs/observability/SmithersEvent';
+import * as _smithers_orchestrator_errors_SmithersErrorCode from '@smthrs/errors/SmithersErrorCode';
+import * as _smithers_orchestrator_errors_SmithersError from '@smthrs/errors/SmithersError';
+export { SmithersError as SmithersErrorInstance } from '@smthrs/errors/SmithersError';
+import * as _smithers_orchestrator_driver_SmithersCtx from '@smthrs/driver/SmithersCtx';
+import { SmithersCtx as SmithersCtx$1 } from '@smthrs/driver/SmithersCtx';
+import * as _smithers_orchestrator_scheduler_SmithersWorkflowOptions from '@smthrs/scheduler/SmithersWorkflowOptions';
+import { SmithersAlertPolicy as SmithersAlertPolicy$1, SmithersWorkflowOptions as SmithersWorkflowOptions$1 } from '@smthrs/scheduler/SmithersWorkflowOptions';
+import * as _smithers_orchestrator_server from '@smthrs/server';
+export { startServer } from '@smthrs/server';
+import * as _smithers_orchestrator_server_serve from '@smthrs/server/serve';
+export { createServeApp } from '@smthrs/server/serve';
+import { OutputSnapshot } from '@smthrs/driver/OutputSnapshot';
+import * as _smithers_orchestrator_db_SchemaRegistryEntry from '@smthrs/db/SchemaRegistryEntry';
+import * as _smithers_orchestrator_driver_RunStatus from '@smthrs/driver/RunStatus';
+import * as _smithers_orchestrator_driver_RunResult from '@smthrs/driver/RunResult';
+import * as _smithers_orchestrator_driver_SmithersErrorReport from '@smthrs/driver/SmithersErrorReport';
+import * as _smithers_orchestrator_driver_RunStartedBy from '@smthrs/driver/RunStartedBy';
+import * as _smithers_orchestrator_driver_RunOptions from '@smthrs/driver/RunOptions';
+import * as _smithers_orchestrator_time_travel_revert from '@smthrs/time-travel/revert';
+export { revertToAttempt } from '@smthrs/time-travel/revert';
+import * as _smithers_orchestrator_observability from '@smthrs/observability';
+export { SmithersObservability, activeNodes, activeRuns, approvalsDenied, approvalsGranted, approvalsRequested, attemptDuration, cacheHits, cacheMisses, createSmithersObservabilityLayer, createSmithersOtelLayer, createSmithersRuntimeLayer, dbQueryDuration, dbRetries, dbTransactionDuration, dbTransactionRetries, dbTransactionRollbacks, externalWaitAsyncPending, hotReloadDuration, hotReloadFailures, hotReloads, httpRequestDuration, httpRequests, nodeDuration, nodesFailed, nodesFinished, nodesStarted, prometheusContentType, renderPrometheusMetrics, resolveSmithersObservabilityOptions, runsTotal, sandboxActive, sandboxBundleSizeBytes, sandboxCompletedTotal, sandboxCreatedTotal, sandboxDurationMs, sandboxPatchCount, sandboxTransportDurationMs, schedulerQueueDepth, smithersMetrics, timerDelayDuration, timersCancelled, timersCreated, timersFired, timersPending, toolCallsTotal, toolDuration, trackSmithersEvent, vcsDuration } from '@smthrs/observability';
+import * as _smithers_orchestrator_graph_ProofBinding from '@smthrs/graph/ProofBinding';
+import * as _smithers_orchestrator_driver_OutputKey from '@smthrs/driver/OutputKey';
+import * as _smithers_orchestrator_openapi from '@smthrs/openapi';
+export { createOpenApiTool, createOpenApiToolSync, createOpenApiTools, createOpenApiToolsSync, listOperations, openApiToolCallErrorsTotal, openApiToolCallsTotal, openApiToolDuration } from '@smthrs/openapi';
 import * as ai from 'ai';
 import { Tool } from 'ai';
-import * as _smithers_orchestrator_memory from '@smithers-orchestrator/memory';
-export { HindsightMemoryStore, LocalMemoryRuntime, MemoryService, Summarizer, TokenLimiter, TtlGarbageCollector, createHindsightMemoryStore, createLocalMemoryRuntime, createMemoryLayer, createMemoryStore, memoryFactReads, memoryFactWrites, memoryMessageSaves, memoryRecallDuration, memoryRecallQueries, namespaceToString, parseNamespace } from '@smithers-orchestrator/memory';
-import * as _smithers_orchestrator_errors_KnownSmithersErrorCode from '@smithers-orchestrator/errors/KnownSmithersErrorCode';
-import * as _smithers_orchestrator_vcs_jj from '@smithers-orchestrator/vcs/jj';
-export { getJjPointer, isJjRepo, revertToJjPointer, runJj, workspaceAdd, workspaceClose, workspaceList } from '@smithers-orchestrator/vcs/jj';
-import * as _smithers_orchestrator_driver_OutputAccessor from '@smithers-orchestrator/driver/OutputAccessor';
-import * as _smithers_orchestrator_react_reconciler_dom_renderer from '@smithers-orchestrator/react-reconciler/dom/renderer';
-export { SmithersRenderer } from '@smithers-orchestrator/react-reconciler/dom/renderer';
-import * as _smithers_orchestrator_graph_GraphSnapshot from '@smithers-orchestrator/graph/GraphSnapshot';
-import * as _smithers_orchestrator_agents_AgentLike from '@smithers-orchestrator/agents/AgentLike';
-import { AgentLike as AgentLike$1 } from '@smithers-orchestrator/agents/AgentLike';
+import * as _smithers_orchestrator_memory from '@smthrs/memory';
+export { HindsightMemoryStore, LocalMemoryRuntime, MemoryService, Summarizer, TokenLimiter, TtlGarbageCollector, createHindsightMemoryStore, createLocalMemoryRuntime, createMemoryLayer, createMemoryStore, memoryFactReads, memoryFactWrites, memoryMessageSaves, memoryRecallDuration, memoryRecallQueries, namespaceToString, parseNamespace } from '@smthrs/memory';
+import * as _smithers_orchestrator_errors_KnownSmithersErrorCode from '@smthrs/errors/KnownSmithersErrorCode';
+import * as _smithers_orchestrator_vcs_jj from '@smthrs/vcs/jj';
+export { getJjPointer, isJjRepo, revertToJjPointer, runJj, workspaceAdd, workspaceClose, workspaceList } from '@smthrs/vcs/jj';
+import * as _smithers_orchestrator_driver_OutputAccessor from '@smthrs/driver/OutputAccessor';
+import * as _smithers_orchestrator_react_reconciler_dom_renderer from '@smthrs/react-reconciler/dom/renderer';
+export { SmithersRenderer } from '@smthrs/react-reconciler/dom/renderer';
+import * as _smithers_orchestrator_graph_GraphSnapshot from '@smthrs/graph/GraphSnapshot';
+import * as _smithers_orchestrator_agents_AgentLike from '@smthrs/agents/AgentLike';
+import { AgentLike as AgentLike$1 } from '@smthrs/agents/AgentLike';
 import React from 'react';
 import { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite';
-import { ApprovalProps as ApprovalProps$1 } from '@smithers-orchestrator/components/components/ApprovalProps';
-import { DepsSpec as DepsSpec$1 } from '@smithers-orchestrator/components/components/DepsSpec';
-import { SandboxProps as SandboxProps$1 } from '@smithers-orchestrator/components/components/SandboxProps';
-import { SignalProps as SignalProps$1 } from '@smithers-orchestrator/components/components/SignalProps';
-import { TaskProps as TaskProps$1 } from '@smithers-orchestrator/components/components/TaskProps';
-import { WorkflowProps } from '@smithers-orchestrator/components/components/WorkflowProps';
-import * as _smithers_orchestrator_server_gateway from '@smithers-orchestrator/server/gateway';
-export { Gateway } from '@smithers-orchestrator/server/gateway';
-import * as _smithers_orchestrator_agents from '@smithers-orchestrator/agents';
-export { AmpAgent, AnthropicAgent, AntigravityAgent, ClaudeCodeAgent, CodexAgent, CursorAgent, ForgeAgent, GeminiAgent, HermesAgent, HermesCliAgent, KimiAgent, OmpAgent, OpenAIAgent, OpenClawAgent, OpenCodeAgent, PiAgent, PoolAgent, VibeAgent, createHttpTool, createOmpCapabilityRegistry } from '@smithers-orchestrator/agents';
-import * as _smithers_orchestrator_scorers from '@smithers-orchestrator/scorers';
-export { aggregateScores, createScorer, estimateCostUsd, faithfulnessScorer, latencyScorer, llmJudge, modelTokenPrices, relevancyScorer, runScorersAsync, runScorersBatch, schemaAdherenceScorer, smithersScorers, toxicityScorer } from '@smithers-orchestrator/scorers';
-import * as _smithers_orchestrator_agents_capability_registry from '@smithers-orchestrator/agents/capability-registry';
-export { hashCapabilityRegistry } from '@smithers-orchestrator/agents/capability-registry';
-export { ERROR_REFERENCE_URL } from '@smithers-orchestrator/errors/ERROR_REFERENCE_URL';
-export { Smithers, approveNode, closeSingleRunnerRuntime, denyNode, fragment, getRun, listRuns, renderFrame, reopenSingleRunnerRuntime, runWorkflow, workflow } from '@smithers-orchestrator/engine';
-export { SmithersDb, loadOutputs, loadOutputsEffect } from '@smithers-orchestrator/db';
-import { SmithersDb } from '@smithers-orchestrator/db/adapter';
-export { camelToSnake } from '@smithers-orchestrator/db/utils/camelToSnake';
-export { ensureSmithersTables } from '@smithers-orchestrator/db/ensure';
-export { errorToJson } from '@smithers-orchestrator/errors/errorToJson';
-export { executeChildWorkflow } from '@smithers-orchestrator/engine/child-workflow';
-export { getSmithersErrorDefinition } from '@smithers-orchestrator/errors/getSmithersErrorDefinition';
-export { getSmithersErrorDocsUrl } from '@smithers-orchestrator/errors/getSmithersErrorDocsUrl';
-export { isKnownSmithersErrorCode } from '@smithers-orchestrator/errors/isKnownSmithersErrorCode';
-export { isSmithersError } from '@smithers-orchestrator/errors/isSmithersError';
-export { knownSmithersErrorCodes } from '@smithers-orchestrator/errors/knownSmithersErrorCodes';
-export { markdownComponents } from '@smithers-orchestrator/components/markdownComponents';
-import * as _smithers_orchestrator_driver_MemoryRuntimeService from '@smithers-orchestrator/driver/MemoryRuntimeService';
-export { renderMdx } from '@smithers-orchestrator/components/renderMdx';
-export { resolveWorktreePath } from '@smithers-orchestrator/graph';
-export { signalRun } from '@smithers-orchestrator/engine/signals';
-export { syncZodTableSchema, zodSchemaColumns, zodToCreateTableSQL } from '@smithers-orchestrator/db/zodToCreateTableSQL';
-export { unwrapZodType } from '@smithers-orchestrator/db/unwrapZodType';
-export { usePatched } from '@smithers-orchestrator/engine/effect/versioning';
-export { zodSchemaToJsonExample } from '@smithers-orchestrator/components/zod-to-example';
-export { zodToTable } from '@smithers-orchestrator/db/zodToTable';
+import { ApprovalProps as ApprovalProps$1 } from '@smthrs/components/components/ApprovalProps';
+import { DepsSpec as DepsSpec$1 } from '@smthrs/components/components/DepsSpec';
+import { SandboxProps as SandboxProps$1 } from '@smthrs/components/components/SandboxProps';
+import { SignalProps as SignalProps$1 } from '@smthrs/components/components/SignalProps';
+import { TaskProps as TaskProps$1 } from '@smthrs/components/components/TaskProps';
+import { WorkflowProps } from '@smthrs/components/components/WorkflowProps';
+import * as _smithers_orchestrator_server_gateway from '@smthrs/server/gateway';
+export { Gateway } from '@smthrs/server/gateway';
+import * as _smithers_orchestrator_agents from '@smthrs/agents';
+export { AmpAgent, AnthropicAgent, AntigravityAgent, ClaudeCodeAgent, CodexAgent, CursorAgent, ForgeAgent, GeminiAgent, HermesAgent, HermesCliAgent, KimiAgent, OmpAgent, OpenAIAgent, OpenClawAgent, OpenCodeAgent, PiAgent, PoolAgent, VibeAgent, createHttpTool, createOmpCapabilityRegistry } from '@smthrs/agents';
+import * as _smithers_orchestrator_scorers from '@smthrs/scorers';
+export { aggregateScores, createScorer, estimateCostUsd, faithfulnessScorer, latencyScorer, llmJudge, modelTokenPrices, relevancyScorer, runScorersAsync, runScorersBatch, schemaAdherenceScorer, smithersScorers, toxicityScorer } from '@smthrs/scorers';
+import * as _smithers_orchestrator_agents_capability_registry from '@smthrs/agents/capability-registry';
+export { hashCapabilityRegistry } from '@smthrs/agents/capability-registry';
+export { ERROR_REFERENCE_URL } from '@smthrs/errors/ERROR_REFERENCE_URL';
+export { Smithers, approveNode, closeSingleRunnerRuntime, denyNode, fragment, getRun, listRuns, renderFrame, reopenSingleRunnerRuntime, runWorkflow, workflow } from '@smthrs/engine';
+export { SmithersDb, loadOutputs, loadOutputsEffect } from '@smthrs/db';
+import { SmithersDb } from '@smthrs/db/adapter';
+export { camelToSnake } from '@smthrs/db/utils/camelToSnake';
+export { ensureSmithersTables } from '@smthrs/db/ensure';
+export { errorToJson } from '@smthrs/errors/errorToJson';
+export { executeChildWorkflow } from '@smthrs/engine/child-workflow';
+export { getSmithersErrorDefinition } from '@smthrs/errors/getSmithersErrorDefinition';
+export { getSmithersErrorDocsUrl } from '@smthrs/errors/getSmithersErrorDocsUrl';
+export { isKnownSmithersErrorCode } from '@smthrs/errors/isKnownSmithersErrorCode';
+export { isSmithersError } from '@smthrs/errors/isSmithersError';
+export { knownSmithersErrorCodes } from '@smthrs/errors/knownSmithersErrorCodes';
+export { markdownComponents } from '@smthrs/components/markdownComponents';
+import * as _smithers_orchestrator_driver_MemoryRuntimeService from '@smthrs/driver/MemoryRuntimeService';
+export { renderMdx } from '@smthrs/components/renderMdx';
+export { resolveWorktreePath } from '@smthrs/graph';
+export { signalRun } from '@smthrs/engine/signals';
+export { syncZodTableSchema, zodSchemaColumns, zodToCreateTableSQL } from '@smthrs/db/zodToCreateTableSQL';
+export { unwrapZodType } from '@smthrs/db/unwrapZodType';
+export { usePatched } from '@smthrs/engine/effect/versioning';
+export { zodSchemaToJsonExample } from '@smthrs/components/zod-to-example';
+export { zodToTable } from '@smthrs/db/zodToTable';
 
 type SerializedCtx$1 = {
     runId: string;
@@ -254,8 +254,8 @@ type CreateSmithersApi$1<Schema = unknown> = {
  * @param {import("./OpenSmithersBackendOptions.ts").OpenSmithersBackendOptions} [opts]
  * @returns {Promise<import("./CreateSmithersApi.ts").CreateSmithersApi<Schemas> & {
  *   close?: () => Promise<void>;
- *   memoryStore: import("@smithers-orchestrator/memory").MemoryStore;
- *   memoryService: import("@smithers-orchestrator/driver/MemoryRuntimeService").MemoryRuntimeService;
+ *   memoryStore: import("@smthrs/memory").MemoryStore;
+ *   memoryService: import("@smthrs/driver/MemoryRuntimeService").MemoryRuntimeService;
  * }>}
  */
 declare function openSmithersBackend<Schemas extends Record<string, zod.ZodObject<any>>>(schemas?: Schemas, opts?: OpenSmithersBackendOptions$1): Promise<CreateSmithersApi$1<Schemas> & {
@@ -342,7 +342,7 @@ type MigrateSmithersStoreResult = SmithersMigrationResult$1;
  *
  * @template {Record<string, import("zod").ZodObject<any>>} S
  * @param {ExternalSmithersConfig<S>} config
- * @returns {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<S> & { tables: Record<string, any>; cleanup: () => void }}
+ * @returns {import("@smthrs/components/SmithersWorkflow").SmithersWorkflow<S> & { tables: Record<string, any>; cleanup: () => void }}
  */
 declare function createExternalSmithers<S extends Record<string, zod.ZodObject<any>>>(config: ExternalSmithersConfig$1<S>): _smithers_orchestrator_components_SmithersWorkflow.SmithersWorkflow<S> & {
     tables: Record<string, any>;
@@ -378,7 +378,7 @@ declare function createSmithers<Schemas extends Record<string, zod.ZodObject<any
 /**
  * Cloudflare-native SQLite backend for Workers/Durable Objects. Pass a descriptor
  * produced by `createCloudflareDurableObjectSqliteDescriptor()` or
- * `createCloudflareD1SqliteDescriptor()` from `smithers-orchestrator/cloudflare`.
+ * `createCloudflareD1SqliteDescriptor()` from `smthrs/cloudflare`.
  *
  * @template {Record<string, import("zod").ZodObject<any>>} Schemas
  * @param {Schemas} schemas

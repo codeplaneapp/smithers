@@ -11,7 +11,7 @@ description: "One command. One editable .mdx file. Your first workflow runs in 3
 From inside your project:
 
 ```bash
-bunx smithers-orchestrator init
+bunx smthrs init
 ```
 
 `init` asks one question, which coding agent do you prefer, shows what it detected (Claude Code, Codex, Pi, ...), and scaffolds `.smithers/` with the focused authoring pack (`create-workflow`, `create-skill`, `docs-driven-development`), installs dependencies, and installs that agent's plugin (or skill). Former recipes live under `examples/init-pack/`; piped or non-interactive callers (CI, agents, `--yes`) skip the question and install defaults, and `--no-tutorial` skips the guided session.
@@ -24,7 +24,7 @@ bunx smithers-orchestrator init
 
 Your agent drives Smithers. Two ways to give it the context it needs:
 
-- **Have your agent read the docs.** Ask it to run `bunx smithers-orchestrator docs` (concise index) or `bunx smithers-orchestrator docs-full`, or point it at [`https://smithers.sh/llms-full.txt`](https://smithers.sh/llms-full.txt). Quick, no install.
+- **Have your agent read the docs.** Ask it to run `bunx smthrs docs` (concise index) or `bunx smthrs docs-full`, or point it at [`https://smithers.sh/llms-full.txt`](https://smithers.sh/llms-full.txt). Quick, no install.
 - **Install the plugin or skill for your harness** so context is always loaded. Each page below has the exact install:
 
 | Harness | Install the plugin / skill |
@@ -62,7 +62,7 @@ To watch a run live in your browser, ask your agent:
 
 > **"Open the Smithers UI for that run."**
 
-Your agent runs `bunx smithers-orchestrator ui <RUN_ID>`, which opens the run's live status card (stages, output, any approval gates) in your browser. Keep it open while you hand off more work.
+Your agent runs `bunx smthrs ui <RUN_ID>`, which opens the run's live status card (stages, output, any approval gates) in your browser. Keep it open while you hand off more work.
 
 </Step>
 

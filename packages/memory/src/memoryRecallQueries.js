@@ -1,1 +1,1 @@
-export { memoryRecallQueries } from "@smithers-orchestrator/observability/metrics";
+export { memoryRecallQueries } from "@smthrs/observability/metrics";

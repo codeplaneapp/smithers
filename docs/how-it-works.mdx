@@ -185,9 +185,9 @@ flowchart TD
 Operator side is identical for both (you, the agent, run these on the human's behalf; never hand them to the human):
 
 ```bash
-bunx smithers-orchestrator ps --status waiting-approval
-bunx smithers-orchestrator approve RUN_ID --node ship-decision --by alice
-bunx smithers-orchestrator up workflow.tsx --run-id RUN_ID --resume true
+bunx smthrs ps --status waiting-approval
+bunx smthrs approve RUN_ID --node ship-decision --by alice
+bunx smthrs up workflow.tsx --run-id RUN_ID --resume true
 ```
 
 `<HumanTask>` is for richer interaction: a human submits arbitrary structured JSON. `<EscalationChain>` and `<ApprovalGate>` are higher-level patterns built from these.
@@ -197,7 +197,7 @@ bunx smithers-orchestrator up workflow.tsx --run-id RUN_ID --resume true
 The contract: **a completed task is never re-executed.** Resume loads persisted state, validates the environment (workflow source hash + VCS revision must match the original run), cleans stale in-progress attempts (>15 min without a heartbeat are abandoned), re-renders, and continues.
 
 ```bash
-bunx smithers-orchestrator up workflow.tsx --run-id RUN_ID --resume true
+bunx smthrs up workflow.tsx --run-id RUN_ID --resume true
 ```
 
 <Frame caption="A run is killed mid-flight: the completed task is skipped on resume, the interrupted one re-runs as a fresh attempt, and the run finishes from the last persisted frame instead of starting over.">
@@ -216,7 +216,7 @@ Same rule as React keys. A changed ID looks like a new task to the runtime; a di
 The supervisor auto-resumes runs whose owner process died:
 
 ```bash
-bunx smithers-orchestrator supervise --all --interval 30s --stale-threshold 1m
+bunx smthrs supervise --all --interval 30s --stale-threshold 1m
 ```
 
 Standalone supervision requires an explicit scope: pass one or more run IDs with
@@ -260,11 +260,11 @@ Don't cache side-effect tasks (deploys, emails, mutations). Caching is for pure 
 Every frame commit produces a `GraphSnapshot`.
 
 ```bash
-bunx smithers-orchestrator timeline RUN_ID           # frames + forks
-bunx smithers-orchestrator diff RUN_ID NODE_ID     # node DiffBundle
-bunx smithers-orchestrator rewind RUN_ID 5
-bunx smithers-orchestrator fork workflow.tsx --run-id RUN_ID --frame 5 --reset-node analyze
-bunx smithers-orchestrator replay workflow.tsx --run-id RUN_ID --frame 5 --restore-vcs
+bunx smthrs timeline RUN_ID           # frames + forks
+bunx smthrs diff RUN_ID NODE_ID     # node DiffBundle
+bunx smthrs rewind RUN_ID 5
+bunx smthrs fork workflow.tsx --run-id RUN_ID --frame 5 --reset-node analyze
+bunx smthrs replay workflow.tsx --run-id RUN_ID --frame 5 --restore-vcs
 ```
 
 Replay with `--restore-vcs` checks out the jj revision the snapshot was taken at, so re-execution sees the same source code as the original run.
@@ -316,7 +316,7 @@ comments, and PR merge status, is external and must be marked.
 Attach evaluators to a Task. They run **after** completion and never block.
 
 ```tsx
-import { schemaAdherenceScorer, latencyScorer } from "smithers-orchestrator/scorers";
+import { schemaAdherenceScorer, latencyScorer } from "smthrs/scorers";
 
 <Task
   id="analyze"
@@ -340,7 +340,7 @@ Also exported: `runScorersAsync`, `runScorersBatch`, `aggregateScores`, the `smi
 Shared by the `eval-suite-run` [seeded workflow](/workflows/eval-suite-run) and the `evals` gateway extension: `parseEvalDataset` (parses a JSON array or JSONL dataset), `evaluateEvalCase` (grades a case's status/output/error against `expected`: an assertion spec of `status`/`output`/`outputContains`/`errorContains`, or a literal value matched by subset/deep-equal), `evalAssertionScorer` (turns a graded case's assertions into a scored row), `evalCaseRunId` (a readable, collision-free child-run id), the `EVAL_CASE_STATUSES` and `EVAL_PASS_THRESHOLD` constants, and the low-level primitives `slugifyEvalToken`, `jsonEquals`, `jsonContains`, `normalizeExpected`, `formatEvalError`, and `isPlainObject`.
 
 ```bash
-bunx smithers-orchestrator scores RUN_ID
+bunx smthrs scores RUN_ID
 ```
 
 ## Memory (cross-run state)
@@ -356,7 +356,7 @@ Five built-in tools (`read`, `write`, `edit`, `grep`, `bash`) sandboxed to `root
 Least-privilege per task:
 
 ```tsx
-import { AnthropicAgent } from "smithers-orchestrator";
+import { AnthropicAgent } from "smthrs";
 const analyst     = new AnthropicAgent({ model, instructions: "..." }); // no tools
 const reviewer    = new AnthropicAgent({ model, instructions: "...", tools: { read, grep } });
 const implementer = new AnthropicAgent({ model, instructions: "...", tools: { read, write, edit, bash } });
@@ -386,7 +386,7 @@ a native opt-in.
 - **Stable task IDs.** `id="implement-${i}"` or `id={Math.random()}` breaks resume. Derive from data.
 - **`useState` is not durable.** It survives re-renders within one process but is lost on crash/resume/rewind/fork. Persist via `ctx` and a Task.
 - **Input is immutable.** Resuming with different `--input` is an error; the input is persisted at first run.
-- **Adding a schema field auto-migrates (SQLite).** On every boot the runtime runs `CREATE TABLE IF NOT EXISTS` and then `ALTER TABLE ... ADD COLUMN` for any column a typed input/output Zod schema introduced, so new fields are added in place without recreating `smithers.db`. If you still see `SQLiteError: table input has no column named X`, you're on a build before this boot-time migration landed (or a Postgres-backed DB, which doesn't auto-add columns yet); upgrade with `bunx smithers-orchestrator --version` or start a fresh run. Renaming or removing a field, or changing its type, isn't migrated and needs a fresh DB.
+- **Adding a schema field auto-migrates (SQLite).** On every boot the runtime runs `CREATE TABLE IF NOT EXISTS` and then `ALTER TABLE ... ADD COLUMN` for any column a typed input/output Zod schema introduced, so new fields are added in place without recreating `smithers.db`. If you still see `SQLiteError: table input has no column named X`, you're on a build before this boot-time migration landed (or a Postgres-backed DB, which doesn't auto-add columns yet); upgrade with `bunx smthrs --version` or start a fresh run. Renaming or removing a field, or changing its type, isn't migrated and needs a fresh DB.
 - **Code changes block resume.** A workflow source change is a different workflow: hot reload applies changes within a running frame, but resume validates the source hash of the original run, and a changed source blocks it. Start a new run instead of resuming across edits.
 - **Cached output is re-validated.** Schema drift after caching is caught (the validator rejects the stale row), so the cache misses safely.
 - **Side-effect tasks should not be cached.** Pure work only.

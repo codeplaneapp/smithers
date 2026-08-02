@@ -1,9 +1,9 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { z } from "zod";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { Sidecar, Task, Workflow, computeSidecarDelta, runWorkflow } from "smithers-orchestrator";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { Sidecar, Task, Workflow, computeSidecarDelta, runWorkflow } from "smthrs";
 import { createTestSmithers, sleep } from "./helpers.js";
 
 async function waitForScores(adapter, runId, count) {

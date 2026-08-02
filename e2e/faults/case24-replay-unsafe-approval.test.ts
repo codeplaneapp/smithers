@@ -6,8 +6,8 @@ import { join } from "node:path";
 import React from "react";
 import { Effect } from "effect";
 import { z } from "zod";
-import { Task, Workflow, createSmithers, defineTool, runWorkflow, type AgentLike } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { Task, Workflow, createSmithers, defineTool, runWorkflow, type AgentLike } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
 
 const NODE_ID = "publish-pr-comment";
 const TIMEOUT_MS = 20_000;

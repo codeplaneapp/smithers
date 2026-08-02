@@ -6,4 +6,4 @@
 // ---------------------------------------------------------------------------
 
 /** Symbol key under which the spec's document/base URL is stored. */
-export const SPEC_SOURCE_URL = Symbol.for("smithers-orchestrator/openapi/specSourceUrl");
+export const SPEC_SOURCE_URL = Symbol.for("smthrs/openapi/specSourceUrl");

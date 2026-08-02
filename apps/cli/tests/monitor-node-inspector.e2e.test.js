@@ -52,8 +52,8 @@ const PROMPT = "Freeze the scope for the inspector-probe token on Avalanche C-Ch
 const AGENT_SUMMARY = "inspector probe output";
 
 const WORKFLOW = `
-/** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { ClaudeCodeAgent, createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, Task, smithers, outputs } = createSmithers({

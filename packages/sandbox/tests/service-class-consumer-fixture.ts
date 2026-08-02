@@ -1,5 +1,5 @@
 import { Context } from "effect";
-import { SandboxTransport } from "@smithers-orchestrator/sandbox";
+import { SandboxTransport } from "@smthrs/sandbox";
 
 type SandboxTransportService = Context.Service.Shape<typeof SandboxTransport>;
 

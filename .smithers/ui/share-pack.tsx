@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { createGatewayReactRoot, useGatewayRun } from "smithers-orchestrator/gateway-react";
+import { createGatewayReactRoot, useGatewayRun } from "smthrs/gateway-react";
 
 function runIdFromUrl() {
   if (typeof location === "undefined") return undefined;

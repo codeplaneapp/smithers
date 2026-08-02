@@ -3,12 +3,12 @@
 // @smithers-type-exports-end
 
 import { Effect } from "effect";
-import { isRunHeartbeatFresh } from "@smithers-orchestrator/engine";
-import { isPidAlive, parseRuntimeOwnerPid } from "@smithers-orchestrator/engine/runtime-owner";
-import { computeRetryDelayMs } from "@smithers-orchestrator/scheduler/computeRetryDelayMs";
-import { SmithersError } from "@smithers-orchestrator/errors";
+import { isRunHeartbeatFresh } from "@smthrs/engine";
+import { isPidAlive, parseRuntimeOwnerPid } from "@smthrs/engine/runtime-owner";
+import { computeRetryDelayMs } from "@smthrs/scheduler/computeRetryDelayMs";
+import { SmithersError } from "@smthrs/errors";
 import { formatAge } from "./format.js";
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./WhyBlocker.ts").WhyBlocker} WhyBlocker */
 /** @typedef {import("./WhyDiagnosis.ts").WhyDiagnosis} WhyDiagnosis */
 

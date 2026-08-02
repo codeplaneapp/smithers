@@ -1,7 +1,7 @@
 // smithers-source: user
 // smithers-display-name: OpenClaw Integration Hardening
-/** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, Parallel, Sequence, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { ClaudeCodeAgent, Parallel, Sequence, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { codexFirst } from "../lib/codexAccounts";
 import { dirname, resolve } from "node:path";

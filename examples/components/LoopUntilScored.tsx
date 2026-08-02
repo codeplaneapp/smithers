@@ -1,6 +1,6 @@
 // smithers-source: seeded
-/** @jsxImportSource smithers-orchestrator */
-import { Loop } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Loop } from "smthrs";
 
 export type LoopUntilScoredProps = {
   idPrefix: string;

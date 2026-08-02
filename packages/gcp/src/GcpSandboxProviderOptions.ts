@@ -1,4 +1,4 @@
-import type { SandboxProviderRequest } from "@smithers-orchestrator/sandbox";
+import type { SandboxProviderRequest } from "@smthrs/sandbox";
 
 /**
  * A Cloud Storage client double: the subset of `@google-cloud/storage`'s

@@ -1,6 +1,6 @@
 import { useMemo, useSyncExternalStore } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
-import type { GatewayEventFrame, GatewayRunEventRow } from "@smithers-orchestrator/gateway-client";
+import type { GatewayEventFrame, GatewayRunEventRow } from "@smthrs/gateway-client";
 import { normalizeError } from "./GatewayAsyncState.ts";
 import { useSmithersCollections } from "./useSmithersCollections.ts";
 

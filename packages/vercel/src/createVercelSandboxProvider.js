@@ -1,5 +1,5 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { createCommandSandboxProvider, redactSandboxProviderValue } from "@smithers-orchestrator/sandbox";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { createCommandSandboxProvider, redactSandboxProviderValue } from "@smthrs/sandbox";
 import { VERCEL_SANDBOX_PROVIDER_ID } from "./VERCEL_SANDBOX_PROVIDER_ID.js";
 
 const DEFAULT_WORKDIR = "/vercel/sandbox";
@@ -22,7 +22,7 @@ const SECRET_KEY_RE = /token|secret|key|password|credential|authorization|passwd
  * teardown.
  *
  * @param {import("./VercelSandboxProviderOptions.ts").VercelSandboxProviderOptions} [options]
- * @returns {import("@smithers-orchestrator/sandbox").SandboxProvider}
+ * @returns {import("@smthrs/sandbox").SandboxProvider}
  */
 export function createVercelSandboxProvider(options = {}) {
   const id = options.id ?? VERCEL_SANDBOX_PROVIDER_ID;
@@ -78,7 +78,7 @@ export function createVercelSandboxProvider(options = {}) {
           // reachable (sandbox.domain(port) alone does not open them).
           ...(Array.isArray(options.ports) && options.ports.length > 0 ? { ports: options.ports } : {}),
           timeout: createTimeoutMs,
-          ...(options.createOptions ?? {}),
+          ...options.createOptions,
           ...auth,
         });
       } catch (error) {

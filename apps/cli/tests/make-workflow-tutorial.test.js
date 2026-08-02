@@ -14,7 +14,7 @@ test("make-workflow-tutorial remains a documented archived example", () => {
 
 test("make-workflow-tutorial keeps bounded external-session and human-doc readers wired", () => {
   const source = readFileSync(resolve(REPO_ROOT, WORKFLOW_PATH), "utf8");
-  expect(source).toContain("@smithers-orchestrator/observability/_traceRedaction");
+  expect(source).toContain("@smthrs/observability/_traceRedaction");
   expect(source).toContain('.codex", "history.jsonl');
   expect(source).toContain("assistant");
   expect(source).toContain("MAX_BYTES_PER_FILE");

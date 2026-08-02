@@ -6,17 +6,17 @@
 import * as DurableDeferred from "effect/unstable/workflow/DurableDeferred";
 import { resolve as resolvePath } from "node:path";
 import { Effect, Exit, Schema } from "effect";
-import { updateAsyncExternalWaitPending } from "@smithers-orchestrator/observability/metrics";
+import { updateAsyncExternalWaitPending } from "@smthrs/observability/metrics";
 import {
   normalizeWaitForEventCorrelationId,
   parseWaitForEventAttemptSnapshot,
   parseWaitForEventOptionalFiniteNumber,
-} from "@smithers-orchestrator/db/waitForEventAttempt";
+} from "@smthrs/db/waitForEventAttempt";
 /**
  * @typedef {{ _tag: "Complete"; exit: Exit.Exit<any, any>; } | { _tag: "Pending"; }} BridgeDeferredResult
  */
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} _SmithersDb */
-/** @typedef {import("@smithers-orchestrator/db/waitForEventAttempt").WaitForEventAttemptSnapshot} WaitForEventAttemptSnapshot */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} _SmithersDb */
+/** @typedef {import("@smthrs/db/waitForEventAttempt").WaitForEventAttemptSnapshot} WaitForEventAttemptSnapshot */
 /**
  * @typedef {{ signalName: string; correlationId: string | null; payloadJson: string; seq: number; receivedAtMs: number; }} WaitForEventSignalInput
  */
@@ -58,7 +58,7 @@ const waitForEventDurableDeferredSuccessSchema = Schema.Struct({
 });
 // The wait-for-event attempt-meta parser is shared with the db adapter's
 // `findRunsAwaitingEvent` — the single implementation lives in
-// `@smithers-orchestrator/db/waitForEventAttempt` (imported above). Local
+// `@smthrs/db/waitForEventAttempt` (imported above). Local
 // aliases keep this module's exported internals stable.
 const normalizeCorrelationId = normalizeWaitForEventCorrelationId;
 const parseOptionalFiniteNumber = parseWaitForEventOptionalFiniteNumber;

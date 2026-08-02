@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as BunContext from "@effect/platform-bun/BunServices";
-import { captureWorkspaceSnapshot, getJjPointer, revertToJjPointer, runJj } from "@smithers-orchestrator/vcs";
+import { captureWorkspaceSnapshot, getJjPointer, revertToJjPointer, runJj } from "@smthrs/vcs";
 import { Effect } from "effect";
 
 const jjAvailable = spawnSync("jj", ["--version"], { stdio: "ignore" }).status === 0;

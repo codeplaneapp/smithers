@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/react */
 import { it, expect } from "bun:test";
 import { describeHeadlessRender, renderForTest } from "./renderHelpers.tsx";
-import type { GatewayRunNode, GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
+import type { GatewayRunNode, GatewayEventFrame } from "@smthrs/gateway-client";
 import { NodeInspectorView, TreePanel, type ApprovalUiState } from "../src/modes/TreeMode.tsx";
 import type { NodeDiffView } from "../src/modes/diffUtils.ts";
 import { ALL_TABS, type FlatNode, type TabId } from "../src/modes/treeUtils.ts";

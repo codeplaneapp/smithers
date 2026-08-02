@@ -1,4 +1,4 @@
-import { ClaudeCodeAgent, CodexAgent } from "smithers-orchestrator";
+import { ClaudeCodeAgent, CodexAgent } from "smthrs";
 import {
   orderClaudeAccounts,
   orderCodexAccounts,

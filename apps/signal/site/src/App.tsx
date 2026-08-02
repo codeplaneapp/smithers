@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { EmptyState, SmithersUiStyles, Spinner } from "smithers-orchestrator/ui";
+import { EmptyState, SmithersUiStyles, Spinner } from "smthrs/ui";
 import { fetchArchive, fetchIssueByDate, fetchLatestIssue } from "./api";
 import { ArchivePage } from "./components/ArchivePage";
 import { IssueView } from "./components/IssueView";

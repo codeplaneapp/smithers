@@ -11,7 +11,7 @@ apiVersion: v1
 - Request: `{ fresh? }`
 - Response: `UsageReport[]`
 
-Each report is a normalized provider usage probe for one registered account (see `listAccounts`), shaped by `@smithers-orchestrator/usage`: `{ accountLabel, provider, authMode, source, windows, planType?, credits?, fetchedAt, stale, estimate, error? }`. `windows` lists quota windows as `{ id, label, unit, usedPercent?, used?, limit?, remaining?, resetsAt? }`, the same data `bunx smithers-orchestrator usage` prints.
+Each report is a normalized provider usage probe for one registered account (see `listAccounts`), shaped by `@smthrs/usage`: `{ accountLabel, provider, authMode, source, windows, planType?, credits?, fetchedAt, stale, estimate, error? }`. `windows` lists quota windows as `{ id, label, unit, usedPercent?, used?, limit?, remaining?, resetsAt? }`, the same data `bunx smthrs usage` prints.
 
 The Gateway caches reports in memory for 60 seconds; pass `fresh: true` to bypass the cache and re-probe providers. A probe failure sets `error` on that account's report instead of failing the call.
 

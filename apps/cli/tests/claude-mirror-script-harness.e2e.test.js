@@ -18,8 +18,8 @@ const SCRIPT_PATH = resolve(import.meta.dir, "../../../claude-plugin/workflows/s
 const CLI_ENTRY = resolve(import.meta.dir, "../src/index.js");
 
 const FANOUT_WORKFLOW = `
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Parallel, Task, Workflow, Sequence } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, Parallel, Task, Workflow, Sequence } from "smthrs";
 import { z } from "zod";
 
 const { smithers, outputs } = createSmithers({
@@ -64,9 +64,9 @@ function loadScriptBody() {
 
 /** @param {string} command @param {string} cwd */
 function execMirrorCommand(command, cwd) {
-  // The script targets `bunx smithers-orchestrator`; tests run the same CLI
+  // The script targets `bunx smthrs`; tests run the same CLI
   // from the workspace so they exercise the code under review, not npm.
-  const localized = command.replaceAll("bunx smithers-orchestrator", `bun ${CLI_ENTRY}`);
+  const localized = command.replaceAll("bunx smthrs", `bun ${CLI_ENTRY}`);
   const result = spawnSync("bash", ["-c", localized], {
     cwd,
     encoding: "utf8",

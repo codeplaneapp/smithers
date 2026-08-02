@@ -12,7 +12,7 @@ import {
   QueueSectionLabel,
   QueueSectionTrigger,
   TaskItem,
-} from "@smithers-orchestrator/ui";
+} from "@smthrs/ui";
 
 const meta: Meta = {
   title: "Agentic/Plans & Queues",

@@ -1,12 +1,12 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import "../preload.ts";
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { TaskDescriptor } from "smithers-orchestrator";
-import { fakeAgent, renderPrompt, renderWorkflow, runTask } from "smithers-orchestrator/testing";
+import type { TaskDescriptor } from "smthrs";
+import { fakeAgent, renderPrompt, renderWorkflow, runTask } from "smthrs/testing";
 
 type Task = TaskDescriptor;
 type Frame = { tasks: readonly Task[] };

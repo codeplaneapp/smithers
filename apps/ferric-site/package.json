@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/ferric-site",
+  "name": "@smthrs/ferric-site",
   "version": "0.0.1",
   "private": true,
   "description": "Cloudflare Worker deployment for ferric.smithers.sh — Operation Ferric, React's runtime rewritten in Rust",

@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // real-usage — generated suite. See evals/README.md.
 import { createFluencyEval } from "../../lib/eval-kit";
 

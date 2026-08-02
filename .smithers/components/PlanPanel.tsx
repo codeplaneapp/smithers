@@ -1,6 +1,6 @@
 // smithers-source: seeded
-/** @jsxImportSource smithers-orchestrator */
-import { Panel, type AgentLike } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Panel, type AgentLike } from "smthrs";
 import { z } from "zod/v4";
 import { panelists as defaultPanelists, synthesizer as defaultSynthesizer } from "./roles";
 import PlanPrompt from "../prompts/plan.mdx";

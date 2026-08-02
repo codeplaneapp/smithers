@@ -3,9 +3,9 @@
 // smithers-display-name: Context Engineer
 // smithers-description: Turn a vague user script into a context contract, route it to skills/workflows, add backpressure, execute, and report — the concierge proxy.
 // smithers-tags: concierge, context-engineering, planning
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import { GrillMe, grillOutputSchema } from "../components/GrillMe";

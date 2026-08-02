@@ -27,7 +27,7 @@ import {
   selectModelProvider,
   type ProviderSelection,
 } from "../lib/daily-ceo-intel/modelProvider";
-import type { AgentLike } from "smithers-orchestrator";
+import type { AgentLike } from "smthrs";
 import type { RunConfig } from "../lib/daily-ceo-intel/config";
 import type { CoverageRow, FetchSourceRow, Issue, Item, RenderOutput } from "../lib/daily-ceo-intel/schemas";
 

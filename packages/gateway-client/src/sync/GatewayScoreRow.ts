@@ -1,4 +1,4 @@
-import type { GatewayScoreRow as ProtocolGatewayScoreRow } from "@smithers-orchestrator/protocol/gateway-rpc";
+import type { GatewayScoreRow as ProtocolGatewayScoreRow } from "@smthrs/protocol/gateway-rpc";
 
 /**
  * One row of the `scores` collection — the live `listScores` RPC response shape.

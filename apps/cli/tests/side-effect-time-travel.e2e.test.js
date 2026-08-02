@@ -5,9 +5,9 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Effect } from "effect";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { captureSnapshot } from "@smithers-orchestrator/time-travel/snapshot";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { captureSnapshot } from "@smthrs/time-travel/snapshot";
 import { createTempRepo, pinSqliteBackend, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
 
 const COMMAND_TIMEOUT_MS = 120_000;
@@ -23,10 +23,10 @@ function hasJj() {
 }
 
 function effectWorkflowSource() {
-  return `/** @jsxImportSource smithers-orchestrator */
+  return `/** @jsxImportSource smthrs */
 import { appendFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { createSmithers, defineTool } from "smithers-orchestrator";
+import { createSmithers, defineTool } from "smthrs";
 import { z } from "zod";
 
 const { smithers, Workflow, Task, outputs } = createSmithers({

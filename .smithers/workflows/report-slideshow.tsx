@@ -3,10 +3,10 @@
 // smithers-display-name: Report Slideshow
 // smithers-description: Generate a concise HTML slideshow report from a Smithers run state and artifacts.
 // smithers-tags: ops, reporting
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
 import { execFileSync } from "node:child_process";
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import { parseFirstJsonObject } from "../lib/parse-first-json-value";

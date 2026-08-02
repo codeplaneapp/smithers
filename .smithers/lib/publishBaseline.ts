@@ -68,7 +68,7 @@ export async function resolvePublishBaseline(opts: {
 }): Promise<PublishBaseline> {
   const repoRoot = opts.repoRoot;
   const excludes = (opts.excludes ?? DEFAULT_EXCLUDES).map((p) => `:(exclude)${p}`);
-  const packageName = opts.packageName ?? "smithers-orchestrator";
+  const packageName = opts.packageName ?? "smthrs";
   const maxFiles = opts.maxFiles ?? 4000;
   const notes: string[] = [];
 

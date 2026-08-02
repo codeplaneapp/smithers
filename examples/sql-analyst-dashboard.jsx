@@ -11,11 +11,11 @@
  * drafts do not silently execute. A human approval gate is available for risky
  * or repeatedly rejected queries.
  */
-import { Sequence, Loop } from "smithers-orchestrator";
+import { Sequence, Loop } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import InspectSchemaPrompt from "./prompts/sql-analyst-dashboard/inspect-schema.mdx";
 import PlanQueryPrompt from "./prompts/sql-analyst-dashboard/plan-query.mdx";

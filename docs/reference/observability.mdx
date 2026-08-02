@@ -21,7 +21,7 @@ import {
   prometheusContentType,
   smithersMetrics,
   SmithersObservability,
-} from "smithers-orchestrator";
+} from "smthrs";
 ```
 
 <Note>
@@ -38,7 +38,7 @@ or open a span without importing `withSmithersSpan` directly.
 
 ```ts
 import { Effect } from "effect";
-import { SmithersObservability } from "smithers-orchestrator";
+import { SmithersObservability } from "smthrs";
 
 const program = Effect.gen(function* () {
   const obs = yield* SmithersObservability;
@@ -86,7 +86,7 @@ function createSmithersObservabilityLayer(
 
 ```ts
 import { Effect, Layer } from "effect";
-import { createSmithersObservabilityLayer } from "smithers-orchestrator";
+import { createSmithersObservabilityLayer } from "smthrs";
 
 const layer = createSmithersObservabilityLayer({
   serviceName: "my-control-plane",
@@ -103,7 +103,7 @@ Alias of `createSmithersObservabilityLayer`, exported under the runtime's name
 intent reads clearly.
 
 ```ts
-import { createSmithersRuntimeLayer } from "smithers-orchestrator";
+import { createSmithersRuntimeLayer } from "smthrs";
 
 const layer = createSmithersRuntimeLayer({ logLevel: "debug" });
 ```
@@ -127,7 +127,7 @@ function createSmithersOtelLayer(
 </ParamField>
 
 ```ts
-import { createSmithersOtelLayer } from "smithers-orchestrator";
+import { createSmithersOtelLayer } from "smthrs";
 
 // No-op unless SMITHERS_OTEL_ENABLED=1 (or enabled: true).
 const otel = createSmithersOtelLayer({
@@ -211,7 +211,7 @@ export OTEL_EXPORTER_OTLP_HEADERS='Authorization=Basic <base64 token>'
 </ResponseField>
 
 ```ts
-import { resolveSmithersObservabilityOptions } from "smithers-orchestrator";
+import { resolveSmithersObservabilityOptions } from "smthrs";
 
 const resolved = resolveSmithersObservabilityOptions({ serviceName: "ci" });
 // { enabled: false, endpoint: "http://localhost:4318", serviceName: "ci", ... }
@@ -238,7 +238,7 @@ function trackSmithersEvent(event: SmithersEvent): Effect.Effect<void>;
 
 ```ts
 import { Effect } from "effect";
-import { trackSmithersEvent } from "smithers-orchestrator";
+import { trackSmithersEvent } from "smthrs";
 
 await Effect.runPromise(
   trackSmithersEvent({
@@ -273,7 +273,7 @@ The exact `Content-Type` for a Prometheus response:
 `text/plain; version=0.0.4; charset=utf-8`. Pair it with the rendered body.
 
 ```ts
-import { renderPrometheusMetrics, prometheusContentType } from "smithers-orchestrator";
+import { renderPrometheusMetrics, prometheusContentType } from "smthrs";
 
 // Inside any HTTP handler:
 function handleMetrics() {
@@ -299,7 +299,7 @@ metric renders under its Prometheus name; histograms also emit `_bucket`,
 registry holds more (gateway, devtools, agent, alert, supervisor families).
 
 ```ts
-import { smithersMetrics } from "smithers-orchestrator";
+import { smithersMetrics } from "smthrs";
 
 const everyMetric = Object.values(smithersMetrics); // all Effect Metrics
 ```

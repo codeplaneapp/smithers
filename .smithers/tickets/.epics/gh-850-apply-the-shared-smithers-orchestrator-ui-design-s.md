@@ -1,4 +1,4 @@
-# Apply the shared @smithers-orchestrator/ui design system to the monitor
+# Apply the shared @smthrs/ui design system to the monitor
 
 GitHub: https://github.com/smithersai/smithers/issues/850
 

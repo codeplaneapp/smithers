@@ -85,7 +85,7 @@ test("the archive documents a workflow-specific copy and graph command for every
 
 test("the review example uses the shared tinted primary button", () => {
   const source = readFileSync(resolve(ROOT, "examples/ui/review.tsx"), "utf8");
-  expect(source).toContain('import { Button } from "smithers-orchestrator/ui";');
+  expect(source).toContain('import { Button } from "smthrs/ui";');
   expect(source).not.toContain('className="button primary"');
   expect(source.match(/<Button[^>]+data-testid="review-launch(?:-empty)?"/g)).toHaveLength(2);
 });
@@ -121,7 +121,7 @@ test("every former init workflow's declared UI bundles for real (compiled, not m
   // The real Gateway UI bundler (packages/server/src/gatewayUi/bundle.js) —
   // the same Bun.build path the live gateway uses to serve each workflow's
   // <UI>, including its workspace-package resolution for @tanstack/* and
-  // smithers-orchestrator/gateway-react. A hand-rolled Bun.build call here
+  // smthrs/gateway-react. A hand-rolled Bun.build call here
   // would miss that resolution and false-fail on every UI.
   // Run bounded batches in clean Bun children. Bun's in-process test module
   // graph may already contain another workflow UI, and one child retaining

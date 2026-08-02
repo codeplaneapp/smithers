@@ -1,4 +1,4 @@
-import type { TaskDescriptor } from "@smithers-orchestrator/graph/types";
+import type { TaskDescriptor } from "@smthrs/graph/types";
 
 export type SchedulerWaitHandler = (
   durationMs: number,

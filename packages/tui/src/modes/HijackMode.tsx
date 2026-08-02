@@ -6,7 +6,7 @@ import { useRenderer } from "../RendererContext.tsx";
 import { useOverlayOpen } from "../OverlayContext.tsx";
 import { resolveCliEntry } from "../cliEntry.ts";
 import { isModifiedKeyEvent } from "./treeUtils.ts";
-import { runNodeKey, type GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import { runNodeKey, type GatewayRunNode } from "@smthrs/gateway-client";
 import {
   hijackCandidates,
   pinnedHijackRows,
@@ -20,7 +20,7 @@ type Phase = "selecting" | "handing-off" | "returned";
 
 /**
  * Build the `smithers hijack` invocation for a specific node, run through the
- * REAL CLI entry (SMITHERS_CLI or the resolved `@smithers-orchestrator/cli`
+ * REAL CLI entry (SMITHERS_CLI or the resolved `@smthrs/cli`
  * package) — never a bare `smithers` on PATH, which could be stale or missing.
  * Returns null when no CLI entry can be resolved so the caller can surface a
  * clear error instead of guessing. `--target` scopes the hijack to the selected

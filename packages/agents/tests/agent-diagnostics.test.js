@@ -10,7 +10,7 @@ import {
   launchDiagnostics,
 } from "../src/diagnostics/index.js";
 import { BaseCliAgent } from "../src/BaseCliAgent/index.js";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { runDiagnosticCommand } from "../src/diagnostics/runDiagnosticCommand.js";
 
 /**

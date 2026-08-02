@@ -6,7 +6,7 @@ description: Inspect and act on a git or jj working tree.
 `vcs` is an archived example, not installed by `init` (copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent): a small dispatcher workflow over a git or jj working tree, detailed below under Actions. The Smithers UI launches it via `action`, but it runs from the CLI too.
 
 ```bash
-bunx smithers-orchestrator workflow run vcs --input '{"action":"status","vcs":"jj"}'
+bunx smthrs workflow run vcs --input '{"action":"status","vcs":"jj"}'
 ```
 
 <Frame caption="The vcs UI shows the working tree for the run and dispatches git or jj actions like status, log, commit, and rebase.">

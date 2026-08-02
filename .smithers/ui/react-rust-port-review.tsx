@@ -6,7 +6,7 @@
  * in one place: the implementer's report, both adversarial reviews, the
  * deterministic verifier's verdict, the landing/ratchet row, the node's LIVE
  * agent chat, and the pending human gates — every widget a shipped
- * smithers-orchestrator component over the gateway-react hooks.
+ * smthrs component over the gateway-react hooks.
  *
  * Diffs render through the house DiffHunks anatomy via parseUnifiedFile, fed
  * from the verify row (vcs.tsx reference-bundle pattern: diff text travels as a
@@ -18,7 +18,7 @@
  * gateway: gateway.register("react-rust-port", wf, { ui: { entry: ".smithers/ui/react-rust-port-review.tsx" } })
  */
 import { useState } from "react";
-import { createGatewayReactRoot, useGatewayNodeOutput } from "smithers-orchestrator/gateway-react";
+import { createGatewayReactRoot, useGatewayNodeOutput } from "smthrs/gateway-react";
 import {
   ConnectionBadge,
   GatewayApprovalList,
@@ -29,8 +29,8 @@ import {
   RunTree,
   StatusPill,
   WorkflowUiShell,
-} from "smithers-orchestrator/gateway-ui";
-import { DiffHunks, EmptyState, KpiStat, parseUnifiedFile } from "smithers-orchestrator/ui";
+} from "smthrs/gateway-ui";
+import { DiffHunks, EmptyState, KpiStat, parseUnifiedFile } from "smthrs/ui";
 
 const WORKFLOW = "react-rust-port";
 const SLICE_NODE = /^(?<slice>.+?):(implement|review-claude|review-codex|verify|land.*)$/;

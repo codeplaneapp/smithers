@@ -15,7 +15,7 @@
     "registryItem": "https://elements.ai-sdk.dev/components/task",
     "ported": "partial-anatomy",
     "omissions": [],
-    "divergences": ["The collapsible task wrapper ships as AgentTask (Task collides with a smithers-orchestrator workflow export)"]
+    "divergences": ["The collapsible task wrapper ships as AgentTask (Task collides with a smthrs workflow export)"]
   },
   {
     "file": "src/agentic/AgentTask.tsx",
@@ -24,7 +24,7 @@
     "registryItem": "https://elements.ai-sdk.dev/components/task",
     "ported": "full-anatomy",
     "omissions": [],
-    "divergences": ["Renamed Task -> AgentTask to avoid the smithers-orchestrator workflow Task export collision"]
+    "divergences": ["Renamed Task -> AgentTask to avoid the smthrs workflow Task export collision"]
   },
   {
     "file": "src/agentic/Queue.tsx",

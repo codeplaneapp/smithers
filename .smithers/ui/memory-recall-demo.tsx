@@ -6,8 +6,8 @@ import {
   useGatewayRun,
   useGatewayRunEvents,
   useGatewayRunTree,
-} from "smithers-orchestrator/gateway-react";
-import { RunEventLog, RunTree, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
+} from "smthrs/gateway-react";
+import { RunEventLog, RunTree, WorkflowUiShell } from "smthrs/gateway-ui";
 import {
   Badge,
   Card,
@@ -21,7 +21,7 @@ import {
   TableBody,
   TableCell,
   TableRow,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 
 export type MemoryConfig = {
   bank?: string;

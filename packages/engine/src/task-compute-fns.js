@@ -1,11 +1,11 @@
-import { createSubflowResultError } from "@smithers-orchestrator/graph/subflow-result-error";
-import { executeSandbox } from "@smithers-orchestrator/sandbox/execute";
+import { createSubflowResultError } from "@smthrs/graph/subflow-result-error";
+import { executeSandbox } from "@smthrs/sandbox/execute";
 import { executeChildWorkflow } from "./child-workflow.js";
 import { buildValidatedChildRunId } from "./child-run-id.js";
 import { applyDiffBundle } from "./effect/diff-bundle.js";
 
-/** @typedef {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow} SmithersWorkflow */
-/** @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("@smthrs/components/SmithersWorkflow").SmithersWorkflow} SmithersWorkflow */
+/** @typedef {import("@smthrs/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
 
 // Default cap on captured tool output for a <Sandbox> child workflow; other
 // sandbox call paths thread caller-provided values through instead.

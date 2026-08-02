@@ -9,7 +9,7 @@ describe("gateway-react README", () => {
     expect(existsSync(README_PATH)).toBe(true);
 
     const readme = readFileSync(README_PATH, "utf8");
-    expect(readme).toContain("# @smithers-orchestrator/gateway-react");
+    expect(readme).toContain("# @smthrs/gateway-react");
     expect(readme).toContain("React bindings");
     expect(readme).toContain("smithers ui");
     expect(readme).toContain("SmithersGatewayProvider");

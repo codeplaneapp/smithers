@@ -1,18 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
 import { Effect } from "effect";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-import { trackEvent } from "@smithers-orchestrator/observability/metrics";
-import { isPidAlive, parseRuntimeOwnerPid } from "@smithers-orchestrator/engine/runtime-owner";
-import * as engineModule from "@smithers-orchestrator/engine/engine";
-import { SmithersError } from "@smithers-orchestrator/errors";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
+import { trackEvent } from "@smthrs/observability/metrics";
+import { isPidAlive, parseRuntimeOwnerPid } from "@smthrs/engine/runtime-owner";
+import * as engineModule from "@smthrs/engine/engine";
+import { SmithersError } from "@smthrs/errors";
 import { isTerminalClaudeMirrorRunStatus } from "./claude-mirror/isTerminalClaudeMirrorRunStatus.js";
 import { findAndOpenDb } from "./find-db.js";
 import { resumeRunDetached, resumeRunDetachedLogFile } from "./resume-detached.js";
 import { buildBuiltinRelaunch, describeResumeTarget, resolveResumeTarget } from "./resume-target.js";
 /** @typedef {import("./RunAutoResumeSkipReason.ts").RunAutoResumeSkipReason} RunAutoResumeSkipReason */
 /** @typedef {import("./ResumeTarget.ts").ResumeTarget} ResumeTarget */
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./SupervisorOptions.ts").SupervisorOptions} SupervisorOptions */
 /** @typedef {import("./SupervisorPollSummary.ts").SupervisorPollSummary} SupervisorPollSummary */
 
@@ -127,7 +127,7 @@ export function parseDurationMs(raw, fieldName) {
   }
   return ms;
 }
-export { isPidAlive, parseRuntimeOwnerPid } from "@smithers-orchestrator/engine/runtime-owner";
+export { isPidAlive, parseRuntimeOwnerPid } from "@smthrs/engine/runtime-owner";
 /**
  * @param {SupervisorOptions} options
  * @returns {NormalizedSupervisorOptions}
@@ -142,7 +142,7 @@ function normalizeSupervisorOptions(options) {
     runsDueForQuotaResume: (adapter, nowMs) => {
       const helper = /** @type {any} */ (engineModule).runsDueForQuotaResume;
       if (typeof helper !== "function") {
-        return Promise.reject(new Error("@smithers-orchestrator/engine does not export runsDueForQuotaResume"));
+        return Promise.reject(new Error("@smthrs/engine does not export runsDueForQuotaResume"));
       }
       return helper(adapter, nowMs);
     },

@@ -3,8 +3,8 @@
 // smithers-display-name: Federation Standalone Manifest Hardening
 // smithers-description: Resolve final standalone-install, transitional-copy, and launch-verification gaps.
 // smithers-tags: maintenance, federation, architecture
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 
@@ -48,7 +48,7 @@ plan/evidence/inventory changes; preserve canonical path ownership.
 Resolve all findings, not just the two labeled blockers:
 
 1. apps/signal/package.json: add an explicit split-time package-manifest rewrite
-   from smithers-orchestrator workspace:* to ^0.31.0. The generated root
+   from smthrs workspace:* to ^0.31.0. The generated root
    manifest does not implicitly rewrite the nested app manifest. Specify
    ordering, lockfile regeneration, standalone install/typecheck/test/deploy
    validation, and future update policy.
@@ -93,7 +93,7 @@ Resolve all findings, not just the two labeled blockers:
 
 7. apps/telegram-summary: make the smithers-integrations standalone root/workspace
    shape explicit and add the existing planned package.json
-   @smithers-orchestrator/gateway-ui workspace:* -> ^0.31.0 split-time rewrite.
+   @smthrs/gateway-ui workspace:* -> ^0.31.0 split-time rewrite.
    Specify the generated/retained root manifest or workspace file(s), dependency
    installation, lockfile regeneration, and app test/typecheck validation.
 
@@ -107,7 +107,7 @@ Resolve all findings, not just the two labeled blockers:
    Inventory any new owned check script exactly.
 
 10. Add an explicit update/drift policy for the
-    evals/lib/verify.test.ts embedded @smithers-orchestrator/ui adapter-import
+    evals/lib/verify.test.ts embedded @smthrs/ui adapter-import
     string fixtures: initial assertions pin the published 0.31.0 surface and a
     named check/update step runs when multi republishes/renames subpaths.
 

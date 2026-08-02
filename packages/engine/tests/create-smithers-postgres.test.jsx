@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * PostgreSQL/PGlite coverage for the createSmithers JSX API
  * (createSmithersPostgres). The JSX API differs from the Effect-native builder:
@@ -14,10 +14,10 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { z } from "zod";
 import { Effect } from "effect";
-import { ContinueAsNew, Ralph, Sequence, Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { ContinueAsNew, Ralph, Sequence, Task, Workflow, runWorkflow } from "smthrs";
 import { createSmithersPostgres } from "../../smithers/src/create.js";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { loadRunOutputRowsEffect } from "@smithers-orchestrator/db/snapshot";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { loadRunOutputRowsEffect } from "@smthrs/db/snapshot";
 
 setDefaultTimeout(180_000);
 

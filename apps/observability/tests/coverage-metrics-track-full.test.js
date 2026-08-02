@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { metricsServiceAdapter, trackEvent } from "@smithers-orchestrator/observability/metrics";
+import { metricsServiceAdapter, trackEvent } from "@smthrs/observability/metrics";
 
 /** @param {any} event */
 function runTrack(event) {

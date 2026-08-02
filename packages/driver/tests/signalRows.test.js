@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { SmithersCtx } from "../src/SmithersCtx.js";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 function makeCtx(signals) {
   return new SmithersCtx({

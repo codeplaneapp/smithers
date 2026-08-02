@@ -8,7 +8,7 @@ apiVersion: v1
 `pauseRun` gracefully pauses an active run: it stops scheduling new tasks,
 lets in-flight tasks finish, then parks the run in the resumable `paused`
 status. Unlike `cancelRun`, it never aborts running tasks. Resume with
-`resumeRun` (or `bunx smithers-orchestrator up --resume`).
+`resumeRun` (or `bunx smthrs up --resume`).
 
 - Method: `pauseRun`
 - Scope: `run:write`

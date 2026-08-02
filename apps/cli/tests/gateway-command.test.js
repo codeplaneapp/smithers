@@ -101,8 +101,8 @@ function writeBasicUi(repo) {
   repo.write(
     ".smithers/workflows/basic.tsx",
     [
-      "/** @jsxImportSource smithers-orchestrator */",
-      'import { createSmithers } from "smithers-orchestrator";',
+      "/** @jsxImportSource smthrs */",
+      'import { createSmithers } from "smthrs";',
       "",
       "const { Workflow, Task, UI, smithers } = createSmithers({});",
       "",
@@ -118,7 +118,7 @@ function writeBasicUi(repo) {
   repo.write(
     ".smithers/ui/basic.tsx",
     [
-      'import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";',
+      'import { createGatewayReactRoot } from "smthrs/gateway-react";',
       "",
       "createGatewayReactRoot(<main>Basic UI</main>);",
       "",
@@ -294,8 +294,8 @@ test("gateway is live while a workflow import is blocked and waits for an early 
       "while (!existsSync(" +
         JSON.stringify(releaseFile) +
         ")) await new Promise((resolve) => setTimeout(resolve, 10));",
-      "/** @jsxImportSource smithers-orchestrator */",
-      'import { createSmithers } from "smithers-orchestrator";',
+      "/** @jsxImportSource smthrs */",
+      'import { createSmithers } from "smthrs";',
       "const { Workflow, Task, smithers } = createSmithers({});",
       'export default smithers(() => <Workflow name="blocked"><Task id="done">{{ ok: true }}</Task></Workflow>);',
       "",
@@ -366,8 +366,8 @@ test("a discovered workspace workflow overrides the built-in fallback", async ()
       "while (!existsSync(" +
         JSON.stringify(releaseFile) +
         ")) await new Promise((resolve) => setTimeout(resolve, 10));",
-      "/** @jsxImportSource smithers-orchestrator */",
-      'import { createSmithers } from "smithers-orchestrator";',
+      "/** @jsxImportSource smthrs */",
+      'import { createSmithers } from "smthrs";',
       "const { Workflow, Task, smithers } = createSmithers({});",
       'export default smithers(() => <Workflow name="Workspace override"><UI entry="../ui/workspace.tsx" title="Workspace override" /><Task id="done">{{ ok: true }}</Task></Workflow>);',
       "",
@@ -376,7 +376,7 @@ test("a discovered workspace workflow overrides the built-in fallback", async ()
   repo.write(
     ".smithers/ui/workspace.tsx",
     [
-      'import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";',
+      'import { createGatewayReactRoot } from "smthrs/gateway-react";',
       "createGatewayReactRoot(<main>Workspace override</main>);",
       "",
     ].join("\n"),
@@ -487,8 +487,8 @@ test("gateway discovers a global-pack workflow-owned UI when the workspace has n
   globalHome.write(
     ".smithers/workflows/globping.tsx",
     [
-      "/** @jsxImportSource smithers-orchestrator */",
-      'import { createSmithers } from "smithers-orchestrator";',
+      "/** @jsxImportSource smthrs */",
+      'import { createSmithers } from "smthrs";',
       'import { z } from "zod/v4";',
       "",
       "const { Workflow, Task, UI, smithers, outputs } = createSmithers({",
@@ -508,7 +508,7 @@ test("gateway discovers a global-pack workflow-owned UI when the workspace has n
     ".smithers/ui/globping.tsx",
     [
       'import React from "react";',
-      'import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";',
+      'import { createGatewayReactRoot } from "smthrs/gateway-react";',
       "",
       "function GlobPingUi() {",
       "  return <main>Global Ping UI</main>;",

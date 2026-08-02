@@ -1,8 +1,8 @@
 // smithers-source: user
 // smithers-display-name: Mission
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import AskUserInstructions from "../prompts/ask-user-instructions.mdx";

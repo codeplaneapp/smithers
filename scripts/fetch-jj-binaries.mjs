@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Download the upstream jj (Jujutsu) release binaries into the per-platform
-// `@smithers-orchestrator/jj-<platform>` packages so Smithers can ship a
+// `@smthrs/jj-<platform>` packages so Smithers can ship a
 // bundled jj. Run this before `pnpm release`; the binaries are gitignored and
 // never committed.
 //

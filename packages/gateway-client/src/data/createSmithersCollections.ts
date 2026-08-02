@@ -18,7 +18,7 @@ import type {
   ListTicketsRequest,
   ListWorkflowsRequest,
   SubmitApprovalRequest,
-} from "@smithers-orchestrator/protocol/gateway-rpc";
+} from "@smthrs/protocol/gateway-rpc";
 import { isGatewayUnavailableError } from "../isGatewayUnavailableError.ts";
 import { noteGatewayUnavailable } from "./gatewayUnavailableNotice.ts";
 import type { GatewayApprovalRow } from "../sync/GatewayApprovalRow.ts";

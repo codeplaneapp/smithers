@@ -3,9 +3,9 @@ import { Effect } from "effect";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { POSTGRES, quoteIdentifier, translateDdl } from "@smithers-orchestrator/db/dialect";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { POSTGRES, quoteIdentifier, translateDdl } from "@smthrs/db/dialect";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { createSmithersPostgres } from "./create.js";
 import { findSmithersAnchorDir } from "./findSmithersAnchorDir.js";
 

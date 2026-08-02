@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
-import type { GatewayWorkflowRow } from "@smithers-orchestrator/gateway-client";
-import type { ListWorkflowsRequest, ListWorkflowsResponse } from "@smithers-orchestrator/gateway-client/rpc";
+import type { GatewayWorkflowRow } from "@smthrs/gateway-client";
+import type { ListWorkflowsRequest, ListWorkflowsResponse } from "@smthrs/gateway-client/rpc";
 import { useSmithersCollections } from "./useSmithersCollections.ts";
 import { gatewayCollectionAsyncState, type GatewayAsyncState } from "./GatewayAsyncState.ts";
 

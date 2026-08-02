@@ -28,7 +28,7 @@
  * grader files, or per-task logic ever reach it.
  */
 
-import { ClaudeCodeAgent, OpenAIAgent } from "@smithers-orchestrator/agents";
+import { ClaudeCodeAgent, OpenAIAgent } from "@smthrs/agents";
 
 // ---- model identifiers -----------------------------------------------------
 // "Codex 5.5" → gpt-5.5 (the flagship 5.5; no `gpt-5.5-codex` variant exists).

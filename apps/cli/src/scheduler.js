@@ -2,11 +2,11 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { CronExpressionParser } from "cron-parser";
 import { Effect, Schedule } from "effect";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
 import { runPromise } from "./smithersRuntime.js";
 import { findAndOpenDb } from "./find-db.js";
 const CLI_ENTRYPOINT = fileURLToPath(new URL("./index.js", import.meta.url));
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /**
  * @typedef {{
  *   cronId: string;

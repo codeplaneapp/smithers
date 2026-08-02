@@ -1,7 +1,7 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
-import { Workflow, Task, runWorkflow } from "smithers-orchestrator";
-import { renderPrometheusMetrics } from "@smithers-orchestrator/observability";
+import { Workflow, Task, runWorkflow } from "smthrs";
+import { renderPrometheusMetrics } from "@smthrs/observability";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";

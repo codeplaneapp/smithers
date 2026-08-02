@@ -1,17 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  useGatewayNodeOutput,
-  useGatewayRpc,
-  useGatewayRunEvents,
-  useGatewayRunTree,
-} from "@smithers-orchestrator/gateway-react";
-import type { GatewayAsyncState, UseGatewayRunTreeResult } from "@smithers-orchestrator/gateway-react";
+import { useGatewayNodeOutput, useGatewayRpc, useGatewayRunEvents, useGatewayRunTree } from "@smthrs/gateway-react";
+import type { GatewayAsyncState, UseGatewayRunTreeResult } from "@smthrs/gateway-react";
 import {
   runNodeKey,
   type GatewayEventFrame,
   type GatewayRpcPayload,
   type GatewayRunNode,
-} from "@smithers-orchestrator/gateway-client";
+} from "@smthrs/gateway-client";
 import { nodeLogEvents } from "./eventFrame.ts";
 import { toNodeDiffView, type NodeDiffView } from "./diffUtils.ts";
 import { defaultTab, flattenTree, resolveFocusIdx, type FlatNode, type TabId } from "./treeUtils.ts";

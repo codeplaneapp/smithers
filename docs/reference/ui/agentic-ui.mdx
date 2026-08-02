@@ -1,9 +1,9 @@
 ---
 title: Agentic UI components
-description: The agentic component families in smithers-orchestrator/ui for prompt, approvals, artifacts, sandbox, and canvas surfaces.
+description: The agentic component families in smthrs/ui for prompt, approvals, artifacts, sandbox, and canvas surfaces.
 ---
 
-`smithers-orchestrator/ui` ships a full set of agentic UI families with shadcn
+`smthrs/ui` ships a full set of agentic UI families with shadcn
 component anatomy: compound slots, `data-slot` attributes, typed props, and
 self-injected namespaced (`sui-*`) styles. Every component calls
 `useInjectUiCss()` plus its lane fragment, so rendering any component is enough
@@ -27,7 +27,7 @@ shipped names are the contract:
 
 ## Conversation
 
-Compound transcript primitives from `smithers-orchestrator/ui`.
+Compound transcript primitives from `smthrs/ui`.
 
 ```tsx
 import {
@@ -38,7 +38,7 @@ import {
   MessageScroller, MessageScrollerProvider, MessageScrollerViewport, MessageScrollerContent,
   MessageScrollerItem, MessageScrollerButton,
   useMessageScroller, useMessageVisibility, useMessageScrollerState,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 ```
 
 - `Message` family: one chat turn with avatar, header, content, footer, and actions slots. `MessageGroup` clusters consecutive turns.
@@ -57,7 +57,7 @@ import {
   usePromptInputAttachments,
   Attachment, AttachmentMedia, AttachmentContent, AttachmentTitle, AttachmentDescription,
   AttachmentActions, AttachmentAction, AttachmentTrigger, AttachmentGroup, AttachmentPreview, AttachmentRemove,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 ```
 
 `PromptInput` is a controlled composer form with submit/stop states
@@ -76,7 +76,7 @@ import {
   toolCallStatus, TOOL_CALL_STATE_LABELS,
   AgentOutput, MessageResponse, parseAgentOutput, formatPartialJson,
   CodeBlock, CodeBlockHeader, CodeBlockFilename, CodeBlockGroup, CodeBlockTabs,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 ```
 
 - `Reasoning`: collapsible reasoning trace with a streaming-aware `ReasoningSummary`.
@@ -95,7 +95,7 @@ import {
   Queue, QueueSection, QueueSectionTrigger, QueueSectionLabel, QueueSectionContent,
   QueueList, QueueItem, QueueItemIndicator, QueueItemContent, QueueItemDescription,
   ActivityTimeline, ActivityItem, ActivityGroup,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 ```
 
 `Plan` renders a step plan (legacy props or compound anatomy) with per-step
@@ -112,14 +112,14 @@ import {
   ApprovalCard, ApprovalRisk, ApprovalResources, ApprovalNote,
   Checkpoint, CheckpointIcon, CheckpointMetadata, CheckpointTrigger, CheckpointActions,
   useCheckpoint, CHECKPOINT_ACTION_KINDS,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 ```
 
 `Confirmation` renders the approval lifecycle (pending, accepted, rejected)
 with action slots; `ApprovalCard` adds risk level, affected resources, and a
 reviewer note; `Checkpoint` presents a durability checkpoint with restore,
 fork, replay, rewind, and return-to-live actions. Gateway-bound wrappers live
-in `smithers-orchestrator/gateway-ui` as `GatewayApprovalList`,
+in `smthrs/gateway-ui` as `GatewayApprovalList`,
 `GatewayApprovalConfirmation`, and `GatewayCheckpointControls`.
 
 ## Sources and citations
@@ -129,7 +129,7 @@ import {
   Sources, SourcesTrigger, SourcesContent, Source,
   InlineCitation, CitationCard, CitationCarousel, CitationQuote,
   Suggestion, SuggestionGroup, OpenInChat,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 ```
 
 `Sources` lists cited origins; `InlineCitation` anchors inline references with
@@ -147,7 +147,7 @@ import {
   ModelBadge, ProviderBadge,
   ContextUsage, ContextTrigger, ContextContent, ContextContentHeader, ContextContentBody, ContextContentFooter,
   ContextInputUsage, ContextOutputUsage, ContextReasoningUsage, ContextCacheUsage, contextUsagePercent,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 ```
 
 `AgentDefinition` documents an agent (instructions, tools, output schema) with
@@ -168,7 +168,7 @@ import {
   Commit, CommitHeader, CommitAuthor, CommitInfo, CommitMessage, CommitMetadata, CommitHash, CommitTimestamp,
   CommitActions, CommitFiles, CommitFile, CommitFileStatus, CommitFilePath, useCommitModel,
   ChangeSummary, EnvironmentVariables, EnvironmentVariable, SecretField,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 ```
 
 Review-surface families: `TestResults` (suite/test rows with status and
@@ -184,7 +184,7 @@ import {
   AgentSandbox, AgentSandboxHeader, AgentSandboxStatus, AgentSandboxActions, AgentSandboxContent, sandboxStateToStatus,
   WebPreview, WebPreviewToolbar, WebPreviewAddress, WebPreviewContent,
   JSXPreview,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 ```
 
 `AgentSandbox` shows sandbox lifecycle state; `WebPreview` embeds a sandboxed
@@ -197,10 +197,10 @@ React subtree.
 import {
   WorkflowCanvas, WorkflowNode, WorkflowNodeHeader, WorkflowNodeContent, WorkflowNodeStatus,
   WorkflowEdge, WorkflowConnection, WorkflowControls, WorkflowPanel, WorkflowToolbar, WorkflowMinimap,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 ```
 
 Canvas anatomy for workflow graphs. The gateway binding
 (`SmithersCanvasNode`, `SmithersNodeHandles` from
-`smithers-orchestrator/gateway-ui`) adapts these slots into
+`smthrs/gateway-ui`) adapts these slots into
 `WorkflowGraph` `nodeTypes`.

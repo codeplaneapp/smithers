@@ -2,8 +2,8 @@
 // smithers-display-name: Build plugin-smithers (Eliza -> Smithers)
 // smithers-description: Implement packages/eliza-plugin — an ElizaOS plugin (plugin-smithers) that drives the Smithers Gateway (launch/watch/approve/cancel runs, proactive chat updates). Private repo workflow. Grounded in .smithers/workflows/archive/plugin-smithers-DESIGN.md.
 // smithers-tags: eliza, plugin, integration, private
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../../agents";
 import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../../components/ValidationLoop";
@@ -15,7 +15,7 @@ const SPEC = `
 # Task: implement \`plugin-smithers\` — an ElizaOS plugin that drives Smithers
 
 Build the NEW package **\`packages/eliza-plugin\`** (internal name
-\`@smithers-orchestrator/eliza-plugin\`): a first-class ElizaOS v1.x plugin that
+\`@smthrs/eliza-plugin\`): a first-class ElizaOS v1.x plugin that
 lets an Eliza agent drive the Smithers durable control plane — launch workflows,
 watch them, answer approval gates, and report progress back into chat. This is
 the mirror image of the already-shipped \`agent-eliza\` package (Smithers ->
@@ -39,7 +39,7 @@ are illustrative. You MUST wire against the REAL Smithers APIs by reading:
 
 - **\`packages/pi-plugin/\`** — the precedent to mirror for monorepo conventions
   (package.json, tsup.config.ts, tsconfig.json, tests layout, how it talks to
-  Smithers, how it reuses \`@smithers-orchestrator/agents/agent-contract\`).
+  Smithers, how it reuses \`@smthrs/agents/agent-contract\`).
   Match its structure and build/test setup.
 - **\`packages/gateway-client/src/SmithersGatewayClient.ts\`** and
   **\`packages/gateway-client/src/GatewayRpcTypeMap.ts\`** — the REAL client.
@@ -87,16 +87,16 @@ A complete, working plugin — read + write + human-in-the-loop + polish:
    services/actions/providers/evaluators/routes/init, \`dependencies:
    ['@elizaos/plugin-sql']\`). Default export + named \`smithersPlugin\`.
 8. \`packages/eliza-plugin/package.json\` per DESIGN §8: internal name
-   \`@smithers-orchestrator/eliza-plugin\`, \`keywords\`
+   \`@smthrs/eliza-plugin\`, \`keywords\`
    \`["elizaos","plugin","smithers","orchestration"]\`, \`agentConfig.pluginParameters\`
    for SMITHERS_URL / SMITHERS_API_KEY, deps \`@elizaos/core\` (^1.7.2, a real
-   dep — externalized by tsup) + \`@smithers-orchestrator/gateway-client\`
+   dep — externalized by tsup) + \`@smthrs/gateway-client\`
    (\`workspace:*\`), tsup build externalizing @elizaos/core. Add
    \`tsconfig.json\` + \`tsup.config.ts\` mirroring pi-plugin.
 
-Reuse where the design says to: \`@smithers-orchestrator/agents/agent-contract\`
+Reuse where the design says to: \`@smthrs/agents/agent-contract\`
 (\`renderSmithersAgentPromptGuidance\`) folded into the provider text, and
-\`SmithersError\` from \`@smithers-orchestrator/errors\` for error shapes.
+\`SmithersError\` from \`@smthrs/errors\` for error shapes.
 
 ## Tests (NO MOCKS — repo policy; CI has no @elizaos/core, no LLM, no browsers)
 
@@ -121,7 +121,7 @@ Design §11. Keep the package test gate deterministic and CI-safe:
 - **\`pnpm install\` then \`pnpm install --frozen-lockfile\` BOTH succeed** — if
   you add the package to the root \`package.json\`, you MUST regenerate and
   commit \`pnpm-lock.yaml\` so the ROOT importer includes
-  \`@smithers-orchestrator/eliza-plugin\`; otherwise CI's frozen install fails
+  \`@smthrs/eliza-plugin\`; otherwise CI's frozen install fails
   with \`ERR_PNPM_OUTDATED_LOCKFILE\`. (This exact bug bit the last package —
   do not repeat it.)
 - \`pnpm test\` gate green: \`check-single-effect-version\`,

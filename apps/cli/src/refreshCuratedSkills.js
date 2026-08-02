@@ -28,7 +28,7 @@ import {
  * Skill installs drift in two ways that both broke real agents:
  *  1. The CLI ships a newer SKILL.md but the copy in an agent's skills dir is
  *     stale (older mental model, missing the "do it, don't describe it" rule).
- *  2. A *retired* skill (`smithers-orchestrator`, with `recommend-plan-mode`)
+ *  2. A *retired* skill (`smthrs`, with `recommend-plan-mode`)
  *     lingers and shadows the current one, so the agent loads read-only
  *     plan-mode guidance and narrates instead of writing the workflow.
  *
@@ -195,7 +195,7 @@ export function refreshCuratedSkills(opts = {}) {
     // A deselected agent skips (re)install of the current skill, but MUST still
     // get the harmful retired skill removed below — deselection means "no
     // smithers curated skill here", which includes not leaving the retired
-    // `smithers-orchestrator` skill (with its stale plan-mode guidance) behind.
+    // `smthrs` skill (with its stale plan-mode guidance) behind.
     if (!deselected.has(target.id)) {
       const dest = join(skillsDir, CURATED_SKILL_NAME);
       const installedMd = readSkillMdMaybe(dest);
@@ -228,7 +228,7 @@ export function refreshCuratedSkills(opts = {}) {
     }
 
     // Remove retired skills regardless of folder name (e.g. a
-    // `smithers-orchestrator` dir, or a retired skill under any other folder).
+    // `smthrs` dir, or a retired skill under any other folder).
     if (existsSync(skillsDir)) {
       let entries = [];
       try {

@@ -13,21 +13,21 @@ a patch release.
 
 ## Gateway UI SDKs
 
-- **New browser client package: `@smithers-orchestrator/gateway-client`.** It
+- **New browser client package: `@smthrs/gateway-client`.** It
   ships `SmithersGatewayClient`, `SmithersGatewayConnection`, typed request and
   response maps for the stable Gateway RPC contract, structured `GatewayRpcError`
   handling, HTTP RPC helpers, WebSocket connection support, and a
   `streamRunEvents()` async iterator for run-scoped event streams.
 
-- **New React package: `@smithers-orchestrator/gateway-react`.** It ships
+- **New React package: `@smthrs/gateway-react`.** It ships
   `SmithersGatewayProvider`, `createGatewayReactRoot`, and hooks for common UI
   reads and actions: `useGatewayRpc`, `useGatewayRuns`, `useGatewayRun`,
   `useGatewayRunEvents`, `useGatewayWorkflows`, `useGatewayApprovals`,
   `useGatewayNodeOutput`, and `useGatewayActions`.
 
-- **Convenience subpath exports from `smithers-orchestrator`.** Apps can import
-  the new SDK surfaces through `smithers-orchestrator/gateway-client` and
-  `smithers-orchestrator/gateway-react` in addition to the standalone workspace
+- **Convenience subpath exports from `smthrs`.** Apps can import
+  the new SDK surfaces through `smthrs/gateway-client` and
+  `smthrs/gateway-react` in addition to the standalone workspace
   packages.
 
 ## Gateway-Hosted React UIs
@@ -87,7 +87,7 @@ a patch release.
 
 ## Default Workflow Pack
 
-- **`bunx smithers-orchestrator init` now seeds the `mission` workflow.** `mission` is a
+- **`bunx smthrs init` now seeds the `mission` workflow.** `mission` is a
   long-horizon workflow that plans work into milestones, optionally waits for
   plan approval, runs focused feature workers in parallel, integrates milestone
   output, validates the checkpoint, performs one follow-up repair pass when
@@ -123,7 +123,7 @@ a patch release.
   link to the Smithers GitHub repository.
 
 - **README onboarding was refreshed.** The README now points new users at
-  `bunx smithers-orchestrator@latest init` and describes the generated workflow
+  `bunx smthrs@latest init` and describes the generated workflow
   pack as ready-to-run.
 
 ## Fixes and Hardening
@@ -142,10 +142,10 @@ a patch release.
   explicit `UNKNOWN_OUTPUT_SCHEMA` message telling authors to use
   `createSmithers(...).outputs.<key>` or a string output key.
 
-- **`bunx smithers-orchestrator init` resolves published package versions
+- **`bunx smthrs init` resolves published package versions
   correctly.** The workflow pack now reads its own package version from the
   installed CLI package, resolves dependency versions with `createRequire`, and
-  writes a concrete `smithers-orchestrator` semver range instead of always using
+  writes a concrete `smthrs` semver range instead of always using
   `"latest"`.
 
 - **Published package dependency guardrails were added.** New tests simulate the

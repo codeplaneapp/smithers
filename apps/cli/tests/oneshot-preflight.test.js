@@ -167,7 +167,7 @@ test("oneshot warns for dirty and detached cwd states and stays quiet for a clea
   writeFileSync(join(cwd, ".gitignore"), ".smithers/*\n.home/\nsmithers.db*\n");
   writeFileSync(
     join(workflowDir, "oneshot.tsx"),
-    `/** @jsxImportSource smithers-orchestrator */
+    `/** @jsxImportSource smthrs */
 import { createSmithers } from "${pathToFileURL(join(repoRoot, "packages/smithers/src/index.js")).href}";
 import { z } from "${pathToFileURL(join(repoRoot, "node_modules/zod/index.js")).href}";
 const { Workflow, Task, smithers, outputs } = createSmithers({

@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import { useGatewayNodeEvents } from "@smithers-orchestrator/gateway-react";
+import { useGatewayNodeEvents } from "@smthrs/gateway-react";
 import {
   ChatMessage,
   ChatTranscript,
@@ -10,7 +10,7 @@ import {
   Reasoning,
   StatusPill,
   ToolCall,
-} from "@smithers-orchestrator/ui";
+} from "@smthrs/ui";
 import { buildNodeChatTranscript, type NodeChatItem } from "./nodeChat";
 import { theme } from "./theme";
 

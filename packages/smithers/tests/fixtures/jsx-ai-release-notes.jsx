@@ -1,5 +1,5 @@
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Task, Workflow } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, Task, Workflow } from "smthrs";
 import { z } from "zod";
 import { join } from "node:path";
 import { mkdtempSync } from "node:fs";

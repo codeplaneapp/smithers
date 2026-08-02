@@ -11,8 +11,8 @@ import { useResolvedTheme } from "../internal/useResolvedTheme";
  * a unified patch through `@pierre/diffs` `processPatch` and renders it with the
  * `CodeView` React widget, which tokenizes every line through Shiki. It lives in
  * the `adapters` layer because `@pierre/diffs` is a heavy widget dependency; the
- * base `@smithers-orchestrator/ui` barrel never pulls it in, so consumers opt in
- * through the `@smithers-orchestrator/ui/adapters/pierre-diff-view` subpath.
+ * base `@smthrs/ui` barrel never pulls it in, so consumers opt in
+ * through the `@smthrs/ui/adapters/pierre-diff-view` subpath.
  *
  * The component is fully props-driven with no app coupling. Multi's original
  * carried an app `Theme` import; here an optional `mode` prop overrides the

@@ -10,7 +10,7 @@
  * receivedAtMs } }` when a `smithers:wait-for-event` node parks. Both the
  * engine (`bridgeSignalResolve`) and the db adapter
  * (`findRunsAwaitingEvent`) must interpret that metadata identically, so the
- * ONE implementation lives here in `@smithers-orchestrator/db`.
+ * ONE implementation lives here in `@smthrs/db`.
  */
 
 /**

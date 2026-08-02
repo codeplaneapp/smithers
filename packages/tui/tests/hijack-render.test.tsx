@@ -6,12 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { useRenderer as useOpenTuiRenderer } from "@opentui/react";
 import type { CliRenderer } from "@opentui/core";
-import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import type { GatewayRunNode } from "@smthrs/gateway-client";
 import { describeHeadlessRender, renderForTest } from "./renderHelpers.tsx";
 import { RendererProvider } from "../src/RendererContext.tsx";
 import { hijackCommand, Selecting, HandingOff, Returned, HijackMode } from "../src/modes/HijackMode.tsx";
-import { SmithersGatewayProvider } from "@smithers-orchestrator/gateway-react";
-import { SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
+import { SmithersGatewayProvider } from "@smthrs/gateway-react";
+import { SmithersGatewayClient } from "@smthrs/gateway-client";
 import { startSeededGateway, defaultSeed, emptySeed } from "./seededGateway.ts";
 
 /**

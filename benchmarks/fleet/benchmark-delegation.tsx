@@ -2,14 +2,14 @@
 // smithers-display-name: Benchmark Delegation (Claude-only)
 // smithers-description: Headless, zero-approval recursive delegation for long-horizon benchmark tasks. Opus plans and reviews, Opus delegates to Opus, and down to Sonnet to implement. No goal questions, no end poll — meant to run detached in a rollout container against one subscription.
 // smithers-tags: benchmark, delegation, fleet
-/** @jsxImportSource smithers-orchestrator */
-import { DelegationChain, createSmithers, delegationSchemas } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { DelegationChain, createSmithers, delegationSchemas } from "smthrs";
 import {
   estimateAccuracyScorer,
   planSolidityScorer,
   pocJudgmentScorer,
   tierFitScorer,
-} from "smithers-orchestrator/scorers";
+} from "smthrs/scorers";
 import { z } from "zod/v4";
 import { buildFleetTiers } from "./buildFleetTiers";
 

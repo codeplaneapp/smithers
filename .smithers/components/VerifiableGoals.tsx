@@ -1,6 +1,6 @@
 // smithers-source: authored
-/** @jsxImportSource smithers-orchestrator */
-import { Sequence, Task, type AgentLike } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Sequence, Task, type AgentLike } from "smthrs";
 import { z } from "zod/v4";
 
 // One verifiable goal per ticket: small enough to research→plan→implement in a

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { withTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { withTaskRuntime } from "@smthrs/driver/task-runtime";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import { __childWorkflowInternals, executeChildWorkflow } from "../src/child-workflow.js";

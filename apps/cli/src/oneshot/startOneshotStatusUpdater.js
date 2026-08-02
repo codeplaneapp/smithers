@@ -1,4 +1,4 @@
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { listNarratorCandidates } from "../narrator-agents.js";
 import { runPromise } from "../smithersRuntime.js";
 import { SOTA_SLOTS } from "../sota-models.generated.js";

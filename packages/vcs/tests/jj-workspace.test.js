@@ -4,7 +4,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import { Effect } from "effect";
 import * as BunContext from "@effect/platform-bun/BunServices";
-import { renderPrometheusMetrics } from "@smithers-orchestrator/observability";
+import { renderPrometheusMetrics } from "@smthrs/observability";
 import * as vcsEffects from "../src/jj.js";
 
 const JJ_ENV = "SMITHERS_JJ_PATH";

@@ -17,9 +17,9 @@ If a run id is given (the `Run id` above), you have file and shell tools — ins
 the real run state before deciding, substituting that id for `RUN_ID` below. Read
 it, do not guess:
 
-- `bunx smithers-orchestrator inspect RUN_ID` for the full run state (steps, agents, outputs).
-- `bunx smithers-orchestrator events RUN_ID --limit 200` for the event history.
-- `bunx smithers-orchestrator node NODE_ID --run-id RUN_ID` for a specific node's tool calls and output.
+- `bunx smthrs inspect RUN_ID` for the full run state (steps, agents, outputs).
+- `bunx smthrs events RUN_ID --limit 200` for the event history.
+- `bunx smthrs node NODE_ID --run-id RUN_ID` for a specific node's tool calls and output.
 
 These are read-only. Do NOT start, cancel, fork, or graph any run — another step
 owns that. If no run id is given, work purely from the prompt and context above.

@@ -2,11 +2,11 @@
 /**
  * Operation Ferric — workflow UI (presentation-only; it cannot schedule work).
  * Declared by the workflow via `UI entry="../ui/react-rust-port.tsx"` and
- * composed from smithers-orchestrator/gateway-ui widgets + smithers-orchestrator/ui
+ * composed from smthrs/gateway-ui widgets + smthrs/ui
  * primitives over the gateway-react hooks (spec §6).
  */
 import { useState } from "react";
-import { createGatewayReactRoot, useGatewayRun } from "smithers-orchestrator/gateway-react";
+import { createGatewayReactRoot, useGatewayRun } from "smthrs/gateway-react";
 import {
   ApprovalPanel,
   ConnectionBadge,
@@ -19,8 +19,8 @@ import {
   RunTree,
   StatusPill,
   WorkflowUiShell,
-} from "smithers-orchestrator/gateway-ui";
-import { EmptyState, KpiStat } from "smithers-orchestrator/ui";
+} from "smthrs/gateway-ui";
+import { EmptyState, KpiStat } from "smthrs/ui";
 
 const WORKFLOW = "react-rust-port";
 const MILESTONES = ["M0", "M1", "M2", "M3", "M4", "M5M6", "M7", "M8", "GA", "M9"];

@@ -4,7 +4,7 @@
  * This runs identically locally (single process, SQLite) and on Kubernetes
  * (distributed orchestrator + workers, Postgres). No code changes needed.
  */
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 const { smithers, Workflow, Task, Sequence, outputs } = createSmithers({
     analysis: z.object({

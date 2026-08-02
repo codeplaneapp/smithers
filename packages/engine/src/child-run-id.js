@@ -1,5 +1,5 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { buildSubflowChildRunId } from "@smithers-orchestrator/graph/subflow-run-lineage";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { buildSubflowChildRunId } from "@smthrs/graph/subflow-run-lineage";
 
 // Keep generated child ids inside the grammar shared by Gateway/time-travel
 // read paths. `=,` are reserved for engine-added nested-loop scope suffixes.

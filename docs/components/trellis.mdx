@@ -14,14 +14,14 @@ work with runtime-adaptive topology, and keep fixed JSX for known
 deterministic graphs.
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import {
   ClaudeCodeAgent,
   CodexAgent,
   Trellis,
   createSmithers,
   delegationV2Schemas,
-} from "smithers-orchestrator";
+} from "smthrs";
 import { z } from "zod/v4";
 
 const input = z.object({
@@ -62,7 +62,7 @@ export default smithers((ctx) => {
 The run must pin the same concurrency value:
 
 ```bash
-bunx smithers-orchestrator up workflow.tsx \
+bunx smthrs up workflow.tsx \
   --input '{"prompt":"Implement the feature and prove it works"}' \
   --max-concurrency 4
 ```

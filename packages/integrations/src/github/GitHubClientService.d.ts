@@ -1,5 +1,5 @@
 import { Schema, Effect } from 'effect';
-import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
+import { SmithersError } from '@smthrs/errors/SmithersError';
 
 type GitHubRequestMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 type GitHubRequestOptions<A = unknown> = {

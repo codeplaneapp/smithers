@@ -14,7 +14,7 @@ import {
   useGatewayRun,
   useGatewayRuns,
   useGatewayRunTree,
-} from "smithers-orchestrator/gateway-react";
+} from "smthrs/gateway-react";
 import {
   ApprovalPanel,
   RunEventLog,
@@ -22,8 +22,8 @@ import {
   WorkflowUiShell,
   WorkflowUiStyles,
   formatStatus,
-} from "smithers-orchestrator/gateway-ui";
-import { EmptyState } from "smithers-orchestrator/ui";
+} from "smthrs/gateway-ui";
+import { EmptyState } from "smthrs/ui";
 
 const panelStyle: React.CSSProperties = {
   border: "1px solid rgba(128,128,128,0.25)",

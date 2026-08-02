@@ -58,12 +58,12 @@ describe("integrations deep subpath types resolve through published exports", ()
     const { code, out } = typecheck(
       "good.tsx",
       [
-        `import { makePollingSource } from "@smithers-orchestrator/integrations/core/EventSource";`,
-        `import { integrationEventName } from "@smithers-orchestrator/integrations/core/signalNames";`,
-        `import { splitRepo } from "@smithers-orchestrator/integrations/github/components/outbound";`,
-        `import { SendMessage } from "@smithers-orchestrator/integrations/telegram/components/SendMessage";`,
+        `import { makePollingSource } from "@smthrs/integrations/core/EventSource";`,
+        `import { integrationEventName } from "@smthrs/integrations/core/signalNames";`,
+        `import { splitRepo } from "@smthrs/integrations/github/components/outbound";`,
+        `import { SendMessage } from "@smthrs/integrations/telegram/components/SendMessage";`,
         `import { Effect } from "effect";`,
-        `import type { TelegramClientConfig } from "@smithers-orchestrator/integrations/telegram/TelegramClientTypes";`,
+        `import type { TelegramClientConfig } from "@smthrs/integrations/telegram/TelegramClientTypes";`,
         `const eventName: string = integrationEventName("github", "push");`,
         `const repo: { owner: string; name: string } = splitRepo("smithersai/smithers");`,
         `const config: TelegramClientConfig = { botToken: "token" };`,
@@ -80,8 +80,8 @@ describe("integrations deep subpath types resolve through published exports", ()
     const { code, out } = typecheck(
       "bad.tsx",
       [
-        `import { splitRepo } from "@smithers-orchestrator/integrations/github/components/outbound";`,
-        `import type { SendMessageProps } from "@smithers-orchestrator/integrations/telegram/components/SendMessage";`,
+        `import { splitRepo } from "@smthrs/integrations/github/components/outbound";`,
+        `import type { SendMessageProps } from "@smthrs/integrations/telegram/components/SendMessage";`,
         `const badOwner: number = splitRepo("smithersai/smithers").owner;`,
         `const badProps: SendMessageProps = { id: "send", chatId: "chat", children: () => ({ text: 123 }) };`,
         `export { badOwner, badProps };`,

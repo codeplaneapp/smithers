@@ -6,7 +6,7 @@ import { build } from "tsup";
 import * as source from "../src/index.ts";
 
 /**
- * Package-export/runtime parity gate. The published `@smithers-orchestrator/
+ * Package-export/runtime parity gate. The published `@smthrs/
  * testing` entrypoint is the COMMITTED src/index.js artifact (via the
  * package.json exports map), while most in-repo suites resolve the tsconfig
  * alias straight to src/index.ts. A stale committed bundle can therefore stay
@@ -18,7 +18,7 @@ import * as source from "../src/index.ts";
  * serialization's native fields, real-adapter advertised cut points, and
  * cut-point receipt/ambiguity emission.
  */
-const shippedPath = Bun.resolveSync("@smithers-orchestrator/testing", import.meta.dir);
+const shippedPath = Bun.resolveSync("@smthrs/testing", import.meta.dir);
 const shipped = (await import(shippedPath)) as typeof source;
 
 describe("published artifact parity", () => {

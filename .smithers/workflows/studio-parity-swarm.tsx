@@ -1,6 +1,6 @@
 // smithers-display-name: Smithers UI Parity Swarm
-/** @jsxImportSource smithers-orchestrator */
-import { MergeQueue, Parallel, Sequence, Task, Worktree, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { MergeQueue, Parallel, Sequence, Task, Worktree, createSmithers } from "smthrs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";

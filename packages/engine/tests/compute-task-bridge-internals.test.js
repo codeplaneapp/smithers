@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { z } from "zod";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { requireTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { TaskHeartbeatTimeout } from "@smithers-orchestrator/errors/TaskHeartbeatTimeout";
-import { defineTool } from "@smithers-orchestrator/tool-context";
-import { archiveDiscardedEffects } from "@smithers-orchestrator/time-travel/archiveDiscardedEffects";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { requireTaskRuntime } from "@smthrs/driver/task-runtime";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { TaskHeartbeatTimeout } from "@smthrs/errors/TaskHeartbeatTimeout";
+import { defineTool } from "@smthrs/tool-context";
+import { archiveDiscardedEffects } from "@smthrs/time-travel/archiveDiscardedEffects";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import {

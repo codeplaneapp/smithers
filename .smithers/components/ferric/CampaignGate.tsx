@@ -1,5 +1,5 @@
-/** @jsxImportSource smithers-orchestrator */
-import { Approval } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Approval } from "smthrs";
 import { outputs } from "./ferricSmithers";
 import { APPROVAL_SLA, GATE_REGISTRY, type FerricGateId } from "./ferricGates";
 

@@ -73,7 +73,7 @@
       {
         "path": ".smithers/workflows/smoketest.tsx",
         "id": "smoketest",
-        "description": "Comprehensive release smoke test. Four parallel agents prove the published smithers-orchestrator works for a brand-new user: the human onboarding flow, the agent onboarding flow, every user-facing change across the last 4 releases, and a real workflow UI served over the gateway — then a deterministic report aggregates the verdict.",
+        "description": "Comprehensive release smoke test. Four parallel agents prove the published smthrs works for a brand-new user: the human onboarding flow, the agent onboarding flow, every user-facing change across the last 4 releases, and a real workflow UI served over the gateway — then a deterministic report aggregates the verdict.",
         "sha256": "02d9248563af11282d5cad9da5ee774c514708da08939245762c0c561ccb9cf2",
         "bytes": 7826,
         "variants": 30

@@ -1,4 +1,4 @@
-import { ClaudeCodeAgent, PiAgent } from "smithers-orchestrator";
+import { ClaudeCodeAgent, PiAgent } from "smthrs";
 
 type AgentArgs = {
   prompt?: string;

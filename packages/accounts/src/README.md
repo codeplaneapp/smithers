@@ -1,4 +1,4 @@
-# @smithers-orchestrator/accounts — src
+# @smthrs/accounts — src
 
 The account registry behind `smithers agents`: Claude Code / Antigravity /
 Codex / Kimi subscription accounts and Anthropic / OpenAI / Gemini API-key

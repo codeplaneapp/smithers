@@ -18,8 +18,8 @@ import { getTableColumns } from "drizzle-orm/utils";
 import { createHash } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Effect, Exit, Metric } from "effect";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { getSqlMessageStorage } from "./sql-message-storage.js";
 import { sha256Hex } from "./sha256Hex.js";
 import { POSTGRES, beginTransactionSql } from "./dialect.js";
@@ -30,7 +30,7 @@ import {
   dbQueryDuration,
   dbTransactionDuration,
   dbTransactionRollbacks,
-} from "@smithers-orchestrator/observability/metrics";
+} from "@smthrs/observability/metrics";
 
 function incrementGauge(metric, delta) {
   return Metric.value(metric).pipe(Effect.flatMap((state) => Metric.update(metric, Number(state.value) + delta)));
@@ -65,7 +65,7 @@ import { normalizeWaitForEventCorrelationId, parseWaitForEventAttemptSnapshot } 
  * @typedef {Effect.Effect<A, E> & PromiseLike<A>} RunnableEffect
  */
 /** @typedef {import("./adapter/SignalQuery.ts").SignalQuery} SignalQuery */
-/** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
+/** @typedef {import("@smthrs/errors/SmithersError").SmithersError} SmithersError */
 /**
  * @typedef {{ runId: string; frameNo: number; createdAtMs: number; xmlJson: string; xmlHash: string; encoding: string; mountedTaskIdsJson: string | null; taskIndexJson: string | null; note: string | null; }} FrameRow
  */
@@ -4450,7 +4450,7 @@ export class SmithersDb {
   // ---------------------------------------------------------------------------
   /**
    * List cross-run memory facts, optionally scoped to a namespace. Reads the
-   * `_smithers_memory_facts` table written by `@smithers-orchestrator/memory`'s
+   * `_smithers_memory_facts` table written by `@smthrs/memory`'s
    * MemoryStore (`setFact`) — the SAME table the `smithers memory list` CLI reads
    * — so a fact set by any run/workflow surfaces here. Columns are snake→camel
    * cased by the storage layer (`value_json → valueJson`, etc.). A null/undefined

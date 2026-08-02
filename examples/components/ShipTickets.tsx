@@ -1,6 +1,6 @@
 // smithers-source: authored
-/** @jsxImportSource smithers-orchestrator */
-import { Sequence, Task, Worktree, type AgentLike } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Sequence, Task, Worktree, type AgentLike } from "smthrs";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve, relative } from "node:path";
 import { z } from "zod/v4";

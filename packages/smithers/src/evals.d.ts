@@ -1,6 +1,6 @@
-import type { EvalAssertion, EvalCaseInput } from "@smithers-orchestrator/scorers/evalCases";
+import type { EvalAssertion, EvalCaseInput } from "@smthrs/scorers/evalCases";
 
-export * from "@smithers-orchestrator/scorers/evalCases";
+export * from "@smthrs/scorers/evalCases";
 
 export type ReadEvalSuiteResult = {
   suiteId: string;

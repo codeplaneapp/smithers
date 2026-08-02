@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
@@ -8,11 +8,11 @@ import { tmpdir } from "node:os";
 import { WebSocket } from "ws";
 import { z } from "zod";
 import { Effect } from "effect";
-import { createSmithers, runWorkflow } from "smithers-orchestrator";
-import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import type { DevToolsSnapshot } from "@smithers-orchestrator/protocol";
+import { createSmithers, runWorkflow } from "smthrs";
+import { canonicalizeXml } from "@smthrs/graph/utils/xml";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import type { DevToolsSnapshot } from "@smthrs/protocol";
 import { Gateway } from "../src/gateway.js";
 import { DEVTOOLS_TASK_PROMPT_MAX_CHARS, getDevToolsSnapshotRoute } from "../src/gatewayRoutes/getDevToolsSnapshot.js";
 import { sleep } from "../../smithers/tests/helpers.js";

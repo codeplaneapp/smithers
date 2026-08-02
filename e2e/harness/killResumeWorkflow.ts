@@ -2,7 +2,7 @@ import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import React from "react";
 import { z } from "zod";
-import { Sequence, Task, Workflow, createSmithers } from "smithers-orchestrator";
+import { Sequence, Task, Workflow, createSmithers } from "smthrs";
 
 /**
  * Shared workflow definition for the real engine kill/resume durability case

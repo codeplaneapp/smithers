@@ -1,4 +1,4 @@
-# @smithers-orchestrator/db — src
+# @smthrs/db — src
 
 The Smithers persistence layer. Two layers do the work: `sql-message-storage.js`
 (raw SQL over bun:sqlite/PGlite/Postgres with snake/camel mapping and dialect
@@ -26,7 +26,7 @@ the `runState/` derivation used by ps/monitor surfaces; `docWatcher.js` +
 tombstone-respecting last-write-wins.
 
 Gotchas: `index.js` is the barrel, but package.json's `./*` export makes every
-src file deep-importable (e.g. `@smithers-orchestrator/db/docWatcher`,
+src file deep-importable (e.g. `@smthrs/db/docWatcher`,
 `/buildHumanRequestId`, `/react-output`) — do not rename files casually. The
 `adapter/`, `frame-codec/`, `internal-schema/`, `output/`, `runState/`
 directories hold the type sidecars and split implementations behind the

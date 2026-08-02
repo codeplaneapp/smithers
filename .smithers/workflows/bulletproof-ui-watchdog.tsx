@@ -1,6 +1,6 @@
 // smithers-display-name: Bulletproof UI Watchdog
-/** @jsxImportSource smithers-orchestrator */
-import { Sequence, Task, Timer, UI, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Sequence, Task, Timer, UI, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { providers } from "../agents";
 import { codexFirst } from "../lib/codexAccounts";

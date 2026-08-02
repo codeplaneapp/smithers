@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { reducedMotionCss, workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
+import { reducedMotionCss, workflowUiThemeCss } from "@smthrs/ui-styleguide";
 import { agentOutputCss, smithersUiCss } from "../src/uiCss";
 import { tokens } from "../src/tokens";
 

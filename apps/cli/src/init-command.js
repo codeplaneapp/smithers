@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { z } from "incur";
-import { SmithersError } from "@smithers-orchestrator/errors";
+import { SmithersError } from "@smthrs/errors";
 import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
 import { regenerateAgentsTsIfPresent } from "./agent-commands/regenerateAgentsTsIfPresent.js";
 import { runInitCeremony } from "./initCeremony.js";
@@ -123,7 +123,7 @@ function buildInitCta(templateResult) {
     commands: templateResult
       ? [
           {
-            command: templateResult.command.replace(/^bunx smithers-orchestrator\s+/, ""),
+            command: templateResult.command.replace(/^bunx smthrs\s+/, ""),
             description: `Run ${templateResult.id}`,
           },
           { command: "starters", description: "Browse the other templates" },
@@ -159,8 +159,8 @@ async function runDurableReinit(options) {
   try {
     const [{ Effect }, { runWorkflow }, { ensureSmithersTables }, { mdxPlugin }] = await Promise.all([
       import("effect"),
-      import("@smithers-orchestrator/engine"),
-      import("@smithers-orchestrator/db/ensure"),
+      import("@smthrs/engine"),
+      import("@smthrs/db/ensure"),
       import("./mdx-plugin.js"),
     ]);
     mdxPlugin();

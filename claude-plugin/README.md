@@ -4,7 +4,7 @@ A [Claude Code plugin](https://code.claude.com/docs/en/plugins) that makes Claud
 fluent in **Smithers**, the durable control plane for long-running coding agents.
 Installing it gives a Claude Code session:
 
-- the **`smithers` MCP server** (`smithers-orchestrator --mcp`) — `list_workflows`,
+- the **`smithers` MCP server** (`smthrs --mcp`) — `list_workflows`,
   `run_workflow`, `watch_run`, `resolve_approval`, and the rest of the semantic
   tool surface;
 - the **`smithers` skill** — teaches Claude to drive Smithers as an orchestrator
@@ -40,8 +40,8 @@ workflow input and transcripts are never copied into attribution.
    crash, retries on failure, and gates on human approvals.
 2. **A live UI for every workflow.** Whenever Claude creates or runs a workflow it
    authors a standalone React UI at `.smithers/ui/<key>.tsx` (composed from the
-   `smithers-orchestrator/gateway-ui` run widgets and `smithers-orchestrator/ui`
-   primitives over the `smithers-orchestrator/gateway-react` hooks) and launches it with
+   `smthrs/gateway-ui` run widgets and `smthrs/ui`
+   primitives over the `smthrs/gateway-react` hooks) and launches it with
    `smithers ui <runId>`, so the human watches the run live in their browser
    instead of reading text summaries. See
    [`skills/smithers/SKILL.md`](./skills/smithers/SKILL.md) for the exact
@@ -112,7 +112,7 @@ SessionStart run count, the `/workflows` mirror — goes through
    `package.json` is named `smithers-monorepo` and that has
    `apps/cli/src/index.js`), it runs that working tree. Contributors get the code
    they are editing, not the last published release.
-2. Otherwise it runs `bunx smithers-orchestrator` — the published package.
+2. Otherwise it runs `bunx smthrs` — the published package.
 
 `bin/smithers.mjs` applies that choice for config files that can only name a
 static command, forwarding argv and stdio unchanged. In a checkout the
@@ -121,6 +121,6 @@ SessionStart hook also passes the resolved command to the mirror as `args.cli`.
 ## Requirements
 
 - `claude` (Claude Code) with the `claude plugin` / `/plugin` interface.
-- `bunx` on PATH (the MCP server launches via `bunx smithers-orchestrator --mcp`
+- `bunx` on PATH (the MCP server launches via `bunx smthrs --mcp`
   unless a source checkout is detected, in which case it runs `bun` on that tree).
 - `node` on PATH (the hooks and the launcher are dependency-free Node ESM scripts).

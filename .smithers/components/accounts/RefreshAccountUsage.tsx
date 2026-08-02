@@ -1,5 +1,5 @@
-/** @jsxImportSource smithers-orchestrator */
-import { Task } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Task } from "smthrs";
 import { z } from "zod";
 import { SNAPSHOT_PATH, writeSnapshot, type AccountUsage } from "./accountPool";
 
@@ -32,8 +32,8 @@ export function RefreshAccountUsage({ id = "accounts:refresh", output }: { id?: 
   return (
     <Task id={id} output={output as any} retries={1}>
       {async () => {
-        const { listAccounts } = await import("@smithers-orchestrator/accounts");
-        const { getAccountUsage } = await import("@smithers-orchestrator/usage");
+        const { listAccounts } = await import("@smthrs/accounts");
+        const { getAccountUsage } = await import("@smthrs/usage");
 
         const accounts = listAccounts();
         const probed: AccountUsage[] = await Promise.all(

@@ -1,1 +1,1 @@
-export * from "@smithers-orchestrator/gateway-react";
+export * from "@smthrs/gateway-react";

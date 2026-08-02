@@ -6,8 +6,8 @@ description: Render a workflow tree to a GraphSnapshot without executing.
 Use `renderFrame` to preview the task graph (CI validation, graph-inspection UIs, dry-run checks) without executing or persisting anything. It parses `ctx.input` through the workflow input schema first, applying defaults and transforms to a derived context without mutating the supplied context. `runId` and `iteration` are arbitrary strings used only for snapshot identity.
 
 ```ts
-import { renderFrame } from "smithers-orchestrator";
-import { SmithersCtx } from "@smithers-orchestrator/driver";
+import { renderFrame } from "smthrs";
+import { SmithersCtx } from "@smthrs/driver";
 import { Effect } from "effect";
 
 const ctx = new SmithersCtx({ runId: "preview", iteration: 0, input: { task: "preview" }, outputs: {} });
@@ -35,5 +35,5 @@ const snap = await Effect.runPromise(renderFrame(workflow, ctx));
 CLI equivalent:
 
 ```bash
-bunx smithers-orchestrator graph workflow.tsx --input '{"task":"preview"}'
+bunx smthrs graph workflow.tsx --input '{"task":"preview"}'
 ```

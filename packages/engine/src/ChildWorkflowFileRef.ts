@@ -6,7 +6,7 @@
  * root are rejected before anything is imported.
  *
  * Structurally identical to the `WorkflowFileRef` accepted by the `<Subflow>`
- * component in `@smithers-orchestrator/components`.
+ * component in `@smthrs/components`.
  */
 export type ChildWorkflowFileRef = {
   /**

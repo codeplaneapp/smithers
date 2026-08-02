@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
-import { createGatewayReactRoot, useGatewayNodeOutput, useGatewayRunEvents } from "smithers-orchestrator/gateway-react";
-import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
+import { createGatewayReactRoot, useGatewayNodeOutput, useGatewayRunEvents } from "smthrs/gateway-react";
+import { WorkflowUiStyles } from "smthrs/gateway-ui";
 
 const PROBE_NODE_ID = "probe";
 

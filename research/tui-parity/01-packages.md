@@ -13,13 +13,13 @@ multi's per-feature layout is a five-layer taxonomy. `src/approvals/` (35 files:
 | Zustand store | `approvalsStore.ts` (gates, selection, pending-deny, acting keys, notes, identity-epoch fence, `useAuthStore.subscribe` reset) | portable |
 | Headless bridge | `ApprovalsBridge.tsx` (returns null; pumps `useGatewayApprovals` + `useSmithersGateway` into the store; fingerprints rows; reconciles toasts; installs the execution port) | portable |
 | Execution port | `approvalDecisionExecution.ts` (module singleton + `bindApprovalExecutionPort`/`getApprovalExecutionPort`; `ApprovalExecutionPort = { submit(vars, invocationId), refetch() }`) | portable; the DI seam |
-| View | `ApprovalsCanvas.tsx` (~21KB; reads the store via ~12 selectors, invokes flows via `invokeUserFlow` at ~8 sites, mixes 50+ raw DOM elements with `@smithers-orchestrator/ui` components) | NOT portable as-is; this is the refactor |
+| View | `ApprovalsCanvas.tsx` (~21KB; reads the store via ~12 selectors, invokes flows via `invokeUserFlow` at ~8 sites, mixes 50+ raw DOM elements with `@smthrs/ui` components) | NOT portable as-is; this is the refactor |
 
 The view refactor: the store-reading/view-model half of each canvas moves into a ui-core `use<Feature>Vm` hook; the markup half stays per-platform (DOM canvas in multi, opentui mode in packages/tui, both consuming the same VM).
 
 The bridge pattern generalizes: all 15 `*Bridge.tsx` files in multi return null: `app/RepoRouteBridge`, `app/RootProjectSelectionBridge`, `approvals/ApprovalsBridge`, `crons/CronsBridge`, `evals/EvalsBridge`, `issues/IssuesBridge`, `landings/LandingsBridge`, `memory/MemoryFactsBridge`, `optimize/OptimizeBridge`, `prompts/PromptsBridge`, `runs/RunsListBridge`, `scores/ScoresBridge`, `smithersCloud/SandboxRepoSyncBridge`, `tickets/TicketsBridge`, `vcs/VcsBridge`. Of multi's 24 gateway-react importers, 11 are these null-rendering bridges and 4 are pure derivation modules; only ~9 are real visual canvases. The React-hook dependency is already concentrated in a thin pumping layer.
 
-## packages/ui-core (@smithers-orchestrator/ui-core)
+## packages/ui-core (@smthrs/ui-core)
 
 Layout (colocate by domain, one named export per file, index.ts barrels only):
 
@@ -54,7 +54,7 @@ packages/ui-core/
 
 Two sources feed ui-core:
 
-1. multi (move-and-reimport; its pnpm overrides already link `@smithers-orchestrator/{gateway-client,gateway-react,ui}` and `smithers-orchestrator` to `../smithers/packages/*`, so adding a ui-core override makes the loop same-day).
+1. multi (move-and-reimport; its pnpm overrides already link `@smthrs/{gateway-client,gateway-react,ui}` and `smthrs` to `../smithers/packages/*`, so adding a ui-core override makes the loop same-day).
 2. `packages/tui/src/modes/*Utils.ts` where they duplicate multi domain logic (treeUtils/graphUtils/logUtils/timelineUtils overlap runsList/runProgress; approvalUtils/humanUtils overlap the approvals domain; `eventFrame.ts` is the shared event-envelope normalizer and belongs in ui-core).
 
 ## The extraction inventory from multi, phase by phase
@@ -97,7 +97,7 @@ Per feature, the domain + store + bridge trio: `vcs/vcs.ts` + `vcsStore` + `VcsB
 - `app/deriveRoute.ts` (354 lines, pure, parity-tested against the real router), `app/routeStore.ts` (25 lines; sole writer is the router subscription), `app/appShellDecision.ts` (86 lines, pure `deriveAppShellDecision` returning `{effectiveLayout, isChat, mode, showTranscript, canvasKey}`).
 - `app/history.ts` already platform-branches: no window -> `createMemoryHistory`, desktop webview -> hash, else browser. The TUI takes the memory-history path and keeps deriveRoute + routeStore + appShellDecision byte-for-byte; multi's `bindRouteStore.ts` (32 lines, router subscription -> `deriveRoute` -> store) is replaced in the TUI by a navigation intent writer that sets the same RouteState.
 
-## packages/tui-ui (@smithers-orchestrator/tui-ui)
+## packages/tui-ui (@smthrs/tui-ui)
 
 opentui leaf components, props-in/callbacks-out, `jsxImportSource "@opentui/react"` (same tsconfig shape as packages/tui). No gateway imports, no stores, no business logic (arch-check enforced). Vocabulary mirrors ui/gateway-ui so a web reader recognizes the TUI code:
 
@@ -114,8 +114,8 @@ Existing render vocabulary to reuse from packages/tui: box/text/scrollbox/select
 
 Extend `scripts/check-ui-architecture.mjs` (smithers repo; exact-ratchet baseline `scripts/ui-architecture-baseline.json`, `checkUiArchitecture({root, baselinePath})` also invoked by `scripts/generate-workflow-pack.ts`) with:
 
-- ui-core forbidden imports: `@opentui/*`, `react-dom`, `@smithers-orchestrator/ui`, `@smithers-orchestrator/gateway-ui`, plus DOM-global lexical scan (window/document/navigator/localStorage) outside `src/platform/web*` adapters.
-- tui-ui forbidden imports: `@smithers-orchestrator/gateway-client`, `@smithers-orchestrator/gateway-react`, `@smithers-orchestrator/ui-core`, zustand.
+- ui-core forbidden imports: `@opentui/*`, `react-dom`, `@smthrs/ui`, `@smthrs/gateway-ui`, plus DOM-global lexical scan (window/document/navigator/localStorage) outside `src/platform/web*` adapters.
+- tui-ui forbidden imports: `@smthrs/gateway-client`, `@smthrs/gateway-react`, `@smthrs/ui-core`, zustand.
 - Baseline inventory rows for both new packages; keep `scripts/check-ui-architecture.test.mjs` green.
 
 ## Repo mechanics for the new packages

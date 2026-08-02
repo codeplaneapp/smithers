@@ -45,7 +45,7 @@ describe("graph subpath types resolve through published exports", () => {
   const tmp = mkdtempSync(join(tmpdir(), "graph-subpath-types-"));
   afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
-  // Resolve `@smithers-orchestrator/graph/*` the way a real consumer would:
+  // Resolve `@smthrs/graph/*` the way a real consumer would:
   // through the repo node_modules workspace symlink and the package `exports`.
   symlinkSync(join(repoRoot, "node_modules"), join(tmp, "node_modules"), "dir");
   writeFileSync(
@@ -78,10 +78,10 @@ describe("graph subpath types resolve through published exports", () => {
     const { code, out } = typecheck(
       "good.ts",
       [
-        `import { DEFAULT_MERGE_QUEUE_CONCURRENCY, WORKTREE_EMPTY_PATH_ERROR } from "@smithers-orchestrator/graph/constants";`,
-        `import { canonicalizeXml, parseXmlJson } from "@smithers-orchestrator/graph/utils/xml";`,
-        `import { stablePathId } from "@smithers-orchestrator/graph/utils/tree-ids";`,
-        `import { classifyClaudeWorkflowNodeKind } from "@smithers-orchestrator/graph/classifyClaudeWorkflowNodeKind";`,
+        `import { DEFAULT_MERGE_QUEUE_CONCURRENCY, WORKTREE_EMPTY_PATH_ERROR } from "@smthrs/graph/constants";`,
+        `import { canonicalizeXml, parseXmlJson } from "@smthrs/graph/utils/xml";`,
+        `import { stablePathId } from "@smthrs/graph/utils/tree-ids";`,
+        `import { classifyClaudeWorkflowNodeKind } from "@smthrs/graph/classifyClaudeWorkflowNodeKind";`,
         `const a: number = DEFAULT_MERGE_QUEUE_CONCURRENCY;`,
         `const w: string = WORKTREE_EMPTY_PATH_ERROR;`,
         `const c: string = canonicalizeXml(null);`,
@@ -99,9 +99,9 @@ describe("graph subpath types resolve through published exports", () => {
     const { code, out } = typecheck(
       "bad.ts",
       [
-        `import { DEFAULT_MERGE_QUEUE_CONCURRENCY } from "@smithers-orchestrator/graph/constants";`,
-        `import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";`,
-        `import { stablePathId } from "@smithers-orchestrator/graph/utils/tree-ids";`,
+        `import { DEFAULT_MERGE_QUEUE_CONCURRENCY } from "@smthrs/graph/constants";`,
+        `import { canonicalizeXml } from "@smthrs/graph/utils/xml";`,
+        `import { stablePathId } from "@smthrs/graph/utils/tree-ids";`,
         // number assigned to string must fail
         `const bad1: string = DEFAULT_MERGE_QUEUE_CONCURRENCY;`,
         // string return assigned to number must fail
@@ -154,11 +154,11 @@ describe("graph type-only subpaths resolve to real declarations", () => {
     const { code, out } = typecheck(
       "good.ts",
       [
-        `import type { TaskDescriptor } from "@smithers-orchestrator/graph/TaskDescriptor";`,
-        `import type { XmlNode, XmlText } from "@smithers-orchestrator/graph/XmlNode";`,
-        `import type { GraphSnapshot } from "@smithers-orchestrator/graph/GraphSnapshot";`,
-        `import type { WorkflowGraph } from "@smithers-orchestrator/graph/types";`,
-        `import { extractFromHost } from "@smithers-orchestrator/graph/dom/extract";`,
+        `import type { TaskDescriptor } from "@smthrs/graph/TaskDescriptor";`,
+        `import type { XmlNode, XmlText } from "@smthrs/graph/XmlNode";`,
+        `import type { GraphSnapshot } from "@smthrs/graph/GraphSnapshot";`,
+        `import type { WorkflowGraph } from "@smthrs/graph/types";`,
+        `import { extractFromHost } from "@smthrs/graph/dom/extract";`,
         `const t: XmlText = { kind: "text", text: "hi" };`,
         `const n: XmlNode = t;`,
         `const snap: GraphSnapshot = { runId: "r", frameNo: 0, xml: n, tasks: [] };`,
@@ -175,8 +175,8 @@ describe("graph type-only subpaths resolve to real declarations", () => {
     const { code, out } = typecheck(
       "bad.ts",
       [
-        `import type { XmlText } from "@smithers-orchestrator/graph/XmlNode";`,
-        `import type { GraphSnapshot } from "@smithers-orchestrator/graph/GraphSnapshot";`,
+        `import type { XmlText } from "@smthrs/graph/XmlNode";`,
+        `import type { GraphSnapshot } from "@smthrs/graph/GraphSnapshot";`,
         // XmlText.text is string; a number must fail
         `const bad1: XmlText = { kind: "text", text: 123 };`,
         // GraphSnapshot.frameNo is number; a string must fail

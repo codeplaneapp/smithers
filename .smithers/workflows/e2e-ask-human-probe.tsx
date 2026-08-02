@@ -1,7 +1,7 @@
 // smithers-source: e2e
 // smithers-display-name: E2E Ask Human Probe
-/** @jsxImportSource smithers-orchestrator */
-import { HumanTask, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { HumanTask, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 
 // The human's answer is a single string field. The engine stores this as a

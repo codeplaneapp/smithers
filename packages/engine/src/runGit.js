@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import { resolveGitBinary } from "@smithers-orchestrator/vcs";
+import { resolveGitBinary } from "@smthrs/vcs";
 
 /**
  * Resolve Git once when the runner module loads. Workflows may temporarily

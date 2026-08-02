@@ -9,7 +9,7 @@ export const GEMINI_SUNSET_MESSAGE = [
   "Gemini CLI support has been sunset in Smithers.",
   "Use AntigravityAgent with Google's `agy` CLI instead.",
   "Example:",
-  '  import { AntigravityAgent } from "smithers-orchestrator";',
+  '  import { AntigravityAgent } from "smthrs";',
   '  const agent = new AntigravityAgent({ model: "gemini-3.5-flash", cwd: process.cwd() });',
 ].join("\n");
 

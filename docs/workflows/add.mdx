@@ -1,17 +1,17 @@
 ---
 title: add
-description: System workflow behind `bunx smithers-orchestrator add`: installs a workflow pack from GitHub, npm, or a local file as a durable, replayable run.
+description: System workflow behind `bunx smthrs add`: installs a workflow pack from GitHub, npm, or a local file as a durable, replayable run.
 ---
 
 `add` is a **system workflow** (`system: true`): internal plumbing for
 Smithers' own durable processes, hidden from default listings (`workflow list` without `--system`, the interactive picker,
 MCP `list_workflows`, gateway `listWorkflows`) but explicitly runnable.
 
-`bunx smithers-orchestrator add <spec>` installs imperatively; running the workflow
+`bunx smthrs add <spec>` installs imperatively; running the workflow
 instead records the same install as a durable, replayable, inspectable run.
 
 ```bash
-bunx smithers-orchestrator workflow run add --input '{"spec":"user/repo"}'
+bunx smthrs workflow run add --input '{"spec":"user/repo"}'
 ```
 
 ## Input

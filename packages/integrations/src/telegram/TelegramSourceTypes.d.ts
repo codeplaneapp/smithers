@@ -1,7 +1,7 @@
 import { Schedule } from 'effect';
 import { CursorStore } from '../core/CursorStoreTypes.js';
 import { TelegramClientConfig } from './TelegramClientTypes.js';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 
 /**
  * Options for `makeTelegramSource`: a getUpdates long-poll EventSource whose

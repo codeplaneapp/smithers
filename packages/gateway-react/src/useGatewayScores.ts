@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
-import type { GatewayScoreRow } from "@smithers-orchestrator/gateway-client";
-import type { ListScoresRequest } from "@smithers-orchestrator/gateway-client/rpc";
+import type { GatewayScoreRow } from "@smthrs/gateway-client";
+import type { ListScoresRequest } from "@smthrs/gateway-client/rpc";
 import { useSmithersCollections } from "./useSmithersCollections.ts";
 import { gatewayCollectionAsyncState, type GatewayAsyncState } from "./GatewayAsyncState.ts";
 

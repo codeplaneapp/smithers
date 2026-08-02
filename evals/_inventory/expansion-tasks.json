@@ -6,7 +6,7 @@
     "kind": "knowledge",
     "tier": "weak",
     "verify": "deterministic",
-    "task": "What CLI flag activates HTTP server mode when running a workflow with `bunx smithers-orchestrator up`?",
+    "task": "What CLI flag activates HTTP server mode when running a workflow with `bunx smthrs up`?",
     "canonicalAnswer": "--serve",
     "mustNot": [],
     "notes": "Found in /docs/integrations/serve.mdx table; flag is boolean, defaults to false",
@@ -1200,7 +1200,7 @@
     "task": "What is captured in a frame snapshot? What can you diff across frames?",
     "canonicalAnswer": "",
     "mustNot": [],
-    "notes": "Correct answer must name: frame snapshots record nodes, outputs, input, vcsPointer, workflowHash at a point-in-time. The diff between frames is SnapshotDiff: nodesAdded/Removed/Changed, outputsAdded/Removed/Changed, ralphAdded/Removed/Changed, inputChanged, vcsPointerChanged. Use bunx smithers-orchestrator diff RUN_ID NODE_ID to inspect per-node diffs. See packages/time-travel/src/index.d.ts lines 172-184 and docs/how-it-works.mdx.",
+    "notes": "Correct answer must name: frame snapshots record nodes, outputs, input, vcsPointer, workflowHash at a point-in-time. The diff between frames is SnapshotDiff: nodesAdded/Removed/Changed, outputsAdded/Removed/Changed, ralphAdded/Removed/Changed, inputChanged, vcsPointerChanged. Use bunx smthrs diff RUN_ID NODE_ID to inspect per-node diffs. See packages/time-travel/src/index.d.ts lines 172-184 and docs/how-it-works.mdx.",
     "source": "curated"
   },
   {
@@ -1250,7 +1250,7 @@
     "tier": "weak",
     "verify": "deterministic",
     "task": "What is the exact CLI command to preview and list all operationIds from an OpenAPI spec at ./api/spec.yaml?",
-    "canonicalAnswer": "bunx smithers-orchestrator openapi list ./api/spec.yaml",
+    "canonicalAnswer": "bunx smthrs openapi list ./api/spec.yaml",
     "mustNot": [],
     "notes": "Candidate should know the exact CLI verb and its position. See docs/cli/overview.mdx and docs/concepts/openapi-tools.mdx for the 'openapi list' command structure.",
     "source": "curated"

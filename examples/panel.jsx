@@ -5,11 +5,11 @@
  * Use cases: PR review (security + quality + architecture), design review,
  * RFC feedback, multi-perspective analysis.
  */
-import { Sequence, Parallel } from "smithers-orchestrator";
+import { Sequence, Parallel } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, grep, bash } from "smithers-orchestrator/tools";
+import { read, grep, bash } from "smthrs/tools";
 import { z } from "zod";
 import ReviewPrompt from "./prompts/panel/review.mdx";
 import SynthesisPrompt from "./prompts/panel/synthesis.mdx";

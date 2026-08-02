@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { parseSubflowChildRunId } from "@smithers-orchestrator/graph/subflow-run-lineage";
+import { parseSubflowChildRunId } from "@smthrs/graph/subflow-run-lineage";
 import { rewindLockStore } from "./rewindLockStore.js";
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./RewindLockHandle.ts").RewindLockHandle} RewindLockHandle */
 
 export const REWIND_LEASE_TTL_MS = 60_000;

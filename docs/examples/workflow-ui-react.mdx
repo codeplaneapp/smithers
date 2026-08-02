@@ -3,7 +3,7 @@ title: Workflow UI (React)
 description: A complete `gateway-react` workflow UI you can drop next to a workflow, with boot, run state, pushed live events, metrics, node output, approvals, and a stale-data-free render model.
 ---
 
-A minimal, first-class React UI for a workflow, shipped with the Gateway in one file. It demonstrates every piece a real UI needs (see the breakdown below). Drop it at `.smithers/ui/<your-workflow>.tsx`, declare it from the workflow with `<UI entry="../ui/<your-workflow>.tsx" />`, and open it with `bunx smithers-orchestrator ui`.
+A minimal, first-class React UI for a workflow, shipped with the Gateway in one file. It demonstrates every piece a real UI needs (see the breakdown below). Drop it at `.smithers/ui/<your-workflow>.tsx`, declare it from the workflow with `<UI entry="../ui/<your-workflow>.tsx" />`, and open it with `bunx smthrs ui`.
 
 For the full conceptual walkthrough, see [Custom Workflow UIs](/guides/custom-workflow-ui).
 
@@ -15,7 +15,7 @@ three sequential agent tasks declared with `hijack` and
 `onHijackExit="complete"`. The workflow UI follows the active hijack candidate,
 opens the Gateway's PTY WebSocket, and presents the native agent session through
 the shared `ChatTranscript`, `ChatMessage`, and `ChatComposer` components from
-`smithers-orchestrator/ui`.
+`smthrs/ui`.
 
 Each session is still a real, resumable Codex session: the browser only replaces
 the terminal presentation, writing chat input as PTY bytes and rendering the
@@ -36,7 +36,7 @@ import {
   useGatewayRun,
   useGatewayRunEvents,
   useGatewayRuns,
-} from "smithers-orchestrator/gateway-react";
+} from "smthrs/gateway-react";
 
 function runIdFromUrl(): string | undefined {
   if (typeof location === "undefined") return undefined;
@@ -199,8 +199,8 @@ createGatewayReactRoot(<App />);
 In your workflow file:
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, UI } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, UI } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, Task, smithers, outputs } = createSmithers({
@@ -218,8 +218,8 @@ export default smithers(() => (
 Then:
 
 ```bash
-bunx smithers-orchestrator up demo-react-ui -d
-bunx smithers-orchestrator ui                          # opens the bundle in your browser
+bunx smthrs up demo-react-ui -d
+bunx smthrs ui                          # opens the bundle in your browser
 ```
 
 The Gateway discovers the `<UI>` declaration when it registers the workflow's `entryFile`, and serves the bundle at `/workflows/demo-react-ui`. Its HTML shell injects `__SMITHERS_GATEWAY_UI__` and `?runId=` before your script runs; `createGatewayReactRoot` picks up both automatically.

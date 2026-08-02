@@ -2,7 +2,7 @@ import { TelegramInlineKeyboard as TelegramInlineKeyboard$1, TelegramInlineKeybo
 import { TelegramApprovalChoice as TelegramApprovalChoice$1, TelegramApprovalDecision as TelegramApprovalDecision$1, TelegramApprovalKeyboardSpec as TelegramApprovalKeyboardSpec$1, TelegramApprovalMode as TelegramApprovalMode$1, TelegramApprovalOption as TelegramApprovalOption$1, TelegramApprovalSelection as TelegramApprovalSelection$1 } from './approvalTypes.js';
 import { z } from 'zod';
 import 'effect';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 
 /**
  * A short, deterministic, colon-free token that disambiguates one approval's

@@ -36,4 +36,4 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=8192
 
-      - run: pnpm --filter @smithers-orchestrator/e2e test:soak
+      - run: pnpm --filter @smthrs/e2e test:soak

@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // feature-eval-factory — the durable smithers script behind the goal:
 //
 //   1. GENERATE — fan out one authoring agent per FeatureGroup in
@@ -15,7 +15,7 @@
 //      regenerates the bundles — repeating until the suite hits the target
 //      (100% pass / 99% one-shot) or maxIterations.
 //
-//   bunx smithers-orchestrator up evals/feature-eval-factory.tsx --detach \
+//   bunx smthrs up evals/feature-eval-factory.tsx --detach \
 //     --input '{"genConcurrency":4,"optimizeModel":"haiku"}'
 //
 // Per-group shards avoid the concurrent-append corruption that one shared file
@@ -32,7 +32,7 @@ import {
   Parallel,
   Sequence,
   Task,
-} from "smithers-orchestrator";
+} from "smthrs";
 import { homedir } from "node:os";
 import { z } from "zod/v4";
 import { repoRoot } from "./lib/paths.js";

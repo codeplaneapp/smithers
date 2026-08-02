@@ -1,8 +1,8 @@
 /// <reference path="../types/bun-test-shim.d.ts" />
-import { SmithersCtx } from '@smithers-orchestrator/driver/SmithersCtx';
-import { SmithersRenderer } from '@smithers-orchestrator/react-reconciler';
-import { WorkflowDefinition } from '@smithers-orchestrator/driver/WorkflowDefinition';
-import { WorkflowGraph } from '@smithers-orchestrator/graph';
+import { SmithersCtx } from '@smthrs/driver/SmithersCtx';
+import { SmithersRenderer } from '@smthrs/react-reconciler';
+import { WorkflowDefinition } from '@smthrs/driver/WorkflowDefinition';
+import { WorkflowGraph } from '@smthrs/graph';
 
 type OutputSnapshot = Record<string, unknown[]>;
 type RuntimeConfig = {

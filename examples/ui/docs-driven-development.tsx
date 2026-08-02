@@ -9,8 +9,8 @@ import {
   useGatewayRunTree,
   useGatewayRuns,
   useGatewayTickets,
-} from "smithers-orchestrator/gateway-react";
-import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
+} from "smthrs/gateway-react";
+import { WorkflowUiStyles } from "smthrs/gateway-ui";
 import { docsContent } from "./ddd-docsContent.generated";
 import { crepeThemeCss } from "./crepeTheme.generated";
 import { ticketsBacklog } from "./ddd-ticketsBacklog.generated";

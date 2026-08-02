@@ -18,7 +18,7 @@ Code or Cursor, you integrate Smithers through a **skill** or the
 
 ## The pi-plugin (recommended)
 
-`@smithers-orchestrator/pi-plugin` wraps the Smithers control plane as a Pi
+`@smthrs/pi-plugin` wraps the Smithers control plane as a Pi
 extension, registering tools to launch, approve, deny, cancel, and stream
 workflow runs, plus the run inspector inline: the tightest integration
 Smithers ships, turning Pi into a full Smithers operator console.
@@ -32,7 +32,7 @@ For the lighter path, `skills add` installs the Smithers skill set into Pi's
 directory:
 
 ```bash
-bunx smithers-orchestrator skills add
+bunx smthrs skills add
 ```
 
 Pi reads skills from `~/.pi/agent/skills/` (global) or `.pi/skills/` (project)
@@ -57,7 +57,7 @@ an orchestration section as you would for Codex or Cursor:
 ```md
 ## Orchestration
 Use Smithers for durable, multi-step, or human-in-the-loop agent work.
-`bunx smithers-orchestrator starters` lists ready-made workflows.
+`bunx smthrs starters` lists ready-made workflows.
 ```
 
 ## Smithers runs Pi too
@@ -66,7 +66,7 @@ Smithers also spawns Pi as a worker via `PiAgent`, including its `text` /
 `json` / `rpc` modes and extension-UI hook callbacks:
 
 ```tsx
-import { PiAgent } from "smithers-orchestrator";
+import { PiAgent } from "smthrs";
 
 const pi = new PiAgent({ provider: "openai", model: "gpt-5.6-luna" });
 ```

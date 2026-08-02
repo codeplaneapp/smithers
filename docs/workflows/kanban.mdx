@@ -6,7 +6,7 @@ description: Implement ticket files from .smithers/tickets in parallel worktree 
 `kanban` is archived (not installed by `init`): copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent. It reads Markdown tickets from `.smithers/tickets/`, runs each ticket in its own worktree branch, then asks an agent to merge successful branches back into the main workspace.
 
 ```bash
-bunx smithers-orchestrator workflow run kanban --input '{"maxConcurrency":3}'
+bunx smthrs workflow run kanban --input '{"maxConcurrency":3}'
 ```
 
 <Frame caption="The kanban UI shows each ticket implemented on its own worktree branch, merging only the ones that pass.">

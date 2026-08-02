@@ -1,4 +1,4 @@
-import type { TaskDescriptor } from "@smithers-orchestrator/graph/TaskDescriptor";
+import type { TaskDescriptor } from "@smthrs/graph/TaskDescriptor";
 
 /** A breached Aspects budget for a task that is about to be dispatched. */
 export type AspectBudgetBreach = {

@@ -45,12 +45,12 @@ An initialized `.smithers` directory can describe itself with a
 `smithers.toon` manifest and move through a complete pack lifecycle:
 
 ```sh
-bunx smithers-orchestrator add user/repository --yes
-bunx smithers-orchestrator packs list
-bunx smithers-orchestrator packs update
-bunx smithers-orchestrator eject pack-name:workflow-name
-bunx smithers-orchestrator share --dry-run
-bunx smithers-orchestrator remove pack-name
+bunx smthrs add user/repository --yes
+bunx smthrs packs list
+bunx smthrs packs update
+bunx smthrs eject pack-name:workflow-name
+bunx smthrs share --dry-run
+bunx smthrs remove pack-name
 ```
 
 Installed workflows are read-only and can be addressed as
@@ -143,7 +143,7 @@ fail with a named error instead of an obscure driver exception.
 A typed `RuntimeAdapter` now owns clock, storage, identifiers, task execution,
 and optional filesystem, subprocess, worktree, and sandbox capabilities.
 
-The new `smithers-orchestrator/browser` entry point runs the real workflow
+The new `smthrs/browser` entry point runs the real workflow
 driver, renderer, graph extraction, and core components in a browser. A
 workflow that asks for a Node-only capability gets
 `RUNTIME_CAPABILITY_UNAVAILABLE`. The adapter is exercised in real headless
@@ -194,13 +194,13 @@ prices them from the shared model table.
 ## Upgrade
 
 ```sh
-bunx smithers-orchestrator@0.28.0 init
+bunx smthrs@0.28.0 init
 ```
 
 Existing projects can run the agent-assisted upgrade flow:
 
 ```sh
-bunx smithers-orchestrator@0.28.0 upgrade
+bunx smthrs@0.28.0 upgrade
 ```
 
 Read the full [0.28.0 changelog](/changelogs/0.28.0) before upgrading if you

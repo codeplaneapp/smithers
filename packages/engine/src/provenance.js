@@ -1,9 +1,9 @@
-import { digestProofRow } from "@smithers-orchestrator/driver/provenance";
-import { buildStateKey } from "@smithers-orchestrator/scheduler/buildStateKey";
+import { digestProofRow } from "@smthrs/driver/provenance";
+import { buildStateKey } from "@smthrs/scheduler/buildStateKey";
 
 /**
  * @param {unknown} value
- * @returns {value is import("@smithers-orchestrator/graph/ProofBinding").ProofBinding}
+ * @returns {value is import("@smthrs/graph/ProofBinding").ProofBinding}
  */
 function isProofBinding(value) {
   return Boolean(
@@ -23,7 +23,7 @@ function isProofBinding(value) {
  * same (table,nodeId,iteration) is a DB-level mutation and must retain the
  * original proof across re-render/resume; a new iteration is a newly-produced
  * authority row and may establish a new proof.
- * @param {import("@smithers-orchestrator/graph/ProofBinding").ProofBinding} binding
+ * @param {import("@smthrs/graph/ProofBinding").ProofBinding} binding
  */
 function bindingIdentity(binding) {
   return JSON.stringify([binding.table, binding.nodeId, binding.iteration]);
@@ -33,7 +33,7 @@ function bindingIdentity(binding) {
  * Restore pinned task bindings from the latest durable frame. Older frames
  * simply omit the fields and produce an empty map.
  * @param {{ taskIndexJson?: string | null } | null | undefined} frame
- * @returns {Map<string, import("@smithers-orchestrator/graph/ProofBinding").ProofBinding[]>}
+ * @returns {Map<string, import("@smthrs/graph/ProofBinding").ProofBinding[]>}
  */
 export function proofBindingsFromFrame(frame) {
   const restored = new Map();
@@ -66,8 +66,8 @@ export function proofBindingsFromFrame(frame) {
  * producer iteration) replaces the old proof; merely observing mutated
  * content at the same identity never silently re-blesses it.
  *
- * @param {readonly import("@smithers-orchestrator/graph").TaskDescriptor[]} tasks
- * @param {Map<string, import("@smithers-orchestrator/graph/ProofBinding").ProofBinding[]>} pinned
+ * @param {readonly import("@smthrs/graph").TaskDescriptor[]} tasks
+ * @param {Map<string, import("@smthrs/graph/ProofBinding").ProofBinding[]>} pinned
  */
 export function pinTaskProofBindings(tasks, pinned) {
   for (const task of tasks) {
@@ -104,7 +104,7 @@ export function pinTaskProofBindings(tasks, pinned) {
  * proofs wait for their producer; a previously-proved row that disappeared or
  * changed is stale.
  *
- * @param {readonly import("@smithers-orchestrator/graph").TaskDescriptor[]} tasks
+ * @param {readonly import("@smthrs/graph").TaskDescriptor[]} tasks
  * @param {Record<string, readonly unknown[]>} outputs
  */
 export function verifyTaskProofBindings(tasks, outputs) {

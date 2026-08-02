@@ -12,7 +12,7 @@ import {
   SmithersUiStyles,
   StatusPill,
   parseUnifiedFile,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 import { z } from "zod/v4";
 import type { CheckResult } from "./stackedShip";
 import { artifactFileName } from "./stackedShip";
@@ -151,7 +151,7 @@ export type PierreRenderers = {
 /** Loaded lazily so environments without the review package still render. */
 export async function loadPierre(): Promise<PierreRenderers | null> {
   try {
-    const mod = await import("@smithers-orchestrator/review/diffs");
+    const mod = await import("@smthrs/review/diffs");
     return { render: mod.renderPierreFileDiff, extract: mod.extractDiffAssets };
   } catch {
     return null;

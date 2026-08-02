@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/electric-proxy",
+  "name": "@smthrs/electric-proxy",
   "version": "0.32.0",
   "description": "Auth, scope, rate-limit, and observability proxy for Smithers ElectricSQL Shapes",
   "type": "module",
@@ -29,7 +29,7 @@
     "test": "bun test tests"
   },
   "dependencies": {
-    "@smithers-orchestrator/gateway": "workspace:*"
+    "@smthrs/gateway": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest",

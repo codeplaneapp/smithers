@@ -3,10 +3,10 @@
 // smithers-display-name: Create Workflow
 // smithers-description: Build a new Smithers workflow from a plain-English ask — clarify, provision docs & skills, design, scaffold, verify, and document.
 // smithers-tags: authoring, workflow-pack, scaffolding
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
 import { $ } from "bun";
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { parse as parseYaml } from "yaml";
 import { agents } from "../agents";
@@ -460,8 +460,8 @@ export default smithers((ctx) => {
                   const activeTestFile = `${TESTS_DIR}/${activeWorkflowName}.test.tsx`;
 
                   const errors: string[] = [];
-                  const graphCmd = `${bunx} smithers-orchestrator graph ${activeWorkflowFile}`;
-                  const res = await $`${bunx} smithers-orchestrator graph ${activeWorkflowFile}`.nothrow().quiet();
+                  const graphCmd = `${bunx} smthrs graph ${activeWorkflowFile}`;
+                  const res = await $`${bunx} smthrs graph ${activeWorkflowFile}`.nothrow().quiet();
                   if (res.exitCode !== 0) {
                     const errText = `${res.stderr?.toString() ?? ""}\n${res.stdout?.toString() ?? ""}`.trim();
                     errors.push(`[graph] ${errText.slice(0, 6000)}`);
@@ -580,7 +580,7 @@ export default smithers((ctx) => {
                     ? [
                         `smithers workflow run ${workflowName} --prompt "<your input>"  # or: smithers up ${workflowFile}`,
                         `pnpm -C .smithers test  # run the registered workflow tests`,
-                        `bunx smithers-orchestrator graph ${workflowFile}  # print the graph; add --interactive for the TUI`,
+                        `bunx smthrs graph ${workflowFile}  # print the graph; add --interactive for the TUI`,
                         ...(uiWritten ? [`smithers ui <runId>  # open the custom UI in ${uiFile} for a run`] : []),
                         `smithers workflow run create-workflow --prompt "iterate on ${workflowName}: <what to change>"  # iterate`,
                       ]

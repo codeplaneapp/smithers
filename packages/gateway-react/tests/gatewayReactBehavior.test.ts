@@ -15,8 +15,8 @@ try {
 import { describe, expect, test } from "bun:test";
 import { act, createElement, useEffect, useState, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import type { SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
-import { SmithersGatewayClient as RealSmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
+import type { SmithersGatewayClient } from "@smthrs/gateway-client";
+import { SmithersGatewayClient as RealSmithersGatewayClient } from "@smthrs/gateway-client";
 import {
   SmithersCollectionsContext,
   SmithersGatewayContext,
@@ -24,7 +24,7 @@ import {
   createGatewayReactRoot,
   useGatewayRpc,
 } from "../src/index.ts";
-import type { SmithersCollections } from "@smithers-orchestrator/gateway-client";
+import type { SmithersCollections } from "@smthrs/gateway-client";
 
 // React's act() requires this flag so updates are flushed synchronously and
 // warnings are suppressed in the bun + happy-dom test environment.

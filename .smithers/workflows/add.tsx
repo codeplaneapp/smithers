@@ -5,8 +5,8 @@
 // smithers-tags: system, packs
 // smithers-system: true
 // smithers-disable-model-invocation: true
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 
 const inputSchema = z.object({
@@ -21,9 +21,7 @@ const inputSchema = z.object({
 const outputSchema = z.object({ name: z.string(), path: z.string(), scope: z.string(), report: z.string() });
 const { Workflow, Task, smithers, outputs } = createSmithers({ input: inputSchema, result: outputSchema });
 const cliModule = (name: string) =>
-  process.env.SMITHERS_CLI_SRC_DIR
-    ? `${process.env.SMITHERS_CLI_SRC_DIR}/${name}.js`
-    : `@smithers-orchestrator/cli/${name}`;
+  process.env.SMITHERS_CLI_SRC_DIR ? `${process.env.SMITHERS_CLI_SRC_DIR}/${name}.js` : `@smthrs/cli/${name}`;
 
 export default smithers((ctx) => (
   <Workflow name="add">

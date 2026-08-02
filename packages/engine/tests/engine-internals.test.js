@@ -6,9 +6,9 @@ import { join, resolve as resolvePath } from "node:path";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { __engineInternals as I, runsDueForQuotaResume } from "../src/engine.js";
 
 const inputPayloadTable = sqliteTable("input_payload", {

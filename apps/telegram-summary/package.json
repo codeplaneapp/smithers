@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/telegram-summary",
+  "name": "@smthrs/telegram-summary",
   "version": "0.0.1",
   "private": true,
   "description": "Telegram daily summary bot and dashboard for smithers.sh",
@@ -11,7 +11,7 @@
     "destroy": "alchemy destroy"
   },
   "dependencies": {
-    "@smithers-orchestrator/gateway-ui": "workspace:*"
+    "@smthrs/gateway-ui": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "26.1.0",

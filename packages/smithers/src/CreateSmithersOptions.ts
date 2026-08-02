@@ -1,4 +1,4 @@
-import type { SmithersAlertPolicy } from "@smithers-orchestrator/scheduler/SmithersWorkflowOptions";
+import type { SmithersAlertPolicy } from "@smthrs/scheduler/SmithersWorkflowOptions";
 
 export type CreateSmithersOptions = {
   readableName?: string;

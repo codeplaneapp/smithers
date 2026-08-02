@@ -52,7 +52,7 @@ const GATEWAY_REACT_EXPORTS = new Set(["createGatewayReactRoot", "useGatewayRunT
  * of hand-rolling markup, and always surface live agent feedback.
  *
  * Rules (each violation carries its rule id):
- * - `imports`        — import only from react + `smithers-orchestrator/gateway-react`,
+ * - `imports`        — import only from react + `smthrs/gateway-react`,
  *                      `.../gateway-ui`, `.../ui` (plus relative modules).
  * - `shell`          — page chrome comes from `WorkflowUiShell` (or
  *                      `SimpleWorkflowDashboard` for the stock layout).
@@ -87,13 +87,13 @@ export function gradeWorkflowUiSource(uiSource, options = {}) {
   const syntax = maskStringsAndComments(uiSource);
 
   const allowedSpecifier =
-    /^(react(\/.*)?|smithers-orchestrator\/(gateway-react|gateway-ui|ui)(\/.*)?|@smithers-orchestrator\/(gateway-react|gateway-ui|ui)(\/.*)?|\.\.?\/.*)$/;
+    /^(react(\/.*)?|smthrs\/(gateway-react|gateway-ui|ui)(\/.*)?|@smthrs\/(gateway-react|gateway-ui|ui)(\/.*)?|\.\.?\/.*)$/;
   for (const { index, specifier } of moduleSpecifiers(uiSource)) {
     if (syntax[index] !== "i" && syntax[index] !== "e") continue;
     if (!allowedSpecifier.test(specifier)) {
       violations.push({
         rule: "imports",
-        detail: `Import from "${specifier}" — workflow UIs may only import react and the smithers-orchestrator gateway-react/gateway-ui/ui subpaths.`,
+        detail: `Import from "${specifier}" — workflow UIs may only import react and the smthrs gateway-react/gateway-ui/ui subpaths.`,
       });
     }
   }
@@ -144,7 +144,7 @@ export function gradeWorkflowUiSource(uiSource, options = {}) {
   if (/<table\b/.test(code)) {
     violations.push({
       rule: "hand-rolled-table",
-      detail: "Raw <table> markup — use Table (smithers-orchestrator/ui) or FleetTable (gateway-ui).",
+      detail: "Raw <table> markup — use Table (smthrs/ui) or FleetTable (gateway-ui).",
     });
   }
 
@@ -481,7 +481,7 @@ function maskWorkflowSyntax(source) {
   );
   const result = quoted;
   return result.replace(
-    /(^|[=(:,!&|?{};\n]|\breturn\s+)\/(?:\\.|[^/\\\n\[]|\[[^\]]*\])+\/[dgimsuvy]*/gm,
+    /(^|[=(:,!&|?{};\n]|\breturn\s+)\/(?:\\.|[^/\\\n[]|\[[^\]]*\])+\/[dgimsuvy]*/gm,
     (literal, prefix) => prefix + literal.slice(prefix.length).replace(/[^\n]/g, " "),
   );
 }
@@ -492,8 +492,8 @@ function importedBindings(source, names) {
   const syntax = maskStringsAndComments(source);
   const modulesFor = (name) =>
     GATEWAY_REACT_EXPORTS.has(name)
-      ? ["smithers-orchestrator/gateway-react", "@smithers-orchestrator/gateway-react"]
-      : ["smithers-orchestrator/gateway-ui", "@smithers-orchestrator/gateway-ui"];
+      ? ["smthrs/gateway-react", "@smthrs/gateway-react"]
+      : ["smthrs/gateway-ui", "@smthrs/gateway-ui"];
   for (const match of source.matchAll(/\bimport\s*\{([\s\S]*?)\}\s*from\s*["']([^"']+)["']/g)) {
     if (!names.some((name) => modulesFor(name).includes(match[2]))) continue;
     for (const specifier of match[1].split(",")) {
@@ -768,7 +768,7 @@ function isRegexStart(prefix) {
   const trimmed = prefix.trimEnd();
   if (!trimmed) return true;
   const last = trimmed.at(-1);
-  if (/[([{=,:;!?&|+*%^~\-]/.test(last)) return true;
+  if (/[([{=,:;!?&|+*%^~-]/.test(last)) return true;
   const word = trimmed.match(/[A-Za-z_$][\w$]*$/)?.[0];
   return [
     "return",
@@ -882,9 +882,10 @@ export const workflowUiComplianceScorer = createScorer({
     if (!uiSource) {
       return { score: 0, reason: "No UI source to grade." };
     }
-    const report = gradeWorkflowUiSource(uiSource, {
-      ...(typeof payload.workflowSource === "string" ? { workflowSource: payload.workflowSource } : {}),
-    });
+    const report = gradeWorkflowUiSource(
+      uiSource,
+      typeof payload.workflowSource === "string" ? { workflowSource: payload.workflowSource } : {},
+    );
     return {
       score: report.score,
       reason: report.passed

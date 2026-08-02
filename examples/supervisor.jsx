@@ -4,11 +4,11 @@
  * Pattern: Supervisor plans → spawns workers → reviews results → re-delegates failures.
  * Use cases: project manager agent, team lead, dynamic task allocation.
  */
-import { Sequence, Parallel, Loop, Worktree } from "smithers-orchestrator";
+import { Sequence, Parallel, Loop, Worktree } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, write, edit, bash, grep } from "smithers-orchestrator/tools";
+import { read, write, edit, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import DelegatePrompt from "./prompts/supervisor/delegate.mdx";
 import WorkerPrompt from "./prompts/supervisor/worker.mdx";

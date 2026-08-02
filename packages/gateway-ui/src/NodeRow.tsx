@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
-import { runNodeKey } from "@smithers-orchestrator/gateway-client";
-import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import { runNodeKey } from "@smthrs/gateway-client";
+import type { GatewayRunNode } from "@smthrs/gateway-client";
 import type { CSSProperties } from "react";
 import { StatusPill } from "./StatusPill";
 

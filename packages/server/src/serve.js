@@ -1,14 +1,14 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { Effect, Metric } from "effect";
-import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
-import { finalizeCancelledRun, isRunHeartbeatFresh } from "@smithers-orchestrator/engine";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
-import { prometheusContentType, renderPrometheusMetrics } from "@smithers-orchestrator/observability";
-import { logWarning } from "@smithers-orchestrator/observability/logging";
-import { recoverRewindAuditsAtStartup } from "@smithers-orchestrator/time-travel/recoverRewindAuditsAtStartup";
+import { approveNode, denyNode } from "@smthrs/engine/approvals";
+import { finalizeCancelledRun, isRunHeartbeatFresh } from "@smthrs/engine";
+import { nowMs } from "@smthrs/scheduler/nowMs";
+import { prometheusContentType, renderPrometheusMetrics } from "@smthrs/observability";
+import { logWarning } from "@smthrs/observability/logging";
+import { recoverRewindAuditsAtStartup } from "@smthrs/time-travel/recoverRewindAuditsAtStartup";
 import { runPromise } from "./smithersRuntime.js";
-import { httpRequests, httpRequestDuration, trackEvent } from "@smithers-orchestrator/observability/metrics";
+import { httpRequests, httpRequestDuration } from "@smthrs/observability/metrics";
 /** @typedef {import("./ServeOptions.js").ServeOptions} ServeOptions */
 
 // Event-poll cadence for the SSE stream.

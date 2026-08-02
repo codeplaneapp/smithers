@@ -1,4 +1,4 @@
-// @smithers-orchestrator/integrations/github — GitHub integration surface.
+// @smthrs/integrations/github — GitHub integration surface.
 //
 // Inbound: `makeGitHubWebhookSource` (X-Hub-Signature-256 verified, per-action
 // signal fan-out) + declarative listeners (`OnWebhook`, `OnPullRequest`,

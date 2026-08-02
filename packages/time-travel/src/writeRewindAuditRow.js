@@ -1,6 +1,6 @@
 import { resolveRewindAuditClient } from "./resolveRewindAuditClient.js";
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./RewindAuditResult.ts").RewindAuditResult} RewindAuditResult */
 
 /**

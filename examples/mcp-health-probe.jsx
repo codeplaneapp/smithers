@@ -6,11 +6,11 @@
  * Pattern: scheduler -> MCP probe set -> result checker -> report agent
  * Use cases: MCP fleet health monitoring, capability drift detection, outage alerting.
  */
-import { Sequence, Parallel, Loop } from "smithers-orchestrator";
+import { Sequence, Parallel, Loop } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, write, bash, grep } from "smithers-orchestrator/tools";
+import { read, write, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import SchedulePrompt from "./prompts/mcp-health-probe/schedule.mdx";
 import ProbePrompt from "./prompts/mcp-health-probe/probe.mdx";

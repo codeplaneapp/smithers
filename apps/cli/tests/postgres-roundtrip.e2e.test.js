@@ -49,8 +49,8 @@ function writePostgresWorkflow(repo) {
   repo.write(
     ".smithers/workflows/postgres-roundtrip.tsx",
     [
-      "/** @jsxImportSource smithers-orchestrator */",
-      'import { openSmithersBackend, Workflow, Task } from "smithers-orchestrator";',
+      "/** @jsxImportSource smthrs */",
+      'import { openSmithersBackend, Workflow, Task } from "smthrs";',
       'import { z } from "zod";',
       "",
       "const { smithers, outputs } = await openSmithersBackend({",

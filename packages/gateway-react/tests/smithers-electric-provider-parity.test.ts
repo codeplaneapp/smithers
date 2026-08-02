@@ -2,13 +2,9 @@ import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import React from "react";
 import { z } from "zod";
 import { QueryClient } from "@tanstack/react-query";
-import {
-  createSmithersCollections,
-  createSmithersDataClient,
-  type GatewayCronRow,
-} from "@smithers-orchestrator/gateway-client";
-import { Gateway } from "@smithers-orchestrator/server";
-import { createSmithersPostgres } from "smithers-orchestrator";
+import { createSmithersCollections, createSmithersDataClient, type GatewayCronRow } from "@smthrs/gateway-client";
+import { Gateway } from "@smthrs/server";
+import { createSmithersPostgres } from "smthrs";
 import {
   createSmithersElectricProxy,
   serveSmithersElectricProxy,

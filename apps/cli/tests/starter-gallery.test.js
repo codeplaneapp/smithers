@@ -46,10 +46,10 @@ describe("starter gallery data", () => {
       // Single-deliverable starters route to oneshot; multi-stage starters are
       // prompts for the portable create-workflow builder.
       if (starter.workflow === "oneshot") {
-        expect(starterCommand(starter)).toStartWith('bunx smithers-orchestrator oneshot "');
+        expect(starterCommand(starter)).toStartWith('bunx smthrs oneshot "');
       } else {
         expect(starter.workflow).toBe("create-workflow");
-        expect(starterCommand(starter)).toStartWith("bunx smithers-orchestrator workflow run create-workflow --");
+        expect(starterCommand(starter)).toStartWith("bunx smthrs workflow run create-workflow --");
       }
     }
     expect(STARTER_TEMPLATE_IDS).toEqual(STARTER_RECIPES.map((starter) => starter.id));
@@ -73,7 +73,7 @@ describe("starter gallery data", () => {
     const rendered = renderStarterGallery(buildStarterGallery());
     expect(rendered).not.toMatch(/(^|[\s`])smithers(?:\s|$)/);
     for (const recipe of STARTER_RECIPES) {
-      expect(starterCommand(recipe)).toStartWith("bunx smithers-orchestrator ");
+      expect(starterCommand(recipe)).toStartWith("bunx smthrs ");
       for (const followUp of recipe.followUps) {
         expect(followUp).not.toMatch(/^smithers(?:\s|$)/);
       }
@@ -102,13 +102,13 @@ describe("starter gallery data", () => {
     const overview = renderStarterGallery(buildStarterGallery({ audience: "product" }));
     expect(overview).toContain("Smithers starters");
     expect(overview).toContain("idea-to-tickets");
-    expect(overview).toContain("Use `bunx smithers-orchestrator init --template <id>`");
+    expect(overview).toContain("Use `bunx smthrs init --template <id>`");
 
     const detail = renderStarterGallery(buildStarterGallery({ id: "customer-incident" }));
     expect(detail).toContain("Turn a customer report into a fix path");
     expect(detail).toContain("Template ID: customer-incident");
     expect(detail).toContain("Before you run it:");
-    expect(detail).toContain('bunx smithers-orchestrator oneshot "');
+    expect(detail).toContain('bunx smthrs oneshot "');
   });
 });
 
@@ -122,7 +122,7 @@ describe("smithers starters command", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Smithers starters");
     expect(result.stdout).toContain("idea-to-tickets");
-    expect(result.stdout).toContain("bunx smithers-orchestrator oneshot ");
+    expect(result.stdout).toContain("bunx smthrs oneshot ");
   });
 
   test("emits structured JSON for integrations", () => {
@@ -134,7 +134,7 @@ describe("smithers starters command", () => {
     expect(result.exitCode).toBe(0);
     expect(result.json.selected.id).toBe("idea-to-tickets");
     expect(result.json.selected.workflow).toBe("oneshot");
-    expect(result.json.selected.command).toStartWith("bunx smithers-orchestrator oneshot ");
+    expect(result.json.selected.command).toStartWith("bunx smthrs oneshot ");
     expect(result.json.starters).toHaveLength(1);
   });
 
@@ -146,6 +146,6 @@ describe("smithers starters command", () => {
     });
     expect(result.exitCode).toBe(4);
     expect(result.json.code).toBe("STARTER_NOT_FOUND");
-    expect(result.json.message).toContain('Run "bunx smithers-orchestrator starters"');
+    expect(result.json.message).toContain('Run "bunx smthrs starters"');
   });
 });

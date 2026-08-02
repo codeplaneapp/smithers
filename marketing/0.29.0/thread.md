@@ -22,7 +22,7 @@ recall/retain recording. See the [media plan](#media-plan).
 >
 > First-class agent memory, XState machines folded over durable rows, and Microsandbox microVMs.
 >
-> bunx smithers-orchestrator@latest init
+> bunx smthrs@latest init
 
 Claim IDs: release-scale, memory, xstate, microsandbox
 Characters: 210
@@ -118,9 +118,9 @@ it, and screenshot the `stately.ai/registry/inspect` tab with Playwright.
 
 The workflow itself (`.smithers/workflows/xstate-release-train.tsx`) and its
 custom statechart UI are committed and verified end-to-end: run
-`bunx smithers-orchestrator up .smithers/workflows/xstate-release-train.tsx`,
+`bunx smthrs up .smithers/workflows/xstate-release-train.tsx`,
 approve the gate, then
-`bunx smithers-orchestrator signal <runId> REVISE --data '{"feedback":"..."}'`
+`bunx smthrs signal <runId> REVISE --data '{"feedback":"..."}'`
 and the machine advances `research → approval → draft-r0 → revise-r0 → draft-r1`.
 
 ### Tweet 2 — Memory visualization (BLOCKED on a product defect)

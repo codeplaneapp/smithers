@@ -4,7 +4,7 @@ description: Run a subtree in an isolated worktree (git or jj) rooted at `path`.
 ---
 
 ```ts
-import { Worktree } from "smithers-orchestrator";
+import { Worktree } from "smthrs";
 
 type WorktreeProps = {
   key?: string;
@@ -17,11 +17,11 @@ type WorktreeProps = {
 };
 ```
 
-Complete runnable example (renders with `bunx smithers-orchestrator graph`):
+Complete runnable example (renders with `bunx smthrs graph`):
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Worktree, MergeQueue, ClaudeCodeAgent } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, Worktree, MergeQueue, ClaudeCodeAgent } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, Task, smithers, outputs } = createSmithers({
@@ -94,4 +94,4 @@ Both use the graph resolver, so they match the path Smithers gives worker tasks.
   re-running `git add`/`git commit`.
 - Innermost `<Worktree>` wins when nested; duplicate ids are rejected.
 - Empty/whitespace `path` is rejected at render time.
-- A relative `path` resolves against the **launch root**, never the workflow file's directory (`workflowPath` is threaded through render separately and isn't used as the path base). The launch root is `--root` if given, else the nearest ancestor of the operator working directory containing a `.smithers/` package, else the operator working directory. A relative `path` like `wt-a` lands beside wherever you ran `bunx smithers-orchestrator up <path>` from, which can differ from where the workflow source lives; Smithers emits a one-time warning for relative worktree paths showing the base and resolved absolute path. Pass an absolute `path` (e.g. `/tmp/smithers/wt-a`) for a deterministic location, and read back the resolved location with `ctx.worktreePath(...)` or `ctx.resolveWorktreePath(...)` rather than reconstructing it.
+- A relative `path` resolves against the **launch root**, never the workflow file's directory (`workflowPath` is threaded through render separately and isn't used as the path base). The launch root is `--root` if given, else the nearest ancestor of the operator working directory containing a `.smithers/` package, else the operator working directory. A relative `path` like `wt-a` lands beside wherever you ran `bunx smthrs up <path>` from, which can differ from where the workflow source lives; Smithers emits a one-time warning for relative worktree paths showing the base and resolved absolute path. Pass an absolute `path` (e.g. `/tmp/smithers/wt-a`) for a deterministic location, and read back the resolved location with `ctx.worktreePath(...)` or `ctx.resolveWorktreePath(...)` rather than reconstructing it.

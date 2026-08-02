@@ -8,7 +8,7 @@ description: Reproduce and fix a reported bug with validation.
 `debug` reuses `implement`'s `ValidationLoop` component with a bug-focused default prompt, but skips early-exit (`done`) and prior-attempt feedback, so it always runs all `maxIterations` (up to 3) instead of stopping once validation passes and a reviewer approves.
 
 ```bash
-bunx smithers-orchestrator workflow run debug --prompt "Fix the intermittent gateway reconnect failure"
+bunx smthrs workflow run debug --prompt "Fix the intermittent gateway reconnect failure"
 ```
 
 <Frame caption="The debug UI shows the reproduce → fix → validate iterations, with no early exit until the fix is verified.">

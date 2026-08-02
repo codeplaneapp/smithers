@@ -1,9 +1,9 @@
 import { CursorStore as CursorStore$1 } from './CursorStoreTypes.js';
-import * as _smithers_orchestrator_db_adapter from '@smithers-orchestrator/db/adapter';
+import * as _smithers_orchestrator_db_adapter from '@smthrs/db/adapter';
 import 'effect';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /**
  * CursorStore backed by the db adapter's `_smithers_integration_cursors`
  * table, so a polling source survives process restarts.

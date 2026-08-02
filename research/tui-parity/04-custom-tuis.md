@@ -15,8 +15,8 @@
 
 `.smithers/tui/<key>.tsx` is a self-contained opentui + React module:
 
-- `/** @jsxImportSource @opentui/react */` (NOT plain react, NOT smithers-orchestrator).
-- Imports allowed: `react`, `@opentui/core`, `@opentui/react`, `@smithers-orchestrator/tui-ui`, `@smithers-orchestrator/ui-core`, `@smithers-orchestrator/gateway-react` (hooks run fine under opentui; packages/tui is the proof), plus relative imports that stay inside `.smithers/tui/`.
+- `/** @jsxImportSource @opentui/react */` (NOT plain react, NOT smthrs).
+- Imports allowed: `react`, `@opentui/core`, `@opentui/react`, `@smthrs/tui-ui`, `@smthrs/ui-core`, `@smthrs/gateway-react` (hooks run fine under opentui; packages/tui is the proof), plus relative imports that stay inside `.smithers/tui/`.
 - Boot: default-export a component `({ runId }) => JSX`. The loader owns the renderer and provider stack; custom TUIs never call `createCliRenderer` themselves. This differs from `.smithers/ui/` (where each file calls `createGatewayReactRoot` and the gateway wraps it in a page) because a terminal has exactly one renderer and the loader must keep quit keys, error boundary, and gateway wiring uniform.
 
 ### The loader: `smithers tui [runId] [--workflow <key>]`

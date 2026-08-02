@@ -6,8 +6,8 @@ CLI is the stable cross-language surface. Resolution order for the binary:
 
 1. ``$SMITHERS_BIN`` (explicit override),
 2. a ``smithers`` on ``PATH``,
-3. ``bunx smithers-orchestrator`` (works with no global install),
-4. ``npx smithers-orchestrator`` as a last resort.
+3. ``bunx smthrs`` (works with no global install),
+4. ``npx smthrs`` as a last resort.
 
 Nothing here raises: callers get a structured ``CliResult`` and decide what to do.
 """
@@ -55,9 +55,9 @@ def _base_command() -> list[str]:
     if shutil.which("smithers"):
         return ["smithers"]
     if shutil.which("bunx"):
-        return ["bunx", "smithers-orchestrator"]
+        return ["bunx", "smthrs"]
     if shutil.which("npx"):
-        return ["npx", "smithers-orchestrator"]
+        return ["npx", "smthrs"]
     # Fall back to a bare name; the subprocess call will report the failure.
     return ["smithers"]
 

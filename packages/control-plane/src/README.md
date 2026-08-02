@@ -1,4 +1,4 @@
-# @smithers-orchestrator/control-plane — src
+# @smthrs/control-plane — src
 
 Single-module package. `index.js` exports `ensureControlPlaneTables(sqlite)` and
 `ControlPlaneStore`: durable org/team/project, billing-account, identity-provider,
@@ -11,7 +11,7 @@ writes an audit event.
 `index.d.ts` is the hand-maintained public type surface (`ControlPlaneSqlite`,
 `ControlPlaneOrg`, ...); `index.js` pulls those types back in via `@typedef`
 JSDoc imports. Consumers reach this package through the
-`smithers-orchestrator/control-plane` re-export in `packages/smithers`.
+`smthrs/control-plane` re-export in `packages/smithers`.
 
 Gotchas:
 

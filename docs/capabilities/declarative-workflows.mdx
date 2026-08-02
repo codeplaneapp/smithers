@@ -30,11 +30,11 @@ React's reconciliation model is the escape hatch between these poles, and it pre
 
 ## How Smithers does it
 
-A workflow file default-exports the result of `smithers((ctx) => <tree>)`. The tree is built from host components - `<Workflow>`, `<Task>`, `<Sequence>`, `<Parallel>`, `<Branch>`, `<Loop>` - that render to `smithers:*` host elements, never the DOM (`jsxImportSource: "smithers-orchestrator"` in tsconfig routes JSX to the workflow reconciler).
+A workflow file default-exports the result of `smithers((ctx) => <tree>)`. The tree is built from host components - `<Workflow>`, `<Task>`, `<Sequence>`, `<Parallel>`, `<Branch>`, `<Loop>` - that render to `smithers:*` host elements, never the DOM (`jsxImportSource: "smthrs"` in tsconfig routes JSX to the workflow reconciler).
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, Task, Sequence, Parallel, smithers, outputs } = createSmithers({
@@ -102,8 +102,8 @@ Every frame's `GraphSnapshot` is persisted. That single fact is why the rest of 
 
 - **Retries** re-dispatch a `TaskDescriptor`, not "re-run the script."
 - **Resume** replays render against persisted state; completed tasks are in the state, so they never re-execute.
-- **Approvals** suspend a *node* in a stored graph; the process can exit and the run survives until [`bunx smithers-orchestrator approve`](/cli/overview).
-- **Hot reload** (`bunx smithers-orchestrator up workflow.tsx --hot`) re-renders edited source against the same persisted state on the next frame, diffs the plans, and continues - in-flight task state intact.
+- **Approvals** suspend a *node* in a stored graph; the process can exit and the run survives until [`bunx smthrs approve`](/cli/overview).
+- **Hot reload** (`bunx smthrs up workflow.tsx --hot`) re-renders edited source against the same persisted state on the next frame, diffs the plans, and continues - in-flight task state intact.
 - **UIs and time travel** draw and fork frames because a frame is data, not a stack trace.
 
 An imperative Temporal workflow gets these too - but only by making the *event history* the durable artifact and constraining your code to replay deterministically against it. Smithers moves the constraint: your render must be pure (side effects belong in task bodies), and in exchange the plan is a first-class, printable value.
@@ -111,29 +111,29 @@ An imperative Temporal workflow gets these too - but only by making the *event h
 Printable literally:
 
 ```bash
-bunx smithers-orchestrator graph workflow.tsx --input '{"repo":"acme/api"}'   # render the graph, execute nothing
-bunx smithers-orchestrator graph workflow.tsx --compact                        # structure only, no prompt bodies
+bunx smthrs graph workflow.tsx --input '{"repo":"acme/api"}'   # render the graph, execute nothing
+bunx smthrs graph workflow.tsx --compact                        # structure only, no prompt bodies
 ```
 
-`bunx smithers-orchestrator graph` is the payoff of description-shaped workflows in one command: the full plan, before a single token is spent. Use it in review the way you'd read a Step Functions definition - except it's the real artifact, not a diagram that drifted.
+`bunx smthrs graph` is the payoff of description-shaped workflows in one command: the full plan, before a single token is spent. Use it in review the way you'd read a Step Functions definition - except it's the real artifact, not a diagram that drifted.
 
 ## Guarantees and limits
 
 - **Renders must be pure.** `Date.now()` or `fetch` in the render body produces unstable plans. Side effects go in task bodies, which are durable and retried.
 - **IDs are the identity.** Renaming a task id orphans its persisted output and creates a new node. Keep ids stable and data-derived (`` `${ticket.id}-implement` ``), especially under fan-out - same rule as Temporal's workflow versioning, smaller blast radius.
 - **Hot reload is not resume.** `--hot` applies edits within a running frame; resuming a *stopped* run validates the original source hash and fails with `RESUME_METADATA_MISMATCH` if the file changed. Edited workflow → fresh run.
-- **`bunx smithers-orchestrator graph` validates shape, not semantics.** It catches structural errors cheaply, but a `deps` key that doesn't match any node id still fails at runtime, not at graph time.
+- **`bunx smthrs graph` validates shape, not semantics.** It catches structural errors cheaply, but a `deps` key that doesn't match any node id still fails at runtime, not at graph time.
 - **Frames aren't free.** Every frame writes a snapshot; unbounded loops grow the database. `<ContinueAsNew>` hands off to a fresh run with carried state.
 - Where a **visual builder** genuinely fits - non-engineers wiring SaaS triggers - n8n or Zapier is the right tool; Smithers assumes the author (human or agent) writes code.
 
 ## Operating it
 
 ```bash
-bunx smithers-orchestrator graph <workflow> [--input <json>] [--compact]   # render without executing
-bunx smithers-orchestrator up workflow.tsx --hot                           # run with hot reload while authoring
-bunx smithers-orchestrator workflow list                                   # discover .smithers/workflows
-bunx smithers-orchestrator tree RUN_ID                                   # DevTools snapshot of a live run's tree
-bunx smithers-orchestrator inspect RUN_ID                                # node-level state of the extracted graph
+bunx smthrs graph <workflow> [--input <json>] [--compact]   # render without executing
+bunx smthrs up workflow.tsx --hot                           # run with hot reload while authoring
+bunx smthrs workflow list                                   # discover .smithers/workflows
+bunx smthrs tree RUN_ID                                   # DevTools snapshot of a live run's tree
+bunx smthrs inspect RUN_ID                                # node-level state of the extracted graph
 ```
 
 ## See also

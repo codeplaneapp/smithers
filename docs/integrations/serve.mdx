@@ -10,7 +10,7 @@ Serve mode starts a Hono-based HTTP server alongside a running workflow. Every r
 ## CLI
 
 ```bash
-bunx smithers-orchestrator up workflow.tsx --serve --port 3000 --host 0.0.0.0 --auth-token "$SMITHERS_API_KEY"
+bunx smthrs up workflow.tsx --serve --port 3000 --host 0.0.0.0 --auth-token "$SMITHERS_API_KEY"
 ```
 
 A non-loopback `--host` (like `0.0.0.0`) requires `--auth-token` (or `--insecure`, dangerous). The default `127.0.0.1` needs neither.
@@ -30,13 +30,13 @@ The process stays alive after the workflow completes, so final state stays query
 Detached mode:
 
 ```bash
-bunx smithers-orchestrator up workflow.tsx --serve --port 8080 -d
+bunx smthrs up workflow.tsx --serve --port 8080 -d
 ```
 
 ## Programmatic
 
 ```ts
-import { SmithersDb, createServeApp } from "smithers-orchestrator";
+import { SmithersDb, createServeApp } from "smthrs";
 
 const adapter = new SmithersDb(workflow.db);
 const abort = new AbortController();
@@ -189,7 +189,7 @@ Unknown routes return `404` with code `NOT_FOUND`.
 | | Serve mode | [Multi-workflow server](/integrations/server) |
 |---|---|---|
 | Scope | Single workflow, single run | Any workflow, multiple concurrent runs |
-| Start | `bunx smithers-orchestrator up --serve` or `createServeApp()` | `startServer()` |
+| Start | `bunx smthrs up --serve` or `createServeApp()` | `startServer()` |
 | Routes | `/`, `/events`, `/approve/:nodeId`, ... | `/v1/runs`, `/v1/runs/:runId`, ... |
 | Framework | Hono | Node.js `http` |
 | Use case | Development, single-purpose services | Production API gateway |
@@ -200,7 +200,7 @@ Unknown routes return `404` with code `NOT_FOUND`.
 
 ```bash
 # Start a workflow with serve mode
-bunx smithers-orchestrator up workflow.tsx --serve --port 8080 --auth-token sk-secret
+bunx smthrs up workflow.tsx --serve --port 8080 --auth-token sk-secret
 
 # Status
 curl http://localhost:8080/ -H "Authorization: Bearer sk-secret"

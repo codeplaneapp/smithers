@@ -1,24 +1,24 @@
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
-import { normalizeTokenUsage } from "@smithers-orchestrator/agents/BaseCliAgent";
-import { detectAgentFamily } from "@smithers-orchestrator/observability/detectAgentFamily";
-import { detectCaptureMode } from "@smithers-orchestrator/observability/detectCaptureMode";
-import { resolveAgentTraceCapabilities } from "@smithers-orchestrator/observability/resolveAgentTraceCapabilities";
-import { unsupportedKindsForCapabilities } from "@smithers-orchestrator/observability/unsupportedKindsForCapabilities";
-import { kindPhase } from "@smithers-orchestrator/observability/kindPhase";
-import { normalizeStructuredEvent } from "@smithers-orchestrator/observability/normalizeStructuredEvent";
-import { extractProviderSessionCorrelation } from "@smithers-orchestrator/observability/_traceEventNormalizers";
-import { redactValue } from "@smithers-orchestrator/observability/_traceRedaction";
-import { canonicalTraceEventToOtelLogRecord } from "@smithers-orchestrator/observability/canonicalTraceEventToOtelLogRecord";
-import { agentSessionEventToOtelLogRecord } from "@smithers-orchestrator/observability/agentSessionEventToOtelLogRecord";
-import { emitOtelLogRecord } from "@smithers-orchestrator/observability/emitOtelLogRecord";
-import { shouldExportTraceEventToOtel } from "@smithers-orchestrator/observability/_otelLogBuilders";
+import { nowMs } from "@smthrs/scheduler/nowMs";
+import { normalizeTokenUsage } from "@smthrs/agents/BaseCliAgent";
+import { detectAgentFamily } from "@smthrs/observability/detectAgentFamily";
+import { detectCaptureMode } from "@smthrs/observability/detectCaptureMode";
+import { resolveAgentTraceCapabilities } from "@smthrs/observability/resolveAgentTraceCapabilities";
+import { unsupportedKindsForCapabilities } from "@smthrs/observability/unsupportedKindsForCapabilities";
+import { kindPhase } from "@smthrs/observability/kindPhase";
+import { normalizeStructuredEvent } from "@smthrs/observability/normalizeStructuredEvent";
+import { extractProviderSessionCorrelation } from "@smthrs/observability/_traceEventNormalizers";
+import { redactValue } from "@smthrs/observability/_traceRedaction";
+import { canonicalTraceEventToOtelLogRecord } from "@smthrs/observability/canonicalTraceEventToOtelLogRecord";
+import { agentSessionEventToOtelLogRecord } from "@smthrs/observability/agentSessionEventToOtelLogRecord";
+import { emitOtelLogRecord } from "@smthrs/observability/emitOtelLogRecord";
+import { shouldExportTraceEventToOtel } from "@smthrs/observability/_otelLogBuilders";
 import {
   resolveClaudeSessionFile,
   resolveCodexSessionFile,
   resolvePiSessionFile,
-} from "@smithers-orchestrator/observability/_sessionFileResolvers";
+} from "@smthrs/observability/_sessionFileResolvers";
 
 // Bound the in-memory canonical trace-event buffer (spec decision 15). A chatty
 // agent node can emit tens of thousands of stdout-derived events before flush;
@@ -34,20 +34,20 @@ const TRACE_EVENT_MAX_RETAINED = 4096;
 const TRACE_EVENT_TRIM_BATCH = 512;
 
 /**
- * @typedef {import("@smithers-orchestrator/observability/SmithersEvent").SmithersEvent} SmithersEvent
- * @typedef {import("@smithers-orchestrator/observability/agentTrace").AgentCaptureMode} AgentCaptureMode
- * @typedef {import("@smithers-orchestrator/observability/agentTrace").AgentFamily} AgentFamily
- * @typedef {import("@smithers-orchestrator/observability/agentTrace").AgentSessionTranscriptEvent} AgentSessionTranscriptEvent
- * @typedef {import("@smithers-orchestrator/observability/agentTrace").AgentTraceCapabilityProfile} AgentTraceCapabilityProfile
- * @typedef {import("@smithers-orchestrator/observability/agentTrace").AgentTraceSummary} AgentTraceSummary
- * @typedef {import("@smithers-orchestrator/observability/agentTrace").CanonicalAgentTraceEvent} CanonicalAgentTraceEvent
- * @typedef {import("@smithers-orchestrator/observability/agentTrace").CanonicalAgentTraceEventKind} CanonicalAgentTraceEventKind
- * @typedef {import("@smithers-orchestrator/observability/agentTrace").TraceCompleteness} TraceCompleteness
+ * @typedef {import("@smthrs/observability/SmithersEvent").SmithersEvent} SmithersEvent
+ * @typedef {import("@smthrs/observability/agentTrace").AgentCaptureMode} AgentCaptureMode
+ * @typedef {import("@smthrs/observability/agentTrace").AgentFamily} AgentFamily
+ * @typedef {import("@smthrs/observability/agentTrace").AgentSessionTranscriptEvent} AgentSessionTranscriptEvent
+ * @typedef {import("@smthrs/observability/agentTrace").AgentTraceCapabilityProfile} AgentTraceCapabilityProfile
+ * @typedef {import("@smthrs/observability/agentTrace").AgentTraceSummary} AgentTraceSummary
+ * @typedef {import("@smthrs/observability/agentTrace").CanonicalAgentTraceEvent} CanonicalAgentTraceEvent
+ * @typedef {import("@smthrs/observability/agentTrace").CanonicalAgentTraceEventKind} CanonicalAgentTraceEventKind
+ * @typedef {import("@smthrs/observability/agentTrace").TraceCompleteness} TraceCompleteness
  * @typedef {import("./AgentTraceCollectorOptions.ts").AgentTraceCollectorOptions} AgentTraceCollectorOptions
  * @typedef {import("./events.js").EventBus} EventBus
  *
- * @typedef {import("@smithers-orchestrator/observability/_traceEventNormalizers").NormalizedTraceBatch} NormalizedTraceBatch
- * @typedef {import("@smithers-orchestrator/observability/_traceEventNormalizers").NormalizedTraceEvent} NormalizedTraceEvent
+ * @typedef {import("@smthrs/observability/_traceEventNormalizers").NormalizedTraceBatch} NormalizedTraceBatch
+ * @typedef {import("@smthrs/observability/_traceEventNormalizers").NormalizedTraceEvent} NormalizedTraceEvent
  */
 
 /**

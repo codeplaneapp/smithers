@@ -20,7 +20,7 @@ import { tokens as t } from "../tokens";
  * smithers theme tokens and a CVD-validated categorical palette, over Recharts.
  *
  * It lives in the `adapters/` layer because it pulls the heavy `recharts`
- * widget; reach it through the `smithers-orchestrator/ui/adapters/chart`
+ * widget; reach it through the `smthrs/ui/adapters/chart`
  * subpath (never the base barrel, which the UI-architecture guard keeps free
  * of heavy dependencies).
  *

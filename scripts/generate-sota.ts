@@ -288,8 +288,8 @@ function renderMdx(registry: SotaRegistry, benchmarks: Benchmark[]): string {
     `**Registry v${registry.version}** · updated **${registry.updatedAt}**. This page is generated from ` +
       "[`docs/data/sota-models.json`](https://github.com/smithersai/smithers/blob/main/docs/data/sota-models.json), " +
       "the single source of truth for which models smithers configures by default. A daily research job checks every " +
-      "provider for new GA models and opens a PR here when the state of the art moves; `bunx smithers-orchestrator update` " +
-      "picks the changes up on your machine, and re-running `bunx smithers-orchestrator init` refreshes installed " +
+      "provider for new GA models and opens a PR here when the state of the art moves; `bunx smthrs update` " +
+      "picks the changes up on your machine, and re-running `bunx smthrs init` refreshes installed " +
       "workflows to the new defaults.",
   );
   lines.push("");

@@ -5,7 +5,7 @@ import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } fr
 
 // src/schemaMock.ts
 import { toJSONSchema } from "zod";
-import { zodSchemaToJsonExample } from "@smithers-orchestrator/components/zod-to-example";
+import { zodSchemaToJsonExample } from "@smthrs/components/zod-to-example";
 function stringForFormat(format) {
   switch (format) {
     case "email":

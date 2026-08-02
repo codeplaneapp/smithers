@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { RuntimeCapabilityError } from "../src/RuntimeCapabilityError.js";
 
 describe("RuntimeCapabilityError", () => {

@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/telegram",
+  "name": "@smthrs/telegram",
   "version": "0.32.0",
   "description": "Serverless-friendly Telegram Bot API helpers for Smithers workflows and examples",
   "type": "module",

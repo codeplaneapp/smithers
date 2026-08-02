@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import type { GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
+import type { GatewayEventFrame } from "@smthrs/gateway-client";
 import {
   classifyFrame,
   frameTickChar,

@@ -1,4 +1,4 @@
-import type { GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
+import type { GatewayEventFrame } from "@smthrs/gateway-client";
 
 /**
  * A run event with the gateway `run.event` envelope removed: the engine event

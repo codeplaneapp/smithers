@@ -1,4 +1,4 @@
-# @smithers-orchestrator/server — src
+# @smthrs/server — src
 
 The Smithers Gateway control plane. `gateway.js` is the core: the `Gateway`
 class serves the WS RPC protocol, HTTP `/v1/rpc`, the `/v1/api` REST + SSE

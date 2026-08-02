@@ -1,7 +1,7 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { Task } from "../../components/src/components/Task.js";
 import { Workflow } from "../../components/src/components/Workflow.js";
 import { runWorkflow } from "../src/engine.js";

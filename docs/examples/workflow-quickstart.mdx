@@ -1,20 +1,20 @@
 ---
 title: "Workflow Quickstart"
-description: "A two-agent sequential smithers-orchestrator workflow where a planner task feeds a briefing task through persisted structured output."
+description: "A two-agent sequential smthrs workflow where a planner task feeds a briefing task through persisted structured output."
 ---
 
 # Workflow Quickstart
 
 <Note>
-Standalone `smithers-orchestrator` quickstart: a planner task feeds a briefing task through persisted workflow output.
+Standalone `smthrs` quickstart: a planner task feeds a briefing task through persisted workflow output.
 </Note>
 
 ## Source
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // workflows/quickstart.tsx
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { ToolLoopAgent as Agent, Output } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
@@ -76,7 +76,7 @@ Write a brief based on the plan. The "stepCount" must equal the number of steps.
 ## Running
 
 ```bash
-bunx smithers-orchestrator up workflows/quickstart.tsx --input '{"goal": "Build a CLI tool for managing dotfiles"}'
+bunx smthrs up workflows/quickstart.tsx --input '{"goal": "Build a CLI tool for managing dotfiles"}'
 ```
 
 ```

@@ -3,14 +3,14 @@ import { dirname, join, resolve } from "node:path";
 
 /**
  * Diagnose the "dangling workspace link" failure mode: a workspace-linked
- * dependency dir (e.g. `node_modules/@smithers-orchestrator/cli`) is a symlink
+ * dependency dir (e.g. `node_modules/@smthrs/cli`) is a symlink
  * whose target no longer exists — typically because something rewrote the
  * links to point into a git worktree that has since been removed. Bun then
- * fails the import with a bare `ENOENT reading ".../@smithers-orchestrator/cli"`,
+ * fails the import with a bare `ENOENT reading ".../@smthrs/cli"`,
  * which says nothing about the fix.
  *
  * Walks up from `startDir` to the nearest `node_modules` that contains
- * `@smithers-orchestrator` or `smithers-orchestrator`, scans those entries for
+ * `@smthrs` or `smthrs`, scans those entries for
  * dangling symlinks, and returns an actionable message naming the broken
  * links, their dead targets, and the repair (`pnpm install`). Returns `null`
  * when no dangling link is found (the import failure has some other cause).
@@ -53,7 +53,7 @@ export function danglingWorkspaceLinkHint(startDir) {
 function collectDanglingLinks(nodeModules) {
   /** @type {{ linkPath: string; target: string }[]} */
   const dangling = [];
-  const candidateDirs = [join(nodeModules, "@smithers-orchestrator"), nodeModules];
+  const candidateDirs = [join(nodeModules, "@smthrs"), nodeModules];
   for (const dir of candidateDirs) {
     /** @type {string[]} */
     let entries;
@@ -63,7 +63,7 @@ function collectDanglingLinks(nodeModules) {
       continue;
     }
     for (const entry of entries) {
-      if (dir === nodeModules && entry !== "smithers-orchestrator" && entry !== "smithers-workflows") {
+      if (dir === nodeModules && entry !== "smthrs" && entry !== "smithers-workflows") {
         continue;
       }
       const linkPath = join(dir, entry);

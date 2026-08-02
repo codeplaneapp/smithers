@@ -1,4 +1,4 @@
-# @smithers-orchestrator/agents — src
+# @smthrs/agents — src
 
 Agent adapters for Smithers. Two families:
 

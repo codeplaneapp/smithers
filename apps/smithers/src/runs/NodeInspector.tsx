@@ -1,5 +1,5 @@
 import "./inspector.css";
-import { EmptyState } from "@smithers-orchestrator/ui";
+import { EmptyState } from "@smthrs/ui";
 import { openSurface } from "../app/navigation";
 import { useCardUiStore, type InspectorTab } from "../cards/cardUiStore";
 import { useChatStore } from "../chat/chatStore";

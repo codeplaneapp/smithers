@@ -1,16 +1,7 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import {
-  Parallel,
-  SmithersDb,
-  Task,
-  Timer,
-  WaitForEvent,
-  Workflow,
-  runWorkflow,
-  signalRun,
-} from "smithers-orchestrator";
+import { Parallel, SmithersDb, Task, Timer, WaitForEvent, Workflow, runWorkflow, signalRun } from "smthrs";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers.js";
 import { Effect } from "effect";
 const END_TO_END_TIMEOUT_MS = 30_000;

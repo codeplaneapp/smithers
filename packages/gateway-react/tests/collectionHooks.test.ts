@@ -21,10 +21,10 @@ import { dirname, join } from "node:path";
 import React, { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { z } from "zod";
-import { Gateway, type GatewayTokenGrant } from "@smithers-orchestrator/server";
-import { SmithersDb } from "@smithers-orchestrator/db";
-import { SmithersGatewayClient, type SmithersDataClient } from "@smithers-orchestrator/gateway-client";
-import { createSmithers } from "smithers-orchestrator";
+import { Gateway, type GatewayTokenGrant } from "@smthrs/server";
+import { SmithersDb } from "@smthrs/db";
+import { SmithersGatewayClient, type SmithersDataClient } from "@smthrs/gateway-client";
+import { createSmithers } from "smthrs";
 import {
   SmithersCollectionsProvider,
   SmithersGatewayProvider,

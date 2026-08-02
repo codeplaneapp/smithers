@@ -1,4 +1,4 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 const CHILD_WORKFLOW_SUSPENDING_STATUSES = new Set([
   "waiting-approval",

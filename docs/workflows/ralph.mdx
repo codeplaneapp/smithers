@@ -9,7 +9,7 @@ for a bounded variant. Once installed, it repeatedly runs the configured
 smart agent on your prompt.
 
 ```bash
-bunx smithers-orchestrator workflow run ralph --prompt "Continue reducing flaky tests"
+bunx smthrs workflow run ralph --prompt "Continue reducing flaky tests"
 ```
 
 <Frame caption="The ralph UI shows the single agent task re-running on your prompt in an unbounded loop.">
@@ -33,4 +33,4 @@ bunx smithers-orchestrator workflow run ralph --prompt "Continue reducing flaky 
 
 ## Resume & retry
 
-`ralph` won't stop on its own: cancel it with `bunx smithers-orchestrator cancel RUN_ID` when enough work is done, or configure a `maxIterations` limit in your workflow file. Runs are durable and resume with `up --resume`.
+`ralph` won't stop on its own: cancel it with `bunx smthrs cancel RUN_ID` when enough work is done, or configure a `maxIterations` limit in your workflow file. Runs are durable and resume with `up --resume`.

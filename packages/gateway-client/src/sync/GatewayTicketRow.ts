@@ -1,7 +1,7 @@
 import type {
   GatewayDocKind as ProtocolGatewayDocKind,
   GatewayTicketRow as ProtocolGatewayTicketRow,
-} from "@smithers-orchestrator/protocol/gateway-rpc";
+} from "@smthrs/protocol/gateway-rpc";
 
 /**
  * One row of the `tickets` collection — the live `listTickets` RPC response

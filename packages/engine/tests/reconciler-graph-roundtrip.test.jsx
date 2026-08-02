@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // Round-trip integration tests: React component tree → host tree →
 // extracted task plan → engine schedule + execute.
 //
@@ -9,9 +9,9 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { Effect } from "effect";
-import { Sandbox, Task, Workflow, runWorkflow } from "smithers-orchestrator";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
-import { extractFromHost } from "@smithers-orchestrator/graph/dom/extract";
+import { Sandbox, Task, Workflow, runWorkflow } from "smthrs";
+import { SmithersRenderer } from "@smthrs/react-reconciler/dom/renderer";
+import { extractFromHost } from "@smthrs/graph/dom/extract";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 
 describe("reconciler→graph→engine pipeline", () => {

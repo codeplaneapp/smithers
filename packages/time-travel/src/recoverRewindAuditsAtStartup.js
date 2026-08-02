@@ -1,6 +1,6 @@
 import { recoverInProgressRewindAudits } from "./recoverInProgressRewindAudits.js";
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 
 /**
  * Best-effort startup recovery of rewinds interrupted by a prior crash. Call

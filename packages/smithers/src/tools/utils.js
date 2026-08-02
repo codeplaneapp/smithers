@@ -2,8 +2,8 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { dirname } from "node:path";
 import { mkdir, realpath, stat } from "node:fs/promises";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { assertPathWithinRoot, resolveSandboxPath } from "@smithers-orchestrator/sandbox/sandboxPath";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { assertPathWithinRoot, resolveSandboxPath } from "@smthrs/sandbox/sandboxPath";
 import { getToolContext } from "./context.js";
 
 export const DEFAULT_MAX_OUTPUT_BYTES = 200_000;

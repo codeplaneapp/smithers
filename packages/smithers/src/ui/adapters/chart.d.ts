@@ -1,1 +1,1 @@
-export * from "@smithers-orchestrator/ui/adapters/chart";
+export * from "@smthrs/ui/adapters/chart";

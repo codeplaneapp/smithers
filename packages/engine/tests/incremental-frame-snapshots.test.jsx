@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * A/B equivalence for the incremental frame-snapshot cache: the same fixture
  * workflow runs once with SMITHERS_INCREMENTAL_FRAME_SNAPSHOTS=0 (the full
@@ -22,12 +22,12 @@
  * poison resume/time-travel for up to FRAME_KEYFRAME_INTERVAL frames.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { Loop, Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { Loop, Task, Workflow, runWorkflow } from "smthrs";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";
-import { loadSnapshot } from "@smithers-orchestrator/time-travel";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { loadSnapshot } from "@smthrs/time-travel";
+import { SmithersDb } from "@smthrs/db/adapter";
 
 const ENV_KEY = "SMITHERS_INCREMENTAL_FRAME_SNAPSHOTS";
 const savedEnv = process.env[ENV_KEY];

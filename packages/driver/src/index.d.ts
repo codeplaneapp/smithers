@@ -1,21 +1,21 @@
-import * as _smithers_orchestrator_graph_types from '@smithers-orchestrator/graph/types';
-import { TaskDescriptor as TaskDescriptor$2, WorkflowGraph } from '@smithers-orchestrator/graph/types';
-import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
-import { SmithersEvent } from '@smithers-orchestrator/observability/SmithersEvent';
+import * as _smithers_orchestrator_graph_types from '@smthrs/graph/types';
+import { TaskDescriptor as TaskDescriptor$2, WorkflowGraph } from '@smthrs/graph/types';
+import { SmithersError } from '@smthrs/errors/SmithersError';
+import { SmithersEvent } from '@smthrs/observability/SmithersEvent';
 import { Layer } from 'effect';
-import * as _smithers_orchestrator_scheduler from '@smithers-orchestrator/scheduler';
-import { WaitReason as WaitReason$1, EngineDecision as EngineDecision$1 } from '@smithers-orchestrator/scheduler';
+import * as _smithers_orchestrator_scheduler from '@smthrs/scheduler';
+import { WaitReason as WaitReason$1, EngineDecision as EngineDecision$1 } from '@smthrs/scheduler';
 import { z } from 'zod';
-import * as _smithers_orchestrator_graph_ProofBinding from '@smithers-orchestrator/graph/ProofBinding';
-import { SmithersWorkflowOptions } from '@smithers-orchestrator/scheduler/SmithersWorkflowOptions';
-import { SchemaRegistryEntry } from '@smithers-orchestrator/db/SchemaRegistryEntry';
-import * as _smithers_orchestrator_graph from '@smithers-orchestrator/graph';
-import { ExtractOptions, WorkflowGraph as WorkflowGraph$1 } from '@smithers-orchestrator/graph';
+import * as _smithers_orchestrator_graph_ProofBinding from '@smthrs/graph/ProofBinding';
+import { SmithersWorkflowOptions } from '@smthrs/scheduler/SmithersWorkflowOptions';
+import { SchemaRegistryEntry } from '@smthrs/db/SchemaRegistryEntry';
+import * as _smithers_orchestrator_graph from '@smthrs/graph';
+import { ExtractOptions, WorkflowGraph as WorkflowGraph$1 } from '@smthrs/graph';
 
 /**
  * Raw signal row as loaded by a `RuntimeAdapter.signals.load` implementation
  * (or seeded via `RunOptions.signals` for tests/replay without a live
- * adapter). Mirrors `@smithers-orchestrator/db`'s `SignalRow` shape minus
+ * adapter). Mirrors `@smthrs/db`'s `SignalRow` shape minus
  * `runId` (the ctx is already run-scoped). `payloadJson` may be a JSON string
  * (as stored durably) or an already-parsed value (test convenience).
  */
@@ -31,7 +31,7 @@ type SignalRowInput$1 = {
  * A signal row as handed to workflow/render code. `payload` is intentionally
  * `unknown` — signals are not schema-validated at receipt time (a `smithers
  * signal` call can deliver arbitrary JSON), so typed access belongs to the
- * caller (e.g. `@smithers-orchestrator/xstate`'s `eventReceived`, which
+ * caller (e.g. `@smthrs/xstate`'s `eventReceived`, which
  * validates against a supplied schema and reports a typed error naming the
  * signal on failure) rather than being asserted here.
  */
@@ -239,7 +239,7 @@ type RuntimeSubprocessResult$1 = {
 type RuntimeSubprocess$1 = {
     spawn(command: string, args?: readonly string[], opts?: Record<string, unknown>): Promise<RuntimeSubprocessResult$1>;
 };
-/** Worktree path-resolution capability, mirroring `@smithers-orchestrator/graph`'s `resolveWorktreePath` contract. */
+/** Worktree path-resolution capability, mirroring `@smthrs/graph`'s `resolveWorktreePath` contract. */
 type RuntimeWorktree$1 = {
     resolve(path: string, opts?: {
         baseRootDir?: string;
@@ -882,7 +882,7 @@ declare class WorkflowDriver<Schema extends unknown = unknown> {
     activeRunId: string;
     /** @type {RunOptions | undefined} */
     activeOptions: RunOptions$1 | undefined;
-    /** @type {import("@smithers-orchestrator/graph").WorkflowGraph | undefined} */
+    /** @type {import("@smthrs/graph").WorkflowGraph | undefined} */
     lastGraph: _smithers_orchestrator_graph.WorkflowGraph | undefined;
     /** @type {{ nodeId: string; waitingOn: string[] }[]} Tasks that deferred on unresolved deps in the latest render. */
     lastDeferredDeps: {

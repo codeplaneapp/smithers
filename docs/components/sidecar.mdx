@@ -5,7 +5,7 @@ description: Run a cheap shadow agent beside a primary task and compare their sc
 
 ```ts
 // Props
-import { Sidecar, computeSidecarDelta } from "smithers-orchestrator";
+import { Sidecar, computeSidecarDelta } from "smthrs";
 
 type SidecarProps = {
   id?: string;                         // default: "sidecar"
@@ -51,7 +51,7 @@ type SidecarDelta = {
 
 `<Sidecar>` renders a `<Parallel>` with two `<Task>` children: the primary keeps the component `id`, writes to `output`, and is the node downstream code reads; the sidecar (`${id}-sidecar`) shares the prompt, runs with `continueOnFail: true`, and writes to `sidecarOutput` or `output` by default.
 
-Both tasks share the `scorers` prop; Smithers records live results in `_smithers_scorers` per task node id, so `bunx smithers-orchestrator scores RUN_ID` lists the primary and sidecar rows separately.
+Both tasks share the `scorers` prop; Smithers records live results in `_smithers_scorers` per task node id, so `bunx smthrs scores RUN_ID` lists the primary and sidecar rows separately.
 
 `computeSidecarDelta(rows, { primaryNodeId, sidecarNodeId, scorerId })` derives `primaryScore`, `sidecarScore`, `delta`, and `cheaperWins` from persisted scorer rows only.
 
@@ -190,8 +190,8 @@ export const Task = createTaskComponent({ applyCliToolAllowlist });
 
 ```ts SidecarProps.ts
 import type React from "react";
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
-import type { ScorersMap } from "@smithers-orchestrator/graph/types";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
+import type { ScorersMap } from "@smthrs/graph/types";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type SidecarProps = {

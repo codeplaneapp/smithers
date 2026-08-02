@@ -2,10 +2,10 @@
 // smithers-display-name: TUI Parity Program
 // smithers-description: Bring multi's product UX to the terminal: extract isomorphic ui-core, build tui-ui + the TUI shell on opentui, zmux e2e everything. Phase-by-phase worktree lanes with real check oracles, review, and human gates.
 // smithers-tags: tui, opentui, ui-core, zmux, parity, program
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import { Approval, Sequence, Task, Worktree, createSmithers } from "smithers-orchestrator";
+import { Approval, Sequence, Task, Worktree, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 
@@ -61,12 +61,12 @@ const PHASES: PhaseDef[] = [
     title: "Phase 1 - Boilerplate + rails",
     specFiles: ["00-overview.md", "01-packages.md", "06-zmux-harness.md"],
     detail: `Land the program rails, spec-first, nothing product-visible yet:
-1. Scaffold packages/ui-core (@smithers-orchestrator/ui-core): the isomorphic
+1. Scaffold packages/ui-core (@smthrs/ui-core): the isomorphic
    headless product layer. Zero DOM, zero opentui, zero react-dom. Seed it with
    the Platform DI interface module (see 02-platform-di.md), a first extracted
    pure-domain module + its tests, and package.json/tsconfig/test scripts
    matching sibling packages (raw-source shipping like gateway-react).
-2. Scaffold packages/tui-ui (@smithers-orchestrator/tui-ui): the opentui leaf
+2. Scaffold packages/tui-ui (@smthrs/tui-ui): the opentui leaf
    component library (props-in/callbacks-out). jsxImportSource "@opentui/react"
    like packages/tui. Seed with StatusPill, EmptyState, Keybar leaf components
    + pure-function tests (no TTY needed).
@@ -104,7 +104,7 @@ existing packages/tui modes onto it:
    /Users/williamcory/multi (runsList/runProgress/statusMeta per
    01-packages.md), their stores and headless bridges, into ui-core, and add
    view-model hooks useRunsListVm + useRunInspectorVm over gateway-react.
-2. Update multi to import these from @smithers-orchestrator/ui-core (its pnpm
+2. Update multi to import these from @smthrs/ui-core (its pnpm
    link overrides make the loop same-day); multi's own checks must stay green
    (pnpm -C /Users/williamcory/multi typecheck if reachable, else note it in
    the report for the merge step).
@@ -368,7 +368,7 @@ GROUND RULES (non-negotiable):
   enforces this; keep scripts/check-tui-architecture.mjs green).
 - Extraction from /Users/williamcory/multi is move-and-reimport, never
   copy-paste-fork: after extracting a module into ui-core, update multi to
-  import it from @smithers-orchestrator/ui-core.`;
+  import it from @smthrs/ui-core.`;
 
 export default smithers((ctx) => {
   const startPhase = asInt(ctx.input.startPhase, 1);

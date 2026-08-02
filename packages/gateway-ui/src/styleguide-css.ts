@@ -1,1 +1,1 @@
-export { workflowUiLayoutCss, workflowUiStyles, workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
+export { workflowUiLayoutCss, workflowUiStyles, workflowUiThemeCss } from "@smthrs/ui-styleguide";

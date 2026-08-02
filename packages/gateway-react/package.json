@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/gateway-react",
+  "name": "@smthrs/gateway-react",
   "version": "0.32.0",
   "description": "React hooks and root helpers for Smithers Gateway UIs",
   "type": "module",
@@ -25,7 +25,7 @@
     "test": "bun test tests"
   },
   "dependencies": {
-    "@smithers-orchestrator/gateway-client": "workspace:*",
+    "@smthrs/gateway-client": "workspace:*",
     "@tanstack/react-db": "0.1.91",
     "@tanstack/react-query": "5.101.2",
     "effect": "4.0.0-beta.102"
@@ -36,8 +36,8 @@
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.10.6",
-    "@smithers-orchestrator/db": "workspace:*",
-    "@smithers-orchestrator/server": "workspace:*",
+    "@smthrs/db": "workspace:*",
+    "@smthrs/server": "workspace:*",
     "@types/bun": "latest",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",

@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { getTableName } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Effect, Metric } from "effect";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { createMemoryStore } from "../src/store/index.js";
 import { MemoryService, createMemoryLayer } from "../src/service.js";
 import { Summarizer } from "../src/processors.js";

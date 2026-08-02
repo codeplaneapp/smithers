@@ -5,11 +5,11 @@
  * Use cases: CI status gates, deployment readiness, approval polling,
  * dependency availability, service health checks.
  */
-import { Sequence, Loop } from "smithers-orchestrator";
+import { Sequence, Loop } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { bash } from "smithers-orchestrator/tools";
+import { bash } from "smthrs/tools";
 import { z } from "zod";
 import CheckPrompt from "./prompts/gate/check.mdx";
 const checkSchema = z.object({

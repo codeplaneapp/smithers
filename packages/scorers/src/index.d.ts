@@ -1,10 +1,10 @@
-import * as _smithers_orchestrator_agents_AgentLike from '@smithers-orchestrator/agents/AgentLike';
-import { AgentLike as AgentLike$4 } from '@smithers-orchestrator/agents/AgentLike';
+import * as _smithers_orchestrator_agents_AgentLike from '@smthrs/agents/AgentLike';
+import { AgentLike as AgentLike$4 } from '@smthrs/agents/AgentLike';
 import { ZodObject } from 'zod';
-export { smithersScorers } from '@smithers-orchestrator/db/internal-schema';
-import * as _smithers_orchestrator_db_adapter from '@smithers-orchestrator/db/adapter';
+export { smithersScorers } from '@smthrs/db/internal-schema';
+import * as _smithers_orchestrator_db_adapter from '@smthrs/db/adapter';
 import * as effect from 'effect';
-export { scorerDuration, scorersFailed, scorersFinished, scorersStarted } from '@smithers-orchestrator/observability/metrics';
+export { scorerDuration, scorersFailed, scorersFinished, scorersStarted } from '@smthrs/observability/metrics';
 
 /** Options for `gradeWorkflowUiSource`. */
 type WorkflowUiComplianceOptions$2 = {
@@ -425,7 +425,7 @@ declare function llmJudge(config: LlmJudgeConfig$1): Scorer$c;
 type LlmJudgeConfig$1 = LlmJudgeConfig$2;
 type Scorer$c = Scorer$e;
 
-/** @typedef {import("@smithers-orchestrator/agents/AgentLike").AgentLike} AgentLike */
+/** @typedef {import("@smthrs/agents/AgentLike").AgentLike} AgentLike */
 /** @typedef {import("./types.js").Scorer} Scorer */
 /**
  * Creates a relevancy scorer that uses an LLM judge to evaluate whether
@@ -438,7 +438,7 @@ declare function relevancyScorer(judge: AgentLike$3): Scorer$b;
 type AgentLike$3 = _smithers_orchestrator_agents_AgentLike.AgentLike;
 type Scorer$b = Scorer$e;
 
-/** @typedef {import("@smithers-orchestrator/agents/AgentLike").AgentLike} AgentLike */
+/** @typedef {import("@smthrs/agents/AgentLike").AgentLike} AgentLike */
 /** @typedef {import("./types.js").Scorer} Scorer */
 /**
  * Creates a toxicity scorer that uses an LLM judge to detect toxic,
@@ -451,7 +451,7 @@ declare function toxicityScorer(judge: AgentLike$2): Scorer$a;
 type AgentLike$2 = _smithers_orchestrator_agents_AgentLike.AgentLike;
 type Scorer$a = Scorer$e;
 
-/** @typedef {import("@smithers-orchestrator/agents/AgentLike").AgentLike} AgentLike */
+/** @typedef {import("@smthrs/agents/AgentLike").AgentLike} AgentLike */
 /** @typedef {import("./types.js").Scorer} Scorer */
 /**
  * Creates a faithfulness scorer that uses an LLM judge to check whether
@@ -717,7 +717,7 @@ declare function estimateCostUsd(usage: {
  * of hand-rolling markup, and always surface live agent feedback.
  *
  * Rules (each violation carries its rule id):
- * - `imports`        — import only from react + `smithers-orchestrator/gateway-react`,
+ * - `imports`        — import only from react + `smthrs/gateway-react`,
  *                      `.../gateway-ui`, `.../ui` (plus relative modules).
  * - `shell`          — page chrome comes from `WorkflowUiShell` (or
  *                      `SimpleWorkflowDashboard` for the stock layout).
@@ -989,7 +989,7 @@ type SmithersDb$1 = _smithers_orchestrator_db_adapter.SmithersDb;
 
 /** @typedef {import("./AggregateOptions.js").AggregateOptions} AggregateOptions */
 /** @typedef {import("./types.js").AggregateScore} AggregateScore */
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./DelegationRunScoreOptions.js").DelegationRunResults} DelegationRunResults */
 /** @typedef {import("./DelegationRunScoreOptions.js").DelegationRunScoreOptions} DelegationRunScoreOptions */
 /** @typedef {import("./types.js").ScoreResult} ScoreResult */

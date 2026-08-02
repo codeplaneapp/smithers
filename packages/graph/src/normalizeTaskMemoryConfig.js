@@ -1,4 +1,4 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 const MEMORY_NAMESPACE_KINDS = new Set(["workflow", "agent", "user", "global"]);
 

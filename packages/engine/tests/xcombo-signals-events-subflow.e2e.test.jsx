@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // Cross-feature audit lane: signals / events / observability x child runs
 // (<Subflow mode="childRun">). Every test here drives the REAL engine over a
 // temp sqlite db with compute tasks only (no model calls), the same harness
@@ -10,7 +10,7 @@
 // covered elsewhere; the pins below are the combination defects.
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { Subflow, Task, WaitForEvent, Workflow, runWorkflow, signalRun, SmithersDb } from "smithers-orchestrator";
+import { Subflow, Task, WaitForEvent, Workflow, runWorkflow, signalRun, SmithersDb } from "smthrs";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers.js";
 import { diagnoseRunEffect } from "../../../apps/cli/src/why-diagnosis.js";
 import { Effect } from "effect";

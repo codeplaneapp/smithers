@@ -1,8 +1,8 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
-import { Workflow, Task, Sequence, Parallel, Branch, Loop, MergeQueue, runWorkflow } from "smithers-orchestrator";
+import { Workflow, Task, Sequence, Parallel, Branch, Loop, MergeQueue, runWorkflow } from "smthrs";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
-import { faithfulnessScorer } from "@smithers-orchestrator/scorers";
+import { faithfulnessScorer } from "@smthrs/scorers";
 import { z } from "zod";
 import { Effect } from "effect";
 const schemas = {

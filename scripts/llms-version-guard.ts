@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-export const PUBLISHED_PACKAGE_NAME = "smithers-orchestrator";
+export const PUBLISHED_PACKAGE_NAME = "smthrs";
 
 export type NpmPublicationStatus = "published" | "unpublished" | "unavailable";
 export type NpmPublicationChecker = (version: string) => NpmPublicationStatus;

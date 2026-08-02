@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/openclaw-site",
+  "name": "@smthrs/openclaw-site",
   "version": "0.0.1",
   "private": true,
   "description": "Cloudflare Worker deployment for the OpenClaw marketing site",

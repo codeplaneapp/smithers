@@ -1,5 +1,5 @@
-import * as _smithers_orchestrator_sandbox from '@smithers-orchestrator/sandbox';
-import { SandboxProviderRequest } from '@smithers-orchestrator/sandbox';
+import * as _smithers_orchestrator_sandbox from '@smthrs/sandbox';
+import { SandboxProviderRequest } from '@smthrs/sandbox';
 
 type MicrosandboxExecOptionsBuilderLike = {
     args(args: string[]): MicrosandboxExecOptionsBuilderLike;
@@ -146,7 +146,7 @@ declare const MICROSANDBOX_PROVIDER_ID: "microsandbox";
  * seam onto the Microsandbox TypeScript SDK.
  *
  * @param {import("./MicrosandboxSandboxProviderOptions.ts").MicrosandboxSandboxProviderOptions} [options]
- * @returns {import("@smithers-orchestrator/sandbox").SandboxProvider}
+ * @returns {import("@smthrs/sandbox").SandboxProvider}
  */
 declare function createMicrosandboxSandboxProvider(options?: MicrosandboxSandboxProviderOptions$1): _smithers_orchestrator_sandbox.SandboxProvider;
 

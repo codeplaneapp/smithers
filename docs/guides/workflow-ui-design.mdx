@@ -11,7 +11,7 @@ The reference implementation is the Smithers product UI; the rules below are ext
 
 ## Components first
 
-The fastest way to comply with this guide: don't hand-write the CSS. `smithers-orchestrator/ui` ships shared components (Button, Card, Badge, StatusPill, Tabs, Dialog, Tooltip, Select, Input, Alert, Table, Progress, Skeleton, Spinner, EmptyState, and more) styled from the tokens below, with house recipes baked in (tinted primary button, brand focus halo, 22px status pills, 8px card radius) and correct in light and dark by construction; Radix supplies accessibility. See [the shared component library](/guides/custom-workflow-ui#the-shared-component-library) for usage and the [UI Component Library reference](/reference/ui) for the full catalog.
+The fastest way to comply with this guide: don't hand-write the CSS. `smthrs/ui` ships shared components (Button, Card, Badge, StatusPill, Tabs, Dialog, Tooltip, Select, Input, Alert, Table, Progress, Skeleton, Spinner, EmptyState, and more) styled from the tokens below, with house recipes baked in (tinted primary button, brand focus halo, 22px status pills, 8px card radius) and correct in light and dark by construction; Radix supplies accessibility. See [the shared component library](/guides/custom-workflow-ui#the-shared-component-library) for usage and the [UI Component Library reference](/reference/ui) for the full catalog.
 
 Everything below is the contract those components implement, and what you follow when writing custom CSS next to them.
 
@@ -19,7 +19,7 @@ Everything below is the contract those components implement, and what you follow
 
 Every UI declares the same custom properties and reads them everywhere. Never hardcode a color, tint, or shadow alpha inline: reach for a token, or derive one with `color-mix`. This keeps light and dark correct and workflow UIs from drifting apart.
 
-<Note>The Gateway's HTML shell already injects this exact token block (the canonical `workflowUiThemeCss` from `@smithers-orchestrator/ui-styleguide`) into every `/workflows/<key>` page and stamps `data-theme` on `<html>` from a `?theme=dark|light` query param before first paint, so a UI that just *reads* the tokens is themed automatically, even inside an iframe host forcing a theme via that param. Declaring the block yourself (as below, or via `WorkflowUiStyles` from `gateway-ui`) is still correct, keeps the UI portable outside the shell, and duplicate declarations are harmless.</Note>
+<Note>The Gateway's HTML shell already injects this exact token block (the canonical `workflowUiThemeCss` from `@smthrs/ui-styleguide`) into every `/workflows/<key>` page and stamps `data-theme` on `<html>` from a `?theme=dark|light` query param before first paint, so a UI that just *reads* the tokens is themed automatically, even inside an iframe host forcing a theme via that param. Declaring the block yourself (as below, or via `WorkflowUiStyles` from `gateway-ui`) is still correct, keeps the UI portable outside the shell, and duplicate declarations are harmless.</Note>
 
 Paste this `:root` block at the top of your `<style>`: it carries the canonical light values, dark overrides for both the explicit toggle and the OS preference, and the typographic base.
 
@@ -225,7 +225,7 @@ Animation is fast and earns its place; nothing bounces for decoration.
   and `standaloneThemeCss()` already ship the same document-wide safety net,
   so component CSS must not add its own media-query guard. Imperative canvas
   widgets use `prefersReducedMotion()` and `observeReducedMotion()` from
-  `smithers-orchestrator/ui`.
+  `smthrs/ui`.
 
 ### Layout: a readable measure and calm chrome
 
@@ -249,7 +249,7 @@ A minimal, on-system `.smithers/ui/<workflow>.tsx` looks like this (tokens above
 
 ```tsx
 /** @jsxImportSource react */
-import { createGatewayReactRoot, useGatewayRun } from "smithers-orchestrator/gateway-react";
+import { createGatewayReactRoot, useGatewayRun } from "smthrs/gateway-react";
 
 const runId = new URLSearchParams(location.search).get("runId") ?? undefined;
 

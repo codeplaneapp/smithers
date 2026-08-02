@@ -19,9 +19,9 @@ function makeTempRoot() {
 }
 
 describe("danglingWorkspaceLinkHint", () => {
-  test("names a dangling @smithers-orchestrator link and the pnpm install fix", () => {
+  test("names a dangling @smthrs link and the pnpm install fix", () => {
     const root = makeTempRoot();
-    const scopeDir = join(root, "node_modules", "@smithers-orchestrator");
+    const scopeDir = join(root, "node_modules", "@smthrs");
     mkdirSync(scopeDir, { recursive: true });
     const deadTarget = join(root, ".smithers", "workflows", ".worktrees", "sr-task", "apps", "cli");
     symlinkSync(deadTarget, join(scopeDir, "cli"));
@@ -32,18 +32,18 @@ describe("danglingWorkspaceLinkHint", () => {
     expect(hint).toContain("worktree");
     expect(hint).toContain("pnpm install");
   });
-  test("reports a dangling top-level smithers-orchestrator link", () => {
+  test("reports a dangling top-level smthrs link", () => {
     const root = makeTempRoot();
     const nodeModules = join(root, "node_modules");
     mkdirSync(nodeModules, { recursive: true });
-    symlinkSync(join(root, "gone", "packages", "smithers"), join(nodeModules, "smithers-orchestrator"));
+    symlinkSync(join(root, "gone", "packages", "smithers"), join(nodeModules, "smthrs"));
     const hint = danglingWorkspaceLinkHint(root);
     expect(hint).not.toBeNull();
-    expect(hint).toContain(join(nodeModules, "smithers-orchestrator"));
+    expect(hint).toContain(join(nodeModules, "smthrs"));
   });
   test("returns null when workspace links resolve", () => {
     const root = makeTempRoot();
-    const scopeDir = join(root, "node_modules", "@smithers-orchestrator");
+    const scopeDir = join(root, "node_modules", "@smthrs");
     const realPkg = join(root, "packages", "cli");
     mkdirSync(scopeDir, { recursive: true });
     mkdirSync(realPkg, { recursive: true });

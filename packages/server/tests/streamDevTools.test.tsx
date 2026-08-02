@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
@@ -7,14 +7,14 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { WebSocket } from "ws";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
-import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
-import { renderPrometheusMetrics } from "@smithers-orchestrator/observability";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { createSmithers } from "smthrs";
+import { canonicalizeXml } from "@smthrs/graph/utils/xml";
+import { renderPrometheusMetrics } from "@smthrs/observability";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { Gateway } from "../src/gateway.js";
 import { streamDevToolsRoute } from "../src/gatewayRoutes/streamDevTools.js";
-import { diffSnapshots } from "@smithers-orchestrator/devtools";
+import { diffSnapshots } from "@smthrs/devtools";
 import { sleep } from "../../smithers/tests/helpers.js";
 
 function now() {

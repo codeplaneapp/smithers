@@ -23,8 +23,8 @@
 //   • Every lane ends in a deterministic "ready" compute task so waves settle even when
 //     agent tasks exhaust retries; render logic never shells out (data-only conditions).
 //   • Issues #1386-#1412 are excluded: the live xcombo-fix-train run owns them.
-/** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, UI, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { ClaudeCodeAgent, UI, createSmithers } from "smthrs";
 import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";

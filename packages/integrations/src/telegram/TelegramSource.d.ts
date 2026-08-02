@@ -3,7 +3,7 @@ import { EventSource } from '../core/EventSourceTypes.js';
 import { ExternalEvent } from '../core/ExternalEventTypes.js';
 import 'effect';
 import '../core/CursorStoreTypes.js';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 import './TelegramClientTypes.js';
 
 /**

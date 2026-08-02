@@ -47,7 +47,7 @@ export function getExplicitWorkflowPath(args) {
 }
 
 /**
- * Resolve the local `smithers-orchestrator` package's bin JS file under
+ * Resolve the local `smthrs` package's bin JS file under
  * `<directory>/node_modules/`. Going through `package.json` (instead of the
  * `.bin/smithers` shell shim npm/pnpm generate) is the whole point: the shim
  * is `#!/bin/sh` and re-execing it with `process.execPath` (bun) makes bun
@@ -57,7 +57,7 @@ export function getExplicitWorkflowPath(args) {
  * @param {string} directory
  */
 export function resolveLocalSmithersBinJs(directory) {
-  const pkgJsonPath = resolve(directory, "node_modules/smithers-orchestrator/package.json");
+  const pkgJsonPath = resolve(directory, "node_modules/smthrs/package.json");
   if (!existsSync(pkgJsonPath)) return null;
   let pkg;
   try {
@@ -79,7 +79,7 @@ export function resolveLocalSmithersBinJs(directory) {
  *
  * A checkout outranks every installed copy: someone standing inside the
  * Smithers source tree means *that* Smithers. Without this, editing engine code
- * and running `smithers`/`bunx smithers-orchestrator` in a tree that has not
+ * and running `smithers`/`bunx smthrs` in a tree that has not
  * been installed (a fresh worktree, a slimmed checkout) silently executes the
  * published build instead of the edit under test.
  *
@@ -185,7 +185,7 @@ export function compareVersions(a, b) {
 }
 
 /**
- * The `smithers-orchestrator` package that owns `binPath`: its version and the
+ * The `smthrs` package that owns `binPath`: its version and the
  * directory whose `package.json` pins it (the parent of `node_modules`). Null
  * when `binPath` is not inside an installed copy, which includes the source
  * checkout entry — a checkout is never a stale pin.
@@ -200,7 +200,7 @@ export function describeLocalSmithersInstall(binPath) {
     if (existsSync(manifestPath)) {
       try {
         const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-        if (manifest?.name === "smithers-orchestrator" && typeof manifest?.version === "string") {
+        if (manifest?.name === "smthrs" && typeof manifest?.version === "string") {
           const parent = dirname(current);
           const grandparent = dirname(parent);
           const installRoot = parse(parent).base === "node_modules" ? grandparent : null;
@@ -238,8 +238,8 @@ export function describeProtocolCommandSkew({ args, binPath }) {
   const pinnedBy = install.installRoot ? resolve(install.installRoot, "package.json") : install.packageRoot;
   const upgradeIn = install.installRoot ?? install.packageRoot;
   return [
-    `[smithers] \`smithers ${command}\` needs smithers-orchestrator >=${required}, but this directory delegates to ${install.version}.`,
+    `[smithers] \`smithers ${command}\` needs smthrs >=${required}, but this directory delegates to ${install.version}.`,
     `[smithers]   pinned by: ${pinnedBy}`,
-    `[smithers]   fix: cd ${upgradeIn} && bun add smithers-orchestrator@latest`,
+    `[smithers]   fix: cd ${upgradeIn} && bun add smthrs@latest`,
   ].join("\n");
 }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
+import { canonicalizeXml } from "@smthrs/graph/utils/xml";
 import {
   encodeFrameDelta,
   applyFrameDelta,

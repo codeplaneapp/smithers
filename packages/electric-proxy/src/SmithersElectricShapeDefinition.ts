@@ -1,4 +1,4 @@
-import type { GatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
+import type { GatewayScope } from "@smthrs/gateway/auth/scopes";
 
 export type SmithersElectricShapeDefinition = {
   name: string;

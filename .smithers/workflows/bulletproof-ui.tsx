@@ -1,6 +1,6 @@
 // smithers-display-name: Bulletproof UI Campaign
-/** @jsxImportSource smithers-orchestrator */
-import { MergeQueue, Parallel, Sequence, Task, UI, Worktree, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { MergeQueue, Parallel, Sequence, Task, UI, Worktree, createSmithers } from "smthrs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
@@ -152,7 +152,7 @@ const HOUSE_RULES = [
   "House rules for ALL work in this campaign:",
   "- FIRST read packages/ui/src/README.md and packages/ui/tests/css-contract.test.ts end to end; they are the architecture contract (shadcn anatomy: data-slot attributes, CVA variant APIs, asChild via Radix Slot; CSS shipped ONLY as JS strings composed into uiCss.ts; colors ONLY through the tokens.ts var(--house-token, #lightFallback) bridge; every component calls useInjectUiCss(); sui-* class namespace).",
   "- Light AND dark must work with zero per-component dark-mode code: token fallbacks are the light values; dark comes from the styleguide theme. Never hardcode a hex color in component CSS.",
-  "- No new runtime dependencies in @smithers-orchestrator/ui base. Heavy widgets go behind adapters/* subpaths only. Tailwind is banned; port anatomy, not code.",
+  "- No new runtime dependencies in @smthrs/ui base. Heavy widgets go behind adapters/* subpaths only. Tailwind is banned; port anatomy, not code.",
   "- Every ported/new component gets an entry in packages/ui/shadcn-provenance.json naming its upstream registry item URL (ui.shadcn.com or elements.ai-sdk.dev item), per the policy in that file.",
   "- Tests: bun + happy-dom render tests for each component (including a data-theme=dark render), and extend tests/css-contract.test.ts coverage for new CSS blocks. Run pnpm -C packages/ui test until green.",
   "- If you add public exports, run `pnpm check:docs` from the repo root and fix what it flags (update docs/ pages as needed, then run `pnpm docs:llms` and commit the regenerated bundles inside YOUR worktree).",
@@ -240,7 +240,7 @@ const LANES: Lane[] = [
     title: "Govern .smithers/ui + examples/ui + shipped pack with the ratchet",
     spec: [
       "The workflow-pack UI layer is ungoverned: scripts/check-ui-architecture.mjs lists .smithers in IGNORED_DIRECTORIES and only walks packages/* and apps/*. Fix that:",
-      "- Extend scripts/check-ui-architecture.mjs to ALSO walk .smithers/ui/ and examples/ui/ with pack-UI rules: imports restricted to react, smithers-orchestrator/ui (+/adapters/*), smithers-orchestrator/gateway-ui, smithers-orchestrator/gateway-react, and relative pack-local modules; NO <style> jsx blocks; NO style={{}} props; no bespoke theme/token modules. Snapshot every CURRENT violation into scripts/ui-architecture-baseline.json as exact-ratchet allowlist entries (do not fix offenders in this lane; the baseline mode is 'remove stale entries, never add new ones').",
+      "- Extend scripts/check-ui-architecture.mjs to ALSO walk .smithers/ui/ and examples/ui/ with pack-UI rules: imports restricted to react, smthrs/ui (+/adapters/*), smthrs/gateway-ui, smthrs/gateway-react, and relative pack-local modules; NO <style> jsx blocks; NO style={{}} props; no bespoke theme/token modules. Snapshot every CURRENT violation into scripts/ui-architecture-baseline.json as exact-ratchet allowlist entries (do not fix offenders in this lane; the baseline mode is 'remove stale entries, never add new ones').",
       "- Update scripts/check-ui-architecture.test.mjs to cover the new walk (fixture-based: a compliant pack UI passes, a fresh <style> block fails, a baselined offender passes until edited).",
       "- Wire the same composition check into scripts/generate-workflow-pack.ts so a shipped pack UI that would violate the rules fails generation with an actionable error.",
       "Keep the existing packages/apps governance behavior byte-identical. Run `pnpm check:ui-architecture` and `node --test scripts/check-ui-architecture.test.mjs` until green.",
@@ -267,7 +267,7 @@ const LANES: Lane[] = [
     agent: "terra",
     title: "Burn down review.tsx and issue-blitz.tsx to composed UIs",
     spec: [
-      "Rewrite the two flagship offender pack UIs to compose the shipped libraries (imports only from react, smithers-orchestrator/ui, smithers-orchestrator/gateway-ui, smithers-orchestrator/gateway-react):",
+      "Rewrite the two flagship offender pack UIs to compose the shipped libraries (imports only from react, smthrs/ui, smthrs/gateway-ui, smthrs/gateway-react):",
       "- .smithers/ui/review.tsx: currently injects WorkflowUiStyles then rebuilds a ~40-rule bespoke design system (own --bg/--panel/--primary tokens, hand-rolled .button/.badge/.verdict classes). Replace with SmithersUiStyles + Button/Card/Badge/StatusPill/Tabs/SectionHeader/EmptyState + gateway-ui RunTree/RunEventLog/NodeOutputView compositions. Zero <style> blocks, zero style={{}} props, zero custom CSS strings.",
       "- .smithers/ui/issue-blitz.tsx: currently 46 style={{}} props, a hardcoded hex DOT palette, hand-rolled Chip/status dots, and no library imports. Same treatment; status colors via StatusPill/status tokens.",
       "Preserve each UI's information layout and live behavior (same gateway-react hooks, same node ids); this is a visual-layer swap, not a redesign. Verify with the fixture flow the repo uses for pack UI changes (render test or gateway boot + smithers graph for the owning workflows: review, issue-blitz).",
@@ -414,7 +414,7 @@ export function runWaveCi(wave: 1 | 2, cwd: string) {
 // ── Prompts ─────────────────────────────────────────────────────────────────
 const INVESTIGATION_CONTEXT = [
   "Campaign context (from the maintainer's audit, 2026-07-20):",
-  "- packages/ui (@smithers-orchestrator/ui) is the ONE design system for every Smithers UI surface. gateway-ui + ui-styleguide are legacy facades mid-burndown.",
+  "- packages/ui (@smthrs/ui) is the ONE design system for every Smithers UI surface. gateway-ui + ui-styleguide are legacy facades mid-burndown.",
   "- The chat layer is only ChatMessage/ChatTranscript/ChatComposer; there are NO agent-native components (reasoning/thinking, tool calls, streaming markdown response, plans, sources). NodeOutputView renders agent output as a JSON <pre>.",
   "- shadcn-provenance.json declares approved collections (chat/shadcn, primitives/shadcn) but has zero entries; every port must register there.",
   "- shadcn/ui shipped an official chat set in June 2026 (MessageScroller, Message, Bubble, Attachment, Marker, shimmer, scroll-fade). Vercel AI Elements (elements.ai-sdk.dev) defines the agent taxonomy (Reasoning, Chain of Thought, Tool, Plan, Task, Sources, Inline Citation, Code Block...). Both are Tailwind-based, so we port ANATOMY (structure, states, interactions), never code.",
@@ -525,7 +525,7 @@ function auditPrompt(ctx: any): string {
     "Final audit of the Bulletproof UI campaign. Verify ON DISK (read the actual files on local main), not from the reports:",
     "1. Every lgtm lane's components exist, are exported from packages/ui/src/index.ts, and have provenance entries.",
     "2. The wave CI rows are genuinely green and current.",
-    "3. List what the campaign deliberately deferred as followUps (known: the ddd pack-UI family (~7.5k hand-rolled lines), delegation-chain/create-workflow bespoke theme stack, remaining gateway-ui legacy-facade burndown (~66 baseline refs), the concierge smithers:page prompt + theme handoff in the multi repo, multi's adoption of @smithers-orchestrator/ui, apps/smithers POC disposition, marketing *-site pages). Add anything the lane results show was skipped or exhausted.",
+    "3. List what the campaign deliberately deferred as followUps (known: the ddd pack-UI family (~7.5k hand-rolled lines), delegation-chain/create-workflow bespoke theme stack, remaining gateway-ui legacy-facade burndown (~66 baseline refs), the concierge smithers:page prompt + theme handoff in the multi repo, multi's adoption of @smthrs/ui, apps/smithers POC disposition, marketing *-site pages). Add anything the lane results show was skipped or exhausted.",
     "complete=true only if every wave-1 lane landed and gates are green.",
     `Lane results:\n${JSON.stringify(results, null, 2)}`,
     `Merges:\n${JSON.stringify(merges, null, 2)}`,

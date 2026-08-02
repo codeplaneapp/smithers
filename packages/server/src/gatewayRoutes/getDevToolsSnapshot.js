@@ -1,12 +1,12 @@
-import { snapshotSerialize } from "@smithers-orchestrator/devtools";
-import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
+import { snapshotSerialize } from "@smthrs/devtools";
+import { computeRunStateFromRow } from "@smthrs/db/runState";
 import { RUN_ID_PATTERN } from "./RUN_ID_PATTERN.js";
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("@smithers-orchestrator/protocol/devtools").DevToolsNode} DevToolsNode */
-/** @typedef {import("@smithers-orchestrator/protocol/devtools").DevToolsSnapshot} DevToolsSnapshot */
-/** @typedef {import("@smithers-orchestrator/protocol/devtools").DevToolsNodeType} DevToolsNodeType */
-/** @typedef {import("@smithers-orchestrator/devtools/snapshotSerializer").SnapshotSerializerWarning} SnapshotSerializerWarning */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/protocol/devtools").DevToolsNode} DevToolsNode */
+/** @typedef {import("@smthrs/protocol/devtools").DevToolsSnapshot} DevToolsSnapshot */
+/** @typedef {import("@smthrs/protocol/devtools").DevToolsNodeType} DevToolsNodeType */
+/** @typedef {import("@smthrs/devtools/snapshotSerializer").SnapshotSerializerWarning} SnapshotSerializerWarning */
 
 export const DEVTOOLS_RUN_ID_PATTERN = RUN_ID_PATTERN;
 export const DEVTOOLS_MAX_FRAME_NO = 2_147_483_647;
@@ -59,8 +59,8 @@ function boolProp(value) {
   return value === true || value === "true" || value === "1";
 }
 
-/** @typedef {import("@smithers-orchestrator/protocol/devtools").DevToolsAgentRef} DevToolsAgentRef */
-/** @typedef {import("@smithers-orchestrator/protocol/devtools").DevToolsAgentSummary} DevToolsAgentSummary */
+/** @typedef {import("@smthrs/protocol/devtools").DevToolsAgentRef} DevToolsAgentRef */
+/** @typedef {import("@smthrs/protocol/devtools").DevToolsAgentSummary} DevToolsAgentSummary */
 
 /**
  * Re-whitelist an agent ref persisted in the frame task index. The engine only

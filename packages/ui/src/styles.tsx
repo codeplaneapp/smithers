@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 import { useInsertionEffect } from "react";
-import { standaloneThemeCss, workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
+import { standaloneThemeCss, workflowUiThemeCss } from "@smthrs/ui-styleguide";
 import { smithersUiCss } from "./uiCss";
 
 export { smithersUiCss } from "./uiCss";

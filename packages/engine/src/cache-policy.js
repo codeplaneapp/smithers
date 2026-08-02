@@ -1,7 +1,7 @@
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
+import { nowMs } from "@smthrs/scheduler/nowMs";
 
 /**
- * @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor
+ * @typedef {import("@smthrs/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor
  */
 
 /**

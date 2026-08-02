@@ -12,7 +12,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Effect } from "effect";
 import { SmithersDb } from "../src/adapter.js";
 import { ensureSmithersTables } from "../src/ensure.js";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
 
 function createSharedDb() {
   const sqlite = new Database(":memory:");

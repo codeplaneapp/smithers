@@ -45,8 +45,8 @@ References: see *Sources* at the bottom.
 ### `<ExtractPrompt>`
 
 ```ts
-import type { AgentLike, OutputTarget } from "smithers-orchestrator";
-import type { Scorer } from "@smithers-orchestrator/scorers";
+import type { AgentLike, OutputTarget } from "smthrs";
+import type { Scorer } from "@smthrs/scorers";
 import type { PromptCache } from "./extract-prompt/PromptCache";
 
 type ExtractPromptProps = {

@@ -1,4 +1,4 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 /** @typedef {import("./EventSource.ts").SmithersEventSource} SmithersEventSource */
 /** @typedef {import("./EventSource.ts").SmithersCtxLike} SmithersCtxLike */

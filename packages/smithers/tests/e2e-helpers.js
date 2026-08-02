@@ -125,7 +125,7 @@ function linkRepoRuntimeDeps(repoDir) {
   const binDir = join(nodeModulesDir, ".bin");
   ensureDir(nodeModulesDir);
   ensureDir(binDir);
-  symlinkIfMissing(resolve(REPO_ROOT, "packages/smithers"), join(nodeModulesDir, "smithers-orchestrator"));
+  symlinkIfMissing(resolve(REPO_ROOT, "packages/smithers"), join(nodeModulesDir, "smthrs"));
   symlinkIfMissing(resolve(ROOT_NODE_MODULES, "zod"), join(nodeModulesDir, "zod"));
   symlinkIfMissing(resolve(ROOT_NODE_MODULES, "react"), join(nodeModulesDir, "react"));
   symlinkIfMissing(resolve(ROOT_NODE_MODULES, "react-dom"), join(nodeModulesDir, "react-dom"));
@@ -305,8 +305,8 @@ export function writeTestWorkflow(repo, relativePath = "workflow.tsx") {
   return repo.write(
     relativePath,
     [
-      "/** @jsxImportSource smithers-orchestrator */",
-      'import { createSmithers, Workflow, Task } from "smithers-orchestrator";',
+      "/** @jsxImportSource smthrs */",
+      'import { createSmithers, Workflow, Task } from "smthrs";',
       'import { z } from "zod";',
       "",
       "const { smithers, outputs } = createSmithers({",

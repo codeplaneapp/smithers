@@ -22,11 +22,11 @@ import { buildSteeringLaunchSpec, createOneshotMonitorControl } from "../src/one
 import { oneshotCta } from "../src/oneshot/oneshotCta.js";
 import { buildBuiltinRelaunch, buildBuiltinResumeConfig, parseBuiltinResume } from "../src/resume-target.js";
 import { bundleGatewayUiEntry } from "../../../packages/server/src/gatewayUi/bundle.js";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { createTestDb } from "../../../packages/smithers/tests/helpers.js";
 import { ddl, schema } from "../../../packages/smithers/tests/schema.js";
-import { openDurableSqliteDatabase } from "@smithers-orchestrator/db";
+import { openDurableSqliteDatabase } from "@smthrs/db";
 import { SOTA_SLOTS } from "../src/sota-models.generated.js";
 import {
   createExecutableDir,
@@ -1263,7 +1263,7 @@ test("detached oneshot succeeds only after its run row is readable", async () =>
   const receipt = join(fixture.cwd, "receipt.json");
   writeFileSync(
     join(fixture.workflowDir, "oneshot.tsx"),
-    `/** @jsxImportSource smithers-orchestrator */
+    `/** @jsxImportSource smthrs */
 import { createSmithers } from ${JSON.stringify(pathToFileURL(join(repoRoot, "packages/smithers/src/index.js")).href)};
 import { z } from ${JSON.stringify(pathToFileURL(join(repoRoot, "node_modules/zod/index.js")).href)};
 const { Workflow, Task, smithers, outputs } = createSmithers({ input: z.object({ goal: z.string(), review: z.enum(["on", "off"]), model: z.string() }), receipt: z.object({ ok: z.boolean() }) });
@@ -1362,12 +1362,12 @@ test("workspace override receives goal, review, and model input", () => {
   chmodSync(fakeCodex, 0o755);
   writeFileSync(
     join(cwd, "package.json"),
-    JSON.stringify({ type: "module", dependencies: { "smithers-orchestrator": "workspace:*", zod: "*" } }),
+    JSON.stringify({ type: "module", dependencies: { smthrs: "workspace:*", zod: "*" } }),
   );
   const receipt = join(cwd, "override-input.json");
   writeFileSync(
     join(workflowDir, "oneshot.tsx"),
-    `/** @jsxImportSource smithers-orchestrator */
+    `/** @jsxImportSource smthrs */
 import { createSmithers } from "${pathToFileURL(join(repoRoot, "packages/smithers/src/index.js")).href}";
 import { z } from "${pathToFileURL(join(repoRoot, "node_modules/zod/index.js")).href}";
 const { Workflow, Task, smithers, outputs } = createSmithers({

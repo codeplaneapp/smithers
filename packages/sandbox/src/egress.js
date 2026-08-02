@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 export const SANDBOX_EGRESS_CA_BUNDLE_RELATIVE_PATH = ".smithers/egress/ca.crt";
 export const SANDBOX_EGRESS_CA_WORKSPACE_PATH = "/workspace/.smithers/egress/ca.crt";
@@ -135,7 +135,7 @@ export function sandboxEgressEnv(value, options = {}) {
   if (!egress) {
     return {};
   }
-  const env = { ...(egress.env ?? {}) };
+  const env = { ...egress.env };
   if (egress.httpProxy) {
     env.HTTP_PROXY = egress.httpProxy;
   }

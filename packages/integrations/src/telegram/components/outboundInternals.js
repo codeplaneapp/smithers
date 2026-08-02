@@ -16,9 +16,9 @@
 
 import React from "react";
 import { Effect } from "effect";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { Task } from "@smithers-orchestrator/components";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { Task } from "@smthrs/components";
 import { resolveTelegramClient } from "../config.js";
 
 /**

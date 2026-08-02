@@ -1,4 +1,4 @@
-# @smithers-orchestrator/usage — src
+# @smthrs/usage — src
 
 Every module here is public npm surface: the package exports both `.` and
 `./*`, so file names are API — do not rename, move, or split them. The

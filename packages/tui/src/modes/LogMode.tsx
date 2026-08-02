@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { useRunInspectorVm } from "@smithers-orchestrator/ui-core";
+import { useRunInspectorVm } from "@smthrs/ui-core";
 import { TUI_EVENT_CAP } from "../data.ts";
 import type { GatewayEventFrame } from "../data.ts";
 import {
@@ -13,7 +13,7 @@ import {
 import { normalizeFrame } from "./eventFrame.ts";
 import { isModifiedKeyEvent } from "./treeUtils.ts";
 import { useOverlayOpen } from "../OverlayContext.tsx";
-import { sanitizeTerminalText } from "@smithers-orchestrator/tui-ui";
+import { sanitizeTerminalText } from "@smthrs/tui-ui";
 
 const COMPACT_WIDTH = 100;
 const LOG_WINDOW_VIEWPORTS = 3;

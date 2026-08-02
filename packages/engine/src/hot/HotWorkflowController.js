@@ -9,11 +9,11 @@ import { pathToFileURL } from "node:url";
 import { Effect, Metric } from "effect";
 import { WatchTree } from "./watch.js";
 import { buildOverlayEffect, cleanupGenerationsEffect, resolveOverlayEntry } from "./overlay.js";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-import { logInfo, logWarning } from "@smithers-orchestrator/observability/logging";
-import { hotReloads, hotReloadFailures, hotReloadDuration } from "@smithers-orchestrator/observability/metrics";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-/** @typedef {import("@smithers-orchestrator/driver/RunOptions").HotReloadOptions} HotReloadOptions */
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
+import { logInfo, logWarning } from "@smthrs/observability/logging";
+import { hotReloads, hotReloadFailures, hotReloadDuration } from "@smthrs/observability/metrics";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+/** @typedef {import("@smthrs/driver/RunOptions").HotReloadOptions} HotReloadOptions */
 
 const DEFAULT_MAX_GENERATIONS = 3;
 const DEFAULT_DEBOUNCE_MS = 100;

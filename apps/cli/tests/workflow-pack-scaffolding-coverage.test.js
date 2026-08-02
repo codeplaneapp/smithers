@@ -265,14 +265,14 @@ test("bun install reports ENOENT and non-zero exits with captured output", () =>
 test("bun install success links the local runtime and supports inherited stdio", () => {
   const root = tempProject("smithers-install-ok-");
   const binDir = join(root, "bun-bin");
-  writeExecutable(join(binDir, "bun"), "#!/bin/sh\n/bin/mkdir -p node_modules/smithers-orchestrator\nexit 0\n");
+  writeExecutable(join(binDir, "bun"), "#!/bin/sh\n/bin/mkdir -p node_modules/smthrs\nexit 0\n");
   const result = withProcessPath(binDir, () =>
     initWorkflowPack({
       ...baseOptions(root),
       skipInstall: false,
     }),
   );
-  const runtimeLink = join(root, ".smithers", "node_modules", "smithers-orchestrator");
+  const runtimeLink = join(root, ".smithers", "node_modules", "smthrs");
   expect(result.install).toEqual({ status: "ok" });
   expect(lstatSync(runtimeLink).isSymbolicLink()).toBe(true);
   expect(realpathSync(runtimeLink)).toBe(realpathSync(LOCAL_RUNTIME));

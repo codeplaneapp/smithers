@@ -413,7 +413,7 @@
       "ported": "partial-anatomy",
       "omissions": [],
       "divergences": [
-        "The collapsible task wrapper ships as AgentTask (Task collides with a smithers-orchestrator workflow export)"
+        "The collapsible task wrapper ships as AgentTask (Task collides with a smthrs workflow export)"
       ]
     },
     {
@@ -430,7 +430,7 @@
       "ported": "full-anatomy",
       "omissions": [],
       "divergences": [
-        "Renamed Task -> AgentTask to avoid the smithers-orchestrator workflow Task export collision"
+        "Renamed Task -> AgentTask to avoid the smthrs workflow Task export collision"
       ]
     },
     {
@@ -904,7 +904,7 @@
         "sandbox terminal/output streaming anatomy"
       ],
       "divergences": [
-        "frozen compound names (Sandbox/SandboxHeader/SandboxStatus/SandboxActions/SandboxContent) ship as aliases; AgentSandbox-prefixed names kept for back-compat (bare Sandbox collides with the smithers-orchestrator workflow export in shared scope)",
+        "frozen compound names (Sandbox/SandboxHeader/SandboxStatus/SandboxActions/SandboxContent) ship as aliases; AgentSandbox-prefixed names kept for back-compat (bare Sandbox collides with the smthrs workflow export in shared scope)",
         "non-ready states render an honest EmptyState instead of placeholder output",
         "lifecycle state changes are announced via an aria-live=polite visually-hidden region"
       ]
@@ -969,7 +969,7 @@
         "Upstream Canvas ReactFlow wrapper itself (pre-configured pan/zoom/selection/delete/fitView behaviors bound to the AI SDK data model)"
       ],
       "divergences": [
-        "Renderer-neutral presentational anatomy: upstream Canvas wraps ReactFlow directly, while @xyflow/react never enters this package; the ReactFlow renderer lives in @smithers-orchestrator/gateway-ui",
+        "Renderer-neutral presentational anatomy: upstream Canvas wraps ReactFlow directly, while @xyflow/react never enters this package; the ReactFlow renderer lives in @smthrs/gateway-ui",
         "WorkflowEdge and WorkflowConnection are legend/inline representations (from -> to, pending-connection validity) rather than ReactFlow edge/connection-line renderers",
         "WorkflowNodeStatus is a smithers addition (shared StatusPill) with no upstream equivalent",
         "WorkflowMinimap is a labelled seam frame with no upstream component; upstream parks ReactFlow's MiniMap as a Canvas child",

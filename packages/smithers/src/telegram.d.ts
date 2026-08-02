@@ -1,1 +1,1 @@
-export * from "@smithers-orchestrator/telegram";
+export * from "@smthrs/telegram";

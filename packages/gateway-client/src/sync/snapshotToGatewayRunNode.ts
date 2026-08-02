@@ -301,7 +301,7 @@ function nodeAgent(node: DevToolsSnapshotNode): GatewayRunNode["agent"] {
       task?.agent ?? (typeof (node.props ?? {}).agent === "string" ? String((node.props ?? {}).agent) : undefined);
     return typeof legacy === "string" && legacy ? legacy : undefined;
   }
-  const agent: GatewayRunNodeAgent = { ...(declared ?? {}) };
+  const agent: GatewayRunNodeAgent = { ...declared };
   if (!agent.name) {
     agent.name = agent.engine ?? agent.model ?? ranEngine ?? ranAgentId;
   }

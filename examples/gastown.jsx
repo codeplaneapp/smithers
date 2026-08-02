@@ -12,11 +12,11 @@
  *   Convoys (work batches)    → Convoy bead tracking related work
  *   gt done (self-clean)      → Task completion + merge request creation
  */
-import { Sequence, Parallel, Loop, MergeQueue, Branch, Worktree } from "smithers-orchestrator";
+import { Sequence, Parallel, Loop, MergeQueue, Branch, Worktree } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, write, edit, bash, grep } from "smithers-orchestrator/tools";
+import { read, write, edit, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import MayorPrompt from "./prompts/gastown/mayor.mdx";
 import PolecatPrompt from "./prompts/gastown/polecat.mdx";

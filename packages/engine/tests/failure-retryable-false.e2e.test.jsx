@@ -1,8 +1,8 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { Parallel, Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { Parallel, Task, Workflow, runWorkflow } from "smthrs";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import { Effect } from "effect";
@@ -454,7 +454,7 @@ describe("failureRetryable=false short-circuits engine retries", () => {
  *   effectiveError?.details?.failureRetryable === false ||
  *   effectiveError?.code === "AGENT_CONFIG_INVALID"
  */
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { EventBus as BridgeEventBus } from "../src/events.js";
 import { executeTaskBridge as bridgeExecuteTaskBridge } from "../src/effect/workflow-bridge.js";
 import { z as bridgeZ } from "zod";

@@ -1,4 +1,4 @@
-# examples/tsconfig.json points smithers-orchestrator at src/*.js source, not the published package — typecheck:examples does not validate against shipped types
+# examples/tsconfig.json points smthrs at src/*.js source, not the published package — typecheck:examples does not validate against shipped types
 
 > Decomposed from #306 — test-coverage epic (`.smithers/tickets/.epics/0052-audit-test-coverage-gaps.md`)
 > Resolved 2026-07-08: covered by apps/cli/tests/examples-tsconfig-published-types.test.js (verified against this tree).
@@ -9,7 +9,7 @@
 
 Add the missing test coverage described below, then make it pass.
 
-**Finding:** examples/tsconfig.json points smithers-orchestrator at src/*.js source, not the published package — typecheck:examples does not validate against shipped types
+**Finding:** examples/tsconfig.json points smthrs at src/*.js source, not the published package — typecheck:examples does not validate against shipped types
 
 **Detail:** examples tsconfig still points at src/*.js source, not the published package; does not validate against shipped types
 

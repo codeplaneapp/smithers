@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import React from "react";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
-import { Gateway, type SmithersWorkflow } from "@smithers-orchestrator/server/gateway";
+import { createSmithers } from "smthrs";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { SmithersGatewayClient } from "@smthrs/gateway-client";
+import { Gateway, type SmithersWorkflow } from "@smthrs/server/gateway";
 import { loadBudget } from "../budgets/loadBudget.ts";
 
 // case16 — N=5 subscribers on one run against the REAL Gateway.
@@ -15,7 +15,7 @@ import { loadBudget } from "../budgets/loadBudget.ts";
 // This used to fabricate its own `_smithers_events` table and hand-roll a
 // WebSocket "subscription" server that read the rows and streamed them, so it
 // validated a mock of the fan-out contract, not the product. It now drives the
-// real @smithers-orchestrator/server Gateway: events are published through the
+// real @smthrs/server Gateway: events are published through the
 // real `broadcastEvent` path (persisted + seq-assigned by the product) and each
 // subscriber consumes the real `streamRunEvents` WS surface via
 // SmithersGatewayClient — the same subscription case09/case15/case28 exercise.

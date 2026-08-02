@@ -178,7 +178,7 @@ function positiveSafeInteger(value, name) {
  * }}
  */
 export function validateWorkflowProgram(rawProgram, options = {}) {
-  const limits = { ...DEFAULT_DELEGATION_V2_LIMITS, ...(options.limits ?? {}) };
+  const limits = { ...DEFAULT_DELEGATION_V2_LIMITS, ...options.limits };
   for (const [name, value] of Object.entries(limits)) positiveSafeInteger(value, `limits.${name}`);
   const rootMaxConcurrency = positiveSafeInteger(
     options.rootMaxConcurrency ?? limits.maxConcurrency,

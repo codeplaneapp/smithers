@@ -64,9 +64,9 @@ This three-task workflow runs research, then plan, then implement. Sequence enfo
 Start it. Kill the process while `plan` is running. Resume it:
 
 ```bash
-bunx smithers-orchestrator up ship-it.tsx --run-id r1
+bunx smthrs up ship-it.tsx --run-id r1
 # ^C while plan is in flight
-bunx smithers-orchestrator up ship-it.tsx --run-id r1 --resume true
+bunx smthrs up ship-it.tsx --run-id r1 --resume true
 ```
 
 `research` is skipped (already in the database). `plan` re-runs as attempt 2 (interrupted mid-flight). `implement` runs for the first time. No work is lost, and you wrote no recovery code.
@@ -84,9 +84,9 @@ This falls out of one design choice: state is the source of truth, and the plan 
 It buys three things for free: resume, because re-rendering from current state needs no event log to replay; time travel, because every render frame is a row, so forking a run is throwing away rows; and SQL debugging, because state is queryable and an event chain isn't.
 
 ```bash
-bunx smithers-orchestrator timeline r1                     # every frame
-bunx smithers-orchestrator fork workflow.tsx --run-id r1 --frame 4  # branch an alternate timeline
-bunx smithers-orchestrator diff r1 NODE_ID                 # a node's DiffBundle as a unified diff
+bunx smthrs timeline r1                     # every frame
+bunx smthrs fork workflow.tsx --run-id r1 --frame 4  # branch an alternate timeline
+bunx smthrs diff r1 NODE_ID                 # a node's DiffBundle as a unified diff
 ```
 
 Git history for agent runs, with the actual run state in every frame.
@@ -107,7 +107,7 @@ A background agent that can't stop and ask a human is dangerous to run unattende
 />
 ```
 
-`<Approval>` durably suspends the run: the process exits, costs nothing while it waits, and lives on only as a database row with nothing running. A reviewer answers tomorrow over CLI, web, or HTTP, and `bunx smithers-orchestrator supervise` resumes any run whose heartbeat went stale after the machine died.
+`<Approval>` durably suspends the run: the process exits, costs nothing while it waits, and lives on only as a database row with nothing running. A reviewer answers tomorrow over CLI, web, or HTTP, and `bunx smthrs supervise` resumes any run whose heartbeat went stale after the machine died.
 
 ## Patterns are compositions on the substrate
 
@@ -147,9 +147,9 @@ This is the claim a skeptic should test first. The same workflow runs Claude Cod
 </Frame>
 
 ```bash
-bunx smithers-orchestrator init        # scaffold the workflow pack
-bunx smithers-orchestrator up workflow.tsx --serve --metrics   # HTTP API, SSE stream, Prometheus
-bunx smithers-orchestrator observability --detach         # Grafana, Prometheus, Tempo, one command
+bunx smthrs init        # scaffold the workflow pack
+bunx smthrs up workflow.tsx --serve --metrics   # HTTP API, SSE stream, Prometheus
+bunx smthrs observability --detach         # Grafana, Prometheus, Tempo, one command
 ```
 
 <Frame caption="Live frames stream over the gateway as the run executes. Every state transition, every attempt, every retry is already a row you can scrub back through.">

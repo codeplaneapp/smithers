@@ -3,9 +3,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Context, Duration, Effect, Schedule, Schema } from "effect";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { withTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { withTaskRuntime } from "@smthrs/driver/task-runtime";
 import { Smithers, __builderInternals as I } from "../src/effect/builder.js";
 
 const inputSchema = Schema.Struct({

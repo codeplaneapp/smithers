@@ -1,6 +1,6 @@
 // smithers-source: authored
 // smithers-display-name: Demo Sample (Ship It)
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 //
 // Tiny 3-task workflow the autonomous demo runs LIVE to show crash-resume.
 // Designed so:
@@ -9,7 +9,7 @@
 //   - implement is fast            (~1.2s)
 // If you run it through, total wall time is ~10s.
 
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 
 const result = z.object({ message: z.string() });

@@ -1,7 +1,7 @@
 // smithers-display-name: Local UI Feature Swarm
 // smithers-source: authored
-/** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, Parallel, Sequence, Task, Worktree, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { ClaudeCodeAgent, Parallel, Sequence, Task, Worktree, createSmithers } from "smthrs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";

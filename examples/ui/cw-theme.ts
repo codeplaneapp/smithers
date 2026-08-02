@@ -2,7 +2,7 @@
 // This intentionally mirrors multi's shipped custom UI vocabulary: Inter,
 // small dense controls, light-by-default surfaces, soft borders/shadows, glass
 // top bars, and color used only for brand/status.
-import { workflowUiStyles } from "smithers-orchestrator/gateway-ui";
+import { workflowUiStyles } from "smthrs/gateway-ui";
 
 export const themeCss = [
   workflowUiStyles,

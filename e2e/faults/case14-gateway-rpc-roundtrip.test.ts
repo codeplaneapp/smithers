@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import React from "react";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { Gateway, type SmithersWorkflow } from "@smithers-orchestrator/server/gateway";
+import { createSmithers } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { Gateway, type SmithersWorkflow } from "@smthrs/server/gateway";
 
 const WORKFLOW_KEY = "case14-workflow";
 const RUN_ID = "case14-real-roundtrip";

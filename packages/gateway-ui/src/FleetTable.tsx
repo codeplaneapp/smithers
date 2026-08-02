@@ -1,16 +1,7 @@
 /** @jsxImportSource react */
 import { useInsertionEffect, type CSSProperties, type ReactNode } from "react";
-import { useGatewayRunTree } from "@smithers-orchestrator/gateway-react";
-import {
-  EmptyState,
-  StatusPill,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@smithers-orchestrator/ui";
+import { useGatewayRunTree } from "@smthrs/gateway-react";
+import { EmptyState, StatusPill, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@smthrs/ui";
 import { nodeStatusIndex, rollupNodeStatus } from "./runNodeStatus";
 import { ensureGatewayUiStyles, theme } from "./theme";
 

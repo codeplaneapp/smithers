@@ -1,10 +1,10 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createSmithers } from "smithers-orchestrator";
-import { retryTask } from "@smithers-orchestrator/time-travel/retry-task";
+import { createSmithers } from "smthrs";
+import { retryTask } from "@smthrs/time-travel/retry-task";
 import { z } from "zod";
 import { Gateway } from "../src/gateway.js";
 

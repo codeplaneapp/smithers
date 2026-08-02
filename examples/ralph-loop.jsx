@@ -1,4 +1,4 @@
-import { Loop, ClaudeCodeAgent } from "smithers-orchestrator";
+import { Loop, ClaudeCodeAgent } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { z } from "zod";
 import CheckPrompt from "./prompts/ralph-loop/check.mdx";

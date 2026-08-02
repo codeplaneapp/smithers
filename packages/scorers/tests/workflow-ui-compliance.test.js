@@ -9,9 +9,9 @@ import {
 
 const COMPLIANT_UI = `/** @jsxImportSource react */
 import { useState } from "react";
-import { createGatewayReactRoot, useGatewayRunTree } from "smithers-orchestrator/gateway-react";
-import { FleetTable, NodeChatStream, NodeStageStrip, RunMeta, WorkflowUiShell, nodeStatusIndex } from "smithers-orchestrator/gateway-ui";
-import { EmptyState, KpiStat } from "smithers-orchestrator/ui";
+import { createGatewayReactRoot, useGatewayRunTree } from "smthrs/gateway-react";
+import { FleetTable, NodeChatStream, NodeStageStrip, RunMeta, WorkflowUiShell, nodeStatusIndex } from "smthrs/gateway-ui";
+import { EmptyState, KpiStat } from "smthrs/ui";
 
 function App() {
   const [selected, setSelected] = useState("a");
@@ -30,8 +30,8 @@ createGatewayReactRoot(<App />);
 // hex colors, a raw <table>, no shell, no live agent chat.
 const HAND_ROLLED_UI = `/** @jsxImportSource react */
 import { useState } from "react";
-import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";
-import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
+import { createGatewayReactRoot } from "smthrs/gateway-react";
+import { WorkflowUiStyles } from "smthrs/gateway-ui";
 
 function Pill({ status }) {
   return <span style={{ background: "#26262b", color: "#9a9aa5", borderRadius: 999 }}>{status}</span>;
@@ -51,8 +51,8 @@ createGatewayReactRoot(<App />);
 // own node statuses up against engine lifecycle words. `toRunStatus` has
 // already mapped those to `ok`, so every finished phase renders as un-started.
 const ENGINE_VOCABULARY_UI = `/** @jsxImportSource react */
-import { createGatewayReactRoot, useGatewayRunTree } from "smithers-orchestrator/gateway-react";
-import { NodeChatStream, RunMeta, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
+import { createGatewayReactRoot, useGatewayRunTree } from "smthrs/gateway-react";
+import { NodeChatStream, RunMeta, WorkflowUiShell } from "smthrs/gateway-ui";
 
 function statusOf(tree, ids) {
   const mine = ids.map((id) => (tree.nodes ?? []).find((n) => n.id === id)).filter(Boolean);
@@ -76,8 +76,8 @@ createGatewayReactRoot(<App />);
 // A ticket/agent-output `status` has its own vocabulary and must not be
 // flagged, including in a UI that also reads the run tree.
 const TICKET_STATUS_UI = `/** @jsxImportSource react */
-import { createGatewayReactRoot, useGatewayRunTree } from "smithers-orchestrator/gateway-react";
-import { RunMeta, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
+import { createGatewayReactRoot, useGatewayRunTree } from "smthrs/gateway-react";
+import { RunMeta, WorkflowUiShell } from "smthrs/gateway-ui";
 
 function App({ ticket }) {
   const tree = useGatewayRunTree("run-1");
@@ -262,8 +262,8 @@ describe("gradeWorkflowUiSource", () => {
 
   test("accepts supported nested UI adapter imports", () => {
     const source = `${COMPLIANT_UI}
-import { adapter } from "smithers-orchestrator/ui/adapters/compact";
-import { otherAdapter } from "@smithers-orchestrator/ui/adapters/compact";
+import { adapter } from "smthrs/ui/adapters/compact";
+import { otherAdapter } from "@smthrs/ui/adapters/compact";
 void adapter; void otherAdapter;
 `;
     expect(
@@ -273,7 +273,7 @@ void adapter; void otherAdapter;
 
   test("requires rendered or called usage instead of imported names", () => {
     const unused = `
-import { WorkflowUiShell, createGatewayReactRoot, NodeChatStream } from "smithers-orchestrator/ui";
+import { WorkflowUiShell, createGatewayReactRoot, NodeChatStream } from "smthrs/ui";
 const App = () => <div />;
 `;
     const rules = gradeWorkflowUiSource(unused, { requireNodeChat: true }).violations.map(
@@ -294,8 +294,8 @@ const App = () => <div />;
   });
 
   test("resolves namespace bindings only when qualified names are used", () => {
-    const valid = `import * as UI from "smithers-orchestrator/gateway-ui";
-import * as Gateway from "smithers-orchestrator/gateway-react";
+    const valid = `import * as UI from "smthrs/gateway-ui";
+import * as Gateway from "smthrs/gateway-react";
 const App = () => <UI.WorkflowUiShell><UI.NodeChatStream /></UI.WorkflowUiShell>;
 Gateway.createGatewayReactRoot(<App />);`;
     expect(gradeWorkflowUiSource(valid, { requireNodeChat: true }).passed).toBe(true);
@@ -309,7 +309,7 @@ Gateway.createGatewayReactRoot(<App />);`;
   });
 
   test("does not accept original names when aliased imports are unused", () => {
-    const source = `import { WorkflowUiShell as Shell, createGatewayReactRoot as mount, NodeChatStream as Chat } from "smithers-orchestrator/gateway-ui";
+    const source = `import { WorkflowUiShell as Shell, createGatewayReactRoot as mount, NodeChatStream as Chat } from "smthrs/gateway-ui";
 const App = () => <div>WorkflowUiShell NodeChatStream createGatewayReactRoot</div>;`;
     expect(
       gradeWorkflowUiSource(source, { requireNodeChat: true }).violations.map((violation) => violation.rule),
@@ -317,7 +317,7 @@ const App = () => <div>WorkflowUiShell NodeChatStream createGatewayReactRoot</di
   });
 
   test("does not treat string-contained imports or shadowed locals as bindings", () => {
-    const source = `const decoy = "import { WorkflowUiShell, NodeChatStream } from 'smithers-orchestrator/gateway-ui'; import { createGatewayReactRoot } from 'smithers-orchestrator/gateway-react'";
+    const source = `const decoy = "import { WorkflowUiShell, NodeChatStream } from 'smthrs/gateway-ui'; import { createGatewayReactRoot } from 'smthrs/gateway-react'";
 const App = (WorkflowUiShell) => <WorkflowUiShell />;
 function render(NodeChatStream) { return <NodeChatStream />; }
 function mount(createGatewayReactRoot) { createGatewayReactRoot(<App />); }`;
@@ -328,8 +328,8 @@ function mount(createGatewayReactRoot) { createGatewayReactRoot(<App />); }`;
   });
 
   test("matches namespace members and dollar-prefixed aliases exactly", () => {
-    const valid = `import * as UI from "smithers-orchestrator/gateway-ui";
-import { createGatewayReactRoot as $mount, WorkflowUiShell as $Shell, NodeChatStream as $Chat } from "smithers-orchestrator/gateway-react";
+    const valid = `import * as UI from "smthrs/gateway-ui";
+import { createGatewayReactRoot as $mount, WorkflowUiShell as $Shell, NodeChatStream as $Chat } from "smthrs/gateway-react";
 const App = () => <UI.WorkflowUiShell><UI.NodeChatStream /><$Shell><$Chat /></$Shell></UI.WorkflowUiShell>;
 $mount(<App />);`;
     expect(gradeWorkflowUiSource(valid, { requireNodeChat: true }).passed).toBe(true);
@@ -401,7 +401,7 @@ test("requires bindings to come from the shipped entrypoint", () => {
 
 test("does not accept imported names used as object properties", () => {
   const source =
-    'import { WorkflowUiShell, NodeChatStream, createGatewayReactRoot } from "smithers-orchestrator/gateway-ui";\\nconst widgets = { WorkflowUiShell, NodeChatStream, createGatewayReactRoot };\\nconst App = () => <div />;\\nwidgets.createGatewayReactRoot(<App />);';
+    'import { WorkflowUiShell, NodeChatStream, createGatewayReactRoot } from "smthrs/gateway-ui";\\nconst widgets = { WorkflowUiShell, NodeChatStream, createGatewayReactRoot };\\nconst App = () => <div />;\\nwidgets.createGatewayReactRoot(<App />);';
   const rules = gradeWorkflowUiSource(source, { requireNodeChat: true }).violations.map((violation) => violation.rule);
   expect(rules).toEqual(expect.arrayContaining(["shell", "mount", "live-chat"]));
 });
@@ -428,8 +428,8 @@ describe("workflowUiComplianceScorer", () => {
 describe("JSX lexing", () => {
   test("a quoted JSX attribute before a self-closing tag does not swallow the mount as a regex", () => {
     const source = [
-      'import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";',
-      'import { WorkflowUiShell } from "smithers-orchestrator/gateway-ui";',
+      'import { createGatewayReactRoot } from "smthrs/gateway-react";',
+      'import { WorkflowUiShell } from "smthrs/gateway-ui";',
       'function App() { return <WorkflowUiShell title="Fixture" />; }',
       "createGatewayReactRoot(<App />);",
       "",
@@ -441,8 +441,8 @@ describe("JSX lexing", () => {
 
   test("division and real regex literals still mask correctly", () => {
     const source = [
-      'import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";',
-      'import { WorkflowUiShell } from "smithers-orchestrator/gateway-ui";',
+      'import { createGatewayReactRoot } from "smthrs/gateway-react";',
+      'import { WorkflowUiShell } from "smthrs/gateway-ui";',
       "const ratio = 1 / 2;",
       "const pattern = /createGatewayReactRoot\\(/g;",
       "void pattern; void ratio;",

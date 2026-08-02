@@ -18,7 +18,7 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@smithers-orchestrator/ui";
+} from "@smthrs/ui";
 
 const meta: Meta = {
   title: "Primitives/Inputs",

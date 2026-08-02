@@ -254,7 +254,7 @@ export function main() {
       if (!existsSync(evalFile)) {
         writeFileSync(
           evalFile,
-          `/** @jsxImportSource smithers-orchestrator */\n// ${suite} — generated suite. See evals/README.md.\nimport { createFluencyEval } from "../../lib/eval-kit";\n\nexport default createFluencyEval({ suite: "${suite}" });\n`,
+          `/** @jsxImportSource smthrs */\n// ${suite} — generated suite. See evals/README.md.\nimport { createFluencyEval } from "../../lib/eval-kit";\n\nexport default createFluencyEval({ suite: "${suite}" });\n`,
         );
       }
     }

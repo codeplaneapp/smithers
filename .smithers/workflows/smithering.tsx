@@ -88,10 +88,10 @@
 //   - In autonomous mode (review=false) a monitor escalation flows straight into review of
 //     a possibly-broken build; the escalation reason survives in monitor:triage output.
 // ─────────────────────────────────────────────────────────────────────────────
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
 import { $ } from "bun";
-import { ClaudeCodeAgent, HumanTask, ScanFixVerify, createSmithers, type AgentLike } from "smithers-orchestrator";
+import { ClaudeCodeAgent, HumanTask, ScanFixVerify, createSmithers, type AgentLike } from "smthrs";
 import { z } from "zod/v4";
 import { codexFirst } from "../lib/codexAccounts";
 

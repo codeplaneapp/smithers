@@ -1,4 +1,4 @@
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { ferricSchemas } from "./ferricSchemas";
 
 /**

@@ -1,10 +1,10 @@
-# Make `smithers monitor` truly beautiful (match @smithers-orchestrator/ui polish)
+# Make `smithers monitor` truly beautiful (match @smthrs/ui polish)
 
 GitHub: https://github.com/smithersai/smithers/issues/643
 
 ## Goal
 
-Make **`smithers monitor` truly beautiful** — bring it up to the polish of the rest of the product. Today it looks sloppy relative to `@smithers-orchestrator/ui` and the hosted surfaces.
+Make **`smithers monitor` truly beautiful** — bring it up to the polish of the rest of the product. Today it looks sloppy relative to `@smthrs/ui` and the hosted surfaces.
 
 ## Why now
 
@@ -12,7 +12,7 @@ Make **`smithers monitor` truly beautiful** — bring it up to the polish of the
 
 ## Scope
 
-- [ ] Design pass: apply the `@smithers-orchestrator/ui` design system (tokens, component anatomy, 2-theme light/dark — see memory `smithers-ui-design-system`, 21 shadcn-anatomy components) consistently across the monitor.
+- [ ] Design pass: apply the `@smthrs/ui` design system (tokens, component anatomy, 2-theme light/dark — see memory `smithers-ui-design-system`, 21 shadcn-anatomy components) consistently across the monitor.
 - [ ] Runs list — hierarchy, status, timing, density.
 - [ ] Execution tree — legible node states, retries, nesting.
 - [ ] Events view — readable stream, filtering.

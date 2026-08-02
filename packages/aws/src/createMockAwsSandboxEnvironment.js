@@ -43,7 +43,7 @@ function extractBuildspecCommand(buildspec) {
  * upload, and download failures. Everything is deterministic and requires no AWS
  * credentials.
  *
- * @param {(args: { command: string; request: Record<string, unknown>; files: Map<string, string>; env: Record<string, string> }) => import("@smithers-orchestrator/sandbox").SandboxProviderResult | Promise<import("@smithers-orchestrator/sandbox").SandboxProviderResult>} handler
+ * @param {(args: { command: string; request: Record<string, unknown>; files: Map<string, string>; env: Record<string, string> }) => import("@smthrs/sandbox").SandboxProviderResult | Promise<import("@smthrs/sandbox").SandboxProviderResult>} handler
  * @param {{
  *   exitCode?: number;
  *   stoppedReason?: string;
@@ -58,7 +58,7 @@ export function createMockAwsSandboxEnvironment(handler, mockOptions = {}) {
   /** @type {Map<string, string>} */
   const store = new Map();
   /** @type {{ create?: boolean; exec?: boolean; upload?: boolean; download?: boolean }} */
-  const faults = { ...(mockOptions.faults ?? {}) };
+  const faults = { ...mockOptions.faults };
   const faultMessage = mockOptions.faultMessage ?? "mock aws sandbox fault";
   let ecsExitCode = mockOptions.exitCode ?? 0;
   let stoppedReason = mockOptions.stoppedReason;

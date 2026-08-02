@@ -2,11 +2,11 @@
 // smithers-display-name: Self-Improve (eval hill-climb)
 // smithers-description: Durable keep-if-better loop over a smithers eval suite. Each round snapshots a target file, an Opus agent proposes one improvement, re-runs the eval, and keeps the edit only if the objective strictly improves (else reverts). A holdout guard blocks overfitting. Meant to lift a benchmark scaffold's prompts/workflow over time.
 // smithers-tags: eval, optimize, self-improve, fleet
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
-import { ClaudeCodeAgent, Loop, Sequence, Task, createSmithers } from "smithers-orchestrator";
+import { ClaudeCodeAgent, Loop, Sequence, Task, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 
 // The target is the file we hill-climb (a prompt .mdx, a workflow .tsx, or an

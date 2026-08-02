@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { acquireRewindLock } from "../../src/acquireRewindLock.js";
 
 const [dbPath, runId, mode, rawTtlMs] = process.argv.slice(2);

@@ -8,7 +8,7 @@ import {
   stripAutoColumns,
   validateExistingOutput,
   validateOutput,
-} from "@smithers-orchestrator/db/output";
+} from "@smthrs/db/output";
 import {
   awaitApprovalDurableDeferred,
   awaitWaitForEventDurableDeferred,
@@ -21,12 +21,12 @@ import {
   isHumanTaskMeta,
 } from "../human-requests.js";
 import { parseAttemptMetaJson } from "./bridge-utils.js";
-import { updateAsyncExternalWaitPending } from "@smithers-orchestrator/observability/metrics";
-import { markdownComponents } from "@smithers-orchestrator/components/markdownComponents";
-import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
-import { buildStateKey } from "@smithers-orchestrator/scheduler/buildStateKey";
+import { updateAsyncExternalWaitPending } from "@smthrs/observability/metrics";
+import { markdownComponents } from "@smthrs/components/markdownComponents";
+import { errorToJson } from "@smthrs/errors/errorToJson";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { nowMs } from "@smthrs/scheduler/nowMs";
+import { buildStateKey } from "@smthrs/scheduler/buildStateKey";
 // Reconciles the three bridge-managed deferred task kinds — Timer
 // (meta.__timer), WaitForEvent (meta.__waitForEvent), and approval-gated tasks
 // (desc.needsApproval) — against the durable attempt/node rows so the
@@ -44,9 +44,9 @@ import { buildStateKey } from "@smithers-orchestrator/scheduler/buildStateKey";
 /**
  * @typedef {(state: "pending" | "failed" | "skipped") => Promise<void>} DeferredBridgeStateEmitter
  */
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} _SmithersDb */
-/** @typedef {import("@smithers-orchestrator/db/adapter/ApprovalRow").ApprovalRow} ApprovalRow */
-/** @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} _SmithersDb */
+/** @typedef {import("@smthrs/db/adapter/ApprovalRow").ApprovalRow} ApprovalRow */
+/** @typedef {import("@smthrs/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<Record<string, unknown>>} BunSQLiteDatabase */
 
 const timerDurationMultipliers = {

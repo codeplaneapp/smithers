@@ -43,7 +43,7 @@ Why this bites:
 - No auth wiring: `smithers ui` sends no bearer, `smithers gateway` accepts
   one static token and never reads the `~/.smithers` token store.
 - Version skew per launch directory: the bin delegates only when
-  `cwd/.smithers/node_modules/smithers-orchestrator` exists. From a project
+  `cwd/.smithers/node_modules/smthrs` exists. From a project
   subdirectory the global CLI runs against the project's store.
 - pglite is effectively single-process, yet every backend resolution can
   boot a PGlite instance, and reads boot a second one plus a socket server.
@@ -61,9 +61,9 @@ Why this bites:
    the bin walks up from cwd to the filesystem root (the same unbounded
    walk as `findLocalPackDir` and tsx/bunx; `findSmithersAnchorDir`'s HOME
    bound is a DB-placement rule, not a code-resolution rule), checking at
-   each level `.smithers/node_modules/smithers-orchestrator` first, then
-   `node_modules/smithers-orchestrator` (a project that depends on
-   smithers-orchestrator directly delegates too). First hit wins; reaching
+   each level `.smithers/node_modules/smthrs` first, then
+   `node_modules/smthrs` (a project that depends on
+   smthrs directly delegates too). First hit wins; reaching
    `$HOME` and finding `~/.smithers/node_modules` delegates to the global
    pack's pinned runtime, consistent with `resolvePackDirs` serving
    `~/.smithers` workflows. The realpath self-guard stays. `.mdx` joins the

@@ -5,11 +5,11 @@
  * Use cases: bug triage, support ticket routing, PR labeling, alert handling,
  * email classification, content moderation.
  */
-import { Sequence, Parallel } from "smithers-orchestrator";
+import { Sequence, Parallel } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import ClassifyPrompt from "./prompts/triage/classify.mdx";
 import HandlePrompt from "./prompts/triage/handle.mdx";

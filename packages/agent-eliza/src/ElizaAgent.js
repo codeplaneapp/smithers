@@ -1,8 +1,8 @@
-import { buildGenerateResult, extractPrompt, truncate } from "@smithers-orchestrator/agents/BaseCliAgent";
+import { buildGenerateResult, extractPrompt, truncate } from "@smthrs/agents/BaseCliAgent";
 
 /** @typedef {import("./ElizaAgentOptions.ts").ElizaAgentOptions} ElizaAgentOptions */
 /** @typedef {import("./ElizaAgentOptions.ts").ElizaPlugin} ElizaPlugin */
-/** @typedef {import("@smithers-orchestrator/agents").AgentGenerateOptions} AgentGenerateOptions */
+/** @typedef {import("@smthrs/agents").AgentGenerateOptions} AgentGenerateOptions */
 /** @typedef {import("ai").GenerateTextResult} GenerateTextResult */
 
 /**
@@ -55,9 +55,9 @@ export async function defaultRuntimeFactory(opts, { loadCore = () => import("@el
   }
 
   const mergedSettings = {
-    ...(opts.character.settings ?? {}),
-    ...(opts.settings ?? {}),
-    ...(opts.env ?? {}),
+    ...opts.character.settings,
+    ...opts.settings,
+    ...opts.env,
   };
 
   const runtime = new AgentRuntime({
@@ -121,7 +121,7 @@ function raceAbort(promise, abortSignal) {
  * `@elizaos/core` is a hard dependency this opt-in package owns and installs.
  * It is resolved via a dynamic import (so this module carries no load-time
  * dependency and the structural types keep the build self-contained), but
- * consumers of `@smithers-orchestrator/agent-eliza` get it transitively.
+ * consumers of `@smthrs/agent-eliza` get it transitively.
  */
 export class ElizaAgent {
   /** @type {string | undefined} */

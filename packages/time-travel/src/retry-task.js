@@ -1,11 +1,11 @@
 import { Effect } from "effect";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
-import { parseSubflowChildRunId } from "@smithers-orchestrator/graph/subflow-run-lineage";
+import { nowMs } from "@smthrs/scheduler/nowMs";
+import { parseSubflowChildRunId } from "@smthrs/graph/subflow-run-lineage";
 import { markResetCancelledMeta } from "./resetCancelMarker.js";
 import { validateWorkflowIdentity } from "./validateWorkflowIdentity.js";
 /** @typedef {import("./RetryTaskOptions.ts").RetryTaskOptions} RetryTaskOptions */
 /** @typedef {import("./RetryTaskResult.ts").RetryTaskResult} RetryTaskResult */
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 
 /**
  * @param {string} nodeId

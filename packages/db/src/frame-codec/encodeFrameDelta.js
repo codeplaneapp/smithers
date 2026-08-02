@@ -1,4 +1,4 @@
-import { parseXmlJson } from "@smithers-orchestrator/graph/utils/xml";
+import { parseXmlJson } from "@smthrs/graph/utils/xml";
 /** @typedef {import("./FrameDeltaOp.ts").FrameDeltaOp} FrameDeltaOp */
 /** @typedef {import("./JsonPath.ts").JsonPath} JsonPath */
 

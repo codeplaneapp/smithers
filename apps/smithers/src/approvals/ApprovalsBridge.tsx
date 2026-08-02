@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { useGatewayApprovals, useGatewayMutation } from "@smithers-orchestrator/gateway-react";
-import { gatewayKeys, type GatewayApprovalRow } from "@smithers-orchestrator/gateway-client";
+import { useGatewayApprovals, useGatewayMutation } from "@smthrs/gateway-react";
+import { gatewayKeys, type GatewayApprovalRow } from "@smthrs/gateway-client";
 import { useLocalModeRefetch } from "../sync/useLocalModeRefetch";
 import type { ApprovalGate } from "./approvals";
 import { bindApprovalActions, syncSelection, useApprovalsStore } from "./approvalsStore";

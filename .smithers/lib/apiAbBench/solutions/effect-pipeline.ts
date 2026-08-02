@@ -1,6 +1,6 @@
 // Reference solution (effect arm, task `pipeline`). Proves the harness can score a correct candidate.
 import { Schema } from "effect";
-import { Smithers } from "smithers-orchestrator";
+import { Smithers } from "smthrs";
 
 const G = Smithers.workflow({ name: "ab-pipeline", input: Schema.Struct({ base: Schema.Number }) });
 

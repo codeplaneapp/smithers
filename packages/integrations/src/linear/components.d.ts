@@ -4,7 +4,7 @@ import 'zod';
 import './LinearConfig.js';
 import './LinearClientTypes.js';
 import 'effect';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 
 /**
  * Wait for `integration:linear:issue.update`. Correlate on `issueId`

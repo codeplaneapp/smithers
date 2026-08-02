@@ -1,9 +1,9 @@
-import { listAccounts } from "@smithers-orchestrator/accounts";
-import { AntigravityAgent } from "@smithers-orchestrator/agents/AntigravityAgent";
-import { ClaudeCodeAgent } from "@smithers-orchestrator/agents/ClaudeCodeAgent";
-import { CodexAgent } from "@smithers-orchestrator/agents/CodexAgent";
-import { KimiAgent } from "@smithers-orchestrator/agents/KimiAgent";
-import { PiAgent } from "@smithers-orchestrator/agents/PiAgent";
+import { listAccounts } from "@smthrs/accounts";
+import { AntigravityAgent } from "@smthrs/agents/AntigravityAgent";
+import { ClaudeCodeAgent } from "@smthrs/agents/ClaudeCodeAgent";
+import { CodexAgent } from "@smthrs/agents/CodexAgent";
+import { KimiAgent } from "@smthrs/agents/KimiAgent";
+import { PiAgent } from "@smthrs/agents/PiAgent";
 import { detectAvailableAgents } from "./agent-detection.js";
 import { SOTA_SLOTS } from "./sota-models.generated.js";
 

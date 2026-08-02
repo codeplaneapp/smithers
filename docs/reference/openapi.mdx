@@ -19,7 +19,7 @@ import {
   createOpenApiTool,
   createOpenApiToolSync,
   listOperations,
-} from "smithers-orchestrator";
+} from "smthrs";
 ```
 
 <Note>
@@ -84,7 +84,7 @@ function createOpenApiTools(
 ```ts
 import { ToolLoopAgent } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { createOpenApiTools } from "smithers-orchestrator";
+import { createOpenApiTools } from "smthrs";
 
 const tools = await createOpenApiTools("https://api.example.com/openapi.json", {
   baseUrl: "https://api.example.com",
@@ -220,7 +220,7 @@ for (const op of listOperations("./petstore.json")) {
 The same preview is available from the CLI:
 
 ```bash
-bunx smithers-orchestrator openapi list ./api/openapi.yaml
+bunx smthrs openapi list ./api/openapi.yaml
 ```
 
 **Source** [`listOperations.js`](https://github.com/smithersai/smithers/blob/main/packages/openapi/src/tool-factory/listOperations.js) · **Tests** [`spec-parser.test.js`](https://github.com/smithersai/smithers/blob/main/packages/openapi/tests/spec-parser.test.js) · **See also** [OpenAPI tools](/concepts/openapi-tools)
@@ -228,7 +228,7 @@ bunx smithers-orchestrator openapi list ./api/openapi.yaml
 ## Types
 
 `OpenApiAuth`, `OpenApiSpec`, and `OpenApiToolsOptions` are exported from
-`smithers-orchestrator`. `Tool` is the AI SDK tool type from the `ai` package.
+`smthrs`. `Tool` is the AI SDK tool type from the `ai` package.
 
 ### OpenApiAuth
 
@@ -262,7 +262,7 @@ Applied to every request. A discriminated union on `type`.
 </ResponseField>
 
 ```ts
-import type { OpenApiAuth } from "smithers-orchestrator";
+import type { OpenApiAuth } from "smthrs";
 
 const apiKey: OpenApiAuth = { type: "apiKey", name: "X-API-Key", in: "header", value: KEY };
 const bearer: OpenApiAuth = { type: "bearer", token: TOKEN };
@@ -276,7 +276,7 @@ pass a file path or URL string and let the loader parse it; import the type only
 to construct or narrow a spec yourself.
 
 ```ts
-import type { OpenApiSpec } from "smithers-orchestrator";
+import type { OpenApiSpec } from "smthrs";
 
 type OpenApiSpec = {
   openapi: string;

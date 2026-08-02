@@ -2,8 +2,8 @@ import { SocketRunner } from "effect/unstable/cluster";
 import { mkdir, cp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Effect, Layer } from "effect";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
 import { SandboxEntityExecutor } from "./sandbox-entity.js";
 import { bubblewrapArgs, makeBaseSandboxHandle, sandboxExecArgs, spawnSandboxCommand } from "./process-runner.js";
 /** @type {Layer.Layer<SandboxEntityExecutor, never, never>} */

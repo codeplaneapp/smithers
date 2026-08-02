@@ -22,12 +22,12 @@ import {
   isKnownSmithersErrorCode,
   isSmithersError,
   knownSmithersErrorCodes,
-} from "smithers-orchestrator";
+} from "smthrs";
 import type {
   KnownSmithersErrorCode,
   SmithersError,
   SmithersErrorCode,
-} from "smithers-orchestrator";
+} from "smthrs";
 ```
 
 Every built-in `SmithersErrorInstance` carries three pieces of documentation metadata:
@@ -56,7 +56,7 @@ Use `KnownSmithersErrorCode` for an exhaustive switch over built-in Smithers cod
 
 ```ts
 import { Effect } from "effect";
-import { runWorkflow } from "smithers-orchestrator";
+import { runWorkflow } from "smthrs";
 
 try {
   await Effect.runPromise(runWorkflow(workflow, { input: {} }));
@@ -263,8 +263,8 @@ account label and valid providers, while the remaining valid accounts still
 load. Such an entry is left out of the active account list but preserved
 verbatim in `accounts.json` across later `agents add` and `agents remove` calls,
 so an unrelated change never destroys the credentials its `configDir` points at.
-Run `bunx smithers-orchestrator agents remove <label>` to delete it, or
-`bunx smithers-orchestrator agents add --label <label> --replace ...` to migrate
+Run `bunx smthrs agents remove <label>` to delete it, or
+`bunx smthrs agents add --label <label> --replace ...` to migrate
 it onto a supported provider.
 `ACCOUNTS_FILE_INVALID` is reserved for invalid JSON or entries whose
 known provider shape is malformed.

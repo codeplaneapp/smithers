@@ -1,31 +1,26 @@
 import { createServer } from "node:http";
 import { readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import {
-  isIntegrationError,
-  makeIntegrationRuntime,
-  readJsonPath,
-  verifySignature,
-} from "@smithers-orchestrator/integrations";
+import { isIntegrationError, makeIntegrationRuntime, readJsonPath, verifySignature } from "@smthrs/integrations";
 import { pathToFileURL } from "node:url";
 import { resolve, dirname, sep, basename } from "node:path";
 import { Effect, Metric } from "effect";
-import { finalizeCancelledRun, isRunHeartbeatFresh, runWorkflow } from "@smithers-orchestrator/engine";
-import { escapeSmithersDir } from "@smithers-orchestrator/graph/escapeSmithersDir";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-import { logError, logInfo, logWarning } from "@smithers-orchestrator/observability/logging";
+import { finalizeCancelledRun, isRunHeartbeatFresh, runWorkflow } from "@smthrs/engine";
+import { escapeSmithersDir } from "@smthrs/graph/escapeSmithersDir";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { computeRunStateFromRow } from "@smthrs/db/runState";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
+import { logError, logInfo, logWarning } from "@smthrs/observability/logging";
 import { runPromise, runSync } from "./smithersRuntime.js";
-import { httpRequests, httpRequestDuration, trackEvent } from "@smithers-orchestrator/observability/metrics";
-import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
-import { signalRun } from "@smithers-orchestrator/engine/signals";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
-import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { assertMaxBytes, assertMaxJsonDepth } from "@smithers-orchestrator/db/input-bounds";
-import { prometheusContentType, renderPrometheusMetrics } from "@smithers-orchestrator/observability";
+import { httpRequests, httpRequestDuration } from "@smthrs/observability/metrics";
+import { approveNode, denyNode } from "@smthrs/engine/approvals";
+import { signalRun } from "@smthrs/engine/signals";
+import { nowMs } from "@smthrs/scheduler/nowMs";
+import { errorToJson } from "@smthrs/errors/errorToJson";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { assertMaxBytes, assertMaxJsonDepth } from "@smthrs/db/input-bounds";
+import { prometheusContentType, renderPrometheusMetrics } from "@smthrs/observability";
 /** @typedef {import("node:http").ServerResponse} ServerResponse */
 /** @typedef {import("./ServerOptions.js").ServerOptions} ServerOptions */
 
@@ -185,7 +180,7 @@ async function readRawBody(req, maxBytes) {
  * plus a config-driven decode (event name, correlation-id/payload/dedupe-key
  * dot-paths) into ONE ExternalEvent per delivery.
  * @param {import("./IntegrationsConfig.js").IntegrationsConfig} integrations
- * @returns {import("@smithers-orchestrator/integrations/core/EventSource").MakeWebhookSourceOptions[]}
+ * @returns {import("@smthrs/integrations/core/EventSource").MakeWebhookSourceOptions[]}
  */
 function buildIntegrationWebhookSources(integrations) {
   return (integrations.webhooks ?? []).map((config) => {
@@ -867,7 +862,7 @@ function startServerInternal(opts = {}) {
   }
   const serverAdapter = serverDb ? new SmithersDb(serverDb) : null;
   const integrationWebhookSources = opts.integrations ? buildIntegrationWebhookSources(opts.integrations) : [];
-  /** @type {import("@smithers-orchestrator/integrations/core/IntegrationRuntime").IntegrationRuntime | null} */
+  /** @type {import("@smthrs/integrations/core/IntegrationRuntime").IntegrationRuntime | null} */
   let integrationRuntime = null;
   if (integrationWebhookSources.length > 0) {
     if (!serverAdapter) {

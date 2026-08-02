@@ -44,7 +44,7 @@ export const MONITOR_DEFAULT_AUTO_HEAL = /** @type {const} */ (["stalled", "wedg
  */
 export function monitorReadPathRules() {
   return [
-    "Read run state ONLY through the Gateway client (`smithers-orchestrator/gateway-client`) or the public CLI: `bunx smithers-orchestrator status`, `bunx smithers-orchestrator inspect RUN_ID --format json`, `bunx smithers-orchestrator events RUN_ID`, `bunx smithers-orchestrator node NODE_ID --runId RUN_ID`, `bunx smithers-orchestrator why RUN_ID`, `bunx smithers-orchestrator ps`.",
+    "Read run state ONLY through the Gateway client (`smthrs/gateway-client`) or the public CLI: `bunx smthrs status`, `bunx smthrs inspect RUN_ID --format json`, `bunx smthrs events RUN_ID`, `bunx smthrs node NODE_ID --runId RUN_ID`, `bunx smthrs why RUN_ID`, `bunx smthrs ps`.",
     "NEVER open the store directly. Do not read `.smithers/*.db`, `.smithers/pg`, `smithers.db`, or any SQL over them, and do not parse the Gateway runtime state file. Those are private engine state; reading them races the run and is wrong even when it appears to work.",
     "If a read fails or returns nothing, that is evidence of `unknown` — not a licence to guess from stale memory.",
   ];
@@ -100,7 +100,7 @@ export function monitorAuthorityRules(params = {}) {
   return [
     "Your default action is to OBSERVE AND REPORT. Doing nothing and watching another beat is a correct, complete answer, and it is the right one whenever you are unsure.",
     `You may act autonomously ONLY on these conditions: ${allowed}. Every other condition must be escalated to a human.`,
-    `Resume a stalled run only when it has no active runtime owner: \`bunx smithers-orchestrator up WORKFLOW --resume --run-id ${runId}\` re-enters its durable frame. Retry a wedged node at most once with \`bunx smithers-orchestrator retry-task WORKFLOW --run-id ${runId} --node-id NODE_ID\`; this resets the node's output and downstream dependents before creating fresh attempts, so report exactly what was reset. Never run either repair against a live owner; escalate instead.`,
+    `Resume a stalled run only when it has no active runtime owner: \`bunx smthrs up WORKFLOW --resume --run-id ${runId}\` re-enters its durable frame. Retry a wedged node at most once with \`bunx smthrs retry-task WORKFLOW --run-id ${runId} --node-id NODE_ID\`; this resets the node's output and downstream dependents before creating fresh attempts, so report exactly what was reset. Never run either repair against a live owner; escalate instead.`,
     "You may NEVER take a destructive or irreversible action on your own. Do not cancel a run, do not rewind, revert, or time-travel it, do not resolve an approval or answer a human request on the human's behalf, and do not edit the repository. Those require a human decision, always.",
     "ESCALATE to a human instead of guessing when: the condition is not in your auto-heal set; the evidence is contradictory or unreadable; a repair you already applied did not change the symptom; the same condition recurs after two repairs; or the correct fix would be destructive.",
     "When you escalate, state what you saw, what you already tried, what you believe is wrong, and the single specific decision you need. Do not ask an open question.",

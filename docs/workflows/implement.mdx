@@ -6,7 +6,7 @@ description: Implement a change with validation and review.
 `implement` is archived (not installed by `init`): copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent. It is the default coding workflow for a single change: a shared `ValidationLoop` implements, validates, reviews, and iterates on failures.
 
 ```bash
-bunx smithers-orchestrator workflow run implement --prompt "Add rate limiting to the API"
+bunx smthrs workflow run implement --prompt "Add rate limiting to the API"
 ```
 
 <Frame caption="The implement UI streams each stage (implementation, validation, and the reviewer panel's synthesized verdict) as the build → validate → review loop runs.">

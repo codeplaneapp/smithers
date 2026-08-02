@@ -1,4 +1,4 @@
-# @smithers-orchestrator/components — src
+# @smthrs/components — src
 
 The React render layer for Smithers workflows. Components here render to
 `smithers:*` host elements that the reconciler and graph packages extract into
@@ -22,7 +22,7 @@ does that.
 - `// @smithers-type-exports-begin/end` blocks are tool-managed — never
   hand-edit them.
 - The package.json `"./*"` export makes EVERY file under src/ a public
-  subpath (e.g. `@smithers-orchestrator/components/SmithersWorkflow` is
+  subpath (e.g. `@smthrs/components/SmithersWorkflow` is
   imported by packages/server; packages/engine tests import
   `components/components/index`). No file here may be moved, renamed, or have
   exports removed without a breaking-change decision.

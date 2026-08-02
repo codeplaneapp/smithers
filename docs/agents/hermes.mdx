@@ -15,7 +15,7 @@ The fastest path is `mcp add`, which writes its server straight into Hermes's
 `~/.hermes/config.yaml`:
 
 ```bash
-bunx smithers-orchestrator mcp add --agent hermes
+bunx smthrs mcp add --agent hermes
 ```
 
 By hand: Hermes reads MCP servers from `~/.hermes/config.yaml` under
@@ -25,7 +25,7 @@ By hand: Hermes reads MCP servers from `~/.hermes/config.yaml` under
 mcp_servers:
   smithers:
     command: bunx
-    args: ["smithers-orchestrator", "--mcp"]
+    args: ["smthrs", "--mcp"]
 ```
 
 Or use the Hermes CLI:
@@ -45,7 +45,7 @@ generated Smithers CLI skill set into `~/.agents/skills/`; point Hermes there
 for command-level skill context:
 
 ```bash
-bunx smithers-orchestrator skills add
+bunx smthrs skills add
 ```
 
 The MCP server above remains the primary integration; generated skill files
@@ -60,7 +60,7 @@ the repo uses:
 ```md
 ## Orchestration
 Use Smithers for durable, multi-step, or human-in-the-loop agent work.
-`bunx smithers-orchestrator starters` lists ready-made workflows.
+`bunx smthrs starters` lists ready-made workflows.
 ```
 
 ## See also

@@ -6,8 +6,8 @@ import {
   runWithCorrelationContext,
   updateCurrentCorrelationContext,
   withCorrelationContext,
-} from "@smithers-orchestrator/observability/correlation";
-import { logInfo } from "@smithers-orchestrator/observability/logging";
+} from "@smthrs/observability/correlation";
+import { logInfo } from "@smthrs/observability/logging";
 
 /**
  * Regression guard: the imperative logger (`logging.js`) reads correlation via

@@ -5,7 +5,7 @@ description: "0.17.0 ships Gateway v1: the Gateway's RPC schema, scope vocabular
 
 0.17.0 ships **Gateway v1**: the Gateway's RPC schema, scope vocabulary,
 error codes, and OpenAPI document are now a stable, separately published
-package (`@smithers-orchestrator/gateway`) so external clients (bots,
+package (`@smthrs/gateway`) so external clients (bots,
 dashboards, SDKs in other languages) can build against the contract instead
 of the server source. 0.15.0 launched the Gateway; 0.17.0 commits to its
 wire shape.
@@ -25,14 +25,14 @@ single-Effect-version guardrail and a new fault-injection E2E lane.
 
 - **`pi-plugin` moved to its own workspace package.** The runtime previously lived
   in `packages/smithers/src/pi-plugin/` and was re-exported from the
-  `smithers-orchestrator/pi-plugin` subpath. It is now `packages/pi-plugin/`,
-  published as `@smithers-orchestrator/pi-plugin`. The
-  `smithers-orchestrator/pi-plugin` and `smithers-orchestrator/pi-extension`
+  `smthrs/pi-plugin` subpath. It is now `packages/pi-plugin/`,
+  published as `@smthrs/pi-plugin`. The
+  `smthrs/pi-plugin` and `smthrs/pi-extension`
   subpath re-exports have been deleted. Update imports:
 
   ```diff
-  - import { runWorkflow } from "smithers-orchestrator/pi-plugin";
-  + import { runWorkflow } from "@smithers-orchestrator/pi-plugin";
+  - import { runWorkflow } from "smthrs/pi-plugin";
+  + import { runWorkflow } from "@smthrs/pi-plugin";
   ```
 
 ---
@@ -41,7 +41,7 @@ single-Effect-version guardrail and a new fault-injection E2E lane.
 
 0.15.0 shipped the Gateway. 0.17.0 ships the **contract**. The Gateway's RPC
 schema, scope vocabulary, error codes, and OpenAPI document now live in their
-own workspace package (`@smithers-orchestrator/gateway`) and are the single
+own workspace package (`@smthrs/gateway`) and are the single
 source of truth that both the in-process server and any external client
 codegen against. The server no longer carries its own copy of the method or
 scope tables; clients no longer have to scrape the source to learn the wire
@@ -90,16 +90,16 @@ import {
   type GatewayRpcMethod,
   type GatewayRpcErrorCode,
   type GatewayScope,
-} from "@smithers-orchestrator/gateway";
+} from "@smthrs/gateway";
 
 // Just the wire types and JSON Schemas.
-import type { LaunchRunRequest } from "@smithers-orchestrator/gateway/rpc";
+import type { LaunchRunRequest } from "@smthrs/gateway/rpc";
 
 // Just the scope helpers (e.g. for an auth middleware).
 import {
   hasGatewayScope,
   type GatewayScope,
-} from "@smithers-orchestrator/gateway/auth/scopes";
+} from "@smthrs/gateway/auth/scopes";
 ```
 
 ### Calling a method over HTTP
@@ -120,7 +120,7 @@ Or in TypeScript, with the contract types pulled in:
 import type {
   LaunchRunRequest,
   LaunchRunResponse,
-} from "@smithers-orchestrator/gateway/rpc";
+} from "@smthrs/gateway/rpc";
 
 const req: LaunchRunRequest = {
   workflow: "deploy",
@@ -145,7 +145,7 @@ is the right transport for clients that want to follow events instead of
 polling:
 
 ```ts
-import type { StreamRunEventsRequest } from "@smithers-orchestrator/gateway/rpc";
+import type { StreamRunEventsRequest } from "@smthrs/gateway/rpc";
 
 const ws = new WebSocket("ws://localhost:7331");
 ws.onopen = () => {
@@ -173,7 +173,7 @@ ws.onmessage = (m) => {
 
 ### The scope vocabulary
 
-`@smithers-orchestrator/gateway/auth/scopes` exports the v1 scope vocabulary.
+`@smthrs/gateway/auth/scopes` exports the v1 scope vocabulary.
 Each method declares the scope it requires; `hasGatewayScope()` performs the
 match and understands legacy grants:
 
@@ -198,7 +198,7 @@ so existing tokens keep working.
 import {
   hasGatewayScope,
   getRequiredScopeForGatewayMethod,
-} from "@smithers-orchestrator/gateway";
+} from "@smthrs/gateway";
 
 const granted = ["run:write", "signal:submit"]; // from your auth layer
 const required = getRequiredScopeForGatewayMethod("launchRun"); // "run:write"
@@ -212,7 +212,7 @@ which lets a gateway, proxy, or client validate payloads without a generated
 SDK:
 
 ```ts
-import { getGatewayRpcDefinition } from "@smithers-orchestrator/gateway";
+import { getGatewayRpcDefinition } from "@smthrs/gateway";
 import Ajv from "ajv";
 
 const def = getGatewayRpcDefinition("submitApproval");
@@ -233,12 +233,12 @@ consumes OpenAPI works:
 ```bash
 # Python client
 openapi-generator-cli generate \
-  -i node_modules/@smithers-orchestrator/gateway/openapi.yaml \
+  -i node_modules/@smthrs/gateway/openapi.yaml \
   -g python -o ./clients/python
 
 # Go client
 oapi-codegen -package smithers \
-  node_modules/@smithers-orchestrator/gateway/openapi.yaml \
+  node_modules/@smthrs/gateway/openapi.yaml \
   > ./clients/go/smithers.gen.go
 ```
 
@@ -250,7 +250,7 @@ checked at PR time, so the YAML cannot drift from the runtime.
 `packages/server/src/gateway.js` no longer ships its own method or scope
 table. It imports `getRequiredScopeForGatewayMethod`, `hasGatewayScope`,
 and the per-method JSON Schemas straight from
-`@smithers-orchestrator/gateway`. A new 283-line contract test
+`@smthrs/gateway`. A new 283-line contract test
 (`packages/server/tests/gateway-v1-contract.test.jsx`) pins the wire shape
 end-to-end so server changes can't silently break the published v1
 contract.
@@ -270,9 +270,9 @@ interactive agent without losing run state:
   completion; `reopen` restarts the task on the next resume.
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { Task, Workflow, createSmithers } from "smithers-orchestrator";
-import { ClaudeCodeAgent } from "@smithers-orchestrator/agents";
+/** @jsxImportSource smthrs */
+import { Task, Workflow, createSmithers } from "smthrs";
+import { ClaudeCodeAgent } from "@smthrs/agents";
 import { z } from "zod";
 
 const claude = new ClaudeCodeAgent({ model: "claude-opus-4-7" });
@@ -295,7 +295,7 @@ export default smithers(() => (
 Then drive the hijacked session from the terminal:
 
 ```bash
-bunx smithers-orchestrator chat create --agent claude --cwd .
+bunx smthrs chat create --agent claude --cwd .
 # Drops you into an interactive Claude Code session inside the run.
 # Send `{}` to hand control back; the task completes and the run continues.
 ```
@@ -310,7 +310,7 @@ Hijack requires an agent that exposes a CLI engine (`cliEngine` /
 The CLI grows a proper account/credentials surface so multiple subscriptions
 can run side-by-side and so machine-readable output stays clean.
 
-### `@smithers-orchestrator/accounts` package
+### `@smthrs/accounts` package
 
 A new workspace package backing per-provider credentials in
 `~/.smithers/accounts.json`:
@@ -322,7 +322,7 @@ import {
   getAccount,
   accountToProviderEnv,
   type Account,
-} from "@smithers-orchestrator/accounts";
+} from "@smthrs/accounts";
 
 addAccount({
   provider: "claude-code",
@@ -337,10 +337,10 @@ const env = accountToProviderEnv(getAccount("work"));
 // → { CLAUDE_CONFIG_DIR: "/Users/.../claude-work" }
 ```
 
-### Interactive `bunx smithers-orchestrator agents add`
+### Interactive `bunx smthrs agents add`
 
 ```bash
-$ bunx smithers-orchestrator agents add
+$ bunx smthrs agents add
 ◇ Detected CLI: claude (1.3.0), codex (0.5.1)
 ◇ Which provider?  ›  Claude Code
 ◇ Label this account  ›  work
@@ -359,7 +359,7 @@ accepts `apiKey` to opt into API billing instead of subscription auth.
 Two subscriptions can run concurrently in the same process:
 
 ```ts
-import { ClaudeCodeAgent } from "@smithers-orchestrator/agents";
+import { ClaudeCodeAgent } from "@smthrs/agents";
 
 // Subscription #1, pinned to ~/.smithers/configs/claude-work
 const claudeWork = new ClaudeCodeAgent({
@@ -383,16 +383,16 @@ const claudeApi = new ClaudeCodeAgent({
 Each `configDir` is wired through to the right per-CLI environment variable
 (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GEMINI_DIR`, `KIMI_SHARE_DIR`).
 
-### `bunx smithers-orchestrator chat create`
+### `bunx smthrs chat create`
 
 A one-task auto-hijacked chat that drops you into an interactive Claude
 Code, Codex, or Gemini session inside a Smithers run. Built on top of the
 new `Task hijack` prop and now assembled from package-level primitives so
-the command does not need to import the top-level `smithers-orchestrator`
+the command does not need to import the top-level `smthrs`
 bundle just to create its inline workflow:
 
 ```bash
-bunx smithers-orchestrator chat create --agent claude --cwd .
+bunx smthrs chat create --agent claude --cwd .
 # (or --agent codex / --agent gemini)
 ```
 
@@ -402,20 +402,20 @@ the workflow and the task completes.
 ### MDX and generated workflow packs
 
 The CLI now owns its Bun MDX plugin locally (`apps/cli/src/mdx-plugin.js`)
-instead of importing the plugin through the public `smithers-orchestrator`
+instead of importing the plugin through the public `smthrs`
 package. Generated workflow packs also include `@types/node` alongside the
 React and MDX type pins, which keeps freshly initialized packs typecheckable
 when workflows use Node globals or built-ins.
 
-### `bunx smithers-orchestrator init --agents-only`
+### `bunx smthrs init --agents-only`
 
 Scaffold the agents file without generating workflows. Useful when you
 already have your own workflow pack and just want Smithers to manage
 credentials:
 
 ```bash
-bunx smithers-orchestrator init --agents-only            # just .smithers/agents.ts
-bunx smithers-orchestrator init --agents-only --addAgents # also launch the wizard
+bunx smthrs init --agents-only            # just .smithers/agents.ts
+bunx smthrs init --agents-only --addAgents # also launch the wizard
 ```
 
 ### JSON-clean stdout
@@ -425,7 +425,7 @@ stderr so commands invoked with `--format json` produce a parseable stdout
 stream:
 
 ```bash
-bunx smithers-orchestrator ps --format json | jq '.[] | select(.status == "running") | .runId'
+bunx smthrs ps --format json | jq '.[] | select(.status == "running") | .runId'
 # stdout is pure JSON; smithers' own logs go to stderr.
 ```
 
@@ -445,7 +445,7 @@ extraction:
   indefinitely:
 
   ```ts
-  import { Gateway } from "smithers-orchestrator";
+  import { Gateway } from "smthrs";
 
   const gateway = new Gateway({
     auth: { mode: "token", tokens: { /* ... */ } },
@@ -472,7 +472,7 @@ interleaving, and OpenAPI execution / `$ref` cycles.
 ## New: DB schema evolution + transaction coordination
 
 - **`syncZodTableSchema(sqlite, tableName, schema, opts)`** is a new export
-  from `@smithers-orchestrator/db`. It replaces the bare
+  from `@smthrs/db`. It replaces the bare
   `CREATE TABLE IF NOT EXISTS` path used at boot: when a Zod schema gains
   columns between releases, it issues `ALTER TABLE ADD COLUMN` so existing
   databases catch up without a manual migration. `createSmithers()` and
@@ -480,7 +480,7 @@ interleaving, and OpenAPI execution / `$ref` cycles.
   custom tables can opt in:
 
   ```ts
-  import { syncZodTableSchema } from "@smithers-orchestrator/db";
+  import { syncZodTableSchema } from "@smthrs/db";
   import { Database } from "bun:sqlite";
   import { z } from "zod";
 
@@ -518,7 +518,7 @@ e.g. `{ kind: "workflow", id: "task:subtask:0" }`, round-trip without
 ambiguity:
 
 ```ts
-import { namespaceToString, parseNamespace } from "@smithers-orchestrator/memory";
+import { namespaceToString, parseNamespace } from "@smthrs/memory";
 
 const ns = { kind: "workflow", id: "task:subtask:0" };
 const s = namespaceToString(ns);
@@ -540,10 +540,10 @@ This keeps Prometheus metric instances single-sourced while preserving the
 existing subpath imports:
 
 ```ts
-import { memoryRecallDuration } from "@smithers-orchestrator/memory/metrics";
-import { openApiToolDuration } from "@smithers-orchestrator/openapi/metrics";
-import { scorerDuration } from "@smithers-orchestrator/scorers/metrics";
-import { snapshotDuration } from "@smithers-orchestrator/time-travel/metrics";
+import { memoryRecallDuration } from "@smthrs/memory/metrics";
+import { openApiToolDuration } from "@smthrs/openapi/metrics";
+import { scorerDuration } from "@smthrs/scorers/metrics";
+import { snapshotDuration } from "@smthrs/time-travel/metrics";
 ```
 
 The observability catalog now includes counters and histograms for:
@@ -556,9 +556,9 @@ The observability catalog now includes counters and histograms for:
   and snapshot duration.
 
 The memory and scorer Drizzle table definitions are also centralized under
-`@smithers-orchestrator/db/internal-schema`; the package-level
-`@smithers-orchestrator/memory/schema` and
-`@smithers-orchestrator/scorers/schema` subpaths continue to re-export the
+`@smthrs/db/internal-schema`; the package-level
+`@smthrs/memory/schema` and
+`@smthrs/scorers/schema` subpaths continue to re-export the
 same tables for callers that already import them there. This removes schema
 ownership cycles between DB, memory, and scorers without changing the table
 names.
@@ -579,13 +579,13 @@ caches:
 - **`MemoryPromptCache`**: in-process for tests.
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import {
   ExtractPrompt,
   MarkdownPromptCache,
   rctfPromptSchema,
-} from "smithers-orchestrator/components/extract-prompt";
+} from "smthrs/components/extract-prompt";
 import { agents } from "./agents";
 import { z } from "zod";
 
@@ -622,7 +622,7 @@ export default smithers((ctx) => {
 Run it:
 
 ```bash
-bunx smithers-orchestrator run extract-prompt --input '{"prompt":"Write me a code review prompt","stakes":"high"}'
+bunx smthrs run extract-prompt --input '{"prompt":"Write me a code review prompt","stakes":"high"}'
 # Drafter loops until the score crosses the stakes threshold or the user approves.
 # Approved prompt lands in .smithers/cache/prompts/<cacheKey>.md.
 ```
@@ -651,7 +651,7 @@ workflow contracts fail at `tsc` time rather than at runtime:
 - **Graph-level agent and scorer types** no longer import the concrete
   agents or scorers packages. `packages/graph` now carries the structural
   `AgentLike` capability shape and `ScorersMap`, and `packages/components`
-  imports scorer types from `@smithers-orchestrator/graph/types`. That keeps
+  imports scorer types from `@smthrs/graph/types`. That keeps
   the graph and component contracts type-safe without pulling runtime
   package dependencies into lower-level packages.
 
@@ -659,7 +659,7 @@ workflow contracts fail at `tsc` time rather than at runtime:
 
 ## New: Fault-injection E2E matrix
 
-0.17.0 adds a private `@smithers-orchestrator/e2e` workspace package with
+0.17.0 adds a private `@smthrs/e2e` workspace package with
 the fault matrix from ticket 0022. The suite is organized as reusable
 fault primitives, per-case tests, explicit latency/RSS budgets, and a flake
 log:
@@ -684,7 +684,7 @@ log:
 Two GitHub Actions lanes run the suite:
 
 - **`.github/workflows/faults.yml`** runs the per-PR fault subset with
-  `pnpm --filter @smithers-orchestrator/e2e test:faults`.
+  `pnpm --filter @smthrs/e2e test:faults`.
 - **`.github/workflows/faults-nightly.yml`** runs the soak lane on a daily
   cron with `SMITHERS_E2E_SOAK=1`.
 
@@ -848,7 +848,7 @@ A handful of doc gaps were flagged during release prep and remain open for
 follow-up:
 
 - Update `docs/integrations/pi-integration.mdx` import paths to
-  `@smithers-orchestrator/pi-plugin`.
+  `@smthrs/pi-plugin`.
 - Add `agents.add`/`agents.list`/`agents.remove`/`agents.test` and
   `chat.create` to the CLI TOON catalog in `docs/cli/overview.mdx`, and
   document `configDir` / `apiKey` in `docs/integrations/cli-agents.mdx`.

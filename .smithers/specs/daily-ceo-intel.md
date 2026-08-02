@@ -137,7 +137,7 @@ render md/html/json → archive (R2) → publish (KV) → commit-seen-state.
   r/ProgrammerHumor + r/sipstea-style meme subs for The Lighter Side).
 - Bluesky public AppView API: brand queries + funny/meme dev-AI content ("funny
   tweets" equivalent — no X API dependency in v1; X can be added later as a provider).
-- Brand disambiguation: strong positives `"smithers.sh"`, `"smithers-orchestrator"`,
+- Brand disambiguation: strong positives `"smithers.sh"`, `"smthrs"`,
   `"smithersai"`, github.com/smithersai; bare "Smithers" requires AI/agent/workflow
   context; negatives: Waylon, Simpsons, "Mr. Burns", nuclear plant.
 
@@ -164,7 +164,7 @@ Sanitize HTML before rendering. Secrets never in prompts or artifacts.
   authenticated manual-trigger endpoint.
 - `site/` — the magazine. Worker + Assets via alchemy (copy kimi-benchmarks-site
   pattern), domain `signal.smithers.sh`. React SPA composed from
-  `smithers-orchestrator/ui` primitives (Card, Tabs, StatusPill, EmptyState, ...)
+  `smthrs/ui` primitives (Card, Tabs, StatusPill, EmptyState, ...)
   with a newspaper/magazine layout: masthead, issue date, The Brief above the fold,
   story cards per section, The Lighter Side as the closer, archive page per date,
   coverage/transparency footer. Reads `/api/issue/latest`, `/api/issue/:date`,

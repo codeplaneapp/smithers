@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ChangedFile } from "../src/walkthrough/changedFileSchema";
 import { renderWalkthroughHtml } from "../src/walkthrough/renderWalkthroughHtml";
-import { standaloneThemeCss } from "@smithers-orchestrator/ui-styleguide";
+import { standaloneThemeCss } from "@smthrs/ui-styleguide";
 
 type RenderWalkthroughInput = Parameters<typeof renderWalkthroughHtml>[0];
 

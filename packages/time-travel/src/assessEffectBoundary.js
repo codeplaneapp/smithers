@@ -1,6 +1,6 @@
-import { SUBFLOW_RUN_LINEAGE_MAX_ROWS } from "@smithers-orchestrator/graph/subflow-run-lineage";
+import { SUBFLOW_RUN_LINEAGE_MAX_ROWS } from "@smthrs/graph/subflow-run-lineage";
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./CrossedEffect.ts").CrossedEffect} CrossedEffect */
 /** @typedef {import("./EffectBoundaryParams.ts").EffectBoundaryParams} EffectBoundaryParams */
 /** @typedef {import("./EffectBoundaryReport.ts").EffectBoundaryReport} EffectBoundaryReport */

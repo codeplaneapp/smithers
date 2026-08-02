@@ -1,7 +1,7 @@
 // smithers-source: user
 // smithers-display-name: Finish Campaigns
-/** @jsxImportSource smithers-orchestrator */
-import { OpenCodeAgent, UI, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { OpenCodeAgent, UI, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { providers } from "../agents";
 import { codexFirst } from "../lib/codexAccounts";
@@ -99,7 +99,7 @@ The work, in priority order:
 1. Drive run ${tfRunId} (workflow implement-testing-framework-e2e) to completion. Check "smithers status ${tfRunId}". If it is quota-parked with a dead engine, resume it exactly like this:
    env -u ANTHROPIC_API_KEY smithers up .smithers/workflows/implement-testing-framework-e2e.tsx --run-id ${tfRunId} --resume true --force true -d
    Remaining in-run path: fable-as-sol readiness re-review -> improvement rounds as needed -> consensus reviews -> assess -> final-verify-and-summarize.
-2. The last substantive blocker sol raised: root "pnpm test" is red in 8 workspaces (including the apps/kimi-benchmarks-site UI-inventory gate entry and the missing @smithers-orchestrator/microsandbox workspace link, both judged outside the target diff). If the run's improvement rounds don't clear them, fix and land these root-gate failures directly.
+2. The last substantive blocker sol raised: root "pnpm test" is red in 8 workspaces (including the apps/kimi-benchmarks-site UI-inventory gate entry and the missing @smthrs/microsandbox workspace link, both judged outside the target diff). If the run's improvement rounds don't clear them, fix and land these root-gate failures directly.
 3. After the run finishes: verify the final summarize output and jj log; confirm every accepted round is committed (no uncommitted packages/testing or e2e/testing-framework work). Then commit the workflow-file improvements in .smithers/workflows/implement-testing-framework-e2e.tsx (UI wiring + import, reusePlanRunId regex fix, IMPL_LONG 60m lane timeouts, ?.issues?.some guards, luna->fable implementation lanes). Before landing workflow-file changes, run "pnpm typecheck" and the .smithers workflow tests (implement-testing-framework-e2e-workflow.test.ts must pass).
 4. The temporary sol->fable reviewer swap in that workflow file reverts only when the codex weekly window resets on 2026-07-25. If today is earlier, leave that item unchecked and add a dated note instead.
 5. Smithers defects surfaced by the campaign (work these only when nothing above is actionable, one at a time, root-cause fix + tests, each committed separately): quota-park leaves a dead engine so nothing auto-resumes at window reset; issue #1348 snapshot input recorded pre-validation; issue #1349 control-plane DB unbounded growth; the DB-swap operational trap (open handles pin a renamed DB); gateway mounts workflow UIs only at boot.

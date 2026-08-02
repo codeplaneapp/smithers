@@ -3,7 +3,7 @@
 elizaOS-conventions authoring layer for Smithers workflows: author, load,
 format, and register workflows using elizaOS Skill/Plugin shapes. Public
 surface is `index.js` (subpath export
-`@smithers-orchestrator/agent-eliza/conventions`).
+`@smthrs/agent-eliza/conventions`).
 
 - `frontmatter.js` — parses/serializes frontmatter. Executable `.ts`/`.js`
   files use a leading block comment (`/* ---\n...yaml...\n--- */`) because raw

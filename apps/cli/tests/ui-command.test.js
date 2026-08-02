@@ -5,7 +5,7 @@ import { createServer as createNetServer } from "node:net";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { createSmithers } from "../../../packages/smithers/src/create.js";
 import { createTempRepo, runSmithers, writeTestWorkflow } from "../../../packages/smithers/tests/e2e-helpers.js";
 import { canonicalWorkspacePath, gatewayRuntimePaths, writeGatewayRuntimeState } from "../src/gateway-runtime.js";
@@ -119,8 +119,8 @@ function seedConflictedWorkspace(repo) {
   repo.write(
     ".smithers/workflows/basic.tsx",
     [
-      "/** @jsxImportSource smithers-orchestrator */",
-      'import { createSmithers } from "smithers-orchestrator";',
+      "/** @jsxImportSource smthrs */",
+      'import { createSmithers } from "smthrs";',
       "",
       "const { Workflow, Task, UI, smithers } = createSmithers({});",
       "",
@@ -136,7 +136,7 @@ function seedConflictedWorkspace(repo) {
   repo.write(
     ".smithers/ui/basic.tsx",
     [
-      'import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";',
+      'import { createGatewayReactRoot } from "smthrs/gateway-react";',
       "",
       "createGatewayReactRoot(<main>Basic UI</main>);",
       "",
@@ -181,8 +181,8 @@ function writeWorkflowWithUi(repo, key, label, declareUi = true) {
   repo.write(
     `.smithers/workflows/${key}.tsx`,
     [
-      "/** @jsxImportSource smithers-orchestrator */",
-      'import { createSmithers } from "smithers-orchestrator";',
+      "/** @jsxImportSource smthrs */",
+      'import { createSmithers } from "smthrs";',
       'import { z } from "zod";',
       "",
       "const { Workflow, Task, UI, smithers, outputs } = createSmithers({",
@@ -202,7 +202,7 @@ function writeWorkflowWithUi(repo, key, label, declareUi = true) {
     `.smithers/ui/${key}.tsx`,
     [
       "/** @jsxImportSource react */",
-      'import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";',
+      'import { createGatewayReactRoot } from "smthrs/gateway-react";',
       "",
       `createGatewayReactRoot(<main>${label}</main>);`,
       "",
@@ -612,8 +612,8 @@ describe("smithers ui", () => {
     repo.write(
       ".smithers/workflows/basic.tsx",
       [
-        "/** @jsxImportSource smithers-orchestrator */",
-        'import { createSmithers, Workflow, Task, UI } from "smithers-orchestrator";',
+        "/** @jsxImportSource smthrs */",
+        'import { createSmithers, Workflow, Task, UI } from "smthrs";',
         'import { z } from "zod";',
         "",
         "const { smithers, outputs } = createSmithers({",

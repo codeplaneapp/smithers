@@ -46,7 +46,7 @@ type ProofBinding = {
 ## Staleness is a signal, not an error
 
 `BOUND_STALE` does not fail the run: it's exposed to workflow code
-(`ctx.boundStale("lane:push")`) and to `bunx smithers-orchestrator why`. On a
+(`ctx.boundStale("lane:push")`) and to `bunx smthrs why`. On a
 subsequent render, that signal can keep a correction loop open while the
 upstream authority is reproduced against the current artifact:
 

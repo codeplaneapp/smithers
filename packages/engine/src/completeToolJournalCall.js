@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
+import { errorToJson } from "@smthrs/errors/errorToJson";
 
 /**
  * @param {unknown} value
@@ -41,7 +41,7 @@ function rowValue(row, camel, snake) {
  * exact archive row and surfaced durably.
  *
  * @param {{
- *   adapter: import("@smithers-orchestrator/db/adapter").SmithersDb;
+ *   adapter: import("@smthrs/db/adapter").SmithersDb;
  *   runId: string;
  *   nodeId: string;
  *   iteration: number;

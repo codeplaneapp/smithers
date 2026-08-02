@@ -1,4 +1,4 @@
-/** @typedef {import("@smithers-orchestrator/protocol/errors").NodeOutputErrorCode} NodeOutputErrorCode */
+/** @typedef {import("@smthrs/protocol/errors").NodeOutputErrorCode} NodeOutputErrorCode */
 
 export class NodeOutputRouteError extends Error {
   /**

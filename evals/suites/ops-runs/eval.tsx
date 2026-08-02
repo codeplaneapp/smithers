@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // ops-runs — can a weak model investigate real run history? The candidate writes
 // SQL against Smithers' REAL _smithers_* run schema to answer operational
 // questions (which run is blocked? which node failed? what's the error?). The

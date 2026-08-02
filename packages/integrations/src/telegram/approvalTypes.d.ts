@@ -1,6 +1,6 @@
 export { TelegramInlineKeyboard, TelegramInlineKeyboardButton } from './TelegramClientTypes.js';
 import 'effect';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 
 /** One choice an approver can make via an inline button. */
 type TelegramApprovalChoice = {

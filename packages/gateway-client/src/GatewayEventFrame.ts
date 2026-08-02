@@ -1,1 +1,1 @@
-export type { GatewayEventFrame } from "@smithers-orchestrator/protocol/gateway-rpc";
+export type { GatewayEventFrame } from "@smthrs/protocol/gateway-rpc";

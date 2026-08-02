@@ -1,9 +1,9 @@
 import { lstat } from 'node:fs/promises';
-import * as _smithers_orchestrator_observability_SmithersEvent from '@smithers-orchestrator/observability/SmithersEvent';
-import { SmithersDb } from '@smithers-orchestrator/db/adapter';
+import * as _smithers_orchestrator_observability_SmithersEvent from '@smthrs/observability/SmithersEvent';
+import { SmithersDb } from '@smthrs/db/adapter';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { Effect, Context, Layer } from 'effect';
-import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
+import { SmithersError } from '@smthrs/errors/SmithersError';
 
 type SandboxRuntime$1 = "bubblewrap" | "docker" | "codeplane" | "cloudflare";
 

@@ -1,7 +1,7 @@
 import { Effect, Metric } from "effect";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
+import { nowMs } from "@smthrs/scheduler/nowMs";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { smithersBranches } from "../schema.js";
 import { persistSnapshotRow, snapshotContentHashFromJson } from "../snapshot/captureSnapshotEffect.js";
 import { loadSnapshot } from "../snapshot/loadSnapshotEffect.js";
@@ -15,7 +15,7 @@ import { recordForcedEffectBoundary } from "../recordForcedEffectBoundary.js";
 import { isRunLikelyLive } from "../isRunLikelyLive.js";
 /** @typedef {import("../BranchInfo.ts").BranchInfo} BranchInfo */
 /** @typedef {import("../ForkParams.ts").ForkParams} ForkParams */
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("../snapshot/Snapshot.ts").Snapshot} Snapshot */
 
 const DURABILITY_CONFIG_KEY = "__smithersDurability";

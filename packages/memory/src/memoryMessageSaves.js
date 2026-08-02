@@ -1,1 +1,1 @@
-export { memoryMessageSaves } from "@smithers-orchestrator/observability/metrics";
+export { memoryMessageSaves } from "@smthrs/observability/metrics";

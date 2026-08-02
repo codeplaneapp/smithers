@@ -119,18 +119,18 @@ test("a pack shipping a canonical gateway-react UI passes the import scan", asyn
   writeFileSync(
     join(fixture, "workflows", "board.tsx"),
     [
-      "/** @jsxImportSource smithers-orchestrator */",
-      'import { UI } from "smithers-orchestrator";',
+      "/** @jsxImportSource smthrs */",
+      'import { UI } from "smthrs";',
       'export default <UI entry="../ui/board.tsx" />;',
     ].join("\n"),
   );
-  // The canonical UI contract: react + smithers-orchestrator/gateway-react.
+  // The canonical UI contract: react + smthrs/gateway-react.
   writeFileSync(
     join(fixture, "ui", "board.tsx"),
     [
       "/** @jsxImportSource react */",
       'import { useState } from "react";',
-      'import { createGatewayReactRoot, useGatewayRuns } from "smithers-orchestrator/gateway-react";',
+      'import { createGatewayReactRoot, useGatewayRuns } from "smthrs/gateway-react";',
       "export default function App() { const [n] = useState(0); useGatewayRuns; return n; }",
       "createGatewayReactRoot;",
     ].join("\n"),

@@ -108,9 +108,9 @@ revision to `.smithers/reports/stacked-ship/<runKey>/<slug>-r<iteration>.html`
 plus a stack index at `.../index.html`. Renderer contract:
 
 - React `renderToStaticMarkup` with `<SmithersUiStyles withTheme />` from
-  `smithers-orchestrator/ui`; document shell, theme boot script, and keyboard nav
+  `smthrs/ui`; document shell, theme boot script, and keyboard nav
   follow the walkthrough precedent in `apps/review`.
-- Diffs render through the pierre SSR path (`@smithers-orchestrator/review/diffs`:
+- Diffs render through the pierre SSR path (`@smthrs/review/diffs`:
   `renderPierreFileDiff` + `extractDiffAssets`, bodies wrapped in `.pierre-diff`),
   falling back to SSR `DiffHunks` over `parseUnifiedFile` for oversized or failed
   files. Both dependencies already exist in `.smithers/package.json`.
@@ -141,7 +141,7 @@ review UI structure (exported pure helpers, guarded mount, `?runId=` deep link).
 
 ## Testing plan (near-total coverage)
 
-Four layers over `smithers-orchestrator/testing`, mirroring the strongest existing
+Four layers over `smthrs/testing`, mirroring the strongest existing
 suites:
 
 1. **Lib units.** Every pure function in `stackedShip.ts` and

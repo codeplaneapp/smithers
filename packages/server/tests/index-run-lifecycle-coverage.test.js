@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterEach, describe, expect, test } from "bun:test";
 import { startServer } from "../src/index.js";
 import { sleep } from "../../smithers/tests/helpers.js";
@@ -66,8 +66,8 @@ describe("server run lifecycle continuations", () => {
     const workflowPath = resolve(testDir, `${name}.tsx`);
     writeFileSync(
       workflowPath,
-      `/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+      `/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 const { smithers, Workflow, Task, outputs } = createSmithers(
   { outputA: z.object({ value: z.number() }) },

@@ -74,9 +74,7 @@ function collectStrings(value, output = []) {
 
 test("component reference docs cover exported components", () => {
   const smithersIndex = readRepoFile("packages/smithers/src/index.js");
-  const componentExportBlock = smithersIndex.match(
-    /export \{([^}]+)\} from "@smithers-orchestrator\/components";/s,
-  )?.[1];
+  const componentExportBlock = smithersIndex.match(/export \{([^}]+)\} from "@smthrs\/components";/s)?.[1];
   expect(componentExportBlock).toBeTruthy();
 
   const componentDocs = new Set(
@@ -156,14 +154,14 @@ test("package configuration docs cover current explicit package exports", () => 
   const packageJson = JSON.parse(readRepoFile("packages/smithers/package.json"));
   const explicitImportPaths = Object.keys(packageJson.exports)
     .filter((subpath) => subpath !== "./*")
-    .map((subpath) => (subpath === "." ? "smithers-orchestrator" : `smithers-orchestrator/${subpath.slice(2)}`));
+    .map((subpath) => (subpath === "." ? "smthrs" : `smthrs/${subpath.slice(2)}`));
 
   for (const importPath of explicitImportPaths) {
     expect(packageConfigDoc).toContain(`| \`${importPath}\``);
   }
 
-  expect(packageConfigDoc).not.toContain("| `smithers-orchestrator/pi-plugin`");
-  expect(packageConfigDoc).not.toContain("| `smithers-orchestrator/pi-extension`");
+  expect(packageConfigDoc).not.toContain("| `smthrs/pi-plugin`");
+  expect(packageConfigDoc).not.toContain("| `smthrs/pi-extension`");
 });
 
 test("package configuration docs cover published workspace packages", () => {
@@ -346,9 +344,9 @@ test("TUI guide documents the current interactive commands", () => {
 
   expect(tuiGuide).not.toContain("[`gui`](/cli/overview)");
   expect(tuiGuide).not.toMatch(/\bgui command\b/i);
-  expect(tuiGuide).toContain("bunx smithers-orchestrator init");
-  expect(tuiGuide).toContain("bunx smithers-orchestrator up --interactive");
-  expect(tuiGuide).toContain("bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive");
+  expect(tuiGuide).toContain("bunx smthrs init");
+  expect(tuiGuide).toContain("bunx smthrs up --interactive");
+  expect(tuiGuide).toContain("bunx smthrs workflow run WORKFLOW_ID --interactive");
   expect(tuiGuide).toContain("/images/tui/interactive-monitor-hello.svg");
 });
 

@@ -10,7 +10,7 @@ import {
   useGatewayRpc,
   useSmithersGateway,
 } from "../src/index.ts";
-import type { SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
+import type { SmithersGatewayClient } from "@smthrs/gateway-client";
 
 function createSpyClient() {
   const calls: string[] = [];

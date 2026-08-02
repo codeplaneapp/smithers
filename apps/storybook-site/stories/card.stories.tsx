@@ -10,7 +10,7 @@ import {
   EmptyState,
   KpiStat,
   SectionHeader,
-} from "@smithers-orchestrator/ui";
+} from "@smthrs/ui";
 
 const meta: Meta = {
   title: "Primitives/Card",

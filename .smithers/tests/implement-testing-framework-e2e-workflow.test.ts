@@ -5,14 +5,8 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { ClaudeCodeAgent, CodexAgent } from "smithers-orchestrator";
-import {
-  renderWorkflow,
-  runTask,
-  simulate,
-  type RenderedWorkflow,
-  type SimulateMockFunction,
-} from "smithers-orchestrator/testing";
+import { ClaudeCodeAgent, CodexAgent } from "smthrs";
+import { renderWorkflow, runTask, simulate, type RenderedWorkflow, type SimulateMockFunction } from "smthrs/testing";
 
 const WORKFLOW_PATH = join(import.meta.dir, "../workflows/implement-testing-framework-e2e.tsx");
 const TREE = "testing-tree-v1";

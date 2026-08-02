@@ -1,5 +1,5 @@
-import { useGatewayWorkflows } from "@smithers-orchestrator/gateway-react";
-import { EmptyState, Skeleton } from "@smithers-orchestrator/ui";
+import { useGatewayWorkflows } from "@smthrs/gateway-react";
+import { EmptyState, Skeleton } from "@smthrs/ui";
 import "./crons.css";
 import { describeCron, sortCrons, summarizeCrons, toneForCronEnabled, validateCreate } from "./crons";
 import { useCronsStore } from "./cronsStore";

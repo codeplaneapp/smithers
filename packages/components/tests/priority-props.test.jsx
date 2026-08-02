@@ -1,8 +1,8 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
-import { MERGE_QUEUE_PRIORITY } from "@smithers-orchestrator/graph/constants";
-import { MergeQueue, Parallel, Task, Workflow } from "smithers-orchestrator";
+import { SmithersRenderer } from "@smthrs/react-reconciler/dom/renderer";
+import { MERGE_QUEUE_PRIORITY } from "@smthrs/graph/constants";
+import { MergeQueue, Parallel, Task, Workflow } from "smthrs";
 import { outputSchemas } from "./schema.js";
 
 /** @param {{ tasks: Array<{ nodeId: string }> }} res */

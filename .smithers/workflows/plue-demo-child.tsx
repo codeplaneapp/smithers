@@ -1,8 +1,8 @@
 // smithers-source: authored
 // smithers-display-name: Plue Demo Child
 // smithers-description: Tiny self-contained demo workflow shipped to a Plue Microsandbox VM by run-on-plue.tsx.
-/** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, CodexAgent, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { ClaudeCodeAgent, CodexAgent, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 
 /**

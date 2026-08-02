@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { Attachment, Bubble, ChatMessage, ChatTranscript, Marker, Shimmer } from "@smithers-orchestrator/ui";
+import { Attachment, Bubble, ChatMessage, ChatTranscript, Marker, Shimmer } from "@smthrs/ui";
 
 const meta: Meta = {
   title: "Chat/Transcript",

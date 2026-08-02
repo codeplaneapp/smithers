@@ -16,7 +16,7 @@ import {
   ClaudeCodeAgent,
   CodexAgent,
   KimiAgent,
-} from "smithers-orchestrator";
+} from "smthrs";
 
 const cwd = process.cwd();
 

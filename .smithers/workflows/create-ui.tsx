@@ -4,9 +4,9 @@
 // smithers-description: One agent authors .smithers/ui/<key>.tsx for a workflow that lacks one and verifies it against the live gateway; a deterministic compliance gate grades design-system usage (and NodeChatStream live chat for agent workflows) and loops violations back until the file passes. Triggered by the monitor's "Create UI" button.
 // smithers-tags: ui, monitor, system
 // smithers-system: true
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Loop, Sequence } from "smithers-orchestrator";
-import { gradeWorkflowUiSource } from "smithers-orchestrator/scorers";
+/** @jsxImportSource smthrs */
+import { createSmithers, Loop, Sequence } from "smthrs";
+import { gradeWorkflowUiSource } from "smthrs/scorers";
 import { existsSync, readFileSync } from "node:fs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
@@ -75,14 +75,14 @@ function prompt(target: string, gatewayUrl: string, exampleRunId: string, feedba
     "3. Write .smithers/ui/" +
       target +
       ".tsx. COMPOSE THE SHIPPED DESIGN SYSTEM — never hand-roll what a component covers:",
-    "   - Page chrome: WorkflowUiShell (title + meta={<RunMeta runId={runId} />}) from smithers-orchestrator/gateway-ui. Never hand-format run id/status text.",
+    "   - Page chrome: WorkflowUiShell (title + meta={<RunMeta runId={runId} />}) from smthrs/gateway-ui. Never hand-format run id/status text.",
     "   - Pipeline headers: NodeStageStrip (runId + ordered top-level node ids). Fan-out ledgers: FleetTable (items with per-item nodeIds → live rollup status pills, selectable rows).",
     "   - EVERY AGENT NODE shown in a detail pane gets a NodeChatStream (runId, nodeId, title, subtitle=agent·model, status from nodeStatusIndex) — humans must be able to watch the agent's live chat/tool calls in real time. Deterministic nodes use NodeOutputCard instead.",
-    "   - Stats/empty states: KpiStat, EmptyState, StatusPill from smithers-orchestrator/ui; approvals via ApprovalPanel or useGatewayActions().submitApproval({runId, nodeId, iteration, decision: { approved }}).",
+    "   - Stats/empty states: KpiStat, EmptyState, StatusPill from smthrs/ui; approvals via ApprovalPanel or useGatewayActions().submitApproval({runId, nodeId, iteration, decision: { approved }}).",
     "   - Node status derivation: nodeStatusIndex(useGatewayRunTree(runId).nodes) + rollupNodeStatus — do NOT reimplement status rank maps.",
-    "   - BANNED (the deterministic gate rejects the file): raw hex colors, borderRadius:999 pill spans, raw <table> markup, imports outside react + smithers-orchestrator/{gateway-react,gateway-ui,ui}.",
+    "   - BANNED (the deterministic gate rejects the file): raw hex colors, borderRadius:999 pill spans, raw <table> markup, imports outside react + smthrs/{gateway-react,gateway-ui,ui}.",
     "   - Pragma /** @jsxImportSource react */ and finish the file with createGatewayReactRoot(<App />).",
-    "   - Data comes ONLY from smithers-orchestrator/gateway-react hooks. useGatewayRun(runId) takes a STRING; useGatewayRunEvents(runId) returns { events, streaming, error }; useGatewayNodeOutput({runId,nodeId,iteration}).data is { status, row, schema } and the row lives at .row (render 'pending' when row is null — NEVER render the envelope).",
+    "   - Data comes ONLY from smthrs/gateway-react hooks. useGatewayRun(runId) takes a STRING; useGatewayRunEvents(runId) returns { events, streaming, error }; useGatewayNodeOutput({runId,nodeId,iteration}).data is { status, row, schema } and the row lives at .row (render 'pending' when row is null — NEVER render the envelope).",
     "   - Output rows are DB-shaped: booleans may be 0/1, arrays/objects may be JSON strings; parse defensively.",
     "   - Honor ?runId= from location.search and fall back to the latest run of this workflow from useGatewayRuns().",
     "4. Do NOT edit the workflow file itself (adding <UI> would break parked runs' resume hashes). The gateway serves .smithers/ui/<key>.tsx by convention automatically.",

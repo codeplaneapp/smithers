@@ -1,14 +1,14 @@
 // smithers-display-name: Shared UI Library Extraction Swarm
-/** @jsxImportSource smithers-orchestrator */
-import { MergeQueue, Parallel, Sequence, Task, UI, Worktree, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { MergeQueue, Parallel, Sequence, Task, UI, Worktree, createSmithers } from "smthrs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
 import { providers } from "../agents";
 
 // Every reusable UI component across the smithers repo and the Multi app must be
-// importable from the shared libraries (packages/ui → smithers-orchestrator/ui,
-// packages/gateway-ui → smithers-orchestrator/gateway-ui). This swarm inventories
+// importable from the shared libraries (packages/ui → smthrs/ui,
+// packages/gateway-ui → smthrs/gateway-ui). This swarm inventories
 // both codebases once, then loops discovery → parallel worktree extraction lanes
 // → serialized merges → CI gate → audit, until no meaningful gap remains.
 
@@ -287,8 +287,8 @@ function ticketFeedback(state: ReturnType<typeof ticketState>): string {
 }
 
 const SHARED_TARGETS = [
-  "- packages/ui (subpath smithers-orchestrator/ui): generic browser primitives and widgets — Button, Card, Tabs, StatusPill, EmptyState, chat/*, tokens/theme. New generic components land here.",
-  "- packages/gateway-ui (subpath smithers-orchestrator/gateway-ui): run/workflow-aware components composed over smithers-orchestrator/gateway-react hooks — RunTree, RunEventLog, ApprovalPanel, SimpleWorkflowDashboard. New run-aware components land here.",
+  "- packages/ui (subpath smthrs/ui): generic browser primitives and widgets — Button, Card, Tabs, StatusPill, EmptyState, chat/*, tokens/theme. New generic components land here.",
+  "- packages/gateway-ui (subpath smthrs/gateway-ui): run/workflow-aware components composed over smthrs/gateway-react hooks — RunTree, RunEventLog, ApprovalPanel, SimpleWorkflowDashboard. New run-aware components land here.",
   "- packages/smithers: the published facade; subpath exports must stay wired for anything new.",
 ].join("\n");
 

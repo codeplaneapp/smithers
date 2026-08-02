@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { request } from "node:http";
@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { createSmithers, Gateway, Sequence } from "smithers-orchestrator";
+import { createSmithers, Gateway, Sequence } from "smthrs";
 import { z } from "zod/v4";
 
 /**

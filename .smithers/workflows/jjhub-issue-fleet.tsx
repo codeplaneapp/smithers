@@ -1,12 +1,12 @@
 // smithers-source: authored
 // smithers-display-name: jjhub Issue Fleet
 // smithers-description: One jjhub sandbox per open smithersai/plue issue; codex sol implements in-VM; branches land as GitHub PRs + jjhub landing requests.
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createSmithers, UI } from "smithers-orchestrator";
+import { createSmithers, UI } from "smthrs";
 import { z } from "zod/v4";
 
 /**

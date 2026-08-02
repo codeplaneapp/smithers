@@ -14,8 +14,8 @@ function writeOptimizableWorkflow(repo) {
   return repo.write(
     "workflow.tsx",
     [
-      "/** @jsxImportSource smithers-orchestrator */",
-      'import { createSmithers, Workflow, Task } from "smithers-orchestrator";',
+      "/** @jsxImportSource smthrs */",
+      'import { createSmithers, Workflow, Task } from "smthrs";',
       'import { z } from "zod";',
       "",
       "const { smithers, outputs } = createSmithers({",
@@ -51,8 +51,8 @@ function writeConditionalOptimizableWorkflow(repo) {
   return repo.write(
     "conditional-workflow.tsx",
     [
-      "/** @jsxImportSource smithers-orchestrator */",
-      'import { createSmithers, Workflow, Task } from "smithers-orchestrator";',
+      "/** @jsxImportSource smthrs */",
+      'import { createSmithers, Workflow, Task } from "smthrs";',
       'import { z } from "zod";',
       "",
       "const { smithers, outputs } = createSmithers({",

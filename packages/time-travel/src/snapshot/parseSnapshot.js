@@ -1,5 +1,5 @@
 import { parseSnapshotJson } from "./parseSnapshotJson.js";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 /** @typedef {import("../ParsedSnapshot.ts").ParsedSnapshot} ParsedSnapshot */
 /** @typedef {import("./Snapshot.ts").Snapshot} Snapshot */
 

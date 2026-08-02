@@ -56,7 +56,7 @@ describe("PACKAGE_AND_BUILD contracts", () => {
 
     expect(rootPackage.private).toBe(true);
     expect(rootPackage.bin.smithers).toBe("apps/cli/src/index.js");
-    expect(publicPackage.name).toBe("smithers-orchestrator");
+    expect(publicPackage.name).toBe("smthrs");
     expect(publicPackage.bin.smithers).toBe("./src/bin/smithers.js");
     expect(publicPackage.files).toContain("src/");
     expect(publicPackage.files).toContain("docs/llms.txt");
@@ -65,7 +65,7 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "findNearestWorkflowLocalCli",
       "findNearestLocalSmithersCli",
       "spawn(process.execPath",
-      'await import("@smithers-orchestrator/cli")',
+      'await import("@smthrs/cli")',
     ]);
     expectText("packages/agents/src/index.d.ts", ["PoolAgent", "PoolAgentOptions", "createPoolCapabilityRegistry"]);
     expectText("packages/smithers/src/index.d.ts", ["PoolAgent", "PoolAgentOptions"]);
@@ -135,9 +135,9 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       }
     }
     expect(unresolved).toEqual([]);
-    expect(localNames.get("smithers-orchestrator")).toBe("packages/smithers");
-    expect(localNames.get("@smithers-orchestrator/observability")).toBe("apps/observability");
-    expect(localNames.get("@smithers-orchestrator/e2e")).toBe("e2e");
+    expect(localNames.get("smthrs")).toBe("packages/smithers");
+    expect(localNames.get("@smthrs/observability")).toBe("apps/observability");
+    expect(localNames.get("@smthrs/e2e")).toBe("e2e");
     expect(localNames.get("smithers-workflows")).toBe(".smithers");
   });
 
@@ -153,21 +153,15 @@ describe("PACKAGE_AND_BUILD contracts", () => {
     }
 
     expect(tsconfig.compilerOptions.jsx).toBe("react-jsx");
-    expect(tsconfig.compilerOptions.jsxImportSource).toBe("smithers-orchestrator");
-    expect(paths["smithers-orchestrator"]).toEqual(["./packages/smithers/src/index.js"]);
-    expect(paths["smithers-orchestrator/jsx-runtime"]).toEqual(["./packages/smithers/src/jsx-runtime.js"]);
-    expect(paths["smithers-orchestrator/jsx-dev-runtime"]).toEqual(["./packages/smithers/src/jsx-runtime.js"]);
-    expect(paths["smithers-orchestrator/tools"]).toEqual(["./packages/smithers/src/tools.js"]);
-    expect(paths["smithers-orchestrator/*"]).toEqual([
-      "./packages/smithers/src/*.js",
-      "./packages/smithers/src/*/index.js",
-    ]);
-    expect(paths["@smithers-orchestrator/db/runState"]).toEqual([
-      "./packages/db/src/runState.js",
-      "./packages/db/src/runState.d.ts",
-    ]);
-    expect(paths["@smithers-orchestrator/server"]).toEqual(["./packages/server/src/index.js"]);
-    expect(paths["@smithers-orchestrator/observability"]).toEqual(["./apps/observability/src/index.js"]);
+    expect(tsconfig.compilerOptions.jsxImportSource).toBe("smthrs");
+    expect(paths["smthrs"]).toEqual(["./packages/smithers/src/index.js"]);
+    expect(paths["smthrs/jsx-runtime"]).toEqual(["./packages/smithers/src/jsx-runtime.js"]);
+    expect(paths["smthrs/jsx-dev-runtime"]).toEqual(["./packages/smithers/src/jsx-runtime.js"]);
+    expect(paths["smthrs/tools"]).toEqual(["./packages/smithers/src/tools.js"]);
+    expect(paths["smthrs/*"]).toEqual(["./packages/smithers/src/*.js", "./packages/smithers/src/*/index.js"]);
+    expect(paths["@smthrs/db/runState"]).toEqual(["./packages/db/src/runState.js", "./packages/db/src/runState.d.ts"]);
+    expect(paths["@smthrs/server"]).toEqual(["./packages/server/src/index.js"]);
+    expect(paths["@smthrs/observability"]).toEqual(["./apps/observability/src/index.js"]);
     expect(tsconfig.compilerOptions.typeRoots).toEqual(["./packages/smithers/src/types", "./node_modules/@types"]);
     expectText("bunfig.toml", ['preload = ["./preload.js"]', "[test]", 'root = "."']);
     expectText("preload.js", ['import { mdxPlugin } from "./packages/smithers/src/mdx-plugin.js";', "mdxPlugin();"]);
@@ -277,14 +271,11 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "docker compose -f deploy/electric/docker-compose.yml up -d postgres",
       "SMITHERS_TEST_PG_URL:",
     ]);
-    expectText(".github/workflows/faults.yml", [
-      "pnpm -r build",
-      "pnpm --filter @smithers-orchestrator/e2e test:faults",
-    ]);
+    expectText(".github/workflows/faults.yml", ["pnpm -r build", "pnpm --filter @smthrs/e2e test:faults"]);
     expectText(".github/workflows/faults-nightly.yml", [
       'SMITHERS_E2E_SOAK: "1"',
       "pnpm -r build",
-      "pnpm --filter @smithers-orchestrator/e2e test:soak",
+      "pnpm --filter @smthrs/e2e test:soak",
     ]);
   });
 
@@ -359,12 +350,7 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       'pnpm", ["-C", pkg, "run", "build"]',
     ]);
     expectText("scripts/check-fault-skips.mjs", ["allowedSkips", "skipPattern", "no untracked skips"]);
-    expectText("scripts/normalize-bunx.ts", [
-      "bunx smithers-orchestrator",
-      "normalizeCommands",
-      "normalizeInline",
-      "README.md",
-    ]);
+    expectText("scripts/normalize-bunx.ts", ["bunx smthrs", "normalizeCommands", "normalizeInline", "README.md"]);
     expectText("scripts/normalize-placeholders.ts", [
       "<run-id>",
       "RUN_ID",

@@ -23,7 +23,7 @@
 // Verified against core.telegram.org/bots/webapps, @telegram-apps/init-data-node,
 // and aiogram.
 
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 /** Telegram's production Ed25519 public key (hex) for third-party validation. */
 export const TELEGRAM_WEBAPP_ED25519_PUBLIC_KEY_PROD =

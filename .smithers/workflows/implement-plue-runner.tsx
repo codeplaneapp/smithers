@@ -12,8 +12,8 @@
 //   M3  plue:      npm package `plue` (bin `plue`) + Go CLI repo extraction
 //   M4  both:      docs + llms bundle regeneration
 //
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import { implementer, panelists } from "../components/roles";
@@ -56,7 +56,7 @@ const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({
 const SHARED_CONTEXT = `
 CONTEXT YOU MUST LOAD FIRST:
 - Read the spec: ${SPEC}; its architecture decisions are the ground truth.
-- The two repos: smithers-orchestrator at ${SMITHERS_REPO} (jj colocated repo;
+- The two repos: smthrs at ${SMITHERS_REPO} (jj colocated repo;
   see its CLAUDE.md), plue at ${PLUE_REPO} (Go monorepo, jj-native product).
 
 EXECUTION ENVIRONMENT:
@@ -83,7 +83,7 @@ MILESTONE 1 — smithers: the plue sandbox provider and the runner workflow.
 Work in ${SMITHERS_REPO}. Deliverables:
 
 1. \`.smithers/lib/plue-provider.ts\` — export \`createPlueSandboxProvider(options)\`
-   returning a \`SandboxProvider\` (type from "smithers-orchestrator/sandbox";
+   returning a \`SandboxProvider\` (type from "smthrs/sandbox";
    see packages/sandbox/src/SandboxProvider.ts). Options (all overridable):
    { plueBin (default: env PLUE_BIN or "plue"), repo (required, "owner/repo"),
      workspaceName?, keepWorkspace? (default false),
@@ -106,16 +106,16 @@ Work in ${SMITHERS_REPO}. Deliverables:
       verify empirically on the live VM and adjust). Verify with
       \`claude --version\` and \`codex --version\` over SSH.
    e. Ship a self-contained mini-project to the VM (base64 tar over ssh stdin
-      is fine): package.json (deps: smithers-orchestrator@<orchestratorVersion>,
+      is fine): package.json (deps: smthrs@<orchestratorVersion>,
       zod), an agents.ts defining a ClaudeCodeAgent and a CodexAgent that
       authenticate from env only, the child script verbatim as script.tsx, and
       input.json from request.input.childInput.
    f. Write remote env (ANTHROPIC_API_KEY, OPENAI_API_KEY, plus options.env)
       to a 0600 file consumed by the run and deleted afterwards; never echo it.
    g. Run the child: bun install, then execute script.tsx with
-      smithers-orchestrator's CLI (\`bunx --bun smithers-orchestrator@<v> up
+      smthrs's CLI (\`bunx --bun smthrs@<v> up
       script.tsx --input "$(cat input.json)"\` or the mechanism you verify
-      works — check \`bunx smithers-orchestrator up --help\` locally first).
+      works — check \`bunx smthrs up --help\` locally first).
       Capture the child run's final status and outputs (e.g. via the
       orchestrator's inspect/ps JSON surface in the VM after up returns) and
       map them into the inline SandboxProviderResult shape
@@ -147,7 +147,7 @@ Work in ${SMITHERS_REPO}. Deliverables:
 
 VALIDATION (what the validate step will re-run — make these pass):
 - cd ${SMITHERS_REPO}/.smithers && bun test lib/plue-provider.test.ts
-- cd ${SMITHERS_REPO} && bunx smithers-orchestrator graph
+- cd ${SMITHERS_REPO} && bunx smthrs graph
   .smithers/workflows/run-on-plue.tsx exits 0, and the same for
   .smithers/workflows/plue-demo-child.tsx
 - bunx tsc --noEmit -p ${SMITHERS_REPO}/.smithers/tsconfig.json exits 0
@@ -184,14 +184,14 @@ Work in ${PLUE_REPO}. Deliverables:
    fixtures — use fakes with obvious placeholder values).
 3. Fix the broken workflow-sandbox dispatch at the source: in
    internal/services/workflow_sandbox_scheduler.go buildWorkflowCommand
-   (~line 610), \`bun x --package smithers-orchestrator smithers run <path>\`
-   invokes a command that does not exist in current smithers-orchestrator
+   (~line 610), \`bun x --package smthrs smithers run <path>\`
+   invokes a command that does not exist in current smthrs
    (>=0.26 has \`up\`, not \`run\`). Change it to \`up\` with the equivalent
    flags (verify the current orchestrator CLI surface with
-   \`bunx smithers-orchestrator@0.26.1 up --help\` / \`--help\`), and PIN the
+   \`bunx smthrs@0.26.1 up --help\` / \`--help\`), and PIN the
    orchestrator version in that command instead of resolving latest at VM
    boot. Update any tests asserting the old command string. Also bump the
-   stale "smithers-orchestrator": "^0.9.1" in cmd/runner/workflow/package.json
+   stale "smthrs": "^0.9.1" in cmd/runner/workflow/package.json
    to the pinned current version IF the runner workflow code still compiles
    against it — if the 0.9→0.26 API breaks that runtime, leave the bump out,
    note it in your summary, and only fix the scheduler command.
@@ -216,13 +216,13 @@ extraction for the Go CLI.
 
 Work in ${PLUE_REPO}. Naming decision (final, from the spec): npm package
 \`plue\`, bin \`plue\` — verified available on npm; avoids colliding with
-smithers-orchestrator's \`smithers\` bin. Deliverables:
+smthrs's \`smithers\` bin. Deliverables:
 
 1. Rework packages/npm-cli into the \`plue\` package: name "plue", bin
    { "plue": "bin/plue.js" }, version 0.1.0, description/README (the README
    must explain: what plue/Smithers-cloud is, install via npm/bunx, auth
    login, workspace create/exec, and using it as the backend for
-   smithers-orchestrator's run-on-plue workflow). Keep the
+   smthrs's run-on-plue workflow). Keep the
    download-vendored-binary postinstall pattern but make the release base URL
    configurable with a sane default pointing at the standalone repo's GitHub
    releases (env PLUE_RELEASE_BASE_URL override; SMITHERS_CLI_SKIP_DOWNLOAD

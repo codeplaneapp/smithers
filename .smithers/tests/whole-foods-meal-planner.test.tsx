@@ -1,8 +1,8 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import "../preload.ts";
 import { afterAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { renderWorkflow, runTask } from "smithers-orchestrator/testing";
+import { renderWorkflow, runTask } from "smthrs/testing";
 import {
   calculatePlanCalories,
   groupByStoreSection,

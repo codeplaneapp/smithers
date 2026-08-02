@@ -6,8 +6,8 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import React from "react";
 import { Effect } from "effect";
-import { createSmithers, runWorkflow, signalRun } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { createSmithers, runWorkflow, signalRun } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
 import {
   TelegramApproval,
   approvalInlineKeyboard,

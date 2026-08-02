@@ -21,7 +21,7 @@ controller. Smithers never contacts a worker directly.
   and SSH gateway are ready.
 - It stages a small project containing the workflow source, `agents.ts`,
   `package.json`, and `input.json`.
-- It executes `bunx smithers-orchestrator up <file> --input <json>` in the guest
+- It executes `bunx smthrs up <file> --input <json>` in the guest
   and maps the run result into `SandboxProviderResult`.
 - Cleanup deletes the workspace unless `keepWorkspace` was explicitly selected.
 - A provider error returns a typed failed result and never falls back to another

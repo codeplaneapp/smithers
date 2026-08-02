@@ -5,11 +5,11 @@
  *
  * Shape: alert stream → deduper/context lookup → classifier agent → page/ticket sink.
  */
-import { Sequence, Parallel } from "smithers-orchestrator";
+import { Sequence, Parallel } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { bash, read, grep } from "smithers-orchestrator/tools";
+import { bash, read, grep } from "smthrs/tools";
 import { z } from "zod";
 import DedupePrompt from "./prompts/alert-suppressor/dedupe.mdx";
 import ContextPrompt from "./prompts/alert-suppressor/context.mdx";

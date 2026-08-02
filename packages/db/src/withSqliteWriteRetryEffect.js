@@ -1,8 +1,8 @@
 import { Duration, Effect, Metric, Schedule } from "effect";
-import { dbRetries } from "@smithers-orchestrator/observability/metrics";
-import { retryPolicyToSchedule } from "@smithers-orchestrator/scheduler/retryPolicyToSchedule";
+import { dbRetries } from "@smthrs/observability/metrics";
+import { retryPolicyToSchedule } from "@smthrs/scheduler/retryPolicyToSchedule";
 import { isRetryableSqliteWriteError } from "./isRetryableSqliteWriteError.js";
-/** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
+/** @typedef {import("@smthrs/errors/SmithersError").SmithersError} SmithersError */
 /** @typedef {import("./SqliteWriteRetryOptions.ts").SqliteWriteRetryOptions} SqliteWriteRetryOptions */
 
 // Raised from 6→10 and 2000→10000: concurrent Worktree tasks can produce

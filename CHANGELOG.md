@@ -1,4 +1,4 @@
-# smithers-orchestrator
+# smthrs
 
 This is the complete, commit-level changelog. For the guided tour of each
 release (what changed and why it matters, with screenshots and examples), see
@@ -329,7 +329,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - feat(xstate): reducer hash-versioning, sound prefix-cache key, bounded LRU ([8e767206f1](https://github.com/smithersai/smithers/commit/8e767206f1))
 - feat(xstate): eventReceived correlationId scoping, timedOut bind fix, signal coverage tests ([44a61c7159](https://github.com/smithersai/smithers/commit/44a61c7159))
 - feat(xstate): add re-entry task-identity lint ([f11a0f95e1](https://github.com/smithersai/smithers/commit/f11a0f95e1))
-- feat(xstate): add @smithers-orchestrator/xstate durable machine fold package ([6180c27b37](https://github.com/smithersai/smithers/commit/6180c27b37))
+- feat(xstate): add @smthrs/xstate durable machine fold package ([6180c27b37](https://github.com/smithersai/smithers/commit/6180c27b37))
 - feat(smithers): add finish-campaigns two-lane workflow (opencode-kimi + codex-sol) with UI, tests, and todo.md restore ([ccd962c5e3](https://github.com/smithersai/smithers/commit/ccd962c5e3))
 - feat(ui): add shared Terminal xterm adapter ([1eef7ff71c](https://github.com/smithersai/smithers/commit/1eef7ff71c))
 - feat(ui): add shared StageStrip pipeline-stage chip strip ([34323ac1b8](https://github.com/smithersai/smithers/commit/34323ac1b8))
@@ -709,7 +709,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - feat(workflows): agentTier input on the audit workflow ([0291b7cf2a](https://github.com/smithersai/smithers/commit/0291b7cf2a))
 - feat(cli): serve the global ~/.smithers pack from the gateway ([b6dd181a44](https://github.com/smithersai/smithers/commit/b6dd181a44))
 - feat(cli): theme-aware init pack templates on the shared ui components ([5dfa7a01b5](https://github.com/smithersai/smithers/commit/5dfa7a01b5))
-- feat(ui): @smithers-orchestrator/ui — token-native shadcn-anatomy component library ([48fcaada6f](https://github.com/smithersai/smithers/commit/48fcaada6f))
+- feat(ui): @smthrs/ui — token-native shadcn-anatomy component library ([48fcaada6f](https://github.com/smithersai/smithers/commit/48fcaada6f))
 - feat(server): theme gateway UI pages before first paint ([53b0181018](https://github.com/smithersai/smithers/commit/53b0181018))
 - feat(gateway-ui): follow style-guide theme tokens in inline component styles ([1db896a131](https://github.com/smithersai/smithers/commit/1db896a131))
 
@@ -838,7 +838,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - fix(cli): resolve aliased UI entries during pack eject ([154207d2ef](https://github.com/smithersai/smithers/commit/154207d2ef))
 - fix(cli): make pack eject closure self-contained ([c6b1c4d7de](https://github.com/smithersai/smithers/commit/c6b1c4d7de))
 - fix(cli): resolve directory imports during pack eject ([fc6a454fa9](https://github.com/smithersai/smithers/commit/fc6a454fa9))
-- fix(cli): allow smithers-orchestrator subpaths in pack import scan and bare #ref shorthand ([71b4e59973](https://github.com/smithersai/smithers/commit/71b4e59973))
+- fix(cli): allow smthrs subpaths in pack import scan and bare #ref shorthand ([71b4e59973](https://github.com/smithersai/smithers/commit/71b4e59973))
 - fix(cli): harden pack lifecycle per phase-2 Sol review ([2b637c5f03](https://github.com/smithersai/smithers/commit/2b637c5f03))
 - fix(cli): close phase-2 pack gaps — qualified shadow resolution, subdir tarballs, packs update, re-export scan ([68d56ff057](https://github.com/smithersai/smithers/commit/68d56ff057))
 - fix(cli): report pack workflow eligibility ([3fc8c2c9fd](https://github.com/smithersai/smithers/commit/3fc8c2c9fd))
@@ -957,7 +957,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - fix(scorers): medium] Delegation scorer: empty {events:[]} payload doesn't fall back to context ([b1ba94bff3](https://github.com/smithersai/smithers/commit/b1ba94bff3))
 - fix(usage): Anthropic header probe swallows non-ok responses as a blank 'headers' row instead of reporting t ([b3a26182f0](https://github.com/smithersai/smithers/commit/b3a26182f0))
 - fix(gateway): submitApproval requestSchema rejects the top-level `note` field the TS type declares and the s ([3b76e6f816](https://github.com/smithersai/smithers/commit/3b76e6f816))
-- fix(react-reconciler): injectIntoDevTools registers stale package name '@smithers-orchestrator/core-react' ( ([4b7976ab54](https://github.com/smithersai/smithers/commit/4b7976ab54))
+- fix(react-reconciler): injectIntoDevTools registers stale package name '@smthrs/core-react' ( ([4b7976ab54](https://github.com/smithersai/smithers/commit/4b7976ab54))
 - fix(react-reconciler): `getFiberId(fiber) ?? setFiberId(fiber)` fallback would assign an undefined DevTools ([ad10c40a1a](https://github.com/smithersai/smithers/commit/ad10c40a1a))
 - fix(observability): sandboxCompletedTotal loses its status tag when the event has no runtime ([78936eaec9](https://github.com/smithersai/smithers/commit/78936eaec9))
 - fix(observability): context-window metrics ignore cache tokens whenever inputTokens is present ([28a92a7441](https://github.com/smithersai/smithers/commit/28a92a7441))
@@ -1054,7 +1054,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - fix(components): wire deps map + until across seven composites ([3530eb2e08](https://github.com/smithersai/smithers/commit/3530eb2e08))
 - fix(workflows): replace removed codex --search flag with tools.web_search config ([368646b8f8](https://github.com/smithersai/smithers/commit/368646b8f8))
 - fix(ddd-ui): match loading-copy convention and complete feature-detail sub-tab ARIA ([8638b1871f](https://github.com/smithersai/smithers/commit/8638b1871f))
-- fix(examples): point smithers-orchestrator at published package instead of src ([5c59f620af](https://github.com/smithersai/smithers/commit/5c59f620af))
+- fix(examples): point smthrs at published package instead of src ([5c59f620af](https://github.com/smithersai/smithers/commit/5c59f620af))
 - fix(components): flatten element strategy to text before passing to task ([c24c6bd7d5](https://github.com/smithersai/smithers/commit/c24c6bd7d5))
 - fix(agents): stop re-arming inactivity timer after RPC settle ([8c39a847f7](https://github.com/smithersai/smithers/commit/8c39a847f7))
 - fix(memory): tolerate Windows EBUSY on temp-dir teardown in file-backed e2e ([0ff47c5f40](https://github.com/smithersai/smithers/commit/0ff47c5f40))
@@ -1094,7 +1094,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - fix(test-fortress): absorb transient agent failures ([7cd92b10be](https://github.com/smithersai/smithers/commit/7cd92b10be))
 - fix(ddd): harden generated backlog materialization ([aeeb3a3af8](https://github.com/smithersai/smithers/commit/aeeb3a3af8))
 - fix(workflows): drop unsupported key props from TestFortressTrack call sites ([d74ea721b0](https://github.com/smithersai/smithers/commit/d74ea721b0))
-- fix(server): declare @smithers-orchestrator/graph as a runtime dependency (#641) ([bbc1264e90](https://github.com/smithersai/smithers/commit/bbc1264e90))
+- fix(server): declare @smthrs/graph as a runtime dependency (#641) ([bbc1264e90](https://github.com/smithersai/smithers/commit/bbc1264e90))
 - fix(gateway): name the frame-schema builders' return type for declaration emit ([cdb2a3fecd](https://github.com/smithersai/smithers/commit/cdb2a3fecd))
 - fix(kanban): correct the loop review gate and input default ([7af334cfd9](https://github.com/smithersai/smithers/commit/7af334cfd9))
 - fix(agents): honor diagnostic env for gcloud ([ee63229f73](https://github.com/smithersai/smithers/commit/ee63229f73))
@@ -1241,7 +1241,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - refactor(cli): stylistic cleanup + folder READMEs ([c271a4e652](https://github.com/smithersai/smithers/commit/c271a4e652))
 - refactor(bug-worker): stylistic cleanup + folder READMEs ([6c4ea8839a](https://github.com/smithersai/smithers/commit/6c4ea8839a))
 - refactor(gateway-react): delegation flux state machine on Effect.ts ([1771e6adc0](https://github.com/smithersai/smithers/commit/1771e6adc0))
-- refactor(gateway-ui): delegate the status vocabulary to @smithers-orchestrator/ui ([9aeba9af8c](https://github.com/smithersai/smithers/commit/9aeba9af8c))
+- refactor(gateway-ui): delegate the status vocabulary to @smthrs/ui ([9aeba9af8c](https://github.com/smithersai/smithers/commit/9aeba9af8c))
 
 ### Tests (239 changes, 244 commits)
 
@@ -1529,7 +1529,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - docs(models): refresh 5.6 and Fable role defaults ([501aaa2c8a](https://github.com/smithersai/smithers/commit/501aaa2c8a))
 - docs: reframe run control as gateway-first workspace contract ([dfe446a620](https://github.com/smithersai/smithers/commit/dfe446a620))
 - docs(readme): clarify workflow run caption ([ee5ea412ec](https://github.com/smithersai/smithers/commit/ee5ea412ec))
-- docs(accounts): use bunx smithers-orchestrator in the legacy-account cleanup hint ([f49621df6f](https://github.com/smithersai/smithers/commit/f49621df6f))
+- docs(accounts): use bunx smthrs in the legacy-account cleanup hint ([f49621df6f](https://github.com/smithersai/smithers/commit/f49621df6f))
 - docs(readme): restructure around three prompt-led examples ([26a310c2c5](https://github.com/smithersai/smithers/commit/26a310c2c5))
 - docs(epics): record completed coverage gap work ([5280f9d447](https://github.com/smithersai/smithers/commit/5280f9d447))
 - docs: regenerate review-loop composite source embed ([e565971591](https://github.com/smithersai/smithers/commit/e565971591))

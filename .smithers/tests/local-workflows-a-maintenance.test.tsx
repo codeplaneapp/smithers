@@ -1,10 +1,10 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import "../preload.ts";
 import { describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join, parse, resolve } from "node:path";
-import { fakeAgent, renderWorkflow, runTask, simulate } from "smithers-orchestrator/testing";
+import { fakeAgent, renderWorkflow, runTask, simulate } from "smthrs/testing";
 
 const workflows = join(import.meta.dir, "..", "workflows");
 type TaskLike = {

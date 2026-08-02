@@ -2,7 +2,7 @@ import * as ai from 'ai';
 import { Tool as Tool$1, ToolSet, ToolLoopAgentSettings, LanguageModel, ToolLoopAgent } from 'ai';
 import { B as BaseCliAgentOptions, a as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, b as PiExtensionUiResponse$1, A as AgentGenerateOptions$3, c as BaseCliAgent, C as CliOutputInterpreter$e, d as CodexConfigOverrides, e as AgentCliEvent$1, f as CliOutputInterpreter$f, g as AgentCliActionKind } from './index-CN9hS6LR.js';
 import * as zod from 'zod';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 import 'effect';
 import 'node:child_process';
 

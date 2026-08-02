@@ -11,7 +11,7 @@ import type {
   GatewayRpcErrorDetails as ProtocolGatewayRpcErrorDetails,
   GatewayRpcMethod,
   SmithersApiVersion,
-} from "@smithers-orchestrator/protocol/gateway-rpc";
+} from "@smthrs/protocol/gateway-rpc";
 import type { GatewayScope } from "../auth/scopes.js";
 
 export type {
@@ -134,7 +134,7 @@ export type {
   BrowserActivityEvent,
   BrowserScreenshot,
   BrowserSelection,
-} from "@smithers-orchestrator/protocol/gateway-rpc";
+} from "@smthrs/protocol/gateway-rpc";
 
 export type GatewayRpcErrorDetails = ProtocolGatewayRpcErrorDetails;
 

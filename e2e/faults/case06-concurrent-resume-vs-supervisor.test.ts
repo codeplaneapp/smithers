@@ -5,7 +5,7 @@
  *
  * REAL product path (no-mocks):
  *   - Build a real in-memory DB via `ensureSmithersTables` and drive it through
- *     the real `@smithers-orchestrator/db/adapter` `SmithersDb`.
+ *     the real `@smthrs/db/adapter` `SmithersDb`.
  *   - The takeover is the REAL `adapter.claimRunForResume` compare-and-swap
  *     (owner + heartbeat expectation, stale-before gate) — the same primitive
  *     the resume path and the supervisor use in production.
@@ -23,8 +23,8 @@
 import { describe, expect, onTestFinished, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 
 const STALE_THRESHOLD_MS = 30_000;
 

@@ -1,4 +1,4 @@
-import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import type { GatewayRunNode } from "@smthrs/gateway-client";
 
 /**
  * Logical-node status index over a run tree's flattened rows.

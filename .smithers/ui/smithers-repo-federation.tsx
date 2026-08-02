@@ -5,8 +5,8 @@ import {
   useGatewayNodeOutput,
   useGatewayRunEvents,
   useGatewayRuns,
-} from "smithers-orchestrator/gateway-react";
-import { ApprovalPanel, RunEventLog, RunTree, StatusPill, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
+} from "smthrs/gateway-react";
+import { ApprovalPanel, RunEventLog, RunTree, StatusPill, WorkflowUiShell } from "smthrs/gateway-ui";
 import {
   Badge,
   Card,
@@ -27,7 +27,7 @@ import {
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 
 const WORKFLOW_KEY = "smithers-repo-federation";
 const federationStyles = [

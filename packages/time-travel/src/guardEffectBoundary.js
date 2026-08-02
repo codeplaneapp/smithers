@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { assessEffectBoundary } from "./assessEffectBoundary.js";
 import { executeEffectReverts } from "./executeEffectReverts.js";
 import { loadEffectHandlers } from "./loadEffectHandlers.js";
 import { recordForcedEffectBoundary } from "./recordForcedEffectBoundary.js";
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("@smithers-orchestrator/observability/SmithersEvent").SmithersEvent} SmithersEvent */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/observability/SmithersEvent").SmithersEvent} SmithersEvent */
 /** @typedef {import("./EffectBoundaryParams.ts").EffectBoundaryParams} EffectBoundaryParams */
 /** @typedef {import("./EffectBoundaryReport.ts").EffectBoundaryReport} EffectBoundaryReport */
 

@@ -13,7 +13,7 @@
  *
  * The hijack terminal attaches to the gateway's `/v1/pty/hijack` websocket
  * (which runs `smithers hijack <runId> --target <nodeId>` in a real PTY) and
- * renders through the shared `@smithers-orchestrator/ui` terminal adapter:
+ * renders through the shared `@smthrs/ui` terminal adapter:
  * binary frames are raw PTY bytes both ways, text frames are JSON control
  * messages (`resize` up, `exit`/`error` down).
  */
@@ -21,7 +21,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   useSyncExternalStore,
   type CSSProperties,
@@ -35,7 +34,7 @@ import {
   useGatewayRun,
   useGatewayRunDiff,
   useSmithersGateway,
-} from "@smithers-orchestrator/gateway-react";
+} from "@smthrs/gateway-react";
 import {
   Button,
   Card,
@@ -53,8 +52,8 @@ import {
   TabsList,
   TabsTrigger,
   normalizeStatus,
-} from "@smithers-orchestrator/ui";
-import { PierreDiffView } from "@smithers-orchestrator/ui/adapters/pierre-diff-view";
+} from "@smthrs/ui";
+import { PierreDiffView } from "@smthrs/ui/adapters/pierre-diff-view";
 import { HijackTerminal } from "./HijackTerminal";
 import { NodeChatStream } from "./NodeChatStream";
 import { RunEventLog } from "./RunEventLog";

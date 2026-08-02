@@ -34,9 +34,9 @@ function writeWorkflowPackTypecheckHarness(repo) {
     ['declare module "*.mdx" {', "  const Component: any;", "  export default Component;", "}", ""].join("\n"),
   );
   repo.write(
-    ".smithers/types/smithers-orchestrator.d.ts",
+    ".smithers/types/smthrs.d.ts",
     [
-      'declare module "smithers-orchestrator" {',
+      'declare module "smthrs" {',
       "  export type AgentLike = any;",
       "  export type OutputTarget = any;",
       "  export type SmithersCtx<T = any> = any;",
@@ -84,9 +84,9 @@ function writeWorkflowPackTypecheckHarness(repo) {
     ].join("\n"),
   );
   repo.write(
-    ".smithers/types/smithers-orchestrator-jsx-runtime.d.ts",
+    ".smithers/types/smthrs-jsx-runtime.d.ts",
     [
-      'declare module "smithers-orchestrator/jsx-runtime" {',
+      'declare module "smthrs/jsx-runtime" {',
       "  export const Fragment: any;",
       "  export function jsx(type: any, props: any, key?: any): any;",
       "  export function jsxs(type: any, props: any, key?: any): any;",
@@ -96,9 +96,9 @@ function writeWorkflowPackTypecheckHarness(repo) {
     ].join("\n"),
   );
   repo.write(
-    ".smithers/types/smithers-orchestrator-gateway-react.d.ts",
+    ".smithers/types/smthrs-gateway-react.d.ts",
     [
-      'declare module "smithers-orchestrator/gateway-react" {',
+      'declare module "smthrs/gateway-react" {',
       "  export const createGatewayReactRoot: any;",
       "  export function useGatewayActions(): any;",
       "  export function useGatewayApprovals(...args: any[]): any;",
@@ -124,9 +124,9 @@ function writeWorkflowPackTypecheckHarness(repo) {
     ].join("\n"),
   );
   repo.write(
-    ".smithers/types/smithers-orchestrator-gateway-ui.d.ts",
+    ".smithers/types/smthrs-gateway-ui.d.ts",
     [
-      'declare module "smithers-orchestrator/gateway-ui" {',
+      'declare module "smthrs/gateway-ui" {',
       "  export const WorkflowUiShell: any;",
       "  export const WorkflowUiStyles: any;",
       "  export const workflowUiStyles: any;",
@@ -143,7 +143,7 @@ function writeWorkflowPackTypecheckHarness(repo) {
   );
   // Seeded multi-file UI dependency declarations are browser-only coverage
   // inputs: the pack smoke typecheck doesn't install them, so declare their
-  // imported surface as `any`, mirroring the smithers-orchestrator stubs above.
+  // imported surface as `any`, mirroring the smthrs stubs above.
   // (Shorthand ambient modules are not enough: generic TYPE usage like
   // `Node<T>` needs explicit type declarations.)
   repo.write(
@@ -176,9 +176,9 @@ function writeWorkflowPackTypecheckHarness(repo) {
     ].join("\n"),
   );
   repo.write(
-    ".smithers/types/smithers-orchestrator-ui.d.ts",
+    ".smithers/types/smthrs-ui.d.ts",
     [
-      'declare module "smithers-orchestrator/ui" {',
+      'declare module "smthrs/ui" {',
       "  export const Badge: any;",
       "  export const Button: any;",
       "  export const Card: any;",
@@ -218,11 +218,11 @@ function writeWorkflowPackTypecheckHarness(repo) {
           types: ["node", "react", "react-dom", "mdx"],
           paths: {
             "~/*": ["./*"],
-            "smithers-orchestrator": ["./types/smithers-orchestrator.d.ts"],
-            "smithers-orchestrator/gateway-react": ["./types/smithers-orchestrator-gateway-react.d.ts"],
-            "smithers-orchestrator/gateway-ui": ["./types/smithers-orchestrator-gateway-ui.d.ts"],
-            "smithers-orchestrator/ui": ["./types/smithers-orchestrator-ui.d.ts"],
-            "smithers-orchestrator/jsx-runtime": ["./types/smithers-orchestrator-jsx-runtime.d.ts"],
+            smthrs: ["./types/smthrs.d.ts"],
+            "smthrs/gateway-react": ["./types/smthrs-gateway-react.d.ts"],
+            "smthrs/gateway-ui": ["./types/smthrs-gateway-ui.d.ts"],
+            "smthrs/ui": ["./types/smthrs-ui.d.ts"],
+            "smthrs/jsx-runtime": ["./types/smthrs-jsx-runtime.d.ts"],
           },
         },
         include: [
@@ -347,7 +347,7 @@ test(
     // Single-deliverable starters route to `smithers oneshot` (see
     // starter-gallery.js), not to a create-workflow authoring run.
     expect(result.json.template.workflow).toBe("oneshot");
-    expect(result.json.template.command).toStartWith("bunx smithers-orchestrator oneshot ");
+    expect(result.json.template.command).toStartWith("bunx smthrs oneshot ");
     expect(result.json.install).toMatchObject({
       reason: "skip-install",
       status: "skipped",

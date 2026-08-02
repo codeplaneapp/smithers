@@ -1,8 +1,8 @@
-# smithers-orchestrator
+# smthrs
 
 **Run long-horizon coding-agent work as durable workflows.**
 
-[![npm](https://img.shields.io/npm/v/smithers-orchestrator?color=2563eb&label=npm)](https://www.npmjs.com/package/smithers-orchestrator)
+[![npm](https://img.shields.io/npm/v/smthrs?color=2563eb&label=npm)](https://www.npmjs.com/package/smthrs)
 [![License: MIT](https://img.shields.io/badge/license-MIT-2563eb)](https://github.com/smithersai/smithers/blob/main/LICENSE)
 [![Docs](https://img.shields.io/badge/docs-smithers.sh-2563eb)](https://smithers.sh)
 
@@ -50,7 +50,7 @@ approvals.
 One command sets everything up. From inside your project:
 
 ```bash
-bunx smithers-orchestrator init
+bunx smthrs init
 ```
 
 `init` does everything:
@@ -70,12 +70,12 @@ Then just ask:
 Your agent picks the right workflow, starts the run, and keeps going through retries and
 review loops until the work is actually done.
 
-> **Always run `bunx smithers-orchestrator`, never `bunx smithers`.** On npm, `smithers`
+> **Always run `bunx smthrs`, never `bunx smithers`.** On npm, `smithers`
 > is an unrelated package. The installed binary alias `smithers` is only safe inside a
 > project that resolves `node_modules/.bin/smithers`.
 
 To wire the MCP server into every detected agent too, run
-`bunx smithers-orchestrator mcp add`. See [Agent Support](https://smithers.sh/agents/overview)
+`bunx smthrs mcp add`. See [Agent Support](https://smithers.sh/agents/overview)
 for the full per-agent matrix.
 
 ## Drive it yourself
@@ -84,7 +84,7 @@ Prefer the CLI? Ask `create-workflow` to build something for you:
 
 ```bash
 # describe the workflow you want; create-workflow clarifies, scaffolds, and documents it
-bunx smithers-orchestrator workflow run create-workflow --prompt "add rate limiting, audit logging, and API key rotation"
+bunx smthrs workflow run create-workflow --prompt "add rate limiting, audit logging, and API key rotation"
 ```
 
 Or copy one of the 29 archived starter patterns (`hello`, `plan`, `review`, `debug`, and
@@ -94,14 +94,14 @@ more) from `examples/init-pack/` into `.smithers/workflows/` and run it directly
 Watch what's happening, whether your agent started the run or you did:
 
 ```bash
-bunx smithers-orchestrator ps              # list active, paused, and recently completed runs
-bunx smithers-orchestrator inspect RUN_ID  # steps, agents, approvals, and outputs for one run
-bunx smithers-orchestrator logs RUN_ID     # tail the event log
-bunx smithers-orchestrator chat RUN_ID     # read the agent's chat output
+bunx smthrs ps              # list active, paused, and recently completed runs
+bunx smthrs inspect RUN_ID  # steps, agents, approvals, and outputs for one run
+bunx smthrs logs RUN_ID     # tail the event log
+bunx smthrs chat RUN_ID     # read the agent's chat output
 ```
 
-Run `bunx smithers-orchestrator starters` to browse plain-English starters, and
-`bunx smithers-orchestrator workflow list` to see what's installed.
+Run `bunx smthrs starters` to browse plain-English starters, and
+`bunx smthrs workflow list` to see what's installed.
 
 ## Durable by default
 
@@ -119,11 +119,11 @@ written down, then the workflow re-renders from persisted state to decide the ne
 crash at any point resumes from the last write, not from the top.
 
 ```bash
-bunx smithers-orchestrator up workflow.tsx --input '{"description":"Fix bug"}'
-bunx smithers-orchestrator up workflow.tsx --run-id abc123 --resume true   # resume after a crash
-bunx smithers-orchestrator rewind abc123 --frame 4                          # time-travel to an earlier frame
-bunx smithers-orchestrator fork abc123                                      # branch an alternate timeline
-bunx smithers-orchestrator replay abc123                                    # replay from a checkpoint
+bunx smthrs up workflow.tsx --input '{"description":"Fix bug"}'
+bunx smthrs up workflow.tsx --run-id abc123 --resume true   # resume after a crash
+bunx smthrs rewind abc123 --frame 4                          # time-travel to an earlier frame
+bunx smthrs fork abc123                                      # branch an alternate timeline
+bunx smthrs replay abc123                                    # replay from a checkpoint
 ```
 
 ## Author your own
@@ -134,7 +134,7 @@ author a repository-specific workflow from the same primitives. A workflow is a 
 tasks, each with a Zod-validated output:
 
 ```tsx
-import { createSmithers, Sequence } from "smithers-orchestrator";
+import { createSmithers, Sequence } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, Task, smithers, outputs } = createSmithers({
@@ -183,22 +183,22 @@ sandboxes, and composite patterns. See
 ## Package entry points
 
 The main entry re-exports the full toolkit, so most code only needs
-`import { ... } from "smithers-orchestrator"`. Dedicated subpaths exist for focused imports:
+`import { ... } from "smthrs"`. Dedicated subpaths exist for focused imports:
 
 | Import | What it gives you |
 | --- | --- |
-| `smithers-orchestrator` | `createSmithers`, the workflow components, agent adapters, errors, and the rest of the core API. |
-| `smithers-orchestrator/tools` | The built-in agent tool sandbox. |
-| `smithers-orchestrator/gateway-client` | Typed client for the Gateway RPC/WS control plane. |
-| `smithers-orchestrator/gateway-react` | React hooks for live, multi-run state. |
-| `smithers-orchestrator/sandbox` | The `<Sandbox>` primitive and `SandboxProvider` interface. |
-| `smithers-orchestrator/microsandbox` | The first-class Microsandbox microVM provider. |
-| `smithers-orchestrator/control-plane` | Programmatic control-plane API for launching and steering runs. |
-| `smithers-orchestrator/server` | The Gateway server (`startServer`, `createServeApp`). |
-| `smithers-orchestrator/observability` | Prometheus metrics and OpenTelemetry tracing layers. |
-| `smithers-orchestrator/memory` | Cross-run memory store and recall. |
-| `smithers-orchestrator/scorers` | Eval scorers (LLM-judge, relevancy, faithfulness, …). |
-| `smithers-orchestrator/openapi` | Generate AI SDK tools from OpenAPI specs. |
+| `smthrs` | `createSmithers`, the workflow components, agent adapters, errors, and the rest of the core API. |
+| `smthrs/tools` | The built-in agent tool sandbox. |
+| `smthrs/gateway-client` | Typed client for the Gateway RPC/WS control plane. |
+| `smthrs/gateway-react` | React hooks for live, multi-run state. |
+| `smthrs/sandbox` | The `<Sandbox>` primitive and `SandboxProvider` interface. |
+| `smthrs/microsandbox` | The first-class Microsandbox microVM provider. |
+| `smthrs/control-plane` | Programmatic control-plane API for launching and steering runs. |
+| `smthrs/server` | The Gateway server (`startServer`, `createServeApp`). |
+| `smthrs/observability` | Prometheus metrics and OpenTelemetry tracing layers. |
+| `smthrs/memory` | Cross-run memory store and recall. |
+| `smthrs/scorers` | Eval scorers (LLM-judge, relevancy, faithfulness, …). |
+| `smthrs/openapi` | Generate AI SDK tools from OpenAPI specs. |
 
 ## Any agent, any model
 
@@ -221,7 +221,7 @@ Docker, or on any backend you implement against `SandboxProvider`.
 - A version control system for snapshotting and isolating agent work:
   [jj (Jujutsu)](https://github.com/jj-vcs/jj) or [git](https://git-scm.com). jj is
   preferred and powers durability, time-travel, and per-task worktrees; the optional
-  `@smithers-orchestrator/jj-<platform>` package bundles a jj binary so a fresh install
+  `@smthrs/jj-<platform>` package bundles a jj binary so a fresh install
   works with no system jj.
 
 ## Docs

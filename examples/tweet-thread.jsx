@@ -4,7 +4,7 @@
  * Set these env vars:
  *   X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_SECRET
  */
-import { Sequence, Timer } from "smithers-orchestrator";
+import { Sequence, Timer } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { z } from "zod";
 

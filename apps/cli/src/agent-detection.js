@@ -3,7 +3,7 @@ import { constants, accessSync, existsSync, readdirSync, readFileSync, statSync 
 import { homedir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 
-import { accountToProviderEnv, listAccounts } from "@smithers-orchestrator/accounts";
+import { accountToProviderEnv, listAccounts } from "@smthrs/accounts";
 import { registeredAgentId } from "./registered-agent-id.js";
 import { SOTA_DEPRECATED_MODELS, SOTA_SLOTS } from "./sota-models.generated.js";
 /** @typedef {import("./AgentAvailability.ts").AgentAvailability} AgentAvailability */
@@ -1220,13 +1220,13 @@ const CODEX_MODEL_SUFFIX = {
   [SOTA_SLOTS.codex]: "Luna",
 };
 
-/** @param {import("@smithers-orchestrator/accounts").Account} account */
+/** @param {import("@smthrs/accounts").Account} account */
 function isCodexAccount(account) {
   return ACCOUNT_PROVIDER_POOL[account.provider] === "codex";
 }
 
 /**
- * @param {import("@smithers-orchestrator/accounts").Account} account
+ * @param {import("@smthrs/accounts").Account} account
  * @param {string} model
  */
 function codexAccountVariantId(account, model) {
@@ -1270,7 +1270,7 @@ function pathLiteral(absPath, homeDir) {
  * Renders an account as `<labelCamel>: new SmithersFooAgent({ ... })` for
  * inclusion in the providers map.
  *
- * @param {import("@smithers-orchestrator/accounts").Account} account
+ * @param {import("@smthrs/accounts").Account} account
  * @param {string} homeDir
  * @returns {string}
  */
@@ -1283,7 +1283,7 @@ function renderAccountProviderLine(account, homeDir) {
  * Codex accounts receive Sol/Terra/Luna siblings so default pools can select
  * the right model without discarding the account's configDir or API key.
  *
- * @param {import("@smithers-orchestrator/accounts").Account} account
+ * @param {import("@smthrs/accounts").Account} account
  * @param {string} homeDir
  * @param {string} providerId
  * @param {string | undefined} modelOverride
@@ -1313,7 +1313,7 @@ function renderAccountProviderVariantLine(account, homeDir, providerId, modelOve
 }
 
 /**
- * @param {import("@smithers-orchestrator/accounts").Account} account
+ * @param {import("@smthrs/accounts").Account} account
  * @param {string} homeDir
  * @returns {string[]}
  */
@@ -1426,7 +1426,7 @@ function createDefaultOpenRouterAvailability(env) {
 
 /**
  * @param {Set<string>} activeBaseIds
- * @param {import("@smithers-orchestrator/accounts").Account[]} registeredAccounts
+ * @param {import("@smthrs/accounts").Account[]} registeredAccounts
  */
 function requiredTiersHaveCandidates(activeBaseIds, registeredAccounts) {
   return REQUIRED_DEFAULT_TIERS.every((tier) => {
@@ -1540,12 +1540,10 @@ export function generateAgentsTs(env = process.env, options = {}) {
     inactiveImportNames.delete(importName);
   }
   const smithersImportLines = [
-    'import { type AgentLike } from "smithers-orchestrator";',
-    ...[...activeImportNames].map(
-      (importName) => `import { ${importName} as Smithers${importName} } from "smithers-orchestrator";`,
-    ),
+    'import { type AgentLike } from "smthrs";',
+    ...[...activeImportNames].map((importName) => `import { ${importName} as Smithers${importName} } from "smthrs";`),
     ...[...inactiveImportNames].map(
-      (importName) => `// import { ${importName} as Smithers${importName} } from "smithers-orchestrator";`,
+      (importName) => `// import { ${importName} as Smithers${importName} } from "smthrs";`,
     ),
   ];
   const homeDir = env.HOME ?? homedir();

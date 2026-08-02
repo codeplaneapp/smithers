@@ -33,7 +33,7 @@ function issueUpdateRequest(overrides = {}) {
 }
 
 /**
- * @param {import("@smithers-orchestrator/db/adapter").SmithersDb} adapter
+ * @param {import("@smthrs/db/adapter").SmithersDb} adapter
  * @param {string} runId
  * @param {string} signalName
  */

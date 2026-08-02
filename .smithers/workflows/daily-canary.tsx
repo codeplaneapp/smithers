@@ -2,12 +2,12 @@
 // smithers-description: Daily workflow-backed canaries for fresh init and persistent workspace memory, with smart-model bug hunting over the past week of git history.
 // smithers-tags: system, canary, memory
 // smithers-system: true
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, parse, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
-import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
+import { ClaudeCodeAgent, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { codexFirst } from "../lib/codexAccounts";
 

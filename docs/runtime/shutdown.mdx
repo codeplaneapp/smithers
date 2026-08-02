@@ -14,7 +14,7 @@ and still hang.
 instead is unsafe: a hard exit skips your own database flushes and cleanup.
 
 ```ts
-import { closeSingleRunnerRuntime, runWorkflow } from "smithers-orchestrator";
+import { closeSingleRunnerRuntime, runWorkflow } from "smthrs";
 import { Effect } from "effect";
 
 const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));

@@ -17,29 +17,29 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { closeSync, readFileSync, existsSync, mkdirSync, openSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { Effect, Fiber } from "effect";
 import { Cli, SyncSkills, z } from "incur";
-import { isRunHeartbeatFresh, runWorkflow, renderFrame, resolveSchema } from "@smithers-orchestrator/engine";
-import { __engineInternals } from "@smithers-orchestrator/engine/engine";
-import { readWorkflowEntryHash, readWorkflowGraphHash } from "@smithers-orchestrator/engine/workflow-hash";
+import { isRunHeartbeatFresh, runWorkflow, renderFrame, resolveSchema } from "@smthrs/engine";
+import { __engineInternals } from "@smthrs/engine/engine";
+import { readWorkflowEntryHash, readWorkflowGraphHash } from "@smthrs/engine/workflow-hash";
 import { mdxPlugin } from "./mdx-plugin.js";
-import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
-import { signalRun } from "@smithers-orchestrator/engine/signals";
-import { loadInput, loadOutputs } from "@smithers-orchestrator/db/snapshot";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
-import { parseStateKey } from "@smithers-orchestrator/scheduler/parseStateKey";
-import { normalizeRunStartedBy, SmithersCtx } from "@smithers-orchestrator/driver";
+import { approveNode, denyNode } from "@smthrs/engine/approvals";
+import { signalRun } from "@smthrs/engine/signals";
+import { loadInput, loadOutputs } from "@smthrs/db/snapshot";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { computeRunStateFromRow } from "@smthrs/db/runState";
+import { parseStateKey } from "@smthrs/scheduler/parseStateKey";
+import { normalizeRunStartedBy, SmithersCtx } from "@smthrs/driver";
 import { resolveCliStartedBy } from "./runStartedBy.js";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
 import { runFork, runPromise, runSync } from "./smithersRuntime.js";
-import { trackEvent } from "@smithers-orchestrator/observability/metrics";
-import { vcsToolingStatus } from "@smithers-orchestrator/vcs/vcsToolingStatus";
-import { findVcsRoot } from "@smithers-orchestrator/vcs/find-root";
-import { listSmithersWorktrees } from "@smithers-orchestrator/engine/listSmithersWorktrees";
-import { reapWorktrees } from "@smithers-orchestrator/engine/reapWorktrees";
-import { revertToAttempt } from "@smithers-orchestrator/time-travel/revert";
-import { retryTask } from "@smithers-orchestrator/time-travel/retry-task";
-import { timeTravel } from "@smithers-orchestrator/time-travel/timetravel";
+import { trackEvent } from "@smthrs/observability/metrics";
+import { vcsToolingStatus } from "@smthrs/vcs/vcsToolingStatus";
+import { findVcsRoot } from "@smthrs/vcs/find-root";
+import { listSmithersWorktrees } from "@smthrs/engine/listSmithersWorktrees";
+import { reapWorktrees } from "@smthrs/engine/reapWorktrees";
+import { revertToAttempt } from "@smthrs/time-travel/revert";
+import { retryTask } from "@smthrs/time-travel/retry-task";
+import { timeTravel } from "@smthrs/time-travel/timetravel";
 import { spawn } from "node:child_process";
 import { CronExpressionParser } from "cron-parser";
 import {
@@ -47,8 +47,8 @@ import {
   isHumanRequestPastTimeout,
   validateHumanRequestValue,
   waitForHumanAnswer,
-} from "@smithers-orchestrator/engine/human-requests";
-import { SmithersError } from "@smithers-orchestrator/errors";
+} from "@smthrs/engine/human-requests";
+import { SmithersError } from "@smthrs/errors";
 import { findAndOpenDb, findSmithersDb } from "./find-db.js";
 import { cliWorkspace } from "./cliWorkspace.js";
 import {
@@ -131,8 +131,8 @@ import {
   needsPreflightNotice,
   preflightConfigEntry,
 } from "./oneshot-preflight.js";
-import { listAccounts, removeAccount } from "@smithers-orchestrator/accounts";
-import { getUsageForAccounts, formatUsageReports } from "@smithers-orchestrator/usage";
+import { listAccounts, removeAccount } from "@smthrs/accounts";
+import { getUsageForAccounts, formatUsageReports } from "@smthrs/usage";
 import { runAgentAdd, pingAccount } from "./agent-commands/runAgentAdd.js";
 import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
 import { getWorkflowFollowUpCtas } from "./workflow-pack.js";
@@ -203,7 +203,7 @@ import {
   formatCliAgentCapabilityDoctorReport,
   getCliAgentCapabilityDoctorReport,
   getCliAgentCapabilityReport,
-} from "@smithers-orchestrator/agents/cli-capabilities";
+} from "@smthrs/agents/cli-capabilities";
 import { findAndOpenSupervisorDb, parseDurationMs, supervisorLoopEffect, supervisorPollEffect } from "./supervisor.js";
 import { DEFAULT_LIFECYCLE_EVENT_TYPES, renderAttemptPool, tallyAttemptPool } from "./observability-helpers.js";
 import { buildDurabilityRunOptions } from "./up-engine-options.js";
@@ -278,7 +278,7 @@ async function loadWorkflowAsync(path) {
 // Advertise this CLI's module directory to workflows launched by it. System
 // workflows (the seeded `init`) import CLI internals through this so they
 // always run the exact code that launched them, instead of depending on
-// `@smithers-orchestrator/cli` being resolvable from the pack's node_modules.
+// `@smthrs/cli` being resolvable from the pack's node_modules.
 process.env.SMITHERS_CLI_SRC_DIR ??= dirname(fileURLToPath(import.meta.url));
 
 /**
@@ -487,7 +487,7 @@ function isLogFollowActiveState(state) {
 }
 /**
  * @param {string} runId
- * @param {import("@smithers-orchestrator/db/runState").RunStateView | undefined} stateView
+ * @param {import("@smthrs/db/runState").RunStateView | undefined} stateView
  */
 function reportLogFollowInactiveDerivedState(runId, stateView) {
   if (stateView?.state !== "stale" && stateView?.state !== "orphaned") return;
@@ -3088,7 +3088,7 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
       // pin through ANY mechanism (--backend, SMITHERS_BACKEND, or a `backend`
       // field in smithers.config.ts) wins. Reading the marker directly meant a
       // config-file pin was silently ignored here.
-      const { resolveSmithersBackendPreference } = await import("smithers-orchestrator/resolveSmithersBackendChoice");
+      const { resolveSmithersBackendPreference } = await import("smthrs/resolveSmithersBackendChoice");
       const { backend: selectedBackend } = await resolveSmithersBackendPreference({
         cwd: process.cwd(),
         backend: options.backend,
@@ -3102,7 +3102,7 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
         // reported as such (rather than masking it behind the mismatch).
         let probe;
         try {
-          const { openSmithersBackend } = await import("smithers-orchestrator");
+          const { openSmithersBackend } = await import("smthrs");
           // Validate the authoritative pglite store actually opens (so a
           // genuinely broken store surfaces as BACKEND_OPEN_FAILED rather
           // than being masked by the BACKEND_MISMATCH below). No schemas
@@ -3139,8 +3139,7 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
     // but nothing acted on it at startup, so a process kill mid-rewind left
     // runs silently un-recovered. (SQLite-only; non-fatal.)
     {
-      const { recoverRewindAuditsAtStartup } =
-        await import("@smithers-orchestrator/time-travel/recoverRewindAuditsAtStartup");
+      const { recoverRewindAuditsAtStartup } = await import("@smthrs/time-travel/recoverRewindAuditsAtStartup");
       await recoverRewindAuditsAtStartup(adapter, {
         onRecovered: (count) =>
           process.stderr.write(
@@ -3457,7 +3456,7 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
           exitCode: 4,
         });
       }
-      const { createServeApp } = await import("@smithers-orchestrator/server/serve");
+      const { createServeApp } = await import("@smthrs/server/serve");
       const effectiveRunId = monitoredRunId ?? `run-${Date.now()}`;
       const serveApp = createServeApp({
         workflow: workflow,
@@ -4321,7 +4320,7 @@ async function runGatewayCommand(options) {
     startLock.release();
     startLockReleased = true;
   };
-  /** @type {import("@smithers-orchestrator/server/gateway").Gateway | undefined} */
+  /** @type {import("@smthrs/server/gateway").Gateway | undefined} */
   let gateway;
   /** @type {Array<() => unknown | Promise<unknown>>} */
   const backendCleanups = [];
@@ -4366,13 +4365,13 @@ async function runGatewayCommand(options) {
       process.env.SMITHERS_BACKEND = options.backend;
     }
     const [{ Gateway }, { openSmithersBackend }] = await Promise.all([
-      import("@smithers-orchestrator/server/gateway"),
-      import("smithers-orchestrator"),
+      import("@smthrs/server/gateway"),
+      import("smthrs"),
     ]);
     // Same shared precedence as every other boot path (explicit → env → config
     // → marker → sqlite); hand-rolling it here used to skip the config pin, so
     // the Gateway advertised a different backend than the engine wrote to.
-    const { resolveSmithersBackendPreference } = await import("smithers-orchestrator/resolveSmithersBackendChoice");
+    const { resolveSmithersBackendPreference } = await import("smthrs/resolveSmithersBackendChoice");
     identityBackend = (await resolveSmithersBackendPreference({ cwd: workspace, backend: options.backend })).backend;
     // Idle spin-down (spec decision 14): autostarted daemons pass --idle-timeout
     // (see ensureWorkspaceGateway) so they exit once idle; an explicit
@@ -4915,7 +4914,7 @@ const workflowCli = Cli.create({
       if (!vcs.ok && c.format !== "json") {
         process.stderr.write(
           `${pc.yellow("⚠ No jj or git found.")} Smithers needs one to snapshot and isolate agent work.\n` +
-            `  Smithers bundles jj via the optional @smithers-orchestrator/jj-<platform> package; if it could not\n` +
+            `  Smithers bundles jj via the optional @smthrs/jj-<platform> package; if it could not\n` +
             `  install for your platform, install jj (https://github.com/jj-vcs/jj) or git, or set SMITHERS_JJ_PATH.\n`,
         );
       }
@@ -4996,8 +4995,8 @@ async function resolveMemoryWorkflowAsync(workflowPath) {
  * @param {{ readOnly?: boolean }} [options]
  */
 async function openMemoryStore(workflowPath, options = {}) {
-  const { createMemoryStore } = await import("@smithers-orchestrator/memory/store");
-  const { parseNamespace } = await import("@smithers-orchestrator/memory/types");
+  const { createMemoryStore } = await import("@smthrs/memory/store");
+  const { parseNamespace } = await import("@smthrs/memory/types");
   if (!workflowPath && options.readOnly && cliWorkspace.usesManifestFallback()) {
     const opened = await findAndOpenDb();
     return { store: createMemoryStore(opened.db), parseNamespace, cleanup: opened.cleanup };
@@ -5666,7 +5665,7 @@ const openapiCli = Cli.create({
     args: openapiListArgs,
     async run(c) {
       try {
-        const { listOperations } = await import("@smithers-orchestrator/openapi/tool-factory");
+        const { listOperations } = await import("@smthrs/openapi/tool-factory");
         const ops = listOperations(c.args.specPath);
         if (ops.length === 0) {
           console.log("  No operations found in spec.");
@@ -5688,7 +5687,7 @@ const openapiCli = Cli.create({
     args: openapiGenerateArgs,
     async run(c) {
       try {
-        const { createOpenApiToolsSync } = await import("@smithers-orchestrator/openapi/tool-factory");
+        const { createOpenApiToolsSync } = await import("@smthrs/openapi/tool-factory");
         const specPath = resolve(process.cwd(), c.args.specPath);
         const outputPath = resolve(process.cwd(), c.args.outputPath);
         const outputDir = dirname(outputPath);
@@ -5703,7 +5702,7 @@ const openapiCli = Cli.create({
           outputPath,
           [
             'import { fileURLToPath } from "node:url";',
-            'import { createOpenApiToolsSync } from "smithers-orchestrator/openapi";',
+            'import { createOpenApiToolsSync } from "smthrs/openapi";',
             "",
             `const specPath = fileURLToPath(new URL(${JSON.stringify(importPath)}, import.meta.url));`,
             "",
@@ -6342,7 +6341,7 @@ const cli = Cli.create({
   // the alias is documented here until an upstream flag entry lands. (#11)
   description: CLI_DESCRIPTION,
   version: readPackageVersion(),
-  mcp: { command: "bunx smithers-orchestrator --mcp" },
+  mcp: { command: "bunx smthrs --mcp" },
 })
   // =========================================================================
   // smithers init [prompt]
@@ -7025,7 +7024,7 @@ const cli = Cli.create({
     async run(c) {
       const fail = makeFail(c);
       try {
-        const { migrateSmithersStore } = await import("smithers-orchestrator/migrateSmithersStore");
+        const { migrateSmithersStore } = await import("smthrs/migrateSmithersStore");
         if (!c.options.to) {
           return fail({
             code: "INVALID_INPUT",
@@ -9755,7 +9754,7 @@ const cli = Cli.create({
           code: "COMPOSE_NOT_FOUND",
           message: [
             `Docker Compose file not found. Checked ${composeDirCandidates.map((dir) => resolve(dir, "docker-compose.otel.yml")).join(", ")}.`,
-            `Reinstall smithers-orchestrator or upgrade @smithers-orchestrator/observability to a version that ships the local stack assets, then run "smithers observability --detach".`,
+            `Reinstall smthrs or upgrade @smthrs/observability to a version that ships the local stack assets, then run "smithers observability --detach".`,
             `Docker with Compose support is required.`,
           ].join(" "),
           exitCode: 1,
@@ -9884,7 +9883,7 @@ const cli = Cli.create({
     async run(c) {
       const fail = makeFail(c);
       try {
-        const { replayFromCheckpoint } = await import("@smithers-orchestrator/time-travel/replay");
+        const { replayFromCheckpoint } = await import("@smthrs/time-travel/replay");
         const { adapter, cleanup } = await loadWorkflowDb(c.args.workflow);
         try {
           const parsedOverrides = tryParseJsonInput(c.options.input, "input");
@@ -9918,7 +9917,7 @@ const cli = Cli.create({
           const workflow = await loadWorkflow(c.args.workflow);
           const onProgress = buildProgressReporter();
           const abort = setupAbortSignal();
-          const engine = await import("@smithers-orchestrator/engine");
+          const engine = await import("@smthrs/engine");
           const runResult = await Effect.runPromise(
             engine.runWorkflow(workflow, {
               input: {},
@@ -10169,7 +10168,7 @@ const cli = Cli.create({
     async run(c) {
       const fail = makeFail(c);
       try {
-        const { forkRun } = await import("@smithers-orchestrator/time-travel/fork");
+        const { forkRun } = await import("@smthrs/time-travel/fork");
         const { adapter, cleanup } = await loadWorkflowDb(c.args.workflow);
         try {
           const parsedOverrides = tryParseJsonInput(c.options.input, "input");
@@ -10196,7 +10195,7 @@ const cli = Cli.create({
             const workflow = await loadWorkflow(c.args.workflow);
             const onProgress = buildProgressReporter();
             const abort = setupAbortSignal();
-            const engine = await import("@smithers-orchestrator/engine");
+            const engine = await import("@smthrs/engine");
             const runResult = await Effect.runPromise(
               engine.runWorkflow(workflow, {
                 input: {},
@@ -10275,7 +10274,7 @@ const cli = Cli.create({
       const fail = makeFail(c);
       try {
         const { buildTimeline, buildTimelineTree, formatTimelineForTui, formatTimelineAsJson } =
-          await import("@smithers-orchestrator/time-travel/timeline");
+          await import("@smthrs/time-travel/timeline");
         const { adapter, cleanup } = await findAndOpenDb();
         try {
           const tree = c.options.tree
@@ -11045,8 +11044,7 @@ async function runRawJsonTimelineCommandIfMatched(argv) {
   if (!jsonOutput || positionals.length !== 2 || positionals[0] !== "timeline") {
     return false;
   }
-  const { buildTimeline, buildTimelineTree, formatTimelineAsJson } =
-    await import("@smithers-orchestrator/time-travel/timeline");
+  const { buildTimeline, buildTimelineTree, formatTimelineAsJson } = await import("@smthrs/time-travel/timeline");
   const { adapter, cleanup } = await findAndOpenDb();
   try {
     const tree = treeOutput
@@ -11309,7 +11307,7 @@ async function main() {
     process.exit(4);
   }
   if (command === "review") {
-    const { runReviewCli } = await import("@smithers-orchestrator/review/cli");
+    const { runReviewCli } = await import("@smthrs/review/cli");
     // Forward every arg except the `review` token itself — including any flags
     // that preceded it (e.g. `smithers --help review`), so the review CLI can
     // render its own help instead of eagerly starting a review.
@@ -11321,7 +11319,7 @@ async function main() {
   }
   // Self-heal the curated agent skill on a normal human-facing invocation:
   // keep ~/.claude/skills (and Pi) in sync with the bundled skill and evict
-  // any retired `smithers-orchestrator` copy. Throttled + best-effort; skipped
+  // any retired `smthrs` copy. Throttled + best-effort; skipped
   // in CI, non-TTY use, JSON mode, and for completions/version/help so it
   // never mutates agent state or adds noise/latency to scripted use. Opt out with
   // SMITHERS_NO_SKILL_REFRESH=1.
@@ -11470,7 +11468,7 @@ async function main() {
   }
   // `mcp add` failed inside the registration helper and we did not recover it
   // via supplementary wiring. The usual cause is a runner that word-split the
-  // `bunx smithers-orchestrator --mcp` launch command, leaving the helper to
+  // `bunx smthrs --mcp` launch command, leaving the helper to
   // choke on the bare `--mcp` flag. Point the user at the reliable manual path.
   if (wiring?.kind === "mcp" && !serveSucceeded && !targetsOnlyExtra) {
     console.error("");

@@ -8,7 +8,7 @@ Smithers custom UIs use TanStack DB as the frontend data layer: UI code reads co
 ```ts
 import { QueryClient } from "@tanstack/react-query";
 import { useLiveQuery } from "@tanstack/react-db";
-import { createSmithersCollections } from "smithers-orchestrator/gateway-client";
+import { createSmithersCollections } from "smthrs/gateway-client";
 
 const queryClient = new QueryClient();
 const collections = createSmithersCollections(
@@ -87,7 +87,7 @@ SQLite and embedded PGlite mutating routes return `{ seq }`, the invalidation se
 
 ## Multiplayer Provider
 
-Multiplayer workspaces use the official ElectricCollection provider through `@smithers-orchestrator/electric-proxy`:
+Multiplayer workspaces use the official ElectricCollection provider through `@smthrs/electric-proxy`:
 
 ```txt
 ElectricCollection -> electricBaseUrl/v1/shape -> electric-proxy -> Postgres
@@ -115,7 +115,7 @@ Use these hooks for workflow UIs, and `useSmithersCollections()` for a custom co
 
 ```tsx
 import { useLiveQuery } from "@tanstack/react-db";
-import { useSmithersCollections } from "smithers-orchestrator/gateway-react";
+import { useSmithersCollections } from "smthrs/gateway-react";
 
 function ScoreList({ runId }: { runId: string }) {
   const { collections } = useSmithersCollections();

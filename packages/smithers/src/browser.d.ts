@@ -9,11 +9,11 @@ export {
   Worktree,
   RuntimeCapabilityError,
   RUNTIME_CAPABILITY_UNAVAILABLE,
-} from "@smithers-orchestrator/engine/browser";
+} from "@smthrs/engine/browser";
 export type {
   RuntimeAdapter,
   BrowserRuntimeOptions,
   BrowserWorkflow,
   BrowserRunOptions,
   BrowserSmithers,
-} from "@smithers-orchestrator/engine/browser";
+} from "@smthrs/engine/browser";

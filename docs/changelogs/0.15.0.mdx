@@ -26,7 +26,7 @@ the Gateway is how you do it.
 ### Quick start
 
 ```ts
-import { SmithersGateway } from "smithers-orchestrator/gateway";
+import { SmithersGateway } from "smthrs/gateway";
 
 const gateway = new SmithersGateway({
   auth: {
@@ -202,13 +202,13 @@ deterministic.
 
 ## CLI
 
-- **`bunx smithers-orchestrator signal`**: Deliver structured data to a `<Signal>` or
+- **`bunx smthrs signal`**: Deliver structured data to a `<Signal>` or
   `<WaitForEvent>` node from the command line.
-- **`bunx smithers-orchestrator retry-task`**: Retry a specific task without time travel. Resets
+- **`bunx smthrs retry-task`**: Retry a specific task without time travel. Resets
   the node and dependents, re-executes only what changed.
-- **`bunx smithers-orchestrator timetravel`**: Revert to a previous task state. Optionally
+- **`bunx smthrs timetravel`**: Revert to a previous task state. Optionally
   restore the VCS filesystem and resume immediately.
-- **`bunx smithers-orchestrator ask` diagnostics**: `--dump-prompt`, `--tool-surface`,
+- **`bunx smthrs ask` diagnostics**: `--dump-prompt`, `--tool-surface`,
   `--list-agents`, `--print-bootstrap` for debugging agent bootstrap.
 
 ---

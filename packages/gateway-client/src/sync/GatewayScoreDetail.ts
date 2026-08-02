@@ -1,4 +1,4 @@
-import type { GatewayScoreDetail as ProtocolGatewayScoreDetail } from "@smithers-orchestrator/protocol/gateway-rpc";
+import type { GatewayScoreDetail as ProtocolGatewayScoreDetail } from "@smthrs/protocol/gateway-rpc";
 
 /**
  * A single persisted score with its JSON payloads decoded by the gateway.

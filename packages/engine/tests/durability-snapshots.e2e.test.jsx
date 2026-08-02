@@ -1,12 +1,12 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { Effect } from "effect";
-import { runWorkflow, Task, Workflow } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { runWorkflow, Task, Workflow } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 

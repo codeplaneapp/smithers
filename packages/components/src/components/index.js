@@ -96,7 +96,7 @@
 /** @typedef {import("./SandboxVolumeMount.ts").SandboxVolumeMount} SandboxVolumeMount */
 /** @typedef {import("./SandboxWorkspaceSpec.ts").SandboxWorkspaceSpec} SandboxWorkspaceSpec */
 /** @typedef {import("./ScanFixVerifyProps.ts").ScanFixVerifyProps} ScanFixVerifyProps */
-/** @typedef {import("@smithers-orchestrator/graph/types").ScorersMap} ScorersMap */
+/** @typedef {import("@smthrs/graph/types").ScorersMap} ScorersMap */
 /** @typedef {import("./SequenceProps.ts").SequenceProps} SequenceProps */
 /** @typedef {import("./SidecarDelta.ts").SidecarDelta} SidecarDelta */
 /** @typedef {import("./SidecarProps.ts").SidecarProps} SidecarProps */

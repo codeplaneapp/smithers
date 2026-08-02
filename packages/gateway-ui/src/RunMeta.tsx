@@ -1,7 +1,7 @@
 /** @jsxImportSource react */
 import type { CSSProperties } from "react";
-import { useGatewayRun } from "@smithers-orchestrator/gateway-react";
-import { StatusPill } from "@smithers-orchestrator/ui";
+import { useGatewayRun } from "@smthrs/gateway-react";
+import { StatusPill } from "@smthrs/ui";
 import { ConnectionBadge } from "./ConnectionBadge";
 import { theme } from "./theme";
 

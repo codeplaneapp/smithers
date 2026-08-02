@@ -18,7 +18,7 @@ import {
   type AgentLike,
   ClaudeCodeAgent,
   KimiAgent,
-} from "smithers-orchestrator";
+} from "smthrs";
 import { codexFirst } from "../lib/codexAccounts";
 
 export const SOL_MODEL = process.env.SMITHERS_SOL_MODEL?.trim() || "gpt-5.6-sol";

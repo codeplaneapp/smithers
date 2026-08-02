@@ -8,7 +8,7 @@
  */
 
 /**
- * @param {import("@smithers-orchestrator/driver").SmithersCtx<any> | null | undefined} ctx
+ * @param {import("@smthrs/driver").SmithersCtx<any> | null | undefined} ctx
  * @param {unknown} target
  * @returns {Record<string, any>[]}
  */

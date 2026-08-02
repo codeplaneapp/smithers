@@ -1,11 +1,11 @@
-# @smithers-orchestrator/vcs — src
+# @smthrs/vcs — src
 
 The VCS layer for Smithers: jj/git binary resolution, the Effect-based jj
 command runner with workspace/snapshot operations, repo-root discovery, and the
 synchronous tooling preflight used by `smithers doctor`.
 
 - `resolveJjBinary.js` — resolves the `jj` to spawn: `SMITHERS_JJ_PATH` override
-  → bundled `@smithers-orchestrator/jj-<platform>` package → bare `"jj"` on PATH.
+  → bundled `@smthrs/jj-<platform>` package → bare `"jj"` on PATH.
 - `resolveGitBinary.js` — same for `git` (override → PATH; git is never bundled).
 - `jj.js` — `runJj` plus the operations built on it: pointer capture/revert,
   workspace add/list/close, `captureWorkspaceSnapshot`, `isJjRepo`. Effect-land;

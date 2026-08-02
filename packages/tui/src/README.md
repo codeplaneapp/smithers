@@ -1,4 +1,4 @@
-# @smithers-orchestrator/tui — src
+# @smthrs/tui — src
 
 The `smithers-mon` single-run terminal monitor.
 

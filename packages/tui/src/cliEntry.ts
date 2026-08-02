@@ -1,14 +1,14 @@
 import { fileURLToPath } from "node:url";
 
 /**
- * Resolve the real `@smithers-orchestrator/cli` entry point to spawn for
+ * Resolve the real `@smthrs/cli` entry point to spawn for
  * subcommands (`gateway`, `hijack`). Priority:
  *   1. `SMITHERS_CLI` — set by the CLI when it launches the TUI, the exact entry
  *      the user invoked.
- *   2. The installed `@smithers-orchestrator/cli` package's `.` entry, resolved
+ *   2. The installed `@smthrs/cli` package's `.` entry, resolved
  *      from disk so published `smithers-mon` installs work too.
  *
- * We resolve the package's ENTRY (`import.meta.resolve("@smithers-orchestrator/cli")`)
+ * We resolve the package's ENTRY (`import.meta.resolve("@smthrs/cli")`)
  * rather than its `package.json`: the CLI package's `exports` map does not
  * declare `"./package.json"`, and its `"./*"` wildcard would resolve a
  * `package.json` request to a non-existent `src/package.json.js`, so a
@@ -30,7 +30,7 @@ export function resolveCliEntry(
   const fromEnv = process.env.SMITHERS_CLI;
   if (fromEnv) return fromEnv;
   try {
-    const entryUrl = resolveModule("@smithers-orchestrator/cli");
+    const entryUrl = resolveModule("@smthrs/cli");
     return fileURLToPath(entryUrl);
   } catch {
     return null;

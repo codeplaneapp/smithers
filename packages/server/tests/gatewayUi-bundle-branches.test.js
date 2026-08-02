@@ -78,16 +78,12 @@ describe("gateway UI bundle branch coverage", () => {
     expect(body).toContain("QueryClient");
   });
 
-  test("resolves a smithers-orchestrator gateway UI dependency through the dedupe plugin", async () => {
+  test("resolves a smthrs gateway UI dependency through the dedupe plugin", async () => {
     tempDir = mkdtempSync(join(process.cwd(), ".smithers-ui-smithers-dep-"));
     const entry = join(tempDir, "entry.tsx");
     writeFileSync(
       entry,
-      [
-        'import * as GatewayClient from "@smithers-orchestrator/gateway-client";',
-        "console.log(GatewayClient);",
-        "",
-      ].join("\n"),
+      ['import * as GatewayClient from "@smthrs/gateway-client";', "console.log(GatewayClient);", ""].join("\n"),
     );
     const body = await bundleGatewayUiEntry({ entry }, new Map());
     expect(body.length).toBeGreaterThan(0);
@@ -103,7 +99,7 @@ describe("gateway UI bundle branch coverage", () => {
       [
         'import "react/__nope_subpath__";',
         'import "@tanstack/__nope_pkg__";',
-        'import "@smithers-orchestrator/gateway/__nope__";',
+        'import "@smthrs/gateway/__nope__";',
         "",
       ].join("\n"),
     );

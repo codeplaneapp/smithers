@@ -1,5 +1,5 @@
 import { getTableName } from "drizzle-orm";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { validateForkSources } from "./validateForkSources.js";
 import { resolveStableId } from "./utils/tree-ids.js";
 import { coerceFiniteNumber } from "./utils/numeric-props.js";

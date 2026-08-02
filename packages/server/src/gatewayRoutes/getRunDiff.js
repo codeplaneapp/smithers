@@ -1,8 +1,4 @@
-import {
-  applyDiffBundle,
-  computeDiffBundle,
-  computeDiffBundleBetweenRefs,
-} from "@smithers-orchestrator/engine/effect/diff-bundle";
+import { applyDiffBundle, computeDiffBundle, computeDiffBundleBetweenRefs } from "@smthrs/engine/effect/diff-bundle";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

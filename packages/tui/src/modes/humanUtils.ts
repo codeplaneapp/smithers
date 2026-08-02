@@ -1,4 +1,4 @@
-import type { GatewayRunNode, GatewayApprovalRow } from "@smithers-orchestrator/gateway-client";
+import type { GatewayRunNode, GatewayApprovalRow } from "@smthrs/gateway-client";
 
 /**
  * Everything the inspector needs to render a pending durable human-task request.

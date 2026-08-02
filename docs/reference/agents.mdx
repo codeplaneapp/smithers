@@ -22,13 +22,13 @@ import {
   OpenAIAgent,
   createHttpTool,
   hashCapabilityRegistry,
-} from "smithers-orchestrator";
-import type { AgentLike, OpenAIAgentOptions } from "smithers-orchestrator";
+} from "smthrs";
+import type { AgentLike, OpenAIAgentOptions } from "smthrs";
 ```
 
 <Note>
 Import agent classes, the tool factories, and their option **types** from the
-`smithers-orchestrator` facade. The option type shapes are also listed in the
+`smthrs` facade. The option type shapes are also listed in the
 [Types reference](/reference/types).
 </Note>
 
@@ -78,7 +78,7 @@ plus a `model`. Reach for these to bill a provider's API directly. For a vendor'
 full CLI surface, use a [CLI agent](#cli-agents).
 
 ```ts
-import { OpenAIAgent, AnthropicAgent, tools } from "smithers-orchestrator";
+import { OpenAIAgent, AnthropicAgent, tools } from "smthrs";
 import { stepCountIs } from "ai";
 
 const implementer = new OpenAIAgent({
@@ -207,7 +207,7 @@ See [SOTA role defaults](/reference/sota-models#role-defaults).
 </Note>
 
 ```tsx
-import { CodexAgent, Task, Workflow, createSmithers } from "smithers-orchestrator";
+import { CodexAgent, Task, Workflow, createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { smithers, outputs } = createSmithers({

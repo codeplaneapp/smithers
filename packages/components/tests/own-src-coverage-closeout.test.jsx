@@ -1,10 +1,10 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import { ScanFixVerify } from "../src/components/index.js";
 import { useOptionalSmithersContext } from "../src/components/useOptionalSmithersContext.js";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
-import { SmithersContext, SmithersCtx } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersRenderer } from "@smthrs/react-reconciler/dom/renderer";
+import { SmithersContext, SmithersCtx } from "@smthrs/react-reconciler/context";
 
 const agent = { id: "agent", generate: async () => ({ text: "ok" }) };
 const otherAgent = { id: "other", generate: async () => ({ text: "ok" }) };

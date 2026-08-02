@@ -7,7 +7,7 @@ import {
   timedOut,
   useSmithersMachine,
   type SmithersEventSource,
-} from "@smithers-orchestrator/xstate";
+} from "@smthrs/xstate";
 
 const machine = createMachine({
   context: { revision: 0 },

@@ -1,10 +1,10 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { startServer } from "../src/index.js";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { sleep } from "../../smithers/tests/helpers.js";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -82,8 +82,8 @@ const fakeAgent = {
     const body = slow ? "run the slow task" : "{{ value: 7 }}";
     writeFileSync(
       workflowPath,
-      `/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+      `/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 ${slowAgent}
 const { smithers, Workflow, Task, outputs } = createSmithers(

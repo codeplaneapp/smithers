@@ -1,11 +1,6 @@
 /** @jsxImportSource react */
-import {
-  createGatewayReactRoot,
-  useGatewayNodeOutput,
-  useGatewayRun,
-  useGatewayRuns,
-} from "smithers-orchestrator/gateway-react";
-import { ConnectionBadge, RunEventLog, RunTree, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
+import { createGatewayReactRoot, useGatewayNodeOutput, useGatewayRun, useGatewayRuns } from "smthrs/gateway-react";
+import { ConnectionBadge, RunEventLog, RunTree, WorkflowUiShell } from "smthrs/gateway-ui";
 import {
   Badge,
   Card,
@@ -17,7 +12,7 @@ import {
   SectionHeader,
   SmithersUiStyles,
   StatusPill,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 
 function runIdFromUrl(): string | undefined {
   if (typeof location === "undefined") return undefined;

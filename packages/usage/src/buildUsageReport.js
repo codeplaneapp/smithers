@@ -1,6 +1,6 @@
-import { API_KEY_PROVIDERS } from "@smithers-orchestrator/accounts";
+import { API_KEY_PROVIDERS } from "@smthrs/accounts";
 
-/** @typedef {import("@smithers-orchestrator/accounts").Account} Account */
+/** @typedef {import("@smthrs/accounts").Account} Account */
 /** @typedef {import("./UsageReport.ts").UsageReport} UsageReport */
 /** @typedef {import("./UsageWindow.ts").UsageWindow} UsageWindow */
 

@@ -1,4 +1,4 @@
-# @smithers-orchestrator/observability — src
+# @smthrs/observability — src
 
 The concrete observability implementation: Effect-based metrics, logging, and
 tracing services, OTLP layer wiring (`createSmithersObservabilityLayer`,

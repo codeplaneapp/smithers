@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 import { useInsertionEffect, type ComponentProps, type CSSProperties, type ReactNode } from "react";
-import { Button, type ButtonProps } from "@smithers-orchestrator/ui";
+import { Button, type ButtonProps } from "@smthrs/ui";
 import { ensureGatewayUiStyles } from "./theme";
 
 /**

@@ -7,7 +7,7 @@
 // throws, returns a structured result the caller can log or branch on.
 
 import { Effect } from "effect";
-import { revertToJjPointer } from "@smithers-orchestrator/vcs/jj";
+import { revertToJjPointer } from "@smthrs/vcs/jj";
 import { getPlatformLayer } from "./platform-layer.js";
 
 /**

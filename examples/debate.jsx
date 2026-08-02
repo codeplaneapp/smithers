@@ -5,11 +5,11 @@
  * Use cases: design decisions, architecture choices, trade-off analysis,
  * RFC evaluation, technology selection.
  */
-import { Sequence, Parallel, Loop } from "smithers-orchestrator";
+import { Sequence, Parallel, Loop } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, grep } from "smithers-orchestrator/tools";
+import { read, grep } from "smthrs/tools";
 import { z } from "zod";
 import ArgumentPrompt from "./prompts/debate/argument.mdx";
 import VerdictPrompt from "./prompts/debate/verdict.mdx";

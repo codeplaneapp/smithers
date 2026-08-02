@@ -16,7 +16,7 @@ It provides:
 Smithers installs this plugin as part of:
 
 ```bash
-bunx smithers-orchestrator mcp add --agent openclaw
+bunx smthrs mcp add --agent openclaw
 ```
 
 The same command also writes the Smithers MCP server into

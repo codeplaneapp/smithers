@@ -1,7 +1,7 @@
 // src/renderWorkflow.ts
-import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler";
-import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
+import { SmithersCtx } from "@smthrs/driver/SmithersCtx";
+import { SmithersRenderer } from "@smthrs/react-reconciler";
+import { canonicalizeXml } from "@smthrs/graph/utils/xml";
 function buildRuntimeConfig(options) {
   return {
     ...options.runtimeConfig,
@@ -35,8 +35,8 @@ async function renderWorkflow(workflow, options = {}) {
   );
   const baseRootDir = options.baseRootDir ?? options.runtimeConfig?.baseRootDir;
   const workflowPath = options.workflowPath ?? options.runtimeConfig?.workflowPath ?? null;
-  const engineHelpers = await import("@smithers-orchestrator/engine/engine");
-  const computeHelpers = await import("@smithers-orchestrator/engine/task-compute-fns");
+  const engineHelpers = await import("@smthrs/engine/engine");
+  const computeHelpers = await import("@smthrs/engine/task-compute-fns");
   engineHelpers.resolveTaskOutputs(graph.tasks, workflow);
   computeHelpers.attachSubflowComputeFns(graph.tasks, workflow, {
     rootDir: baseRootDir,

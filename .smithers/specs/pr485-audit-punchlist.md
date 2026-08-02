@@ -117,10 +117,10 @@ delete it; audit sync/SyncKey.ts + sync/SyncBackoff.ts — keep only what the
 new stack imports (delete orphans and their barrel exports if any).
 
 ## Gate (all must pass before you finish)
-- pnpm --filter @smithers-orchestrator/gateway-client typecheck+test
-- pnpm --filter @smithers-orchestrator/gateway-react typecheck+test
-- pnpm --filter @smithers-orchestrator/server typecheck+test
-- pnpm --filter @smithers-orchestrator/gateway typecheck+test
+- pnpm --filter @smthrs/gateway-client typecheck+test
+- pnpm --filter @smthrs/gateway-react typecheck+test
+- pnpm --filter @smthrs/server typecheck+test
+- pnpm --filter @smthrs/gateway typecheck+test
 - root `pnpm typecheck`
 - If evals regen tooling exists, run it; if docs mention changed APIs run
   `pnpm docs:llms`.

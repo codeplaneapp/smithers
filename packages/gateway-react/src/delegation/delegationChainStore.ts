@@ -29,7 +29,7 @@
  */
 
 import { Data, Effect, Exit, Fiber, Match, Queue, Ref, Scope, Stream, SubscriptionRef } from "effect";
-import { GatewayRpcError } from "@smithers-orchestrator/gateway-client";
+import { GatewayRpcError } from "@smthrs/gateway-client";
 import {
   delegationTargetKey,
   delegationTargetsFromEvents,

@@ -1,5 +1,5 @@
 // smithers-display-name: Agentic UI Library Program
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import {
   ClaudeCodeAgent,
   MergeQueue,
@@ -10,7 +10,7 @@ import {
   UI,
   Worktree,
   createSmithers,
-} from "smithers-orchestrator";
+} from "smthrs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
@@ -256,7 +256,7 @@ export const LANES: Lane[] = [
       "Add in packages/ui/src/agentic/ (or approvals/ per the frozen spec): the Confirmation family (Confirmation, ConfirmationTitle, ConfirmationRequest, ConfirmationAccepted, ConfirmationRejected, ConfirmationActions, ConfirmationAction), ApprovalCard with ApprovalRisk, ApprovalResources, ApprovalNote (note/editor slots, risk levels, proposed actions, affected resources), and the Checkpoint family (Checkpoint, CheckpointIcon, CheckpointMetadata, CheckpointTrigger, CheckpointActions).",
       "Approval states must cover: synchronizing, requested, approving, denying, approved, denied, expired, unavailable, failed-submission.",
       "Checkpoint actions must support the Smithers concepts: restore, fork, replay, rewind, return-to-live.",
-      "Then add Gateway-connected wrappers in packages/gateway-ui (NEW files only, composed over smithers-orchestrator/gateway-react hooks + these base components): an approval wrapper wired to useGatewayApprovals/submitApproval (decision is a nested {approved} object) and a checkpoint wrapper wired to the snapshot/rewind actions. Do not modify existing gateway-ui exports' behavior; the integration lane wires barrels.",
+      "Then add Gateway-connected wrappers in packages/gateway-ui (NEW files only, composed over smthrs/gateway-react hooks + these base components): an approval wrapper wired to useGatewayApprovals/submitApproval (decision is a nested {approved} object) and a checkpoint wrapper wired to the snapshot/rewind actions. Do not modify existing gateway-ui exports' behavior; the integration lane wires barrels.",
     ].join("\n"),
   },
   {
@@ -439,7 +439,7 @@ export const ADOPTION_LANES: Lane[] = [
       "CompactGroup",
     ],
     spec: [
-      `Refactor Multi's transcript and composer (${MULTI_ROOT}/src/chat/ChatTranscript.tsx, ComposingCard.tsx and their collaborators) to consume the shared components from @smithers-orchestrator/ui: Message family, MessageScroller, Bubble, MessageBranch, PromptInput, AttachmentGroup, Marker, Shimmer, SuggestionGroup, Reasoning, ToolCall, Sources, CompactGroup.`,
+      `Refactor Multi's transcript and composer (${MULTI_ROOT}/src/chat/ChatTranscript.tsx, ComposingCard.tsx and their collaborators) to consume the shared components from @smthrs/ui: Message family, MessageScroller, Bubble, MessageBranch, PromptInput, AttachmentGroup, Marker, Shimmer, SuggestionGroup, Reasoning, ToolCall, Sources, CompactGroup.`,
       "PRESERVE, verified by the existing tests: Zustand store ownership (zero new useState/useEffect in product code), ref-registered imperative handles, transcript persistence, scope compaction, inline live cards, pair co-composition, slash commands, dictation, streaming behavior, and honest pending/error states.",
     ].join("\n"),
   },
@@ -848,7 +848,7 @@ const HOUSE_RULES = [
   "House rules for ALL smithers-repo lanes in this program:",
   "- FIRST read packages/ui/src/README.md and packages/ui/tests/css-contract.test.ts end to end; they are the architecture contract (shadcn anatomy: data-slot attributes, compound APIs, CVA where appropriate, Radix Slot/asChild; sui-* class namespace; colors ONLY through the tokens.ts bridge; CSS shipped ONLY as TypeScript strings because Gateway bundling drops CSS imports; every component self-injects its deduplicated stylesheet).",
   "- Light, dark, reduced-motion, keyboard, and screen-reader behavior are mandatory for every component. Never hardcode a hex color; dark mode comes from tokens, not per-component code.",
-  "- Base exports stay lightweight: NO new runtime dependencies in @smithers-orchestrator/ui base. Heavy renderers go behind adapters/* subpaths only. Tailwind is banned; port upstream anatomy/behavior/accessibility/state models, never code.",
+  "- Base exports stay lightweight: NO new runtime dependencies in @smthrs/ui base. Heavy renderers go behind adapters/* subpaths only. Tailwind is banned; port upstream anatomy/behavior/accessibility/state models, never code.",
   "- NEVER edit shared integration files in a component lane: packages/ui/src/index.ts, packages/ui/src/uiCss.ts, packages/ui/shadcn-provenance.json, packages/gateway-ui/src/index.ts, ANY package.json, pnpm-lock.yaml, bun.lock, docs/**, or scripts/ui-architecture-baseline.json. The integration lane owns all of those. Your lane ships ONLY: component sources in your lane's directory, lane-owned *Css.ts string fragment(s) that your components self-inject (follow the frozen spec's convention), colocated tests, and a provenance FRAGMENT at packages/ui/provenance/<your-lane-id>.json following the existing fragment files there.",
   "- packages/ui stays transport-neutral: props-driven, zero imports from gateway-react/gateway-client. Gateway hook/action bindings belong in packages/gateway-ui (only the approvals-checkpoints and workflow-canvas lanes touch it, in NEW files).",
   "- Tests: real behavior, no mocks that conceal missing integration. bun + happy-dom render tests including a data-theme=dark render; where happy-dom cannot paint (canvas-like widgets), assert the parsed model. New behavior must go red before your change and green after.",
@@ -861,7 +861,7 @@ const HOUSE_RULES = [
 const MULTI_RULES = [
   `House rules for ALL Multi adoption lanes (repo: ${MULTI_ROOT}):`,
   `- ALL work happens in ${MULTI_ROOT} (jj-colocated). The working copy carries UNRELATED uncommitted changes (a URL-identity refactor and others) that MUST be preserved: never revert, reformat, or commit files you did not change for this lane. Use jj st / jj diff as working-copy truth; commit ONLY your own files with explicit pathspecs (\`jj commit <paths> -m ...\`); NEVER git add -A / git commit -a / git stash / git rebase / --amend.`,
-  "- Multi must NOT add a direct AI Elements runtime dependency, must NOT add @smithers-orchestrator/gateway-ui, and must NOT create duplicate local wrapper components around the shared ones. It already links @smithers-orchestrator/ui (pnpm override link:../smithers/packages/ui); import from it directly (adapters via @smithers-orchestrator/ui/adapters/* if needed).",
+  "- Multi must NOT add a direct AI Elements runtime dependency, must NOT add @smthrs/gateway-ui, and must NOT create duplicate local wrapper components around the shared ones. It already links @smthrs/ui (pnpm override link:../smithers/packages/ui); import from it directly (adapters via @smthrs/ui/adapters/* if needed).",
   "- Respect Multi's state discipline: Zustand-only React state in product code (no new useState/useEffect), stores own behavior, components render.",
   "- Real behavior and data in tests; no mocks that conceal missing integration. Honest pending/error states.",
   "- Focused verification before you report: pnpm check:ui-architecture, pnpm typecheck, and the focused tests for the files you touched.",
@@ -1035,7 +1035,7 @@ function adoptionValidatePrompt(lane: Lane, implementation: RawRow | undefined):
     "Steps (run them in the Multi repo, do not trust the report):",
     "1. `jj log -r 'mine() & description(glob:\"*\")' -n 10` + `jj st`: confirm the lane's commits exist, contain ONLY lane-relevant files, and the unrelated dirty working copy was not swept in (diffNonEmpty=false if no lane commits exist).",
     "2. Run pnpm check:ui-architecture, pnpm test:ui-architecture, pnpm typecheck, and the focused tests for the touched surfaces.",
-    "3. Verify no duplicate local wrappers were created, no AI Elements dependency and no @smithers-orchestrator/gateway-ui dependency were added (check package.json), and raw/source fallbacks remain where structured renderers took over.",
+    "3. Verify no duplicate local wrappers were created, no AI Elements dependency and no @smthrs/gateway-ui dependency were added (check package.json), and raw/source fallbacks remain where structured renderers took over.",
     "4. Spot-check preserved behaviors named in the lane spec (stores, imperative handles, persistence, streaming, dictation as applicable).",
     "5. Distinguish INHERITED breakage (failures on files outside the lane's commits) and note it in summary without failing the lane for it.",
     "Set allPassed=false if the report is partial/blocked, a lane-owned check fails, or a claimed test does not exist.",

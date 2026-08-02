@@ -29,35 +29,31 @@ describe("isCommentLine", () => {
 
 describe("findViolationsInFile", () => {
   it("flags a published-CLI call in a shell script", () => {
-    const violations = findViolationsInFile("a.sh", "bunx smithers-orchestrator up flow.tsx\n");
+    const violations = findViolationsInFile("a.sh", "bunx smthrs up flow.tsx\n");
     assert.equal(violations.length, 1);
     assert.equal(violations[0].line, 1);
   });
 
   it("flags every runner that fetches the published package", () => {
     for (const runner of ["bunx", "npx", "pnpm dlx", "yarn dlx"]) {
-      const violations = findViolationsInFile("a.sh", `${runner} smithers-orchestrator ps\n`);
+      const violations = findViolationsInFile("a.sh", `${runner} smthrs ps\n`);
       assert.equal(violations.length, 1, `${runner} should be flagged`);
     }
   });
 
   it("ignores comments in a shell script", () => {
-    assert.deepEqual(findViolationsInFile("a.sh", "# bunx smithers-orchestrator ps\n"), []);
+    assert.deepEqual(findViolationsInFile("a.sh", "# bunx smthrs ps\n"), []);
   });
 
   it("flags a published-CLI call in package.json scripts", () => {
-    const contents = JSON.stringify(
-      { scripts: { build: "tsc", release: "bunx smithers-orchestrator up r.tsx" } },
-      null,
-      2,
-    );
+    const contents = JSON.stringify({ scripts: { build: "tsc", release: "bunx smthrs up r.tsx" } }, null, 2);
     const violations = findViolationsInFile("package.json", contents);
     assert.equal(violations.length, 1);
     assert.match(violations[0].text, /^release: /);
   });
 
   it("ignores non-script package.json fields", () => {
-    const contents = JSON.stringify({ description: "run bunx smithers-orchestrator up" });
+    const contents = JSON.stringify({ description: "run bunx smthrs up" });
     assert.deepEqual(findViolationsInFile("package.json", contents), []);
   });
 
@@ -66,31 +62,31 @@ describe("findViolationsInFile", () => {
   });
 
   it("flags a shell-executed call in TypeScript", () => {
-    const source = "const res = await $`bunx smithers-orchestrator graph f.tsx`.nothrow();\n";
+    const source = "const res = await $`bunx smthrs graph f.tsx`.nothrow();\n";
     const violations = findViolationsInFile("w.tsx", source);
     assert.equal(violations.length, 1);
   });
 
   it("flags a spawnSync call in JavaScript", () => {
-    const source = 'spawnSync("sh", ["-c", "bunx smithers-orchestrator ps"]);\n';
+    const source = 'spawnSync("sh", ["-c", "bunx smthrs ps"]);\n';
     assert.equal(findViolationsInFile("h.mjs", source).length, 1);
   });
 
   it("leaves prose in agent prompts and docs assertions alone", () => {
-    const source = 'const prompt = "Verify with `bunx smithers-orchestrator graph <file>`";\n';
+    const source = 'const prompt = "Verify with `bunx smthrs graph <file>`";\n';
     assert.deepEqual(findViolationsInFile("w.tsx", source), []);
   });
 
   it("flags every line of a plugin server config", () => {
     const contents = JSON.stringify({
-      mcpServers: { smithers: { command: "bunx smithers-orchestrator", args: ["--mcp"] } },
+      mcpServers: { smithers: { command: "bunx smthrs", args: ["--mcp"] } },
     });
     assert.equal(findViolationsInFile("claude-plugin/.mcp.json", contents).length, 1);
   });
 
   it("returns nothing for an allowlisted path", () => {
     const [allowlisted] = Object.keys(ALLOWLIST);
-    assert.deepEqual(findViolationsInFile(allowlisted, "bunx smithers-orchestrator ps\n"), []);
+    assert.deepEqual(findViolationsInFile(allowlisted, "bunx smthrs ps\n"), []);
   });
 });
 

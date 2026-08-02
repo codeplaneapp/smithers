@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { metricsServiceAdapter } from "@smithers-orchestrator/observability/metrics";
+import { metricsServiceAdapter } from "@smthrs/observability/metrics";
 
 function snapshot() {
   return Effect.runPromise(metricsServiceAdapter.snapshot());

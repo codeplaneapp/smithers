@@ -78,12 +78,7 @@ import {
   waitTone,
   workflowOptions,
 } from "../src/monitor-ui/monitorModel.ts";
-import {
-  hijackActionFor,
-  hijackCandidateForNode,
-  hijackCandidatesOf,
-  ptyHijackUrl,
-} from "smithers-orchestrator/gateway-ui";
+import { hijackActionFor, hijackCandidateForNode, hijackCandidatesOf, ptyHijackUrl } from "smthrs/gateway-ui";
 import { predictRunUsage } from "../src/monitor-ui/usagePrediction.ts";
 
 describe("embedded monitor bootstrap", () => {

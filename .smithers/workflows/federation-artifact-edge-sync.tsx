@@ -3,8 +3,8 @@
 // smithers-display-name: Federation Artifact Edge Sync
 // smithers-description: Synchronize future package dependency facts across reviewed federation artifacts.
 // smithers-tags: maintenance, federation, architecture
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 
@@ -41,9 +41,9 @@ Never inspect the dirty live checkout as source evidence. Do not mutate the
 source clone, manifest.json, GitHub, workflow code, or repository source.
 
 The release plan and DAG currently disagree in futureAggregate:
-- dag.json has the required @smithers-orchestrator/engine ->
-  @smithers-orchestrator/review package edge; release-plan.json omits it.
-- release-plan.json correctly records @smithers-orchestrator/gateway-react
+- dag.json has the required @smthrs/engine ->
+  @smthrs/review package edge; release-plan.json omits it.
+- release-plan.json correctly records @smthrs/gateway-react
   runtime dependsOn/postDecoupleDependsOn as gateway-client only and
   devDependsOn as db/server. dag.json still incorrectly puts db/server in its
   runtime dependsOn/postDecoupleDependsOn.

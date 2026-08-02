@@ -18,7 +18,7 @@ import { xtermBaseCss } from "./xtermCss";
  * live run UI unchanged.
  *
  * It lives in the `adapters/` layer because it pulls the heavy `@xterm/*`
- * widgets; reach it through the `@smithers-orchestrator/ui/adapters/terminal`
+ * widgets; reach it through the `@smthrs/ui/adapters/terminal`
  * subpath (never the base barrel, which the UI-architecture guard keeps free of
  * heavy dependencies).
  */

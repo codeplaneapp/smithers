@@ -2,7 +2,7 @@ import { MakeWebhookSourceOptions } from '../core/EventSourceTypes.js';
 import { LinearConfig } from './LinearConfig.js';
 import '../core/CursorStoreTypes.js';
 import 'effect';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 import '../core/ExternalEventTypes.js';
 
 type MakeLinearWebhookSourceOptions = LinearConfig & {

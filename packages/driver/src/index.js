@@ -11,7 +11,7 @@
 /** @typedef {import("./OutputKey.ts").OutputKey} OutputKey */
 /** @typedef {import("./OutputSnapshot.ts").OutputSnapshot} OutputSnapshot */
 /** @template [Schema=unknown] @typedef {import("./OutputRows.ts").OutputRowsReader<Schema>} OutputRowsReader */
-/** @typedef {import("@smithers-orchestrator/graph/ProofBinding").ProofBinding} ProofBinding */
+/** @typedef {import("@smthrs/graph/ProofBinding").ProofBinding} ProofBinding */
 /** @typedef {import("./RunAuthContext.ts").RunAuthContext} RunAuthContext */
 /** @typedef {import("./RunStartedBy.ts").RunStartedBy} RunStartedBy */
 /** @typedef {import("./RunOptions.ts").EffectPlatformRuntime} EffectPlatformRuntime */

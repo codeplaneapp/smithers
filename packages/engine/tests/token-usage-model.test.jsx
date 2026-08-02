@@ -1,11 +1,11 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { Workflow, Task, runWorkflow } from "smithers-orchestrator";
+import { Workflow, Task, runWorkflow } from "smthrs";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 const schemas = { a: z.object({ v: z.number() }) };
 

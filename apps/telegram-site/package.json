@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/telegram-site",
+  "name": "@smthrs/telegram-site",
   "version": "0.0.1",
   "private": true,
   "description": "Cloudflare Worker deployment for the Smithers on Telegram marketing site",

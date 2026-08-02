@@ -1,15 +1,9 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import {
-  Task,
-  Workflow,
-  closeSingleRunnerRuntime,
-  reopenSingleRunnerRuntime,
-  runWorkflow,
-} from "smithers-orchestrator";
-import { __singleRunnerInternals as I } from "@smithers-orchestrator/engine/effect/single-runner";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { Task, Workflow, closeSingleRunnerRuntime, reopenSingleRunnerRuntime, runWorkflow } from "smthrs";
+import { __singleRunnerInternals as I } from "@smthrs/engine/effect/single-runner";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 

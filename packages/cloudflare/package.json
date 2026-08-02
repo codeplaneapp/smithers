@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/cloudflare",
+  "name": "@smthrs/cloudflare",
   "version": "0.32.0",
   "description": "Cloudflare Workers, Durable Object SQLite, D1, and Sandbox SDK integration for Smithers",
   "type": "module",
@@ -20,7 +20,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@smithers-orchestrator/sandbox": "workspace:*"
+    "@smthrs/sandbox": "workspace:*"
   },
   "peerDependencies": {
     "@cloudflare/sandbox": "^0.12.3"
@@ -31,7 +31,7 @@
     }
   },
   "devDependencies": {
-    "@smithers-orchestrator/db": "workspace:*",
+    "@smthrs/db": "workspace:*",
     "@types/bun": "latest",
     "typescript": "~6.0.3",
     "@cloudflare/sandbox": "^0.12.3"

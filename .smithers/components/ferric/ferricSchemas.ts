@@ -1,4 +1,4 @@
-import { approvalDecisionSchema } from "smithers-orchestrator";
+import { approvalDecisionSchema } from "smthrs";
 import { z } from "zod";
 
 /**

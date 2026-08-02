@@ -1,5 +1,5 @@
-/** @jsxImportSource smithers-orchestrator */
-import { Parallel, Sequence } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Parallel, Sequence } from "smthrs";
 import { Task, outputs } from "./ferricSmithers";
 import { CampaignGate, gateRow } from "./CampaignGate";
 import { Slice } from "./Slice";

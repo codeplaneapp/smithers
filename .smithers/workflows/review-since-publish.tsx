@@ -1,8 +1,8 @@
 // smithers-source: authored
 // smithers-display-name: Review Since Publish
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
-import { createSmithers, Loop, Parallel, Sequence, Task } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
+import { createSmithers, Loop, Parallel, Sequence, Task } from "smthrs";
 import { z } from "zod/v4";
 import { providers } from "../agents";
 import { baselineBriefing, resolvePublishBaseline, type PublishBaseline } from "../lib/publishBaseline";
@@ -82,7 +82,7 @@ const baselineSchema = z.object({
 });
 
 export const inputSchema = z.object({
-  packageName: z.string().trim().min(1).default("smithers-orchestrator"),
+  packageName: z.string().trim().min(1).default("smthrs"),
   repoRoot: z.string().trim().min(1).default(process.cwd()),
   /** Skip the npm lookup and pin the baseline tag by hand. */
   tag: z.string().trim().default(""),

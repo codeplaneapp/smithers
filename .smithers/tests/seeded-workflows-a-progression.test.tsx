@@ -1,10 +1,10 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { renderPrompt, renderWorkflow, runTask, simulate } from "smithers-orchestrator/testing";
+import { renderPrompt, renderWorkflow, runTask, simulate } from "smthrs/testing";
 
 const workflows = join(import.meta.dir, "..", "workflows");
 const load = async (file: string, tag = "") => {

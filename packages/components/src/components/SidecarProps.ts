@@ -1,6 +1,6 @@
 import type React from "react";
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
-import type { ScorersMap } from "@smithers-orchestrator/graph/types";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
+import type { ScorersMap } from "@smthrs/graph/types";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type SidecarProps = {

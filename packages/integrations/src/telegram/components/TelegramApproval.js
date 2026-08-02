@@ -25,7 +25,7 @@
 
 import React from "react";
 import { Effect } from "effect";
-import { Task } from "@smithers-orchestrator/components";
+import { Task } from "@smthrs/components";
 import { OnCallbackQuery } from "./OnMessage.js";
 import { SendMessage, TelegramSendResultSchema } from "./SendMessage.js";
 import { TelegramCallbackQuerySchema } from "../schemas.js";

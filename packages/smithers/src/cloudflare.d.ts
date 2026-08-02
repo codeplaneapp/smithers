@@ -1,2 +1,2 @@
 export { createSmithersCloudflare } from "./index.js";
-export * from "@smithers-orchestrator/cloudflare";
+export * from "@smthrs/cloudflare";

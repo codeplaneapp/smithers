@@ -5,11 +5,11 @@
  *
  * Shape: git inspector → diagnosis agent → command plan → optional execution.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { bash, read, grep } from "smithers-orchestrator/tools";
+import { bash, read, grep } from "smthrs/tools";
 import { z } from "zod";
 import InspectPrompt from "./prompts/branch-doctor/inspect.mdx";
 import DiagnosePrompt from "./prompts/branch-doctor/diagnose.mdx";

@@ -43,34 +43,30 @@ function provenanceManifest() {
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "smithers-ui-architecture-"));
-  json(root, "package.json", { name: "smithers-orchestrator", exports: {} });
+  json(root, "package.json", { name: "smthrs", exports: {} });
   json(root, "packages/ui/package.json", {
-    name: "@smithers-orchestrator/ui",
+    name: "@smthrs/ui",
     exports: { ".": "./src/index.ts" },
   });
   write(root, "packages/ui/src/index.ts", "export const ui = true;\n");
   json(root, "packages/ui/shadcn-provenance.json", provenanceManifest());
   json(root, "packages/components/package.json", {
-    name: "@smithers-orchestrator/components",
+    name: "@smthrs/components",
     exports: { ".": "./src/index.js" },
   });
   write(root, "packages/components/src/index.js", "export const workflowComponent = true;\n");
   json(root, "packages/gateway-react/package.json", {
-    name: "@smithers-orchestrator/gateway-react",
+    name: "@smthrs/gateway-react",
     exports: { ".": "./src/index.ts" },
-    dependencies: { "@smithers-orchestrator/gateway-client": "workspace:*" },
+    dependencies: { "@smthrs/gateway-client": "workspace:*" },
   });
   write(root, "packages/gateway-react/src/index.ts", "export const gatewayHook = true;\n");
   json(root, "packages/gateway-ui/package.json", {
-    name: "@smithers-orchestrator/gateway-ui",
+    name: "@smthrs/gateway-ui",
     exports: { ".": "./src/index.ts" },
-    dependencies: { "@smithers-orchestrator/gateway-react": "workspace:*" },
+    dependencies: { "@smthrs/gateway-react": "workspace:*" },
   });
-  write(
-    root,
-    "packages/gateway-ui/src/index.ts",
-    'export { useGatewayRun } from "@smithers-orchestrator/gateway-react";\n',
-  );
+  write(root, "packages/gateway-ui/src/index.ts", 'export { useGatewayRun } from "@smthrs/gateway-react";\n');
   return root;
 }
 
@@ -118,7 +114,7 @@ test("a compliant pack UI passes", (context) => {
   write(
     root,
     ".smithers/ui/compliant.tsx",
-    'import { useState } from "react"; import { Button } from "smithers-orchestrator/ui"; import { helper } from "./helper"; export function Compliant() { const [open] = useState(false); return <Button>{helper(open)}</Button>; }\n',
+    'import { useState } from "react"; import { Button } from "smthrs/ui"; import { helper } from "./helper"; export function Compliant() { const [open] = useState(false); return <Button>{helper(open)}</Button>; }\n',
   );
   write(root, ".smithers/ui/helper.ts", 'export function helper(open: boolean) { return open ? "Open" : "Closed"; }\n');
   snapshot(root);
@@ -206,7 +202,7 @@ test("workflow-render hooks are distinct from public gateway data hooks", (conte
   const root = fixture();
   context.after(() => rmSync(root, { recursive: true, force: true }));
   json(root, "packages/xstate/package.json", {
-    name: "@smithers-orchestrator/xstate",
+    name: "@smthrs/xstate",
     exports: { ".": "./src/index.js" },
     dependencies: { react: "^19.0.0" },
   });
@@ -280,7 +276,7 @@ for (const [name, mutate, expected] of [
       write(
         root,
         "packages/ui/src/chat/Chat.tsx",
-        'import { useGatewayRun } from "@smithers-orchestrator/gateway-react"; export function Chat() { return <div />; }\n',
+        'import { useGatewayRun } from "@smthrs/gateway-react"; export function Chat() { return <div />; }\n',
       ),
     "gateway-react-location",
   ],
@@ -288,14 +284,10 @@ for (const [name, mutate, expected] of [
     "gateway hooks in any other package",
     (root) => {
       json(root, "packages/consumer/package.json", {
-        name: "@smithers-orchestrator/consumer",
+        name: "@smthrs/consumer",
         exports: { ".": "./src/index.ts" },
       });
-      write(
-        root,
-        "packages/consumer/src/index.ts",
-        'export { useGatewayRun } from "@smithers-orchestrator/gateway-react";\n',
-      );
+      write(root, "packages/consumer/src/index.ts", 'export { useGatewayRun } from "@smthrs/gateway-react";\n');
     },
     "gateway-react-location",
   ],
@@ -303,14 +295,10 @@ for (const [name, mutate, expected] of [
     "gateway hooks from a public package entry outside src",
     (root) => {
       json(root, "packages/consumer/package.json", {
-        name: "@smithers-orchestrator/consumer",
+        name: "@smthrs/consumer",
         exports: { ".": "./index.ts" },
       });
-      write(
-        root,
-        "packages/consumer/index.ts",
-        'export { useGatewayRun } from "@smithers-orchestrator/gateway-react";\n',
-      );
+      write(root, "packages/consumer/index.ts", 'export { useGatewayRun } from "@smthrs/gateway-react";\n');
     },
     "gateway-react-location",
   ],
@@ -472,7 +460,7 @@ for (const [name, mutate, expected] of [
     "a second public React hook package",
     (root) => {
       json(root, "packages/data-react/package.json", {
-        name: "@smithers-orchestrator/data-react",
+        name: "@smthrs/data-react",
         main: "index.js",
         dependencies: { react: "^19.0.0" },
       });
@@ -484,7 +472,7 @@ for (const [name, mutate, expected] of [
     "a public hook subpath outside src",
     (root) => {
       json(root, "packages/data/package.json", {
-        name: "@smithers-orchestrator/data",
+        name: "@smthrs/data",
         exports: { "./use-data": "./use-data.ts" },
       });
       write(root, "packages/data/use-data.ts", "export function useData() { return null; }\n");
@@ -495,7 +483,7 @@ for (const [name, mutate, expected] of [
     "a CommonJS public hook entry",
     (root) => {
       json(root, "packages/data/package.json", {
-        name: "@smithers-orchestrator/data",
+        name: "@smthrs/data",
         main: "index.cjs",
       });
       write(root, "packages/data/index.cjs", "module.exports.useData = function useData() { return null; };\n");
@@ -506,7 +494,7 @@ for (const [name, mutate, expected] of [
     "a CommonJS object public hook entry",
     (root) => {
       json(root, "packages/data/package.json", {
-        name: "@smithers-orchestrator/data",
+        name: "@smthrs/data",
         main: "index.cjs",
       });
       write(root, "packages/data/index.cjs", "function useData() { return null; }\nmodule.exports = { useData };\n");
@@ -517,7 +505,7 @@ for (const [name, mutate, expected] of [
     "a direct CommonJS-assigned public hook entry",
     (root) => {
       json(root, "packages/data/package.json", {
-        name: "@smithers-orchestrator/data",
+        name: "@smthrs/data",
         main: "index.cjs",
       });
       write(root, "packages/data/index.cjs", "function useData() { return null; }\nmodule.exports = useData;\n");
@@ -528,7 +516,7 @@ for (const [name, mutate, expected] of [
     "a TypeScript CommonJS public hook export assignment",
     (root) => {
       json(root, "packages/data/package.json", {
-        name: "@smithers-orchestrator/data",
+        name: "@smthrs/data",
         main: "index.ts",
       });
       write(root, "packages/data/index.ts", "function useData() { return null; }\nexport = useData;\n");
@@ -539,7 +527,7 @@ for (const [name, mutate, expected] of [
     "an Object.defineProperty public hook entry",
     (root) => {
       json(root, "packages/data/package.json", {
-        name: "@smithers-orchestrator/data",
+        name: "@smthrs/data",
         main: "index.cjs",
       });
       write(
@@ -554,7 +542,7 @@ for (const [name, mutate, expected] of [
     "a default re-export from a hook-named module",
     (root) => {
       json(root, "packages/data/package.json", {
-        name: "@smithers-orchestrator/data",
+        name: "@smthrs/data",
         exports: { ".": "./index.js" },
       });
       write(root, "packages/data/index.js", 'export { default } from "./useData.js";\n');
@@ -566,7 +554,7 @@ for (const [name, mutate, expected] of [
     "a public hook hidden behind an export-star entry",
     (root) => {
       json(root, "packages/data/package.json", {
-        name: "@smithers-orchestrator/data",
+        name: "@smthrs/data",
         exports: { ".": "./index.js" },
       });
       write(root, "packages/data/index.js", "export * from './hooks.js';\n");
@@ -582,7 +570,7 @@ for (const [name, mutate, expected] of [
     "a public hook hidden behind a runtime namespace re-export",
     (root) => {
       json(root, "packages/data/package.json", {
-        name: "@smithers-orchestrator/data",
+        name: "@smthrs/data",
         exports: { ".": "./index.js" },
       });
       write(root, "packages/data/index.js", 'export * as hooks from "./hooks.js";\n');
@@ -594,7 +582,7 @@ for (const [name, mutate, expected] of [
     "a second visual package",
     (root) => {
       json(root, "packages/dashboard/package.json", {
-        name: "@smithers-orchestrator/dashboard",
+        name: "@smthrs/dashboard",
         main: "index.tsx",
       });
       write(root, "packages/dashboard/index.tsx", "export function Dashboard() { return <section />; }\n");
@@ -605,7 +593,7 @@ for (const [name, mutate, expected] of [
     "an unlisted component library in a new visual package",
     (root) => {
       json(root, "packages/dashboard/package.json", {
-        name: "@smithers-orchestrator/dashboard",
+        name: "@smthrs/dashboard",
         exports: { ".": "./index.tsx" },
         dependencies: { "@fluentui/react-components": "1.0.0" },
       });
@@ -621,7 +609,7 @@ for (const [name, mutate, expected] of [
     "an undeclared new package cannot hide an unlisted component dependency",
     (root) => {
       json(root, "packages/dashboard/package.json", {
-        name: "@smithers-orchestrator/dashboard",
+        name: "@smthrs/dashboard",
         dependencies: { "@fluentui/react-components": "1.0.0" },
       });
     },
@@ -631,7 +619,7 @@ for (const [name, mutate, expected] of [
     "a second package importing visual icons",
     (root) => {
       json(root, "packages/dashboard/package.json", {
-        name: "@smithers-orchestrator/dashboard",
+        name: "@smthrs/dashboard",
         main: "index.tsx",
       });
       write(root, "packages/dashboard/index.tsx", 'export { CircleIcon } from "lucide-react";\n');
@@ -640,15 +628,14 @@ for (const [name, mutate, expected] of [
   ],
   [
     "gateway-react imports through the umbrella package",
-    (root) =>
-      write(root, "packages/gateway-react/src/umbrella.ts", 'export { gatewayKeys } from "smithers-orchestrator";\n'),
+    (root) => write(root, "packages/gateway-react/src/umbrella.ts", 'export { gatewayKeys } from "smthrs";\n'),
     "gateway-react-direction",
   ],
   [
     "gateway-react depends on the umbrella package",
     (root) => {
       const manifest = JSON.parse(readFileSync(join(root, "packages/gateway-react/package.json"), "utf8"));
-      manifest.dependencies["smithers-orchestrator"] = "workspace:*";
+      manifest.dependencies["smthrs"] = "workspace:*";
       json(root, "packages/gateway-react/package.json", manifest);
     },
     "gateway-react-direction",
@@ -667,7 +654,7 @@ for (const [name, mutate, expected] of [
     "ui-core importing opentui",
     (root) => {
       json(root, "packages/ui-core/package.json", {
-        name: "@smithers-orchestrator/ui-core",
+        name: "@smthrs/ui-core",
         exports: { ".": "./src/index.ts" },
       });
       write(root, "packages/ui-core/src/index.ts", 'export { useKeyboard } from "@opentui/react";\n');
@@ -678,10 +665,10 @@ for (const [name, mutate, expected] of [
     "ui-core importing the web ui barrel",
     (root) => {
       json(root, "packages/ui-core/package.json", {
-        name: "@smithers-orchestrator/ui-core",
+        name: "@smthrs/ui-core",
         exports: { ".": "./src/index.ts" },
       });
-      write(root, "packages/ui-core/src/index.ts", 'export { Button } from "@smithers-orchestrator/ui";\n');
+      write(root, "packages/ui-core/src/index.ts", 'export { Button } from "@smthrs/ui";\n');
     },
     "ui-core-boundary",
   ],
@@ -689,7 +676,7 @@ for (const [name, mutate, expected] of [
     "ui-core referencing a DOM global outside the web platform adapter",
     (root) => {
       json(root, "packages/ui-core/package.json", {
-        name: "@smithers-orchestrator/ui-core",
+        name: "@smthrs/ui-core",
         exports: { ".": "./src/index.ts" },
       });
       write(root, "packages/ui-core/src/index.ts", "export const width = window.innerWidth;\n");
@@ -700,14 +687,10 @@ for (const [name, mutate, expected] of [
     "tui-ui importing gateway-react",
     (root) => {
       json(root, "packages/tui-ui/package.json", {
-        name: "@smithers-orchestrator/tui-ui",
+        name: "@smthrs/tui-ui",
         exports: { ".": "./src/index.ts" },
       });
-      write(
-        root,
-        "packages/tui-ui/src/index.ts",
-        'export { useGatewayRun } from "@smithers-orchestrator/gateway-react";\n',
-      );
+      write(root, "packages/tui-ui/src/index.ts", 'export { useGatewayRun } from "@smthrs/gateway-react";\n');
     },
     "tui-ui-boundary",
   ],
@@ -715,7 +698,7 @@ for (const [name, mutate, expected] of [
     "tui-ui importing zustand",
     (root) => {
       json(root, "packages/tui-ui/package.json", {
-        name: "@smithers-orchestrator/tui-ui",
+        name: "@smthrs/tui-ui",
         exports: { ".": "./src/index.ts" },
       });
       write(
@@ -742,7 +725,7 @@ test("wildcard public export targets are expanded before checking for hooks", (c
   const root = fixture();
   context.after(() => rmSync(root, { recursive: true, force: true }));
   json(root, "packages/data/package.json", {
-    name: "@smithers-orchestrator/data",
+    name: "@smthrs/data",
     exports: { "./*": "./src/*.js" },
   });
   write(root, "packages/data/src/constants.js", "export const value = 1;\n");
@@ -757,7 +740,7 @@ test("wildcard public exports do not mistake hook calls for hook exports", (cont
   const root = fixture();
   context.after(() => rmSync(root, { recursive: true, force: true }));
   json(root, "packages/data/package.json", {
-    name: "@smithers-orchestrator/data",
+    name: "@smthrs/data",
     exports: { "./*": "./src/*.js" },
   });
   write(root, "packages/data/src/constants.js", "export const value = 1;\n");
@@ -774,7 +757,7 @@ test("default hook re-exports are followed through intermediate modules", (conte
   const root = fixture();
   context.after(() => rmSync(root, { recursive: true, force: true }));
   json(root, "packages/data/package.json", {
-    name: "@smithers-orchestrator/data",
+    name: "@smthrs/data",
     exports: { ".": "./index.js" },
   });
   write(root, "packages/data/index.js", "export const data = true;\n");
@@ -791,7 +774,7 @@ test("default re-exports do not expose unrelated named hooks", (context) => {
   const root = fixture();
   context.after(() => rmSync(root, { recursive: true, force: true }));
   json(root, "packages/data/package.json", {
-    name: "@smithers-orchestrator/data",
+    name: "@smthrs/data",
     exports: { ".": "./index.js" },
   });
   write(root, "packages/data/index.js", 'export { default } from "./values.js";\n');
@@ -804,7 +787,7 @@ test("export-star barrels do not expose default hooks", (context) => {
   const root = fixture();
   context.after(() => rmSync(root, { recursive: true, force: true }));
   json(root, "packages/data/package.json", {
-    name: "@smithers-orchestrator/data",
+    name: "@smthrs/data",
     exports: { ".": "./index.js" },
   });
   write(root, "packages/data/index.js", "export const data = true;\n");
@@ -818,7 +801,7 @@ test("runtime namespace re-exports expose default hooks", (context) => {
   const root = fixture();
   context.after(() => rmSync(root, { recursive: true, force: true }));
   json(root, "packages/data/package.json", {
-    name: "@smithers-orchestrator/data",
+    name: "@smthrs/data",
     exports: { ".": "./index.js" },
   });
   write(root, "packages/data/index.js", "export const data = true;\n");
@@ -834,7 +817,7 @@ test("default type-only declarations do not count as public runtime hooks", (con
   const root = fixture();
   context.after(() => rmSync(root, { recursive: true, force: true }));
   json(root, "packages/data/package.json", {
-    name: "@smithers-orchestrator/data",
+    name: "@smthrs/data",
     exports: { ".": "./useData.ts" },
   });
   write(root, "packages/data/useData.ts", "export const data = true;\n");
@@ -847,7 +830,7 @@ test("type-only hook exports do not count as public runtime hooks", (context) =>
   const root = fixture();
   context.after(() => rmSync(root, { recursive: true, force: true }));
   json(root, "packages/data/package.json", {
-    name: "@smithers-orchestrator/data",
+    name: "@smthrs/data",
     exports: { ".": "./index.ts" },
   });
   write(root, "packages/data/index.ts", "export const data = true;\n");
@@ -874,7 +857,7 @@ test("type-only namespace re-exports do not expose runtime hooks", (context) => 
   const root = fixture();
   context.after(() => rmSync(root, { recursive: true, force: true }));
   json(root, "packages/data/package.json", {
-    name: "@smithers-orchestrator/data",
+    name: "@smthrs/data",
     exports: { ".": "./index.ts" },
   });
   write(root, "packages/data/index.ts", "export const data = true;\n");
@@ -892,7 +875,7 @@ for (const [name, source] of [
     const root = fixture();
     context.after(() => rmSync(root, { recursive: true, force: true }));
     json(root, "packages/data/package.json", {
-      name: "@smithers-orchestrator/data",
+      name: "@smthrs/data",
       main: "index.cjs",
     });
     write(root, "packages/data/index.cjs", "module.exports.value = true;\n");
@@ -1034,7 +1017,7 @@ test("typed disconnected props and connected gateway imports pass", (context) =>
   write(
     root,
     "packages/ui/src/smithers/connected/Live.tsx",
-    'import { useGatewayRun } from "@smithers-orchestrator/gateway-react"; export function Live(props: { runId: string }) { return <div>{String(useGatewayRun(props.runId))}</div>; }\n',
+    'import { useGatewayRun } from "@smthrs/gateway-react"; export function Live(props: { runId: string }) { return <div>{String(useGatewayRun(props.runId))}</div>; }\n',
   );
   snapshot(root);
   assert.equal(check(root).ok, true);
@@ -1044,7 +1027,7 @@ test("compliant ui-core and tui-ui modules pass", (context) => {
   const root = fixture();
   context.after(() => rmSync(root, { recursive: true, force: true }));
   json(root, "packages/ui-core/package.json", {
-    name: "@smithers-orchestrator/ui-core",
+    name: "@smthrs/ui-core",
     exports: { ".": "./src/index.ts", "./*": "./src/*.ts" },
   });
   write(root, "packages/ui-core/src/index.ts", 'export { statusTone } from "./runs/statusMeta.ts";\n');
@@ -1054,7 +1037,7 @@ test("compliant ui-core and tui-ui modules pass", (context) => {
     "export function statusTone(status: string) { return status; }\n",
   );
   json(root, "packages/tui-ui/package.json", {
-    name: "@smithers-orchestrator/tui-ui",
+    name: "@smthrs/tui-ui",
     exports: { ".": "./src/index.ts" },
     dependencies: { "@opentui/core": "^0.4.2", "@opentui/react": "^0.4.2" },
   });

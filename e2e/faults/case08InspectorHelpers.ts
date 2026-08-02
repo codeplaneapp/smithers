@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import type { RunState } from "@smithers-orchestrator/db/runState/RunState";
+import type { RunState } from "@smthrs/db/runState/RunState";
 
 // Keep this in lockstep with deriveRunState's RunState return type.
 export const ALLOWED_STATES: ReadonlySet<RunState> = new Set<RunState>([

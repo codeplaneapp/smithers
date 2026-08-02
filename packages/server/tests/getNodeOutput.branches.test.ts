@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { zodToTable } from "@smithers-orchestrator/db/zodToTable";
+import { zodToTable } from "@smthrs/db/zodToTable";
 import { getNodeOutputRoute } from "../src/gatewayRoutes/getNodeOutput.js";
 
 function nodeRow(outputTable: string, state = "finished") {

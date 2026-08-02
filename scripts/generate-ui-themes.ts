@@ -52,7 +52,7 @@ function emit(file: string, exportName: string, css: string, note: string) {
   emitTo(uiDir, file, exportName, css, note);
 }
 
-// The shared @smithers-orchestrator/ui markdown-editor adapter ships the same
+// The shared @smthrs/ui markdown-editor adapter ships the same
 // Crepe theme through its own <style> injector, so keep its pre-bundled copy in
 // lockstep with the .smithers/ui one below.
 const uiAdapterDir = resolve(root, "packages/ui/src/adapters/markdown-editor");
@@ -165,7 +165,7 @@ emitTo(
   "crepeTheme.generated.ts",
   "crepeThemeCss",
   crepeCss,
-  "Milkdown Crepe CSS (common + house light/dark token bridge), pre-bundled for the @smithers-orchestrator/ui markdown-editor adapter <style> injection.",
+  "Milkdown Crepe CSS (common + house light/dark token bridge), pre-bundled for the @smthrs/ui markdown-editor adapter <style> injection.",
 );
 emitTo(
   exampleUiDir,

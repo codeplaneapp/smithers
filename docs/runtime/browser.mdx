@@ -3,7 +3,7 @@ title: Browser runtime
 description: Run portable Smithers workflows in a browser through the RuntimeAdapter contract.
 ---
 
-Import the browser-safe facade from `smithers-orchestrator/browser`. It runs the
+Import the browser-safe facade from `smthrs/browser`. It runs the
 real Smithers driver, scheduler, renderer, graph extractor, schema validation,
 and task dependency semantics in a lean, Node-free bundle.
 
@@ -16,7 +16,7 @@ import {
   createBrowserRuntime,
   createBrowserSmithers,
   defineBrowserWorkflow,
-} from "smithers-orchestrator/browser";
+} from "smthrs/browser";
 
 const resultSchema = z.object({ answer: z.number() });
 const workflow = defineBrowserWorkflow(() =>
@@ -99,7 +99,7 @@ supplies a custom `RuntimeAdapter` that owns that capability.
 
 The browser facade omits Node database factories, server helpers, CLI agents,
 subprocess code, bundled tools, and the full Node component barrel. Use the
-main `smithers-orchestrator` entry point for those surfaces.
+main `smthrs` entry point for those surfaces.
 
 ---
 

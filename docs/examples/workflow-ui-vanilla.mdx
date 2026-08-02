@@ -1,16 +1,16 @@
 ---
 title: Workflow UI (Vanilla)
-description: A complete zero-dep workflow UI on `@smithers-orchestrator/gateway-client`: boot, live events, node output, approvals, all in one file.
+description: A complete zero-dep workflow UI on `@smthrs/gateway-client`: boot, live events, node output, approvals, all in one file.
 ---
 
-Same workflow UI as the [React example](/examples/workflow-ui-react), built directly on `@smithers-orchestrator/gateway-client` with no framework: for a tiny bundle, an already-owned render layer (Solid, Lit, Mithril, plain DOM), or rendering before any framework boots.
+Same workflow UI as the [React example](/examples/workflow-ui-react), built directly on `@smthrs/gateway-client` with no framework: for a tiny bundle, an already-owned render layer (Solid, Lit, Mithril, plain DOM), or rendering before any framework boots.
 
 For the full conceptual walkthrough, see [Custom Workflow UIs](/guides/custom-workflow-ui).
 
 ## The bundle
 
 ```ts
-import { SmithersGatewayClient } from "smithers-orchestrator/gateway-client";
+import { SmithersGatewayClient } from "smthrs/gateway-client";
 
 const WORKFLOW_KEY = "demo-vanilla-ui";
 
@@ -167,8 +167,8 @@ For a minimal recipe, see the 60-line React `useGatewayRpc` source: [`packages/g
 ## Declaring the UI
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, UI } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, UI } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, Task, smithers, outputs } = createSmithers({

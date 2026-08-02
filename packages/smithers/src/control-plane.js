@@ -1,1 +1,1 @@
-export * from "@smithers-orchestrator/control-plane";
+export * from "@smthrs/control-plane";

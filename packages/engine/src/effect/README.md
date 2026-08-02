@@ -25,7 +25,7 @@ convert between the two); tool-managed `@smithers-type-exports` blocks
 re-surface them as JSDoc typedefs.
 
 Gotchas: the package exports map makes every file here a public subpath
-(`@smithers-orchestrator/engine/effect/*`), so nothing can be moved or renamed. Each
+(`@smthrs/engine/effect/*`), so nothing can be moved or renamed. Each
 sizeable module exports a `__*Internals` object consumed by
 `packages/engine/tests/*-internals.test.js` — private helpers are part of the
 test surface; keep those objects complete when adding or removing helpers.

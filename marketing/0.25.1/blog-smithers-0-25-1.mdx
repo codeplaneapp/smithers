@@ -13,21 +13,21 @@ Smithers is the durable runtime layer for long-running coding agents: persisted 
 
 ## Migration fixes
 
-The main work in 0.25.1 is around `bunx smithers-orchestrator migrate`.
+The main work in 0.25.1 is around `bunx smthrs migrate`.
 
 Corrupt legacy SQLite source stores now produce actionable `DB_QUERY_FAILED` guidance instead of raw SQLite engine errors. The failure preserves the underlying cause, but the message points operators toward useful next steps such as checking integrity or restoring from a known-good backup. These failure paths leave the source store untouched.
 
 Unopenable legacy SQLite stores are handled the same way. Locked files, permission failures, and incomplete copies that are missing SQLite sidecar files are now wrapped with Smithers migration guidance rather than exposed as raw `bun:sqlite` failures. That matters during backend migration because the command should tell you whether the store itself cannot be opened, not force you to reverse-engineer the storage layer from an engine exception.
 
-PostgreSQL migrations also validate target configuration earlier. When running `bunx smithers-orchestrator migrate --to postgres`, Smithers now checks for `--url`, `SMITHERS_POSTGRES_URL`, or `DATABASE_URL` before opening the source store. Missing Postgres configuration is reported directly instead of being masked by a separate source-store problem.
+PostgreSQL migrations also validate target configuration earlier. When running `bunx smthrs migrate --to postgres`, Smithers now checks for `--url`, `SMITHERS_POSTGRES_URL`, or `DATABASE_URL` before opening the source store. Missing Postgres configuration is reported directly instead of being masked by a separate source-store problem.
 
 ## Accounts and CLI fixes
 
 0.25.1 also tightens command startup behavior for existing local environments.
 
-Older `accounts.json` files may contain provider entries that no longer exist, such as a legacy `gemini` subscription account. Smithers now skips unknown or legacy providers with a warning and continues loading the remaining valid accounts. That keeps commands such as `bunx smithers-orchestrator init` from failing the entire account file because of one stale entry. Users can still remove stale entries manually to silence the warning.
+Older `accounts.json` files may contain provider entries that no longer exist, such as a legacy `gemini` subscription account. Smithers now skips unknown or legacy providers with a warning and continues loading the remaining valid accounts. That keeps commands such as `bunx smthrs init` from failing the entire account file because of one stale entry. Users can still remove stale entries manually to silence the warning.
 
-Documented negated CLI flags now parse correctly. `--no-vcs`, `--no-deps`, and `--no-mcp` are accepted instead of being rejected as unknown flags. This fixes the behavior for workflows and recovery commands that rely on those documented switches, including time-travel flows using flags such as `bunx smithers-orchestrator timetravel --no-vcs --no-deps`.
+Documented negated CLI flags now parse correctly. `--no-vcs`, `--no-deps`, and `--no-mcp` are accepted instead of being rejected as unknown flags. This fixes the behavior for workflows and recovery commands that rely on those documented switches, including time-travel flows using flags such as `bunx smthrs timetravel --no-vcs --no-deps`.
 
 Gateway JWT auth also rejects non-canonical base64url signature encodings. That closes an edge case where a mutated compact JWT signature segment could decode to the same HMAC bytes on some runtimes because of unused trailing base64url bits. On top of that, the `allowedOrigins` Origin allow-list now applies to the `token` and `jwt` auth modes, not just `trusted-proxy`. Those are the modes a browser-facing `smithers ui` deployment actually uses, so operators can now restrict which web origins may connect, enforced at both the HTTP RPC path and the WebSocket upgrade.
 

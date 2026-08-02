@@ -3,8 +3,8 @@
 // smithers-display-name: Smithers Repo Federation
 // smithers-description: Split the smithers monorepo into 10 standalone public repos plus multi/plue/awesome-smithers PR lanes, strip smithers to a runtime kernel, and land it behind manifest/publish/merge approval gates.
 // smithers-tags: migration, github, release
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, UI } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, UI } from "smthrs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";

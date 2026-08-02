@@ -1,7 +1,7 @@
 import React from "react";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
-import { stripAutoColumns } from "@smithers-orchestrator/db/react-output";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
+import { stripAutoColumns } from "@smthrs/db/react-output";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { WaitForEvent } from "./WaitForEvent.js";
 /**
  * @template Schema

@@ -11,11 +11,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { decodeHtmlEntities } from "../decodeHtmlEntities.js";
 import { markdownComponents } from "../markdownComponents.js";
 import { zodSchemaToJsonExample } from "../zod-to-example.js";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
 import { AspectContext } from "../aspects/AspectContext.js";
 import { MemoryContext } from "../memory/MemoryContext.js";
-/** @typedef {import("@smithers-orchestrator/agents/AgentLike").AgentLike} AgentLike */
+/** @typedef {import("@smthrs/agents/AgentLike").AgentLike} AgentLike */
 /** @typedef {import("./DepsSpec.ts").DepsSpec} DepsSpec */
 /**
  * @template Row, Output, D
@@ -65,7 +65,7 @@ export function renderPromptToText(prompt) {
       element = React.cloneElement(prompt, {
         components: {
           ...markdownComponents,
-          ...(/** @type {{ components?: Record<string, unknown> }} */ (prompt.props).components ?? {}),
+          ...prompt.props.components,
         },
       });
     } else {

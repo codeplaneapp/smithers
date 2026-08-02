@@ -1,8 +1,8 @@
 /** @jsxImportSource react */
 import { useMemo } from "react";
-import { createGatewayReactRoot, useGatewayNodeOutput, useGatewayRun } from "smithers-orchestrator/gateway-react";
-import { RunEventLog, RunTree, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
-import { Card, EmptyState, StatusPill, Tabs, TabsContent, TabsList, TabsTrigger } from "smithers-orchestrator/ui";
+import { createGatewayReactRoot, useGatewayNodeOutput, useGatewayRun } from "smthrs/gateway-react";
+import { RunEventLog, RunTree, WorkflowUiShell } from "smthrs/gateway-ui";
+import { Card, EmptyState, StatusPill, Tabs, TabsContent, TabsList, TabsTrigger } from "smthrs/ui";
 
 const WORKFLOW_KEY = "audit-fix-train";
 

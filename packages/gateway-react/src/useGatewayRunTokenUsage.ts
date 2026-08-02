@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { ListRunTokenUsageResponse } from "@smithers-orchestrator/gateway-client";
+import type { ListRunTokenUsageResponse } from "@smthrs/gateway-client";
 import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
 import { useGatewayRpc } from "./useGatewayRpc.ts";
 

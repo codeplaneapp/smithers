@@ -22,9 +22,9 @@ import {
   useGatewayUsageReports,
   useGatewayWorkflows,
   type UseGatewayRunTreeResult,
-} from "smithers-orchestrator/gateway-react";
-import { snapshotToGatewayRunNode, type DevToolsSnapshot } from "smithers-orchestrator/gateway-client";
-import { HijackCandidateButton, OneshotSurface, WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
+} from "smthrs/gateway-react";
+import { snapshotToGatewayRunNode, type DevToolsSnapshot } from "smthrs/gateway-client";
+import { HijackCandidateButton, OneshotSurface, WorkflowUiStyles } from "smthrs/gateway-ui";
 import {
   Button,
   observeReducedMotion,
@@ -36,7 +36,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 import { Chip, MonitorToolbar, RunLifecycleControls, RunRailRow, RunsPagination, ToneDot } from "./monitorShell.tsx";
 import { processPatch, type CodeViewItem } from "@pierre/diffs";
 import { CodeView } from "@pierre/diffs/react";
@@ -4643,7 +4643,7 @@ function App() {
 // variable or a shared semantic soft/border token; tones carry state, never decoration.
 //
 // Controls (buttons, chips, inputs, selects, row buttons, tables) are the
-// shared smithers-orchestrator/ui primitives rendered by SmithersUiStyles at
+// shared smthrs/ui primitives rendered by SmithersUiStyles at
 // the root — their geometry, hover, focus-ring, and disabled styling live in
 // that package, never here. This sheet only carries monitor layout plus
 // monitor-specific accents on those primitives (.mon-btn-ok, .mon-toggle).
@@ -4681,7 +4681,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-toolbar { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .mon-count-note { font-size: var(--fs-1); font-variant-numeric: tabular-nums; }
 
-/* Controls are the shared smithers-orchestrator/ui primitives (sui-*): Button,
+/* Controls are the shared smthrs/ui primitives (sui-*): Button,
    Input, Select, RowButton carry their own geometry, hover, focus ring, and
    disabled styling. Only monitor-specific accents live here. */
 .mon-filter-input { min-width: 200px; }

@@ -1,10 +1,10 @@
-# @smithers-orchestrator/gateway — src
+# @smthrs/gateway — src
 
 The stable Gateway runtime contract package: pure data plus tiny pure
-functions. `@smithers-orchestrator/protocol/gateway-rpc` owns the canonical
+functions. `@smthrs/protocol/gateway-rpc` owns the canonical
 wire types; this package owns the runtime RPC catalog and JSON schemas, auth
 scopes, compatibility aliases, and API row serializers. Its only runtime
-dependency is `@smithers-orchestrator/protocol`, and it deliberately has no
+dependency is `@smthrs/protocol`, and it deliberately has no
 `effect` dependency.
 
 Layout:
@@ -22,10 +22,10 @@ Layout:
 - `index.js` — re-exports all three; `package.json` also exposes each subpath
   (`./rpc`, `./auth/scopes`, `./api`) directly.
 
-`@smithers-orchestrator/gateway/rpc` remains a supported compatibility surface:
+`@smthrs/gateway/rpc` remains a supported compatibility surface:
 it re-exports the protocol wire types alongside the gateway-owned runtime
 catalog values. The server consumes that runtime catalog. Client code uses
-`@smithers-orchestrator/gateway-client`, and `gateway-react` consumes
+`@smthrs/gateway-client`, and `gateway-react` consumes
 `gateway-client` instead of importing this package directly.
 
 Gotchas:

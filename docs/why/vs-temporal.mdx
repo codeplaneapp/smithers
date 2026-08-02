@@ -12,7 +12,7 @@ Smithers applies the same guarantee, "a crash never loses finished work," to a d
 | | Temporal | Smithers |
 | --- | --- | --- |
 | Built for | Distributed business transactions | Coding-agent work with human gates |
-| Infrastructure | A server cluster (self-hosted or Temporal Cloud) plus worker fleets | One process and a SQLite file; `bunx smithers-orchestrator up` |
+| Infrastructure | A server cluster (self-hosted or Temporal Cloud) plus worker fleets | One process and a SQLite file; `bunx smthrs up` |
 | Workflow code | Deterministic by contract: side effects live in activities, code replays against event history | Ordinary TypeScript and JSX; state is re-read, code is never replayed |
 | Agents | You integrate them inside activities | Claude Code, Codex, Pi, and AI SDK models are first-class task nodes |
 | Humans | Signals and queries you design | `<Approval>`, `<HumanTask>`, and durable questions in the box |

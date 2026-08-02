@@ -4,7 +4,7 @@ description: Typed wrapper around &lt;WaitForEvent&gt;; signal name equals node 
 ---
 
 ```ts
-import { Signal } from "smithers-orchestrator";
+import { Signal } from "smthrs";
 
 type SignalProps = {
   id: string; // signal name and node id
@@ -25,7 +25,7 @@ type SignalProps = {
 ```
 
 ```tsx
-import { Signal, Task, Workflow, createSmithers } from "smithers-orchestrator";
+import { Signal, Task, Workflow, createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { smithers, outputs } = createSmithers({
@@ -50,4 +50,4 @@ export default smithers(() => (
 
 - Renders `<WaitForEvent event={id} output={schema}>` internally.
 - Async waits show in `smithers_external_wait_async_pending{kind="event"}`.
-- Delivering a signal doesn't resume a suspended run by itself: an external controller must call Gateway `submitSignal` then `resumeRun`, keeping auth, ownership, event emission, and backend selection inside the workspace control plane. Ad hoc: run `bunx smithers-orchestrator signal RUN_ID user-feedback --data '{...}'` from the workspace root (the directory holding `.smithers/`; second arg = signal name = the `<Signal>` id), then `bunx smithers-orchestrator up workflow.tsx --run-id RUN_ID --resume true`. Discover the workspace singleton via `smithers gateway status --format json` and use its URL; never open or select a backing database directly.
+- Delivering a signal doesn't resume a suspended run by itself: an external controller must call Gateway `submitSignal` then `resumeRun`, keeping auth, ownership, event emission, and backend selection inside the workspace control plane. Ad hoc: run `bunx smthrs signal RUN_ID user-feedback --data '{...}'` from the workspace root (the directory holding `.smithers/`; second arg = signal name = the `<Signal>` id), then `bunx smthrs up workflow.tsx --run-id RUN_ID --resume true`. Discover the workspace singleton via `smithers gateway status --format json` and use its URL; never open or select a backing database directly.

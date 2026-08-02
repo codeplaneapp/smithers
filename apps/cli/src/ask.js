@@ -4,17 +4,14 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { listAccounts } from "@smithers-orchestrator/accounts";
-import { AntigravityAgent } from "@smithers-orchestrator/agents/AntigravityAgent";
-import { ClaudeCodeAgent } from "@smithers-orchestrator/agents/ClaudeCodeAgent";
-import { CodexAgent } from "@smithers-orchestrator/agents/CodexAgent";
-import { KimiAgent } from "@smithers-orchestrator/agents/KimiAgent";
-import { PiAgent } from "@smithers-orchestrator/agents/PiAgent";
-import { SmithersError } from "@smithers-orchestrator/errors";
-import {
-  createSmithersAgentContract,
-  renderSmithersAgentPromptGuidance,
-} from "@smithers-orchestrator/agents/agent-contract";
+import { listAccounts } from "@smthrs/accounts";
+import { AntigravityAgent } from "@smthrs/agents/AntigravityAgent";
+import { ClaudeCodeAgent } from "@smthrs/agents/ClaudeCodeAgent";
+import { CodexAgent } from "@smthrs/agents/CodexAgent";
+import { KimiAgent } from "@smthrs/agents/KimiAgent";
+import { PiAgent } from "@smthrs/agents/PiAgent";
+import { SmithersError } from "@smthrs/errors";
+import { createSmithersAgentContract, renderSmithersAgentPromptGuidance } from "@smthrs/agents/agent-contract";
 import { describeUnavailableAgent, detectAvailableAgents, formatNoUsableAgentsMessage } from "./agent-detection.js";
 /**
  * @typedef {typeof ASK_AGENT_IDS[number]} AskAgentId
@@ -22,11 +19,11 @@ import { describeUnavailableAgent, detectAvailableAgents, formatNoUsableAgentsMe
 /**
  * @typedef {{ agent?: AskAgentId; listAgents?: boolean; dumpPrompt?: boolean; toolSurface?: SmithersToolSurface; noMcp?: boolean; printBootstrap?: boolean; }} AskOptions
  */
-/** @typedef {import("@smithers-orchestrator/agents/agent-contract").SmithersToolSurface} SmithersToolSurface */
-/** @typedef {import("@smithers-orchestrator/agents/agent-contract").SmithersAgentContract} SmithersAgentContract */
-/** @typedef {import("@smithers-orchestrator/agents/BaseCliAgent").BaseCliAgent} BaseCliAgent */
+/** @typedef {import("@smthrs/agents/agent-contract").SmithersToolSurface} SmithersToolSurface */
+/** @typedef {import("@smthrs/agents/agent-contract").SmithersAgentContract} SmithersAgentContract */
+/** @typedef {import("@smthrs/agents/BaseCliAgent").BaseCliAgent} BaseCliAgent */
 /** @typedef {import("./AgentAvailability.ts").AgentAvailability} AgentAvailability */
-/** @typedef {import("@smithers-orchestrator/accounts").Account} Account */
+/** @typedef {import("@smthrs/accounts").Account} Account */
 /** @typedef {"mcp-config-file" | "mcp-config-inline" | "mcp-allow-list" | "prompt-only"} AskBootstrapMode */
 /** @typedef {AgentAvailability & { id: AskAgentId }} AskSupportedAvailability */
 /** @typedef {{ availability: AskSupportedAvailability; bootstrapMode: AskBootstrapMode; selectionReason: string }} AskSelection */

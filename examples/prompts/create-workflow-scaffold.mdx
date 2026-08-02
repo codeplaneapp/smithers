@@ -21,7 +21,7 @@ own `.mdx` file, one per prompt named in the design. Write the custom UI to
 
 1. **Start from the closest example** named in the provisioning manifest. Copy
    its structure, then adapt. Don't invent API; if unsure, re-read the example or
-   `bunx smithers-orchestrator docs`.
+   `bunx smthrs docs`.
 2. **Workflow file header**: begin with the seed comments and the JSX pragma,
    exactly like the other workflows in `{props.workflowsDir}`:
    ```
@@ -30,10 +30,10 @@ own `.mdx` file, one per prompt named in the design. Write the custom UI to
    // smithers-display-name: <Title Case Name>
    // smithers-description: <one sentence: what the workflow does>
    // smithers-tags: <comma-separated tags, e.g. ops, reporting>
-   /** @jsxImportSource smithers-orchestrator */
+   /** @jsxImportSource smthrs */
    ```
-3. **Imports**: `import { createSmithers } from "smithers-orchestrator"` (or
-   `import { createSmithers, UI } from "smithers-orchestrator"` when writing a
+3. **Imports**: `import { createSmithers } from "smthrs"` (or
+   `import { createSmithers, UI } from "smthrs"` when writing a
    custom UI), `import { z } from "zod/v4"`, `import { agents } from "../agents"`,
    any components from `../components`, and each prompt from
    `../prompts/<name>.mdx`.
@@ -76,7 +76,7 @@ plan (skip only if the design's `ui` is null because the user declined one):
 2. Start with `/** @jsxImportSource react */`, import React hooks from `react`,
    and import `createGatewayReactRoot`, `useGatewayRuns`, `useGatewayRunEvents`,
    `useGatewayNodeOutput`, and `useGatewayActions` (as needed) from
-   `smithers-orchestrator/gateway-react`.
+   `smthrs/gateway-react`.
 3. Set the workflow key constant to the workflow id and read the runId from the
    URL (`?runId=`), like the existing UIs do.
 4. Render the design's `ui.panels` from the real node output tables (the task
@@ -93,7 +93,7 @@ plan (skip only if the design's `ui` is null because the user declined one):
 
 ## Acceptance criteria
 
-- `bunx smithers-orchestrator graph {props.workflowsDir}/<workflowName>.tsx`
+- `bunx smthrs graph {props.workflowsDir}/<workflowName>.tsx`
   exits 0 (run it yourself before finishing).
 - The UI file (when required) transpiles with `bun build --no-bundle`.
 - The workflow declares the UI with `<UI entry="../ui/<workflowName>.tsx" />`;

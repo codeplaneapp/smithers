@@ -211,10 +211,10 @@ function parseCloudflareSandboxResult(rawResult, { command, remoteSandboxId, res
  * Builds a Smithers SandboxProvider backed by Cloudflare Sandbox SDK.
  *
  * @param {{
- *   binding?: unknown | ((request: import("@smithers-orchestrator/sandbox").SandboxProviderRequest) => unknown);
+ *   binding?: unknown | ((request: import("@smthrs/sandbox").SandboxProviderRequest) => unknown);
  *   getSandbox?: (binding: unknown, sandboxId: string, options?: Record<string, unknown>) => any;
  *   id?: string;
- *   sandboxId?: (request: import("@smithers-orchestrator/sandbox").SandboxProviderRequest) => string;
+ *   sandboxId?: (request: import("@smthrs/sandbox").SandboxProviderRequest) => string;
  *   sandboxOptions?: Record<string, unknown>;
  *   keepAlive?: boolean;
  *   sleepAfter?: string | number;
@@ -226,7 +226,7 @@ function parseCloudflareSandboxResult(rawResult, { command, remoteSandboxId, res
  *   cleanup?: "destroy" | "keep";
  *   importCloudflareSandbox?: () => Promise<{ getSandbox?: unknown }>;
  * }} options
- * @returns {import("@smithers-orchestrator/sandbox").SandboxProvider}
+ * @returns {import("@smthrs/sandbox").SandboxProvider}
  */
 export function createCloudflareSandboxProvider(options = {}) {
   const id = options.id ?? CLOUDFLARE_SANDBOX_PROVIDER_ID;
@@ -247,7 +247,7 @@ export function createCloudflareSandboxProvider(options = {}) {
       const remoteSandboxId = options.sandboxId?.(request) ?? `${request.runId}-${request.sandboxId}`;
       const sandbox = getSandbox(binding, remoteSandboxId, {
         enableDefaultSession: false,
-        ...(options.sandboxOptions ?? {}),
+        ...options.sandboxOptions,
         keepAlive: options.keepAlive ?? options.sandboxOptions?.keepAlive,
         // Idle-hibernation window; the main container cost lever. Falls back
         // to the Sandbox SDK default (~10m) when neither is set.
@@ -281,7 +281,7 @@ export function createCloudflareSandboxProvider(options = {}) {
       );
 
       const env = {
-        ...(options.env ?? {}),
+        ...options.env,
         SMITHERS_SANDBOX_REQUEST_PATH: requestPath,
         SMITHERS_SANDBOX_RESULT_PATH: resultPath,
       };
@@ -343,7 +343,7 @@ export function createCloudflareSandboxProvider(options = {}) {
  * Test helper that implements the subset of the Cloudflare Sandbox SDK used by
  * `createCloudflareSandboxProvider`.
  *
- * @param {(args: { command: string; request: { runId: string; sandboxId: string; input?: unknown; config?: unknown }; files: Map<string, string> }) => import("@smithers-orchestrator/sandbox").SandboxProviderResult | Promise<import("@smithers-orchestrator/sandbox").SandboxProviderResult>} handler
+ * @param {(args: { command: string; request: { runId: string; sandboxId: string; input?: unknown; config?: unknown }; files: Map<string, string> }) => import("@smthrs/sandbox").SandboxProviderResult | Promise<import("@smthrs/sandbox").SandboxProviderResult>} handler
  */
 export function createMockCloudflareSandboxEnvironment(handler) {
   const sandboxes = new Map();

@@ -7,7 +7,7 @@ import {
   useGatewayRun,
   useGatewayRunEvents,
   useGatewayRuns,
-} from "smithers-orchestrator/gateway-react";
+} from "smthrs/gateway-react";
 import { sharedDarkStandaloneThemeCss } from "./shared-theme";
 
 const WORKFLOW_KEY = "issue-train";

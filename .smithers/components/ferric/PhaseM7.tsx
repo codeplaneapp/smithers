@@ -1,5 +1,5 @@
-/** @jsxImportSource smithers-orchestrator */
-import { Parallel } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Parallel } from "smthrs";
 import { outputs } from "./ferricSmithers";
 import { FuzzTask } from "./FuzzTask";
 import { SuiteTask } from "./SuiteTask";

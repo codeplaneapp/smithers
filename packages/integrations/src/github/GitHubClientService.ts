@@ -1,6 +1,6 @@
 import type { Effect } from "effect";
 import type { Schema } from "effect";
-import type { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import type { SmithersError } from "@smthrs/errors/SmithersError";
 
 export type GitHubRequestMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 

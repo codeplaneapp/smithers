@@ -1,7 +1,7 @@
 // Reference Telegram Mini App initData verification for a Cloudflare Worker.
 //
 // This mirrors `verifyTelegramWebAppInitData` from
-// `@smithers-orchestrator/integrations/telegram` — it is inlined here so the
+// `@smthrs/integrations/telegram` — it is inlined here so the
 // Worker bundle stays dependency-free and copy-pasteable. It does REAL HMAC
 // verification (no mocks): secret = HMAC_SHA256(key="WebAppData", msg=botToken);
 // authentic iff hex(HMAC_SHA256(key=secret, msg=dataCheckString)) === hash,

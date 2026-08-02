@@ -1,5 +1,5 @@
-import { deriveClaudeWorkflowPhasesFromFrame } from "@smithers-orchestrator/graph";
-import { SmithersError } from "@smithers-orchestrator/errors";
+import { deriveClaudeWorkflowPhasesFromFrame } from "@smthrs/graph";
+import { SmithersError } from "@smthrs/errors";
 import { aggregateNodeDetailEffect } from "../node-detail.js";
 import { runPromise } from "../smithersRuntime.js";
 import { claudeMirrorContract } from "./claudeMirrorContract.js";

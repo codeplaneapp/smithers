@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 import { useState } from "react";
-import { useGatewayActions } from "@smithers-orchestrator/gateway-react";
+import { useGatewayActions } from "@smthrs/gateway-react";
 import {
   Checkpoint,
   CheckpointActions,
@@ -8,7 +8,7 @@ import {
   CheckpointMetadata,
   type CheckpointActionKind,
   type CheckpointModel,
-} from "@smithers-orchestrator/ui";
+} from "@smthrs/ui";
 
 export type GatewayCheckpointControlsProps = {
   runId: string;

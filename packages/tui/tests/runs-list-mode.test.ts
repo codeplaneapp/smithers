@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { RunSummary, RunStatusFilter } from "@smithers-orchestrator/ui-core";
+import type { RunSummary, RunStatusFilter } from "@smthrs/ui-core";
 import { flattenRunGroups, nextStatusFilter } from "../src/modes/RunsListMode.tsx";
 
 function run(runId: string): RunSummary {

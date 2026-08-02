@@ -1,5 +1,5 @@
 /// <reference path="../types/bun-test-shim.d.ts" />
-import { TaskDescriptor } from '@smithers-orchestrator/graph';
+import { TaskDescriptor } from '@smthrs/graph';
 
 type RunTaskOptions = {
     rootDir?: string;

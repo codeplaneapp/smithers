@@ -3,9 +3,9 @@
 // smithers-display-name: Hello World
 // smithers-description: The smallest possible workflow: one agent task that runs the prompt in .smithers/prompts/hello.mdx. Your starting point for authoring your own.
 // smithers-tags: starter, hello-world
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import HelloPrompt from "../prompts/hello.mdx";

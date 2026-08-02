@@ -3,7 +3,7 @@ import type { RunStartedBy } from "./RunStartedBy.ts";
 import type { OutputSnapshot } from "./OutputSnapshot.ts";
 import type { SmithersErrorReport } from "./SmithersErrorReport.ts";
 import type { SignalRowInput } from "./SignalRows.ts";
-import type { SmithersEvent } from "@smithers-orchestrator/observability/SmithersEvent";
+import type { SmithersEvent } from "@smthrs/observability/SmithersEvent";
 import type { Layer } from "effect";
 
 export type EffectPlatformRuntime = "bun" | "node" | "worker";

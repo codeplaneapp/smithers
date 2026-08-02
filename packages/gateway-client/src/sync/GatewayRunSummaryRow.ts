@@ -5,5 +5,5 @@ export type GatewayRunSummaryRow = Record<string, unknown> & {
   createdAtMs?: number;
   parentRunId?: string | null;
   system: boolean;
-  startedBy?: import("@smithers-orchestrator/protocol/gateway-rpc").RunStartedBy;
+  startedBy?: import("@smthrs/protocol/gateway-rpc").RunStartedBy;
 };

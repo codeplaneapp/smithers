@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
-import { jsx, jsxs } from "smithers-orchestrator/jsx-runtime";
+import { createSmithers } from "smthrs";
+import { jsx, jsxs } from "smthrs/jsx-runtime";
 import { Gateway } from "../src/gateway.js";
 
 function getPort(server) {

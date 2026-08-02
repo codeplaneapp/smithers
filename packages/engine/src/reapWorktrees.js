@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { rmSync } from "node:fs";
 import { basename, resolve, sep } from "node:path";
 import { Effect } from "effect";
-import { runJj } from "@smithers-orchestrator/vcs";
+import { runJj } from "@smthrs/vcs";
 import { listSmithersWorktrees } from "./listSmithersWorktrees.js";
 import { getPlatformLayer } from "./platform-layer.js";
 import { runGit } from "./runGit.js";

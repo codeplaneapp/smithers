@@ -1,5 +1,5 @@
 import pc from "picocolors";
-import { sanitizeTerminalText } from "@smithers-orchestrator/tui/src/sanitizeTerminalText.ts";
+import { sanitizeTerminalText } from "@smthrs/tui/src/sanitizeTerminalText.ts";
 
 /**
  * Format any agent stream text before the TUI wraps it. This keeps raw event

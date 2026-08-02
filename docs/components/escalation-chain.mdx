@@ -5,7 +5,7 @@ description: Sequential agent escalation with optional human fallback.
 
 ```ts
 // Props
-import { EscalationChain } from "smithers-orchestrator";
+import { EscalationChain } from "smthrs";
 
 type EscalationChainProps = {
   id?: string; // default "escalation"
@@ -60,7 +60,7 @@ The `<EscalationChain>` implementation and the files it imports, straight from t
 // @smithers-type-exports-end
 
 import React from "react";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
 import { Sequence } from "./Sequence.js";
 import { Branch } from "./Branch.js";
 import { Task } from "./Task.js";
@@ -202,9 +202,8 @@ export function EscalationChain(props) {
 // @smithers-type-exports-end
 
 import React from "react";
-import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-export { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+export { SmithersCtx } from "@smthrs/driver/SmithersCtx";
 /** @type {React.Context<SmithersCtx<any> | null>} */
 export const SmithersContext = React.createContext(null);
 SmithersContext.displayName = "SmithersContext";
@@ -256,7 +255,7 @@ export function Sequence(props) {
 
 ```js Branch.js
 import React from "react";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 /** @typedef {import("./BranchProps.ts").BranchProps} BranchProps */
 
 /**
@@ -320,10 +319,10 @@ export const Task = createTaskComponent({ applyCliToolAllowlist });
 
 import React from "react";
 import { z } from "zod";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
-import { getTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
+import { getTaskRuntime } from "@smthrs/driver/task-runtime";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 /** @typedef {import("./ApprovalAutoApprove.ts").ApprovalAutoApprove} ApprovalAutoApprove */
 /** @typedef {import("./ApprovalMode.ts").ApprovalMode} ApprovalMode */
 /** @typedef {import("./ApprovalOption.ts").ApprovalOption} ApprovalOption */
@@ -450,18 +449,14 @@ function validateApprovalRestriction(value, field, id) {
 }
 /**
  * @param {ApprovalAutoApprove[keyof ApprovalAutoApprove]} callback
- * @param {import("@smithers-orchestrator/driver").SmithersCtx<unknown> | null} ctx
+ * @param {import("@smthrs/driver").SmithersCtx<unknown> | null} ctx
  * @returns {boolean | undefined}
  */
 function evaluateBooleanCallback(callback, ctx) {
   if (typeof callback !== "function") {
     return undefined;
   }
-  return Boolean(
-    /** @type {(ctx: import("@smithers-orchestrator/driver").SmithersCtx<unknown> | null) => boolean} */ (callback)(
-      ctx,
-    ),
-  );
+  return Boolean(/** @type {(ctx: import("@smthrs/driver").SmithersCtx<unknown> | null) => boolean} */ (callback)(ctx));
 }
 /**
  * @template Row
@@ -583,7 +578,7 @@ export type EscalationChainProps = {
 ```
 
 ```ts EscalationLevel.ts
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type EscalationLevel = {

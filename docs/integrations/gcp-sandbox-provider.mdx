@@ -5,7 +5,7 @@ description: Run a Smithers <Sandbox> child workflow on Cloud Run Jobs with crea
 
 # GCP Sandbox Provider
 
-`@smithers-orchestrator/gcp` is a first-class Smithers `SandboxProvider` for
+`@smthrs/gcp` is a first-class Smithers `SandboxProvider` for
 Google Cloud. It executes a `<Sandbox>` child workflow's request on Cloud Run
 Jobs and ships the request/result bundle through a Cloud Storage bucket,
 since Cloud Run Jobs give the caller no shared filesystem. The shared
@@ -19,7 +19,7 @@ import {
   createGcpSandboxProvider,
   registerGcpSandboxProvider,
   GCP_SANDBOX_PROVIDER_ID,
-} from "smithers-orchestrator/gcp";
+} from "smthrs/gcp";
 ```
 
 ## Credentials
@@ -70,8 +70,8 @@ Other knobs: `prefix` (default `smithers/sandbox`), `command`, `workdir`
 ## Usage
 
 ```tsx
-import { Sandbox } from "smithers-orchestrator";
-import { createGcpSandboxProvider } from "smithers-orchestrator/gcp";
+import { Sandbox } from "smthrs";
+import { createGcpSandboxProvider } from "smthrs/gcp";
 
 const provider = createGcpSandboxProvider({
   projectId: "my-project",

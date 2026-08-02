@@ -119,11 +119,11 @@ key namespace.
 The SDK lives in the two existing gateway packages so embedded workflow UIs
 get the same surface in-tree code does without reaching into apps/smithers:
 
-- `@smithers-orchestrator/gateway-client` — vanilla core: `SyncKey`,
+- `@smthrs/gateway-client` — vanilla core: `SyncKey`,
   `SyncCache`, `SyncSubscriptionHub`, `SyncClient`, `SyncTransport`,
   `SyncBackoff`, `gatewayKeys`, and `createSmithersGatewayTransport` which
   wires `SmithersGatewayClient`'s resilient stream generators in.
-- `@smithers-orchestrator/gateway-react` — React surface: `SyncProvider`,
+- `@smthrs/gateway-react` — React surface: `SyncProvider`,
   `useSyncClient`, `useSyncQuery`, `useSyncMutation`, `useSyncSubscription`,
   and the typed gateway shortcuts (`useGatewayQuery`, `useGatewayMutation`,
   `useGatewayRunStream`).
@@ -147,7 +147,7 @@ the existing store onto SDK primitives is out of scope for slice C.
 
 A workflow UI mounted at `/workflows/<key>` can either:
 
-- import from `@smithers-orchestrator/gateway-react` (in-tree or embedded UIs)
+- import from `@smthrs/gateway-react` (in-tree or embedded UIs)
 - pass a `SyncTransport` of its own (third-party UIs that talk to their own
   RPC over postMessage to the host iframe)
 

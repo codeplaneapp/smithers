@@ -12,7 +12,7 @@ import {
   ALL_TABS,
   type FlatNode,
 } from "../../src/runs/treeUtils.ts";
-import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import type { GatewayRunNode } from "@smthrs/gateway-client";
 
 function node(id: string, overrides: Partial<GatewayRunNode> = {}): GatewayRunNode {
   return { id, name: id, kind: "task", status: "done", ...overrides };

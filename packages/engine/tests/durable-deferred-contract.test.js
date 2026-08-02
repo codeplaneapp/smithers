@@ -1,7 +1,7 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { jsx, jsxs } from "smithers-orchestrator/jsx-runtime";
+import { jsx, jsxs } from "smthrs/jsx-runtime";
 import {
   Approval,
   Sequence,
@@ -12,7 +12,7 @@ import {
   approvalDecisionSchema,
   runWorkflow,
   signalRun,
-} from "smithers-orchestrator";
+} from "smthrs";
 import { approveNode, denyNode } from "../src/approvals.js";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { Effect } from "effect";

@@ -1,7 +1,7 @@
 import { LinearConfig as LinearConfig$1 } from './LinearConfig.js';
 import { CreateIssueInput as CreateIssueInput$1, LinearClientService as LinearClientService$1, LinearCommentResult as LinearCommentResult$1, LinearIssueResult as LinearIssueResult$1, LinearPriority as LinearPriority$1, LinearTeamRef as LinearTeamRef$1 } from './LinearClientTypes.js';
 import { Context, Layer } from 'effect';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 
 /**
  * Layer providing {@link LinearClient} from config (explicit >

@@ -17,7 +17,7 @@
 // matters).
 
 import { z } from "zod";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 /** Namespace prefix for approval callback_data (Smithers APproval). */
 const CALLBACK_PREFIX = "sap";

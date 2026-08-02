@@ -1,8 +1,8 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
-import { GeminiAgent } from "@smithers-orchestrator/agents/GeminiAgent";
+import { SmithersRenderer } from "@smthrs/react-reconciler/dom/renderer";
+import { GeminiAgent } from "@smthrs/agents/GeminiAgent";
 import { SMITHERS_WORKFLOW_VIEW_KIND, TUI, UI } from "../src/components/index.js";
 import { Loop as LoopFromModule, Ralph as RalphFromModule } from "../src/components/Loop.js";
 import { Task } from "../src/components/index.js";

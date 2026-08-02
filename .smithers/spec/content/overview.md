@@ -12,7 +12,7 @@ Durability is the core contract. State lives in SQLite, PGlite, or Postgres tabl
 
 Around the engine is the operator surface. The smithers CLI installs, updates, ejects, removes, and shares workflow packs; launches and resumes runs; reclaims owned worktrees; watches logs; answers approvals; sends signals; manages schedules and durable alerts; manages agent accounts; runs evals; generates OpenAPI tools; migrates storage; starts gateways; opens monitors; and serves MCP tools for other agents. The gateway exposes versioned RPC and WebSocket APIs for runs, approvals, prompts, docs, tickets, memory, score comparisons, run diffs, cron, and DevTools. gateway-client and gateway-react let browser or desktop UIs consume that API without inventing a second contract.
 
-The runtime is also portable. smithers-orchestrator/browser runs the real driver, scheduler, renderer, dependency semantics, and schema validation through a RuntimeAdapter while filesystem, subprocess, worktree, and sandbox capabilities fail closed unless the host provides them. The testing package covers quick workflow simulation and a durability scenario kernel with virtual-time, real-database, and real-process tiers.
+The runtime is also portable. smthrs/browser runs the real driver, scheduler, renderer, dependency semantics, and schema validation through a RuntimeAdapter while filesystem, subprocess, worktree, and sandbox capabilities fail closed unless the host provides them. The testing package covers quick workflow simulation and a durability scenario kernel with virtual-time, real-database, and real-process tiers.
 
 ## What ships here
 

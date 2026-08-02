@@ -1,4 +1,4 @@
-import { registerSandboxProvider } from "@smithers-orchestrator/sandbox";
+import { registerSandboxProvider } from "@smthrs/sandbox";
 import { createMicrosandboxSandboxProvider } from "./createMicrosandboxSandboxProvider.js";
 
 /**

@@ -1,9 +1,9 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { captureSnapshot, loadLatestSnapshot, parseSnapshot } from "@smithers-orchestrator/time-travel/snapshot";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { captureSnapshot, loadLatestSnapshot, parseSnapshot } from "@smthrs/time-travel/snapshot";
 import { Effect } from "effect";
-import { Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { Task, Workflow, runWorkflow } from "smthrs";
 import { z } from "zod";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 

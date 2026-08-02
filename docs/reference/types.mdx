@@ -1,14 +1,14 @@
 ---
 title: Types
-description: Public TypeScript surface for smithers-orchestrator.
+description: Public TypeScript surface for smthrs.
 ---
 
-This mirrors what `tsc --emitDeclarationOnly` would emit. Import these types from `smithers-orchestrator` unless noted otherwise.
+This mirrors what `tsc --emitDeclarationOnly` would emit. Import these types from `smthrs` unless noted otherwise.
 
 `createSmithers` is a **named export**:
 
 ```ts
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 ```
 
 It returns a local API object for the workflow module. Destructure what you
@@ -43,7 +43,7 @@ Major sections at a glance:
 - **Component props**: `WorkflowProps`, `ApprovalProps`, `SignalProps`, `LoopProps`, etc., all JSX component interfaces.
 - **Errors**: `SmithersError`, `KnownSmithersErrorCode`, typed error codes; see [Errors](/reference/errors).
 - **Server / Gateway**: `ServerOptions`, `GatewayOptions`, `GatewayAuthConfig`, self-hosting configuration.
-- **Scorers / Memory / OpenAPI / Observability**: sub-path imports (`smithers-orchestrator/scorers`, `/memory`, `/openapi`, `/observability`).
+- **Scorers / Memory / OpenAPI / Observability**: sub-path imports (`smthrs/scorers`, `/memory`, `/openapi`, `/observability`).
 
 ```ts
 // =============================================================================
@@ -58,7 +58,7 @@ interface SmithersWorkflow<Schema = unknown> {
   readonly db?: unknown;
   readonly build: (ctx: SmithersCtx<Schema>) => JSX.Element;
   readonly opts: SmithersWorkflowOptions;
-  readonly memoryService?: import("@smithers-orchestrator/driver/MemoryRuntimeService").MemoryRuntimeService;
+  readonly memoryService?: import("@smthrs/driver/MemoryRuntimeService").MemoryRuntimeService;
   readonly schemaRegistry?: Map<string, SchemaRegistryEntry>;
   readonly zodToKeyName?: Map<import("zod").ZodObject<import("zod").ZodRawShape>, string>;
 }
@@ -90,7 +90,7 @@ type SmithersWorkflowOptions = {
 };
 
 // A Zod schema (createSmithers(...).outputs.<key>), a Drizzle table, or a
-// string schema key. Restated in @smithers-orchestrator/scheduler, which must
+// string schema key. Restated in @smthrs/scheduler, which must
 // not depend on zod or components.
 type SmithersWorkflowOutputTarget =
   | { readonly _def: unknown }
@@ -206,9 +206,9 @@ type RunAuthContext = {
 | Terminal | `finished`, `continued`, `failed`, `cancelled` | This run will not schedule more work. A `continued` run points to its successor through `nextRunId`. |
 
 `TaskState` is the persisted, detailed lifecycle for an individual task.
-Import it from `@smithers-orchestrator/scheduler/TaskState`. `NodeStatus` is a
+Import it from `@smthrs/scheduler/TaskState`. `NodeStatus` is a
 separate six-value display palette exported by
-`@smithers-orchestrator/gateway-react`; `useGatewayRunTree` collapses detailed
+`@smthrs/gateway-react`; `useGatewayRunTree` collapses detailed
 task and run states into that palette. In particular, every `waiting-*` value
 maps to `waiting`. Do not use the display palette as a persisted lifecycle
 contract.
@@ -326,7 +326,7 @@ type RunStatus =
   | "cancelled";
 
 // Persisted per-task lifecycle. Import from
-// @smithers-orchestrator/scheduler/TaskState.
+// @smthrs/scheduler/TaskState.
 type TaskState =
   | "pending"
   | "waiting-approval"
@@ -342,7 +342,7 @@ type TaskState =
   | "skipped";
 
 // Display palette returned by useGatewayRunTree. Import from
-// @smithers-orchestrator/gateway-react.
+// @smthrs/gateway-react.
 type NodeStatus =
   | "ok"
   | "running"
@@ -1636,7 +1636,7 @@ type KnownSmithersErrorCode =
 // Server
 // =============================================================================
 
-type SmithersDb = import("@smithers-orchestrator/db/adapter").SmithersDb;
+type SmithersDb = import("@smthrs/db/adapter").SmithersDb;
 
 type ServerOptions = {
   port?: number;
@@ -1753,7 +1753,7 @@ type GatewayOptions = {
 };
 
 // =============================================================================
-// Scorers (smithers-orchestrator/scorers)
+// Scorers (smthrs/scorers)
 // =============================================================================
 
 type ScoreResult  = { score: number; reason?: string; meta?: Record<string, unknown> };
@@ -1832,7 +1832,7 @@ type CreateScorerConfig = {
 };
 
 // =============================================================================
-// Memory (smithers-orchestrator/memory)
+// Memory (smthrs/memory)
 // =============================================================================
 
 type MemoryFact    = { namespace: string; key: string; valueJson: string; schemaSig?: string | null; createdAtMs: number; updatedAtMs: number; ttlMs?: number | null };
@@ -1969,7 +1969,7 @@ type MemoryLayerConfig = {
 };
 
 // =============================================================================
-// OpenAPI tools (smithers-orchestrator/openapi)
+// OpenAPI tools (smthrs/openapi)
 // =============================================================================
 
 type OpenApiAuth =
@@ -2105,7 +2105,7 @@ type CreateSmithersPostgresOptions =
     | { provider: "pglite"; dataDir?: string }
   );
 
-// Named export from "smithers-orchestrator". The returned `smithers` property is
+// Named export from "smthrs". The returned `smithers` property is
 // the workflow wrapper; there is no default-exported top-level smithers function.
 declare function createSmithers<Schemas extends Record<string, import("zod").ZodObject<any>>>(
   schemas: Schemas,
@@ -2185,7 +2185,7 @@ declare function createExternalSmithers<S extends Record<string, import("zod").Z
 ): SmithersWorkflow<S> & { tables: Record<string, any>; cleanup: () => void };
 
 // =============================================================================
-// Observability (smithers-orchestrator/observability)
+// Observability (smthrs/observability)
 // =============================================================================
 
 type SmithersLogFormat = "json" | "pretty";
@@ -2209,4 +2209,4 @@ runWorkflow(workflow, {
 });
 ```
 
-For canonical, machine-checked types, install `smithers-orchestrator` and use editor go-to-definition. For runtime errors, see [Errors](/reference/errors).
+For canonical, machine-checked types, install `smthrs` and use editor go-to-definition. For runtime errors, see [Errors](/reference/errors).

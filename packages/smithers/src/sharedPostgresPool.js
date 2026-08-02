@@ -2,7 +2,7 @@
  * Process-local PostgreSQL pool registry. Each normalized URL owns at most one
  * bounded node-postgres pool; callers receive a reference-counted lease.
  */
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 const DEFAULT_POSTGRES_POOL_MAX = 16;
 /**

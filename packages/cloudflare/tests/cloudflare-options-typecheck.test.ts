@@ -25,7 +25,7 @@ describe("CloudflareSandboxProviderOptions public type", () => {
 				import {
 					createCloudflareSandboxProvider,
 					type CloudflareSandboxProviderOptions,
-				} from "@smithers-orchestrator/cloudflare";
+				} from "@smthrs/cloudflare";
 
 				const stringOptions: CloudflareSandboxProviderOptions = { sleepAfter: "10m" };
 				const numericOptions: CloudflareSandboxProviderOptions = { sleepAfter: 600 };
@@ -43,7 +43,7 @@ describe("CloudflareSandboxProviderOptions public type", () => {
           module: "ESNext",
           moduleResolution: "bundler",
           paths: {
-            "@smithers-orchestrator/cloudflare": [resolve(REPO_ROOT, "packages/cloudflare/src/index.d.ts")],
+            "@smthrs/cloudflare": [resolve(REPO_ROOT, "packages/cloudflare/src/index.d.ts")],
           },
           skipLibCheck: true,
           lib: ["ESNext", "DOM", "DOM.Iterable"],

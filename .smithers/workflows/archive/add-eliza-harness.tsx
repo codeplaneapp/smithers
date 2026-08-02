@@ -2,8 +2,8 @@
 // smithers-display-name: Add Eliza Agent Harness
 // smithers-description: Implement an ElizaAgent harness in packages/agents that wraps the elizaOS AgentRuntime as a Smithers AgentLike, with pass-through access to all elizaOS plugins. Durable implement -> validate -> review loop.
 // smithers-tags: agents, integration, eliza
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../../agents";
 import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../../components/ValidationLoop";

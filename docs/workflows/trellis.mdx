@@ -5,14 +5,14 @@ description: Experimental prompt-first workflow where Sol or Fable grows a bound
 
 `trellis` is the repository's executable Dynamic Delegation v2 workflow: an
 experimental local workflow, not yet part of the default
-`bunx smithers-orchestrator init`
+`bunx smthrs init`
 pack. It maps Sol/Fable authors, a Terra validator, and the Terra implementer
 chain (riding the component's `luna` seat) into the
 [`<Trellis>`](/components/trellis) component and declares the
 `Smithers Trellis` custom UI.
 
 ```bash
-bunx smithers-orchestrator workflow run trellis \
+bunx smthrs workflow run trellis \
   --prompt "Implement the feature, review it independently, and prove it works" \
   --max-concurrency 4
 ```
@@ -22,7 +22,7 @@ component cap matches the persisted run cap. To use another value, pass it as
 both workflow input and run option:
 
 ```bash
-bunx smithers-orchestrator workflow run trellis \
+bunx smthrs workflow run trellis \
   --input '{"prompt":"Research and implement the change","maxConcurrency":2}' \
   --max-concurrency 2
 ```
@@ -46,7 +46,7 @@ admission ceiling. Phase A does not claim measured diff or filesystem-sandbox
 enforcement. For example:
 
 ```bash
-bunx smithers-orchestrator workflow run trellis \
+bunx smthrs workflow run trellis \
   --input '{"prompt":"Fix the protocol core and prove replay","criticalExecutionPolicy":{"allowedCategories":["protocol_core"],"allowedPathPrefixes":["packages/engine/src"],"maxChangedLines":40}}' \
   --max-concurrency 4
 ```
@@ -56,7 +56,7 @@ bunx smithers-orchestrator workflow run trellis \
 Open the workflow UI to launch and inspect runs:
 
 ```bash
-bunx smithers-orchestrator ui --workflow trellis
+bunx smthrs ui --workflow trellis
 ```
 
 The launcher submits the selected concurrency as workflow input and run

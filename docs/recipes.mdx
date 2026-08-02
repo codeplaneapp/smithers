@@ -7,7 +7,7 @@ Each recipe is a working snippet plus one line of context. They compose freely.
 
 <Note>API reference: [Reference overview](/reference/overview) maps every package to its exhaustive API page, each with links to source and tests.</Note>
 
-If you want a ready-to-run outcome before writing workflow code, start with [Starters](/starters) or run `bunx smithers-orchestrator starters`.
+If you want a ready-to-run outcome before writing workflow code, start with [Starters](/starters) or run `bunx smthrs starters`.
 
 ## Default model routing
 
@@ -185,7 +185,7 @@ One context boundary per logical operation, not per step. Splitting too finely l
 ## Per-agent least-privilege tools
 
 ```tsx
-import { OpenAIAgent } from "smithers-orchestrator";
+import { OpenAIAgent } from "smthrs";
 
 const researcher  = new OpenAIAgent({ model: "gpt-5.6-luna", instructions: "Return JSON" });
 const validator   = new OpenAIAgent({ model: "gpt-5.6-terra", instructions: "...", tools: { read, grep } });
@@ -203,7 +203,7 @@ External mutations must mark themselves and use the runtime idempotency key.
 Add `revert` when time travel can compensate the operation.
 
 ```tsx
-import { defineTool } from "smithers-orchestrator/tools";
+import { defineTool } from "smthrs/tools";
 
 const createTicket = defineTool({
   name: "jira.create",
@@ -309,7 +309,7 @@ waiter and records a durability gap that needs attention. Lock waits are logged
 and abort-aware.
 
 ```bash
-bunx smithers-orchestrator revert workflow.tsx --run-id RUN_ID --node-id implement --attempt 1
+bunx smthrs revert workflow.tsx --run-id RUN_ID --node-id implement --attempt 1
 ```
 
 Every discard command checks the external-effect journal before changing the
@@ -318,11 +318,11 @@ stops the command with `TIME_TRAVEL_SIDE_EFFECT_BLOCKED`.
 
 ```bash
 # Print the report and cross unresolved effects. The run is marked for attention.
-bunx smithers-orchestrator revert workflow.tsx \
+bunx smthrs revert workflow.tsx \
   --run-id RUN_ID --node-id implement --attempt 1 --force
 
 # Skip registered handlers. Any crossed effects now require --force.
-bunx smithers-orchestrator revert workflow.tsx \
+bunx smthrs revert workflow.tsx \
   --run-id RUN_ID --node-id implement --attempt 1 --no-revert --force
 ```
 
@@ -332,10 +332,10 @@ GitHub API mutations such as `gh pr merge` are not.
 ## Time travel: fork, replay, diff
 
 ```bash
-bunx smithers-orchestrator timeline RUN_ID --tree
-bunx smithers-orchestrator diff RUN_ID NODE_ID
-bunx smithers-orchestrator fork workflow.tsx --run-id RUN_ID --frame 5 --reset-node analyze --label exp1
-bunx smithers-orchestrator replay workflow.tsx --run-id RUN_ID --frame 5 --restore-vcs
+bunx smthrs timeline RUN_ID --tree
+bunx smthrs diff RUN_ID NODE_ID
+bunx smthrs fork workflow.tsx --run-id RUN_ID --frame 5 --reset-node analyze --label exp1
+bunx smthrs replay workflow.tsx --run-id RUN_ID --frame 5 --restore-vcs
 ```
 
 Fork makes a child run without starting it (add `--run` to start immediately);
@@ -349,7 +349,7 @@ source. See [Time-travel commands compared](/cli/overview#time-travel-commands-c
 ## Scoring tasks
 
 ```tsx
-import { schemaAdherenceScorer, latencyScorer, llmJudge } from "smithers-orchestrator/scorers";
+import { schemaAdherenceScorer, latencyScorer, llmJudge } from "smthrs/scorers";
 
 <Task
   id="analyze"
@@ -386,7 +386,7 @@ Scorers run after the task and never block. Sample expensive scorers with `ratio
 ```
 
 ```bash
-bunx smithers-orchestrator eval workflow.tsx --cases evals/smoke.jsonl --suite smoke --force
+bunx smthrs eval workflow.tsx --cases evals/smoke.jsonl --suite smoke --force
 ```
 
 Use eval suites when you need repeatable workflow-level checks. Assertions support `status`, `output` (exact match), and `outputContains` (partial match). Reports land in `.smithers/evals/<suite>.json`; the command exits non-zero on failures.
@@ -404,7 +404,7 @@ Avoids unbounded SQLite growth in long-lived loops.
 ## Hot reload while authoring
 
 ```bash
-bunx smithers-orchestrator up workflow.tsx --hot
+bunx smthrs up workflow.tsx --hot
 ```
 
 Edits to the workflow source apply on the next render frame without losing in-flight task state. Schema changes still require a fresh run.

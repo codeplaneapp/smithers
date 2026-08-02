@@ -1,12 +1,12 @@
 import { spawn } from "node:child_process";
 import { Effect, Metric } from "effect";
-import { NodeDiffCache, NodeDiffTooLargeError } from "@smithers-orchestrator/db/cache/nodeDiffCache";
-import { computeDiffBundleBetweenRefs } from "@smithers-orchestrator/engine/effect/diff-bundle";
+import { NodeDiffCache, NodeDiffTooLargeError } from "@smthrs/db/cache/nodeDiffCache";
+import { computeDiffBundleBetweenRefs } from "@smthrs/engine/effect/diff-bundle";
 import { runPromise } from "../smithersRuntime.js";
 import { RUN_ID_PATTERN } from "./RUN_ID_PATTERN.js";
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("@smithers-orchestrator/db/adapter").AttemptRow} AttemptRow */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").AttemptRow} AttemptRow */
 /** @typedef {import("./GetNodeDiffRouteResult.js").GetNodeDiffRouteResult} GetNodeDiffRouteResult */
 /** @typedef {import("./DiffSummary.js").DiffSummary} DiffSummary */
 const NODE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,128}$/;
@@ -259,8 +259,8 @@ function scheduleCacheRowGauge(cache, emitEffect, nowMs) {
  *   iteration: unknown;
  *   resolveRun: (runId: string) => Promise<{ adapter: SmithersDb } | null>;
  *   emitEffect?: (effect: Effect.Effect<void>) => Promise<unknown>;
- *   computeDiffBundleImpl?: (baseRef: string, cwd: string, seq?: number) => Promise<import("@smithers-orchestrator/engine/effect/DiffBundle").DiffBundle>;
- *   computeDiffBundleBetweenRefsImpl?: (baseRef: string, targetRef: string, cwd: string, seq?: number) => Promise<import("@smithers-orchestrator/engine/effect/DiffBundle").DiffBundle>;
+ *   computeDiffBundleImpl?: (baseRef: string, cwd: string, seq?: number) => Promise<import("@smthrs/engine/effect/DiffBundle").DiffBundle>;
+ *   computeDiffBundleBetweenRefsImpl?: (baseRef: string, targetRef: string, cwd: string, seq?: number) => Promise<import("@smthrs/engine/effect/DiffBundle").DiffBundle>;
  *   resolveCommitPointerImpl?: (pointer: string, cwd: string) => Promise<string | null>;
  *   nowMs?: () => number;
  *   stat?: boolean;

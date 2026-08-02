@@ -1,7 +1,7 @@
 import { basename, resolve } from "node:path";
 import { intro, isCancel, log, multiselect } from "@clack/prompts";
 import pc from "picocolors";
-import { accountsRoot } from "@smithers-orchestrator/accounts";
+import { accountsRoot } from "@smthrs/accounts";
 import { detectAvailableAgents } from "./agent-detection.js";
 import { applyWorkflowPackUpdates, CURATED_PUBLIC_WORKFLOW_IDS, initWorkflowPack } from "./workflow-pack.js";
 import { buildDefaultSelections, selectionsToPackOptions } from "./init/interactiveInit.js";

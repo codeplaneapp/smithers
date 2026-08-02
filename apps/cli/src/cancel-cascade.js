@@ -1,8 +1,8 @@
 import { spawnSync } from "node:child_process";
-import { finalizeCancelledRun, isRunHeartbeatFresh } from "@smithers-orchestrator/engine";
-import { isPidAlive, parseRuntimeOwnerPid } from "@smithers-orchestrator/engine/runtime-owner";
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("@smithers-orchestrator/db/adapter").RunRow} RunRow */
+import { finalizeCancelledRun, isRunHeartbeatFresh } from "@smthrs/engine";
+import { isPidAlive, parseRuntimeOwnerPid } from "@smthrs/engine/runtime-owner";
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").RunRow} RunRow */
 
 /**
  * Statuses `smithers cancel` can act on. Everything else (finished, failed,

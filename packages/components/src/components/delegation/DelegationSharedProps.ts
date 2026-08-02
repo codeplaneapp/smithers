@@ -1,5 +1,5 @@
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
-import type { ScorersMap } from "@smithers-orchestrator/graph/types";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
+import type { ScorersMap } from "@smthrs/graph/types";
 import type { OutputTarget } from "../OutputTarget.ts";
 import type { Tier } from "./delegationSchemas.ts";
 
@@ -53,7 +53,7 @@ export type DelegationSharedProps = {
    *
    * WARNING: the delegation fold and the `smithers ui` delegation UI
    * (`foldDelegation`/`delegationTableForNodeId` in
-   * `@smithers-orchestrator/gateway-react`) only recognize the default
+   * `@smthrs/gateway-react`) only recognize the default
    * `"dc"` prefix. A custom prefix still executes correctly, but the run
    * renders NO delegation UI until the fold learns the new prefix — keep the
    * default unless you also extend the fold.
@@ -77,7 +77,7 @@ export type DelegationSharedProps = {
   poll?: boolean;
   /** Run budget, enforced from rolled-up dcExec actuals (and wall-clock via Aspects for maxMinutes). */
   budget?: DelegationBudget;
-  /** Delegation scorers (e.g. from `smithers-orchestrator/scorers`). */
+  /** Delegation scorers (e.g. from `smthrs/scorers`). */
   scorers?: DelegationScorers;
   skipIf?: boolean;
 };

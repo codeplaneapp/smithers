@@ -6,9 +6,9 @@
 // smithers-display-name: Backpressure Plan
 // smithers-description: Turn acceptance criteria into a gate matrix (schema/test/eval/review/approval/trace) so a workflow cannot just try-its-best and move on.
 // smithers-tags: quality, backpressure
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import ExtractCriteriaPrompt from "../prompts/backpressure-plan-extract-criteria.mdx";

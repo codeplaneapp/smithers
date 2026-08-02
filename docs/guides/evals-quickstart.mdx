@@ -3,7 +3,7 @@ title: "Eval Suites Quickstart"
 description: Run repeatable workflow regressions from JSON or JSONL cases.
 ---
 
-Eval suites protect an important workflow with repeatable cases, each getting a persisted run record, stable metadata, and a JSON report you can check in CI. You need a workflow file (e.g. `workflow.tsx`) and a working `bunx smithers-orchestrator init` scaffold; each case runs that workflow with the given input and checks the result.
+Eval suites protect an important workflow with repeatable cases, each getting a persisted run record, stable metadata, and a JSON report you can check in CI. You need a workflow file (e.g. `workflow.tsx`) and a working `bunx smthrs init` scaffold; each case runs that workflow with the given input and checks the result.
 
 <Note>API reference: [Scorers](/reference/scorers) lists every scorer, its options, and links to source and tests.</Note>
 
@@ -56,7 +56,7 @@ Use a judge assertion when correctness depends on meaning or tone rather than an
 Smithers automatically picks an authenticated local judge agent; use `--judge-provider` and `--judge-model` to select one explicitly:
 
 ```bash
-bunx smithers-orchestrator eval workflow.tsx \
+bunx smthrs eval workflow.tsx \
   --cases evals/smoke.jsonl \
   --judge-provider codex \
   --judge-model gpt-5.6-luna \
@@ -68,7 +68,7 @@ If no usable judge agent is configured, judge assertions fail with setup guidanc
 ## 2. Dry-run the plan
 
 ```bash
-bunx smithers-orchestrator eval workflow.tsx --cases evals/smoke.jsonl --suite smoke --dry-run
+bunx smthrs eval workflow.tsx --cases evals/smoke.jsonl --suite smoke --dry-run
 ```
 
 Dry-run mode prints the planned case IDs, run IDs, and judge requirements without touching the database; pass `--run-label <label>` to keep dry-run and execution IDs consistent.
@@ -76,7 +76,7 @@ Dry-run mode prints the planned case IDs, run IDs, and judge requirements withou
 ## 3. Execute the suite
 
 ```bash
-bunx smithers-orchestrator eval workflow.tsx --cases evals/smoke.jsonl --suite smoke --force
+bunx smthrs eval workflow.tsx --cases evals/smoke.jsonl --suite smoke --force
 ```
 
 By default the report is written to `.smithers/evals/smoke.json`; use `--report path/to/report.json` for a different location.
@@ -90,7 +90,7 @@ The command exits `0` when all cases pass, `1` when any genuinely fail, `4` for 
 ## 4. Use structured output in CI
 
 ```bash
-bunx smithers-orchestrator eval workflow.tsx \
+bunx smthrs eval workflow.tsx \
   --cases evals/smoke.jsonl \
   --suite smoke \
   --report artifacts/smoke-eval.json \

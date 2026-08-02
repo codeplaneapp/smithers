@@ -31,25 +31,25 @@ MCP server into detected coding agents, no per-agent config by hand.
 
 ```bash
 # Sync the Smithers skill set into supported skill locations
-bunx smithers-orchestrator skills add
+bunx smthrs skills add
 
 # Register Smithers as an MCP server in every detected agent
-bunx smithers-orchestrator mcp add
+bunx smthrs mcp add
 ```
 
 Target a single MCP agent with `--agent`, or scope skill installs to the current
 project with `--no-global`:
 
 ```bash
-bunx smithers-orchestrator mcp add --agent cursor
-bunx smithers-orchestrator skills add --no-global   # writes .agents/skills in the repo
+bunx smthrs mcp add --agent cursor
+bunx smthrs skills add --no-global   # writes .agents/skills in the repo
 ```
 
 <Note>
-`skills add` generates a skill per CLI command group (`bunx smithers-orchestrator up`, `bunx smithers-orchestrator ps`,
-`bunx smithers-orchestrator approve`, …) and syncs them into supported skill
+`skills add` generates a skill per CLI command group (`bunx smthrs up`, `bunx smthrs ps`,
+`bunx smthrs approve`, …) and syncs them into supported skill
 locations, including the canonical `~/.agents/skills` directory. `mcp add`
-registers `bunx smithers-orchestrator --mcp` in each agent's MCP config. Override
+registers `bunx smthrs --mcp` in each agent's MCP config. Override
 the launch command with `--command` if Smithers is a project dependency.
 </Note>
 
@@ -60,8 +60,8 @@ as one of its own flags. Register with the agent's own CLI instead, with a `--`
 separator so the agent passes `--mcp` through to Smithers untouched:
 
 ```bash
-codex mcp add smithers -- bunx smithers-orchestrator --mcp
-claude mcp add smithers -- bunx smithers-orchestrator --mcp
+codex mcp add smithers -- bunx smthrs --mcp
+claude mcp add smithers -- bunx smthrs --mcp
 ```
 
 The CLI prints these commands for you when `mcp add` fails. See
@@ -84,7 +84,7 @@ current: it syncs the generated CLI command skills *and* the curated `smithers`
 skill (`SKILL.md` plus the `llms-full.txt` bundle) from the installed package.
 
 ```bash
-bunx smithers-orchestrator skills add
+bunx smthrs skills add
 ```
 
 It behaves identically in an agent, a CI job, and an interactive terminal, so a
@@ -94,7 +94,7 @@ the curated skill's status and version next to the command skills, and flags a
 stale copy:
 
 ```bash
-bunx smithers-orchestrator skills list
+bunx smthrs skills list
 ```
 
 ```text
@@ -105,7 +105,7 @@ Curated skill (smithers, bundled v0.30.0):
 Run `smithers skills add` to bring the curated skill up to date.
 ```
 
-`bunx smithers-orchestrator update` runs the same sync once the package upgrade
+`bunx smthrs update` runs the same sync once the package upgrade
 finishes, so an upgrade leaves every Smithers-owned skill current on its own.
 Opt out of the curated-skill half with `SMITHERS_NO_SKILL_REFRESH=1`.
 
@@ -141,7 +141,7 @@ existing config and silently skips an agent that isn't installed.
 
 ## Worker defaults: Claude builds and gates, Codex checks
 
-When `bunx smithers-orchestrator init` finds usable Codex authentication, the
+When `bunx smthrs init` finds usable Codex authentication, the
 generated implementation pool starts with Claude Opus 5, the checking pools
 start with Codex, and every pool pins the model tier to the job:
 

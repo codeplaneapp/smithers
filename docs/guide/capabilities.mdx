@@ -31,13 +31,13 @@ embed Smithers in your own server.
 | "We embed Smithers in our server and already have a logger. Use ours, not yours." | `createSmithersObservabilityLayer({ installLogger: false })` keeps your own logger installed ([Observability API](/reference/observability)). |
 | "Mirror every run event and failure into our own sink." | The `onProgress` and `onError` run callbacks, which receive every event and failure report as plain objects. |
 | "Send traces and metrics to our Grafana / Datadog." | OTLP export via `SMITHERS_OTEL_ENABLED=1` + `OTEL_EXPORTER_OTLP_ENDPOINT`; Prometheus text at the server's `GET /metrics`. |
-| "Give me a local dashboard with traces so I can poke around." | `bunx smithers-orchestrator observability`: a Grafana + Prometheus + Tempo + OTLP collector stack via Docker Compose. |
+| "Give me a local dashboard with traces so I can poke around." | `bunx smthrs observability`: a Grafana + Prometheus + Tempo + OTLP collector stack via Docker Compose. |
 
 ## Get alerted
 
 | You say | Smithers runs under the hood |
 | --- | --- |
-| "When the nightly release run fails, page the on-call with the runbook link." | An `alertPolicy` on the workflow (ownership, severity, runbook, reactions), with durable alert rows via `bunx smithers-orchestrator alerts` ([Alerting](/guides/alerting)). |
+| "When the nightly release run fails, page the on-call with the runbook link." | An `alertPolicy` on the workflow (ownership, severity, runbook, reactions), with durable alert rows via `bunx smthrs alerts` ([Alerting](/guides/alerting)). |
 | "Send me a daily digest of my runs on Telegram." | The [Telegram integration](/integrations/telegram) and the `telegram-daily-digest` pack workflow. |
 
 ## Go back in time
@@ -47,10 +47,10 @@ on, not just read.
 
 | You say | Smithers runs under the hood |
 | --- | --- |
-| "That refactor went sideways at step 4. Rewind to just before it." | `bunx smithers-orchestrator rewind` back to the good frame. |
-| "Fork the run from before the review step and try a different approach." | `bunx smithers-orchestrator fork`, then `replay` drives the branch forward. |
-| "Show me every checkpoint this run took and what each one changed." | `bunx smithers-orchestrator timeline`, `snapshots`, and `diff`. |
-| "Put my files back the way they were before that task ran." | `bunx smithers-orchestrator restore` / `revert` reset the working tree to a checkpoint. |
+| "That refactor went sideways at step 4. Rewind to just before it." | `bunx smthrs rewind` back to the good frame. |
+| "Fork the run from before the review step and try a different approach." | `bunx smthrs fork`, then `replay` drives the branch forward. |
+| "Show me every checkpoint this run took and what each one changed." | `bunx smthrs timeline`, `snapshots`, and `diff`. |
+| "Put my files back the way they were before that task ran." | `bunx smthrs restore` / `revert` reset the working tree to a checkpoint. |
 
 See [time travel in Recipes](/recipes#time-travel-fork-replay-diff) for the full loop.
 
@@ -58,56 +58,56 @@ See [time travel in Recipes](/recipes#time-travel-fork-replay-diff) for the full
 
 | You say | Smithers runs under the hood |
 | --- | --- |
-| "Hand me that agent session; I'll drive it from my terminal." | `bunx smithers-orchestrator hijack` hands the run's live agent session to you, resumable. |
-| "Pause the migration run: finish what's in flight, start nothing new." | `bunx smithers-orchestrator pause` parks it durably; resume later with `up --resume RUN_ID`. |
-| "The run is waiting on the deploy; tell it the deploy finished." | `bunx smithers-orchestrator signal` delivers the event a waiting run is listening for. |
-| "Did any run ask me a question? Show me, and let me answer." | `bunx smithers-orchestrator human` lists and resolves durable questions raised mid-run. |
-| "If my overnight runs stall, resume them automatically." | `bunx smithers-orchestrator supervise` watches named runs and auto-resumes them. |
+| "Hand me that agent session; I'll drive it from my terminal." | `bunx smthrs hijack` hands the run's live agent session to you, resumable. |
+| "Pause the migration run: finish what's in flight, start nothing new." | `bunx smthrs pause` parks it durably; resume later with `up --resume RUN_ID`. |
+| "The run is waiting on the deploy; tell it the deploy finished." | `bunx smthrs signal` delivers the event a waiting run is listening for. |
+| "Did any run ask me a question? Show me, and let me answer." | `bunx smthrs human` lists and resolves durable questions raised mid-run. |
+| "If my overnight runs stall, resume them automatically." | `bunx smthrs supervise` watches named runs and auto-resumes them. |
 
 ## Teach it and tune it
 
 | You say | Smithers runs under the hood |
 | --- | --- |
-| "What has Smithers learned about this repo across runs?" | `bunx smithers-orchestrator memory`: cross-run memory facts, queryable ([Memory](/concepts/memory)). |
+| "What has Smithers learned about this repo across runs?" | `bunx smthrs memory`: cross-run memory facts, queryable ([Memory](/concepts/memory)). |
 | "Give it memory that recalls by meaning, not keywords." | A Hindsight endpoint via `HINDSIGHT_URL`. Signing up or self-hosting is the one step your agent can't do for you: [Set Up Semantic Memory](/guide/setup/semantic-memory). |
-| "Protect this workflow with regression cases we can run in CI." | `bunx smithers-orchestrator eval` over a JSON/JSONL suite, emitting a check-in-able report ([Eval Suites Quickstart](/guides/evals-quickstart)). |
-| "How did the last few runs score?" | `bunx smithers-orchestrator scores` ([Scorers](/reference/scorers)). |
-| "Make the reviewer prompt better, and prove it's better." | `bunx smithers-orchestrator optimize`: GEPA prompt optimization verified against your eval suite ([Workflow optimization](/guides/workflow-optimization)). |
+| "Protect this workflow with regression cases we can run in CI." | `bunx smthrs eval` over a JSON/JSONL suite, emitting a check-in-able report ([Eval Suites Quickstart](/guides/evals-quickstart)). |
+| "How did the last few runs score?" | `bunx smthrs scores` ([Scorers](/reference/scorers)). |
+| "Make the reviewer prompt better, and prove it's better." | `bunx smthrs optimize`: GEPA prompt optimization verified against your eval suite ([Workflow optimization](/guides/workflow-optimization)). |
 
 ## Accounts, quota, and cost
 
 | You say | Smithers runs under the hood |
 | --- | --- |
-| "Use my Claude subscription for the smart steps and my OpenAI key for the rest." | `bunx smithers-orchestrator agents`: register subscriptions and API keys, then route each task to the right one. |
-| "How much of my quota have runs burned this week?" | `bunx smithers-orchestrator usage` per registered account. |
+| "Use my Claude subscription for the smart steps and my OpenAI key for the rest." | `bunx smthrs agents`: register subscriptions and API keys, then route each task to the right one. |
+| "How much of my quota have runs burned this week?" | `bunx smthrs usage` per registered account. |
 
 ## Share and extend
 
 | You say | Smithers runs under the hood |
 | --- | --- |
-| "Install that team's review pack." | `bunx smithers-orchestrator add` from GitHub, npm, or a local file. |
-| "Publish our pack so other teams can install it." | `bunx smithers-orchestrator share` opens the pull request for you. |
-| "Update the packs we've installed." | `bunx smithers-orchestrator packs update`. |
-| "Copy the built-in implement workflow into the repo so we can customize it." | `bunx smithers-orchestrator eject` copies the workflow plus its UI, prompts, and libraries. |
-| "Upgrade Smithers itself." | `bunx smithers-orchestrator update`, or `upgrade` for the agent-assisted path. |
+| "Install that team's review pack." | `bunx smthrs add` from GitHub, npm, or a local file. |
+| "Publish our pack so other teams can install it." | `bunx smthrs share` opens the pull request for you. |
+| "Update the packs we've installed." | `bunx smthrs packs update`. |
+| "Copy the built-in implement workflow into the repo so we can customize it." | `bunx smthrs eject` copies the workflow plus its UI, prompts, and libraries. |
+| "Upgrade Smithers itself." | `bunx smthrs update`, or `upgrade` for the agent-assisted path. |
 
 ## Quick jobs, no workflow
 
 | You say | Smithers runs under the hood |
 | --- | --- |
-| "Fix this bug (or upgrade every dependency, or make CI green) in the background and show me a live dashboard with the diff." | `bunx smithers-orchestrator oneshot`: one strong agent, one goal at any size, up to roughly 300k tokens in a single run, with chat/diff/hijack controls ([Oneshot](/guides/oneshot)). |
-| "Open that oneshot so I can watch it live, steer the agent, or restart it." | `bunx smithers-orchestrator monitor RUN_ID`: the dedicated oneshot monitor with streaming chat, honest steering delivery, restart, and an attachment-scoped cheap narrator. |
-| "Review this PR and give me a walkthrough I can actually read." | `bunx smithers-orchestrator review`: code review plus a story-form HTML walkthrough. |
-| "What happened in that run?" / "Why is it stuck?" | `bunx smithers-orchestrator what` / `why`: a narrated recap, or the exact blocker. |
-| "Ask Smithers how I'd do X." | `bunx smithers-orchestrator ask` answers from the installed docs and MCP server. |
+| "Fix this bug (or upgrade every dependency, or make CI green) in the background and show me a live dashboard with the diff." | `bunx smthrs oneshot`: one strong agent, one goal at any size, up to roughly 300k tokens in a single run, with chat/diff/hijack controls ([Oneshot](/guides/oneshot)). |
+| "Open that oneshot so I can watch it live, steer the agent, or restart it." | `bunx smthrs monitor RUN_ID`: the dedicated oneshot monitor with streaming chat, honest steering delivery, restart, and an attachment-scoped cheap narrator. |
+| "Review this PR and give me a walkthrough I can actually read." | `bunx smthrs review`: code review plus a story-form HTML walkthrough. |
+| "What happened in that run?" / "Why is it stuck?" | `bunx smthrs what` / `why`: a narrated recap, or the exact blocker. |
+| "Ask Smithers how I'd do X." | `bunx smthrs ask` answers from the installed docs and MCP server. |
 
 ## Run it your way
 
 | You say | Smithers runs under the hood |
 | --- | --- |
 | "Run the risky steps in an isolated cloud sandbox." | Sandbox providers: Microsandbox, Daytona, Vercel, AWS, GCP ([Sandbox providers](/components/sandbox-providers)). |
-| "Let a teammate watch and approve from their laptop." | `bunx smithers-orchestrator gateway` serves the HTTP control plane; `token` mints short-lived access ([Gateway](/integrations/gateway)). |
-| "Keep run history in our Postgres, not a local SQLite file." | `bunx smithers-orchestrator migrate` moves the run store to PGlite or Postgres ([Database](/reference/db)). |
+| "Let a teammate watch and approve from their laptop." | `bunx smthrs gateway` serves the HTTP control plane; `token` mints short-lived access ([Gateway](/integrations/gateway)). |
+| "Keep run history in our Postgres, not a local SQLite file." | `bunx smthrs migrate` moves the run store to PGlite or Postgres ([Database](/reference/db)). |
 
 ## Read next
 

@@ -73,12 +73,12 @@ import type {
   BrowserPickResponse,
   CloseBrowserSessionResponse,
   ListBrowserSessionsResponse,
-} from "@smithers-orchestrator/protocol/gateway-rpc";
+} from "@smthrs/protocol/gateway-rpc";
 import type { GatewayCronRow } from "./sync/GatewayCronRow.ts";
-import type { UsageReport, UsageWindow } from "@smithers-orchestrator/usage";
+import type { UsageReport } from "@smthrs/usage";
 
-export type { UsageReport, UsageWindow } from "@smithers-orchestrator/usage";
-export type { RunStartedBy } from "@smithers-orchestrator/protocol/gateway-rpc";
+export type { UsageReport, UsageWindow } from "@smthrs/usage";
+export type { RunStartedBy } from "@smthrs/protocol/gateway-rpc";
 
 export type ListUsageReportsRequest = { fresh?: boolean };
 

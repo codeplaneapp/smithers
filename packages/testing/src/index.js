@@ -2345,7 +2345,7 @@ import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } fr
 
 // src/schemaMock.ts
 import { toJSONSchema } from "zod";
-import { zodSchemaToJsonExample } from "@smithers-orchestrator/components/zod-to-example";
+import { zodSchemaToJsonExample } from "@smthrs/components/zod-to-example";
 function stringForFormat(format) {
   switch (format) {
     case "email":
@@ -2937,9 +2937,9 @@ var fakeAgent = Object.assign(buildFakeAgent, {
 });
 
 // src/renderWorkflow.ts
-import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler";
-import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
+import { SmithersCtx } from "@smthrs/driver/SmithersCtx";
+import { SmithersRenderer } from "@smthrs/react-reconciler";
+import { canonicalizeXml } from "@smthrs/graph/utils/xml";
 function buildRuntimeConfig(options) {
   return {
     ...options.runtimeConfig,
@@ -2973,8 +2973,8 @@ async function renderWorkflow(workflow, options = {}) {
   );
   const baseRootDir = options.baseRootDir ?? options.runtimeConfig?.baseRootDir;
   const workflowPath = options.workflowPath ?? options.runtimeConfig?.workflowPath ?? null;
-  const engineHelpers = await import("@smithers-orchestrator/engine/engine");
-  const computeHelpers = await import("@smithers-orchestrator/engine/task-compute-fns");
+  const engineHelpers = await import("@smthrs/engine/engine");
+  const computeHelpers = await import("@smthrs/engine/task-compute-fns");
   engineHelpers.resolveTaskOutputs(graph.tasks, workflow);
   computeHelpers.attachSubflowComputeFns(graph.tasks, workflow, {
     rootDir: baseRootDir,
@@ -2997,7 +2997,7 @@ async function renderWorkflow(workflow, options = {}) {
 }
 
 // src/renderPrompt.ts
-import { renderPromptToText } from "@smithers-orchestrator/components/components/Task";
+import { renderPromptToText } from "@smthrs/components/components/Task";
 
 // src/runTask.ts
 async function runTask(task, options = {}) {
@@ -3040,9 +3040,9 @@ function validateOutput(task, value) {
 }
 
 // src/simulate.ts
-import { WorkflowDriver } from "@smithers-orchestrator/driver";
-import { SmithersRenderer as SmithersRenderer2 } from "@smithers-orchestrator/react-reconciler";
-import { makeWorkflowSession } from "@smithers-orchestrator/scheduler";
+import { WorkflowDriver } from "@smthrs/driver";
+import { SmithersRenderer as SmithersRenderer2 } from "@smthrs/react-reconciler";
+import { makeWorkflowSession } from "@smthrs/scheduler";
 import { Effect } from "effect";
 function createRunId() {
   return `sim_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
@@ -3210,8 +3210,8 @@ function __simulateWithControls(workflow, options = {}, controls) {
       const graph = await smithersRenderer.render(element, extractOptions);
       const rootDir = extractOptions?.baseRootDir ?? options.rootDir;
       const workflowPath = extractOptions?.workflowPath ?? options.workflowPath ?? null;
-      const engineHelpers = await import("@smithers-orchestrator/engine/engine");
-      const computeHelpers = await import("@smithers-orchestrator/engine/task-compute-fns");
+      const engineHelpers = await import("@smthrs/engine/engine");
+      const computeHelpers = await import("@smthrs/engine/task-compute-fns");
       engineHelpers.resolveTaskOutputs(graph.tasks, workflow);
       computeHelpers.attachSubflowComputeFns(graph.tasks, workflow, {
         rootDir,
@@ -4552,7 +4552,7 @@ var shrink = async (ast, controls, failure2, options = {}) => {
 
 // src/adapters/realDbAdapter.ts
 init_Harness();
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { SmithersDb } from "@smthrs/db/adapter";
 
 // src/adapters/realDbCutPoints.ts
 var preserve = (value) => value;
@@ -4623,7 +4623,7 @@ var realDbAdapter = (options) => {
   return registerTrustedAdapter(
     {
       identity: options.identity ?? "real-db:sqlite",
-      verifiedProductionIdentity: "@smithers-orchestrator/db/adapter:SmithersDb",
+      verifiedProductionIdentity: "@smthrs/db/adapter:SmithersDb",
       supportedCutPoints: executableCutPoints,
       admissionProbe: async () => {
         resource = await options.open();
@@ -4805,7 +4805,7 @@ var realDbAdapter = (options) => {
           phase: fault2.phase,
           executed: true,
           invoked: context?.invoked === true,
-          productionIdentity: "@smithers-orchestrator/db/adapter:SmithersDb",
+          productionIdentity: "@smthrs/db/adapter:SmithersDb",
           result: context?.result,
           observed
         };

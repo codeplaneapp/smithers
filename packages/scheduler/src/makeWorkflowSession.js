@@ -1,6 +1,6 @@
 import { Effect } from "effect";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
 import { buildPlanTree } from "./buildPlanTree.js";
 import { buildStateKey } from "./buildStateKey.js";
 import { cloneTaskStateMap } from "./cloneTaskStateMap.js";
@@ -8,8 +8,8 @@ import { computeRetryDelayMs } from "./computeRetryDelayMs.js";
 import { findDescriptor } from "./findDescriptor.js";
 import { parseStateKey } from "./parseStateKey.js";
 import { scheduleTasks } from "./scheduleTasks.js";
-/** @typedef {import("@smithers-orchestrator/graph").TaskDescriptor} TaskDescriptor */
-/** @typedef {import("@smithers-orchestrator/graph").WorkflowGraph} WorkflowGraph */
+/** @typedef {import("@smthrs/graph").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("@smthrs/graph").WorkflowGraph} WorkflowGraph */
 /** @typedef {import("./ApprovalResolution.ts").ApprovalResolution} ApprovalResolution */
 /** @typedef {import("./EngineDecision.ts").EngineDecision} EngineDecision */
 /** @typedef {import("./PlanNode.ts").PlanNode} PlanNode */

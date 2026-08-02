@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { VERCEL_SANDBOX_PROVIDER_ID } from "../src/VERCEL_SANDBOX_PROVIDER_ID.js";
 import { createVercelSandboxProvider } from "../src/createVercelSandboxProvider.js";
 import { createMockVercelSandboxEnvironment } from "../src/createMockVercelSandboxEnvironment.js";

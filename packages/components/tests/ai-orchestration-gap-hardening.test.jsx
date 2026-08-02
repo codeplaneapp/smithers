@@ -1,9 +1,9 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import { Debate, DecisionTable, Optimizer, Panel, ReviewLoop, SuperSmithers, Task } from "../src/components/index.js";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
-import { SmithersContext, SmithersCtx } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersRenderer } from "@smthrs/react-reconciler/dom/renderer";
+import { SmithersContext, SmithersCtx } from "@smthrs/react-reconciler/context";
 
 const RUN_ID = "ai-orchestration-gaps";
 const agent = { id: "agent", generate: async () => ({ text: "ok" }) };

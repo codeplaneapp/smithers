@@ -1,4 +1,4 @@
-import { createSandboxProviderContractSuite } from "@smithers-orchestrator/sandbox";
+import { createSandboxProviderContractSuite } from "@smthrs/sandbox";
 import { VERCEL_SANDBOX_PROVIDER_ID } from "../src/VERCEL_SANDBOX_PROVIDER_ID.js";
 import { createVercelSandboxProvider } from "../src/createVercelSandboxProvider.js";
 import { createMockVercelSandboxEnvironment } from "../src/createMockVercelSandboxEnvironment.js";

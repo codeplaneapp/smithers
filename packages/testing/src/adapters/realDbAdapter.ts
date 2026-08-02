@@ -1,4 +1,4 @@
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { registerTrustedAdapter, type AdapterFaultContext, type HarnessAdapter } from "../harness/Harness.ts";
 import { realDbCutPoints } from "./realDbCutPoints.ts";
 import { existsSync } from "node:fs";
@@ -102,7 +102,7 @@ export const realDbAdapter = (options: RealDbAdapterOptions): HarnessAdapter => 
   return registerTrustedAdapter(
     {
       identity: options.identity ?? "real-db:sqlite",
-      verifiedProductionIdentity: "@smithers-orchestrator/db/adapter:SmithersDb",
+      verifiedProductionIdentity: "@smthrs/db/adapter:SmithersDb",
       supportedCutPoints: executableCutPoints,
       admissionProbe: async () => {
         resource = await options.open();
@@ -346,7 +346,7 @@ export const realDbAdapter = (options: RealDbAdapterOptions): HarnessAdapter => 
           phase: fault.phase,
           executed: true,
           invoked: context?.invoked === true,
-          productionIdentity: "@smithers-orchestrator/db/adapter:SmithersDb",
+          productionIdentity: "@smthrs/db/adapter:SmithersDb",
           result: context?.result,
           observed,
         };

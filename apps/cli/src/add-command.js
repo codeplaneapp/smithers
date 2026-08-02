@@ -17,8 +17,8 @@ export async function runDurableAdd({ spec, global = false, yes = false } = {}) 
   try {
     const [{ Effect }, { runWorkflow }, { ensureSmithersTables }, { mdxPlugin }] = await Promise.all([
       import("effect"),
-      import("@smithers-orchestrator/engine"),
-      import("@smithers-orchestrator/db/ensure"),
+      import("@smthrs/engine"),
+      import("@smthrs/db/ensure"),
       import("./mdx-plugin.js"),
     ]);
     mdxPlugin();

@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/react */
 import { useEffect, useState } from "react";
 import { useRun } from "./data.ts";
-import { sanitizeTerminalText } from "@smithers-orchestrator/tui-ui";
+import { sanitizeTerminalText } from "@smthrs/tui-ui";
 import {
   buildRunHeaderData,
   statusDotColor,

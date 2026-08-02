@@ -1,6 +1,6 @@
 import { Effect } from "effect";
-import { closeSingleRunnerRuntime, runWorkflow } from "smithers-orchestrator";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { closeSingleRunnerRuntime, runWorkflow } from "smthrs";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import {
   buildKillResumeWorkflow,
   type EngineChildMode,

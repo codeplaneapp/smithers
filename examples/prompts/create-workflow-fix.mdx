@@ -15,7 +15,7 @@ errors, fix the files, and make both pass. You have file + shell tools.
 
 ## Verify command that failed
 
-`bunx smithers-orchestrator graph {props.workflowFile}` plus, if the UI file
+`bunx smthrs graph {props.workflowFile}` plus, if the UI file
 exists, `bun build --no-bundle {props.uiFile}`. Errors below are prefixed
 `[graph]` or `[ui]` so you know which check failed.
 
@@ -45,15 +45,15 @@ exists, `bun build --no-bundle {props.uiFile}`. Errors below are prefixed
      prompt; wrap them in backticks or fenced code blocks.
    - **UI transpile errors**: wrong JSX pragma (must be
      `/** @jsxImportSource react */`), bad import from
-     `smithers-orchestrator/gateway-react`, or plain TypeScript mistakes.
+     `smthrs/gateway-react`, or plain TypeScript mistakes.
      Compare against `{props.uiDir}/vcs.tsx`.
    - **UI not advertised**: the browser file exists but the workflow lacks
      `<UI entry="../ui/<workflow>.tsx" />`, so `smithers ui` cannot find it.
 3. Make the smallest change that fixes the error without abandoning the design.
-   If the docs would help, run `bunx smithers-orchestrator docs` or
-   `bunx smithers-orchestrator ask "<question>"`.
+   If the docs would help, run `bunx smthrs docs` or
+   `bunx smthrs ask "<question>"`.
 4. Re-run the failing command(s) yourself and confirm exit 0 before you finish:
-   `bunx smithers-orchestrator graph {props.workflowFile}` and, if the UI file
+   `bunx smthrs graph {props.workflowFile}` and, if the UI file
    exists, `bun build --no-bundle {props.uiFile} > /dev/null`.
 
 Do not delete the workflow or the UI, and do not stub either out to "pass".

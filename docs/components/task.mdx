@@ -4,7 +4,7 @@ description: Executable node; runs an agent, compute callback, or emits a static
 ---
 
 ```ts
-import { Task } from "smithers-orchestrator";
+import { Task } from "smthrs";
 
 type TaskProps = {
   id: string;
@@ -83,11 +83,11 @@ matching table. Set `outputSchema={...}` only for a custom Drizzle table or
 string key it can't infer a schema from.
 
 <Warning>
-**Don't name an output field `iteration`, `runId`, or `nodeId`.** Smithers persists every output alongside those internal columns, so declaring one collides and the workflow fails to load (`bunx smithers-orchestrator graph` errors before running). Loop counters hit this most: use `round`, `pass`, or `attempt` instead.
+**Don't name an output field `iteration`, `runId`, or `nodeId`.** Smithers persists every output alongside those internal columns, so declaring one collides and the workflow fails to load (`bunx smthrs graph` errors before running). Loop counters hit this most: use `round`, `pass`, or `attempt` instead.
 </Warning>
 
 ```tsx
-import { CodexAgent } from "smithers-orchestrator";
+import { CodexAgent } from "smthrs";
 
 const analysisAgent = new CodexAgent({
   model: "gpt-5.6-terra",
@@ -245,7 +245,7 @@ Every agent task produces a reusable session snapshot; use `fork` to start a new
 `fork` never mutates or continues the source task; multiple tasks may fork the same source safely, and a forked task may itself be forked.
 
 ```tsx
-import { CodexAgent } from "smithers-orchestrator";
+import { CodexAgent } from "smthrs";
 
 const planner = new CodexAgent({ model: "gpt-5.6-sol" });
 const implementer = new CodexAgent({ model: "gpt-5.6-terra", config: { model_reasoning_effort: "medium" } });
@@ -272,7 +272,7 @@ const VERIFY = "verify" as const;
 **Parallel branches**: fork the same source from sibling tasks; each gets its own copy, unaffected by the others:
 
 ```tsx
-import { CodexAgent } from "smithers-orchestrator";
+import { CodexAgent } from "smthrs";
 
 const researcher = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
 const implementer = new CodexAgent({ model: "gpt-5.6-terra", config: { model_reasoning_effort: "medium" } });

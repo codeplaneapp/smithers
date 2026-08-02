@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { DiffHunks, FileTree, parseUnifiedFile } from "@smithers-orchestrator/ui";
+import { DiffHunks, FileTree, parseUnifiedFile } from "@smthrs/ui";
 
 const SAMPLE_PATCH = `diff --git a/src/auth/session.ts b/src/auth/session.ts
 --- a/src/auth/session.ts

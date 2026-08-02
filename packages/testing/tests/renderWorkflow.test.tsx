@@ -1,7 +1,7 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { fakeAgent, renderPrompt, renderWorkflow, runTask } from "../src/index.ts";
 
 const schemas = {

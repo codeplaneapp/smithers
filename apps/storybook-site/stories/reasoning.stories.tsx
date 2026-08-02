@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { ChainOfThought, CodeBlock, Markdown, Reasoning, ToolCall } from "@smithers-orchestrator/ui";
+import { ChainOfThought, CodeBlock, Markdown, Reasoning, ToolCall } from "@smthrs/ui";
 
 const meta: Meta = {
   title: "Agentic/Reasoning & Tools",

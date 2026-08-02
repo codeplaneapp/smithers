@@ -3,13 +3,13 @@ title: MessageResponse
 description: Render assistant Markdown safely while content is still streaming.
 ---
 
-`MessageResponse` (`smithers-orchestrator/ui`) renders assistant Markdown via
+`MessageResponse` (`smthrs/ui`) renders assistant Markdown via
 the dependency-free `Markdown` primitive, keeping incomplete fences and
 inline markers stable across stream chunks, and shows an `aria-hidden` caret
 while `streaming` is true.
 
 ```tsx
-import { MessageResponse } from "smithers-orchestrator/ui";
+import { MessageResponse } from "smthrs/ui";
 
 <MessageResponse
   content={assistantText}

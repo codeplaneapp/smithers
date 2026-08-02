@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/integrations",
+  "name": "@smthrs/integrations",
   "version": "0.32.0",
   "description": "External service integrations (webhook + polling event sources) for Smithers workflows",
   "type": "module",
@@ -40,13 +40,13 @@
     "build": "node ../../scripts/clean-dts.mjs src && tsup"
   },
   "dependencies": {
-    "@smithers-orchestrator/components": "workspace:*",
-    "@smithers-orchestrator/db": "workspace:*",
-    "@smithers-orchestrator/engine": "workspace:*",
-    "@smithers-orchestrator/errors": "workspace:*",
-    "@smithers-orchestrator/observability": "workspace:*",
-    "@smithers-orchestrator/react-reconciler": "workspace:*",
-    "@smithers-orchestrator/scheduler": "workspace:*",
+    "@smthrs/components": "workspace:*",
+    "@smthrs/db": "workspace:*",
+    "@smthrs/engine": "workspace:*",
+    "@smthrs/errors": "workspace:*",
+    "@smthrs/observability": "workspace:*",
+    "@smthrs/react-reconciler": "workspace:*",
+    "@smthrs/scheduler": "workspace:*",
     "effect": "4.0.0-beta.102",
     "react": "^19.2.7",
     "zod": "4.4.3"

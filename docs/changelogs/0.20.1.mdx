@@ -1,9 +1,9 @@
 ---
 title: "0.20.1"
-description: "Patch release: agent-trace observability lands, the bunx smithers-orchestrator init agent"
+description: "Patch release: agent-trace observability lands, the bunx smthrs init agent"
 ---
 
-Patch release: agent-trace observability lands, the `bunx smithers-orchestrator init` agent
+Patch release: agent-trace observability lands, the `bunx smthrs init` agent
 flow gets sharper, and `pnpm release` now opens a GitHub release.
 
 ---
@@ -49,13 +49,13 @@ flow gets sharper, and `pnpm release` now opens a GitHub release.
 
 ## CLI
 
-- **`bunx smithers-orchestrator init` agent detection.** Reworked
+- **`bunx smthrs init` agent detection.** Reworked
   `apps/cli/src/agent-detection.js` so the init flow detects installed
   agents correctly across more environments; covered by new tests in
   `apps/cli/tests/cli-agent-detection.test.js` and
   `apps/cli/tests/init-agents.e2e.test.js`.
 
-- **Better `.gitignore` templates.** `bunx smithers-orchestrator init` now writes
+- **Better `.gitignore` templates.** `bunx smthrs init` now writes
   `*.db-shm`, `*.db-wal`, `*.log`, and `logs/` into
   `.smithers/.gitignore`, and adds a new
   `.smithers/workflows/.gitignore` for `*.log` / `run-*.log`. Keeps

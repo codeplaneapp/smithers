@@ -27,7 +27,7 @@ bun install
 bun run deploy
 
 # Watch it run
-kubectl logs -f deployment/smithers-orchestrator -n smithers-system
+kubectl logs -f deployment/smthrs -n smithers-system
 
 # Access the Gateway
 minikube service smithers-gateway -n smithers-system --url
@@ -106,7 +106,7 @@ Your workflow code is identical to local Smithers — no changes needed:
 
 ```tsx
 // workflow.tsx
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { smithers, Workflow, Task, Sequence, outputs } = createSmithers({
@@ -180,7 +180,7 @@ kubectl scale deployment smithers-worker --replicas=10 -n smithers-system
 
 ```bash
 # Via kubectl
-kubectl logs deployment/smithers-orchestrator -n smithers-system
+kubectl logs deployment/smthrs -n smithers-system
 
 # Via Smithers CLI (pointing at the Gateway)
 export SMITHERS_GATEWAY_URL=$(minikube service smithers-gateway -n smithers-system --url)
@@ -227,7 +227,7 @@ accordingly.
 [Fabrik](https://github.com/SamuelLHuber/local-isolated-ralph) by
 [Samuel Huber](https://github.com/SamuelLHuber) (dTech.vision) is a K3s-based
 Kubernetes layer for Smithers that takes a fundamentally different architectural
-approach. It uses `smithers-orchestrator` as a direct dependency and wraps it
+approach. It uses `smthrs` as a direct dependency and wraps it
 with Kubernetes-native job dispatch.
 
 **Key differences:**

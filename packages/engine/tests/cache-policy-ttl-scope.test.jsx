@@ -1,9 +1,9 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { z } from "zod";
 import { Effect } from "effect";
-import { Workflow, Task, runWorkflow } from "smithers-orchestrator";
+import { Workflow, Task, runWorkflow } from "smthrs";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 
 function outputShape() {

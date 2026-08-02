@@ -4,11 +4,11 @@
  * Pattern: Extract data from source → Transform/enrich with agent → Load to destination.
  * Use cases: data migration, API sync, content processing, log analysis.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, write, bash, grep } from "smithers-orchestrator/tools";
+import { read, write, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import ExtractPrompt from "./prompts/etl/extract.mdx";
 import TransformPrompt from "./prompts/etl/transform.mdx";

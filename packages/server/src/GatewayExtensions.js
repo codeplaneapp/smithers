@@ -15,7 +15,7 @@
 // Namespace ownership is one-shot per registry: re-registering a namespace
 // throws so two extensions cannot silently overwrite each other's keys.
 
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 const EXTENSION_METHOD_PREFIX = "ext.";
 const EXTENSION_STREAM_METHOD_PREFIX = "ext.stream.";

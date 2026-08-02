@@ -1,5 +1,5 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-/** @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
+import { SmithersError } from "@smthrs/errors/SmithersError";
+/** @typedef {import("@smthrs/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
 
 /**
  * A payload that is still a thenable was never awaited. `stripAutoColumns`

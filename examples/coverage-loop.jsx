@@ -4,11 +4,11 @@
  * Pattern: Iterative quality improvement loop with measurable convergence.
  * Use cases: test coverage, type coverage, lint fixes, accessibility score.
  */
-import { Sequence, Loop } from "smithers-orchestrator";
+import { Sequence, Loop } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, write, bash, grep } from "smithers-orchestrator/tools";
+import { read, write, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import MeasurePrompt from "./prompts/coverage-loop/measure.mdx";
 import FixPrompt from "./prompts/coverage-loop/fix.mdx";

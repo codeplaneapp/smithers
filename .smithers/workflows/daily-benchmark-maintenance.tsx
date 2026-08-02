@@ -2,12 +2,12 @@
 // smithers-description: Daily workflow-backed SOTA and benchmark maintenance: refresh model registry research, smoke-run benchmark/eval harnesses, and let a smart model research benchmark updates.
 // smithers-tags: system, benchmarks, evals, research
 // smithers-system: true
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
+import { ClaudeCodeAgent, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { codexFirst } from "../lib/codexAccounts";
 

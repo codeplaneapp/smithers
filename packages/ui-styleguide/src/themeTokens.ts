@@ -83,7 +83,7 @@ export const darkTokens = [
 export const sharedTokens = [
   // Legacy aliases (do not remove; workflow UIs rely on them). Trap: this
   // page-vocabulary `--accent` is the BRAND violet, while the shadcn bridge's
-  // `tokens.accent` (@smithers-orchestrator/ui) is the hover fill -- never
+  // `tokens.accent` (@smthrs/ui) is the hover fill -- never
   // treat the two as interchangeable.
   "--panel:var(--surface)",
   "--card:var(--surface)",
@@ -123,7 +123,7 @@ export const sharedTokens = [
   "--ring:color-mix(in srgb, var(--brand) 22%, transparent)",
   "--ring-border:color-mix(in srgb, var(--brand) 50%, transparent)",
   // Geometry: spacing, type scale, radii, and shared control heights.
-  // Spacing policy (enforced by @smithers-orchestrator/ui css-contract tests):
+  // Spacing policy (enforced by @smthrs/ui css-contract tests):
   // the --sp scale (4px steps) paces layout-level spacing; component-internal
   // padding/gap sits on a 2px fine grid (even px values only, no 5/7/9px).
   // Weight roles: 650 is the only emphasis weight for titles/labels; 700 is

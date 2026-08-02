@@ -1,7 +1,7 @@
 // smithers-source: authored
 // smithers-display-name: Validated Implement
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Sequence, Loop } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, Sequence, Loop } from "smthrs";
 import { spawnSync } from "node:child_process";
 import { z } from "zod/v4";
 import { agents } from "../agents";

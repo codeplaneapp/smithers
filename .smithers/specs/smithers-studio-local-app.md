@@ -1,7 +1,7 @@
 # Smithers Studio: the open-source local app
 
 Smithers Studio is the fully open-source local version of the Multi UI, built in this
-repo as `apps/studio` (`@smithers-orchestrator/studio`). It is a desktop app: an
+repo as `apps/studio` (`@smthrs/studio`). It is a desktop app: an
 electrobun shell whose Bun main process hosts the entire backend locally and whose
 webview runs the React frontend ported from `../multi`. It operates on local checkouts
 of GitHub repos, runs agent work in sandboxes through the official Smithers sandbox
@@ -21,13 +21,13 @@ GUI ships from it.
 ## Hard requirements at boot
 
 Studio refuses to run without both agent CLIs. The boot preflight uses
-`detectAvailableAgents` from `@smithers-orchestrator/cli/agent-detection`:
+`detectAvailableAgents` from `@smthrs/cli/agent-detection`:
 
 - `claude` must be installed and usable (`hasBinary` and a credential signal).
 - `codex` must be installed and usable.
-- `git` must be on PATH (`vcsToolingStatus()` from `@smithers-orchestrator/vcs`).
+- `git` must be on PATH (`vcsToolingStatus()` from `@smthrs/vcs`).
 - jj is NOT a user requirement: `packages/vcs` bundles per-platform jj binaries
-  (`@smithers-orchestrator/jj-*`) resolved by `resolveJjBinary()`.
+  (`@smthrs/jj-*`) resolved by `resolveJjBinary()`.
 
 A failed preflight renders a full-screen diagnosis (which check failed, the exact
 install/login command to fix it) and nothing else. There is no degraded anonymous
@@ -119,7 +119,7 @@ Port disposition (from the Multi audit):
 | Honor the kill list | SPEC §15.3 of Multi (no dock, no standalone login, no standalone diff/logs routes) |
 
 State stays Zustand per feature folder plus xstate for flowchat. Gateway data flows
-through `@smithers-orchestrator/gateway-client` / `gateway-react` exactly as Multi
+through `@smthrs/gateway-client` / `gateway-react` exactly as Multi
 does today (both repos already link these packages from this monorepo).
 
 ### The GUI/TUI seam
@@ -144,7 +144,7 @@ fails on any DOM/electrobun import (Multi has precedent arch guards in
 
 ```
 apps/studio/
-  package.json            # @smithers-orchestrator/studio, private
+  package.json            # @smthrs/studio, private
   electrobun.config.ts
   src/main/               # bun main process: services, proxy, rpc bridge
   src/app/                # ported frontend (logic modules + surfaces)

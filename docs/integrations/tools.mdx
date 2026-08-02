@@ -4,7 +4,7 @@ description: Sandboxed file and shell tools for AI agent tasks, with exact input
 ---
 
 ```ts
-import { tools, read, write, edit, grep, bash, defineTool, getDefinedToolMetadata } from "smithers-orchestrator";
+import { tools, read, write, edit, grep, bash, defineTool, getDefinedToolMetadata } from "smthrs";
 ```
 
 `tools` bundles all five tools keyed by name:
@@ -15,7 +15,7 @@ const { read, write, edit, grep, bash } = tools;
 
 <Note>API reference: [Tools](/reference/tools) lists every built-in tool and helper, its options, and links to source and tests.</Note>
 
-The `smithers-orchestrator/tools` subpath also exports lower-level helpers:
+The `smthrs/tools` subpath also exports lower-level helpers:
 
 | Export | Purpose |
 |---|---|
@@ -64,7 +64,7 @@ Each invocation receives a unique `callToken`. Completion and failure updates ma
 `defineTool()` wraps custom [AI SDK](https://ai-sdk.dev) tools with Smithers runtime context, deterministic idempotency keys, side-effect metadata, and the side-effect snapshot hook.
 
 ```ts
-import { defineTool } from "smithers-orchestrator";
+import { defineTool } from "smthrs";
 import { z } from "zod";
 
 const placeOrder = defineTool({
@@ -165,7 +165,7 @@ Returns file contents as UTF-8. Throws `"File too large"` if size exceeds `maxOu
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { read, grep } from "smithers-orchestrator";
+import { read, grep } from "smthrs";
 
 const codeAgent = new Agent({
   model: openai("gpt-5.6-sol"),
@@ -198,7 +198,7 @@ Returns `"ok"`; throws `"Content too large"` if content exceeds `maxOutputBytes`
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { write, read } from "smithers-orchestrator";
+import { write, read } from "smthrs";
 
 const writerAgent = new Agent({
   model: openai("gpt-5.6-luna"),
@@ -313,7 +313,7 @@ bash `/dev/tcp`), a nested shell, or a renamed binary. Unenforced isolation logs
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { bash } from "smithers-orchestrator";
+import { bash } from "smthrs";
 
 const devAgent = new Agent({
   model: openai("gpt-5.6-terra"),
@@ -337,7 +337,7 @@ Pass tools to an [AI SDK](https://ai-sdk.dev) agent and assign the agent to a [`
 ```tsx
 import { ToolLoopAgent as Agent } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { createSmithers, read, write, edit, grep, bash, Task } from "smithers-orchestrator";
+import { createSmithers, read, write, edit, grep, bash, Task } from "smthrs";
 import { z } from "zod";
 
 const codeAgent = new Agent({
@@ -364,7 +364,7 @@ The full bundle works too:
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { tools } from "smithers-orchestrator";
+import { tools } from "smthrs";
 
 const fullAgent = new Agent({
   model: openai("gpt-5.6-terra"),
@@ -383,7 +383,7 @@ const fullAgent = new Agent({
 
 ```ts
 import { Effect } from "effect";
-import { runWorkflow } from "smithers-orchestrator";
+import { runWorkflow } from "smthrs";
 
 const result = await Effect.runPromise(runWorkflow(workflow, {
   input: { file: "src/auth.ts" },

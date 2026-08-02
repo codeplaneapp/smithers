@@ -5,7 +5,7 @@ description: Parallel checks with auto-aggregated pass/fail verdict.
 
 ```ts
 // Props
-import { CheckSuite } from "smithers-orchestrator";
+import { CheckSuite } from "smthrs";
 
 type CheckConfig = { id: string; agent?: AgentLike; command?: string; label?: string };
 
@@ -53,8 +53,8 @@ The `<CheckSuite>` implementation and the files it imports, straight from the pa
 
 import React from "react";
 import { spawn } from "node:child_process";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
-import { getTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
+import { getTaskRuntime } from "@smthrs/driver/task-runtime";
 import { Sequence } from "./Sequence.js";
 import { Parallel } from "./Parallel.js";
 import { Task } from "./Task.js";
@@ -363,9 +363,8 @@ export function CheckSuite(props) {
 // @smithers-type-exports-end
 
 import React from "react";
-import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-export { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+export { SmithersCtx } from "@smthrs/driver/SmithersCtx";
 /** @type {React.Context<SmithersCtx<any> | null>} */
 export const SmithersContext = React.createContext(null);
 SmithersContext.displayName = "SmithersContext";
@@ -396,7 +395,7 @@ export function createSmithersContext() {
 
 ```js task-runtime.js
 import { AsyncLocalStorage } from "node:async_hooks";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 /** @typedef {import("./SmithersTaskRuntime.ts").SmithersTaskRuntime} SmithersTaskRuntime */
 
 const storage = new AsyncLocalStorage();
@@ -517,7 +516,7 @@ export type CheckSuiteProps = {
 ```
 
 ```ts CheckConfig.ts
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
 
 export type CheckConfig = {
   id: string;

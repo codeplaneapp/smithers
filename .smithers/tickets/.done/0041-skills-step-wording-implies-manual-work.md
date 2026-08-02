@@ -7,7 +7,7 @@ Filed from user feedback on X (onboarding replies), 2026-06-17.
 Even when the skill install is explained, the wording gives *"the false
 impression that it's an extra step, before they've actually read the content"*,
 and it's mixed into the get-started flow. The intent is for the CLI to **tell**
-the user "this is what's happening when you run `smithers-orchestrator skills`,"
+the user "this is what's happening when you run `smthrs skills`,"
 not to read as a task the user must perform — *"it's supposed to tell you that's
 what's happening … not ask you to do it yourself."*
 

@@ -7,14 +7,14 @@
 // fs watcher and are overridden in tests.
 
 import { Effect } from "effect";
-import { captureWorkspaceSnapshot, isJjRepo } from "@smithers-orchestrator/vcs/jj";
+import { captureWorkspaceSnapshot, isJjRepo } from "@smthrs/vcs/jj";
 import { getPlatformLayer } from "./platform-layer.js";
 import { createSnapshotService } from "./snapshotService.js";
 import { createWorkspaceWatcher } from "./workspaceWatcher.js";
 import { pruneWorkspaceDurability } from "./pruneWorkspaceDurability.js";
 import { appendGap, defaultGapSpoolPath } from "./durabilityGapSpool.js";
 import { createSnapshotServer, nextSnapshotSocketPath } from "./snapshotServer.js";
-import { logError, logInfo } from "@smithers-orchestrator/observability/logging";
+import { logError, logInfo } from "@smthrs/observability/logging";
 
 /**
  * Build a human label from a CLI hook payload (Claude PostToolUse JSON or our own).

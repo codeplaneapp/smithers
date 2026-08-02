@@ -1,10 +1,10 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { Effect, SchemaParser } from "effect";
 import { z } from "zod";
-import { jsx, jsxs } from "smithers-orchestrator/jsx-runtime";
+import { jsx, jsxs } from "smthrs/jsx-runtime";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
-import { runWorkflow } from "smithers-orchestrator";
+import { runWorkflow } from "smthrs";
 import {
   isTaskResultFailure,
   isUnknownWorkerError,

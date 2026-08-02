@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { createSmithers } from "../src/create.js";
 import { migrateSmithersStore } from "../src/migrateSmithersStore.js";
 

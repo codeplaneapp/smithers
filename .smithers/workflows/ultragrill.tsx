@@ -1,8 +1,8 @@
 // smithers-source: authored
 // smithers-display-name: UltraGrill
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
-import { createSmithers, Loop, Parallel, Sequence, Task, WaitForEvent } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
+import { createSmithers, Loop, Parallel, Sequence, Task, WaitForEvent } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 

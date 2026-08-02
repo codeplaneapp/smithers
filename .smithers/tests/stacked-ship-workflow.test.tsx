@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { coverWorkflow, renderPrompt, renderWorkflow } from "smithers-orchestrator/testing";
+import { coverWorkflow, renderPrompt, renderWorkflow } from "smthrs/testing";
 import workflow, {
   finalReviewPrompt,
   implementPrompt,

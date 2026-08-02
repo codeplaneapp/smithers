@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * Cross-feature audit lane: ATTEMPT MACHINERY (retry-task / revert / attempt
  * budgets / rewind leases) x CHILD WORKFLOWS (<Subflow mode="childRun">).
@@ -20,8 +20,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { Effect } from "effect";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { Parallel, Sequence, Subflow } from "../../components/src/components/index.js";
 import { __setRuntimeModuleLoader, extractFromHost } from "../../graph/src/dom/extract.js";
 import { runWorkflow } from "../../engine/src/engine.js";

@@ -1,4 +1,4 @@
-# @smithers-orchestrator/bug-worker — src
+# @smthrs/bug-worker — src
 
 Cloudflare Worker source for the bug.smithers.sh intake (routes, caps, and
 deploy instructions live in `../README.md`).

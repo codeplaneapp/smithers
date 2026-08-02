@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // ui-functional — can a weak model author a custom workflow UI that ACTUALLY
 // WORKS? Unlike ui-authoring (which only transpiles the bundle + string-checks
 // the API), this suite BOOTS the candidate's UI in a real browser against a real

@@ -25,7 +25,7 @@
     <text x="612" y="520" font-size="25" fill="#9CA3B4">WorkflowDriver + graph</text>
     <text x="612" y="562" font-size="25" fill="#9CA3B4">typed RuntimeAdapter</text>
     <text x="612" y="604" font-size="25" fill="#9CA3B4">explicit capability errors</text>
-    <text x="612" y="672" font-size="19" fill="#6B7280">smithers-orchestrator/browser</text>
+    <text x="612" y="672" font-size="19" fill="#6B7280">smthrs/browser</text>
 
     <rect x="1064" y="350" width="440" height="370" rx="16" fill="#141826" stroke="#31558E"/>
     <text x="1096" y="400" font-size="19" font-weight="700" letter-spacing="3" fill="#4C8DFF">SANDBOX PROVIDERS</text>

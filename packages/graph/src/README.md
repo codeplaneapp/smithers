@@ -1,4 +1,4 @@
-# @smithers-orchestrator/graph — src
+# @smthrs/graph — src
 
 The framework-neutral workflow graph model. `types.ts` is the source of truth;
 the one-type-per-file `.ts` sidecars (`TaskDescriptor.ts`, `GraphSnapshot.ts`,
@@ -30,4 +30,4 @@ byte-for-byte. The subpaths `./constants`, `./utils/xml`, and
 `./classifyClaudeWorkflowNodeKind` ship hand-written sibling `.d.ts` files
 enforced by `tests/subpath-exports-types.test.js`. `types.ts` is public type
 surface: driver, components, and react-reconciler deep-import
-`@smithers-orchestrator/graph/types`.
+`@smthrs/graph/types`.

@@ -1,4 +1,4 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { GCP_SANDBOX_PROVIDER_ID } from "./GCP_SANDBOX_PROVIDER_ID.js";
 
 /**
@@ -81,7 +81,7 @@ function buildCreateJobBody(options, timeoutSec, provider) {
     ? taskTemplate.containers.filter(isPlainObject).map((container) => ({ ...container }))
     : [];
   const container = {
-    ...(existingContainers[0] ?? {}),
+    ...existingContainers[0],
     ...plainObject(options.container),
   };
   const image = pickString(options.image, options.containerImage, container.image);

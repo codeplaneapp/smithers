@@ -10,7 +10,7 @@ Smithers provides deterministic orchestration (workflow graph, approvals, retrie
 ### 1) PI as Workflow Agent
 
 ```tsx
-import { PiAgent } from "smithers-orchestrator";
+import { PiAgent } from "smthrs";
 
 const pi = new PiAgent({
   provider: "openai",
@@ -26,19 +26,19 @@ const pi = new PiAgent({
 
 `PiAgent` supports all PI CLI flags: provider/model, tools, extensions, skills, prompt templates, themes, sessions. Text mode uses `--print` by default; JSON/RPC modes set `--mode` and omit `--print`.
 
-PI sessions are first-class hijack targets: `bunx smithers-orchestrator hijack RUN_ID --target pi` reopens the PI session for local steering.
+PI sessions are first-class hijack targets: `bunx smthrs hijack RUN_ID --target pi` reopens the PI session for local steering.
 
 ### 2) PI Server Client
 
-Drive Smithers server APIs from a PI extension or Bun process via `@smithers-orchestrator/pi-plugin`:
+Drive Smithers server APIs from a PI extension or Bun process via `@smthrs/pi-plugin`:
 
 ```ts
-import { runWorkflow, approve, streamEvents } from "@smithers-orchestrator/pi-plugin";
+import { runWorkflow, approve, streamEvents } from "@smthrs/pi-plugin";
 ```
 
-`@smithers-orchestrator/pi-plugin` currently publishes TypeScript source entrypoints; run it with Bun or bundle it before using it from plain Node.
+`@smthrs/pi-plugin` currently publishes TypeScript source entrypoints; run it with Bun or bundle it before using it from plain Node.
 
-The older `smithers-orchestrator/pi-plugin` and `smithers-orchestrator/pi-extension` subpaths were removed; use the scoped package directly.
+The older `smthrs/pi-plugin` and `smthrs/pi-extension` subpaths were removed; use the scoped package directly.
 
 ### 3) Hybrid: PI Extensibility + Smithers Orchestration
 
@@ -48,7 +48,7 @@ The older `smithers-orchestrator/pi-plugin` and `smithers-orchestrator/pi-extens
 Patterns:
 
 1. PI skill-driven coding task inside a Smithers `<Task>`.
-2. PI extension command that starts/resumes Smithers workflows via server API or `@smithers-orchestrator/pi-plugin`.
+2. PI extension command that starts/resumes Smithers workflows via server API or `@smthrs/pi-plugin`.
 3. Smithers workflow output persisted to SQLite and consumed by later PI-assisted tasks.
 
 ## Hijacking PI Sessions
@@ -71,7 +71,7 @@ Session persistence:
 1. Install PI CLI and add to `PATH`.
 2. Configure PI credentials via env/config (prefer over CLI args for API keys).
 3. Instantiate `PiAgent` with explicit options in workflows.
-4. For server-driven workflows, use `@smithers-orchestrator/pi-plugin`.
+4. For server-driven workflows, use `@smthrs/pi-plugin`.
 
 ```bash
 # Verify PI is installed
@@ -87,4 +87,4 @@ pi --version
 
 ## Limitations
 
-Smithers has no chat interface for PI; chat UI integration is the host application's responsibility, via `@smithers-orchestrator/pi-plugin`.
+Smithers has no chat interface for PI; chat UI integration is the host application's responsibility, via `@smthrs/pi-plugin`.

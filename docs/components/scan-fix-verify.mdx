@@ -5,7 +5,7 @@ description: Scan for problems, fix in parallel, verify, then report in a retry 
 
 ```ts
 // Props
-import { ScanFixVerify } from "smithers-orchestrator";
+import { ScanFixVerify } from "smthrs";
 
 type ScanFixVerifyProps = {
   id?: string; // default "sfv"
@@ -23,11 +23,11 @@ type ScanFixVerifyProps = {
 };
 ```
 
-Complete runnable example (renders with `bunx smithers-orchestrator graph`):
+Complete runnable example (renders with `bunx smthrs graph`):
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, ScanFixVerify, ClaudeCodeAgent } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, ScanFixVerify, ClaudeCodeAgent } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, smithers, outputs } = createSmithers({
@@ -71,7 +71,7 @@ The `<ScanFixVerify>` implementation and the files it imports, straight from the
 <CodeGroup>
 ```js ScanFixVerify.js
 import React from "react";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
 import { Task } from "./Task.js";
 import { Sequence } from "./Sequence.js";
 import { Parallel } from "./Parallel.js";
@@ -190,9 +190,8 @@ export function ScanFixVerify(props) {
 // @smithers-type-exports-end
 
 import React from "react";
-import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-export { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+export { SmithersCtx } from "@smthrs/driver/SmithersCtx";
 /** @type {React.Context<SmithersCtx<any> | null>} */
 export const SmithersContext = React.createContext(null);
 SmithersContext.displayName = "SmithersContext";
@@ -322,7 +321,7 @@ export const Ralph = Loop;
 
 ```ts ScanFixVerifyProps.ts
 import type React from "react";
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type ScanFixVerifyProps = {

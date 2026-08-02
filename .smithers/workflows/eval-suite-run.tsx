@@ -3,15 +3,9 @@
 // smithers-display-name: Eval Suite Run
 // smithers-description: Fans a saved eval suite's dataset out as real child-workflow runs — one per case — scores each against its expected value/assertions, and reports a suite-level pass/fail verdict. Launched by the `evals` gateway extension's client (issue #77), never run standalone.
 // smithers-tags: evals, internal
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, executeChildWorkflow } from "smithers-orchestrator";
-import {
-  evalAssertionScorer,
-  evalCaseRunId,
-  evaluateEvalCase,
-  readEvalSuite,
-  writeEvalCaseRow,
-} from "smithers-orchestrator/evals";
+/** @jsxImportSource smthrs */
+import { createSmithers, executeChildWorkflow } from "smthrs";
+import { evalAssertionScorer, evalCaseRunId, evaluateEvalCase, readEvalSuite, writeEvalCaseRow } from "smthrs/evals";
 import { z } from "zod/v4";
 
 /**
@@ -41,9 +35,9 @@ import { z } from "zod/v4";
  * This file ships in the GLOBAL seeded pack (`scripts/generate-workflow-
  * pack.ts`), so every `smithers init`ed workspace — including a bare repo
  * with no local `.smithers/` — can run it. It imports ONLY
- * `smithers-orchestrator` (and its `/evals` subpath): a seeded workflow is
+ * `smthrs` (and its `/evals` subpath): a seeded workflow is
  * installed into a user's own project, which under pnpm's strict install
- * cannot resolve `@smithers-orchestrator/*` internal packages.
+ * cannot resolve `@smthrs/*` internal packages.
  */
 
 const CASE_TIMEOUT_MS = 30 * 60_000;

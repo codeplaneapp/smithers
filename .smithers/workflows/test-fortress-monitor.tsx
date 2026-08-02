@@ -3,8 +3,8 @@
 // smithers-description: Health check for the test-fortress run — reads run + node state and rewrites a static HTML dashboard of done / in-flight / scheduled work. Meant to run on a */3 * * * * cron.
 // smithers-tags: system, monitor, health, cron
 // smithers-system: true
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 
 const inputSchema = z.object({

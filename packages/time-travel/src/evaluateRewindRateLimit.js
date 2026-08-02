@@ -2,7 +2,7 @@ import { countRecentRewindAuditRows } from "./countRecentRewindAuditRows.js";
 import { REWIND_RATE_LIMIT_MAX } from "./REWIND_RATE_LIMIT_MAX.js";
 import { REWIND_RATE_LIMIT_WINDOW_MS } from "./REWIND_RATE_LIMIT_WINDOW_MS.js";
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 
 /**
  * Evaluate caller-scoped rewind quota for one run.

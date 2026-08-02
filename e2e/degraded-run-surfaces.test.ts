@@ -3,9 +3,9 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import React from "react";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { Gateway, type SmithersWorkflow } from "@smithers-orchestrator/server/gateway";
+import { createSmithers } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { Gateway, type SmithersWorkflow } from "@smthrs/server/gateway";
 import { DevToolsRunStore } from "../packages/devtools/src/DevToolsRunStore.js";
 import { createTempRepo, pinSqliteBackend, runSmithers } from "../packages/smithers/tests/e2e-helpers.js";
 
@@ -148,10 +148,10 @@ describe("degraded run cross-surface contract", () => {
         const operatorGuidance = readFileSync(resolve(import.meta.dir, "../docs/runtime/run-state.mdx"), "utf8");
         for (const requiredGuidance of [
           "Never trust top-level status alone",
-          "smithers-orchestrator inspect",
-          "smithers-orchestrator node",
-          "smithers-orchestrator events",
-          "smithers-orchestrator scores",
+          "smthrs inspect",
+          "smthrs node",
+          "smthrs events",
+          "smthrs scores",
           "failedChildren > 0",
           "<Parallel maxConcurrency={N}>",
         ]) {

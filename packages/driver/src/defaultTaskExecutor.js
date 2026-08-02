@@ -1,5 +1,5 @@
 import { withAbort } from "./withAbort.js";
-/** @typedef {import("@smithers-orchestrator/graph").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("@smthrs/graph").TaskDescriptor} TaskDescriptor */
 /** @typedef {import("./workflow-types.ts").TaskExecutorContext} TaskExecutorContext */
 
 /**

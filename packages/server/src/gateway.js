@@ -14,19 +14,14 @@ import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { CronExpressionParser } from "cron-parser";
 import { Effect, Metric } from "effect";
 import { WebSocketServer } from "ws";
-import { DB_RUN_ID_MAX_LENGTH, SmithersDb } from "@smithers-orchestrator/db/adapter";
-import {
-  captureTxid,
-  createTxidCapture,
-  isRealPostgresAdapter,
-  runWithTxidCapture,
-} from "@smithers-orchestrator/db/captureTxid";
-import { getSmithersSchemaSignature } from "@smithers-orchestrator/db/getSmithersSchemaSignature";
-import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { loadInput } from "@smithers-orchestrator/db/snapshot";
-import { sha256Hex } from "@smithers-orchestrator/db/sha256Hex";
-import { watchDocsDirectory } from "@smithers-orchestrator/db/docWatcher";
+import { DB_RUN_ID_MAX_LENGTH, SmithersDb } from "@smthrs/db/adapter";
+import { captureTxid, createTxidCapture, isRealPostgresAdapter, runWithTxidCapture } from "@smthrs/db/captureTxid";
+import { getSmithersSchemaSignature } from "@smthrs/db/getSmithersSchemaSignature";
+import { computeRunStateFromRow } from "@smthrs/db/runState";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { loadInput } from "@smthrs/db/snapshot";
+import { sha256Hex } from "@smthrs/db/sha256Hex";
+import { watchDocsDirectory } from "@smthrs/db/docWatcher";
 import {
   devtoolsActiveSubscribers,
   devtoolsBackpressureDisconnectTotal,
@@ -54,20 +49,20 @@ import {
   gatewayWebhooksReceivedTotal,
   gatewayWebhooksRejectedTotal,
   gatewayWebhooksVerifiedTotal,
-} from "@smithers-orchestrator/observability/metrics";
+} from "@smthrs/observability/metrics";
 import { runFork, runPromise } from "./smithersRuntime.js";
-import { prometheusContentType, renderPrometheusMetrics } from "@smithers-orchestrator/observability";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
-import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
-import { isSmithersError } from "@smithers-orchestrator/errors/isSmithersError";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { prometheusContentType, renderPrometheusMetrics } from "@smthrs/observability";
+import { nowMs } from "@smthrs/scheduler/nowMs";
+import { errorToJson } from "@smthrs/errors/errorToJson";
+import { isSmithersError } from "@smthrs/errors/isSmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import {
   assertJsonPayloadWithinBounds,
   assertOptionalStringMaxLength,
   assertPositiveFiniteInteger,
-} from "@smithers-orchestrator/db/input-bounds";
-import { loadLatestSnapshot } from "@smithers-orchestrator/time-travel/snapshot";
-import { diffRawSnapshots } from "@smithers-orchestrator/time-travel/diff";
+} from "@smthrs/db/input-bounds";
+import { loadLatestSnapshot } from "@smthrs/time-travel/snapshot";
+import { diffRawSnapshots } from "@smthrs/time-travel/diff";
 import { getNodeOutputRoute } from "./gatewayRoutes/getNodeOutput.js";
 import { NodeOutputRouteError } from "./gatewayRoutes/NodeOutputRouteError.js";
 import { getNodeDiffRoute } from "./gatewayRoutes/getNodeDiff.js";
@@ -82,16 +77,16 @@ import {
 } from "./gatewayRoutes/getDevToolsSnapshot.js";
 import { streamDevToolsRoute } from "./gatewayRoutes/streamDevTools.js";
 import { jumpToFrameRoute, JumpToFrameError } from "./gatewayRoutes/jumpToFrame.js";
-import { retryTask as retryTaskReset } from "@smithers-orchestrator/time-travel/retry-task";
-import { writeRewindAuditRow } from "@smithers-orchestrator/time-travel/writeRewindAuditRow";
-import { recoverInProgressRewindAudits } from "@smithers-orchestrator/time-travel/recoverInProgressRewindAudits";
+import { retryTask as retryTaskReset } from "@smthrs/time-travel/retry-task";
+import { writeRewindAuditRow } from "@smthrs/time-travel/writeRewindAuditRow";
+import { recoverInProgressRewindAudits } from "@smthrs/time-travel/recoverInProgressRewindAudits";
 import {
   GATEWAY_EVENT_WINDOW_DEFAULT,
   GATEWAY_RPC_ERRORS,
   SMITHERS_API_VERSION,
   getRequiredScopeForGatewayMethod,
-} from "@smithers-orchestrator/gateway/rpc";
-import { hasGatewayScope, isGatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
+} from "@smthrs/gateway/rpc";
+import { hasGatewayScope, isGatewayScope } from "@smthrs/gateway/auth/scopes";
 import {
   apiCollectionNames,
   serializeAccountRow,
@@ -107,9 +102,9 @@ import {
   serializeScoreRow,
   serializeTicketRow,
   serializeWorkflowRow,
-} from "@smithers-orchestrator/gateway/api";
-import { listAccounts } from "@smithers-orchestrator/accounts/listAccounts";
-import { getUsageForAccounts } from "@smithers-orchestrator/usage";
+} from "@smthrs/gateway/api";
+import { listAccounts } from "@smthrs/accounts/listAccounts";
+import { getUsageForAccounts } from "@smthrs/usage";
 import {
   EXTENSION_BACKPRESSURE_DISCONNECT_CODE,
   EXTENSION_METHOD_NOT_FOUND_CODE,
@@ -119,15 +114,15 @@ import {
   GatewayExtensions,
   isExtensionMethod,
 } from "./GatewayExtensions.js";
-import { workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
+import { workflowUiThemeCss } from "@smthrs/ui-styleguide";
 import { hijackCandidatesFromAttempts } from "./hijackCandidates.js";
 import { createGatewayUiApp } from "./gatewayUi/createGatewayUiApp.js";
 import { renderDefaultConsoleClient } from "./gatewayUi/defaultConsole.js";
 import { authorizeGatewayUiRequest } from "./gatewayUi/auth.js";
 import { bundleGatewayUiEntry } from "./gatewayUi/bundle.js";
 import { DEFAULT_OPERATOR_UI_ENTRY } from "./gatewayUi/defaultOperatorUi.js";
-import { clampRunStartedByPrompt, normalizeRunStartedBy, SmithersCtx } from "@smithers-orchestrator/driver";
-import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smithers-orchestrator/components";
+import { clampRunStartedByPrompt, normalizeRunStartedBy, SmithersCtx } from "@smthrs/driver";
+import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smthrs/components";
 import { createBrowserSessionRegistry } from "./browser.js";
 import { validateBrowserRequest } from "./gatewayRoutes/browser.js";
 import { renderBrowserViewer } from "./gatewayUi/browserViewer.js";
@@ -144,9 +139,9 @@ import { renderBrowserViewer } from "./gatewayUi/browserViewer.js";
 /** @typedef {import("./RequestFrame.js").RequestFrame} RequestFrame */
 /** @typedef {import("./ResponseFrame.js").ResponseFrame} ResponseFrame */
 /** @typedef {import("node:http").ServerResponse} ServerResponse */
-/** @typedef {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<unknown>} SmithersWorkflow */
-/** @typedef {import("@smithers-orchestrator/observability/SmithersEvent").SmithersEvent} SmithersEvent */
-/** @typedef {import("@smithers-orchestrator/usage").UsageReport} UsageReport */
+/** @typedef {import("@smthrs/components/SmithersWorkflow").SmithersWorkflow<unknown>} SmithersWorkflow */
+/** @typedef {import("@smthrs/observability/SmithersEvent").SmithersEvent} SmithersEvent */
+/** @typedef {import("@smthrs/usage").UsageReport} UsageReport */
 /** @typedef {Record<string, string | number | null | undefined>} GatewayMetricLabels */
 /** @typedef {"ws" | "http"} GatewayTransport */
 /**
@@ -365,17 +360,17 @@ let engineApprovalsPromise = null;
 let engineSignalsPromise = null;
 
 function loadEngineRuntime() {
-  engineRuntimePromise ??= import("@smithers-orchestrator/engine");
+  engineRuntimePromise ??= import("@smthrs/engine");
   return engineRuntimePromise;
 }
 
 function loadEngineApprovals() {
-  engineApprovalsPromise ??= import("@smithers-orchestrator/engine/approvals");
+  engineApprovalsPromise ??= import("@smthrs/engine/approvals");
   return engineApprovalsPromise;
 }
 
 function loadEngineSignals() {
-  engineSignalsPromise ??= import("@smithers-orchestrator/engine/signals");
+  engineSignalsPromise ??= import("@smthrs/engine/signals");
   return engineSignalsPromise;
 }
 
@@ -563,7 +558,7 @@ function resolveRunOwnerId(run) {
  * gateway-ui provenance surfaces consume.
  *
  * @param {{ configJson?: string | null }} row
- * @returns {import("@smithers-orchestrator/driver/RunStartedBy").RunStartedBy | undefined}
+ * @returns {import("@smthrs/driver/RunStartedBy").RunStartedBy | undefined}
  */
 function runStartedByFromRow(row) {
   const config = parseJson(typeof row?.configJson === "string" ? row.configJson : null);
@@ -1017,7 +1012,7 @@ function visitWorkflowViewElements(node, visit) {
  * @param {Record<string, unknown>} props
  * @param {string} workflowKey
  * @param {string | undefined} entryFile
- * @returns {import("@smithers-orchestrator/driver/WorkflowView").WorkflowViewDefinition | null}
+ * @returns {import("@smthrs/driver/WorkflowView").WorkflowViewDefinition | null}
  */
 function normalizeWorkflowViewDeclaration(kind, props, workflowKey, entryFile) {
   const title = asString(props.title);
@@ -1060,7 +1055,7 @@ function normalizeWorkflowViewDeclaration(kind, props, workflowKey, entryFile) {
 }
 
 /**
- * @param {import("@smithers-orchestrator/driver/WorkflowView").WorkflowViewDefinition} view
+ * @param {import("@smthrs/driver/WorkflowView").WorkflowViewDefinition} view
  * @param {string} workflowKey
  * @param {string} fallbackPath
  * @returns {ResolvedGatewayUiConfig}
@@ -1090,7 +1085,7 @@ function workflowViewToGatewayUiConfig(view, workflowKey, fallbackPath) {
 }
 
 /**
- * @param {import("@smithers-orchestrator/driver/WorkflowView").WorkflowViewDefinition} view
+ * @param {import("@smthrs/driver/WorkflowView").WorkflowViewDefinition} view
  * @returns {ResolvedWorkflowTuiConfig}
  */
 function workflowViewToTuiConfig(view) {
@@ -1108,7 +1103,7 @@ function workflowViewToTuiConfig(view) {
  * @param {string} workflowKey
  * @param {SmithersWorkflow} workflow
  * @param {string | undefined} entryFile
- * @returns {{ ui?: import("@smithers-orchestrator/driver/WorkflowView").WorkflowViewDefinition; tui?: import("@smithers-orchestrator/driver/WorkflowView").WorkflowViewDefinition }}
+ * @returns {{ ui?: import("@smthrs/driver/WorkflowView").WorkflowViewDefinition; tui?: import("@smthrs/driver/WorkflowView").WorkflowViewDefinition }}
  */
 function discoverWorkflowViews(workflowKey, workflow, entryFile) {
   const views = {};
@@ -1122,9 +1117,7 @@ function discoverWorkflowViews(workflowKey, workflow, entryFile) {
       auth: null,
       outputs: {},
       zodToKeyName: workflow.zodToKeyName,
-      runtimeConfig: {
-        ...(entryFile ? { workflowPath: entryFile, baseRootDir: dirname(entryFile) } : {}),
-      },
+      runtimeConfig: entryFile ? { workflowPath: entryFile, baseRootDir: dirname(entryFile) } : {},
     });
     root = workflow.build(ctx);
   } catch (error) {
@@ -1423,7 +1416,7 @@ function responseError(id, code, message, details = {}) {
 /**
  * @param {string} id
  * @param {string} method
- * @param {{ requiredScopeForMethod?: (method: string) => import("@smithers-orchestrator/gateway/auth/scopes").GatewayScope | undefined }} [registry]
+ * @param {{ requiredScopeForMethod?: (method: string) => import("@smthrs/gateway/auth/scopes").GatewayScope | undefined }} [registry]
  * @returns {ResponseFrame}
  */
 function responseForbidden(id, method, registry) {
@@ -1669,8 +1662,8 @@ function eventBrowserSessionId(event, payload) {
 }
 /**
  * @param {string} method
- * @param {{ requiredScopeForMethod?: (method: string) => import("@smithers-orchestrator/gateway/auth/scopes").GatewayScope | undefined }} [registry]
- * @returns {import("@smithers-orchestrator/gateway/auth/scopes").GatewayScope}
+ * @param {{ requiredScopeForMethod?: (method: string) => import("@smthrs/gateway/auth/scopes").GatewayScope | undefined }} [registry]
+ * @returns {import("@smthrs/gateway/auth/scopes").GatewayScope}
  */
 function requiredScopeForMethod(method, registry) {
   if (
@@ -1702,7 +1695,7 @@ function requiredScopeForMethod(method, registry) {
 /**
  * @param {string[]} scopes
  * @param {string} method
- * @param {{ requiredScopeForMethod?: (method: string) => import("@smithers-orchestrator/gateway/auth/scopes").GatewayScope | undefined }} [registry]
+ * @param {{ requiredScopeForMethod?: (method: string) => import("@smthrs/gateway/auth/scopes").GatewayScope | undefined }} [registry]
  * @returns {boolean}
  */
 function hasScope(scopes, method, registry) {
@@ -4752,7 +4745,7 @@ a { color: var(--brand); }</style>
     // returned ascending). JS-side history paging could not stay
     // interactive on long runs, and its bounded recency window missed OLD
     // nodes' events entirely — transcripts for early nodes never loaded.
-    if (!/^[a-zA-Z0-9:_.\-]{1,160}$/.test(nodeId)) {
+    if (!/^[a-zA-Z0-9:_.-]{1,160}$/.test(nodeId)) {
       throw new SmithersError("INVALID_INPUT", "nodeId contains unsupported characters");
     }
     const matches = await resolved.adapter.listNodeEvents(runId, nodeId, {
@@ -6284,7 +6277,7 @@ a { color: var(--brand); }</style>
    * @param {Record<string, unknown>} input
    * @param {RunStartAuthContext} auth
    * @param {string} [runId]
-   * @param {{ resume?: boolean; maxConcurrency?: number; allowNetwork?: boolean; maxOutputBytes?: number; toolTimeoutMs?: number; startedBy?: import("@smithers-orchestrator/driver/RunStartedBy").RunStartedBy }} [options]
+   * @param {{ resume?: boolean; maxConcurrency?: number; allowNetwork?: boolean; maxOutputBytes?: number; toolTimeoutMs?: number; startedBy?: import("@smthrs/driver/RunStartedBy").RunStartedBy }} [options]
    */
   async startRun(workflowKey, input, auth, runId = crypto.randomUUID(), options) {
     const entry = this.workflows.get(workflowKey);
@@ -7894,7 +7887,7 @@ a { color: var(--brand); }</style>
    * `smithers agents` CLI manages (resolved via `accountsRoot(process.env)`,
    * honoring `SMITHERS_HOME`/`HOME`) — NOT a per-workspace DB table. So, like
    * `listPromptsFromDisk` but at the user root, this reads the file directly
-   * through the `@smithers-orchestrator/accounts` package's `listAccounts()` and
+   * through the `@smthrs/accounts` package's `listAccounts()` and
    * maps each entry onto the wire `GatewayAccount` shape.
    *
    * SECRET REDACTION: an account may carry a raw `apiKey` (a plaintext
@@ -8210,7 +8203,7 @@ a { color: var(--brand); }</style>
    * distinct adapter (so a doc in any shared DB surfaces), but a write has to
    * pick one; picking the first registered keeps create→list→update→delete
    * consistent. Returns `null` only when no workflow is registered yet.
-   * @returns {import("@smithers-orchestrator/db/adapter").SmithersDb | null}
+   * @returns {import("@smthrs/db/adapter").SmithersDb | null}
    */
   primaryDocsAdapter() {
     const first = this.workflows.values().next().value;

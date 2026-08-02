@@ -5,7 +5,7 @@ description: Adversarial multi-round debate between proposer and opponent, then 
 
 ```ts
 // Props
-import { Debate } from "smithers-orchestrator";
+import { Debate } from "smthrs";
 
 type DebateProps = {
   id?: string;                       // default: "debate"
@@ -232,7 +232,7 @@ export const Task = createTaskComponent({ applyCliToolAllowlist });
 
 ```js useOptionalSmithersContext.js
 import React from "react";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
 
 /**
  * Read the workflow context when React is rendering the component, but allow
@@ -255,7 +255,7 @@ export function useOptionalSmithersContext() {
 
 ```ts DebateProps.ts
 import type React from "react";
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type DebateProps = {

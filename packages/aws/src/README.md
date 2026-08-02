@@ -1,4 +1,4 @@
-# @smithers-orchestrator/aws — src
+# @smthrs/aws — src
 
 AWS sandbox provider for Smithers. It runs a Smithers sandbox request on AWS
 Fargate (ECS `RunTask`) or AWS CodeBuild and transports the request/result
@@ -20,7 +20,7 @@ the remote task.
 ## Usage
 
 ```js
-import { createAwsSandboxProvider } from "@smithers-orchestrator/aws";
+import { createAwsSandboxProvider } from "@smthrs/aws";
 
 // Fargate (default)
 const provider = createAwsSandboxProvider({

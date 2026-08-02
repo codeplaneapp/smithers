@@ -33,24 +33,24 @@ Two lessons recur. First, the steerable systems (Temporal, LangGraph, Argo) all 
 
 `smithers gateway` serves one process per workspace: a domain REST API, an RPC surface, and WebSocket event streams over every run in the workspace database. Clients authenticate with bearer tokens carrying [typed scopes](/integrations/gateway) (`Authorization: Bearer <token>` or `x-smithers-key`; JWT and trusted-proxy modes exist for shared deployments). On connect, the WebSocket handshake returns a `hello` payload with protocol, features, and the session's role/scopes, then pushes live event frames filtered by `runId` subscription. Runs launched through the Gateway expose `ctx.auth = { triggeredBy, role, scopes, createdAt }`, and `<Approval>` can restrict who may decide with `allowedScopes` / `allowedUsers` - enforced server-side before `submitApproval` is accepted.
 
-Because all UI surfaces are Gateway clients over that durable state, the run/UI decoupling is structural, not a feature flag. Close the Monitor tab; the run continues. Reboot your laptop mid-run; `bunx smithers-orchestrator ps` still lists it, and reopening the UI resumes the same view from the database.
+Because all UI surfaces are Gateway clients over that durable state, the run/UI decoupling is structural, not a feature flag. Close the Monitor tab; the run continues. Reboot your laptop mid-run; `bunx smthrs ps` still lists it, and reopening the UI resumes the same view from the database.
 
 ### Three surfaces, one state
 
 | Surface | Command | What it is |
 | --- | --- | --- |
 | [Monitor](/guides/monitor) | `smithers monitor` | Zero-setup web UI over **every run** in the workspace: a "Needs you" triage band (pending approvals, human-parked runs, 24h failures), live run rows, execution tree with per-node durations, a node inspector (prompt, tool calls, transcript, output, diff), frame scrubber, and an embedded PTY to hijack supported agent sessions |
-| Custom workflow UI | `bunx smithers-orchestrator ui RUN_ID` | The workflow's **own** browser app at `/workflows/<key>?runId=<id>`, built from `.smithers/ui/<key>.tsx` |
-| TUI | `bunx smithers-orchestrator up` (interactive) | Full-screen terminal monitoring; workflows can ship their own via [`<TUI>`](/components/tui) |
+| Custom workflow UI | `bunx smthrs ui RUN_ID` | The workflow's **own** browser app at `/workflows/<key>?runId=<id>`, built from `.smithers/ui/<key>.tsx` |
+| TUI | `bunx smthrs up` (interactive) | Full-screen terminal monitoring; workflows can ship their own via [`<TUI>`](/components/tui) |
 
-`bunx smithers-orchestrator gui` opens a directory's workspace at the most recent run's workflow UI; `smithers monitor RUN_ID` deep-links one run. All three autostart a Gateway if none is running (`--no-autostart` to opt out, `--gateway <url>` to point at a remote one).
+`bunx smthrs gui` opens a directory's workspace at the most recent run's workflow UI; `smithers monitor RUN_ID` deep-links one run. All three autostart a Gateway if none is running (`--no-autostart` to opt out, `--gateway <url>` to point at a remote one).
 
 ### Workflow-owned UIs
 
 A custom UI is declared *in the workflow* with [`<UI>`](/components/ui) - it renders nothing in the graph; the Gateway discovers it at `gateway.register()`, bundles the entry with `Bun.build` into a single browser script, and serves it with a boot config (`__SMITHERS_GATEWAY_UI__`) injected before your code runs:
 
 ```tsx .smithers/workflows/triage.tsx
-import { createSmithers, UI } from "smithers-orchestrator";
+import { createSmithers, UI } from "smthrs";
 
 const { Workflow, Task, smithers } = createSmithers({ /* schemas */ });
 
@@ -62,13 +62,13 @@ export default smithers(() => (
 ));
 ```
 
-The browser side composes verified, shipped pieces - `smithers-orchestrator/gateway-react` hooks (`useGatewayRun`, `useGatewayRuns`, `useGatewayRunEvents`, `useGatewayNodeOutput`, `useGatewayNodeEvents`, `useGatewayApprovals`, `useGatewayActions`, `useGatewayRunDiff`, `useGatewayScores`, `useGatewayRunTokenUsage`, and more, over TanStack DB collections), `smithers-orchestrator/gateway-ui` run-aware widgets (`RunList`, `RunTree`, `RunEventLog`, `ApprovalPanel`, `NodeChatStream`, `NodeOutputCard`, `WorkflowGraph`, `LaunchButton`, `StatusPill`, `SimpleWorkflowDashboard`), and the `smithers-orchestrator/ui` shadcn-anatomy base library, all themed by the [workflow UI design tokens](/guides/workflow-ui-design) so light/dark is automatic:
+The browser side composes verified, shipped pieces - `smthrs/gateway-react` hooks (`useGatewayRun`, `useGatewayRuns`, `useGatewayRunEvents`, `useGatewayNodeOutput`, `useGatewayNodeEvents`, `useGatewayApprovals`, `useGatewayActions`, `useGatewayRunDiff`, `useGatewayScores`, `useGatewayRunTokenUsage`, and more, over TanStack DB collections), `smthrs/gateway-ui` run-aware widgets (`RunList`, `RunTree`, `RunEventLog`, `ApprovalPanel`, `NodeChatStream`, `NodeOutputCard`, `WorkflowGraph`, `LaunchButton`, `StatusPill`, `SimpleWorkflowDashboard`), and the `smthrs/ui` shadcn-anatomy base library, all themed by the [workflow UI design tokens](/guides/workflow-ui-design) so light/dark is automatic:
 
 ```tsx .smithers/ui/triage.tsx
 /** @jsxImportSource react */
-import { createGatewayReactRoot, useGatewayApprovals, useGatewayRun } from "smithers-orchestrator/gateway-react";
-import { ApprovalPanel, RunEventLog, RunTree } from "smithers-orchestrator/gateway-ui";
-import { SmithersUiStyles } from "smithers-orchestrator/ui";
+import { createGatewayReactRoot, useGatewayApprovals, useGatewayRun } from "smthrs/gateway-react";
+import { ApprovalPanel, RunEventLog, RunTree } from "smthrs/gateway-ui";
+import { SmithersUiStyles } from "smthrs/ui";
 
 function App({ runId }: { runId?: string }) {
   const run = useGatewayRun(runId);
@@ -87,11 +87,11 @@ createGatewayReactRoot(<App />);
 ```
 
 ```sh
-bunx smithers-orchestrator ui RUN_ID     # open the workflow's own UI for a run
-bunx smithers-orchestrator monitor       # or the all-runs Monitor, zero code
+bunx smthrs ui RUN_ID     # open the workflow's own UI for a run
+bunx smthrs monitor       # or the all-runs Monitor, zero code
 ```
 
-Steering is first-class, not read-only: approvals decide in place, `useGatewayActions()` launches runs and submits decisions, `bunx smithers-orchestrator signal` delivers durable signals to `<Signal>`/`<WaitForEvent>` nodes, and pause/resume/cancel/retry-task are one-shot RPCs. Mid-run correction - the property [interruptible-agent arguments](https://arxiv.org/abs/1611.08219) center on - comes from the durable substrate: rewind, fork-from-checkpoint, and revert-attempt are all exposed through the same Gateway (see [Time Travel](/guides/time-travel-quickstart)).
+Steering is first-class, not read-only: approvals decide in place, `useGatewayActions()` launches runs and submits decisions, `bunx smthrs signal` delivers durable signals to `<Signal>`/`<WaitForEvent>` nodes, and pause/resume/cancel/retry-task are one-shot RPCs. Mid-run correction - the property [interruptible-agent arguments](https://arxiv.org/abs/1611.08219) center on - comes from the durable substrate: rewind, fork-from-checkpoint, and revert-attempt are all exposed through the same Gateway (see [Time Travel](/guides/time-travel-quickstart)).
 
 ### Hot reload
 
@@ -112,10 +112,10 @@ Workflow code hot-reloads under `RunOptions.hot` (schema-shape changes are block
 ```sh
 smithers gateway              # start the workspace control plane (or: gateway status | stop)
 smithers monitor [RUN_ID]     # all-runs web UI, autostarts the gateway
-bunx smithers-orchestrator ui RUN_ID            # the run's workflow-owned custom UI
-bunx smithers-orchestrator gui [--workflow id]  # open a directory's workspace UI
-bunx smithers-orchestrator token issue --scopes run:read --ttl 15m   # scoped short-lived bearer
-bunx smithers-orchestrator approve | deny | signal | pause | resume  # steer from the terminal
+bunx smthrs ui RUN_ID            # the run's workflow-owned custom UI
+bunx smthrs gui [--workflow id]  # open a directory's workspace UI
+bunx smthrs token issue --scopes run:read --ttl 15m   # scoped short-lived bearer
+bunx smthrs approve | deny | signal | pause | resume  # steer from the terminal
 ```
 
 Agents steer through the same state via the MCP tools: `watch_run`, `get_run_events`, `list_pending_approvals`, `resolve_approval`, `ask_human`.

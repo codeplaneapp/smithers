@@ -1,7 +1,7 @@
 /** @jsxImportSource react */
 import { useState } from "react";
-import { createGatewayReactRoot, useGatewayRunEvents, useGatewayRuns } from "smithers-orchestrator/gateway-react";
-import { NodeOutputView, RunEventLog, RunTree, StatusPill, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
+import { createGatewayReactRoot, useGatewayRunEvents, useGatewayRuns } from "smthrs/gateway-react";
+import { NodeOutputView, RunEventLog, RunTree, StatusPill, WorkflowUiShell } from "smthrs/gateway-ui";
 
 const WORKFLOW_KEY = "review-since-publish";
 

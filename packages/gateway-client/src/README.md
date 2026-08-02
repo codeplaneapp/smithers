@@ -1,4 +1,4 @@
-# @smithers-orchestrator/gateway-client — src
+# @smthrs/gateway-client — src
 
 Browser-first SDK for the Smithers Gateway. `SmithersGatewayClient` speaks HTTP
 RPC (`POST /v1/rpc/<method>`), `SmithersGatewayConnection` wraps a raw
@@ -9,9 +9,9 @@ This package owns client behavior, not the Gateway wire contract.
 
 Wire/type modules:
 
-- `rpc.ts` — the public `@smithers-orchestrator/gateway-client/rpc` forwarding
+- `rpc.ts` — the public `@smthrs/gateway-client/rpc` forwarding
   surface. It re-exports the canonical wire types from
-  `@smithers-orchestrator/protocol/gateway-rpc` and adds the client-side method
+  `@smthrs/protocol/gateway-rpc` and adds the client-side method
   maps plus `GatewayRpcError`.
 - `GatewayEventFrame` / `GatewayResponseFrame` — compatibility modules that
   forward the protocol-owned frame types.
@@ -36,9 +36,9 @@ Subdirectories: `data/` is the REST + SSE data client and TanStack DB
 collection layer; `sync/` holds the `Gateway*Row` types and the
 DevTools-snapshot → run-tree mapping.
 
-`@smithers-orchestrator/gateway-react` builds its providers and hooks on this
+`@smthrs/gateway-react` builds its providers and hooks on this
 package. It imports RPC and row types through `gateway-client` and has no direct
-dependency on `@smithers-orchestrator/gateway`.
+dependency on `@smthrs/gateway`.
 
 Gotchas: package.json exports a `./*` wildcard, so EVERY file here is a public
 npm subpath — never move, rename, or delete a module. The package has no

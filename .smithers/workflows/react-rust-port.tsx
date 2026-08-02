@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * Operation Ferric — the single durable Smithers workflow.
  *
@@ -18,7 +18,7 @@
  * worktree lanes fork the launch root while landings merge into the campaign
  * repo, so they must be the same repository.
  */
-import { Aspects, ContinueAsNew, Sequence, TryCatchFinally, UI } from "smithers-orchestrator";
+import { Aspects, ContinueAsNew, Sequence, TryCatchFinally, UI } from "smthrs";
 import { Workflow, Task, smithers, outputs } from "../components/ferric/ferricSmithers";
 import { FoundationAndBudget } from "../components/ferric/FoundationAndBudget";
 import { PhaseM0 } from "../components/ferric/PhaseM0";
@@ -32,8 +32,8 @@ import { PhaseGA } from "../components/ferric/PhaseGA";
 import { PhaseM9 } from "../components/ferric/PhaseM9";
 import { TrialPhase } from "../components/ferric/TrialPhase";
 import { SuiteTask } from "../components/ferric/SuiteTask";
-import { Sidecar } from "smithers-orchestrator";
-import { schemaAdherenceScorer, latencyScorer } from "smithers-orchestrator/scorers";
+import { Sidecar } from "smthrs";
+import { schemaAdherenceScorer, latencyScorer } from "smthrs/scorers";
 import { luna, terra } from "../components/ferric/ferricAgents";
 import { MILESTONE_TOKEN_BUDGET, cfg, type SliceDef } from "../components/ferric/ferricConfig";
 import M1FlagCodegenPrompt from "../prompts/ferric-m1-flag-codegen.mdx";

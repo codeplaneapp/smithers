@@ -4,7 +4,7 @@ import * as effect from 'effect';
 import { WebhookRequest as WebhookRequest$1, MakeWebhookSourceOptions, WebhookSource } from '../core/EventSourceTypes.js';
 import './GitHubConfig.js';
 import '../core/CursorStoreTypes.js';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 
 /**
  * Decode one GitHub webhook delivery into ExternalEvents.

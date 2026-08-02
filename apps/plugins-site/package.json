@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/plugins-site",
+  "name": "@smthrs/plugins-site",
   "version": "0.0.1",
   "private": true,
   "description": "Cloudflare Worker deployment for the Smithers plugins marketing site (Claude Code + Codex)",

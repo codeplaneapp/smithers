@@ -14,10 +14,10 @@ import {
   approvalDecisionSchema,
   createSmithers,
   runWorkflow,
-} from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import type { RunState } from "@smithers-orchestrator/db/runState/RunState";
-import { getDevToolsSnapshotRoute } from "@smithers-orchestrator/server/gatewayRoutes/getDevToolsSnapshot";
+} from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
+import type { RunState } from "@smthrs/db/runState/RunState";
+import { getDevToolsSnapshotRoute } from "@smthrs/server/gatewayRoutes/getDevToolsSnapshot";
 import { assertNotIdle } from "./case08InspectorHelpers.ts";
 
 const ACTIVE_RUN_ID = "run-case08-real-active";

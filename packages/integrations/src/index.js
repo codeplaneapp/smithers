@@ -1,4 +1,4 @@
-// @smithers-orchestrator/integrations — core surface.
+// @smthrs/integrations — core surface.
 // Service-specific surfaces live under ./telegram, ./github, ./linear.
 export * from "./core/CursorStore.js";
 export * from "./core/deliverEvents.js";

@@ -2,7 +2,7 @@ import { CursorStore } from './CursorStoreTypes.js';
 import * as effect from 'effect';
 import { Stream } from 'effect';
 import { ExternalEvent } from './ExternalEventTypes.js';
-import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
+import { SmithersError } from '@smthrs/errors/SmithersError';
 
 /**
  * A process-wide source of external events. `events` is the (possibly

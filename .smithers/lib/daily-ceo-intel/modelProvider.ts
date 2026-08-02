@@ -12,7 +12,7 @@
  * repo already uses for the (currently unauthenticated) `gemini1` provider in
  * .smithers/agents.ts.
  */
-import { OpenAIAgent, type AgentLike } from "smithers-orchestrator";
+import { OpenAIAgent, type AgentLike } from "smthrs";
 
 export const MODEL_PROVIDER_NAMES = ["anthropic", "openai", "gemini"] as const;
 export type ModelProviderName = (typeof MODEL_PROVIDER_NAMES)[number];

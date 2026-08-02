@@ -15,7 +15,7 @@
  * `color-mix(in srgb, ${token} N%, transparent)` instead.
  */
 import type { CSSProperties } from "react";
-import { reducedMotionCss } from "@smithers-orchestrator/ui-styleguide";
+import { reducedMotionCss } from "@smthrs/ui-styleguide";
 
 export const theme = {
   bg: "var(--bg, #fafafa)",
@@ -45,7 +45,7 @@ export const theme = {
   ringBorder: "var(--ring-border, color-mix(in srgb, var(--brand, #6d56d8) 50%, transparent))",
   radius: "var(--r-2, 10px)",
   // The canonical house stacks, routed through the styleguide custom
-  // properties (identical fallbacks in ui-styleguide and @smithers-orchestrator/ui
+  // properties (identical fallbacks in ui-styleguide and @smthrs/ui
   // tokens -- keep all three in sync).
   fontMono: "var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)",
   fontSans:
@@ -150,7 +150,7 @@ export function ensureGatewayUiStyles(): void {
 }
 
 // The complete status vocabulary, class colors, and resolver live in
-// @smithers-orchestrator/ui. Re-export them so long-standing gateway-ui imports
+// @smthrs/ui. Re-export them so long-standing gateway-ui imports
 // keep working without a second alias/color map.
 export {
   resolveTheme,
@@ -163,4 +163,4 @@ export {
   isTerminalRunStatus,
   type ResolvedTheme,
   type StatusClass,
-} from "@smithers-orchestrator/ui";
+} from "@smthrs/ui";

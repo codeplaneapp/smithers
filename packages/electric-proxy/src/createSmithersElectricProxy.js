@@ -1,4 +1,4 @@
-import { hasGatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
+import { hasGatewayScope } from "@smthrs/gateway/auth/scopes";
 import { createSmithersElectricProxyMetrics } from "./createSmithersElectricProxyMetrics.js";
 import { emitSmithersElectricEvent } from "./createSmithersElectricProxyObserver.js";
 import { smithersElectricCatalogWithOutputTables } from "./smithersElectricShapeCatalog.js";

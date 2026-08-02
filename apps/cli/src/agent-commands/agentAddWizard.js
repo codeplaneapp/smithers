@@ -1,8 +1,8 @@
 import { confirm, intro, isCancel, note, outro, password, select, spinner, text } from "@clack/prompts";
-import { defaultConfigDir } from "@smithers-orchestrator/accounts";
+import { defaultConfigDir } from "@smthrs/accounts";
 import { runAgentAdd, pingAccount } from "./runAgentAdd.js";
 
-/** @typedef {import("@smithers-orchestrator/accounts").AccountProvider} AccountProvider */
+/** @typedef {import("@smthrs/accounts").AccountProvider} AccountProvider */
 
 const PROVIDER_CHOICES = [
   { value: "codex", label: "Codex (subscription, recommended)", hint: "ChatGPT Plus/Pro via `codex` CLI" },

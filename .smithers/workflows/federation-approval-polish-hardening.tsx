@@ -3,8 +3,8 @@
 // smithers-display-name: Federation Approval Polish Hardening
 // smithers-description: Encode the actionable non-blocking findings from the final Kimi architecture review.
 // smithers-tags: maintenance, federation, architecture
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 
@@ -49,20 +49,20 @@ already-established ownership decision and exact path coverage.
 The architecture review returned approvable:true and verified all core
 invariants. Encode these findings so execution is unambiguous:
 
-1. packages/cloudflare imports @smithers-orchestrator/db only from
+1. packages/cloudflare imports @smthrs/db only from
    packages/cloudflare/tests/cloudflare-sqlite.test.js. Remove db from the
    package record's runtime dependsOn and record it as devDependsOn. Do not
    change the initial repo DAG because db is an already-published external
    prerequisite in stays-in-smithers.
 
 2. Add an explicit futureAggregate.packageEdges entry from
-   @smithers-orchestrator/engine to @smithers-orchestrator/review. Its reason
+   @smthrs/engine to @smthrs/review. Its reason
    must state that engine@0.32.0 first exports createSmithers and
    openSmithersBackend per the review rewritePlan. Keep the existing
    ui-styleguide and agents edges and preserve the initial DAG unchanged.
 
-3. apps/signal imports smithers-orchestrator/ui in production runner/site code.
-   Move smithers-orchestrator:^0.31.0 from the smithers-signal generated root
+3. apps/signal imports smthrs/ui in production runner/site code.
+   Move smthrs:^0.31.0 from the smithers-signal generated root
    manifest devDependencies to dependencies, and make its notes explicitly
    runtime. This remains an external prerequisite, not an initial DAG edge.
 

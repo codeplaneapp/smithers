@@ -3,7 +3,7 @@ title: "XState"
 description: "Typed control state for workflows: fold an XState v5 machine over durable output and signal rows with useSmithersMachine"
 ---
 
-`smithers-orchestrator/xstate` runs [XState v5](https://stately.ai/docs) state
+`smthrs/xstate` runs [XState v5](https://stately.ai/docs) state
 machines as an **optional derived-state layer** over rows Smithers already
 persists (not a backend, scheduler, or persisted actor): each frame,
 `useSmithersMachine` recomputes state as a pure fold over durable output and
@@ -17,7 +17,7 @@ approval ladders, multi-phase pipelines with re-entry) and you want
 
 ```tsx
 import { setup, assign } from "xstate";
-import { useSmithersMachine, taskOutput, approvalDecided, eventReceived, timedOut } from "smithers-orchestrator/xstate";
+import { useSmithersMachine, taskOutput, approvalDecided, eventReceived, timedOut } from "smthrs/xstate";
 
 const releaseMachine = setup({}).createMachine({
   context: { revision: 0 },
@@ -81,7 +81,7 @@ function Release() {
 }
 ```
 
-External events are ordinary signals: `bunx smithers-orchestrator signal RUN_ID REVISE --data '{...}'`.
+External events are ordinary signals: `bunx smthrs signal RUN_ID REVISE --data '{...}'`.
 There is **no `send()`, no `onDone` prop, and no actor**.
 
 ## The fold

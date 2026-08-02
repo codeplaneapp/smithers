@@ -1,11 +1,11 @@
 import { Effect } from "effect";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
+import { nowMs } from "@smthrs/scheduler/nowMs";
 import { smithersVcsTags } from "../schema.js";
-import { getJjPointer, runJj } from "@smithers-orchestrator/vcs/jj";
+import { getJjPointer, runJj } from "@smthrs/vcs/jj";
 /** @typedef {import("effect/unstable/process/ChildProcessSpawner").CommandExecutor} CommandExecutor */
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/errors/SmithersError").SmithersError} SmithersError */
 /** @typedef {import("./VcsTag.ts").VcsTag} VcsTag */
 
 /**

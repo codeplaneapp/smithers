@@ -4,4 +4,4 @@ export {
   smithersMemoryMessages,
   smithersMemoryNotes,
   smithersMemoryNoteSupersessions,
-} from "@smithers-orchestrator/db/internal-schema";
+} from "@smthrs/db/internal-schema";

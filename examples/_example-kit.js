@@ -1,4 +1,4 @@
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 export const approvalSchema = z.object({
     approved: z.boolean(),

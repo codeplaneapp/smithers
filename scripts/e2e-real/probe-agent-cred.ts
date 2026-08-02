@@ -1,4 +1,4 @@
-import { listAccounts } from "@smithers-orchestrator/accounts";
+import { listAccounts } from "@smthrs/accounts";
 import { resolve } from "node:path";
 
 const repoRoot = resolve(import.meta.dir, "../..");

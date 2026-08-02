@@ -1,6 +1,6 @@
 // smithers-display-name: Issue 306 — case08 real product-path coverage
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";
@@ -38,7 +38,7 @@ function DEFAULT_PROMPT(): string {
     "2. `await Effect.runPromise(runWorkflow(workflow, { runId, input: { value: 7 } }))` and assert the",
     "   result status is 'waiting-approval'.",
     "3. `const run = await adapter.getRun(runId)`, then `const view = await computeRunStateFromRow(adapter, run)`",
-    "   — the SAME call the gateway inspector uses (import from '@smithers-orchestrator/db/runState').",
+    "   — the SAME call the gateway inspector uses (import from '@smthrs/db/runState').",
     "   Assert `view.state === 'waiting-approval'`, that it is not idle-like, and that `view.blocked`",
     "   partially matches `{ kind: 'approval', nodeId: 'approve-deploy' }` via expect(...).toMatchObject(...)",
     "   (the real ReasonBlocked also carries a `requestedAt` string) — this proves the pending approval was",

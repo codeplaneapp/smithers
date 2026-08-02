@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import * as sourceEntry from "../src/index.ts";
 import {
-  compileScenario,
   e2eHarness,
   fault,
   integrationHarness,
@@ -33,7 +32,7 @@ import { registerTrustedAdapter, type AdapterFaultContext } from "../src/harness
  * Real-adapter invocation rows live in
  * e2e/testing-framework/cutpoint-conformance.test.ts against a live SmithersDb.
  */
-const shippedPath = Bun.resolveSync("@smithers-orchestrator/testing", import.meta.dir);
+const shippedPath = Bun.resolveSync("@smthrs/testing", import.meta.dir);
 const shippedEntry = (await import(shippedPath)) as typeof sourceEntry;
 const ENTRIES = [
   { entry: "source" as const, M: sourceEntry },

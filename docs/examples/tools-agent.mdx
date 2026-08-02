@@ -10,12 +10,12 @@ An agent with filesystem and shell tools for codebase analysis, log searching, o
 ## Workflow Definition
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // tools-agent.tsx
-import { createSmithers, Task, Sequence } from "smithers-orchestrator";
+import { createSmithers, Task, Sequence } from "smthrs";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { tools } from "smithers-orchestrator";
+import { tools } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, smithers, outputs } = createSmithers({
@@ -63,7 +63,7 @@ export default smithers((ctx) => (
 ## Running
 
 ```bash
-bunx smithers-orchestrator up tools-agent.tsx --input '{}'
+bunx smthrs up tools-agent.tsx --input '{}'
 ```
 
 ```
@@ -103,7 +103,7 @@ bunx smithers-orchestrator up tools-agent.tsx --input '{}'
 | `retries` | `2` | Retry on failure (e.g., grep typo on first pass). |
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 <Task
   id="search"
   output={outputs.searchResult}

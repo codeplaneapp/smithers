@@ -1,11 +1,11 @@
 // smithers-display-name: Riskless GitHub Issue Sweep
 // smithers-source: one conservative admission pass, bounded correction lanes, one serialized landing queue
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { ClaudeCodeAgent, CodexAgent, createSmithers } from "smithers-orchestrator";
+import { ClaudeCodeAgent, CodexAgent, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { buildPublicIssueAgentPolicy, resolvePublicIssueToolchainReadPaths } from "../lib/publicIssueAgentPolicy";
 import {

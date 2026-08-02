@@ -5,7 +5,7 @@ description: Run a Smithers <Sandbox> child workflow on Vercel Sandbox compute w
 
 # Vercel Sandbox Provider
 
-`@smithers-orchestrator/vercel` is a first-class Smithers `SandboxProvider`
+`@smthrs/vercel` is a first-class Smithers `SandboxProvider`
 backed by the [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox) SDK: it
 ships a `<Sandbox>` child workflow's request JSON into the sandbox workdir,
 runs the entry command, and reads the result JSON back. The shared
@@ -20,7 +20,7 @@ import {
   createVercelSandboxProvider,
   registerVercelSandboxProvider,
   VERCEL_SANDBOX_PROVIDER_ID,
-} from "smithers-orchestrator/vercel";
+} from "smthrs/vercel";
 ```
 
 ## Credentials
@@ -46,8 +46,8 @@ Each can also be passed as a factory option (`oidcToken`, `token`, `teamId`,
 ## Usage
 
 ```tsx
-import { createSmithers, Sandbox } from "smithers-orchestrator";
-import { createVercelSandboxProvider } from "smithers-orchestrator/vercel";
+import { createSmithers, Sandbox } from "smthrs";
+import { createVercelSandboxProvider } from "smthrs/vercel";
 
 const provider = createVercelSandboxProvider({
   runtime: "node24",
@@ -72,7 +72,7 @@ export default parent.smithers((ctx) => (
 Or register it once and reference it by id:
 
 ```ts
-import { registerVercelSandboxProvider } from "smithers-orchestrator/vercel";
+import { registerVercelSandboxProvider } from "smthrs/vercel";
 
 const unregister = registerVercelSandboxProvider({ runtime: "node24" });
 

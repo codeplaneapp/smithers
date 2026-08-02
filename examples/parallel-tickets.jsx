@@ -16,8 +16,8 @@
  * Subscriptions: Claude roles run via the Claude Code CLI; the reviewer runs
  * via the Pi/Codex CLI — both use the user's existing subscriptions.
  */
-import { Sequence, Parallel, Loop, MergeQueue, Worktree } from "smithers-orchestrator";
-import { ClaudeCodeAgent, PiAgent } from "smithers-orchestrator";
+import { Sequence, Parallel, Loop, MergeQueue, Worktree } from "smthrs";
+import { ClaudeCodeAgent, PiAgent } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { z } from "zod";
 import TriagePrompt from "./prompts/parallel-tickets/triage.mdx";

@@ -1,17 +1,17 @@
 /// <reference path="../types/bun-test-shim.d.ts" />
 export { AutoMock, FakeAgent, FakeAgentCall, FakeAgentFiles, FakeAgentOptions, FakeAgentResult, FakeAgentScript, SafeSchema, auto, fakeAgent, isAuto } from './fakeAgent.js';
 export { RenderWorkflowOptions, RenderedWorkflow, renderWorkflow } from './renderWorkflow.js';
-export { renderPromptToText as renderPrompt } from '@smithers-orchestrator/components/components/Task';
+export { renderPromptToText as renderPrompt } from '@smthrs/components/components/Task';
 export { RunTaskOptions, runTask } from './runTask.js';
 export { Sim, SimTaskRecord, SimulateMockFunction, SimulateOptions, simulate } from './simulate.js';
 export { CoverableWorkflow, WorkflowCoverageApproval, WorkflowCoverageApprovalResolver, WorkflowCoverageApprovalValue, WorkflowCoverageDecision, WorkflowCoverageError, WorkflowCoverageEventContext, WorkflowCoverageEventResolver, WorkflowCoverageFailure, WorkflowCoverageOptions, WorkflowCoveragePass, WorkflowCoverageResult, WorkflowCoverageTaskContext, WorkflowCoverageValidation, coverWorkflow, expectFullCoverage } from './coverWorkflow.js';
 export { simMatchers, toHaveExecuted, toHaveExecutedInOrder, toHaveFinished } from './matchers.js';
 import { ChildProcess } from 'node:child_process';
-import '@smithers-orchestrator/driver/SmithersCtx';
-import '@smithers-orchestrator/react-reconciler';
-import '@smithers-orchestrator/driver/WorkflowDefinition';
-import '@smithers-orchestrator/graph';
-import '@smithers-orchestrator/scheduler';
+import '@smthrs/driver/SmithersCtx';
+import '@smthrs/react-reconciler';
+import '@smthrs/driver/WorkflowDefinition';
+import '@smthrs/graph';
+import '@smthrs/scheduler';
 
 type ScenarioValue = null | boolean | number | string | readonly ScenarioValue[] | {
     readonly [key: string]: ScenarioValue;

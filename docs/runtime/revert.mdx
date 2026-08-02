@@ -8,7 +8,7 @@ Each successful task attempt captures the current [JJ](https://jj-vcs.github.io/
 <Note>API reference: [Time Travel](/reference/time-travel) lists every revert and time-travel export, its options, and links to source and tests.</Note>
 
 ```bash
-bunx smithers-orchestrator revert workflow.tsx \
+bunx smthrs revert workflow.tsx \
   --run-id RUN_ID --node-id NODE_ID [--attempt N=1] [--iteration N=0] \
   [--force] [--no-revert]
 ```
@@ -38,7 +38,7 @@ GitHub issues, comments, releases, and PR merge state are external effects.
 ## Programmatic
 
 ```ts
-import { revertToAttempt, timeTravel } from "smithers-orchestrator";
+import { revertToAttempt, timeTravel } from "smthrs";
 
 const result = await revertToAttempt(adapter, {
   runId: "abc123",

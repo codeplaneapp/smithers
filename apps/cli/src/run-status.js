@@ -5,12 +5,12 @@
 // `buildRunStatusSummary` is the thin adapter-facing wrapper the CLI calls and
 // `renderRunStatusHuman` the compact (~5-8 line) human formatter.
 
-import { SmithersError } from "@smithers-orchestrator/errors";
-import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
+import { SmithersError } from "@smthrs/errors";
+import { computeRunStateFromRow } from "@smthrs/db/runState";
 import { formatElapsedCompact } from "./format.js";
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("@smithers-orchestrator/db/runState").RunStateView} RunStateView */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/runState").RunStateView} RunStateView */
 
 /** Window used to answer "is it moving?" — nodes finished in the last N ms. */
 export const RUN_STATUS_RECENT_WINDOW_MS = 10 * 60 * 1000;

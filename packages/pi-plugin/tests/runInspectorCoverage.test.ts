@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { DevToolsStore } from "../src/runtime/DevToolsStore.js";
 import { RunInspector } from "../src/views/RunInspector.js";
 import type { DevToolsClient } from "../src/runtime/DevToolsClient.js";
-import type { DevToolsNode, DevToolsSnapshot } from "@smithers-orchestrator/protocol";
+import type { DevToolsNode, DevToolsSnapshot } from "@smthrs/protocol";
 
 const plainTheme = {
   fg: (_color: string, value: string) => value,

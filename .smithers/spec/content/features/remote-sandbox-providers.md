@@ -74,7 +74,7 @@ createMicrosandboxSandboxProvider runs child workflows in local hardware-isolate
 
 ## Architecture
 
-- `packages/cloudflare`, `packages/vercel`, `packages/aws`, `packages/gcp`, `packages/daytona`, and `packages/microsandbox` are optional provider packages re-exported by smithers-orchestrator subpaths.
+- `packages/cloudflare`, `packages/vercel`, `packages/aws`, `packages/gcp`, `packages/daytona`, and `packages/microsandbox` are optional provider packages re-exported by smthrs subpaths.
 - `packages/sandbox/src/provider-kit` supplies shared transport and provider contracts.
 - Docs distinguish storage descriptors from remote execution providers, especially on Cloudflare.
 

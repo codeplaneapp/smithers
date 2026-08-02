@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { OPTIMIZATION_ARTIFACT_ENV } from "@smithers-orchestrator/engine";
-import { SmithersError } from "@smithers-orchestrator/errors";
+import { OPTIMIZATION_ARTIFACT_ENV } from "@smthrs/engine";
+import { SmithersError } from "@smthrs/errors";
 import { optimizeOptions, runOptimizeCommand, withOptimizationArtifactEnv } from "../src/optimize-command.js";
 
 const originalArtifactEnv = process.env[OPTIMIZATION_ARTIFACT_ENV];

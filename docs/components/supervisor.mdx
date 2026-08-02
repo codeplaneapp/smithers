@@ -5,7 +5,7 @@ description: Boss plans, workers run in parallel, boss reviews and re-delegates 
 
 ```ts
 // Props
-import { Supervisor } from "smithers-orchestrator";
+import { Supervisor } from "smthrs";
 
 type SupervisorProps = {
   id?: string;                                  // default: "supervisor"
@@ -284,8 +284,8 @@ export const Ralph = Loop;
 
 ```js Worktree.js
 import React from "react";
-import { WORKTREE_EMPTY_PATH_ERROR } from "@smithers-orchestrator/graph/constants";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { WORKTREE_EMPTY_PATH_ERROR } from "@smthrs/graph/constants";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 /** @typedef {import("./WorktreeProps.ts").WorktreeProps} WorktreeProps */
 
 /**
@@ -303,7 +303,7 @@ export function Worktree(props) {
 
 ```js useOptionalSmithersContext.js
 import React from "react";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
 
 /**
  * Read the workflow context when React is rendering the component, but allow
@@ -326,7 +326,7 @@ export function useOptionalSmithersContext() {
 
 ```ts SupervisorProps.ts
 import type React from "react";
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type SupervisorProps = {

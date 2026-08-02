@@ -1,7 +1,7 @@
 // smithers-source: authored
 // smithers-display-name: PR Review, Improve & Merge
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Sequence, Loop } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, Sequence, Loop } from "smthrs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

@@ -1,5 +1,5 @@
 import { createOpenAI, openai } from "@ai-sdk/openai";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { jsonSchema, Output, ToolLoopAgent } from "ai";
 import { resolveSdkModel } from "./resolveSdkModel.js";
 import { streamResultToGenerateResult } from "./streamResultToGenerateResult.js";

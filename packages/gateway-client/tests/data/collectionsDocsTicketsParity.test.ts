@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { QueryClient } from "@tanstack/react-query";
-import { createSmithersPostgres } from "smithers-orchestrator";
+import { createSmithersPostgres } from "smthrs";
 
 import {
   createSmithersCollections,

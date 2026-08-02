@@ -5,7 +5,7 @@
  * Use cases: batch file processing, multi-file refactoring, parallel analysis,
  * map-reduce style operations.
  */
-import { Sequence, Parallel, ClaudeCodeAgent } from "smithers-orchestrator";
+import { Sequence, Parallel, ClaudeCodeAgent } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { z } from "zod";
 import SplitPrompt from "./prompts/fan-out-fan-in/split.mdx";

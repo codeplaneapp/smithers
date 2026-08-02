@@ -38,7 +38,7 @@ Use one SQLite database file per deployment on durable storage, or run PostgreSQ
 
 ### Electric Cloud Sync
 
-Cloud GUI replicas use `@smithers-orchestrator/electric-proxy` in front of ElectricSQL, run only against managed PostgreSQL configured for logical replication: `wal_level=logical`, a publication covering every `_smithers_*` table plus workflow output tables, and a replication slot for Electric. PGlite can't be a source: it runs `wal_level=replica` and can't create logical replication slots.
+Cloud GUI replicas use `@smthrs/electric-proxy` in front of ElectricSQL, run only against managed PostgreSQL configured for logical replication: `wal_level=logical`, a publication covering every `_smithers_*` table plus workflow output tables, and a replication slot for Electric. PGlite can't be a source: it runs `wal_level=replica` and can't create logical replication slots.
 
 The proxy is the public shape endpoint: it authenticates the same scoped Gateway tokens, maps `run:read` to read-only shape access, injects workspace/run/user predicates from the grant, strips `Authorization` before forwarding to Electric, and caps 60 shape opens/minute, 50 active shapes, and 4 MiB per frame. Writes skip Electric shapes: clients post to `/v1/electric/write`, the Gateway applies the RPC mutation under scope checks and returns the PostgreSQL txid, and TanStack DB holds optimistic state until Electric streams that txid back.
 

@@ -1,8 +1,8 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, onTestFinished, test } from "bun:test";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { corruptHeartbeat } from "../harness/corruptHeartbeat.ts";
 
 type RunRow = {

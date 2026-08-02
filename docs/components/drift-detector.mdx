@@ -5,7 +5,7 @@ description: Capture state, compare against a baseline, and alert on meaningful 
 
 ```ts
 // Props
-import { DriftDetector } from "smithers-orchestrator";
+import { DriftDetector } from "smthrs";
 
 type DriftDetectorProps = {
   id?: string; // default "drift"; ids {id}-capture, {id}-compare
@@ -52,7 +52,7 @@ The `<DriftDetector>` implementation and the files it imports, straight from the
 <CodeGroup>
 ```js DriftDetector.js
 import React from "react";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
 import { Task } from "./Task.js";
 import { Sequence } from "./Sequence.js";
 import { Branch } from "./Branch.js";
@@ -144,9 +144,8 @@ export function DriftDetector(props) {
 // @smithers-type-exports-end
 
 import React from "react";
-import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-export { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+export { SmithersCtx } from "@smthrs/driver/SmithersCtx";
 /** @type {React.Context<SmithersCtx<any> | null>} */
 export const SmithersContext = React.createContext(null);
 SmithersContext.displayName = "SmithersContext";
@@ -225,7 +224,7 @@ export function Sequence(props) {
 
 ```js Branch.js
 import React from "react";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 /** @typedef {import("./BranchProps.ts").BranchProps} BranchProps */
 
 /**
@@ -282,7 +281,7 @@ export const Ralph = Loop;
 
 ```ts DriftDetectorProps.ts
 import type React from "react";
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type DriftDetectorProps = {

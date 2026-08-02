@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
+import { workflowUiThemeCss } from "@smthrs/ui-styleguide";
 import { SANDBOX_CSS_ID, sandboxCss } from "../src/sandbox/sandboxCss";
 
 /** Strip every var(--x, fallback) expression, including rgba fallbacks. */

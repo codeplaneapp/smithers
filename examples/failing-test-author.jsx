@@ -5,11 +5,11 @@
  *
  * Pattern: Issue reader → repro/test author agent → test runner → downstream handoff.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, write, bash, grep } from "smithers-orchestrator/tools";
+import { read, write, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import AnalyzePrompt from "./prompts/failing-test-author/analyze.mdx";
 import AuthorPrompt from "./prompts/failing-test-author/author.mdx";

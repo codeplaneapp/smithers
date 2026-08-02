@@ -1,4 +1,4 @@
-// @smithers-orchestrator/integrations/linear — Linear integration surface:
+// @smthrs/integrations/linear — Linear integration surface:
 // GraphQL client (Effect service), webhook source, listener + outbound
 // components, zod payload schemas, config registry.
 export * from "./linear/config.js";

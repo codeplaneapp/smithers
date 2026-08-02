@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: Install smithers-orchestrator with the workflow pack, or manually for standalone JSX workflow projects.
+description: Install smthrs with the workflow pack, or manually for standalone JSX workflow projects.
 ---
 
 Most teams should start with the workflow pack: a working `.smithers/` directory with seeded workflows, prompts, and agent configuration, rather than hand-assembling the project structure.
@@ -15,31 +15,31 @@ Most teams should start with the workflow pack: a working `.smithers/` directory
 ## Always Run with `bunx`
 
 <Warning>
-  Agents, MCP configs, and docs should use `bunx smithers-orchestrator <command>`.
+  Agents, MCP configs, and docs should use `bunx smthrs <command>`.
   Do **not** use `bunx smithers`: it's only the installed binary alias; on
   npm `smithers` is an unrelated package, so `bunx smithers` can download and run
   something else.
 </Warning>
 
-- The published npm package is [`smithers-orchestrator`](https://www.npmjs.com/package/smithers-orchestrator).
-- `bunx smithers-orchestrator ...` works from any directory, using the project-pinned dependency when one exists.
+- The published npm package is [`smthrs`](https://www.npmjs.com/package/smthrs).
+- `bunx smthrs ...` works from any directory, using the project-pinned dependency when one exists.
 - Use the `smithers` alias only when the environment intentionally provides that binary, e.g. a project script resolving `node_modules/.bin/smithers`.
 - Avoid global installs: a global `smithers` on PATH can drift from and shadow the project-pinned version.
 
-If you previously ran `npm i -g smithers-orchestrator`, uninstall it (`npm rm -g smithers-orchestrator`) and switch to `bunx`.
+If you previously ran `npm i -g smthrs`, uninstall it (`npm rm -g smthrs`) and switch to `bunx`.
 
 ## Updating Smithers
 
 How you update depends on how you run Smithers:
 
-- **`bunx` / `npx` (recommended):** nothing to update. `bunx smithers-orchestrator@latest <command>` resolves the newest published version; inside a workflow project it uses the version pinned in `package.json`. To move a pinned project forward, bump the dependency, run `bunx smithers-orchestrator@latest init` to re-scaffold, or edit the `smithers-orchestrator` version in `.smithers/package.json` directly.
+- **`bunx` / `npx` (recommended):** nothing to update. `bunx smthrs@latest <command>` resolves the newest published version; inside a workflow project it uses the version pinned in `package.json`. To move a pinned project forward, bump the dependency, run `bunx smthrs@latest init` to re-scaffold, or edit the `smthrs` version in `.smithers/package.json` directly.
 - **Global install:** upgrade with your package manager.
 
   ```bash
-  bun add -g smithers-orchestrator@latest    # bun
-  npm install -g smithers-orchestrator@latest # npm
-  pnpm add -g smithers-orchestrator@latest    # pnpm
-  yarn global add smithers-orchestrator@latest # yarn
+  bun add -g smthrs@latest    # bun
+  npm install -g smthrs@latest # npm
+  pnpm add -g smthrs@latest    # pnpm
+  yarn global add smthrs@latest # yarn
   ```
 
 Or let `smithers update` do it: it detects the install method and runs the right command (or, for a `bunx`/project install, prints what to run):
@@ -55,7 +55,7 @@ generated CLI command skills and the curated `smithers` skill) so an upgrade
 never leaves an agent reading the previous release's `SKILL.md` and
 `llms-full.txt`. This runs in agent and CI sessions too, not just interactive
 terminals. Opt out with `SMITHERS_NO_SKILL_REFRESH=1`, and run
-`bunx smithers-orchestrator skills add` yourself if the sync is skipped or
+`bunx smthrs skills add` yourself if the sync is skipped or
 fails.
 
 Verify the installed version:
@@ -64,16 +64,16 @@ Verify the installed version:
 smithers --version
 ```
 
-Smithers also checks npm at most once a day and prints a one-line notice on an interactive run when a newer release exists, or when its [SOTA model registry](/reference/sota-models) falls behind the published one: run `smithers update` then `bunx smithers-orchestrator init` to move workflows onto the latest agents. Disable it with `SMITHERS_NO_UPDATE_CHECK=1` (already off in CI, JSON/agent output, and non-interactive shells).
+Smithers also checks npm at most once a day and prints a one-line notice on an interactive run when a newer release exists, or when its [SOTA model registry](/reference/sota-models) falls behind the published one: run `smithers update` then `bunx smthrs init` to move workflows onto the latest agents. Disable it with `SMITHERS_NO_UPDATE_CHECK=1` (already off in CI, JSON/agent output, and non-interactive shells).
 
 ### Clean reinstall
 
 If you suspect a stale cache or leftover global symlink shadowing the project version, remove the global install and runner cache, then reinstall:
 
 ```bash
-npm rm -g smithers-orchestrator   # or: bun remove -g smithers-orchestrator
+npm rm -g smthrs   # or: bun remove -g smthrs
 which smithers                    # confirm no stale binary remains on PATH
-bunx smithers-orchestrator@latest --version
+bunx smthrs@latest --version
 ```
 
 `bunx`/`npx` keep their own download caches; appending `@latest` forces a fresh fetch instead of a cached one.
@@ -81,7 +81,7 @@ bunx smithers-orchestrator@latest --version
 ## Recommended: Install the Workflow Pack
 
 ```bash
-bunx smithers-orchestrator init
+bunx smthrs init
 ```
 
 That scaffolds `.smithers/` with files such as:
@@ -92,7 +92,7 @@ That scaffolds `.smithers/` with files such as:
 | `.smithers/prompts/` | Prompt templates for the curated authoring workflows |
 | `.smithers/lib/ddd/` | Portable helpers for the docs-driven-development workflow |
 | `.smithers/ui/` | Workflow-owned UIs and their complete local module closure |
-| `.smithers/package.json` | Local workflow project manifest with `smithers-orchestrator` dependency |
+| `.smithers/package.json` | Local workflow project manifest with `smthrs` dependency |
 | `.smithers/tsconfig.json` | TypeScript config for JSX workflow authoring |
 | `.smithers/bunfig.toml` | Bun preload config for MDX workflow prompts |
 | `.smithers/preload.ts` | Registers the MDX preload plugin |
@@ -109,7 +109,7 @@ and UI examples under `examples/init-pack/` in the source repository.
 To overwrite an existing scaffold:
 
 ```bash
-bunx smithers-orchestrator init --force
+bunx smthrs init --force
 ```
 
 ## Install the Agent Skill
@@ -126,7 +126,7 @@ point them at `docs-full` (below).
 To sync the generated Smithers CLI command skill set:
 
 ```bash
-bunx smithers-orchestrator skills add
+bunx smthrs skills add
 ```
 
 That writes generated command-level skill files to supported skill locations,
@@ -140,8 +140,8 @@ for the outcome, e.g. *"orchestrate an agent to add rate limiting and keep
 iterating until the tests pass,"* and it reaches for Smithers itself.
 
 Agents without a skills directory: point them at
-`bunx smithers-orchestrator docs-full` (prints the same bundle) or
-`bunx smithers-orchestrator ask "<question>"`.
+`bunx smthrs docs-full` (prints the same bundle) or
+`bunx smthrs ask "<question>"`.
 
 [Agent Support](/agents/overview) covers installing skills where supported and
 registering the MCP server, across Claude Code, Codex, Cursor, Copilot, Pi,
@@ -162,15 +162,15 @@ See [JSX Installation](/jsx/overview) for the package list, TypeScript configura
 
 ### Version control
 
-Smithers bundles jj: the optional `@smithers-orchestrator/jj-<platform>` package vendors a jj binary per platform, so a fresh install needs no system jj. Resolution order:
+Smithers bundles jj: the optional `@smthrs/jj-<platform>` package vendors a jj binary per platform, so a fresh install needs no system jj. Resolution order:
 
 1. `SMITHERS_JJ_PATH`: point this at a jj binary to override everything.
 2. The bundled binary for your platform.
 3. `jj` on your `PATH`.
 
-If no bundled binary is installed (unsupported platform, or `--no-optional`) and neither `jj` nor `git` is on `PATH`, worktree-needing runs fail with a message to install one. Check what Smithers found with `bunx smithers-orchestrator workflow doctor` (the `vcs` section reports the resolved jj and git).
+If no bundled binary is installed (unsupported platform, or `--no-optional`) and neither `jj` nor `git` is on `PATH`, worktree-needing runs fail with a message to install one. Check what Smithers found with `bunx smthrs workflow doctor` (the `vcs` section reports the resolved jj and git).
 
-If the bundled jj exists but fails with `EACCES`, its executable bit was stripped during packaging or install. Fix the local install with `chmod +x node_modules/@smithers-orchestrator/jj-*/bin/jj`, reinstall, or set `SMITHERS_JJ_PATH` to a known-good `jj` binary.
+If the bundled jj exists but fails with `EACCES`, its executable bit was stripped during packaging or install. Fix the local install with `chmod +x node_modules/@smthrs/jj-*/bin/jj`, reinstall, or set `SMITHERS_JJ_PATH` to a known-good `jj` binary.
 
 ## After Installation
 

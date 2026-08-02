@@ -1,6 +1,6 @@
 import { createSmithers } from "../index.js";
 import { z } from "zod";
-import type { AgentLike } from "@smithers-orchestrator/agents";
+import type { AgentLike } from "@smthrs/agents";
 
 const agent = {
   generate: async () => ({ ok: true }),

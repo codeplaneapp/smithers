@@ -1,1 +1,1 @@
-export * from "@smithers-orchestrator/ui/adapters/markdown-editor";
+export * from "@smthrs/ui/adapters/markdown-editor";

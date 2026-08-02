@@ -3,10 +3,10 @@
 /** @typedef {import("./RunOutputCommandResult.ts").RunOutputCommandResult} RunOutputCommandResult */
 // @smithers-type-exports-end
 
-import { getNodeOutputRoute } from "@smithers-orchestrator/server/gatewayRoutes/getNodeOutput";
-import { NodeOutputRouteError } from "@smithers-orchestrator/server/gatewayRoutes/NodeOutputRouteError";
-import { RUN_ID_PATTERN } from "@smithers-orchestrator/server/gatewayRoutes/RUN_ID_PATTERN";
-import { camelToSnake } from "@smithers-orchestrator/db/utils/camelToSnake";
+import { getNodeOutputRoute } from "@smthrs/server/gatewayRoutes/getNodeOutput";
+import { NodeOutputRouteError } from "@smthrs/server/gatewayRoutes/NodeOutputRouteError";
+import { RUN_ID_PATTERN } from "@smthrs/server/gatewayRoutes/RUN_ID_PATTERN";
+import { camelToSnake } from "@smthrs/db/utils/camelToSnake";
 import { EXIT_OK } from "./util/exitCodes.js";
 import { formatCliErrorForStderr, getCliErrorMapping } from "./util/errorMessage.js";
 
@@ -55,7 +55,7 @@ function formatValue(value) {
 }
 
 /**
- * @param {import("@smithers-orchestrator/db/adapter").SmithersDb} adapter
+ * @param {import("@smthrs/db/adapter").SmithersDb} adapter
  * @param {string} runId
  * @param {string} nodeId
  * @returns {Promise<number | null>}
@@ -127,7 +127,7 @@ async function runRawJsonOutput(input, iteration) {
  * (`review_codex`). Older runs may already store the snake_case name, so try
  * the stored name first and fall back to the snake_case translation.
  *
- * @param {import("@smithers-orchestrator/db/adapter").SmithersDb} adapter
+ * @param {import("@smthrs/db/adapter").SmithersDb} adapter
  * @param {string} outputTable
  * @param {string} runId
  * @param {string} nodeId

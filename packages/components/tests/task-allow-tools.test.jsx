@@ -1,12 +1,12 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
-import { renderFrame } from "@smithers-orchestrator/engine";
-import { SmithersCtx } from "@smithers-orchestrator/react-reconciler/context";
-import { AntigravityAgent } from "@smithers-orchestrator/agents/AntigravityAgent";
-import { ClaudeCodeAgent } from "@smithers-orchestrator/agents/ClaudeCodeAgent";
-import { PiAgent } from "@smithers-orchestrator/agents/PiAgent";
+import { createSmithers } from "smthrs";
+import { renderFrame } from "@smthrs/engine";
+import { SmithersCtx } from "@smthrs/react-reconciler/context";
+import { AntigravityAgent } from "@smthrs/agents/AntigravityAgent";
+import { ClaudeCodeAgent } from "@smthrs/agents/ClaudeCodeAgent";
+import { PiAgent } from "@smthrs/agents/PiAgent";
 import { Effect } from "effect";
 describe("Task allowTools", () => {
   test("passes an allowlist through to ClaudeCodeAgent tasks", async () => {

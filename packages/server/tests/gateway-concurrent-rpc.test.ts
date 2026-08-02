@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import React from "react";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { Gateway } from "../src/gateway.js";
 import { sleep } from "../../smithers/tests/helpers.js";
 

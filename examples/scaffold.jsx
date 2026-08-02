@@ -6,11 +6,11 @@
  * Use cases: new project setup, feature scaffolding, component generation,
  * API endpoint generation, test file generation.
  */
-import { Sequence, Parallel } from "smithers-orchestrator";
+import { Sequence, Parallel } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, write, bash, grep } from "smithers-orchestrator/tools";
+import { read, write, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import BlueprintPrompt from "./prompts/scaffold/blueprint.mdx";
 import GeneratePrompt from "./prompts/scaffold/generate.mdx";

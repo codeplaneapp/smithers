@@ -6,7 +6,7 @@
 // is visible.
 
 import * as net from "node:net";
-import { appendGap, defaultGapSpoolPath } from "@smithers-orchestrator/engine/durabilityGapSpool";
+import { appendGap, defaultGapSpoolPath } from "@smthrs/engine/durabilityGapSpool";
 
 /** Read a whole stream to a string. */
 function readAll(stream) {

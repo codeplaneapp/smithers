@@ -4,9 +4,8 @@
 // @smithers-type-exports-end
 
 import React from "react";
-import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-export { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+export { SmithersCtx } from "@smthrs/driver/SmithersCtx";
 /** @type {React.Context<SmithersCtx<any> | null>} */
 export const SmithersContext = React.createContext(null);
 SmithersContext.displayName = "SmithersContext";

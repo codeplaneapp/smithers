@@ -61,16 +61,16 @@ The pieces, as implemented:
 
 ### Quota exhaustion: park, don't burn
 
-When an agent CLI hits a usage limit, `BaseCliAgent` classifies it (pattern-matching the provider's limit banner, extracting `quotaResetAtMs` when the message names a reset time) and the engine treats it as a **non-attempt**: the failure does not consume retry budget, and the run parks in `waiting-quota` instead of grinding its retries to zero against a wall that won't move. The gateway's sweep (or `bunx smithers-orchestrator supervise`) resumes the run once the reset time elapses. This is the DLQ insight applied to quotas: don't redeliver into a known-dead consumer.
+When an agent CLI hits a usage limit, `BaseCliAgent` classifies it (pattern-matching the provider's limit banner, extracting `quotaResetAtMs` when the message names a reset time) and the engine treats it as a **non-attempt**: the failure does not consume retry budget, and the run parks in `waiting-quota` instead of grinding its retries to zero against a wall that won't move. The gateway's sweep (or `bunx smthrs supervise`) resumes the run once the reset time elapses. This is the DLQ insight applied to quotas: don't redeliver into a known-dead consumer.
 
 ## Attempt history and per-attempt filesystem state
 
-Every attempt is a row in `_smithers_attempts` (`packages/db/src/internal-schema/smithersAttempts.js`), keyed by `(run_id, node_id, iteration, attempt)`, with `state`, timing, `heartbeat_at_ms`, `error_json`, `response_text` - and `jj_pointer`: a version-control pointer to the working-tree state for that attempt. That last column is the agent-specific part. Attempt 1 may have left the repo half-edited; the attempt record knows exactly what the tree looked like, so you can inspect it (`bunx smithers-orchestrator node`) or roll the workspace back to it:
+Every attempt is a row in `_smithers_attempts` (`packages/db/src/internal-schema/smithersAttempts.js`), keyed by `(run_id, node_id, iteration, attempt)`, with `state`, timing, `heartbeat_at_ms`, `error_json`, `response_text` - and `jj_pointer`: a version-control pointer to the working-tree state for that attempt. That last column is the agent-specific part. Attempt 1 may have left the repo half-edited; the attempt record knows exactly what the tree looked like, so you can inspect it (`bunx smthrs node`) or roll the workspace back to it:
 
 ```bash
-bunx smithers-orchestrator node -r RUN_ID -n implement          # attempts, errors, tool calls
-bunx smithers-orchestrator revert workflow.tsx -r RUN_ID -n implement --attempt 1
-bunx smithers-orchestrator retry-task workflow.tsx -r RUN_ID -n implement   # reset + resume
+bunx smthrs node -r RUN_ID -n implement          # attempts, errors, tool calls
+bunx smthrs revert workflow.tsx -r RUN_ID -n implement --attempt 1
+bunx smthrs retry-task workflow.tsx -r RUN_ID -n implement   # reset + resume
 ```
 
 `retry-task` resets the node (and by default its dependents; `--no-deps` to scope it) and resumes the workflow - the manual override when the automatic budget is spent or you've fixed the environment. `timetravel` combines both: revert filesystem, reset DB state, optionally `--resume`.
@@ -87,8 +87,8 @@ On retry after a non-idempotent side-effect executed, Smithers injects an explic
 
 ## When the run itself dies
 
-- **Stale runs** - `bunx smithers-orchestrator supervise -r RUN_ID` (or `--all` for a workspace sweep) polls every 10s and auto-resumes runs whose heartbeat is stale past 30s (`--interval`, `--stale-threshold`, `--max-concurrent 3`, `--dry-run`). Kubernetes-style restart supervision, but resuming from the durable DB position rather than from zero.
-- **Cancellation** - `bunx smithers-orchestrator cancel RUN_ID` safely halts agents and terminates one run; `smithers pause <runId>` lets in-flight tasks finish and parks resumably; `bunx smithers-orchestrator down` sweeps all active runs (stale-only unless `--force`).
+- **Stale runs** - `bunx smthrs supervise -r RUN_ID` (or `--all` for a workspace sweep) polls every 10s and auto-resumes runs whose heartbeat is stale past 30s (`--interval`, `--stale-threshold`, `--max-concurrent 3`, `--dry-run`). Kubernetes-style restart supervision, but resuming from the durable DB position rather than from zero.
+- **Cancellation** - `bunx smthrs cancel RUN_ID` safely halts agents and terminates one run; `smithers pause <runId>` lets in-flight tasks finish and parks resumably; `bunx smthrs down` sweeps all active runs (stale-only unless `--force`).
 - **The autopsy** - when `up`/`workflow run` reports a failed run, the `post-failure` system workflow launches automatically: it gathers `inspect`/`events`/source, investigates with read-only tools, classifies the failure (`workflow-bug` / `environment` / `agent-flake` / `smithers-bug` / `unknown`), and emits one suggestion with exact commands - behind an approval gate before any bug is reported. Full details: [Post-Failure Autopsies](/guide/post-failure). Opt out with `--no-post-failure` or `SMITHERS_POST_FAILURE=0`.
 - **Reporting** - `smithers bug --run RUN_ID` files a report to bug.smithers.sh with the run's workflow name, status, error, and last ~50 events, secrets scrubbed.
 

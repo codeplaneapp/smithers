@@ -2,10 +2,10 @@ import * as zod from 'zod';
 import { z } from 'zod';
 import * as drizzle_orm from 'drizzle-orm';
 import { Table as Table$1, and } from 'drizzle-orm';
-import * as _smithers_orchestrator_errors_SmithersError from '@smithers-orchestrator/errors/SmithersError';
-import { SmithersError as SmithersError$2 } from '@smithers-orchestrator/errors/SmithersError';
+import * as _smithers_orchestrator_errors_SmithersError from '@smthrs/errors/SmithersError';
+import { SmithersError as SmithersError$2 } from '@smthrs/errors/SmithersError';
 import * as drizzle_orm_bun_sqlite from 'drizzle-orm/bun-sqlite';
-import * as _smithers_orchestrator_errors_toSmithersError from '@smithers-orchestrator/errors/toSmithersError';
+import * as _smithers_orchestrator_errors_toSmithersError from '@smthrs/errors/toSmithersError';
 import * as bun_sqlite from 'bun:sqlite';
 import { ManagedRuntime, Effect } from 'effect';
 import * as SqlClient from 'effect/unstable/sql/SqlClient';
@@ -581,7 +581,7 @@ type ExternalSqliteDescriptor = {
  * @typedef {Effect.Effect<A, E> & PromiseLike<A>} RunnableEffect
  */
 /** @typedef {import("./adapter/SignalQuery.ts").SignalQuery} SignalQuery */
-/** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
+/** @typedef {import("@smthrs/errors/SmithersError").SmithersError} SmithersError */
 /**
  * @typedef {{ runId: string; frameNo: number; createdAtMs: number; xmlJson: string; xmlHash: string; encoding: string; mountedTaskIdsJson: string | null; taskIndexJson: string | null; note: string | null; }} FrameRow
  */
@@ -1450,7 +1450,7 @@ declare class SmithersDb {
     deleteCron(cronId: string): RunnableEffect<void, SmithersError$1>;
     /**
    * List cross-run memory facts, optionally scoped to a namespace. Reads the
-   * `_smithers_memory_facts` table written by `@smithers-orchestrator/memory`'s
+   * `_smithers_memory_facts` table written by `@smthrs/memory`'s
    * MemoryStore (`setFact`) — the SAME table the `smithers memory list` CLI reads
    * — so a fact set by any run/workflow surfaces here. Columns are snake→camel
    * cased by the storage layer (`value_json → valueJson`, etc.). A null/undefined
@@ -1869,7 +1869,7 @@ declare function assertNoReservedColumns(schema: {
 }): void;
 
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} _BunSQLiteDatabase */
-/** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} _SmithersError */
+/** @typedef {import("@smthrs/errors/SmithersError").SmithersError} _SmithersError */
 /**
  * @param {_BunSQLiteDatabase<Record<string, unknown>>} db
  * @returns {Effect.Effect<void, _SmithersError>}
@@ -7973,7 +7973,7 @@ type NodeDiffCacheResult = {
     sizeBytes: number;
     cacheResult: "hit" | "miss";
 };
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} _SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} _SmithersDb */
 /** @typedef {import("../adapter/NodeDiffCacheRow.ts").NodeDiffCacheRow} _NodeDiffCacheRow */
 /** @typedef {{ bundle: unknown; sizeBytes: number; cacheResult: "hit" | "miss" }} NodeDiffCacheResult */
 declare const NODE_DIFF_MAX_BYTES: number;

@@ -1,4 +1,4 @@
-const CLI_COMMAND = "bunx smithers-orchestrator";
+const CLI_COMMAND = "bunx smthrs";
 const INSTALL_COMMAND = `${CLI_COMMAND} init --add-agents`;
 
 /**

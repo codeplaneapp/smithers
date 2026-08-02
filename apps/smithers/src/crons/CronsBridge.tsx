@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { useGatewayCrons, useGatewayMutation } from "@smithers-orchestrator/gateway-react";
-import { gatewayKeys, type GatewayCronRow } from "@smithers-orchestrator/gateway-client";
+import { useGatewayCrons, useGatewayMutation } from "@smthrs/gateway-react";
+import { gatewayKeys, type GatewayCronRow } from "@smthrs/gateway-client";
 import { useLocalModeRefetch } from "../sync/useLocalModeRefetch";
 import { describeCron, nameFromWorkflowPath, type Cron } from "./crons";
 import { bindCronActions, useCronsStore } from "./cronsStore";

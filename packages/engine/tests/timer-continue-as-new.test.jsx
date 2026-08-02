@@ -1,11 +1,11 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { runWorkflow, Timer, Workflow } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
-import { buildStateKey } from "@smithers-orchestrator/scheduler/buildStateKey";
+import { runWorkflow, Timer, Workflow } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { nowMs } from "@smthrs/scheduler/nowMs";
+import { buildStateKey } from "@smthrs/scheduler/buildStateKey";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import { resolveDeferredTaskStateBridge } from "../src/effect/deferred-state-bridge.js";

@@ -22,7 +22,7 @@ import { startInMemoryGateway, type InMemoryGateway } from "./inMemoryGateway.ts
 // so DOM-dependent imports must happen after happy-dom registration above.
 const { act, createElement, useState } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { SmithersGatewayProvider } = await import("@smithers-orchestrator/gateway-react");
+const { SmithersGatewayProvider } = await import("@smthrs/gateway-react");
 const {
   HijackCandidateButton,
   OneshotSurface,

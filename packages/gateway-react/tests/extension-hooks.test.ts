@@ -15,8 +15,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { Server } from "node:http";
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
-import { Gateway } from "@smithers-orchestrator/server/gateway";
+import { SmithersGatewayClient } from "@smthrs/gateway-client";
+import { Gateway } from "@smthrs/server/gateway";
 import {
   SmithersGatewayProvider,
   useGatewayExtensionAction,

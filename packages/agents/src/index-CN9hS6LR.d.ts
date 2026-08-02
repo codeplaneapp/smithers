@@ -1,6 +1,6 @@
 import * as ai from 'ai';
-import * as _smithers_orchestrator_errors_SmithersError from '@smithers-orchestrator/errors/SmithersError';
-import { SmithersError as SmithersError$1 } from '@smithers-orchestrator/errors/SmithersError';
+import * as _smithers_orchestrator_errors_SmithersError from '@smthrs/errors/SmithersError';
+import { SmithersError as SmithersError$1 } from '@smthrs/errors/SmithersError';
 import { Effect } from 'effect';
 import { spawn } from 'node:child_process';
 
@@ -247,7 +247,7 @@ type LanguageModelUsage = ai.LanguageModelUsage;
  * @typedef {{ cwd: string; env: Record<string, string>; input?: string; timeoutMs?: number; idleTimeoutMs?: number; signal?: AbortSignal; maxOutputBytes?: number; truncateKeep?: "head" | "tail"; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onProcess?: (event: { phase: "started" | "exited"; pid: number | undefined }) => void; }} RunCommandOptions
  */
 /** @typedef {import("./RunCommandResult.ts").RunCommandResult} RunCommandResult */
-/** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
+/** @typedef {import("@smthrs/errors/SmithersError").SmithersError} SmithersError */
 /**
  * @param {string} command
  * @param {string[]} args

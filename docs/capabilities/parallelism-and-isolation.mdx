@@ -44,8 +44,8 @@ On top of every group cap sits a **run-wide cap**: unpinned it starts at 4 and g
 `<Worktree path="...">` roots its subtree in an isolated git or jj worktree; descendants inherit the absolute `worktreePath` as their `cwd` ([full reference](/components/worktree)). Worktree creation is serialized per VCS root because concurrent `git worktree add` / `jj workspace add` calls mutate the shared `.git` state (see `packages/engine/src/engine.js`).
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Parallel, Worktree, MergeQueue, ClaudeCodeAgent } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, Parallel, Worktree, MergeQueue, ClaudeCodeAgent } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, Task, smithers, outputs } = createSmithers({
@@ -110,7 +110,7 @@ Smithers does not auto-resolve conflicts - nobody credibly does. What it gives y
 
 ### `<Sandbox>`: when a worktree isn't enough
 
-Worktrees isolate the *working copy*, not the machine - a lane can still `rm -rf ~`, read your env, or hit the network. For untrusted or destructive work, `<Sandbox>` runs a child workflow through a provider (`bubblewrap`, `docker`, or any object registered via `registerSandboxProvider`, including microVM backends like the `@smithers-orchestrator/daytona` and `microsandbox` packages), with `allowNetwork`, `egress` proxy/CA controls, resource limits, and diff review (`reviewDiffs` defaults to true) before changes touch your tree. See [`<Sandbox>`](/components/sandbox) and [sandbox providers](/components/sandbox-providers).
+Worktrees isolate the *working copy*, not the machine - a lane can still `rm -rf ~`, read your env, or hit the network. For untrusted or destructive work, `<Sandbox>` runs a child workflow through a provider (`bubblewrap`, `docker`, or any object registered via `registerSandboxProvider`, including microVM backends like the `@smthrs/daytona` and `microsandbox` packages), with `allowNetwork`, `egress` proxy/CA controls, resource limits, and diff review (`reviewDiffs` defaults to true) before changes touch your tree. See [`<Sandbox>`](/components/sandbox) and [sandbox providers](/components/sandbox-providers).
 
 ## Guarantees and limits
 
@@ -121,12 +121,12 @@ Worktrees isolate the *working copy*, not the machine - a lane can still `rm -rf
 ## Operating it
 
 ```bash
-bunx smithers-orchestrator up fanout -d --max-concurrency 6   # pin the run-wide cap
+bunx smthrs up fanout -d --max-concurrency 6   # pin the run-wide cap
 smithers status <run>                        # which lanes are in flight / gating progress
 smithers worktree list                       # every worktree Smithers created, and its owning run
 smithers worktree prune --older-than 24h     # reclaim worktrees of finished runs
 smithers worktree prune --force              # also drop uncommitted/unpushed lane work
-bunx smithers-orchestrator restore --node NODE_ID                 # restore a lane's worktree to a durability checkpoint
+bunx smthrs restore --node NODE_ID                 # restore a lane's worktree to a durability checkpoint
 ```
 
 ## See also

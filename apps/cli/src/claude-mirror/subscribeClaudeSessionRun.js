@@ -1,4 +1,4 @@
-import { findSmithersAnchorDir } from "smithers-orchestrator/findSmithersAnchorDir";
+import { findSmithersAnchorDir } from "smthrs/findSmithersAnchorDir";
 import { resolveClaudeMirrorSubscriptionsPath } from "./resolveClaudeMirrorSubscriptionsPath.js";
 import { upsertClaudeMirrorSubscription } from "./upsertClaudeMirrorSubscription.js";
 

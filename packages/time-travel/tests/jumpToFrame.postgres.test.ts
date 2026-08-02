@@ -19,9 +19,9 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import React from "react";
 import { Context, Effect, Schema } from "effect";
-import { Workflow } from "@smithers-orchestrator/components/components/index";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { runWorkflow, Smithers, __builderInternals as I } from "@smithers-orchestrator/engine";
+import { Workflow } from "@smthrs/components/components/index";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { runWorkflow, Smithers, __builderInternals as I } from "@smthrs/engine";
 import { jumpToFrame } from "../src/jumpToFrame.js";
 import { listRewindAuditRows } from "../src/listRewindAuditRows.js";
 import { recoverInProgressRewindAudits } from "../src/recoverInProgressRewindAudits.js";

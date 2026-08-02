@@ -1,4 +1,4 @@
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
 
 export type PanelistConfig = {
   /** A single agent, or a failover CHAIN (`AgentLike[]`) run as one panelist. */

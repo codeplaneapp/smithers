@@ -1,9 +1,9 @@
 import { Effect } from "effect";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { workspaceAdd } from "@smithers-orchestrator/vcs/jj";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { workspaceAdd } from "@smthrs/vcs/jj";
 import { loadVcsTag } from "./loadVcsTagEffect.js";
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 
 /**
  * Create a jj workspace at the revision recorded for a specific snapshot.

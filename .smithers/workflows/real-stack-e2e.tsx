@@ -1,5 +1,5 @@
 // smithers-display-name: Real-Stack E2E (no mocks)
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * real-stack-e2e — drive apps/smithers to a fully real, zero-mock e2e suite,
  * then keep improving quality and coverage in a ralph loop.
@@ -44,7 +44,7 @@
  *      (artifacts/feature-gifs/index.html), push any remainder, then write an
  *      evidence report.
  */
-import { ClaudeCodeAgent, createSmithers, HumanTask, Loop, Sequence } from "smithers-orchestrator";
+import { ClaudeCodeAgent, createSmithers, HumanTask, Loop, Sequence } from "smthrs";
 import { z } from "zod/v4";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -185,7 +185,7 @@ const GROUND_RULES = `## Ground rules (non-negotiable)
 
 const OPS_NOTES = `## When you are blocked
 If you are missing a credential, a human decision, or hit something destructive/irreversible, DO NOT guess and DO NOT fake it. Raise a blocking human request and wait:
-  bunx smithers-orchestrator ask-human "<exact question>" --context "<what you tried>"
+  bunx smthrs ask-human "<exact question>" --context "<what you tried>"
 (SMITHERS_RUN_ID is already in your environment, so it attaches to this run.) The operator answers via "smithers human inbox" / "smithers human answer".
 
 ## Verification

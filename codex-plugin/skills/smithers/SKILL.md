@@ -12,8 +12,8 @@ description: >-
   `smithers oneshot`, and reserve a full workflow for work that genuinely needs
   ordered stages, durability, approvals, loops, or reuse. A workflow that runs
   long, fans out, or pauses on approvals should get a live custom UI at
-  .smithers/ui/<key>.tsx (composed from the smithers-orchestrator/gateway-ui +
-  smithers-orchestrator/ui component libraries over the gateway-react hooks,
+  .smithers/ui/<key>.tsx (composed from the smthrs/gateway-ui +
+  smthrs/ui component libraries over the gateway-react hooks,
   never hand-rolled markup), launched with `smithers ui` so the human can
   watch; short linear runs are fine on `smithers monitor`.
 ---
@@ -59,10 +59,10 @@ You reach Smithers two ways, both already wired by this plugin:
   `get_node_detail`, `fork_run`, `time_travel`, ...).
 - The **`smithers` CLI** — a real binary you invoke through your shell.
 
-> **If `smithers` is not on your PATH**, run it as `bunx smithers-orchestrator
+> **If `smithers` is not on your PATH**, run it as `bunx smthrs
 > <args>` — the exact package the MCP server in this plugin launches. So every
-> `smithers <cmd>` below is equivalent to `bunx smithers-orchestrator <cmd>`
-> (e.g. `bunx smithers-orchestrator ui <runId>`). Don't ask the human to install
+> `smithers <cmd>` below is equivalent to `bunx smthrs <cmd>`
+> (e.g. `bunx smthrs ui <runId>`). Don't ask the human to install
 > anything; fall back to `bunx` yourself.
 
 ## You drive it, the human does not
@@ -131,8 +131,8 @@ A suspend on an approval gate is **waiting**, not failure (the CLI exits non-zer
 code 3, on suspend — that is expected). Node output rows are snake_case and array
 fields are JSON strings.
 
-For the full API at any time, run `bunx smithers-orchestrator docs-full` (prints
-the complete `llms-full.txt`) or `bunx smithers-orchestrator ask "<question>"`.
+For the full API at any time, run `bunx smthrs docs-full` (prints
+the complete `llms-full.txt`) or `bunx smthrs ask "<question>"`.
 
 ## Durable spawn-tool routing (recommended)
 
@@ -179,9 +179,9 @@ It is fed entirely by live gateway hooks. The rules:
    workflow file's basename without extension (`.smithers/workflows/foo.tsx` →
    `.smithers/ui/foo.tsx`). A name mismatch means no UI is mounted.
 2. **Imports — ONLY these four:** `react`,
-   `smithers-orchestrator/gateway-react` (hooks + `createGatewayReactRoot`),
-   `smithers-orchestrator/gateway-ui` (prebuilt run widgets + page shell), and
-   `smithers-orchestrator/ui` (Button/Card/Tabs/Dialog/... primitives).
+   `smthrs/gateway-react` (hooks + `createGatewayReactRoot`),
+   `smthrs/gateway-ui` (prebuilt run widgets + page shell), and
+   `smthrs/ui` (Button/Card/Tabs/Dialog/... primitives).
    No `components` package (that is the server-side workflow-definition library,
    not browser UI), no third-party UI libraries, no extra dependencies, no
    `.css` imports (the shipped components carry their own styles).
@@ -205,14 +205,14 @@ It is fed entirely by live gateway hooks. The rules:
 
 ## The component libraries you compose from
 
-- **`smithers-orchestrator/gateway-ui` — run-shaped widgets.** Each one connects
+- **`smthrs/gateway-ui` — run-shaped widgets.** Each one connects
   to the gateway by itself: `SimpleWorkflowDashboard` (a complete
   launch/watch/select dashboard in ONE component), `WorkflowUiShell` (the page
   scaffold: house styles + topbar with `title`/`meta`/`actions`), `RunList`,
   `RunTree`, `RunEventLog`, `NodeOutputView`, `ApprovalPanel` (approve/deny
   buttons wired), `LaunchButton`, `WorkflowPicker`, `ConnectionBadge`,
   `StatusPill`, plus the `theme` tokens.
-- **`smithers-orchestrator/ui` — token-native primitives** for everything
+- **`smthrs/ui` — token-native primitives** for everything
   around those widgets: `Button`, `Badge`, `StatusPill`, `Card`/`CardHeader`/
   `CardTitle`/`CardContent`, `Input`, `Textarea`, `Label`, `Alert`, `Table`,
   `Tabs`, `Dialog`, `Tooltip`, `Select`, `Progress`, `Separator`, `Skeleton`,
@@ -227,10 +227,10 @@ Default shapes, in order of preference:
    `createGatewayReactRoot(<SimpleWorkflowDashboard workflow="<key>" />)` and
    you are done.
 2. The workflow has bespoke output → `WorkflowUiShell` + the gateway-ui widgets
-   for runs/tree/events/approvals + `smithers-orchestrator/ui` primitives for
+   for runs/tree/events/approvals + `smthrs/ui` primitives for
    the custom panes, fed by the hooks below.
 
-## The hooks you actually have (from `smithers-orchestrator/gateway-react`)
+## The hooks you actually have (from `smthrs/gateway-react`)
 
 - `useGatewayRunEvents(runId, { afterSeq: 0 })` → `{ events, lastHeartbeat,
   streaming, error }`. Live event stream. Each event is `{ type, event, payload,
@@ -254,9 +254,9 @@ Default shapes, in order of preference:
 
 There are **no** bare `useRun`/`useNodes`/`useTimeline` hooks — every hook is
 `useGateway*`. These names cover the common cases; the MCP server runs whatever
-`smithers-orchestrator` version `bunx` resolves, so for anything beyond the hooks
-listed here, confirm the current surface with `bunx smithers-orchestrator
-docs-full` (or read the installed `smithers-orchestrator/gateway-react` types)
+`smthrs` version `bunx` resolves, so for anything beyond the hooks
+listed here, confirm the current surface with `bunx smthrs
+docs-full` (or read the installed `smthrs/gateway-react` types)
 before relying on it.
 
 ## Minimal working example (model your UI on this)
@@ -270,9 +270,9 @@ nodes are named differently produces a UI that shows nothing.
 
 ```tsx
 /** @jsxImportSource react */
-import { createGatewayReactRoot, useGatewayNodeOutput } from "smithers-orchestrator/gateway-react";
-import { ApprovalPanel, ConnectionBadge, RunEventLog, RunTree, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
-import { Card, CardHeader, CardTitle, EmptyState, SmithersUiStyles, StatusPill } from "smithers-orchestrator/ui";
+import { createGatewayReactRoot, useGatewayNodeOutput } from "smthrs/gateway-react";
+import { ApprovalPanel, ConnectionBadge, RunEventLog, RunTree, WorkflowUiShell } from "smthrs/gateway-ui";
+import { Card, CardHeader, CardTitle, EmptyState, SmithersUiStyles, StatusPill } from "smthrs/ui";
 
 // The node whose output is the workflow's headline result. Match your workflow.
 const RESULT_NODE_ID = "result";
@@ -332,7 +332,7 @@ createGatewayReactRoot(<App />);
 
 Every visible piece above is a shipped component: `WorkflowUiShell` injects the
 house styles and topbar, `RunTree`/`RunEventLog`/`ApprovalPanel` connect to the
-gateway by themselves, and the result pane is `smithers-orchestrator/ui`
+gateway by themselves, and the result pane is `smthrs/ui`
 primitives. The only hand-written logic is the workflow-specific part: which
 node's output to headline. Adapt `RESULT_NODE_ID` and the rendered fields to
 the workflow's real node ids and output schema. For launch/cancel from the UI,
@@ -348,7 +348,7 @@ before claiming it is open:
 ```bash
 # 1. Confirm the UI mounts (prints the URL, does NOT open a browser).
 #    Fails with NO_UI if you forgot to author .smithers/ui/<key>.tsx.
-smithers ui <runId> --no-open      # or: bunx smithers-orchestrator ui <runId> --no-open
+smithers ui <runId> --no-open      # or: bunx smthrs ui <runId> --no-open
 
 # 2. Then actually open it for the human.
 smithers ui <runId>                # opens the most relevant run's UI in the browser
@@ -356,7 +356,7 @@ smithers ui                        # latest run
 smithers ui -w <key>               # open a workflow's UI directly
 ```
 
-(If `smithers` is not on PATH, prefix every command with `bunx smithers-orchestrator`.)
+(If `smithers` is not on PATH, prefix every command with `bunx smthrs`.)
 
 `smithers ui` auto-starts a local gateway (default `http://127.0.0.1:7331`) if one
 isn't running and opens `/workflows/<key>?runId=<runId>`. You run this command

@@ -4,11 +4,11 @@
  * Pattern: Audit docs against source of truth → auto-fix → open PR.
  * Use cases: API docs sync, README updates, changelog generation, JSDoc sync.
  */
-import { Sequence, Parallel } from "smithers-orchestrator";
+import { Sequence, Parallel } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, write, edit, bash, grep } from "smithers-orchestrator/tools";
+import { read, write, edit, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import AuditPrompt from "./prompts/doc-sync/audit.mdx";
 import FixPrompt from "./prompts/doc-sync/fix.mdx";

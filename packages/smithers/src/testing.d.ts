@@ -1,1 +1,1 @@
-export * from "@smithers-orchestrator/testing";
+export * from "@smthrs/testing";

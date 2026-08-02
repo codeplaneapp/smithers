@@ -6,7 +6,7 @@
 // (HMAC + Ed25519). Real fixture Bot API + real Web Crypto — no mocks.
 import { afterAll, describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
-import { Chunk, Effect, Schedule, Stream } from "effect";
+import { Effect, Schedule, Stream } from "effect";
 import { startTelegramFixture } from "./telegram-fixture.js";
 import { TelegramClient, TelegramClientLive, makeTelegramClient } from "../src/telegram/TelegramClient.js";
 import {

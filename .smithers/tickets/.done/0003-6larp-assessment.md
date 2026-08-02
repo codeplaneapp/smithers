@@ -25,6 +25,6 @@ Objective: critically evaluate whether shipped code is real or performative, the
 - [x] Run package-level tests for touched packages.
 - [x] Run `apps/smithers-demo` tests and build after dependency-manifest fix.
 - [x] Run package-level agents tests after fixing the unawaited diagnostics test and timeout watchdog.
-- [x] Run full engine package after serializing the engine package script and fixing the timer/CLI harness races. `pnpm --filter @smithers-orchestrator/engine --config.verify-deps-before-run=false test` passed: 527 tests across 87 files.
+- [x] Run full engine package after serializing the engine package script and fixing the timer/CLI harness races. `pnpm --filter @smthrs/engine --config.verify-deps-before-run=false test` passed: 527 tests across 87 files.
 - [x] Run broader root checks. Root preflight checks passed: `node scripts/check-single-effect-version.mjs`, `node scripts/check-dependency-boundaries.mjs`, and `node scripts/check-architecture-budget.mjs`.
 - [x] Run a full recursive workspace test after fixes. `pnpm -r --workspace-concurrency=1 --config.verify-deps-before-run=false test` passed across 31 workspace projects. Notable remaining skips are documented above.

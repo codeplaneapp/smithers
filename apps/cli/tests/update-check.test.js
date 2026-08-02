@@ -80,35 +80,23 @@ describe("compareVersions / isUpdateAvailable", () => {
 
 describe("detectInstallMethod", () => {
   const cases = [
-    [
-      "bunx cache",
-      "/home/u/.bun/install/cache/smithers-orchestrator@0.26.1/src/bin/smithers.js",
-      { kind: "bunx", manager: "bun" },
-    ],
-    [
-      "npx cache",
-      "/home/u/.npm/_npx/abc123/node_modules/smithers-orchestrator/src/bin/smithers.js",
-      { kind: "bunx", manager: "npm" },
-    ],
+    ["bunx cache", "/home/u/.bun/install/cache/smthrs@0.26.1/src/bin/smithers.js", { kind: "bunx", manager: "bun" }],
+    ["npx cache", "/home/u/.npm/_npx/abc123/node_modules/smthrs/src/bin/smithers.js", { kind: "bunx", manager: "npm" }],
     ["global bun", "/home/u/.bun/bin/smithers", { kind: "global", manager: "bun" }],
     [
       "global pnpm",
-      "/home/u/Library/pnpm/global/5/node_modules/smithers-orchestrator/src/bin/smithers.js",
+      "/home/u/Library/pnpm/global/5/node_modules/smthrs/src/bin/smithers.js",
       { kind: "global", manager: "pnpm" },
     ],
     [
       "global yarn",
-      "/home/u/.config/yarn/global/node_modules/smithers-orchestrator/src/bin/smithers.js",
+      "/home/u/.config/yarn/global/node_modules/smthrs/src/bin/smithers.js",
       { kind: "global", manager: "yarn" },
     ],
-    [
-      "global npm",
-      "/usr/local/lib/node_modules/smithers-orchestrator/src/bin/smithers.js",
-      { kind: "global", manager: "npm" },
-    ],
+    ["global npm", "/usr/local/lib/node_modules/smthrs/src/bin/smithers.js", { kind: "global", manager: "npm" }],
     [
       "nvm npm",
-      "/home/u/.nvm/versions/node/v22.0.0/lib/node_modules/smithers-orchestrator/src/bin/smithers.js",
+      "/home/u/.nvm/versions/node/v22.0.0/lib/node_modules/smthrs/src/bin/smithers.js",
       { kind: "global", manager: "npm" },
     ],
   ];

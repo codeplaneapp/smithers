@@ -1,8 +1,8 @@
 /** @jsxImportSource react */
 import { useEffect, useRef, useState, type FocusEvent, type ReactNode } from "react";
-import type { GatewayApprovalRow } from "@smithers-orchestrator/gateway-client";
-import type { ListApprovalsRequest, SubmitApprovalRequest } from "@smithers-orchestrator/gateway-client/rpc";
-import { useGatewayActions, useGatewayApprovals } from "@smithers-orchestrator/gateway-react";
+import type { GatewayApprovalRow } from "@smthrs/gateway-client";
+import type { ListApprovalsRequest, SubmitApprovalRequest } from "@smthrs/gateway-client/rpc";
+import { useGatewayActions, useGatewayApprovals } from "@smthrs/gateway-react";
 import {
   Button,
   Confirmation,
@@ -14,7 +14,7 @@ import {
   ConfirmationTitle,
   ApprovalNote,
   type ApprovalState,
-} from "@smithers-orchestrator/ui";
+} from "@smthrs/ui";
 
 /** The canonical synthetic id for a pending approval row. */
 export function gatewayApprovalKey(row: GatewayApprovalRow): string {

@@ -1,13 +1,13 @@
 #!/usr/bin/env bun
 /**
- * Normalize CLI invocations across docs to use `bunx smithers-orchestrator`.
+ * Normalize CLI invocations across docs to use `bunx smthrs`.
  *
  * installation.mdx sets the rule: every CLI invocation in the docs is
- * `bunx smithers-orchestrator <command>`. Bare `smithers` is a different npm
+ * `bunx smthrs <command>`. Bare `smithers` is a different npm
  * package and `bunx smithers` runs it, so both bare `smithers <sub>` and
  * `bunx smithers <sub>` (bunx with the wrong package name) are wrong.
  *
- * This rewrites, to `bunx smithers-orchestrator <sub>`:
+ * This rewrites, to `bunx smthrs <sub>`:
  *   - bare `smithers <sub>`        (optionally with a `$ ` shell prompt)
  *   - `bunx smithers <sub>`        (bunx + bare package)
  *   - `npx smithers <sub>`         (npx + bare package)
@@ -26,7 +26,7 @@
  * prefix guards a distinct false positive:
  *   - `/`  slash commands and POSIX path segments (`/smithers`, Hermes `/smithers run`)
  *   - `\`  Windows path segments (`C:\tools\smithers run`)
- *   - word chars  hyphen-free bin/package suffixes (`mysmithers`, `smithers-orchestrator`)
+ *   - word chars  hyphen-free bin/package suffixes (`mysmithers`, `smthrs`)
  *   - `@`  scoped packages and mentions (`@smithersai/smithers`, a `@smithers run` chat mention)
  *   - `.`  domain- or property-like tokens (`foo.smithers run`)
  *   - `-`  hyphenated bin names (`my-smithers run`)
@@ -120,7 +120,7 @@ const KNOWN_SUBCOMMANDS = [
 
 const SUB = KNOWN_SUBCOMMANDS.join("|");
 
-// `smithers` (not `smithers-orchestrator`) optionally prefixed by `bunx `/`npx `,
+// `smithers` (not `smthrs`) optionally prefixed by `bunx `/`npx `,
 // immediately followed by a known subcommand or an angle-bracket placeholder
 // (`<command>`, `<subcommand>`, ...). Capture an optional `$ ` prompt that may
 // sit before a bare `smithers` so we can preserve it.
@@ -132,7 +132,7 @@ const CMD_RE = new RegExp(
 );
 
 export function normalizeCommands(text: string): string {
-  return text.replace(CMD_RE, (_m, _runner, tail) => `bunx smithers-orchestrator${tail}`);
+  return text.replace(CMD_RE, (_m, _runner, tail) => `bunx smthrs${tail}`);
 }
 
 // Replace bare/bunx/npx smithers commands inside inline code spans only.
@@ -184,8 +184,8 @@ export function rewrite(original: string): string {
 
   let result = out.join("\n");
   result = result.replace(
-    /the\s+`smithers`\s+command is available via\s+`bunx smithers-orchestrator`\s+or globally if linked\./g,
-    "the `smithers` command is invoked via `bunx smithers-orchestrator`. Smithers does not need to be installed globally.",
+    /the\s+`smithers`\s+command is available via\s+`bunx smthrs`\s+or globally if linked\./g,
+    "the `smithers` command is invoked via `bunx smthrs`. Smithers does not need to be installed globally.",
   );
   return result;
 }
@@ -215,13 +215,13 @@ if (import.meta.main) {
     if (offenders.length) {
       console.error(
         `\n✗ ${offenders.length} doc file(s) use bare \`smithers\` or \`bunx smithers\` commands.\n` +
-          `  Every CLI invocation must be \`bunx smithers-orchestrator <command>\`.\n` +
+          `  Every CLI invocation must be \`bunx smthrs <command>\`.\n` +
           `  Run \`bun scripts/normalize-bunx.ts\` to fix:\n` +
           offenders.map((o) => `    ${o}`).join("\n"),
       );
       process.exit(1);
     }
-    console.log("✓ all docs use bunx smithers-orchestrator");
+    console.log("✓ all docs use bunx smthrs");
   } else {
     console.log(`\nUpdated ${changed} file(s).`);
   }

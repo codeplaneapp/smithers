@@ -1,9 +1,8 @@
 /** @jsxImportSource react */
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useGatewayRunTree } from "@smithers-orchestrator/gateway-react";
-import { StageStrip, type StageStripProps } from "@smithers-orchestrator/ui";
+import { type ReactNode } from "react";
+import { useGatewayRunTree } from "@smthrs/gateway-react";
+import { StageStrip, type StageStripProps } from "@smthrs/ui";
 import { nodeStatusIndex } from "./runNodeStatus";
-import { visuallyHidden } from "./theme";
 
 export type NodeStageStripStage = {
   /** The workflow node id backing this stage. */

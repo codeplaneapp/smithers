@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { fakeAgent, renderPrompt, renderWorkflow, runTask, simulate } from "smithers-orchestrator/testing";
+import { fakeAgent, renderPrompt, renderWorkflow, runTask, simulate } from "smthrs/testing";
 import { parsePorcelainPaths } from "../workflows/fix-six-issues.tsx";
 
 const workflows = join(import.meta.dir, "..", "workflows");

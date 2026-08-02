@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { Gateway } from "smithers-orchestrator/gateway";
+import { Gateway } from "smthrs/gateway";
 
 function readTokens() {
   const tokenStore = process.env.SMITHERS_TOKEN_STORE ?? "/data/tokens.json";

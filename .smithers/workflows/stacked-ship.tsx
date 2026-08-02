@@ -1,6 +1,6 @@
 // smithers-source: authored
 // smithers-display-name: Stacked Ship
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import {
   Approval,
   ClaudeCodeAgent,
@@ -10,7 +10,7 @@ import {
   UI,
   approvalDecisionSchema,
   createSmithers,
-} from "smithers-orchestrator";
+} from "smthrs";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -281,9 +281,9 @@ type ProcessResult = { exitCode: number; stdout: string; stderr: string };
 
 function resolveJj(): string {
   try {
-    // Bundled binary via @smithers-orchestrator/vcs when PATH has no jj.
+    // Bundled binary via @smthrs/vcs when PATH has no jj.
     const localRequire = createRequire(import.meta.url);
-    const vcs = localRequire("@smithers-orchestrator/vcs") as {
+    const vcs = localRequire("@smthrs/vcs") as {
       resolveJjBinary: () => { path: string } | null;
     };
     return vcs.resolveJjBinary()?.path ?? "jj";

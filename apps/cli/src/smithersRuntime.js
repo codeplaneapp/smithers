@@ -1,6 +1,6 @@
 import * as WorkflowEngine from "effect/unstable/workflow/WorkflowEngine";
 import { Cause, Effect, Exit, Layer, ManagedRuntime } from "effect";
-import { SchedulerLive, WorkflowSessionLive } from "@smithers-orchestrator/scheduler";
+import { SchedulerLive, WorkflowSessionLive } from "@smthrs/scheduler";
 import {
   CorrelationContextLive,
   MetricsServiceLive,
@@ -9,8 +9,8 @@ import {
   getCurrentSmithersTraceAnnotations,
   getCurrentSmithersTraceSpan,
   setSmithersLogRunner,
-} from "@smithers-orchestrator/observability";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+} from "@smthrs/observability";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
 import { SmithersLoggerLayer } from "./util/logger.ts";
 const ObservabilityLayer = Layer.mergeAll(CorrelationContextLive, MetricsServiceLive, TracingServiceLive);
 const SmithersCoreLayer = Layer.mergeAll(

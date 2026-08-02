@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
-import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import type { GatewayRunNode } from "@smthrs/gateway-client";
 import { buildGatewayRunTree } from "./buildGatewayRunTree.ts";
 import { useSmithersCollections } from "../useSmithersCollections.ts";
 

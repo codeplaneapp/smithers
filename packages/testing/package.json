@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/testing",
+  "name": "@smthrs/testing",
   "version": "0.32.0",
   "description": "Workflow testing helpers for Smithers",
   "type": "module",
@@ -30,13 +30,13 @@
     "test": "bun test tests"
   },
   "dependencies": {
-    "@smithers-orchestrator/components": "workspace:*",
-    "@smithers-orchestrator/db": "workspace:*",
-    "@smithers-orchestrator/driver": "workspace:*",
-    "@smithers-orchestrator/engine": "workspace:*",
-    "@smithers-orchestrator/graph": "workspace:*",
-    "@smithers-orchestrator/react-reconciler": "workspace:*",
-    "@smithers-orchestrator/scheduler": "workspace:*",
+    "@smthrs/components": "workspace:*",
+    "@smthrs/db": "workspace:*",
+    "@smthrs/driver": "workspace:*",
+    "@smthrs/engine": "workspace:*",
+    "@smthrs/graph": "workspace:*",
+    "@smthrs/react-reconciler": "workspace:*",
+    "@smthrs/scheduler": "workspace:*",
     "effect": "4.0.0-beta.102",
     "zod": "^4.4.3"
   },
@@ -51,7 +51,7 @@
   "devDependencies": {
     "@types/bun": "latest",
     "koffi": "^2.16.2",
-    "smithers-orchestrator": "workspace:*",
+    "smthrs": "workspace:*",
     "typescript": "~6.0.3"
   }
 }

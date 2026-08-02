@@ -6,7 +6,7 @@ of a project's generated agents file.
 - `agentAddWizard.js` — interactive @clack/prompts flow; loops until the user
   is done adding accounts and returns the labels added this session.
 - `runAgentAdd.js` — non-interactive core: registers an account via
-  `@smithers-orchestrator/accounts`, verifies subscription config dirs, and
+  `@smthrs/accounts`, verifies subscription config dirs, and
   returns `{ ok, account | reason, regen }`. Also exports `pingAccount`, a
   best-effort `<bin> --version` health probe the wizard runs after adding.
 - `regenerateAgentsTsIfPresent.js` — rewrites `.smithers/agents.ts` after a

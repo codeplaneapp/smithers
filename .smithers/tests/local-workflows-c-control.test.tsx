@@ -1,11 +1,11 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import "../preload.ts";
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { renderPrompt, renderWorkflow, runTask, simulate } from "smithers-orchestrator/testing";
+import { renderPrompt, renderWorkflow, runTask, simulate } from "smthrs/testing";
 import { z } from "zod/v4";
 
 setDefaultTimeout(60_000);

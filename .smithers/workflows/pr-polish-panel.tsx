@@ -1,12 +1,12 @@
 // smithers-source: authored
 // smithers-display-name: PR Polish Panel (Fable + Sol)
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Sequence, Parallel, Loop, UI } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, Sequence, Parallel, Loop, UI } from "smthrs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod/v4";
-import { ClaudeCodeAgent } from "smithers-orchestrator";
+import { ClaudeCodeAgent } from "smthrs";
 import { implementer, polishReviewer } from "../components/roles";
 
 /**

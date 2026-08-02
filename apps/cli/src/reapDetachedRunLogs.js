@@ -39,7 +39,7 @@ function nonNegativeEnvNumber(raw, fallback, integer = false) {
  * @param {{
  *   cwd?: string;
  *   logDir?: string;
- *   adapter?: Pick<import("@smithers-orchestrator/db/adapter").SmithersDb, "getRun">;
+ *   adapter?: Pick<import("@smthrs/db/adapter").SmithersDb, "getRun">;
  *   env?: NodeJS.ProcessEnv;
  *   nowMs?: number;
  *   warn?: (line: string) => void;

@@ -1,7 +1,7 @@
 import { defineConfig } from "tsup";
 
 // Compile the `.ts` sources to committed `.js` + `.d.ts` in `src/` so the
-// published package (and the `smithers-orchestrator/testing` re-export) ships
+// published package (and the `smthrs/testing` re-export) ships
 // runnable JavaScript instead of raw TypeScript that Node cannot load. Pin ESM
 // so declaration output is deterministic `.d.ts` (not `.d.cts`).
 export default defineConfig({

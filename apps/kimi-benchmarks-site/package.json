@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/kimi-benchmarks-site",
+  "name": "@smthrs/kimi-benchmarks-site",
   "version": "0.0.1",
   "private": true,
   "description": "Cloudflare Worker deployment for the Kimi K3 RoadmapBench comparison report",

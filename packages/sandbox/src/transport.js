@@ -6,7 +6,7 @@
 // @smithers-type-exports-end
 
 import { Context, Effect, Layer } from "effect";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { CodeplaneSandboxExecutorLive, DockerSandboxExecutorLive } from "./effect/http-runner.js";
 import { makeSandboxTransportServiceEffect } from "./effect/sandbox-entity.js";
 import { BubblewrapSandboxExecutorLive } from "./effect/socket-runner.js";
@@ -47,7 +47,7 @@ export function layerForSandboxRuntime(runtime) {
     case "cloudflare":
       throw new SmithersError(
         "INVALID_INPUT",
-        'Sandbox runtime "cloudflare" requires a provider from smithers-orchestrator/cloudflare, e.g. createCloudflareSandboxProvider().',
+        'Sandbox runtime "cloudflare" requires a provider from smthrs/cloudflare, e.g. createCloudflareSandboxProvider().',
         {
           runtime,
         },

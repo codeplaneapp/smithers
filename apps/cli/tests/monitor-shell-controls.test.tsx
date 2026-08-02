@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 /**
- * Monitor shell controls on the shared smithers-orchestrator/ui primitives
+ * Monitor shell controls on the shared smthrs/ui primitives
  * (issue #1033): focus, disabled, active, and keyboard states of the topbar
  * filters, rail rows, pagination, chips, and run lifecycle actions.
  *
@@ -27,8 +27,8 @@ const { act, useState } = await import("react");
 const { createRoot } = await import("react-dom/client");
 type ReactElement = import("react").ReactElement;
 type Root = import("react-dom/client").Root;
-const { SMITHERS_UI_STYLE_ATTR, smithersUiCss } = await import("smithers-orchestrator/ui");
-const { workflowUiThemeCss } = await import("smithers-orchestrator/gateway-ui");
+const { SMITHERS_UI_STYLE_ATTR, smithersUiCss } = await import("smthrs/ui");
+const { workflowUiThemeCss } = await import("smthrs/gateway-ui");
 const { Chip, MonitorToolbar, RunLifecycleActions, RunLifecycleControls, RunRailRow, RunsPagination } =
   await import("../src/monitor-ui/monitorShell.tsx");
 const {

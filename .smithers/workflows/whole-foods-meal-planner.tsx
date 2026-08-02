@@ -3,11 +3,11 @@
 // smithers-display-name: Whole Foods Meal Planner
 // smithers-description: Plans a calorie-and-budget-targeted, Whole Foods-biased meal plan, validates it deterministically with a bounded re-plan loop, gates ordering behind a durable approval, then places the order or returns checkout links.
 // smithers-tags: meal-planning, whole-foods, approval, groceries
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { resolve } from "node:path";
-import { Approval, Branch, ClaudeCodeAgent, createSmithers, Loop, Sequence, UI } from "smithers-orchestrator";
+import { Approval, Branch, ClaudeCodeAgent, createSmithers, Loop, Sequence, UI } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import {

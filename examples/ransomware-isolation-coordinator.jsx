@@ -5,11 +5,11 @@
  *
  * Shape: detector → containment tools → approval/operator → reporting agent.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { bash } from "smithers-orchestrator/tools";
+import { bash } from "smthrs/tools";
 import { z } from "zod";
 import DetectPrompt from "./prompts/ransomware-isolation-coordinator/detect.mdx";
 import ContainPrompt from "./prompts/ransomware-isolation-coordinator/contain.mdx";

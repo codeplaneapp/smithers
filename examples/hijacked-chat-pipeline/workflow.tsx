@@ -1,9 +1,9 @@
 // smithers-source: example
 // smithers-display-name: Hijacked Chat Pipeline
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
-import { UI } from "@smithers-orchestrator/components";
-import { CodexAgent } from "@smithers-orchestrator/agents/CodexAgent";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
+import { UI } from "@smthrs/components";
+import { CodexAgent } from "@smthrs/agents/CodexAgent";
 import { z } from "zod/v4";
 
 const inputSchema = z.object({

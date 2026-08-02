@@ -1,8 +1,8 @@
 // smithers-source: user
 // smithers-display-name: XState Release Train
-/** @jsxImportSource smithers-orchestrator */
-import { ApprovalGate, Task, UI, WaitForEvent, createSmithers } from "smithers-orchestrator";
-import { approvalDecided, eventReceived, taskOutput, timedOut, useSmithersMachine } from "smithers-orchestrator/xstate";
+/** @jsxImportSource smthrs */
+import { ApprovalGate, Task, UI, WaitForEvent, createSmithers } from "smthrs";
+import { approvalDecided, eventReceived, taskOutput, timedOut, useSmithersMachine } from "smthrs/xstate";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import { RELEASE_TRAIN_OUTPUTS, releaseTrainMachine } from "../components/releaseTrainMachine";

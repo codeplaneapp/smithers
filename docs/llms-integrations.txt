@@ -8,7 +8,7 @@
 
 > Three patterns for connecting Smithers to external services.
 
-Smithers ships first-party event sources for GitHub, Linear, and Telegram (`@smithers-orchestrator/integrations`) that turn provider webhooks into durable workflow signals. For other services (Notion, Slack, etc.), your app owns the integration: pick tools on an SDK agent, skills/plugins/MCP on a CLI agent, or an external CLI run inside a task. If the service already exposes an MCP server and you're using an SDK agent, [MCP Toolset](/integrations/mcp-toolset) turns that server into AI SDK tools.
+Smithers ships first-party event sources for GitHub, Linear, and Telegram (`@smthrs/integrations`) that turn provider webhooks into durable workflow signals. For other services (Notion, Slack, etc.), your app owns the integration: pick tools on an SDK agent, skills/plugins/MCP on a CLI agent, or an external CLI run inside a task. If the service already exposes an MCP server and you're using an SDK agent, [MCP Toolset](/integrations/mcp-toolset) turns that server into AI SDK tools.
 
 ## Pattern 1: Pass tools to an SDK agent
 
@@ -36,7 +36,7 @@ const opsAgent = new Agent({
 Use this when your CLI agent already supports external integrations and Smithers should only orchestrate the task.
 
 ```ts
-import { PiAgent } from "smithers-orchestrator";
+import { PiAgent } from "smthrs";
 
 const pi = new PiAgent({
   provider: "openai",
@@ -95,7 +95,7 @@ CLI-backed agent classes wrap external AI command-line tools and implement the [
 ## Quick Start
 
 ```tsx
-import { CodexAgent, Task, Workflow, createSmithers } from "smithers-orchestrator";
+import { CodexAgent, Task, Workflow, createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { smithers, outputs } = createSmithers({
@@ -153,7 +153,7 @@ continue its active session.
 
 ## Default routing: Claude builds and gates, Codex checks
 
-When `bunx smithers-orchestrator init` detects usable Codex authentication,
+When `bunx smthrs init` detects usable Codex authentication,
 its generated implementation pool starts with Claude Opus 5, the checking
 pools start with Codex workers using exact model pins, and the orchestration
 seats run on Claude:
@@ -182,7 +182,7 @@ See [SOTA role defaults](/reference/sota-models#role-defaults).
 `OmpAgent` runs the installed OMP v17.0.5 harness in headless text, JSON print, or RPC mode.
 
 ```ts
-import { OmpAgent } from "smithers-orchestrator";
+import { OmpAgent } from "smthrs";
 
 const omp = new OmpAgent({
   provider: "openai",
@@ -221,7 +221,7 @@ JSON print mode emits a session header followed by agent-session events such as 
 `CodexAgent` is the Smithers wrapper for OpenAI's `codex` CLI. It runs `codex exec` in non-interactive mode, sends the task prompt over stdin, forces `--json` so Smithers can stream structured progress, and captures the final assistant message via `--output-last-message`.
 
 ```tsx
-import { CodexAgent, Task, Workflow, createSmithers } from "smithers-orchestrator";
+import { CodexAgent, Task, Workflow, createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { smithers, outputs } = createSmithers({
@@ -252,7 +252,7 @@ For ChatGPT-account Codex auth, use an exact Codex model id such as
 
 - Subscription login: run `codex login` once. For isolated accounts, pass `configDir`; Smithers sets `CODEX_HOME` for that invocation.
 - `apiKey`: Smithers sets `OPENAI_API_KEY` on the spawned process, but Codex CLI >= 0.144 ignores that variable for auth/billing selection when subscription login is present. The option is therefore effectively inert on current CLIs; the subscription login wins.
-- Account registry: `bunx smithers-orchestrator agents add --provider codex ...` registers a subscription config directory, while `--provider openai-api` registers API-key billing for Codex-compatible providers.
+- Account registry: `bunx smthrs agents add --provider codex ...` registers a subscription config directory, while `--provider openai-api` registers API-key billing for Codex-compatible providers.
 
 ### Structured output
 
@@ -284,7 +284,7 @@ forces `--output-format stream-json` so Smithers can stream structured progress.
   `ANTHROPIC_API_KEY` to the spawned `claude` process.
 
 ```ts
-import { ClaudeCodeAgent } from "smithers-orchestrator";
+import { ClaudeCodeAgent } from "smthrs";
 
 // Subscription billing, pinned to an isolated login dir (no API key):
 const claude = new ClaudeCodeAgent({
@@ -324,7 +324,7 @@ validation. Setting `outputFormat: "json"` and `tools: ""` keeps the run a singl
 quiet completion with no tool use.
 
 ```ts
-import { ClaudeCodeAgent } from "smithers-orchestrator";
+import { ClaudeCodeAgent } from "smthrs";
 import { z } from "zod";
 
 const schema = z.object({
@@ -363,7 +363,7 @@ matching the schema. No API key is needed; it bills your ChatGPT subscription
 via `~/.codex/auth.json` (or `CODEX_HOME` when `configDir` is set).
 
 ```ts
-import { CodexAgent } from "smithers-orchestrator";
+import { CodexAgent } from "smthrs";
 import { z } from "zod";
 
 const schema = z.object({
@@ -436,7 +436,7 @@ await agent.generate({
 `ClaudeCodeAgent` extends the base with Claude Code-specific session and permission flags. Key additions: `permissionMode`, `sessionId`, `mcpConfig`, `resume`.
 
 ```ts
-import { ClaudeCodeAgent } from "smithers-orchestrator";
+import { ClaudeCodeAgent } from "smthrs";
 new ClaudeCodeAgent({
   permissionMode?: "acceptEdits" | "bypassPermissions" | "default" | "delegate" | "dontAsk" | "plan";
   allowedTools?: string[]; disallowedTools?: string[]; disableSlashCommands?: boolean;
@@ -495,7 +495,7 @@ const agent = new ClaudeCodeAgent({
 `CodexAgent` extends the base with OpenAI Codex-specific flags. Key additions: `sandbox`, `config`, `outputSchema`.
 
 ```ts
-import { CodexAgent } from "smithers-orchestrator";
+import { CodexAgent } from "smthrs";
 new CodexAgent({
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
   fullAuto?: boolean; dangerouslyBypassApprovalsAndSandbox?: boolean;
@@ -512,7 +512,7 @@ new CodexAgent({
 `CursorAgent` wraps Cursor's `cursor-agent` CLI in headless print mode. Key additions: `apiKey`, `mode`, `force`, `sandbox`, `workspace`, `pluginDir`, `resume`, `continueSession`, and `worktree`.
 
 ```ts
-import { CursorAgent } from "smithers-orchestrator";
+import { CursorAgent } from "smthrs";
 new CursorAgent({
   apiKey?: string; header?: string[];
   model?: string; mode?: "plan" | "ask"; plan?: boolean;
@@ -532,7 +532,7 @@ login state.
 `AntigravityAgent` wraps the Google `agy` CLI. Key additions: `allowedMcpServerNames`, `geminiDir`, `conversation`, `continue`, and `resume`.
 
 ```ts
-import { AntigravityAgent } from "smithers-orchestrator";
+import { AntigravityAgent } from "smthrs";
 new AntigravityAgent({
   model?: string; sandbox?: boolean;
   yolo?: boolean; dangerouslySkipPermissions?: boolean;
@@ -569,7 +569,7 @@ outside workflow launch through `agy plugin`.
 `GeminiAgent` is the deprecated legacy wrapper for the older `gemini` CLI. Prefer `AntigravityAgent` for new Google CLI integrations, but existing workflows can still use `GeminiAgent`.
 
 ```ts
-import { GeminiAgent } from "smithers-orchestrator";
+import { GeminiAgent } from "smthrs";
 new GeminiAgent({
   debug?: boolean; model?: string; sandbox?: boolean; yolo?: boolean;
   approvalMode?: "default" | "auto_edit" | "yolo" | "plan";
@@ -586,7 +586,7 @@ new GeminiAgent({
 `PiAgent` wraps the Pi CLI and adds extension UI hook support. Key additions: `provider`, `model`, `mode`, `onExtensionUiRequest`, `extension`, `thinking`.
 
 ```ts
-import { PiAgent, type PiExtensionUiRequest, type PiExtensionUiResponse } from "smithers-orchestrator";
+import { PiAgent, type PiExtensionUiRequest, type PiExtensionUiResponse } from "smthrs";
 new PiAgent({
   provider?: string; model?: string; apiKey?: string; appendSystemPrompt?: string; mode?: "text" | "json" | "rpc";
   print?: boolean; continue?: boolean; resume?: boolean; session?: string;
@@ -604,7 +604,7 @@ new PiAgent({
 `KimiAgent` wraps the Moonshot Kimi CLI with automatic session isolation. Key additions: `thinking`, `agent`, `maxRalphIterations`.
 
 ```ts
-import { KimiAgent } from "smithers-orchestrator";
+import { KimiAgent } from "smthrs";
 new KimiAgent({
   thinking?: boolean; outputFormat?: "text" | "stream-json";
   finalMessageOnly?: boolean; quiet?: boolean;
@@ -625,7 +625,7 @@ the `configDir` name just keeps the option uniform across agents.
 `ForgeAgent` wraps the Forge CLI and supports 300+ models via provider/model strings. Key additions: `conversationId`, `provider`, `workflow`.
 
 ```ts
-import { ForgeAgent } from "smithers-orchestrator";
+import { ForgeAgent } from "smthrs";
 new ForgeAgent({
   directory?: string; provider?: string; agent?: string;
   conversationId?: string; sandbox?: string; restricted?: boolean;
@@ -639,7 +639,7 @@ Key additions: `provider`, `continueSession`. A per-call `resumeSession` emits
 `-r <session>`; a configured `continueSession` emits `-c [name]`.
 
 ```ts
-import { HermesCliAgent } from "smithers-orchestrator";
+import { HermesCliAgent } from "smthrs";
 new HermesCliAgent({
   model?: string; provider?: string;
   continueSession?: string | boolean;
@@ -648,7 +648,7 @@ new HermesCliAgent({
 
 Smithers also installs a native Hermes plugin (slash commands, a live-run status
 injector, lifecycle hooks, a bundled skill, and approval buttons) when you run
-`bunx smithers-orchestrator hermes` (an alias for `bunx smithers-orchestrator mcp add --agent hermes`),
+`bunx smthrs hermes` (an alias for `bunx smthrs mcp add --agent hermes`),
 so Hermes can drive Smithers as its durable control plane. See the
 [Hermes & Eliza](/integrations/hermes) page.
 
@@ -659,7 +659,7 @@ so Hermes can drive Smithers as its durable control plane. See the
 OpenClaw conversation when the installed CLI supports sessions.
 
 ```ts
-import { OpenClawAgent } from "smithers-orchestrator";
+import { OpenClawAgent } from "smthrs";
 new OpenClawAgent({
   agent?: string;
   session?: string;
@@ -670,7 +670,7 @@ new OpenClawAgent({
 ```
 
 Smithers also installs a native OpenClaw plugin when you run
-`bunx smithers-orchestrator mcp add --agent openclaw`. The plugin adds Smithers
+`bunx smthrs mcp add --agent openclaw`. The plugin adds Smithers
 workflow tools, a bundled orchestration skill, and eval/optimization tools that
 encourage OpenClaw to turn repeated work into reusable, measured workflows. See
 [OpenClaw](/agents/openclaw).
@@ -678,7 +678,7 @@ encourage OpenClaw to turn repeated work into reusable, measured workflows. See
 `AmpAgent` wraps the Amp CLI in `--execute` headless mode. Key additions: `visibility`, `mcpConfig`, `dangerouslyAllowAll`.
 
 ```ts
-import { AmpAgent } from "smithers-orchestrator";
+import { AmpAgent } from "smthrs";
 new AmpAgent({
   visibility?: "private" | "public" | "workspace" | "group";
   mcpConfig?: string; settingsFile?: string;
@@ -690,7 +690,7 @@ new AmpAgent({
 `VibeAgent` wraps Mistral's `vibe` CLI with streaming JSON output. Key additions: `agent`, `maxTurns`, `maxPrice`, `maxTokens`, `enabledTools`, `sessionId`, `continueSession`.
 
 ```ts
-import { VibeAgent } from "smithers-orchestrator";
+import { VibeAgent } from "smthrs";
 new VibeAgent({
   agent?: string;
   maxTurns?: number; maxPrice?: number; maxTokens?: number;
@@ -702,7 +702,7 @@ new VibeAgent({
 `OpenCodeAgent` wraps the OpenCode CLI via `opencode run --format json`. Key additions: `agentName`, `continueSession`, `sessionId`. Note: native hijack support is not yet shipped.
 
 ```ts
-import { OpenCodeAgent } from "smithers-orchestrator";
+import { OpenCodeAgent } from "smthrs";
 new OpenCodeAgent({
   model: "provider/model",
   agentName: "readonly",
@@ -715,7 +715,7 @@ new OpenCodeAgent({
 named agents, explicit sandbox mode, and manual session continuation.
 
 ```ts
-import { PoolAgent } from "smithers-orchestrator";
+import { PoolAgent } from "smthrs";
 new PoolAgent({
   agentName: "default",
   sandbox: "required",
@@ -725,7 +725,7 @@ new PoolAgent({
 
 ## Hijack handoff
 
-Most built-in CLI agents support `bunx smithers-orchestrator hijack RUN_ID`, which relaunches the agent in its native CLI session for interactive takeover.
+Most built-in CLI agents support `bunx smthrs hijack RUN_ID`, which relaunches the agent in its native CLI session for interactive takeover.
 
 Smithers persists the native session or conversation id on each task event. On hijack, it waits for a safe boundary between blocking tool calls, then reopens the session via the vendor's resume flag:
 
@@ -739,7 +739,7 @@ Smithers persists the native session or conversation id on each task event. On h
 | `ForgeAgent` | `forge --conversation-id` |
 | `AmpAgent` | `amp threads continue` |
 
-On clean exit the workflow resumes in detached mode. Cursor, Vibe, OpenCode, OpenClaw, and OMP stream capture and headless session continuation are documented above, but native `bunx smithers-orchestrator hijack` support for Cursor, Vibe, OpenCode, OpenClaw, and OMP is not shipped yet. The deprecated `GeminiAgent` has no native hijack launcher; use `AntigravityAgent` (`agy --conversation`) for Google CLI takeover. See [How it works → Durability and resume](/how-it-works#durability--resume).
+On clean exit the workflow resumes in detached mode. Cursor, Vibe, OpenCode, OpenClaw, and OMP stream capture and headless session continuation are documented above, but native `bunx smthrs hijack` support for Cursor, Vibe, OpenCode, OpenClaw, and OMP is not shipped yet. The deprecated `GeminiAgent` has no native hijack launcher; use `AntigravityAgent` (`agy --conversation`) for Google CLI takeover. See [How it works → Durability and resume](/how-it-works#durability--resume).
 
 ## Notes
 
@@ -767,7 +767,7 @@ import {
   OpenAIAgent,
   createHttpTool,
   tools,
-} from "smithers-orchestrator";
+} from "smthrs";
 import { stepCountIs } from "ai";
 ```
 
@@ -790,8 +790,8 @@ const codex = new OpenAIAgent({
 ```
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { AnthropicAgent, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { AnthropicAgent, createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, Task, smithers, outputs } = createSmithers({
@@ -942,7 +942,7 @@ The tool input accepts `method`, `url`, `headers`, `query`, `body`, optional `au
 [Hermes](https://github.com/NousResearch/hermes-agent) (Nous Research) exposes an OpenAI-compatible HTTP API; `HermesAgent` is a convenience `OpenAIAgent` subclass that points at your Hermes server and disables native structured output by default (a local Hermes server may not honor JSON-schema response formats).
 
 ```ts
-import { HermesAgent } from "smithers-orchestrator";
+import { HermesAgent } from "smthrs";
 
 const hermes = new HermesAgent({
   baseURL: "http://127.0.0.1:5123/v1", // or set HERMES_BASE_URL
@@ -957,10 +957,10 @@ const hermes = new HermesAgent({
 
 ## Eliza
 
-`ElizaAgent` wraps an in-process elizaOS `AgentRuntime` so an Eliza character and its plugins (Slack, Discord, Telegram, model providers) run as a first-class Smithers agent. Unlike the other agents here, it ships in a separate opt-in package owning the `@elizaos/core` dependency: install and import it from `@smithers-orchestrator/agent-eliza`:
+`ElizaAgent` wraps an in-process elizaOS `AgentRuntime` so an Eliza character and its plugins (Slack, Discord, Telegram, model providers) run as a first-class Smithers agent. Unlike the other agents here, it ships in a separate opt-in package owning the `@elizaos/core` dependency: install and import it from `@smthrs/agent-eliza`:
 
 ```ts
-import { ElizaAgent } from "@smithers-orchestrator/agent-eliza";
+import { ElizaAgent } from "@smthrs/agent-eliza";
 
 const eliza = new ElizaAgent({
   character: { name: "SupportBot", bio: "Answers product questions." },
@@ -974,12 +974,12 @@ The harness lazily initializes the runtime on the first `generate` (or `prefligh
 
 ## Hijack Support
 
-SDK agents do not reopen a provider-native CLI; Smithers persists the agent conversation and reopens it through a Smithers-managed REPL via `bunx smithers-orchestrator hijack RUN_ID`.
+SDK agents do not reopen a provider-native CLI; Smithers persists the agent conversation and reopens it through a Smithers-managed REPL via `bunx smthrs hijack RUN_ID`.
 
 Live-run behavior:
 
 - Smithers captures response history after each step via `onStepEnd`.
-- `bunx smithers-orchestrator hijack` waits until history is durable, aborts the current agent task (handing it off to the REPL), and opens the REPL.
+- `bunx smthrs hijack` waits until history is durable, aborts the current agent task (handing it off to the REPL), and opens the REPL.
 - On clean REPL exit, Smithers writes updated message history back and resumes the workflow automatically.
 
 Limits:
@@ -1006,7 +1006,7 @@ Use `createTranscriptionTool` when an SDK agent needs to transcribe audio in its
 For Whisper, remote audio downloads are capped at 25 MiB by default; set `maxResponseBodyBytes` for a different cap (the deprecated `maxResponseBytes` is a fallback when it's omitted). The generic `createHttpTool` has its own independent 1 MiB default.
 
 ```ts
-import { AnthropicAgent, createTranscriptionTool } from "@smithers-orchestrator/agents";
+import { AnthropicAgent, createTranscriptionTool } from "@smthrs/agents";
 
 const transcribeAudio = createTranscriptionTool({
   provider: "deepgram", // or "whisper"
@@ -1057,16 +1057,16 @@ For the opposite direction, where an MCP-aware client drives Smithers workflows,
 ## Import
 
 ```ts
-import { OpenAIAgent } from "smithers-orchestrator";
+import { OpenAIAgent } from "smthrs";
 import {
   createMcpToolset,
   type McpServerConfig,
   type McpToolset,
   type McpToolsetOptions,
-} from "@smithers-orchestrator/agents/mcp/createMcpToolset";
+} from "@smthrs/agents/mcp/createMcpToolset";
 ```
 
-`createMcpToolset` is intentionally a deep import from `@smithers-orchestrator/agents/mcp/createMcpToolset`; it is not re-exported from the top-level `smithers-orchestrator` facade.
+`createMcpToolset` is intentionally a deep import from `@smthrs/agents/mcp/createMcpToolset`; it is not re-exported from the top-level `smthrs` facade.
 
 ## Quick Start
 
@@ -1174,7 +1174,7 @@ Use `createMcpToolset` when building an SDK-agent workflow with `AnthropicAgent`
 > Sandboxed file and shell tools for AI agent tasks, with exact input schemas, security policies, and usage examples.
 
 ```ts
-import { tools, read, write, edit, grep, bash, defineTool, getDefinedToolMetadata } from "smithers-orchestrator";
+import { tools, read, write, edit, grep, bash, defineTool, getDefinedToolMetadata } from "smthrs";
 ```
 
 `tools` bundles all five tools keyed by name:
@@ -1185,7 +1185,7 @@ const { read, write, edit, grep, bash } = tools;
 
 <Note>API reference: [Tools](/reference/tools) lists every built-in tool and helper, its options, and links to source and tests.</Note>
 
-The `smithers-orchestrator/tools` subpath also exports lower-level helpers:
+The `smthrs/tools` subpath also exports lower-level helpers:
 
 | Export | Purpose |
 |---|---|
@@ -1234,7 +1234,7 @@ Each invocation receives a unique `callToken`. Completion and failure updates ma
 `defineTool()` wraps custom [AI SDK](https://ai-sdk.dev) tools with Smithers runtime context, deterministic idempotency keys, side-effect metadata, and the side-effect snapshot hook.
 
 ```ts
-import { defineTool } from "smithers-orchestrator";
+import { defineTool } from "smthrs";
 import { z } from "zod";
 
 const placeOrder = defineTool({
@@ -1335,7 +1335,7 @@ Returns file contents as UTF-8. Throws `"File too large"` if size exceeds `maxOu
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { read, grep } from "smithers-orchestrator";
+import { read, grep } from "smthrs";
 
 const codeAgent = new Agent({
   model: openai("gpt-5.6-sol"),
@@ -1368,7 +1368,7 @@ Returns `"ok"`; throws `"Content too large"` if content exceeds `maxOutputBytes`
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { write, read } from "smithers-orchestrator";
+import { write, read } from "smthrs";
 
 const writerAgent = new Agent({
   model: openai("gpt-5.6-luna"),
@@ -1483,7 +1483,7 @@ bash `/dev/tcp`), a nested shell, or a renamed binary. Unenforced isolation logs
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { bash } from "smithers-orchestrator";
+import { bash } from "smthrs";
 
 const devAgent = new Agent({
   model: openai("gpt-5.6-terra"),
@@ -1507,7 +1507,7 @@ Pass tools to an [AI SDK](https://ai-sdk.dev) agent and assign the agent to a [`
 ```tsx
 import { ToolLoopAgent as Agent } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { createSmithers, read, write, edit, grep, bash, Task } from "smithers-orchestrator";
+import { createSmithers, read, write, edit, grep, bash, Task } from "smthrs";
 import { z } from "zod";
 
 const codeAgent = new Agent({
@@ -1534,7 +1534,7 @@ The full bundle works too:
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { tools } from "smithers-orchestrator";
+import { tools } from "smthrs";
 
 const fullAgent = new Agent({
   model: openai("gpt-5.6-terra"),
@@ -1553,7 +1553,7 @@ const fullAgent = new Agent({
 
 ```ts
 import { Effect } from "effect";
-import { runWorkflow } from "smithers-orchestrator";
+import { runWorkflow } from "smthrs";
 
 const result = await Effect.runPromise(runWorkflow(workflow, {
   input: { file: "src/auth.ts" },
@@ -1935,7 +1935,7 @@ Smithers provides deterministic orchestration (workflow graph, approvals, retrie
 ### 1) PI as Workflow Agent
 
 ```tsx
-import { PiAgent } from "smithers-orchestrator";
+import { PiAgent } from "smthrs";
 
 const pi = new PiAgent({
   provider: "openai",
@@ -1951,19 +1951,19 @@ const pi = new PiAgent({
 
 `PiAgent` supports all PI CLI flags: provider/model, tools, extensions, skills, prompt templates, themes, sessions. Text mode uses `--print` by default; JSON/RPC modes set `--mode` and omit `--print`.
 
-PI sessions are first-class hijack targets: `bunx smithers-orchestrator hijack RUN_ID --target pi` reopens the PI session for local steering.
+PI sessions are first-class hijack targets: `bunx smthrs hijack RUN_ID --target pi` reopens the PI session for local steering.
 
 ### 2) PI Server Client
 
-Drive Smithers server APIs from a PI extension or Bun process via `@smithers-orchestrator/pi-plugin`:
+Drive Smithers server APIs from a PI extension or Bun process via `@smthrs/pi-plugin`:
 
 ```ts
-import { runWorkflow, approve, streamEvents } from "@smithers-orchestrator/pi-plugin";
+import { runWorkflow, approve, streamEvents } from "@smthrs/pi-plugin";
 ```
 
-`@smithers-orchestrator/pi-plugin` currently publishes TypeScript source entrypoints; run it with Bun or bundle it before using it from plain Node.
+`@smthrs/pi-plugin` currently publishes TypeScript source entrypoints; run it with Bun or bundle it before using it from plain Node.
 
-The older `smithers-orchestrator/pi-plugin` and `smithers-orchestrator/pi-extension` subpaths were removed; use the scoped package directly.
+The older `smthrs/pi-plugin` and `smthrs/pi-extension` subpaths were removed; use the scoped package directly.
 
 ### 3) Hybrid: PI Extensibility + Smithers Orchestration
 
@@ -1973,7 +1973,7 @@ The older `smithers-orchestrator/pi-plugin` and `smithers-orchestrator/pi-extens
 Patterns:
 
 1. PI skill-driven coding task inside a Smithers `<Task>`.
-2. PI extension command that starts/resumes Smithers workflows via server API or `@smithers-orchestrator/pi-plugin`.
+2. PI extension command that starts/resumes Smithers workflows via server API or `@smthrs/pi-plugin`.
 3. Smithers workflow output persisted to SQLite and consumed by later PI-assisted tasks.
 
 ## Hijacking PI Sessions
@@ -1996,7 +1996,7 @@ Session persistence:
 1. Install PI CLI and add to `PATH`.
 2. Configure PI credentials via env/config (prefer over CLI args for API keys).
 3. Instantiate `PiAgent` with explicit options in workflows.
-4. For server-driven workflows, use `@smithers-orchestrator/pi-plugin`.
+4. For server-driven workflows, use `@smthrs/pi-plugin`.
 
 ```bash
 # Verify PI is installed
@@ -2012,7 +2012,7 @@ pi --version
 
 ## Limitations
 
-Smithers has no chat interface for PI; chat UI integration is the host application's responsibility, via `@smithers-orchestrator/pi-plugin`.
+Smithers has no chat interface for PI; chat UI integration is the host application's responsibility, via `@smthrs/pi-plugin`.
 
 ---
 
@@ -2049,17 +2049,17 @@ Smithers installs a **native Hermes plugin**, far richer than a bare MCP entry
 - **Gateway push-back**: a detached run launched from a chat session reports its
   result back into that same session.
 - **Slack approval buttons**: an approval gate becomes Approve / Deny buttons that
-  map straight to `bunx smithers-orchestrator approve` / `bunx smithers-orchestrator deny`.
+  map straight to `bunx smthrs approve` / `bunx smthrs deny`.
 
 ### Distribution is one command
 
 The plugin ships inside the Smithers CLI, so installing it is one command:
 
 ```bash
-bunx smithers-orchestrator hermes
+bunx smthrs hermes
 
 # `hermes` is a convenience alias for the generic form:
-bunx smithers-orchestrator mcp add --agent hermes
+bunx smthrs mcp add --agent hermes
 ```
 
 The command writes the plugin into `~/.hermes/plugins/smithers/`, installs the
@@ -2100,8 +2100,8 @@ In both runtimes the guidance is the same: a Smithers workflow is a **superset
 of a skill**, since a skill is static instructions while a workflow is
 executable, durable, typed, inspectable, composable, and optimizable. Capture
 reusable procedures as workflows (even small one-task ones), and optimize
-them like skills with `bunx smithers-orchestrator eval`, scorers, and
-`bunx smithers-orchestrator optimize`. See the
+them like skills with `bunx smthrs eval`, scorers, and
+`bunx smthrs optimize`. See the
 [smithers skill](https://github.com/smithersai/smithers/blob/main/skills/smithers/SKILL.md).
 
 ## Links
@@ -2116,7 +2116,7 @@ them like skills with `bunx smithers-orchestrator eval`, scorers, and
 
 > Typed control state for workflows: fold an XState v5 machine over durable output and signal rows with useSmithersMachine
 
-`smithers-orchestrator/xstate` runs [XState v5](https://stately.ai/docs) state
+`smthrs/xstate` runs [XState v5](https://stately.ai/docs) state
 machines as an **optional derived-state layer** over rows Smithers already
 persists (not a backend, scheduler, or persisted actor): each frame,
 `useSmithersMachine` recomputes state as a pure fold over durable output and
@@ -2130,7 +2130,7 @@ approval ladders, multi-phase pipelines with re-entry) and you want
 
 ```tsx
 import { setup, assign } from "xstate";
-import { useSmithersMachine, taskOutput, approvalDecided, eventReceived, timedOut } from "smithers-orchestrator/xstate";
+import { useSmithersMachine, taskOutput, approvalDecided, eventReceived, timedOut } from "smthrs/xstate";
 
 const releaseMachine = setup({}).createMachine({
   context: { revision: 0 },
@@ -2194,7 +2194,7 @@ function Release() {
 }
 ```
 
-External events are ordinary signals: `bunx smithers-orchestrator signal RUN_ID REVISE --data '{...}'`.
+External events are ordinary signals: `bunx smthrs signal RUN_ID REVISE --data '{...}'`.
 There is **no `send()`, no `onDone` prop, and no actor**.
 
 ## The fold
@@ -2325,7 +2325,7 @@ visualization work unmodified on the machine definition.
 
 # Microsandbox Provider
 
-`@smithers-orchestrator/microsandbox` is a first-class Smithers
+`@smthrs/microsandbox` is a first-class Smithers
 `SandboxProvider` backed by the open source
 [Microsandbox](https://github.com/superradcompany/microsandbox) SDK. Each run
 boots a local microVM with its own Linux kernel, exchanges the Smithers
@@ -2339,7 +2339,7 @@ import {
   createMicrosandboxSandboxProvider,
   registerMicrosandboxSandboxProvider,
   MICROSANDBOX_PROVIDER_ID,
-} from "smithers-orchestrator/microsandbox";
+} from "smthrs/microsandbox";
 ```
 
 Microsandbox labels the runtime beta: pin and test the SDK version you
@@ -2369,8 +2369,8 @@ image on first use; later sandboxes reuse the local image cache.
 Pass the provider object directly to `<Sandbox>`:
 
 ```tsx
-import { createSmithers, Sandbox } from "smithers-orchestrator";
-import { createMicrosandboxSandboxProvider } from "smithers-orchestrator/microsandbox";
+import { createSmithers, Sandbox } from "smthrs";
+import { createMicrosandboxSandboxProvider } from "smthrs/microsandbox";
 
 const provider = createMicrosandboxSandboxProvider({
   image: "oven/bun:1",
@@ -2399,7 +2399,7 @@ export default parent.smithers((ctx) => (
 Or register it once and select it by id:
 
 ```ts
-import { registerMicrosandboxSandboxProvider } from "smithers-orchestrator/microsandbox";
+import { registerMicrosandboxSandboxProvider } from "smthrs/microsandbox";
 
 const unregister = registerMicrosandboxSandboxProvider({
   image: "oven/bun:1",
@@ -2531,7 +2531,7 @@ public exports, and requires no hypervisor, image pull, or credentials.
 
 # Daytona Sandbox Provider
 
-`@smithers-orchestrator/daytona` is a first-class Smithers `SandboxProvider`
+`@smthrs/daytona` is a first-class Smithers `SandboxProvider`
 backed by the [Daytona](https://www.daytona.io/) SDK. It runs a `<Sandbox>`
 child workflow's request inside a Daytona sandbox: uploads the request JSON,
 runs the entry command, reads the result JSON back. The shared provider-kit
@@ -2545,7 +2545,7 @@ import {
   createDaytonaSandboxProvider,
   registerDaytonaSandboxProvider,
   DAYTONA_SANDBOX_PROVIDER_ID,
-} from "smithers-orchestrator/daytona";
+} from "smthrs/daytona";
 ```
 
 ## Credentials
@@ -2573,8 +2573,8 @@ options, or through `clientOptions`.
 Pass the provider straight to `<Sandbox>`:
 
 ```tsx
-import { createSmithers, Sandbox } from "smithers-orchestrator";
-import { createDaytonaSandboxProvider } from "smithers-orchestrator/daytona";
+import { createSmithers, Sandbox } from "smthrs";
+import { createDaytonaSandboxProvider } from "smthrs/daytona";
 
 const provider = createDaytonaSandboxProvider({
   image: "ubuntu:22.04",
@@ -2598,7 +2598,7 @@ export default parent.smithers((ctx) => (
 Or register it once and reference it by id:
 
 ```ts
-import { registerDaytonaSandboxProvider } from "smithers-orchestrator/daytona";
+import { registerDaytonaSandboxProvider } from "smthrs/daytona";
 
 const unregister = registerDaytonaSandboxProvider({ image: "ubuntu:22.04" });
 
@@ -2661,7 +2661,7 @@ touching Daytona.
 
 # Vercel Sandbox Provider
 
-`@smithers-orchestrator/vercel` is a first-class Smithers `SandboxProvider`
+`@smthrs/vercel` is a first-class Smithers `SandboxProvider`
 backed by the [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox) SDK: it
 ships a `<Sandbox>` child workflow's request JSON into the sandbox workdir,
 runs the entry command, and reads the result JSON back. The shared
@@ -2676,7 +2676,7 @@ import {
   createVercelSandboxProvider,
   registerVercelSandboxProvider,
   VERCEL_SANDBOX_PROVIDER_ID,
-} from "smithers-orchestrator/vercel";
+} from "smthrs/vercel";
 ```
 
 ## Credentials
@@ -2702,8 +2702,8 @@ Each can also be passed as a factory option (`oidcToken`, `token`, `teamId`,
 ## Usage
 
 ```tsx
-import { createSmithers, Sandbox } from "smithers-orchestrator";
-import { createVercelSandboxProvider } from "smithers-orchestrator/vercel";
+import { createSmithers, Sandbox } from "smthrs";
+import { createVercelSandboxProvider } from "smthrs/vercel";
 
 const provider = createVercelSandboxProvider({
   runtime: "node24",
@@ -2728,7 +2728,7 @@ export default parent.smithers((ctx) => (
 Or register it once and reference it by id:
 
 ```ts
-import { registerVercelSandboxProvider } from "smithers-orchestrator/vercel";
+import { registerVercelSandboxProvider } from "smthrs/vercel";
 
 const unregister = registerVercelSandboxProvider({ runtime: "node24" });
 
@@ -2790,7 +2790,7 @@ unit tests run in CI without touching Vercel.
 
 # AWS Sandbox Provider
 
-`@smithers-orchestrator/aws` is a Smithers `SandboxProvider` that runs a
+`@smthrs/aws` is a Smithers `SandboxProvider` that runs a
 `<Sandbox>` child workflow's request on AWS: Fargate (ECS `RunTask`, the
 default) or CodeBuild. AWS shares no filesystem with the orchestrator, so the
 request/result bundle transports through an S3 bucket. The shared
@@ -2805,7 +2805,7 @@ import {
   createAwsSandboxProvider,
   registerAwsSandboxProvider,
   AWS_SANDBOX_PROVIDER_ID,
-} from "smithers-orchestrator/aws";
+} from "smthrs/aws";
 ```
 
 ## Credentials
@@ -2839,7 +2839,7 @@ The task or build role needs S3 read/write on the prefix.
 ## Usage
 
 ```tsx
-import { createAwsSandboxProvider } from "smithers-orchestrator/aws";
+import { createAwsSandboxProvider } from "smthrs/aws";
 
 // Fargate (default)
 const provider = createAwsSandboxProvider({
@@ -2919,7 +2919,7 @@ credentials, so unit tests run in CI without touching AWS.
 
 # GCP Sandbox Provider
 
-`@smithers-orchestrator/gcp` is a first-class Smithers `SandboxProvider` for
+`@smthrs/gcp` is a first-class Smithers `SandboxProvider` for
 Google Cloud. It executes a `<Sandbox>` child workflow's request on Cloud Run
 Jobs and ships the request/result bundle through a Cloud Storage bucket,
 since Cloud Run Jobs give the caller no shared filesystem. The shared
@@ -2933,7 +2933,7 @@ import {
   createGcpSandboxProvider,
   registerGcpSandboxProvider,
   GCP_SANDBOX_PROVIDER_ID,
-} from "smithers-orchestrator/gcp";
+} from "smthrs/gcp";
 ```
 
 ## Credentials
@@ -2984,8 +2984,8 @@ Other knobs: `prefix` (default `smithers/sandbox`), `command`, `workdir`
 ## Usage
 
 ```tsx
-import { Sandbox } from "smithers-orchestrator";
-import { createGcpSandboxProvider } from "smithers-orchestrator/gcp";
+import { Sandbox } from "smthrs";
+import { createGcpSandboxProvider } from "smthrs/gcp";
 
 const provider = createGcpSandboxProvider({
   projectId: "my-project",
@@ -3117,13 +3117,13 @@ helper (on Cloudflare the provider is wired through `createSmithersCloudflare`).
 
 | Platform | Package | Create fn · provider id | Execution · transport |
 |---|---|---|---|
-| Microsandbox | `@smithers-orchestrator/microsandbox` | `createMicrosandboxSandboxProvider` · `microsandbox` | Local hardware-isolated microVM · guest filesystem |
-| Cloudflare | `@smithers-orchestrator/cloudflare` | `createCloudflareSandboxProvider` · `cloudflare-sandbox` | `@cloudflare/sandbox` container |
-| AWS | `@smithers-orchestrator/aws` | `createAwsSandboxProvider` · `aws-sandbox` | Fargate (ECS) or CodeBuild runner · S3 bundle transport |
-| GCP | `@smithers-orchestrator/gcp` | `createGcpSandboxProvider` · `gcp-sandbox` | Cloud Run Jobs runner · GCS bundle transport |
-| Vercel | `@smithers-orchestrator/vercel` | `createVercelSandboxProvider` · `vercel-sandbox` | Vercel Sandbox compute |
-| Daytona | `@smithers-orchestrator/daytona` | `createDaytonaSandboxProvider` · `daytona-sandbox` | Daytona sandboxes |
-| Any host (Docker) | `@smithers-orchestrator/sandbox` | Docker `http-runner` | Local/remote Docker |
+| Microsandbox | `@smthrs/microsandbox` | `createMicrosandboxSandboxProvider` · `microsandbox` | Local hardware-isolated microVM · guest filesystem |
+| Cloudflare | `@smthrs/cloudflare` | `createCloudflareSandboxProvider` · `cloudflare-sandbox` | `@cloudflare/sandbox` container |
+| AWS | `@smthrs/aws` | `createAwsSandboxProvider` · `aws-sandbox` | Fargate (ECS) or CodeBuild runner · S3 bundle transport |
+| GCP | `@smthrs/gcp` | `createGcpSandboxProvider` · `gcp-sandbox` | Cloud Run Jobs runner · GCS bundle transport |
+| Vercel | `@smthrs/vercel` | `createVercelSandboxProvider` · `vercel-sandbox` | Vercel Sandbox compute |
+| Daytona | `@smthrs/daytona` | `createDaytonaSandboxProvider` · `daytona-sandbox` | Daytona sandboxes |
+| Any host (Docker) | `@smthrs/sandbox` | Docker `http-runner` | Local/remote Docker |
 
 <Note>
   There's no dedicated Kubernetes provider yet: on a cluster, run the
@@ -3187,7 +3187,7 @@ The provider:
 4. Installs Bun, then the Claude Code and Codex CLIs, when missing.
 5. Seeds Claude and Codex auth for the remote CLIs.
 6. Ships a small remote project containing the child workflow source, `agents.ts`, `package.json`, and `input.json`.
-7. Runs `smithers-orchestrator up` in the workspace and reads the remote run result back over SSH.
+7. Runs `smthrs up` in the workspace and reads the remote run result back over SSH.
 8. Deletes the workspace unless `keepWorkspace` is true.
 
 The parent workflow receives:
@@ -3216,7 +3216,7 @@ Secrets are seeded at run time through Plue's operation-scoped secret or credent
 Run the included demo child workflow:
 
 ```bash
-bunx smithers-orchestrator up .smithers/workflows/run-on-plue.tsx --input '{
+bunx smthrs up .smithers/workflows/run-on-plue.tsx --input '{
   "script": ".smithers/workflows/plue-demo-child.tsx",
   "repo": "alice/smoke-test"
 }'
@@ -3225,7 +3225,7 @@ bunx smithers-orchestrator up .smithers/workflows/run-on-plue.tsx --input '{
 Pass input through to the remote child:
 
 ```bash
-bunx smithers-orchestrator up .smithers/workflows/run-on-plue.tsx --input '{
+bunx smthrs up .smithers/workflows/run-on-plue.tsx --input '{
   "script": "workflows/review-child.tsx",
   "repo": "acme/app",
   "input": {
@@ -3237,7 +3237,7 @@ bunx smithers-orchestrator up .smithers/workflows/run-on-plue.tsx --input '{
 Use a local or custom CLI binary and keep the workspace for inspection:
 
 ```bash
-bunx smithers-orchestrator up .smithers/workflows/run-on-plue.tsx --input '{
+bunx smthrs up .smithers/workflows/run-on-plue.tsx --input '{
   "script": ".smithers/workflows/plue-demo-child.tsx",
   "repo": "alice/smoke-test",
   "plueBin": "/path/to/plue",
@@ -3250,9 +3250,9 @@ bunx smithers-orchestrator up .smithers/workflows/run-on-plue.tsx --input '{
 `run-on-plue` is the default wrapper, but workflows can pass the provider object to `<Sandbox>` directly:
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
-import { Sandbox } from "@smithers-orchestrator/components";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
+import { Sandbox } from "@smthrs/components";
 import { createPlueSandboxProvider } from "../lib/plue-provider";
 import { childWorkflow } from "./child";
 import { z } from "zod/v4";

@@ -1,14 +1,7 @@
 /** @jsxImportSource react */
 import { useMemo, useState } from "react";
-import { createGatewayReactRoot, useGatewayNodeOutput, useGatewayRun } from "smithers-orchestrator/gateway-react";
-import {
-  ApprovalPanel,
-  ConnectionBadge,
-  LaunchButton,
-  RunEventLog,
-  RunTree,
-  WorkflowUiShell,
-} from "smithers-orchestrator/gateway-ui";
+import { createGatewayReactRoot, useGatewayNodeOutput, useGatewayRun } from "smthrs/gateway-react";
+import { ApprovalPanel, ConnectionBadge, LaunchButton, RunEventLog, RunTree, WorkflowUiShell } from "smthrs/gateway-ui";
 import {
   Badge,
   Button,
@@ -25,7 +18,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 
 const WORKFLOW = "whole-foods-meal-planner";
 const wholeFoodsMealPlannerStyles = [

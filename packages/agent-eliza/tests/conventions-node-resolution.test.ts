@@ -20,12 +20,12 @@ const packageRoot = resolve(fileURLToPath(import.meta.url), "../..");
 // ---------------------------------------------------------------------------
 
 describe("conventions subpath export — plain node resolution", () => {
-  test("import('@smithers-orchestrator/agent-eliza/conventions') exposes defineWorkflow as a function", () => {
+  test("import('@smthrs/agent-eliza/conventions') exposes defineWorkflow as a function", () => {
     // Spawn a plain `node` process — this exercises the `./conventions` export map
     // entry which points to `./src/conventions/index.js`. If only `.ts` exists,
     // node cannot load it and exits non-zero.
     const script = [
-      "import('@smithers-orchestrator/agent-eliza/conventions').then(m => {",
+      "import('@smthrs/agent-eliza/conventions').then(m => {",
       "  if (typeof m.defineWorkflow !== 'function') {",
       "    console.error('defineWorkflow is not a function:', typeof m.defineWorkflow);",
       "    process.exit(1);",

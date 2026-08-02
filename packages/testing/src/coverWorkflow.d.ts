@@ -1,5 +1,5 @@
 /// <reference path="../types/bun-test-shim.d.ts" />
-import { WorkflowDefinition } from '@smithers-orchestrator/driver/WorkflowDefinition';
+import { WorkflowDefinition } from '@smthrs/driver/WorkflowDefinition';
 
 type CoverableWorkflow<Schema = unknown> = WorkflowDefinition<Schema> | {
     readonly default: WorkflowDefinition<Schema>;

@@ -9,11 +9,11 @@ Smithers 0.25.3 is a focused patch. It fixes two user-facing defects a release s
 
 ## CLI
 
-`bunx smithers-orchestrator memory get`, `set`, `rm`, and `list` now run against the shared workspace store without a `--workflow` flag. The `--workflow` option was declared required, so the documented form `bunx smithers-orchestrator memory set workflow:ns key value` failed with a `VALIDATION_ERROR` ("expected string, received undefined" on `workflow`) unless you pointed `--workflow` at an arbitrary workflow file. Memory facts live in the workspace store, not in any single workflow, so `--workflow` is now optional and the commands resolve the workspace database when it is omitted.
+`bunx smthrs memory get`, `set`, `rm`, and `list` now run against the shared workspace store without a `--workflow` flag. The `--workflow` option was declared required, so the documented form `bunx smthrs memory set workflow:ns key value` failed with a `VALIDATION_ERROR` ("expected string, received undefined" on `workflow`) unless you pointed `--workflow` at an arbitrary workflow file. Memory facts live in the workspace store, not in any single workflow, so `--workflow` is now optional and the commands resolve the workspace database when it is omitted.
 
 ## Workflows
 
-The seeded `monitor` workflow renders and runs again. Its `gather` output schema declared a top-level `runId` field, which collides with the reserved `run_id` output column the 0.25.0 schema guard rejects, so `bunx smithers-orchestrator graph monitor.tsx`, any run of `monitor`, and `bunx smithers-orchestrator workflow skills` over the whole pack all failed with `INVALID_INPUT: uses reserved field name(s): runId`. The field is renamed to `targetRunId`, matching the input convention the workflow already used.
+The seeded `monitor` workflow renders and runs again. Its `gather` output schema declared a top-level `runId` field, which collides with the reserved `run_id` output column the 0.25.0 schema guard rejects, so `bunx smthrs graph monitor.tsx`, any run of `monitor`, and `bunx smthrs workflow skills` over the whole pack all failed with `INVALID_INPUT: uses reserved field name(s): runId`. The field is renamed to `targetRunId`, matching the input convention the workflow already used.
 
 The seeded `smithering` workflow renders again. Two of its prompts wrote a bare path like `artifacts/smithering/build/<runId>/<id>/` in prose, and MDX parsed `<runId>` and `<id>` as JSX tags, which dropped the prompt module's default export so the workflow failed to load. The paths are now wrapped in backticks.
 
@@ -31,7 +31,7 @@ The release smoke test (`.smithers/workflows/smoketest.tsx`) is now comprehensiv
 
 New regression tests cover the fixes and the gaps that hid them: a `memory` CLI round-trip with no `--workflow`, a guard that renders every seeded workflow's graph and asserts each loads without a reserved-column, MDX, or null-input error (it would have caught the `monitor`, `smithering`, and `workflow-skill` defects), and a real-browser end-to-end test for Gateway root routing plus a workflow UI mount.
 
-The `@smithers-orchestrator/components` declaration build is now hermetic. It emitted `src/index.d.ts` with `clean: false`, so each build read its own prior output and re-wrapped the React import, growing the `React__default` alias by one `__default` every build. The build now removes the stale declaration first, so repeated builds are byte-identical.
+The `@smthrs/components` declaration build is now hermetic. It emitted `src/index.d.ts` with `clean: false`, so each build read its own prior output and re-wrapped the React import, growing the `React__default` alias by one `__default` every build. The build now removes the stale declaration first, so repeated builds are byte-identical.
 
 ## Migration notes
 

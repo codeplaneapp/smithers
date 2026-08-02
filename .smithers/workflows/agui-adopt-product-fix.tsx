@@ -1,6 +1,6 @@
 // smithers-display-name: Agentic UI adopt-product Fix Round
-/** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, OpenCodeAgent, Sequence, Task, UI, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { ClaudeCodeAgent, OpenCodeAgent, Sequence, Task, UI, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { codexFirst } from "../lib/codexAccounts";
 import { MULTI_ROOT, reviewSchema, validationSchema } from "./build-agentic-ui-library";

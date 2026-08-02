@@ -11,9 +11,9 @@ import * as Sharding from "effect/unstable/cluster/Sharding";
 import * as ShardingConfig from "effect/unstable/cluster/ShardingConfig";
 import * as SingleRunner from "effect/unstable/cluster/SingleRunner";
 import { Effect, Layer, ManagedRuntime } from "effect";
-import { fromTaggedErrorPayload } from "@smithers-orchestrator/errors/fromTaggedErrorPayload";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { toTaggedErrorPayload } from "@smithers-orchestrator/errors/toTaggedErrorPayload";
+import { fromTaggedErrorPayload } from "@smthrs/errors/fromTaggedErrorPayload";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { toTaggedErrorPayload } from "@smthrs/errors/toTaggedErrorPayload";
 import { isUnknownWorkerError, isTaskResultFailure, TaskWorkerEntity } from "./entity-worker.js";
 /**
  * @typedef {(task: WorkerTask) => void} TaskWorkerDispatchSubscriber

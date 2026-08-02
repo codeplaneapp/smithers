@@ -1,5 +1,5 @@
 import { llmJudge } from "./llmJudge.js";
-/** @typedef {import("@smithers-orchestrator/agents/AgentLike").AgentLike} AgentLike */
+/** @typedef {import("@smthrs/agents/AgentLike").AgentLike} AgentLike */
 /** @typedef {import("./types.js").Scorer} Scorer */
 
 /**

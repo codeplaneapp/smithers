@@ -1,5 +1,5 @@
 import { Effect } from 'effect';
-import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
+import { SmithersError } from '@smthrs/errors/SmithersError';
 
 /** A Linear priority: 0 none, 1 urgent, 2 high, 3 normal, 4 low — or a name. */
 type LinearPriority = number | "none" | "urgent" | "high" | "normal" | "medium" | "low";

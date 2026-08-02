@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Gateway } from "smithers-orchestrator";
+import type { Gateway } from "smthrs";
 import {
   createConnectionContext,
   createDddFixtureRepo,

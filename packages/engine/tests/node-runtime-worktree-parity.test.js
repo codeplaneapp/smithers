@@ -1,11 +1,11 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { resolve } from "node:path";
 import { createNodeRuntime } from "../src/node-runtime.js";
-import { resetRelativeWorktreePathWarningForTest } from "@smithers-orchestrator/graph";
+import { resetRelativeWorktreePathWarningForTest } from "@smthrs/graph";
 
 /**
  * `createNodeRuntime().worktree.resolve` wraps the real, unmodified
- * `resolveWorktreePath` from `@smithers-orchestrator/graph` — these tests
+ * `resolveWorktreePath` from `@smthrs/graph` — these tests
  * pin the exact current contract (see packages/graph/tests/worktree-path.test.js)
  * so wiring it through `RuntimeAdapter` cannot silently regress it.
  */

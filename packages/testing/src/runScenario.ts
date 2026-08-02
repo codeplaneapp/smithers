@@ -1,4 +1,4 @@
-import { Effect, Fiber, Option } from "effect";
+import { Effect, Fiber } from "effect";
 import { replayIdentity } from "./scenario/replayIdentity.ts";
 import { kernelLayer, KernelRuntimeService, makeKernel } from "./kernel/KernelRuntime.ts";
 import { runAtBoundaryFork, type HarnessError } from "./kernel/boundary.ts";

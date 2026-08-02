@@ -3,7 +3,7 @@
 // @smithers-type-exports-end
 
 import { Effect, Schedule } from "effect";
-import { logInfo } from "@smithers-orchestrator/observability/logging";
+import { logInfo } from "@smthrs/observability/logging";
 import { makePollingSource } from "../core/EventSource.js";
 import { IntegrationError } from "../core/IntegrationError.js";
 import { integrationEventName } from "../core/signalNames.js";

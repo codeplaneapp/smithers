@@ -1,8 +1,8 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 /** @typedef {import("./PlanNode.ts").PlanNode} PlanNode */
 /** @typedef {import("./RalphMeta.ts").RalphMeta} RalphMeta */
 /** @typedef {import("./RalphStateMap.ts").RalphStateMap} RalphStateMap */
-/** @typedef {import("@smithers-orchestrator/graph").XmlNode} XmlNode */
+/** @typedef {import("@smthrs/graph").XmlNode} XmlNode */
 
 /**
  * @param {string} prefix

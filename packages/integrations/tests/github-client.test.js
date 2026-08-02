@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { Effect, Fiber } from "effect";
 import * as TestClock from "effect/testing/TestClock";
-import { setSmithersLogRunner } from "@smithers-orchestrator/observability/logging";
+import { setSmithersLogRunner } from "@smthrs/observability/logging";
 import { makeGitHubClient, nextPageUrl } from "../src/github/GitHubClient.js";
 import { configureGitHub, resolveGitHubConfig } from "../src/github/config.js";
 

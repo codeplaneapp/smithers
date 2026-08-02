@@ -1808,7 +1808,7 @@
     "kind": "knowledge",
     "tier": "weak",
     "verify": "deterministic",
-    "task": "Which agents support hijack (native interactive resume) via bunx smithers-orchestrator hijack?",
+    "task": "Which agents support hijack (native interactive resume) via bunx smthrs hijack?",
     "canonicalAnswer": "ClaudeCodeAgent (claude --resume), CodexAgent (codex resume), AntigravityAgent (agy --conversation), GeminiAgent (gemini --resume), PiAgent (pi --session), KimiAgent (kimi --session), ForgeAgent (forge --conversation-id), AmpAgent (amp threads continue)",
     "slice": "agents-runtimes"
   },
@@ -2534,7 +2534,7 @@
     "tier": "weak",
     "verify": "deterministic",
     "task": "List facts from a workflow namespace using the CLI.",
-    "canonicalAnswer": "bunx smithers-orchestrator memory list workflow:code-review -w workflow.tsx",
+    "canonicalAnswer": "bunx smthrs memory list workflow:code-review -w workflow.tsx",
     "slice": "memory"
   },
   {
@@ -2676,7 +2676,7 @@
     "kind": "ops",
     "tier": "weak",
     "verify": "fixture",
-    "task": "Start a workflow with bunx smithers-orchestrator up workflow.tsx --serve --port 8080. Verify GET /health returns 200 without auth.",
+    "task": "Start a workflow with bunx smthrs up workflow.tsx --serve --port 8080. Verify GET /health returns 200 without auth.",
     "canonicalAnswer": "serve mode, --serve",
     "slice": "observability-gateway-server"
   },
@@ -4172,7 +4172,7 @@
     "kind": "ops",
     "tier": "weak",
     "verify": "deterministic",
-    "task": "Run 'bunx smithers-orchestrator init' in an empty directory and verify that .smithers/ is created with workflows/, prompts/, and agents/ subdirectories.",
+    "task": "Run 'bunx smthrs init' in an empty directory and verify that .smithers/ is created with workflows/, prompts/, and agents/ subdirectories.",
     "canonicalAnswer": ".smithers/workflows",
     "slice": "examples-starters-init"
   },
@@ -4183,7 +4183,7 @@
     "kind": "ops",
     "tier": "weak",
     "verify": "deterministic",
-    "task": "Initialize a new Smithers project with the 'idea-to-tickets' template using 'bunx smithers-orchestrator init --template idea-to-tickets' and verify the scaffolding includes next-steps guidance.",
+    "task": "Initialize a new Smithers project with the 'idea-to-tickets' template using 'bunx smthrs init --template idea-to-tickets' and verify the scaffolding includes next-steps guidance.",
     "canonicalAnswer": "idea-to-tickets",
     "slice": "examples-starters-init"
   },
@@ -4194,7 +4194,7 @@
     "kind": "knowledge",
     "tier": "weak",
     "verify": "deterministic",
-    "task": "Run 'bunx smithers-orchestrator starters' and identify which starter is best for supporting a customer incident response.",
+    "task": "Run 'bunx smthrs starters' and identify which starter is best for supporting a customer incident response.",
     "canonicalAnswer": "customer-incident",
     "slice": "examples-starters-init"
   },
@@ -4205,7 +4205,7 @@
     "kind": "knowledge",
     "tier": "weak",
     "verify": "deterministic",
-    "task": "Use 'bunx smithers-orchestrator starters --goal build' to find starters focused on implementation and engineering.",
+    "task": "Use 'bunx smthrs starters --goal build' to find starters focused on implementation and engineering.",
     "canonicalAnswer": "--goal",
     "slice": "examples-starters-init"
   },
@@ -4216,7 +4216,7 @@
     "kind": "ops",
     "tier": "weak",
     "verify": "fixture",
-    "task": "Run a discovered workflow using 'bunx smithers-orchestrator workflow run <name>' with an example input and verify it executes and produces output.",
+    "task": "Run a discovered workflow using 'bunx smthrs workflow run <name>' with an example input and verify it executes and produces output.",
     "canonicalAnswer": "workflow run",
     "slice": "examples-starters-init"
   },
@@ -4227,7 +4227,7 @@
     "kind": "ops",
     "tier": "weak",
     "verify": "deterministic",
-    "task": "Create a new workflow scaffold using 'bunx smithers-orchestrator workflow.create my-new-workflow' and verify a .tsx file is created with minimal JSX structure.",
+    "task": "Create a new workflow scaffold using 'bunx smthrs workflow.create my-new-workflow' and verify a .tsx file is created with minimal JSX structure.",
     "canonicalAnswer": "my-new-workflow.tsx",
     "slice": "examples-starters-init"
   },
@@ -4326,7 +4326,7 @@
     "kind": "ops",
     "tier": "weak",
     "verify": "deterministic",
-    "task": "Run 'bunx smithers-orchestrator graph <workflow>' on a valid workflow file and verify it outputs the graph without errors.",
+    "task": "Run 'bunx smthrs graph <workflow>' on a valid workflow file and verify it outputs the graph without errors.",
     "canonicalAnswer": "graph",
     "slice": "examples-starters-init"
   },
@@ -4337,7 +4337,7 @@
     "kind": "ops",
     "tier": "weak",
     "verify": "deterministic",
-    "task": "Run 'bunx smithers-orchestrator workflow.inspect <name>' on a seeded workflow and verify it displays input/output schemas and skill documentation.",
+    "task": "Run 'bunx smthrs workflow.inspect <name>' on a seeded workflow and verify it displays input/output schemas and skill documentation.",
     "canonicalAnswer": "workflow.inspect",
     "slice": "examples-starters-init"
   },
@@ -4436,7 +4436,7 @@
     "kind": "ops",
     "tier": "weak",
     "verify": "deterministic",
-    "task": "Run 'bunx smithers-orchestrator init --force' on a directory that already has a .smithers/ folder and verify it overwrites without error.",
+    "task": "Run 'bunx smthrs init --force' on a directory that already has a .smithers/ folder and verify it overwrites without error.",
     "canonicalAnswer": "--force",
     "slice": "examples-starters-init"
   },
@@ -4447,7 +4447,7 @@
     "kind": "ops",
     "tier": "weak",
     "verify": "deterministic",
-    "task": "Run 'bunx smithers-orchestrator init --global' and verify it creates or updates ~/.smithers instead of ./.smithers.",
+    "task": "Run 'bunx smthrs init --global' and verify it creates or updates ~/.smithers instead of ./.smithers.",
     "canonicalAnswer": "--global",
     "slice": "examples-starters-init"
   },
@@ -4458,7 +4458,7 @@
     "kind": "ops",
     "tier": "weak",
     "verify": "deterministic",
-    "task": "Run 'bunx smithers-orchestrator workflow.list' and verify it shows both local .smithers/workflows and global ~/.smithers/workflows entries.",
+    "task": "Run 'bunx smthrs workflow.list' and verify it shows both local .smithers/workflows and global ~/.smithers/workflows entries.",
     "canonicalAnswer": "workflow.list",
     "slice": "examples-starters-init"
   },

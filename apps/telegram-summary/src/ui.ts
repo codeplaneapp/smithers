@@ -1,4 +1,4 @@
-import { workflowUiThemeCss } from "@smithers-orchestrator/gateway-ui/styleguide-css";
+import { workflowUiThemeCss } from "@smthrs/gateway-ui/styleguide-css";
 import type { DigestRow } from "./service.ts";
 import { digestJsonFromRow } from "./service.ts";
 

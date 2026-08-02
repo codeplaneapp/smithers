@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createCloudflareSandboxProvider, createMockCloudflareSandboxEnvironment } from "../src/index.js";
 
 /**
- * @param {Partial<import("@smithers-orchestrator/sandbox").SandboxProviderRequest>} [overrides]
+ * @param {Partial<import("@smthrs/sandbox").SandboxProviderRequest>} [overrides]
  */
 function makeRequest(overrides = {}) {
   return {

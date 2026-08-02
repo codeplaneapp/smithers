@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
-import { accountToProviderEnv, getAccount } from "@smithers-orchestrator/accounts";
-import { SmithersError } from "@smithers-orchestrator/errors";
+import { accountToProviderEnv, getAccount } from "@smthrs/accounts";
+import { SmithersError } from "@smthrs/errors";
 import { registeredAgentLabel } from "./registered-agent-id.js";
 /** @typedef {import("./HijackCandidate.ts").HijackCandidate} HijackCandidate */
 /** @typedef {import("./HijackLaunchSpec.ts").HijackLaunchSpec} HijackLaunchSpec */
 /** @typedef {import("./NativeHijackEngine.ts").NativeHijackEngine} NativeHijackEngine */
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 
 /**
  * @param {string | null} [metaJson]

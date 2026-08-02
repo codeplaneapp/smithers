@@ -1,10 +1,10 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { expect, test } from "bun:test";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { fakeAgent, renderPrompt, renderWorkflow, runTask, simulate } from "smithers-orchestrator/testing";
+import { fakeAgent, renderPrompt, renderWorkflow, runTask, simulate } from "smthrs/testing";
 
 const workflows = join(import.meta.dir, "..", "workflows");
 type Task = {

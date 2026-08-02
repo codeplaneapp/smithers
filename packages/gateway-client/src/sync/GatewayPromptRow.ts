@@ -1,4 +1,4 @@
-import type { GatewayPrompt } from "@smithers-orchestrator/protocol/gateway-rpc";
+import type { GatewayPrompt } from "@smthrs/protocol/gateway-rpc";
 
 /**
  * One row of the `prompts` collection — the live `listPrompts` RPC response

@@ -1,4 +1,4 @@
-import { workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
+import { workflowUiThemeCss } from "@smthrs/ui-styleguide";
 
 export const DEFAULT_OPERATOR_UI_ENTRY = "smithers:default-operator-ui";
 const WORKFLOW_UI_THEME_PLACEHOLDER = "/*__SMITHERS_WORKFLOW_UI_THEME_CSS__*/";

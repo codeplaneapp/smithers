@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // guidance-interactive — when an agent hands a human a copy-paste command, does
 // it follow the docs' "hand humans interactive commands" rule and include the
 // `--interactive` flag where supported? Verify is deterministic `contains`

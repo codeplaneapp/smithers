@@ -6,7 +6,7 @@ export { linearCommentDataSchema, linearCommentEventSchema, linearCommentOutputS
 import './linear/LinearConfig.js';
 import './linear/LinearClientTypes.js';
 import 'effect';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 import './linear/LinearWebhookSourceTypes.js';
 import './core/EventSourceTypes.js';
 import './core/CursorStoreTypes.js';

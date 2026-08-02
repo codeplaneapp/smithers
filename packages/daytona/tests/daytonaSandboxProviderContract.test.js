@@ -1,4 +1,4 @@
-import { createSandboxProviderContractSuite } from "@smithers-orchestrator/sandbox";
+import { createSandboxProviderContractSuite } from "@smthrs/sandbox";
 import { DAYTONA_SANDBOX_PROVIDER_ID } from "../src/DAYTONA_SANDBOX_PROVIDER_ID.js";
 import { createDaytonaSandboxProvider } from "../src/createDaytonaSandboxProvider.js";
 import { createMockDaytonaSandboxEnvironment } from "../src/createMockDaytonaSandboxEnvironment.js";

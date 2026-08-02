@@ -13,10 +13,10 @@ import {
   approvalDecisionSchema,
   createSmithers,
   runWorkflow,
-} from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { Gateway, type SmithersWorkflow } from "@smithers-orchestrator/server/gateway";
+} from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { Gateway, type SmithersWorkflow } from "@smthrs/server/gateway";
 import { corruptHeartbeat } from "../harness/corruptHeartbeat.ts";
 
 const RUN_ID = "run-case03";

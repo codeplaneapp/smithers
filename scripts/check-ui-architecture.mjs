@@ -22,24 +22,24 @@ const IGNORED_DIRECTORIES = new Set([
   "ui-dist",
 ]);
 const UI_PACKAGES = new Set([
-  "@smithers-orchestrator/gateway-react",
-  "@smithers-orchestrator/gateway-ui",
-  "@smithers-orchestrator/ui",
-  "@smithers-orchestrator/ui-styleguide",
-  "smithers-orchestrator/gateway-react",
-  "smithers-orchestrator/gateway-ui",
-  "smithers-orchestrator/ui",
-  "smithers-orchestrator/ui-styleguide",
+  "@smthrs/gateway-react",
+  "@smthrs/gateway-ui",
+  "@smthrs/ui",
+  "@smthrs/ui-styleguide",
+  "smthrs/gateway-react",
+  "smthrs/gateway-ui",
+  "smthrs/ui",
+  "smthrs/ui-styleguide",
 ]);
 // Workflow-render hooks execute inside the reconciler and are not gateway/UI
 // data hooks. Keep this exception explicit so new public React hook packages
 // still fail the single-hook-package policy by default.
-const WORKFLOW_RENDER_HOOK_PACKAGES = new Set(["@smithers-orchestrator/xstate"]);
+const WORKFLOW_RENDER_HOOK_PACKAGES = new Set(["@smthrs/xstate"]);
 const LEGACY_UI_PACKAGES = new Set([
-  "@smithers-orchestrator/gateway-ui",
-  "@smithers-orchestrator/ui-styleguide",
-  "smithers-orchestrator/gateway-ui",
-  "smithers-orchestrator/ui-styleguide",
+  "@smthrs/gateway-ui",
+  "@smthrs/ui-styleguide",
+  "smthrs/gateway-ui",
+  "smthrs/ui-styleguide",
 ]);
 const VISUAL_DEPENDENCY_PREFIXES = [
   "@ai-elements",
@@ -78,15 +78,10 @@ const HEAVY_DEPENDENCY_PREFIXES = [
 // ui-core (packages/ui-core/src/) is the isomorphic headless product layer:
 // zero DOM, zero opentui, zero react-dom, and it must not reach into the
 // platform-visual web packages. `react-dom`/`@opentui` are checked by prefix
-// (subpaths like `react-dom/client` still count); the smithers-orchestrator
+// (subpaths like `react-dom/client` still count); the smthrs
 // UI packages are checked by exact base package.
 const UI_CORE_FORBIDDEN_PREFIXES = ["@opentui", "react-dom"];
-const UI_CORE_FORBIDDEN_PACKAGES = new Set([
-  "@smithers-orchestrator/gateway-ui",
-  "@smithers-orchestrator/ui",
-  "smithers-orchestrator/gateway-ui",
-  "smithers-orchestrator/ui",
-]);
+const UI_CORE_FORBIDDEN_PACKAGES = new Set(["@smthrs/gateway-ui", "@smthrs/ui", "smthrs/gateway-ui", "smthrs/ui"]);
 // DOM globals are checked lexically (not just via import specifiers) since a
 // global like `window` needs no import statement. `src/platform/web*` is the
 // carve-out for the (future) web Platform adapter implementations, which are
@@ -98,12 +93,12 @@ const UI_CORE_WEB_ADAPTER_PREFIX = "packages/ui-core/src/platform/web";
 // props-in/callbacks-out, no business logic, no gateway data access, and no
 // zustand stores of its own.
 const TUI_UI_FORBIDDEN_PACKAGES = new Set([
-  "@smithers-orchestrator/gateway-client",
-  "@smithers-orchestrator/gateway-react",
-  "@smithers-orchestrator/ui-core",
-  "smithers-orchestrator/gateway-client",
-  "smithers-orchestrator/gateway-react",
-  "smithers-orchestrator/ui-core",
+  "@smthrs/gateway-client",
+  "@smthrs/gateway-react",
+  "@smthrs/ui-core",
+  "smthrs/gateway-client",
+  "smthrs/gateway-react",
+  "smthrs/ui-core",
   "zustand",
 ]);
 const DUPLICATE_WRAPPER_NAMES = new Set([
@@ -148,7 +143,7 @@ const SHADCN_DIRECTORIES = ["packages/ui/src/chat/shadcn", "packages/ui/src/prim
 // (which predates the program) would otherwise reject it outright. The closure
 // lane also sanctions MonitorButton.tsx: it predates the tightened guard (so it
 // was never baselined) and already conforms to the program profile, importing
-// only the @smithers-orchestrator/ui barrel plus its local theme module.
+// only the @smthrs/ui barrel plus its local theme module.
 const SANCTIONED_GATEWAY_UI_PROGRAM_FILES = new Set([
   "packages/gateway-ui/src/CronCalendar.tsx",
   "packages/gateway-ui/src/GatewayApprovals.tsx",
@@ -160,13 +155,13 @@ const SANCTIONED_GATEWAY_UI_PROGRAM_FILES = new Set([
   "packages/gateway-ui/src/hijack.ts",
 ]);
 // Sanctioned program files are gateway-data bindings: they may import
-// @smithers-orchestrator/gateway-react (data hooks) in addition to the
-// @smithers-orchestrator/ui barrel.
+// @smthrs/gateway-react (data hooks) in addition to the
+// @smthrs/ui barrel.
 const SANCTIONED_GATEWAY_UI_PROGRAM_SPECIFIERS = new Set([
-  "@smithers-orchestrator/ui",
-  "@smithers-orchestrator/gateway-react",
-  "smithers-orchestrator/ui",
-  "smithers-orchestrator/gateway-react",
+  "@smthrs/ui",
+  "@smthrs/gateway-react",
+  "smthrs/ui",
+  "smthrs/gateway-react",
 ]);
 // The frozen agentic-ui program assigns these component files to lanes whose
 // CSS fragment lives in the lane's own directory (integrationContract A), so
@@ -177,9 +172,9 @@ const SANCTIONED_UI_LAYER_EDGES = new Set([
 ]);
 // The frozen agentic-ui program exports component-anatomy hooks
 // (usePromptInputAttachments, useMessageScroller, ...) from the
-// @smithers-orchestrator/ui barrel (integrationContract B), so the
+// @smthrs/ui barrel (integrationContract B), so the
 // single-public-hook rule does not apply to its root entry.
-const HOOK_EXPORT_EXEMPT_PACKAGES = new Set(["@smithers-orchestrator/ui"]);
+const HOOK_EXPORT_EXEMPT_PACKAGES = new Set(["@smthrs/ui"]);
 const SHADCN_PROVENANCE_SCHEMA = "https://json-schema.org/draft/2020-12/schema";
 const SHADCN_PROVENANCE_REGISTRIES = ["https://ui.shadcn.com", "https://elements.ai-sdk.dev"];
 const SHADCN_PROVENANCE_COLLECTIONS = ["chat/shadcn", "primitives/shadcn", "agentic/ai-elements"];
@@ -367,12 +362,7 @@ const PACK_UI_DIRECTORIES = [".smithers/ui", "examples/ui"];
 // that composes the canonical gateway theme and preserves their legacy token
 // aliases. Keep this exception exact so new bespoke theme modules still fail.
 const SANCTIONED_PACK_UI_THEME_MODULES = new Set([".smithers/ui/shared-theme.ts"]);
-const PACK_UI_IMPORTS = new Set([
-  "react",
-  "smithers-orchestrator/gateway-react",
-  "smithers-orchestrator/gateway-ui",
-  "smithers-orchestrator/ui",
-]);
+const PACK_UI_IMPORTS = new Set(["react", "smthrs/gateway-react", "smthrs/gateway-ui", "smthrs/ui"]);
 const INTRINSIC_VISUAL_TAGS = new Set([
   "a",
   "article",
@@ -545,9 +535,7 @@ function isPackLocalImport(path, specifier) {
 
 function isAllowedPackUiImport(path, specifier) {
   return (
-    isPackLocalImport(path, specifier) ||
-    PACK_UI_IMPORTS.has(specifier) ||
-    specifier.startsWith("smithers-orchestrator/ui/adapters/")
+    isPackLocalImport(path, specifier) || PACK_UI_IMPORTS.has(specifier) || specifier.startsWith("smthrs/ui/adapters/")
   );
 }
 
@@ -697,7 +685,7 @@ export function parseModuleSpecifiers(source) {
 
 function basePackage(specifier) {
   if (specifier.startsWith("@")) return specifier.split("/").slice(0, 2).join("/");
-  if (specifier.startsWith("smithers-orchestrator/")) return specifier.split("/").slice(0, 2).join("/");
+  if (specifier.startsWith("smthrs/")) return specifier.split("/").slice(0, 2).join("/");
   return specifier.split("/")[0];
 }
 
@@ -713,15 +701,11 @@ function isUiSpecifier(specifier) {
 
 function isGatewayReact(specifier) {
   const base = basePackage(specifier);
-  return base === "@smithers-orchestrator/gateway-react" || base === "smithers-orchestrator/gateway-react";
+  return base === "@smthrs/gateway-react" || base === "smthrs/gateway-react";
 }
 
 function isSmithersPackage(specifier) {
-  return (
-    specifier === "smithers-orchestrator" ||
-    specifier.startsWith("smithers-orchestrator/") ||
-    specifier.startsWith("@smithers-orchestrator/")
-  );
+  return specifier === "smthrs" || specifier.startsWith("smthrs/") || specifier.startsWith("@smthrs/");
 }
 
 function isLegacyUiPackage(specifier) {
@@ -1138,7 +1122,7 @@ function uiLayer(path) {
 
 function importedUiLayer(file, specifier) {
   if (isGatewayReact(specifier)) return "gateway-react";
-  const uiBases = ["@smithers-orchestrator/ui/", "smithers-orchestrator/ui/"];
+  const uiBases = ["@smthrs/ui/", "smthrs/ui/"];
   const externalBase = uiBases.find((base) => specifier.startsWith(base));
   if (externalBase) {
     const subpath = specifier.slice(externalBase.length);
@@ -1475,8 +1459,8 @@ export function collectUiArchitectureState(root, kind = "smithers") {
     violations.push(...packUiViolations(path, sources.get(path)));
     for (const specifier of specifiers) {
       if (!isPackUiPath(path)) {
-        // Sanctioned program files import ONLY the @smithers-orchestrator/ui
-        // barrel and the @smithers-orchestrator/gateway-react data hooks
+        // Sanctioned program files import ONLY the @smthrs/ui
+        // barrel and the @smthrs/gateway-react data hooks
         // (integrationContract E); those edges are exempt from the frozen
         // uiImports inventory. Any other specifier still inventories.
         const sanctionedBarrelEdge =
@@ -1517,8 +1501,8 @@ export function collectUiArchitectureState(root, kind = "smithers") {
       if (kind === "smithers" && path.startsWith("packages/gateway-react/src/")) {
         if (
           isSmithersPackage(specifier) &&
-          basePackage(specifier) !== "@smithers-orchestrator/gateway-client" &&
-          basePackage(specifier) !== "smithers-orchestrator/gateway-client"
+          basePackage(specifier) !== "@smthrs/gateway-client" &&
+          basePackage(specifier) !== "smthrs/gateway-client"
         ) {
           violations.push(formatViolation("gateway-react-direction", `${path} imports ${specifier}`));
         }
@@ -1688,12 +1672,12 @@ export function collectUiArchitectureState(root, kind = "smithers") {
     const includeExports =
       kind === "multi" ||
       [
-        "@smithers-orchestrator/components",
-        "@smithers-orchestrator/gateway-react",
-        "@smithers-orchestrator/gateway-ui",
-        "@smithers-orchestrator/ui",
-        "@smithers-orchestrator/ui-styleguide",
-        "smithers-orchestrator",
+        "@smthrs/components",
+        "@smthrs/gateway-react",
+        "@smthrs/gateway-ui",
+        "@smthrs/ui",
+        "@smthrs/ui-styleguide",
+        "smthrs",
       ].includes(manifest.name);
     if (typeof manifest.name === "string") {
       inventories.packageExportSurfaces.push(`${path}#name=${JSON.stringify(manifest.name)}`);
@@ -1725,18 +1709,14 @@ export function collectUiArchitectureState(root, kind = "smithers") {
           path === "packages/gateway-react/package.json" &&
           section !== "devDependencies" &&
           isSmithersPackage(dependency) &&
-          dependency !== "@smithers-orchestrator/gateway-client"
+          dependency !== "@smthrs/gateway-client"
         ) {
           violations.push(formatViolation("gateway-react-direction", `${path} ${section} contains ${dependency}`));
         }
         if (
           kind === "smithers" &&
           path.startsWith("packages/") &&
-          ![
-            "@smithers-orchestrator/gateway-ui",
-            "@smithers-orchestrator/ui",
-            "@smithers-orchestrator/ui-styleguide",
-          ].includes(manifest.name) &&
+          !["@smthrs/gateway-ui", "@smthrs/ui", "@smthrs/ui-styleguide"].includes(manifest.name) &&
           matchesPrefix(dependency, VISUAL_DEPENDENCY_PREFIXES)
         ) {
           violations.push(formatViolation("single-visual-package", `${path} ${section} contains ${dependency}`));
@@ -1747,7 +1727,7 @@ export function collectUiArchitectureState(root, kind = "smithers") {
     const permitsWorkflowRenderHooks = WORKFLOW_RENDER_HOOK_PACKAGES.has(manifest.name);
     if (
       kind === "smithers" &&
-      manifest.name !== "@smithers-orchestrator/gateway-react" &&
+      manifest.name !== "@smthrs/gateway-react" &&
       !permitsWorkflowRenderHooks &&
       (/(^|[-/])hooks?$/.test(manifest.name ?? "") ||
         exportKeys.some((key) => /(^|\/)(?:hooks?|use(?:[-_A-Z]|$))/.test(key)))
@@ -1756,7 +1736,7 @@ export function collectUiArchitectureState(root, kind = "smithers") {
     }
     if (
       kind === "smithers" &&
-      manifest.name !== "@smithers-orchestrator/gateway-react" &&
+      manifest.name !== "@smthrs/gateway-react" &&
       !permitsWorkflowRenderHooks &&
       !HOOK_EXPORT_EXEMPT_PACKAGES.has(manifest.name)
     ) {
@@ -1774,7 +1754,7 @@ export function collectUiArchitectureState(root, kind = "smithers") {
         }
       }
     }
-    if (kind === "smithers" && manifest.name === "@smithers-orchestrator/ui") {
+    if (kind === "smithers" && manifest.name === "@smthrs/ui") {
       const baseExport = JSON.stringify(manifest.exports?.["."] ?? "");
       if (baseExport.includes("adapters") || baseExport.includes("smithers/connected")) {
         violations.push(formatViolation("base-ui-export", `${path} base export exposes an adapter or connected layer`));
@@ -1791,12 +1771,7 @@ export function collectUiArchitectureState(root, kind = "smithers") {
     if (
       kind === "smithers" &&
       path.startsWith("packages/") &&
-      ![
-        "@smithers-orchestrator/components",
-        "@smithers-orchestrator/gateway-ui",
-        "@smithers-orchestrator/ui",
-        "@smithers-orchestrator/ui-styleguide",
-      ].includes(manifest.name)
+      !["@smthrs/components", "@smthrs/gateway-ui", "@smthrs/ui", "@smthrs/ui-styleguide"].includes(manifest.name)
     ) {
       const packageDirectory = posix.dirname(path);
       const packageSources = sorted([

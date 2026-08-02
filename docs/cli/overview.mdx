@@ -3,18 +3,18 @@ title: CLI
 description: Every Smithers CLI command in one structured catalog (TOON format).
 ---
 
-Always invoke as `bunx smithers-orchestrator <command>` (see [Installation](/installation) for why). Use `--help` on any command for the canonical option list.
+Always invoke as `bunx smthrs <command>` (see [Installation](/installation) for why). Use `--help` on any command for the canonical option list.
 
 ## Conventions
 
-- Run control is workspace-scoped. The workspace Gateway is the default control plane for controllers, Bun cron jobs, monitors, bots, and custom clients; use `smithers-orchestrator/gateway-client` or Gateway RPC/REST rather than opening SQLite/PGlite/Postgres or querying `_smithers_*` tables. One-shot CLI commands are also a supported abstraction boundary. Direct stores are runtime/migration/maintainer-diagnostic internals.
+- Run control is workspace-scoped. The workspace Gateway is the default control plane for controllers, Bun cron jobs, monitors, bots, and custom clients; use `smthrs/gateway-client` or Gateway RPC/REST rather than opening SQLite/PGlite/Postgres or querying `_smithers_*` tables. One-shot CLI commands are also a supported abstraction boundary. Direct stores are runtime/migration/maintainer-diagnostic internals.
 - `smithers gateway status --format json` discovers the verified singleton URL for the current workspace. Do not parse its runtime state file, assume port 7331, or pass `--backend` to `ps`/`inspect`/other control commands to search another store. `--backend` is for Gateway/workflow bootstrap and explicit migration diagnostics only.
 - Task root: tools run from the project root (the nearest directory containing a `.smithers/`, walking up from the working directory). `up`, `workflow run`, `graph`, and `eval` all resolve the root this way, so the launch form never changes where tasks run. Override with `--root`; a resume without `--root` reuses the root the run was originally launched with.
 - Boolean flags accept either bare form (`--watch`) or explicit `--watch true|false`.
 - Global options: `--format toon|json|yaml|md|jsonl`, `--filter-output <key.path>`, `--full-output`, `--token-count`, `--token-limit N`, `--token-offset N`, `--schema`, `--llms`, `--llms-full`, `--mcp`, `--help`, `--version`.
 - MCP stdio mode: pass `--mcp` to start Smithers as an MCP server. Add `--surface semantic|raw|both` to choose the exposed tool surface. Add `--allowed-tools name,name` and/or `--read-only` to scope the semantic toolset exposed to outbound MCP clients.
 - Workflow resolution: `revert`, `replay`, `fork`, `retry-task`, and `timetravel` take a workflow file path. `up`, `graph`, `eval`, and `optimize` accept either a workflow path or a discovered workflow ID (an existing file is used as-is; otherwise the argument is resolved as an ID, the same way `workflow run` does). `workflow run <name>` resolves IDs from the nearest local `.smithers/workflows/<name>.tsx`, local `.smithers/packs/*/workflows/`, global `~/.smithers/workflows/`, and global `~/.smithers/packs/*/workflows/`. Local workflows take precedence: on an id collision the local file wins. Run `workflow run <pack>:<id>` to select a pack explicitly. The global pack honors `SMITHERS_HOME`. So global workflows run from any directory, while a repo's own pack can override them by name.
-- Rewrites: `bunx smithers-orchestrator workflow WORKFLOW_ID` runs a discovered workflow when `<id>` resolves; `bunx smithers-orchestrator workflow.tsx` behaves like `bunx smithers-orchestrator up workflow.tsx`; `bunx smithers-orchestrator chat create` behaves like `bunx smithers-orchestrator chat-create`.
+- Rewrites: `bunx smthrs workflow WORKFLOW_ID` runs a discovered workflow when `<id>` resolves; `bunx smthrs workflow.tsx` behaves like `bunx smthrs up workflow.tsx`; `bunx smthrs chat create` behaves like `bunx smthrs chat-create`.
 - JSON arguments are preflighted before workflow modules load. `--input` and `--annotations` accept an inline JSON value or `-` to read JSON from stdin, capped at 1 MiB.
 
 ## Run concurrency
@@ -68,15 +68,15 @@ On a TTY the CLI prints human-formatted text. When output is piped or captured (
 
 ```toon
 commands[2]{command,description}:
-  bunx smithers-orchestrator logs run-abc123,Tail active run
-  bunx smithers-orchestrator inspect run-abc123,Inspect most recent run
+  bunx smthrs logs run-abc123,Tail active run
+  bunx smthrs inspect run-abc123,Inspect most recent run
 ```
 
-Read each row as two comma-separated fields declared by the `{command,description}` header. **The runnable shell command is the first field, up to the comma; the text after the comma is a human description, not part of the command.** So the first row's command is `bunx smithers-orchestrator logs run-abc123`, and `Tail active run` is prose. Never copy-paste a whole row into a shell. Field values are unquoted unless they themselves contain a comma or a quote, in which case TOON quotes and escapes them (a `--prompt "..."` value comes out as `"... --prompt \"<describe>\""`); strip that TOON quoting before running. On a TTY the same CTA renders as aligned `command  # description` lines, so this parsing only matters for piped or agent output. Pass `--format json` to get the same `cta` as a nested object with explicit `command` and `description` keys and skip parsing the table.
+Read each row as two comma-separated fields declared by the `{command,description}` header. **The runnable shell command is the first field, up to the comma; the text after the comma is a human description, not part of the command.** So the first row's command is `bunx smthrs logs run-abc123`, and `Tail active run` is prose. Never copy-paste a whole row into a shell. Field values are unquoted unless they themselves contain a comma or a quote, in which case TOON quotes and escapes them (a `--prompt "..."` value comes out as `"... --prompt \"<describe>\""`); strip that TOON quoting before running. On a TTY the same CTA renders as aligned `command  # description` lines, so this parsing only matters for piped or agent output. Pass `--format json` to get the same `cta` as a nested object with explicit `command` and `description` keys and skip parsing the table.
 
 ## Pauses, resume, and detached runs
 
-`bunx smithers-orchestrator up` exits when a run reaches a durable wait state (`waiting-approval`, `waiting-event`, or `waiting-timer`), even in foreground mode. `bunx smithers-orchestrator up --detach` starts a background owner and returns its `runId`, but that owner also exits when the run pauses. This is expected: the persisted run is waiting for an external decision, signal, or timer rather than burning a process.
+`bunx smthrs up` exits when a run reaches a durable wait state (`waiting-approval`, `waiting-event`, or `waiting-timer`), even in foreground mode. `bunx smthrs up --detach` starts a background owner and returns its `runId`, but that owner also exits when the run pauses. This is expected: the persisted run is waiting for an external decision, signal, or timer rather than burning a process.
 
 To drive a run to completion across pauses, use the Gateway (`getRun`, `streamRunEventsResilient`, `submitApproval`, `submitSignal`, and `resumeRun`) for an automated keeper. For ad-hoc operation, the equivalent public CLI commands are `ps`, `why RUN_ID`, `inspect RUN_ID`, `logs RUN_ID -f`, `approve`/`deny`, `signal`, and `up <workflow.tsx> --resume RUN_ID`. Use `--force` only after confirming the previous owner is gone or intentionally replacing it. Never implement the keeper by querying the run store.
 
@@ -84,7 +84,7 @@ If resume fails with `RESUME_METADATA_MISMATCH`, the workflow file changed after
 
 ## Interactive mode and the full-screen TUI monitor
 
-`bunx smithers-orchestrator up --interactive` (or just `bunx smithers-orchestrator up` / `bunx smithers-orchestrator workflow run` from an interactive TTY without a positional argument) opens a terminal UI that guides you through three steps:
+`bunx smthrs up --interactive` (or just `bunx smthrs up` / `bunx smthrs workflow run` from an interactive TTY without a positional argument) opens a terminal UI that guides you through three steps:
 
 1. **Workflow picker** - fuzzy-search your installed workflows and select one.
 2. **Input prompts** - fill required fields for the chosen workflow.
@@ -92,7 +92,7 @@ If resume fails with `RESUME_METADATA_MISMATCH`, the workflow file changed after
 
 The monitor connects to a local Gateway on port 7331, starting one automatically if none is running.  It exits when you press `q`.
 
-**Agents: hand humans interactive commands.** When you (an AI agent) give a human a command to run themselves, include the `--interactive` flag whenever the command supports it (`bunx smithers-orchestrator up --interactive`, `bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive`), so the human lands in this full-screen monitor instead of a detached log tail. Reserve the non-interactive forms for CI, scripts, and the commands you execute yourself with your shell tool. Never pass `--interactive` to a command you run programmatically, since it opens a full-screen TUI your harness cannot drive.
+**Agents: hand humans interactive commands.** When you (an AI agent) give a human a command to run themselves, include the `--interactive` flag whenever the command supports it (`bunx smthrs up --interactive`, `bunx smthrs workflow run WORKFLOW_ID --interactive`), so the human lands in this full-screen monitor instead of a detached log tail. Reserve the non-interactive forms for CI, scripts, and the commands you execute yourself with your shell tool. Never pass `--interactive` to a command you run programmatically, since it opens a full-screen TUI your harness cannot drive.
 
 ### Monitor modes and keybindings
 
@@ -103,8 +103,8 @@ The monitor opens in **Tree** mode. Switch modes with the letter aliases below. 
 | **Tree** | `1` (from another mode) | Node tree with per-node output, logs, diffs, and props; inline approval banner when waiting |
 | **Graph** | `g` (toggles Tree ↔ Graph), or `2` | Directed dependency graph; `j`/`k` navigate, `⏎` inspects a node in Tree |
 | **Logs** | `l`, or `3` | Filtered event stream (up to 2 000 events); `[`/`]` filter by attempt, `f` toggles follow |
-| **Timeline** | `t`, or `4` | Horizontal tick strip you scrub with `j`/`k` to inspect node state at past frames; `L` jumps back to live (inspect-only; rewind with `bunx smithers-orchestrator rewind`) |
-| **Hijack** | `h`, or `5` | Hand off to `bunx smithers-orchestrator hijack` for an active node |
+| **Timeline** | `t`, or `4` | Horizontal tick strip you scrub with `j`/`k` to inspect node state at past frames; `L` jumps back to live (inspect-only; rewind with `bunx smthrs rewind`) |
+| **Hijack** | `h`, or `5` | Hand off to `bunx smthrs hijack` for an active node |
 | **Quit** | `q` (or Ctrl-C) | (quit) |
 
 Inside **Tree** mode the number keys are **inspector tabs, not mode switches**: `1` output, `2` logs, `3` diff, `4` props (`←`/`→` also walk the tabs). Use the `g`/`l`/`t`/`h` aliases to leave Tree.
@@ -115,9 +115,9 @@ The status header shrinks to a compact one-liner on terminals narrower than 100 
 
 A detached run (`up --detach` / `run --detach`) and an MCP `run_workflow` background launch both execute where the user has no live view of progress. To close that gap, the CLI returns a `monitoring` block with the run and prints agent-directed guidance in the "Next steps" CTA: offer the user one of these ways to watch the run, then set up whichever they pick.
 
-1. **Smithers Monitor (live, zero setup):** run `bunx smithers-orchestrator monitor RUN_ID`. A built-in oneshot opens its dedicated transcript, steer, restart, and attachment-scoped cheap narrator surface. Other runs open the all-runs workspace view focused on that run (status, execution tree, events, approvals). See [the Smithers Monitor](/guides/monitor).
+1. **Smithers Monitor (live, zero setup):** run `bunx smthrs monitor RUN_ID`. A built-in oneshot opens its dedicated transcript, steer, restart, and attachment-scoped cheap narrator surface. Other runs open the all-runs workspace view focused on that run (status, execution tree, events, approvals). See [the Smithers Monitor](/guides/monitor).
 2. **Status-report cron (hands-off):** a Bun job that every 5 minutes calls Gateway `getRun` and reports the status; use `streamRunEventsResilient` while the process is awake.
-3. **Live custom UI (richest, most work):** run `bunx smithers-orchestrator ui RUN_ID` when the workflow declares a `.smithers/ui/<workflow>.tsx` UI with `<UI entry="../ui/<workflow>.tsx" />`, otherwise author the UI source and declaration first. See [custom workflow UIs](/guides/custom-workflow-ui).
+3. **Live custom UI (richest, most work):** run `bunx smthrs ui RUN_ID` when the workflow declares a `.smithers/ui/<workflow>.tsx` UI with `<UI entry="../ui/<workflow>.tsx" />`, otherwise author the UI source and declaration first. See [custom workflow UIs](/guides/custom-workflow-ui).
 4. **Quick HTML page (fastest):** write a static status page from Gateway `getRun` / `getDevToolsSnapshot`, open it, and refresh it about every 5 minutes.
 
 The same `monitoring` object (its `text` plus structured `options`) is in the `run_workflow` MCP result for background launches, and is `null` when `waitForTerminal` is set (the run already finished).
@@ -127,15 +127,15 @@ The same `monitoring` object (its `text` plus structured `options`) is in the `r
 Open a run's custom browser UI with:
 
 ```sh
-bunx smithers-orchestrator ui RUN_ID
+bunx smthrs ui RUN_ID
 ```
 
-`bunx smithers-orchestrator ui` discovers the workspace singleton, verifies that the answering process serves this workspace, and uses its advertised URL. Discovery refuses gateways that advertise another workspace; use `--gateway <url>` or `--no-autostart` when you need to be explicit. When none is running it starts `smithers gateway` automatically (one per workspace: concurrent autostarts race on a lock and share the winner) and then opens the UI. `smithers gateway` serves workspace run state and workflow-owned `<UI>` declarations, with entry files resolved relative to the workflow that declared them. A workspace with no local `.smithers` pack and no prior run store still boots and serves the global pack alone. That is the headless sandbox shape: provision a VM with `bunx smithers-orchestrator init --global --yes --no-skill` (the default `bun install` inside `~/.smithers` is required for pack workflows to import) and `smithers gateway` serves the full pack, UIs included, from any bare cloned repo. Manage the daemon with `smithers gateway status` and `smithers gateway stop`. Use `bunx smithers-orchestrator ui RUN_ID --no-autostart` to fail fast when no Gateway is already running, or `--gateway <url>` for a remote Gateway. When the Gateway requires a bearer token, `ui`/`monitor`/`gui` route the browser through its [session handoff](/integrations/gateway#browser-session-handoff) so the printed URL opens cleanly; pass `--host 0.0.0.0` (or `SMITHERS_GATEWAY_HOST`) for [Tailscale/LAN access](/integrations/gateway#remote-access-tailscale--ssh--lan), which auto-mints a token and prints dialable interface URLs.
+`bunx smthrs ui` discovers the workspace singleton, verifies that the answering process serves this workspace, and uses its advertised URL. Discovery refuses gateways that advertise another workspace; use `--gateway <url>` or `--no-autostart` when you need to be explicit. When none is running it starts `smithers gateway` automatically (one per workspace: concurrent autostarts race on a lock and share the winner) and then opens the UI. `smithers gateway` serves workspace run state and workflow-owned `<UI>` declarations, with entry files resolved relative to the workflow that declared them. A workspace with no local `.smithers` pack and no prior run store still boots and serves the global pack alone. That is the headless sandbox shape: provision a VM with `bunx smthrs init --global --yes --no-skill` (the default `bun install` inside `~/.smithers` is required for pack workflows to import) and `smithers gateway` serves the full pack, UIs included, from any bare cloned repo. Manage the daemon with `smithers gateway status` and `smithers gateway stop`. Use `bunx smthrs ui RUN_ID --no-autostart` to fail fast when no Gateway is already running, or `--gateway <url>` for a remote Gateway. When the Gateway requires a bearer token, `ui`/`monitor`/`gui` route the browser through its [session handoff](/integrations/gateway#browser-session-handoff) so the printed URL opens cleanly; pass `--host 0.0.0.0` (or `SMITHERS_GATEWAY_HOST`) for [Tailscale/LAN access](/integrations/gateway#remote-access-tailscale--ssh--lan), which auto-mints a token and prints dialable interface URLs.
 
 ## Troubleshooting
 
 - `RESUME_METADATA_MISMATCH`: the workflow source or metadata changed since the run began. Start a fresh run instead of resuming across the edit.
-- Bundled jj exits with `EACCES`: the optional `@smithers-orchestrator/jj-<platform>` binary is present but not executable. Run `chmod +x node_modules/@smithers-orchestrator/jj-*/bin/jj`, reinstall Smithers, or set `SMITHERS_JJ_PATH` to a working `jj` binary. Confirm resolution with `bunx smithers-orchestrator workflow doctor`.
+- Bundled jj exits with `EACCES`: the optional `@smthrs/jj-<platform>` binary is present but not executable. Run `chmod +x node_modules/@smthrs/jj-*/bin/jj`, reinstall Smithers, or set `SMITHERS_JJ_PATH` to a working `jj` binary. Confirm resolution with `bunx smthrs workflow doctor`.
 
 ## Time-travel commands compared
 
@@ -156,19 +156,19 @@ them; skipped effects become blockers. `replay` and `fork --run` never
 compensate the parent run's effects.
 
 ```bash
-bunx smithers-orchestrator revert workflow.tsx \
+bunx smthrs revert workflow.tsx \
   --run-id RUN_ID --node-id NODE_ID --attempt 1 [--force] [--no-revert]
 
-bunx smithers-orchestrator timetravel workflow.tsx \
+bunx smthrs timetravel workflow.tsx \
   --run-id RUN_ID --node-id NODE_ID [--force] [--no-revert]
 
-bunx smithers-orchestrator rewind RUN_ID FRAME_NO \
+bunx smthrs rewind RUN_ID FRAME_NO \
   [--force] [--no-revert]
 
-bunx smithers-orchestrator replay workflow.tsx \
+bunx smthrs replay workflow.tsx \
   --run-id RUN_ID --frame FRAME_NO [--force]
 
-bunx smithers-orchestrator fork workflow.tsx \
+bunx smthrs fork workflow.tsx \
   --run-id RUN_ID --frame FRAME_NO --run [--force]
 ```
 
@@ -1084,4 +1084,4 @@ commands[102]:
 - **DevTools commands**: `tree`, `diff`, `output`, and `rewind` intentionally use command-scoped `--json`/`-j` and return exit code `1` for parser/user errors.
 - **Account commands**: `agents add|list|remove|test` manage `~/.smithers/accounts.json`; subscription providers use CLI config directories, API providers use API keys. Legacy entries with an unknown provider are preserved across `add`/`remove`; `agents remove <label>` deletes one.
 - **Output format**: all commands honour `--format toon|json|yaml|md|jsonl`; `--filter-output <key.path>` extracts a nested field from JSON output.
-- **Interactive TUI**: use `bunx smithers-orchestrator up --interactive` or `bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive` for the current full-screen terminal monitor. `bunx smithers-orchestrator init` also has a human setup flow (one agent question, then a hijacked tutorial). See [Interactive TUI](/guides/tui).
+- **Interactive TUI**: use `bunx smthrs up --interactive` or `bunx smthrs workflow run WORKFLOW_ID --interactive` for the current full-screen terminal monitor. `bunx smthrs init` also has a human setup flow (one agent question, then a hijacked tutorial). See [Interactive TUI](/guides/tui).

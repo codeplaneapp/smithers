@@ -1,9 +1,9 @@
 import { mkdirSync, existsSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { addAccount, defaultConfigDir } from "@smithers-orchestrator/accounts";
+import { addAccount, defaultConfigDir } from "@smthrs/accounts";
 import { regenerateAgentsTsIfPresent } from "./regenerateAgentsTsIfPresent.js";
 
-/** @typedef {import("@smithers-orchestrator/accounts").AccountProvider} AccountProvider */
+/** @typedef {import("@smthrs/accounts").AccountProvider} AccountProvider */
 
 /**
  * Provider id → CLI binary name. For API-key providers this is null because

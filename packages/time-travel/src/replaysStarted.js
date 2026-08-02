@@ -1,1 +1,1 @@
-export { replaysStarted } from "@smithers-orchestrator/observability/metrics";
+export { replaysStarted } from "@smthrs/observability/metrics";

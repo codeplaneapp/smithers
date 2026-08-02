@@ -6,7 +6,7 @@ import { useEffect } from "react";
  * WHY THIS EXISTS (local-mode freshness strategy):
  * The shipped `runs` and `approvals` gateway collections are PULL-ONLY — unlike
  * `run`/`nodes`/`runEvents`, their collection defs carry NO `stream` (see
- * `@smithers-orchestrator/gateway-client` `gatewayCollectionDefs.ts`). So a run
+ * `@smthrs/gateway-client` `gatewayCollectionDefs.ts`). So a run
  * launched, a gate reached, or an approval resolved ANYWHERE after the initial
  * pull is never pushed into these list collections — the list would otherwise go
  * stale mid-session until a reload. The master design

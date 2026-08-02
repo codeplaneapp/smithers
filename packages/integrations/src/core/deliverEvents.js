@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Effect, Exit, Schedule, Stream } from "effect";
-import { signalRun } from "@smithers-orchestrator/engine/signals";
-import { logError, logInfo } from "@smithers-orchestrator/observability/logging";
+import { signalRun } from "@smthrs/engine/signals";
+import { logError, logInfo } from "@smthrs/observability/logging";
 import { IntegrationError } from "./IntegrationError.js";
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./ExternalEventTypes.ts").ExternalEvent} ExternalEvent */
 /** @typedef {import("./EventSourceTypes.ts").EventSource} EventSource */
 
@@ -24,7 +24,7 @@ const CLAIM_HEARTBEAT_SCHEDULE = Schedule.spaced("10 seconds");
  *
  * @param {SmithersDb} adapter
  * @param {ExternalEvent} event
- * @returns {Effect.Effect<{ deduped: boolean; runIds: string[] }, import("@smithers-orchestrator/errors/SmithersError").SmithersError>}
+ * @returns {Effect.Effect<{ deduped: boolean; runIds: string[] }, import("@smthrs/errors/SmithersError").SmithersError>}
  */
 export function deliverEvent(adapter, event) {
   return Effect.gen(function* () {
@@ -93,7 +93,7 @@ export function deliverEvent(adapter, event) {
       const runIds = yield* adapter.findRunsAwaitingEvent(canonicalEvent.eventName, canonicalEvent.correlationId);
       const fanout = Effect.gen(function* () {
         const delivered = [];
-        /** @type {Array<{ runId: string; error: import("@smithers-orchestrator/errors/SmithersError").SmithersError }>} */
+        /** @type {Array<{ runId: string; error: import("@smthrs/errors/SmithersError").SmithersError }>} */
         const failures = [];
         for (const runId of runIds) {
           yield* renewClaim;
@@ -206,7 +206,7 @@ export function deliverEvent(adapter, event) {
  *
  * @param {SmithersDb} adapter
  * @param {EventSource} source
- * @returns {Effect.Effect<void, import("@smithers-orchestrator/errors/SmithersError").SmithersError>}
+ * @returns {Effect.Effect<void, import("@smthrs/errors/SmithersError").SmithersError>}
  */
 export function deliverEvents(adapter, source) {
   return Stream.runForEach(source.events, (item) => {

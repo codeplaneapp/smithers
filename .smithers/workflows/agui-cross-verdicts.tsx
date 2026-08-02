@@ -1,6 +1,6 @@
 // smithers-display-name: Agentic UI Cross-Seat Verdicts
-/** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, Parallel, Sequence, Task, UI, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { ClaudeCodeAgent, Parallel, Sequence, Task, UI, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { codexFirst } from "../lib/codexAccounts";
 import { MULTI_ROOT, reviewSchema } from "./build-agentic-ui-library";

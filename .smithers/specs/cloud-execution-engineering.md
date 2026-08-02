@@ -243,11 +243,11 @@ In Kubernetes, worker pods discover the orchestrator via a Service:
 apiVersion: v1
 kind: Service
 metadata:
-  name: smithers-orchestrator
+  name: smthrs
   namespace: smithers-system
 spec:
   selector:
-    app: smithers-orchestrator
+    app: smthrs
   ports:
     - name: gateway
       port: 3000
@@ -255,7 +255,7 @@ spec:
       port: 3001
 ```
 
-Workers set `SMITHERS_ORCHESTRATOR_URL=http://smithers-orchestrator:3001`.
+Workers set `SMITHERS_ORCHESTRATOR_URL=http://smthrs:3001`.
 
 ### Task Serialization
 
@@ -348,10 +348,10 @@ import { $ } from "bun";
 
 const tag = process.env.IMAGE_TAG ?? "latest";
 
-await $`docker build --target orchestrator -t smithers-orchestrator:${tag} .`;
+await $`docker build --target orchestrator -t smthrs:${tag} .`;
 await $`docker build --target worker -t smithers-worker:${tag} .`;
 
-console.log(`Built smithers-orchestrator:${tag} and smithers-worker:${tag}`);
+console.log(`Built smthrs:${tag} and smithers-worker:${tag}`);
 ```
 
 ### Alternative: Init Container (no custom image)
@@ -463,21 +463,21 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: smithers-orchestrator
+  name: smthrs
   namespace: smithers-system
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: smithers-orchestrator
+      app: smthrs
   template:
     metadata:
       labels:
-        app: smithers-orchestrator
+        app: smthrs
     spec:
       containers:
         - name: orchestrator
-          image: smithers-orchestrator:latest
+          image: smthrs:latest
           ports:
             - name: gateway
               containerPort: 3000
@@ -513,11 +513,11 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: smithers-orchestrator
+  name: smthrs
   namespace: smithers-system
 spec:
   selector:
-    app: smithers-orchestrator
+    app: smthrs
   ports:
     - name: gateway
       port: 3000
@@ -554,7 +554,7 @@ spec:
             - name: SMITHERS_ROLE
               value: worker
             - name: SMITHERS_ORCHESTRATOR_URL
-              value: http://smithers-orchestrator.smithers-system.svc.cluster.local:3001
+              value: http://smthrs.smithers-system.svc.cluster.local:3001
           envFrom:
             - secretRef:
                 name: smithers-api-keys
@@ -590,7 +590,7 @@ metadata:
 spec:
   type: LoadBalancer
   selector:
-    app: smithers-orchestrator
+    app: smthrs
   ports:
     - name: http
       port: 80
@@ -677,7 +677,7 @@ async function deploy() {
       await $`bun run scripts/build.ts`;
 
       // Load into minikube
-      await $`minikube image load smithers-orchestrator:latest`;
+      await $`minikube image load smthrs:latest`;
       await $`minikube image load smithers-worker:latest`;
 
       // Apply manifests
@@ -693,7 +693,7 @@ async function deploy() {
       await $`kubectl apply -f k8s/gateway.yaml`;
 
       // Wait for orchestrator
-      await $`kubectl wait --for=condition=ready pod -l app=smithers-orchestrator -n smithers-system --timeout=120s`;
+      await $`kubectl wait --for=condition=ready pod -l app=smthrs -n smithers-system --timeout=120s`;
 
       const url = await $`minikube service smithers-gateway -n smithers-system --url`.text();
       console.log(`Gateway available at: ${url.trim()}`);
@@ -768,7 +768,7 @@ deploy();
 
 [Fabrik](https://github.com/SamuelLHuber/local-isolated-ralph) by
 [Samuel Huber](https://github.com/SamuelLHuber) (dTech.vision) is an existing
-K3s-based Kubernetes layer for Smithers. It has `smithers-orchestrator` as a
+K3s-based Kubernetes layer for Smithers. It has `smthrs` as a
 direct dependency and takes a fundamentally different architecture.
 
 ### Fabrik Architecture

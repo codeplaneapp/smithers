@@ -6,8 +6,8 @@
 
 import * as Activity from "effect/unstable/workflow/Activity";
 import { Effect, Schema } from "effect";
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} _SmithersDb */
-/** @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} _SmithersDb */
+/** @typedef {import("@smthrs/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
 
 const adapterNamespaces = new WeakMap();
 /**

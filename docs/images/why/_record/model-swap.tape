@@ -22,12 +22,12 @@ Set Padding 18
 Type "# same workflow.tsx, three different harnesses, zero diff" Enter
 Sleep 1s
 
-Type "bunx smithers-orchestrator up workflow.tsx --input '{\"agent\":\"claude\"}'"  Sleep 300ms Enter
+Type "bunx smthrs up workflow.tsx --input '{\"agent\":\"claude\"}'"  Sleep 300ms Enter
 Sleep 4s
 
-Type "bunx smithers-orchestrator up workflow.tsx --input '{\"agent\":\"codex\"}'"  Sleep 300ms Enter
+Type "bunx smthrs up workflow.tsx --input '{\"agent\":\"codex\"}'"  Sleep 300ms Enter
 Sleep 4s
 
-Type "bunx smithers-orchestrator up workflow.tsx --input '{\"agent\":\"kimi\"}'"  Sleep 300ms Enter
+Type "bunx smthrs up workflow.tsx --input '{\"agent\":\"kimi\"}'"  Sleep 300ms Enter
 Sleep 4s
 Sleep 1s

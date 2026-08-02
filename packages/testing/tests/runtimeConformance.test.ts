@@ -1,13 +1,7 @@
 import React from "react";
 import { z } from "zod";
 import { describe, expect, test } from "bun:test";
-import {
-  createBrowserRuntime,
-  createBrowserSmithers,
-  defineBrowserWorkflow,
-  Task,
-  Workflow,
-} from "smithers-orchestrator/browser";
+import { createBrowserRuntime, createBrowserSmithers, defineBrowserWorkflow, Task, Workflow } from "smthrs/browser";
 import { assertRuntimeConformance } from "../src/runtimeConformance.ts";
 
 // A real Zod schema so `extractGraph` actually wires it in as `outputSchema`

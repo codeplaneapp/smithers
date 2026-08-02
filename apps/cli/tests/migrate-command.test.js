@@ -1,5 +1,5 @@
 import { expect, setDefaultTimeout, test } from "bun:test";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { createServer } from "node:net";
 import { createSmithers } from "../../../packages/smithers/src/create.js";
 import { createTempRepo, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
@@ -253,8 +253,8 @@ test("post-migration smithers workflow run fails loud for a sync createSmithers 
   repo.write(
     ".smithers/workflows/up-backend-test.tsx",
     [
-      "/** @jsxImportSource smithers-orchestrator */",
-      'import { createSmithers } from "smithers-orchestrator";',
+      "/** @jsxImportSource smthrs */",
+      'import { createSmithers } from "smthrs";',
       'import { z } from "zod";',
       "",
       "const { Workflow, Task, smithers, outputs } = createSmithers({",
@@ -333,8 +333,8 @@ test("post-migration smithers up honors SMITHERS_BACKEND=sqlite instead of marke
   repo.write(
     ".smithers/workflows/up-env-sqlite.tsx",
     [
-      "/** @jsxImportSource smithers-orchestrator */",
-      'import { createSmithers } from "smithers-orchestrator";',
+      "/** @jsxImportSource smthrs */",
+      'import { createSmithers } from "smthrs";',
       'import { z } from "zod";',
       "",
       "const { Workflow, Task, smithers, outputs } = createSmithers({",
@@ -389,8 +389,8 @@ test("authoritative pglite open failure stops workflow run instead of writing st
   repo.write(
     ".smithers/workflows/up-backend-fail.tsx",
     [
-      "/** @jsxImportSource smithers-orchestrator */",
-      'import { createSmithers } from "smithers-orchestrator";',
+      "/** @jsxImportSource smthrs */",
+      'import { createSmithers } from "smthrs";',
       'import { z } from "zod";',
       "",
       "const { Workflow, Task, smithers, outputs } = createSmithers({",

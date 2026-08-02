@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * Regression test: Loop `until` must re-evaluate from fresh DB data
  * after each iteration completes.
@@ -11,7 +11,7 @@
  * - The Loop should exit
  */
 import { describe, expect, test } from "bun:test";
-import { Loop, Sequence, Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { Loop, Sequence, Task, Workflow, runWorkflow } from "smthrs";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";

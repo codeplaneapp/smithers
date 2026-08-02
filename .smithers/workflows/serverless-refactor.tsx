@@ -2,7 +2,7 @@
 // smithers-display-name: Serverless Refactor (Codex 5.6 role split)
 // smithers-description: Drive the serverless refactor as Sol plan/review → Luna implement → Terra validate/PR loops, with non-Codex providers as failover-only.
 // smithers-tags: refactor, serverless, cloudflare, vercel, effect-platform, plan, implement, review, panel, worktree
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 //
 // The orchestration pattern (what the user asked for)
 // ---------------------------------------------------
@@ -39,7 +39,7 @@
 //    phase's PR before its dependents land, or run them in waves via `only`.
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
-import { createSmithers, Parallel, Sequence, Task, Worktree } from "smithers-orchestrator";
+import { createSmithers, Parallel, Sequence, Task, Worktree } from "smthrs";
 import { z } from "zod/v4";
 import { implementer, panelists, synthesizer, validator } from "../components/roles";
 import { PlanPanel, planOutputSchema, planSynthesisSchema } from "../components/PlanPanel";
@@ -167,9 +167,9 @@ const DEFAULT_TASKS: z.input<typeof taskSchema>[] = [
   {
     id: "3a-vercel-example-rebuild",
     title: "✨ feat(vercel-example): rebuild into a real multi-agent serverless showcase",
-    goal: "CROSS-REPO at /Users/williamcory/vercel-example. Today it is a Telegram-summary ECHO app (only summarizer is FixtureSummarizerPort — no agent ever runs in a function) and it is deploy-broken (pins smithers-orchestrator ^0.26.1 but imports smithers-orchestrator/telegram, added in 0.27 — clean npm install breaks next build; only works via a node_modules symlink). Make it the real showcase.",
+    goal: "CROSS-REPO at /Users/williamcory/vercel-example. Today it is a Telegram-summary ECHO app (only summarizer is FixtureSummarizerPort — no agent ever runs in a function) and it is deploy-broken (pins smthrs ^0.26.1 but imports smthrs/telegram, added in 0.27 — clean npm install breaks next build; only works via a node_modules symlink). Make it the real showcase.",
     files:
-      "/Users/williamcory/vercel-example: package.json (bump smithers-orchestrator ^0.26.1 → current, add engines node>=22), src/summary.ts + src/container.ts + src/pipeline.ts (replace FixtureSummarizerPort with real agent dispatch across a pool), src/db/pool.ts (Neon serverless/pooled driver), add a Vercel Sandbox offload for >20min agent work, vercel.json (maxDuration).",
+      "/Users/williamcory/vercel-example: package.json (bump smthrs ^0.26.1 → current, add engines node>=22), src/summary.ts + src/container.ts + src/pipeline.ts (replace FixtureSummarizerPort with real agent dispatch across a pool), src/db/pool.ts (Neon serverless/pooled driver), add a Vercel Sandbox offload for >20min agent work, vercel.json (maxDuration).",
     done: "clean `npm install && next build` green from the registry (no workspace symlink); a deployed function drives a REAL agent run across ≥2 agents; tests exercise the agents. Commit directly in that repo.",
     isolate: false,
   },
@@ -184,7 +184,7 @@ const DEFAULT_TASKS: z.input<typeof taskSchema>[] = [
   {
     id: "4a-dual-surface-e2e",
     title: "✅ test(cloudflare): dual-surface e2e — Workers isolate AND sandbox container",
-    goal: "Prove BOTH Cloudflare surfaces independently (a setup can pass in one and fail in the other): (1) Workers ISOLATE — importing `smithers-orchestrator` itself + createSmithersCloudflare + a workflow on DO-SQLite under Miniflare, asserting no bun:sqlite/node:fs/child_process leaks into the isolate; (2) sandbox CONTAINER — createCloudflareSandboxProvider running a real harness to a diff bundle. No mocks.",
+    goal: "Prove BOTH Cloudflare surfaces independently (a setup can pass in one and fail in the other): (1) Workers ISOLATE — importing `smthrs` itself + createSmithersCloudflare + a workflow on DO-SQLite under Miniflare, asserting no bun:sqlite/node:fs/child_process leaks into the isolate; (2) sandbox CONTAINER — createCloudflareSandboxProvider running a real harness to a diff bundle. No mocks.",
     files:
       "packages/cloudflare/tests/, e2e/. Use @cloudflare/vitest-pool-workers / Miniflare for the isolate lane. Same isolate-vs-Node split noted for Vercel (Edge vs Node fn).",
     done: "CI runs both lanes green on a clean box (seed a fake agent; skip browser-only). `pnpm -C packages/cloudflare test` + the new e2e lane pass.",

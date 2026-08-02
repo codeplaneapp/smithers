@@ -12,7 +12,7 @@ import {
   createSyntheticIdGenerator,
 } from "./BaseCliAgent/index.js";
 import { normalizeCapabilityStringList } from "./capability-registry/index.js";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 /**
  * The kimi CLI's OAuth refresh endpoint, mirroring the Python implementation
@@ -92,8 +92,8 @@ async function refreshKimiTokenIfNeeded(credsDir, fileName) {
       "Content-Type": "application/x-www-form-urlencoded",
       "X-Msh-Platform": "kimi_cli",
       "X-Msh-Version": "1.37.0",
-      "X-Msh-Device-Name": "smithers-orchestrator",
-      "X-Msh-Device-Model": "smithers-orchestrator",
+      "X-Msh-Device-Name": "smthrs",
+      "X-Msh-Device-Model": "smthrs",
       "X-Msh-Os-Version": process.platform,
     };
     try {

@@ -127,8 +127,8 @@ export async function runInitTutorial(opts) {
   try {
     const [{ Effect }, { runWorkflow }, { SmithersDb }] = await Promise.all([
       import("effect"),
-      import("@smithers-orchestrator/engine"),
-      import("@smithers-orchestrator/db/adapter"),
+      import("@smthrs/engine"),
+      import("@smthrs/db/adapter"),
     ]);
     const workflow = await buildInlineChatWorkflow({
       engine,

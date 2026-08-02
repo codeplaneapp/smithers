@@ -86,7 +86,7 @@ test(
     // Corrupt the durable workflow file so its import throws at load.
     repo.write(
       ".smithers/workflows/init.tsx",
-      '/** @jsxImportSource smithers-orchestrator */\nthrow new Error("intentionally broken init workflow");\n',
+      '/** @jsxImportSource smthrs */\nthrow new Error("intentionally broken init workflow");\n',
     );
 
     const broken = runSmithers(["init", "--no-install"], {

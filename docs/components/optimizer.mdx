@@ -5,7 +5,7 @@ description: Generate, evaluate, and improve in a loop until a target score is r
 
 ```ts
 // Props
-import { Optimizer } from "smithers-orchestrator";
+import { Optimizer } from "smthrs";
 
 type OptimizerProps = {
   id?: string; // default "optimizer"; task ids {id}-generate, {id}-evaluate
@@ -21,11 +21,11 @@ type OptimizerProps = {
 };
 ```
 
-Complete runnable example (renders with `bunx smithers-orchestrator graph`):
+Complete runnable example (renders with `bunx smthrs graph`):
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Optimizer, ClaudeCodeAgent } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, Optimizer, ClaudeCodeAgent } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, smithers, outputs } = createSmithers({
@@ -235,7 +235,7 @@ export const Task = createTaskComponent({ applyCliToolAllowlist });
 
 ```js useOptionalSmithersContext.js
 import React from "react";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
 
 /**
  * Read the workflow context when React is rendering the component, but allow
@@ -258,7 +258,7 @@ export function useOptionalSmithersContext() {
 
 ```ts OptimizerProps.ts
 import type React from "react";
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type OptimizerProps = {

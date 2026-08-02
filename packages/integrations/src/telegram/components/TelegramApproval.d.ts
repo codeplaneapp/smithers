@@ -5,7 +5,7 @@ import { TelegramCallbackQuerySchema } from '../schemas.js';
 import 'zod';
 import '../TelegramClientTypes.js';
 import 'effect';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 import '../approvalTypes.js';
 import './outboundProps.js';
 

@@ -12,9 +12,9 @@ instead of forking. Underneath, the runtime moved to Effect 4.
 ## Upgrading
 
 ```bash
-bunx smithers-orchestrator update        # upgrade the CLI
-bunx smithers-orchestrator upgrade       # agent-assisted: reads the changelogs and applies what your project needs
-bunx smithers-orchestrator packs update  # refresh installed workflow packs
+bunx smthrs update        # upgrade the CLI
+bunx smthrs upgrade       # agent-assisted: reads the changelogs and applies what your project needs
+bunx smthrs packs update  # refresh installed workflow packs
 ```
 
 Behavior changes are collected in the [upgrade notes](#upgrade-notes).
@@ -32,8 +32,8 @@ The launch commands also stop assuming loopback, so the Monitor works over
 Tailscale, a LAN, or an SSH tunnel:
 
 ```bash
-bunx smithers-orchestrator monitor --host 0.0.0.0
-# or: SMITHERS_GATEWAY_HOST=0.0.0.0 bunx smithers-orchestrator ui RUN_ID
+bunx smthrs monitor --host 0.0.0.0
+# or: SMITHERS_GATEWAY_HOST=0.0.0.0 bunx smthrs ui RUN_ID
 ```
 
 <Frame caption="The Monitor following a live run end to end: the run appears with a running status pill, the health banner reads Healthy while the execution tree progresses and events stream in, and it ends on Completed with 4/4 tasks done.">
@@ -76,12 +76,12 @@ an environmental reason, such as a missing service) from `approved: false` (a
 real rejection), so infrastructure trouble no longer reads as rejected work.
 
 Eval runs get the same treatment. A case that fails on a known harness
-signature is graded `INCONCLUSIVE` instead of failed, and `bunx smithers-orchestrator eval`
+signature is graded `INCONCLUSIVE` instead of failed, and `bunx smthrs eval`
 exits 5 (instead of 1) when every red case is inconclusive, so CI can tell
 "the work regressed" from "the harness fell over."
 
 ```bash
-bunx smithers-orchestrator eval suite.jsonl   # exit 5 = only inconclusive reds
+bunx smthrs eval suite.jsonl   # exit 5 = only inconclusive reds
 ```
 
 ## Resume a run whose workflow you edited
@@ -91,8 +91,8 @@ parked on `RESUME_METADATA_MISMATCH` after an in-flight workflow edit can
 continue instead of forcing a fork:
 
 ```bash
-bunx smithers-orchestrator retry-task RUN_ID TASK_ID --accept-workflow-change
-bunx smithers-orchestrator up --resume RUN_ID --accept-workflow-change
+bunx smthrs retry-task RUN_ID TASK_ID --accept-workflow-change
+bunx smthrs up --resume RUN_ID --accept-workflow-change
 ```
 
 The mismatch error names the flag, so the fix is in the message.
@@ -149,7 +149,7 @@ Each ships with its own live UI:
   decodes persisted UltraGrill and durable event frames correctly.
 - Monitor health no longer goes stale, and a run's durable sidecar identity is
   preserved across reads.
-- `bunx smithers-orchestrator usage` reports Kimi Code subscription quota alongside the other
+- `bunx smthrs usage` reports Kimi Code subscription quota alongside the other
   providers.
 - The VCS layer rejects mutable jj pointers so a revert or time-travel lands on
   a stable revision.
@@ -181,7 +181,7 @@ Each ships with its own live UI:
 - `allowNetwork: false` now permits loopback and unix-socket traffic. If you
   relied on it to isolate a task from local services, that isolation no longer
   holds; remote egress stays denied.
-- `bunx smithers-orchestrator eval` exits 5 when every red case is inconclusive. CI scripts that
+- `bunx smthrs eval` exits 5 when every red case is inconclusive. CI scripts that
   treat any nonzero exit as regression should special-case 5.
 - Runs stuck on `RESUME_METADATA_MISMATCH` after an in-flight workflow edit can
   resume with `--accept-workflow-change` instead of forking.
@@ -191,5 +191,5 @@ Each ships with its own live UI:
 This page is the tour, not the inventory. The complete commit-level list is
 in [CHANGELOG.md on GitHub](https://github.com/smithersai/smithers/blob/main/CHANGELOG.md).
 
-Found a bug? `bunx smithers-orchestrator bug` files it with your run context
+Found a bug? `bunx smthrs bug` files it with your run context
 attached.

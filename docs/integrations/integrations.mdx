@@ -3,7 +3,7 @@ title: Integrations
 description: Three patterns for connecting Smithers to external services.
 ---
 
-Smithers ships first-party event sources for GitHub, Linear, and Telegram (`@smithers-orchestrator/integrations`) that turn provider webhooks into durable workflow signals. For other services (Notion, Slack, etc.), your app owns the integration: pick tools on an SDK agent, skills/plugins/MCP on a CLI agent, or an external CLI run inside a task. If the service already exposes an MCP server and you're using an SDK agent, [MCP Toolset](/integrations/mcp-toolset) turns that server into AI SDK tools.
+Smithers ships first-party event sources for GitHub, Linear, and Telegram (`@smthrs/integrations`) that turn provider webhooks into durable workflow signals. For other services (Notion, Slack, etc.), your app owns the integration: pick tools on an SDK agent, skills/plugins/MCP on a CLI agent, or an external CLI run inside a task. If the service already exposes an MCP server and you're using an SDK agent, [MCP Toolset](/integrations/mcp-toolset) turns that server into AI SDK tools.
 
 ## Pattern 1: Pass tools to an SDK agent
 
@@ -31,7 +31,7 @@ const opsAgent = new Agent({
 Use this when your CLI agent already supports external integrations and Smithers should only orchestrate the task.
 
 ```ts
-import { PiAgent } from "smithers-orchestrator";
+import { PiAgent } from "smthrs";
 
 const pi = new PiAgent({
   provider: "openai",

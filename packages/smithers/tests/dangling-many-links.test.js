@@ -15,7 +15,7 @@ afterEach(() => {
 test("summarizes with '...and N more' when more than five links are dangling", () => {
   const root = mkdtempSync(join(tmpdir(), "smithers-dangling-many-"));
   tempRoots.push(root);
-  const scopeDir = join(root, "node_modules", "@smithers-orchestrator");
+  const scopeDir = join(root, "node_modules", "@smthrs");
   mkdirSync(scopeDir, { recursive: true });
   // Seven dangling links so the shown list (5) is exceeded and the summary
   // "...and N more" line fires.

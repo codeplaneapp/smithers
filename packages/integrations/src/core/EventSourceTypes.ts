@@ -1,6 +1,6 @@
 import type { Stream } from "effect";
 import type { ExternalEvent } from "./ExternalEventTypes.ts";
-import type { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import type { SmithersError } from "@smthrs/errors/SmithersError";
 
 /**
  * A process-wide source of external events. `events` is the (possibly

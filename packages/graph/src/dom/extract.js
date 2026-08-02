@@ -6,7 +6,7 @@
 import { resolveStableId } from "../utils/tree-ids.js";
 import { getTableName } from "drizzle-orm";
 import { DEFAULT_MERGE_QUEUE_CONCURRENCY, MERGE_QUEUE_PRIORITY, WORKTREE_EMPTY_PATH_ERROR } from "../constants.js";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { resolveWorktreePath } from "../worktree-path.js";
 import { coerceFiniteNumber } from "../utils/numeric-props.js";
 import { normalizeTaskSideEffect } from "../normalizeTaskSideEffect.js";
@@ -19,7 +19,7 @@ import { createSubflowResultError } from "../subflow-result-error.js";
 /** @typedef {import("../XmlNode.ts").XmlNode} XmlNode */
 
 // TODO(migration): Delegate extractFromHost to
-// @smithers-orchestrator/graph.extractGraph once core extraction reaches full
+// @smthrs/graph.extractGraph once core extraction reaches full
 // legacy parity. Current blockers:
 // - <Subflow> and <Sandbox> descriptors here attach runtime computeFn handlers
 //   that call executeChildWorkflow/executeSandbox; core extractGraph currently
@@ -480,7 +480,7 @@ export function extractFromHost(root, opts) {
           prompt: undefined,
           staticPayload: undefined,
           computeFn: async () => {
-            const { executeChildWorkflow } = await loadRuntimeModule("@smithers-orchestrator/engine/child-workflow");
+            const { executeChildWorkflow } = await loadRuntimeModule("@smthrs/engine/child-workflow");
             const result = await executeChildWorkflow(undefined, {
               workflow: raw.__smithersSubflowWorkflow,
               input: raw.__smithersSubflowInput,
@@ -583,9 +583,9 @@ export function extractFromHost(root, opts) {
         staticPayload: undefined,
         computeFn: async () => {
           const [{ executeSandbox }, { executeChildWorkflow }, { applyDiffBundle }] = await Promise.all([
-            loadRuntimeModule("@smithers-orchestrator/sandbox/execute"),
-            loadRuntimeModule("@smithers-orchestrator/engine/child-workflow"),
-            loadRuntimeModule("@smithers-orchestrator/engine/effect/diff-bundle"),
+            loadRuntimeModule("@smthrs/sandbox/execute"),
+            loadRuntimeModule("@smthrs/engine/child-workflow"),
+            loadRuntimeModule("@smthrs/engine/effect/diff-bundle"),
           ]);
           if (!workflowDef) {
             throw new SmithersError("INVALID_INPUT", `Sandbox ${nodeId} is missing workflow definition.`, { nodeId });

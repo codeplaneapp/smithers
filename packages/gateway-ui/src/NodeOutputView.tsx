@@ -1,7 +1,7 @@
 /** @jsxImportSource react */
 import type { CSSProperties } from "react";
-import { useGatewayNodeOutput } from "@smithers-orchestrator/gateway-react";
-import { AgentOutput, parseAgentOutput } from "@smithers-orchestrator/ui";
+import { useGatewayNodeOutput } from "@smthrs/gateway-react";
+import { AgentOutput, parseAgentOutput } from "@smthrs/ui";
 import { theme } from "./theme";
 
 export type NodeOutputViewProps = {

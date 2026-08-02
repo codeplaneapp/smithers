@@ -171,7 +171,7 @@ type WorkspaceSnapshot = {
  * A resolved VCS executable plus where Smithers found it.
  *
  * - `env`: an explicit override (e.g. `SMITHERS_JJ_PATH`)
- * - `bundled`: a binary shipped inside a `@smithers-orchestrator/jj-<platform>` package
+ * - `bundled`: a binary shipped inside a `@smthrs/jj-<platform>` package
  * - `path`: the bare command name, left for the OS to resolve against `PATH`
  */
 type ResolvedBinary = {
@@ -236,7 +236,7 @@ declare function resolveBundledJjPath({ platform, arch, resolvePackage, fileExis
  *      existing override remains authoritative so a bad explicit path is
  *      reported instead of silently running a different binary.
  *   2. An executable binary bundled via
- *      `@smithers-orchestrator/jj-<platform>` (`.exe` existence on Windows).
+ *      `@smthrs/jj-<platform>` (`.exe` existence on Windows).
  *   3. The bare `"jj"`, left for the OS to resolve against `PATH`.
  *
  * Always returns a spawnable command. When jj is genuinely absent the bare

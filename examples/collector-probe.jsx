@@ -5,11 +5,11 @@
  * Shape: invocation -> collector -> anomaly detector / report.
  * Pattern: Loop monitors successive invocations, flags drift, emits report.
  */
-import { Sequence, Loop } from "smithers-orchestrator";
+import { Sequence, Loop } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import InvocationPrompt from "./prompts/collector-probe/invocation.mdx";
 import CollectorPrompt from "./prompts/collector-probe/collector.mdx";

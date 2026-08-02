@@ -1,4 +1,4 @@
-# @smithers-orchestrator/review — src
+# @smthrs/review — src
 
 Source for `smithers-review`: a CLI (the package `bin` points at `cli/main.ts`)
 that reviews a change set with agents and renders a self-contained HTML

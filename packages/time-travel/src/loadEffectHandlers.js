@@ -1,12 +1,12 @@
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { getTableName } from "drizzle-orm";
-import { loadInput, loadOutputs } from "@smithers-orchestrator/db/snapshot";
-import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler";
+import { loadInput, loadOutputs } from "@smthrs/db/snapshot";
+import { SmithersCtx } from "@smthrs/driver/SmithersCtx";
+import { SmithersRenderer } from "@smthrs/react-reconciler";
 import { validateWorkflowIdentity } from "./validateWorkflowIdentity.js";
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./EffectHandlerRegistry.ts").EffectHandlerRegistry} EffectHandlerRegistry */
 
 /**
@@ -154,9 +154,7 @@ export async function loadEffectHandlers(db, runId) {
   }
   for (const task of graph.tasks) {
     if (task.sideEffect) {
-      tasks.set(task.nodeId, {
-        ...(typeof task.sideEffect.revert === "function" ? { revert: task.sideEffect.revert } : {}),
-      });
+      tasks.set(task.nodeId, typeof task.sideEffect.revert === "function" ? { revert: task.sideEffect.revert } : {});
     }
     const taskTools = task.tools && typeof task.tools === "object" ? Object.entries(task.tools) : [];
     for (const [registeredName, tool] of taskTools) {

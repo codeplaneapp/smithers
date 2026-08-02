@@ -1,5 +1,5 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { createCommandSandboxProvider } from "@smithers-orchestrator/sandbox";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { createCommandSandboxProvider } from "@smthrs/sandbox";
 import { DAYTONA_SANDBOX_PROVIDER_ID } from "./DAYTONA_SANDBOX_PROVIDER_ID.js";
 
 const DEFAULT_AUTO_STOP_INTERVAL_MINUTES = 15;
@@ -14,7 +14,7 @@ const SECRET_KEY_RE = /token|secret|key|password|credential|authorization|passwd
  * `sandbox.process.executeCommand`, `daytona.delete`).
  *
  * @param {import("./DaytonaSandboxProviderOptions.ts").DaytonaSandboxProviderOptions} [options]
- * @returns {import("@smithers-orchestrator/sandbox").SandboxProvider}
+ * @returns {import("@smthrs/sandbox").SandboxProvider}
  */
 export function createDaytonaSandboxProvider(options = {}) {
   const id = options.id ?? DAYTONA_SANDBOX_PROVIDER_ID;
@@ -172,7 +172,7 @@ async function loadDaytonaSdk(id, importSdk) {
  * `persistence`).
  *
  * @param {import("./DaytonaSandboxProviderOptions.ts").DaytonaSandboxProviderOptions} options
- * @param {import("@smithers-orchestrator/sandbox").SandboxProviderRequest} request
+ * @param {import("@smthrs/sandbox").SandboxProviderRequest} request
  * @returns {import("./DaytonaSandboxProviderOptions.ts").DaytonaCreateOptions}
  */
 function resolveDaytonaCreateOptions(options, request) {
@@ -195,7 +195,7 @@ function resolveDaytonaCreateOptions(options, request) {
     ephemeral = false;
   }
 
-  const labels = { ...(options.labels ?? {}), ...(asStringRecord(config.labels) ?? {}) };
+  const labels = { ...options.labels, ...asStringRecord(config.labels) };
   const resources = asResources(config.resources) ?? options.resources;
 
   /** @type {import("./DaytonaSandboxProviderOptions.ts").DaytonaCreateOptions} */

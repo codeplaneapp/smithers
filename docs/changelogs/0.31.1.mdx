@@ -13,9 +13,9 @@ touches 1,234 files, with 108,016 insertions and 20,757 deletions.
 ## Upgrading
 
 ```bash
-bunx smithers-orchestrator update        # upgrade the CLI
-bunx smithers-orchestrator upgrade       # agent-assisted: reads the changelogs and applies what your project needs
-bunx smithers-orchestrator packs update  # refresh installed workflow packs
+bunx smthrs update        # upgrade the CLI
+bunx smthrs upgrade       # agent-assisted: reads the changelogs and applies what your project needs
+bunx smthrs packs update  # refresh installed workflow packs
 ```
 
 Behavior changes are collected in the [upgrade notes](#upgrade-notes).
@@ -32,7 +32,7 @@ you define for stalled or wedged-node conditions, and escalates to a durable
 - Healing actions are ordinary workflow code, so a monitor can retry a node,
   resume a parked run, or gather diagnostics before waking you.
 - Escalations are durable human requests, so the question survives restarts
-  and shows up in `bunx smithers-orchestrator human inbox` and the Monitor UI.
+  and shows up in `bunx smthrs human inbox` and the Monitor UI.
 - This is a first release of the surface; expect the condition vocabulary to
   grow in coming versions.
 
@@ -43,8 +43,8 @@ end: resuming failed with `RESUME_METADATA_MISMATCH` and your only option was
 forking a fresh run. Now you decide:
 
 ```bash
-bunx smithers-orchestrator retry-task RUN_ID TASK_ID --accept-workflow-change
-bunx smithers-orchestrator up --resume RUN_ID --accept-workflow-change
+bunx smthrs retry-task RUN_ID TASK_ID --accept-workflow-change
+bunx smthrs up --resume RUN_ID --accept-workflow-change
 ```
 
 - The run carries the edited workflow forward from the resume point.
@@ -106,7 +106,7 @@ This is where much of the release's hardening work went.
   denied, and denial errors name the `--allow-network` escape hatch.
 - **Evals stop blaming your workflow for harness deaths.** A red case whose
   failure matches a harness signature (network, DNS, OOM, rate limit) is now
-  graded INCONCLUSIVE instead of failed, and `bunx smithers-orchestrator eval` exits with code
+  graded INCONCLUSIVE instead of failed, and `bunx smthrs eval` exits with code
   5 when every red case is inconclusive, so CI can retry instead of
   reverting good work.
 
@@ -138,7 +138,7 @@ This is where much of the release's hardening work went.
   completion.
 - Sandboxed tasks with `allowNetwork: false` can now reach loopback services.
   If you relied on loopback being blocked, that is no longer the case.
-- `bunx smithers-orchestrator eval` can now exit with code 5 (all red cases inconclusive).
+- `bunx smthrs eval` can now exit with code 5 (all red cases inconclusive).
   CI scripts that treat any nonzero exit as a regression should handle it as
   a retry signal.
 
@@ -147,5 +147,5 @@ This is where much of the release's hardening work went.
 This page is the tour, not the inventory. The complete commit-level list is in
 [CHANGELOG.md on GitHub](https://github.com/smithersai/smithers/blob/main/CHANGELOG.md).
 
-Found a bug? `bunx smithers-orchestrator bug` files it with run context
+Found a bug? `bunx smthrs bug` files it with run context
 attached.

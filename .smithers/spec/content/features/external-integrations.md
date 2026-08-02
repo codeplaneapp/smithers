@@ -28,10 +28,10 @@ The standalone package handles secret verification, update normalization, typed 
 
 ## Endpoints and commands
 
-- `API @smithers-orchestrator/integrations/github` ([docs](docs/integrations/integrations.mdx))
-- `API @smithers-orchestrator/integrations/linear` ([docs](docs/integrations/integrations.mdx))
-- `API @smithers-orchestrator/integrations/telegram` ([docs](docs/integrations/telegram.mdx))
-- `API smithers-orchestrator/telegram` ([docs](docs/integrations/telegram.mdx))
+- `API @smthrs/integrations/github` ([docs](docs/integrations/integrations.mdx))
+- `API @smthrs/integrations/linear` ([docs](docs/integrations/integrations.mdx))
+- `API @smthrs/integrations/telegram` ([docs](docs/integrations/telegram.mdx))
+- `API smthrs/telegram` ([docs](docs/integrations/telegram.mdx))
 
 ## Related docs
 

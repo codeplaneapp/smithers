@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { renderWorkflow, runTask } from "smithers-orchestrator/testing";
+import { renderWorkflow, runTask } from "smthrs/testing";
 import workflow, {
   ARMS,
   ARM_CONFIG,

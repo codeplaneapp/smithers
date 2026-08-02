@@ -1,4 +1,4 @@
-import { ClaudeCodeAgent, CodexAgent } from "smithers-orchestrator";
+import { ClaudeCodeAgent, CodexAgent } from "smthrs";
 
 /**
  * Bash command prefixes the coding agents may run inside a repo checkout. Kept

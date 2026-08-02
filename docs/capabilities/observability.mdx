@@ -44,7 +44,7 @@ Every event carries `type`, `runId`, `timestampMs`; node-scoped events add `node
 `runWorkflow` (and `createSmithers` run options) take `onProgress` and `onError` callbacks:
 
 ```tsx
-import { runWorkflow } from "smithers-orchestrator";
+import { runWorkflow } from "smthrs";
 import { Effect } from "effect";
 import workflow from "./workflow";
 
@@ -65,10 +65,10 @@ Remote consumers get the same events over the Gateway's WebSocket (`streamRunEve
 
 ### OTel traces, metrics, and logs
 
-`createSmithersObservabilityLayer` (from `smithers-orchestrator/observability`) wires the Effect runtime's logger, an OTLP exporter, and the metrics service in one layer:
+`createSmithersObservabilityLayer` (from `smthrs/observability`) wires the Effect runtime's logger, an OTLP exporter, and the metrics service in one layer:
 
 ```ts
-import { createSmithersObservabilityLayer } from "smithers-orchestrator/observability";
+import { createSmithersObservabilityLayer } from "smthrs/observability";
 
 const layer = createSmithersObservabilityLayer({
   enabled: true,                          // or SMITHERS_OTEL_ENABLED=1
@@ -86,7 +86,7 @@ The metric catalog is large and specific: 150+ definitions covering run/node/att
 A full local backend ships in the repo:
 
 ```bash
-bunx smithers-orchestrator observability   # docker compose -f observability/docker-compose.otel.yml
+bunx smthrs observability   # docker compose -f observability/docker-compose.otel.yml
 ```
 
 That starts an OTLP Collector (gRPC 4317, HTTP 4318), Prometheus (9090), Tempo for traces, Loki for logs, and Grafana with pre-built dashboards. The layer's default endpoint (`http://localhost:4318`) points at exactly this collector.
@@ -94,21 +94,21 @@ That starts an OTLP Collector (gRPC 4317, HTTP 4318), Prometheus (9090), Tempo f
 ### Watching a run live
 
 ```bash
-bunx smithers-orchestrator status RUN_ID            # verdict, node counts, agent/model mix, gating nodes
-bunx smithers-orchestrator inspect RUN_ID --watch   # full run state, live
-bunx smithers-orchestrator events RUN_ID --watch    # lifecycle stream; --type tool-call --node analyze to filter, --raw for agent chunks
-bunx smithers-orchestrator logs RUN_ID              # tail the event log
-bunx smithers-orchestrator node NODE_ID --runId RUN_ID   # retries, tool calls, output for one node
-bunx smithers-orchestrator what RUN_ID              # a cheap agent narrates the recorded facts
-bunx smithers-orchestrator why RUN_ID               # names the real blocker and prints the exact unblock command
-bunx smithers-orchestrator monitor                  # live web UI over every run in the workspace
+bunx smthrs status RUN_ID            # verdict, node counts, agent/model mix, gating nodes
+bunx smthrs inspect RUN_ID --watch   # full run state, live
+bunx smthrs events RUN_ID --watch    # lifecycle stream; --type tool-call --node analyze to filter, --raw for agent chunks
+bunx smthrs logs RUN_ID              # tail the event log
+bunx smthrs node NODE_ID --runId RUN_ID   # retries, tool calls, output for one node
+bunx smthrs what RUN_ID              # a cheap agent narrates the recorded facts
+bunx smthrs why RUN_ID               # names the real blocker and prints the exact unblock command
+bunx smthrs monitor                  # live web UI over every run in the workspace
 ```
 
 `what` and `why` are the event-sourcing payoff in miniature: they read the log, not the process, so they work on a run whose process died yesterday. The [Monitor](/guides/monitor) is the same idea as a web page - approvals inbox, live run rows, frames, and the raw event stream, served by the workspace gateway with zero UI code.
 
 ### Alerts and provenance
 
-Observability feeds two enforcement layers. `alertPolicy` on `createSmithers()` attaches ownership, severity, runbooks, and deterministic reactions to workflows; fired alerts become durable rows (`_smithers_alerts`) managed with `bunx smithers-orchestrator alerts` - see [Alerting](/guides/alerting). [Provenance binding](/concepts/provenance) goes further: because every approval and artifact is an event with a digest, the engine can *enforce* that a task only runs against the exact upstream artifact that authorized it, parking the task when authority is stale.
+Observability feeds two enforcement layers. `alertPolicy` on `createSmithers()` attaches ownership, severity, runbooks, and deterministic reactions to workflows; fired alerts become durable rows (`_smithers_alerts`) managed with `bunx smthrs alerts` - see [Alerting](/guides/alerting). [Provenance binding](/concepts/provenance) goes further: because every approval and artifact is an event with a digest, the engine can *enforce* that a task only runs against the exact upstream artifact that authorized it, parking the task when authority is stale.
 
 ## Guarantees and limits
 
@@ -119,7 +119,7 @@ Observability feeds two enforcement layers. `alertPolicy` on `createSmithers()` 
 - **No hosted dashboard.** There is no smithers.sh cloud UI with retention, sharing, and org-wide search. You run the Monitor locally and bring your own Grafana/Tempo/Loki (or point OTLP at Datadog/Langfuse/Phoenix - the exporter is standard).
 - **No `gen_ai.*` semconv yet.** Spans use `smithers.*` attributes, not the OTel GenAI conventions - defensible while those remain pre-stable, but tools that key on `gen_ai.operation.name` won't auto-recognize Smithers spans.
 - **OTel export is best-effort telemetry**, opt-in and off by default. The event log is the durable record; if the collector is down, spans drop, events don't.
-- **Evals are adjacent, not fused.** Scorer results are events (`ScorerFinished`) and rows, but Smithers does not turn production traces into eval datasets the way Braintrust or LangSmith do; `bunx smithers-orchestrator eval` runs suites explicitly.
+- **Evals are adjacent, not fused.** Scorer results are events (`ScorerFinished`) and rows, but Smithers does not turn production traces into eval datasets the way Braintrust or LangSmith do; `bunx smthrs eval` runs suites explicitly.
 - A few union variants are reserved but not currently emitted (e.g. `RunStateChanged`, `OpenApiToolCalled`) - documented as such in Event Types.
 
 ## Operating it

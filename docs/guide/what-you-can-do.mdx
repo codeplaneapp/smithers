@@ -99,7 +99,7 @@ Smithers runs are durable: they survive crashes, restarts, and flaky tools, trac
 
 > "Keep working on reducing flaky tests. Don't stop until I tell you to."
 
-Your agent runs [`ralph`](/workflows/ralph), an unbounded loop that re-runs the smart agent on your prompt. Say stop and it runs `bunx smithers-orchestrator cancel RUN_ID`.
+Your agent runs [`ralph`](/workflows/ralph), an unbounded loop that re-runs the smart agent on your prompt. Say stop and it runs `bunx smthrs cancel RUN_ID`.
 
 <Frame caption="ralph loops the same prompt indefinitely, so a long-grind task keeps making progress while you're away.">
   <img src="/images/workflow-ui/ralph.png" alt="Smithers workflow UI showing ralph running a single agent task in an unbounded loop" />
@@ -109,13 +109,13 @@ Your agent runs [`ralph`](/workflows/ralph), an unbounded loop that re-runs the 
 
 > "Every morning, scan the repo for stale TODOs and broken doc examples and open fixes."
 
-Your agent registers a cron schedule (`bunx smithers-orchestrator cron add`) to run the workflow automatically. Ask what's scheduled with `bunx smithers-orchestrator cron list`.
+Your agent registers a cron schedule (`bunx smthrs cron add`) to run the workflow automatically. Ask what's scheduled with `bunx smthrs cron list`.
 
 **Gate on your approval.** Say:
 
 > "Draft the release blog post, but don't publish until I approve it."
 
-The workflow durably suspends at an approval gate. Say "approve it" and your agent runs `bunx smithers-orchestrator approve`, resuming right where it left off: work happens while you're away, the irreversible step waits for you. `mission` uses the same gate for its milestone-plan sign-off.
+The workflow durably suspends at an approval gate. Say "approve it" and your agent runs `bunx smthrs approve`, resuming right where it left off: work happens while you're away, the irreversible step waits for you. `mission` uses the same gate for its milestone-plan sign-off.
 
 ## Make your own workflows discoverable
 

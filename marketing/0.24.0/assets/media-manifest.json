@@ -9,25 +9,25 @@
       "file": "marketing/0.24.0/assets/tweet-01-hero.svg",
       "sibling": "assets/tweet-01-hero.svg",
       "captureRecommended": false,
-      "command": "bunx smithers-orchestrator gateway"
+      "command": "bunx smthrs gateway"
     },
     {
       "tweetIndex": 2,
       "kind": "terminal",
-      "suggestion": "terminal screenshot of `bunx smithers-orchestrator gateway` startup output showing workspace and DB paths",
+      "suggestion": "terminal screenshot of `bunx smthrs gateway` startup output showing workspace and DB paths",
       "file": "marketing/0.24.0/assets/tweet-02-terminal.svg",
       "sibling": "assets/tweet-02-terminal.svg",
       "captureRecommended": true,
-      "command": "bunx smithers-orchestrator gateway"
+      "command": "bunx smthrs gateway"
     },
     {
       "tweetIndex": 3,
       "kind": "terminal",
-      "suggestion": "terminal screenshot of `bunx smithers-orchestrator inspect` output showing input schema fields alongside a run summary",
+      "suggestion": "terminal screenshot of `bunx smthrs inspect` output showing input schema fields alongside a run summary",
       "file": "marketing/0.24.0/assets/tweet-03-terminal.svg",
       "sibling": "assets/tweet-03-terminal.svg",
       "captureRecommended": true,
-      "command": "bunx smithers-orchestrator inspect"
+      "command": "bunx smthrs inspect"
     },
     {
       "tweetIndex": 4,
@@ -45,25 +45,25 @@
       "file": "marketing/0.24.0/assets/tweet-05-terminal.svg",
       "sibling": "assets/tweet-05-terminal.svg",
       "captureRecommended": true,
-      "command": "bunx smithers-orchestrator up -d"
+      "command": "bunx smthrs up -d"
     },
     {
       "tweetIndex": 6,
       "kind": "terminal",
-      "suggestion": "terminal screenshot of `bunx smithers-orchestrator init` completing without errors",
+      "suggestion": "terminal screenshot of `bunx smthrs init` completing without errors",
       "file": "marketing/0.24.0/assets/tweet-06-terminal.svg",
       "sibling": "assets/tweet-06-terminal.svg",
       "captureRecommended": true,
-      "command": "bunx smithers-orchestrator init"
+      "command": "bunx smthrs init"
     },
     {
       "tweetIndex": 7,
       "kind": "terminal",
-      "suggestion": "terminal screenshot of `bunx smithers-orchestrator observability` starting the Docker Compose stack",
+      "suggestion": "terminal screenshot of `bunx smthrs observability` starting the Docker Compose stack",
       "file": "marketing/0.24.0/assets/tweet-07-terminal.svg",
       "sibling": "assets/tweet-07-terminal.svg",
       "captureRecommended": true,
-      "command": "bunx smithers-orchestrator observability"
+      "command": "bunx smthrs observability"
     },
     {
       "tweetIndex": 8,
@@ -78,28 +78,28 @@
   "captures": [
     {
       "tweetIndex": 2,
-      "command": "bunx smithers-orchestrator gateway",
-      "suggestion": "terminal screenshot of `bunx smithers-orchestrator gateway` startup output showing workspace and DB paths"
+      "command": "bunx smthrs gateway",
+      "suggestion": "terminal screenshot of `bunx smthrs gateway` startup output showing workspace and DB paths"
     },
     {
       "tweetIndex": 3,
-      "command": "bunx smithers-orchestrator inspect",
-      "suggestion": "terminal screenshot of `bunx smithers-orchestrator inspect` output showing input schema fields alongside a run summary"
+      "command": "bunx smthrs inspect",
+      "suggestion": "terminal screenshot of `bunx smthrs inspect` output showing input schema fields alongside a run summary"
     },
     {
       "tweetIndex": 5,
-      "command": "bunx smithers-orchestrator up -d",
+      "command": "bunx smthrs up -d",
       "suggestion": "terminal screenshot showing a detached run's events arriving in a connected Gateway client"
     },
     {
       "tweetIndex": 6,
-      "command": "bunx smithers-orchestrator init",
-      "suggestion": "terminal screenshot of `bunx smithers-orchestrator init` completing without errors"
+      "command": "bunx smthrs init",
+      "suggestion": "terminal screenshot of `bunx smthrs init` completing without errors"
     },
     {
       "tweetIndex": 7,
-      "command": "bunx smithers-orchestrator observability",
-      "suggestion": "terminal screenshot of `bunx smithers-orchestrator observability` starting the Docker Compose stack"
+      "command": "bunx smthrs observability",
+      "suggestion": "terminal screenshot of `bunx smthrs observability` starting the Docker Compose stack"
     }
   ]
 }

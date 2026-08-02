@@ -73,21 +73,21 @@ backpressure → approve → execute → report.
 ```bash
 # Launch the concierge on a vague script. --review true (default) inserts the
 # approval gate; --review false runs straight through.
-bunx smithers-orchestrator workflow run context-engineer \
+bunx smthrs workflow run context-engineer \
   --prompt "I need the agent to help me harden our rate limiting and prove it works"
 
 # Watch it
-bunx smithers-orchestrator ps                       # active / paused / recent runs
-bunx smithers-orchestrator logs <run-id> -f         # follow the event stream
-bunx smithers-orchestrator inspect <run-id>         # full run state (contract, route, gates)
-bunx smithers-orchestrator why <run-id>             # why is it paused?
+bunx smthrs ps                       # active / paused / recent runs
+bunx smthrs logs <run-id> -f         # follow the event stream
+bunx smthrs inspect <run-id>         # full run state (contract, route, gates)
+bunx smthrs why <run-id>             # why is it paused?
 
 # Clear the design-approval gate once you've read the contract
-bunx smithers-orchestrator approve <run-id> --node approve-contract --by <name>
-bunx smithers-orchestrator deny <run-id> --node approve-contract   # send it back
+bunx smthrs approve <run-id> --node approve-contract --by <name>
+bunx smthrs deny <run-id> --node approve-contract   # send it back
 
 # Bail out
-bunx smithers-orchestrator cancel <run-id>
+bunx smthrs cancel <run-id>
 ```
 
 The run **pauses durably** at `approve-contract` (a suspended run is a row,

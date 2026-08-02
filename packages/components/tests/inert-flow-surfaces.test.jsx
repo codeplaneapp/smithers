@@ -1,6 +1,6 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
-import { SmithersDb, Subflow, runWorkflow } from "smithers-orchestrator";
+import { SmithersDb, Subflow, runWorkflow } from "smthrs";
 import { createTestSmithers } from "./helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";
@@ -95,7 +95,7 @@ describe("<Task memory> is inert at runtime (known gap)", () => {
       // BUG (documented gap): the memory prop is extracted onto the task
       // descriptor as `memoryConfig` (packages/graph/src/extract.js) but no
       // engine/scheduler code consumes it — the engine never imports
-      // @smithers-orchestrator/memory. The agent sees the authored prompt
+      // @smthrs/memory. The agent sees the authored prompt
       // only, with no recalled facts injected and nothing remembered. When
       // memory integration lands, rewrite this test to assert recall/save.
       expect(result.status).toBe("finished");

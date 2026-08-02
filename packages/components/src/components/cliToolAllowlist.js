@@ -5,11 +5,11 @@
 // Node-only CLI agent classes (they use `node:child_process` under the
 // hood), which would otherwise be the one thing standing between Task.js and
 // a clean browser bundle.
-import { AntigravityAgent } from "@smithers-orchestrator/agents/AntigravityAgent";
-import { ClaudeCodeAgent } from "@smithers-orchestrator/agents/ClaudeCodeAgent";
-import { GeminiAgent } from "@smithers-orchestrator/agents/GeminiAgent";
-import { PiAgent } from "@smithers-orchestrator/agents/PiAgent";
-/** @typedef {import("@smithers-orchestrator/agents/AgentLike").AgentLike} AgentLike */
+import { AntigravityAgent } from "@smthrs/agents/AntigravityAgent";
+import { ClaudeCodeAgent } from "@smthrs/agents/ClaudeCodeAgent";
+import { GeminiAgent } from "@smthrs/agents/GeminiAgent";
+import { PiAgent } from "@smthrs/agents/PiAgent";
+/** @typedef {import("@smthrs/agents/AgentLike").AgentLike} AgentLike */
 
 /**
  * @param {AgentLike} agent

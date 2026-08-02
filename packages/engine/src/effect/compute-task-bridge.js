@@ -1,28 +1,28 @@
 import { Cause, Duration, Effect, Exit, Metric, Result, Schedule } from "effect";
-import { buildOutputRow, stripAutoColumns, validateOutput } from "@smithers-orchestrator/db/output";
-import { TaskHeartbeatTimeout } from "@smithers-orchestrator/errors/TaskHeartbeatTimeout";
-import { TaskTimeout } from "@smithers-orchestrator/errors/TaskTimeout";
+import { buildOutputRow, stripAutoColumns, validateOutput } from "@smthrs/db/output";
+import { TaskHeartbeatTimeout } from "@smthrs/errors/TaskHeartbeatTimeout";
+import { TaskTimeout } from "@smthrs/errors/TaskTimeout";
 import { makeAbortError, wireAbortSignal } from "./bridge-utils.js";
-import { withTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
+import { withTaskRuntime } from "@smthrs/driver/task-runtime";
 import { getSubflowChildRunId } from "../task-compute-fns.js";
-import { logDebug, logError, logInfo, logWarning } from "@smithers-orchestrator/observability/logging";
-import { attemptDuration, nodeDuration } from "@smithers-orchestrator/observability/metrics";
-import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
-import { fromTaggedError } from "@smithers-orchestrator/errors/fromTaggedError";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
-import { getJjPointer } from "@smithers-orchestrator/vcs/jj";
+import { logDebug, logError, logInfo, logWarning } from "@smthrs/observability/logging";
+import { attemptDuration, nodeDuration } from "@smthrs/observability/metrics";
+import { errorToJson } from "@smthrs/errors/errorToJson";
+import { fromTaggedError } from "@smthrs/errors/fromTaggedError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { nowMs } from "@smthrs/scheduler/nowMs";
+import { getJjPointer } from "@smthrs/vcs/jj";
 import { buildOutputValidationDiagnostics } from "../output-validation-diagnostics.js";
 import { getPlatformLayer } from "../platform-layer.js";
 import { sleep } from "../sleep.js";
 import { createHash } from "node:crypto";
-import { runWithToolContext } from "@smithers-orchestrator/tool-context";
+import { runWithToolContext } from "@smthrs/tool-context";
 import { createToolJournalContext } from "../createToolJournalContext.js";
 /**
  * @typedef {{ rootDir: string; }} ComputeTaskBridgeToolConfig
  */
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} _SmithersDb */
-/** @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} _SmithersDb */
+/** @typedef {import("@smthrs/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<Record<string, unknown>>} _BunSQLiteDatabase */
 
 // Floor between heartbeat DB writes so a hot heartbeat() loop cannot hammer

@@ -1,4 +1,4 @@
-import type { SmithersCtx } from "@smithers-orchestrator/driver";
+import type { SmithersCtx } from "@smthrs/driver";
 import { z } from "zod";
 const report = z.object({ title: z.string(), count: z.number() });
 declare const ctx: SmithersCtx<{ report: typeof report }>;

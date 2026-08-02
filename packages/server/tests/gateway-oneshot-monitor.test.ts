@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import React from "react";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { createSmithers } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { Gateway } from "../src/gateway.js";
 
 const cleanups: Array<() => Promise<void> | void> = [];

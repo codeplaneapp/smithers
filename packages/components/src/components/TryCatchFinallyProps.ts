@@ -1,6 +1,6 @@
 import type React from "react";
-import type { SmithersErrorCode } from "@smithers-orchestrator/errors/SmithersErrorCode";
-import type { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import type { SmithersErrorCode } from "@smthrs/errors/SmithersErrorCode";
+import type { SmithersError } from "@smthrs/errors/SmithersError";
 
 export type TryCatchFinallyProps = {
   id?: string;

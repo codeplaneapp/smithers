@@ -1,5 +1,5 @@
-import { SmithersError } from "@smithers-orchestrator/errors";
-import { DEFAULT_AGENT_ASK_NODE_ID } from "@smithers-orchestrator/engine/human-requests";
+import { SmithersError } from "@smthrs/errors";
+import { DEFAULT_AGENT_ASK_NODE_ID } from "@smthrs/engine/human-requests";
 
 /**
  * Run statuses we treat as "in progress" for autodetecting which run an ad-hoc

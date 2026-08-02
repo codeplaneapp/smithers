@@ -1,4 +1,4 @@
-# Workflow testing library (`smithers-orchestrator/testing`)
+# Workflow testing library (`smthrs/testing`)
 
 Status: proposed. Author: will@tevm.tech (+ Claude). Date: 2026-07-03.
 Target package version at time of writing: 0.26.1.
@@ -62,22 +62,22 @@ evidence. This section is what the design stands on.
 
 ### Hard constraints (these shape the whole design)
 
-1. **The `smithers-orchestrator` barrel pulls `bun:sqlite` at module load.** The
+1. **The `smthrs` barrel pulls `bun:sqlite` at module load.** The
    barrel re-exports the engine (`packages/smithers/src/index.js:196-206`); the
    engine index statically imports `bun:sqlite` via
    `packages/engine/src/effect/builder.js:1` and imports
    `@effect/platform-bun/BunContext` (`engine.js:34`). So
-   `import { createSmithers } from "smithers-orchestrator"` (what every seeded
+   `import { createSmithers } from "smthrs"` (what every seeded
    workflow does) evaluates `bun:sqlite` under Node, before any DB opens.
    Deferring the `new Database()` call inside `create.js` does not help. Making
    a workflow importable under Node needs a Node-clean authoring subpath, see
-   `smithers-orchestrator/define` below.
+   `smthrs/define` below.
 
 2. **Nine seeded workflows `import { $ } from "bun"` at module scope** and cannot
    be imported under Node regardless of the barrel:
    `triage-run, monitor, monitor-smithers, post-failure, create-workflow,
    make-workflow-tutorial, report-slideshow, build-tui-monitor, smithering`.
-   Their compute tasks shell out to live `bunx smithers-orchestrator` and write
+   Their compute tasks shell out to live `bunx smthrs` and write
    files, so "compute runs real" is not sub-second or side-effect-free for them.
 
 3. **`packages/driver`, `packages/scheduler`, `packages/react-reconciler`,
@@ -95,18 +95,18 @@ evidence. This section is what the design stands on.
 
 ## Design
 
-One new package, `packages/testing` (`@smithers-orchestrator/testing`), shipped
+One new package, `packages/testing` (`@smthrs/testing`), shipped
 as source TypeScript with no dts build (same pattern as
-`@smithers-orchestrator/gateway-client`, `electric-proxy`, `pi-plugin`). The
+`@smthrs/gateway-client`, `electric-proxy`, `pi-plugin`). The
 definition-time `z.infer` generics are the headline feature, so a hand-written
 `.d.ts` that could drift is the wrong choice. Subpaths:
 
-- `smithers-orchestrator/testing` — Node-clean core (render + simulation tiers,
+- `smthrs/testing` — Node-clean core (render + simulation tiers,
   fake agents, matchers).
-- `smithers-orchestrator/testing/engine` — bun-only engine tier.
-- `smithers-orchestrator/testing/e2e` — re-export of the existing fake-binary
+- `smthrs/testing/engine` — bun-only engine tier.
+- `smthrs/testing/e2e` — re-export of the existing fake-binary
   CLI harness.
-- `smithers-orchestrator/testing/vitest` — the `smithersTest()` vitest plugin.
+- `smthrs/testing/vitest` — the `smithersTest()` vitest plugin.
 
 The core is runner-agnostic: plain async functions plus data, with value
 matchers registered through `expect.extend` in both vitest and bun test. Type
@@ -121,19 +121,19 @@ Three execution tiers behind one mock vocabulary:
 ```
 tier 1  renderWorkflow()   render one frame, no execution        Node + Bun (needs Node-importable workflow)
 tier 2  simulate()         full control flow, in-memory, mocked  Node + Bun (needs Node-importable workflow)
-tier 3  testWorkflow()     real engine, temp DB, real files      Bun only (smithers-orchestrator/testing/engine)
+tier 3  testWorkflow()     real engine, temp DB, real files      Bun only (smthrs/testing/engine)
         e2e (existing)     real CLI + fake binaries               re-exported from /testing/e2e
 ```
 
 Under `bun test`, all tiers work for every workflow today. Under vitest on Node,
 tiers 1 and 2 work for workflows that are Node-importable, which requires the
-`smithers-orchestrator/define` authoring subpath (M6) and, for bun-coupled
+`smthrs/define` authoring subpath (M6) and, for bun-coupled
 workflows, moving their shell-outs behind a portable seam.
 
 ### 1. Fake agents
 
 ```ts
-import { fakeAgent, auto } from "smithers-orchestrator/testing";
+import { fakeAgent, auto } from "smthrs/testing";
 
 // A standalone AgentLike whose output is TYPED and safeParse-validated when the
 // fake is defined. Use this to inject into an `agent` prop or an agents pool.
@@ -195,7 +195,7 @@ One entry point returning a handle. `await sim.run()` runs to completion; the
 stepwise methods drive waits.
 
 ```ts
-import { simulate, auto } from "smithers-orchestrator/testing";
+import { simulate, auto } from "smthrs/testing";
 import workflow from "../workflows/triage-run";
 
 const sim = simulate(workflow, {
@@ -331,7 +331,7 @@ One persistent `SmithersRenderer` per harness instance so hook state behaves
 like the engine (the engine keeps one renderer per run; fresh-per-render resets
 hooks, a documented trap).
 
-### 4. Engine tier: `testWorkflow()` (`smithers-orchestrator/testing/engine`, bun only)
+### 4. Engine tier: `testWorkflow()` (`smthrs/testing/engine`, bun only)
 
 Same mock vocabulary, real engine: temp-dir sqlite via a `createTestSmithers`
 fixture, real output validation and schema-retry ladder, real approvals
@@ -339,7 +339,7 @@ fixture, real output validation and schema-retry ladder, real approvals
 a jj temp workspace with diff assertions.
 
 ```ts
-import { testWorkflow, createTempWorkspace } from "smithers-orchestrator/testing/engine";
+import { testWorkflow, createTempWorkspace } from "smthrs/testing/engine";
 
 const ws = await createTempWorkspace({ jj: true });
 const run = await testWorkflow(workflow, { input, mocks, rootDir: ws.dir });
@@ -363,7 +363,7 @@ substitution do not need it either; it is the escape hatch for testing
 seeded/legacy workflows as authored.
 
 The existing e2e helpers (`createTempRepo`, `runSmithers`, `writeFakeClaudeBinary`,
-and so on) re-export under `smithers-orchestrator/testing/e2e`.
+and so on) re-export under `smthrs/testing/e2e`.
 
 ### 5. Assertions that run in tests and at runtime
 
@@ -434,17 +434,17 @@ includes them), `toHaveFailedWith("ASSERTION_FAILED")`. New error codes
 `INVARIANT_FAILED` and `ASSERTION_FAILED` in `packages/errors` with
 `details.{invariant | assertId, nodeId, message}`.
 
-### 6. `smithers-orchestrator/define`: the Node-clean authoring subpath
+### 6. `smthrs/define`: the Node-clean authoring subpath
 
 This is the enabler for vitest on Node and a smithers improvement in its own
-right. Today `import { createSmithers } from "smithers-orchestrator"` evaluates
+right. Today `import { createSmithers } from "smthrs"` evaluates
 `bun:sqlite` under Node because the barrel re-exports the engine. `define`
 exposes only what authoring needs: `createSmithers`, the bound components,
 `outputs`, `useCtx`, `smithers`. It does not re-export the engine, and it loads
 `bun:sqlite` through a dynamic `import()` on first DB access (so `api.db` still
 works under bun, and workflows that never touch `api.db` at import time load
 cleanly under Node). Seeded workflows migrate their import to
-`smithers-orchestrator/define`; the barrel keeps re-exporting `createSmithers`
+`smthrs/define`; the barrel keeps re-exporting `createSmithers`
 for back-compat but is no longer the recommended authoring import.
 
 Side benefits beyond testing: faster `smithers graph`, lighter workflow module
@@ -452,12 +452,12 @@ loads everywhere, and workflows become importable by any Node tool.
 
 Bun-coupled workflows (the 9 that `import { $ } from "bun"`) additionally need
 their CLI shell-outs behind a portable seam (for example a
-`smithers-orchestrator/cli-exec` helper that uses `node:child_process` under Node
+`smthrs/cli-exec` helper that uses `node:child_process` under Node
 and `Bun.$` under bun) before they are Node-importable. Until then they are
 bun-test-only, which is fine: `bun test` runs all tiers.
 
-The `smithersTest()` vitest plugin (`smithers-orchestrator/testing/vitest`)
-provides: esbuild `jsx: "automatic"` with `jsxImportSource: "smithers-orchestrator"`
+The `smithersTest()` vitest plugin (`smthrs/testing/vitest`)
+provides: esbuild `jsx: "automatic"` with `jsxImportSource: "smthrs"`
 (matches the seeded tsconfig and per-file pragma), `@mdx-js/rollup` for `.mdx`
 prompt imports (replacing the Bun-only `mdxPlugin()`), `resolve.dedupe:
 ["react"]` (the one-React rule the delegation shim enforces), and the `~/*` pack
@@ -562,7 +562,7 @@ primitives.
 | M3 smoke + CLI | 34-workflow simulation smoke (bun test); `smithers simulate`; `smithers test`; init-pack test scaffolding + `test` script | `apps/cli` e2e via the existing temp-repo harness; note the delegate-shim staleness caveat |
 | M4 engine tier | `RunOptions.resolveAgent` (threaded through `executeTaskBridgeEffect`); `testWorkflow`, `createTempWorkspace`, sync `run.diff()` + `toMatchFiles`; re-export e2e-helpers as `/testing/e2e` | `triage-run` (bun) + `monitor` + `implement` tests; sim-vs-engine parity test (same mocks, same outputs) |
 | M5 assertions | `invariants` prop with per-kind retry semantics; `<Assert>` component; `_smithers_assertions` table + `insertAssertionResult`; `INVARIANT_FAILED`/`ASSERTION_FAILED`; sim-tier evaluation + matchers | components/engine tests including agent retry-feedback threading; additive-table sync check on existing user stores |
-| M6 vitest | `smithers-orchestrator/define` (barrel restructure + dynamic-import DB); portable CLI-shell seam so bun-coupled workflows become Node-importable; `smithersTest()` vitest plugin; migrate seeded pack imports | vitest-on-Node CI job running tiers 1 and 2 against the Node-importable seeded workflows |
+| M6 vitest | `smthrs/define` (barrel restructure + dynamic-import DB); portable CLI-shell seam so bun-coupled workflows become Node-importable; `smithersTest()` vitest plugin; migrate seeded pack imports | vitest-on-Node CI job running tiers 1 and 2 against the Node-importable seeded workflows |
 | docs (each M) | `docs/guides/testing-workflows.mdx`, `docs/reference/testing.mdx`, `docs/cli/overview.mdx` command rows, package-configuration tables; `pnpm docs:llms` regen (4 output locations); update the `smithers` skill so agents author tests alongside workflows | `check:docs` / `check:llms` |
 
 ## Row-shape parity (a correctness risk to pin)

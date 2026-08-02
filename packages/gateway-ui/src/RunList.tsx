@@ -1,8 +1,8 @@
 /** @jsxImportSource react */
 import { useEffect, useInsertionEffect, useRef, useState, type CSSProperties } from "react";
-import { useGatewayRuns } from "@smithers-orchestrator/gateway-react";
-import type { GatewayRunSummaryRow } from "@smithers-orchestrator/gateway-client";
-import { RelativeTime, Skeleton } from "@smithers-orchestrator/ui";
+import { useGatewayRuns } from "@smthrs/gateway-react";
+import type { GatewayRunSummaryRow } from "@smthrs/gateway-client";
+import { RelativeTime, Skeleton } from "@smthrs/ui";
 import { StatusPill } from "./StatusPill";
 import { ensureGatewayUiStyles, theme, visuallyHidden } from "./theme";
 

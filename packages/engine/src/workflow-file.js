@@ -1,11 +1,11 @@
 import { realpath } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import "./workflow-module-resolution.js";
 
 /** @typedef {import("./ChildWorkflowFileRef.ts").ChildWorkflowFileRef} ChildWorkflowFileRef */
-/** @typedef {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any>} AnySmithersWorkflow */
+/** @typedef {import("@smthrs/components/SmithersWorkflow").SmithersWorkflow<any>} AnySmithersWorkflow */
 
 // Module formats a runtime-generated workflow file may ship as. Anything else
 // (JSON, WASM, shell scripts, …) is rejected before it reaches the module

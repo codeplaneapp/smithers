@@ -25,7 +25,7 @@ crash-resume durability work are intentionally left out of this thread.
 > scaffolds real files, and runs a verify loop until the workflow compiles, then
 > writes the skill that documents it.
 >
-> `bunx smithers-orchestrator init` ships it seeded. 🧵
+> `bunx smthrs init` ships it seeded. 🧵
 
 Leads with the most quotable capability (Smithers writes Smithers) and a command a
 reader can run today. The 🧵 opens the loop.
@@ -49,7 +49,7 @@ answers the migration worry in three words.
 ### 3. Know your quota
 **Media:** `assets/usage.png`
 
-> New: `bunx smithers-orchestrator usage`.
+> New: `bunx smthrs usage`.
 >
 > One report of how much rate limit or subscription quota each account has burned,
 > across Claude Code, Codex, the Anthropic API, and the OpenAI API. Credentials are
@@ -110,7 +110,7 @@ line that sells it.
 > with no system install.
 >
 > A package manager pulls only the binary matching your host, and
-> `bunx smithers-orchestrator workflow doctor` tells you up front when no usable git
+> `bunx smthrs workflow doctor` tells you up front when no usable git
 > or jj is present.
 
 A clean DX win. The doctor line shows Smithers fails loud instead of halfway.

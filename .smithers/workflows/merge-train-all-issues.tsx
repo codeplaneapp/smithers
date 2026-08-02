@@ -30,8 +30,8 @@
 //   ... --input '{"numbers":[296],"reviewIterations":2}'
 // Skip the heavy gate while smoke-testing the plumbing:
 //   ... --input '{"gateCommand":"pnpm typecheck"}'
-/** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { ClaudeCodeAgent, createSmithers } from "smthrs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";

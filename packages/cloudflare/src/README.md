@@ -1,4 +1,4 @@
-# @smithers-orchestrator/cloudflare — src
+# @smthrs/cloudflare — src
 
 Single-module package (`index.js`) with three Cloudflare integrations:
 

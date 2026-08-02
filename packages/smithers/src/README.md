@@ -1,6 +1,6 @@
-# smithers-orchestrator — src
+# smthrs — src
 
-Source of the published `smithers-orchestrator` facade package. `index.js`
+Source of the published `smthrs` facade package. `index.js`
 aggregates the whole workspace API; the real logic lives in a handful of files:
 
 - `create.js` — the core factories (`createSmithers`, `createSmithersCloudflare`,
@@ -25,5 +25,5 @@ Gotchas:
 - `// @smithers-type-exports-begin/end` blocks (e.g. in `index.js`,
   `examples-entry.js`) are tool-managed; preserve them byte-for-byte.
 - `bin/smithers.js` re-execs the nearest project-local smithers install
-  (tsc-style) before falling back to `@smithers-orchestrator/cli`, avoiding the
+  (tsc-style) before falling back to `@smthrs/cli`, avoiding the
   two-React-copies trap.

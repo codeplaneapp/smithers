@@ -30,10 +30,10 @@ A common operator loop looks like this: a run wedges on a node, you inspect it, 
 
 ```sh
 # The run wedged, you fixed the workflow file. Resume in place:
-bunx smithers-orchestrator retry-task <runId> <nodeId> --accept-workflow-change
+bunx smthrs retry-task <runId> <nodeId> --accept-workflow-change
 
 # Or resume the whole run with the edited workflow:
-bunx smithers-orchestrator up --resume <runId> --accept-workflow-change
+bunx smthrs up --resume <runId> --accept-workflow-change
 ```
 
 Starting runs got safer at the other end too. `smithers oneshot` now warns when the working copy is dirty and has the agent triage the uncommitted changes before starting on the goal ([19f98b83](https://github.com/smithersai/smithers/commit/19f98b833962c3cbde7f48cd27b208d69021ef93)), instead of letting an agent barrel into a tree that already contains someone else's half-finished work.
@@ -84,8 +84,8 @@ There are no breaking changes in 0.32.0. Two things are worth checking after you
 Upgrade and point a monitor at a live run:
 
 ```sh
-bunx smithers-orchestrator update
-bunx smithers-orchestrator monitor <runId>
+bunx smthrs update
+bunx smthrs monitor <runId>
 ```
 
 The full changelog lives at [docs/changelogs/0.32.0](https://smithers.sh/changelogs/0.32.0). If you have been waiting for subflows, resume, and time-travel to be boring, 0.32.0 is the release to take them into production. Start at [smithers.sh](https://smithers.sh).

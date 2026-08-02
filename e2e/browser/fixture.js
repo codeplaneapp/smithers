@@ -1,5 +1,5 @@
 import { runSharedRuntimeFixture } from "../runtime/fixture.js";
-import { assertRuntimeConformance } from "@smithers-orchestrator/testing/runtimeConformance";
+import { assertRuntimeConformance } from "@smthrs/testing/runtimeConformance";
 
 // Cast once: proving Node/Bun globals are *absent* means reading properties
 // that this lane's types deliberately don't declare on `globalThis`.

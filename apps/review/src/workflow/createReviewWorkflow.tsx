@@ -1,7 +1,7 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { createSmithers, Parallel, Sequence, type AgentLike } from "smithers-orchestrator";
+import { createSmithers, Parallel, Sequence, type AgentLike } from "smthrs";
 import {
   buildNativeReviewPrompt,
   finalizeNativeReview,

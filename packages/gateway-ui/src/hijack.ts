@@ -9,7 +9,7 @@
  * the terminal itself lives in ./OneshotSurface.tsx.
  */
 
-import { normalizeStatus } from "@smithers-orchestrator/ui";
+import { normalizeStatus } from "@smthrs/ui";
 
 /** A node whose recorded attempts can be resumed by `smithers hijack`. */
 export type HijackCandidate = {

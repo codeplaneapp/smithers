@@ -1,8 +1,8 @@
 // smithers-display-name: Close Issues (Codex)
 // smithers-source: one-off — fix + review + land every open GitHub issue not opened by roninjin10.
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
-import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
+import { ClaudeCodeAgent, createSmithers } from "smthrs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";

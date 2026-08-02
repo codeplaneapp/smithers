@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, spyOn, test } from "bun:test";
 import { resolve } from "node:path";
 import { extractFromHost } from "../src/dom/extract.js";

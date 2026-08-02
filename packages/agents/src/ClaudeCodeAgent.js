@@ -12,7 +12,7 @@ import {
 } from "./BaseCliAgent/index.js";
 import { normalizeCapabilityStringList } from "./capability-registry/index.js";
 import { isClaudeLimitBanner } from "./BaseCliAgent/isClaudeLimitBanner.js";
-import { logWarning } from "@smithers-orchestrator/observability/logging";
+import { logWarning } from "@smthrs/observability/logging";
 /** @typedef {import("./BaseCliAgent/BaseCliAgentOptions.ts").BaseCliAgentOptions} BaseCliAgentOptions */
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./ClaudeCodeAgentOptions.ts").ClaudeCodeAgentOptions} ClaudeCodeAgentOptions */

@@ -9,16 +9,16 @@ Workflows are JSX trees. Smithers renders the tree, extracts ready tasks, execut
 
 ## Setup
 
-Most projects should use `bunx smithers-orchestrator init`; it scaffolds everything below.
+Most projects should use `bunx smthrs init`; it scaffolds everything below.
 
 To embed into an existing codebase:
 
 ```bash
-bun add smithers-orchestrator zod
+bun add smthrs zod
 bun add -d typescript @types/react @types/node
 ```
 
-`smithers-orchestrator` bundles React and ships the JSX runtime at `smithers-orchestrator/jsx-runtime`: skip `react` and `react-dom`. `jsxImportSource` (below) routes JSX through the workflow reconciler, never React DOM. The one required dev dep is `@types/react` (React ships no bundled types; the JSX transform resolves its namespace from it). Only the browser UI surface, `smithers-orchestrator/gateway-react`, takes `react`/`react-dom` as peers.
+`smthrs` bundles React and ships the JSX runtime at `smthrs/jsx-runtime`: skip `react` and `react-dom`. `jsxImportSource` (below) routes JSX through the workflow reconciler, never React DOM. The one required dev dep is `@types/react` (React ships no bundled types; the JSX transform resolves its namespace from it). Only the browser UI surface, `smthrs/gateway-react`, takes `react`/`react-dom` as peers.
 
 Minimal `tsconfig.json`:
 
@@ -29,7 +29,7 @@ Minimal `tsconfig.json`:
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
-    "jsxImportSource": "smithers-orchestrator",
+    "jsxImportSource": "smthrs",
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true
@@ -37,17 +37,17 @@ Minimal `tsconfig.json`:
 }
 ```
 
-`jsxImportSource` is the only non-standard line; it routes JSX through `smithers-orchestrator/jsx-runtime` instead of React DOM.
+`jsxImportSource` is the only non-standard line; it routes JSX through `smthrs/jsx-runtime` instead of React DOM.
 
 Optional MDX prompts: add `bun add -d @types/mdx` and a `preload.ts` that calls `mdxPlugin()`, register it in `bunfig.toml` as `preload = ["./preload.ts"]`.
 
-Verify with `bunx tsc --noEmit` and `bunx smithers-orchestrator --help`.
+Verify with `bunx tsc --noEmit` and `bunx smthrs --help`.
 
 ## A minimal workflow
 
 ```tsx
-// @jsxImportSource smithers-orchestrator (only needed if not set in tsconfig.json)
-import { createSmithers, Sequence, Task } from "smithers-orchestrator";
+// @jsxImportSource smthrs (only needed if not set in tsconfig.json)
+import { createSmithers, Sequence, Task } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, smithers, outputs } = createSmithers({

@@ -1,4 +1,4 @@
-import { Button, Card, CardContent, CardHeader, CardTitle } from "smithers-orchestrator/ui";
+import { Button, Card, CardContent, CardHeader, CardTitle } from "smthrs/ui";
 import type { PublicIssue } from "../types";
 
 /** The Lighter Side — always the closer. */

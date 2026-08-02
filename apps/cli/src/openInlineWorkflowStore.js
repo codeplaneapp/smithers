@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { SmithersError } from "@smithers-orchestrator/errors";
+import { SmithersError } from "@smthrs/errors";
 
 /** @param {string} cwd @param {Record<string, import("zod").ZodTypeAny>} schemas */
 export async function openInlineWorkflowStore(cwd, schemas) {
@@ -8,12 +8,12 @@ export async function openInlineWorkflowStore(cwd, schemas) {
       import("bun:sqlite"),
       import("drizzle-orm/bun-sqlite"),
       import("drizzle-orm/sqlite-core"),
-      import("@smithers-orchestrator/db/zodToTable"),
-      import("@smithers-orchestrator/db/zodToCreateTableSQL"),
-      import("@smithers-orchestrator/db/utils/camelToSnake"),
+      import("@smthrs/db/zodToTable"),
+      import("@smthrs/db/zodToCreateTableSQL"),
+      import("@smthrs/db/utils/camelToSnake"),
     ]);
-  const { findSmithersAnchorDir } = await import("smithers-orchestrator/findSmithersAnchorDir");
-  const { resolveSmithersBackendPreference } = await import("smithers-orchestrator/resolveSmithersBackendChoice");
+  const { findSmithersAnchorDir } = await import("smthrs/findSmithersAnchorDir");
+  const { resolveSmithersBackendPreference } = await import("smthrs/resolveSmithersBackendChoice");
   const anchorDir = findSmithersAnchorDir(cwd);
   // Ask the shared resolver, not a marker file. Reading `.smithers/migrated.json`
   // directly used to override `--backend sqlite`, `SMITHERS_BACKEND=sqlite`, and

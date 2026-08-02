@@ -2,7 +2,7 @@
 import { it, expect } from "bun:test";
 import { act } from "react";
 import { describeHeadlessRender, renderForTest } from "./renderHelpers.tsx";
-import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import type { GatewayRunNode } from "@smthrs/gateway-client";
 import { GraphView } from "../src/modes/GraphMode.tsx";
 
 /**

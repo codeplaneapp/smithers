@@ -384,7 +384,7 @@ test("mcp add and skills add run supplementary Hermes and Pi wiring from the rea
     PATH: process.env.PATH ?? "",
   });
 
-  const mcp = runSmithers(["mcp", "add", "--agent", "hermes", "--command", "bunx smithers-orchestrator --mcp"], {
+  const mcp = runSmithers(["mcp", "add", "--agent", "hermes", "--command", "bunx smthrs --mcp"], {
     cwd: repo.dir,
     format: null,
     env,
@@ -395,7 +395,7 @@ test("mcp add and skills add run supplementary Hermes and Pi wiring from the rea
   const hermesConfig = parseYaml(readFileSync(join(home, ".hermes", "config.yaml"), "utf8"));
   expect(hermesConfig.mcp_servers.smithers).toEqual({
     command: "bunx",
-    args: ["smithers-orchestrator", "--mcp"],
+    args: ["smthrs", "--mcp"],
   });
   expect(existsSync(join(home, ".hermes", "plugins", "smithers", "plugin.yaml"))).toBe(true);
 

@@ -5,11 +5,11 @@
  * Use cases: user-generated content moderation, AI output screening, policy enforcement,
  * abuse detection, compliance gating.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import IntakePrompt from "./prompts/trust-safety-moderator/intake.mdx";
 import ModeratePrompt from "./prompts/trust-safety-moderator/moderate.mdx";

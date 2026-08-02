@@ -39,7 +39,7 @@ function run(command, args) {
  */
 function checkNpmPublication(version) {
   // npm is npm.cmd on Windows; .cmd files only spawn through a shell.
-  const result = spawnSync("npm", ["view", `smithers-orchestrator@${version}`, "version"], {
+  const result = spawnSync("npm", ["view", `smthrs@${version}`, "version"], {
     cwd: root,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],

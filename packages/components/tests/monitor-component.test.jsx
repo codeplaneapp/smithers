@@ -1,7 +1,7 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
-import { SmithersContext, SmithersCtx } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersRenderer } from "@smthrs/react-reconciler/dom/renderer";
+import { SmithersContext, SmithersCtx } from "@smthrs/react-reconciler/context";
 import { Monitor, Task, monitorPrompt } from "../src/components/index.js";
 
 const agent = { id: "watcher", generate: async () => ({}) };
@@ -191,7 +191,7 @@ describe("the shipped monitoring prompt", () => {
   const prompt = monitorPrompt({ watchRunId: "run-under-watch" });
 
   test("binds the monitor to the Gateway client / CLI and forbids the store", () => {
-    expect(prompt).toContain("smithers-orchestrator/gateway-client");
+    expect(prompt).toContain("smthrs/gateway-client");
     expect(prompt).toContain("NEVER open the store directly");
     expect(prompt).toContain("smithers.db");
   });

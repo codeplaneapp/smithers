@@ -4,7 +4,7 @@ description: Durable human approval; persists ApprovalDecision, selection, or ra
 ---
 
 ```ts
-import { Approval, approvalDecisionSchema } from "smithers-orchestrator";
+import { Approval, approvalDecisionSchema } from "smthrs";
 
 type ApprovalProps = {
   id: string;
@@ -41,11 +41,11 @@ type ApprovalProps = {
 };
 ```
 
-Complete runnable example (renders with `bunx smithers-orchestrator graph`). `async` parks the gate without blocking the run: the `deploy` lane waits on the decision through `needs`, while the `update-docs` lane proceeds in parallel.
+Complete runnable example (renders with `bunx smthrs graph`). `async` parks the gate without blocking the run: the `deploy` lane waits on the decision through `needs`, while the `update-docs` lane proceeds in parallel.
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Approval, Parallel, Sequence, ClaudeCodeAgent, approvalDecisionSchema } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, Approval, Parallel, Sequence, ClaudeCodeAgent, approvalDecisionSchema } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, Task, smithers, outputs } = createSmithers({
@@ -81,5 +81,5 @@ export default smithers(() => (
 ## Notes
 
 - `mode="select"` returns `{ selected, notes }`; `mode="rank"` returns `{ ranked, notes }`.
-- Deferred and keyed on (run, node, iteration); survives restarts. The operating agent relays the request, gets the decision, and resolves it via `bunx smithers-orchestrator approve`/`deny` (never hand the command to the human).
+- Deferred and keyed on (run, node, iteration); survives restarts. The operating agent relays the request, gets the decision, and resolves it via `bunx smthrs approve`/`deny` (never hand the command to the human).
 - For a pre-task pause without persisted decision, use `<Task needsApproval>`.

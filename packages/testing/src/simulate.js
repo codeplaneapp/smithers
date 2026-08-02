@@ -1,7 +1,7 @@
 // src/simulate.ts
-import { WorkflowDriver } from "@smithers-orchestrator/driver";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler";
-import { makeWorkflowSession } from "@smithers-orchestrator/scheduler";
+import { WorkflowDriver } from "@smthrs/driver";
+import { SmithersRenderer } from "@smthrs/react-reconciler";
+import { makeWorkflowSession } from "@smthrs/scheduler";
 import { Effect } from "effect";
 
 // src/fakeAgent.ts
@@ -11,7 +11,7 @@ import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } fr
 
 // src/schemaMock.ts
 import { toJSONSchema } from "zod";
-import { zodSchemaToJsonExample } from "@smithers-orchestrator/components/zod-to-example";
+import { zodSchemaToJsonExample } from "@smthrs/components/zod-to-example";
 function stringForFormat(format) {
   switch (format) {
     case "email":
@@ -769,8 +769,8 @@ function __simulateWithControls(workflow, options = {}, controls) {
       const graph = await smithersRenderer.render(element, extractOptions);
       const rootDir = extractOptions?.baseRootDir ?? options.rootDir;
       const workflowPath = extractOptions?.workflowPath ?? options.workflowPath ?? null;
-      const engineHelpers = await import("@smithers-orchestrator/engine/engine");
-      const computeHelpers = await import("@smithers-orchestrator/engine/task-compute-fns");
+      const engineHelpers = await import("@smthrs/engine/engine");
+      const computeHelpers = await import("@smthrs/engine/task-compute-fns");
       engineHelpers.resolveTaskOutputs(graph.tasks, workflow);
       computeHelpers.attachSubflowComputeFns(graph.tasks, workflow, {
         rootDir,

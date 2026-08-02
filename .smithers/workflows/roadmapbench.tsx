@@ -1,5 +1,5 @@
 // smithers-display-name: RoadmapBench
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 //
 // RoadmapBench-on-smithers: a multi-agent, long-horizon software-development
 // workflow that uses Codex 5.6 Sol for planning/review/finalization and Codex
@@ -18,7 +18,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ClaudeCodeAgent, Sequence, Task, createScorer, createSmithers } from "smithers-orchestrator";
+import { ClaudeCodeAgent, Sequence, Task, createScorer, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { codexFirst } from "../lib/codexAccounts";
 

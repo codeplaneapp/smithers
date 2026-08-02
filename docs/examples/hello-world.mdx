@@ -14,7 +14,7 @@ Write a short, friendly one-sentence greeting for {props.name}.
 Run it:
 
 ```bash
-bunx smithers-orchestrator workflow run hello --name Ada
+bunx smthrs workflow run hello --name Ada
 ```
 
 ```
@@ -35,9 +35,9 @@ See [MDX Workflow Authoring](/guides/mdx-authoring) for how to create your own M
 When you need branching, schemas, or parallel tasks, write the workflow in TypeScript:
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // hello-world.tsx
-import { createSmithers, Sequence } from "smithers-orchestrator";
+import { createSmithers, Sequence } from "smthrs";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
@@ -67,7 +67,7 @@ export default smithers((ctx) => (
 Run it:
 
 ```bash
-bunx smithers-orchestrator up hello-world.tsx --input '{}'
+bunx smthrs up hello-world.tsx --input '{}'
 ```
 
 ```

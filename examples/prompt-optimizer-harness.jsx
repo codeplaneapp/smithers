@@ -5,11 +5,11 @@
  * Pattern: dataset/test cases → candidate prompt → evals/checks → optimize → regenerate.
  * Use cases: prompt engineering, A/B testing prompts, iterative prompt refinement.
  */
-import { Sequence, Loop } from "smithers-orchestrator";
+import { Sequence, Loop } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, write, bash, grep } from "smithers-orchestrator/tools";
+import { read, write, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import GeneratePrompt from "./prompts/prompt-optimizer-harness/generate.mdx";
 import EvaluatePrompt from "./prompts/prompt-optimizer-harness/evaluate.mdx";

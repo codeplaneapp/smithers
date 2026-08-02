@@ -6,7 +6,7 @@ import {
   type SmithersCollections,
   type SmithersDataClient,
   type WorkspaceMode,
-} from "@smithers-orchestrator/gateway-client";
+} from "@smthrs/gateway-client";
 import { SmithersCollectionsContext } from "./SmithersCollectionsContext.ts";
 
 function defaultMode(): WorkspaceMode {

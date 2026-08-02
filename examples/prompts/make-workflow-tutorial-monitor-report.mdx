@@ -7,10 +7,10 @@ This user is trying Smithers for the first time — keep your update friendly an
 
 Run these commands to see what's happening:
 ```
-bunx smithers-orchestrator inspect {props.childRunId}
+bunx smthrs inspect {props.childRunId}
 ```
 ```
-bunx smithers-orchestrator logs {props.childRunId}
+bunx smthrs logs {props.childRunId}
 ```
 
 ## Write a progress update
@@ -26,6 +26,6 @@ Be encouraging — this is their first workflow build. Make it feel like progres
 If the build just finished:
 - Celebrate it! Tell them the workflow file was written, the custom UI source
   lives in `.smithers/ui/`, and the workflow declares it with `<UI>`
-- Tell them how to run it: `bunx smithers-orchestrator workflow run {props.childRunId}`
+- Tell them how to run it: `bunx smthrs workflow run {props.childRunId}`
 
 {props.schema}

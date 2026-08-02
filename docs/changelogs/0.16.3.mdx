@@ -4,24 +4,24 @@ description: "Patch release: declare the missing @mdx-js/esbuild runtime depende
 ---
 
 Patch release: declare the missing `@mdx-js/esbuild` runtime dependency
-in `smithers-orchestrator` so a fresh `bunx smithers-orchestrator init`
+in `smthrs` so a fresh `bunx smthrs init`
 can actually start the CLI.
 
 ---
 
 ## Fixes
 
-- **`smithers-orchestrator` now declares `@mdx-js/esbuild`** as a direct
+- **`smthrs` now declares `@mdx-js/esbuild`** as a direct
   dependency. `src/mdx-plugin.js` imports `@mdx-js/esbuild` but the
   package wasn't listed in `packages/smithers/package.json`, so a clean
-  `bunx smithers-orchestrator@latest init` produced an unresolvable
+  `bunx smthrs@latest init` produced an unresolvable
   `Cannot find module '@mdx-js/esbuild'` as soon as the CLI loaded
-  (`@smithers-orchestrator/cli` re-exports `mdxPlugin` at startup).
+  (`@smthrs/cli` re-exports `mdxPlugin` at startup).
 
 ## Features
 
-- **`bunx smithers-orchestrator gui [path]`** opens a directory as a workspace in the
+- **`bunx smthrs gui [path]`** opens a directory as a workspace in the
   Smithers GUI macOS app (via `open -b com.smithers.SmithersGUI`). A bare path
-  argument (`bunx smithers-orchestrator .` or `bunx smithers-orchestrator <dir>`)
-  is treated as `bunx smithers-orchestrator gui <dir>`, matching the `code .`
+  argument (`bunx smthrs .` or `bunx smthrs <dir>`)
+  is treated as `bunx smthrs gui <dir>`, matching the `code .`
   convention from VS Code / Cursor.

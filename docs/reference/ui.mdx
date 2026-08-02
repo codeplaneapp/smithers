@@ -1,9 +1,9 @@
 ---
 title: UI Component Library
-description: The shared @smithers-orchestrator/ui component library (Button, Card, Dialog, Tabs, StatusPill, chat surfaces, and more), token-native shadcn anatomy that is correct in light and dark by construction.
+description: The shared @smthrs/ui component library (Button, Card, Dialog, Tabs, StatusPill, chat surfaces, and more), token-native shadcn anatomy that is correct in light and dark by construction.
 ---
 
-`@smithers-orchestrator/ui` is the shared component library for every Smithers
+`@smthrs/ui` is the shared component library for every Smithers
 UI surface: custom workflow UIs under `.smithers/ui/`, the Monitor, Studio, and
 any app embedding a Gateway page. For a map of every kind of UI documentation
 (chat components, agentic components, adapters, run-aware widgets, hooks, and
@@ -16,28 +16,28 @@ correct in light and dark with zero dark-mode code: the OS
 on `<html>` (which the Gateway shell sets from a `?theme=` query param) always
 wins.
 
-Import from the `smithers-orchestrator/ui` subpath, which resolves through the
-`smithers-orchestrator` install you already have. Importing the scoped
-`@smithers-orchestrator/ui` name directly also works, but requires declaring it
+Import from the `smthrs/ui` subpath, which resolves through the
+`smthrs` install you already have. Importing the scoped
+`@smthrs/ui` name directly also works, but requires declaring it
 as a direct dependency under pnpm-style isolated layouts.
 
 ```tsx
-import { Button, Card, CardHeader, CardTitle, SmithersUiStyles, StatusPill } from "smithers-orchestrator/ui";
+import { Button, Card, CardHeader, CardTitle, SmithersUiStyles, StatusPill } from "smthrs/ui";
 ```
 
 ## How the three UI packages layer
 
 When you build a workflow UI, reach for the packages in this order:
 
-1. [`smithers-orchestrator/gateway-ui`](/reference/gateway-ui) for the
+1. [`smthrs/gateway-ui`](/reference/gateway-ui) for the
    run-shaped widgets: `RunList`, `RunTree`, `RunEventLog`, `ApprovalPanel`,
    `LaunchButton`, `SimpleWorkflowDashboard`, and the `WorkflowUiShell` page
    scaffold. Each connects to the Gateway by itself.
-2. `smithers-orchestrator/ui` (this page) for everything around those widgets:
+2. `smthrs/ui` (this page) for everything around those widgets:
    buttons, cards, inputs, dialogs, tabs, tables, status pills, empty states,
    KPI stats, and the chat surface. These are pure visual components with no
    Gateway wiring.
-3. [`smithers-orchestrator/gateway-react`](/reference/gateway-react) hooks for
+3. [`smthrs/gateway-react`](/reference/gateway-react) hooks for
    bespoke pieces neither library covers: read the same live data the
    gateway-ui widgets use and render it with the primitives here.
 
@@ -254,9 +254,9 @@ can build a `DiffFile` from a raw patch and reason about it without a runtime:
 ### Adapters
 
 Heavy third-party editor widgets live behind explicit
-`@smithers-orchestrator/ui/adapters/*` subpaths, so importing the base library
+`@smthrs/ui/adapters/*` subpaths, so importing the base library
 never pulls their runtime. Import them from the matching
-`smithers-orchestrator/ui/adapters/*` subpath instead of the root `ui` barrel.
+`smthrs/ui/adapters/*` subpath instead of the root `ui` barrel.
 
 | Component | What it renders | Key props |
 | --- | --- | --- |
@@ -274,8 +274,8 @@ self-injection fallback every editor performs.
 
 ```tsx
 import { useRef } from "react";
-import { Button, SmithersUiStyles } from "smithers-orchestrator/ui";
-import { MarkdownEditor, MarkdownEditorStyles } from "smithers-orchestrator/ui/adapters/markdown-editor";
+import { Button, SmithersUiStyles } from "smthrs/ui";
+import { MarkdownEditor, MarkdownEditorStyles } from "smthrs/ui/adapters/markdown-editor";
 
 function DocEditor({ initial, onSave }: { initial: string; onSave: (markdown: string) => void }) {
   const editor = useRef<{ getMarkdown: () => string } | null>(null);
@@ -299,8 +299,8 @@ library:
 ```tsx .smithers/ui/triage.tsx
 /** @jsxImportSource react */
 import { useState } from "react";
-import { createGatewayReactRoot, useGatewayActions, useGatewayRuns } from "smithers-orchestrator/gateway-react";
-import { RunEventLog, RunTree, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
+import { createGatewayReactRoot, useGatewayActions, useGatewayRuns } from "smthrs/gateway-react";
+import { RunEventLog, RunTree, WorkflowUiShell } from "smthrs/gateway-ui";
 import {
   Button,
   Card,
@@ -311,7 +311,7 @@ import {
   RowButton,
   SmithersUiStyles,
   StatusPill,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 
 function App() {
   const [prompt, setPrompt] = useState("");
@@ -361,7 +361,7 @@ createGatewayReactRoot(<App />);
 ```
 
 Save it as `.smithers/ui/triage.tsx`, declare `<UI entry="../ui/triage.tsx" />`
-in the workflow, and open it with `bunx smithers-orchestrator ui RUN_ID`. See
+in the workflow, and open it with `bunx smthrs ui RUN_ID`. See
 [Custom Workflow UIs](/guides/custom-workflow-ui) for the full wiring guide and
 [Workflow UI Design Principles](/guides/workflow-ui-design) for the visual
 language these components implement.

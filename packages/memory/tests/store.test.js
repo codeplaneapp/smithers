@@ -1,7 +1,7 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { createMemoryStore } from "../src/store/index.js";
 import { namespaceToString } from "../src/namespaceToString.js";
 import { parseNamespace } from "../src/parseNamespace.js";

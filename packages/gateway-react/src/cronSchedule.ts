@@ -11,10 +11,10 @@
  * gateway-react-direction architecture rule also bars importing other
  * smithers packages here).
  */
-import type { GatewayCronRow } from "@smithers-orchestrator/gateway-client";
+import type { GatewayCronRow } from "@smthrs/gateway-client";
 
 /**
- * Structural mirror of `@smithers-orchestrator/ui/calendar`'s CalendarEvent.
+ * Structural mirror of `@smthrs/ui/calendar`'s CalendarEvent.
  * gateway-react may not import UI packages (architecture rule), so the type
  * is redeclared; assignment to CalendarEvent is checked structurally at the
  * gateway-ui boundary.

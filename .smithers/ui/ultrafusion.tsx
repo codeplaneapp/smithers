@@ -5,7 +5,7 @@
  * gateway-ui widgets + ui primitives over the gateway-react hooks.
  */
 import { useState } from "react";
-import { createGatewayReactRoot, useGatewayNodeOutput } from "smithers-orchestrator/gateway-react";
+import { createGatewayReactRoot, useGatewayNodeOutput } from "smthrs/gateway-react";
 import {
   ConnectionBadge,
   MonitorButton,
@@ -17,8 +17,8 @@ import {
   RunTree,
   StatusPill,
   WorkflowUiShell,
-} from "smithers-orchestrator/gateway-ui";
-import { EmptyState, KpiStat } from "smithers-orchestrator/ui";
+} from "smthrs/gateway-ui";
+import { EmptyState, KpiStat } from "smthrs/ui";
 
 const WORKFLOW = "ultrafusion";
 const LETTERS = ["A", "B", "C", "D"];

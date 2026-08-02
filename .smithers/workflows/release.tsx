@@ -1,7 +1,7 @@
 // smithers-source: user
 // smithers-display-name: Release
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Sequence } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, Sequence } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import FeatureDocSyncAuditPrompt from "../prompts/feature-doc-sync-audit.mdx";
@@ -143,7 +143,7 @@ export default smithers((ctx) => {
             let lastReleaseRef: string | null = null;
             let commitsSinceRelease: string[] = [];
             try {
-              lastPublishedVersion = run("npm view smithers-orchestrator version") || null;
+              lastPublishedVersion = run("npm view smthrs version") || null;
             } catch {
               // Offline or never-published: fall back to nothing rather than
               // failing the whole release. The changelog gate still runs.

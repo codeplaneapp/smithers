@@ -1467,7 +1467,7 @@
     "name": "Hijack (interactive resume)",
     "area": "agent-lifecycle",
     "kind": "concept",
-    "summary": "Most CLI agents support native interactive takeover via bunx smithers-orchestrator hijack RUN_ID using vendor-specific resume flags.",
+    "summary": "Most CLI agents support native interactive takeover via bunx smthrs hijack RUN_ID using vendor-specific resume flags.",
     "slice": "agents-runtimes"
   },
   {
@@ -1945,7 +1945,7 @@
     "area": "memory",
     "kind": "cli",
     "summary": "CLI command to inspect facts in a namespace for debugging and observability.",
-    "keyApi": "bunx smithers-orchestrator memory list",
+    "keyApi": "bunx smthrs memory list",
     "docPointer": "llms-memory.txt",
     "slice": "memory"
   },
@@ -2110,7 +2110,7 @@
     "name": "Serve mode (single-workflow HTTP server)",
     "area": "observability",
     "kind": "concept",
-    "keyApi": "createServeApp, bunx smithers-orchestrator up --serve, --port, --host, --auth-token, --metrics",
+    "keyApi": "createServeApp, bunx smthrs up --serve, --port, --host, --auth-token, --metrics",
     "summary": "Hono-based HTTP server for a single workflow: REST routes, SSE events, approvals, metrics, and health endpoint.",
     "slice": "observability-gateway-server"
   },
@@ -3306,7 +3306,7 @@
     "area": "cli",
     "kind": "cli",
     "summary": "Scaffold .smithers/ with seeded workflows, prompts, components, agent configs, and optional dependencies.",
-    "keyApi": "bunx smithers-orchestrator init",
+    "keyApi": "bunx smthrs init",
     "docPointer": "docs/llms-full.txt (lines 380-410)",
     "slice": "examples-starters-init"
   },
@@ -3316,7 +3316,7 @@
     "area": "cli",
     "kind": "concept",
     "summary": "Pre-built starter templates for common workflows (idea-to-prd, idea-to-tickets, research, debug, etc.).",
-    "keyApi": "bunx smithers-orchestrator init --template <id>",
+    "keyApi": "bunx smthrs init --template <id>",
     "docPointer": "docs/llms-full.txt (lines 550-590)",
     "slice": "examples-starters-init"
   },
@@ -3326,7 +3326,7 @@
     "area": "cli",
     "kind": "cli",
     "summary": "Browse and filter available starter templates by audience, goal, workflow, or tag.",
-    "keyApi": "bunx smithers-orchestrator starters [--audience|--goal|--workflow|--tag]",
+    "keyApi": "bunx smthrs starters [--audience|--goal|--workflow|--tag]",
     "docPointer": "docs/llms-full.txt (lines 595-610)",
     "slice": "examples-starters-init"
   },
@@ -3336,7 +3336,7 @@
     "area": "cli",
     "kind": "cli",
     "summary": "Execute a discovered workflow by ID with input, concurrency control, resumption, and HTTP serving.",
-    "keyApi": "bunx smithers-orchestrator workflow run <name>",
+    "keyApi": "bunx smthrs workflow run <name>",
     "docPointer": "docs/llms-full.txt (lines ~1720-1770)",
     "slice": "examples-starters-init"
   },
@@ -3346,7 +3346,7 @@
     "area": "cli",
     "kind": "cli",
     "summary": "Create a new minimal flat workflow scaffold in .smithers/workflows/ with TypeScript and JSX setup.",
-    "keyApi": "bunx smithers-orchestrator workflow.create <name>",
+    "keyApi": "bunx smthrs workflow.create <name>",
     "docPointer": "docs/llms-full.txt (~1835)",
     "slice": "examples-starters-init"
   },
@@ -3406,7 +3406,7 @@
     "area": "cli",
     "kind": "cli",
     "summary": "Render the workflow graph without executing it to verify structure and detect syntax errors.",
-    "keyApi": "bunx smithers-orchestrator graph <workflow>",
+    "keyApi": "bunx smthrs graph <workflow>",
     "docPointer": "docs/llms-full.txt (~1800)",
     "slice": "examples-starters-init"
   },
@@ -3416,7 +3416,7 @@
     "area": "cli",
     "kind": "cli",
     "summary": "Show workflow metadata, input/output schemas, and agent-facing skill documentation.",
-    "keyApi": "bunx smithers-orchestrator workflow.inspect <name>",
+    "keyApi": "bunx smthrs workflow.inspect <name>",
     "docPointer": "docs/llms-full.txt (~1828)",
     "slice": "examples-starters-init"
   },
@@ -3426,7 +3426,7 @@
     "area": "cli",
     "kind": "cli",
     "summary": "Generate SKILL.md documentation for discovered workflows for agent use.",
-    "keyApi": "bunx smithers-orchestrator workflow.skills [name] [--output]",
+    "keyApi": "bunx smthrs workflow.skills [name] [--output]",
     "docPointer": "docs/llms-full.txt (~1839)",
     "slice": "examples-starters-init"
   },
@@ -3506,7 +3506,7 @@
     "area": "cli",
     "kind": "cli",
     "summary": "List all discovered workflows from local .smithers/workflows/ and global ~/.smithers/workflows/.",
-    "keyApi": "bunx smithers-orchestrator workflow.list",
+    "keyApi": "bunx smthrs workflow.list",
     "docPointer": "docs/llms-full.txt (~1715)",
     "slice": "examples-starters-init"
   },
@@ -3516,7 +3516,7 @@
     "area": "cli",
     "kind": "doc",
     "summary": "10 canonical starter template IDs with audiences and corresponding seeded workflows (idea-to-prd, idea-to-tickets, launch-checklist, etc.).",
-    "keyApi": "bunx smithers-orchestrator starters",
+    "keyApi": "bunx smthrs starters",
     "docPointer": "docs/llms-full.txt (lines 575-590)",
     "slice": "examples-starters-init"
   },
@@ -3536,7 +3536,7 @@
     "area": "cli",
     "kind": "cli",
     "summary": "Start or resume a workflow execution with input, run ID, resource limits, and optional HTTP serving.",
-    "keyApi": "bunx smithers-orchestrator up <workflow>",
+    "keyApi": "bunx smthrs up <workflow>",
     "docPointer": "docs/llms-full.txt (~1720)",
     "slice": "examples-starters-init"
   },
@@ -3546,7 +3546,7 @@
     "area": "cli",
     "kind": "cli",
     "summary": "Overwrite existing .smithers/ scaffold files during init.",
-    "keyApi": "bunx smithers-orchestrator init --force",
+    "keyApi": "bunx smthrs init --force",
     "docPointer": "docs/llms-full.txt (line 1704)",
     "slice": "examples-starters-init"
   },
@@ -3556,7 +3556,7 @@
     "area": "cli",
     "kind": "cli",
     "summary": "Scaffold the workflow pack in ~/.smithers (global) instead of ./.smithers (local).",
-    "keyApi": "bunx smithers-orchestrator init --global",
+    "keyApi": "bunx smthrs init --global",
     "docPointer": "docs/llms-full.txt (line 1708)",
     "slice": "examples-starters-init"
   },
@@ -3566,7 +3566,7 @@
     "area": "cli",
     "kind": "cli",
     "summary": "Only create .smithers/agents/ configuration without touching the workflow pack.",
-    "keyApi": "bunx smithers-orchestrator init --agents-only",
+    "keyApi": "bunx smthrs init --agents-only",
     "docPointer": "docs/llms-full.txt (line 1705)",
     "slice": "examples-starters-init"
   },

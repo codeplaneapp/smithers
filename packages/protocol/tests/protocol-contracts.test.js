@@ -155,7 +155,7 @@ describe("protocol runtime constants", () => {
             JUMP_TO_FRAME_ERROR_CODES,
             NODE_DIFF_ERROR_CODES,
             NODE_OUTPUT_ERROR_CODES,
-          } from "@smithers-orchestrator/protocol";
+          } from "@smthrs/protocol";
 
           console.log(JSON.stringify({
             DEVTOOLS_ERROR_CODES,

@@ -3,8 +3,8 @@
 // @smithers-type-exports-end
 
 import React from "react";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { Task } from "../Task.js";
 import { Sequence } from "../Sequence.js";
 import { Parallel } from "../Parallel.js";
@@ -69,7 +69,7 @@ function positiveInteger(value, name) {
 
 /** @param {TrellisProps["limits"]} limits */
 function normalizeLimits(limits) {
-  const next = { ...DEFAULT_LIMITS, ...(limits ?? {}) };
+  const next = { ...DEFAULT_LIMITS, ...limits };
   for (const [name, value] of Object.entries(next)) positiveInteger(value, `Trellis limits.${name}`);
   return next;
 }

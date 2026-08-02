@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { renderPrometheusMetrics } from "@smithers-orchestrator/observability";
+import { renderPrometheusMetrics } from "@smthrs/observability";
 import { randomBytes } from "node:crypto";
 import { connect as connectTcp } from "node:net";
 import { Gateway } from "../src/gateway.js";

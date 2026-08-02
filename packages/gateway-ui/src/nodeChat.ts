@@ -1,5 +1,5 @@
-import type { GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
-import type { ToolCallState } from "@smithers-orchestrator/ui";
+import type { GatewayEventFrame } from "@smthrs/gateway-client";
+import type { ToolCallState } from "@smthrs/ui";
 
 /**
  * Pure transcript model behind {@link NodeChatStream}: fold node-scoped event

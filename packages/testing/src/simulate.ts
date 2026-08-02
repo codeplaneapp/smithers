@@ -1,10 +1,10 @@
-import { WorkflowDriver } from "@smithers-orchestrator/driver";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler";
-import { makeWorkflowSession } from "@smithers-orchestrator/scheduler";
+import { WorkflowDriver } from "@smthrs/driver";
+import { SmithersRenderer } from "@smthrs/react-reconciler";
+import { makeWorkflowSession } from "@smthrs/scheduler";
 import { Effect } from "effect";
-import type { WorkflowDefinition } from "@smithers-orchestrator/driver/WorkflowDefinition";
-import type { ExtractOptions, TaskDescriptor, WorkflowGraph } from "@smithers-orchestrator/graph";
-import type { EngineDecision, RunResult, WaitReason, WorkflowSessionService } from "@smithers-orchestrator/scheduler";
+import type { WorkflowDefinition } from "@smthrs/driver/WorkflowDefinition";
+import type { ExtractOptions, TaskDescriptor, WorkflowGraph } from "@smthrs/graph";
+import type { EngineDecision, RunResult, WaitReason, WorkflowSessionService } from "@smthrs/scheduler";
 import type { FakeAgent } from "./fakeAgent.ts";
 import { isAuto } from "./fakeAgent.ts";
 import { schemaMock } from "./schemaMock.ts";
@@ -304,9 +304,8 @@ export function __simulateWithControls<Schema = unknown>(
       const graph = await smithersRenderer.render(element, extractOptions);
       const rootDir = extractOptions?.baseRootDir ?? options.rootDir;
       const workflowPath = extractOptions?.workflowPath ?? options.workflowPath ?? null;
-      const engineHelpers = (await import("@smithers-orchestrator/engine/engine")) as unknown as EngineOutputHelpers;
-      const computeHelpers =
-        (await import("@smithers-orchestrator/engine/task-compute-fns")) as unknown as TaskComputeFnHelpers;
+      const engineHelpers = (await import("@smthrs/engine/engine")) as unknown as EngineOutputHelpers;
+      const computeHelpers = (await import("@smthrs/engine/task-compute-fns")) as unknown as TaskComputeFnHelpers;
       engineHelpers.resolveTaskOutputs(graph.tasks, workflow);
       computeHelpers.attachSubflowComputeFns(graph.tasks, workflow, {
         rootDir,

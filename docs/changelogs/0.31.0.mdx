@@ -19,9 +19,9 @@ and orchestrator seats in the model registry.
 ## Upgrading
 
 ```bash
-bunx smithers-orchestrator update        # upgrade the CLI
-bunx smithers-orchestrator upgrade       # agent-assisted: reads the changelogs and applies what your project needs
-bunx smithers-orchestrator packs update  # refresh installed workflow packs
+bunx smthrs update        # upgrade the CLI
+bunx smthrs upgrade       # agent-assisted: reads the changelogs and applies what your project needs
+bunx smthrs packs update  # refresh installed workflow packs
 ```
 
 Behavior changes are collected in the [upgrade notes](#upgrade-notes).
@@ -55,7 +55,7 @@ When an agent decides for itself when to act, mark the exact tool call
 instead:
 
 ```ts
-import { defineTool } from "smithers-orchestrator/tools";
+import { defineTool } from "smthrs/tools";
 import { z } from "zod";
 
 const createTicket = defineTool({
@@ -77,9 +77,9 @@ status of intended, then succeeded or unknown. Time travel consults that
 journal:
 
 ```bash
-bunx smithers-orchestrator rewind RUN_ID <frame>              # prints an effect-boundary report
-bunx smithers-orchestrator rewind RUN_ID <frame> --force      # cross anyway; the run is marked needs-attention
-bunx smithers-orchestrator rewind RUN_ID <frame> --no-revert  # keep the effects; skip compensation
+bunx smthrs rewind RUN_ID <frame>              # prints an effect-boundary report
+bunx smthrs rewind RUN_ID <frame> --force      # cross anyway; the run is marked needs-attention
+bunx smthrs rewind RUN_ID <frame> --no-revert  # keep the effects; skip compensation
 ```
 
 - **Rewind, fork, replay, and `jumpToFrame` run an effect-boundary
@@ -119,7 +119,7 @@ the orchestrator seat that Claude Opus 4.8 held. GPT-5.6 Sol and Terra
 move to the review, validation, and checking seats.
 
 ```bash
-bunx smithers-orchestrator oneshot "make the flaky auth test deterministic"
+bunx smthrs oneshot "make the flaky auth test deterministic"
 ```
 
 - Cost scoring prices `claude-opus-5` at $5 per million input tokens and
@@ -140,8 +140,8 @@ and lint in a scratch worktree, then pushes main and closes the issues.
 It ships with a live UI.
 
 ```bash
-bunx smithers-orchestrator packs update
-bunx smithers-orchestrator up opus5-bug-sweep
+bunx smthrs packs update
+bunx smthrs up opus5-bug-sweep
 ```
 
 ## Reliability and security
@@ -158,10 +158,10 @@ repo's own issue tracker. The most noticeable, with a security pin first:
   Activity hide/show can no longer leave a UI reading from a closed client
   (#906), and provider recreation now accounts for every behavior-affecting
   option (#904).
-- **`bunx smithers-orchestrator ui` and gateway autostart got honest.** Autostart waits scale
+- **`bunx smthrs ui` and gateway autostart got honest.** Autostart waits scale
   instead of racing, `START_IN_PROGRESS` reports what is actually happening,
   and workflow UIs mount lazily (#1362).
-- **`bunx smithers-orchestrator events --watch` tails instead of replaying.** It no longer
+- **`bunx smthrs events --watch` tails instead of replaying.** It no longer
   dumps the run's full history before following new events (#1355).
 - **The bash tool stops over-blocking.** With network access off, the denylist
   scanned every argument token and rejected benign local commands; it now
@@ -169,9 +169,9 @@ repo's own issue tracker. The most noticeable, with a security pin first:
 - **Webhook deliveries no longer double-fire on Postgres.** The dedupe contract
   held on SQLite but the Postgres `ON CONFLICT` loser still reported success
   (#682).
-- **`bunx smithers-orchestrator skills add`/`list`/`update` work headless.** The commands own
+- **`bunx smthrs skills add`/`list`/`update` work headless.** The commands own
   the curated skill and no longer gate on a TTY (#1377).
-- **`bunx smithers-orchestrator worktree prune` reclaims landed lanes.** Fully-landed jj lane
+- **`bunx smthrs worktree prune` reclaims landed lanes.** Fully-landed jj lane
   workspaces were misread as unsaved work due to colocated git HEAD skew and
   held forever (#1379).
 - **Retried agent attempts survive a busy runner.** The engine clears a busy
@@ -241,7 +241,7 @@ reference, and its entry pages now say so.
 - **`jjhub-issue-fleet` pack workflow.** Fans each open GitHub issue into its
   own jjhub sandbox VM with a Codex lane and returns PRs, with a live fleet
   UI.
-- **Every `@smithers-orchestrator/ui` component has a browsable
+- **Every `@smthrs/ui` component has a browsable
   catalog:** 47 stories at
   [storybook.smithers.sh](https://storybook.smithers.sh).
 - **Launching Smithers from the Claude Code native Workflow tool no
@@ -265,7 +265,7 @@ Thank you to the external contributors in this release:
 - **[@paolohajinz75](https://github.com/paolohajinz75)** added the repo
   `.editorconfig`.
 
-Running into something? `bunx smithers-orchestrator bug` files a report
+Running into something? `bunx smthrs bug` files a report
 straight from your terminal.
 
 ## Upgrade notes
@@ -290,4 +290,4 @@ straight from your terminal.
 The complete commit-level history for this release is in
 [CHANGELOG.md](https://github.com/smithersai/smithers/blob/main/CHANGELOG.md).
 
-Found a bug? Run `bunx smithers-orchestrator bug` to file it.
+Found a bug? Run `bunx smthrs bug` to file it.

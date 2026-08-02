@@ -3,9 +3,9 @@
 // Everything here is either a pure function or a gateway-free component so bun
 // tests can exercise it directly (no network, no ReactFlow canvas required).
 // The DelegationGraph shape is the frozen contract owned by
-// smithers-orchestrator/gateway-react (useDelegationChain / foldDelegation).
+// smthrs/gateway-react (useDelegationChain / foldDelegation).
 import { Suspense, lazy, useState, type ReactNode } from "react";
-import type { DelegationGraph } from "smithers-orchestrator/gateway-react";
+import type { DelegationGraph } from "smthrs/gateway-react";
 
 export type DelegationNode = DelegationGraph["nodes"][string];
 export type DcGate = DelegationNode["gates"][number];

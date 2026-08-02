@@ -3,11 +3,11 @@
  * <BisectGuide> — Orchestrate git bisect with an agent interpreting ambiguous outcomes at each step.
  * Shape: VCS controller ↔ test runner ↔ adjudicator agent.
  */
-import { Sequence, Loop } from "smithers-orchestrator";
+import { Sequence, Loop } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent, Output } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { bash, read, grep } from "smithers-orchestrator/tools";
+import { bash, read, grep } from "smthrs/tools";
 import { z } from "zod";
 import BisectStepPrompt from "./prompts/bisect-guide/bisect-step.mdx";
 import AdjudicatePrompt from "./prompts/bisect-guide/adjudicate.mdx";

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { TelegramClientConfig, SendMessageSmartOptions } from '../TelegramClientTypes.js';
 import { TelegramApprovalMode, TelegramApprovalOption } from '../approvalTypes.js';
 import 'effect';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 
 /** The request rendered into the approval prompt. */
 type TelegramApprovalRequest = {

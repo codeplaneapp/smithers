@@ -1,8 +1,8 @@
 /**
- * @smithers-orchestrator/gateway-ui
+ * @smthrs/gateway-ui
  *
  * Reusable React components for Smithers Gateway UIs, built on the
- * `@smithers-orchestrator/gateway-react` hooks. Drop them into a custom workflow
+ * `@smthrs/gateway-react` hooks. Drop them into a custom workflow
  * UI under `.smithers/ui/<workflow>.tsx` (mounted with `createGatewayReactRoot`)
  * to assemble a run dashboard in minutes instead of wiring hooks by hand.
  *
@@ -11,8 +11,8 @@
  * `className` + `style` to override.
  *
  * @example
- * import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";
- * import { RunList, RunTree, ApprovalPanel } from "smithers-orchestrator/gateway-ui";
+ * import { createGatewayReactRoot } from "smthrs/gateway-react";
+ * import { RunList, RunTree, ApprovalPanel } from "smthrs/gateway-ui";
  * import { useState } from "react";
  *
  * function App() {

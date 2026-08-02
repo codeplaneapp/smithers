@@ -22,8 +22,8 @@ See the [migration notes](#migration-notes) at the bottom.
 
 The Gateway is now a singleton: CLI commands autostart one shared daemon per workspace (with identity checks so you never attach to the wrong one), and every run in that workspace flows through it over a single shared SQLite store.
 
-- **Manage it explicitly** with `bunx smithers-orchestrator gateway status` and `bunx smithers-orchestrator gateway stop`.
-- **Idle spin-down:** autostarted daemons exit after ~5 minutes with no WS clients, in-flight runs, crons, or timers. `SMITHERS_GATEWAY_IDLE_MS` tunes the window; an explicit `bunx smithers-orchestrator gateway` never idle-exits.
+- **Manage it explicitly** with `bunx smthrs gateway status` and `bunx smthrs gateway stop`.
+- **Idle spin-down:** autostarted daemons exit after ~5 minutes with no WS clients, in-flight runs, crons, or timers. `SMITHERS_GATEWAY_IDLE_MS` tunes the window; an explicit `bunx smthrs gateway` never idle-exits.
 - **Escape hatch for CI, sandboxes, and containers:** set `SMITHERS_NO_DAEMON=1` (or pass `--no-daemon`) to opt out of autostart. Commands that genuinely need a daemon fail loud and name the hatch instead of silently spawning one.
 - **DNS-rebinding defense:** unauthenticated requests with a non-loopback `Host` are rejected (including correct handling of a bare `::1`), and the local UI gateway proxy blocks cross-origin requests. Remote binds that legitimately serve non-loopback Hosts use auth as the gate, or the explicit `SMITHERS_GATEWAY_TRUST_ANY_HOST=1` opt-out.
 - **Tested under load:** a new no-mocks test runs 50 concurrent workflows through one gateway owner: all 50 finish, every run is attributed exactly once, and per-run event sequences stay contiguous.
@@ -42,8 +42,8 @@ The UI data layer moved to TanStack DB collections with per-mode providers behin
 Workflow UIs are now a first-class authoring surface:
 
 - **A reusable [`gateway-ui` component package](/reference/gateway-ui)** and a [workflow UI styleguide](/guides/workflow-ui-design) provide the primitives custom workflow UIs are built from.
-- **A create-workflow builder UI** with a code editor and live graph preview backs `bunx smithers-orchestrator make-workflow`: describe a workflow in plain English and watch it get designed, scaffolded, and graph-verified.
-- **Experimental:** `bunx smithers-orchestrator ui --app` serves a local UI app preview with a concierge chat that can create and launch workflows ([ui.smithers.sh](https://ui.smithers.sh)). It requires an LLM API key and is not yet part of the supported product surface.
+- **A create-workflow builder UI** with a code editor and live graph preview backs `bunx smthrs make-workflow`: describe a workflow in plain English and watch it get designed, scaffolded, and graph-verified.
+- **Experimental:** `bunx smthrs ui --app` serves a local UI app preview with a concierge chat that can create and launch workflows ([ui.smithers.sh](https://ui.smithers.sh)). It requires an LLM API key and is not yet part of the supported product surface.
 
 <Frame caption="A run streaming live step transitions into the UI as each task starts and finishes. The same live collections now power the web UI, the TUI monitor, and the chat plugins.">
  <img src="/images/why/runs-live.gif" alt="A Smithers run streaming live step transitions into a tree as each task starts and finishes" />
@@ -51,14 +51,14 @@ Workflow UIs are now a first-class authoring surface:
 
 ## Full-screen TUI monitor
 
-`bunx smithers-orchestrator up --interactive` now opens a full-screen OpenTUI + React monitor with five modes (tree, graph, logs, timeline, and hijack), fed by the same live gateway-react hooks as the web UI, with inline approvals. For watching an already-detached run, [`smithers monitor`](https://monitor.smithers.sh) is the cockpit equivalent.
+`bunx smthrs up --interactive` now opens a full-screen OpenTUI + React monitor with five modes (tree, graph, logs, timeline, and hijack), fed by the same live gateway-react hooks as the web UI, with inline approvals. For watching an already-detached run, [`smithers monitor`](https://monitor.smithers.sh) is the cockpit equivalent.
 
 ## Claude Code and Codex plugins: durable runs, inside the chat
 
 Both plugins are covered in depth at [plugins.smithers.sh](https://plugins.smithers.sh).
 
-- **Claude Code** ([integration guide](/integrations/claude-code-plugin)): the plugin now mirrors every Smithers run into a live /workflows view by default, with a background monitor that surfaces approvals, human requests, failures, and stalls. It is driven by new versioned protocol commands (`bunx smithers-orchestrator claude tick|node-wait|monitor`), and the graph layer derives Claude-native phase plans, including from persisted frames, so a restarted session picks the view back up.
-- **Codex** gets its own plugin whose skill drives the agent to run its work through Smithers and open a live `bunx smithers-orchestrator ui` view per workflow.
+- **Claude Code** ([integration guide](/integrations/claude-code-plugin)): the plugin now mirrors every Smithers run into a live /workflows view by default, with a background monitor that surfaces approvals, human requests, failures, and stalls. It is driven by new versioned protocol commands (`bunx smthrs claude tick|node-wait|monitor`), and the graph layer derives Claude-native phase plans, including from persisted frames, so a restarted session picks the view back up.
+- **Codex** gets its own plugin whose skill drives the agent to run its work through Smithers and open a live `bunx smthrs ui` view per workflow.
 
 ## Self-healing runs
 
@@ -66,7 +66,7 @@ When a run fails, Smithers now [investigates itself](https://self-healing.smithe
 
 - **Post-failure autopsy:** the CLI auto-launches an autopsy workflow on run failure that diagnoses what went wrong from the event history and reports findings ([guide](/guide/post-failure)).
 - **Fleet medic:** the `monitor-smithers` sweep gains an auto-remediation medic stage that proposes and applies fixes for stuck or degraded runs.
-- **`bunx smithers-orchestrator supervise`** continues to watch for stale running runs and auto-resume them.
+- **`bunx smthrs supervise`** continues to watch for stale running runs and auto-resume them.
 
 <Frame caption="Durability is the point: a run that crashes mid-flight resumes from its last checkpoint, and in 0.27.0 a run that fails gets an automatic autopsy.">
  <img src="/images/why/crash-resume.gif" alt="A Smithers run crashing and resuming from its last durable checkpoint" />
@@ -89,26 +89,26 @@ A new [docs-driven development](https://ddd.smithers.sh) family of workflows tre
 ## CLI
 
 - **Interactive `init` wizard** ([init.smithers.sh](https://init.smithers.sh)) with à-la-carte workflow/skill/agent-doc selection and persisted skill deselections; `--yes` / `--non-interactive` for CI. Non-interactive re-init now runs as a durable, replayable [system workflow](/workflows/init), falling back to the imperative path if the workflow cannot load.
-- **`bunx smithers-orchestrator make-workflow "<task>"`** dispatches the create-workflow builder from a plain-English description, and `init [prompt]` chains straight into it: install the pack and describe your first workflow in one command. A seeded [make-workflow tutorial](/workflows/make-workflow-tutorial) teaches the authoring loop.
-- **`bunx smithers-orchestrator update`** detects how Smithers was installed (bunx/npx, global bun/npm/pnpm/yarn, project-local) and upgrades it or prints the exact command, plus a passive once-a-day update notice (`SMITHERS_NO_UPDATE_CHECK` opts out).
-- **HTML run reports:** `bunx smithers-orchestrator workflow run --report` emits an HTML report with open-in-browser.
-- **`bunx smithers-orchestrator bug`** files bug reports with scrubbed run context ([how we handle them](/contributing/bug-reports)).
+- **`bunx smthrs make-workflow "<task>"`** dispatches the create-workflow builder from a plain-English description, and `init [prompt]` chains straight into it: install the pack and describe your first workflow in one command. A seeded [make-workflow tutorial](/workflows/make-workflow-tutorial) teaches the authoring loop.
+- **`bunx smthrs update`** detects how Smithers was installed (bunx/npx, global bun/npm/pnpm/yarn, project-local) and upgrades it or prints the exact command, plus a passive once-a-day update notice (`SMITHERS_NO_UPDATE_CHECK` opts out).
+- **HTML run reports:** `bunx smthrs workflow run --report` emits an HTML report with open-in-browser.
+- **`bunx smthrs bug`** files bug reports with scrubbed run context ([how we handle them](/contributing/bug-reports)).
 - **Agent availability probing:** the CLI now probes whether agent CLIs can actually run instead of trusting auth files on disk.
-- **Version-pinned LLM docs:** `bunx smithers-orchestrator docs` / `docs-full` serve `llms.txt` / `llms-full.txt` pinned to the installed version, with a git-tag fallback for older `--docs-version` requests.
+- **Version-pinned LLM docs:** `bunx smthrs docs` / `docs-full` serve `llms.txt` / `llms-full.txt` pinned to the installed version, with a git-tag fallback for older `--docs-version` requests.
 - **Project-local CLI resolution:** a globally-installed `smithers` resolves and delegates to the nearest project-local install, the way tsx and bunx do.
 - **waiting-quota is handled consistently** across the CLI, TUI, gateway, and UI: paused exit code, waiting badge/tone, and active-run treatment instead of reading as failed or terminal.
 
 ## Agents
 
 - **OpenClaw** is now a supported agent ([openclaw.smithers.sh](https://openclaw.smithers.sh)): a new adapter, a native OpenClaw plugin with an orchestrate skill, and working session resume (`--session-id` emitted, resume metadata persisted).
-- **elizaOS** ships as the opt-in `@smithers-orchestrator/agent-eliza` package, wrapping the elizaOS AgentRuntime with an elizaOS-conventions authoring/loading layer; `@elizaos/core` stays out of default installs.
+- **elizaOS** ships as the opt-in `@smthrs/agent-eliza` package, wrapping the elizaOS AgentRuntime with an elizaOS-conventions authoring/loading layer; `@elizaos/core` stays out of default installs.
 - **A review agent tier** joins the generated `agents.ts`, so plan/implement/review pools are first-class in fresh installs.
 - **SSRF fixes in agent tools:** the http tool no longer attaches configured secret headers to hosts outside the allowlist, and the transcription tool rejects loopback/private/link-local audio URLs unless explicitly opted in.
 - **MCP stdio deadlock fixed:** the transport now drains the server's stderr pipe, so a verbose MCP server can no longer stall the session once the OS pipe buffer filled.
 
 ## Workflow pack
 
-- **Every user-facing seeded workflow now ships a custom UI**: the init pack seeds per-workflow browser UIs built on the new `gateway-ui` package, opened with `bunx smithers-orchestrator ui RUN_ID`.
+- **Every user-facing seeded workflow now ships a custom UI**: the init pack seeds per-workflow browser UIs built on the new `gateway-ui` package, opened with `bunx smthrs ui RUN_ID`.
 - **Fresh installs default the implement pool to Claude Sonnet 5** in the generated `agents.ts`.
 - **Re-init detects drifted seeded pack files** and offers an interactive update, so upgrading the pack no longer means diffing by hand.
 - Plan and review now run as model-diverse panels whose moderator synthesizes a single verdict, with resilient failover when one CLI cannot authenticate. The Panel component's moderator is gated on actual panelist outputs instead of synthesizing a verdict blind.

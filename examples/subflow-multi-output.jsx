@@ -19,7 +19,7 @@
  * The executable proof of this contract lives in
  * packages/engine/tests/subflow-childrun-multi-output.e2e.test.jsx.
  */
-import { Sequence, Subflow } from "smithers-orchestrator";
+import { Sequence, Subflow } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { z } from "zod";
 const draftSchema = z.object({ text: z.string() });

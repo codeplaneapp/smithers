@@ -10,12 +10,12 @@ export const CURATED_SKILL_NAME = "smithers";
 
 /**
  * Retired skill identities that must never keep shadowing the current curated
- * skill. The old `smithers-orchestrator` skill taught a stale JSX/Ralph mental
+ * skill. The old `smthrs` skill taught a stale JSX/Ralph mental
  * model and set `recommend-plan-mode`, which (being read-only) made agents
  * describe workflows instead of writing them. `refreshCuratedSkills` removes any
  * skill install carrying these markers.
  */
-export const RETIRED_SKILL_NAMES = ["smithers-orchestrator"];
+export const RETIRED_SKILL_NAMES = ["smthrs"];
 
 /**
  * Coding agents that read skills from a directory we know how to target. Each

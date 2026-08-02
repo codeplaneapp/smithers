@@ -3,8 +3,8 @@
 // smithers-display-name: Federation Manifest Hardening
 // smithers-description: Repair and validate the Smithers federation ownership manifest, release DAG, and clean-snapshot review safety.
 // smithers-tags: maintenance, federation, safety
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 

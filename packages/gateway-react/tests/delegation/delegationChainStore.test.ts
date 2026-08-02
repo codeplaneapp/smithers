@@ -4,7 +4,7 @@
 // payloads — the store under test, the fold, and the target enumeration are
 // all the real implementations.
 import { describe, expect, test } from "bun:test";
-import { GatewayRpcError } from "@smithers-orchestrator/gateway-client";
+import { GatewayRpcError } from "@smthrs/gateway-client";
 import {
   createDelegationChainStore,
   EVENT_HISTORY_PAGE_SIZE,

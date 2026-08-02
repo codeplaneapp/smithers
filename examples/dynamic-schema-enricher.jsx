@@ -4,11 +4,11 @@
  *
  * Shape: input/context → dynamic type resolver → extractor → typed output.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import ContextPrompt from "./prompts/dynamic-schema-enricher/context.mdx";
 import ResolvePrompt from "./prompts/dynamic-schema-enricher/resolve.mdx";

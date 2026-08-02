@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { reducedMotionCss } from "@smithers-orchestrator/ui-styleguide";
+import { reducedMotionCss } from "@smthrs/ui-styleguide";
 import { agenticReasoningCss, sharedCss, smithersUiCss } from "../src/uiCss";
 
 describe("agentic reasoning CSS", () => {

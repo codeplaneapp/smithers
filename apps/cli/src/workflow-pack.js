@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { accountsRoot } from "@smithers-orchestrator/accounts";
+import { accountsRoot } from "@smthrs/accounts";
 import { generateAgentsTs } from "./agent-detection.js";
 import {
   installCuratedSkill,
@@ -112,7 +112,7 @@ function isLocalSourceCheckout() {
 }
 /**
  * Pins shipped with this release for devDep-only specs that won't be in the
- * user's `node_modules` after `bunx smithers-orchestrator@latest init`. Bump
+ * user's `node_modules` after `bunx smthrs@latest init`. Bump
  * these when updating the monorepo's root devDependencies.
  */
 const BUNDLED_VERSION_PINS = {
@@ -179,10 +179,10 @@ function renderPackageJson(versions) {
         dependencies: {
           react: versions.reactVersion,
           "react-dom": versions.reactDomVersion,
-          "smithers-orchestrator": smithersSpec,
+          smthrs: smithersSpec,
           // The seeded `init` system workflow imports the CLI's pack
           // scaffolding functions to make re-init a durable run.
-          "@smithers-orchestrator/cli": smithersSpec,
+          "@smthrs/cli": smithersSpec,
           zod: versions.zodVersion,
           "@milkdown/crepe": versions.milkdownCrepeVersion,
           mermaid: versions.mermaidVersion,
@@ -641,7 +641,7 @@ function linkLocalSourceRuntime(rootDir) {
   if (!isLocalSourceCheckout()) return;
   const nodeModules = resolve(rootDir, "node_modules");
   if (!existsSync(nodeModules)) return;
-  const runtimeLink = resolve(nodeModules, "smithers-orchestrator");
+  const runtimeLink = resolve(nodeModules, "smthrs");
   rmSync(runtimeLink, { recursive: true, force: true });
   symlinkSync(SOURCE_SMITHERS_PACKAGE, runtimeLink, "dir");
 }

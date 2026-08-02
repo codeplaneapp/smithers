@@ -1,6 +1,6 @@
 // smithers-display-name: Land Shared UI Worktrees
-/** @jsxImportSource smithers-orchestrator */
-import { MergeQueue, Sequence, Task, UI, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { MergeQueue, Sequence, Task, UI, createSmithers } from "smthrs";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod/v4";
@@ -111,7 +111,7 @@ function fixPrompt(ci: RawRow | undefined, repoRoot: string): string {
 function reportPrompt(merges: RawRow[], repoRoot: string): string {
   return [
     `All shared-UI worktrees are landed and the CI gate is green in ${repoRoot}. Write the landing report.`,
-    "List every component now newly importable from smithers-orchestrator/ui (including adapters/* subpaths) and smithers-orchestrator/gateway-ui, verified by reading the package index/export maps — do not guess. Name honest followUps (unlanded lanes, deferred consumer migrations, styleguide gaps).",
+    "List every component now newly importable from smthrs/ui (including adapters/* subpaths) and smthrs/gateway-ui, verified by reading the package index/export maps — do not guess. Name honest followUps (unlanded lanes, deferred consumer migrations, styleguide gaps).",
     `Merge results:\n${JSON.stringify(merges, null, 2)}`,
   ].join("\n\n");
 }

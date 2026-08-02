@@ -1,10 +1,10 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import "../preload.ts";
 import { describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { renderWorkflow, runTask, simulate } from "smithers-orchestrator/testing";
+import { renderWorkflow, runTask, simulate } from "smthrs/testing";
 
 const workflows = join(import.meta.dir, "..", "workflows");
 const load = async (name: string) => (await import(join(workflows, name))).default;

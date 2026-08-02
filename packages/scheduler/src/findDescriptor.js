@@ -1,4 +1,4 @@
-/** @typedef {import("@smithers-orchestrator/graph").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("@smthrs/graph").TaskDescriptor} TaskDescriptor */
 
 /**
  * `state.descriptors` holds exactly one entry per nodeId — the CURRENT

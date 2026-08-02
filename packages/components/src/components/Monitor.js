@@ -97,7 +97,7 @@ export function Monitor(props) {
 
   /**
    * Build one handler `<Task>`. Handlers are named per condition so an operator
-   * reading `bunx smithers-orchestrator inspect` on the monitor run can see which repair fired.
+   * reading `bunx smthrs inspect` on the monitor run can see which repair fired.
    * @param {MonitorCondition} name
    * @param {string} instruction
    */
@@ -118,14 +118,14 @@ export function Monitor(props) {
           "",
           instruction,
           "",
-          "Read run state only through `smithers-orchestrator/gateway-client` or the public CLI. Never open the store.",
+          "Read run state only through `smthrs/gateway-client` or the public CLI. Never open the store.",
           "Report exactly what you did and what changed. If the action did not change the symptom, say so plainly rather than trying something else.",
         ].join("\n"),
     });
 
   /**
    * Escalation is a durable human request on the MONITOR run, so it survives a
-   * restart and shows up in `bunx smithers-orchestrator human inbox` / the Gateway.
+   * restart and shows up in `bunx smthrs human inbox` / the Gateway.
    * @param {MonitorCondition} name
    * @param {string} ask
    */
@@ -156,7 +156,7 @@ export function Monitor(props) {
         ? handlerTask(
             "stalled",
             watchWorkflowPath
-              ? `First confirm that the health sample explicitly reports \`ownerActive: false\`; if ownership evidence is absent or true, do not act and report that recovery needs a human. Then resume the ownerless run: \`bunx smithers-orchestrator up ${shellArg(watchWorkflowPath)} --resume --run-id ${shellArg(watchRunId)}\`. Confirm with \`bunx smithers-orchestrator status ${shellArg(watchRunId)}\` that events resumed. Do nothing else.`
+              ? `First confirm that the health sample explicitly reports \`ownerActive: false\`; if ownership evidence is absent or true, do not act and report that recovery needs a human. Then resume the ownerless run: \`bunx smthrs up ${shellArg(watchWorkflowPath)} --resume --run-id ${shellArg(watchRunId)}\`. Confirm with \`bunx smthrs status ${shellArg(watchRunId)}\` that events resumed. Do nothing else.`
               : "Do not resume: watchWorkflowPath was not supplied. Report that the monitor cannot build a safe resume command.",
           )
         : escalate(
@@ -170,7 +170,7 @@ export function Monitor(props) {
         ? handlerTask(
             "wedged-node",
             watchWorkflowPath && typeof health?.targetNodeId === "string" && health.targetNodeId
-              ? `First confirm that the health sample explicitly reports \`ownerActive: false\`; if ownership evidence is absent or true, do not act and report that recovery needs a human. Then retry the ownerless wedged node once: \`bunx smithers-orchestrator retry-task ${shellArg(watchWorkflowPath)} --run-id ${shellArg(watchRunId)} --node-id ${shellArg(health.targetNodeId)}\`. This resets that node's output and downstream dependents before creating fresh attempts. Report exactly what was reset. Do not retry a second time — a node that wedges again needs a human.`
+              ? `First confirm that the health sample explicitly reports \`ownerActive: false\`; if ownership evidence is absent or true, do not act and report that recovery needs a human. Then retry the ownerless wedged node once: \`bunx smthrs retry-task ${shellArg(watchWorkflowPath)} --run-id ${shellArg(watchRunId)} --node-id ${shellArg(health.targetNodeId)}\`. This resets that node's output and downstream dependents before creating fresh attempts. Report exactly what was reset. Do not retry a second time — a node that wedges again needs a human.`
               : "Do not retry: watchWorkflowPath or targetNodeId is missing from the health sample. Report the incomplete monitor evidence.",
           )
         : escalate(
@@ -184,7 +184,7 @@ export function Monitor(props) {
     "runaway-loop": autoHeal.includes("runaway-loop")
       ? handlerTask(
           "runaway-loop",
-          `Cancel the runaway run: \`bunx smithers-orchestrator cancel ${shellArg(watchRunId)}\`. Record the loop id, its iteration count, and the token burn that justified cancelling BEFORE you cancel.`,
+          `Cancel the runaway run: \`bunx smthrs cancel ${shellArg(watchRunId)}\`. Record the loop id, its iteration count, and the token burn that justified cancelling BEFORE you cancel.`,
         )
       : escalate(
           "runaway-loop",

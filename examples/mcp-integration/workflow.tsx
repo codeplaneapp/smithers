@@ -1,8 +1,8 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { resolve } from "node:path";
-import { AnthropicAgent } from "@smithers-orchestrator/agents";
-import { createMcpToolset } from "@smithers-orchestrator/agents/mcp/createMcpToolset";
-import { Task, Workflow } from "smithers-orchestrator";
+import { AnthropicAgent } from "@smthrs/agents";
+import { createMcpToolset } from "@smthrs/agents/mcp/createMcpToolset";
+import { Task, Workflow } from "smthrs";
 import { z } from "zod";
 import { createExampleSmithers } from "../_example-kit.js";
 

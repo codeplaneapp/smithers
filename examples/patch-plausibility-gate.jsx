@@ -5,11 +5,11 @@
  * Pattern: Code agent proposes patch → parallel lint/test/build → gate aggregates → comment/merge/update.
  * Use cases: PR quality gates, pre-merge verification, continuous integration plausibility checks.
  */
-import { Sequence, Parallel } from "smithers-orchestrator";
+import { Sequence, Parallel } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { bash, read, grep } from "smithers-orchestrator/tools";
+import { bash, read, grep } from "smthrs/tools";
 import { z } from "zod";
 import PatchPrompt from "./prompts/patch-plausibility-gate/patch.mdx";
 import LintPrompt from "./prompts/patch-plausibility-gate/lint.mdx";

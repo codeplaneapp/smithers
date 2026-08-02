@@ -41,7 +41,7 @@ CLI harnesses extend `BaseCliAgent` and spawn the vendor binary as a child proce
 The `agent` prop takes one agent or an ordered chain; `fallbackAgent` is sugar for a two-rung chain:
 
 ```tsx
-import { ClaudeCodeAgent, CodexAgent, GeminiAgent, createSmithers, Sequence, Task } from "smithers-orchestrator";
+import { ClaudeCodeAgent, CodexAgent, GeminiAgent, createSmithers, Sequence, Task } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, smithers, outputs } = createSmithers({
@@ -82,17 +82,17 @@ The engine (`packages/engine/src/engine.js`) treats `AGENT_QUOTA_EXCEEDED` speci
 
 ### Seats: subscriptions and API keys
 
-`bunx smithers-orchestrator agents add` registers an account - interactively or via flags - for `claude-code`, `codex`, `antigravity`, `kimi`, `anthropic-api`, `openai-api`, or `gemini-api`:
+`bunx smthrs agents add` registers an account - interactively or via flags - for `claude-code`, `codex`, `antigravity`, `kimi`, `anthropic-api`, `openai-api`, or `gemini-api`:
 
 ```bash
-bunx smithers-orchestrator agents add --provider claude-code --label claude-work \
+bunx smthrs agents add --provider claude-code --label claude-work \
   --configDir ~/.smithers-accounts/claude-work
-bunx smithers-orchestrator agents add --provider openai-api --label oai-main --apiKey sk-...
-bunx smithers-orchestrator agents list
-bunx smithers-orchestrator usage          # rate-limit / subscription quota per registered account
+bunx smthrs agents add --provider openai-api --label oai-main --apiKey sk-...
+bunx smthrs agents list
+bunx smthrs usage          # rate-limit / subscription quota per registered account
 ```
 
-Subscription seats are a **config directory**, not a key: `ClaudeCodeAgent` *clears* `ANTHROPIC_API_KEY` so the CLI bills your Claude Pro/Max plan from credentials at `CLAUDE_CONFIG_DIR/.credentials.json`; `CodexAgent` mirrors this with `CODEX_HOME`/`auth.json`. Registering multiple labels for one provider gives you a seat pool you wire into distinct agent instances (one `configDir` each) and place on chain rungs - the quota failover above then rotates work off exhausted seats. Setting `apiKey` flips the same adapter to pay-per-token API billing, which is what makes cold sandboxes viable (see [Sandboxes](/concepts/sandboxes)). `bunx smithers-orchestrator agents add` also regenerates a previously generated `.smithers/agents.ts` to reflect the registry; hand-edited files are left alone.
+Subscription seats are a **config directory**, not a key: `ClaudeCodeAgent` *clears* `ANTHROPIC_API_KEY` so the CLI bills your Claude Pro/Max plan from credentials at `CLAUDE_CONFIG_DIR/.credentials.json`; `CodexAgent` mirrors this with `CODEX_HOME`/`auth.json`. Registering multiple labels for one provider gives you a seat pool you wire into distinct agent instances (one `configDir` each) and place on chain rungs - the quota failover above then rotates work off exhausted seats. Setting `apiKey` flips the same adapter to pay-per-token API billing, which is what makes cold sandboxes viable (see [Sandboxes](/concepts/sandboxes)). `bunx smthrs agents add` also regenerates a previously generated `.smithers/agents.ts` to reflect the registry; hand-edited files are left alone.
 
 ## Guarantees and limits
 
@@ -100,7 +100,7 @@ Subscription seats are a **config directory**, not a key: `ClaudeCodeAgent` *cle
 
 **Not guaranteed - what does not port cleanly:**
 
-- **Tool surfaces differ.** Each harness ships its own built-ins and its own MCP bootstrap (project-config vs. CLI-flag vs. none). The per-agent capability registry (`bunx smithers-orchestrator agents capabilities`, validated by `bunx smithers-orchestrator agents doctor`) makes the differences inspectable, not invisible.
+- **Tool surfaces differ.** Each harness ships its own built-ins and its own MCP bootstrap (project-config vs. CLI-flag vs. none). The per-agent capability registry (`bunx smthrs agents capabilities`, validated by `bunx smthrs agents doctor`) makes the differences inspectable, not invisible.
 - **Permission models differ.** Claude Code's allowlists, Codex's sandbox modes, and Cursor's approval flows are not translated between each other. A prompt tuned to one harness's permission prompts can behave differently on its fallback.
 - **Context windows and prompt caching differ.** A prompt near one model's window may truncate on its fallback, and provider-side prompt-cache economics do not transfer - a fallover attempt is a cold cache.
 - **Subscription ToS are the vendor's.** Smithers routes work across the seats *you* registered; whether pooled or automated use fits your Claude/ChatGPT plan terms is between you and the vendor.
@@ -109,14 +109,14 @@ Subscription seats are a **config directory**, not a key: `ClaudeCodeAgent` *cle
 ## Operating it
 
 ```bash
-bunx smithers-orchestrator agents list                 # registered seats and keys
-bunx smithers-orchestrator usage --fresh               # live quota per account
-bunx smithers-orchestrator agents capabilities         # per-harness tool/MCP/skill surface report
-bunx smithers-orchestrator agents doctor               # validate the capability registries
+bunx smthrs agents list                 # registered seats and keys
+bunx smthrs usage --fresh               # live quota per account
+bunx smthrs agents capabilities         # per-harness tool/MCP/skill surface report
+bunx smthrs agents doctor               # validate the capability registries
 smithers status RUN_ID              # verdict incl. agent/model mix
-bunx smithers-orchestrator inspect RUN_ID --pool      # tally attempt engine/model usage
-bunx smithers-orchestrator why RUN_ID                 # explains a waiting-quota park
-bunx smithers-orchestrator retry-task RUN_ID NODE_ID # manual failover nudge
+bunx smthrs inspect RUN_ID --pool      # tally attempt engine/model usage
+bunx smthrs why RUN_ID                 # explains a waiting-quota park
+bunx smthrs retry-task RUN_ID NODE_ID # manual failover nudge
 ```
 
 `smithers status` shows which engines and models a run actually used; `inspect --pool` tallies attempts per engine/model, which is how you audit that the cheap model is really taking the bulk of the work.

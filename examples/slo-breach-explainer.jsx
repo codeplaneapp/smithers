@@ -6,11 +6,11 @@
  * Pattern: metrics trigger → trace/log fetchers (parallel) → synthesis agent → incident note.
  * Use cases: SLO breach triage, incident root-cause summaries, on-call handoff notes.
  */
-import { Sequence, Parallel } from "smithers-orchestrator";
+import { Sequence, Parallel } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import TriggerPrompt from "./prompts/slo-breach-explainer/trigger.mdx";
 import TracesPrompt from "./prompts/slo-breach-explainer/traces.mdx";

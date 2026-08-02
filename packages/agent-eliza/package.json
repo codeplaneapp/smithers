@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/agent-eliza",
+  "name": "@smthrs/agent-eliza",
   "version": "0.32.0",
   "description": "elizaOS agent harness for Smithers (opt-in, installs @elizaos/core)",
   "type": "module",
@@ -35,9 +35,9 @@
   },
   "dependencies": {
     "@elizaos/core": "~1.7.2",
-    "@smithers-orchestrator/agents": "workspace:*",
+    "@smthrs/agents": "workspace:*",
     "ai": "^7.0.10",
-    "smithers-orchestrator": "workspace:*",
+    "smthrs": "workspace:*",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },

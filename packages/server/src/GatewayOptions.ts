@@ -4,7 +4,7 @@ import type { GatewayOperatorUiConfig } from "./GatewayOperatorUiConfig.js";
 import type { GatewayUiConfig } from "./GatewayUiConfig.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { createBrowserSessionRegistry } from "./browser.js";
-import type { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import type { SmithersDb } from "@smthrs/db/adapter";
 
 export type GatewayOptions = {
   browser?: ReturnType<typeof createBrowserSessionRegistry>;
@@ -82,7 +82,7 @@ export type GatewayOptions = {
   identity?: {
     /** Storage backend the workspace store resolved to (sqlite | pglite | postgres). */
     backend?: string;
-    /** smithers-orchestrator package version serving this gateway. */
+    /** smthrs package version serving this gateway. */
     version?: string;
   };
   /**

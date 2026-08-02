@@ -1,7 +1,7 @@
 /** @jsxImportSource react */
 import { useInsertionEffect, type CSSProperties } from "react";
-import { useGatewayRunTree } from "@smithers-orchestrator/gateway-react";
-import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import { useGatewayRunTree } from "@smthrs/gateway-react";
+import type { GatewayRunNode } from "@smthrs/gateway-client";
 import { NodeRow } from "./NodeRow";
 import { ensureGatewayUiStyles, theme } from "./theme";
 

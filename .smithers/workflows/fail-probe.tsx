@@ -1,8 +1,8 @@
 // smithers-source: authored
 // smithers-display-name: Fail Probe
 // smithers-description: Deliberately failing workflow to smoke-test the post-failure auto-trigger. Safe to delete.
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 
 const { Workflow, Task, smithers, outputs } = createSmithers({

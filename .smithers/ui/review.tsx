@@ -7,8 +7,8 @@ import {
   useGatewayRun,
   useGatewayRunEvents,
   useGatewayRuns,
-} from "smithers-orchestrator/gateway-react";
-import { NodeOutputView, RunEventLog, RunTree, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
+} from "smthrs/gateway-react";
+import { NodeOutputView, RunEventLog, RunTree, WorkflowUiShell } from "smthrs/gateway-ui";
 import {
   Badge,
   Button,
@@ -28,7 +28,7 @@ import {
   TabsTrigger,
   isTerminalRunStatus,
   normalizeStatus,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 
 const WORKFLOW_KEY = "review";
 const MAX_REVIEWERS = 6;

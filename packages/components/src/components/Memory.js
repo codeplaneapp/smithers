@@ -3,8 +3,8 @@
 // @smithers-type-exports-end
 
 import React from "react";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { normalizeTaskMemoryConfig } from "@smithers-orchestrator/graph/normalizeTaskMemoryConfig";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { normalizeTaskMemoryConfig } from "@smthrs/graph/normalizeTaskMemoryConfig";
 import { MemoryContext } from "../memory/MemoryContext.js";
 
 /**

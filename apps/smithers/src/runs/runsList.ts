@@ -8,7 +8,7 @@
  * holds only the pure types + filter/group/summarize reducers, unit-tested
  * without a DOM against inline fixtures (see runsListDomain.test.ts).
  */
-import { formatStatus, normalizeStatus, statusClass } from "@smithers-orchestrator/ui/status";
+import { formatStatus, normalizeStatus, statusClass } from "@smthrs/ui/status";
 import type { NodeStatus } from "./Run";
 import type { StatusTone } from "./statusMeta";
 

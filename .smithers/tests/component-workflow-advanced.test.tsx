@@ -1,11 +1,11 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import React from "react";
-import { createSmithers } from "smithers-orchestrator";
-import { fakeAgent, renderPrompt, renderWorkflow, runTask, simulate } from "smithers-orchestrator/testing";
+import { createSmithers } from "smthrs";
+import { fakeAgent, renderPrompt, renderWorkflow, runTask, simulate } from "smthrs/testing";
 import { z } from "zod/v4";
 import {
   ShipTickets,

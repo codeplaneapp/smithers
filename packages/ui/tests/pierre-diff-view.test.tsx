@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 // PierreDiffView is the heavy `@pierre/diffs` adapter, exported through the
-// `@smithers-orchestrator/ui/adapters/pierre-diff-view` subpath (never the base
+// `@smthrs/ui/adapters/pierre-diff-view` subpath (never the base
 // barrel). CodeView tokenizes lines asynchronously through Shiki and lays them
 // out with ResizeObserver/rAF, none of which paint deterministically under
 // happy-dom, so per-line highlighting is asserted against the parsed CodeView

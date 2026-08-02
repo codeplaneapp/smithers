@@ -1,11 +1,11 @@
-# @smithers-orchestrator/gcp — src
+# @smthrs/gcp — src
 
 A first-class Smithers **sandbox provider** for Google Cloud. It executes a
 Smithers bundle on **Cloud Run Jobs** and ships the request/result bundles
 through a **Cloud Storage** bucket, because Cloud Run Jobs give no shared
 filesystem back to the caller.
 
-Built on `@smithers-orchestrator/sandbox`'s provider-kit
+Built on `@smthrs/sandbox`'s provider-kit
 (`createCommandSandboxProvider`): the kit owns the request/result protocol,
 egress, secret scrubbing, and cleanup. This package only implements the
 `SandboxSession` seam — GCS transport + Cloud Run runner.
@@ -49,8 +49,8 @@ and GCS-transport variables below.
 ## Usage
 
 ```tsx
-import { Sandbox } from "smithers-orchestrator/components";
-import { createGcpSandboxProvider } from "@smithers-orchestrator/gcp";
+import { Sandbox } from "smthrs/components";
+import { createGcpSandboxProvider } from "@smthrs/gcp";
 
 const provider = createGcpSandboxProvider({
   projectId: "my-project",

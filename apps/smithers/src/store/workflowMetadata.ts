@@ -1,4 +1,4 @@
-import type { GatewayWorkflowRow } from "@smithers-orchestrator/gateway-client";
+import type { GatewayWorkflowRow } from "@smthrs/gateway-client";
 import type { CommandId } from "../commands";
 import type { StoreWorkflow } from "./workflows";
 
@@ -6,7 +6,7 @@ import type { StoreWorkflow } from "./workflows";
  * The live `listWorkflows` row shape (`{ key, readableName?, description?, hasUi,
  * uiPath }`). `GatewayWorkflowRow` is the gateway-client alias for the gateway's
  * `GatewayWorkflowSummary` RPC type; we import it from gateway-client (a direct
- * dependency) rather than the `@smithers-orchestrator/gateway` package (peer-only,
+ * dependency) rather than the `@smthrs/gateway` package (peer-only,
  * not a direct dep here).
  */
 export type GatewayWorkflowSummary = GatewayWorkflowRow;

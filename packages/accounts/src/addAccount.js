@@ -1,4 +1,4 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { readAccounts } from "./readAccounts.js";
 import { writeAccounts } from "./writeAccounts.js";
 import { withAccountsLock } from "./withAccountsLock.js";

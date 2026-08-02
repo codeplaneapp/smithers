@@ -27,7 +27,7 @@ export const meta = {
 //                                        (workflow = discovered ID or a .tsx/.mdx path)
 //   { mirrorAllNodes?, maxLiveWatchers?, agentBudget?, collapseAt? }
 //   { cli? }                             command that runs the Smithers CLI
-//                                        (default `bunx smithers-orchestrator`).
+//                                        (default `bunx smthrs`).
 //                                        Inside a Smithers source checkout the
 //                                        SessionStart hook passes the working
 //                                        tree's entry so the mirror never drives
@@ -71,7 +71,7 @@ function shellQuote(value) {
 
 const CLI_COMMAND = typeof workflowArgs.cli === 'string' && workflowArgs.cli.trim()
   ? workflowArgs.cli.trim()
-  : 'bunx smithers-orchestrator'
+  : 'bunx smthrs'
 const CLI = workflowArgs.cwd
   ? `cd ${shellQuote(workflowArgs.cwd)} && ${CLI_COMMAND}`
   : CLI_COMMAND
@@ -280,12 +280,12 @@ while (ticks < MAX_TICKS) {
     if (errorTicks < 3) {
       continue
     }
-    log(`Mirror sync error for run ${runId}: ${typeof tick.error === 'string' ? tick.error : 'smithers claude tick failed'}. Check the run id and that smithers-orchestrator is up to date, then re-attach with args {"runId":"${runId}"}.`)
+    log(`Mirror sync error for run ${runId}: ${typeof tick.error === 'string' ? tick.error : 'smithers claude tick failed'}. Check the run id and that smthrs is up to date, then re-attach with args {"runId":"${runId}"}.`)
     break
   }
   errorTicks = 0
   if (tick.contract !== CONTRACT) {
-    log(`smithers claude tick speaks contract ${tick.contract}, this mirror speaks ${CONTRACT}. Update the smithers plugin and smithers-orchestrator, then re-attach with args {"runId":"${runId}"}.`)
+    log(`smithers claude tick speaks contract ${tick.contract}, this mirror speaks ${CONTRACT}. Update the smithers plugin and smthrs, then re-attach with args {"runId":"${runId}"}.`)
     break
   }
   seq = typeof tick.seq === 'number' ? tick.seq : seq

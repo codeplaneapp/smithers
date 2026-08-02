@@ -1,5 +1,5 @@
 // smithers-display-name: Finish Agentic UI Library Program
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import {
   ClaudeCodeAgent,
   MergeQueue,
@@ -10,7 +10,7 @@ import {
   UI,
   Worktree,
   createSmithers,
-} from "smithers-orchestrator";
+} from "smthrs";
 import { join } from "node:path";
 import { z } from "zod/v4";
 import { providers } from "../agents";
@@ -305,7 +305,7 @@ function integrationReviewPrompt(seat: Seat, implementation: RawRow | undefined,
 const MULTI_RULES = [
   `House rules for Multi adoption lanes (repo: ${MULTI_ROOT}):`,
   `- ALL work happens in ${MULTI_ROOT} (jj-colocated, carries UNRELATED uncommitted changes that MUST be preserved — never revert or commit files you did not change). jj st / jj diff are truth; commit ONLY your files with explicit pathspecs; NEVER git add -A / stash / rebase / --amend.`,
-  "- Multi must NOT add an AI Elements dependency, must NOT add @smithers-orchestrator/gateway-ui, and must NOT create duplicate local wrappers. It links @smithers-orchestrator/ui via pnpm override (link:../smithers/packages/ui); import shared components directly (adapters via @smithers-orchestrator/ui/adapters/*).",
+  "- Multi must NOT add an AI Elements dependency, must NOT add @smthrs/gateway-ui, and must NOT create duplicate local wrappers. It links @smthrs/ui via pnpm override (link:../smithers/packages/ui); import shared components directly (adapters via @smthrs/ui/adapters/*).",
   "- Zustand-only state in product code; stores own behavior. Real behavior in tests; honest pending/error states; retain raw/source fallbacks where structured renderers take over.",
   "- Known pre-existing Multi main failures (inherited, NOT caused by this program): AdvancedCanvas.coverage.render.test.tsx and TicketsCard.coverage.render.test.tsx navigation tests. Fixing them belongs to the CI-closure step, not your lane; do not let them block your lane's focused checks.",
 ].join("\n");

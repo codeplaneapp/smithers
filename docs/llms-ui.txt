@@ -10,12 +10,12 @@
 
 Agents build every Smithers UI surface by composing the shared component
 library, never by hand-rolling markup and CSS. The library has two layers:
-`@smithers-orchestrator/ui` ports [shadcn/ui](https://ui.shadcn.com) component
+`@smthrs/ui` ports [shadcn/ui](https://ui.shadcn.com) component
 anatomy (`data-slot` attributes, CVA variants, `asChild` via Radix Slot) and
 adds agent-native components built specifically for Smithers (reasoning, tool
 calls, plans, queues, approvals, checkpoints, context usage), while
-`@smithers-orchestrator/gateway-ui` supplies run-aware widgets composed over
-the `smithers-orchestrator/gateway-react` hooks. A custom workflow UI at
+`@smthrs/gateway-ui` supplies run-aware widgets composed over
+the `smthrs/gateway-react` hooks. A custom workflow UI at
 `.smithers/ui/<workflow>.tsx` imports from those subpaths and nothing else.
 
 ## Doc types at a glance
@@ -36,12 +36,12 @@ the `smithers-orchestrator/gateway-react` hooks. A custom workflow UI at
 ## How the layers stack
 
 1. `react` renders.
-2. `smithers-orchestrator/ui` provides the components: shadcn anatomy, the
+2. `smthrs/ui` provides the components: shadcn anatomy, the
    agent-native families, and tokens that make light and dark correct by
-   construction. Heavy renderers live behind `smithers-orchestrator/ui/adapters/*`.
-3. `smithers-orchestrator/gateway-ui` provides run-aware widgets that already
+   construction. Heavy renderers live behind `smthrs/ui/adapters/*`.
+3. `smthrs/gateway-ui` provides run-aware widgets that already
    know how to render runs, events, approvals, and node output.
-4. `smithers-orchestrator/gateway-react` provides the live hooks those widgets
+4. `smthrs/gateway-react` provides the live hooks those widgets
    (and your custom panels) read runs through.
 5. Your workflow UI composes the three subpaths and calls
    `createGatewayReactRoot(<App />)`. The Gateway bundles and serves it at
@@ -66,7 +66,7 @@ UI package to Markdown; pass `Markdown` or another renderer as children for
 Markdown content.
 
 ```tsx
-import { Markdown, Reasoning } from "smithers-orchestrator/ui";
+import { Markdown, Reasoning } from "smthrs/ui";
 
 <Reasoning streaming={isStreaming} duration={72}>
   <Markdown content={reasoningText} />
@@ -98,7 +98,7 @@ denial states of an agent tool invocation, tinted through the shared status
 vocabulary.
 
 ```tsx
-import { ToolCall } from "smithers-orchestrator/ui";
+import { ToolCall } from "smthrs/ui";
 
 <ToolCall
   name="search"
@@ -140,7 +140,7 @@ controls through `approvalSlot`, which renders only during
 Step status is never color-only; each dot has matching screen-reader text.
 
 ```tsx
-import { ChainOfThought } from "smithers-orchestrator/ui";
+import { ChainOfThought } from "smthrs/ui";
 
 <ChainOfThought
   streaming
@@ -173,7 +173,7 @@ The whole block uses the same controlled disclosure and streaming behavior as
 Import `Plan` from the base UI package:
 
 ```tsx
-import { Plan, TaskItem } from "smithers-orchestrator/ui";
+import { Plan, TaskItem } from "smthrs/ui";
 
 <Plan
   streaming
@@ -220,7 +220,7 @@ rest of the component library.
 `TaskItem` works on its own or inside a `Plan` step detail:
 
 ```tsx
-import { TaskItem } from "smithers-orchestrator/ui";
+import { TaskItem } from "smthrs/ui";
 
 <TaskItem
   label="Run focused tests"
@@ -253,7 +253,7 @@ and `formatStatus` helpers; every tinted dot has matching screen-reader text.
 > Attribute a response with a collapsible text-only source list.
 
 ```tsx
-import { Sources } from "smithers-orchestrator/ui";
+import { Sources } from "smthrs/ui";
 
 <Sources
   sources={[
@@ -291,7 +291,7 @@ the sanitized URL after default navigation is prevented.
 > Add a keyboard-accessible source chip and tooltip inside prose.
 
 ```tsx
-import { InlineCitation } from "smithers-orchestrator/ui";
+import { InlineCitation } from "smthrs/ui";
 
 <p>
   Smithers keeps durable run history
@@ -325,12 +325,12 @@ sanitized URL, with an event whose default action is already prevented.
 
 > Render token-themed code with copy, wrapping, line numbers, and a highlighter seam.
 
-`CodeBlock`, the base fenced-code surface from `smithers-orchestrator/ui`, uses
+`CodeBlock`, the base fenced-code surface from `smthrs/ui`, uses
 the shared `--code-bg` and `--code-text` theme tokens and ships no
 syntax-highlighting dependency.
 
 ```tsx
-import { CodeBlock } from "smithers-orchestrator/ui";
+import { CodeBlock } from "smthrs/ui";
 
 <CodeBlock
   code={source}
@@ -365,13 +365,13 @@ renders escaped plain text.
 
 > Render assistant Markdown safely while content is still streaming.
 
-`MessageResponse` (`smithers-orchestrator/ui`) renders assistant Markdown via
+`MessageResponse` (`smthrs/ui`) renders assistant Markdown via
 the dependency-free `Markdown` primitive, keeping incomplete fences and
 inline markers stable across stream chunks, and shows an `aria-hidden` caret
 while `streaming` is true.
 
 ```tsx
-import { MessageResponse } from "smithers-orchestrator/ui";
+import { MessageResponse } from "smthrs/ui";
 
 <MessageResponse
   content={assistantText}
@@ -410,7 +410,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
   chartConfig,
-} from "smithers-orchestrator/ui/adapters/chart";
+} from "smthrs/ui/adapters/chart";
 
 const config = chartConfig([
   { key: "landed", label: "Landed" },
@@ -482,8 +482,8 @@ that launch, approve, and cancel. Most hooks share the
 them all.
 
 <Note>
-Everything here lives at the subpath `smithers-orchestrator/gateway-react`,
-**not** the bare `smithers-orchestrator` facade. Import from the subpath, or
+Everything here lives at the subpath `smthrs/gateway-react`,
+**not** the bare `smthrs` facade. Import from the subpath, or
 the build fails.
 </Note>
 
@@ -492,7 +492,7 @@ import {
   SmithersGatewayProvider,
   useGatewayRun,
   useGatewayActions,
-} from "smithers-orchestrator/gateway-react";
+} from "smthrs/gateway-react";
 
 function App() {
   return (
@@ -1197,7 +1197,7 @@ These types are exported from the same subpath for typing your own components.
 import type {
   SmithersCollectionsContextValue,
   GatewayConnectionStatus,
-} from "smithers-orchestrator/gateway-react";
+} from "smthrs/gateway-react";
 // GatewayAsyncState<T> is generic; see its section above for the full shape.
 ```
 
@@ -1225,7 +1225,7 @@ The reference implementation is the Smithers product UI; the rules below are ext
 
 ## Components first
 
-The fastest way to comply with this guide: don't hand-write the CSS. `smithers-orchestrator/ui` ships shared components (Button, Card, Badge, StatusPill, Tabs, Dialog, Tooltip, Select, Input, Alert, Table, Progress, Skeleton, Spinner, EmptyState, and more) styled from the tokens below, with house recipes baked in (tinted primary button, brand focus halo, 22px status pills, 8px card radius) and correct in light and dark by construction; Radix supplies accessibility. See [the shared component library](/guides/custom-workflow-ui#the-shared-component-library) for usage and the [UI Component Library reference](/reference/ui) for the full catalog.
+The fastest way to comply with this guide: don't hand-write the CSS. `smthrs/ui` ships shared components (Button, Card, Badge, StatusPill, Tabs, Dialog, Tooltip, Select, Input, Alert, Table, Progress, Skeleton, Spinner, EmptyState, and more) styled from the tokens below, with house recipes baked in (tinted primary button, brand focus halo, 22px status pills, 8px card radius) and correct in light and dark by construction; Radix supplies accessibility. See [the shared component library](/guides/custom-workflow-ui#the-shared-component-library) for usage and the [UI Component Library reference](/reference/ui) for the full catalog.
 
 Everything below is the contract those components implement, and what you follow when writing custom CSS next to them.
 
@@ -1233,7 +1233,7 @@ Everything below is the contract those components implement, and what you follow
 
 Every UI declares the same custom properties and reads them everywhere. Never hardcode a color, tint, or shadow alpha inline: reach for a token, or derive one with `color-mix`. This keeps light and dark correct and workflow UIs from drifting apart.
 
-<Note>The Gateway's HTML shell already injects this exact token block (the canonical `workflowUiThemeCss` from `@smithers-orchestrator/ui-styleguide`) into every `/workflows/<key>` page and stamps `data-theme` on `<html>` from a `?theme=dark|light` query param before first paint, so a UI that just *reads* the tokens is themed automatically, even inside an iframe host forcing a theme via that param. Declaring the block yourself (as below, or via `WorkflowUiStyles` from `gateway-ui`) is still correct, keeps the UI portable outside the shell, and duplicate declarations are harmless.</Note>
+<Note>The Gateway's HTML shell already injects this exact token block (the canonical `workflowUiThemeCss` from `@smthrs/ui-styleguide`) into every `/workflows/<key>` page and stamps `data-theme` on `<html>` from a `?theme=dark|light` query param before first paint, so a UI that just *reads* the tokens is themed automatically, even inside an iframe host forcing a theme via that param. Declaring the block yourself (as below, or via `WorkflowUiStyles` from `gateway-ui`) is still correct, keeps the UI portable outside the shell, and duplicate declarations are harmless.</Note>
 
 Paste this `:root` block at the top of your `<style>`: it carries the canonical light values, dark overrides for both the explicit toggle and the OS preference, and the typographic base.
 
@@ -1439,7 +1439,7 @@ Animation is fast and earns its place; nothing bounces for decoration.
   and `standaloneThemeCss()` already ship the same document-wide safety net,
   so component CSS must not add its own media-query guard. Imperative canvas
   widgets use `prefersReducedMotion()` and `observeReducedMotion()` from
-  `smithers-orchestrator/ui`.
+  `smthrs/ui`.
 
 ### Layout: a readable measure and calm chrome
 
@@ -1463,7 +1463,7 @@ A minimal, on-system `.smithers/ui/<workflow>.tsx` looks like this (tokens above
 
 ```tsx
 /** @jsxImportSource react */
-import { createGatewayReactRoot, useGatewayRun } from "smithers-orchestrator/gateway-react";
+import { createGatewayReactRoot, useGatewayRun } from "smthrs/gateway-react";
 
 const runId = new URLSearchParams(location.search).get("runId") ?? undefined;
 

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { useGatewayRuns, useGatewayScores } from "@smithers-orchestrator/gateway-react";
-import type { GatewayScoreRow } from "@smithers-orchestrator/gateway-client";
+import { useGatewayRuns, useGatewayScores } from "@smthrs/gateway-react";
+import type { GatewayScoreRow } from "@smthrs/gateway-client";
 import { useLocalModeRefetch } from "../sync/useLocalModeRefetch";
 import { resolveActiveRunId, type RunStatus, type ScoresRun } from "./scoreReport";
 import { bindScoresActions, useScoresStore } from "./scoresStore";

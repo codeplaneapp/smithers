@@ -80,7 +80,7 @@ bun evals/harness/run-all.ts
 bun evals/harness/scorecard.ts
 
 # A single case, one model (cheap shape check first)
-bunx smithers-orchestrator eval evals/suites/authoring-workflows/eval.tsx \
+bunx smthrs eval evals/suites/authoring-workflows/eval.tsx \
   --cases evals/suites/authoring-workflows/cases.jsonl --suite authoring-workflows --dry-run
 ```
 
@@ -89,7 +89,7 @@ bunx smithers-orchestrator eval evals/suites/authoring-workflows/eval.tsx \
 When an agent struggles with Smithers, capture it as an eval in one command:
 
 ```bash
-bunx smithers-orchestrator up evals/new-eval.tsx \
+bunx smthrs up evals/new-eval.tsx \
   --input '{"friction":"Agent could not figure out how to add a human approval gate; guessed <Human> which does not exist.","area":"approvals-humans"}'
 ```
 

@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { archiveDiscardedEffects } from "@smithers-orchestrator/time-travel/archiveDiscardedEffects";
-import { assessEffectBoundary } from "@smithers-orchestrator/time-travel/assessEffectBoundary";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { archiveDiscardedEffects } from "@smthrs/time-travel/archiveDiscardedEffects";
+import { assessEffectBoundary } from "@smthrs/time-travel/assessEffectBoundary";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import { createToolJournalContext } from "../src/createToolJournalContext.js";

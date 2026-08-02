@@ -14,9 +14,9 @@ For a richer approval flow with custom request summaries and an `<Approval>` com
 ## Source
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // workflows/approval.tsx
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, Sequence, Task, smithers, outputs } = createSmithers({
@@ -52,7 +52,7 @@ export default smithers((ctx) => (
 ## Running
 
 ```bash
-bunx smithers-orchestrator up workflows/approval.tsx --input '{"name": "Deploy v2"}'
+bunx smthrs up workflows/approval.tsx --input '{"name": "Deploy v2"}'
 ```
 
 The workflow pauses at the approval gate:
@@ -60,14 +60,14 @@ The workflow pauses at the approval gate:
 ```
 [approval] Starting run mno345
 [approve] Waiting for approval...
-[approval] Paused. Run `bunx smithers-orchestrator approve` or `bunx smithers-orchestrator deny` to continue.
+[approval] Paused. Run `bunx smthrs approve` or `bunx smthrs deny` to continue.
 ```
 
 Approve and resume:
 
 ```bash
-bunx smithers-orchestrator approve mno345 --node approve
-bunx smithers-orchestrator up workflows/approval.tsx --run-id mno345 --resume true
+bunx smthrs approve mno345 --node approve
+bunx smthrs up workflows/approval.tsx --run-id mno345 --resume true
 ```
 
 ```

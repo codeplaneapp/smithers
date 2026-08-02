@@ -6,7 +6,7 @@
 // exercising the same RPC surface (`launchRun` / `getRun` / `streamRunEvents`) a
 // hosted Smithers deployment exposes. No auth on localhost by default; set
 // SWEBP_GATEWAY_TOKEN to require a bearer token.
-import { Gateway } from "@smithers-orchestrator/server";
+import { Gateway } from "@smthrs/server";
 
 import workflow from "../workflow.tsx";
 

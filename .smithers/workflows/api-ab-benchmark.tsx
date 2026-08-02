@@ -1,8 +1,8 @@
 // smithers-source: authored
 // smithers-display-name: API A/B Authoring Benchmark
 // smithers-description: Two arms (Effect API vs JSX/React API) author the same three workflows from one reference doc each; scored deterministically by authored/typechecks/runs/correct with no LLM judge.
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, ClaudeCodeAgent, UI } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, ClaudeCodeAgent, UI } from "smthrs";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";

@@ -15,7 +15,7 @@ import { parse, stringify } from "yaml";
  * @param {object} opts
  * @param {string} [opts.name] Server name (default `"smithers"`).
  * @param {string} opts.command Executable agents will run (e.g. `"bunx"`).
- * @param {string[]} opts.args Arguments for the command (e.g. `["smithers-orchestrator", "--mcp"]`).
+ * @param {string[]} opts.args Arguments for the command (e.g. `["smthrs", "--mcp"]`).
  * @param {string} [opts.homeDir] Home directory override (for tests).
  * @returns {{ agent: "Hermes"; registered: boolean; path: string; reason?: string }}
  */

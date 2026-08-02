@@ -1,4 +1,4 @@
-import type { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import type { SmithersError } from "@smthrs/errors/SmithersError";
 
 export type SmithersErrorReport = {
   readonly error: SmithersError;

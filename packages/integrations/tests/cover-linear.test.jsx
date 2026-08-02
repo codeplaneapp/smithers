@@ -10,9 +10,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createSmithers, renderFrame } from "smithers-orchestrator";
-import { SmithersCtx } from "@smithers-orchestrator/react-reconciler/context";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler";
+import { createSmithers, renderFrame } from "smthrs";
+import { SmithersCtx } from "@smthrs/react-reconciler/context";
+import { SmithersRenderer } from "@smthrs/react-reconciler";
 import {
   LinearClient,
   LinearClientLive,
@@ -51,13 +51,13 @@ function startScriptServer() {
       if (next.raw !== undefined) {
         return new Response(next.raw, {
           status: next.status ?? 200,
-          headers: { "content-type": "application/json", ...(next.headers ?? {}) },
+          headers: { "content-type": "application/json", ...next.headers },
         });
       }
       const payload = next.errors !== undefined ? { errors: next.errors } : { data: next.data };
       return new Response(JSON.stringify(payload), {
         status: next.status ?? 200,
-        headers: { "content-type": "application/json", ...(next.headers ?? {}) },
+        headers: { "content-type": "application/json", ...next.headers },
       });
     },
   });

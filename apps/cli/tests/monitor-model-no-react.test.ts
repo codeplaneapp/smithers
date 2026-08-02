@@ -2,7 +2,7 @@
  * monitorModel.ts calls itself framework-free; this pins that it actually is
  * (issue #1381).
  *
- * It used to read its status vocabulary from `smithers-orchestrator/ui`, and
+ * It used to read its status vocabulary from `smthrs/ui`, and
  * that barrel eagerly evaluates dialog/select/tooltip -> radix-ui ->
  * react-remove-scroll. There is no runtime tree-shaking, so two pure helpers
  * pulled the whole React component tree into every plain CLI test process that
@@ -27,12 +27,12 @@ const REACT_FAMILY = /[/\\](react|react-dom|radix-ui|react-remove-scroll|schedul
 
 test("monitorModel imports the status vocabulary from the React-free subpath", () => {
   const source = readFileSync(MODEL_SOURCE, "utf8");
-  expect(source).toContain('from "smithers-orchestrator/ui/status"');
-  expect(source).not.toMatch(/from "smithers-orchestrator\/ui"/);
+  expect(source).toContain('from "smthrs/ui/status"');
+  expect(source).not.toMatch(/from "smthrs\/ui"/);
 });
 
 test("the status subpath exports the vocabulary monitorModel needs", async () => {
-  const status = await import("smithers-orchestrator/ui/status");
+  const status = await import("smthrs/ui/status");
   expect(typeof status.normalizeStatus).toBe("function");
   expect(typeof status.statusClass).toBe("function");
   expect(status.statusClass("waiting-approval")).toBe("warn");

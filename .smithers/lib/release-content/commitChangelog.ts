@@ -206,7 +206,7 @@ export function renderCommitChangelogSection(
   return { section, totalCommits: context.commits.length, categoryCounts };
 }
 
-const HEADER = `# smithers-orchestrator
+const HEADER = `# smthrs
 
 This is the complete, commit-level changelog. For the guided tour of each
 release (what changed and why it matters, with screenshots and examples), see
