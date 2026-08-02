@@ -16,6 +16,7 @@ import { Workflow, Task, Sequence, Loop, runWorkflow } from "smithers-orchestrat
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { enqueueSteer, expireQueuedSteersForRun } from "../src/steers.js";
+import { finalizeCancelledRun } from "../src/engine.js";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";
@@ -577,6 +578,49 @@ describe("steer runtime", () => {
       ).rejects.toMatchObject({ code: "NODE_NOT_IN_RUN" });
       expect(await Effect.runPromise(adapter.listSteers("terminal-steer"))).toHaveLength(0);
       expect(await Effect.runPromise(adapter.listSteers("unknown-node-steer"))).toHaveLength(0);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("direct cancellation (CLI cancel/down, no engine boot) expires a queued steer in the terminal transaction", async () => {
+    const { db, cleanup } = createTestSmithers({ a: z.object({ v: z.number() }) });
+    const adapter = new SmithersDb(db);
+    const runId = "steer-direct-cancel";
+    try {
+      // A parked run that had a steer queued while it was still active (a
+      // waiting run accepts steers); the engine is NOT running now.
+      await Effect.runPromise(
+        adapter.insertRun({ runId, workflowName: "steer-test", status: "waiting-timer", createdAtMs: 1 }),
+      );
+      await Effect.runPromise(
+        adapter.insertNode({
+          runId,
+          nodeId: "task",
+          iteration: 0,
+          state: "in-progress",
+          lastAttempt: 1,
+          updatedAtMs: 1,
+          outputTable: "",
+          label: null,
+        }),
+      );
+      await Effect.runPromise(enqueueSteer(adapter, runId, "task", "queued-then-cancelled"));
+      expect((await Effect.runPromise(adapter.listSteers(runId)))[0]?.status).toBe("queued");
+
+      // cascadeCancelRun terminalizes the run through finalizeCancelledRun with
+      // no engine and no separate expiry loop; the fold-in must expire the steer.
+      const result = await finalizeCancelledRun(adapter, runId, { now: 5000 });
+      expect(result.won).toBe(true);
+      expect((await Effect.runPromise(adapter.getRun(runId)))?.status).toBe("cancelled");
+      const steer = (await Effect.runPromise(adapter.listSteers(runId)))[0];
+      expect(steer?.status).toBe("expired");
+      expect(steer?.expiredAtMs).toBe(5000);
+
+      // Replaying the terminal finalization is idempotent — no re-expiry, no throw.
+      const replay = await finalizeCancelledRun(adapter, runId, { now: 6000 });
+      expect(replay.won).toBe(false);
+      expect((await Effect.runPromise(adapter.listSteers(runId)))[0]?.status).toBe("expired");
     } finally {
       cleanup();
     }

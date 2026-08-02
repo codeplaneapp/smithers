@@ -4431,6 +4431,37 @@ export async function finalizeCancelledRun(adapter, runId, options = {}) {
           persistedEvents.push(cancelEvent);
           insertedCancellationEvent = true;
         }
+        // Expire any still-queued steers inside the SAME terminal transaction.
+        // A steer queued on an allowed parked run that is cancelled directly —
+        // CLI cancel/down terminalizes it without another engine boot, so the
+        // engine's own expiry loop never runs — would otherwise stay queued
+        // forever; a crash between the terminal commit and a separate expiry
+        // pass strands it the same way. Folding expiry into cancel-finalization
+        // makes it durable and atomic for every terminal cancel transition, and
+        // it stays idempotent on replay because markSteerExpired only touches
+        // rows still in the queued state.
+        const queuedSteers = (await Effect.runPromise(adapter.listSteers(runId))).filter(
+          (steer) => steer.status === "queued",
+        );
+        for (const steer of queuedSteers) {
+          await Effect.runPromise(adapter.markSteerExpired(steer.steerId, cancelledAtMs));
+          const steerExpired = {
+            type: "SteerExpired",
+            runId,
+            nodeId: steer.nodeId,
+            steerId: steer.steerId,
+            timestampMs: cancelledAtMs,
+          };
+          await Effect.runPromise(
+            adapter.insertEventWithNextSeq({
+              runId,
+              timestampMs: cancelledAtMs,
+              type: steerExpired.type,
+              payloadJson: JSON.stringify(steerExpired),
+            }),
+          );
+          persistedEvents.push(steerExpired);
+        }
       }
     }),
   );
