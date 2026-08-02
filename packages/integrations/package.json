@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/integrations",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "description": "External service integrations (webhook + polling event sources) for Smithers workflows",
   "type": "module",
   "sideEffects": false,

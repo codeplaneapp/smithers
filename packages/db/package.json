@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/db",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "description": "SQLite and Drizzle persistence adapter for Smithers workflows",
   "type": "module",
   "sideEffects": false,

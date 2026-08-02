@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/daytona",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "description": "Daytona sandbox provider for Smithers: run sandboxed workflows on Daytona sandboxes",
   "type": "module",
   "sideEffects": false,

@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/accounts",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "description": "Manage multiple Claude/Antigravity/Codex/Gemini/Kimi subscription and API-key accounts that Smithers agents can round-robin through.",
   "type": "module",
   "sideEffects": false,

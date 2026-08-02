@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/jj-win32-x64",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "description": "Vendored jj (Jujutsu) binary for win32-x64, used by @smthrs/vcs. Installed automatically as an optional dependency; not meant to be depended on directly.",
   "license": "Apache-2.0",
   "os": [

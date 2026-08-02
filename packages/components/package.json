@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/components",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "description": "React components for Smithers workflows",
   "type": "module",
   "sideEffects": false,
