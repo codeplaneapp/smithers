@@ -590,6 +590,27 @@ describe("codex strategy checks", () => {
       dispose();
     }
   });
+  test("api_key_valid prefers ChatGPT subscription tokens over a stale stored API key — #1447", async () => {
+    // `codex login` (chatgpt) can leave OPENAI_API_KEY behind in auth.json; the
+    // codex binary honors auth_mode, so preflight must not probe the stale key.
+    const { codexHome, dispose } = makeCodexHome({
+      auth_mode: "chatgpt",
+      OPENAI_API_KEY: "sk-test-stale-key-should-not-be-probed",
+      tokens: { access_token: "fake-access-token", refresh_token: "fake-refresh", account_id: "acct_123" },
+    });
+    try {
+      const strategy = getDiagnosticStrategy("codex");
+      const report = await runDiagnostics(strategy, {
+        env: { CODEX_HOME: codexHome },
+        cwd: "/tmp",
+      });
+      const apiKeyCheck = report.checks.find((c) => c.id === "api_key_valid");
+      expect(apiKeyCheck.status).toBe("pass");
+      expect(apiKeyCheck.message).toContain("subscription");
+    } finally {
+      dispose();
+    }
+  });
   test("api_key_valid probes (does not blindly trust) an API key stored in CODEX_HOME/auth.json", async () => {
     // A stored key can be invalid/exhausted; it must be validated against the
     // API, not passed on presence. A fake key → 401 (fail) or network error.
