@@ -136,6 +136,61 @@ describe("quota failover across an agent chain", () => {
   );
 
   test(
+    "a preflight-broken lead plus a rate-limited fallback parks the run waiting-quota instead of hard-failing",
+    async () => {
+      const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);
+      const adapter = new SmithersDb(db);
+      const fallbackResetAtMs = Date.now() + 600_000;
+      try {
+        let primaryCalls = 0;
+        let fallbackCalls = 0;
+        // e.g. Codex missing from PATH: every preflight fails, so the rung can
+        // never serve a quota failover (issue #1482).
+        const primary = {
+          id: "primary",
+          tools: {},
+          async preflight() {
+            throw new SmithersError("AGENT_CONFIG_INVALID", "codex: command not found", { preflight: true });
+          },
+          async generate() {
+            primaryCalls += 1;
+            return { output: { value: 1 } };
+          },
+        };
+        const fallback = {
+          id: "fallback",
+          tools: {},
+          async generate() {
+            fallbackCalls += 1;
+            throw quotaError(fallbackResetAtMs);
+          },
+        };
+        const workflow = smithers(() => (
+          <Workflow name="quota-preflight-broken-lead">
+            <Task id="q" output={outputs.outputA} agent={[primary, fallback]} retries={1}>
+              the dead lead must not masquerade as an available fallback
+            </Task>
+          </Workflow>
+        ));
+        const runId = "quota-preflight-broken-lead-run";
+
+        const parked = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId }));
+        expect(parked.status).toBe("waiting-quota");
+        expect(primaryCalls).toBe(0);
+        expect(fallbackCalls).toBe(1);
+
+        const run = await Effect.runPromise(adapter.getRun(runId));
+        expect(run?.status).toBe("waiting-quota");
+        const quotaMeta = JSON.parse(run?.errorJson ?? "null");
+        expect(quotaMeta?.resetAtMs).toBe(fallbackResetAtMs);
+      } finally {
+        cleanup();
+      }
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
     "failing over on a rate limit does not consume the task's retry budget",
     async () => {
       const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);

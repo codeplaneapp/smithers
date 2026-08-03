@@ -3601,18 +3601,56 @@ function quotaBlockedChainRound(attempts, chainLength) {
   return { blocked, resetAtMs };
 }
 /**
+ * Chain rungs whose agents failed preflight, recorded in attempt meta by the
+ * preflight-aware selection scan. The preflight result is cached run-wide, so
+ * a rung that failed once cannot serve a quota failover for the rest of the
+ * run — counting it as an available fallback would send the task back to a
+ * dead agent whose terminal preflight error then consumes the retry budget
+ * and hard-fails the run instead of parking it waiting-quota (issue #1482).
+ * @param {AttemptRow[]} priorAttempts
+ * @param {Record<string, unknown> | null | undefined} currentAttemptMeta
+ * @returns {Set<number>}
+ */
+function preflightFailedChainIndices(priorAttempts, currentAttemptMeta) {
+  /** @type {Set<number>} */
+  const blocked = new Set();
+  /** @param {Record<string, unknown> | null | undefined} meta */
+  const collect = (meta) => {
+    const skips = meta?.agentChainSkips;
+    if (!Array.isArray(skips)) return;
+    for (const skip of skips) {
+      if (
+        skip &&
+        typeof skip === "object" &&
+        skip.reason === "preflight-failed" &&
+        typeof skip.chainIndex === "number" &&
+        Number.isInteger(skip.chainIndex) &&
+        skip.chainIndex >= 0
+      ) {
+        blocked.add(skip.chainIndex);
+      }
+    }
+  };
+  for (const attempt of priorAttempts) collect(parseAttemptMetaJson(attempt.metaJson));
+  collect(currentAttemptMeta);
+  return blocked;
+}
+/**
  * What a rate-limited attempt means for the task's agent chain: fail over to the
  * next agent that is not itself rate-limited, or — when every agent is blocked —
  * park with the EARLIEST reset among them so the run wakes as soon as any
- * provider frees up.
+ * provider frees up. Rungs that are dead for other reasons (preflight-failed,
+ * auth-disabled) cannot serve the failover either, so they don't keep the run
+ * alive past the point where every workable agent is rate-limited.
  * @param {AttemptRow[]} priorAttempts
  * @param {unknown[]} chain
  * @param {number | null} chainIndex
  * @param {number | null} resetAtMs
  * @param {Set<unknown>} [disabledAgents]
+ * @param {Set<number>} [preflightFailedIndices]
  * @returns {{ failoverPending: boolean; earliestResetAtMs: number | null }}
  */
-function resolveQuotaChainFailover(priorAttempts, chain, chainIndex, resetAtMs, disabledAgents) {
+function resolveQuotaChainFailover(priorAttempts, chain, chainIndex, resetAtMs, disabledAgents, preflightFailedIndices) {
   const round = quotaBlockedChainRound(priorAttempts, chain.length);
   const blocked = new Set(round.blocked);
   const resets = new Map(round.resetAtMs);
@@ -3620,7 +3658,9 @@ function resolveQuotaChainFailover(priorAttempts, chain, chainIndex, resetAtMs, 
     blocked.add(chainIndex);
     if (resetAtMs != null) resets.set(chainIndex, resetAtMs);
   }
-  const failoverPending = chain.some((agent, index) => !blocked.has(index) && !disabledAgents?.has(agent));
+  const failoverPending = chain.some(
+    (agent, index) => !blocked.has(index) && !disabledAgents?.has(agent) && !preflightFailedIndices?.has(index),
+  );
   const resetTimes = [...resets.values()];
   return {
     failoverPending,
@@ -6953,6 +6993,7 @@ async function legacyExecuteTask(
         effectiveChainIndex,
         quotaResetAtMs,
         disabledAgents,
+        preflightFailedChainIndices(priorAttempts, attemptMeta),
       );
       if (failoverPending) {
         details.quotaFailoverPending = true;
