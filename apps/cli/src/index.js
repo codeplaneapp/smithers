@@ -207,7 +207,12 @@ import {
 import { findAndOpenSupervisorDb, parseDurationMs, supervisorLoopEffect, supervisorPollEffect } from "./supervisor.js";
 import { DEFAULT_LIFECYCLE_EVENT_TYPES, renderAttemptPool, tallyAttemptPool } from "./observability-helpers.js";
 import { buildDurabilityRunOptions } from "./up-engine-options.js";
-import { BUILTIN_RESUME_CONFIG_KEY, buildBuiltinResumeConfig } from "./resume-target.js";
+import {
+  BUILTIN_RESUME_CONFIG_KEY,
+  buildBuiltinRelaunch,
+  buildBuiltinResumeConfig,
+  resolveResumeTarget,
+} from "./resume-target.js";
 import { WATCH_MIN_INTERVAL_MS, runWatchLoop, watchIntervalSecondsToMs } from "./watch.js";
 import { runMcpModeIfRequested } from "./mcp/mcp-mode.js";
 import {
@@ -2668,6 +2673,71 @@ async function findParentRunError(parentRunId) {
       };
     }
     return null;
+  } finally {
+    opened.cleanup?.();
+  }
+}
+
+/**
+ * Derive the workflow to relaunch for `up --resume <runId>` with no workflow
+ * arg: the stored run record already knows its workflow file, so demanding the
+ * path again would contradict the --resume help text.
+ *
+ * @param {string} runId
+ * @returns {Promise<{ workflowPath: string } | { error: { code: string; message: string; exitCode: number } }>}
+ */
+async function deriveResumeWorkflowPath(runId) {
+  let opened;
+  try {
+    opened = await findAndOpenDb();
+  } catch (err) {
+    if (err instanceof SmithersError && err.code === "CLI_DB_NOT_FOUND") {
+      return {
+        error: {
+          code: "RUN_NOT_FOUND",
+          message: `Run not found: ${runId} (no smithers store exists in this workspace yet)`,
+          exitCode: 4,
+        },
+      };
+    }
+    throw err;
+  }
+  try {
+    const run = await opened.adapter.getRun(runId);
+    if (!run) {
+      return {
+        error: { code: "RUN_NOT_FOUND", message: `Run not found: ${runId}`, exitCode: 4 },
+      };
+    }
+    const target = resolveResumeTarget(
+      { runId, workflowPath: run.workflowPath, configJson: run.configJson },
+      { workflowExists: (workflowPath) => existsSync(workflowPath) },
+    );
+    if (target?.kind === "workflow-file") {
+      return { workflowPath: target.workflowPath };
+    }
+    if (target?.kind === "builtin") {
+      let relaunchArgs;
+      try {
+        relaunchArgs = buildBuiltinRelaunch(target, { runId, resume: true }).args;
+      } catch {
+        relaunchArgs = [target.command, ...target.args];
+      }
+      return {
+        error: {
+          code: "RUN_NOT_RESUMABLE_HERE",
+          message: `Run ${runId} was started by built-in \`smithers ${target.command}\` and has no workflow file; resume it with:\n  smithers ${relaunchArgs.join(" ")}`,
+          exitCode: 4,
+        },
+      };
+    }
+    return {
+      error: {
+        code: "WORKFLOW_REQUIRED",
+        message: `Run ${runId} has no workflow file on disk (recorded path: ${run.workflowPath ?? "none"}). Provide the workflow path explicitly: smithers up <workflow-file> --resume --run-id ${runId}`,
+        exitCode: 4,
+      },
+    };
   } finally {
     opened.cleanup?.();
   }
@@ -7002,7 +7072,20 @@ const cli = Cli.create({
     alias: { detach: "d", runId: "r", input: "i", maxConcurrency: "c" },
     async run(c) {
       const fail = makeFail(c);
-      const mode = interactiveLaunchMode(c.options, Boolean(c.args.workflow), c.format);
+      let workflowArg = c.args.workflow;
+      // `up --resume <runId>` (or --resume with --run-id) needs no workflow
+      // arg: derive it from the stored run record, as the --resume help
+      // promises.
+      if (!workflowArg && !c.options.interactive) {
+        const { resume, resumeRunId } = normalizeResumeOption(c.options.resume);
+        const resumeTargetRunId = resumeRunId ?? (resume ? c.options.runId : undefined);
+        if (resumeTargetRunId) {
+          const derived = await deriveResumeWorkflowPath(resumeTargetRunId);
+          if ("error" in derived) return fail(derived.error);
+          workflowArg = derived.workflowPath;
+        }
+      }
+      const mode = interactiveLaunchMode(c.options, Boolean(workflowArg), c.format);
       if (mode === "needs-tty") {
         return fail({
           code: "INTERACTIVE_REQUIRES_TTY",
@@ -7020,16 +7103,16 @@ const cli = Cli.create({
       }
       if (mode === "interactive") {
         let preselect;
-        if (c.args.workflow) {
-          const asPath = resolve(process.cwd(), c.args.workflow);
+        if (workflowArg) {
+          const asPath = resolve(process.cwd(), workflowArg);
           if (existsSync(asPath)) {
-            const id = basename(c.args.workflow).replace(/\.[mc]?[tj]sx?$/i, "");
+            const id = basename(workflowArg).replace(/\.[mc]?[tj]sx?$/i, "");
             preselect = { entryFile: asPath, id, displayName: id };
           } else {
             // Not a file — treat the arg as a discovered workflow ID, the
             // same way `smithers workflow run <id>` does.
             try {
-              const discovered = resolveWorkflow(c.args.workflow, process.cwd());
+              const discovered = resolveWorkflow(workflowArg, process.cwd());
               preselect = {
                 entryFile: discovered.entryFile,
                 id: discovered.id,
@@ -7047,7 +7130,7 @@ const cli = Cli.create({
       }
       const optionError = validateUpOptionConsistency(c.options);
       if (optionError) return fail(optionError);
-      return executeUpCommand(c, c.args.workflow, c.options, fail);
+      return executeUpCommand(c, workflowArg, c.options, fail);
     },
   })
   // =========================================================================
