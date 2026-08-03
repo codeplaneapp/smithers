@@ -745,7 +745,7 @@ The frame is the unit of progress: time travel, observability, hot reload, and r
 | Method | Returns | Use for |
 |---|---|---|
 | `ctx.input` | `T` | Immutable input passed to `runWorkflow`. |
-| `ctx.outputs(table)` / `ctx.outputs.<key>` | `Row[]` | All rows for an output schema key or target. |
+| `ctx.outputs(table)` / `ctx.outputs.<key>` | `Row[]` | All rows for an output schema key or target. `table` accepts the string key or the output ref (`outputs.probe`); an argument that resolves to neither throws. An empty array always means the producer has not written rows yet at this render. |
 | `ctx.outputMaybe(table, { nodeId, iteration? })` | `Row \| undefined` | Conditional rendering; returns `undefined` until the upstream task completes. |
 | `ctx.output(table, { nodeId, iteration? })` | `Row` | Same, but throws if missing. Use inside a Task body where the dep is guaranteed. |
 | `ctx.outputRows(output, { nodeId?, scope? })` | `{ payload, nodeId, iteration, seq }[]` | Reads each durable row once in completion order. `seq` is stable across resume, rewind, and fork. |

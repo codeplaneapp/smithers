@@ -134,9 +134,19 @@ export class SmithersCtx {
     this._taskStates = opts.taskStates;
     this._taskIterations = opts.taskIterations;
     /**
-     * @param {string} table
+     * Callable form of `ctx.outputs`. Accepts either the string table name or
+     * the output target ref (`outputs.probe`) that every other accessor on
+     * this class already takes. Before, the raw argument indexed the snapshot
+     * directly, so a ref stringified to `"[object Object]"`, missed, and
+     * silently returned `[]` — indistinguishable from "no rows yet" (#1486).
+     * An argument that cannot be resolved to a table name now throws instead
+     * of answering with a plausible-looking empty array.
+     * @param {TableRef} table
      */
-    const outputsFn = (table) => opts.outputs[table] ?? [];
+    const outputsFn = (table) => {
+      const tableName = typeof table === "string" ? table : this.requireTableName(table);
+      return opts.outputs[tableName] ?? [];
+    };
     for (const [name, rows] of Object.entries(opts.outputs)) {
       outputsFn[name] = rows;
     }
@@ -475,6 +485,24 @@ export class SmithersCtx {
     const zodKey = this._zodToKeyName?.get(table);
     if (zodKey) return zodKey;
     return resolveDrizzleName(table) ?? String(table);
+  }
+  /**
+   * Like {@link resolveTableName}, but throws instead of degrading to
+   * `String(table)` when the argument maps to no declared output table. Used
+   * by the callable `ctx.outputs(...)` form, where a silent `[]` is
+   * indistinguishable from "the upstream has not produced rows yet".
+   * @param {TableRef} table
+   * @returns {string}
+   */
+  requireTableName(table) {
+    const zodKey = this._zodToKeyName?.get(table);
+    if (zodKey) return zodKey;
+    const drizzleName = resolveDrizzleName(table);
+    if (drizzleName) return drizzleName;
+    throw new SmithersError(
+      "OUTPUT_TABLE_UNRESOLVABLE",
+      `ctx.outputs(...) received an argument that does not resolve to a declared output table. Pass an output ref (outputs.myTable) or its string name.`,
+    );
   }
   /**
    * Record that a task with `deps` deferred this render because its
