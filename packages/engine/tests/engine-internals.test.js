@@ -939,6 +939,81 @@ describe("engine internals: durability, options and graph helpers", () => {
     ).not.toThrow();
   });
 
+  test("assertResumeDurabilityMetadata: --accept-workflow-change re-blesses missing hashes (#1489)", () => {
+    const v2Config = I.buildDurabilityConfig({}, { entryWorkflowHash: "entry" });
+    // Stored workflowHash is null but the current source hashes fine: accepting
+    // the workflow change must re-bless instead of failing identically.
+    const accepted = I.assertResumeDurabilityMetadata(
+      {
+        workflowPath: "/tmp/wf.ts",
+        workflowHash: null,
+        vcsRoot: "/repo",
+      },
+      v2Config,
+      {
+        workflowHash: "graph-1",
+        entryWorkflowHash: "entry",
+        vcsRoot: "/repo",
+      },
+      "/tmp/wf.ts",
+      { acceptWorkflowChange: true },
+    );
+    expect(accepted).toEqual(["workflow module graph unavailable"]);
+    // Missing stored entry hash is likewise acceptable.
+    expect(
+      I.assertResumeDurabilityMetadata(
+        {
+          workflowPath: "/tmp/wf.ts",
+          workflowHash: "graph-1",
+          vcsRoot: "/repo",
+        },
+        I.buildDurabilityConfig({}, { entryWorkflowHash: null }),
+        {
+          workflowHash: "graph-1",
+          entryWorkflowHash: "entry",
+          vcsRoot: "/repo",
+        },
+        "/tmp/wf.ts",
+        { acceptWorkflowChange: true },
+      ),
+    ).toEqual(["workflow entry hash unavailable"]);
+    // Without the flag it still fails closed, and the hint points at the flag.
+    expect(() =>
+      I.assertResumeDurabilityMetadata(
+        {
+          workflowPath: "/tmp/wf.ts",
+          workflowHash: null,
+          vcsRoot: "/repo",
+        },
+        v2Config,
+        {
+          workflowHash: "graph-1",
+          entryWorkflowHash: "entry",
+          vcsRoot: "/repo",
+        },
+        "/tmp/wf.ts",
+      ),
+    ).toThrow("--accept-workflow-change");
+    // A non-workflow mismatch (VCS root) is never accepted by the flag.
+    expect(() =>
+      I.assertResumeDurabilityMetadata(
+        {
+          workflowPath: "/tmp/wf.ts",
+          workflowHash: null,
+          vcsRoot: "/repo",
+        },
+        v2Config,
+        {
+          workflowHash: "graph-1",
+          entryWorkflowHash: "entry",
+          vcsRoot: "/repo2",
+        },
+        "/tmp/wf.ts",
+        { acceptWorkflowChange: true },
+      ),
+    ).toThrow("VCS root changed");
+  });
+
   test("parses run config/auth and validates run options", () => {
     expect(I.resolveRootDir({ rootDir: "/tmp/root" }, null)).toBe(resolvePath("/tmp/root"));
     expect(I.resolveLogDir("/tmp/root", "run", null)).toBeUndefined();

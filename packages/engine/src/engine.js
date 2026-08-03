@@ -2649,17 +2649,22 @@ function assertResumeDurabilityMetadata(existingRun, existingConfig, current, wo
   ) {
     mismatches.push("VCS root changed");
   }
+  // "unavailable" covers runs recorded without hashes (e.g. legacy or
+  // interrupted starts); accepting re-blesses them from the current source
+  // because resume activation persists the fresh runMetadata hashes.
+  const workflowHashMismatchLabels = [
+    "workflow entry file changed",
+    "workflow module graph changed",
+    "workflow entry hash unavailable",
+    "workflow module graph unavailable",
+  ];
   const acceptedWorkflowMismatches =
     options.acceptWorkflowChange === true
-      ? mismatches.filter(
-          (mismatch) => mismatch === "workflow entry file changed" || mismatch === "workflow module graph changed",
-        )
+      ? mismatches.filter((mismatch) => workflowHashMismatchLabels.includes(mismatch))
       : [];
   const blockingMismatches = mismatches.filter((mismatch) => !acceptedWorkflowMismatches.includes(mismatch));
   if (blockingMismatches.length > 0) {
-    const isWorkflowEdit = blockingMismatches.some(
-      (m) => m === "workflow entry file changed" || m === "workflow module graph changed",
-    );
+    const isWorkflowEdit = blockingMismatches.some((m) => workflowHashMismatchLabels.includes(m));
     const hint = isWorkflowEdit
       ? "The workflow source changed since this run started, so it can no longer be resumed safely. " +
         "To re-bless the durability metadata and resume THIS run in place, pass `--accept-workflow-change` " +
