@@ -354,6 +354,11 @@ export const GATEWAY_RPC_INPUT_MAX_BYTES = GATEWAY_RPC_MAX_PAYLOAD_BYTES;
 export const GATEWAY_RPC_INPUT_MAX_DEPTH = GATEWAY_RPC_MAX_DEPTH;
 const GATEWAY_METHOD_NAME_PATTERN = /^[a-z][a-zA-Z0-9]*(?:\.[a-z][a-zA-Z0-9]*)*$/;
 const GATEWAY_UI_ASSET_PREFIX = "__smithers_ui";
+// A <UI>/<TUI> discovery render is synchronous JS and cannot be preempted,
+// so the background drain yields to the event loop BETWEEN workflows and
+// warns once any single render exceeds this budget (#incident: a pathological
+// pack pegged the gateway at ~99% CPU and /health went unreachable).
+const WORKFLOW_VIEW_DISCOVERY_SLOW_MS = 1_000;
 
 let engineRuntimePromise = null;
 let engineApprovalsPromise = null;
@@ -2651,6 +2656,26 @@ export class Gateway {
   workflowRegistryReady = null;
   /** @type {Map<string, Promise<void>>} */
   workflowRegistryRefreshes = new Map();
+  /**
+   * Background <UI>/<TUI> discovery. register() never renders a workflow
+   * synchronously: renders are queued and drained one per macrotask so a slow
+   * or throwing workflow can neither block startup nor starve /health.
+   * @type {Array<{ key: string, workflow: SmithersWorkflow, entryFile: string | undefined, resolve: () => void }>}
+   */
+  viewDiscoveryQueue = [];
+  /** @type {Map<string, { workflow: SmithersWorkflow, promise: Promise<void> }>} */
+  viewDiscoveryPending = new Map();
+  /**
+   * Keys whose discovery render already ran (success OR failure), mapped to
+   * the workflow identity that was rendered. A render runs at most once per
+   * registration identity — a throwing render is skipped after one warn and
+   * never retried in a hot loop.
+   * @type {Map<string, SmithersWorkflow>}
+   */
+  viewDiscoveryCompleted = new Map();
+  viewDiscoveryScheduled = false;
+  /** Instance copy so tests can shrink the slow-render warn budget. */
+  viewDiscoverySlowMs = WORKFLOW_VIEW_DISCOVERY_SLOW_MS;
   /** @type {{ reports: UsageReport[], cachedAtMs: number } | null} */
   usageReportsCache = null;
   /** @type {Promise<UsageReport[]> | null} */
@@ -2882,14 +2907,16 @@ export class Gateway {
   }
   /** Wait for a host-owned registry load before returning aggregate data. */
   async awaitWorkflowRegistryReady() {
-    if (!this.workflowRegistryReady) {
-      return;
+    if (this.workflowRegistryReady) {
+      const { workflowsLoaded, workflowsTotal } = this.workflowRegistryProgress();
+      if (workflowsLoaded < workflowsTotal) {
+        await this.workflowRegistryReady();
+      }
     }
-    const { workflowsLoaded, workflowsTotal } = this.workflowRegistryProgress();
-    if (workflowsLoaded >= workflowsTotal) {
-      return;
-    }
-    await this.workflowRegistryReady();
+    // Workflow modules being registered is not the same as their <UI>/<TUI>
+    // views being discovered: drain the background render queue (one render
+    // per macrotask) so aggregate listings report accurate hasUi flags.
+    await this.awaitAllWorkflowViewDiscovery();
   }
   /**
    * Give the host one chance to register an unknown workflow. Concurrent
@@ -3199,6 +3226,11 @@ export class Gateway {
     const requestedWorkflowKey = workflowKeyFromUiPath(url.pathname);
     if (requestedWorkflowKey && !this.workflows.has(requestedWorkflowKey)) {
       await this.refreshWorkflowRegistryOnMiss(requestedWorkflowKey);
+    }
+    if (requestedWorkflowKey && this.workflows.has(requestedWorkflowKey)) {
+      // A UI request wants this workflow's discovered <UI>/<TUI> view now —
+      // render it on demand instead of waiting for the whole pack to drain.
+      await this.awaitWorkflowViewDiscovery(requestedWorkflowKey);
     }
     const uiMatch = this.resolveUiMatch(url.pathname);
     if (!uiMatch) {
@@ -5213,23 +5245,23 @@ a { color: var(--brand); }</style>
    */
   register(key, workflow, options) {
     ensureSmithersTables(workflow.db);
-    const embeddedViews = discoverWorkflowViews(key, workflow, options?.entryFile);
-    const ui =
-      resolveGatewayUiConfig(options?.ui, `/workflows/${encodeURIComponent(key)}`) ??
-      (embeddedViews.ui
-        ? workflowViewToGatewayUiConfig(embeddedViews.ui, key, `/workflows/${encodeURIComponent(key)}`)
-        : null);
-    const tui = embeddedViews.tui ? workflowViewToTuiConfig(embeddedViews.tui) : null;
+    // <UI>/<TUI> discovery renders the workflow tree, which is arbitrary
+    // workspace code: with a large pack it pegged the event loop for minutes
+    // before /health answered. Register immediately with the explicit UI
+    // config and render lazily in the background (or on first request for
+    // this workflow's UI) instead.
+    const ui = resolveGatewayUiConfig(options?.ui, `/workflows/${encodeURIComponent(key)}`);
     this.workflows.set(key, {
       key,
       workflow,
       schedule: options?.schedule,
       webhook: options?.webhook,
       ui,
-      tui,
+      tui: null,
       system: Boolean(options?.system),
       entryFile: options?.entryFile,
     });
+    this.enqueueWorkflowViewDiscovery(key, workflow, options?.entryFile);
     void this.queueApiInvalidation(["workflows"]);
     // Startup recovery: any audit row left in `in_progress` from a prior
     // crash is flipped to `partial` and the associated run is flagged as
@@ -5248,6 +5280,155 @@ a { color: var(--brand); }</style>
       );
     });
     return this;
+  }
+  /**
+   * Queue a background <UI>/<TUI> discovery render for a registered workflow.
+   * At most one render ever runs per registration identity: a workflow whose
+   * render throws is skipped after one warn and never retried.
+   * @param {string} key
+   * @param {SmithersWorkflow} workflow
+   * @param {string | undefined} entryFile
+   */
+  enqueueWorkflowViewDiscovery(key, workflow, entryFile) {
+    if (this.viewDiscoveryCompleted.get(key) === workflow) {
+      return;
+    }
+    const pending = this.viewDiscoveryPending.get(key);
+    if (pending && pending.workflow === workflow) {
+      return;
+    }
+    if (pending) {
+      // Re-registered under a different workflow identity before its render
+      // ran: drop the superseded queue item.
+      const index = this.viewDiscoveryQueue.findIndex((item) => item.key === key);
+      if (index >= 0) {
+        const [superseded] = this.viewDiscoveryQueue.splice(index, 1);
+        superseded.resolve();
+      }
+      this.viewDiscoveryPending.delete(key);
+    }
+    /** @type {() => void} */
+    let resolvePromise = () => {};
+    const promise = new Promise((resolve) => {
+      resolvePromise = resolve;
+    });
+    this.viewDiscoveryPending.set(key, { workflow, promise });
+    this.viewDiscoveryQueue.push({ key, workflow, entryFile, resolve: resolvePromise });
+    this.scheduleWorkflowViewDiscoveryDrain();
+  }
+  scheduleWorkflowViewDiscoveryDrain() {
+    if (this.viewDiscoveryScheduled) {
+      return;
+    }
+    this.viewDiscoveryScheduled = true;
+    // One render per macrotask: the event loop (and /health) always gets a
+    // slice between workflows, no matter how large the pack.
+    setImmediate(() => {
+      this.viewDiscoveryScheduled = false;
+      this.drainWorkflowViewDiscovery();
+    });
+  }
+  drainWorkflowViewDiscovery() {
+    const item = this.viewDiscoveryQueue.shift();
+    if (!item) {
+      return;
+    }
+    this.runWorkflowViewDiscovery(item);
+    if (this.viewDiscoveryQueue.length > 0) {
+      this.scheduleWorkflowViewDiscoveryDrain();
+    }
+  }
+  /**
+   * @param {{ key: string; workflow: SmithersWorkflow; entryFile: string | undefined; resolve: () => void }} item
+   */
+  runWorkflowViewDiscovery(item) {
+    const { key, workflow, entryFile } = item;
+    try {
+      if (this.viewDiscoveryCompleted.get(key) === workflow) {
+        return;
+      }
+      this.viewDiscoveryCompleted.set(key, workflow);
+      const startedAtMs = nowMs();
+      let embeddedViews;
+      try {
+        embeddedViews = discoverWorkflowViews(key, workflow, entryFile);
+      } catch (error) {
+        // A throwing render (including an invalid <UI> declaration surfaced by
+        // the visitor) skips this workflow with one warn — never a hot loop.
+        emitGatewayLog(
+          "warning",
+          "workflow UI discovery failed",
+          {
+            workflow: key,
+            ...gatewayErrorAnnotations(error),
+          },
+          "gateway:workflow-ui-discovery",
+        );
+        return;
+      }
+      const elapsedMs = nowMs() - startedAtMs;
+      if (elapsedMs > this.viewDiscoverySlowMs) {
+        emitGatewayLog(
+          "warning",
+          "workflow UI discovery render exceeded time budget",
+          { workflow: key, elapsedMs, budgetMs: this.viewDiscoverySlowMs },
+          "gateway:workflow-ui-discovery",
+        );
+      }
+      const entry = this.workflows.get(key);
+      if (!entry || entry.workflow !== workflow) {
+        return;
+      }
+      let changed = false;
+      if (!entry.ui && embeddedViews.ui) {
+        entry.ui = workflowViewToGatewayUiConfig(embeddedViews.ui, key, `/workflows/${encodeURIComponent(key)}`);
+        changed = true;
+      }
+      if (!entry.tui && embeddedViews.tui) {
+        entry.tui = workflowViewToTuiConfig(embeddedViews.tui);
+        changed = true;
+      }
+      if (changed) {
+        void this.queueApiInvalidation(["workflows"]);
+      }
+    } finally {
+      const pending = this.viewDiscoveryPending.get(key);
+      if (pending && pending.workflow === workflow) {
+        this.viewDiscoveryPending.delete(key);
+      }
+      item.resolve();
+    }
+  }
+  /**
+   * Wait for a workflow's discovery render, pulling it out of the background
+   * queue and rendering it now when a request needs its view immediately.
+   * @param {string} key
+   */
+  async awaitWorkflowViewDiscovery(key) {
+    const index = this.viewDiscoveryQueue.findIndex((item) => item.key === key);
+    if (index >= 0) {
+      const [item] = this.viewDiscoveryQueue.splice(index, 1);
+      this.runWorkflowViewDiscovery(item);
+      return;
+    }
+    await this.viewDiscoveryPending.get(key)?.promise;
+  }
+  /** Wait for every queued discovery render, drained one per macrotask. */
+  async awaitAllWorkflowViewDiscovery() {
+    while (this.viewDiscoveryPending.size > 0 || this.viewDiscoveryQueue.length > 0) {
+      const pending = [...this.viewDiscoveryPending.values()].map((entry) => entry.promise);
+      if (pending.length === 0) {
+        break;
+      }
+      await Promise.all(pending);
+    }
+  }
+  /** Settle every queued discovery without rendering (gateway shutdown). */
+  cancelWorkflowViewDiscovery() {
+    for (const item of this.viewDiscoveryQueue.splice(0)) {
+      item.resolve();
+    }
+    this.viewDiscoveryPending.clear();
   }
   /**
    * Gate a `/v1/pty/hijack` websocket upgrade: authenticate the request (same
@@ -5645,6 +5826,8 @@ a { color: var(--brand); }</style>
   }
   async close() {
     this.stopIdleMonitor();
+    // A closing gateway never renders queued workflow views.
+    this.cancelWorkflowViewDiscovery();
     for (const session of this.ptySessions) {
       session.dispose();
     }

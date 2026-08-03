@@ -929,6 +929,34 @@ declare class Gateway {
     workflowRegistryReady: null;
     /** @type {Map<string, Promise<void>>} */
     workflowRegistryRefreshes: Map<string, Promise<void>>;
+    /**
+     * Background <UI>/<TUI> discovery. register() never renders a workflow
+     * synchronously: renders are queued and drained one per macrotask so a slow
+     * or throwing workflow can neither block startup nor starve /health.
+     * @type {Array<{ key: string, workflow: SmithersWorkflow, entryFile: string | undefined, resolve: () => void }>}
+     */
+    viewDiscoveryQueue: Array<{
+        key: string;
+        workflow: SmithersWorkflow;
+        entryFile: string | undefined;
+        resolve: () => void;
+    }>;
+    /** @type {Map<string, { workflow: SmithersWorkflow, promise: Promise<void> }>} */
+    viewDiscoveryPending: Map<string, {
+        workflow: SmithersWorkflow;
+        promise: Promise<void>;
+    }>;
+    /**
+     * Keys whose discovery render already ran (success OR failure), mapped to
+     * the workflow identity that was rendered. A render runs at most once per
+     * registration identity — a throwing render is skipped after one warn and
+     * never retried in a hot loop.
+     * @type {Map<string, SmithersWorkflow>}
+     */
+    viewDiscoveryCompleted: Map<string, SmithersWorkflow>;
+    viewDiscoveryScheduled: boolean;
+    /** Instance copy so tests can shrink the slow-render warn budget. */
+    viewDiscoverySlowMs: number;
     /** @type {{ reports: UsageReport[], cachedAtMs: number } | null} */
     usageReportsCache: {
         reports: UsageReport[];
@@ -1588,6 +1616,36 @@ declare class Gateway {
      * @returns {this}
      */
     register(key: string, workflow: SmithersWorkflow, options?: GatewayRegisterOptions): this;
+    /**
+     * Queue a background <UI>/<TUI> discovery render for a registered workflow.
+     * At most one render ever runs per registration identity: a workflow whose
+     * render throws is skipped after one warn and never retried.
+     * @param {string} key
+     * @param {SmithersWorkflow} workflow
+     * @param {string | undefined} entryFile
+     */
+    enqueueWorkflowViewDiscovery(key: string, workflow: SmithersWorkflow, entryFile: string | undefined): void;
+    scheduleWorkflowViewDiscoveryDrain(): void;
+    drainWorkflowViewDiscovery(): void;
+    /**
+     * @param {{ key: string; workflow: SmithersWorkflow; entryFile: string | undefined; resolve: () => void }} item
+     */
+    runWorkflowViewDiscovery(item: {
+        key: string;
+        workflow: SmithersWorkflow;
+        entryFile: string | undefined;
+        resolve: () => void;
+    }): void;
+    /**
+     * Wait for a workflow's discovery render, pulling it out of the background
+     * queue and rendering it now when a request needs its view immediately.
+     * @param {string} key
+     */
+    awaitWorkflowViewDiscovery(key: string): Promise<void>;
+    /** Wait for every queued discovery render, drained one per macrotask. */
+    awaitAllWorkflowViewDiscovery(): Promise<void>;
+    /** Settle every queued discovery without rendering (gateway shutdown). */
+    cancelWorkflowViewDiscovery(): void;
     /**
      * Gate a `/v1/pty/hijack` websocket upgrade: authenticate the request (same
      * token/Host/Origin semantics as the HTTP API, token also accepted as a
