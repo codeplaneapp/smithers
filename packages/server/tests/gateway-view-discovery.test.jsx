@@ -77,6 +77,28 @@ function createInlineUiWorkflow(dbPath, name, counter) {
   });
 }
 
+function createCustomPathUiWorkflow(dbPath, name, counter, path) {
+  const { smithers, Workflow, Task, UI, outputs } = createSmithers(
+    { result: z.object({ ok: z.boolean() }) },
+    { dbPath },
+  );
+  return smithers(() => {
+    counter.count += 1;
+    return (
+      <Workflow name={name}>
+        <UI path={path} title={`${name} UI`}>
+          <main data-testid={`${name}-ui`}>
+            <h1>{`${name} UI`}</h1>
+          </main>
+        </UI>
+        <Task id="task1" output={outputs.result}>
+          {{ ok: true }}
+        </Task>
+      </Workflow>
+    );
+  });
+}
+
 function captureGatewayLogs() {
   const messages = [];
   const originalLog = console.log;
@@ -205,6 +227,24 @@ describe("Gateway workflow view discovery", () => {
       hasUi: true,
       uiPath: "/workflows/inline",
     });
+    expect(counter.count).toBe(1);
+  }, 20_000);
+
+  test("a UI declared at a custom path still serves before its background render drains", async () => {
+    // The workflow key is not readable from a custom mount path, so an
+    // unmatched request must drain pending discovery once instead of 404ing.
+    const counter = { count: 0 };
+    gateway = new Gateway();
+    gateway.register(
+      "custom-path",
+      createCustomPathUiWorkflow(makeDbPath("custom-path"), "custom-path", counter, "/dash"),
+    );
+    const server = await gateway.listen({ host: "127.0.0.1", port: 0 });
+    const baseUrl = `http://127.0.0.1:${getPort(server)}`;
+
+    const response = await fetch(`${baseUrl}/dash`);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("<title>custom-path UI</title>");
     expect(counter.count).toBe(1);
   }, 20_000);
 

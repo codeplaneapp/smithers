@@ -3232,7 +3232,15 @@ export class Gateway {
       // render it on demand instead of waiting for the whole pack to drain.
       await this.awaitWorkflowViewDiscovery(requestedWorkflowKey);
     }
-    const uiMatch = this.resolveUiMatch(url.pathname);
+    let uiMatch = this.resolveUiMatch(url.pathname);
+    if (!uiMatch && (this.viewDiscoveryQueue.length > 0 || this.viewDiscoveryPending.size > 0)) {
+      // A `<UI path="/custom">` mounts outside `/workflows/<key>`, so the key
+      // cannot be read from the path: an unmatched request drains the pending
+      // discovery renders once before it 404s. Every render runs at most once,
+      // so this cannot become a hot loop.
+      await this.awaitAllWorkflowViewDiscovery();
+      uiMatch = this.resolveUiMatch(url.pathname);
+    }
     if (!uiMatch) {
       const declaredMount = requestedWorkflowKey ? this.workflowUiMountRedirect(requestedWorkflowKey, url) : null;
       if (declaredMount) {
