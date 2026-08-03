@@ -4449,6 +4449,7 @@ async function runGatewayCommand(options) {
     ensureSmithersTables(workspaceWorkflow.db);
     setupSqliteCleanup(workspaceWorkflow);
     backendCleanups.push(() => workspaceApi.close?.());
+    const workspaceAdapter = new SmithersDb(workspaceWorkflow.db);
     /** @type {Map<string, Promise<void>>} */
     const workflowLoaders = new Map();
     let readOnlyWorkflow;
@@ -4554,14 +4555,48 @@ async function runGatewayCommand(options) {
         const discovered = discoverWorkflows(workspace).find((candidate) => candidate.id === workflowKey);
         if (discovered) {
           await loadAndRegisterWorkflow(discovered);
+          return;
+        }
+        // Explicit-path launches (`smithers up src/workflows/foo.tsx`) live
+        // outside every registry dir, so a rescan can never find them. The
+        // run row recorded the entry file at launch — register from it so
+        // `smithers ui <runId>` serves the workflow-owned <UI> declaration.
+        const entryFile = await recordedRunEntryFile(workflowKey);
+        if (entryFile) {
+          await loadAndRegisterWorkflow({ id: workflowKey, entryFile });
         }
         return;
       }
     };
+    /**
+     * Entry file recorded by the most recent run whose workflow key matches
+     * an unregistered `workflowKey`. Null when no run names a still-existing
+     * entry file for the key.
+     * @param {string} workflowKey
+     * @returns {Promise<string | null>}
+     */
+    const recordedRunEntryFile = async (workflowKey) => {
+      try {
+        const runs = await workspaceAdapter.listRuns(50, undefined, workflowKey);
+        for (const run of Array.isArray(runs) ? runs : []) {
+          const workflowPath = typeof run?.workflowPath === "string" ? run.workflowPath : null;
+          if (!workflowPath || workflowIdFromPath(workflowPath) !== workflowKey) {
+            continue;
+          }
+          if (existsSync(workflowPath)) {
+            return workflowPath;
+          }
+        }
+      } catch {
+        // A registry-refresh probe must never fail the request; the Gateway
+        // falls through to its definitive NOT_FOUND response.
+      }
+      return null;
+    };
     gateway.extend(
       "evals",
       createEvalsExtension({
-        adapter: new SmithersDb(workspaceWorkflow.db),
+        adapter: workspaceAdapter,
         resolveWorkflowKey: (key) => workflowIndex.get(key),
         workspace,
       }),

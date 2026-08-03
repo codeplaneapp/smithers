@@ -177,9 +177,9 @@ function seedConflictedWorkspace(repo) {
   );
 }
 
-function writeWorkflowWithUi(repo, key, label, declareUi = true) {
+function writeWorkflowWithUi(repo, key, label, declareUi = true, root = ".smithers") {
   repo.write(
-    `.smithers/workflows/${key}.tsx`,
+    `${root}/workflows/${key}.tsx`,
     [
       "/** @jsxImportSource smthrs */",
       'import { createSmithers } from "smthrs";',
@@ -199,7 +199,7 @@ function writeWorkflowWithUi(repo, key, label, declareUi = true) {
     ].join("\n"),
   );
   repo.write(
-    `.smithers/ui/${key}.tsx`,
+    `${root}/ui/${key}.tsx`,
     [
       "/** @jsxImportSource react */",
       'import { createGatewayReactRoot } from "smthrs/gateway-react";',
@@ -504,6 +504,46 @@ describe("smithers ui", () => {
       workflow: "tdsweep-land",
     });
     expect(`${result.stdout}\n${result.stderr}`).not.toContain("/workflows/audit?runId=run-late-authored");
+  }, 60_000);
+
+  test("ui registers an explicit-path run's workflow from its recorded entry file (#1474)", async () => {
+    const repo = createTempRepo();
+    writeWorkflowWithUi(repo, "audit", "Audit UI");
+    // Authored OUTSIDE every registry dir: only the run row knows the entry file.
+    writeWorkflowWithUi(repo, "gtm-leads", "GTM Leads UI", true, "src");
+    const { env } = makeStateDirEnv();
+    const port = await findOpenPort();
+    const gateway = await startWorkspaceGateway(repo, port, env);
+
+    const run = await runSmithersAsync(["up", "src/workflows/gtm-leads.tsx", "--run-id", "run-explicit-path"], {
+      cwd: repo.dir,
+      env,
+      format: "json",
+    });
+    if (run.exitCode !== 0) {
+      throw new Error(
+        `Explicit-path fixture run failed. stdout=${JSON.stringify(run.stdout)} stderr=${JSON.stringify(run.stderr)}`,
+      );
+    }
+
+    const result = await runSmithersAsync(
+      ["ui", "run-explicit-path", "--port", String(port), "--no-autostart", "--no-open"],
+      {
+        cwd: repo.dir,
+        env,
+        format: "json",
+      },
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.json).toMatchObject({
+      opened: false,
+      url: `${gateway.base}/workflows/gtm-leads?runId=run-explicit-path`,
+      runId: "run-explicit-path",
+      workflow: "gtm-leads",
+    });
+    const ui = await fetch(`${gateway.base}/workflows/gtm-leads`);
+    expect(ui.status).toBe(200);
+    expect(await ui.text()).toContain('"workflowKey":"gtm-leads"');
   }, 60_000);
 
   test("emits a JSON error envelope when no Gateway is reachable and autostart is disabled", async () => {
