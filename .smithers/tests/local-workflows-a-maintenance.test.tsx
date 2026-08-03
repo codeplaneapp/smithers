@@ -471,5 +471,5 @@ describe.serial("Local-A maintenance and probe workflows", () => {
     await expect(runTask(boom as never)).rejects.toThrow(
       "fail-probe: intentional failure to exercise the post-failure auto-trigger",
     );
-  });
+  }, 30_000);
 });

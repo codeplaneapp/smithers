@@ -175,8 +175,11 @@ const workflowOwners = {
     "federation-static-import-hardening.tsx",
     "federation-workflow-hardening-2.tsx",
     "pr-polish-panel.tsx",
+    "rename-dependents.tsx",
+    "rename-package.tsx",
     "smithers-repo-federation.tsx",
     "sol-issue-train-pinned.tsx",
+    "upgrade-dependents.tsx",
     "whole-foods-meal-planner.tsx",
   ],
   "./tests/review-since-publish.test.tsx": ["review-since-publish.tsx"],
@@ -409,6 +412,24 @@ describe("federation workflow smoke coverage", () => {
     });
     const train = await renderWorkflow(module.default, { workflowPath, input: {}, outputs: {} });
     expect(train.tasks.map((task) => task.nodeId)).toContain("setup");
+  }, 30_000);
+
+  test("dependent rename and upgrade workflows render their lead lanes", async () => {
+    const renamePackage = await renderWorkflowFile("rename-package.tsx");
+    expect(renamePackage.tasks.map((task) => task.nodeId)).toContain("sweep-packages");
+
+    const renamePath = join(workflowRoot, "rename-dependents.tsx");
+    const renameModule = await import(renamePath);
+    expect(renameModule.default.inputSchema.safeParse({}).success).toBe(false);
+    const renameDependents = await renderWorkflow(renameModule.default, {
+      workflowPath: renamePath,
+      input: { repos: ["smithersai/example-dependent"] },
+      outputs: {},
+    });
+    expect(renameDependents.tasks.map((task) => task.nodeId)).toContain("rename-smithersai-example-dependent");
+
+    const upgradeDependents = await renderWorkflowFile("upgrade-dependents.tsx");
+    expect(upgradeDependents.tasks.map((task) => task.nodeId)).toContain("discover");
   }, 30_000);
 
   test("pr-polish-panel opens with independent reviews before the isolated polish step", async () => {

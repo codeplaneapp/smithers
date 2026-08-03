@@ -76,7 +76,8 @@ describe("Poller", () => {
         </Workflow>
       );
     });
-    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+    const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+    const result = await resumeUntilSettled(workflow, first);
     expect(result.status).toBe("finished");
     expect(calls).toBe(3);
     const checkRows = db
