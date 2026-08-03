@@ -6,6 +6,15 @@ import { findAndOpenDb } from "./find-db.js";
 
 const DEFAULT_BUG_ENDPOINT = "https://bug.smithers.sh/api/bugs";
 const MAX_RUN_EVENTS = 50;
+/**
+ * High-frequency stream noise skipped when collecting the event tail: a run
+ * heartbeating every ~500ms would otherwise fill all MAX_RUN_EVENTS slots
+ * with a ~25s TaskHeartbeat window and carry no lifecycle history at all.
+ */
+const NOISE_EVENT_TYPES = new Set(["TaskHeartbeat", "AgentEvent"]);
+/** Upper bound on event rows scanned while hunting for meaningful events. */
+const MAX_EVENT_SCAN = 5_000;
+const EVENT_SCAN_PAGE = 500;
 const POST_TIMEOUT_MS = 15_000;
 /** Object keys whose values are always redacted wholesale. */
 const SECRET_KEY_PATTERN =
@@ -105,8 +114,9 @@ function runErrorMessage(errorJson) {
 }
 
 /**
- * Read the run row plus the tail (~last 50) of its event history from the
- * nearest workspace DB, using the same read path as `ps`/`events`.
+ * Read the run row plus the tail (~last 50 meaningful events, heartbeat/chunk
+ * noise excluded) of its event history from the nearest workspace DB, using
+ * the same read path as `ps`/`events`.
  *
  * @param {string} runId
  * @returns {Promise<{ run: any; events: any[] } | undefined>}
@@ -116,16 +126,29 @@ async function gatherRun(runId) {
   try {
     const run = await adapter.getRun(runId);
     if (!run) return undefined;
-    // Read only the tail: find the last seq, then fetch the window just
-    // before it (listEvents' afterSeq is exclusive, so `lastSeq -
-    // MAX_RUN_EVENTS` yields exactly the last MAX_RUN_EVENTS rows including
-    // the terminal event) instead of scanning the whole event history.
+    // Read only the tail: walk backwards from the last seq in pages
+    // (listEvents' afterSeq is exclusive and ascending), skipping
+    // NOISE_EVENT_TYPES so a heartbeating run attaches lifecycle history
+    // instead of 50 TaskHeartbeat rows (#1484). Bounded by MAX_EVENT_SCAN so
+    // a long noise-only history never turns into a full-table scan.
     const lastSeq = await adapter.getLastEventSeq(runId);
     /** @type {any[]} */
-    let tail = [];
+    const tail = [];
     if (lastSeq != null) {
-      const page = await adapter.listEvents(runId, lastSeq - MAX_RUN_EVENTS, MAX_RUN_EVENTS);
-      if (Array.isArray(page)) tail = page;
+      let cursor = lastSeq;
+      let scanned = 0;
+      while (cursor >= 0 && tail.length < MAX_RUN_EVENTS && scanned < MAX_EVENT_SCAN) {
+        const afterSeq = Math.max(-1, cursor - EVENT_SCAN_PAGE);
+        const page = await adapter.listEvents(runId, afterSeq, cursor - afterSeq);
+        if (!Array.isArray(page) || page.length === 0) break;
+        scanned += page.length;
+        for (let i = page.length - 1; i >= 0 && tail.length < MAX_RUN_EVENTS; i -= 1) {
+          if (!NOISE_EVENT_TYPES.has(page[i].type)) tail.push(page[i]);
+        }
+        cursor = afterSeq;
+      }
+      // Collected newest-first while walking backwards; restore log order.
+      tail.reverse();
     }
     const events = tail.map((event) => {
       let payload = event.payloadJson ?? null;
@@ -201,13 +224,16 @@ export async function runBugCommand(c, fail) {
   }
   const runError = gathered ? runErrorMessage(gathered.run.errorJson) : null;
   let title = c.options.title;
-  if (!title && gathered) {
-    title = runError
-      ? `Run ${gathered.run.runId} failed: ${runError.slice(0, 120)}`
-      : `Run ${gathered.run.runId} (${gathered.run.status})`;
+  if (!title && gathered && runError) {
+    title = `Run ${gathered.run.runId} failed: ${runError.slice(0, 120)}`;
   }
-  if (!title) {
+  if (!title && typeof c.options.body === "string" && c.options.body.trim()) {
+    // A hand-written body beats the bland status line: "Run <id> (running)"
+    // tells triage nothing about the actual bug (#1484).
     title = c.options.body.slice(0, 120);
+  }
+  if (!title && gathered) {
+    title = `Run ${gathered.run.runId} (${gathered.run.workflowName ?? "unknown workflow"}, status: ${gathered.run.status})`;
   }
   const payload = /** @type {Record<string, unknown>} */ (
     scrubValue({

@@ -159,6 +159,67 @@ describe("smithers bug", () => {
   );
 
   test(
+    "heartbeat-flooded running run attaches lifecycle events, not TaskHeartbeat noise, and titles from the body (#1484)",
+    async () => {
+      const repo = createTempRepo();
+      const { sqlite, adapter } = openRepoDb(repo);
+      try {
+        const now = Date.now();
+        await adapter.insertRun({
+          runId: "hb-run",
+          workflowName: "hb-fixture",
+          workflowPath: "workflow.tsx",
+          status: "running",
+          createdAtMs: now - 120_000,
+          startedAtMs: now - 119_000,
+          finishedAtMs: null,
+          heartbeatAtMs: now,
+          errorJson: null,
+        });
+        // 10 lifecycle events, then a flood of heartbeats that would fill the
+        // whole 50-event tail window if not filtered out.
+        for (let i = 1; i <= 10; i += 1) {
+          await adapter.insertEventWithNextSeq({
+            runId: "hb-run",
+            timestampMs: now - 120_000 + i * 100,
+            type: "NodeStarted",
+            payloadJson: JSON.stringify({ nodeId: `node-${i}` }),
+          });
+        }
+        for (let i = 1; i <= 200; i += 1) {
+          await adapter.insertEventWithNextSeq({
+            runId: "hb-run",
+            timestampMs: now - 100_000 + i * 500,
+            type: "TaskHeartbeat",
+            payloadJson: JSON.stringify({ nodeId: "synthesize", intervalMs: 500 }),
+          });
+        }
+        const before = receivedPayloadsSnapshot().length;
+
+        const result = runSmithers(
+          ["bug", "--run", "hb-run", "--body", "synthesize node is stuck", "--endpoint", liveEndpoint()],
+          { cwd: repo.dir, format: "json", timeoutMs: CLI_COMMAND_TIMEOUT_MS },
+        );
+
+        expect(result.exitCode).toBe(0);
+        const payloads = receivedPayloadsSnapshot();
+        expect(payloads.length).toBe(before + 1);
+        const payload = payloads[payloads.length - 1];
+        // The body describes the bug; "Run hb-run (running)" tells triage nothing.
+        expect(payload.title).toBe("synthesize node is stuck");
+        // Heartbeat noise is skipped; the lifecycle history survives.
+        expect(payload.run.events.length).toBe(10);
+        expect(payload.run.events.every((event) => event.type === "NodeStarted")).toBe(true);
+        expect(payload.run.events[0].payload.nodeId).toBe("node-1");
+        expect(payload.run.events[9].payload.nodeId).toBe("node-10");
+      } finally {
+        sqlite.close();
+      }
+    },
+    CLI_COMMAND_TIMEOUT_MS,
+  );
+
+  test(
     "default (non-JSON) format prints the friendly line once and does not double-print onto stdout",
     async () => {
       const repo = createTempRepo();
