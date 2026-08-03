@@ -183,8 +183,16 @@ function classifyNonRetryableAgentError(message, command, context = {}) {
  * - claude: `--resume <id>` of a killed/relocated conversation prints
  *   `No conversation found with session ID: <id>` (isolated jj worktrees can
  *   relocate the cwd its conversation store is keyed by).
+ *
+ * `hadResumeSession` says whether THIS invocation actually resumed a prior
+ * session. When it did not — the session that broke was already freshly
+ * minted — "retry will start a fresh session" is a false promise: the CLI is
+ * failing to establish sessions at all, and only failing over to another
+ * agent can help. The error still carries `discardResumeSession: true` (the
+ * heartbeat may have captured the broken id as agentResume) plus
+ * `freshSessionFailure: true` and an honest message (issue #1480).
  */
-export function classifySessionLoss(command, errorText, rawStderr) {
+export function classifySessionLoss(command, errorText, rawStderr, hadResumeSession = true) {
   const kimiMatch =
     command === "kimi"
       ? rawStderr.match(/kimi -r ([0-9a-f-]{8,})/i) || errorText.match(/kimi -r ([0-9a-f-]{8,})/i)
@@ -192,10 +200,13 @@ export function classifySessionLoss(command, errorText, rawStderr) {
   if (kimiMatch) {
     return new SmithersError(
       "AGENT_SESSION_LOST",
-      `Kimi session ${kimiMatch[1]} is broken. Retry will start a fresh session.`,
+      hadResumeSession
+        ? `Kimi session ${kimiMatch[1]} is broken. Retry will start a fresh session.`
+        : `Kimi session ${kimiMatch[1]} is broken even though this attempt started a FRESH session — the kimi CLI is failing to establish sessions; retrying it will not help. Failing over to the next agent in the chain (if any).`,
       {
         failureRetryable: true,
         discardResumeSession: true,
+        freshSessionFailure: !hadResumeSession,
         command: "kimi",
         kimiSessionId: kimiMatch[1],
       },
@@ -1164,7 +1175,12 @@ export class BaseCliAgent {
                   return yield* Effect.fail(nonRetryable);
                 }
                 const rawStderr = result.stderr ?? "";
-                const sessionLoss = classifySessionLoss(commandSpec.command, errorText, rawStderr);
+                const sessionLoss = classifySessionLoss(
+                  commandSpec.command,
+                  errorText,
+                  rawStderr,
+                  typeof options?.resumeSession === "string",
+                );
                 if (sessionLoss) {
                   return yield* Effect.fail(sessionLoss);
                 }
@@ -1185,6 +1201,7 @@ export class BaseCliAgent {
                 commandSpec.command,
                 completedError,
                 result.stderr ?? "",
+                typeof options?.resumeSession === "string",
               );
               if (completedSessionLoss) {
                 return yield* Effect.fail(completedSessionLoss);

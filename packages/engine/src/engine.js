@@ -4851,7 +4851,24 @@ async function legacyExecuteTask(
       // quota-failed attempts so the rung reflects only genuine agent failures.
       const quotaFailedAttempts = attempts.filter((a) => a.state === "failed" && isQuotaTaskFailure(a)).length;
       const rung = Math.max(0, attemptNo - 1 - quotaFailedAttempts);
-      const startIndex = Math.min(rung, Math.max(selectionPool.length - 1, 0));
+      // A retry must advance PAST the agent that actually failed, not just to
+      // the raw rung: the preflight scan below can skip forward within one
+      // attempt (e.g. both Codex leads fail preflight and attempt 1 lands on
+      // kimi at chain index 2), so attempt 2's rung 1 would re-scan from an
+      // agent BEFORE the one that failed and re-select the same broken agent
+      // until the retry budget dies without the chain tail ever engaging
+      // (issue #1480). Quota failures stay exempt, same as the rung above.
+      const lastGenuineFailureMeta = parseAttemptMetaJson(
+        attempts.find((a) => a.state === "failed" && !isQuotaTaskFailure(a))?.metaJson,
+      );
+      const lastFailedChainIndex =
+        typeof lastGenuineFailureMeta?.agentChainIndex === "number" ? lastGenuineFailureMeta.agentChainIndex : null;
+      let advanceIndex = 0;
+      if (lastFailedChainIndex != null) {
+        const next = selectionPool.findIndex((entry) => entry.chainIndex > lastFailedChainIndex);
+        advanceIndex = next === -1 ? Math.max(selectionPool.length - 1, 0) : next;
+      }
+      const startIndex = Math.min(Math.max(rung, advanceIndex), Math.max(selectionPool.length - 1, 0));
       // Rungs already rate-limited in this failover round: skip them so a
       // quota-blocked provider hands the work to the next agent in the chain
       // instead of stalling the lane until its window resets.
@@ -4880,9 +4897,17 @@ async function legacyExecuteTask(
         },
       };
       let selectedHealthyAgent = false;
+      // Every candidate the scan passes over is recorded on the attempt meta
+      // with the reason, so a chain that silently lands mid-list (e.g. Codex
+      // leads skipped, task seated on kimi) stays debuggable from the
+      // attempt record instead of the leads vanishing without trace
+      // (issue #1480).
+      const agentChainSkips = [];
+      const skipLabel = (candidate) => candidate.id ?? candidate.constructor?.name ?? null;
       for (let i = startIndex; i < selectionPool.length; i++) {
         const { agent: candidate, chainIndex } = selectionPool[i];
         if (quotaBlockedRungs.has(chainIndex)) {
+          agentChainSkips.push({ agentId: skipLabel(candidate), chainIndex, reason: "quota-blocked" });
           continue;
         }
         effectiveAgent = candidate;
@@ -4899,6 +4924,12 @@ async function legacyExecuteTask(
           const errStr = String(
             (selectionPreflightError && selectionPreflightError.message) ?? selectionPreflightError ?? "",
           );
+          agentChainSkips.push({
+            agentId: skipLabel(candidate),
+            chainIndex,
+            reason: "preflight-failed",
+            error: errStr.slice(0, 300),
+          });
           const isAuthError =
             /invalid_authentication|401|api.key.*invalid|expired.*credentials|authentication.*failed/i.test(errStr);
           if (isAuthError && disabledAgents && i < selectionPool.length - 1) {
@@ -4908,6 +4939,9 @@ async function legacyExecuteTask(
           // the backward scan below gets a chance before the preflight
           // block surfaces the terminal failure.
         }
+      }
+      if (agentChainSkips.length > 0) {
+        attemptMeta.agentChainSkips = agentChainSkips;
       }
       // Backward fallback: the final attempt maps to the LAST rung, so a
       // dead terminal agent (e.g. an uninstalled fallback CLI) has no
