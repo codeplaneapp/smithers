@@ -409,7 +409,7 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "tempo",
       "REDACTED_SECRET",
     ]);
-    expectText("scripts/readme-contract.test.mjs", ["Live workflow runs:", "<Loop>", "Ralph"]);
+    expectText("scripts/readme-contract.test.mjs", ["task-fork.gif", "<Loop>", "Ralph"]);
   });
 
   test("gitignore excludes Smithers runtime artifacts without hiding source directories", () => {
