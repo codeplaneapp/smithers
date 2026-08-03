@@ -643,6 +643,30 @@ function redactConnectionStringForCli(value) {
     return "<redacted>";
   }
 }
+let stdioGuardInstalled = false;
+/**
+ * Keep a foreground engine alive when the calling shell closes its stdio pipe
+ * (e.g. `smithers retry-task ... | head`). Without this the first progress
+ * write after the pipe closes kills the whole engine — SIGPIPE under Bun, an
+ * unhandled stream EPIPE under Node — orphaning the run while its agent
+ * children keep going. Closed-pipe writes are silently dropped; every other
+ * stream error still crashes as before.
+ */
+function guardAgainstClosedStdio() {
+  if (stdioGuardInstalled) return;
+  stdioGuardInstalled = true;
+  try {
+    process.on("SIGPIPE", () => {});
+  } catch {
+    // Signal not supported on this platform/runtime.
+  }
+  for (const stream of [process.stdout, process.stderr]) {
+    stream.on("error", (err) => {
+      if (/** @type {NodeJS.ErrnoException} */ (err)?.code === "EPIPE") return;
+      throw err;
+    });
+  }
+}
 function buildProgressReporter() {
   const startTime = Date.now();
   const formatElapsed = () => {
@@ -9652,6 +9676,10 @@ const cli = Cli.create({
       nodeId: z.string().describe("Task/node ID to retry"),
       iteration: z.number().int().default(0).describe("Loop iteration"),
       deps: z.boolean().default(true).describe("Also reset dependents. Use --no-deps to reset only this node."),
+      detach: z
+        .boolean()
+        .default(false)
+        .describe("After the reset, resume the run in the background (like `up -d`) and exit"),
       force: z.boolean().default(false).describe("Allow retry even if run is still running"),
       acceptWorkflowChange: z
         .boolean()
@@ -9660,12 +9688,14 @@ const cli = Cli.create({
           "Resume this run after its workflow source changed, re-blessing durability metadata in place; you own replay determinism",
         ),
     }),
-    alias: { runId: "r", nodeId: "n" },
+    alias: { runId: "r", nodeId: "n", detach: "d" },
     async run(c) {
       const fail = makeFail(c);
       try {
-        const { adapter, workflow, cleanup } = await loadWorkflowDb(c.args.workflow);
+        const workflowFile = resolveWorkflowArg(c.args.workflow);
+        const { adapter, workflow, cleanup } = await loadWorkflowDb(workflowFile);
         try {
+          guardAgainstClosedStdio();
           const reportProgress = buildProgressReporter();
           let engineAttached = false;
           let retryState;
@@ -9676,7 +9706,7 @@ const cli = Cli.create({
             }
             reportProgress(event);
           };
-          await preflightRetryResume(adapter, c.options.runId, c.args.workflow, {
+          await preflightRetryResume(adapter, c.options.runId, workflowFile, {
             acceptWorkflowChange: c.options.acceptWorkflowChange,
           });
           const retryResumeClaim = {
@@ -9703,6 +9733,31 @@ const cli = Cli.create({
             process.exitCode = 1;
             return c.ok(resetResult);
           }
+          if (c.options.detach) {
+            // Hand the reset run to a detached `up --resume` child carrying the
+            // claim stamped during the reset, so the engine never runs in (and
+            // dies with) the calling shell's foreground pipe.
+            try {
+              const pid = resumeRunDetached(
+                {
+                  kind: "workflow-file",
+                  workflowPath: resolve(process.cwd(), workflowFile),
+                  cwd: process.cwd(),
+                },
+                c.options.runId,
+                retryResumeClaim,
+              );
+              process.stderr.write(
+                `[smithers] Reset ${resetResult.resetNodes.join(", ")}; resuming run ${c.options.runId} detached (pid ${pid}).\n`,
+              );
+              return c.ok({ ...resetResult, detached: true, pid });
+            } catch (error) {
+              if (retryState) {
+                await rollbackFailedRetryResume(adapter, retryState, retryResumeClaim, error);
+              }
+              throw error;
+            }
+          }
           const abort = setupAbortSignal();
           let runResult;
           try {
@@ -9710,7 +9765,7 @@ const cli = Cli.create({
               runWorkflow(workflow, {
                 input: {},
                 runId: c.options.runId,
-                workflowPath: c.args.workflow,
+                workflowPath: workflowFile,
                 resume: true,
                 force: c.options.force,
                 acceptWorkflowChange: c.options.acceptWorkflowChange,

@@ -71,9 +71,10 @@ Every attempt is a row in `_smithers_attempts` (`packages/db/src/internal-schema
 bunx smthrs node -r RUN_ID -n implement          # attempts, errors, tool calls
 bunx smthrs revert workflow.tsx -r RUN_ID -n implement --attempt 1
 bunx smthrs retry-task workflow.tsx -r RUN_ID -n implement   # reset + resume
+bunx smthrs retry-task workflow.tsx -r RUN_ID -n implement -d  # reset, resume detached
 ```
 
-`retry-task` resets the node (and by default its dependents; `--no-deps` to scope it) and resumes the workflow - the manual override when the automatic budget is spent or you've fixed the environment. `timetravel` combines both: revert filesystem, reset DB state, optionally `--resume`.
+`retry-task` resets the node (and by default its dependents; `--no-deps` to scope it) and resumes the workflow - the manual override when the automatic budget is spent or you've fixed the environment. By default the engine resumes in the foreground; pass `-d`/`--detach` to hand the run to a background engine (like `up -d`) so it survives your shell or a closed output pipe. The dependent set is approximated from attempt order (the DB stores no dependency edges), so `--deps` can also sweep in siblings that started after the target; use `--no-deps` for a strictly single-node reset. `timetravel` combines both: revert filesystem, reset DB state, optionally `--resume`.
 
 ### Side effects: the saga-shaped part
 
