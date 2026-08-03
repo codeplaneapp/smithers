@@ -1070,5 +1070,38 @@ export function extractFromHost(root, opts) {
     }
   }
   walk(root, { path: [], iteration: 0, parentIsRalph: false, parallelStack: [], worktreeStack: [], loopStack: [] });
+  scopeDependencyIds(tasks);
   return { xml: toXmlNode(root), tasks, mountedTaskIds };
+}
+
+/**
+ * Scope `dependsOn`/`needs` references authored with logical task ids to the
+ * mounted node ids of tasks nested inside ancestor loops. A task inside a
+ * nested loop is mounted as `<logical id>@@<ancestor scope>`, but dependency
+ * edges are authored with logical ids (e.g. by <Panel>), so an exact-id lookup
+ * would report the upstream task as missing and deadlock the run. When an
+ * exact id is not mounted, resolve it against the dependent task's own loop
+ * scope, preferring the nearest (most deeply scoped) match.
+ * @param {TaskDescriptor[]} tasks
+ */
+function scopeDependencyIds(tasks) {
+  const mounted = new Set(tasks.map((task) => task.nodeId));
+  for (const task of tasks) {
+    const atIdx = task.nodeId.indexOf("@@");
+    if (atIdx === -1) continue;
+    const scopeEntries = task.nodeId.slice(atIdx + 2).split(",");
+    /** @param {string} depId */
+    const resolve = (depId) => {
+      if (mounted.has(depId)) return depId;
+      for (let depth = scopeEntries.length; depth >= 1; depth--) {
+        const candidate = `${depId}@@${scopeEntries.slice(0, depth).join(",")}`;
+        if (mounted.has(candidate)) return candidate;
+      }
+      return depId;
+    };
+    if (task.dependsOn) task.dependsOn = task.dependsOn.map(resolve);
+    if (task.needs) {
+      task.needs = Object.fromEntries(Object.entries(task.needs).map(([key, value]) => [key, resolve(value)]));
+    }
+  }
 }

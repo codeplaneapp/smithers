@@ -190,6 +190,31 @@ describe("extractFromHost", () => {
     ]);
     expect(() => extractFromHost(root)).toThrow("Duplicate Ralph id");
   });
+  test("scopes dependsOn/needs authored with logical ids to loop-scoped node ids (issue #1487)", () => {
+    // <Panel> inside a nested loop authors moderator dependsOn/needs with the
+    // logical panelist ids, but the panelists are mounted with the ancestor
+    // loop scope appended — an exact-id dependency lookup then deadlocks.
+    const root = hostEl("smithers:ralph", { id: "outer" }, [
+      hostEl("smithers:sequence", {}, [
+        hostEl("smithers:task", { id: "unscoped", output: "t" }),
+        hostEl("smithers:ralph", { id: "inner" }, [
+          hostEl("smithers:task", { id: "panelist-a", output: "t" }),
+          hostEl("smithers:task", { id: "panelist-b", output: "t" }),
+          hostEl("smithers:task", {
+            id: "moderator",
+            output: "t",
+            dependsOn: ["panelist-a", "panelist-b", "unscoped", "missing"],
+            needs: { "panelist-a": "panelist-a", other: "unscoped" },
+          }),
+        ]),
+      ]),
+    ]);
+    const result = extractFromHost(root, { ralphIterations: { outer: 2 } });
+    const moderator = result.tasks.find((task) => task.nodeId.startsWith("moderator"));
+    expect(moderator.nodeId).toBe("moderator@@outer=2");
+    expect(moderator.dependsOn).toEqual(["panelist-a@@outer=2", "panelist-b@@outer=2", "unscoped", "missing"]);
+    expect(moderator.needs).toEqual({ "panelist-a": "panelist-a@@outer=2", other: "unscoped" });
+  });
   test("extracts ralph iteration from opts", () => {
     const root = hostEl("smithers:ralph", { id: "myLoop" }, [hostEl("smithers:task", { id: "t1", output: "t" })]);
     const result = extractFromHost(root, {
