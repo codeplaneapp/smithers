@@ -4,6 +4,22 @@ import { SmithersError as SmithersError$1 } from '@smthrs/errors/SmithersError';
 import { Effect } from 'effect';
 import { spawn } from 'node:child_process';
 
+/**
+ * Normalized cross-harness file-change record. See
+ * `research/file-change-contract.md` for the design rationale.
+ */
+type AgentFileChangeKind = "created" | "modified" | "deleted" | "renamed";
+type AgentFileChange$1 = {
+    path: string;
+    kind: AgentFileChangeKind;
+    /** Set when `kind === "renamed"`. */
+    oldPath?: string;
+    /** Full `git diff`-style unified patch, when available. */
+    unifiedDiff?: string;
+    /** Did the harness report the diff, or did we build it from tool input? */
+    source: "reported" | "reconstructed";
+};
+
 type BaseCliAgentOptions$2 = {
     id?: string;
     model?: string;
@@ -330,6 +346,37 @@ declare function pushList(args: string[], flag: string, values?: string[]): void
 declare function normalizeCodexConfig(config?: CodexConfigOverrides$1): string[];
 type CodexConfigOverrides$1 = CodexConfigOverrides$2;
 
+/**
+ * @param {string} path
+ * @param {string} oldText
+ * @param {string} newText
+ * @returns {string | undefined} unified diff, or undefined when texts are identical
+ */
+declare function reconstructUnifiedDiff(path: string, oldText: string, newText: string): string | undefined;
+
+/** @typedef {import("../agent-contract/AgentFileChange.ts").AgentFileChange} AgentFileChange */
+/**
+ * Shared `parseFileChanges` logic for harnesses that share Claude Code's
+ * Anthropic-style `tool_use` shape: `Edit`/`MultiEdit`
+ * carry `old_string`/`new_string`/`file_path` verbatim in the tool input;
+ * `Write` carries only the new full-file `content`, so a diff can only be
+ * reconstructed when the caller separately knows the prior content (pass
+ * `options.priorContent` — e.g. `""` once the tool result confirms the file
+ * was newly created). Without that knowledge a `Write` stays paths-only: an
+ * empty-old diff over an EXISTING file would be fabricated.
+ * `NotebookEdit` carries `new_source`; only `edit_mode: "insert"` has a
+ * genuinely empty old cell, so only inserts reconstruct a diff.
+ *
+ * @param {unknown} toolTitle - the tool_use block's `name` (e.g. "Edit")
+ * @param {unknown} input - the tool_use block's `input`
+ * @param {{ priorContent?: string }} [options] - known prior file content (Write only)
+ * @returns {AgentFileChange[] | undefined}
+ */
+declare function parseAnthropicStyleFileChanges(toolTitle: unknown, input: unknown, options?: {
+    priorContent?: string;
+}): AgentFileChange[] | undefined;
+type AgentFileChange = AgentFileChange$1;
+
 /** @typedef {import("./AgentCliEvent.ts").AgentCliEvent} AgentCliEvent */
 /** @typedef {import("./AgentGenerateOptions.ts").AgentGenerateOptions} AgentGenerateOptions */
 /** @typedef {import("./BaseCliAgentOptions.ts").BaseCliAgentOptions} BaseCliAgentOptions */
@@ -487,4 +534,4 @@ type PiExtensionUiRequest = PiExtensionUiRequest$2;
 type PiExtensionUiResponse = PiExtensionUiResponse$2;
 type RunCommandResult = RunCommandResult$2;
 
-export { type AgentGenerateOptions$2 as A, type BaseCliAgentOptions$2 as B, type CliOutputInterpreter$2 as C, extractTextFromJsonValue as D, extractUsageFromOutput as E, isLikelyRuntimeMetadata as F, isRecord as G, normalizeCodexConfig as H, normalizeTokenUsage as I, pushFlag as J, pushList as K, resolveTimeouts as L, runAgentPromise as M, type NormalizedTokenUsage as N, runCommandEffect as O, type PiExtensionUiRequest$2 as P, runRpcCommandEffect as Q, type RunCommandResult as R, shouldSurfaceUnparsedStdout as S, toolKindFromName as T, truncate as U, truncateToBytes as V, tryParseJson as W, type BaseCliAgentOptions as a, type PiExtensionUiResponse$2 as b, BaseCliAgent as c, type CodexConfigOverrides$2 as d, type AgentCliEvent$1 as e, type CliOutputInterpreter as f, type AgentCliActionKind$2 as g, type AgentCliActionEvent as h, type AgentCliActionKind as i, type AgentCliActionPhase as j, type AgentCliCompletedEvent as k, type AgentCliEvent as l, type AgentCliEventLevel as m, type AgentCliStartedEvent as n, type AgentGenerateOptions as o, type CliUsageInfo as p, type CodexConfigOverrides as q, type PiExtensionUiRequest as r, type PiExtensionUiResponse as s, asNumber as t, asString as u, buildGenerateResult as v, combineNonEmpty as w, createAgentStdoutTextEmitter as x, createSyntheticIdGenerator as y, extractPrompt as z };
+export { type AgentFileChange$1 as A, type BaseCliAgentOptions$2 as B, type CliOutputInterpreter$2 as C, createSyntheticIdGenerator as D, extractPrompt as E, extractTextFromJsonValue as F, extractUsageFromOutput as G, isLikelyRuntimeMetadata as H, isRecord as I, normalizeCodexConfig as J, normalizeTokenUsage as K, parseAnthropicStyleFileChanges as L, pushFlag as M, type NormalizedTokenUsage as N, pushList as O, type PiExtensionUiRequest$2 as P, reconstructUnifiedDiff as Q, type RunCommandResult as R, resolveTimeouts as S, runAgentPromise as T, runCommandEffect as U, runRpcCommandEffect as V, shouldSurfaceUnparsedStdout as W, toolKindFromName as X, truncate as Y, truncateToBytes as Z, tryParseJson as _, type BaseCliAgentOptions as a, type PiExtensionUiResponse$2 as b, type AgentGenerateOptions$2 as c, BaseCliAgent as d, type CodexConfigOverrides$2 as e, type AgentCliEvent$1 as f, type CliOutputInterpreter as g, type AgentCliActionKind$2 as h, type AgentFileChangeKind as i, type AgentCliActionEvent as j, type AgentCliActionKind as k, type AgentCliActionPhase as l, type AgentCliCompletedEvent as m, type AgentCliEvent as n, type AgentCliEventLevel as o, type AgentCliStartedEvent as p, type AgentGenerateOptions as q, type CliUsageInfo as r, type CodexConfigOverrides as s, type PiExtensionUiRequest as t, type PiExtensionUiResponse as u, asNumber as v, asString as w, buildGenerateResult as x, combineNonEmpty as y, createAgentStdoutTextEmitter as z };

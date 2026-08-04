@@ -1,5 +1,7 @@
 // @smithers-type-exports-begin
 /** @typedef {import("@smthrs/agents/capability-registry").AgentCapabilityRegistry} AgentCapabilityRegistry */
+/** @typedef {import("@smthrs/agents").AgentFileChange} AgentFileChange */
+/** @typedef {import("@smthrs/agents").AgentFileChangeKind} AgentFileChangeKind */
 /** @typedef {import("@smthrs/agents/AgentLike").AgentLike} AgentLike */
 /** @typedef {import("@smthrs/agents/capability-registry").AgentToolDescriptor} AgentToolDescriptor */
 /** @typedef {import("@smthrs/scorers").AggregateOptions} AggregateOptions */

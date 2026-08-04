@@ -1,6 +1,6 @@
 import * as ai from 'ai';
 import { Tool as Tool$1, ToolSet, ToolLoopAgentSettings, LanguageModel, ToolLoopAgent } from 'ai';
-import { B as BaseCliAgentOptions, a as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, b as PiExtensionUiResponse$1, A as AgentGenerateOptions$3, c as BaseCliAgent, C as CliOutputInterpreter$e, d as CodexConfigOverrides, e as AgentCliEvent$1, f as CliOutputInterpreter$f, g as AgentCliActionKind } from './index-OMppfuZe.js';
+import { B as BaseCliAgentOptions, a as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, b as PiExtensionUiResponse$1, A as AgentFileChange$1, c as AgentGenerateOptions$3, d as BaseCliAgent, C as CliOutputInterpreter$e, e as CodexConfigOverrides, f as AgentCliEvent$1, g as CliOutputInterpreter$f, h as AgentCliActionKind, i as AgentFileChangeKind$1 } from './index-CNm-EanA.js';
 import * as zod from 'zod';
 import '@smthrs/errors/SmithersError';
 import 'effect';
@@ -249,6 +249,12 @@ type AgentCapabilityRegistry$c = {
     humanInteraction: {
         supportsUiRequests: boolean;
         methods: string[];
+    };
+    fileChanges: {
+        /** Can this engine identify file-mutating tool calls at all? */
+        supportsFileChanges: boolean;
+        /** Can it produce (report or reconstruct) full diff content? */
+        supportsUnifiedDiff: boolean;
     };
     builtIns: string[];
 };
@@ -536,6 +542,8 @@ type AgentLike$1 = {
     capabilities?: AgentCapabilityRegistry$a;
     /** True when the agent consumes outputSchema through a native structured-output API. */
     supportsNativeStructuredOutput?: boolean;
+    /** Optional harness-specific file-change normalizer. */
+    parseFileChanges?: (rawEvent: unknown) => AgentFileChange$1[] | undefined;
     /**
      * Performs deterministic startup checks before the first generation call in a
      * workflow run. A rejected promise fails the task without retrying.
@@ -687,7 +695,15 @@ declare class AmpAgent extends BaseCliAgent {
      */
     createOutputInterpreter(): CliOutputInterpreter$d;
     /**
-     * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
+     * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
+     * into {@link AgentFileChange} records. `action` is `{ title, detail: { input } }`.
+     *
+     * @param {unknown} action
+     * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+     */
+    parseFileChanges(action: unknown): AgentFileChange$1[] | undefined;
+    /**
+     * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any }} params
      */
     buildCommand(params: {
         prompt: string;
@@ -890,6 +906,14 @@ declare class ClaudeCodeAgent extends BaseCliAgent {
      */
     createOutputInterpreter(): CliOutputInterpreter$b;
     /**
+     * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
+     * into {@link AgentFileChange} records. `action` is `{ title, detail: { input } }`.
+     *
+     * @param {unknown} action
+     * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+     */
+    parseFileChanges(action: unknown): AgentFileChange$1[] | undefined;
+    /**
      * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
      */
     buildCommand(params: {
@@ -972,6 +996,15 @@ declare class CodexAgent extends BaseCliAgent {
      */
     createOutputInterpreter(): CliOutputInterpreter$a;
     /**
+     * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
+     * into {@link AgentFileChange} records. `action.detail.changes` is codex's
+     * native `{path, kind}[]` — no diff content in the protocol.
+     *
+     * @param {unknown} action
+     * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+     */
+    parseFileChanges(action: unknown): AgentFileChange$1[] | undefined;
+    /**
      * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
      */
     buildCommand(params: {
@@ -1011,6 +1044,16 @@ declare class CursorAgent extends BaseCliAgent {
      * @returns {CliOutputInterpreter}
      */
     createOutputInterpreter(): CliOutputInterpreter$9;
+    /**
+     * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
+     * into {@link AgentFileChange} records. `action` is
+     * `{ title, detail: { arguments } }` where `arguments` is the tool call's
+     * protobuf `args` object.
+     *
+     * @param {unknown} action
+     * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+     */
+    parseFileChanges(action: unknown): AgentFileChange$1[] | undefined;
     /**
      * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any }} params
      */
@@ -1205,6 +1248,15 @@ declare class KimiAgent extends BaseCliAgent {
      */
     createOutputInterpreter(): CliOutputInterpreter$6;
     /**
+     * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
+     * into {@link AgentFileChange} records. `action.detail.arguments` is the raw
+     * JSON-string function-call arguments (OpenAI-style tool calls).
+     *
+     * @param {unknown} action
+     * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+     */
+    parseFileChanges(action: unknown): AgentFileChange$1[] | undefined;
+    /**
      * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
      */
     buildCommand(params: {
@@ -1321,6 +1373,14 @@ declare class OpenCodeAgent extends BaseCliAgent {
      * @returns {CliOutputInterpreter}
      */
     createOutputInterpreter(): CliOutputInterpreter$4;
+    /**
+     * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
+     * into {@link AgentFileChange} records. `action` is `{ title, detail: { input } }`.
+     *
+     * @param {unknown} action
+     * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+     */
+    parseFileChanges(action: unknown): AgentFileChange$1[] | undefined;
     /**
      * Build the CLI command spec for `opencode run`.
      *
@@ -1925,6 +1985,8 @@ type SmithersAgentContractTool = SmithersAgentContractTool$1;
 type SmithersAgentToolCategory = SmithersAgentToolCategory$1;
 type SmithersListedTool = SmithersListedTool$2;
 type SmithersToolSurface = SmithersToolSurface$2;
+type AgentFileChangeKind = AgentFileChangeKind$1;
+type AgentFileChange = AgentFileChange$1;
 type CliAgentCapabilityAdapterId = CliAgentCapabilityAdapterId$1;
 type CliAgentCapabilityDoctorEntry = CliAgentCapabilityDoctorEntry$1;
 type CliAgentCapabilityDoctorReport = CliAgentCapabilityDoctorReport$3;
@@ -1951,4 +2013,4 @@ type TranscriptionProvider = TranscriptionProvider$1;
 type TranscriptionToolInput = TranscriptionToolInput$1;
 type TranscriptionToolResult = TranscriptionToolResult$1;
 
-export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, type AudioHostResolver, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateHttpToolOptions, type CreateTranscriptionToolOptions, CursorAgent, type CursorAgentOptions, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, HermesCliAgent, type HermesCliAgentOptions, type HttpToolAuth, type HttpToolInput, type HttpToolOutput, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, OmpAgent, OpenAIAgent, type OpenAIAgentOptions, OpenClawAgent, type OpenClawAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type PinnedAudioTransport, type PinnedAudioTransportRequest, PoolAgent, type PoolAgentOptions, type ResolvedAudioAddress, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, type TranscriptionProvider, type TranscriptionToolInput, type TranscriptionToolResult, VibeAgent, type VibeAgentOptions, createBraveSearchProvider, createElevenLabsTextToSpeechTool, createExaSearchProvider, createGroundedWebSearchToolset, createHermesCliCapabilityRegistry, createHttpTool, createImageGenerationTool, createOmpCapabilityRegistry, createOpenClawCapabilityRegistry, createPoolCapabilityRegistry, createSerperSearchProvider, createSmithersAgentContract, createTavilySearchProvider, createTranscriptionTool, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
+export { type AgentCapabilityRegistry, type AgentFileChange, type AgentFileChangeKind, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, type AudioHostResolver, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateHttpToolOptions, type CreateTranscriptionToolOptions, CursorAgent, type CursorAgentOptions, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, HermesCliAgent, type HermesCliAgentOptions, type HttpToolAuth, type HttpToolInput, type HttpToolOutput, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, OmpAgent, OpenAIAgent, type OpenAIAgentOptions, OpenClawAgent, type OpenClawAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type PinnedAudioTransport, type PinnedAudioTransportRequest, PoolAgent, type PoolAgentOptions, type ResolvedAudioAddress, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, type TranscriptionProvider, type TranscriptionToolInput, type TranscriptionToolResult, VibeAgent, type VibeAgentOptions, createBraveSearchProvider, createElevenLabsTextToSpeechTool, createExaSearchProvider, createGroundedWebSearchToolset, createHermesCliCapabilityRegistry, createHttpTool, createImageGenerationTool, createOmpCapabilityRegistry, createOpenClawCapabilityRegistry, createPoolCapabilityRegistry, createSerperSearchProvider, createSmithersAgentContract, createTavilySearchProvider, createTranscriptionTool, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
