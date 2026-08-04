@@ -1,10 +1,18 @@
 # CLI-transcript fixtures for the file-change-contract parser
 
-Each `.jsonl` file is a contiguous excerpt of real Smithers execution-log
+Each `.jsonl` file is a scrubbed contiguous excerpt of real Smithers execution-log
 lines (`.smithers/executions/<runId>/logs/stream.ndjson`), filtered down to
 one workflow node/iteration/attempt and trimmed to a focused window. Every
-line is a complete JSON object matching the source format exactly (one
-object per line, no reformatting of the payload itself).
+line is a complete JSON object with the same event shape as the source line.
+Run `node scripts/scrub-transcript-fixture.mjs <fixture.jsonl>` before commit;
+it replaces local paths, run/session identifiers, and timestamps with
+deterministic placeholders. Tool-call ids are mapped to *distinct*
+placeholders (`tool-fixture-1`, `tool-fixture-2`, … in first-appearance
+order) so started/completed correlation by action id survives scrubbing.
+The source `stream.ndjson` is compact JSON (no space after `:`/`,`); these
+fixtures are re-serialized with the formatter's default spacing for
+readability, so lines are not byte-identical to the source, only
+value-identical.
 
 ## Format choice
 
@@ -87,6 +95,19 @@ have failed to start/authenticate in each captured run). No line anywhere
 in this workspace's execution logs shows a kimi tool call or file edit.
 Per instructions, no kimi fixture was fabricated — flagging as missing
 pending a real kimi run with file-change activity.
+
+`KimiAgent.parseFileChanges` is nonetheless implemented (not left absent):
+the installed `kimi_cli` 1.48.0 vendor package
+(`kimi_cli/tools/file/write.py`, `kimi_cli/tools/file/replace.py`) was read
+directly to confirm kimi's real builtin file-mutating tool names and
+argument schemas (`WriteFile{path,content,mode}`,
+`StrReplaceFile{path,edit:{old,new,replace_all}|Edit[]}` — notably *not*
+Claude Code's `Edit`/`Write`/`file_path`/`old_string` shape, despite kimi
+sharing Claude's OpenAI-style `function.arguments` JSON-string tool-call
+envelope). `packages/agents/tests/file-change-contract.test.js` covers this
+with schema-accurate synthetic payloads (not a captured transcript) built
+directly from that vendor source. Promote to a real fixture once a kimi run
+with file-change activity is captured.
 
 ## Other engines checked, not found
 
