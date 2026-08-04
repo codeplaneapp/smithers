@@ -131,4 +131,38 @@ describe("toNodeDiffView", () => {
     if (view.kind !== "patch") throw new Error("expected patch");
     expect(view.unified.endsWith("+a")).toBe(true);
   });
+
+  it("marks a live working-copy bundle as live in the summary and view", () => {
+    const view = toNodeDiffView({
+      seq: 1,
+      baseRef: "abc",
+      live: true,
+      patches: [{ path: "src/a.ts", operation: "modify", diff: "@@ -1 +1 @@\n-old\n+new\n" }],
+    });
+    expect(view.kind).toBe("patch");
+    if (view.kind !== "patch") throw new Error("expected patch");
+    expect(view.live).toBe(true);
+    expect(view.summary).toBe("1 file changed (live)");
+    expect(view.unified).toContain("+new");
+  });
+
+  it("marks a live stat payload as live", () => {
+    const view = toNodeDiffView({
+      live: true,
+      summary: { filesChanged: 1, added: 2, removed: 1, files: [{ path: "a.ts", added: 2, removed: 1 }] },
+    });
+    expect(view.kind).toBe("stat");
+    if (view.kind !== "stat") throw new Error("expected stat");
+    expect(view.live).toBe(true);
+    expect(view.summary).toContain("(live)");
+  });
+
+  it("a final bundle without the flag is not marked live", () => {
+    const view = toNodeDiffView({
+      patches: [{ path: "x", operation: "modify", diff: "@@ @@\n+a\n" }],
+    });
+    if (view.kind !== "patch") throw new Error("expected patch");
+    expect(view.live).toBeUndefined();
+    expect(view.summary).toBe("1 file changed");
+  });
 });

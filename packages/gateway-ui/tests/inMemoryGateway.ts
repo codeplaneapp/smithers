@@ -20,6 +20,8 @@ export type SeedState = {
   events?: Record<string, Array<Record<string, unknown>>>;
   trees?: Record<string, unknown>;
   outputs?: Record<string, unknown>;
+  /** Seeded getRunDiff RPC payloads by runId (e.g. a live working-copy bundle). */
+  runDiffs?: Record<string, unknown>;
   hijackCandidates?: Record<string, Array<Record<string, unknown>>>;
   /** Optional response delay by `runId:nodeId`, used to exercise loading transitions. */
   outputDelayMs?: Record<string, number>;
@@ -81,6 +83,7 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
     events: seed.events ?? {},
     trees: seed.trees ?? {},
     outputs: seed.outputs ?? {},
+    runDiffs: seed.runDiffs ?? {},
     hijackCandidates: seed.hijackCandidates ?? {},
     outputDelayMs: seed.outputDelayMs ?? {},
     runsDelayMs: seed.runsDelayMs ?? 0,
@@ -229,6 +232,16 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
         const delayMs = state.outputDelayMs[outputKey] ?? 0;
         if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
         return ok(state.outputs[outputKey] ?? null);
+      }
+      // POST /v1/rpc/getRunDiff
+      if (path === "/v1/rpc/getRunDiff" && request.method === "POST") {
+        const body = (await request.json().catch(() => ({}))) as { runId?: string };
+        const payload = state.runDiffs[body.runId ?? ""];
+        return NativeResponse.json(
+          payload === undefined
+            ? { type: "res", id: "rpc-1", ok: false, error: { code: "RunNotFound", message: `No run ${body.runId}` } }
+            : { type: "res", id: "rpc-1", ok: true, payload },
+        );
       }
       // GET /v1/api/approvals
       if (path === "/v1/api/approvals" && request.method === "GET") {

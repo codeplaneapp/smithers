@@ -28,6 +28,9 @@ import { defaultTab, flattenTree, resolveFocusIdx, type FlatNode, type TabId } f
 const NODE_LOG_TAIL = 500;
 export const TUI_OUTPUT_PREVIEW_CHARS = 20_000;
 export const TUI_OUTPUT_TRUNCATION_MARKER = "\n... [truncated]";
+// Trailing debounce for live diff refreshes: agent edits arrive in bursts of
+// run events, so refetch once the burst settles instead of polling tightly.
+const LIVE_DIFF_REFETCH_DEBOUNCE_MS = 1500;
 
 function outputPreview(text: string): string {
   if (text.length <= TUI_OUTPUT_PREVIEW_CHARS) return text;
@@ -202,11 +205,23 @@ export function useRunInspectorVm(
     data: diffData,
     loading: diffLoading,
     error: diffError,
+    refetch: diffRefetch,
   } = useNodeDiff({
     runId,
     nodeId: activeTab === "diff" ? focusedNode?.id : undefined,
     iteration: focusedNode?.iteration,
   });
+
+  // Live diff: while the focused node is still running, the gateway diffs
+  // its checkout's working copy, so refresh on run events (trailing-
+  // debounced — agent edits arrive in bursts) rather than a tight poll.
+  const focusedNodeRunning = focusedNode?.status === "running" || focusedNode?.status === "in-progress";
+  const lastEventSeq = events.length > 0 ? Number(events[events.length - 1]?.seq ?? 0) : 0;
+  useEffect(() => {
+    if (activeTab !== "diff" || !focusedNodeRunning) return;
+    const timer = setTimeout(() => void diffRefetch(), LIVE_DIFF_REFETCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [activeTab, focusedNodeRunning, lastEventSeq, diffRefetch]);
 
   const nodeLogs = focusedNode
     ? nodeLogEvents(events, focusedNode.id, focusedNode.iteration).slice(-NODE_LOG_TAIL)
@@ -231,7 +246,9 @@ export function useRunInspectorVm(
     outputText,
     nodeLogs,
     diff: toNodeDiffView(diffData, diffError),
-    diffLoading: activeTab === "diff" && diffLoading,
+    // Only gate on loading when there is nothing to show yet — a live
+    // refetch must not flicker the current diff out for a spinner.
+    diffLoading: activeTab === "diff" && diffLoading && diffData === undefined,
     events,
     streaming,
   };

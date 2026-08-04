@@ -331,4 +331,52 @@ describe("OneshotSurface", () => {
     const harness = await mount(createElement(OneshotSurface, {}));
     expect(harness.container.textContent).toContain("No run selected");
   });
+
+  test("renders a live working-copy diff while the run is still running", async () => {
+    gateway = startInMemoryGateway({
+      runs: [RUN],
+      hijackCandidates: { [RUN_ID]: [] },
+      runDiffs: {
+        [RUN_ID]: {
+          seq: 1,
+          baseRef: "base",
+          live: true,
+          patches: [
+            {
+              path: "src/a.ts",
+              operation: "modify",
+              diff: "diff --git a/src/a.ts b/src/a.ts\nindex 0000000..1111111 100644\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-old\n+new-live\n",
+            },
+          ],
+        },
+      },
+    });
+    const harness = await mount(createElement(OneshotSurface, { runId: RUN_ID, initialTab: "diff" }));
+    await harness.flush(150);
+    const text = harness.container.textContent ?? "";
+    expect(text).toContain("Live working-copy diff");
+    // PierreDiffView parsed the seeded patch (line stats), so the diff tab is
+    // showing live content, not the old terminal-state gate.
+    expect(text).toContain("+1 -1");
+    expect(text).not.toContain("terminal state");
+  });
+
+  test("refetches the diff on run events while the run is live", async () => {
+    gateway = startInMemoryGateway({
+      runs: [RUN],
+      hijackCandidates: { [RUN_ID]: [] },
+      runDiffs: {
+        [RUN_ID]: { seq: 1, baseRef: "base", live: true, patches: [] },
+      },
+    });
+    const harness = await mount(createElement(OneshotSurface, { runId: RUN_ID, initialTab: "diff" }));
+    await harness.flush(150);
+    const diffRequests = () => gateway?.requests.filter((request) => request.path.endsWith("/v1/rpc/getRunDiff")) ?? [];
+    const before = diffRequests().length;
+    expect(before).toBeGreaterThan(0);
+    gateway?.pushEvents(RUN_ID, [{ seq: 1, event: "tool.use", payload: { nodeId: "implement" } }]);
+    // Trailing debounce (1.5s) settles, then the refetch lands.
+    await harness.flush(2000);
+    expect(diffRequests().length).toBeGreaterThan(before);
+  });
 });

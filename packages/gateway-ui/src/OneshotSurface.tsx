@@ -21,6 +21,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
   type CSSProperties,
@@ -102,6 +103,9 @@ type OneshotStatus = { text: string; engine?: string; timestampMs?: number; seq?
 type SteerDelivery = "idle" | "sending" | "queued" | "delivered" | "agent-acked" | "failed";
 
 const STATUS_NODE_ID = "status";
+// Trailing debounce for live diff refreshes: agent edits arrive in bursts of
+// run events, so refetch once the burst settles instead of polling tightly.
+const LIVE_DIFF_REFETCH_DEBOUNCE_MS = 1500;
 // Keep request cancellation paired with the fetch implementation captured by
 // the Gateway client. Test/browser hosts may replace DOM globals after modules
 // load (happy-dom does); mixing constructors produces an invalid AbortSignal.
@@ -621,6 +625,7 @@ export function OneshotSurface({
   const candidates = useHijackCandidates(runId, running);
   const diff = diffState.data;
   const oversized = diff && "status" in diff && diff.status === "oversized";
+  const liveDiff = Boolean(diff && "live" in diff && diff.live);
   const patch = useMemo(
     () => (diff && "patches" in diff ? diff.patches.map((item) => item.diff).join("\n") : ""),
     [diff],
@@ -667,6 +672,23 @@ export function OneshotSurface({
     poller.pollNow();
     return () => poller.dispose();
   }, [gateway, runId, running, oneshotControls]);
+
+  // Live diff: the gateway diffs the run's working copy while the run is
+  // live, so refresh on run events (trailing-debounced — edits arrive in
+  // bursts) rather than a tight poll, and once more on the terminal
+  // transition to land the authoritative base-to-terminal snapshot.
+  const diffRefetch = diffState.refetch;
+  const diffEventCount = controlEvents.events.length;
+  useEffect(() => {
+    if (!running) return;
+    const timer = setTimeout(() => void diffRefetch(), LIVE_DIFF_REFETCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [running, diffEventCount, diffRefetch]);
+  const wasRunningRef = useRef(running);
+  useEffect(() => {
+    if (wasRunningRef.current && !running) void diffRefetch();
+    wasRunningRef.current = running;
+  }, [running, diffRefetch]);
 
   useEffect(() => {
     if (!steerMessageId) return;
@@ -879,7 +901,21 @@ export function OneshotSurface({
           ) : diffState.error ? (
             <EmptyState title="Diff unavailable" description={diffState.error.message} />
           ) : (
-            <PierreDiffView patch={patch} emptyLabel="No finished diff is available yet." />
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, minHeight: 0 }}>
+              {liveDiff ? (
+                <span data-testid="oneshot-diff-live" style={{ color: theme.textDim, fontSize: 12 }}>
+                  Live working-copy diff — refreshes as the agent edits; the final snapshot lands when the run ends.
+                </span>
+              ) : null}
+              <PierreDiffView
+                patch={patch}
+                emptyLabel={
+                  running
+                    ? "No changes yet — the diff appears here as the agent edits files."
+                    : "No finished diff is available yet."
+                }
+              />
+            </div>
           )}
         </TabsContent>
         <TabsContent value="events">

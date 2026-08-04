@@ -97,6 +97,26 @@ describeHeadlessRender("NodeInspectorView – terminal rendering (CI-safe, no ga
     renderer.destroy();
   });
 
+  it("renders a live working-copy diff with its live marker while the node runs", async () => {
+    const diff: NodeDiffView = {
+      kind: "patch",
+      summary: "2 files changed (live)",
+      unified: "# modify src/a.ts\n@@ -1 +1 @@\n-old\n+new",
+      live: true,
+    };
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <NodeInspectorView {...baseProps({ activeTab: "diff", diff })} />,
+      { width: 120, height: 24 },
+    );
+    await waitForVisualIdle();
+    const f = captureCharFrame();
+    expect(f).toContain("2 files changed (live)");
+    expect(f).toContain("+new");
+    // A live diff is data, not the old terminal-state gate error.
+    expect(f).not.toContain("Diff unavailable");
+    renderer.destroy();
+  });
+
   it("shows a loading state for the diff tab", async () => {
     const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
       <NodeInspectorView {...baseProps({ activeTab: "diff", diffLoading: true })} />,
