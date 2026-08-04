@@ -678,12 +678,16 @@ export function OneshotSurface({
   // bursts) rather than a tight poll, and once more on the terminal
   // transition to land the authoritative base-to-terminal snapshot.
   const diffRefetch = diffState.refetch;
-  const diffEventCount = controlEvents.events.length;
+  // Key on the last event's seq, not the array length: the events ring is
+  // capped (maxEvents), so its length stops changing on a long run and a
+  // length-keyed effect would silently stop refreshing the diff.
+  const lastDiffEventSeq =
+    controlEvents.events.length > 0 ? Number(controlEvents.events[controlEvents.events.length - 1]?.seq ?? 0) : 0;
   useEffect(() => {
     if (!running) return;
     const timer = setTimeout(() => void diffRefetch(), LIVE_DIFF_REFETCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [running, diffEventCount, diffRefetch]);
+  }, [running, lastDiffEventSeq, diffRefetch]);
   const wasRunningRef = useRef(running);
   useEffect(() => {
     if (wasRunningRef.current && !running) void diffRefetch();
