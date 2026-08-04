@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/testing",
-  "version": "0.33.0",
+  "version": "0.33.1",
   "description": "Workflow testing helpers for Smithers",
   "type": "module",
   "sideEffects": false,

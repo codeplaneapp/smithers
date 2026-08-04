@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/graph",
-  "version": "0.33.0",
+  "version": "0.33.1",
   "description": "Framework-neutral Smithers workflow graph model and extraction helpers",
   "type": "module",
   "sideEffects": false,

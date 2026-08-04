@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/xstate",
-  "version": "0.33.0",
+  "version": "0.33.1",
   "description": "XState v5 machines as durable derived control state for Smithers workflows: pure folds over output and signal rows",
   "type": "module",
   "sideEffects": false,

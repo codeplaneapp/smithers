@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/ui-core",
-  "version": "0.33.0",
+  "version": "0.33.1",
   "description": "Isomorphic headless product layer for Smithers UIs: pure domain modules, Platform DI interfaces, and view-model hooks shared by the web app and the terminal UI",
   "type": "module",
   "sideEffects": false,

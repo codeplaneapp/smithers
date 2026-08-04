@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/ui-styleguide",
-  "version": "0.33.0",
+  "version": "0.33.1",
   "description": "Shared CSS tokens and layout primitives for Smithers browser UIs.",
   "type": "module",
   "sideEffects": false,
