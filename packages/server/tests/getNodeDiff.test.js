@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { SmithersDb } from "@smthrs/db/adapter";
 import { getNodeDiffRoute } from "../src/gatewayRoutes/getNodeDiff.js";
+import { NODE_DIFF_MAX_BYTES } from "@smthrs/db/cache/nodeDiffCache";
 function createTestDb() {
   const sqlite = new Database(":memory:");
   const db = drizzle(sqlite);
@@ -247,6 +248,38 @@ describe("getNodeDiffRoute", () => {
       expect(result.payload.summary.filesChanged).toBe(1);
       expect(result.payload.summary.added).toBe(1);
       expect(result.payload.summary.removed).toBe(1);
+    }
+    sqlite.close();
+  });
+  test("in-progress live diff enforces the same size cap as the terminal diff", async () => {
+    const { sqlite, adapter } = createTestDb();
+    const runId = "run-diff-live-large";
+    const nodeId = "task:live-large";
+    await adapter.insertRun(runRow(runId, { vcsRevision: "base-ref-large" }));
+    await adapter.insertNode(nodeRow(runId, nodeId, 0, { state: "in-progress" }));
+    await adapter.insertAttempt(
+      attemptRow(runId, nodeId, 0, {
+        state: "in-progress",
+        finishedAtMs: null,
+        jjPointer: null,
+      }),
+    );
+    const result = await getNodeDiffRoute({
+      runId,
+      nodeId,
+      iteration: 0,
+      resolveRun: async () => ({ adapter }),
+      computeDiffBundleImpl: async (baseRef) => ({
+        seq: 1,
+        baseRef,
+        patches: [{ path: "huge.txt", operation: "modify", diff: "x".repeat(NODE_DIFF_MAX_BYTES) }],
+      }),
+      resolveCommitPointerImpl: async (pointer) => pointer,
+      emitEffect: async () => undefined,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("DiffTooLarge");
     }
     sqlite.close();
   });

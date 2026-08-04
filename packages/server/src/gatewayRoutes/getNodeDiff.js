@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { Effect, Metric } from "effect";
-import { NodeDiffCache, NodeDiffTooLargeError } from "@smthrs/db/cache/nodeDiffCache";
+import { NODE_DIFF_MAX_BYTES, NodeDiffCache, NodeDiffTooLargeError } from "@smthrs/db/cache/nodeDiffCache";
 import { computeDiffBundle, computeDiffBundleBetweenRefs } from "@smthrs/engine/effect/diff-bundle";
 import { runPromise } from "../smithersRuntime.js";
 import { RUN_ID_PATTERN } from "./RUN_ID_PATTERN.js";
@@ -390,9 +390,13 @@ export async function getNodeDiffRoute({
         }
         resultLabel = "ok";
         rootSpanAttrs.cacheResult = "bypass";
+        // Cap the live full-bundle payload the same way the terminal path
+        // does (NodeDiffCache.getOrCompute throws NodeDiffTooLargeError).
+        if (sizeBytes > NODE_DIFF_MAX_BYTES) throw new NodeDiffTooLargeError(sizeBytes);
         await finalize();
         return { ok: true, payload };
       } catch (error) {
+        if (error instanceof NodeDiffTooLargeError) throw error;
         if (error instanceof GetNodeDiffError && error.code === "VcsError") throw error;
         throw new GetNodeDiffError("AttemptNotFinished", "Attempt is still running.");
       }
