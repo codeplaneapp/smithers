@@ -1,6 +1,6 @@
 ---
 title: getRunDiff
-description: Gateway RPC for the final run-level diff.
+description: Gateway RPC for the run-level diff (final, or live while the run executes).
 maturity: stable
 apiVersion: v1
 ---
@@ -12,5 +12,7 @@ apiVersion: v1
 - Response: `GetRunDiffResponse` (`DiffBundle` or an explicit `status: "oversized"` marker)
 
 The bundle spans the run's base VCS revision to its terminal revision; runs with no changed files return an honest empty `patches` array. Oversized results are never truncated, only flagged via `sizeBytes` and `maxBytes`.
+
+While the run is still executing (any non-terminal status), the same method returns a live working-copy diff instead: the run base is diffed against the current working copy of every checkout the run's attempts recorded, flagged with `live: true`, and capped the same way. Live bundles are computed read-only and are never cached; the terminal base-to-terminal diff remains the authoritative final snapshot.
 
 Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RunNotFound`, `VcsError`, and `Internal`.
