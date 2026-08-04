@@ -4,6 +4,8 @@
 /** @typedef {import("./SmithersAgentToolCategory.ts").SmithersAgentToolCategory} SmithersAgentToolCategory */
 /** @typedef {import("./SmithersListedTool.ts").SmithersListedTool} SmithersListedTool */
 /** @typedef {import("./SmithersToolSurface.ts").SmithersToolSurface} SmithersToolSurface */
+/** @typedef {import("./AgentFileChange.ts").AgentFileChangeKind} AgentFileChangeKind */
+/** @typedef {import("./AgentFileChange.ts").AgentFileChange} AgentFileChange */
 // @smithers-type-exports-end
 
 export { renderSmithersAgentPromptGuidance } from "./renderSmithersAgentPromptGuidance.js";

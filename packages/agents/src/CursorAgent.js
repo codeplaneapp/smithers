@@ -51,6 +51,10 @@ export function createCursorCapabilityRegistry(opts = {}) {
       supportsUiRequests: false,
       methods: [],
     },
+    fileChanges: {
+      supportsFileChanges: false,
+      supportsUnifiedDiff: false,
+    },
     builtIns: resolveCursorBuiltIns(opts),
   };
 }

@@ -83,6 +83,10 @@ export function createAntigravityCapabilityRegistry(opts = {}) {
       supportsUiRequests: false,
       methods: [],
     },
+    fileChanges: {
+      supportsFileChanges: false,
+      supportsUnifiedDiff: false,
+    },
     builtIns: resolveAntigravityBuiltIns(opts),
   };
 }

@@ -22,13 +22,21 @@ export type NodeChatToolCall = {
   resultText?: string;
 };
 
+export type NodeChatFile = {
+  path: string;
+  kind: "created" | "modified" | "deleted" | "renamed";
+  oldPath?: string;
+  unifiedDiff?: string;
+};
+
 export type NodeChatItem =
   | { kind: "marker"; key: string; label: string }
   | { kind: "text"; key: string; text: string }
   | { kind: "stderr"; key: string; text: string }
   | { kind: "reasoning"; key: string; text: string }
   | { kind: "tool"; key: string; call: NodeChatToolCall }
-  | { kind: "note"; key: string; label: string };
+  | { kind: "note"; key: string; label: string }
+  | { kind: "file_change"; key: string; label: string; files: NodeChatFile[] };
 
 export type NodeChatTranscript = {
   items: NodeChatItem[];
@@ -73,16 +81,61 @@ const LIFECYCLE_STATUS: Record<string, string> = {
   NodeWaitingTimer: "waiting",
 };
 
-function describeFileChange(detail: UnknownRecord, fallback: string): string {
+const FILE_CHANGE_KIND: Record<string, NodeChatFile["kind"]> = {
+  created: "created",
+  add: "created",
+  modified: "modified",
+  update: "modified",
+  deleted: "deleted",
+  delete: "deleted",
+  renamed: "renamed",
+  rename: "renamed",
+};
+
+/**
+ * Prefer the normalized `detail.fileChanges` (`AgentFileChange[]`, richer
+ * kind/diff data — see `packages/agents` `parseFileChanges`) when a harness
+ * adapter attached it; fall back to the legacy `detail.changes`/`detail.file`
+ * scan for adapters that haven't been migrated.
+ */
+function parseFileChangeFiles(detail: UnknownRecord): NodeChatFile[] {
+  const normalized = detail.fileChanges;
+  if (Array.isArray(normalized) && normalized.length) {
+    const files = normalized
+      .map((entry): NodeChatFile | undefined => {
+        if (!isRecord(entry)) return undefined;
+        const path = str(entry.path);
+        if (!path) return undefined;
+        const kind = FILE_CHANGE_KIND[str(entry.kind) ?? ""] ?? "modified";
+        const oldPath = str(entry.oldPath);
+        const unifiedDiff = str(entry.unifiedDiff);
+        return { path, kind, ...(oldPath ? { oldPath } : {}), ...(unifiedDiff ? { unifiedDiff } : {}) };
+      })
+      .filter((file): file is NodeChatFile => Boolean(file));
+    if (files.length) return files;
+  }
   const changes = detail.changes;
   if (Array.isArray(changes) && changes.length) {
-    const files = changes
-      .map((change) => (isRecord(change) ? (str(change.file) ?? str(change.path)) : undefined))
-      .filter((file): file is string => Boolean(file));
-    if (files.length) {
-      const head = files.slice(0, 3).join(", ");
-      return `Edited ${head}${files.length > 3 ? ` +${files.length - 3} more` : ""}`;
-    }
+    return changes
+      .map((change): NodeChatFile | undefined => {
+        if (!isRecord(change)) return undefined;
+        const path = str(change.file) ?? str(change.path);
+        if (!path) return undefined;
+        const kind = FILE_CHANGE_KIND[str(change.kind) ?? ""] ?? "modified";
+        return { path, kind };
+      })
+      .filter((file): file is NodeChatFile => Boolean(file));
+  }
+  return [];
+}
+
+function describeFileChange(files: NodeChatFile[], fallback: string): string {
+  if (files.length) {
+    const head = files
+      .slice(0, 3)
+      .map((f) => f.path)
+      .join(", ");
+    return `Edited ${head}${files.length > 3 ? ` +${files.length - 3} more` : ""}`;
   }
   return fallback || "Files changed";
 }
@@ -217,7 +270,13 @@ export function buildNodeChatTranscript(
     } else if (kind === "reasoning" || (kind === "note" && agentEvent.entryType === "thought")) {
       if (message) appendText("reasoning", frame.seq, message);
     } else if (kind === "file_change") {
-      items.push({ kind: "note", key: `note:${frame.seq}`, label: describeFileChange(detail, title) });
+      const files = parseFileChangeFiles(detail);
+      items.push({
+        kind: "file_change",
+        key: `filechange:${frame.seq}`,
+        label: describeFileChange(files, title),
+        files,
+      });
       sawContent = true;
     } else if (kind === "web_search") {
       items.push({

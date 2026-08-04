@@ -1995,6 +1995,25 @@ function parseQuotaResetAtMs(errorJson) {
   }
 }
 /**
+ * True when the run was parked by a hijack hand-off: the engine aborts the
+ * live task for `smithers hijack` and finalizes the run as `cancelled` with
+ * `errorJson.code === "RUN_HIJACKED"`. That is not a real terminal state —
+ * resuming ends the hijack and hands the task back to the workflow — so
+ * terminal-status gates (resumeRun, auto-resume) must let it through.
+ * @param {{ status?: unknown; errorJson?: unknown } | null | undefined} run
+ * @returns {boolean}
+ */
+function isHijackParkedRun(run) {
+  if (!run || run.status !== "cancelled" || typeof run.errorJson !== "string" || !run.errorJson) {
+    return false;
+  }
+  try {
+    return asObject(JSON.parse(run.errorJson))?.code === "RUN_HIJACKED";
+  } catch {
+    return false;
+  }
+}
+/**
  * @param {unknown} source
  * @param {string | undefined} path
  * @returns {unknown}
@@ -2859,8 +2878,11 @@ export class Gateway {
       typeof options.oneshotMonitor.restart === "function"
         ? options.oneshotMonitor
         : null;
-    /** @type {Set<{ dispose: () => void }>} */
+    /** @type {Set<{ runId?: string; dispose: () => void }>} */
     this.ptySessions = new Set();
+    // Set by close() so PTY teardown during shutdown does not spawn fresh
+    // resume engines inside a dying process.
+    this.gatewayClosing = false;
     this.ui = resolveGatewayUiConfig(options.ui, "/");
     this.operatorUi = resolveDefaultOperatorUiConfig(options.operatorUi);
     this.uiApp = createGatewayUiApp({
@@ -5553,6 +5575,7 @@ a { color: var(--brand); }</style>
       return;
     }
     const session = {
+      runId: params.runId,
       dispose: () => {
         try {
           proc.kill();
@@ -5582,6 +5605,14 @@ a { color: var(--brand); }</style>
           ws.close(1000, "process exited");
         } catch {}
       }
+      // A hijack CLI that exits non-zero never reached its own
+      // return-of-control branch (clean exit 0 relaunches the run itself) —
+      // e.g. the operator closed the monitor tab and teardown killed the
+      // process mid-session. The run is left parked as cancelled/RUN_HIJACKED;
+      // hand it back to the workflow so the run survives monitor disconnects.
+      if (code !== 0) {
+        void this.resumeRunAfterHijackHalt(params.runId);
+      }
     });
     ws.on("message", (data, isBinary) => {
       if (isBinary) {
@@ -5610,6 +5641,47 @@ a { color: var(--brand); }</style>
     };
     ws.on("close", teardown);
     ws.on("error", teardown);
+  }
+  /**
+   * Best-effort recovery after a PTY hijack process died without cleanly
+   * returning control (tab closed, socket dropped, launcher crashed). Only
+   * acts when the run is still parked by the hijack; a run the operator
+   * already resumed/cancelled is left alone.
+   * @param {string} runId
+   */
+  async resumeRunAfterHijackHalt(runId) {
+    if (this.gatewayClosing) {
+      return;
+    }
+    try {
+      const resolved = await this.resolveRun(runId);
+      if (!resolved) {
+        return;
+      }
+      const run = await resolved.adapter.getRun(runId);
+      if (!isHijackParkedRun(run)) {
+        return;
+      }
+      emitGatewayLog(
+        "info",
+        "Gateway resuming hijack-parked run after PTY session halted",
+        { runId },
+        "gateway:pty-hijack",
+      );
+      await this.resumeRunIfNeeded(runId, resolved.workflowKey, resolved.adapter, {
+        triggeredBy: "gateway-pty-hijack",
+        scopes: [],
+        role: "operator",
+        tokenId: null,
+      });
+    } catch (error) {
+      emitGatewayLog(
+        "warn",
+        "Gateway failed to resume hijack-parked run",
+        { runId, error: error instanceof Error ? error.message : String(error) },
+        "gateway:pty-hijack",
+      );
+    }
   }
   /**
    * @param {{ port?: number; host?: string; path?: string }} [options]
@@ -5833,6 +5905,7 @@ a { color: var(--brand); }</style>
     return server;
   }
   async close() {
+    this.gatewayClosing = true;
     this.stopIdleMonitor();
     // A closing gateway never renders queued workflow views.
     this.cancelWorkflowViewDiscovery();
@@ -6677,7 +6750,7 @@ a { color: var(--brand); }</style>
         if (!run) {
           return;
         }
-        if (run.status === "finished" || run.status === "failed" || run.status === "cancelled") {
+        if (run.status === "finished" || run.status === "failed" || (run.status === "cancelled" && !isHijackParkedRun(run))) {
           return;
         }
         await this.startRun(workflowKey, {}, auth, runId, { resume: true });
@@ -9190,8 +9263,18 @@ a { color: var(--brand); }</style>
         if (!run) {
           return responseError(frame.id, "NOT_FOUND", `Run not found: ${runId}`);
         }
-        if (run.status === "finished" || run.status === "failed" || run.status === "cancelled") {
+        if (run.status === "finished" || run.status === "failed" || (run.status === "cancelled" && !isHijackParkedRun(run))) {
           return responseOk(frame.id, { runId, status: "already_terminal" });
+        }
+        if (isHijackParkedRun(run)) {
+          // Resuming a hijack-parked run ends the hijack: kill any live PTY
+          // hijack session for the run, then hand the task back to the
+          // workflow to continue autonomously.
+          for (const session of this.ptySessions) {
+            if (session.runId === runId) {
+              session.dispose();
+            }
+          }
         }
         await this.resumeRunIfNeeded(runId, resolved.workflowKey, resolved.adapter, {
           triggeredBy: connection.userId ?? "gateway",

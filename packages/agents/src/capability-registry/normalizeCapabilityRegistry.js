@@ -49,6 +49,10 @@ export function normalizeCapabilityRegistry(registry) {
       supportsUiRequests: registry.humanInteraction.supportsUiRequests,
       methods: normalizeCapabilityStringList(registry.humanInteraction.methods),
     },
+    fileChanges: {
+      supportsFileChanges: registry.fileChanges?.supportsFileChanges ?? false,
+      supportsUnifiedDiff: registry.fileChanges?.supportsUnifiedDiff ?? false,
+    },
     builtIns: normalizeCapabilityStringList(registry.builtIns),
   };
 }

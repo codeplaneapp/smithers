@@ -76,6 +76,10 @@ export function createPiCapabilityRegistry(opts = {}) {
       supportsUiRequests: true,
       methods: ["extension_ui_request"],
     },
+    fileChanges: {
+      supportsFileChanges: false,
+      supportsUnifiedDiff: false,
+    },
     builtIns: resolvePiBuiltIns(opts),
   };
 }

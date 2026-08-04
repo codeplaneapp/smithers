@@ -32,6 +32,8 @@
 /** @typedef {import("./agent-contract/SmithersAgentToolCategory.ts").SmithersAgentToolCategory} SmithersAgentToolCategory */
 /** @typedef {import("./agent-contract/SmithersListedTool.ts").SmithersListedTool} SmithersListedTool */
 /** @typedef {import("./agent-contract/SmithersToolSurface.ts").SmithersToolSurface} SmithersToolSurface */
+/** @typedef {import("./agent-contract/AgentFileChange.ts").AgentFileChangeKind} AgentFileChangeKind */
+/** @typedef {import("./agent-contract/AgentFileChange.ts").AgentFileChange} AgentFileChange */
 /** @typedef {import("./cli-capabilities/CliAgentCapabilityAdapterId.ts").CliAgentCapabilityAdapterId} CliAgentCapabilityAdapterId */
 /** @typedef {import("./cli-capabilities/CliAgentCapabilityDoctorReport.ts").CliAgentCapabilityDoctorEntry} CliAgentCapabilityDoctorEntry */
 /** @typedef {import("./cli-capabilities/CliAgentCapabilityDoctorReport.ts").CliAgentCapabilityDoctorReport} CliAgentCapabilityDoctorReport */

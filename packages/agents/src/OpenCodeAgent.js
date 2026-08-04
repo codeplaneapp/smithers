@@ -17,6 +17,26 @@ import { normalizeCapabilityStringList } from "./capability-registry/index.js";
 /** @typedef {import("./BaseCliAgent/index.ts").CliOutputInterpreter} CliOutputInterpreter */
 
 /**
+ * Normalize opencode's `write`/`edit` tool input — paths-only: opencode's
+ * `filePath`/`content`/`oldString`/`newString` fields are real (see
+ * `write-edit-basic.jsonl`), but no diff-reconstruction guarantee has been
+ * verified against the CLI's full tool-call surface, so this reports path +
+ * kind without a diff (`source: "reported"`), matching the codex contract.
+ *
+ * @param {string} toolName
+ * @param {unknown} input
+ * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+ */
+function parseOpenCodeFileChanges(toolName, input) {
+  if (!isRecord(input)) return undefined;
+  const path = asString(input.filePath) ?? asString(input.file_path);
+  if (!path) return undefined;
+  const name = toolName.toLowerCase();
+  if (name === "write") return [{ path, kind: "modified", source: "reported" }];
+  if (name === "edit") return [{ path, kind: "modified", source: "reported" }];
+  return undefined;
+}
+/**
  * @param {OpenCodeAgentOptions} [opts]  Currently unused — kept for API
  *   consistency with other agents (e.g. ClaudeCodeAgent uses opts to resolve
  *   builtIns based on tool allow/deny lists).  OpenCode does not yet expose
@@ -41,6 +61,10 @@ export function createOpenCodeCapabilityRegistry(opts = {}) {
     humanInteraction: {
       supportsUiRequests: false,
       methods: [],
+    },
+    fileChanges: {
+      supportsFileChanges: true,
+      supportsUnifiedDiff: false,
     },
     builtIns: normalizeCapabilityStringList([
       "read",
@@ -237,6 +261,7 @@ export class OpenCodeAgent extends BaseCliAgent {
         const events = [];
 
         // Emit a "started" action for the tool
+        const fileChanges = state ? parseOpenCodeFileChanges(toolName, state.input) : undefined;
         events.push({
           type: "action",
           engine: this.cliEngine,
@@ -246,7 +271,10 @@ export class OpenCodeAgent extends BaseCliAgent {
             id: callID,
             kind: toolKindFromName(toolName),
             title: toolName,
-            detail: state && isRecord(state.input) ? { input: state.input } : {},
+            detail:
+              state && isRecord(state.input)
+                ? { input: state.input, ...(fileChanges ? { fileChanges } : {}) }
+                : {},
           },
           message: `Running ${toolName}`,
           level: "info",
@@ -387,6 +415,17 @@ export class OpenCodeAgent extends BaseCliAgent {
         ];
       },
     };
+  }
+
+  /**
+   * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
+   * into {@link AgentFileChange} records. `action` is `{ title, detail: { input } }`.
+   *
+   * @param {{ title?: string; detail?: { input?: unknown } }} action
+   * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+   */
+  parseFileChanges(action) {
+    return parseOpenCodeFileChanges(action?.title ?? "", action?.detail?.input);
   }
 
   /**

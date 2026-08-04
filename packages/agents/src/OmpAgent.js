@@ -33,6 +33,7 @@ export function createOmpCapabilityRegistry(opts = {}) {
       smithersSkillIds: normalizeCapabilityStringList(opts.skills),
     },
     humanInteraction: { supportsUiRequests: false, methods: [] },
+    fileChanges: { supportsFileChanges: false, supportsUnifiedDiff: false },
     builtIns: opts.noTools ? [] : normalizeCapabilityStringList(opts.tools?.length ? opts.tools : ["default"]),
   };
 }

@@ -33,5 +33,11 @@ export type AgentCapabilityRegistry = {
     supportsUiRequests: boolean;
     methods: string[];
   };
+  fileChanges: {
+    /** Can this engine identify file-mutating tool calls at all? */
+    supportsFileChanges: boolean;
+    /** Can it produce (report or reconstruct) full diff content? */
+    supportsUnifiedDiff: boolean;
+  };
   builtIns: string[];
 };

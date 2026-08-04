@@ -515,6 +515,31 @@ function asConversationMessages(value) {
   return Array.isArray(value) ? value : undefined;
 }
 /**
+ * Effective launch configuration of the task's CLI agent, persisted on the
+ * hijack hand-off so `smithers hijack` can relaunch the interactive session
+ * with the same model / permission flags / config dir the workflow agent ran
+ * with (`--resume` alone does not restore per-process argv).
+ * @param {any} agent
+ * @param {Record<string, unknown>} attemptMeta
+ * @returns {{ model: string | null; yolo: boolean | null; permissionMode: string | null; dangerouslySkipPermissions: boolean; configDir: string | null }}
+ */
+function agentHijackConfig(agent, attemptMeta) {
+  const opts = agent && typeof agent.opts === "object" && agent.opts ? agent.opts : {};
+  return {
+    model:
+      typeof attemptMeta.agentModel === "string"
+        ? attemptMeta.agentModel
+        : typeof agent?.model === "string"
+          ? agent.model
+          : null,
+    yolo:
+      typeof opts.yolo === "boolean" ? opts.yolo : typeof agent?.yolo === "boolean" ? agent.yolo : null,
+    permissionMode: typeof opts.permissionMode === "string" ? opts.permissionMode : null,
+    dangerouslySkipPermissions: opts.dangerouslySkipPermissions === true,
+    configDir: typeof opts.configDir === "string" ? opts.configDir : null,
+  };
+}
+/**
  * @template T
  * @param {T} value
  * @returns {T | undefined}
@@ -5577,6 +5602,7 @@ async function legacyExecuteTask(
             if (handoffMode === "native-cli" && activeCliActions.size > 0) {
               return;
             }
+            const handoffConfig = agentHijackConfig(effectiveAgent, attemptMeta);
             const completion = {
               requestedAtMs: hijackState.request.requestedAtMs,
               nodeId: desc.nodeId,
@@ -5587,6 +5613,7 @@ async function legacyExecuteTask(
               resume,
               messages: handoffMode === "conversation" ? cloneJsonValue(messages) : undefined,
               cwd: desc.worktreePath ?? taskRoot,
+              config: handoffConfig,
             };
             hijackState.completion = completion;
             attemptMeta.hijackHandoff = {
@@ -5599,6 +5626,7 @@ async function legacyExecuteTask(
               nodeId: completion.nodeId,
               iteration: completion.iteration,
               attempt: completion.attempt,
+              config: handoffConfig,
             };
             await Effect.runPromise(
               adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
@@ -5615,6 +5643,7 @@ async function legacyExecuteTask(
               mode: completion.mode,
               resume: completion.resume ?? null,
               cwd: completion.cwd,
+              config: handoffConfig,
               timestampMs: nowMs(),
             });
             runAbortController.abort();

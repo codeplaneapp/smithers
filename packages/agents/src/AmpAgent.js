@@ -35,6 +35,10 @@ export function createAmpCapabilityRegistry() {
       supportsUiRequests: false,
       methods: [],
     },
+    fileChanges: {
+      supportsFileChanges: false,
+      supportsUnifiedDiff: false,
+    },
     builtIns: ["default"],
   };
 }

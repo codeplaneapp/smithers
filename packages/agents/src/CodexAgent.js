@@ -57,8 +57,33 @@ export function createCodexCapabilityRegistry(opts = {}) {
       supportsUiRequests: false,
       methods: [],
     },
+    fileChanges: {
+      supportsFileChanges: true,
+      supportsUnifiedDiff: false,
+    },
     builtIns: resolveCodexBuiltIns(opts),
   };
+}
+const CODEX_CHANGE_KIND = { add: "created", update: "modified", delete: "deleted" };
+/**
+ * Normalize codex's native `item.changes: {path, kind}[]` — path+kind only,
+ * no diff content ships in the protocol.
+ *
+ * @param {unknown} rawChanges
+ * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+ */
+function parseCodexFileChanges(rawChanges) {
+  if (!Array.isArray(rawChanges)) return undefined;
+  const changes = rawChanges
+    .map((entry) => {
+      if (!isRecord(entry)) return null;
+      const path = asString(entry.path);
+      const rawKind = asString(entry.kind);
+      if (!path || !rawKind) return null;
+      return { path, kind: CODEX_CHANGE_KIND[rawKind] ?? "modified", source: "reported" };
+    })
+    .filter((entry) => Boolean(entry));
+  return changes.length > 0 ? changes : undefined;
 }
 export class CodexAgent extends BaseCliAgent {
   opts;
@@ -175,6 +200,7 @@ export class CodexAgent extends BaseCliAgent {
           })
           .filter((entry) => Boolean(entry));
         const message = files.length > 0 ? files.slice(0, 4).join(", ") : "Updated files";
+        const fileChanges = parseCodexFileChanges(rawChanges);
         return {
           type: "action",
           engine: this.cliEngine,
@@ -187,6 +213,7 @@ export class CodexAgent extends BaseCliAgent {
             detail: {
               type: itemType,
               changes: rawChanges,
+              ...(fileChanges ? { fileChanges } : {}),
             },
           },
           message,
@@ -511,6 +538,17 @@ export class CodexAgent extends BaseCliAgent {
         ];
       },
     };
+  }
+  /**
+   * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
+   * into {@link AgentFileChange} records. `action.detail.changes` is codex's
+   * native `{path, kind}[]` — no diff content in the protocol.
+   *
+   * @param {{ detail?: { changes?: unknown } }} action
+   * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+   */
+  parseFileChanges(action) {
+    return parseCodexFileChanges(action?.detail?.changes);
   }
   /**
    * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params

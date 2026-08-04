@@ -70,8 +70,39 @@ describe("buildNodeChatTranscript", () => {
       ],
       "implement",
     );
-    expect(transcript.items.map((item) => item.kind)).toEqual(["reasoning", "stderr", "note"]);
-    expect(transcript.items[2]).toMatchObject({ label: "Edited src/a.ts, src/b.ts" });
+    expect(transcript.items.map((item) => item.kind)).toEqual(["reasoning", "stderr", "file_change"]);
+    expect(transcript.items[2]).toMatchObject({
+      label: "Edited src/a.ts, src/b.ts",
+      files: [
+        { path: "src/a.ts", kind: "modified" },
+        { path: "src/b.ts", kind: "modified" },
+      ],
+    });
+  });
+
+  test("prefers normalized detail.fileChanges over the legacy detail.changes scan", () => {
+    const transcript = buildNodeChatTranscript(
+      [
+        agentAction("implement", {
+          kind: "file_change",
+          title: "Edit",
+          detail: {
+            changes: [{ file: "legacy/only.ts" }],
+            fileChanges: [
+              { path: "src/a.ts", kind: "modified", unifiedDiff: "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,1 +1,1 @@\n-x\n+y", source: "reconstructed" },
+            ],
+          },
+        }),
+      ],
+      "implement",
+    );
+    expect(transcript.items).toMatchObject([
+      {
+        kind: "file_change",
+        label: "Edited src/a.ts",
+        files: [{ path: "src/a.ts", kind: "modified", unifiedDiff: expect.stringContaining("@@ -1,1 +1,1 @@") }],
+      },
+    ]);
   });
 
   test("inserts attempt markers and derives lifecycle status", () => {

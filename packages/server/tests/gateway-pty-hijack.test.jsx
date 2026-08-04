@@ -260,6 +260,129 @@ describe("gateway /v1/pty/hijack", () => {
   });
 });
 
+describe("gateway hijack lifecycle", () => {
+  /**
+   * Park a finished run exactly the way the engine leaves it after a hijack
+   * hand-off: cancelled, with the RUN_HIJACKED marker on errorJson and the
+   * durable hijack request still stamped on the row.
+   * @param {ReturnType<typeof createValueWorkflow>} workflow
+   * @param {string} runId
+   */
+  async function parkRunAsHijacked(workflow, runId) {
+    const adapter = new SmithersDb(workflow.db);
+    await adapter.updateRun(runId, {
+      status: "cancelled",
+      finishedAtMs: Date.now(),
+      heartbeatAtMs: null,
+      runtimeOwnerId: null,
+      hijackRequestedAtMs: Date.now(),
+      hijackTarget: "claude-code",
+      errorJson: JSON.stringify({
+        code: "RUN_HIJACKED",
+        nodeId: "task1",
+        engine: "claude-code",
+        mode: "native-cli",
+        resume: "session-xyz",
+      }),
+    });
+  }
+
+  /**
+   * @param {ReturnType<typeof createValueWorkflow>} workflow
+   * @param {string} runId
+   */
+  async function waitForUnparked(workflow, runId, timeoutMs = 20_000) {
+    const adapter = new SmithersDb(workflow.db);
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const run = await adapter.getRun(runId);
+      if (run && run.status !== "cancelled") {
+        return run;
+      }
+      await sleep(50);
+    }
+    throw new Error(`run ${runId} stayed hijack-parked (cancelled)`);
+  }
+
+  /** Minimal RPC client: challenge → connect → one request. */
+  async function rpcCall(port, method, params) {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+    /** @type {Record<string, unknown>[]} */
+    const messages = [];
+    ws.on("message", (data) => {
+      try {
+        messages.push(JSON.parse(String(data)));
+      } catch {}
+    });
+    await new Promise((resolve, reject) => {
+      ws.once("open", resolve);
+      ws.once("error", reject);
+    });
+    const waitForMessage = async (predicate) => {
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const found = messages.find(predicate);
+        if (found) return found;
+        await sleep(10);
+      }
+      throw new Error(`timed out waiting for gateway message; saw ${JSON.stringify(messages)}`);
+    };
+    await waitForMessage((message) => message.type === "event" && message.event === "connect.challenge");
+    ws.send(
+      JSON.stringify({
+        type: "req",
+        id: "hello",
+        method: "connect",
+        params: { minProtocol: 1, maxProtocol: 1, client: { id: "pty-test", version: "1.0.0", platform: "bun-test" } },
+      }),
+    );
+    const hello = await waitForMessage((message) => message.type === "res" && message.id === "hello");
+    expect(hello.ok).toBe(true);
+    const id = `rpc-${Math.random().toString(36).slice(2)}`;
+    ws.send(JSON.stringify({ type: "req", id, method, params }));
+    const response = await waitForMessage((message) => message.type === "res" && message.id === id);
+    ws.close();
+    return response;
+  }
+
+  test("resumeRun on a hijack-parked run is not a no-op: it restarts the run in-engine", async () => {
+    const { gateway, workflow, port } = await bootGateway(() => ({ command: ["bash", "-c", "sleep 30"] }));
+    // Sanity: the plain terminal path still short-circuits.
+    const adapter = new SmithersDb(workflow.db);
+    expect((await adapter.getRun("run-pty"))?.status).toBe("finished");
+    const terminal = await rpcCall(port, "resumeRun", { runId: "run-pty" });
+    expect(terminal.payload).toMatchObject({ runId: "run-pty", status: "already_terminal" });
+
+    await parkRunAsHijacked(workflow, "run-pty");
+    const response = await rpcCall(port, "resumeRun", { runId: "run-pty" });
+    expect(response.ok).toBe(true);
+    expect(response.payload).toMatchObject({ runId: "run-pty", status: "resume_requested" });
+    const resumed = await waitForUnparked(workflow, "run-pty");
+    expect(resumed.hijackRequestedAtMs).toBeNull();
+    expect(gateway.activeRuns.has("run-pty") || resumed.status === "finished").toBe(true);
+  });
+
+  test("closing the PTY hijack socket hands the parked run back to the workflow", async () => {
+    const { gateway, workflow, port } = await bootGateway(() => ({ command: ["bash", "-c", "sleep 30"] }));
+    await parkRunAsHijacked(workflow, "run-pty");
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/v1/pty/hijack?runId=run-pty&nodeId=task1&cols=80&rows=24`);
+    await new Promise((resolve, reject) => {
+      ws.once("open", resolve);
+      ws.once("error", reject);
+    });
+    const deadline = Date.now() + 5_000;
+    while (gateway.ptySessions.size === 0 && Date.now() < deadline) {
+      await sleep(10);
+    }
+    expect(gateway.ptySessions.size).toBe(1);
+    // The monitor tab closes: the socket drops, teardown kills the hijack
+    // process mid-session, and the gateway must resume the run itself.
+    ws.close();
+    const resumed = await waitForUnparked(workflow, "run-pty");
+    expect(["running", "finished"]).toContain(resumed.status);
+  });
+});
+
 describe("gateway /v1/api/runs/:id/hijack-candidates", () => {
   test("lists per-node resumable sessions from attempt meta; nodes without one stay absent", async () => {
     const { workflow, port } = await bootGateway(() => null);

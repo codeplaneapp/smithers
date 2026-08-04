@@ -140,6 +140,42 @@ describe("resolveHijackCandidate", () => {
     expect(await resolveHijackCandidate(adapter, "run-1")).toBeNull();
   });
 
+  test("threads the recorded agent launch config from the handoff into the candidate", async () => {
+    const adapter = adapterWithAttempts([
+      attempt({
+        metaJson: JSON.stringify({
+          hijackHandoff: {
+            engine: "claude-code",
+            mode: "native-cli",
+            resume: "sess-1",
+            config: {
+              model: "claude-opus-4-1",
+              yolo: true,
+              permissionMode: "bypassPermissions",
+              configDir: "/cfg",
+            },
+          },
+        }),
+      }),
+    ]);
+    const candidate = await resolveHijackCandidate(adapter, "run-1");
+    expect(candidate.config).toEqual({
+      model: "claude-opus-4-1",
+      yolo: true,
+      permissionMode: "bypassPermissions",
+      configDir: "/cfg",
+    });
+  });
+
+  test("falls back to attempt-level agentModel when the handoff carries no config", async () => {
+    const adapter = adapterWithAttempts([
+      attempt({
+        metaJson: JSON.stringify({ agentEngine: "codex", agentResume: "s1", agentModel: "gpt-5" }),
+      }),
+    ]);
+    expect((await resolveHijackCandidate(adapter, "run-1")).config).toEqual({ model: "gpt-5" });
+  });
+
   test("target filter skips non-matching engine/node but matches by nodeId", async () => {
     const attempts = [
       attempt({
@@ -247,6 +283,101 @@ describe("buildHijackLaunchSpec", () => {
     expect(buildHijackLaunchSpec({ ...base, engine: "forge" }).args).toEqual(["--conversation-id", "R", "-C", "/c"]);
     expect(buildHijackLaunchSpec({ ...base, engine: "amp" }).args).toEqual(["threads", "continue", "R"]);
     expect(buildHijackLaunchSpec({ ...base, engine: "codex" }).command).toBe("codex");
+  });
+
+  test("claude-code re-emits the workflow agent's model and permission flags", () => {
+    const spec = buildHijackLaunchSpec(
+      {
+        engine: "claude-code",
+        mode: "native-cli",
+        resume: "r",
+        cwd: "/c",
+        config: { model: "claude-opus-4-1", yolo: true },
+      },
+      {},
+    );
+    expect(spec.args).toEqual([
+      "--resume",
+      "r",
+      "--allow-dangerously-skip-permissions",
+      "--dangerously-skip-permissions",
+      "--permission-mode",
+      "bypassPermissions",
+      "--model",
+      "claude-opus-4-1",
+    ]);
+  });
+
+  test("an explicit permission mode wins over the yolo bypass default", () => {
+    const spec = buildHijackLaunchSpec(
+      {
+        engine: "claude-code",
+        mode: "native-cli",
+        resume: "r",
+        cwd: "/c",
+        config: { yolo: true, permissionMode: "acceptEdits" },
+      },
+      {},
+    );
+    expect(spec.args).toEqual([
+      "--resume",
+      "r",
+      "--allow-dangerously-skip-permissions",
+      "--dangerously-skip-permissions",
+      "--permission-mode",
+      "acceptEdits",
+    ]);
+  });
+
+  test("a recorded configDir is applied to the resumed session env", () => {
+    const spec = buildHijackLaunchSpec(
+      {
+        engine: "claude-code",
+        mode: "native-cli",
+        resume: "r",
+        cwd: "/c",
+        config: { configDir: "/cfg/claude" },
+      },
+      {},
+    );
+    expect(spec.env.CLAUDE_CONFIG_DIR).toBe("/cfg/claude");
+  });
+
+  test("codex, amp, and antigravity map the recorded bypass intent to their own flags", () => {
+    const base = { mode: "native-cli", resume: "R", cwd: "/c" };
+    expect(buildHijackLaunchSpec({ ...base, engine: "codex", config: { yolo: true, model: "gpt-5" } }, {}).args)
+      .toEqual(["resume", "R", "-C", "/c", "--model", "gpt-5", "--dangerously-bypass-approvals-and-sandbox"]);
+    expect(buildHijackLaunchSpec({ ...base, engine: "amp", config: { yolo: true } }, {}).args).toEqual([
+      "threads",
+      "continue",
+      "R",
+      "--dangerously-allow-all",
+    ]);
+    expect(
+      buildHijackLaunchSpec({ ...base, engine: "antigravity", config: { dangerouslySkipPermissions: true } }, {})
+        .args,
+    ).toEqual(["--conversation", "R", "--dangerously-skip-permissions"]);
+  });
+
+  test("pi, kimi, and forge re-emit the recorded model flag", () => {
+    const base = { mode: "native-cli", resume: "R", cwd: "/c", config: { model: "m-1" } };
+    expect(buildHijackLaunchSpec({ ...base, engine: "pi" }, {}).args).toEqual(["--session", "R", "--model", "m-1"]);
+    expect(buildHijackLaunchSpec({ ...base, engine: "kimi" }, {}).args).toEqual([
+      "--session",
+      "R",
+      "--work-dir",
+      "/c",
+      "--model",
+      "m-1",
+    ]);
+    expect(buildHijackLaunchSpec({ ...base, engine: "forge" }, {}).args).toEqual([
+      "--conversation-id",
+      "R",
+      "-C",
+      "/c",
+      "--model",
+      "m-1",
+    ]);
   });
 
   test("relaunches with the exact registered account without persisting its credential", () => {

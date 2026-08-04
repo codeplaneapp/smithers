@@ -10,6 +10,7 @@ import {
   asString,
   toolKindFromName,
   createSyntheticIdGenerator,
+  parseAnthropicStyleFileChanges,
 } from "./BaseCliAgent/index.js";
 import { normalizeCapabilityStringList } from "./capability-registry/index.js";
 import { SmithersError } from "@smthrs/errors/SmithersError";
@@ -230,6 +231,10 @@ export function createKimiCapabilityRegistry(opts = {}) {
       supportsUiRequests: false,
       methods: [],
     },
+    fileChanges: {
+      supportsFileChanges: true,
+      supportsUnifiedDiff: true,
+    },
     builtIns: ["default"],
   };
 }
@@ -290,6 +295,14 @@ export class KimiAgent extends BaseCliAgent {
           const fn = isRecord(toolCall.function) ? toolCall.function : undefined;
           const name = asString(fn?.name) ?? "tool";
           const id = asString(toolCall.id) ?? nextSyntheticId("kimi-tool");
+          const rawArguments = asString(fn?.arguments);
+          let parsedArguments;
+          try {
+            parsedArguments = rawArguments ? JSON.parse(rawArguments) : undefined;
+          } catch {
+            parsedArguments = undefined;
+          }
+          const fileChanges = parseAnthropicStyleFileChanges(name, parsedArguments);
           events.push({
             type: "action",
             engine: this.cliEngine,
@@ -300,7 +313,8 @@ export class KimiAgent extends BaseCliAgent {
               kind: toolKindFromName(name),
               title: name,
               detail: {
-                arguments: asString(fn?.arguments),
+                arguments: rawArguments,
+                ...(fileChanges ? { fileChanges } : {}),
               },
             },
             message: `Running ${name}`,
@@ -348,6 +362,23 @@ export class KimiAgent extends BaseCliAgent {
         ];
       },
     };
+  }
+  /**
+   * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
+   * into {@link AgentFileChange} records. `action.detail.arguments` is the raw
+   * JSON-string function-call arguments (OpenAI-style tool calls).
+   *
+   * @param {{ title?: string; detail?: { arguments?: string } }} action
+   * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+   */
+  parseFileChanges(action) {
+    let parsedArguments;
+    try {
+      parsedArguments = action?.detail?.arguments ? JSON.parse(action.detail.arguments) : undefined;
+    } catch {
+      return undefined;
+    }
+    return parseAnthropicStyleFileChanges(action?.title ?? "", parsedArguments);
   }
   /**
    * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params

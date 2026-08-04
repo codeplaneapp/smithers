@@ -4,14 +4,16 @@ import { useGatewayNodeEvents } from "@smthrs/gateway-react";
 import {
   ChatMessage,
   ChatTranscript,
+  DiffHunks,
   EmptyState,
   Marker,
   MessageResponse,
+  parseUnifiedFile,
   Reasoning,
   StatusPill,
   ToolCall,
 } from "@smthrs/ui";
-import { buildNodeChatTranscript, type NodeChatItem } from "./nodeChat";
+import { buildNodeChatTranscript, type NodeChatFile, type NodeChatItem } from "./nodeChat";
 import { theme } from "./theme";
 
 export type NodeChatStreamProps = {
@@ -42,12 +44,74 @@ export type NodeChatStreamProps = {
   useNodeEvents?: typeof useGatewayNodeEvents;
 };
 
+const DIFF_FILE_STATUS = { created: "added", modified: "modified", deleted: "deleted", renamed: "renamed" } as const;
+
+function FileChangeFile({ file }: { file: NodeChatFile }) {
+  const [open, setOpen] = useState(false);
+  const diffFile = useMemo(
+    () =>
+      file.unifiedDiff
+        ? parseUnifiedFile(file.unifiedDiff, { path: file.path, status: DIFF_FILE_STATUS[file.kind] })
+        : undefined,
+    [file.unifiedDiff, file.path, file.kind],
+  );
+  return (
+    <div style={{ borderTop: `1px solid ${theme.border}` }}>
+      <button
+        type="button"
+        onClick={() => diffFile && setOpen((v) => !v)}
+        aria-expanded={diffFile ? open : undefined}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          width: "100%",
+          padding: "4px 0",
+          background: "transparent",
+          border: "none",
+          color: theme.text,
+          fontSize: 12,
+          fontFamily: theme.fontMono ?? theme.fontSans,
+          textAlign: "left",
+          cursor: diffFile ? "pointer" : "default",
+        }}
+      >
+        <span style={{ opacity: 0.6 }}>{diffFile ? (open ? "▾" : "▸") : "·"}</span>
+        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {file.path}
+        </span>
+        <span style={{ fontSize: 10, color: theme.textDim }}>{file.kind}</span>
+      </button>
+      {diffFile ? (
+        open ? <DiffHunks file={diffFile} /> : null
+      ) : (
+        <div style={{ fontSize: 11, color: theme.textDim, paddingBottom: 4 }}>diff unavailable</div>
+      )}
+    </div>
+  );
+}
+
+function FileChangeItem({ item }: { item: Extract<NodeChatItem, { kind: "file_change" }> }) {
+  return (
+    <Marker variant="note">
+      <div style={{ display: "flex", flexDirection: "column", gap: 2, width: "100%" }}>
+        <span>{item.label}</span>
+        {item.files.map((file) => (
+          <FileChangeFile key={file.path} file={file} />
+        ))}
+      </div>
+    </Marker>
+  );
+}
+
 function ChatItem({ item, streaming }: { item: NodeChatItem; streaming: boolean }) {
   switch (item.kind) {
     case "marker":
       return <Marker>{item.label}</Marker>;
     case "note":
       return <Marker variant="note">{item.label}</Marker>;
+    case "file_change":
+      return <FileChangeItem item={item} />;
     case "text":
       return (
         <ChatMessage role="assistant">

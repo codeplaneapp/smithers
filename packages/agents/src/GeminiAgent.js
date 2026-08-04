@@ -42,6 +42,10 @@ export function createGeminiCapabilityRegistry(opts = {}) {
       supportsUiRequests: false,
       methods: [],
     },
+    fileChanges: {
+      supportsFileChanges: false,
+      supportsUnifiedDiff: false,
+    },
     builtIns: resolveGeminiBuiltIns(opts),
   };
 }

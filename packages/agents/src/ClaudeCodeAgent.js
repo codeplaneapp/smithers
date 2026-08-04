@@ -9,6 +9,7 @@ import {
   shouldSurfaceUnparsedStdout,
   isLikelyRuntimeMetadata,
   createSyntheticIdGenerator,
+  parseAnthropicStyleFileChanges,
 } from "./BaseCliAgent/index.js";
 import { normalizeCapabilityStringList } from "./capability-registry/index.js";
 import { isClaudeLimitBanner } from "./BaseCliAgent/isClaudeLimitBanner.js";
@@ -59,6 +60,10 @@ export function createClaudeCodeCapabilityRegistry(opts = {}) {
     humanInteraction: {
       supportsUiRequests: false,
       methods: [],
+    },
+    fileChanges: {
+      supportsFileChanges: true,
+      supportsUnifiedDiff: true,
     },
     builtIns: resolveClaudeBuiltIns(opts),
   };
@@ -289,6 +294,7 @@ export class ClaudeCodeAgent extends BaseCliAgent {
             const toolName = asString(block.name) ?? "tool";
             if (!toolUseId) continue;
             toolNameByUseId.set(toolUseId, toolName);
+            const fileChanges = parseAnthropicStyleFileChanges(toolName, block.input);
             events.push({
               type: "action",
               engine: this.cliEngine,
@@ -301,6 +307,7 @@ export class ClaudeCodeAgent extends BaseCliAgent {
                 detail: isRecord(block.input)
                   ? {
                       input: block.input,
+                      ...(fileChanges ? { fileChanges } : {}),
                     }
                   : {},
               },
@@ -404,6 +411,16 @@ export class ClaudeCodeAgent extends BaseCliAgent {
         ];
       },
     };
+  }
+  /**
+   * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
+   * into {@link AgentFileChange} records. `action` is `{ title, detail: { input } }`.
+   *
+   * @param {{ title?: string; detail?: { input?: unknown } }} action
+   * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+   */
+  parseFileChanges(action) {
+    return parseAnthropicStyleFileChanges(action?.title ?? "", action?.detail?.input);
   }
   /**
    * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params

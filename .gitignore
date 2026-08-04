@@ -96,6 +96,8 @@ reference/
 !deploy/reference/
 !deploy/reference/**
 codex/
+!packages/agents/tests/fixtures/cli-transcripts/codex/
+!packages/agents/tests/fixtures/cli-transcripts/codex/**
 ghostty/
 burns
 observability/data/
