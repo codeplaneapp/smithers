@@ -1435,7 +1435,8 @@ export const GATEWAY_RPC_DEFINITIONS = [
     version: SMITHERS_API_VERSION,
     method: "getNodeDiff",
     title: "Get Node Diff",
-    description: "Fetch a node-level diff bundle for one iteration. In-progress attempts return a live working-copy diff (`live: true`).",
+    description:
+      "Fetch a node-level diff bundle for one iteration. In-progress attempts return a live working-copy diff (`live: true`).",
     maturity: "stable",
     transport: "http+websocket",
     requiredScope: "run:read",
@@ -1485,7 +1486,10 @@ export const GATEWAY_RPC_DEFINITIONS = [
               },
               "Changed files.",
             ),
-            live: { type: "boolean", description: "True when computed from the live working copy of a non-terminal run." },
+            live: {
+              type: "boolean",
+              description: "True when computed from the live working copy of a non-terminal run.",
+            },
           },
           ["seq", "baseRef", "patches"],
           "Run DiffBundle (final, or live for a non-terminal run).",

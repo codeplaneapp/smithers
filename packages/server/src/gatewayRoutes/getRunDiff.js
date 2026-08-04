@@ -220,8 +220,7 @@ export async function getRunDiffRoute({
           },
         };
       }
-      const bundle =
-        live.bundles.length === 1 ? live.bundles[0] : mergeBundles(live.bundles, baseRef);
+      const bundle = live.bundles.length === 1 ? live.bundles[0] : mergeBundles(live.bundles, baseRef);
       return finalizeRunBundle({ ...bundle, live: true }, baseRef, "live");
     }
     const attempts = await resolved.adapter.listAttemptsForRun(runId);

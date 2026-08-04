@@ -380,7 +380,12 @@ export async function getNodeDiffRoute({
           await finalize();
           return {
             ok: true,
-            payload: { seq: latestAttempt.attempt ?? 1, baseRef: resolvedBaseRef, summary: summarizeBundle(payload), live: true },
+            payload: {
+              seq: latestAttempt.attempt ?? 1,
+              baseRef: resolvedBaseRef,
+              summary: summarizeBundle(payload),
+              live: true,
+            },
           };
         }
         resultLabel = "ok";
