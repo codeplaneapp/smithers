@@ -1,0 +1,137 @@
+---
+title: "0.33.1"
+description: "Smithers 0.33.1 hardens the runtime: resume and retry-task work again, agent fallback chains recover from session loss instead of failing runs, and the Gateway reliably finds and serves workflow UIs."
+---
+
+**Smithers 0.33.1 is a hardening release.** 13 of its 20 commits are fixes for
+the places 0.33.0 and daily production use exposed cracks: resuming and
+retrying runs, agent fallback chains, and Gateway workflow-UI discovery. One
+feature lands alongside: an upgrade-dependents pack workflow that opens
+rename PRs against open-source dependents.
+
+## Upgrading
+
+```bash
+bunx smthrs update        # upgrade the CLI
+bunx smthrs upgrade       # agent-assisted: applies what your project needs
+bunx smthrs packs update  # refresh installed workflow packs
+```
+
+Behavior changes are collected in the [upgrade notes](#upgrade-notes).
+
+## Resume and retry work again
+
+`retry-task` ran the engine in the foreground with no detach, so a closed
+pipe (SIGPIPE) killed the run and orphaned its agent children. The invocation
+is now detached ([#1481](https://github.com/smithersai/smithers/issues/1481)).
+
+```bash
+bunx smthrs retry-task RUN_ID TASK_ID   # survives the launching terminal closing
+bunx smthrs up --resume RUN_ID          # no workflow path needed anymore
+```
+
+- An approved detached run with a null `workflowHash` can resume again
+  ([#1489](https://github.com/smithersai/smithers/issues/1489)).
+- `up --resume RUN_ID` no longer demands a workflow path, matching its help
+  text: the run's stored workflow is relaunched
+  ([#1475](https://github.com/smithersai/smithers/issues/1475)).
+
+## Fallback chains recover instead of failing the run
+
+A session-loss error from a provider (including Kimi's "session is broken"
+banner) defeated the agent fallback chain: it silently skipped its Codex
+leads instead of retrying or falling through. A mixed-reason chain failure
+hard-failed the run instead of parking it.
+
+- Session-loss errors are now classified, so the chain retries or falls
+  through to the next seat
+  ([#1480](https://github.com/smithersai/smithers/issues/1480)).
+- A mixed agent-chain failure parks the run as `waiting-quota` with preflight
+  context attached, resuming when capacity returns
+  ([#1482](https://github.com/smithersai/smithers/issues/1482)).
+- Codex preflight accepts valid ChatGPT auth even when `auth.json` also
+  contains an `OPENAI_API_KEY`
+  ([#1447](https://github.com/smithersai/smithers/issues/1447)).
+- Both behaviors are pinned by new quota-chain-failover and
+  session-loss-chain-failover e2e suites.
+
+## The Gateway finds your UI, and stays responsive while it does
+
+`bunx smthrs ui` could fail three ways. The Gateway never registered workflows
+launched by explicit path outside `.smithers`
+([#1474](https://github.com/smithersai/smithers/issues/1474)). Registration
+rendered every workflow synchronously, pegging the event loop so `/health`
+went unreachable for minutes (`GATEWAY_UNREACHABLE`). And a custom-path
+`<UI path="/custom">` could 404 until background discovery reached it.
+
+All three are fixed: explicit-path workflows register, `<UI>`/`<TUI>`
+discovery is queued and drains one render per macrotask so `/health` answers
+throughout, and an unmatched UI request drains pending discovery once before
+resolving the mount.
+
+```bash
+bunx smthrs up ./anywhere/my-workflow.tsx -d
+bunx smthrs ui RUN_ID    # now finds the <UI> declaration
+```
+
+<Frame caption="The Monitor overview starts at All clear, a release-canary run is launched live, its running status pill appears in the sidebar, and the run detail shows the Healthy banner while the execution tree ticks through preflight, build, tests, and report to end on Completed with 4/4 tasks done.">
+  <img src="/images/0.33.1/monitor-live.gif" alt="The Smithers Monitor following a live release-canary run from launch to completed" />
+</Frame>
+
+<Frame caption="Touring the finished run: the Completed banner, per-node durations, the node inspector with transcript and output, the Timeline, Debug, Frames, and XML views with a frame scrubber, and the Notable, All, and Activity event tabs.">
+  <img src="/images/0.33.1/monitor-tour.gif" alt="Inspecting a completed run in the Monitor across its inspector, timeline, and XML views" />
+</Frame>
+
+## ctx.outputs stops returning a plausible empty array
+
+The callable form `ctx.outputs(outputs.probe)` silently returned `[]` because
+it indexed the snapshot with the raw argument. It now resolves through the
+same table-ref resolution as every other accessor, and an argument that
+resolves to no declared output table throws
+([#1486](https://github.com/smithersai/smithers/issues/1486)).
+
+```tsx
+const rows = ctx.outputs(outputs.probe); // real rows; an unresolvable ref now throws
+```
+
+- Regression tests pin the callable form to the same rows as the string name.
+
+## upgrade-dependents: open rename PRs downstream
+
+The 0.33.0 rename left dependent repos importing a package that will never
+see another release. The new `upgrade-dependents` pack workflow discovers
+open-source dependents (awesome-smithers, GitHub code search, and any
+`extraRepos` you pass), then runs one lane per repo: an agent clones,
+upgrades to `smthrs`, and must prove `git grep` returns zero hits before an
+independent reviewer re-checks the diff and a draft PR is opened.
+
+```bash
+bunx smthrs up upgrade-dependents
+```
+
+## Other improvements
+
+- `bunx smthrs bug --run RUN_ID` attaches the run's lifecycle events instead
+  of a ~25 second window of TaskHeartbeat noise, and generates a correct
+  report title ([#1484](https://github.com/smithersai/smithers/issues/1484)).
+- Panel moderators inside a Ralph loop no longer deadlock over Ralph's
+  iteration-suffixed dependency names
+  ([#1487](https://github.com/smithersai/smithers/issues/1487)).
+
+## Upgrade notes
+
+- No breaking changes. All 0.33.0 rename guidance still applies.
+- A mixed agent-chain failure now parks the run as `waiting-quota` instead of
+  failing it. Check `bunx smthrs ps` for parked runs before concluding a run
+  died.
+- `bunx smthrs up --resume RUN_ID` without a workflow path is now valid; the
+  stored workflow is relaunched.
+
+## The full changelog
+
+20 commits touching 55 files: 2,186 insertions, 188 deletions. The complete
+commit-level list is in
+[CHANGELOG.md](https://github.com/smithersai/smithers/blob/main/CHANGELOG.md).
+
+Hit a bug? `bunx smthrs bug` files a report in seconds, and `--run RUN_ID`
+attaches the run's events for you.

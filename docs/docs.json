@@ -568,6 +568,7 @@
           {
             "group": "Changelog",
             "pages": [
+              "changelogs/0.33.1",
               "changelogs/0.33.0",
               "changelogs/0.32.0",
               "changelogs/0.31.1",

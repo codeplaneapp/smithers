@@ -4,6 +4,41 @@ This is the complete, commit-level changelog. For the guided tour of each
 release (what changed and why it matters, with screenshots and examples), see
 the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
+## 0.33.1 (2026-08-04)
+
+20 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1): 55 files changed, +2186 / -188 lines. Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
+
+### Features (2)
+
+- feat(pack): docs-home-design-system workflow — Kimi K3 reskins, Fable reviews until LGTM ([bdb6db56f9](https://github.com/smithersai/smithers/commit/bdb6db56f9))
+- feat(pack): upgrade-dependents workflow — fork, upgrade, review, PR every open-source dependent to smthrs ([4cad958237](https://github.com/smithersai/smithers/commit/4cad958237))
+
+### Bug fixes (13)
+
+- fix(driver): resolve output refs in callable ctx.outputs (#1486) ([10acb14ef0](https://github.com/smithersai/smithers/commit/10acb14ef0))
+- fix: Approved detached run cannot resume when workflowHash is null ([7a93377241](https://github.com/smithersai/smithers/commit/7a93377241))
+- fix: retry-task runs the engine in the foreground with no --detach; SIGPIPE from a closed pipe ki ([8375863cba](https://github.com/smithersai/smithers/commit/8375863cba))
+- fix: Mixed agent-chain failure hard-fails run instead of parking waiting-quota (preflight-disable ([4a462feacf](https://github.com/smithersai/smithers/commit/4a462feacf))
+- fix: up --resume \<runId\> contradicts its help: still demands a workflow path ([a605f6c179](https://github.com/smithersai/smithers/commit/a605f6c179))
+- fix: Panel moderators deadlock inside Ralph because needs omit Ralph iteration suffixes ([396dbfc53e](https://github.com/smithersai/smithers/commit/396dbfc53e))
+- fix: smithers bug --run attaches 50 TaskHeartbeat events (a ~25s heartbeat window) instead of lif ([fae89a542c](https://github.com/smithersai/smithers/commit/fae89a542c))
+- fix: Agent fallback chain: Codex leads silently skipped, kimi 'session is broken' error defeats b ([f985c86beb](https://github.com/smithersai/smithers/commit/f985c86beb))
+- fix: Gateway never registers workflows launched by explicit path outside .smithers, so smithers u ([4fdbc13ce2](https://github.com/smithersai/smithers/commit/4fdbc13ce2))
+- fix: Codex preflight rejects valid ChatGPT auth when auth.json also contains OPENAI_API_KEY ([f593d6e7da](https://github.com/smithersai/smithers/commit/f593d6e7da))
+- fix(server): serve custom-path workflow UIs before background discovery drains ([4bb71acc93](https://github.com/smithersai/smithers/commit/4bb71acc93))
+- fix(server): keep /health live by making workflow \<UI\> discovery lazy and batched ([f8f91d58bb](https://github.com/smithersai/smithers/commit/f8f91d58bb))
+- fix(pack): guard crash-recovery render against missing output rows ([eb42b28c9e](https://github.com/smithersai/smithers/commit/eb42b28c9e))
+
+### Documentation (3)
+
+- docs: reskin landing page onto the product design system with new hero copy and credentials row ([5dd72877a3](https://github.com/smithersai/smithers/commit/5dd72877a3))
+- docs: fix duplicate "Smithers - Smithers" landing page title ([6406cf5b49](https://github.com/smithersai/smithers/commit/6406cf5b49))
+- docs: adopt the product logo for favicon and navbar wordmark ([57551aaffe](https://github.com/smithersai/smithers/commit/57551aaffe))
+
+### Chores and maintenance (1 changes, 2 commits)
+
+- fix: repair wave 0 gate failures ([d11af00dcf](https://github.com/smithersai/smithers/commit/d11af00dcf), [3c9c9be1df](https://github.com/smithersai/smithers/commit/3c9c9be1df))
+
 ## 0.33.0 (2026-08-02)
 
 12 commits since [v0.32.0](https://github.com/smithersai/smithers/compare/v0.32.0...v0.33.0): 3029 files changed, +26424 / -22589 lines. Release notes: [smithers.sh/changelogs/0.33.0](https://smithers.sh/changelogs/0.33.0).

@@ -1,0 +1,61 @@
+{
+  "version": "0.33.1",
+  "generatedFrom": "release-content workflow render-media",
+  "assets": [
+    {
+      "tweetIndex": 1,
+      "kind": "hero",
+      "suggestion": "docs/images/0.33.1/monitor-live.gif — live Monitor recording of a release-canary run going green, used as the release hero",
+      "file": "marketing/0.33.1/assets/tweet-01-hero.svg",
+      "sibling": "assets/tweet-01-hero.svg",
+      "captureRecommended": false,
+      "command": null
+    },
+    {
+      "tweetIndex": 2,
+      "kind": "capability",
+      "suggestion": "",
+      "file": "marketing/0.33.1/assets/tweet-02-capability.svg",
+      "sibling": "assets/tweet-02-capability.svg",
+      "captureRecommended": false,
+      "command": null
+    },
+    {
+      "tweetIndex": 3,
+      "kind": "capability",
+      "suggestion": "",
+      "file": "marketing/0.33.1/assets/tweet-03-capability.svg",
+      "sibling": "assets/tweet-03-capability.svg",
+      "captureRecommended": false,
+      "command": null
+    },
+    {
+      "tweetIndex": 4,
+      "kind": "capability",
+      "suggestion": "docs/images/0.33.1/monitor-tour.gif — touring a finished run's UI, fits the gateway/UI reliability story",
+      "file": "marketing/0.33.1/assets/tweet-04-capability.svg",
+      "sibling": "assets/tweet-04-capability.svg",
+      "captureRecommended": false,
+      "command": null
+    },
+    {
+      "tweetIndex": 5,
+      "kind": "capability",
+      "suggestion": "",
+      "file": "marketing/0.33.1/assets/tweet-05-capability.svg",
+      "sibling": "assets/tweet-05-capability.svg",
+      "captureRecommended": false,
+      "command": null
+    },
+    {
+      "tweetIndex": 6,
+      "kind": "capability",
+      "suggestion": "",
+      "file": "marketing/0.33.1/assets/tweet-06-capability.svg",
+      "sibling": "assets/tweet-06-capability.svg",
+      "captureRecommended": false,
+      "command": null
+    }
+  ],
+  "captures": []
+}
