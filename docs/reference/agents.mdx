@@ -272,6 +272,42 @@ export default smithers(() => (
   </Expandable>
 </ParamField>
 
+<a id="file-change-parsing" />
+
+### File-change parsing
+
+CLI agent subclasses may implement an optional `parseFileChanges` method that
+normalizes a `file_change` action (as emitted by `createOutputInterpreter`)
+into [`AgentFileChange`](/reference/types#agentfilechange) records:
+
+```ts
+parseFileChanges?(action: { title?: string; detail?: unknown }): AgentFileChange[] | undefined;
+```
+
+Callers check `typeof agent.parseFileChanges === "function"` before calling:
+an agent that can't normalize simply omits the method (a graceful absence,
+not a stub returning `[]`, since an empty array would wrongly imply "no
+changes" rather than "unsupported"). When implemented, the same normalization
+also runs live inside `createOutputInterpreter`, which attaches the result to
+the streamed action's `detail.fileChanges`.
+
+Each `AgentCapabilityRegistry.fileChanges` declares what an engine supports:
+`supportsFileChanges` (can it identify file-mutating tool calls at all) and
+`supportsUnifiedDiff` (can it additionally report or reconstruct full diff
+content). Per-engine support:
+
+| Engine | `supportsFileChanges` | `supportsUnifiedDiff` | Notes |
+|---|---|---|---|
+| `ClaudeCodeAgent` | `true` | `true` | `Edit`/`MultiEdit` carry both before and after text and reconstruct a unified diff (`source: "reconstructed"`). `Write` reconstructs a full-creation diff once the tool result confirms the file was newly created (known-empty old side); over an existing file with unknown prior content it stays paths-only rather than fabricating an empty-old diff. `NotebookEdit` reconstructs inserts only (a genuinely empty old cell). |
+| `KimiAgent` | `true` | `true` | Kimi's `StrReplaceFile` carries before/after text; `WriteFile` is paths-only because it does not carry prior content. Verified against the `kimi_cli` vendor source. |
+| `CodexAgent` | `true` | `false` | Native `item.changes: {path, kind}[]` gives path + kind only (`source: "reported"`); no diff content ships in the protocol. |
+| `OpenCodeAgent` | `true` | `false` | Tool input carries a path, reported without a diff pending verification of its full tool-call surface. |
+| `CursorAgent` | `true` | `false` | The protobuf `agent.v1.ToolCall` oneof (`writeToolCall`/`editToolCall`/`deleteToolCall`) carries the target path in `args.path` but no verified before/after content, so paths-only (`source: "reported"`). |
+| `AmpAgent` | `true` | `false` | Amp speaks Claude-compatible stream-json with `create_file`/`edit_file` tool schemas; the input carries a path but no verified prior content, so paths-only (`source: "reported"`). |
+| `GeminiAgent` and all other CLI agents | `false` | `false` | No adapter evidence of a verifiable file-change reporting shape yet. |
+
+**Source** [`AgentFileChange.ts`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/agent-contract/AgentFileChange.ts) · [`parseAnthropicStyleFileChanges.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/BaseCliAgent/parseAnthropicStyleFileChanges.js) · **Tests** [`file-change-contract.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/file-change-contract.test.js)
+
 ### ClaudeCodeAgent
 
 Wraps the Anthropic `claude` CLI. Adds session and permission flags on top of the
@@ -517,6 +553,12 @@ function hashCapabilityRegistry(
     </ParamField>
     <ParamField path="humanInteraction" type="{ supportsUiRequests, methods }" required>
       Human-interaction support descriptor.
+    </ParamField>
+    <ParamField path="fileChanges" type="{ supportsFileChanges, supportsUnifiedDiff }" required>
+      File-change reporting descriptor. `supportsFileChanges` is `true` when the
+      engine can identify file-mutating tool calls at all; `supportsUnifiedDiff`
+      is `true` when it can additionally produce (report or reconstruct) full
+      diff content. See [File-change parsing](#file-change-parsing).
     </ParamField>
     <ParamField path="builtIns" type="string[]" required>
       Names of built-in capabilities.

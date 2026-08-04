@@ -8831,7 +8831,21 @@ type AgentCapabilityRegistry = {
     supportsUiRequests: boolean;
     methods: string[];
   };
+  fileChanges: {
+    supportsFileChanges: boolean;
+    supportsUnifiedDiff: boolean;
+  };
   builtIns: string[];
+};
+
+type AgentFileChangeKind = "created" | "modified" | "deleted" | "renamed";
+
+type AgentFileChange = {
+  path: string;
+  kind: AgentFileChangeKind;
+  oldPath?: string;                    // set when kind === "renamed"
+  unifiedDiff?: string;                // full `git diff`-style patch, when available
+  source: "reported" | "reconstructed"; // did the harness report the diff, or did we build it from tool input?
 };
 
 type AgentGenerateOptions = {
