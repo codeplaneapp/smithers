@@ -5,6 +5,8 @@ export type GetNodeDiffStatPayload = {
   seq: number;
   baseRef: string;
   summary: DiffSummary;
+  /** True when computed from the live working copy of an in-progress attempt. */
+  live?: boolean;
 };
 
 export type GetNodeDiffRoutePayload = DiffBundle | GetNodeDiffStatPayload;
