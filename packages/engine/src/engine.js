@@ -3655,7 +3655,14 @@ function preflightFailedChainIndices(priorAttempts, currentAttemptMeta) {
  * @param {Set<number>} [preflightFailedIndices]
  * @returns {{ failoverPending: boolean; earliestResetAtMs: number | null }}
  */
-function resolveQuotaChainFailover(priorAttempts, chain, chainIndex, resetAtMs, disabledAgents, preflightFailedIndices) {
+function resolveQuotaChainFailover(
+  priorAttempts,
+  chain,
+  chainIndex,
+  resetAtMs,
+  disabledAgents,
+  preflightFailedIndices,
+) {
   const round = quotaBlockedChainRound(priorAttempts, chain.length);
   const blocked = new Set(round.blocked);
   const resets = new Map(round.resetAtMs);

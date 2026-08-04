@@ -52,7 +52,11 @@ function RepoLane({ runId, repo }: { runId: string; repo: string }) {
       ) : (
         <p>Renaming…</p>
       )}
-      {v ? <p>Sol review: {v.approved === true ? "approved" : "REJECTED"} — {asString(v.feedback)}</p> : null}
+      {v ? (
+        <p>
+          Sol review: {v.approved === true ? "approved" : "REJECTED"} — {asString(v.feedback)}
+        </p>
+      ) : null}
       {p ? (
         p.prUrl ? (
           <p>

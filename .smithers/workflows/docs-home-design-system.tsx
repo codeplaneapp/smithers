@@ -11,7 +11,9 @@ const implementSchema = z.looseObject({
 });
 
 const reviewSchema = z.looseObject({
-  lgtm: z.boolean().describe("true only when the landing page fully adopts the product design system with nothing left to fix"),
+  lgtm: z
+    .boolean()
+    .describe("true only when the landing page fully adopts the product design system with nothing left to fix"),
   feedback: z.string().default("").describe("concrete, actionable issues when lgtm is false"),
 });
 

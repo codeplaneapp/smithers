@@ -63,9 +63,10 @@ export function RelativeTime({ ts, title, relativeUntilMs, className, ...props }
   useInjectUiCss();
   const label = useRelativeTime(ts);
   const date = new Date(ts);
-  const display = relativeUntilMs !== undefined && Date.now() - ts >= relativeUntilMs
-    ? date.toLocaleTimeString(undefined, { timeStyle: "medium" })
-    : label;
+  const display =
+    relativeUntilMs !== undefined && Date.now() - ts >= relativeUntilMs
+      ? date.toLocaleTimeString(undefined, { timeStyle: "medium" })
+      : label;
   return (
     <time
       data-slot="relative-time"

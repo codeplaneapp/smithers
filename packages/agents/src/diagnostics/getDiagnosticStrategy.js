@@ -313,8 +313,7 @@ function readCodexCliAuth(env) {
   try {
     const raw = readFileSync(join(resolveCodexHome(env), "auth.json"), "utf8");
     const parsed = JSON.parse(raw);
-    const hasTokens =
-      typeof parsed?.tokens?.access_token === "string" && parsed.tokens.access_token.trim();
+    const hasTokens = typeof parsed?.tokens?.access_token === "string" && parsed.tokens.access_token.trim();
     // `codex login` can leave a stale OPENAI_API_KEY alongside ChatGPT tokens;
     // the codex binary honors auth_mode, so a chatgpt login must not be probed
     // as an API key (#1447).

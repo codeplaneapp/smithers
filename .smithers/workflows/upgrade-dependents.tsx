@@ -134,9 +134,7 @@ export default smithers((ctx) => {
   const discovered = ctx.outputMaybe(outputs.discover, { nodeId: "discover" });
   const exclude = new Set(ctx.input.excludeRepos ?? []);
   const repos = discovered
-    ? [...new Set([...(discovered.repos ?? []), ...(ctx.input.extraRepos ?? [])])]
-        .filter((r) => !exclude.has(r))
-        .sort()
+    ? [...new Set([...(discovered.repos ?? []), ...(ctx.input.extraRepos ?? [])])].filter((r) => !exclude.has(r)).sort()
     : [];
   return (
     <Workflow name="upgrade-dependents">
@@ -153,11 +151,23 @@ export default smithers((ctx) => {
             const pr = ctx.outputMaybe(outputs.pr, { nodeId: `pr-${id}` });
             return (
               <Sequence key={id}>
-                <Task id={`upgrade-${id}`} output={outputs.upgrade} agent={luna} retries={2} timeoutMs={UPGRADE_TIMEOUT_MS}>
+                <Task
+                  id={`upgrade-${id}`}
+                  output={outputs.upgrade}
+                  agent={luna}
+                  retries={2}
+                  timeoutMs={UPGRADE_TIMEOUT_MS}
+                >
                   <UpgradePrompt {...names} repo={repo} laneId={id} changelogDir={CHANGELOG_DIR} />
                 </Task>
                 {upgrade && upgrade.status === "upgraded" && upgrade.grepClean ? (
-                  <Task id={`review-${id}`} output={outputs.review} agent={sol} retries={2} timeoutMs={REVIEW_TIMEOUT_MS}>
+                  <Task
+                    id={`review-${id}`}
+                    output={outputs.review}
+                    agent={sol}
+                    retries={2}
+                    timeoutMs={REVIEW_TIMEOUT_MS}
+                  >
                     <ReviewPrompt {...names} repo={repo} clonePath={upgrade.clonePath} />
                   </Task>
                 ) : null}
@@ -173,7 +183,13 @@ export default smithers((ctx) => {
                   </Task>
                 ) : null}
                 {upgrade && pr?.prUrl && upgrade.improvementIdeas.length > 0 ? (
-                  <Task id={`improve-${id}`} output={outputs.improve} agent={fable} retries={2} timeoutMs={IMPROVE_TIMEOUT_MS}>
+                  <Task
+                    id={`improve-${id}`}
+                    output={outputs.improve}
+                    agent={fable}
+                    retries={2}
+                    timeoutMs={IMPROVE_TIMEOUT_MS}
+                  >
                     <ImprovePrompt
                       {...names}
                       improveBranch={IMPROVE_BRANCH}

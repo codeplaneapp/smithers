@@ -159,6 +159,7 @@ const workflowOwners = {
     "xcombo-fix-train.tsx",
   ],
   "./tests/workflow-component-inventory.test.ts": [
+    "docs-home-design-system.tsx",
     "federation-approval-polish-hardening.tsx",
     "federation-architecture-fix.tsx",
     "federation-artifact-edge-sync.tsx",
@@ -412,6 +413,21 @@ describe("federation workflow smoke coverage", () => {
     });
     const train = await renderWorkflow(module.default, { workflowPath, input: {}, outputs: {} });
     expect(train.tasks.map((task) => task.nodeId)).toContain("setup");
+  }, 30_000);
+
+  test("docs-home-design-system loops implement then review until the reviewer says LGTM", async () => {
+    const workflowPath = join(workflowRoot, "docs-home-design-system.tsx");
+    const module = await import(workflowPath);
+    const first = await renderWorkflow(module.default, { workflowPath, input: {}, outputs: {} });
+    const nodeIds = first.tasks.map((task) => task.nodeId);
+
+    expect(nodeIds).toContain("dhds:implement");
+    expect(nodeIds).toContain("dhds:review");
+    expect(nodeIds.indexOf("dhds:implement")).toBeLessThan(nodeIds.indexOf("dhds:review"));
+
+    const xml = first.toXml();
+    expect(xml).toContain('"smithers:ralph"');
+    expect(xml).toContain("design system");
   }, 30_000);
 
   test("dependent rename and upgrade workflows render their lead lanes", async () => {

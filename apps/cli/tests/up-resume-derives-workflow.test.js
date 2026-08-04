@@ -4,7 +4,12 @@
 // Scenarios drive the real CLI as a Bun subprocess against a real
 // sqlite-backed workspace — no mocks anywhere.
 import { describe, expect, test } from "bun:test";
-import { createTempRepo, pinSqliteBackend, runSmithers, writeTestWorkflow } from "../../../packages/smithers/tests/e2e-helpers.js";
+import {
+  createTempRepo,
+  pinSqliteBackend,
+  runSmithers,
+  writeTestWorkflow,
+} from "../../../packages/smithers/tests/e2e-helpers.js";
 
 describe("up --resume <runId> derives the workflow from the run record (#1475)", () => {
   test("unknown run id fails RUN_NOT_FOUND, not WORKFLOW_REQUIRED", () => {

@@ -51,7 +51,11 @@ function RepoLane({ runId, repo }: { runId: string; repo: string }) {
       ) : (
         <p>Upgrading…</p>
       )}
-      {v ? <p>Sol review: {v.approved === true ? "approved" : "REJECTED"} — {asString(v.feedback)}</p> : null}
+      {v ? (
+        <p>
+          Sol review: {v.approved === true ? "approved" : "REJECTED"} — {asString(v.feedback)}
+        </p>
+      ) : null}
       {p ? (
         p.prUrl ? (
           <p>
@@ -67,7 +71,8 @@ function RepoLane({ runId, repo }: { runId: string; repo: string }) {
             Improvements PR: <a href={asString(m.prUrl)}>{asString(m.prUrl)}</a>
             {m.issueUrl ? (
               <>
-                {" "}· issue <a href={asString(m.issueUrl)}>{asString(m.issueUrl)}</a>
+                {" "}
+                · issue <a href={asString(m.issueUrl)}>{asString(m.issueUrl)}</a>
               </>
             ) : null}
           </p>
@@ -89,7 +94,9 @@ function App() {
     return <EmptyState title="No run selected" description="Open with ?runId=<id>." />;
   }
   const d = isRecord(discover) ? discover : undefined;
-  const repos = Array.isArray(d?.repos) ? (d?.repos as unknown[]).filter((r): r is string => typeof r === "string") : [];
+  const repos = Array.isArray(d?.repos)
+    ? (d?.repos as unknown[]).filter((r): r is string => typeof r === "string")
+    : [];
   return (
     <WorkflowUiShell title="Upgrade dependents to smthrs" subtitle={`discover → upgrade → review → PRs · run ${runId}`}>
       <Tabs defaultValue="repos">

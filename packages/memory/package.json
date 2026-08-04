@@ -47,7 +47,7 @@
     "@smthrs/scheduler": "workspace:*",
     "@vectorize-io/hindsight-client": "0.8.4",
     "drizzle-orm": "^0.45.2",
-    "effect": "4.0.0-beta.102",
+    "effect": "4.0.0-beta.103",
     "zod": "^4.4.3"
   },
   "devDependencies": {

@@ -71,7 +71,7 @@
         "bun-types": "^1.3.14",
         "diff": "^9.0.0",
         "drizzle-orm": "^0.45.2",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
         "esbuild": "^0.28.1",
         "oxfmt": "^0.60.0",
         "oxlint": "^1.72.0",
@@ -187,7 +187,7 @@
         "@xterm/xterm": "^6.0.0",
         "cron-parser": "^5.6.1",
         "drizzle-orm": "^0.45.2",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
         "incur": "^0.4.10",
         "picocolors": "^1.1.1",
         "react": "^19.2.7",
@@ -259,9 +259,9 @@
       "name": "@smthrs/observability",
       "version": "0.33.1",
       "dependencies": {
-        "@effect/opentelemetry": "4.0.0-beta.102",
-        "@effect/platform-bun": "4.0.0-beta.102",
-        "effect": "4.0.0-beta.102",
+        "@effect/opentelemetry": "4.0.0-beta.103",
+        "@effect/platform-bun": "4.0.0-beta.103",
+        "effect": "4.0.0-beta.103",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -302,7 +302,7 @@
         "@smthrs/db": "workspace:*",
         "@smthrs/engine": "workspace:*",
         "@smthrs/ui-styleguide": "workspace:*",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
         "mermaid": "^11.16.0",
         "smthrs": "workspace:*",
         "zod": "^4.4.3",
@@ -482,7 +482,7 @@
         "@smthrs/errors": "workspace:*",
         "@smthrs/observability": "workspace:*",
         "ai": "^7.0.10",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
         "zod": "^4.4.3",
       },
       "devDependencies": {
@@ -560,7 +560,7 @@
         "@tanstack/react-query": "^5.101.2",
         "@types/bun": "latest",
         "drizzle-orm": "^0.45.2",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
         "typescript": "~6.0.3",
       },
     },
@@ -604,7 +604,7 @@
         "@smthrs/scheduler": "workspace:*",
         "drizzle-orm": "^0.45.2",
         "drizzle-zod": "^0.8.3",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
         "zod": "^4.4.3",
       },
       "devDependencies": {
@@ -632,7 +632,7 @@
         "@smthrs/graph": "workspace:*",
         "@smthrs/observability": "workspace:*",
         "@smthrs/scheduler": "workspace:*",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
         "zod": "^4.4.3",
       },
       "devDependencies": {
@@ -658,8 +658,8 @@
       "name": "@smthrs/engine",
       "version": "0.33.1",
       "dependencies": {
-        "@effect/platform-bun": "4.0.0-beta.102",
-        "@effect/sql-sqlite-bun": "4.0.0-beta.102",
+        "@effect/platform-bun": "4.0.0-beta.103",
+        "@effect/sql-sqlite-bun": "4.0.0-beta.103",
         "@smthrs/agents": "workspace:*",
         "@smthrs/components": "workspace:*",
         "@smthrs/db": "workspace:*",
@@ -676,13 +676,13 @@
         "@smthrs/vcs": "workspace:*",
         "diff": "^9.0.0",
         "drizzle-orm": "^0.45.2",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
         "react": "^19.2.7",
         "react-dom": "^19.2.7",
         "zod": "^4.4.3",
       },
       "devDependencies": {
-        "@effect/platform-node": "4.0.0-beta.102",
+        "@effect/platform-node": "4.0.0-beta.103",
         "@types/bun": "latest",
         "typescript": "~6.0.3",
       },
@@ -696,7 +696,7 @@
       "name": "@smthrs/errors",
       "version": "0.33.1",
       "dependencies": {
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -741,7 +741,7 @@
         "@smthrs/gateway-client": "workspace:*",
         "@tanstack/react-db": "0.1.91",
         "@tanstack/react-query": "5.101.2",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
       },
       "devDependencies": {
         "@happy-dom/global-registrator": "^20.10.6",
@@ -831,7 +831,7 @@
         "@smthrs/observability": "workspace:*",
         "@smthrs/react-reconciler": "workspace:*",
         "@smthrs/scheduler": "workspace:*",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
         "react": "^19.2.7",
         "zod": "4.4.3",
       },
@@ -887,7 +887,7 @@
         "@smthrs/scheduler": "workspace:*",
         "@vectorize-io/hindsight-client": "0.8.4",
         "drizzle-orm": "^0.45.2",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
         "zod": "^4.4.3",
       },
       "devDependencies": {
@@ -928,7 +928,7 @@
         "@smthrs/observability": "workspace:*",
         "@smthrs/scheduler": "workspace:*",
         "ai": "^7.0.10",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
         "yaml": "^2.9.0",
         "zod": "^4.4.3",
       },
@@ -988,7 +988,7 @@
       },
       "devDependencies": {
         "@types/bun": "latest",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
         "typescript": "~6.0.3",
         "zod": "^4.4.3",
       },
@@ -1002,7 +1002,7 @@
         "@smthrs/errors": "workspace:*",
         "@smthrs/observability": "workspace:*",
         "@smthrs/scheduler": "workspace:*",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -1015,7 +1015,7 @@
       "dependencies": {
         "@smthrs/errors": "workspace:*",
         "@smthrs/graph": "workspace:*",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -1033,7 +1033,7 @@
         "@smthrs/observability": "workspace:*",
         "@smthrs/scheduler": "workspace:*",
         "drizzle-orm": "^0.45.2",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
         "typescript": "~6.0.3",
         "zod": "^4.4.3",
       },
@@ -1063,7 +1063,7 @@
         "@smthrs/usage": "workspace:*",
         "cron-parser": "^5.6.1",
         "drizzle-orm": "^0.45.2",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
         "hono": "^4.12.27",
         "react": "^19.2.7",
         "react-dom": "^19.2.7",
@@ -1127,7 +1127,7 @@
         "ai": "^7.0.10",
         "diff": "^9.0.0",
         "drizzle-orm": "^0.45.2",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
         "incur": "^0.4.10",
         "react": "^19.2.7",
         "zod": "^4.4.3",
@@ -1161,7 +1161,7 @@
         "@smthrs/graph": "workspace:*",
         "@smthrs/react-reconciler": "workspace:*",
         "@smthrs/scheduler": "workspace:*",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
         "zod": "^4.4.3",
       },
       "devDependencies": {
@@ -1181,7 +1181,7 @@
       "name": "@smthrs/time-travel",
       "version": "0.33.1",
       "dependencies": {
-        "@effect/platform-bun": "4.0.0-beta.102",
+        "@effect/platform-bun": "4.0.0-beta.103",
         "@smthrs/db": "workspace:*",
         "@smthrs/driver": "workspace:*",
         "@smthrs/errors": "workspace:*",
@@ -1191,7 +1191,7 @@
         "@smthrs/scheduler": "workspace:*",
         "@smthrs/vcs": "workspace:*",
         "drizzle-orm": "^0.45.2",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
         "picocolors": "^1.1.1",
       },
       "devDependencies": {
@@ -1319,10 +1319,10 @@
       "version": "0.33.1",
       "dependencies": {
         "@smthrs/observability": "workspace:*",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
       },
       "devDependencies": {
-        "@effect/platform-bun": "4.0.0-beta.102",
+        "@effect/platform-bun": "4.0.0-beta.103",
         "@types/bun": "latest",
         "typescript": "~6.0.3",
       },
@@ -1368,7 +1368,7 @@
         "@smthrs/time-travel": "workspace:*",
         "@types/bun": "latest",
         "drizzle-orm": "^0.45.2",
-        "effect": "4.0.0-beta.102",
+        "effect": "4.0.0-beta.103",
         "smthrs": "workspace:*",
         "typescript": "~6.0.3",
         "xstate": "5.32.5",
@@ -1391,7 +1391,7 @@
   ],
   "overrides": {
     "@opentelemetry/propagator-jaeger": "2.9.0",
-    "effect": "4.0.0-beta.102",
+    "effect": "4.0.0-beta.103",
   },
   "packages": {
     "@adobe/css-tools": ["@adobe/css-tools@4.5.0", "", {}, "sha512-6OzddxPio9UiWTCemp4N8cYLV2ZN1ncRnV1cVGtve7dhPOtRkleRyx32GQCYSwDYgaHU3USMm84tNsvKzRCa1Q=="],
@@ -1620,15 +1620,15 @@
 
     "@earendil-works/pi-tui": ["@earendil-works/pi-tui@0.81.1", "", { "dependencies": { "get-east-asian-width": "1.6.0", "marked": "18.0.5" } }, "sha512-OMEe+Zt8oQYi/rCq3upxsTlIScWL0FPhXwQus34TbQb3EmTx88S7Uzx32JxvQiEeWOw8eDCdJf2PBUBE9r6wIg=="],
 
-    "@effect/opentelemetry": ["@effect/opentelemetry@4.0.0-beta.102", "", { "peerDependencies": { "@opentelemetry/api": "^1.9", "@opentelemetry/api-logs": ">=0.203.0 <0.300.0", "@opentelemetry/resources": "^2.0.0", "@opentelemetry/sdk-logs": ">=0.203.0 <0.300.0", "@opentelemetry/sdk-metrics": "^2.0.0", "@opentelemetry/sdk-trace-base": "^2.0.0", "@opentelemetry/sdk-trace-node": "^2.0.0", "@opentelemetry/sdk-trace-web": "^2.0.0", "@opentelemetry/semantic-conventions": "^1.33.0", "effect": "^4.0.0-beta.102" }, "optionalPeers": ["@opentelemetry/api", "@opentelemetry/api-logs", "@opentelemetry/resources", "@opentelemetry/sdk-logs", "@opentelemetry/sdk-metrics", "@opentelemetry/sdk-trace-base", "@opentelemetry/sdk-trace-node", "@opentelemetry/sdk-trace-web"] }, "sha512-U15cxJ1uf3+HMnZB0BUQe3U4TuyIPYxSHJ+wEzkF4ZjteN224hsgeTgsyXSFjSIpWDVWfujdGPqmtkDpcMzf6w=="],
+    "@effect/opentelemetry": ["@effect/opentelemetry@4.0.0-beta.103", "", { "peerDependencies": { "@opentelemetry/api": "^1.9", "@opentelemetry/api-logs": ">=0.203.0 <0.300.0", "@opentelemetry/resources": "^2.0.0", "@opentelemetry/sdk-logs": ">=0.203.0 <0.300.0", "@opentelemetry/sdk-metrics": "^2.0.0", "@opentelemetry/sdk-trace-base": "^2.0.0", "@opentelemetry/sdk-trace-node": "^2.0.0", "@opentelemetry/sdk-trace-web": "^2.0.0", "@opentelemetry/semantic-conventions": "^1.33.0", "effect": "^4.0.0-beta.103" }, "optionalPeers": ["@opentelemetry/api", "@opentelemetry/api-logs", "@opentelemetry/resources", "@opentelemetry/sdk-logs", "@opentelemetry/sdk-metrics", "@opentelemetry/sdk-trace-base", "@opentelemetry/sdk-trace-node", "@opentelemetry/sdk-trace-web"] }, "sha512-nGen5/SeuCkSII+X71YjCUsT/r1AqfS6eWyzCTzXv0NqyLxtnpWJxSYBGy5LtwZFMQsTmQKC7R426IzXbsxOXg=="],
 
-    "@effect/platform-bun": ["@effect/platform-bun@4.0.0-beta.102", "", { "dependencies": { "@effect/platform-node-shared": "^4.0.0-beta.102" }, "peerDependencies": { "effect": "^4.0.0-beta.102" } }, "sha512-hTIb0jjTfXhNgnDq2OX5wrigc0OSvTT0VWWb1PLpMM395RJPu8rCIbTlGhy0NS7kZOd8FfgNi9e0sDhgyu+5Ag=="],
+    "@effect/platform-bun": ["@effect/platform-bun@4.0.0-beta.103", "", { "dependencies": { "@effect/platform-node-shared": "^4.0.0-beta.103" }, "peerDependencies": { "effect": "^4.0.0-beta.103" } }, "sha512-/ay1/lhE9FUKEiDRQs56463eJ9u9ivtUtOCi2eeqI8Aooau7PupKNtV5zKjoRBCLInZMAX7JezT46NW5AdACBQ=="],
 
-    "@effect/platform-node": ["@effect/platform-node@4.0.0-beta.102", "", { "dependencies": { "@effect/platform-node-shared": "^4.0.0-beta.102", "mime": "^4.1.0", "undici": "^8.7.0" }, "peerDependencies": { "effect": "^4.0.0-beta.102", "ioredis": "^5.7.0" } }, "sha512-wYVAU9jAePT+gouMr/EVz1CaW6yDLjPAgXYeEFLz7wugT5iZhFRag6mqajV/wwN3bzWP2fzZHokLuPmqD/rqeA=="],
+    "@effect/platform-node": ["@effect/platform-node@4.0.0-beta.103", "", { "dependencies": { "@effect/platform-node-shared": "^4.0.0-beta.103", "mime": "^4.1.0", "undici": "^8.7.0" }, "peerDependencies": { "effect": "^4.0.0-beta.103", "ioredis": "^5.7.0" } }, "sha512-VD8fbpendwFokMwzC7/MxazjhEVDihPC5NZtomYEyZwGaA1LXMvwP1y8pfXwfshUkG56TN4EMQqzu72c0B9FhA=="],
 
-    "@effect/platform-node-shared": ["@effect/platform-node-shared@4.0.0-beta.102", "", { "dependencies": { "@types/ws": "^8.18.1", "ws": "^8.21.0" }, "peerDependencies": { "effect": "^4.0.0-beta.102" } }, "sha512-gVd793I72MrkX4dXo7eYtRKfNj0RW4eMRfVEKEJI16h2+mBDCzQ+gqMrog2hSTHQnaIbvbYShNQ4TVGuRCYZeQ=="],
+    "@effect/platform-node-shared": ["@effect/platform-node-shared@4.0.0-beta.103", "", { "dependencies": { "@types/ws": "^8.18.1", "ws": "^8.21.0" }, "peerDependencies": { "effect": "^4.0.0-beta.103" } }, "sha512-0aCZMBid5ifqmY55TkfCDLaGTIM8qu3bNFUW7qL9vh/7jFOkaIAMX2MA8muG4deqW17XWxawddWu4v0fK+UW3g=="],
 
-    "@effect/sql-sqlite-bun": ["@effect/sql-sqlite-bun@4.0.0-beta.102", "", { "peerDependencies": { "effect": "^4.0.0-beta.102" } }, "sha512-pBO6FBJ+a21j2qHmzJDK1DeJsxm7HpUQBgucw6prHQXLMUBkhOsfZofhw1FKEdGRDEhO0sGTjffa2KP7iOuDIg=="],
+    "@effect/sql-sqlite-bun": ["@effect/sql-sqlite-bun@4.0.0-beta.103", "", { "peerDependencies": { "effect": "^4.0.0-beta.103" } }, "sha512-u10I6SEWgUc1sKrlT0luxOBNzlUXunzxCChrD75pK5khIN1baKlPn2DD3f7bkh20NxwSzOfxF3hWsrO4VktvNg=="],
 
     "@electric-sql/client": ["@electric-sql/client@1.5.24", "", { "dependencies": { "@microsoft/fetch-event-source": "^2.0.1" }, "optionalDependencies": { "@rollup/rollup-darwin-arm64": "^4.18.1" }, "bin": { "intent": "bin/intent.mjs" } }, "sha512-ItOjBFTfiZvYosglF9Dn4TSqE59yL/psoemHJ7vX8gvEUmElHB2QdP5eQC6q9/lswyv7oqhkZT0Kk8kuq2P5vA=="],
 
@@ -3306,7 +3306,7 @@
 
     "ee-first": ["ee-first@1.1.1", "", {}, "sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow=="],
 
-    "effect": ["effect@4.0.0-beta.102", "", { "dependencies": { "@standard-schema/spec": "^1.1.0", "fast-check": "^4.9.0", "find-my-way-ts": "^0.1.6", "ini": "^7.0.0", "kubernetes-types": "^1.30.0", "msgpackr": "^2.0.4", "multipasta": "^0.2.8", "toml": "^4.1.2", "uuid": "^14.0.1", "yaml": "^2.9.0" } }, "sha512-z8Y+Q76Hh/kjLFZrXu8tGn6e+tDsg45R+UHhxd190pXxD53OGwf/G/zDxXTkse4HJ5mobNZfitLfUCp4fMvu6w=="],
+    "effect": ["effect@4.0.0-beta.103", "", { "dependencies": { "@standard-schema/spec": "^1.1.0", "fast-check": "^4.9.0", "find-my-way-ts": "^0.1.6", "ini": "^7.0.0", "kubernetes-types": "^1.30.0", "msgpackr": "^2.0.4", "multipasta": "^0.2.8", "toml": "^4.1.2", "uuid": "^14.0.1", "yaml": "^2.9.0" } }, "sha512-pE8TxF4m2tQzVI+77dIlm3s+81TACV1AiX1JEkvY+zVuxgQQ8aGSkqXNJF6b/ST+coCSk5cUdbULpQ7sm4oHyw=="],
 
     "electron-to-chromium": ["electron-to-chromium@1.5.399", "", {}, "sha512-lEcqhErbHjXRvd41rnWLpzbyU/IXfIYo7QwaFWmxGeLiLyY2TBCdHnWY88vB+p3ubnihRypDm66panXl7TylLA=="],
 
