@@ -118,6 +118,7 @@ export default smithers((ctx) => {
               `You are the plan JUDGE and synthesizer (round ${round + 1}). Two independent plans were proposed:`,
               `FABLE'S PLAN:\n${JSON.stringify(ctx.latest("plan", "mission:plan-fable") ?? null)}`,
               `SOL'S PLAN:\n${JSON.stringify(ctx.latest("plan", "mission:plan-sol") ?? null)}`,
+              `LOAD RULE: the production e2e suite is only trustworthy at 1-minute load < 12, and parallel agent lanes are themselves the main load source. When the deferred/pending prod-e2e proof leg is the top priority, emit a SOLO round: exactly ONE lane that runs the full e2e suite (checking \`uptime\` first and waiting briefly for load to fall) so nothing competes with it. Resume parallel lanes next round.`,
               `Judge both critically (coverage, lane independence, verifiability, quality of "done" definitions), then SYNTHESIZE a single superior plan of up to ${ctx.input.maxLanes} non-conflicting lanes — take the best lanes from each, merge overlapping ones, drop weak ones. If a lane failed review last round, re-queue it with the reviewer's feedback folded into its instructions. Sanity-check lane file sets are disjoint. Emit the final plan (same schema).`,
             ].join("\n\n")}
           </Task>
