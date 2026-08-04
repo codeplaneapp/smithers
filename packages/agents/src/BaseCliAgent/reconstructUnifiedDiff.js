@@ -1,18 +1,31 @@
 /**
  * Minimal unified-diff builder used to reconstruct `AgentFileChange.unifiedDiff`
  * locally from before/after text a harness already handed us (Claude Code /
- * Kimi tool_use input carries both `old_string`/`new_string` or full `content`
- * — no filesystem read needed). Line-level LCS diff, git-style headers.
+ * Kimi replacement input carries both `old_string`/`new_string` — no
+ * filesystem read needed). Line-level LCS diff, git-style headers.
  *
  * @param {string} oldText
  * @param {string} newText
- * @returns {{ lines: string[]; oldCount: number; newCount: number } | null} null when identical
+ * @returns {{ kind: "ctx" | "del" | "add"; text: string; oldLine?: number; newLine?: number }[]}
  */
+const MAX_DIFF_CELLS = 1_000_000;
+function splitLines(text) {
+  return text === "" ? [] : text.split("\n");
+}
 function diffLines(oldText, newText) {
-  const a = oldText.split("\n");
-  const b = newText.split("\n");
+  const a = splitLines(oldText);
+  const b = splitLines(newText);
   const n = a.length;
   const m = b.length;
+  // Tool payloads are model-controlled: never allocate an unbounded LCS grid.
+  // Bound each dimension too — `n * m` is 0 when either side is empty, which
+  // would otherwise bypass the bound entirely.
+  if (n > MAX_DIFF_CELLS || m > MAX_DIFF_CELLS || n * m > MAX_DIFF_CELLS) return undefined;
+  // One-sided diffs need no LCS grid (and must not allocate one): an empty
+  // old side is pure additions, an empty new side pure deletions. The empty
+  // side contributes NO lines — never a phantom blank line.
+  if (n === 0) return b.map((text, index) => ({ kind: "add", text, newLine: index + 1 }));
+  if (m === 0) return a.map((text, index) => ({ kind: "del", text, oldLine: index + 1 }));
   // LCS table.
   const lcs = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
   for (let i = n - 1; i >= 0; i--) {
@@ -56,6 +69,7 @@ const CONTEXT = 3;
 export function reconstructUnifiedDiff(path, oldText, newText) {
   if (oldText === newText) return undefined;
   const ops = diffLines(oldText, newText);
+  if (!ops) return undefined;
   const changedIndexes = ops.reduce((acc, op, idx) => {
     if (op.kind !== "ctx") acc.push(idx);
     return acc;
@@ -101,5 +115,9 @@ export function reconstructUnifiedDiff(path, oldText, newText) {
     newStart ??= 1;
     return `@@ -${oldStart},${oldCount} +${newStart},${newCount} @@\n${body.join("\n")}`;
   });
-  return [`--- a/${path}`, `+++ b/${path}`, ...hunks].join("\n");
+  // Strip a leading slash so absolute paths don't produce a doubled-slash
+  // header (`--- a//Users/...`); the UI re-derives the display path from
+  // `AgentFileChange.path` via `parseUnifiedFile`, so this is cosmetic only.
+  const headerPath = path.startsWith("/") ? path.slice(1) : path;
+  return [`--- a/${headerPath}`, `+++ b/${headerPath}`, ...hunks].join("\n");
 }

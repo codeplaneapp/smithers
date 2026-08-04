@@ -152,6 +152,12 @@ export class ClaudeCodeAgent extends BaseCliAgent {
     // quota wait (pause + auto-resume) instead of a silent success.
     let limitBannerText = "";
     const toolNameByUseId = new Map();
+    // Write tool_use inputs, keyed by use id. A Write only carries the NEW
+    // full-file content, so whether an honest diff exists is decided by the
+    // tool result: "File created successfully" means the old side was
+    // genuinely empty (reconstruct), "has been updated" means prior content
+    // is unknown (paths-only — never fabricate an empty-old diff).
+    const writeInputByUseId = new Map();
     const nextSyntheticId = createSyntheticIdGenerator();
     /**
      * @param {string} title
@@ -294,6 +300,9 @@ export class ClaudeCodeAgent extends BaseCliAgent {
             const toolName = asString(block.name) ?? "tool";
             if (!toolUseId) continue;
             toolNameByUseId.set(toolUseId, toolName);
+            if (toolName === "Write" && isRecord(block.input)) {
+              writeInputByUseId.set(toolUseId, block.input);
+            }
             const fileChanges = parseAnthropicStyleFileChanges(toolName, block.input);
             events.push({
               type: "action",
@@ -332,6 +341,16 @@ export class ClaudeCodeAgent extends BaseCliAgent {
                   : undefined;
             const isToolError = block.is_error === true;
             const summarizedMessage = summarizeToolOutput(toolName, resultSummary);
+            const writeInput = writeInputByUseId.get(toolUseId);
+            writeInputByUseId.delete(toolUseId);
+            let completedFileChanges;
+            if (writeInput && !isToolError) {
+              const created =
+                typeof resultSummary === "string" && resultSummary.startsWith("File created successfully at:");
+              completedFileChanges = created
+                ? parseAnthropicStyleFileChanges("Write", writeInput, { priorContent: "" })
+                : parseAnthropicStyleFileChanges("Write", writeInput);
+            }
             events.push({
               type: "action",
               engine: this.cliEngine,
@@ -341,7 +360,7 @@ export class ClaudeCodeAgent extends BaseCliAgent {
                 id: toolUseId,
                 kind: toolKindFromName(toolName),
                 title: toolName,
-                detail: {},
+                detail: completedFileChanges ? { fileChanges: completedFileChanges } : {},
               },
               message: summarizedMessage,
               ok: !isToolError,
@@ -416,11 +435,12 @@ export class ClaudeCodeAgent extends BaseCliAgent {
    * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
    * into {@link AgentFileChange} records. `action` is `{ title, detail: { input } }`.
    *
-   * @param {{ title?: string; detail?: { input?: unknown } }} action
+   * @param {unknown} action
    * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
    */
   parseFileChanges(action) {
-    return parseAnthropicStyleFileChanges(action?.title ?? "", action?.detail?.input);
+    const fileAction = /** @type {{ title?: unknown; detail?: { input?: unknown } } | undefined} */ (action);
+    return parseAnthropicStyleFileChanges(asString(fileAction?.title) ?? "", fileAction?.detail?.input);
   }
   /**
    * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params

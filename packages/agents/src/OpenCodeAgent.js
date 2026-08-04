@@ -31,7 +31,7 @@ function parseOpenCodeFileChanges(toolName, input) {
   if (!isRecord(input)) return undefined;
   const path = asString(input.filePath) ?? asString(input.file_path);
   if (!path) return undefined;
-  const name = toolName.toLowerCase();
+  const name = asString(toolName)?.toLowerCase() ?? "";
   if (name === "write") return [{ path, kind: "modified", source: "reported" }];
   if (name === "edit") return [{ path, kind: "modified", source: "reported" }];
   return undefined;
@@ -272,9 +272,7 @@ export class OpenCodeAgent extends BaseCliAgent {
             kind: toolKindFromName(toolName),
             title: toolName,
             detail:
-              state && isRecord(state.input)
-                ? { input: state.input, ...(fileChanges ? { fileChanges } : {}) }
-                : {},
+              state && isRecord(state.input) ? { input: state.input, ...(fileChanges ? { fileChanges } : {}) } : {},
           },
           message: `Running ${toolName}`,
           level: "info",
@@ -421,11 +419,12 @@ export class OpenCodeAgent extends BaseCliAgent {
    * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
    * into {@link AgentFileChange} records. `action` is `{ title, detail: { input } }`.
    *
-   * @param {{ title?: string; detail?: { input?: unknown } }} action
+   * @param {unknown} action
    * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
    */
   parseFileChanges(action) {
-    return parseOpenCodeFileChanges(action?.title ?? "", action?.detail?.input);
+    const fileAction = /** @type {{ title?: unknown; detail?: { input?: unknown } } | undefined} */ (action);
+    return parseOpenCodeFileChanges(asString(fileAction?.title) ?? "", fileAction?.detail?.input);
   }
 
   /**

@@ -544,11 +544,12 @@ export class CodexAgent extends BaseCliAgent {
    * into {@link AgentFileChange} records. `action.detail.changes` is codex's
    * native `{path, kind}[]` — no diff content in the protocol.
    *
-   * @param {{ detail?: { changes?: unknown } }} action
+   * @param {unknown} action
    * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
    */
   parseFileChanges(action) {
-    return parseCodexFileChanges(action?.detail?.changes);
+    const fileAction = /** @type {{ detail?: { changes?: unknown } } | undefined} */ (action);
+    return parseCodexFileChanges(fileAction?.detail?.changes);
   }
   /**
    * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params

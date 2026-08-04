@@ -1,5 +1,6 @@
 import type { AgentCapabilityRegistry } from "./capability-registry";
 import type { AgentGenerateOptions } from "./BaseCliAgent/AgentGenerateOptions";
+import type { AgentFileChange } from "./agent-contract/AgentFileChange";
 
 /**
  * Represents an entity capable of generating responses or actions based on prompts.
@@ -14,6 +15,8 @@ export type AgentLike = {
   capabilities?: AgentCapabilityRegistry;
   /** True when the agent consumes outputSchema through a native structured-output API. */
   supportsNativeStructuredOutput?: boolean;
+  /** Optional harness-specific file-change normalizer. */
+  parseFileChanges?: (rawEvent: unknown) => AgentFileChange[] | undefined;
   /**
    * Performs deterministic startup checks before the first generation call in a
    * workflow run. A rejected promise fails the task without retrying.
