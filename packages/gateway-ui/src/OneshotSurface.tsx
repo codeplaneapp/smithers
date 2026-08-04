@@ -819,7 +819,7 @@ export function OneshotSurface({
         labelPrefix={workflowName === "chat" ? "Live status" : "Cheap narrator"}
         available={narratorAvailable}
       />
-      <Tabs value={tab} onValueChange={(value) => setTab(value as OneshotSurfaceTab)}>
+      <Tabs value={tab} onValueChange={(value: string) => setTab(value as OneshotSurfaceTab)}>
         <TabsList>
           <TabsTrigger value="chat">Chat</TabsTrigger>
           <TabsTrigger value="diff" count={filesChanged}>
@@ -933,13 +933,13 @@ export function OneshotSurface({
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose?.()}>
+    <Dialog open onOpenChange={(open: boolean) => !open && onClose?.()}>
       <DialogContent
         showCloseButton={false}
         className={`oneshot-surface-panel${className ? ` ${className}` : ""}`}
         data-maximized={maximized}
         data-testid={testId}
-        onEscapeKeyDown={(event) => {
+        onEscapeKeyDown={(event: KeyboardEvent) => {
           if (!maximized) return;
           event.preventDefault();
           setMaximized(false);
