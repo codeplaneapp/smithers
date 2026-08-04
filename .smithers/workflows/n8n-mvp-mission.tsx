@@ -60,6 +60,7 @@ const { Workflow, Task, Loop, smithers, outputs } = createSmithers({
 
 const fablePlanner = new ClaudeCodeAgent({ model: "claude-fable-5", cwd: APP });
 const fableReviewer = new ClaudeCodeAgent({ model: "claude-fable-5", cwd: APP });
+const solPlanner = new CodexAgent({ model: "gpt-5.6-sol", cwd: APP });
 const solImplementer = [
   new CodexAgent({ model: "gpt-5.6-sol", cwd: APP }),
   new ClaudeCodeAgent({ model: "claude-fable-5", cwd: APP }), // codex rate-limit fallback
@@ -89,14 +90,31 @@ export default smithers((ctx) => {
       {/* Never-stop: no `until`. Will stops the run; each round replans, and once coreDone the planner emits polish lanes. */}
       <Loop until={false} maxIterations={Infinity}>
         <Sequence>
+          {/* Plan panel: Fable and Sol plan independently; Fable judges + synthesizes the single plan Sol implements. */}
+          <Parallel maxConcurrency={2}>
+            {([
+              { node: "mission:plan-fable", agent: fablePlanner, voice: "Fable" },
+              { node: "mission:plan-sol", agent: solPlanner, voice: "Codex Sol" },
+            ] as const).map((p) => (
+              <Task key={p.node} id={p.node} output={outputs.plan} agent={p.agent}>
+                {[
+                  MISSION_CONTEXT,
+                  `You are ${p.voice}, one of two INDEPENDENT planners on a panel (round ${round + 1}). Read ${TODO}, the specs, current repo state (jj/git status, recent commits), and the previous round's integrate result: ${JSON.stringify(integrate ?? null)}.`,
+                  `Propose up to ${ctx.input.maxLanes} PARALLEL lanes of work that do not conflict with each other (disjoint files/areas). Each lane: id (stable slug), title, precise instructions (what to build, what "done" means, which e2e proves it), uiHeavy=true when the lane is primarily UI/visual/motion work, files it will touch.`,
+                  `Prioritize: unblock-first (failing checks, integration breaks), then TODO order. Plan for HIGH QUALITY: smaller, verifiable lanes over sprawling ones; every lane names its proof.`,
+                  `coreDone=true only when EVERY TODO.md item in sections 1-7 and 9 is [x]. When coreDone, emit polish lanes — the mission never idles.`,
+                  ctx.input.prompt,
+                ].join("\n\n")}
+              </Task>
+            ))}
+          </Parallel>
           <Task id="mission:plan" output={outputs.plan} agent={fablePlanner}>
             {[
               MISSION_CONTEXT,
-              `You are the mission orchestrator (round ${round + 1}). Read ${TODO}, the specs, current repo state (jj/git status, recent commits), and the previous round's integrate result: ${JSON.stringify(integrate ?? null)}.`,
-              `Emit up to ${ctx.input.maxLanes} PARALLEL lanes of work that do not conflict with each other (disjoint files/areas). Each lane: id (stable slug), title, precise instructions (what to build, what "done" means, which e2e proves it), uiHeavy=true when the lane is primarily UI/visual/motion work rather than logic, files it will touch.`,
-              `Prioritize: unblock-first (failing checks, integration breaks), then TODO order. If a lane failed review last round, re-queue it with the reviewer's feedback folded into instructions.`,
-              `coreDone=true only when EVERY TODO.md item in sections 1-7 is [x]. When coreDone, DO NOT stop: emit polish lanes (UX refinement, motion quality, copy, perf, flake hunts, accessibility, e2e depth) — the mission never idles.`,
-              ctx.input.prompt,
+              `You are the plan JUDGE and synthesizer (round ${round + 1}). Two independent plans were proposed:`,
+              `FABLE'S PLAN:\n${JSON.stringify(ctx.latest("plan", "mission:plan-fable") ?? null)}`,
+              `SOL'S PLAN:\n${JSON.stringify(ctx.latest("plan", "mission:plan-sol") ?? null)}`,
+              `Judge both critically (coverage, lane independence, verifiability, quality of "done" definitions), then SYNTHESIZE a single superior plan of up to ${ctx.input.maxLanes} non-conflicting lanes — take the best lanes from each, merge overlapping ones, drop weak ones. If a lane failed review last round, re-queue it with the reviewer's feedback folded into its instructions. Sanity-check lane file sets are disjoint. Emit the final plan (same schema).`,
             ].join("\n\n")}
           </Task>
           <Parallel maxConcurrency={ctx.input.maxLanes}>
