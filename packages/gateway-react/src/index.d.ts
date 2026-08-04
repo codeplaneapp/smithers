@@ -389,6 +389,7 @@ declare function useGatewayRunDiff(params: {
         diff: string;
         binaryContent?: string;
     }[];
+    live?: boolean;
 } | {
     status: "oversized";
     baseRef: string;

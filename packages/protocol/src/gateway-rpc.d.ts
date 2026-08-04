@@ -387,6 +387,8 @@ type GatewayDiffBundle$1 = {
     seq: number;
     baseRef: string;
     patches: GatewayDiffPatch$1[];
+    /** True when computed from the live working copy of a non-terminal run. */
+    live?: boolean;
 };
 type GetRunDiffRequest$1 = {
     runId: string;

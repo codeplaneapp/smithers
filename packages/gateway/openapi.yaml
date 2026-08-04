@@ -9018,7 +9018,7 @@ paths:
     post:
       operationId: getNodeDiff
       summary: "Get Node Diff"
-      description: "Fetch a node-level diff bundle for one iteration."
+      description: "Fetch a node-level diff bundle for one iteration. In-progress attempts return a live working-copy diff (`live: true`)."
       tags:
         - "Gateway RPC"
       security:
@@ -9508,7 +9508,7 @@ paths:
     post:
       operationId: getRunDiff
       summary: "Get Run Diff"
-      description: "Fetch the final base-to-terminal DiffBundle for a run. An oversized result is returned as an explicit marker."
+      description: "Fetch the base-to-terminal DiffBundle for a run. Non-terminal runs return a live working-copy diff (`live: true`). An oversized result is returned as an explicit marker."
       tags:
         - "Gateway RPC"
       security:
@@ -9583,7 +9583,7 @@ paths:
                     oneOf:
                       -
                         type: object
-                        description: "Final run DiffBundle."
+                        description: "Run DiffBundle (final, or live for a non-terminal run)."
                         properties:
                           seq:
                             type: integer
@@ -9620,6 +9620,9 @@ paths:
                                 - operation
                                 - diff
                               additionalProperties: false
+                          live:
+                            type: boolean
+                            description: "True when computed from the live working copy of a non-terminal run."
                         required:
                           - seq
                           - baseRef

@@ -2710,6 +2710,8 @@ type DiffBundle$1 = {
     seq: number;
     baseRef: string;
     patches: FilePatch$1[];
+    /** True when computed from a live working copy (not an immutable ref pair). */
+    live?: boolean;
 };
 
 /**
