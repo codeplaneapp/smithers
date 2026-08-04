@@ -1,7 +1,9 @@
 /* ============================================================================
-   Smithers docs — Brass Lieutenant theme layer
-   Adapted from the Next.js landing page (apps/landing-page). Warm editorial:
-   paper or near-black canvas, brass accent, serif display (Newsreader) + DM Sans body.
+   Smithers docs — product theme layer ("Silt & Lagoon")
+   Mirrors the Smithers product design system (multi/src/styles.css): warm
+   paper canvas, archival ink, water-teal brand, sediment-amber action accent,
+   IBM Plex Mono typography, smooth radii, decelerate-only motion. Dark mode
+   uses the product's deep-lagoon palette (#0d1514 / #45c4b2).
    Kept intentionally light-touch — colors/fonts/appearance come from docs.json;
    this file adds the brand accents and the custom landing-page styling.
    Mintlify auto-loads any .css in the content dir. Selectors use the documented
@@ -9,36 +11,50 @@
    ============================================================================ */
 
 :root {
-  --brass: #cab16a;
-  --brass-muted: #8a7a52;
-  --canvas: #0c0a09;
-  --surface: #161310;
-  --ink: #f2ede4;
-  --ink-muted: #9a9288;
-  --line: #2a2620;
+  /* Product tokens: water = brand/active, sediment = action/completion. */
+  --brand: #0f766e;
+  --confluence: #e8a33d;
+}
+.dark {
+  --brand: #45c4b2;
 }
 
-/* Warm brass text selection across the whole site (matches landing). */
+/* Sediment tint on selection — the accent you can touch (matches product). */
 ::selection {
-  background: color-mix(in oklch, var(--brass) 32%, transparent);
+  background: color-mix(in oklch, var(--confluence) 32%, transparent);
   color: inherit;
 }
 
 /* ── Landing page (index.mdx, mode: "custom") ───────────────────────────── */
 
 .landing-root {
-  --l-canvas: #faf8f4;
-  --l-surface: #eee8df;
-  --l-ink: #2b251f;
-  --l-ink-muted: #6b6258;
-  --l-brass: #735f26;
-  --l-brass-muted: #7a6a47;
-  --l-volatile: #8c4a32;
-  --l-fluid: #796027;
-  --l-line: #d8d0c4;
-  --l-action-ink: #fffdf9;
-  --l-preview-surface: #fffdf9;
-  font-family: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --l-canvas: #f7f4ee;
+  --l-surface: #fffefa;
+  --l-ink: #211d18;
+  --l-ink-muted: #6e675c;
+  --l-brand: #0f766e;
+  --l-brand-strong: #0b5b57;
+  --l-brand-wash: #d6eae4;
+  --l-action: #e8a33d;
+  --l-action-strong: #d08a1d;
+  --l-action-text: #8c5a08;
+  --l-action-wash: rgb(232 163 61 / 16%);
+  --l-volatile: #c2402e;
+  --l-fluid: #8c5a08;
+  --l-line: #e4ddcf;
+  --l-action-ink: #fffefa;
+  --l-preview-surface: #fffefa;
+  --l-shadow-soft: 0 10px 30px rgb(33 29 24 / 12%);
+  /* Legacy alias — inline styles in index.mdx reference --l-brass. */
+  --l-brass: var(--l-brand);
+  /* Product shape/motion: radius scales with size; decelerate only. */
+  --l-r-sm: 8px;
+  --l-r-md: 10px;
+  --l-r-lg: 14px;
+  --l-ease: cubic-bezier(0.22, 0.61, 0.21, 1);
+  --l-dur: 180ms;
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-synthesis: none;
   color: var(--l-ink);
   background: var(--l-canvas);
   position: relative;
@@ -46,17 +62,23 @@
 }
 
 .dark .landing-root {
-  --l-canvas: #0c0a09;
-  --l-surface: #161310;
-  --l-ink: #f2ede4;
-  --l-ink-muted: #9a9288;
-  --l-brass: #cab16a;
-  --l-brass-muted: #8a7a52;
-  --l-volatile: #c98b6b;
-  --l-fluid: #c9a86b;
-  --l-line: #2a2620;
-  --l-action-ink: #0c0a09;
-  --l-preview-surface: #0e0b09;
+  --l-canvas: #0d1514;
+  --l-surface: #131b1a;
+  --l-ink: #ece7db;
+  --l-ink-muted: #a8a193;
+  --l-brand: #45c4b2;
+  --l-brand-strong: #7fbfb3;
+  --l-brand-wash: rgb(69 196 178 / 14%);
+  --l-action: #e8a33d;
+  --l-action-strong: #f0c169;
+  --l-action-text: #f0c169;
+  --l-action-wash: rgb(232 163 61 / 14%);
+  --l-volatile: #e0695a;
+  --l-fluid: #f0c169;
+  --l-line: #232e2c;
+  --l-action-ink: #0a2c2a;
+  --l-preview-surface: #0d1514;
+  --l-shadow-soft: 0 10px 30px rgb(0 0 0 / 45%);
 }
 
 /* Full-bleed canvas behind the whole landing, matched to the active docs
@@ -77,17 +99,6 @@
 .landing-root p { color: var(--l-ink-muted); }
 .landing-root a { text-decoration: none; }
 
-/* Film-grain overlay — the landing's signature texture, subtle. */
-.landing-grain {
-  pointer-events: none;
-  position: fixed;
-  inset: 0;
-  z-index: 1;
-  opacity: 0.03;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-size: 140px 140px;
-}
-
 /* Eyebrow / kicker label — mono, tracked out, muted. */
 .landing-eyebrow {
   display: inline-flex;
@@ -104,45 +115,47 @@
   width: 0.4rem;
   height: 0.4rem;
   border-radius: 999px;
-  background: var(--l-brass);
-  box-shadow: 0 0 0 0 color-mix(in oklch, var(--l-brass) 60%, transparent);
+  background: var(--l-brand);
+  box-shadow: 0 0 0 0 color-mix(in oklch, var(--l-brand) 60%, transparent);
   animation: landing-pulse 2.4s ease-in-out infinite;
 }
 
 @keyframes landing-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--l-brass) 45%, transparent); }
-  50% { box-shadow: 0 0 0 5px color-mix(in oklch, var(--l-brass) 0%, transparent); }
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--l-brand) 45%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in oklch, var(--l-brand) 0%, transparent); }
 }
 
-/* Serif display headline — editorial, tight. */
+/* Display headline — product mono, tight. */
 .landing-display {
-  font-family: "Newsreader", Georgia, "Times New Roman", serif;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-  line-height: 1.08;
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.12;
   color: var(--l-ink);
 }
 
-.landing-brass { color: var(--l-brass); }
+.landing-brass { color: var(--l-brand); }
 
-/* Primary brass button — sharp corners, on-brand. */
+/* Primary brand button — water teal, product radius/motion. */
 .landing-btn {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
   padding: 0.7rem 1.3rem;
-  border-radius: 2px;
+  border-radius: var(--l-r-md);
   font-weight: 600;
   font-size: 0.95rem;
   text-decoration: none;
-  background: var(--l-brass);
+  background: var(--l-brand);
   color: var(--l-action-ink) !important;
-  border: 1px solid var(--l-brass);
-  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  border: 1px solid var(--l-brand);
+  transition: transform var(--l-dur) var(--l-ease), box-shadow var(--l-dur) var(--l-ease), background var(--l-dur) var(--l-ease);
 }
 .landing-btn:hover {
+  background: var(--l-brand-strong);
+  border-color: var(--l-brand-strong);
   transform: translateY(-1px);
-  box-shadow: 0 8px 24px -12px color-mix(in oklch, var(--l-brass) 70%, transparent);
+  box-shadow: var(--l-shadow-soft);
 }
 
 .landing-btn-ghost {
@@ -150,29 +163,29 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.7rem 1.3rem;
-  border-radius: 2px;
+  border-radius: var(--l-r-md);
   font-weight: 600;
   font-size: 0.95rem;
   text-decoration: none;
   background: transparent;
   color: var(--l-ink) !important;
   border: 1px solid var(--l-line);
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: border-color var(--l-dur) var(--l-ease), background var(--l-dur) var(--l-ease);
 }
 .landing-btn-ghost:hover {
-  border-color: color-mix(in oklch, var(--l-brass) 45%, var(--l-line));
+  border-color: color-mix(in oklch, var(--l-brand) 45%, var(--l-line));
   background: color-mix(in oklch, var(--l-surface) 70%, transparent);
 }
 
-/* Cards / panels — sharp, hairline brass-tinted borders. */
+/* Cards / panels — hairline borders, product radius. */
 .landing-card {
   border: 1px solid var(--l-line);
   background: color-mix(in oklch, var(--l-surface) 55%, transparent);
-  border-radius: 3px;
+  border-radius: var(--l-r-lg);
 }
 .landing-card-accent {
-  border-color: color-mix(in oklch, var(--l-brass) 32%, var(--l-line));
-  background: color-mix(in oklch, var(--l-brass) 6%, transparent);
+  border-color: color-mix(in oklch, var(--l-brand) 32%, var(--l-line));
+  background: color-mix(in oklch, var(--l-brand) 6%, transparent);
 }
 
 /* Install-command chip. */
@@ -182,8 +195,12 @@
   color: var(--l-ink);
   border: 1px solid var(--l-line);
   background: color-mix(in oklch, var(--l-surface) 70%, transparent);
-  border-radius: 2px;
+  border-radius: var(--l-r-md);
   padding: 0.75rem 1rem;
+  transition: border-color var(--l-dur) var(--l-ease);
+}
+.landing-cmd:hover {
+  border-color: color-mix(in oklch, var(--l-brand) 40%, var(--l-line));
 }
 
 /* Harness pill. */
@@ -211,7 +228,7 @@
   width: 0.4rem;
   height: 0.4rem;
   border-radius: 999px;
-  background: var(--l-brass);
+  background: var(--l-brand);
   animation: landing-blink 1.4s ease-in-out infinite;
 }
 @keyframes landing-blink {
@@ -226,7 +243,7 @@
   align-items: center;
   gap: 0.5rem;
   padding: 2px;
-  border-radius: 3px;
+  border-radius: calc(var(--l-r-md) + 2px);
   text-decoration: none;
   background-image: linear-gradient(90deg, #ff5f6d, #ffc371, #47e891, #1f9bff, #a35bff, #ff5f6d);
 }
@@ -235,19 +252,19 @@
   align-items: center;
   gap: 0.5rem;
   padding: calc(0.7rem - 2px) 1.2rem;
-  border-radius: 2px;
+  border-radius: var(--l-r-md);
   font-weight: 600;
   font-size: 0.95rem;
   color: var(--l-ink);
   background: var(--l-preview-surface);
 }
 
-/* Clickable recipe chips — the nerdsnipe. Mono, sharp, brass on hover. */
+/* Clickable recipe chips — the nerdsnipe. Mono, small radius, teal on hover. */
 .landing-recipe-chip {
   display: inline-flex;
   align-items: center;
   padding: 0.4rem 0.75rem;
-  border-radius: 2px;
+  border-radius: var(--l-r-sm);
   border: 1px solid var(--l-line);
   background: color-mix(in oklch, var(--l-surface) 60%, transparent);
   font-family: "IBM Plex Mono", ui-monospace, monospace;
@@ -255,12 +272,12 @@
   letter-spacing: 0.01em;
   color: var(--l-ink-muted);
   text-decoration: none;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  transition: color var(--l-dur) var(--l-ease), border-color var(--l-dur) var(--l-ease), background var(--l-dur) var(--l-ease);
 }
 .landing-recipe-chip:hover {
   color: var(--l-ink);
-  border-color: color-mix(in oklch, var(--l-brass) 45%, var(--l-line));
-  background: color-mix(in oklch, var(--l-brass) 8%, transparent);
+  border-color: color-mix(in oklch, var(--l-brand) 45%, var(--l-line));
+  background: color-mix(in oklch, var(--l-brand) 8%, transparent);
 }
 
 /* Per-step agent tag in the demo run — makes multi-harness obvious. */
@@ -269,16 +286,17 @@
   font-size: 0.6rem;
   letter-spacing: 0.04em;
   padding: 0.1rem 0.4rem;
-  border-radius: 2px;
+  border-radius: var(--l-r-sm);
   border: 1px solid var(--l-line);
   color: var(--l-ink-muted);
 }
 
-/* Killer-feature callout (time travel + observability). */
+/* Killer-feature callout (time travel + observability) — sediment amber, the
+   product's action/completion accent. */
 .landing-killer {
-  border: 1px solid color-mix(in oklch, var(--l-brass) 30%, var(--l-line));
-  background: color-mix(in oklch, var(--l-brass) 7%, transparent);
-  border-radius: 4px;
+  border: 1px solid color-mix(in oklch, var(--l-action) 30%, var(--l-line));
+  background: var(--l-action-wash);
+  border-radius: var(--l-r-lg);
 }
 
 /* Respect reduced motion inside the docs landing (the standalone marketing

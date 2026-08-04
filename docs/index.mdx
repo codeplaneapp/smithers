@@ -6,8 +6,6 @@ mode: "custom"
 
 <div className="landing-root">
 
-<div className="landing-grain" aria-hidden="true" />
-
 {/* ─────────────────────────── Hero ─────────────────────────── */}
 <section className="max-w-6xl mx-auto px-6 pt-16 pb-12 md:pt-24">
   <div className="grid lg:grid-cols-2 gap-14 items-center">
@@ -19,22 +17,38 @@ mode: "custom"
       </span>
 
       <h1 className="landing-display mt-6" style={{ fontSize: "clamp(2.4rem, 5vw, 3.9rem)" }}>
-        Agent workflows with <span className="landing-brass">time travel.</span>
+        Powerful workflows you can build <span className="landing-brass">effortlessly.</span>
       </h1>
 
       <p className="mt-6 text-lg leading-relaxed" style={{ maxWidth: "34rem" }}>
-        Zero config: describe the workflow in plain English and your coding
-        agent builds it &mdash; no files written by hand. Then watch every step
-        stream live, and rewind, fork, or replay any run from any point. Durable
-        by default: kill the process, pick up where it left off. Any model, any harness.
+        Build with your agent, customize and improve it automatically over
+        time, connect to anything. Observe every step of the workflow frame by
+        frame. Collaborate on the workflows in real time with your team.
       </p>
 
       <div className="flex flex-wrap gap-3 mt-9">
-        <a href="/guide/get-started" className="landing-btn">Read the docs</a>
-        <a href="/introduction" className="landing-btn-ghost">Technical API (for agents) →</a>
-        <a href="https://ui-preview.smithers.sh" target="_blank" rel="noopener noreferrer" className="landing-btn-preview">
-          <span>Sign up for UI preview <span className="landing-brass">→</span></span>
-        </a>
+        <a href="/guide/get-started" className="landing-btn">Get started for free</a>
+        <a href="mailto:will@smithers.sh" className="landing-btn-ghost">Talk to us</a>
+      </div>
+
+      {/* Credentials */}
+      <div className="flex flex-wrap gap-x-8 gap-y-4 mt-9">
+        <div>
+          <div className="landing-display" style={{ fontSize: "1.5rem" }}>216k+</div>
+          <div style={{ fontSize: "0.8rem", color: "var(--l-ink-muted)" }}>lifetime npm downloads</div>
+        </div>
+        <div>
+          <div className="landing-display" style={{ fontSize: "1.5rem" }}>40+</div>
+          <div style={{ fontSize: "0.8rem", color: "var(--l-ink-muted)" }}>known projects building on Smithers</div>
+        </div>
+        <div>
+          <div className="landing-display" style={{ fontSize: "1.5rem" }}>47</div>
+          <div style={{ fontSize: "0.8rem", color: "var(--l-ink-muted)" }}>forks</div>
+        </div>
+        <div>
+          <div className="landing-display" style={{ fontSize: "1.5rem" }}>22</div>
+          <div style={{ fontSize: "0.8rem", color: "var(--l-ink-muted)" }}>external contributors</div>
+        </div>
       </div>
 
       {/* Install command - the primary CTA */}
@@ -95,7 +109,7 @@ mode: "custom"
     </div>
 
     {/* Demo terminal - a live durable run across multiple harnesses */}
-    <div className="landing-card overflow-hidden" style={{ borderRadius: "6px" }}>
+    <div className="landing-card overflow-hidden" style={{ borderRadius: "14px" }}>
       <div
         className="flex items-center justify-between px-4 py-3"
         style={{ borderBottom: "1px solid var(--l-line)", background: "color-mix(in oklch, var(--l-surface) 60%, transparent)" }}

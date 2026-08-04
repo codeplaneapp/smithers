@@ -4,9 +4,9 @@
   "description": "Multi-agent workflows with full observability and time travel. Watch every step live; rewind, fork, or replay any run. Any model, any harness.",
   "theme": "sequoia",
   "colors": {
-    "primary": "#7c6a3c",
-    "light": "#cab16a",
-    "dark": "#b89f5f"
+    "primary": "#0f766e",
+    "light": "#45c4b2",
+    "dark": "#0b5b57"
   },
   "favicon": "/favicon.svg",
   "logo": {
@@ -19,13 +19,13 @@
   },
   "background": {
     "color": {
-      "light": "#faf8f4",
-      "dark": "#0c0a09"
+      "light": "#f7f4ee",
+      "dark": "#0d1514"
     }
   },
   "fonts": {
-    "heading": { "family": "Newsreader" },
-    "body": { "family": "DM Sans" }
+    "heading": { "family": "IBM Plex Mono" },
+    "body": { "family": "IBM Plex Mono" }
   },
   "styling": {
     "eyebrows": "section",
