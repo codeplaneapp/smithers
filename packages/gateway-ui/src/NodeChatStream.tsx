@@ -55,38 +55,48 @@ function FileChangeFile({ file }: { file: NodeChatFile }) {
         : undefined,
     [file.unifiedDiff, file.path, file.kind],
   );
+  const rowStyle: CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    width: "100%",
+    padding: "4px 0",
+    background: "transparent",
+    border: "none",
+    color: theme.text,
+    fontSize: 12,
+    fontFamily: theme.fontMono ?? theme.fontSans,
+    textAlign: "left",
+  };
+  // Paths-only harnesses (Codex/OpenCode/Cursor/Amp, `source: "reported"`)
+  // have no diff to expand: render a plain non-interactive row with a
+  // diff-unavailable affordance, not a focusable button that does nothing.
+  if (!diffFile) {
+    return (
+      <div style={{ borderTop: `1px solid ${theme.border}` }}>
+        <div style={rowStyle}>
+          <span style={{ opacity: 0.6 }}>·</span>
+          <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {file.path}
+          </span>
+          <span style={{ fontSize: 10, color: theme.textDim }}>{file.kind} · diff unavailable</span>
+        </div>
+      </div>
+    );
+  }
   return (
     <div style={{ borderTop: `1px solid ${theme.border}` }}>
       <button
         type="button"
-        onClick={() => diffFile && setOpen((v) => !v)}
-        aria-expanded={diffFile ? open : undefined}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          width: "100%",
-          padding: "4px 0",
-          background: "transparent",
-          border: "none",
-          color: theme.text,
-          fontSize: 12,
-          fontFamily: theme.fontMono ?? theme.fontSans,
-          textAlign: "left",
-          cursor: diffFile ? "pointer" : "default",
-        }}
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        style={{ ...rowStyle, cursor: "pointer" }}
       >
-        <span style={{ opacity: 0.6 }}>{diffFile ? (open ? "▾" : "▸") : "·"}</span>
-        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {file.path}
-        </span>
+        <span style={{ opacity: 0.6 }}>{open ? "▾" : "▸"}</span>
+        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.path}</span>
         <span style={{ fontSize: 10, color: theme.textDim }}>{file.kind}</span>
       </button>
-      {diffFile ? (
-        open ? <DiffHunks file={diffFile} /> : null
-      ) : (
-        <div style={{ fontSize: 11, color: theme.textDim, paddingBottom: 4 }}>diff unavailable</div>
-      )}
+      {open ? <DiffHunks file={diffFile} /> : null}
     </div>
   );
 }
@@ -96,8 +106,8 @@ function FileChangeItem({ item }: { item: Extract<NodeChatItem, { kind: "file_ch
     <Marker variant="note">
       <div style={{ display: "flex", flexDirection: "column", gap: 2, width: "100%" }}>
         <span>{item.label}</span>
-        {item.files.map((file) => (
-          <FileChangeFile key={file.path} file={file} />
+        {item.files.map((file, index) => (
+          <FileChangeFile key={`${file.path}:${index}`} file={file} />
         ))}
       </div>
     </Marker>

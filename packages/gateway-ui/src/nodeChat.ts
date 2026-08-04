@@ -164,6 +164,8 @@ export function buildNodeChatTranscript(
   const maxItems = options.maxItems ?? 200;
   const items: NodeChatItem[] = [];
   const toolIndex = new Map<string, number>();
+  const fileChangeIndex = new Map<string, number>();
+  const pendingFileChanges = new Map<string, { files: NodeChatFile[]; label: string }>();
   let status: string | undefined;
   let engine: string | undefined;
   let attemptKey: string | undefined;
@@ -180,6 +182,8 @@ export function buildNodeChatTranscript(
         label: `attempt ${attempt}${iteration > 0 ? ` · iteration ${iteration}` : ""}`,
       });
       toolIndex.clear();
+      fileChangeIndex.clear();
+      pendingFileChanges.clear();
     }
     attemptKey = key;
   };
@@ -270,14 +274,34 @@ export function buildNodeChatTranscript(
     } else if (kind === "reasoning" || (kind === "note" && agentEvent.entryType === "thought")) {
       if (message) appendText("reasoning", frame.seq, message);
     } else if (kind === "file_change") {
+      const actionId = str(action.id) ?? `${title}:${frame.seq}`;
       const files = parseFileChangeFiles(detail);
-      items.push({
-        kind: "file_change",
-        key: `filechange:${frame.seq}`,
-        label: describeFileChange(files, title),
-        files,
-      });
-      sawContent = true;
+      if (phase !== undefined && phase !== "completed") {
+        // A started edit is merely proposed. Do not show it until the tool
+        // result confirms success; denied/failed edits must not look applied.
+        if (files.length) pendingFileChanges.set(actionId, { files, label: describeFileChange(files, title) });
+      } else {
+        if (agentEvent.ok === false) {
+          pendingFileChanges.delete(actionId);
+          continue;
+        }
+        const pending = pendingFileChanges.get(actionId);
+        const completedFiles = files.length ? files : (pending?.files ?? []);
+        const label = describeFileChange(completedFiles, pending?.label ?? title);
+        pendingFileChanges.delete(actionId);
+        const existing = fileChangeIndex.get(actionId);
+        if (existing === undefined) {
+          fileChangeIndex.set(actionId, items.length);
+          items.push({ kind: "file_change", key: `filechange:${actionId}:${frame.seq}`, label, files: completedFiles });
+        } else {
+          const item = items[existing];
+          if (item?.kind === "file_change") {
+            item.label = label;
+            item.files = completedFiles.length ? completedFiles : item.files;
+          }
+        }
+        sawContent = true;
+      }
     } else if (kind === "web_search") {
       items.push({
         kind: "note",

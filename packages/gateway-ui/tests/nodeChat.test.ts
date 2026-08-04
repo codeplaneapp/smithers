@@ -1,4 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { ClaudeCodeAgent } from "../../agents/src/ClaudeCodeAgent.js";
+import { CodexAgent } from "../../agents/src/CodexAgent.js";
+import { KimiAgent } from "../../agents/src/KimiAgent.js";
+import { OpenCodeAgent } from "../../agents/src/OpenCodeAgent.js";
 import { buildNodeChatTranscript } from "../src/nodeChat.ts";
 import { nodeStatusIndex, rollupNodeStatus } from "../src/runNodeStatus.ts";
 
@@ -6,6 +12,89 @@ let seqCounter = 0;
 function frame(event: string, payload: Record<string, unknown>) {
   seqCounter += 1;
   return { event, payload, seq: seqCounter };
+}
+
+function agentEventFrame(nodeId: string, engine: string, event: Record<string, unknown>) {
+  return frame("AgentEvent", { nodeId, iteration: 0, attempt: 1, engine, event });
+}
+
+type FixtureEntry = {
+  event?: { type?: string; phase?: string; ok?: boolean; message?: string; action?: Record<string, unknown> };
+};
+type Interpreter = { onStdoutLine: (line: string) => Array<Record<string, unknown>> };
+
+const FIXTURES_DIR = join(import.meta.dir, "../../agents/tests/fixtures/cli-transcripts");
+
+// Rebuild the raw CLI stdout line an interpreter consumed at capture time
+// from the recorded AgentEvent envelope (tool id, name, and raw `input` are
+// retained for file-changing tools), so fixtures replay through the live
+// createOutputInterpreter path instead of filtering pre-normalized actions.
+function claudeRawLine(entry: FixtureEntry): string | undefined {
+  const event = entry?.event;
+  const action = event?.action as { id?: string; title?: string; detail?: { input?: unknown } } | undefined;
+  if (event?.type !== "action" || !action) return undefined;
+  if (event.phase === "started") {
+    return JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", id: action.id, name: action.title, input: action.detail?.input ?? {} }],
+      },
+    });
+  }
+  if (event.phase === "completed") {
+    return JSON.stringify({
+      type: "user",
+      message: {
+        content: [
+          { type: "tool_result", tool_use_id: action.id, content: event.message ?? "", is_error: event.ok === false },
+        ],
+      },
+    });
+  }
+  return undefined;
+}
+
+function codexRawLine(entry: FixtureEntry): string | undefined {
+  const event = entry?.event;
+  const action = event?.action as { id?: string; kind?: string; detail?: { changes?: unknown } } | undefined;
+  if (event?.type !== "action" || action?.kind !== "file_change" || !Array.isArray(action.detail?.changes))
+    return undefined;
+  return JSON.stringify({
+    type: "item.completed",
+    item: { id: action.id, type: "file_change", changes: action.detail.changes },
+  });
+}
+
+function opencodeRawLine(entry: FixtureEntry): string | undefined {
+  const event = entry?.event;
+  const action = event?.action as { id?: string; title?: string; detail?: { input?: unknown } } | undefined;
+  // opencode emits the started+completed pair from ONE tool_use line, so only
+  // the recorded started envelopes rebuild a raw line.
+  if (event?.type !== "action" || event.phase !== "started" || !action) return undefined;
+  return JSON.stringify({
+    type: "tool_use",
+    part: { tool: action.title, callID: action.id, state: { status: "completed", input: action.detail?.input ?? {} } },
+  });
+}
+
+function replayFixtureTranscript(
+  relativePath: string,
+  agent: { createOutputInterpreter: () => Interpreter },
+  engine: string,
+  toRawLine: (entry: FixtureEntry) => string | undefined,
+  nodeId = "mission:replay",
+) {
+  const interpreter = agent.createOutputInterpreter();
+  const frames = [];
+  for (const line of readFileSync(join(FIXTURES_DIR, relativePath), "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    const raw = toRawLine(JSON.parse(line));
+    if (!raw) continue;
+    for (const event of interpreter.onStdoutLine(raw)) {
+      frames.push(agentEventFrame(nodeId, engine, event as Record<string, unknown>));
+    }
+  }
+  return buildNodeChatTranscript(frames, nodeId);
 }
 
 function output(nodeId: string, text: string, extra: Record<string, unknown> = {}) {
@@ -89,7 +178,12 @@ describe("buildNodeChatTranscript", () => {
           detail: {
             changes: [{ file: "legacy/only.ts" }],
             fileChanges: [
-              { path: "src/a.ts", kind: "modified", unifiedDiff: "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,1 +1,1 @@\n-x\n+y", source: "reconstructed" },
+              {
+                path: "src/a.ts",
+                kind: "modified",
+                unifiedDiff: "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,1 +1,1 @@\n-x\n+y",
+                source: "reconstructed",
+              },
             ],
           },
         }),
@@ -103,6 +197,159 @@ describe("buildNodeChatTranscript", () => {
         files: [{ path: "src/a.ts", kind: "modified", unifiedDiff: expect.stringContaining("@@ -1,1 +1,1 @@") }],
       },
     ]);
+  });
+
+  test("renders a file change only after its successful completion, once", () => {
+    const transcript = buildNodeChatTranscript(
+      [
+        agentAction(
+          "implement",
+          {
+            kind: "file_change",
+            id: "edit-1",
+            title: "Edit",
+            detail: { fileChanges: [{ path: "src/a.ts", kind: "modified" }] },
+          },
+          { phase: "started" },
+        ),
+        agentAction(
+          "implement",
+          { kind: "file_change", id: "edit-1", title: "Edit", detail: {} },
+          { phase: "completed", ok: true },
+        ),
+        agentAction(
+          "implement",
+          { kind: "file_change", id: "edit-1", title: "Edit", detail: {} },
+          { phase: "completed", ok: true },
+        ),
+        agentAction(
+          "implement",
+          {
+            kind: "file_change",
+            id: "edit-2",
+            title: "Edit",
+            detail: { fileChanges: [{ path: "src/b.ts", kind: "modified" }] },
+          },
+          { phase: "started" },
+        ),
+        agentAction(
+          "implement",
+          { kind: "file_change", id: "edit-2", title: "Edit", detail: {} },
+          { phase: "completed", ok: false },
+        ),
+      ],
+      "implement",
+    );
+    expect(transcript.items).toMatchObject([{ kind: "file_change", files: [{ path: "src/a.ts" }] }]);
+  });
+
+  test("replays the recorded Claude edit transcript through the live interpreter into one confirmed change with its diff", () => {
+    const transcript = replayFixtureTranscript(
+      "claude-code/edit-basic.jsonl",
+      new ClaudeCodeAgent(),
+      "claude-code",
+      claudeRawLine,
+    );
+    const files = transcript.items.filter((item) => item.kind === "file_change");
+    // Every recorded Edit correlates its started/completed pair by action id:
+    // one transcript item per edit, each carrying the reconstructed diff.
+    expect(files.length).toBeGreaterThan(0);
+    for (const item of files) {
+      if (item.kind !== "file_change") continue;
+      for (const file of item.files) {
+        expect(file.unifiedDiff).toContain("@@");
+      }
+    }
+    expect(
+      files.some((item) => item.kind === "file_change" && item.files.some((f) => f.path === "/repo/ui/TODO.md")),
+    ).toBe(true);
+  });
+
+  test("replays the recorded Claude write transcript: created files get a diff, overwritten files stay paths-only", () => {
+    const transcript = replayFixtureTranscript(
+      "claude-code/write-basic.jsonl",
+      new ClaudeCodeAgent(),
+      "claude-code",
+      claudeRawLine,
+    );
+    const files = transcript.items.filter((item) => item.kind === "file_change");
+    const byPath = new Map<string, { kind: string; unifiedDiff?: string }>();
+    for (const item of files) {
+      if (item.kind !== "file_change") continue;
+      for (const file of item.files) byPath.set(file.path, file);
+    }
+    // "File created successfully at:" → old side genuinely empty → real diff.
+    const created = byPath.get("/repo/ui/docs/cloud-api-inventory.md");
+    expect(created?.kind).toBe("created");
+    expect(created?.unifiedDiff).toContain("+++ b/repo/ui/docs/cloud-api-inventory.md");
+    // "has been updated" → prior content unknown → paths-only, no fabrication.
+    const updated = byPath.get("/repo/ui/e2e/cloud/README.md");
+    expect(updated).toEqual({ path: "/repo/ui/e2e/cloud/README.md", kind: "modified" });
+  });
+
+  test("replays the recorded Codex transcript into paths-only confirmed changes", () => {
+    const transcript = replayFixtureTranscript(
+      "codex/file-changes-basic.jsonl",
+      new CodexAgent(),
+      "codex",
+      codexRawLine,
+    );
+    const files = transcript.items.filter((item) => item.kind === "file_change");
+    expect(files.length).toBeGreaterThan(0);
+    for (const item of files) {
+      if (item.kind !== "file_change") continue;
+      for (const file of item.files) expect(file.unifiedDiff).toBeUndefined();
+    }
+    expect(files.some((item) => item.kind === "file_change" && item.files.some((f) => f.kind === "created"))).toBe(
+      true,
+    );
+  });
+
+  test("replays the recorded OpenCode transcript into one confirmed change per started edit", () => {
+    const transcript = replayFixtureTranscript(
+      "opencode/write-edit-basic.jsonl",
+      new OpenCodeAgent(),
+      "opencode",
+      opencodeRawLine,
+    );
+    const files = transcript.items.filter((item) => item.kind === "file_change");
+    expect(files.length).toBeGreaterThan(0);
+    const paths = files.flatMap((item) => (item.kind === "file_change" ? item.files.map((f) => f.path) : []));
+    expect(paths).toContain("/repo/ui/src/ui/onboarding/SurveyCard.tsx");
+    for (const item of files) {
+      if (item.kind !== "file_change") continue;
+      for (const file of item.files) expect(file.unifiedDiff).toBeUndefined();
+    }
+  });
+
+  test("Kimi WriteFile started/completed correlation finalizes the pending change (regression: completion kept kind tool)", () => {
+    const agent = new KimiAgent();
+    const interpreter = agent.createOutputInterpreter();
+    const events = [
+      ...interpreter.onStdoutLine(
+        JSON.stringify({
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            {
+              id: "call_1",
+              type: "function",
+              function: { name: "WriteFile", arguments: JSON.stringify({ path: "/repo/src/a.ts", content: "hello" }) },
+            },
+          ],
+        }),
+      ),
+      ...interpreter.onStdoutLine(
+        JSON.stringify({ role: "tool", tool_call_id: "call_1", content: "wrote /repo/src/a.ts" }),
+      ),
+    ];
+    const transcript = buildNodeChatTranscript(
+      events.map((event) => agentEventFrame("implement", "kimi", event)),
+      "implement",
+    );
+    const files = transcript.items.filter((item) => item.kind === "file_change");
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatchObject({ kind: "file_change", files: [{ path: "/repo/src/a.ts", kind: "modified" }] });
   });
 
   test("inserts attempt markers and derives lifecycle status", () => {
