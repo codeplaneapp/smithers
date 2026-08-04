@@ -26,11 +26,17 @@ function diffLines(oldText, newText) {
   // side contributes NO lines — never a phantom blank line.
   if (n === 0) return b.map((text, index) => ({ kind: "add", text, newLine: index + 1 }));
   if (m === 0) return a.map((text, index) => ({ kind: "del", text, oldLine: index + 1 }));
-  // LCS table.
-  const lcs = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+  // LCS table, one flat typed array so the cell bound above is also a BYTE
+  // bound (4 bytes/cell). A row-per-line array of Uint32Arrays would carry
+  // per-object overhead the cell count does not model: `n = 1_000_000, m = 1`
+  // passes `n * m <= MAX_DIFF_CELLS` yet allocates a million typed arrays.
+  const width = m + 1;
+  const lcs = new Uint32Array((n + 1) * width);
   for (let i = n - 1; i >= 0; i--) {
+    const row = i * width;
+    const nextRow = row + width;
     for (let j = m - 1; j >= 0; j--) {
-      lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+      lcs[row + j] = a[i] === b[j] ? lcs[nextRow + j + 1] + 1 : Math.max(lcs[nextRow + j], lcs[row + j + 1]);
     }
   }
   const ops = [];
@@ -41,7 +47,7 @@ function diffLines(oldText, newText) {
       ops.push({ kind: "ctx", text: a[i], oldLine: i + 1, newLine: j + 1 });
       i++;
       j++;
-    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
+    } else if (lcs[(i + 1) * width + j] >= lcs[i * width + j + 1]) {
       ops.push({ kind: "del", text: a[i], oldLine: i + 1 });
       i++;
     } else {

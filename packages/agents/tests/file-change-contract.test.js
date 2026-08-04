@@ -646,6 +646,16 @@ describe("reconstructUnifiedDiff safety and patch shape", () => {
     expect(reconstructUnifiedDiff("src/a.ts", huge, "")).toBeUndefined();
   });
 
+  it("diffs a lopsided change (huge old side, tiny new side) inside the cell bound", () => {
+    // n * m stays under the bound, so this allocates the LCS grid — as ONE
+    // flat Uint32Array, not one typed array per old line.
+    const old = Array.from({ length: 100_000 }, (_, index) => `line ${index}`).join("\n");
+    const diff = reconstructUnifiedDiff("src/a.ts", old, "line 0\nreplaced");
+    expect(diff).toContain("@@");
+    expect(diff).toContain("+replaced");
+    expect(diff).toContain("-line 1");
+  });
+
   it("falls back to no diff before allocating an unbounded LCS matrix", () => {
     const text = Array.from({ length: 1_001 }, (_, index) => String(index)).join("\n");
     expect(reconstructUnifiedDiff("src/a.ts", text, text.replace("1000", "changed"))).toBeUndefined();
