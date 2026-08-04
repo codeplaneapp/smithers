@@ -290,18 +290,19 @@ describe("gateway hijack lifecycle", () => {
   /**
    * @param {ReturnType<typeof createValueWorkflow>} workflow
    * @param {string} runId
+   * @param {string} status
    */
-  async function waitForUnparked(workflow, runId, timeoutMs = 20_000) {
+  async function waitForRunStatus(workflow, runId, status, timeoutMs = 20_000) {
     const adapter = new SmithersDb(workflow.db);
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       const run = await adapter.getRun(runId);
-      if (run && run.status !== "cancelled") {
+      if (run && run.status === status) {
         return run;
       }
       await sleep(50);
     }
-    throw new Error(`run ${runId} stayed hijack-parked (cancelled)`);
+    throw new Error(`run ${runId} never reached ${status}`);
   }
 
   /** Minimal RPC client: challenge → connect → one request. */
@@ -357,9 +358,10 @@ describe("gateway hijack lifecycle", () => {
     const response = await rpcCall(port, "resumeRun", { runId: "run-pty" });
     expect(response.ok).toBe(true);
     expect(response.payload).toMatchObject({ runId: "run-pty", status: "resume_requested" });
-    const resumed = await waitForUnparked(workflow, "run-pty");
+    // The hijack ends and the workflow continues autonomously to completion.
+    const resumed = await waitForRunStatus(workflow, "run-pty", "finished");
     expect(resumed.hijackRequestedAtMs).toBeNull();
-    expect(gateway.activeRuns.has("run-pty") || resumed.status === "finished").toBe(true);
+    expect(resumed.errorJson).toBeNull();
   });
 
   test("closing the PTY hijack socket hands the parked run back to the workflow", async () => {
@@ -378,8 +380,8 @@ describe("gateway hijack lifecycle", () => {
     // The monitor tab closes: the socket drops, teardown kills the hijack
     // process mid-session, and the gateway must resume the run itself.
     ws.close();
-    const resumed = await waitForUnparked(workflow, "run-pty");
-    expect(["running", "finished"]).toContain(resumed.status);
+    const resumed = await waitForRunStatus(workflow, "run-pty", "finished");
+    expect(resumed.hijackRequestedAtMs).toBeNull();
   });
 });
 

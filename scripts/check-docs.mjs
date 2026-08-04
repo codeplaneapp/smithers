@@ -3776,7 +3776,7 @@ function checkCliAgentHijackDocsMatchLauncher() {
     [NATIVE_HIJACK_ENGINE_SOURCE, '| "antigravity"'],
     [CLI_HIJACK_SOURCE, 'candidate.engine === "antigravity"'],
     [CLI_HIJACK_SOURCE, 'command: "agy"'],
-    [CLI_HIJACK_SOURCE, 'args: ["--resume", candidate.resume]'],
+    [CLI_HIJACK_SOURCE, 'args = ["--resume", candidate.resume]'],
     [CLI_AGENTS_INTEGRATION, "| `ClaudeCodeAgent` | `claude --resume` |"],
     [CLI_AGENTS_INTEGRATION, "| `CodexAgent` | `codex resume` |"],
     [CLI_AGENTS_INTEGRATION, "| `AntigravityAgent` | `agy --conversation` |"],
