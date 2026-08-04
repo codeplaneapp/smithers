@@ -514,6 +514,7 @@ function sandboxProfile(
   execPathsInput: readonly string[],
   execRootsInput: readonly string[],
   hostHome: string,
+  extraWriteRootsInput: readonly string[] = [],
 ): string {
   const credentialPaths = hostHome
     ? [
@@ -536,6 +537,9 @@ function sandboxProfile(
         .join(" ")
     : "";
   const readRoots = explicitPathspec(readRootsInput.map((path) => resolve(path)));
+  const writeRoots = explicitPathspec(
+    extraWriteRootsInput.map((path) => realpathSync(path)).filter((path) => path !== realpathSync(writeRoot)),
+  );
   const execPaths = explicitPathspec(execPathsInput.map((path) => resolve(path)));
   const execRoots = explicitPathspec(execRootsInput.map((path) => realpathSync(path)));
   const traversal = new Set<string>(["/"]);
@@ -568,7 +572,7 @@ function sandboxProfile(
       ? `(deny file-read* ${credentialPaths} (regex #"/\\.env(?:\\..*)?$"))`
       : `(deny file-read* (regex #"/\\.env(?:\\..*)?$"))`,
     `(allow file-read* ${readRules})`,
-    `(allow file-write* (subpath "${sandboxEscape(realpathSync(writeRoot))}"))`,
+    `(allow file-write* (subpath "${sandboxEscape(realpathSync(writeRoot))}")${writeRoots.map((path) => ` (subpath "${sandboxEscape(path)}")`).join("")})`,
     "(deny network*)",
   ].join("\n");
 }
@@ -706,6 +710,10 @@ export function prepareIsolatedGateDependencies(
       sandboxExecutablePaths(pathValue, pnpm),
       [parentReal],
       homedir(),
+      // pnpm mkdirs and populates its store even for offline frozen installs;
+      // the store is pnpm's own content-addressed cache, sealed again for the
+      // gate run itself.
+      [store],
     );
     const result = spawnSync("/usr/bin/sandbox-exec", ["-p", profile, "--", pnpm, ...argv.slice(1)], {
       cwd: copy,
