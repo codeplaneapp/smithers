@@ -532,8 +532,7 @@ function agentHijackConfig(agent, attemptMeta) {
         : typeof agent?.model === "string"
           ? agent.model
           : null,
-    yolo:
-      typeof opts.yolo === "boolean" ? opts.yolo : typeof agent?.yolo === "boolean" ? agent.yolo : null,
+    yolo: typeof opts.yolo === "boolean" ? opts.yolo : typeof agent?.yolo === "boolean" ? agent.yolo : null,
     permissionMode: typeof opts.permissionMode === "string" ? opts.permissionMode : null,
     dangerouslySkipPermissions: opts.dangerouslySkipPermissions === true,
     configDir: typeof opts.configDir === "string" ? opts.configDir : null,

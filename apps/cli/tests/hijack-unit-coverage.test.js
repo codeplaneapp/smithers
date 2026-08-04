@@ -345,8 +345,9 @@ describe("buildHijackLaunchSpec", () => {
 
   test("codex, amp, and antigravity map the recorded bypass intent to their own flags", () => {
     const base = { mode: "native-cli", resume: "R", cwd: "/c" };
-    expect(buildHijackLaunchSpec({ ...base, engine: "codex", config: { yolo: true, model: "gpt-5" } }, {}).args)
-      .toEqual(["resume", "R", "-C", "/c", "--model", "gpt-5", "--dangerously-bypass-approvals-and-sandbox"]);
+    expect(
+      buildHijackLaunchSpec({ ...base, engine: "codex", config: { yolo: true, model: "gpt-5" } }, {}).args,
+    ).toEqual(["resume", "R", "-C", "/c", "--model", "gpt-5", "--dangerously-bypass-approvals-and-sandbox"]);
     expect(buildHijackLaunchSpec({ ...base, engine: "amp", config: { yolo: true } }, {}).args).toEqual([
       "threads",
       "continue",
@@ -354,8 +355,7 @@ describe("buildHijackLaunchSpec", () => {
       "--dangerously-allow-all",
     ]);
     expect(
-      buildHijackLaunchSpec({ ...base, engine: "antigravity", config: { dangerouslySkipPermissions: true } }, {})
-        .args,
+      buildHijackLaunchSpec({ ...base, engine: "antigravity", config: { dangerouslySkipPermissions: true } }, {}).args,
     ).toEqual(["--conversation", "R", "--dangerously-skip-permissions"]);
   });
 

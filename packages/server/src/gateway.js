@@ -6750,7 +6750,11 @@ a { color: var(--brand); }</style>
         if (!run) {
           return;
         }
-        if (run.status === "finished" || run.status === "failed" || (run.status === "cancelled" && !isHijackParkedRun(run))) {
+        if (
+          run.status === "finished" ||
+          run.status === "failed" ||
+          (run.status === "cancelled" && !isHijackParkedRun(run))
+        ) {
           return;
         }
         await this.startRun(workflowKey, {}, auth, runId, { resume: true });
@@ -9263,7 +9267,11 @@ a { color: var(--brand); }</style>
         if (!run) {
           return responseError(frame.id, "NOT_FOUND", `Run not found: ${runId}`);
         }
-        if (run.status === "finished" || run.status === "failed" || (run.status === "cancelled" && !isHijackParkedRun(run))) {
+        if (
+          run.status === "finished" ||
+          run.status === "failed" ||
+          (run.status === "cancelled" && !isHijackParkedRun(run))
+        ) {
           return responseOk(frame.id, { runId, status: "already_terminal" });
         }
         if (isHijackParkedRun(run)) {

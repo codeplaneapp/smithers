@@ -46,7 +46,9 @@ const integrateSchema = z.looseObject({
 });
 
 const inputSchema = z.object({
-  prompt: z.string().default("Work through TODO.md until everything is done, reviewed, and e2e-proven; then keep polishing."),
+  prompt: z
+    .string()
+    .default("Work through TODO.md until everything is done, reviewed, and e2e-proven; then keep polishing."),
   maxLanes: z.number().int().min(1).max(8).default(4),
 });
 
@@ -92,10 +94,12 @@ export default smithers((ctx) => {
         <Sequence>
           {/* Plan panel: Fable and Sol plan independently; Fable judges + synthesizes the single plan Sol implements. */}
           <Parallel maxConcurrency={2}>
-            {([
-              { node: "mission:plan-fable", agent: fablePlanner, voice: "Fable" },
-              { node: "mission:plan-sol", agent: solPlanner, voice: "Codex Sol" },
-            ] as const).map((p) => (
+            {(
+              [
+                { node: "mission:plan-fable", agent: fablePlanner, voice: "Fable" },
+                { node: "mission:plan-sol", agent: solPlanner, voice: "Codex Sol" },
+              ] as const
+            ).map((p) => (
               <Task key={p.node} id={p.node} output={outputs.plan} agent={p.agent}>
                 {[
                   MISSION_CONTEXT,
@@ -122,7 +126,11 @@ export default smithers((ctx) => {
               const review = reviewFor(lane.id);
               return (
                 <Sequence key={lane.id}>
-                  <Task id={`mission:impl:${lane.id}`} output={outputs.laneResult} agent={lane.uiHeavy ? kimiUi : solImplementer}>
+                  <Task
+                    id={`mission:impl:${lane.id}`}
+                    output={outputs.laneResult}
+                    agent={lane.uiHeavy ? kimiUi : solImplementer}
+                  >
                     {[
                       MISSION_CONTEXT,
                       `LANE ${lane.id}: ${lane.title}`,

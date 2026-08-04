@@ -55,11 +55,7 @@ function extractHijackConfig(value, meta) {
   /** @type {import("./HijackCandidate.ts").HijackCandidateConfig} */
   const config = {};
   const model =
-    typeof source.model === "string"
-      ? source.model
-      : typeof meta.agentModel === "string"
-        ? meta.agentModel
-        : undefined;
+    typeof source.model === "string" ? source.model : typeof meta.agentModel === "string" ? meta.agentModel : undefined;
   if (model) config.model = model;
   if (source.yolo === true) config.yolo = true;
   if (typeof source.permissionMode === "string") config.permissionMode = source.permissionMode;
