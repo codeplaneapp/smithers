@@ -6,10 +6,11 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
 ## 0.33.1 (2026-08-04)
 
-59 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 256 files changed, +31293 / -667 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 247 files, +8813 / -462). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
+61 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 258 files changed, +31371 / -668 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 249 files, +8891 / -463). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
 
-### Features (5)
+### Features (6)
 
+- feat(cli): env-configurable detached-admission timeout (SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS) ([009a0334f6](https://github.com/smithersai/smithers/commit/009a0334f6))
 - feat(workflows): n8n-mvp-mission v2 ([85d613cae3](https://github.com/smithersai/smithers/commit/85d613cae3))
 - feat(server): compute live working-copy diffs for non-terminal runs ([496cbf1000](https://github.com/smithersai/smithers/commit/496cbf1000))
 - feat(gateway-ui,ui-core): live diff view while a run is executing ([4657788ee2](https://github.com/smithersai/smithers/commit/4657788ee2))
@@ -47,9 +48,10 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - fix(server): keep /health live by making workflow \<UI\> discovery lazy and batched ([f8f91d58bb](https://github.com/smithersai/smithers/commit/f8f91d58bb))
 - fix(pack): guard crash-recovery render against missing output rows ([eb42b28c9e](https://github.com/smithersai/smithers/commit/eb42b28c9e))
 
-### Documentation (8)
+### Documentation (9)
 
 - docs(release): fold the #1464 reliability fixes into 0.33.1 ([eeee5f30c7](https://github.com/smithersai/smithers/commit/eeee5f30c7))
+- docs(release): record the gateway schema-head test bump in 0.33.1 ([ad3ddd1ac3](https://github.com/smithersai/smithers/commit/ad3ddd1ac3))
 - docs(release): record the n8n-mvp-mission-v2 typecheck fix in 0.33.1 ([deae91ce52](https://github.com/smithersai/smithers/commit/deae91ce52))
 - docs: document the file-change contract, per-engine support, and regenerated llms bundles ([a7383275ce](https://github.com/smithersai/smithers/commit/a7383275ce))
 - docs(rpc): document live diffs for getRunDiff and getNodeDiff ([3e5678369c](https://github.com/smithersai/smithers/commit/3e5678369c))
