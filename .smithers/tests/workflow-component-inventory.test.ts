@@ -175,6 +175,9 @@ const workflowOwners = {
     "federation-static-import-audit.tsx",
     "federation-static-import-hardening.tsx",
     "federation-workflow-hardening-2.tsx",
+    "file-change-contract.tsx",
+    "n8n-gap-research.tsx",
+    "n8n-mvp-mission.tsx",
     "pr-polish-panel.tsx",
     "rename-dependents.tsx",
     "rename-package.tsx",
@@ -446,6 +449,34 @@ describe("federation workflow smoke coverage", () => {
 
     const upgradeDependents = await renderWorkflowFile("upgrade-dependents.tsx");
     expect(upgradeDependents.tasks.map((task) => task.nodeId)).toContain("discover");
+  }, 30_000);
+
+  test("file-change-contract leads with the spec task before fixtures, polish, and land", async () => {
+    const frame = await renderWorkflowFile("file-change-contract.tsx");
+    const nodeIds = frame.tasks.map((task) => task.nodeId);
+    expect(nodeIds).toContain("fcc:spec");
+    expect(nodeIds[0]).toBe("fcc:spec");
+    expect(frame.tasks[0]?.outputSchema).toBeDefined();
+  }, 30_000);
+
+  test("n8n research fans out one task per facet before synthesizing", async () => {
+    const frame = await renderWorkflowFile("n8n-gap-research.tsx");
+    const nodeIds = frame.tasks.map((task) => task.nodeId);
+    const facets = nodeIds.filter((id) => id.startsWith("gap:") && id !== "gap:synthesize");
+    expect(facets.length).toBeGreaterThan(1);
+    expect(nodeIds).toContain("gap:synthesize");
+    expect(nodeIds.indexOf("gap:synthesize")).toBeGreaterThan(nodeIds.indexOf(facets[0]!));
+  }, 30_000);
+
+  test("n8n-mvp-mission opens each round with an independent plan panel it then judges", async () => {
+    const frame = await renderWorkflowFile("n8n-mvp-mission.tsx");
+    const nodeIds = frame.tasks.map((task) => task.nodeId);
+    expect(nodeIds).toContain("mission:plan-fable");
+    expect(nodeIds).toContain("mission:plan-sol");
+    expect(nodeIds.indexOf("mission:plan-fable")).toBeLessThan(nodeIds.indexOf("mission:plan"));
+    // Never-stop mission: no lanes exist until the judge emits a plan, so the
+    // first frame stops at the synthesized plan rather than mounting lanes.
+    expect(nodeIds.some((id) => id.startsWith("mission:impl:"))).toBe(false);
   }, 30_000);
 
   test("pr-polish-panel opens with independent reviews before the isolated polish step", async () => {
