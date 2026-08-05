@@ -444,7 +444,8 @@ export function summarizeRunStatus(params) {
             ? `'${loop.id}' (maxIterations ${loop.maxIterations} reached, until condition never satisfied)`
             : `'${loop.id}' (until condition never satisfied)`,
         );
-      const extra = exhaustedLoops.length > MAX_BOTTLENECK_NODES ? `, +${exhaustedLoops.length - MAX_BOTTLENECK_NODES} more` : "";
+      const extra =
+        exhaustedLoops.length > MAX_BOTTLENECK_NODES ? `, +${exhaustedLoops.length - MAX_BOTTLENECK_NODES} more` : "";
       reason = `run finished, but loop ${loopDescriptions.join(", ")}${extra} exhausted without converging`;
     } else {
       verdict = "done";

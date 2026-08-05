@@ -4,7 +4,7 @@ export default defineConfig({
   entry: { index: "src/index.js" },
   dts: { only: true, resolve: false },
   outDir: "src",
-  clean: false,
+  clean: ["index.d.ts"],
   format: ["esm"],
   silent: true,
 });

@@ -45,6 +45,44 @@ describe("Loop boundary modes", () => {
     expect(summaryRows[0].ticks).toBe(3);
     cleanup();
   });
+  workflowTest("return-last exhaustion surfaces exhaustedLoops on the finished result (#1464 AWF-1)", async () => {
+    const { Workflow, Task, smithers, outputs, cleanup } = createTestSmithers({
+      tick: z.object({ note: z.string() }),
+    });
+    const workflow = smithers(() => (
+      <Workflow name="loop-exhausted-result">
+        <Loop id="gate" until={false} maxIterations={3} onMaxReached="return-last">
+          <Task id="tick" output={outputs.tick}>
+            {{ note: "never approved" }}
+          </Task>
+        </Loop>
+      </Workflow>
+    ));
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+    expect(result.status).toBe("finished");
+    // The loop exited via return-last with `until` still false: the run must
+    // carry the exhaustion marker so status/why can refuse a green verdict.
+    expect(result.exhaustedLoops).toEqual([{ id: "gate", iteration: 2, maxIterations: 3 }]);
+    cleanup();
+  });
+  workflowTest("a converged loop reports no exhaustedLoops (#1464 AWF-1)", async () => {
+    const { Workflow, Task, smithers, outputs, cleanup } = createTestSmithers({
+      tick: z.object({ note: z.string() }),
+    });
+    const workflow = smithers((ctx) => (
+      <Workflow name="loop-converged-result">
+        <Loop id="gate" until={ctx.iteration >= 1} maxIterations={5} onMaxReached="return-last">
+          <Task id="tick" output={outputs.tick}>
+            {{ note: `tick-${ctx.iteration}` }}
+          </Task>
+        </Loop>
+      </Workflow>
+    ));
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+    expect(result.status).toBe("finished");
+    expect(result.exhaustedLoops).toBeUndefined();
+    cleanup();
+  });
   workflowTest("maxIterations=1 with return-last runs the body exactly once", async () => {
     const { Workflow, Task, smithers, outputs, tables, db, cleanup } = createTestSmithers({
       tick: z.object({ note: z.string() }),

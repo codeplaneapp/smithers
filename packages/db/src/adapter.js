@@ -3812,8 +3812,59 @@ export class SmithersDb {
          FROM _smithers_ralph
          WHERE run_id = ?`,
         [runId],
-        { booleanColumns: ["done"] },
+        { booleanColumns: ["done", "exhausted"] },
       ),
+    );
+  }
+  /**
+   * Register a live agent subprocess so a later CLI invocation can reap it if
+   * its engine dies without cleanup (#1464 AWF-3, #1332).
+   * @param {{ pid: number; runId: string; nodeId?: string | null; enginePid: number; startedAtMs: number }} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+  registerAgentProcess(row) {
+    return this.write(`register agent process ${row.pid}`, () =>
+      this.internalStorage.dialect === POSTGRES
+        ? this.internalStorage.execute(
+            `INSERT INTO _smithers_agent_processes (pid, run_id, node_id, engine_pid, started_at_ms)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(pid)
+             DO UPDATE SET run_id = excluded.run_id, node_id = excluded.node_id,
+                           engine_pid = excluded.engine_pid, started_at_ms = excluded.started_at_ms`,
+            [row.pid, row.runId, row.nodeId ?? null, row.enginePid, row.startedAtMs],
+          )
+        : this.internalStorage.execute(
+            `INSERT OR REPLACE INTO _smithers_agent_processes (pid, run_id, node_id, engine_pid, started_at_ms)
+             VALUES (?, ?, ?, ?, ?)`,
+            [row.pid, row.runId, row.nodeId ?? null, row.enginePid, row.startedAtMs],
+          ),
+    );
+  }
+  /**
+   * @param {number} pid
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+  unregisterAgentProcess(pid) {
+    return this.write(`unregister agent process ${pid}`, () =>
+      this.internalStorage.execute(`DELETE FROM _smithers_agent_processes WHERE pid = ?`, [pid]),
+    );
+  }
+  /**
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+  listAgentProcesses() {
+    return this.read(`list agent processes`, () =>
+      this.internalStorage.queryAll(`SELECT * FROM _smithers_agent_processes ORDER BY started_at_ms ASC`),
+    );
+  }
+  /**
+   * Drop every registry row owned by one engine pid (graceful engine exit).
+   * @param {number} enginePid
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+  clearAgentProcessesForOwner(enginePid) {
+    return this.write(`clear agent processes for owner ${enginePid}`, () =>
+      this.internalStorage.execute(`DELETE FROM _smithers_agent_processes WHERE engine_pid = ?`, [enginePid]),
     );
   }
   /**

@@ -96,6 +96,13 @@ The run-row `status` stays `finished` (`RunState` stays `succeeded`), so existin
 `finished === success` callers and `continueOnFail` semantics are unchanged: the
 count is the signal, not a new terminal status.
 
+The same applies to **loops that never converged**: a `<Loop>`/`<ReviewLoop>`
+exiting via `onMaxReached: "return-last"` with its `until` predicate still false
+is recorded as exhausted. The finished run's `RunResult` and `RunFinished` event
+carry `exhaustedLoops` (`id`, `iteration`, `maxIterations`), `status` reports the
+verdict `degraded` instead of `done`, and `why` names the loop and its unmet
+condition instead of "nothing is blocked".
+
 To avoid rate-limit failures, bound fan-out concurrency with [`<Parallel maxConcurrency={N}>`](/components/parallel) so you don't burst past the provider's limit.
 </Warning>
 

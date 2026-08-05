@@ -39,6 +39,12 @@ export type RunFinishedEvent = RunEventBase & {
   type: "RunFinished";
   failedChildren?: number;
   failedChildKeys?: readonly string[];
+  /** Loops that exited via return-last with `until` still false (#1464 AWF-1). */
+  exhaustedLoops?: readonly {
+    id: string;
+    iteration: number;
+    maxIterations: number | null;
+  }[];
 };
 export type RunFailedEvent = RunEventBase & { type: "RunFailed"; error?: unknown };
 export type RunCancelledEvent = RunEventBase & { type: "RunCancelled" };

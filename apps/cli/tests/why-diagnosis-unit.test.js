@@ -1027,3 +1027,43 @@ describe("why diagnosis unit coverage", () => {
     expect(commands[1].description).toBe("Unblock run");
   });
 });
+
+describe("loop exhaustion naming (#1464 AWF-1)", () => {
+  test("a finished run whose loop exhausted names the loop and the unmet until condition", async () => {
+    const adapter = makeAdapter({
+      run: runRow({ status: "finished", finishedAtMs: NOW - 1_000 }),
+    });
+    adapter.listEventsByTypeEffect = (_runId, type) =>
+      Effect.succeed(
+        type === "RunFinished"
+          ? [
+              {
+                seq: 1,
+                type: "RunFinished",
+                payloadJson: JSON.stringify({
+                  exhaustedLoops: [{ id: "review-loop", iteration: 3, maxIterations: 4 }],
+                }),
+              },
+            ]
+          : [],
+      );
+    const diagnosis = await diagnose(adapter);
+    expect(diagnosis.summary).toContain("review-loop");
+    expect(diagnosis.summary).toContain("until");
+    expect(diagnosis.summary).toContain("maxIterations 4");
+    expect(diagnosis.summary).not.toContain("nothing is blocked");
+    // The human renderer must not short-circuit a finished run back to the
+    // clean message when the summary names an exhausted loop.
+    expect(renderWhyDiagnosisHuman(diagnosis)).toContain("review-loop");
+  });
+
+  test("a finished run with no exhausted loops keeps the clean summary", async () => {
+    const adapter = makeAdapter({
+      run: runRow({ status: "finished", finishedAtMs: NOW - 1_000 }),
+    });
+    adapter.listEventsByTypeEffect = (_runId, type) =>
+      Effect.succeed(type === "RunFinished" ? [{ seq: 1, type: "RunFinished", payloadJson: JSON.stringify({}) }] : []);
+    const diagnosis = await diagnose(adapter);
+    expect(diagnosis.summary).toBe("Run is finished, nothing is blocked.");
+  });
+});

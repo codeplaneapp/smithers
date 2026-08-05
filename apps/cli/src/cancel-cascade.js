@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { finalizeCancelledRun, isRunHeartbeatFresh } from "@smthrs/engine";
 import { isPidAlive, parseRuntimeOwnerPid } from "@smthrs/engine/runtime-owner";
+import { reapOrphanedAgentProcesses } from "./reap-orphaned-agents.js";
 /** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("@smthrs/db/adapter").RunRow} RunRow */
 
@@ -143,6 +144,13 @@ export async function finalizeCancelledOwnedRun(adapter, run, options = {}) {
       graceMs: options.ownerKillGraceMs,
     });
     ownerTerminated = termination.terminated;
+  }
+  // Agent CLIs are spawned as their own process-group leaders, so the owner
+  // group kill above no longer reaches them. Once the run is fenced
+  // cancelled, its run row stops reading as live and the sweep reaps any of
+  // its agents still registered (and still alive) here.
+  if (cancellation.won) {
+    await reapOrphanedAgentProcesses(adapter).catch(() => ({ reaped: [] }));
   }
   return { cancellation, ownerPid, ownerTerminated };
 }

@@ -348,8 +348,17 @@ const CREATE_TABLE_STATEMENTS = [
     ralph_id TEXT NOT NULL,
     iteration INTEGER NOT NULL DEFAULT 0,
     done INTEGER NOT NULL DEFAULT 0,
+    exhausted INTEGER NOT NULL DEFAULT 0,
     updated_at_ms INTEGER NOT NULL,
     PRIMARY KEY (run_id, ralph_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS _smithers_agent_processes (
+    pid INTEGER NOT NULL,
+    run_id TEXT NOT NULL,
+    node_id TEXT,
+    engine_pid INTEGER NOT NULL,
+    started_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (pid)
   )`,
   `CREATE TABLE IF NOT EXISTS _smithers_cron (
     cron_id TEXT PRIMARY KEY,

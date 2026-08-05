@@ -36,6 +36,11 @@ export function runCommandEffect(command, args, options) {
     idleTimeoutMs,
     maxOutputBytes,
     truncateKeep,
+    // Spawn agent CLIs as their own process-group leader (POSIX) so cleanup
+    // can kill the whole group — subagents, MCP servers, tool children —
+    // instead of just the wrapper pid, and so an orphan reaper can address
+    // the group by pgid after an engine death (#1464 AWF-3, #1332).
+    detached: process.platform !== "win32",
     onStdout,
     onStderr,
     onProcess,

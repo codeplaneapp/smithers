@@ -96,6 +96,10 @@ Unattended resumes (the supervisor, the gateway's timer sweep) that hit a mismat
 
 <Accordion title="Process crash / kill -9">
 The run row still says `running` but its heartbeat stops. `bunx smthrs supervise <run-id...>` (or `--all`) polls for runs whose heartbeat is older than the stale threshold (default 30s), claims the run by stamping `runtime_owner_id` with `supervisor:<id>` so two supervisors can't double-resume, and resumes it in a detached child. Completed work is skipped per the contract; the interrupted attempt re-runs.
+
+You don't need `supervise` to *notice* a dead engine: `status`, `ps`, and `inspect` compare `heartbeat_at_ms` against the same 30s threshold and downgrade a stale run to `stalled`/`orphaned` with the last-heartbeat age, even when the full liveness probe fails (a row-only fallback classifies from the run row alone).
+
+Agent subprocesses can't orphan either. Every agent an engine spawns is registered in `_smithers_agent_processes` with its engine pid, spawned as its own process-group leader so the whole tree (subagents, MCP servers, tool children) is killable by pgid. Any CLI invocation sweeps that registry and group-kills entries whose engine is verifiably gone; `cancel`/`down` do the same for the runs they fence. Opt out of the boot sweep with `SMITHERS_NO_ORPHAN_REAPER=1`.
 </Accordion>
 
 <Accordion title="Machine reboot">

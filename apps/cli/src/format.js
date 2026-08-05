@@ -173,10 +173,18 @@ export function formatEventLine(event, baseMs, options) {
       return `${prefix}▶ Run started`;
     case "RunStatusChanged":
       return `${prefix}↺ Run status: ${payload?.status ?? "unknown"}`;
-    case "RunFinished":
-      return payload?.failedChildren > 0
-        ? `${prefix}✓ Run finished (${payload.failedChildren} failed ${payload.failedChildren === 1 ? "child" : "children"})`
-        : `${prefix}✓ Run finished`;
+    case "RunFinished": {
+      const notes = [];
+      if (payload?.failedChildren > 0) {
+        notes.push(`${payload.failedChildren} failed ${payload.failedChildren === 1 ? "child" : "children"}`);
+      }
+      if (Array.isArray(payload?.exhaustedLoops) && payload.exhaustedLoops.length > 0) {
+        notes.push(
+          `${payload.exhaustedLoops.length} exhausted ${payload.exhaustedLoops.length === 1 ? "loop" : "loops"} (until never satisfied)`,
+        );
+      }
+      return notes.length > 0 ? `${prefix}✓ Run finished (${notes.join(", ")})` : `${prefix}✓ Run finished`;
+    }
     case "RunFailed":
       return `${prefix}✗ Run failed: ${truncateText(formatErrorPayload(payload?.error ?? "unknown"), truncatePayloadAt)}`;
     case "RunCancelled":

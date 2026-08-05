@@ -389,6 +389,17 @@ type RunResult$2 = {
      * {@link failedChildren}.
      */
     readonly failedChildKeys?: readonly string[];
+    /**
+     * Loops that exited via `onMaxReached: "return-last"` with their `until`
+     * predicate still false. Present (and non-empty) only on a `finished` result:
+     * the run completed, but these loops never converged (#1464 AWF-1). See
+     * `docs/runtime/run-state.mdx`.
+     */
+    readonly exhaustedLoops?: readonly {
+        readonly id: string;
+        readonly iteration: number;
+        readonly maxIterations: number | null;
+    }[];
 };
 
 type ContinueAsNewHandler$1 = (transition: unknown, context: {
@@ -426,6 +437,7 @@ type FallbackTableName<Schema> = [keyof Schema & string] extends [never] ? strin
 type OutputAccessor$2<Schema, TRow = unknown> = {
     (table: FallbackTableName<Schema>): Array<TRow>;
     <K extends keyof Schema & string>(table: K): Array<InferOutputEntry$1<Schema[K]>>;
+    <K extends keyof Schema & string>(table: Schema[K]): Array<InferOutputEntry$1<Schema[K]>>;
 } & {
     [K in keyof Schema & string]: Array<InferOutputEntry$1<Schema[K]>>;
 };
@@ -692,6 +704,15 @@ declare class SmithersCtx<Schema extends unknown = unknown> {
      * @returns {string}
      */
     resolveTableName(table: TableRef): string;
+    /**
+     * Like {@link resolveTableName}, but throws instead of degrading to
+     * `String(table)` when the argument maps to no declared output table. Used
+     * by the callable `ctx.outputs(...)` form, where a silent `[]` is
+     * indistinguishable from "the upstream has not produced rows yet".
+     * @param {TableRef} table
+     * @returns {string}
+     */
+    requireTableName(table: TableRef): string;
     /**
      * Record that a task with `deps` deferred this render because its
      * dependencies were not resolvable. Called by the Task component before it

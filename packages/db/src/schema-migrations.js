@@ -1788,6 +1788,57 @@ function buildMigrations(context) {
         return { table: "_smithers_runs", addedColumns };
       },
     },
+    {
+      id: "0035_ralph_exhausted",
+      name: "Add loop-exhaustion flag to ralph state",
+      checksum: "packages/db/migrations/0035_add_ralph_exhausted.sql",
+      isApplied: (sqlite) => tableColumnNames(sqlite, "_smithers_ralph").has("exhausted"),
+      isAppliedPostgres: async (pgConn) => (await tableColumnNamesPostgres(pgConn, "_smithers_ralph")).has("exhausted"),
+      up: (sqlite) => {
+        if (!tableExists(sqlite, "_smithers_ralph")) {
+          return { table: "_smithers_ralph", addedColumns: [], skipped: "missing_table" };
+        }
+        const added = addColumnIfMissing(
+          sqlite,
+          "_smithers_ralph",
+          "exhausted",
+          "exhausted INTEGER NOT NULL DEFAULT 0",
+        );
+        return { table: "_smithers_ralph", addedColumns: added ? ["exhausted"] : [] };
+      },
+      upPostgres: async (pgConn) => {
+        if (!(await tableExistsPostgres(pgConn, "_smithers_ralph"))) {
+          return { table: "_smithers_ralph", addedColumns: [], skipped: "missing_table" };
+        }
+        const added = await addColumnIfMissingPostgres(
+          pgConn,
+          "_smithers_ralph",
+          "exhausted",
+          "exhausted INTEGER NOT NULL DEFAULT 0",
+        );
+        return { table: "_smithers_ralph", addedColumns: added ? ["exhausted"] : [] };
+      },
+    },
+    {
+      id: "0036_agent_processes",
+      name: "Track live agent subprocesses so orphaned agents can be reaped",
+      checksum: "packages/db/migrations/0036_add_agent_processes.sql",
+      isApplied: (sqlite) => tableExists(sqlite, "_smithers_agent_processes"),
+      isAppliedPostgres: (pgConn) => tableExistsPostgres(pgConn, "_smithers_agent_processes"),
+      up: (sqlite) => {
+        sqlite.run(createTableStatementFor("_smithers_agent_processes", context.createTableStatements));
+        return { table: "_smithers_agent_processes", created: true };
+      },
+      upPostgres: async (pgConn) => {
+        await pgConn.query({
+          text: translateDdl(
+            POSTGRES,
+            createTableStatementFor("_smithers_agent_processes", context.createTableStatements),
+          ),
+        });
+        return { table: "_smithers_agent_processes", created: true };
+      },
+    },
   ];
 }
 

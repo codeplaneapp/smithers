@@ -26,7 +26,7 @@ import { signalRun } from "@smthrs/engine/signals";
 import { loadInput, loadOutputs } from "@smthrs/db/snapshot";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { SmithersDb } from "@smthrs/db/adapter";
-import { computeRunStateFromRow } from "@smthrs/db/runState";
+import { computeRunStateFromRow, deriveRunState } from "@smthrs/db/runState";
 import { parseStateKey } from "@smthrs/scheduler/parseStateKey";
 import { normalizeRunStartedBy, SmithersCtx } from "@smthrs/driver";
 import { resolveCliStartedBy } from "./runStartedBy.js";
@@ -50,6 +50,7 @@ import {
 } from "@smthrs/engine/human-requests";
 import { SmithersError } from "@smthrs/errors";
 import { findAndOpenDb, findSmithersDb } from "./find-db.js";
+import { reapOrphanedAgentsOnBoot } from "./reap-orphaned-agents.js";
 import { cliWorkspace } from "./cliWorkspace.js";
 import {
   cascadeCancelRun,
@@ -1492,7 +1493,17 @@ async function buildPsRows(adapter, limit, status) {
     const waitingTimers = run.status === "waiting-timer" ? await listWaitingTimers(adapter, run.runId) : [];
     const nextTimer = waitingTimers[0];
     const startedBy = compactStartedByFromConfigJson(run.configJson);
-    const view = await computeRunStateFromRow(adapter, run);
+    // Fall back to a row-only classification (heartbeat_at_ms +
+    // runtime_owner_id) when the full probe throws, so one bad auxiliary read
+    // can neither sink the listing nor leave a dead engine reading "running"
+    // (#1464 AWF-2).
+    const view = await computeRunStateFromRow(adapter, run).catch(() => {
+      try {
+        return deriveRunState({ run });
+      } catch {
+        return { state: run.status };
+      }
+    });
     // Surface pending approval gates so `ps --json` consumers (the OpenClaw /
     // Claude plugins' before-prompt context) can relay gate node ids without
     // a second `inspect` round-trip. Only query the runs that are actually
@@ -1796,7 +1807,11 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
     loopId: l.ralphId,
     iteration: l.iteration,
     maxIterations: l.maxIterations,
+    ...(l.exhausted ? { exhausted: true } : {}),
   }));
+  const exhaustedLoops = Array.isArray(finishedPayload.exhaustedLoops)
+    ? finishedPayload.exhaustedLoops.filter((loop) => loop && typeof loop.id === "string")
+    : [];
   let config = undefined;
   if (r.configJson) {
     try {
@@ -1809,7 +1824,18 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
       error = JSON.parse(r.errorJson);
     } catch {}
   }
-  const runState = await computeRunStateFromRow(adapter, run).catch(() => undefined);
+  const runState = await computeRunStateFromRow(adapter, run).catch(() => {
+    // Row-only fallback: heartbeat_at_ms + runtime_owner_id alone classify a
+    // dead engine as stale/orphaned even when an auxiliary read fails
+    // (#1464 AWF-2).
+    try {
+      return deriveRunState({
+        run: r.status === "continued" && r.finishedAtMs == null ? { ...run, status: "running" } : run,
+      });
+    } catch {
+      return undefined;
+    }
+  });
   const result = {
     run: {
       id: r.runId,
@@ -1864,6 +1890,9 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
   }
   if (loopState.length > 0) {
     result.loops = loopState;
+  }
+  if (exhaustedLoops.length > 0) {
+    result.exhaustedLoops = exhaustedLoops;
   }
   if (config) {
     result.config = config;
@@ -11554,6 +11583,29 @@ async function main() {
       if (notice) console.error(notice);
     } catch {
       /* best-effort: a failed update check never blocks a command */
+    }
+  }
+  // Reap orphaned agent subprocesses whose engine died without cleanup
+  // (SIGKILL, OOM): the engine registers every agent pid it spawns, and this
+  // sweep group-kills any registered pid whose engine is verifiably gone, so
+  // no unsupervised agent keeps burning subscription quota (#1464 AWF-3,
+  // #1332). Best-effort and silent unless something was actually reaped;
+  // skipped for CI/JSON/help so scripted use never sees noise. Opt out with
+  // SMITHERS_NO_ORPHAN_REAPER=1.
+  if (
+    command &&
+    command !== "completions" &&
+    process.env.SMITHERS_NO_ORPHAN_REAPER !== "1" &&
+    !process.env.CI &&
+    !argvRequestsJsonMode(argv) &&
+    !argv.includes("--version") &&
+    !argv.includes("--help") &&
+    !argv.includes("-h")
+  ) {
+    try {
+      await reapOrphanedAgentsOnBoot();
+    } catch {
+      /* best-effort: a failed sweep never blocks a command */
     }
   }
   // `--backend` is a registered option only on up/gateway/workflow.

@@ -1851,6 +1851,7 @@ async function restoreDurableStateFromSnapshot(adapter, db, schema, inputTable, 
         ralphId: ralph.ralphId,
         iteration: ralph.iteration ?? 0,
         done: Boolean(ralph.done),
+        exhausted: Boolean(ralph.exhausted),
         updatedAtMs: restoredAtMs,
       }),
     );
@@ -1969,7 +1970,7 @@ function copyRunScopedRowsWithClient(client, table, sourceRunId, targetRunId) {
 }
 /**
  * @param {RalphStateMap} ralphState
- * @returns {Record<string, { iteration: number; done: boolean }>}
+ * @returns {Record<string, { iteration: number; done: boolean; exhausted?: boolean }>}
  */
 function ralphStateToObject(ralphState) {
   const out = {};
@@ -1978,6 +1979,7 @@ function ralphStateToObject(ralphState) {
     out[ralphId] = {
       iteration: state.iteration,
       done: state.done,
+      ...(state.exhausted ? { exhausted: true } : {}),
     };
   }
   return out;
@@ -1989,7 +1991,11 @@ function ralphStateToObject(ralphState) {
 function cloneRalphStateMap(ralphState) {
   const next = new Map();
   for (const [ralphId, state] of ralphState.entries()) {
-    next.set(ralphId, { iteration: state.iteration, done: state.done });
+    next.set(ralphId, {
+      iteration: state.iteration,
+      done: state.done,
+      ...(state.exhausted ? { exhausted: true } : {}),
+    });
   }
   return next;
 }
@@ -2151,6 +2157,7 @@ async function continueRunAsNewPostgres(params) {
             ralphId,
             iteration: state.iteration,
             done: Boolean(state.done),
+            exhausted: Boolean(state.exhausted),
             updatedAtMs: ts,
           });
         }
@@ -2399,12 +2406,12 @@ async function continueRunAsNew(params) {
         for (const [ralphId, state] of carriedRalphState.entries()) {
           client
             .query(
-              `INSERT INTO _smithers_ralph (run_id, ralph_id, iteration, done, updated_at_ms)
-               VALUES (?, ?, ?, ?, ?)
+              `INSERT INTO _smithers_ralph (run_id, ralph_id, iteration, done, exhausted, updated_at_ms)
+               VALUES (?, ?, ?, ?, ?, ?)
                ON CONFLICT(run_id, ralph_id)
-               DO UPDATE SET iteration = excluded.iteration, done = excluded.done, updated_at_ms = excluded.updated_at_ms`,
+               DO UPDATE SET iteration = excluded.iteration, done = excluded.done, exhausted = excluded.exhausted, updated_at_ms = excluded.updated_at_ms`,
             )
-            .run(targetRunId, ralphId, state.iteration, state.done ? 1 : 0, ts);
+            .run(targetRunId, ralphId, state.iteration, state.done ? 1 : 0, state.exhausted ? 1 : 0, ts);
         }
         client
           .query(
@@ -3400,6 +3407,7 @@ function buildRalphStateMap(rows) {
     map.set(row.ralphId, {
       iteration: row.iteration ?? 0,
       done: Boolean(row.done),
+      ...(row.exhausted ? { exhausted: true } : {}),
     });
   }
   return map;
@@ -5719,6 +5727,22 @@ async function legacyExecuteTask(
             if (phase === "started") liveOwnedPids.add(pid);
             else liveOwnedPids.delete(pid);
           });
+          // Durable registry of live agent subprocesses: if this engine dies
+          // without running cleanup (SIGKILL, OOM), the next CLI invocation
+          // reaps whatever is still registered here instead of leaving
+          // unsupervised agents burning quota (#1464 AWF-3, #1332).
+          // Best-effort — a registry miss never breaks the task.
+          const registryEffect =
+            phase === "started"
+              ? adapter.registerAgentProcess({
+                  pid,
+                  runId,
+                  nodeId: desc.nodeId,
+                  enginePid: process.pid,
+                  startedAtMs: nowMs(),
+                })
+              : adapter.unregisterAgentProcess(pid);
+          void Effect.runPromise(registryEffect).catch(() => {});
         };
         const hijackPollingInterval = hijackState
           ? setInterval(() => {
@@ -7475,6 +7499,7 @@ function ralphStateFromDriverTransition(transition) {
     state.set(ralphId, {
       iteration: Number.isFinite(iteration) ? iteration : 0,
       done: Boolean(value.done),
+      ...(value.exhausted ? { exhausted: true } : {}),
     });
   }
   return state;
@@ -8945,12 +8970,17 @@ async function runWorkflowBodyDriver(workflow, opts) {
     // and surfaces can flag the degraded outcome without re-deriving it. (#295)
     const failedChildren = typeof result.failedChildren === "number" ? result.failedChildren : 0;
     const failedChildKeys = Array.isArray(result.failedChildKeys) ? result.failedChildKeys : [];
+    // Loops that hit maxIterations under return-last without their `until`
+    // ever passing did not converge — carry them onto the event row and result
+    // so status/why can report a degraded (non-done) verdict. (#1464 AWF-1)
+    const exhaustedLoops = Array.isArray(result.exhaustedLoops) ? result.exhaustedLoops : [];
     await Effect.runPromise(
       eventBus.emitEventWithPersist({
         type: "RunFinished",
         runId,
         timestampMs: nowMs(),
         ...(failedChildren > 0 ? { failedChildren, failedChildKeys } : {}),
+        ...(exhaustedLoops.length > 0 ? { exhaustedLoops } : {}),
       }),
     );
     void Effect.runPromise(Metric.update(runDuration, performance.now() - runStartPerformanceMs));
@@ -8974,6 +9004,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
       status: "finished",
       output,
       ...(failedChildren > 0 ? { failedChildren, failedChildKeys } : {}),
+      ...(exhaustedLoops.length > 0 ? { exhaustedLoops } : {}),
     };
   };
   try {
@@ -9449,6 +9480,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
           const nextState = {
             iteration,
             done: existing?.done ?? false,
+            ...(existing?.exhausted ? { exhausted: true } : {}),
           };
           ralphState.set(ralphId, nextState);
           if (existing?.iteration !== nextState.iteration || existing?.done !== nextState.done) {
@@ -9458,6 +9490,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 ralphId,
                 iteration: nextState.iteration,
                 done: nextState.done,
+                exhausted: Boolean(nextState.exhausted),
                 updatedAtMs: nowMs(),
               }),
             );
@@ -9689,6 +9722,12 @@ async function runWorkflowBodyDriver(workflow, opts) {
     detachAbort();
     detachPause();
     wakeLock.release();
+    // Normal exits deregister each agent pid as it settles; this sweeps any
+    // rows left over from an abrupt task teardown so the orphan reaper never
+    // mistakes a finished engine's stale rows for live orphans (#1464 AWF-3).
+    if (typeof adapter.clearAgentProcessesForOwner === "function") {
+      await Effect.runPromise(adapter.clearAgentProcessesForOwner(process.pid)).catch(() => {});
+    }
   }
 }
 /**

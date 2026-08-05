@@ -287,6 +287,7 @@ export const smithersRalph = sqliteTable(
     ralphId: text("ralph_id").notNull(),
     iteration: integer("iteration").notNull().default(0),
     done: integer("done", { mode: "boolean" }).notNull().default(false),
+    exhausted: integer("exhausted", { mode: "boolean" }).notNull().default(false),
     updatedAtMs: integer("updated_at_ms").notNull(),
   },
   (t) => ({

@@ -470,6 +470,24 @@ export function makeWorkflowSession(options = {}) {
         result.failedChildren = failedChildKeys.length;
         result.failedChildKeys = failedChildKeys;
       }
+      // Loops that exited via `onMaxReached: "return-last"` with `until` still
+      // false did not converge; surface them so the run verdict, `smithers why`,
+      // and the RunFinished event can distinguish exhaustion from success
+      // (#1464 AWF-1).
+      const exhaustedLoops = [];
+      const maxIterationsById = ralphMaxIterationsById();
+      for (const [ralphId, ralph] of state.ralphState) {
+        if (ralph.done && ralph.exhausted) {
+          exhaustedLoops.push({
+            id: ralphId,
+            iteration: ralph.iteration,
+            maxIterations: maxIterationsById.get(ralphId) ?? null,
+          });
+        }
+      }
+      if (exhaustedLoops.length > 0) {
+        result.exhaustedLoops = exhaustedLoops;
+      }
     }
     return { _tag: "Finished", result };
   }
@@ -772,9 +790,45 @@ export function makeWorkflowSession(options = {}) {
   function ralphStatePayload() {
     return {
       ralphState: Object.fromEntries(
-        [...state.ralphState.entries()].map(([id, value]) => [id, { iteration: value.iteration, done: value.done }]),
+        [...state.ralphState.entries()].map(([id, value]) => [
+          id,
+          { iteration: value.iteration, done: value.done, ...(value.exhausted ? { exhausted: true } : {}) },
+        ]),
       ),
     };
+  }
+  /**
+   * Ralph metas (id → maxIterations) from the plan tree, for reporting which
+   * loops exhausted without converging on a finished run.
+   * @returns {Map<string, number>}
+   */
+  function ralphMaxIterationsById() {
+    /** @type {Map<string, number>} */
+    const out = new Map();
+    /** @param {unknown} node */
+    const walk = (node) => {
+      if (!node || typeof node !== "object") return;
+      const plan =
+        /** @type {{ kind?: string; id?: string; maxIterations?: number; children?: unknown; actionChildren?: unknown; compensationChildren?: unknown; tryChildren?: unknown; catchChildren?: unknown; finallyChildren?: unknown }} */ (
+          node
+        );
+      if (plan.kind === "ralph" && typeof plan.id === "string") {
+        out.set(plan.id, typeof plan.maxIterations === "number" ? plan.maxIterations : 0);
+      }
+      for (const key of [
+        "children",
+        "actionChildren",
+        "compensationChildren",
+        "tryChildren",
+        "catchChildren",
+        "finallyChildren",
+      ]) {
+        const list = plan[/** @type {keyof typeof plan} */ (key)];
+        if (Array.isArray(list)) for (const child of list) walk(child);
+      }
+    };
+    walk(state.plan);
+    return out;
   }
   /**
    * Duration-timer anchors carried across a continue-as-new boundary. Emitted
@@ -997,7 +1051,10 @@ export function makeWorkflowSession(options = {}) {
               ),
             };
           }
-          state.ralphState.set(ralph.id, { iteration: current.iteration, done: true });
+          // return-last with `until` still false is exhaustion, not convergence:
+          // mark it so the finished run can report a degraded verdict instead of
+          // a clean `done` (#1464 AWF-1).
+          state.ralphState.set(ralph.id, { iteration: current.iteration, done: true, exhausted: true });
           advanced = true;
           continue;
         }
