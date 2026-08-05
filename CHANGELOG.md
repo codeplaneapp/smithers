@@ -6,17 +6,23 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
 ## 0.33.1 (2026-08-04)
 
-45 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 214 files changed, +29581 / -583 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 205 files, +7162 / -383). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
+55 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 255 files changed, +31287 / -666 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 246 files, +8807 / -461). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
 
-### Features (4)
+### Features (5)
 
+- feat(workflows): n8n-mvp-mission v2 ([85d613cae3](https://github.com/smithersai/smithers/commit/85d613cae3))
 - feat(server): compute live working-copy diffs for non-terminal runs ([496cbf1000](https://github.com/smithersai/smithers/commit/496cbf1000))
 - feat(gateway-ui,ui-core): live diff view while a run is executing ([4657788ee2](https://github.com/smithersai/smithers/commit/4657788ee2))
 - feat(pack): docs-home-design-system workflow — Kimi K3 reskins, Fable reviews until LGTM ([bdb6db56f9](https://github.com/smithersai/smithers/commit/bdb6db56f9))
 - feat(pack): upgrade-dependents workflow — fork, upgrade, review, PR every open-source dependent to smthrs ([4cad958237](https://github.com/smithersai/smithers/commit/4cad958237))
 
-### Bug fixes (22)
+### Bug fixes (27)
 
+- fix(scheduler,engine,cli): surface loop exhaustion, stale heartbeats, and orphaned agents (#1464) ([1b9e0e0d49](https://github.com/smithersai/smithers/commit/1b9e0e0d49))
+- fix(cli,db): classify continued runs as running in ps fallback; coerce exhausted in getRalph (#1464) ([90c3cdab9e](https://github.com/smithersai/smithers/commit/90c3cdab9e))
+- fix(cli): normalize listEventsByType result before .catch in run status ([d916161e82](https://github.com/smithersai/smithers/commit/d916161e82))
+- fix(ui): omit intrinsic title prop so EmptyState/SectionHeader accept ReactNode titles ([8e659b86c9](https://github.com/smithersai/smithers/commit/8e659b86c9))
+- fix(pack): drop the invalid laneReview type predicate in n8n-mvp-mission ([6872c991da](https://github.com/smithersai/smithers/commit/6872c991da))
 - fix(agents): finish cross-harness file-change contract normalization ([c03749bb7a](https://github.com/smithersai/smithers/commit/c03749bb7a))
 - fix(agents): bound reconstructUnifiedDiff memory with a flat LCS grid ([c31322be5f](https://github.com/smithersai/smithers/commit/c31322be5f))
 - fix(gateway-ui): render paths-only file changes as plain rows; e2e transcript replay tests ([21b082ce23](https://github.com/smithersai/smithers/commit/21b082ce23))
@@ -49,14 +55,17 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - docs: fix duplicate "Smithers - Smithers" landing page title ([6406cf5b49](https://github.com/smithersai/smithers/commit/6406cf5b49))
 - docs: adopt the product logo for favicon and navbar wordmark ([57551aaffe](https://github.com/smithersai/smithers/commit/57551aaffe))
 
-### Tests (1)
+### Tests (3)
 
+- test(pack): own the file-change-contract and n8n workflows in the inventory ([ac00ab5328](https://github.com/smithersai/smithers/commit/ac00ab5328))
+- test(pack): own n8n-mvp-mission-v2 in the workflow inventory ([b780805b94](https://github.com/smithersai/smithers/commit/b780805b94))
 - test(agents): replay recorded transcripts through live interpreters; distinct fixture tool ids ([16e70ff7e4](https://github.com/smithersai/smithers/commit/16e70ff7e4))
 
-### Chores and maintenance (12)
+### Chores and maintenance (13)
 
 - chore(agents,smithers): export AgentFileChange types and regenerate declarations ([e42113568c](https://github.com/smithersai/smithers/commit/e42113568c))
 - chore(protocol,engine,gateway): regenerate declarations and openapi for live diff flag ([76fe149ce1](https://github.com/smithersai/smithers/commit/76fe149ce1))
+- style: oxfmt the n8n-mvp-mission laneReview filter ([82d999072d](https://github.com/smithersai/smithers/commit/82d999072d))
 - style: oxfmt pre-existing drift outside the file-change-contract work ([3e05c7f381](https://github.com/smithersai/smithers/commit/3e05c7f381))
 - style: oxfmt the live-diff route and rpc definition edits ([b08d067481](https://github.com/smithersai/smithers/commit/b08d067481))
 - chore(preflight): preserve pre-existing working-copy changes ([f090bcd4ef](https://github.com/smithersai/smithers/commit/f090bcd4ef), [3af42b95a6](https://github.com/smithersai/smithers/commit/3af42b95a6), [585ad43466](https://github.com/smithersai/smithers/commit/585ad43466), [f8c746a03a](https://github.com/smithersai/smithers/commit/f8c746a03a))
