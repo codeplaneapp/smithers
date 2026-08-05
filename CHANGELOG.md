@@ -6,7 +6,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
 ## 0.33.1 (2026-08-04)
 
-55 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 255 files changed, +31287 / -666 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 246 files, +8807 / -461). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
+57 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 255 files changed, +31288 / -666 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 246 files, +8808 / -461). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
 
 ### Features (5)
 
@@ -16,13 +16,14 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - feat(pack): docs-home-design-system workflow — Kimi K3 reskins, Fable reviews until LGTM ([bdb6db56f9](https://github.com/smithersai/smithers/commit/bdb6db56f9))
 - feat(pack): upgrade-dependents workflow — fork, upgrade, review, PR every open-source dependent to smthrs ([4cad958237](https://github.com/smithersai/smithers/commit/4cad958237))
 
-### Bug fixes (27)
+### Bug fixes (28)
 
 - fix(scheduler,engine,cli): surface loop exhaustion, stale heartbeats, and orphaned agents (#1464) ([1b9e0e0d49](https://github.com/smithersai/smithers/commit/1b9e0e0d49))
 - fix(cli,db): classify continued runs as running in ps fallback; coerce exhausted in getRalph (#1464) ([90c3cdab9e](https://github.com/smithersai/smithers/commit/90c3cdab9e))
 - fix(cli): normalize listEventsByType result before .catch in run status ([d916161e82](https://github.com/smithersai/smithers/commit/d916161e82))
 - fix(ui): omit intrinsic title prop so EmptyState/SectionHeader accept ReactNode titles ([8e659b86c9](https://github.com/smithersai/smithers/commit/8e659b86c9))
 - fix(pack): drop the invalid laneReview type predicate in n8n-mvp-mission ([6872c991da](https://github.com/smithersai/smithers/commit/6872c991da))
+- fix(pack): drop the invalid laneReview type predicate in n8n-mvp-mission-v2 ([b356a2206b](https://github.com/smithersai/smithers/commit/b356a2206b))
 - fix(agents): finish cross-harness file-change contract normalization ([c03749bb7a](https://github.com/smithersai/smithers/commit/c03749bb7a))
 - fix(agents): bound reconstructUnifiedDiff memory with a flat LCS grid ([c31322be5f](https://github.com/smithersai/smithers/commit/c31322be5f))
 - fix(gateway-ui): render paths-only file changes as plain rows; e2e transcript replay tests ([21b082ce23](https://github.com/smithersai/smithers/commit/21b082ce23))
@@ -46,8 +47,9 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - fix(server): keep /health live by making workflow \<UI\> discovery lazy and batched ([f8f91d58bb](https://github.com/smithersai/smithers/commit/f8f91d58bb))
 - fix(pack): guard crash-recovery render against missing output rows ([eb42b28c9e](https://github.com/smithersai/smithers/commit/eb42b28c9e))
 
-### Documentation (6)
+### Documentation (7)
 
+- docs(release): fold the #1464 reliability fixes into 0.33.1 ([eeee5f30c7](https://github.com/smithersai/smithers/commit/eeee5f30c7))
 - docs: document the file-change contract, per-engine support, and regenerated llms bundles ([a7383275ce](https://github.com/smithersai/smithers/commit/a7383275ce))
 - docs(rpc): document live diffs for getRunDiff and getNodeDiff ([3e5678369c](https://github.com/smithersai/smithers/commit/3e5678369c))
 - docs(release): 0.33.1 changelog, commit log, and launch marketing ([55337cf2cc](https://github.com/smithersai/smithers/commit/55337cf2cc))
