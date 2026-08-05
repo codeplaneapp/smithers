@@ -6,15 +6,26 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
 ## 0.33.1 (2026-08-04)
 
-20 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1): 55 files changed, +2186 / -188 lines. Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
+45 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 214 files changed, +29581 / -583 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 205 files, +7162 / -383). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
 
-### Features (2)
+### Features (4)
 
+- feat(server): compute live working-copy diffs for non-terminal runs ([496cbf1000](https://github.com/smithersai/smithers/commit/496cbf1000))
+- feat(gateway-ui,ui-core): live diff view while a run is executing ([4657788ee2](https://github.com/smithersai/smithers/commit/4657788ee2))
 - feat(pack): docs-home-design-system workflow — Kimi K3 reskins, Fable reviews until LGTM ([bdb6db56f9](https://github.com/smithersai/smithers/commit/bdb6db56f9))
 - feat(pack): upgrade-dependents workflow — fork, upgrade, review, PR every open-source dependent to smthrs ([4cad958237](https://github.com/smithersai/smithers/commit/4cad958237))
 
-### Bug fixes (13)
+### Bug fixes (22)
 
+- fix(agents): finish cross-harness file-change contract normalization ([c03749bb7a](https://github.com/smithersai/smithers/commit/c03749bb7a))
+- fix(agents): bound reconstructUnifiedDiff memory with a flat LCS grid ([c31322be5f](https://github.com/smithersai/smithers/commit/c31322be5f))
+- fix(gateway-ui): render paths-only file changes as plain rows; e2e transcript replay tests ([21b082ce23](https://github.com/smithersai/smithers/commit/21b082ce23))
+- fix(gateway-ui): key live diff refresh on event seq, not ring length ([c9bcfbee8f](https://github.com/smithersai/smithers/commit/c9bcfbee8f))
+- fix(gateway-ui): explicit callback param types in OneshotSurface for strict downstream typechecks ([71b4a058d7](https://github.com/smithersai/smithers/commit/71b4a058d7))
+- fix(server): cap live node diff payloads like the terminal diff ([2aebd7c75a](https://github.com/smithersai/smithers/commit/2aebd7c75a))
+- fix(ci): green the release gates — effect dedupe, formatting, workflow ownership ([a425fe3d88](https://github.com/smithersai/smithers/commit/a425fe3d88))
+- fix(pack): type the dependent-rename and upgrade workflow UIs against the real component API ([21d71fee25](https://github.com/smithersai/smithers/commit/21d71fee25))
+- fix(test): green local release gates — writable pnpm store in install sandbox, hermetic OPENCODE_PERMISSION ([c540ee7352](https://github.com/smithersai/smithers/commit/c540ee7352))
 - fix(driver): resolve output refs in callable ctx.outputs (#1486) ([10acb14ef0](https://github.com/smithersai/smithers/commit/10acb14ef0))
 - fix: Approved detached run cannot resume when workflowHash is null ([7a93377241](https://github.com/smithersai/smithers/commit/7a93377241))
 - fix: retry-task runs the engine in the foreground with no --detach; SIGPIPE from a closed pipe ki ([8375863cba](https://github.com/smithersai/smithers/commit/8375863cba))
@@ -29,14 +40,28 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - fix(server): keep /health live by making workflow \<UI\> discovery lazy and batched ([f8f91d58bb](https://github.com/smithersai/smithers/commit/f8f91d58bb))
 - fix(pack): guard crash-recovery render against missing output rows ([eb42b28c9e](https://github.com/smithersai/smithers/commit/eb42b28c9e))
 
-### Documentation (3)
+### Documentation (6)
 
+- docs: document the file-change contract, per-engine support, and regenerated llms bundles ([a7383275ce](https://github.com/smithersai/smithers/commit/a7383275ce))
+- docs(rpc): document live diffs for getRunDiff and getNodeDiff ([3e5678369c](https://github.com/smithersai/smithers/commit/3e5678369c))
+- docs(release): 0.33.1 changelog, commit log, and launch marketing ([55337cf2cc](https://github.com/smithersai/smithers/commit/55337cf2cc))
 - docs: reskin landing page onto the product design system with new hero copy and credentials row ([5dd72877a3](https://github.com/smithersai/smithers/commit/5dd72877a3))
 - docs: fix duplicate "Smithers - Smithers" landing page title ([6406cf5b49](https://github.com/smithersai/smithers/commit/6406cf5b49))
 - docs: adopt the product logo for favicon and navbar wordmark ([57551aaffe](https://github.com/smithersai/smithers/commit/57551aaffe))
 
-### Chores and maintenance (1 changes, 2 commits)
+### Tests (1)
 
+- test(agents): replay recorded transcripts through live interpreters; distinct fixture tool ids ([16e70ff7e4](https://github.com/smithersai/smithers/commit/16e70ff7e4))
+
+### Chores and maintenance (12)
+
+- chore(agents,smithers): export AgentFileChange types and regenerate declarations ([e42113568c](https://github.com/smithersai/smithers/commit/e42113568c))
+- chore(protocol,engine,gateway): regenerate declarations and openapi for live diff flag ([76fe149ce1](https://github.com/smithersai/smithers/commit/76fe149ce1))
+- style: oxfmt pre-existing drift outside the file-change-contract work ([3e05c7f381](https://github.com/smithersai/smithers/commit/3e05c7f381))
+- style: oxfmt the live-diff route and rpc definition edits ([b08d067481](https://github.com/smithersai/smithers/commit/b08d067481))
+- chore(preflight): preserve pre-existing working-copy changes ([f090bcd4ef](https://github.com/smithersai/smithers/commit/f090bcd4ef), [3af42b95a6](https://github.com/smithersai/smithers/commit/3af42b95a6), [585ad43466](https://github.com/smithersai/smithers/commit/585ad43466), [f8c746a03a](https://github.com/smithersai/smithers/commit/f8c746a03a))
+- chore(pack): n8n MVP mission workflow update ([c2e034aed3](https://github.com/smithersai/smithers/commit/c2e034aed3))
+- chore(release): 0.33.1 version bump ([c218686e5e](https://github.com/smithersai/smithers/commit/c218686e5e))
 - fix: repair wave 0 gate failures ([d11af00dcf](https://github.com/smithersai/smithers/commit/d11af00dcf), [3c9c9be1df](https://github.com/smithersai/smithers/commit/3c9c9be1df))
 
 ## 0.33.0 (2026-08-02)

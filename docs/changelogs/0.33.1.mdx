@@ -1,13 +1,18 @@
 ---
 title: "0.33.1"
-description: "Smithers 0.33.1 hardens the runtime: resume and retry-task work again, agent fallback chains recover from session loss instead of failing runs, and the Gateway reliably finds and serves workflow UIs."
+description: "Smithers 0.33.1 makes agent file edits legible: one file-change contract across every CLI harness, expandable diffs in the run UI, and diffs you can read while the run is still executing. Plus resume, retry-task, fallback chains, and Gateway UI discovery fixes."
 ---
 
-**Smithers 0.33.1 is a hardening release.** 13 of its 20 commits are fixes for
-the places 0.33.0 and daily production use exposed cracks: resuming and
-retrying runs, agent fallback chains, and Gateway workflow-UI discovery. One
-feature lands alongside: an upgrade-dependents pack workflow that opens
-rename PRs against open-source dependents.
+**Smithers 0.33.1 makes agent edits legible.** Every CLI harness reported file
+edits differently, so the run UI could only show a flat "Edited src/foo.ts"
+note. Agents now normalize a file-mutating tool call into one
+`AgentFileChange` shape, the node chat stream renders each confirmed change as
+an expandable diff, and the Diff tab works while the run is still executing
+instead of only after it finishes.
+
+The rest of the release is hardening: 24 of its 45 commits are fixes for the
+places 0.33.0 and daily production use exposed cracks, notably resuming and
+retrying runs, agent fallback chains, and Gateway workflow-UI discovery.
 
 ## Upgrading
 
@@ -18,6 +23,65 @@ bunx smthrs packs update  # refresh installed workflow packs
 ```
 
 Behavior changes are collected in the [upgrade notes](#upgrade-notes).
+
+## Agent file edits are one contract, and the UI renders them as diffs
+
+A CLI agent subclass may now implement `parseFileChanges`, which normalizes a
+`file_change` action into `AgentFileChange` records. The same normalization
+runs live inside `createOutputInterpreter`, which attaches the result to the
+streamed action as `detail.fileChanges`.
+
+```ts
+type AgentFileChange = {
+  path: string;
+  kind: "created" | "modified" | "deleted" | "renamed";
+  oldPath?: string;                     // set when kind is "renamed"
+  unifiedDiff?: string;                 // full patch, when the harness allows one
+  source: "reported" | "reconstructed"; // vendor-supplied, or built from tool input
+};
+```
+
+Claude Code and Kimi carry before and after text, so their edits reconstruct a
+real unified diff. Codex, OpenCode, Cursor, and Amp report paths and kinds
+only. Each engine declares what it can do in
+`AgentCapabilityRegistry.fileChanges` (`supportsFileChanges` and
+`supportsUnifiedDiff`); the per-engine table is in the
+[agents reference](/reference/agents#file-change-parsing).
+
+In the node chat stream that means:
+
+- A change with a diff is an expandable row that opens the hunks inline.
+- A paths-only change renders as a plain row labelled `diff unavailable`
+  rather than a focusable button that does nothing when you click it.
+- A started edit stays hidden until the tool result confirms it, so a denied
+  or failed edit no longer looks applied.
+- Claude's `Write` reconstructs a full-creation diff only once the result
+  confirms the file was new. Over an existing file it stays paths-only
+  instead of fabricating an empty old side, and `NotebookEdit` reconstructs
+  inserts only.
+- Kimi's `WriteFile` keeps its file-change kind through tool-result
+  completion, so the pending change finalizes instead of collapsing into a
+  generic tool row.
+
+Recorded CLI transcripts for Claude Code, Codex, and OpenCode are checked in
+as fixtures and replayed through the real adapters in tests, from raw wire
+lines all the way to finalized chat items, so a vendor stream-shape change
+breaks a test instead of a UI.
+
+## Diffs while the run is still executing
+
+`getRunDiff` and `getNodeDiff` refused until a run reached a terminal status,
+so the Diff tab stayed empty for exactly as long as you cared about it. While
+a run is live, both now diff the run base against the current working copy of
+every checkout an attempt recorded, read-only, never cached, under the same
+50MB oversized cap that produces `DiffTooLarge`. The bundle is flagged
+`live: true` and surfaces as a `(live)` marker in the summary. The terminal
+base-to-terminal diff stays the authoritative final snapshot.
+
+The oneshot Diff tab and the TUI tree-mode diff tab refresh off run events
+with a trailing debounce, because agent edits arrive in bursts, and take one
+final refetch on the terminal transition. A refresh no longer flickers the
+existing diff out for a spinner.
 
 ## Resume and retry work again
 
@@ -117,10 +181,31 @@ bunx smthrs up upgrade-dependents
 - Panel moderators inside a Ralph loop no longer deadlock over Ralph's
   iteration-suffixed dependency names
   ([#1487](https://github.com/smithersai/smithers/issues/1487)).
+- `bunx smthrs hijack` re-emits the agent's launch flags. `--resume` restores
+  conversation state only, so a hijacked session lost the model, permission
+  mode, and config dir the workflow agent ran with. Those are recorded on the
+  hand-off now and replayed onto the CLI invocation.
+- `reconstructUnifiedDiff` bounds its LCS grid by bytes instead of cells. The
+  old `n * m` cell guard allocated one typed array per old line, so a lopsided
+  payload passed the check and still allocated about a gigabyte; one flat
+  `Uint32Array` makes the cell bound a real byte bound.
+- The live node diff path enforces the payload cap it previously bypassed, so
+  an oversized working-copy diff raises `DiffTooLarge` instead of serializing
+  uncapped.
+- The gateway UI keys its live diff refresh on the last event's seq rather
+  than the event ring's length, which stops changing once the 200-event ring
+  fills and froze the live diff on long runs.
 
 ## Upgrade notes
 
-- No breaking changes. All 0.33.0 rename guidance still applies.
+- No breaking changes at runtime. All 0.33.0 rename guidance still applies.
+- `AgentCapabilityRegistry` gains a `fileChanges: { supportsFileChanges,
+  supportsUnifiedDiff }` field. Registries are normalized with both flags
+  `false` when absent, so existing agents keep working; a custom agent typed
+  against the exported TypeScript type needs the field added.
+- `getRunDiff` and `getNodeDiff` return a diff for a non-terminal run now
+  instead of refusing. Bundles computed from a live working copy carry
+  `live: true`; treat the terminal bundle as the authoritative snapshot.
 - A mixed agent-chain failure now parks the run as `waiting-quota` instead of
   failing it. Check `bunx smthrs ps` for parked runs before concluding a run
   died.
@@ -129,8 +214,10 @@ bunx smthrs up upgrade-dependents
 
 ## The full changelog
 
-20 commits touching 55 files: 2,186 insertions, 188 deletions. The complete
-commit-level list is in
+45 commits, plus this changelog update, touching 214 files: 29,581 insertions,
+583 deletions. Most of that insertion count is regenerated `llms-*.txt` docs
+bundles; excluding those and the lockfiles it is 205 files, 7,162 insertions,
+383 deletions. The complete commit-level list is in
 [CHANGELOG.md](https://github.com/smithersai/smithers/blob/main/CHANGELOG.md).
 
 Hit a bug? `bunx smthrs bug` files a report in seconds, and `--run RUN_ID`
