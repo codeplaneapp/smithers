@@ -177,6 +177,7 @@ const workflowOwners = {
     "federation-workflow-hardening-2.tsx",
     "file-change-contract.tsx",
     "n8n-gap-research.tsx",
+    "n8n-mvp-mission-v2.tsx",
     "n8n-mvp-mission.tsx",
     "pr-polish-panel.tsx",
     "rename-dependents.tsx",
@@ -476,6 +477,18 @@ describe("federation workflow smoke coverage", () => {
     expect(nodeIds.indexOf("mission:plan-fable")).toBeLessThan(nodeIds.indexOf("mission:plan"));
     // Never-stop mission: no lanes exist until the judge emits a plan, so the
     // first frame stops at the synthesized plan rather than mounting lanes.
+    expect(nodeIds.some((id) => id.startsWith("mission:impl:"))).toBe(false);
+  }, 30_000);
+
+  test("n8n-mvp-mission-v2 gates every round behind the environment preflight", async () => {
+    const frame = await renderWorkflowFile("n8n-mvp-mission-v2.tsx");
+    const nodeIds = frame.tasks.map((task) => task.nodeId);
+    // v2's headline change over v1: a round never fans out onto a sick machine,
+    // so the preflight runs ahead of the two independent planners and the judge.
+    expect(nodeIds[0]).toBe("mission:preflight");
+    expect(nodeIds.indexOf("mission:plan-fable")).toBeGreaterThan(nodeIds.indexOf("mission:preflight"));
+    expect(nodeIds.indexOf("mission:plan-sol")).toBeGreaterThan(nodeIds.indexOf("mission:preflight"));
+    expect(nodeIds.indexOf("mission:plan-sol")).toBeLessThan(nodeIds.indexOf("mission:plan"));
     expect(nodeIds.some((id) => id.startsWith("mission:impl:"))).toBe(false);
   }, 30_000);
 
