@@ -62,14 +62,13 @@ const { Workflow, Task, Loop, smithers, outputs } = createSmithers({
 
 const fablePlanner = new ClaudeCodeAgent({ model: "claude-fable-5", cwd: APP });
 const fableReviewer = new ClaudeCodeAgent({ model: "claude-fable-5", cwd: APP });
-const solPlanner = new CodexAgent({ model: "gpt-5.6-sol", cwd: APP });
+const solPlanner = new OpenCodeAgent({ model: "kimi-for-coding/k3", cwd: APP }); // codex weekly cap exhausted until 2026-08-10; kimi holds the second panel seat
 const solImplementer = [
-  new CodexAgent({ model: "gpt-5.6-sol", cwd: APP }),
-  new ClaudeCodeAgent({ model: "claude-fable-5", cwd: APP }), // codex rate-limit fallback
+  new ClaudeCodeAgent({ model: "claude-fable-5", cwd: APP }), // codex weekly cap exhausted; Fable implements per will's fallback rule
 ];
 const kimiUi = [
   new OpenCodeAgent({ model: "kimi-for-coding/k3", cwd: APP }),
-  new CodexAgent({ model: "gpt-5.6-sol", cwd: APP }),
+  new ClaudeCodeAgent({ model: "claude-fable-5", cwd: APP }),
 ];
 
 const MISSION_CONTEXT = `MISSION: build a true n8n competitor on jjhub infra in ${APP}. The source of truth is ${TODO}. Everything must be done, reviewed, high quality, and PROVEN by e2e tests against the REAL production jjhub backend (api.jjhub.tech). NO MOCKS anywhere. GitHub e2e flows use the sanctioned codeplanesmithers e2e account (persistent Playwright profile documented in the multi-test-github-account skill at ~/.claude/skills/). Detailed specs live at ${APP}/.oneshot-onboarding-goal.md, ${APP}/.oneshot-web-cloud-goal.md, and /Users/williamcory/flows/docs/specs/Concepts/Connectors Repo.md. Another background run (oneshot-mse12bmn-e2cdc24f) may still be executing the web-cloud refactor — check \`cd ${APP} && bun /Users/williamcory/smithers/apps/cli/src/index.js status oneshot-mse12bmn-e2cdc24f\` and NEVER work on files that run is mid-flight on; plan around it until it finishes.`;
