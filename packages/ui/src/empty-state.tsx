@@ -3,7 +3,9 @@ import type { ComponentProps, ReactNode } from "react";
 import { cn } from "./cn";
 import { useInjectUiCss } from "./styles";
 
-export type EmptyStateProps = ComponentProps<"div"> & {
+// `title` omitted for the same reason as SectionHeader: the intrinsic HTML
+// `title?: string` would collapse the ReactNode slot to `string & ReactNode`.
+export type EmptyStateProps = Omit<ComponentProps<"div">, "title"> & {
   /** Optional leading visual (an svg, emoji span, ...). */
   icon?: ReactNode;
   title?: ReactNode;
