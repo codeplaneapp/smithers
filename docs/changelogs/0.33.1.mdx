@@ -10,7 +10,7 @@ note. Agents now normalize a file-mutating tool call into one
 an expandable diff, and the Diff tab works while the run is still executing
 instead of only after it finishes.
 
-The rest of the release is hardening: 30 of its 57 commits are fixes for the
+The rest of the release is hardening: 30 of its 59 commits are fixes for the
 places 0.33.0 and daily production use exposed cracks, notably resuming and
 retrying runs, agent fallback chains, Gateway workflow-UI discovery, and a run
 status that stops overstating how healthy a run is.
@@ -272,10 +272,10 @@ bunx smthrs up upgrade-dependents
 
 ## The full changelog
 
-57 commits, plus this changelog update, touching 255 files: 31,288 insertions,
-666 deletions. Most of that insertion count is regenerated `llms-*.txt` docs
-bundles; excluding those and the lockfiles it is 246 files, 8,808 insertions,
-461 deletions. The complete commit-level list is in
+59 commits, plus this changelog update, touching 256 files: 31,293 insertions,
+667 deletions. Most of that insertion count is regenerated `llms-*.txt` docs
+bundles; excluding those and the lockfiles it is 247 files, 8,813 insertions,
+462 deletions. The complete commit-level list is in
 [CHANGELOG.md](https://github.com/smithersai/smithers/blob/main/CHANGELOG.md).
 
 Hit a bug? `bunx smthrs bug` files a report in seconds, and `--run RUN_ID`

@@ -6,7 +6,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
 ## 0.33.1 (2026-08-04)
 
-57 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 255 files changed, +31288 / -666 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 246 files, +8808 / -461). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
+59 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 256 files changed, +31293 / -667 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 247 files, +8813 / -462). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
 
 ### Features (5)
 
@@ -47,9 +47,10 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - fix(server): keep /health live by making workflow \<UI\> discovery lazy and batched ([f8f91d58bb](https://github.com/smithersai/smithers/commit/f8f91d58bb))
 - fix(pack): guard crash-recovery render against missing output rows ([eb42b28c9e](https://github.com/smithersai/smithers/commit/eb42b28c9e))
 
-### Documentation (7)
+### Documentation (8)
 
 - docs(release): fold the #1464 reliability fixes into 0.33.1 ([eeee5f30c7](https://github.com/smithersai/smithers/commit/eeee5f30c7))
+- docs(release): record the n8n-mvp-mission-v2 typecheck fix in 0.33.1 ([deae91ce52](https://github.com/smithersai/smithers/commit/deae91ce52))
 - docs: document the file-change contract, per-engine support, and regenerated llms bundles ([a7383275ce](https://github.com/smithersai/smithers/commit/a7383275ce))
 - docs(rpc): document live diffs for getRunDiff and getNodeDiff ([3e5678369c](https://github.com/smithersai/smithers/commit/3e5678369c))
 - docs(release): 0.33.1 changelog, commit log, and launch marketing ([55337cf2cc](https://github.com/smithersai/smithers/commit/55337cf2cc))
@@ -57,10 +58,11 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - docs: fix duplicate "Smithers - Smithers" landing page title ([6406cf5b49](https://github.com/smithersai/smithers/commit/6406cf5b49))
 - docs: adopt the product logo for favicon and navbar wordmark ([57551aaffe](https://github.com/smithersai/smithers/commit/57551aaffe))
 
-### Tests (3)
+### Tests (4)
 
 - test(pack): own the file-change-contract and n8n workflows in the inventory ([ac00ab5328](https://github.com/smithersai/smithers/commit/ac00ab5328))
 - test(pack): own n8n-mvp-mission-v2 in the workflow inventory ([b780805b94](https://github.com/smithersai/smithers/commit/b780805b94))
+- test(server): bump the pinned gateway schema head to 0036 ([35cd822d9a](https://github.com/smithersai/smithers/commit/35cd822d9a))
 - test(agents): replay recorded transcripts through live interpreters; distinct fixture tool ids ([16e70ff7e4](https://github.com/smithersai/smithers/commit/16e70ff7e4))
 
 ### Chores and maintenance (13)
