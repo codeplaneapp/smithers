@@ -81,9 +81,9 @@ export default smithers((ctx) => {
   const round = ctx.iterationCount("plan", "mission:plan");
 
   const reviewFor = (laneId: string) =>
-    (ctx.outputs.laneReview ?? [])
-      .filter((row) => Boolean(row) && row.laneId === laneId)
-      .at(-1) as z.infer<typeof laneReviewSchema> | undefined;
+    (ctx.outputs.laneReview ?? []).filter((row) => Boolean(row) && row.laneId === laneId).at(-1) as
+      | z.infer<typeof laneReviewSchema>
+      | undefined;
 
   return (
     <Workflow name="n8n-mvp-mission">
