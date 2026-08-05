@@ -82,8 +82,7 @@ export default smithers((ctx) => {
 
   const reviewFor = (laneId: string) =>
     (ctx.outputs.laneReview ?? [])
-      .filter((row): row is Record<string, unknown> => Boolean(row))
-      .filter((row) => row.laneId === laneId)
+      .filter((row) => Boolean(row) && row.laneId === laneId)
       .at(-1) as z.infer<typeof laneReviewSchema> | undefined;
 
   return (
