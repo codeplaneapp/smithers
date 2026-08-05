@@ -4116,7 +4116,7 @@ export class SmithersDb {
          WHERE run_id = ? AND ralph_id = ?
          LIMIT 1`,
         [runId, ralphId],
-        { booleanColumns: ["done"] },
+        { booleanColumns: ["done", "exhausted"] },
       ),
     );
   }

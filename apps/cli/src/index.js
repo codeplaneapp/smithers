@@ -1499,7 +1499,12 @@ async function buildPsRows(adapter, limit, status) {
     // (#1464 AWF-2).
     const view = await computeRunStateFromRow(adapter, run).catch(() => {
       try {
-        return deriveRunState({ run });
+        // Same normalization inspect/run-status apply: a continued run whose
+        // segment never finished is logically running, so its stale heartbeat
+        // must downgrade the verdict instead of reading "succeeded" (#1464 AWF-2).
+        return deriveRunState({
+          run: run.status === "continued" && run.finishedAtMs == null ? { ...run, status: "running" } : run,
+        });
       } catch {
         return { state: run.status };
       }
