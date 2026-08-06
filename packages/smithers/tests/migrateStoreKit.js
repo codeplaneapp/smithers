@@ -18,10 +18,13 @@ setDefaultTimeout(120_000);
 
 export const PG_URL = process.env.SMITHERS_TEST_PG_URL;
 
-// Each workspace holds a full PGlite store (~40MB). They are the heaviest
-// scratch dirs the repo produces, so they go through the shared registry:
-// beyond the afterEach below, its process-exit sweep still reclaims them when
-// a suite dies mid-run (this suite's documented Bus error, or an ENOSPC).
+// Each workspace holds a full PGlite store (~40MB) — the heaviest scratch dirs
+// the repo produces, and the ones that turned the $TMPDIR leak into a
+// disk-full outage. They go through the shared registry so the afterEach below
+// drains them by tracked path, including the ones a failing test never reached
+// its own cleanup for. Nothing reclaims them if bun dies outright (this suite's
+// documented Bus error): `bun test` never runs process-exit handlers, so the
+// registry's exit sweep is not a backstop here — the per-test drain is.
 export function makeWorkspace(name) {
   const dir = makeTempDirPath(`${name}-`);
   mkdirSync(join(dir, ".smithers"), { recursive: true });

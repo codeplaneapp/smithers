@@ -91,14 +91,21 @@ const armDrain = (): void => {
   if (afterAll && tracked.size === 0) afterAll(cleanupTempDirs);
 };
 
+// Every directory is namespaced `smithers-*` whether or not the caller asked
+// for it. The prefix is the only forensic handle on a leak — it is how the
+// 30k-directory pileup was attributed to individual suites — and a call site
+// that passes a bare suite name (`makeWorkspace("migrate-reverse-…")`) would
+// otherwise create dirs that a `$TMPDIR` census of `smithers-*` never counts.
+const namespaced = (prefix: string): string => (prefix.startsWith("smithers-") ? prefix : `smithers-${prefix}`);
+
 /**
  * Create a tracked scratch directory under `$TMPDIR`.
  *
- * @param prefix mkdtemp prefix, conventionally `smithers-<suite>-`.
+ * @param prefix mkdtemp prefix; `smithers-` is prepended when absent.
  */
 export const makeTempDir = (prefix = "smithers-"): TempDir => {
   armDrain();
-  const path = mkdtempSync(join(tmpdir(), prefix));
+  const path = mkdtempSync(join(tmpdir(), namespaced(prefix)));
   tracked.add(path);
   const cleanup = () => remove(path);
   return { path, cleanup, [Symbol.dispose]: cleanup };

@@ -9,7 +9,7 @@
 // other runner can write into a directory this test just created.
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cleanupTempDirs, makeTempDir, makeTempDirPath, trackedTempDirs } from "../src/cleanup/tempDir.ts";
 
@@ -17,7 +17,12 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "
 
 /**
  * Run `bun test <file>` with $TMPDIR pointed at a directory this test owns and
- * return the `smithers-*` entries the child left behind.
+ * return everything the child left behind in it.
+ *
+ * Every entry counts, not just `smithers-*`: a clean suite leaves the isolated
+ * $TMPDIR completely empty, so filtering by prefix would only blind the guard
+ * to the regression it is most likely to face — a new raw `mkdtemp` that
+ * happens to use some other prefix.
  *
  * The leading `./` matters: without it bun treats the argument as a name
  * filter, silently runs zero tests, and the guard passes vacuously — so the
@@ -35,7 +40,7 @@ const runIsolated = (relativeTestFile: string) => {
   const output = result.stdout.toString() + result.stderr.toString();
   const ran = Number(/Ran (\d+) tests?/.exec(output)?.[1] ?? 0);
   // The child's own pass/fail is not what is under test here — the leak is.
-  const leaked = readdirSync(isolated.path).filter((entry) => entry.startsWith("smithers-"));
+  const leaked = readdirSync(isolated.path);
   return { ran, leaked, output };
 };
 
@@ -65,6 +70,16 @@ describe("makeTempDir", () => {
       expect(existsSync(path)).toBe(true);
     }
     expect(existsSync(path)).toBe(false);
+  });
+
+  test("namespaces a bare prefix so no directory escapes the smithers-* census", () => {
+    // `makeWorkspace("migrate-reverse-leftover-sqlite")` used to land outside
+    // the family the leak audit counts (and outside the guard's own filter).
+    using bare = makeTempDir("migrate-reverse-");
+    using explicit = makeTempDir("smithers-unit-");
+    expect(basename(bare.path).startsWith("smithers-migrate-reverse-")).toBe(true);
+    expect(basename(explicit.path).startsWith("smithers-unit-")).toBe(true);
+    expect(basename(explicit.path).startsWith("smithers-smithers-")).toBe(false);
   });
 
   test("cleanupTempDirs drains everything created since the last drain", () => {
