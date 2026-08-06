@@ -186,8 +186,17 @@ describe("gateway /v1/pty/hijack", () => {
   });
 
   test("resize control frames reach the PTY (stty size sees the new geometry)", async () => {
+    // Poll for the geometry instead of sleeping a fixed window before reading
+    // it: on a loaded machine the resize frame lands well after any fixed
+    // budget, and the shell would then print the pre-resize size. The loop
+    // still exits with whatever it last read, so a resize that never arrives
+    // fails the assertion rather than hanging.
     const { port } = await bootGateway(() => ({
-      command: ["bash", "-c", "sleep 0.5; stty size"],
+      command: [
+        "bash",
+        "-c",
+        'for _ in $(seq 300); do size=$(stty size); [ "$size" = "40 120" ] && break; sleep 0.05; done; printf "%s" "$size"',
+      ],
     }));
     const ws = new WebSocket(`ws://127.0.0.1:${port}/v1/pty/hijack?runId=run-pty&cols=80&rows=24`);
     const pty = collectPty(ws);
