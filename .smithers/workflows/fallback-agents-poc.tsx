@@ -41,7 +41,10 @@ export default smithers((ctx) => {
   // seed: ctx.runId keeps one run's chain stable across renders and retries
   // (precise per-rung quota skipping) while still shuffling run-to-run.
   const chain = fallbackAgents({ seed: ctx.runId });
-  const chainLabels = chain.map((agent) => agent.opts?.id ?? `${agent.constructor?.name ?? "agent"} (normal fallback)`);
+  const chainLabels = chain.map(
+    (agent) =>
+      (agent as { opts?: { id?: string } }).opts?.id ?? `${agent.constructor?.name ?? "agent"} (normal fallback)`,
+  );
   const probe = ctx.outputMaybe("probe", { nodeId: "probe" });
   return (
     <Workflow name="fallback-agents-poc">

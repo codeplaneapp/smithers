@@ -9148,6 +9148,18 @@ type ForkFanOutProps = {
   skipIf?: boolean;
   children?: string | React.ReactNode; // shared preamble prepended to every prompt
 };
+type ForkFanOutTask = {
+  id: string;
+  prompt: string | React.ReactNode;
+  agent?: AgentLike | AgentLike[];
+  output?: OutputTarget;
+  label?: string;
+  skipIf?: boolean;
+  continueOnFail?: boolean;
+  timeoutMs?: number;
+  heartbeatTimeoutMs?: number;
+  retries?: number;
+};
 type MemoryProps = {
   bank?: string;
   banks?: string[];

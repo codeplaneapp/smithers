@@ -179,7 +179,7 @@ export const providers = {
   }),
 } as const;
 
-export const agents = {
+const agentsBase = {
   kimi: [providers.kimi1],
   codex: [providers.codex1, providers.codex2],
   gemini: [providers.gemini1],
@@ -311,3 +311,7 @@ export const agents = {
     // providers.openrouter,
   ],
 } as const satisfies Record<string, AgentLike[]>;
+
+// Known labels keep their precise tuple types; labels that exist only in a
+// local account registry (migrationHard, ceoIntelCheap, ...) still compile.
+export const agents: typeof agentsBase & Record<string, AgentLike[]> = agentsBase;
