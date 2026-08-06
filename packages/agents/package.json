@@ -73,6 +73,7 @@
     "@ai-sdk/anthropic": "^4.0.5",
     "@ai-sdk/openai": "^4.0.5",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@smthrs/accounts": "workspace:*",
     "@smthrs/driver": "workspace:*",
     "@smthrs/errors": "workspace:*",
     "@smthrs/observability": "workspace:*",

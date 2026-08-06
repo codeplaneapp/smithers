@@ -99,6 +99,26 @@ Subscription seats are a **config directory**, not a key: `ClaudeCodeAgent` *cle
 
 Two labels pointing at the same subscription share one rate limit, so they add no capacity. After registering, Smithers names the account that was signed in and warns when it duplicates an existing label; `agents list` shows the signed-in account per label so duplicates stay visible.
 
+### fallbackAgents(): the whole seat pool on one Task
+
+`fallbackAgents()` (exported from `smthrs`) turns the registry into a ready-made chain: one agent per registered Claude/Codex seat, randomly ordered per call, with the "normal" agent appended as the last rung. On a machine with no registered seats it returns just that normal agent, so the same workflow file runs anywhere.
+
+```tsx
+import { fallbackAgents, ClaudeCodeAgent } from "smthrs";
+
+// Every Claude + Codex seat, shuffled per run, stock agent last:
+<Task agent={fallbackAgents({ seed: ctx.runId })} ... />
+
+// Codex seats only, pinned model, explicit normal agent:
+<Task agent={fallbackAgents({
+  providers: ["codex"],
+  models: { codex: "gpt-5.6-sol" },
+  fallback: new ClaudeCodeAgent({ model: "claude-fable-5" }),
+})} ... />
+```
+
+Options: `providers` (default `["claude-code", "codex"]`, or `"all"`), `fallback` (agent, array, or `[]`), `models` (per-provider override; otherwise the seat's registered model, else the CLI default), `shuffle: false` for registration order, and `seed` / `random` to control the shuffle. Pass `seed: ctx.runId` so one run keeps a stable chain across renders and retries (which keeps per-rung quota skipping precise) while load still spreads across runs.
+
 ## Guarantees and limits
 
 **Guaranteed:** one `AgentLike` contract across every adapter; per-Task chains with restart-surviving quota failover; quota attempts exempt from retry budgets; runs park and self-resume on provider reset; structured output enforced by Zod regardless of harness (prompt-injected schema for CLI agents, native structured output where `supportsNativeStructuredOutput` is set).

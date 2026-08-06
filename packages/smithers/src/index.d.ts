@@ -63,7 +63,7 @@ export { Gateway } from '@smthrs/server/gateway';
 import * as _smthrs_scorers from '@smthrs/scorers';
 export { aggregateScores, createScorer, estimateCostUsd, faithfulnessScorer, latencyScorer, llmJudge, modelTokenPrices, relevancyScorer, runScorersAsync, runScorersBatch, schemaAdherenceScorer, smithersScorers, toxicityScorer } from '@smthrs/scorers';
 import * as _smthrs_agents from '@smthrs/agents';
-export { AmpAgent, AnthropicAgent, AntigravityAgent, ClaudeCodeAgent, CodexAgent, CursorAgent, ForgeAgent, GeminiAgent, HermesAgent, HermesCliAgent, KimiAgent, OmpAgent, OpenAIAgent, OpenClawAgent, OpenCodeAgent, PiAgent, PoolAgent, VibeAgent, createHttpTool, createOmpCapabilityRegistry } from '@smthrs/agents';
+export { AmpAgent, AnthropicAgent, AntigravityAgent, ClaudeCodeAgent, CodexAgent, CursorAgent, ForgeAgent, GeminiAgent, HermesAgent, HermesCliAgent, KimiAgent, OmpAgent, OpenAIAgent, OpenClawAgent, OpenCodeAgent, PiAgent, PoolAgent, VibeAgent, createHttpTool, createOmpCapabilityRegistry, fallbackAgents } from '@smthrs/agents';
 import * as _smthrs_agents_capability_registry from '@smthrs/agents/capability-registry';
 export { hashCapabilityRegistry } from '@smthrs/agents/capability-registry';
 export { ERROR_REFERENCE_URL } from '@smthrs/errors/ERROR_REFERENCE_URL';

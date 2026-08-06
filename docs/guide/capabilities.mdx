@@ -80,6 +80,7 @@ See [time travel in Recipes](/recipes#time-travel-fork-replay-diff) for the full
 | --- | --- |
 | "Use my Claude subscription for the smart steps and my OpenAI key for the rest." | `bunx smthrs agents`: register subscriptions and API keys, then route each task to the right one. |
 | "Add my teammate's Claude account as another seat." | `bunx smthrs agents add --provider claude-code --label claude-2 --tmux` runs the browser login in tmux and registers the isolated config dir. |
+| "Spread this run across all our Claude and Codex subscriptions so rate limits never stall it." | `fallbackAgents()` puts every registered seat on one shuffled failover chain, normal agent last. |
 | "How much of my quota have runs burned this week?" | `bunx smthrs usage` per registered account. |
 
 ## Share and extend
