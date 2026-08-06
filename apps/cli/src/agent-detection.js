@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 
 import { accountToProviderEnv, listAccounts } from "@smthrs/accounts";
+import { readClaudeCredentials as readClaudeStoredOauth } from "@smthrs/usage/readClaudeCredentials";
 import { registeredAgentId } from "./registered-agent-id.js";
 import { SOTA_DEPRECATED_MODELS, SOTA_SLOTS } from "./sota-models.generated.js";
 /** @typedef {import("./AgentAvailability.ts").AgentAvailability} AgentAvailability */
@@ -844,20 +845,22 @@ function readCursorAuth(homeDir, env) {
 }
 
 /**
+ * Claude Code stores default-install OAuth credentials in the macOS Keychain,
+ * so the on-disk `.credentials.json` check alone reports a validly logged-in
+ * machine as unauthenticated whenever the `claude auth status` probe cannot
+ * answer within its timeout. Delegate to the shared reader, which tries the
+ * file first and then the account-scoped Keychain item (a custom configDir
+ * never falls back to the default install's token).
+ *
  * @param {string} configDir
+ * @param {typeof import("node:child_process").spawnSync} [spawn] Injectable for tests.
  */
-function readClaudeCredentials(configDir) {
-  const parsed = readJsonObject(join(configDir, ".credentials.json"));
-  const oauth = parsed?.claudeAiOauth;
-  if (!oauth || typeof oauth !== "object") {
+export function readClaudeCredentials(configDir, spawn = spawnSync) {
+  const oauth = readClaudeStoredOauth({ configDir }, process.platform, spawn);
+  if (!oauth) {
     return { valid: false, reason: "Claude Code OAuth credentials are missing" };
   }
-  const accessToken = oauth.accessToken;
-  if (typeof accessToken !== "string" || !accessToken.trim()) {
-    return { valid: false, reason: "Claude Code OAuth access token is missing" };
-  }
-  const expiresAt = oauth.expiresAt;
-  if (typeof expiresAt === "number" && expiresAt <= Date.now()) {
+  if (typeof oauth.expiresAt === "number" && oauth.expiresAt <= Date.now()) {
     return { valid: false, reason: "Claude Code OAuth token is expired" };
   }
   return { valid: true };
