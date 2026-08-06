@@ -5,16 +5,18 @@ import path from "node:path";
 import { type AgentLike } from "smthrs";
 import { ClaudeCodeAgent as SmithersClaudeCodeAgent } from "smthrs";
 import { CodexAgent as SmithersCodexAgent } from "smthrs";
-import { AmpAgent as SmithersAmpAgent } from "smthrs";
-import { KimiAgent as SmithersKimiAgent } from "smthrs";
-import { OpenAIAgent as SmithersOpenAIAgent } from "smthrs";
-import { AnthropicAgent as SmithersAnthropicAgent } from "smthrs";
 import { OpenCodeAgent as SmithersOpenCodeAgent } from "smthrs";
+import { KimiAgent as SmithersKimiAgent } from "smthrs";
+import { AmpAgent as SmithersAmpAgent } from "smthrs";
+import { OpenClawAgent as SmithersOpenClawAgent } from "smthrs";
+import { OpenAIAgent as SmithersOpenAIAgent } from "smthrs";
+// import { CursorAgent as SmithersCursorAgent } from "smthrs";
 // import { AntigravityAgent as SmithersAntigravityAgent } from "smthrs";
 // import { PiAgent as SmithersPiAgent } from "smthrs";
+// import { OmpAgent as SmithersOmpAgent } from "smthrs";
 // import { VibeAgent as SmithersVibeAgent } from "smthrs";
 // import { HermesCliAgent as SmithersHermesCliAgent } from "smthrs";
-// import { OpenClawAgent as SmithersOpenClawAgent } from "smthrs";
+// import { PoolAgent as SmithersPoolAgent } from "smthrs";
 
 export { ClaudeCodeAgent } from "./agents/claude-code";
 export { CodexAgent } from "./agents/codex";
@@ -40,230 +42,179 @@ export { OpenCodeAgent } from "./agents/opencode";
 
 export const providers = {
   claude: new SmithersClaudeCodeAgent({ model: "claude-fable-5" }),
-  codex: new SmithersCodexAgent({
-    model: "gpt-5.6-luna",
-    config: { model_reasoning_effort: "medium" },
-    skipGitRepoCheck: true,
-  }),
-  //   openrouter: createOpenRouterAgent(),
-  //   antigravity: new SmithersAntigravityAgent(),
-  //   pi: new SmithersPiAgent({ provider: "openai", model: "gpt-5.6-luna" }),
-  //   kimi: new SmithersKimiAgent({ model: "kimi-k2.7-code" }),
+  codex: new SmithersCodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, skipGitRepoCheck: true }),
+//   cursor: new SmithersCursorAgent({ cwd: process.cwd() }),
+//   openrouter: createOpenRouterAgent(),
+  opencode: new SmithersOpenCodeAgent({ model: "anthropic/claude-fable-5" }),
+//   antigravity: new SmithersAntigravityAgent(),
+//   pi: new SmithersPiAgent({ provider: "openai", model: "gpt-5.6-luna" }),
+//   omp: new SmithersOmpAgent({ model: "gpt-5.6-luna" }),
+  kimi: new SmithersKimiAgent({ model: "kimi-k2.7-code" }),
   amp: new SmithersAmpAgent(),
-  //   vibe: new SmithersVibeAgent({ agent: "auto-approve" }),
-  //   hermes: new SmithersHermesCliAgent(),
-  //   openclaw: new SmithersOpenClawAgent(),
-  codexSol: new SmithersCodexAgent({
-    model: "gpt-5.6-sol",
-    config: { model_reasoning_effort: "xhigh" },
-    skipGitRepoCheck: true,
-  }),
-  codexTerra: new SmithersCodexAgent({
-    model: "gpt-5.6-terra",
-    config: { model_reasoning_effort: "medium" },
-    skipGitRepoCheck: true,
-  }),
-  codexLuna: new SmithersCodexAgent({
-    model: "gpt-5.6-luna",
-    config: { model_reasoning_effort: "medium" },
-    skipGitRepoCheck: true,
-  }),
-  claudeOpus: new SmithersClaudeCodeAgent({ model: "claude-opus-4-8" }),
+//   vibe: new SmithersVibeAgent({ agent: "auto-approve" }),
+//   hermes: new SmithersHermesCliAgent(),
+  openclaw: new SmithersOpenClawAgent(),
+//   pool: new SmithersPoolAgent(),
+  codexSol: new SmithersCodexAgent({ model: "gpt-5.6-sol", config: { model_reasoning_effort: "xhigh" }, skipGitRepoCheck: true }),
+  codexTerra: new SmithersCodexAgent({ model: "gpt-5.6-terra", config: { model_reasoning_effort: "medium" }, skipGitRepoCheck: true }),
+  codexLuna: new SmithersCodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, skipGitRepoCheck: true }),
+  claudeOpus: new SmithersClaudeCodeAgent({ model: "claude-opus-5" }),
   claudeSonnet: new SmithersClaudeCodeAgent({ model: "claude-sonnet-5" }),
-  kimi1: new SmithersKimiAgent({
-    model: "kimi-k2.7-code",
-    configDir: path.join(homedir(), ".smithers/accounts/kimi-1"),
-  }),
-  codex1: new SmithersCodexAgent({
-    model: "gpt-5.6-luna",
-    config: { model_reasoning_effort: "medium" },
-    configDir: path.join(homedir(), ".codex"),
-    skipGitRepoCheck: true,
-  }),
-  codex1Sol: new SmithersCodexAgent({
-    model: "gpt-5.6-sol",
-    config: { model_reasoning_effort: "xhigh" },
-    configDir: path.join(homedir(), ".codex"),
-    skipGitRepoCheck: true,
-  }),
-  codex1Terra: new SmithersCodexAgent({
-    model: "gpt-5.6-terra",
-    config: { model_reasoning_effort: "medium" },
-    configDir: path.join(homedir(), ".codex"),
-    skipGitRepoCheck: true,
-  }),
-  codex1Luna: new SmithersCodexAgent({
-    model: "gpt-5.6-luna",
-    config: { model_reasoning_effort: "medium" },
-    configDir: path.join(homedir(), ".codex"),
-    skipGitRepoCheck: true,
-  }),
-  gemini1: new SmithersOpenAIAgent({
-    model: "gemini-3.1-pro-preview",
-    baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
-  }),
-  // In-process SDK agents (no CLI, no filesystem/bash tools ever attached) for
-  // workflows that hand untrusted scraped web content to a model — e.g.
-  // daily-ceo-intel's classification/synthesis tasks. Never add `tools` to
-  // these instances or at their call sites.
-  anthropicHaiku: new SmithersAnthropicAgent({ model: "claude-haiku-4-5-20251001" }),
-  anthropicFable: new SmithersAnthropicAgent({ model: "claude-fable-5" }),
+  kimi1: new SmithersKimiAgent({ model: "kimi-k2.7-code", configDir: path.join(homedir(), ".smithers/accounts/kimi-1"), id: "smithers-account:kimi-1" }),
+  codex1: new SmithersCodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, configDir: path.join(homedir(), ".codex"), skipGitRepoCheck: true, id: "smithers-account:codex-1" }),
+  codex1Sol: new SmithersCodexAgent({ model: "gpt-5.6-sol", config: { model_reasoning_effort: "xhigh" }, configDir: path.join(homedir(), ".codex"), skipGitRepoCheck: true, id: "smithers-account:codex-1" }),
+  codex1Terra: new SmithersCodexAgent({ model: "gpt-5.6-terra", config: { model_reasoning_effort: "medium" }, configDir: path.join(homedir(), ".codex"), skipGitRepoCheck: true, id: "smithers-account:codex-1" }),
+  codex1Luna: new SmithersCodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, configDir: path.join(homedir(), ".codex"), skipGitRepoCheck: true, id: "smithers-account:codex-1" }),
+  gemini1: new SmithersOpenAIAgent({ model: "gemini-3.1-pro-preview", baseURL: "https://generativelanguage.googleapis.com/v1beta/openai", id: "smithers-account:gemini-1" }),
+  claude1: new SmithersClaudeCodeAgent({ model: "claude-fable-5", configDir: path.join(homedir(), ".smithers/accounts/claude-1"), id: "smithers-account:claude-1" }),
+  claude2: new SmithersClaudeCodeAgent({ model: "claude-fable-5", configDir: path.join(homedir(), ".smithers/accounts/claude-2"), id: "smithers-account:claude-2" }),
+  claude3: new SmithersClaudeCodeAgent({ model: "claude-fable-5", configDir: path.join(homedir(), ".smithers/accounts/claude-3"), id: "smithers-account:claude-3" }),
+  claude4: new SmithersClaudeCodeAgent({ model: "claude-fable-5", configDir: path.join(homedir(), ".smithers/accounts/claude-4"), id: "smithers-account:claude-4" }),
+  claude5: new SmithersClaudeCodeAgent({ model: "claude-fable-5", configDir: path.join(homedir(), ".smithers/accounts/claude-5"), id: "smithers-account:claude-5" }),
+  claude6: new SmithersClaudeCodeAgent({ model: "claude-fable-5", configDir: path.join(homedir(), ".smithers/accounts/claude-6"), id: "smithers-account:claude-6" }),
+  claude7: new SmithersClaudeCodeAgent({ model: "claude-fable-5", configDir: path.join(homedir(), ".smithers/accounts/claude-7"), id: "smithers-account:claude-7" }),
+  codex2: new SmithersCodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, configDir: path.join(homedir(), ".smithers/accounts/codex-2"), skipGitRepoCheck: true, id: "smithers-account:codex-2" }),
+  codex2Sol: new SmithersCodexAgent({ model: "gpt-5.6-sol", config: { model_reasoning_effort: "xhigh" }, configDir: path.join(homedir(), ".smithers/accounts/codex-2"), skipGitRepoCheck: true, id: "smithers-account:codex-2" }),
+  codex2Terra: new SmithersCodexAgent({ model: "gpt-5.6-terra", config: { model_reasoning_effort: "medium" }, configDir: path.join(homedir(), ".smithers/accounts/codex-2"), skipGitRepoCheck: true, id: "smithers-account:codex-2" }),
+  codex2Luna: new SmithersCodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, configDir: path.join(homedir(), ".smithers/accounts/codex-2"), skipGitRepoCheck: true, id: "smithers-account:codex-2" }),
 } as const;
 
 export const agents = {
-  // 2026-07-17: codex providers demoted to pool tails while the codex weekly quota
-  // is exhausted (resets 2026-07-23); a codex-first pool parks runs until that reset.
   kimi: [
-    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
+    providers.kimi1,
   ],
   codex: [
-    // providers.codex1,  // codex weekly quota exhausted; restore after 2026-07-23
+    providers.codex1,
+    providers.codex2,
   ],
-  gemini: [providers.gemini1],
+  gemini: [
+    providers.gemini1,
+  ],
+  claude: [
+    providers.claude1,
+    providers.claude2,
+    providers.claude3,
+    providers.claude4,
+    providers.claude5,
+    providers.claude6,
+    providers.claude7,
+  ],
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   cheapFast: [
+    providers.codexLuna,
+    providers.codex1Luna,
+    providers.codex2Luna,
     providers.claudeSonnet,
-    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
-    // providers.codexLuna,  // codex weekly quota exhausted; restore after 2026-07-23
-    // providers.codex1Luna,  // codex weekly quota exhausted; restore after 2026-07-23
-    // providers.kimi,
+    providers.claude1,
+    providers.claude2,
     // providers.vibe,
     // providers.antigravity,
-    // providers.openclaw,
     // providers.pi,
+    // providers.cursor,
   ],
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   research: [
-    providers.claudeSonnet,
-    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
-    providers.claude,
-    // providers.codexLuna,  // codex weekly quota exhausted; restore after 2026-07-23
-    // providers.codex1Luna,  // codex weekly quota exhausted; restore after 2026-07-23
-    // providers.kimi,
+    providers.codexLuna,
+    providers.codex1Luna,
+    providers.codex2Luna,
+    providers.kimi,
+    providers.kimi1,
+    providers.opencode,
     // providers.antigravity,
-    // providers.openclaw,
+    // providers.cursor,
     // providers.openrouter,
   ],
-  // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
+  // Claude leads this seat (Codex 5.6 does not orchestrate or gate). Later entries, including Codex, are runtime fallbacks.
   implement: [
-    providers.claudeSonnet,
-    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
-    providers.claude,
-    // 2026-07-27: codex restored as the fallback tail. The weekly window reset
-    // (codex-1 at 24% used, `smithers usage`), and a Claude-only pool parks the
-    // whole run for hours whenever the Claude session limit trips mid-phase.
-    providers.codex1Sol,
-    providers.codex1Luna,
-    // providers.kimi,
+    providers.claudeOpus,
+    providers.claude1,
+    providers.claude2,
+    providers.codexTerra,
+    providers.codex1Terra,
+    providers.codex2Terra,
     // providers.antigravity,
-    // providers.openclaw,
     // providers.openrouter,
+    // providers.cursor,
   ],
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   midTier: [
+    providers.codexTerra,
+    providers.codex1Terra,
+    providers.codex2Terra,
     providers.claudeSonnet,
-    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
-    providers.claude,
-    // providers.codexTerra,  // codex weekly quota exhausted; restore after 2026-07-23
-    // providers.codex1Terra,  // codex weekly quota exhausted; restore after 2026-07-23
-    // providers.kimi,
+    providers.claude1,
+    providers.claude2,
     // providers.antigravity,
-    // providers.openclaw,
+    // providers.cursor,
     // providers.openrouter,
   ],
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   smartTool: [
+    providers.codexTerra,
+    providers.codex1Terra,
+    providers.codex2Terra,
     providers.claudeSonnet,
-    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
-    providers.claude,
-    // providers.codexTerra,  // codex weekly quota exhausted; restore after 2026-07-23
-    // providers.codex1Terra,  // codex weekly quota exhausted; restore after 2026-07-23
-    // providers.kimi,
+    providers.claude1,
+    providers.claude2,
     // providers.antigravity,
-    // providers.openclaw,
+    // providers.cursor,
     // providers.openrouter,
   ],
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   validate: [
+    providers.codexTerra,
+    providers.codex1Terra,
+    providers.codex2Terra,
     providers.claudeSonnet,
-    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
-    providers.claude,
-    // providers.codexTerra,  // codex weekly quota exhausted; restore after 2026-07-23
-    // providers.codex1Terra,  // codex weekly quota exhausted; restore after 2026-07-23
-    // providers.kimi,
+    providers.claude1,
+    providers.claude2,
     // providers.antigravity,
-    // providers.openclaw,
+    // providers.cursor,
     // providers.openrouter,
   ],
-  // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
+  // Claude leads this seat (Codex 5.6 does not orchestrate or gate). Later entries, including Codex, are runtime fallbacks.
   smart: [
-    providers.claude,
     providers.claudeOpus,
-    providers.claudeSonnet,
-    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
-    // providers.codexSol,  // codex weekly quota exhausted; restore after 2026-07-23
-    // providers.codex1Sol,  // codex weekly quota exhausted; restore after 2026-07-23
-    // providers.openclaw,
+    providers.claude1,
+    providers.claude2,
+    providers.codexSol,
+    providers.codex1Sol,
+    providers.codex2Sol,
     // providers.openrouter,
     // providers.antigravity,
-    // providers.kimi,
+    // providers.cursor,
   ],
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   review: [
-    providers.claude,
-    providers.claudeOpus,
-    providers.claudeSonnet,
-    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
-    // 2026-07-27: codex restored as the fallback tail; see the note on implement.
+    providers.codexSol,
     providers.codex1Sol,
-    // providers.kimi,
-    // providers.openclaw,
+    providers.codex2Sol,
+    providers.claude,
+    providers.claude1,
+    providers.claude2,
     // providers.openrouter,
+    // providers.cursor,
   ],
-  // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
+  // Claude leads this seat (Codex 5.6 does not orchestrate or gate). Later entries, including Codex, are runtime fallbacks.
   planning: [
     providers.claude,
-    providers.claudeOpus,
-    providers.claudeSonnet,
-    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
-    // providers.codexSol,  // codex weekly quota exhausted; restore after 2026-07-23
-    // providers.codex1Sol,  // codex weekly quota exhausted; restore after 2026-07-23
-    // providers.kimi,
-    // providers.openclaw,
+    providers.claude1,
+    providers.claude2,
+    providers.codexSol,
+    providers.codex1Sol,
+    providers.codex2Sol,
+    // providers.cursor,
     // providers.openrouter,
   ],
-  // In-process SDK agents only, no CLI fallback, no tools ever attached — used
-  // by daily-ceo-intel's batched relevance-assessment and lighter-side-curation
-  // tasks, which score untrusted scraped web content and must never run with
-  // filesystem/bash tool access. See docs/deployment/serverless.mdx.
-  ceoIntelCheap: [providers.anthropicHaiku],
-  // In-process SDK agent only, no tools — daily-ceo-intel's editorial synthesis
-  // task; receives only the pre-selected evidence, never raw source HTML.
-  ceoIntelStrong: [providers.anthropicFable],
-  // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
+  // Claude leads this seat (Codex 5.6 does not orchestrate or gate). Later entries, including Codex, are runtime fallbacks.
   orchestrator: [
-    providers.claude,
     providers.claudeOpus,
-    // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
-    // providers.codexSol,  // codex weekly quota exhausted; restore after 2026-07-23
-    // providers.codex1Sol,  // codex weekly quota exhausted; restore after 2026-07-23
-    // providers.kimi,
-    // providers.openclaw,
+    providers.claude1,
+    providers.claude2,
+    providers.codexSol,
+    providers.codex1Sol,
+    providers.codex2Sol,
+    // providers.cursor,
     // providers.openrouter,
-  ],
-  migrationEasy: [
-    new SmithersCodexAgent({
-      model: "gpt-5.6-luna",
-      config: { model_reasoning_effort: "xhigh" },
-      skipGitRepoCheck: true,
-    }),
-  ],
-  migrationHard: [new SmithersOpenCodeAgent({ model: "kimi-for-coding/k3" })],
-  migrationReview: [
-    new SmithersCodexAgent({
-      model: "gpt-5.6-sol",
-      config: { model_reasoning_effort: "xhigh" },
-      skipGitRepoCheck: true,
-    }),
   ],
 } as const satisfies Record<string, AgentLike[]>;

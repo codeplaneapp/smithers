@@ -135,6 +135,7 @@ import {
 import { listAccounts, removeAccount } from "@smthrs/accounts";
 import { getUsageForAccounts, formatUsageReports } from "@smthrs/usage";
 import { runAgentAdd, pingAccount } from "./agent-commands/runAgentAdd.js";
+import { formatAccountIdentity, readAccountIdentity } from "./agent-commands/accountIdentity.js";
 import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
 import { getWorkflowFollowUpCtas } from "./workflow-pack.js";
 import { buildMonitoringGuidance, hasCustomUi, workflowIdFromPath } from "./monitoring-suggestion.js";
@@ -5758,7 +5759,10 @@ const agentsCli = Cli.create({
       }
       const rows = accounts.map((a) => {
         const where = a.configDir ?? (a.apiKey ? "(api key set)" : "");
-        return `  ${a.label.padEnd(24)}  ${a.provider.padEnd(14)}  ${where}`;
+        // Naming the signed-in subscription makes two labels sharing one
+        // rate limit obvious instead of silently halving the pool.
+        const who = formatAccountIdentity(readAccountIdentity(a.provider, a.configDir));
+        return `  ${a.label.padEnd(24)}  ${a.provider.padEnd(14)}  ${who.padEnd(26)}  ${where}`;
       });
       process.stderr.write(`Registered accounts (${accounts.length}):\n${rows.join("\n")}\n`);
       return c.ok({ accounts });
