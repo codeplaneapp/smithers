@@ -20,6 +20,82 @@ type AgentFileChange$1 = {
     source: "reported" | "reconstructed";
 };
 
+type AgentCliActionKind$2 = "turn" | "command" | "tool" | "file_change" | "web_search" | "todo_list" | "reasoning" | "warning" | "note";
+
+type AgentCliActionPhase$1 = "started" | "updated" | "completed";
+type AgentCliEventLevel$1 = "debug" | "info" | "warning" | "error";
+type AgentCliStartedEvent$1 = {
+    type: "started";
+    engine: string;
+    title: string;
+    resume?: string;
+    detail?: Record<string, unknown>;
+};
+type AgentCliActionEvent$1 = {
+    type: "action";
+    engine: string;
+    phase: AgentCliActionPhase$1;
+    entryType?: "thought" | "message";
+    action: {
+        id: string;
+        kind: AgentCliActionKind$2;
+        title: string;
+        detail?: Record<string, unknown>;
+    };
+    message?: string;
+    ok?: boolean;
+    level?: AgentCliEventLevel$1;
+};
+type AgentCliCompletedEvent$1 = {
+    type: "completed";
+    engine: string;
+    ok: boolean;
+    answer?: string;
+    error?: string;
+    resume?: string;
+    usage?: Record<string, unknown>;
+};
+type AgentCliEvent$1 = AgentCliStartedEvent$1 | AgentCliActionEvent$1 | AgentCliCompletedEvent$1;
+
+/**
+ * Loosely-typed generation options. The AI SDK passes a dynamic shape here
+ * (GenerateTextOptions / StreamTextOptions and provider-specific extensions)
+ * so we keep this permissive but avoid raw `any`.
+ */
+type AgentGenerateOptions$2 = {
+    prompt?: unknown;
+    messages?: unknown;
+    timeout?: unknown;
+    abortSignal?: AbortSignal;
+    rootDir?: string;
+    resumeSession?: string;
+    maxOutputBytes?: number;
+    onStdout?: (text: string) => void;
+    onStderr?: (text: string) => void;
+    onEvent?: (event: AgentCliEvent$1) => unknown;
+    onProcess?: (event: {
+        phase: "started" | "exited";
+        pid: number | undefined;
+    }) => void;
+    retry?: unknown;
+    isRetry?: unknown;
+    retryAttempt?: unknown;
+    schemaRetry?: unknown;
+    /**
+     * Run context for the task this agent invocation belongs to. Surfaced to the
+     * spawned agent process (and its subprocesses) as SMITHERS_RUN_ID / NODE_ID /
+     * ITERATION / ATTEMPT so the agent can address its own run — e.g. to raise a
+     * blocking `smithers ask-human` request.
+     */
+    taskContext?: {
+        runId?: string;
+        nodeId?: string;
+        iteration?: number;
+        attempt?: number;
+    };
+    [key: string]: unknown;
+};
+
 type BaseCliAgentOptions$2 = {
     id?: string;
     model?: string;
@@ -88,86 +164,10 @@ type CliUsageInfo$2 = {
     reasoningTokens?: number;
 };
 
-type AgentCliActionKind$2 = "turn" | "command" | "tool" | "file_change" | "web_search" | "todo_list" | "reasoning" | "warning" | "note";
-
-type AgentCliActionPhase$1 = "started" | "updated" | "completed";
-type AgentCliEventLevel$1 = "debug" | "info" | "warning" | "error";
-type AgentCliStartedEvent$1 = {
-    type: "started";
-    engine: string;
-    title: string;
-    resume?: string;
-    detail?: Record<string, unknown>;
-};
-type AgentCliActionEvent$1 = {
-    type: "action";
-    engine: string;
-    phase: AgentCliActionPhase$1;
-    entryType?: "thought" | "message";
-    action: {
-        id: string;
-        kind: AgentCliActionKind$2;
-        title: string;
-        detail?: Record<string, unknown>;
-    };
-    message?: string;
-    ok?: boolean;
-    level?: AgentCliEventLevel$1;
-};
-type AgentCliCompletedEvent$1 = {
-    type: "completed";
-    engine: string;
-    ok: boolean;
-    answer?: string;
-    error?: string;
-    resume?: string;
-    usage?: Record<string, unknown>;
-};
-type AgentCliEvent$1 = AgentCliStartedEvent$1 | AgentCliActionEvent$1 | AgentCliCompletedEvent$1;
-
 type CliOutputInterpreter$2 = {
     onStdoutLine?: (line: string) => AgentCliEvent$1[] | AgentCliEvent$1 | null | undefined;
     onStderrLine?: (line: string) => AgentCliEvent$1[] | AgentCliEvent$1 | null | undefined;
     onExit?: (result: RunCommandResult$2) => AgentCliEvent$1[] | AgentCliEvent$1 | null | undefined;
-};
-
-/**
- * Loosely-typed generation options. The AI SDK passes a dynamic shape here
- * (GenerateTextOptions / StreamTextOptions and provider-specific extensions)
- * so we keep this permissive but avoid raw `any`.
- */
-type AgentGenerateOptions$2 = {
-    prompt?: unknown;
-    messages?: unknown;
-    timeout?: unknown;
-    abortSignal?: AbortSignal;
-    rootDir?: string;
-    resumeSession?: string;
-    maxOutputBytes?: number;
-    onStdout?: (text: string) => void;
-    onStderr?: (text: string) => void;
-    onEvent?: (event: AgentCliEvent$1) => unknown;
-    onProcess?: (event: {
-        phase: "started" | "exited";
-        pid: number | undefined;
-    }) => void;
-    retry?: unknown;
-    isRetry?: unknown;
-    retryAttempt?: unknown;
-    schemaRetry?: unknown;
-    /**
-     * Run context for the task this agent invocation belongs to. Surfaced to the
-     * spawned agent process (and its subprocesses) as SMITHERS_RUN_ID / NODE_ID /
-     * ITERATION / ATTEMPT so the agent can address its own run — e.g. to raise a
-     * blocking `smithers ask-human` request.
-     */
-    taskContext?: {
-        runId?: string;
-        nodeId?: string;
-        iteration?: number;
-        attempt?: number;
-    };
-    [key: string]: unknown;
 };
 
 /**
@@ -534,4 +534,4 @@ type PiExtensionUiRequest = PiExtensionUiRequest$2;
 type PiExtensionUiResponse = PiExtensionUiResponse$2;
 type RunCommandResult = RunCommandResult$2;
 
-export { type AgentFileChange$1 as A, type BaseCliAgentOptions$2 as B, type CliOutputInterpreter$2 as C, createSyntheticIdGenerator as D, extractPrompt as E, extractTextFromJsonValue as F, extractUsageFromOutput as G, isLikelyRuntimeMetadata as H, isRecord as I, normalizeCodexConfig as J, normalizeTokenUsage as K, parseAnthropicStyleFileChanges as L, pushFlag as M, type NormalizedTokenUsage as N, pushList as O, type PiExtensionUiRequest$2 as P, reconstructUnifiedDiff as Q, type RunCommandResult as R, resolveTimeouts as S, runAgentPromise as T, runCommandEffect as U, runRpcCommandEffect as V, shouldSurfaceUnparsedStdout as W, toolKindFromName as X, truncate as Y, truncateToBytes as Z, tryParseJson as _, type BaseCliAgentOptions as a, type PiExtensionUiResponse$2 as b, type AgentGenerateOptions$2 as c, BaseCliAgent as d, type CodexConfigOverrides$2 as e, type AgentCliEvent$1 as f, type CliOutputInterpreter as g, type AgentCliActionKind$2 as h, type AgentFileChangeKind as i, type AgentCliActionEvent as j, type AgentCliActionKind as k, type AgentCliActionPhase as l, type AgentCliCompletedEvent as m, type AgentCliEvent as n, type AgentCliEventLevel as o, type AgentCliStartedEvent as p, type AgentGenerateOptions as q, type CliUsageInfo as r, type CodexConfigOverrides as s, type PiExtensionUiRequest as t, type PiExtensionUiResponse as u, asNumber as v, asString as w, buildGenerateResult as x, combineNonEmpty as y, createAgentStdoutTextEmitter as z };
+export { type AgentFileChange$1 as A, type BaseCliAgentOptions$2 as B, type CliOutputInterpreter$2 as C, createSyntheticIdGenerator as D, extractPrompt as E, extractTextFromJsonValue as F, extractUsageFromOutput as G, isLikelyRuntimeMetadata as H, isRecord as I, normalizeCodexConfig as J, normalizeTokenUsage as K, parseAnthropicStyleFileChanges as L, pushFlag as M, type NormalizedTokenUsage as N, pushList as O, type PiExtensionUiRequest$2 as P, reconstructUnifiedDiff as Q, type RunCommandResult as R, resolveTimeouts as S, runAgentPromise as T, runCommandEffect as U, runRpcCommandEffect as V, shouldSurfaceUnparsedStdout as W, toolKindFromName as X, truncate as Y, truncateToBytes as Z, tryParseJson as _, type AgentGenerateOptions$2 as a, type BaseCliAgentOptions as b, type PiExtensionUiResponse$2 as c, BaseCliAgent as d, type CodexConfigOverrides$2 as e, type AgentCliEvent$1 as f, type CliOutputInterpreter as g, type AgentCliActionKind$2 as h, type AgentFileChangeKind as i, type AgentCliActionEvent as j, type AgentCliActionKind as k, type AgentCliActionPhase as l, type AgentCliCompletedEvent as m, type AgentCliEvent as n, type AgentCliEventLevel as o, type AgentCliStartedEvent as p, type AgentGenerateOptions as q, type CliUsageInfo as r, type CodexConfigOverrides as s, type PiExtensionUiRequest as t, type PiExtensionUiResponse as u, asNumber as v, asString as w, buildGenerateResult as x, combineNonEmpty as y, createAgentStdoutTextEmitter as z };
