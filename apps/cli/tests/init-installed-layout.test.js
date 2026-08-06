@@ -139,8 +139,33 @@ function buildFakeInstallTree() {
       "  if (env.SMITHERS_HOME) return env.SMITHERS_HOME;",
       '  return join(env.HOME ?? homedir(), ".smithers");',
       "}",
+      // registered-agent-id.js re-exports these from @smthrs/accounts.
+      'export function registeredAgentId(label) { return `smithers-account:${label}`; }',
+      "export function registeredAgentLabel(agentId) {",
+      '  if (typeof agentId !== "string" || !agentId.startsWith("smithers-account:")) return undefined;',
+      '  return agentId.slice("smithers-account:".length) || undefined;',
+      "}",
       "",
     ].join("\n"),
+  );
+
+  // Stub out the usage package so agent-detection.js can import
+  // @smthrs/usage/readClaudeCredentials. The module only uses node builtins,
+  // so the real source is copied verbatim with the published `./*` exports.
+  const usageDir = join(nm, "@smthrs", "usage");
+  writeFile(
+    join(usageDir, "package.json"),
+    JSON.stringify({
+      name: "@smthrs/usage",
+      version: "99.0.0",
+      type: "module",
+      exports: { "./*": "./src/*.js" },
+    }) + "\n",
+  );
+  mkdirSync(join(usageDir, "src"), { recursive: true });
+  cpSync(
+    join(REPO_ROOT, "packages/usage/src/readClaudeCredentials.js"),
+    join(usageDir, "src/readClaudeCredentials.js"),
   );
 
   // Fake zod + typescript so require.resolve finds versions.
