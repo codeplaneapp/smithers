@@ -274,8 +274,12 @@ forces `--output-format stream-json` so Smithers can stream structured progress.
   it unsets an inherited `ANTHROPIC_API_KEY`.
 - Subscription login: the `claude` CLI stores credentials per config directory.
   To set up an isolated subscription, run `CLAUDE_CONFIG_DIR=<dir> claude` once
-  and complete `/login` interactively. The credentials land at
-  `<dir>/.credentials.json`.
+  and complete `/login` interactively, or let Smithers drive it:
+  `bunx smthrs agents add --provider claude-code --label <name> --tmux`
+  launches the CLI in a detached tmux session and registers the account when
+  the browser login completes. Credentials land at `<dir>/.credentials.json`, or
+  on macOS in a per-config-dir Keychain item
+  (`Claude Code-credentials-<first 8 hex of sha256(configDir)>`).
 - Pinning a subscription: pass `configDir` to use that directory's credentials.
   Smithers sets `CLAUDE_CONFIG_DIR=<configDir>` for that invocation, so you can
   run several subscriptions side by side. Omit it to use the default `~/.claude/`.
