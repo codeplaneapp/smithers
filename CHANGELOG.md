@@ -6,7 +6,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
 ## 0.33.1 (2026-08-04)
 
-82 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 301 files changed, +34312 / -1008 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 291 files, +11794 / -758). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
+86 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 303 files changed, +34538 / -1009 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 293 files, +11864 / -759). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
 
 ### Features (10)
 
@@ -21,8 +21,10 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - feat(pack): docs-home-design-system workflow — Kimi K3 reskins, Fable reviews until LGTM ([bdb6db56f9](https://github.com/smithersai/smithers/commit/bdb6db56f9))
 - feat(pack): upgrade-dependents workflow — fork, upgrade, review, PR every open-source dependent to smthrs ([4cad958237](https://github.com/smithersai/smithers/commit/4cad958237))
 
-### Bug fixes (34)
+### Bug fixes (36)
 
+- fix(pack): give the research pool config-dir-free Claude rungs ([0fecf7723a](https://github.com/smithersai/smithers/commit/0fecf7723a))
+- fix(pack): type the agents registry for machine-local labels and own the fallback-agents POC ([6d6f2547a0](https://github.com/smithersai/smithers/commit/6d6f2547a0))
 - fix(cli): stub @smthrs/usage and registeredAgentId in the installed-layout test tree ([89343c5816](https://github.com/smithersai/smithers/commit/89343c5816))
 - fix(deps): bump effect to 4.0.0-beta.104 to match the @effect ecosystem ([6b4a3172db](https://github.com/smithersai/smithers/commit/6b4a3172db))
 - fix: probe macOS Keychain for Claude Code OAuth in agent detection ([96d9df0752](https://github.com/smithersai/smithers/commit/96d9df0752))
@@ -58,8 +60,10 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - fix(server): keep /health live by making workflow \<UI\> discovery lazy and batched ([f8f91d58bb](https://github.com/smithersai/smithers/commit/f8f91d58bb))
 - fix(pack): guard crash-recovery render against missing output rows ([eb42b28c9e](https://github.com/smithersai/smithers/commit/eb42b28c9e))
 
-### Documentation (11)
+### Documentation (13)
 
+- docs: regenerate llms bundles for the 0.33.1 changelog update ([c9c8cc38e7](https://github.com/smithersai/smithers/commit/c9c8cc38e7))
+- docs(release): record the umbrella export-drift guard and 0.33.1 late fixes ([52dba11abf](https://github.com/smithersai/smithers/commit/52dba11abf))
 - docs(reference): add ForkFanOutProps to the types reference ([fba7424bde](https://github.com/smithersai/smithers/commit/fba7424bde))
 - docs: regenerate llms bundles ([f747d444f6](https://github.com/smithersai/smithers/commit/f747d444f6))
 - docs(release): fold the #1464 reliability fixes into 0.33.1 ([eeee5f30c7](https://github.com/smithersai/smithers/commit/eeee5f30c7))
