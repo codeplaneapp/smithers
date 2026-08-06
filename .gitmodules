@@ -1,0 +1,3 @@
+[submodule "trellis"]
+	path = trellis
+	url = git@github.com:smithersai/trellis.git
