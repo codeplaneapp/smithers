@@ -6,7 +6,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
 ## 0.33.1 (2026-08-04)
 
-61 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 258 files changed, +31371 / -668 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 249 files, +8891 / -463). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
+62 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 260 files changed, +31375 / -668 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 251 files, +8895 / -463). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
 
 ### Features (6)
 
@@ -67,7 +67,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - test(server): bump the pinned gateway schema head to 0036 ([35cd822d9a](https://github.com/smithersai/smithers/commit/35cd822d9a))
 - test(agents): replay recorded transcripts through live interpreters; distinct fixture tool ids ([16e70ff7e4](https://github.com/smithersai/smithers/commit/16e70ff7e4))
 
-### Chores and maintenance (13)
+### Chores and maintenance (14)
 
 - chore(agents,smithers): export AgentFileChange types and regenerate declarations ([e42113568c](https://github.com/smithersai/smithers/commit/e42113568c))
 - chore(protocol,engine,gateway): regenerate declarations and openapi for live diff flag ([76fe149ce1](https://github.com/smithersai/smithers/commit/76fe149ce1))
@@ -78,6 +78,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - chore(pack): n8n MVP mission workflow update ([c2e034aed3](https://github.com/smithersai/smithers/commit/c2e034aed3))
 - chore(release): 0.33.1 version bump ([c218686e5e](https://github.com/smithersai/smithers/commit/c218686e5e))
 - fix: repair wave 0 gate failures ([d11af00dcf](https://github.com/smithersai/smithers/commit/d11af00dcf), [3c9c9be1df](https://github.com/smithersai/smithers/commit/3c9c9be1df))
+- chore(bench): pin the Trellis benchmark lab as a submodule ([f44d8b3f74](https://github.com/smithersai/smithers/commit/f44d8b3f74))
 
 ## 0.33.0 (2026-08-02)
 

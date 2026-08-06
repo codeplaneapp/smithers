@@ -246,6 +246,10 @@ bunx smthrs up upgrade-dependents
   row, which a heavily loaded machine can miss. Set
   `SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS` to raise or lower that window. The
   default is still 30 seconds, and a value below 1000ms falls back to it.
+- The Trellis benchmark lab is pinned as a git submodule at `trellis/`. It is
+  internal benchmarking infrastructure, not part of any published package, and
+  it stays uninitialized unless you ask for it: nothing in the build, the test
+  suite, or CI reads it.
 
 ## Upgrade notes
 
@@ -277,9 +281,9 @@ bunx smthrs up upgrade-dependents
 
 ## The full changelog
 
-61 commits, plus this changelog update, touching 258 files: 31,371 insertions,
+62 commits, plus this changelog update, touching 260 files: 31,375 insertions,
 668 deletions. Most of that insertion count is regenerated `llms-*.txt` docs
-bundles; excluding those and the lockfiles it is 249 files, 8,891 insertions,
+bundles; excluding those and the lockfiles it is 251 files, 8,895 insertions,
 463 deletions. The complete commit-level list is in
 [CHANGELOG.md](https://github.com/smithersai/smithers/blob/main/CHANGELOG.md).
 
