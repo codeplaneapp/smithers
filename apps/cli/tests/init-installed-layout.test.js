@@ -140,7 +140,7 @@ function buildFakeInstallTree() {
       '  return join(env.HOME ?? homedir(), ".smithers");',
       "}",
       // registered-agent-id.js re-exports these from @smthrs/accounts.
-      'export function registeredAgentId(label) { return `smithers-account:${label}`; }',
+      "export function registeredAgentId(label) { return `smithers-account:${label}`; }",
       "export function registeredAgentLabel(agentId) {",
       '  if (typeof agentId !== "string" || !agentId.startsWith("smithers-account:")) return undefined;',
       '  return agentId.slice("smithers-account:".length) || undefined;',
