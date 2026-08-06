@@ -1,4 +1,4 @@
-import { describe, expect, onTestFinished, test } from "bun:test";
+import { describe, expect, mock, onTestFinished, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -15,7 +15,8 @@ import { ask, buildAskAttemptPlan, runAskAttempts } from "../src/ask.js";
 // We test the exported pure-logic functions by importing the module.
 // detectAvailableAgents calls spawnSync so we test the scoring/status logic
 // via generateAgentsTs with controlled env.
-import { detectAvailableAgents, generateAgentsTs, sanitizeProbeOutput } from "../src/agent-detection.js";
+import { claudeKeychainSuffix } from "@smthrs/usage/readClaudeCredentials";
+import { detectAvailableAgents, generateAgentsTs, readClaudeCredentials, sanitizeProbeOutput } from "../src/agent-detection.js";
 // We can't easily mock spawnSync, but we can test the detection logic
 // by verifying structure and scoring behavior with the real environment.
 describe("detectAvailableAgents", () => {
@@ -630,5 +631,58 @@ describe("sanitizeProbeOutput", () => {
     expect(sanitizeProbeOutput("Kimi credentials are missing or expired")).toBe(
       "Kimi credentials are missing or expired",
     );
+  });
+});
+
+describe("readClaudeCredentials", () => {
+  function tempConfigDir() {
+    const dir = mkdtempSync(join(tmpdir(), "smithers-claude-config-"));
+    onTestFinished(() => {
+      rmSync(dir, { recursive: true, force: true });
+    });
+    return dir;
+  }
+
+  test("accepts on-disk credentials and rejects expired tokens", () => {
+    const configDir = tempConfigDir();
+    const notFound = mock(() => ({ status: 44, stdout: Buffer.from("") }));
+    writeFileSync(
+      join(configDir, ".credentials.json"),
+      JSON.stringify({ claudeAiOauth: { accessToken: "tok", expiresAt: Date.now() + 3_600_000 } }),
+    );
+    expect(readClaudeCredentials(configDir, notFound)).toEqual({ valid: true });
+
+    writeFileSync(
+      join(configDir, ".credentials.json"),
+      JSON.stringify({ claudeAiOauth: { accessToken: "tok", expiresAt: Date.now() - 1_000 } }),
+    );
+    expect(readClaudeCredentials(configDir, notFound).reason).toBe("Claude Code OAuth token is expired");
+  });
+
+  test.skipIf(process.platform !== "darwin")(
+    "falls back to the account-scoped macOS Keychain item when the file is absent",
+    () => {
+      // Regression: a logged-in default install stores OAuth in the Keychain,
+      // so the file-only check reported it as unauthenticated whenever the
+      // `claude auth status` probe timed out (NO_USABLE_AGENTS on macOS).
+      const configDir = tempConfigDir();
+      const service = `Claude Code-credentials-${claudeKeychainSuffix(configDir)}`;
+      const spawn = mock((command, args) => {
+        expect(command).toBe("security");
+        expect(args).toEqual(["find-generic-password", "-s", service, "-w"]);
+        return {
+          status: 0,
+          stdout: Buffer.from(JSON.stringify({ claudeAiOauth: { accessToken: "keychain-token" } })),
+        };
+      });
+      expect(readClaudeCredentials(configDir, spawn)).toEqual({ valid: true });
+      expect(spawn).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  test("reports missing credentials when neither file nor Keychain has them", () => {
+    const configDir = tempConfigDir();
+    const notFound = mock(() => ({ status: 44, stdout: Buffer.from("") }));
+    expect(readClaudeCredentials(configDir, notFound).reason).toBe("Claude Code OAuth credentials are missing");
   });
 });
