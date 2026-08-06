@@ -16,7 +16,12 @@ import { ask, buildAskAttemptPlan, runAskAttempts } from "../src/ask.js";
 // detectAvailableAgents calls spawnSync so we test the scoring/status logic
 // via generateAgentsTs with controlled env.
 import { claudeKeychainSuffix } from "@smthrs/usage/readClaudeCredentials";
-import { detectAvailableAgents, generateAgentsTs, readClaudeCredentials, sanitizeProbeOutput } from "../src/agent-detection.js";
+import {
+  detectAvailableAgents,
+  generateAgentsTs,
+  readClaudeCredentials,
+  sanitizeProbeOutput,
+} from "../src/agent-detection.js";
 // We can't easily mock spawnSync, but we can test the detection logic
 // by verifying structure and scoring behavior with the real environment.
 describe("detectAvailableAgents", () => {

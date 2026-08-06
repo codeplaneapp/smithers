@@ -292,8 +292,12 @@ declare function decodeJwtClaims(token: string | null | undefined): Record<strin
 /**
  * Reads the Claude Code subscription OAuth token for an account. Tries the
  * account's `configDir/.credentials.json` first (the cross-platform location
- * when `CLAUDE_CONFIG_DIR` is set), then falls back to the macOS Keychain item
- * `Claude Code-credentials`.
+ * when `CLAUDE_CONFIG_DIR` is set), then the macOS Keychain: Claude Code keys
+ * per-config-dir logins as `Claude Code-credentials-<first 8 hex of
+ * sha256(configDir)>`, so an isolated account's item is tried before the
+ * unsuffixed default-install item. For accounts with a `configDir`, the
+ * unsuffixed item is NOT used as a fallback — it belongs to the default
+ * `~/.claude` login and would silently attribute another account's token.
  *
  * Returns `null` when no credential can be read, so the adapter degrades to a
  * "none" report rather than throwing. The token is returned only to mint an
