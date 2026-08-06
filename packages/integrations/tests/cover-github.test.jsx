@@ -6,14 +6,13 @@ import { afterAll, describe, expect, test } from "bun:test";
 import React from "react";
 import { z } from "zod";
 import { Effect, Schema } from "effect";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createSmithers, renderFrame } from "smthrs";
 import { SmithersCtx } from "@smthrs/react-reconciler/context";
 import { makeGitHubClient, githubClientLayer, GitHubClient } from "../src/github/GitHubClient.js";
 import { OnWebhook, OnIssueOpened, OnIssueComment, OnPush } from "../src/github/components/OnWebhook.js";
 import { Comment } from "../src/github/components/outbound.js";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 
 function startFixture() {
   const server = Bun.serve({
@@ -145,7 +144,7 @@ describe("GitHubClient rate-limit + parsing edge branches", () => {
 const NullContext = React.createContext(/** @type {any} */ (null));
 
 function makeApi(schemas) {
-  const dir = mkdtempSync(join(tmpdir(), "smithers-gh-cov-"));
+  const dir = makeTempDirPath("smithers-gh-cov-");
   return createSmithers(schemas, { dbPath: join(dir, "db.sqlite") });
 }
 

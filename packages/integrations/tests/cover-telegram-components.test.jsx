@@ -12,8 +12,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import React from "react";
 import { z } from "zod";
 import { Effect } from "effect";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 import { join } from "node:path";
 import { createSmithers, renderFrame, runWorkflow, signalRun } from "smthrs";
 import { SmithersCtx } from "@smthrs/react-reconciler/context";
@@ -45,7 +44,7 @@ const NullContext = React.createContext(/** @type {any} */ (null));
 const msgSchema = z.object({ text: z.string() }).passthrough();
 
 function makeApi(schemas) {
-  const dir = mkdtempSync(join(tmpdir(), "smithers-tgc-cov-"));
+  const dir = makeTempDirPath("smithers-tgc-cov-");
   return createSmithers(schemas, { dbPath: join(dir, "db.sqlite") });
 }
 

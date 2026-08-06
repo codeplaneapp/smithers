@@ -17,11 +17,11 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTempRepo, runSmithers, writeTestWorkflow } from "../../../packages/smithers/tests/e2e-helpers.js";
+import { makeTempDirPath } from "../../../packages/testing/src/cleanup/tempDir.ts";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const CLI_ENTRY = resolve(REPO_ROOT, "apps/cli/src/index.js");
@@ -68,7 +68,7 @@ function runPython(body, opts = {}) {
 // it appends the exact argv it received (as JSON) to $REC and prints a real
 // JSON row on stdout, so tools.py's result-parsing path runs for real too.
 function writeRecordingCli() {
-  const dir = mkdtempSync(join(tmpdir(), "smithers-fake-cli-"));
+  const dir = makeTempDirPath("smithers-fake-cli-");
   const js = join(dir, "fake-smithers.js");
   writeFileSync(
     js,

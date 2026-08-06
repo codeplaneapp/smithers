@@ -9,21 +9,22 @@ import pg from "pg";
 import { createSmithers } from "../src/create.js";
 import { migrateSmithersStore } from "../src/migrateSmithersStore.js";
 import { resolveSmithersBackendChoice } from "../src/resolveSmithersBackendChoice.js";
+import { cleanupTempDirs, makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 import { mkdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 
 setDefaultTimeout(120_000);
 
-/** @type {string[]} */
-export const tempDirs = [];
 export const PG_URL = process.env.SMITHERS_TEST_PG_URL;
 
+// Each workspace holds a full PGlite store (~40MB). They are the heaviest
+// scratch dirs the repo produces, so they go through the shared registry:
+// beyond the afterEach below, its process-exit sweep still reclaims them when
+// a suite dies mid-run (this suite's documented Bus error, or an ENOSPC).
 export function makeWorkspace(name) {
-  const dir = join(tmpdir(), `${name}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const dir = makeTempDirPath(`${name}-`);
   mkdirSync(join(dir, ".smithers"), { recursive: true });
-  tempDirs.push(dir);
   return dir;
 }
 
@@ -39,15 +40,13 @@ export async function closeApi(api) {
 registerCleanup();
 function registerCleanup() {
   try {
-    afterEach(cleanupTempDirs);
+    afterEach(cleanupWorkspaces);
   } catch {
     // Imported outside `bun test` (e.g. a repro script): callers clean up themselves.
   }
 }
-function cleanupTempDirs() {
-  for (const dir of tempDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
-  }
+function cleanupWorkspaces() {
+  cleanupTempDirs();
   // Every test boots at least one PGlite (WASM) instance; without a forced
   // collection between tests the mapped WASM memories accumulate until bun
   // dies with a Bus error near the 2GB mark (reproducible from ~3 tests in).

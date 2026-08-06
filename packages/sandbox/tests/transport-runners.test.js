@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 import { Effect } from "effect";
 import { SandboxEntityExecutor } from "../src/effect/sandbox-entity.js";
 import { CodeplaneSandboxExecutorLive, DockerSandboxExecutorLive } from "../src/effect/http-runner.js";
@@ -22,7 +22,7 @@ const isWindows = process.platform === "win32";
  * @param {string} prefix
  */
 function tempDir(prefix) {
-  return mkdtempSync(join(tmpdir(), prefix));
+  return makeTempDirPath(prefix);
 }
 
 /**

@@ -5,12 +5,12 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { loadWorkflowsFromDir } from "../src/conventions/loader.js";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 
 // Derive the package root from this test file's location: tests/../ = package root.
 const packageRoot = resolve(fileURLToPath(import.meta.url), "../..");
@@ -63,7 +63,7 @@ describe("conventions subpath export — plain node resolution", () => {
 
 describe("loadWorkflowsFromDir — block-comment frontmatter in executable files", () => {
   test("loads a .tsx workflow file with /* --- yaml --- */ leading comment block and parses metadata from frontmatter", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-tsx-fm-test-"));
+    const dir = makeTempDirPath("smithers-tsx-fm-test-");
     // A .tsx workflow file where name/description/tags are ONLY in the block-comment
     // frontmatter — the default export deliberately omits them so we can verify
     // that metadata comes from frontmatter parsing, not from the export object.
@@ -97,7 +97,7 @@ export default { workflow: { build: () => null, opts: {} } };
   });
 
   test("loads a .js workflow file with /* --- yaml --- */ leading comment block", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-comment-fm-test-"));
+    const dir = makeTempDirPath("smithers-comment-fm-test-");
     writeFileSync(
       join(dir, "my-workflow.js"),
       `/* ---
@@ -123,7 +123,7 @@ export default { workflow: { build: () => null, opts: {} }, name: "my-workflow",
   });
 
   test("block-comment frontmatter tags are parsed when export has name", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-comment-fm2-test-"));
+    const dir = makeTempDirPath("smithers-comment-fm2-test-");
     writeFileSync(
       join(dir, "tagged.js"),
       `/* ---
@@ -144,7 +144,7 @@ export default { workflow: {}, name: "tagged", description: "Tagged workflow" };
   });
 
   test("file with no frontmatter (no comment block, no companion .md) still loads", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-no-fm-test-"));
+    const dir = makeTempDirPath("smithers-no-fm-test-");
     writeFileSync(
       join(dir, "simple.js"),
       `export default { workflow: {}, name: "simple", description: "No frontmatter" };`,

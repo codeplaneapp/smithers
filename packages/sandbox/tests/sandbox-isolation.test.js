@@ -19,8 +19,8 @@
 // Host-level process tests remain opt-in because they require the real runtime
 // binaries and platform privileges.
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 import { join } from "node:path";
 import { SANDBOX_MAX_BUNDLE_BYTES, validateSandboxBundle, writeSandboxBundle } from "../src/bundle.js";
 import { resolveSandboxPath, assertPathWithinRoot } from "../src/sandboxPath.js";
@@ -29,7 +29,7 @@ import { resolveSandboxPath, assertPathWithinRoot } from "../src/sandboxPath.js"
  * @param {string} prefix
  */
 function tempDir(prefix) {
-  return mkdtempSync(join(tmpdir(), prefix));
+  return makeTempDirPath(prefix);
 }
 
 describe("sandbox isolation: path-escape boundary", () => {

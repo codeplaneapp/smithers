@@ -1,8 +1,7 @@
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
+import { makeTempDir } from "../../testing/src/cleanup/tempDir.ts";
 import { createSmithers } from "../src/index.js";
 /**
  * @template Schema
@@ -10,8 +9,8 @@ import { createSmithers } from "../src/index.js";
  * @param {string} ddl
  */
 export function createTestDb(schema, ddl) {
-  const dir = mkdtempSync(join(tmpdir(), "smithers-"));
-  const path = join(dir, "db.sqlite");
+  const dir = makeTempDir("smithers-test-db-");
+  const path = join(dir.path, "db.sqlite");
   const sqlite = new Database(path);
   sqlite.exec(ddl);
   const db = drizzle(sqlite, { schema: schema });
@@ -19,7 +18,10 @@ export function createTestDb(schema, ddl) {
     db,
     sqlite,
     path,
-    cleanup: () => sqlite.close(),
+    cleanup: () => {
+      sqlite.close();
+      dir.cleanup();
+    },
   };
 }
 /**
@@ -27,8 +29,8 @@ export function createTestDb(schema, ddl) {
  * @param {S} schemas
  */
 export function createTestSmithers(schemas) {
-  const dir = mkdtempSync(join(tmpdir(), "smithers-"));
-  const dbPath = join(dir, "db.sqlite");
+  const dir = makeTempDir("smithers-test-store-");
+  const dbPath = join(dir.path, "db.sqlite");
   const api = createSmithers(schemas, { dbPath });
   return {
     ...api,
@@ -37,6 +39,7 @@ export function createTestSmithers(schemas) {
       try {
         api.db.$client?.close?.();
       } catch {}
+      dir.cleanup();
     },
   };
 }

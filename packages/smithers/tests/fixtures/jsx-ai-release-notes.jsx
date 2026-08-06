@@ -2,8 +2,7 @@
 import { createSmithers, Task, Workflow } from "smthrs";
 import { z } from "zod";
 import { join } from "node:path";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { makeTempDirPath } from "../../../testing/src/cleanup/tempDir.ts";
 const CHANGELOG = `# Changelog
 
 ## 1.2.0
@@ -13,7 +12,7 @@ const CHANGELOG = `# Changelog
 ## 1.1.0
 - Add CLI status and frames commands
 `;
-const dbPath = join(mkdtempSync(join(tmpdir(), "smithers-jsx-ai-")), "db.sqlite");
+const dbPath = join(makeTempDirPath("smithers-jsx-ai-"), "db.sqlite");
 const { smithers, outputs } = createSmithers(
   {
     output: z.object({

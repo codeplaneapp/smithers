@@ -23,16 +23,15 @@ import {
 import { makeTelegramClient } from "../src/telegram/TelegramClient.js";
 import { TELEGRAM_CALLBACK_QUERY_EVENT } from "../src/telegram/TelegramSource.js";
 import { startTelegramFixture } from "./telegram-fixture.js";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 
 const fixture = startTelegramFixture();
 afterAll(() => fixture.stop());
 const telegramConfig = { botToken: fixture.token, apiBaseUrl: fixture.apiBaseUrl };
 
 function makeApi() {
-  const dir = mkdtempSync(join(tmpdir(), "smithers-tg-approval-"));
+  const dir = makeTempDirPath("smithers-tg-approval-");
   return createSmithers(
     {
       ...telegramApprovalSchemas,
