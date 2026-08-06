@@ -766,6 +766,20 @@ type ParallelProps = {
   skipIf?: boolean;
   children?: React.ReactNode;
 };
+// ForkFanOut composes Parallel[Task(fork=source)]: each entry waits for the
+// fork source, then runs its own prompt from a copy of its final session.
+type ForkFanOutProps = {
+  id?: string;
+  fork: string;                        // task id whose final session every entry forks
+  tasks: ForkFanOutTask[];             // one generated task per entry
+  agent?: AgentLike | AgentLike[];     // default for entries without one
+  taskOutput?: OutputTarget;           // default output target for entries without one
+  maxConcurrency?: number;
+  label?: string;
+  taskProps?: ForkFanOutTaskOptions;   // extra Task props applied to every entry
+  skipIf?: boolean;
+  children?: string | React.ReactNode; // shared preamble prepended to every prompt
+};
 type MemoryProps = {
   bank?: string;
   banks?: string[];
