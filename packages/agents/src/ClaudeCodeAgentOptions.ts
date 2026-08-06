@@ -9,12 +9,15 @@ export type ClaudeCodeAgentOptions = BaseCliAgentOptions & {
   appendSystemPrompt?: string;
   /**
    * Path to an isolated Claude Code config directory. Sets `CLAUDE_CONFIG_DIR`
-   * on the spawned process so this invocation uses the credentials stored at
-   * `<configDir>/.credentials.json` (instead of the user's default `~/.claude/`).
+   * on the spawned process so this invocation uses that directory's
+   * credentials (instead of the user's default `~/.claude/`): the CLI stores
+   * them at `<configDir>/.credentials.json`, or on macOS in a per-config-dir
+   * Keychain item suffixed with the first 8 hex chars of sha256(configDir).
    *
    * Use this to run multiple Claude Code subscriptions side-by-side. Set up
    * the directory by running `CLAUDE_CONFIG_DIR=<path> claude` once and
-   * completing `/login` interactively.
+   * completing `/login` interactively, or via
+   * `smithers agents add --provider claude-code --label <name> --tmux`.
    */
   configDir?: string;
   /**
