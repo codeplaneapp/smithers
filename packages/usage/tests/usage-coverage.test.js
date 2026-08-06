@@ -389,6 +389,34 @@ describe("credential readers", () => {
     expect(spawn).toHaveBeenCalledTimes(1);
   });
 
+  test("readClaudeCredentials queries the per-config-dir Keychain item for isolated accounts", () => {
+    // Claude Code keys isolated logins as `Claude Code-credentials-<first 8
+    // hex of sha256(configDir)>`; the unsuffixed item belongs to ~/.claude and
+    // must NOT be consulted for a non-default configDir.
+    const configDir = "/Users/williamcory/.smithers/accounts/claude-1";
+    const spawn = mock((command, args) => {
+      expect(command).toBe("security");
+      expect(args).toEqual(["find-generic-password", "-s", "Claude Code-credentials-1f3da633", "-w"]);
+      return {
+        status: 0,
+        stdout: Buffer.from(JSON.stringify({ claudeAiOauth: { accessToken: "isolated-token" } })),
+      };
+    });
+    expect(readClaudeCredentials({ configDir }, "darwin", spawn)).toEqual({
+      accessToken: "isolated-token",
+      expiresAt: undefined,
+    });
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  test("readClaudeCredentials does not fall back to the default Keychain item for isolated accounts", () => {
+    const spawn = mock(() => ({ status: 44, stdout: Buffer.from("") }));
+    expect(readClaudeCredentials({ configDir: "/tmp/isolated-claude" }, "darwin", spawn)).toBeNull();
+    // Only the suffixed item is tried; returning ~/.claude's token here would
+    // silently attribute another account's usage.
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
   test("readClaudeCredentials handles Keychain hit with no stdout buffer", () => {
     // status 0 but stdout undefined exercises the `?? ""` fallback on line 34.
     const spawn = mock(() => ({ status: 0, stdout: undefined }));
