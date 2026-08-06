@@ -23,7 +23,9 @@ export function oneshotCodexPauseDetail(env = process.env) {
     if (until) {
       const parsed = Date.parse(until);
       if (Number.isFinite(parsed)) {
-        return Date.now() < parsed ? { paused: true, pausedBy: "marker", until, reason, markerPath } : { paused: false };
+        return Date.now() < parsed
+          ? { paused: true, pausedBy: "marker", until, reason, markerPath }
+          : { paused: false };
       }
     }
     return { paused: true, pausedBy: "marker", until, reason, markerPath };
