@@ -6,7 +6,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
 ## 0.33.1 (2026-08-04)
 
-86 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 303 files changed, +34538 / -1009 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 293 files, +11864 / -759). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
+88 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 303 files changed, +34554 / -1010 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 293 files, +11880 / -760). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
 
 ### Features (10)
 
@@ -76,8 +76,9 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - docs: fix duplicate "Smithers - Smithers" landing page title ([6406cf5b49](https://github.com/smithersai/smithers/commit/6406cf5b49))
 - docs: adopt the product logo for favicon and navbar wordmark ([57551aaffe](https://github.com/smithersai/smithers/commit/57551aaffe))
 
-### Tests (4)
+### Tests (5)
 
+- test(server): poll for the resized PTY geometry instead of racing a fixed sleep ([7df4a29984](https://github.com/smithersai/smithers/commit/7df4a29984))
 - test(pack): own the file-change-contract and n8n workflows in the inventory ([ac00ab5328](https://github.com/smithersai/smithers/commit/ac00ab5328))
 - test(pack): own n8n-mvp-mission-v2 in the workflow inventory ([b780805b94](https://github.com/smithersai/smithers/commit/b780805b94))
 - test(server): bump the pinned gateway schema head to 0036 ([35cd822d9a](https://github.com/smithersai/smithers/commit/35cd822d9a))
