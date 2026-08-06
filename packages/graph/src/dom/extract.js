@@ -996,6 +996,7 @@ export function extractFromHost(root, opts) {
         outputSchema,
         dependsOn,
         needs,
+        forkSource: typeof raw.fork === "string" && raw.fork ? raw.fork : undefined,
         needsApproval,
         waitAsync,
         approvalMode,
