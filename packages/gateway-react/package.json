@@ -28,7 +28,7 @@
     "@smthrs/gateway-client": "workspace:*",
     "@tanstack/react-db": "0.1.91",
     "@tanstack/react-query": "5.101.2",
-    "effect": "4.0.0-beta.103"
+    "effect": "4.0.0-beta.104"
   },
   "peerDependencies": {
     "react": "^19.0.0",

@@ -33,7 +33,7 @@
   },
   "dependencies": {
     "@effect/platform-bun": "4.0.0-beta.103",
-    "@effect/sql-sqlite-bun": "4.0.0-beta.103",
+    "@effect/sql-sqlite-bun": "4.0.0-beta.104",
     "@smthrs/agents": "workspace:*",
     "@smthrs/components": "workspace:*",
     "@smthrs/db": "workspace:*",
@@ -50,7 +50,7 @@
     "@smthrs/vcs": "workspace:*",
     "diff": "^9.0.0",
     "drizzle-orm": "^0.45.2",
-    "effect": "4.0.0-beta.103",
+    "effect": "4.0.0-beta.104",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "zod": "^4.4.3"

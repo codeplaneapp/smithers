@@ -35,7 +35,7 @@
     "@smthrs/vcs": "workspace:*",
     "better-sqlite3": "^12.11.1",
     "drizzle-orm": "^0.45.2",
-    "effect": "4.0.0-beta.103",
+    "effect": "4.0.0-beta.104",
     "esbuild": "^0.28.1",
     "playwright": "^1.61.1",
     "react": "^19.2.7",
