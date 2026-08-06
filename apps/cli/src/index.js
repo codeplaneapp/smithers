@@ -135,6 +135,7 @@ import {
 import { listAccounts, removeAccount } from "@smthrs/accounts";
 import { getUsageForAccounts, formatUsageReports } from "@smthrs/usage";
 import { runAgentAdd, pingAccount } from "./agent-commands/runAgentAdd.js";
+import { runAgentAddWithTmuxLogin } from "./agent-commands/tmuxLogin.js";
 import { formatAccountIdentity, readAccountIdentity } from "./agent-commands/accountIdentity.js";
 import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
 import { getWorkflowFollowUpCtas } from "./workflow-pack.js";
@@ -5707,12 +5708,22 @@ const agentsCli = Cli.create({
       force: z.boolean().default(false).describe("Register even if no credentials are present"),
       replace: z.boolean().default(false).describe("Overwrite an existing account with the same label"),
       loop: z.boolean().default(false).describe("Wizard mode only: keep adding accounts until you say done"),
+      tmux: z
+        .boolean()
+        .default(false)
+        .describe(
+          "Subscription providers: launch the provider CLI in a detached tmux session, wait for the browser login to complete, then register",
+        ),
+      loginTimeout: z
+        .number()
+        .default(600)
+        .describe("--tmux: how many seconds to wait for the login to complete before giving up"),
     }),
     async run(c) {
       // Flag-driven mode: provider+label given → just register.
       if (c.options.provider && c.options.label) {
         try {
-          const result = runAgentAdd({
+          const addInput = {
             provider: c.options.provider,
             label: c.options.label,
             configDir: c.options.configDir,
@@ -5721,12 +5732,20 @@ const agentsCli = Cli.create({
             skipLogin: c.options.skipLogin,
             force: c.options.force,
             replace: c.options.replace,
-          });
+          };
+          const result = c.options.tmux
+            ? await runAgentAddWithTmuxLogin({
+                ...addInput,
+                timeoutMs: c.options.loginTimeout * 1000,
+                onStatus: (message) => process.stderr.write(`${message}\n`),
+              })
+            : runAgentAdd(addInput);
           if (!result.ok) {
-            const code = result.reason === "login-required" ? 2 : 1;
+            const loginPending = result.reason === "login-required" || result.reason === "login-timeout";
+            const code = loginPending ? 2 : 1;
             commandExitOverride = code;
             return c.error({
-              code: result.reason === "login-required" ? "AGENT_LOGIN_REQUIRED" : "AGENT_ADD_FAILED",
+              code: loginPending ? "AGENT_LOGIN_REQUIRED" : "AGENT_ADD_FAILED",
               message: result.detail ?? result.reason,
               exitCode: code,
             });
