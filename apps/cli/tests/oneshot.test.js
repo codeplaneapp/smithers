@@ -107,6 +107,27 @@ describe("oneshot model chain", () => {
       model: "kimi-code/k3",
     });
   });
+  test("a requested codex that is paused reports the pause, not a fake auth failure", () => {
+    expect(() => resolveOneshotChain(all, { agent: "codex", env: { SMITHERS_CODEX_PAUSED: "1" } })).toThrow(
+      /is paused\. Unset SMITHERS_CODEX_PAUSED/,
+    );
+    const home = temp("smithers-codex-pause-marker-");
+    writeFileSync(
+      join(home, "codex-paused.json"),
+      JSON.stringify({ until: "2099-01-01T00:00:00Z", reason: "codex usage limit exhausted" }),
+    );
+    expect(() => resolveOneshotChain(all, { agent: "codex", env: { SMITHERS_HOME: home } })).toThrow(
+      /is paused until 2099-01-01T00:00:00Z \(codex usage limit exhausted\)\. Override with SMITHERS_CODEX_PAUSED=0/,
+    );
+  });
+  test("an expired codex pause marker keeps codex usable", () => {
+    const home = temp("smithers-codex-pause-expired-");
+    writeFileSync(join(home, "codex-paused.json"), JSON.stringify({ until: "2000-01-01T00:00:00Z" }));
+    expect(resolveOneshotChain(all, { agent: "codex", env: { SMITHERS_HOME: home } })[0]).toEqual({
+      engine: "codex",
+      model: SOTA_SLOTS.codexSol,
+    });
+  });
   test("maps canonical model ids or requires an explicit engine", () => {
     expect(resolveOneshotChain(all, { model: "gpt-future-codex", env: { SMITHERS_CODEX_PAUSED: "0" } })[0]).toEqual({
       engine: "codex",

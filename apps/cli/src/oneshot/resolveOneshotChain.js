@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describeUnavailableAgent } from "../agent-detection.js";
 import { SOTA_SLOTS } from "../sota-models.generated.js";
 import { classifyOneshotGoal } from "./classifyOneshotGoal.js";
-import { oneshotCodexPaused } from "./oneshotCodexPaused.js";
+import { oneshotCodexPauseDetail } from "./oneshotCodexPauseDetail.js";
 
 // Oneshot's kimi seat runs Kimi K3 (`kimi-code/k3` in the Kimi CLI), ahead of
 // the registry's `kimi` slot (k2.7-code): K3's 1M window absorbs a whole
@@ -92,7 +92,8 @@ export function resolveOneshotChain(detections, options = {}) {
   const usable = new Set(
     detections.filter((item) => ALLOWED.includes(item.id) && item.usable && !item.deprecated).map((item) => item.id),
   );
-  if (oneshotCodexPaused(env)) usable.delete("codex");
+  const codexPause = oneshotCodexPauseDetail(env);
+  if (codexPause.paused) usable.delete("codex");
   const requestedModel = options.model ? (SLOTS[options.model] ?? options.model) : undefined;
   if (!requestedEngine && requestedModel) {
     if ([SOTA_SLOTS.codexSol, SOTA_SLOTS.codexTerra, SOTA_SLOTS.codex].includes(requestedModel))
@@ -109,6 +110,18 @@ export function resolveOneshotChain(detections, options = {}) {
   }
   if (requestedEngine && !usable.has(requestedEngine)) {
     const detection = detections.find((item) => item.id === requestedEngine);
+    if (requestedEngine === "codex" && codexPause.paused && detection?.usable && !detection.deprecated) {
+      const until = codexPause.until ? ` until ${codexPause.until}` : "";
+      const reason = codexPause.reason ? ` (${codexPause.reason})` : "";
+      const clearHint =
+        codexPause.pausedBy === "env"
+          ? "Unset SMITHERS_CODEX_PAUSED to use it."
+          : `Override with SMITHERS_CODEX_PAUSED=0, or delete ${codexPause.markerPath} if the limit has reset.`;
+      throw new SmithersError(
+        "NO_USABLE_AGENTS",
+        `Requested oneshot agent "${options.agent ?? requestedEngine}" is paused${until}${reason}. ${clearHint}`,
+      );
+    }
     throw new SmithersError(
       "NO_USABLE_AGENTS",
       `Requested oneshot agent "${options.agent ?? requestedEngine}" is unavailable. ${
