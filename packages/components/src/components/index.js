@@ -65,6 +65,9 @@
 /** @typedef {import("./DriftDetectorProps.ts").DriftDetectorProps} DriftDetectorProps */
 /** @typedef {import("./EscalationChainProps.ts").EscalationChainProps} EscalationChainProps */
 /** @typedef {import("./EscalationLevel.ts").EscalationLevel} EscalationLevel */
+/** @typedef {import("./ForkFanOutProps.ts").ForkFanOutProps} ForkFanOutProps */
+/** @typedef {import("./ForkFanOutTask.ts").ForkFanOutTask} ForkFanOutTask */
+/** @typedef {import("./ForkFanOutTask.ts").ForkFanOutTaskOptions} ForkFanOutTaskOptions */
 /** @typedef {import("./GatherAndSynthesizeProps.ts").GatherAndSynthesizeProps} GatherAndSynthesizeProps */
 /** @typedef {import("./HumanTaskProps.ts").HumanTaskProps} HumanTaskProps */
 /**
@@ -150,6 +153,7 @@ export { Optimizer } from "./Optimizer.js";
 export { ContentPipeline } from "./ContentPipeline.js";
 export { ApprovalGate } from "./ApprovalGate.js";
 export { EscalationChain } from "./EscalationChain.js";
+export { ForkFanOut } from "./ForkFanOut.js";
 export { DecisionTable } from "./DecisionTable.js";
 export { DriftDetector } from "./DriftDetector.js";
 export { ScanFixVerify } from "./ScanFixVerify.js";
