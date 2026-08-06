@@ -1,0 +1,307 @@
+---
+title: <ForkFanOut>
+description: Fan out tasks that each fork the same source task's agent session, for end-of-run chores that need full context of the work just done.
+---
+
+```ts
+// Props
+import { ForkFanOut } from "smthrs";
+
+type ForkFanOutProps = {
+  id?: string; // default "fork-fan-out"
+  fork: string; // logical id of the task whose session every entry forks
+  tasks: ForkFanOutTask[];
+  agent?: AgentLike | AgentLike[]; // default agent for entries without one
+  taskOutput?: OutputTarget; // default output target for entries without one
+  maxConcurrency?: number; // omit for no per-group cap (bounded only by the run-level concurrency limit, default 4)
+  label?: string; // display label for the group in run views
+  taskProps?: { continueOnFail?: boolean; timeoutMs?: number; heartbeatTimeoutMs?: number; retries?: number };
+  skipIf?: boolean;
+  children?: ReactNode; // optional shared preamble prepended to every entry prompt
+};
+
+type ForkFanOutTask = {
+  id: string; // generated task id is `<id>-<entry.id>`
+  prompt: string | ReactNode; // submitted after the forked session context loads
+  agent?: AgentLike | AgentLike[]; // overrides the component-level agent
+  output?: OutputTarget; // overrides taskOutput
+  label?: string;
+  skipIf?: boolean;
+  continueOnFail?: boolean;
+  timeoutMs?: number;
+  heartbeatTimeoutMs?: number;
+  retries?: number;
+};
+```
+
+Complete runnable example (renders with `bunx smthrs graph`):
+
+```tsx
+/** @jsxImportSource smthrs */
+import { createSmithers, ForkFanOut, Task, ClaudeCodeAgent } from "smthrs";
+import { z } from "zod";
+
+const { Workflow, smithers, outputs } = createSmithers({
+  implementation: z.object({ summary: z.string() }),
+  chore: z.object({ result: z.string() }),
+});
+
+const agent = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
+
+export default smithers(() => (
+  <Workflow name="feature-with-chores">
+    <Task id="implement" agent={agent} output={outputs.implementation}>
+      Implement the feature.
+    </Task>
+    <ForkFanOut
+      id="wrapup"
+      fork="implement"
+      agent={agent}
+      taskOutput={outputs.chore}
+      maxConcurrency={3}
+      taskProps={{ continueOnFail: true }}
+      tasks={[
+        { id: "lint", prompt: "Run the linter and fix every finding." },
+        { id: "commit", prompt: "Split the working copy into small named commits." },
+        { id: "memory", prompt: "Record durable lessons to memory." },
+        { id: "changelog", prompt: "Append a changelog entry for this change." },
+      ]}
+    >
+      The main work is done. Do only your own chore and leave the rest untouched.
+    </ForkFanOut>
+  </Workflow>
+));
+```
+
+## Notes
+
+- Each generated task waits for the `fork` source to complete, then starts from a copy of its final agent conversation in a fresh, independent session. The source session is never mutated, and sibling entries never see each other's sessions.
+- The fork edge is an implicit dependency, so no `dependsOn` is needed between the source and the fan-out tasks. Entries are independent of each other and run in parallel up to `maxConcurrency`.
+- Inside a `<Loop>`, `fork` resolves to the latest completed snapshot for the source task id.
+- Entry ids must be unique within the component; duplicates throw at render time. A missing agent or output (component-level or per-entry) also throws at render time, before graph extraction.
+- Graph validation fails fast with `TASK_FORK_SOURCE_NOT_FOUND` when `fork` names a task absent from the graph, and with `TASK_FORK_CYCLE` when the fork edge would close a dependency cycle.
+
+{/* GENERATED:COMPONENT-SOURCE START (regenerate: pnpm docs:components) */}
+## Source
+
+The `<ForkFanOut>` implementation and the files it imports, straight from the package source. This section is generated; edit the source, not this block.
+
+<CodeGroup>
+```js ForkFanOut.js
+// @smithers-type-exports-begin
+/** @typedef {import("./ForkFanOutProps.ts").ForkFanOutProps} ForkFanOutProps */
+/** @typedef {import("./ForkFanOutTask.ts").ForkFanOutTask} ForkFanOutTask */
+/** @typedef {import("./ForkFanOutTask.ts").ForkFanOutTaskOptions} ForkFanOutTaskOptions */
+// @smithers-type-exports-end
+
+import React from "react";
+import { Parallel } from "./Parallel.js";
+import { Task } from "./Task.js";
+
+/** Option keys forwarded from an entry (or `taskProps`) onto the generated Task. */
+const TASK_OPTION_KEYS = ["continueOnFail", "timeoutMs", "heartbeatTimeoutMs", "retries"];
+
+/**
+ * Merge component-wide `taskProps` with per-entry overrides. Only allowlisted
+ * option keys are forwarded, so callers can never replace generated-task
+ * invariants (id, fork, agent, output) through `taskProps`. `undefined` entry
+ * values never clobber a component-wide setting.
+ * @param {ForkFanOutTaskOptions | undefined} taskProps
+ * @param {ForkFanOutTask} entry
+ */
+function resolveTaskOptions(taskProps, entry) {
+  const merged = {};
+  for (const key of TASK_OPTION_KEYS) {
+    if (taskProps?.[key] !== undefined) merged[key] = taskProps[key];
+    if (entry[key] !== undefined) merged[key] = entry[key];
+  }
+  return merged;
+}
+
+/**
+ * <ForkFanOut> — Fan out tasks that each fork the same source task's agent session.
+ *
+ * Every generated task waits for `fork` to complete (the fork edge is an
+ * implicit dependency), then starts from a copy of the source's final
+ * conversation in a fresh session and submits its own prompt. Built for
+ * end-of-run chores that need the full context of the work just done (named
+ * commits, linters, memory writes, logging) without depending on each other.
+ *
+ * Composes: Parallel[Task(fork=source) per entry].
+ * @param {ForkFanOutProps} props
+ */
+export function ForkFanOut(props) {
+  if (props.skipIf) return null;
+  const { id, fork, tasks, agent, taskOutput, maxConcurrency, label, taskProps, children } = props;
+  if (!fork) {
+    throw new Error("ForkFanOut requires a fork source task id.");
+  }
+  if (!Array.isArray(tasks) || tasks.length === 0) {
+    throw new Error("ForkFanOut tasks must include at least one task.");
+  }
+  const prefix = id ?? "fork-fan-out";
+  // Entry ids are authored explicitly, so a duplicate is an authoring bug.
+  // Fail fast here with a clear message rather than surfacing DUPLICATE_ID
+  // from graph extraction.
+  const seen = new Set();
+  const elements = [];
+  for (const entry of tasks) {
+    if (entry.skipIf) continue;
+    if (seen.has(entry.id)) {
+      throw new Error(`ForkFanOut tasks contain a duplicate id: "${entry.id}".`);
+    }
+    seen.add(entry.id);
+    const entryAgent = entry.agent ?? agent;
+    if (!entryAgent) {
+      throw new Error(
+        `ForkFanOut task "${entry.id}" has no agent. Forking requires an agent task; ` +
+          `set an agent on the entry or pass a component-level agent.`,
+      );
+    }
+    const entryOutput = entry.output ?? taskOutput;
+    if (!entryOutput) {
+      throw new Error(
+        `ForkFanOut task "${entry.id}" has no output. Tasks must declare an output; ` +
+          `set taskOutput on the component or output on the entry.`,
+      );
+    }
+    const taskId = `${prefix}-${entry.id}`;
+    const prompt =
+      children == null ? entry.prompt : React.createElement(React.Fragment, null, children, "\n\n", entry.prompt);
+    elements.push(
+      React.createElement(Task, {
+        key: taskId,
+        id: taskId,
+        fork,
+        agent: entryAgent,
+        output: entryOutput,
+        ...(entry.label === undefined ? {} : { label: entry.label }),
+        ...resolveTaskOptions(taskProps, entry),
+        children: prompt,
+      }),
+    );
+  }
+  return React.createElement(
+    Parallel,
+    {
+      ...(maxConcurrency === undefined ? {} : { maxConcurrency }),
+      ...(label === undefined ? {} : { label }),
+    },
+    ...elements,
+  );
+}
+```
+
+```js Parallel.js
+import React from "react";
+/** @typedef {import("./ParallelProps.ts").ParallelProps} ParallelProps */
+
+/**
+ * @param {ParallelProps} props
+ */
+export function Parallel(props) {
+  if (props.skipIf) return null;
+  // Align prop sanitization with other structural components. `label` names
+  // the phase group in run views (graph, the Claude /workflows mirror).
+  const next = {
+    maxConcurrency: props.maxConcurrency,
+    subtreeConcurrency: props.subtreeConcurrency,
+    id: props.id,
+    ...(props.label === undefined ? {} : { label: props.label }),
+    ...(props.priority === undefined ? {} : { priority: props.priority }),
+    ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
+  };
+  return React.createElement("smithers:parallel", next, props.children);
+}
+```
+
+```js Task.js
+// @smithers-type-exports-begin
+/**
+ * @template D
+ * @typedef {import("./InferDeps.ts").InferDeps<D>} InferDeps
+ */
+/** @typedef {import("./OutputTarget.ts").OutputTarget} OutputTarget */
+// @smithers-type-exports-end
+
+import { applyCliToolAllowlist } from "./cliToolAllowlist.js";
+import { createTaskComponent } from "./taskCore.js";
+
+export { renderPromptToText } from "./taskCore.js";
+
+/**
+ * The Node/CLI-agent-aware `Task`. Every render-path behavior (deps
+ * resolution, agent-chain assembly, MDX prompt rendering, static/compute/agent
+ * branching) lives in `taskCore.js`; this file only supplies the CLI-agent
+ * tool-allowlist enforcement step (`applyCliToolAllowlist`, which statically
+ * imports `ClaudeCodeAgent`/`PiAgent`/`GeminiAgent`/`AntigravityAgent` — see
+ * `cliToolAllowlist.js`). `Task.browser.js` builds the same component with a
+ * no-op allowlist step instead, so it never pulls those Node-only
+ * (`node:child_process`-backed) classes into a browser bundle.
+ */
+export const Task = createTaskComponent({ applyCliToolAllowlist });
+```
+
+```ts ForkFanOutProps.ts
+import type React from "react";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
+import type { ForkFanOutTask, ForkFanOutTaskOptions } from "./ForkFanOutTask.ts";
+import type { OutputTarget } from "./OutputTarget.ts";
+
+export type ForkFanOutProps = {
+  id?: string;
+  /**
+   * Logical id of the task whose final agent session every generated task forks.
+   * Each fan-out task waits for it to complete, then starts from a copy of its
+   * conversation snapshot in a fresh, independent session. The source is never
+   * mutated.
+   */
+  fork: string;
+  /** Fan-out entries. Each becomes one task forking `fork`. */
+  tasks: ForkFanOutTask[];
+  /** Default agent for entries that do not set one. */
+  agent?: AgentLike | AgentLike[];
+  /** Default output target for entries that do not set one (rows keyed by task id). */
+  taskOutput?: OutputTarget;
+  maxConcurrency?: number;
+  /** Display label for the fan-out group in run views. */
+  label?: string;
+  /** Extra Task props applied to every generated task. Per-entry options win. */
+  taskProps?: ForkFanOutTaskOptions;
+  skipIf?: boolean;
+  /** Optional shared preamble prepended to every entry prompt. */
+  children?: string | React.ReactNode;
+};
+```
+
+```ts ForkFanOutTask.ts
+import type React from "react";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
+import type { OutputTarget } from "./OutputTarget.ts";
+
+/** Extra Task props applied to generated fork tasks (component-wide or per entry). */
+export type ForkFanOutTaskOptions = {
+  continueOnFail?: boolean;
+  timeoutMs?: number;
+  heartbeatTimeoutMs?: number;
+  retries?: number;
+};
+
+/** One fan-out entry: a task that forks the shared source session and runs its own prompt. */
+export type ForkFanOutTask = ForkFanOutTaskOptions & {
+  /** Unique entry identifier; the generated task id is `<id>-<entry.id>`. */
+  id: string;
+  /** Prompt submitted after the forked session context loads. */
+  prompt: string | React.ReactNode;
+  /** Agent for this entry (falls back to the component-level `agent`). Fork requires an agent task. */
+  agent?: AgentLike | AgentLike[];
+  /** Per-entry output schema. */
+  output?: OutputTarget;
+  /** Human-readable label for run views. */
+  label?: string;
+  /** Skip only this entry. */
+  skipIf?: boolean;
+};
+```
+</CodeGroup>
+{/* GENERATED:COMPONENT-SOURCE END */}

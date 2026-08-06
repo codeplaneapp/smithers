@@ -212,6 +212,7 @@ export {
   DecisionTable,
   DriftDetector,
   EscalationChain,
+  ForkFanOut,
   GatherAndSynthesize,
   HumanTask,
   Kanban,
@@ -340,6 +341,7 @@ export {
   VibeAgent,
   OpenCodeAgent,
   PoolAgent,
+  fallbackAgents,
   createHttpTool,
 } from "@smthrs/agents";
 // VCS

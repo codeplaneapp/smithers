@@ -281,6 +281,7 @@
               "components/escalation-chain",
               "components/decision-table",
               "components/drift-detector",
+              "components/fork-fan-out",
               "components/scan-fix-verify",
               "components/poller",
           "components/monitor",
