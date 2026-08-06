@@ -1,6 +1,6 @@
 ---
 title: "0.33.1"
-description: "Smithers 0.33.1 makes agent file edits legible: one file-change contract across every CLI harness, expandable diffs in the run UI, and diffs you can read while the run is still executing. Plus resume, retry-task, fallback chains, Gateway UI discovery, and a run status that stops calling an unconverged run done."
+description: "Smithers 0.33.1 makes agent file edits legible: one file-change contract across every CLI harness, expandable diffs in the run UI, and diffs you can read while the run is still executing. Plus fallbackAgents subscription-pool failover, tmux-assisted account login, resume, retry-task, Gateway UI discovery, and a run status that stops calling an unconverged run done."
 ---
 
 **Smithers 0.33.1 makes agent edits legible.** Every CLI harness reported file
@@ -10,7 +10,7 @@ note. Agents now normalize a file-mutating tool call into one
 an expandable diff, and the Diff tab works while the run is still executing
 instead of only after it finishes.
 
-The rest of the release is hardening: 30 of its 61 commits are fixes for the
+The rest of the release is hardening: 32 of its 76 commits are fixes for the
 places 0.33.0 and daily production use exposed cracks, notably resuming and
 retrying runs, agent fallback chains, Gateway workflow-UI discovery, and a run
 status that stops overstating how healthy a run is.
@@ -83,6 +83,87 @@ The oneshot Diff tab and the TUI tree-mode diff tab refresh off run events
 with a trailing debounce, because agent edits arrive in bursts, and take one
 final refetch on the terminal transition. A refresh no longer flickers the
 existing diff out for a spinner.
+
+## One account's rate limit no longer stalls a run
+
+The new `fallbackAgents()` turns the account registry into a ready-made
+failover chain: one agent rung per registered Claude Code or Codex
+subscription, shuffled per call so load spreads across seats, with your normal
+agent appended as the last rung. On a machine with no registered seats it
+returns just that agent, so single-account setups behave exactly as before.
+
+```tsx
+import { fallbackAgents } from "smthrs";
+
+// One rung per registered Claude/Codex seat, stable order for this run,
+// a stock Claude Code agent as the final rung.
+const agent = fallbackAgents({ seed: ctx.runId });
+```
+
+Seed the shuffle with `ctx.runId` and a run keeps the same chain across every
+render and retry, which keeps the engine's per-rung quota skipping precise,
+while different runs still start from different seats. `providers: "all"`
+extends the pool to Kimi, Antigravity, and raw API-key accounts, and
+`models`/`agentOptions` apply per-provider overrides without ever letting a
+rung be repointed at another subscription.
+
+Oneshot uses the same pool: every usable registered account becomes its own
+shuffled chain rung per engine instead of the run jumping straight to the next
+engine when one account throttles. Adding a second registration for a
+subscription you already registered is called out at add time, because a
+duplicate seat adds no capacity, only confusion; the check compares within one
+provider, so a Claude seat and a Codex seat that happen to share a sign-in
+email stay separate rungs with separate rate limits.
+
+## Register every subscription you own, browser login included
+
+`bunx smthrs agents add --tmux` handles the providers that only offer a
+browser login. It launches the provider CLI in a detached tmux session with
+the account's config dir set (Claude Code via `claude auth login --claudeai`,
+skipping REPL onboarding), prints the attach command so you can complete the
+login in the browser, polls until the credentials land, and registers the
+seat. Re-running after a timeout detects already-finished credentials and just
+registers. The interactive `agents add` wizard offers the same flow whenever
+tmux is available.
+
+```bash
+bunx smthrs agents add            # wizard; offers the tmux flow when available
+bunx smthrs agents add --tmux     # detached tmux browser login, then register
+```
+
+`agents add` also records who was signed in, and `agents list` shows that
+account identity next to each label, so two labels backed by the same
+subscription (and therefore the same rate limit) are visible at a glance
+instead of looking like extra capacity. Registered agent ids are stable now:
+`registeredAgentId`/`registeredAgentLabel` live in `@smthrs/accounts` as the
+canonical home, and the CLI and runtime helpers stamp identical account-backed
+ids.
+
+## ForkFanOut: end-of-run chores on a fork of the finished session
+
+`<ForkFanOut>` fans independent chores out over forks of one task's final
+agent session. Every entry waits for the source task, starts from a copy of
+its conversation snapshot in a fresh session (the source is never mutated),
+and runs its own prompt. It is built for the end of a run: linters, named
+commits, memory writes, and logging that need full context of the work just
+done without depending on each other.
+
+```tsx
+<ForkFanOut
+  fork="implement"
+  agent={chores}
+  tasks={[
+    { id: "lint", prompt: "Run the linters and fix what they flag." },
+    { id: "memory", prompt: "Record what this run learned to memory." },
+  ]}
+/>
+```
+
+Entries accept per-task `agent`/`output`/`label` overrides over the
+component-level defaults, an allowlisted set of `Task` props passes through,
+and duplicate ids or a missing `agent`/`output`/`fork` fail at render time
+instead of mid-run. Details are in the
+[ForkFanOut reference](/components/fork-fan-out).
 
 ## Resume and retry work again
 
@@ -250,6 +331,20 @@ bunx smthrs up upgrade-dependents
   internal benchmarking infrastructure, not part of any published package, and
   it stays uninitialized unless you ask for it: nothing in the build, the test
   suite, or CI reads it.
+- Claude Code OAuth credentials stored in the macOS Keychain are found
+  everywhere they matter. `bunx smthrs usage` and the agent availability probe
+  now read the per-config-dir Keychain item for isolated accounts
+  (`Claude Code-credentials-<hash of the config dir>`), with no fallback to
+  the default install's item, so a validly logged-in account stops reporting
+  `NO_USABLE_AGENTS` when the `claude auth status` probe times out, and one
+  account's token is never attributed to another.
+- `<Task fork>` authored inside a Subflow or Sandbox child workflow keeps its
+  fork edge; the dom extraction variant used for child workflows dropped the
+  prop and the fork was silently lost.
+- Asking oneshot for a codex agent while the codex-paused marker is set now
+  names the pause itself, its until/reason, and how to clear it
+  (`SMITHERS_CODEX_PAUSED=0` or delete the marker) instead of the generic
+  "not enough availability signals" that pointed at healthy auth.
 
 ## Upgrade notes
 
@@ -281,10 +376,10 @@ bunx smthrs up upgrade-dependents
 
 ## The full changelog
 
-62 commits, plus this changelog update, touching 260 files: 31,375 insertions,
-668 deletions. Most of that insertion count is regenerated `llms-*.txt` docs
-bundles; excluding those and the lockfiles it is 251 files, 8,895 insertions,
-463 deletions. The complete commit-level list is in
+76 commits, plus this changelog update, touching 300 files: 34,163 insertions,
+973 deletions. Most of that insertion count is regenerated `llms-*.txt` docs
+bundles; excluding those and the lockfiles it is 290 files, 11,645 insertions,
+758 deletions. The complete commit-level list is in
 [CHANGELOG.md](https://github.com/smithersai/smithers/blob/main/CHANGELOG.md).
 
 Hit a bug? `bunx smthrs bug` files a report in seconds, and `--run RUN_ID`

@@ -6,10 +6,14 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
 ## 0.33.1 (2026-08-04)
 
-62 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 260 files changed, +31375 / -668 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 251 files, +8895 / -463). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
+76 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 300 files changed, +34163 / -973 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 290 files, +11645 / -758). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
 
-### Features (6)
+### Features (10)
 
+- feat(agents): fallbackAgents seat-pool failover chains ([fbead6a494](https://github.com/smithersai/smithers/commit/fbead6a494))
+- feat(cli): tmux-assisted browser login for agents add ([3f8cb9c838](https://github.com/smithersai/smithers/commit/3f8cb9c838))
+- feat(accounts): stable registered-agent ids and signed-in identity display ([a075fead33](https://github.com/smithersai/smithers/commit/a075fead33))
+- feat(components): add \<ForkFanOut\> session-fork fan-out composite ([6a5d084e38](https://github.com/smithersai/smithers/commit/6a5d084e38))
 - feat(cli): env-configurable detached-admission timeout (SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS) ([009a0334f6](https://github.com/smithersai/smithers/commit/009a0334f6))
 - feat(workflows): n8n-mvp-mission v2 ([85d613cae3](https://github.com/smithersai/smithers/commit/85d613cae3))
 - feat(server): compute live working-copy diffs for non-terminal runs ([496cbf1000](https://github.com/smithersai/smithers/commit/496cbf1000))
@@ -17,8 +21,12 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - feat(pack): docs-home-design-system workflow — Kimi K3 reskins, Fable reviews until LGTM ([bdb6db56f9](https://github.com/smithersai/smithers/commit/bdb6db56f9))
 - feat(pack): upgrade-dependents workflow — fork, upgrade, review, PR every open-source dependent to smthrs ([4cad958237](https://github.com/smithersai/smithers/commit/4cad958237))
 
-### Bug fixes (28)
+### Bug fixes (32)
 
+- fix: probe macOS Keychain for Claude Code OAuth in agent detection ([96d9df0752](https://github.com/smithersai/smithers/commit/96d9df0752))
+- fix(usage): probe per-config-dir Keychain item for Claude Code OAuth ([470bec6ada](https://github.com/smithersai/smithers/commit/470bec6ada))
+- fix(graph): record forkSource on task descriptors from dom extract ([2a6c6e1c11](https://github.com/smithersai/smithers/commit/2a6c6e1c11))
+- fix(oneshot): name the codex pause when a requested codex is refused ([49aef95eb4](https://github.com/smithersai/smithers/commit/49aef95eb4))
 - fix(scheduler,engine,cli): surface loop exhaustion, stale heartbeats, and orphaned agents (#1464) ([1b9e0e0d49](https://github.com/smithersai/smithers/commit/1b9e0e0d49))
 - fix(cli,db): classify continued runs as running in ps fallback; coerce exhausted in getRalph (#1464) ([90c3cdab9e](https://github.com/smithersai/smithers/commit/90c3cdab9e))
 - fix(cli): normalize listEventsByType result before .catch in run status ([d916161e82](https://github.com/smithersai/smithers/commit/d916161e82))
@@ -48,8 +56,9 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - fix(server): keep /health live by making workflow \<UI\> discovery lazy and batched ([f8f91d58bb](https://github.com/smithersai/smithers/commit/f8f91d58bb))
 - fix(pack): guard crash-recovery render against missing output rows ([eb42b28c9e](https://github.com/smithersai/smithers/commit/eb42b28c9e))
 
-### Documentation (9)
+### Documentation (10)
 
+- docs: regenerate llms bundles ([f747d444f6](https://github.com/smithersai/smithers/commit/f747d444f6))
 - docs(release): fold the #1464 reliability fixes into 0.33.1 ([eeee5f30c7](https://github.com/smithersai/smithers/commit/eeee5f30c7))
 - docs(release): record the gateway schema-head test bump in 0.33.1 ([ad3ddd1ac3](https://github.com/smithersai/smithers/commit/ad3ddd1ac3))
 - docs(release): record the n8n-mvp-mission-v2 typecheck fix in 0.33.1 ([deae91ce52](https://github.com/smithersai/smithers/commit/deae91ce52))
@@ -67,8 +76,10 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - test(server): bump the pinned gateway schema head to 0036 ([35cd822d9a](https://github.com/smithersai/smithers/commit/35cd822d9a))
 - test(agents): replay recorded transcripts through live interpreters; distinct fixture tool ids ([16e70ff7e4](https://github.com/smithersai/smithers/commit/16e70ff7e4))
 
-### Chores and maintenance (14)
+### Chores and maintenance (16)
 
+- style(cli): rewrap the oneshotCodexPauseDetail ternary ([d8bf812db8](https://github.com/smithersai/smithers/commit/d8bf812db8))
+- chore(preflight): preserve pre-existing working-copy changes before oneshot-msg9ie5c-8c1a3f4b ([a1eaf2ce80](https://github.com/smithersai/smithers/commit/a1eaf2ce80))
 - chore(agents,smithers): export AgentFileChange types and regenerate declarations ([e42113568c](https://github.com/smithersai/smithers/commit/e42113568c))
 - chore(protocol,engine,gateway): regenerate declarations and openapi for live diff flag ([76fe149ce1](https://github.com/smithersai/smithers/commit/76fe149ce1))
 - style: oxfmt the n8n-mvp-mission laneReview filter ([82d999072d](https://github.com/smithersai/smithers/commit/82d999072d))
