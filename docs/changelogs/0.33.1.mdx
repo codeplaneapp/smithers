@@ -10,7 +10,7 @@ note. Agents now normalize a file-mutating tool call into one
 an expandable diff, and the Diff tab works while the run is still executing
 instead of only after it finishes.
 
-The rest of the release is hardening: 32 of its 76 commits are fixes for the
+The rest of the release is hardening: 33 of its 78 commits are fixes for the
 places 0.33.0 and daily production use exposed cracks, notably resuming and
 retrying runs, agent fallback chains, Gateway workflow-UI discovery, and a run
 status that stops overstating how healthy a run is.
@@ -345,6 +345,9 @@ bunx smthrs up upgrade-dependents
   names the pause itself, its until/reason, and how to clear it
   (`SMITHERS_CODEX_PAUSED=0` or delete the marker) instead of the generic
   "not enough availability signals" that pointed at healthy auth.
+- effect is pinned at 4.0.0-beta.104, matching where the `@effect/*`
+  ecosystem's caret peer ranges now resolve. The previous exact beta.103 pin
+  against those ranges duplicated effect across an end-user npm install.
 
 ## Upgrade notes
 
@@ -376,9 +379,9 @@ bunx smthrs up upgrade-dependents
 
 ## The full changelog
 
-76 commits, plus this changelog update, touching 300 files: 34,163 insertions,
-973 deletions. Most of that insertion count is regenerated `llms-*.txt` docs
-bundles; excluding those and the lockfiles it is 290 files, 11,645 insertions,
+78 commits, plus this changelog update, touching 300 files: 34,269 insertions,
+1,008 deletions. Most of that insertion count is regenerated `llms-*.txt` docs
+bundles; excluding those and the lockfiles it is 290 files, 11,751 insertions,
 758 deletions. The complete commit-level list is in
 [CHANGELOG.md](https://github.com/smithersai/smithers/blob/main/CHANGELOG.md).
 
