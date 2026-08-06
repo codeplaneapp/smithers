@@ -61,6 +61,18 @@ describe("extractFromHost", () => {
     expect(result.tasks[0].outputTableName).toBe("my_table");
     expect(result.tasks[0].staticPayload).toEqual({ value: 1 });
   });
+  test("records forkSource on the task descriptor", () => {
+    const agent = { generate: async () => ({}) };
+    const root = hostEl("smithers:workflow", {}, [
+      hostEl("smithers:task", { id: "a", output: "a_table", agent, __smithersKind: "agent" }, [hostText("prompt a")]),
+      hostEl("smithers:task", { id: "b", output: "b_table", agent, fork: "a", __smithersKind: "agent" }, [
+        hostText("prompt b"),
+      ]),
+    ]);
+    const result = extractFromHost(root);
+    expect(result.tasks.find((t) => t.nodeId === "b")?.forkSource).toBe("a");
+    expect(result.tasks.find((t) => t.nodeId === "a")?.forkSource).toBeUndefined();
+  });
   test("normalizes boolean and object sideEffect forms for every task kind", () => {
     const revert = async () => {};
     const agent = { generate: async () => ({}) };
