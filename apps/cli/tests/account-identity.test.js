@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { makeTempDirPath } from "../../../packages/testing/src/cleanup/tempDir.ts";
 import {
   findDuplicateAccounts,
   formatAccountIdentity,
@@ -9,7 +9,7 @@ import {
 } from "../src/agent-commands/accountIdentity.js";
 
 function tempDir(prefix) {
-  return mkdtempSync(join(tmpdir(), prefix));
+  return makeTempDirPath(prefix);
 }
 
 /** Build a config dir holding a Claude Code post-login state file. */

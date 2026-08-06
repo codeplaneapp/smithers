@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { lstat } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 import {
   SANDBOX_MAX_PATCH_FILES,
   SANDBOX_MAX_README_BYTES,
@@ -13,7 +13,7 @@ import {
  * @param {string} prefix
  */
 function tempDir(prefix) {
-  return mkdtempSync(join(tmpdir(), prefix));
+  return makeTempDirPath(prefix);
 }
 describe("sandbox bundle", () => {
   test("writes and validates a bundle", async () => {

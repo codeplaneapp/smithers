@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { SmithersDb } from "@smthrs/db/adapter";
@@ -78,7 +78,7 @@ function delayedShipTransportLayer(delayMs) {
  * @param {string} prefix
  */
 function tempDir(prefix) {
-  return mkdtempSync(join(tmpdir(), prefix));
+  return makeTempDirPath(prefix);
 }
 
 function createDb() {
@@ -111,6 +111,11 @@ function createRuntime(db, options = {}) {
  * @param {Partial<import("../src/ExecuteSandboxOptions.ts").ExecuteSandboxOptions>} overrides
  */
 async function runInRuntime(runtime, overrides = {}) {
+  // Allocated before entering the task runtime: `withTaskRuntime` runs its
+  // callback inside an AsyncLocalStorage context, and bun's hook registration
+  // (which makeTempDir uses to arm its cleanup) hangs the enclosing test when
+  // called from inside one.
+  const rootDir = overrides.rootDir ?? tempDir("smithers-sandbox-execute-");
   return withTaskRuntime(runtime, () =>
     executeSandbox({
       sandboxId: "sandbox-1",
@@ -123,12 +128,12 @@ async function runInRuntime(runtime, overrides = {}) {
         output: { ok: true },
       }),
       input: { prompt: "ship it" },
-      rootDir: tempDir("smithers-sandbox-execute-"),
       allowNetwork: false,
       maxOutputBytes: 1024,
       toolTimeoutMs: 250,
       reviewDiffs: false,
       ...overrides,
+      rootDir,
     }),
   );
 }

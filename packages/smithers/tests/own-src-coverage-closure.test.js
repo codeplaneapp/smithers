@@ -1,22 +1,15 @@
-import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 import { createSmithers, createSmithersPostgres } from "../src/create.js";
 import { migrateSmithersStore } from "../src/migrateSmithersStore.js";
 
 setDefaultTimeout(60_000);
 
-/** @type {string[]} */
-const dirs = [];
-afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-});
 function makeDbPath(prefix) {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
-  dirs.push(dir);
-  return join(dir, "smithers.db");
+  return join(makeTempDirPath(prefix), "smithers.db");
 }
 
 describe("createSmithers Sandbox default workflow", () => {
@@ -68,8 +61,7 @@ describe("migrateSmithersStore source-open failures", () => {
     // file ("unable to open database file"). The migration must replace that raw
     // engine text with the actionable "Could not open the legacy SQLite store"
     // guidance (upgradeSqliteSourceStore's unopenable-source branch), not leak it.
-    const ws = mkdtempSync(join(tmpdir(), "smithers-migrate-unopenable-"));
-    dirs.push(ws);
+    const ws = makeTempDirPath("smithers-migrate-unopenable-");
     mkdirSync(join(ws, ".smithers"), { recursive: true });
     mkdirSync(join(ws, "smithers.db"), { recursive: true });
     await expect(migrateSmithersStore({ cwd: ws, from: "sqlite", to: "pglite", env: {} })).rejects.toMatchObject({

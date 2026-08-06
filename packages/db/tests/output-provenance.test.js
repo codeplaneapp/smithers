@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 import { Effect } from "effect";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
@@ -51,7 +50,7 @@ describe("durable output completion provenance", () => {
   });
 
   test("survives close and resume without changing row order", async () => {
-    const path = join(tmpdir(), `smithers-provenance-${randomUUID()}.db`);
+    const path = join(makeTempDirPath("smithers-provenance-"), "store.db");
     const first = open(path);
     await first.adapter.insertRun({ runId: "resume", workflowName: "wf", status: "running", createdAtMs: 1 });
     await first.adapter.upsertOutputRow(outputs, { runId: "resume", nodeId: "b", iteration: 0 }, { value: 2 });
@@ -112,7 +111,7 @@ describe("durable output completion provenance", () => {
     // across BOTH allocation spaces. Race three signal deliveries against
     // three output upserts on one run, then prove uniqueness across the
     // union and that the order survives a close/reopen unchanged.
-    const path = join(tmpdir(), `smithers-shared-clock-${randomUUID()}.db`);
+    const path = join(makeTempDirPath("smithers-shared-clock-"), "store.db");
     const first = open(path);
     await first.adapter.insertRun({ runId: "clock", workflowName: "wf", status: "running", createdAtMs: 1 });
     await Promise.all([

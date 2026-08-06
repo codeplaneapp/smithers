@@ -1,24 +1,21 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import net from "node:net";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { createSmithers, createSmithersPostgres } from "../src/create.js";
 import { migrateSmithersStore } from "../src/migrateSmithersStore.js";
+import { cleanupTempDirs, makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 
 setDefaultTimeout(120_000);
 
-/** @type {string[]} */
-const tempDirs = [];
 /** @type {Array<() => Promise<void>>} */
 const cleanups = [];
 
 function makeWorkspace(name) {
-  const dir = join(tmpdir(), `${name}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const dir = makeTempDirPath(`${name}-`);
   mkdirSync(join(dir, ".smithers"), { recursive: true });
-  tempDirs.push(dir);
   return dir;
 }
 
@@ -79,9 +76,7 @@ afterEach(async () => {
   for (const fn of cleanups.splice(0).reverse()) {
     await fn().catch(() => {});
   }
-  for (const dir of tempDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  cleanupTempDirs();
 });
 
 describe("migrateSmithersStore — postgres target/source over a real wire", () => {

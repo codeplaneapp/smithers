@@ -1,10 +1,10 @@
 import { describe, expect, test, afterEach } from "bun:test";
 import { findVcsRoot } from "../src/find-root.js";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 function makeTmpDir() {
-  return mkdtempSync(join(tmpdir(), "smithers-vcs-"));
+  return makeTempDirPath("smithers-vcs-");
 }
 describe("findVcsRoot", () => {
   const dirs = [];

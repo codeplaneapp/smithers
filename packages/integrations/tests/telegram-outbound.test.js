@@ -15,9 +15,8 @@ import { Task } from "@smthrs/components";
 import { SendMessage, TelegramSendResultSchema } from "../src/telegram/components/SendMessage.js";
 import { configureTelegram } from "../src/telegram/config.js";
 import { startTelegramFixture } from "./telegram-fixture.js";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 
 const fixture = startTelegramFixture();
 afterAll(() => {
@@ -27,7 +26,7 @@ afterAll(() => {
 const telegramConfig = { botToken: fixture.token, apiBaseUrl: fixture.apiBaseUrl };
 
 function makeApi() {
-  const dir = mkdtempSync(join(tmpdir(), "smithers-telegram-"));
+  const dir = makeTempDirPath("smithers-telegram-");
   return createSmithers(
     {
       note: z.object({ text: z.string() }),

@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 import { ClaudeCodeAgent, CodexAgent, fallbackAgents } from "../src/index.js";
 
 /**
@@ -12,7 +13,7 @@ import { ClaudeCodeAgent, CodexAgent, fallbackAgents } from "../src/index.js";
  * @returns {NodeJS.ProcessEnv}
  */
 function registryEnv(accounts) {
-  const home = mkdtempSync(join(tmpdir(), "smithers-fallback-agents-"));
+  const home = makeTempDirPath("smithers-fallback-agents-");
   mkdirSync(home, { recursive: true });
   writeFileSync(join(home, "accounts.json"), JSON.stringify({ version: 1, accounts }, null, 2));
   return { SMITHERS_HOME: home };
@@ -133,7 +134,7 @@ describe("fallbackAgents", () => {
   });
 
   test("corrupt registry degrades to the fallback instead of throwing", () => {
-    const home = mkdtempSync(join(tmpdir(), "smithers-fallback-agents-corrupt-"));
+    const home = makeTempDirPath("smithers-fallback-agents-corrupt-");
     writeFileSync(join(home, "accounts.json"), "{not json");
     const normal = new CodexAgent({ skipGitRepoCheck: true });
     const chain = fallbackAgents({ env: { SMITHERS_HOME: home }, fallback: normal });

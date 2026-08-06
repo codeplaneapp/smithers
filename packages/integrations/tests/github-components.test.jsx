@@ -1,7 +1,5 @@
 /** @jsxImportSource smthrs */
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { Effect } from "effect";
@@ -9,6 +7,7 @@ import { z } from "zod";
 import { createSmithers, renderFrame, runWorkflow } from "smthrs";
 import { SmithersCtx } from "@smthrs/react-reconciler/context";
 import { OnPullRequest, OnWebhook } from "../src/github/components/OnWebhook.js";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 import {
   AddLabels,
   Comment,
@@ -60,7 +59,7 @@ const fixture = startFixture();
 afterAll(() => fixture.server.stop(true));
 
 function makeApi(schemas) {
-  const dir = mkdtempSync(join(tmpdir(), "smithers-gh-"));
+  const dir = makeTempDirPath("smithers-gh-");
   const dbPath = join(dir, "db.sqlite");
   return { ...createSmithers(schemas, { dbPath }), dbPath };
 }

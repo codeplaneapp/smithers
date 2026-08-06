@@ -1,8 +1,5 @@
 /** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { z } from "zod";
 import { Effect } from "effect";
 import { SmithersDb } from "@smthrs/db/adapter";
@@ -10,6 +7,7 @@ import { Workflow, Task, runWorkflow } from "smthrs";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import { isFreshCacheRow } from "../src/cache-policy.js";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 
 const TIMEOUT_MS = 30_000;
 
@@ -39,7 +37,7 @@ function countingAgent(id) {
 // Pin the run to a VCS-free rootDir so the cache key's jj pointer is stable
 // even when concurrent commits land in this repo while the test runs.
 function stableRootDir() {
-  return mkdtempSync(join(tmpdir(), "smithers-cache-root-"));
+  return makeTempDirPath("smithers-cache-root-");
 }
 
 describe("negative explicit retries", () => {
