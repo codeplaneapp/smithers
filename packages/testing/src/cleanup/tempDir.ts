@@ -6,22 +6,27 @@
 // then failed unrelated runs with ENOSPC.
 //
 // `makeTempDir` removes the "remember to clean up" step. It registers every
-// directory it creates in a module-level registry, and a `process.on("exit")`
-// sweep drains that registry — so no directory outlives the process that made
-// it, whether the suite passed, failed, or threw on the way out. Call sites
-// that want the space back sooner still can:
+// directory it creates in a module-level registry and arms a drain on the test
+// file that asked for it, so no directory outlives the run that made it —
+// whether the suite passed, failed, or threw on the way out. Call sites that
+// want the space back sooner still can:
 //
 //   * `using dir = makeTempDir(...)` — released at the end of the block.
 //   * `dir.cleanup()` — explicit, idempotent.
 //   * `afterEach(cleanupTempDirs)` — drains per test. Worth adding in suites
 //     whose directories are large (the PGlite migrate workspaces are ~40MB
-//     each); everything else can ride the exit sweep.
+//     each); everything else can ride the end-of-file drain.
 //
-// Deliberately *not* used here: a module-scope `afterEach`, which would only
-// cover the first file to import this module (`bun test <dir>` runs every file
-// in one process, with one module registry), and `onTestFinished`, which times
-// the enclosing test out when called from inside an AsyncLocalStorage context
-// such as `withTaskRuntime` (bun 1.4 canary).
+// Two bun behaviours shaped that design, and both cost real debugging time:
+//
+//   * `bun test <dir>` runs every file in one process with one module
+//     registry, so a hook registered when this module first loads only covers
+//     the file that imported it first. The drain is armed from `makeTempDir`
+//     instead, which scopes it to the calling file.
+//   * Registering a bun hook from inside an AsyncLocalStorage context (such as
+//     `withTaskRuntime`) hangs the enclosing test for 5s with "a
+//     beforeEach/afterEach hook timed out" (bun 1.4 canary). Allocate the
+//     directory before entering such a context.
 //
 // Only paths this module created are ever removed. Live state such as the
 // running gateway's `$TMPDIR/smithers-gateway` is never in the registry and is
@@ -56,7 +61,8 @@ const remove = (path: string): void => {
 
 /** Remove every tracked directory. Safe to call repeatedly. */
 export const cleanupTempDirs = (): void => {
-  for (const path of [...tracked]) remove(path);
+  // Snapshot first: `remove` mutates the set it would otherwise iterate.
+  for (const path of Array.from(tracked)) remove(path);
 };
 
 /** Paths currently tracked — the regression guard reads this. */
