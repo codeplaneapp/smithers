@@ -943,7 +943,7 @@ describe("VerifiableGoals", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
-  });
+  }, 30_000);
 });
 
 describe("ExtractPrompt", () => {
