@@ -226,7 +226,7 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers monitor zmux PTY", () 
       // 2 → logs (node-scoped log events).
       await pane.send("2");
       const logsTab = await until(pane.grid, /\(no log events for this node\)|^\s+\[\d+\] /);
-      expect(logsTab.ok).toBe(true);
+      if (!logsTab.ok) throw new Error(`logs tab never rendered\n${logsTab.grid.join("\n")}`);
 
       // 3 → diff. A static probe run makes no file changes; an RPC error
       // surfaces distinctly as "Diff unavailable: …".

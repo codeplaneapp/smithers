@@ -271,7 +271,11 @@ export function NodeInspectorView({
           </scrollbox>
         )}
         {activeTab === "logs" && (
-          <RunEventLog rows={toRunEventLogRows(nodeLogs)} emptyLabel="no log events for this node" />
+          // Parenthesized to match every other inspector placeholder
+          // ("(no output)", RunEventLog's own "(no log events)" default) —
+          // the tui-ui extraction dropped the parens when this moved from an
+          // inline <text> to the shared leaf.
+          <RunEventLog rows={toRunEventLogRows(nodeLogs)} emptyLabel="(no log events for this node)" />
         )}
         {activeTab === "diff" && (
           <scrollbox width="100%" height="100%" scrollY>

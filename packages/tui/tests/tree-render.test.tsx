@@ -79,6 +79,23 @@ describeHeadlessRender("NodeInspectorView – terminal rendering (CI-safe, no ga
     renderer.destroy();
   });
 
+  // The empty logs tab is the FIRST thing an operator sees after pressing [2]
+  // on a node that has produced no events yet (a parked root, a pending task),
+  // so its placeholder is the tab's only observable render. The PTY monitor
+  // e2e (apps/cli/tests/tui-monitor-zmux.e2e.test.js) asserts this exact
+  // string, but only runs on a dev box with zmux — cover it here so CI catches
+  // a drifting placeholder. It must stay parenthesized like every other
+  // inspector placeholder ("(no output)", "(no log events)").
+  it("renders the parenthesized placeholder when the logs tab has no events", async () => {
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <NodeInspectorView {...baseProps({ activeTab: "logs", nodeLogs: [] })} />,
+      { width: 120, height: 24 },
+    );
+    await waitForVisualIdle();
+    expect(captureCharFrame()).toContain("(no log events for this node)");
+    renderer.destroy();
+  });
+
   it("renders a unified diff (summary + patch text) on the diff tab", async () => {
     const diff: NodeDiffView = {
       kind: "patch",
