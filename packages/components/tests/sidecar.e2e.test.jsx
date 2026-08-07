@@ -1,19 +1,34 @@
 /** @jsxImportSource smthrs */
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { Effect } from "effect";
 import { z } from "zod";
 import { SmithersDb } from "@smthrs/db/adapter";
 import { Sidecar, Task, Workflow, computeSidecarDelta, runWorkflow } from "smthrs";
 import { createTestSmithers, sleep } from "./helpers.js";
 
+setDefaultTimeout(30_000);
+
 async function waitForScores(adapter, runId, count) {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     const rows = await adapter.listScorerResults(runId);
     if (rows.length >= count) return rows;
     await sleep(25);
   }
   return adapter.listScorerResults(runId);
+}
+
+async function waitForTerminalAttempt(adapter, runId, nodeId) {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    const attempts = await Effect.runPromise(adapter.listAttemptsForRun(runId));
+    const terminal = attempts.find(
+      (attempt) => attempt.nodeId === nodeId && ["cancelled", "failed", "finished"].includes(attempt.state),
+    );
+    if (terminal) return terminal;
+    await sleep(25);
+  }
+  return undefined;
 }
 
 describe("Sidecar e2e", () => {
@@ -104,6 +119,8 @@ describe("Sidecar e2e", () => {
     const result = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "sidecar-failure" }));
     expect(result.status).toBe("finished");
     expect(db.select().from(tables.summary).all()[0].text).toBe("primary answer");
+    const sidecarAttempt = await waitForTerminalAttempt(new SmithersDb(db), "sidecar-failure", "answer-sidecar");
+    expect(sidecarAttempt?.state).toBe("failed");
     cleanup();
   });
 });

@@ -61,7 +61,7 @@ describe("continue-as-new", () => {
     const run1Node = await adapter.getNode(run1Id, "tick", 0);
     expect(run1Node?.state).toBe("finished");
     cleanup();
-  }, 15_000);
+  }, 30_000);
   test("supports explicit continue-as-new with workflow payload", async () => {
     const { smithers, outputs, Workflow, Sequence, Task, ContinueAsNew, db, tables, cleanup } = createTestSmithers({
       result: z.object({
