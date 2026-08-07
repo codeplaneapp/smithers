@@ -6,7 +6,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
 ## 0.33.1 (2026-08-04)
 
-110 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 357 files changed, +36079 / -1424 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 347 files, +13041 / -1124). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
+112 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 358 files changed, +36080 / -1425 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 348 files, +13042 / -1125). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
 
 ### Features (11)
 
@@ -80,8 +80,9 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - docs: fix duplicate "Smithers - Smithers" landing page title ([6406cf5b49](https://github.com/smithersai/smithers/commit/6406cf5b49))
 - docs: adopt the product logo for favicon and navbar wordmark ([57551aaffe](https://github.com/smithersai/smithers/commit/57551aaffe))
 
-### Tests (14)
+### Tests (15)
 
+- test(components): give goal file checks load headroom ([632f7993a5](https://github.com/smithersai/smithers/commit/632f7993a5))
 - test(engine): avoid wall-clock retry races ([936fdf3ef1](https://github.com/smithersai/smithers/commit/936fdf3ef1))
 - test(engine): stabilize heartbeat checks under load ([8a10911851](https://github.com/smithersai/smithers/commit/8a10911851))
 - test(reconciler): stabilize release-notes fixture under load ([a432d1805a](https://github.com/smithersai/smithers/commit/a432d1805a))
