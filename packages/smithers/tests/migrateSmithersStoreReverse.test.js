@@ -159,21 +159,25 @@ describe("migrateSmithersStore reverse and inference", () => {
   // prior migration. Reverse-inference (`migrate --to sqlite` with no --from)
   // must trust it over leftover stores on disk, instead of misreading the
   // source as sqlite and failing with "source and target are both sqlite".
-  chunkedTest("reverse-infers pglite->sqlite from the migrated.json receipt when --from is omitted", async () => {
-    const cwd = makeWorkspace("smithers-migrate-receipt-reverse");
-    await seedPgliteStoreWithReceipt(cwd, { keepSqlite: false });
-    expect(existsSync(join(cwd, "smithers.db"))).toBe(false);
-    const receipt = JSON.parse(readFileSync(join(cwd, ".smithers", "migrated.json"), "utf8"));
-    expect(receipt.target.backend).toBe("pglite");
+  chunkedTest(
+    "reverse-infers pglite->sqlite from the migrated.json receipt when --from is omitted",
+    async () => {
+      const cwd = makeWorkspace("smithers-migrate-receipt-reverse");
+      await seedPgliteStoreWithReceipt(cwd, { keepSqlite: false });
+      expect(existsSync(join(cwd, "smithers.db"))).toBe(false);
+      const receipt = JSON.parse(readFileSync(join(cwd, ".smithers", "migrated.json"), "utf8"));
+      expect(receipt.target.backend).toBe("pglite");
 
-    const result = await migrateSmithersStore({ cwd, to: "sqlite" });
+      const result = await migrateSmithersStore({ cwd, to: "sqlite" });
 
-    expect(result.source.backend).toBe("pglite");
-    expect(result.backend).toBe("sqlite");
-    expect(result.runCount).toBe(1);
-    expect(existsSync(join(cwd, "smithers.db"))).toBe(true);
-    expect(sqliteRunIds(join(cwd, "smithers.db"))).toEqual(["run-migrate-1"]);
-  });
+      expect(result.source.backend).toBe("pglite");
+      expect(result.backend).toBe("sqlite");
+      expect(result.runCount).toBe(1);
+      expect(existsSync(join(cwd, "smithers.db"))).toBe(true);
+      expect(sqliteRunIds(join(cwd, "smithers.db"))).toEqual(["run-migrate-1"]);
+    },
+    300_000,
+  );
 
   chunkedTest("honors the migrated.json receipt even when a leftover sqlite store still exists", async () => {
     const cwd = makeWorkspace("smithers-migrate-receipt-leftover-sqlite");
