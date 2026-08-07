@@ -26,10 +26,10 @@
   },
   "dependencies": {
     "@smthrs/observability": "workspace:*",
-    "effect": "4.0.0-beta.104"
+    "effect": "4.0.0-beta.105"
   },
   "devDependencies": {
-    "@effect/platform-bun": "4.0.0-beta.103",
+    "@effect/platform-bun": "4.0.0-beta.105",
     "@types/bun": "latest",
     "typescript": "~6.0.3"
   },

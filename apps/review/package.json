@@ -30,7 +30,7 @@
     "@smthrs/db": "workspace:*",
     "@smthrs/engine": "workspace:*",
     "@smthrs/ui-styleguide": "workspace:*",
-    "effect": "4.0.0-beta.104",
+    "effect": "4.0.0-beta.105",
     "mermaid": "^11.16.0",
     "smthrs": "workspace:*",
     "zod": "^4.4.3"
