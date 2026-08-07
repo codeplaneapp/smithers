@@ -6,7 +6,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
 ## 0.33.1 (2026-08-04)
 
-104 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 354 files changed, +36073 / -1411 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 344 files, +13035 / -1111). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
+106 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 355 files changed, +36075 / -1412 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 345 files, +13037 / -1112). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
 
 ### Features (11)
 
@@ -80,8 +80,9 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - docs: fix duplicate "Smithers - Smithers" landing page title ([6406cf5b49](https://github.com/smithersai/smithers/commit/6406cf5b49))
 - docs: adopt the product logo for favicon and navbar wordmark ([57551aaffe](https://github.com/smithersai/smithers/commit/57551aaffe))
 
-### Tests (11)
+### Tests (12)
 
+- test(reconciler): stabilize release-notes fixture under load ([a432d1805a](https://github.com/smithersai/smithers/commit/a432d1805a))
 - test(migrate): give receipt reversal load headroom ([e17e6f3269](https://github.com/smithersai/smithers/commit/e17e6f3269))
 - test(vcs): stabilize workspace rollback under load ([3edaeb2fde](https://github.com/smithersai/smithers/commit/3edaeb2fde))
 - test(release): give timeout fixture startup headroom ([054d44ff27](https://github.com/smithersai/smithers/commit/054d44ff27))
