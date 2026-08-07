@@ -36,7 +36,7 @@ describe("cachePolicy.ttlMs", () => {
     try {
       const workflow = smithers(() => (
         <Workflow name="ttl-cache">
-          <Task id="t" output={outputs.out} agent={counter.agent} cache={{ ttlMs: 1000 }}>
+          <Task id="t" output={outputs.out} agent={counter.agent} cache={{ ttlMs: 300_000 }}>
             same prompt
           </Task>
         </Workflow>
@@ -45,7 +45,7 @@ describe("cachePolicy.ttlMs", () => {
       await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "ttl-r1" }));
       const sqlite = new Database(dbPath);
       try {
-        sqlite.query("UPDATE _smithers_cache SET created_at_ms = ?").run(Date.now() - 5000);
+        sqlite.query("UPDATE _smithers_cache SET created_at_ms = ?").run(Date.now() - 600_000);
       } finally {
         sqlite.close();
       }
