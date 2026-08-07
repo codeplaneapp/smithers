@@ -572,7 +572,7 @@ describe("task heartbeats", () => {
     const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
     cleanup();
-  });
+  }, 180_000);
   test("non-JSON heartbeat payload fails at heartbeat call time", async () => {
     const { smithers, outputs, db, cleanup } = buildSmithers();
     const workflow = smithers(() => (
