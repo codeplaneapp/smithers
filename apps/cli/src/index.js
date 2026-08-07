@@ -5776,15 +5776,22 @@ const agentsCli = Cli.create({
         process.stderr.write("No accounts registered. Add one with `smithers agents add`.\n");
         return c.ok({ accounts });
       }
-      const rows = accounts.map((a) => {
+      // Resolved once and reused for both renderings: --format json consumers
+      // need the signed-in subscription too. Without it a machine reader can
+      // see that claude-3 is at 90% but not which subscription to go
+      // re-authenticate, which is exactly what a quota dashboard is for.
+      const identified = accounts.map((a) => ({
+        ...a,
+        signedInAs: formatAccountIdentity(readAccountIdentity(a.provider, a.configDir)) || null,
+      }));
+      const rows = identified.map((a) => {
         const where = a.configDir ?? (a.apiKey ? "(api key set)" : "");
         // Naming the signed-in subscription makes two labels sharing one
         // rate limit obvious instead of silently halving the pool.
-        const who = formatAccountIdentity(readAccountIdentity(a.provider, a.configDir));
-        return `  ${a.label.padEnd(24)}  ${a.provider.padEnd(14)}  ${who.padEnd(26)}  ${where}`;
+        return `  ${a.label.padEnd(24)}  ${a.provider.padEnd(14)}  ${(a.signedInAs ?? "").padEnd(26)}  ${where}`;
       });
       process.stderr.write(`Registered accounts (${accounts.length}):\n${rows.join("\n")}\n`);
-      return c.ok({ accounts });
+      return c.ok({ accounts: identified });
     },
   })
   .command("remove", {

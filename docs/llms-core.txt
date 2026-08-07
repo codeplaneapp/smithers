@@ -11096,6 +11096,7 @@ Most applications should import from `smthrs`. The workspace packages below are 
 | `@smthrs/openclaw-site` | Private Cloudflare Worker deployment for the OpenClaw marketing site | [Ecosystem](/integrations/ecosystem) |
 | `@smthrs/pi-plugin` | PI extension runtime, views, API wrappers, and workflow inspection integration | [PI Integration](/integrations/pi-integration) |
 | `@smthrs/plugins-site` | Private Cloudflare Worker deployment for the Smithers plugins marketing site (Claude Code and Codex) | [Ecosystem](/integrations/ecosystem) |
+| `@smthrs/quota-dashboard` | Private Electrobun desktop dashboard for subscription quota headroom across registered Claude Code and Codex seats | [CLI Agents](/integrations/cli-agents) |
 | `@smthrs/protocol` | Shared contracts, small value types, and protocol-level errors for cross-package use | [Types](/reference/types), [Errors](/reference/errors) |
 | `@smthrs/react-reconciler` | Custom React reconciler, host context, DOM renderer, DevTools preload, driver, and JSX runtime internals | [Why React](/why-react), [Render Frame](/runtime/render-frame) |
 | `@smthrs/review` | Review CLI package for code review, PR posting, and story-form HTML walkthrough generation, exposed through `bunx smthrs review` and the `smithers-review` bin | [CLI Overview](/cli/overview) |

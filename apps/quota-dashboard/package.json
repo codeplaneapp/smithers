@@ -1,0 +1,15 @@
+{
+  "name": "@smthrs/quota-dashboard",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Desktop dashboard for Claude and Codex subscription quota across every registered Smithers account.",
+  "scripts": {
+    "dev": "electrobun dev",
+    "build": "electrobun build",
+    "start": "electrobun dev"
+  },
+  "dependencies": {
+    "electrobun": "1.18.1"
+  }
+}

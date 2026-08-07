@@ -74,6 +74,7 @@
       "apps/observability/package.json#name=\"@smthrs/observability\"",
       "apps/openclaw-site/package.json#name=\"@smthrs/openclaw-site\"",
       "apps/plugins-site/package.json#name=\"@smthrs/plugins-site\"",
+      "apps/quota-dashboard/package.json#name=\"@smthrs/quota-dashboard\"",
       "apps/review/package.json#name=\"@smthrs/review\"",
       "apps/self-healing-site/package.json#name=\"@smthrs/self-healing-site\"",
       "apps/signal/package.json#name=\"@smthrs/signal\"",
