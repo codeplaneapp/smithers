@@ -6,10 +6,11 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
 ## 0.33.1 (2026-08-04)
 
-88 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 303 files changed, +34554 / -1010 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 293 files, +11880 / -760). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
+96 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 350 files changed, +35854 / -1249 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 340 files, +12816 / -949). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
 
-### Features (10)
+### Features (11)
 
+- feat(quota): add subscription headroom dashboard ([91a92c5013](https://github.com/smithersai/smithers/commit/91a92c5013))
 - feat(agents): fallbackAgents seat-pool failover chains ([fbead6a494](https://github.com/smithersai/smithers/commit/fbead6a494))
 - feat(cli): tmux-assisted browser login for agents add ([3f8cb9c838](https://github.com/smithersai/smithers/commit/3f8cb9c838))
 - feat(accounts): stable registered-agent ids and signed-in identity display ([a075fead33](https://github.com/smithersai/smithers/commit/a075fead33))
@@ -21,8 +22,11 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - feat(pack): docs-home-design-system workflow — Kimi K3 reskins, Fable reviews until LGTM ([bdb6db56f9](https://github.com/smithersai/smithers/commit/bdb6db56f9))
 - feat(pack): upgrade-dependents workflow — fork, upgrade, review, PR every open-source dependent to smthrs ([4cad958237](https://github.com/smithersai/smithers/commit/4cad958237))
 
-### Bug fixes (36)
+### Bug fixes (39)
 
+- fix(deps): align Effect beta packages ([cafd2ad861](https://github.com/smithersai/smithers/commit/cafd2ad861))
+- fix(test): reclaim temporary workspaces ([68770191b5](https://github.com/smithersai/smithers/commit/68770191b5))
+- fix(tui): restore the empty logs placeholder ([aa5324cdd3](https://github.com/smithersai/smithers/commit/aa5324cdd3))
 - fix(pack): give the research pool config-dir-free Claude rungs ([0fecf7723a](https://github.com/smithersai/smithers/commit/0fecf7723a))
 - fix(pack): type the agents registry for machine-local labels and own the fallback-agents POC ([6d6f2547a0](https://github.com/smithersai/smithers/commit/6d6f2547a0))
 - fix(cli): stub @smthrs/usage and registeredAgentId in the installed-layout test tree ([89343c5816](https://github.com/smithersai/smithers/commit/89343c5816))
@@ -76,16 +80,19 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - docs: fix duplicate "Smithers - Smithers" landing page title ([6406cf5b49](https://github.com/smithersai/smithers/commit/6406cf5b49))
 - docs: adopt the product logo for favicon and navbar wordmark ([57551aaffe](https://github.com/smithersai/smithers/commit/57551aaffe))
 
-### Tests (5)
+### Tests (7)
 
+- test(release): harden subprocess checks under load ([533ad6e00f](https://github.com/smithersai/smithers/commit/533ad6e00f))
+- test(components): stabilize async workflows under load ([fd7e36b8d6](https://github.com/smithersai/smithers/commit/fd7e36b8d6))
 - test(server): poll for the resized PTY geometry instead of racing a fixed sleep ([7df4a29984](https://github.com/smithersai/smithers/commit/7df4a29984))
 - test(pack): own the file-change-contract and n8n workflows in the inventory ([ac00ab5328](https://github.com/smithersai/smithers/commit/ac00ab5328))
 - test(pack): own n8n-mvp-mission-v2 in the workflow inventory ([b780805b94](https://github.com/smithersai/smithers/commit/b780805b94))
 - test(server): bump the pinned gateway schema head to 0036 ([35cd822d9a](https://github.com/smithersai/smithers/commit/35cd822d9a))
 - test(agents): replay recorded transcripts through live interpreters; distinct fixture tool ids ([16e70ff7e4](https://github.com/smithersai/smithers/commit/16e70ff7e4))
 
-### Chores and maintenance (17)
+### Chores and maintenance (18)
 
+- chore(trellis): pin the validated v2 runtime ([f22dfc9487](https://github.com/smithersai/smithers/commit/f22dfc9487))
 - style: oxfmt the installed-layout test fixture ([99e695deae](https://github.com/smithersai/smithers/commit/99e695deae))
 - style(cli): rewrap the oneshotCodexPauseDetail ternary ([d8bf812db8](https://github.com/smithersai/smithers/commit/d8bf812db8))
 - chore(preflight): preserve pre-existing working-copy changes before oneshot-msg9ie5c-8c1a3f4b ([a1eaf2ce80](https://github.com/smithersai/smithers/commit/a1eaf2ce80))
