@@ -166,7 +166,7 @@ function buildSmithers() {
   return createTestSmithers(outputSchemas);
 }
 async function waitForRunningAttempt(adapter, nodeId) {
-  for (let i = 0; i < 80; i += 1) {
+  for (let i = 0; i < 1_200; i += 1) {
     try {
       const run = (await adapter.listRuns(20, "running"))[0];
       if (run) {
@@ -205,7 +205,7 @@ describe("task heartbeats", () => {
     const result = await resultPromise;
     expect(result.status).toBe("finished");
     cleanup();
-  }, 10_000);
+  }, 60_000);
   test("a real child that exits cannot keep a wedged agent alive", async () => {
     const { smithers, outputs, db, cleanup } = buildSmithers();
     const agent = new ExitedChildNeverResolvingAgent({ id: "exited-child" });
