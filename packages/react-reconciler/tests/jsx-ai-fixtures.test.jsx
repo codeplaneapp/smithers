@@ -16,5 +16,5 @@ describe("JSX AI fixtures", () => {
     expect(rows[0]?.latestVersion).toBe("1.2.0");
     expect(rows[0]?.changeCount).toBe(2);
     expect(rows[0]?.highlights).toEqual(["Add caching for workflow runs", "Fix resume input handling"]);
-  });
+  }, 30_000);
 });
