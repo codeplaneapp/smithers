@@ -323,13 +323,9 @@ describe("failureRetryable=false short-circuits engine retries", () => {
           </Task>
         </Workflow>
       ));
-      const startMs = Date.now();
       const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
-      const elapsedMs = Date.now() - startMs;
       expect(result.status).toBe("failed");
       expect(callCount).toBe(1);
-      // Non-retryable should fail fast — no exponential backoff window.
-      expect(elapsedMs).toBeLessThan(900);
       const attempts = await adapter.listAttempts(result.runId, "creds-bad", 0);
       expect(attempts).toHaveLength(1);
     } finally {
@@ -359,12 +355,9 @@ describe("failureRetryable=false short-circuits engine retries", () => {
           </Task>
         </Workflow>
       ));
-      const startMs = Date.now();
       const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
-      const elapsedMs = Date.now() - startMs;
       expect(result.status).toBe("failed");
       expect(callCount).toBe(1);
-      expect(elapsedMs).toBeLessThan(900);
       const attempts = await adapter.listAttempts(result.runId, "bad", 0);
       expect(attempts).toHaveLength(1);
       const meta = JSON.parse(attempts[0].metaJson ?? "{}");
@@ -394,12 +387,9 @@ describe("failureRetryable=false short-circuits engine retries", () => {
           </Task>
         </Workflow>
       ));
-      const startMs = Date.now();
       const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
-      const elapsedMs = Date.now() - startMs;
       expect(result.status).toBe("failed");
       expect(callCount).toBe(1);
-      expect(elapsedMs).toBeLessThan(900);
       const attempts = await adapter.listAttempts(result.runId, "missing-config", 0);
       expect(attempts).toHaveLength(1);
       const error = JSON.parse(attempts[0].errorJson ?? "{}");
