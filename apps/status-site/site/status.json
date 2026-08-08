@@ -1,0 +1,50 @@
+{
+  "updatedAt": "2026-08-07T00:00:00Z",
+  "monitoringSince": "2026-08-07",
+  "overall": "operational",
+  "overallNote": "Checked by hand on 2026-08-07. Monitoring for this page started the same day, so there is no history before it.",
+  "components": [
+    {
+      "id": "website",
+      "name": "Website",
+      "url": "https://smithers.sh",
+      "description": "smithers.sh",
+      "status": "operational"
+    },
+    {
+      "id": "plugins",
+      "name": "Plugin registry",
+      "url": "https://plugins.smithers.sh",
+      "description": "plugins.smithers.sh",
+      "status": "operational"
+    },
+    {
+      "id": "microsites",
+      "name": "Microsites",
+      "url": "https://init.smithers.sh",
+      "description": "init, automate, monitor and ui subdomains",
+      "status": "operational"
+    },
+    {
+      "id": "bug-intake",
+      "name": "Bug intake",
+      "url": "https://bug.smithers.sh",
+      "description": "bug.smithers.sh, the target of smithers bug",
+      "status": "operational"
+    },
+    {
+      "id": "npm",
+      "name": "CLI distribution",
+      "url": "https://www.npmjs.com/package/smithers-orchestrator",
+      "description": "smithers-orchestrator on npm. Operated by npm, not by us.",
+      "status": "operational"
+    }
+  ],
+  "history": {
+    "2026-08-07": {
+      "status": "operational",
+      "note": "First day of monitoring. All listed components checked by hand and responding."
+    }
+  },
+  "incidents": []
+}
