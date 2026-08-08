@@ -1,6 +1,6 @@
 ---
 title: Pricing
-description: Your code and data are free to host. You pay only when Smithers does work: models, sandboxes, builds, billed at cost with no markup. Smithers Cloud is currently a closed alpha.
+description: Your code and data are free to host. You pay only when Smithers does work: models, sandboxes, and builds, at direct cost with no markup. Smithers Cloud is in closed alpha and nobody is paying anything today.
 mode: "custom"
 ---
 
@@ -19,22 +19,28 @@ mode: "custom"
   </h1>
 
   <p className="mt-6 text-lg leading-relaxed" style={{ maxWidth: "40rem" }}>
-    Inference, sandboxes, and builds are what actually consume resources, so
-    those are the only things that get metered, and they are metered at our
-    direct cost, with no markup on top. Today exactly one meter has a published
-    rate: managed inference.
+    Smithers Cloud is a product you use: you describe the work, and Smithers
+    does it in a real workspace above your GitHub. The only things that cost
+    money are the resources that work consumes, and they are charged at our
+    direct cost with no markup on top.
+  </p>
+
+  <p className="mt-4" style={{ maxWidth: "40rem" }}>
+    Today exactly one meter has a published rate: managed inference. Nothing
+    without a published rate can be charged, and nothing at all is charged
+    during the closed alpha.
   </p>
 
   <div className="flex flex-wrap gap-3 mt-9">
     <a href="/request-access" className="landing-btn">Request alpha access</a>
-    <a href="/guide/get-started" className="landing-btn-ghost">Or self-host, free forever</a>
+    <a href="/" className="landing-btn-ghost">See what Smithers does</a>
   </div>
 
   <div className="flex flex-wrap gap-2.5 mt-8">
     <span className="landing-pill">No markup on inference</span>
-    <span className="landing-pill">Prepaid · no overdraft</span>
-    <span className="landing-pill">No automatic recharge</span>
     <span className="landing-pill">Git and data never metered</span>
+    <span className="landing-pill">One published meter today</span>
+    <span className="landing-pill">Work pauses at zero, data stays</span>
   </div>
 </section>
 
@@ -43,17 +49,16 @@ mode: "custom"
   <div className="landing-killer p-6">
     <div className="landing-eyebrow" style={{ marginBottom: "0.6rem" }}>Status today · 2026-08-07</div>
     <p style={{ color: "var(--l-ink)", margin: 0, marginBottom: "0.9rem" }}>
-      <strong>Smithers Cloud is a closed alpha, and there is no customer payment
-      at all right now.</strong> Design partners in the alpha are fully
-      subsidized: $500 of usage each, granted and re-granted manually by us. No
-      card is entered, and customer checkout, invoices, and self-serve top-ups
-      are not built yet.
+      <strong>Smithers Cloud is a closed alpha, and there is no customer
+      payment at all right now.</strong> Design partners in the alpha are fully
+      subsidized: $500 of usage each, granted and re-granted by hand. No card is
+      entered. Checkout, invoices, and self-serve top-ups are not built.
     </p>
     <p style={{ color: "var(--l-ink-muted)", margin: 0, fontSize: "0.9rem" }}>
-      Metering still runs, and it has to be accurate. It is how both of us learn
-      what a run actually costs. The rate card below is real and already in
-      effect as the measurement basis. Everything on this page that is not yet
-      available is labeled as such, in place, rather than being left out.
+      Metering still runs, and it has to be accurate, because it is how both of
+      us learn what a run actually costs. The rate card below is real and
+      already in effect as the measurement basis. Everything on this page that
+      is not yet available is labeled as such, in place, rather than left out.
     </p>
     <p className="mt-4" style={{ margin: 0 }}>
       <a href="/request-access" className="landing-brass" style={{ fontWeight: 600, fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }}>
@@ -68,12 +73,12 @@ mode: "custom"
   <div className="mb-10">
     <span className="landing-eyebrow">The rule</span>
     <h2 className="landing-display mt-4" style={{ fontSize: "clamp(1.7rem, 3.5vw, 2.4rem)" }}>
-      Customer-owned code and data are free to host.
+      Your code and data are free to host.
     </h2>
     <p className="mt-5" style={{ maxWidth: "40rem" }}>
-      Storing your repository is not a business model. Charging for it would mean
-      charging you rent on your own work. So we don&rsquo;t. You are billed only
-      when Smithers burns a resource on your behalf.
+      Storing your repository is not a business model. Charging for it would
+      mean charging you rent on your own work. So we don&rsquo;t. You are billed
+      only when Smithers burns a resource on your behalf.
     </p>
   </div>
 
@@ -82,10 +87,10 @@ mode: "custom"
       <div className="landing-eyebrow" style={{ marginBottom: "0.9rem" }}>Free</div>
       <div className="flex flex-col gap-3" style={{ fontSize: "0.92rem", lineHeight: 1.55, color: "var(--l-ink-muted)" }}>
         <span>Git hosting and ordinary customer-supplied data surfaces</span>
-        <span>Repository storage, sync, collaboration, history, and export</span>
+        <span>Repository storage, sync, history, and export</span>
         <span>Your data stays yours and stays accessible even when your usage balance is empty</span>
         <span>Private customer data is not consideration for the free service, and is not used for model training without your explicit consent</span>
-        <span>Waiting, sleeping, checkpointed, and approval-blocked flows consume no active-compute balance. A run parked overnight on your approval costs nothing while it waits</span>
+        <span>Waiting, sleeping, checkpointed, and approval-blocked work consumes no active-compute balance. Work parked overnight on your approval costs nothing while it waits</span>
       </div>
       <p className="mt-5" style={{ fontSize: "0.82rem", color: "var(--l-ink-muted)", margin: 0, marginTop: "1.25rem" }}>
         Fair-use and abuse controls may reject pathological binary, LFS, or
@@ -94,17 +99,20 @@ mode: "custom"
     </div>
 
     <div className="landing-card landing-card-accent p-6">
-      <div className="landing-eyebrow" style={{ marginBottom: "0.9rem" }}>Metered, at cost</div>
+      <div className="landing-eyebrow" style={{ marginBottom: "0.9rem" }}>Metered at cost · billable today</div>
       <div className="flex flex-col gap-3" style={{ fontSize: "0.92rem", lineHeight: 1.55, color: "var(--l-ink)" }}>
-        <span>Model inference</span>
-        <span>Active sandbox CPU and RAM</span>
-        <span>Build and test execution</span>
-        <span>Specialized machines</span>
-        <span>Material, job-specific network usage</span>
+        <span><strong>Managed inference.</strong> One meter, one published rate, on the card below.</span>
       </div>
-      <p className="mt-5" style={{ fontSize: "0.82rem", color: "var(--l-ink-muted)", margin: 0, marginTop: "1.25rem" }}>
-        A meter is only billable once its rate is published on the versioned rate
-        card below. Today that is managed inference and nothing else.
+      <p className="mt-5" style={{ fontSize: "0.85rem", lineHeight: 1.6, color: "var(--l-ink-muted)", margin: 0, marginTop: "1.25rem" }}>
+        The other resources a run can consume (active sandbox CPU and RAM,
+        builds and tests, specialized machines, material job-specific network)
+        are intended to be metered the same way, at cost. None of them has a
+        published unit rate yet.
+      </p>
+      <p className="mt-3" style={{ fontSize: "0.85rem", lineHeight: 1.6, color: "var(--l-ink)", margin: 0, marginTop: "0.75rem" }}>
+        <strong>A meter is billable only once its unit rate is published here.</strong>{" "}
+        Nothing is ever charged against an unpublished rate, and nothing without
+        a rate is being sold to you.
       </p>
     </div>
   </div>
@@ -118,9 +126,10 @@ mode: "custom"
       Published rates, <span className="landing-brass">no markup.</span>
     </h2>
     <p className="mt-5" style={{ maxWidth: "40rem" }}>
-      Smithers provides managed inference. These are the provider&rsquo;s own
-      public pay-as-you-go prices, passed through unchanged. Bring-your-own-key
-      is not part of the initial offer.
+      Smithers provides managed inference, so you do not bring a key or pick a
+      model to get started. These are the provider&rsquo;s own public
+      pay-as-you-go prices, passed through unchanged. Bring-your-own-key is not
+      part of the initial offer.
     </p>
   </div>
 
@@ -136,19 +145,19 @@ mode: "custom"
       </thead>
       <tbody style={{ fontFamily: "ui-monospace, monospace" }}>
         <tr style={{ borderBottom: "1px solid var(--l-line)" }}>
-          <td style={{ padding: "0.85rem 1.1rem", color: "var(--l-ink)" }}>Managed inference &mdash; Cerebras <code>gpt-oss-120b</code></td>
+          <td style={{ padding: "0.85rem 1.1rem", color: "var(--l-ink)" }}>Managed inference · Cerebras <code>gpt-oss-120b</code></td>
           <td style={{ padding: "0.85rem 1.1rem", color: "var(--l-ink-muted)" }}>per 1M input tokens</td>
           <td style={{ padding: "0.85rem 1.1rem", textAlign: "right", color: "var(--l-ink)", fontWeight: 600 }}>$0.35</td>
           <td style={{ padding: "0.85rem 1.1rem", textAlign: "right", color: "var(--l-ink-muted)" }}>none</td>
         </tr>
         <tr style={{ borderBottom: "1px solid var(--l-line)" }}>
-          <td style={{ padding: "0.85rem 1.1rem", color: "var(--l-ink)" }}>Managed inference &mdash; Cerebras <code>gpt-oss-120b</code></td>
+          <td style={{ padding: "0.85rem 1.1rem", color: "var(--l-ink)" }}>Managed inference · Cerebras <code>gpt-oss-120b</code></td>
           <td style={{ padding: "0.85rem 1.1rem", color: "var(--l-ink-muted)" }}>per 1M cached-input tokens</td>
           <td style={{ padding: "0.85rem 1.1rem", textAlign: "right", color: "var(--l-ink)", fontWeight: 600 }}>$0.00</td>
           <td style={{ padding: "0.85rem 1.1rem", textAlign: "right", color: "var(--l-ink-muted)" }}>none</td>
         </tr>
         <tr>
-          <td style={{ padding: "0.85rem 1.1rem", color: "var(--l-ink)" }}>Managed inference &mdash; Cerebras <code>gpt-oss-120b</code></td>
+          <td style={{ padding: "0.85rem 1.1rem", color: "var(--l-ink)" }}>Managed inference · Cerebras <code>gpt-oss-120b</code></td>
           <td style={{ padding: "0.85rem 1.1rem", color: "var(--l-ink-muted)" }}>per 1M output tokens</td>
           <td style={{ padding: "0.85rem 1.1rem", textAlign: "right", color: "var(--l-ink)", fontWeight: 600 }}>$0.75</td>
           <td style={{ padding: "0.85rem 1.1rem", textAlign: "right", color: "var(--l-ink-muted)" }}>none</td>
@@ -178,9 +187,9 @@ mode: "custom"
     <div className="landing-card p-6">
       <strong style={{ display: "block", color: "var(--l-ink)", marginBottom: "0.5rem" }}>What we absorb</strong>
       <p style={{ fontSize: "0.9rem", lineHeight: 1.55, margin: 0 }}>
-        Ordinary control-plane hosting, routine data storage, payment processing
-        fees, and alpha support are absorbed during the alpha rather than
-        allocated onto each run.
+        Ordinary control-plane hosting, routine data storage, and alpha support
+        are absorbed rather than allocated onto each run. Running the product
+        is our cost, not a line on your bill.
       </p>
     </div>
   </div>
@@ -191,26 +200,26 @@ mode: "custom"
   <div className="mb-9">
     <span className="landing-eyebrow">Balance</span>
     <h2 className="landing-display mt-4" style={{ fontSize: "clamp(1.7rem, 3.5vw, 2.4rem)" }}>
-      Prepaid. It stops; it never overdrafts.
+      It stops; it never overdrafts.
     </h2>
   </div>
 
   <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
     <div className="landing-card p-5">
-      <strong style={{ display: "block", color: "var(--l-ink)", marginBottom: "0.4rem" }}>Prepaid only</strong>
-      <span style={{ fontSize: "0.88rem", lineHeight: 1.55, color: "var(--l-ink-muted)" }}>Usage draws down a balance you already hold. There is no overdraft and no automatic recharge by default.</span>
+      <strong style={{ display: "block", color: "var(--l-ink)", marginBottom: "0.4rem" }}>A balance, drawn down</strong>
+      <span style={{ fontSize: "0.88rem", lineHeight: 1.55, color: "var(--l-ink-muted)" }}>Work draws down a balance you already hold. No overdraft, and nothing recharges itself. In the alpha we grant that balance by hand and you never enter a card.</span>
     </div>
     <div className="landing-card p-5">
       <strong style={{ display: "block", color: "var(--l-ink)", marginBottom: "0.4rem" }}>Zero means pause</strong>
       <span style={{ fontSize: "0.88rem", lineHeight: 1.55, color: "var(--l-ink-muted)" }}>At a zero balance, new resource-consuming work pauses. Git, data access, history, and export keep working.</span>
     </div>
     <div className="landing-card p-5">
-      <strong style={{ display: "block", color: "var(--l-ink)", marginBottom: "0.4rem" }}>Dollars, not tokens-of-our-own</strong>
-      <span style={{ fontSize: "0.88rem", lineHeight: 1.55, color: "var(--l-ink-muted)" }}>You see a dollar balance and the actual cost of each run. There is no arbitrary Smithers-credit conversion in between.</span>
+      <strong style={{ display: "block", color: "var(--l-ink)", marginBottom: "0.4rem" }}>Dollars, not an invented credit</strong>
+      <span style={{ fontSize: "0.88rem", lineHeight: 1.55, color: "var(--l-ink-muted)" }}>A dollar balance and the real cost of each run. There is no Smithers-credit conversion sitting in between to obscure it.</span>
     </div>
     <div className="landing-card p-5">
-      <strong style={{ display: "block", color: "var(--l-ink)", marginBottom: "0.4rem" }}>Observable</strong>
-      <span style={{ fontSize: "0.88rem", lineHeight: 1.55, color: "var(--l-ink-muted)" }}>Usage, cost, and capacity are exposed to you through Prometheus-compatible metrics, in the same spirit as Smithers today.</span>
+      <strong style={{ display: "block", color: "var(--l-ink)", marginBottom: "0.4rem" }}>Visible in the product</strong>
+      <span style={{ fontSize: "0.88rem", lineHeight: 1.55, color: "var(--l-ink-muted)" }}>What a piece of work cost, and what is left, shown in the app next to the work that spent it. You never have to ask us what you used.</span>
     </div>
   </div>
 </section>
@@ -223,30 +232,26 @@ mode: "custom"
       Things you cannot buy today.
     </h2>
     <p className="mt-5" style={{ maxWidth: "40rem" }}>
-      Published here so you can plan, and labeled so nobody mistakes an intention
-      for a product. None of the following is purchasable, and none of it is a
-      commitment.
+      Published here so you can plan, and labeled so nobody mistakes an
+      intention for a product. None of the following is purchasable, and none of
+      it is a commitment.
     </p>
   </div>
 
   <div className="flex flex-col gap-4">
     <div className="landing-card p-6">
       <div className="flex flex-wrap items-center gap-3" style={{ marginBottom: "0.7rem" }}>
-        <strong style={{ color: "var(--l-ink)" }}>Credits and self-serve top-ups</strong>
-        <span className="landing-pill" style={{ fontSize: "0.7rem", padding: "0.2rem 0.6rem" }}>when access opens · not today</span>
+        <strong style={{ color: "var(--l-ink)" }}>Buying usage</strong>
+        <span className="landing-pill" style={{ fontSize: "0.7rem", padding: "0.2rem 0.6rem" }}>not built</span>
       </div>
       <p style={{ fontSize: "0.9rem", lineHeight: 1.6, margin: 0 }}>
-        The intended terms for when access opens: each eligible signup receives
-        $100 of non-transferable promotional usage, expiring after 30 days;
-        purchased balances roll over and do not expire during the alpha; initial
-        paid top-ups of $25, $50, $100, and $500; balances non-transferable, no
-        overdraft, no automatic recharge by default. Eligibility during the
-        closed alpha is an explicit GitHub allowlist; when access opens, the
-        initial automatic filter is a GitHub account older than six months plus
-        basic anti-abuse checks.{" "}
-        <strong style={{ color: "var(--l-ink)" }}>None of this checkout exists yet</strong>:
-        during the closed alpha, design partners are fully subsidized and no
-        customer enters a card.
+        There is no checkout, no card capture, no invoices, and no self-serve
+        top-ups. Alpha access is by explicit GitHub allowlist, and the partners
+        on it are fully subsidized: we grant the balance and re-grant it when it
+        runs down.{" "}
+        <strong style={{ color: "var(--l-ink)" }}>Nothing is for sale on this page.</strong>{" "}
+        When buying usage exists, the terms will be published here first, and
+        the at-cost rate card is what they will be built on.
       </p>
     </div>
 
@@ -260,9 +265,9 @@ mode: "custom"
         continuing to be metered at cost. It would monetize orchestration and
         control value (higher concurrency, team controls, scheduling, policy,
         audit, retention, support) rather than access to your data or marked-up
-        tokens. It is explicitly deferred: exact entitlements remain open, and we
-        will not decide them until repeat paid usage shows which controls people
-        actually pay for. Do not read any of this as shipped.
+        tokens. It is explicitly deferred: the exact entitlements are undecided,
+        and we will not decide them until repeat paid usage shows which controls
+        people actually pay for. Do not read any of this as shipped.
       </p>
     </div>
 
@@ -274,11 +279,12 @@ mode: "custom"
       <p style={{ fontSize: "0.9rem", lineHeight: 1.6, margin: 0 }}>
         General sandbox and compute is the expansion meter, and the planned menu
         includes Linux CPU and high-memory sandboxes, GPU, browser sandboxes,
-        Apple Silicon/macOS builders, Xcode build environments, and iOS simulator
-        sessions, with physical iOS device testing possibly a later distinct
-        class. These are plans, not implemented promises, and none is available
-        today. Apple hardware, licensing, signing, privacy, and device-security
-        constraints must be verified before any iOS offer is published.
+        Apple Silicon and macOS builders, Xcode build environments, and iOS
+        simulator sessions, with physical iOS device testing possibly a later
+        distinct class. These are plans, not implemented promises, and none of
+        them is available today. Apple hardware, licensing, signing, privacy,
+        and device-security constraints must be verified before any iOS offer is
+        published.
       </p>
     </div>
   </div>
@@ -313,8 +319,8 @@ mode: "custom"
 
   <p className="mt-6" style={{ fontSize: "0.85rem", color: "var(--l-ink-muted)", maxWidth: "40rem" }}>
     If you need a contractual SLA before you can adopt a tool, the alpha is not
-    the right time to adopt this one. Self-hosting the MIT runtime is always
-    available, and puts the availability question entirely in your hands.
+    the right time to adopt this one. Say so and we will come back to you when
+    it is.
   </p>
 </section>
 
@@ -333,7 +339,7 @@ mode: "custom"
 
   <div className="flex flex-col gap-2.5" style={{ maxWidth: "42rem" }}>
     <div className="landing-card px-5 py-4" style={{ fontSize: "0.9rem", color: "var(--l-ink-muted)" }}>
-      Refund, tax, failed-work, and accounting treatment of purchased balances
+      Refund, tax, failed-work, and accounting treatment, once buying usage exists
     </div>
     <div className="landing-card px-5 py-4" style={{ fontSize: "0.9rem", color: "var(--l-ink-muted)" }}>
       The exact anti-abuse filter once the closed allowlist opens up
@@ -342,7 +348,7 @@ mode: "custom"
       Alpha data-retention and deletion policy, and model-provider disclosure
     </div>
     <div className="landing-card px-5 py-4" style={{ fontSize: "0.9rem", color: "var(--l-ink-muted)" }}>
-      The first compute class after Linux, and the eventual iOS/macOS scope
+      The first compute class after Linux, and the eventual iOS and macOS scope
     </div>
   </div>
 </section>
@@ -352,21 +358,20 @@ mode: "custom"
   <div className="landing-card landing-card-accent p-8 text-center">
     <p className="landing-display" style={{ fontSize: "clamp(1.2rem, 2.6vw, 1.6rem)", color: "var(--l-ink)", maxWidth: "40rem", marginInline: "auto", lineHeight: 1.4 }}>
       Your code and data are free to host. You pay only when Smithers does work:
-      models, sandboxes, builds, GPUs, and simulators.
+      models, sandboxes, and builds.
     </p>
     <p className="mt-4" style={{ fontSize: "0.82rem", color: "var(--l-ink-muted)", maxWidth: "38rem", marginInline: "auto" }}>
-      That is the model. GPUs and simulators are on the planned menu, not on the
-      rate card. The only meter with a published rate today is managed
-      inference.
+      That is the model. Of those, the only meter with a published rate today is
+      managed inference, and during the closed alpha usage is on us.
     </p>
     <div className="flex flex-wrap gap-3 mt-8 justify-center">
       <a href="/request-access" className="landing-btn">Request alpha access</a>
       <a href="mailto:will@smithers.sh" className="landing-btn-ghost">Ask about pricing</a>
     </div>
     <p className="mt-8" style={{ fontSize: "0.85rem", color: "var(--l-ink-muted)", margin: 0, marginTop: "2rem" }}>
-      Prefer to run it yourself? The Smithers runtime is MIT-licensed and needs no
-      cloud at all.{" "}
-      <a href="/guide/get-started" className="landing-brass" style={{ fontWeight: 600 }}>Get started locally →</a>
+      Smithers is open source underneath (MIT), so the pricing above is not a
+      lock-in: the engine is inspectable and self-hostable.{" "}
+      <a href="https://github.com/smithersai/smithers" className="landing-brass" style={{ fontWeight: 600 }}>Read the source →</a>
     </p>
   </div>
 </section>
