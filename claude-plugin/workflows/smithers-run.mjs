@@ -272,7 +272,15 @@ while (ticks < MAX_TICKS) {
     },
   )
   if (!tick) {
-    log(`Mirror sync failed for run ${runId}; stopping the mirror (the Smithers run itself is unaffected).`)
+    // A null tick means the tick agent died (e.g. a transient network/API
+    // failure like ENOTFOUND), not that the run changed state. Treat it like
+    // an error tick and retry; only stop after 3 consecutive failures.
+    errorTicks += 1
+    if (errorTicks < 3) {
+      log(`Mirror tick #${ticks} for run ${runId} failed (transient API error); retrying.`)
+      continue
+    }
+    log(`Mirror sync failed ${errorTicks} times in a row for run ${runId}; stopping the mirror (the Smithers run itself is unaffected). Re-attach with args {"runId":"${runId}"}.`)
     break
   }
   if (tick.contract === -1) {
