@@ -37,7 +37,10 @@ export type ChatComposerProps = Omit<ComponentProps<"form">, "onSubmit"> & {
   docked?: boolean;
   inputAriaLabel?: string;
   submitLabel?: string;
-  stopLabel?: string;
+  /** Visible content for the Send button. */
+  sendLabel?: ReactNode;
+  /** Visible content for the Stop button. Strings also customize its accessible name for compatibility. */
+  stopLabel?: ReactNode;
   textareaProps?: Omit<ComponentProps<"textarea">, "value" | "onChange" | "disabled" | "placeholder">;
 };
 
@@ -56,7 +59,8 @@ export function ChatComposer({
   docked = false,
   inputAriaLabel = "Chat message",
   submitLabel = "Send message",
-  stopLabel = "Stop generating",
+  sendLabel = "↑",
+  stopLabel = "■",
   textareaProps,
   className,
   ...props
@@ -64,6 +68,7 @@ export function ChatComposer({
   useInjectUiCss();
   const busy = lifecycleStatus === "submitted" || lifecycleStatus === "streaming";
   const canSubmit = !disabled && !busy && value.trim().length > 0;
+  const stopAccessibleLabel = typeof stopLabel === "string" && stopLabel !== "■" ? stopLabel : "Stop generating";
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const autogrow = (element: HTMLTextAreaElement) => {
@@ -139,11 +144,11 @@ export function ChatComposer({
               variant="ghost"
               size="icon"
               className="sui-chat-composer-stop"
-              aria-label={stopLabel}
-              title={stopLabel}
+              aria-label={stopAccessibleLabel}
+              title={stopAccessibleLabel}
               onClick={onStop}
             >
-              <span aria-hidden="true">■</span>
+              <span aria-hidden="true">{stopLabel}</span>
             </Button>
           ) : null}
           <Button
@@ -155,7 +160,7 @@ export function ChatComposer({
             title={submitLabel}
             disabled={!canSubmit}
           >
-            <span aria-hidden="true">↑</span>
+            <span aria-hidden="true">{sendLabel}</span>
           </Button>
         </div>
       </div>

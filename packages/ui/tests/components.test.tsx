@@ -224,6 +224,7 @@ describe("chat", () => {
     expect(ready).toContain('data-status="ready"');
     expect(ready).toContain('aria-label="Chat message"');
     expect(ready).toContain('aria-label="Send message"');
+    expect(ready).toContain('<span aria-hidden="true">↑</span>');
     expect(ready).toContain('aria-live="polite"');
     expect(ready).toContain("Connected");
     expect(ready).not.toContain('disabled=""');
@@ -244,6 +245,7 @@ describe("chat", () => {
     );
     expect(streaming).toContain('data-status="streaming"');
     expect(streaming).toContain('aria-label="Stop generating"');
+    expect(streaming).toContain('<span aria-hidden="true">■</span>');
     expect(streaming).toContain("sui-chat-composer-stop");
     // Busy disables send even though the draft is non-empty.
     expect(streaming).toContain('disabled=""');
@@ -264,6 +266,27 @@ describe("chat", () => {
     expect(legacyStatus).toContain("<em>streaming</em>");
     expect(legacyStatus).toContain('data-status="ready"');
     expect(legacyStatus).not.toContain('disabled=""');
+  });
+
+  test("renders custom ReactNode send and stop labels without changing accessible names", () => {
+    const ready = renderToStaticMarkup(
+      <ChatComposer value="Ship it" onValueChange={() => {}} onSubmit={() => {}} sendLabel={<strong>Send</strong>} />,
+    );
+    expect(ready).toContain('<span aria-hidden="true"><strong>Send</strong></span>');
+    expect(ready).toContain('aria-label="Send message"');
+
+    const streaming = renderToStaticMarkup(
+      <ChatComposer
+        value="Ship it"
+        onValueChange={() => {}}
+        onSubmit={() => {}}
+        lifecycleStatus="streaming"
+        onStop={() => {}}
+        stopLabel={<strong>Stop</strong>}
+      />,
+    );
+    expect(streaming).toContain('<span aria-hidden="true"><strong>Stop</strong></span>');
+    expect(streaming).toContain('aria-label="Stop generating"');
   });
 });
 
