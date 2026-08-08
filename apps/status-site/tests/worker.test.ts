@@ -164,6 +164,25 @@ describe("status site worker", () => {
     expect(response.status).toBe(404);
   });
 
+  test("404s the feed when the SPA fallback serves the page in its place", async () => {
+    // This, not a 404, is what the real assets binding does for a missing file:
+    // not_found_handling is single-page-application, so it returns index.html
+    // with a 200. Serving that as the feed would be HTML pretending to be status.
+    const env: StatusSiteEnv = {
+      ASSETS: {
+        async fetch() {
+          return new Response(homeHtml, { headers: { "content-type": "text/html; charset=utf-8" } });
+        },
+      },
+    };
+    const response = await createStatusSiteWorker().fetch(
+      new Request("https://status.smithers.sh/status.json"),
+      env,
+    );
+    expect(response.status).toBe(404);
+    expect(response.headers.get("content-type")).toContain("json");
+  });
+
   test("falls back to the status page for unknown paths", async () => {
     const response = await createStatusSiteWorker().fetch(
       new Request("https://status.smithers.sh/incidents"),

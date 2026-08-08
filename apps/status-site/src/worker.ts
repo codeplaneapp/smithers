@@ -36,7 +36,6 @@ function withHeaders(response: Response, headers: Record<string, string>): Respo
 }
 
 function headersFor(pathname: string): Record<string, string> {
-  if (pathname === "/status.json") return { ...FEED_HEADERS };
   if (pathname.startsWith("/assets/")) return { ...ASSET_HEADERS };
   return { ...HTML_HEADERS };
 }
@@ -45,6 +44,24 @@ async function fetchAsset(request: Request, env: StatusSiteEnv): Promise<Respons
   const response = await env.ASSETS.fetch(request);
   if (response.status === 404) return response;
   return withHeaders(response, headersFor(new URL(request.url).pathname));
+}
+
+/**
+ * The assets binding runs with `not_found_handling: single-page-application`,
+ * so a missing status.json comes back as the index page with a 200 rather than
+ * a 404. Handing that to a caller would be HTML claiming to be the feed, so
+ * anything that is not JSON is reported as a missing feed instead.
+ */
+async function fetchFeed(request: Request, env: StatusSiteEnv): Promise<Response> {
+  const response = await env.ASSETS.fetch(request);
+  const contentType = response.headers.get("content-type") ?? "";
+  if (response.status !== 200 || !contentType.includes("json")) {
+    return Response.json(
+      { error: "status feed unavailable" },
+      { status: 404, headers: { "x-content-type-options": "nosniff" } },
+    );
+  }
+  return withHeaders(response, FEED_HEADERS);
 }
 
 async function fetchIndex(request: Request, env: StatusSiteEnv): Promise<Response> {
@@ -70,11 +87,11 @@ export function createStatusSiteWorker() {
         return Response.json({ ok: true, service: "status-site" });
       }
 
+      // A missing status feed must read as missing, not as an HTML page.
+      if (url.pathname === "/status.json") return fetchFeed(request, env);
+
       const direct = await fetchAsset(request, env);
       if (direct.status !== 404) return direct;
-
-      // A missing status feed must read as missing, not as an HTML page.
-      if (url.pathname === "/status.json") return direct;
 
       return fetchIndex(request, env);
     },
