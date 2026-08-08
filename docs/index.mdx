@@ -1,6 +1,6 @@
 ---
-title: Multi-agent workflows with observability and time travel
-description: Multi-agent workflows with full observability and time travel. Watch every step live; rewind, fork, or replay any run. Any model, any harness.
+title: Rewind the agent, and the repo rewinds with it
+description: Smithers is the open-source durable runtime under your coding agents. Every task attempt checkpoints the run graph and the working tree together, so you can rewind, fork, replay, and diff any step, and a rollback refuses to cross a side effect it cannot undo.
 mode: "custom"
 ---
 
@@ -13,23 +13,31 @@ mode: "custom"
     <div>
       <span className="landing-eyebrow">
         <span className="landing-dot" aria-hidden="true" />
-        Open source · durable runtime for AI agents
+        Open source · durable runtime for coding agents
       </span>
 
       <h1 className="landing-display mt-6" style={{ fontSize: "clamp(2.4rem, 5vw, 3.9rem)" }}>
-        Powerful workflows you can build <span className="landing-brass">effortlessly.</span>
+        Rewind the agent. <span className="landing-brass">The repo rewinds with it.</span>
       </h1>
 
       <p className="mt-6 text-lg leading-relaxed" style={{ maxWidth: "34rem" }}>
-        Build with your agent, customize and improve it automatically over
-        time, connect to anything. Observe every step of the workflow frame by
-        frame. Collaborate on the workflows in real time with your team.
+        Smithers is the durable runtime under the coding agents you already run.
+        Every task attempt checkpoints the run graph <em>and</em> the working
+        tree, so the filesystem and the run graph roll back to the same instant,
+        and refuse to cross a side effect they cannot undo. Rewind any step,
+        fork a run into branches, diff exactly what one task changed.
       </p>
 
       <div className="flex flex-wrap gap-3 mt-9">
-        <a href="/guide/get-started" className="landing-btn">Get started for free</a>
-        <a href="mailto:will@smithers.sh" className="landing-btn-ghost">Talk to us</a>
+        <a href="/request-access" className="landing-btn">Request access</a>
+        <a href="#open-source" className="landing-btn-ghost">Run the open-source CLI</a>
       </div>
+
+      <p className="mt-4" style={{ fontSize: "0.85rem", maxWidth: "34rem" }}>
+        The hosted Smithers app is a <strong style={{ color: "var(--l-ink)" }}>closed
+        alpha</strong>. Access is granted by invitation and there is no public
+        sign-up yet. The runtime below is MIT-licensed and you can run it today.
+      </p>
 
       {/* Credentials */}
       <div className="flex flex-wrap gap-x-8 gap-y-4 mt-9">
@@ -51,11 +59,11 @@ mode: "custom"
         </div>
       </div>
 
-      {/* Install command - the primary CTA */}
-      <div className="mt-12">
+      {/* Install command - the secondary CTA: the open-source path, available today */}
+      <div className="mt-12" id="open-source">
         <div className="landing-eyebrow" style={{ marginBottom: "0.6rem" }}>
           <span style={{ width: "0.25rem", height: "0.25rem", borderRadius: "999px", background: "var(--l-brass)" }} aria-hidden="true" />
-          Run this in your project
+          Open source · run this in your project
         </div>
         <div
           className="landing-cmd flex items-center justify-between gap-4"
@@ -164,7 +172,8 @@ mode: "custom"
           </div>
         </div>
         <div className="mt-5 pt-4" style={{ borderTop: "1px solid var(--l-line)", fontSize: "0.7rem", color: "var(--l-ink-muted)" }}>
-          crash-safe · resumes from the last persisted step · rewind to any step
+          resumes from the last persisted step · rewind restores the working tree
+          to that attempt's commit, not just the graph
         </div>
       </div>
     </div>
@@ -182,33 +191,99 @@ mode: "custom"
     <span className="landing-pill">Pi</span>
     <span className="landing-pill">+ any AI SDK model</span>
   </div>
-  <p className="mt-5" style={{ maxWidth: "36rem", marginInline: "auto" }}>
-    Works with the harnesses you already pay for: <strong style={{ color: "var(--l-ink)" }}>your
-    Codex and Claude subscriptions, not just API keys</strong>. Point each task at
-    whichever agent and model is best for the job, and swap the harness without
-    rewriting the workflow.
+  <p className="mt-5" style={{ maxWidth: "38rem", marginInline: "auto" }}>
+    Point each task at whichever agent and model suits the job, and swap the
+    harness without rewriting the workflow. The meter is the difference: a
+    hosted runtime runs the agent on its infrastructure and bills you for it,
+    while Smithers runs it on yours and drives <strong style={{ color: "var(--l-ink)" }}>the
+    Claude or Codex subscription seat already on your card</strong>. API keys
+    optional, not required.
   </p>
 </section>
 
 {/* ─────────────────────────── Proof ─────────────────────────── */}
-<section className="max-w-4xl mx-auto px-6 py-8 text-center">
-  <div className="flex flex-wrap items-start justify-center gap-x-12 gap-y-5">
+<section className="max-w-4xl mx-auto px-6 py-14">
+  <div className="text-center mb-10">
+    <span className="landing-eyebrow">What time travel actually means here</span>
+    <h2 className="landing-display mt-5" style={{ fontSize: "clamp(1.8rem, 4vw, 2.6rem)" }}>
+      Two ledgers. <span className="landing-brass">One rollback.</span>
+    </h2>
+    <p className="mt-6" style={{ maxWidth: "38rem", marginInline: "auto" }}>
+      An agent run has two kinds of state, and they drift apart the moment you
+      touch one: the orchestrator's record of what ran, and the working tree the
+      agent actually wrote to. Roll back one without the other and you get a run
+      that is lying to itself. Smithers records both, per task attempt, and
+      rolls them back as a unit.
+    </p>
+  </div>
+
+  <div className="grid md:grid-cols-3 gap-4">
+    <div className="landing-card p-5">
+      <div className="landing-eyebrow" style={{ marginBottom: "0.6rem" }}>The join</div>
+      <strong style={{ display: "block", color: "var(--l-ink)", marginBottom: "0.4rem" }}>The graph and the tree, together</strong>
+      <span style={{ fontSize: "0.9rem", lineHeight: 1.55, color: "var(--l-ink-muted)" }}>
+        Every render frame stores a snapshot of graph state; every task attempt
+        stores the worktree's commit pointer. Going back reads both, so the
+        filesystem and the run graph land on the same instant.
+      </span>
+    </div>
+    <div className="landing-card p-5">
+      <div className="landing-eyebrow" style={{ marginBottom: "0.6rem" }}>While it runs</div>
+      <strong style={{ display: "block", color: "var(--l-ink)", marginBottom: "0.4rem" }}>Checkpoints without stopping</strong>
+      <span style={{ fontSize: "0.9rem", lineHeight: 1.55, color: "var(--l-ink-muted)" }}>
+        A watcher commits the tree as it settles, and agents that expose tool
+        hooks get a snapshot per tool call. Nothing pauses to be checkpointed,
+        and a capture that fails is recorded as a gap instead of passing silently.
+      </span>
+    </div>
+    <div className="landing-card p-5">
+      <div className="landing-eyebrow" style={{ marginBottom: "0.6rem" }}>The honest part</div>
+      <strong style={{ display: "block", color: "var(--l-ink)", marginBottom: "0.4rem" }}>A side-effect boundary</strong>
+      <span style={{ fontSize: "0.9rem", lineHeight: 1.55, color: "var(--l-ink-muted)" }}>
+        Rolling back a database does not un-send an email. A rollback that would
+        cross an external effect with no compensation handler blocks rather than
+        pretend. Git writes are exempt; API mutations are not.
+      </span>
+    </div>
+  </div>
+
+  {/* The verbs, as real commands */}
+  <div className="landing-card p-5 mt-5" style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.78rem", lineHeight: 1.9 }}>
+    <div style={{ color: "var(--l-ink-muted)" }}># where can I go back to, and what did that task change?</div>
+    <div style={{ color: "var(--l-ink)" }}><span className="landing-brass">$ </span>bunx smthrs timeline RUN_ID --tree</div>
+    <div style={{ color: "var(--l-ink)" }}><span className="landing-brass">$ </span>bunx smthrs diff RUN_ID NODE_ID</div>
+    <div style={{ color: "var(--l-ink-muted)", marginTop: "0.8rem" }}># branch an experiment off frame 5; the parent run is untouched</div>
+    <div style={{ color: "var(--l-ink)" }}><span className="landing-brass">$ </span>bunx smthrs fork workflow.tsx -r RUN_ID -f 5 -n analyze -l exp-a</div>
+    <div style={{ color: "var(--l-ink-muted)", marginTop: "0.8rem" }}># redo the same run from a bad task: filesystem and DB together</div>
+    <div style={{ color: "var(--l-ink)" }}><span className="landing-brass">$ </span>bunx smthrs timetravel workflow.tsx -r RUN_ID -n plan --resume</div>
+  </div>
+
+  <p className="text-center mt-7 flex flex-wrap justify-center gap-x-6 gap-y-2">
+    <a href="/capabilities/time-travel" className="landing-brass" style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }}>
+      How time travel works, and what it does not guarantee →
+    </a>
+    <a href="/capabilities/durability" className="landing-brass" style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }}>
+      What is persisted, exactly →
+    </a>
+  </p>
+
+  <div className="flex flex-wrap items-start justify-center gap-x-12 gap-y-5 mt-12 pt-10" style={{ borderTop: "1px solid var(--l-line)" }}>
     <div>
       <strong className="landing-display" style={{ display: "block", fontSize: "1.7rem", color: "var(--l-ink)" }}>100+</strong>
       <span style={{ fontSize: "0.78rem", color: "var(--l-ink-muted)" }}>runnable example workflows</span>
     </div>
     <div>
-      <strong className="landing-display" style={{ display: "block", fontSize: "1.7rem", color: "var(--l-ink)" }}>6+</strong>
-      <span style={{ fontSize: "0.78rem", color: "var(--l-ink-muted)" }}>ecosystem projects on the runtime</span>
+      <strong className="landing-display" style={{ display: "block", fontSize: "1.7rem", color: "var(--l-ink)" }}>MIT</strong>
+      <span style={{ fontSize: "0.78rem", color: "var(--l-ink-muted)" }}>open source, self-hosted, no cloud required</span>
     </div>
     <div>
-      <strong className="landing-display" style={{ display: "block", fontSize: "1.7rem", color: "var(--l-ink)" }}>MIT</strong>
-      <span style={{ fontSize: "0.78rem", color: "var(--l-ink-muted)" }}>open source, no cloud required</span>
+      <strong className="landing-display" style={{ display: "block", fontSize: "1.7rem", color: "var(--l-ink)" }}>3</strong>
+      <span style={{ fontSize: "0.78rem", color: "var(--l-ink-muted)" }}>storage backends: SQLite, PGlite, Postgres</span>
     </div>
   </div>
-  <p className="mt-6" style={{ fontSize: "0.82rem", color: "var(--l-ink-muted)" }}>
-    Burns · Ralphinho · Cairo Coder · Agentix · Era · Local Isolated Ralph
-    <a href="/integrations/ecosystem" className="landing-brass" style={{ marginLeft: "0.6rem", fontWeight: 600 }}>community projects on the runtime →</a>
+  <p className="text-center mt-6" style={{ fontSize: "0.82rem", color: "var(--l-ink-muted)" }}>
+    Open-source projects built on the runtime: Burns · Ralphinho · Cairo Coder · Agentix · Era · Local Isolated Ralph
+    <a href="/integrations/ecosystem" className="landing-brass" style={{ marginLeft: "0.6rem", fontWeight: 600 }}>see the ecosystem →</a>
   </p>
 </section>
 
@@ -260,11 +335,11 @@ mode: "custom"
 
   {/* Killer feature: time travel + observability */}
   <div className="landing-killer p-6 mt-8" style={{ maxWidth: "38rem", marginInline: "auto" }}>
-    <div className="landing-eyebrow" style={{ marginBottom: "0.6rem" }}>Time travel · the killer feature</div>
+    <div className="landing-eyebrow" style={{ marginBottom: "0.6rem" }}>Observability · included, not configured</div>
     <p style={{ color: "var(--l-ink)", margin: 0 }}>
-      Every transition, attempt, and approval is a SQLite row, so you can watch a
-      run live, rewind to any step, fork an alternate branch, and replay from a
-      checkpoint. Full observability with Prometheus metrics and traces, no setup.
+      Every transition, attempt, and approval is a database row, so a run is
+      legible while it is still running: watch it live, read any node's output,
+      and see which step is gating progress. Prometheus metrics and traces, no setup.
     </p>
   </div>
 
@@ -416,6 +491,8 @@ mode: "custom"
   <p className="text-center mt-10">
     MIT-licensed and open source on{" "}
     <a href="https://github.com/smithersai/smithers" className="landing-brass" style={{ fontWeight: 600 }}>GitHub</a>.
+    The hosted app is in closed alpha.{" "}
+    <a href="/request-access" className="landing-brass" style={{ fontWeight: 600 }}>Request access</a>.
   </p>
 </section>
 

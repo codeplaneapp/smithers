@@ -23,7 +23,7 @@ import * as _smthrs_devtools_snapshotSerializer from '@smthrs/devtools/snapshotS
 import * as _smthrs_protocol_devtools from '@smthrs/protocol/devtools';
 import * as _smthrs_engine_effect_DiffBundle from '@smthrs/engine/effect/DiffBundle';
 import { DiffBundle } from '@smthrs/engine/effect/DiffBundle';
-import { computeDiffBundleBetweenRefs } from '@smthrs/engine/effect/diff-bundle';
+import { computeDiffBundleBetweenRefs, computeDiffBundle } from '@smthrs/engine/effect/diff-bundle';
 import { selectOutputRow } from '@smthrs/db/output';
 import * as _smthrs_time_travel_jumpToFrame from '@smthrs/time-travel/jumpToFrame';
 export { JumpToFrameError } from '@smthrs/time-travel/jumpToFrame';
@@ -1091,10 +1091,12 @@ declare class Gateway {
             adapter: SmithersDb$4;
         }): Promise<Record<string, unknown>>;
     } | null;
-    /** @type {Set<{ dispose: () => void }>} */
+    /** @type {Set<{ runId?: string; dispose: () => void }>} */
     ptySessions: Set<{
+        runId?: string;
         dispose: () => void;
     }>;
+    gatewayClosing: boolean;
     identity: {
         backend?: string;
         version?: string;
@@ -1677,6 +1679,14 @@ declare class Gateway {
         cols: number;
         rows: number;
     }): void;
+    /**
+     * Best-effort recovery after a PTY hijack process died without cleanly
+     * returning control (tab closed, socket dropped, launcher crashed). Only
+     * acts when the run is still parked by the hijack; a run the operator
+     * already resumed/cancelled is left alone.
+     * @param {string} runId
+     */
+    resumeRunAfterHijackHalt(runId: string): Promise<void>;
     /**
      * @param {{ port?: number; host?: string; path?: string }} [options]
      */
@@ -2703,6 +2713,8 @@ type GetNodeDiffStatPayload = {
     seq: number;
     baseRef: string;
     summary: DiffSummary$1;
+    /** True when computed from the live working copy of an in-progress attempt. */
+    live?: boolean;
 };
 type GetNodeDiffRoutePayload = DiffBundle | GetNodeDiffStatPayload;
 type GetNodeDiffRouteResult$1 = {
@@ -2784,10 +2796,11 @@ declare function summarizeBundle(bundle: {
  * revisions. Each checkout lane is reduced to its terminal tree; cached node
  * bundles are used only when the terminal checkout has been reaped.
  */
-declare function getRunDiffRoute({ runId: rawRunId, resolveRun, computeDiffBundleBetweenRefsImpl, resolveCommitPointerImpl, }: {
+declare function getRunDiffRoute({ runId: rawRunId, resolveRun, computeDiffBundleBetweenRefsImpl, computeDiffBundleImpl, resolveCommitPointerImpl, }: {
     runId: any;
     resolveRun: any;
     computeDiffBundleBetweenRefsImpl?: typeof computeDiffBundleBetweenRefs | undefined;
+    computeDiffBundleImpl?: typeof computeDiffBundle | undefined;
     resolveCommitPointerImpl?: typeof resolveCommitPointer | undefined;
 }): Promise<{
     ok: boolean;
