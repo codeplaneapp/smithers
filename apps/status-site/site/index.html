@@ -6,7 +6,7 @@
     <title>Smithers Status</title>
     <meta
       name="description"
-      content="Current and historical status of the public Smithers surfaces: the website, the plugin registry, the microsites, bug intake and CLI distribution."
+      content="Current and historical status of the public Smithers surfaces: the website, the app, the Smithers Cloud API, the plugin registry, the microsites, bug intake and CLI distribution."
     />
     <meta name="robots" content="index, follow" />
     <style>
@@ -153,9 +153,9 @@
         <span class="dot"></span>
         <h1 id="banner-text">All systems operational</h1>
       </div>
-      <p class="stamp" id="stamp">Last updated 2026-08-07</p>
+      <p class="stamp" id="stamp">Last updated 2026-08-08</p>
       <p class="note" id="note">
-        Checked by hand on 2026-08-07. Monitoring for this page started the same day, so there is no history before it.
+        Monitoring for this page started 2026-08-07; there is no history before it. Components are checked by hand or by the production canary.
       </p>
 
       <section class="block">
@@ -165,6 +165,16 @@
           <div class="comp">
             <span class="name">Website</span>
             <span class="desc">smithers.sh</span>
+            <span class="state operational"><span class="dot"></span>Operational</span>
+          </div>
+          <div class="comp">
+            <span class="name">Smithers Code</span>
+            <span class="desc">code.smithers.sh, the app frontend</span>
+            <span class="state operational"><span class="dot"></span>Operational</span>
+          </div>
+          <div class="comp">
+            <span class="name">Smithers Cloud API</span>
+            <span class="desc">control plane behind the app: repos, workspaces, runs, billing</span>
             <span class="state operational"><span class="dot"></span>Operational</span>
           </div>
           <div class="comp">
@@ -233,7 +243,7 @@
       <div class="wrap row">
         <span>
           Best-effort incident response during the alpha. No SLA is implied.
-          On call: <a href="mailto:will@tevm.tech">will@tevm.tech</a>.
+          On call: <a href="mailto:will@smithers.sh">will@smithers.sh</a>.
         </span>
         <nav class="links" aria-label="Footer">
           <a href="https://smithers.sh">smithers.sh</a>
@@ -449,7 +459,18 @@
               "This page could not load status.json, so what you see below may be stale. It is not a statement that everything is fine.";
           }
           var grid = document.getElementById("cal-grid");
-          if (grid) grid.textContent = "";
+          if (grid) {
+            grid.textContent = "";
+            var message = el("p", "note", "No history to show: the feed did not load.");
+            message.style.gridColumn = "1 / -1";
+            message.style.margin = "0";
+            grid.appendChild(message);
+          }
+          // Nothing wired up the month navigation, so do not offer it.
+          ["cal-prev", "cal-next"].forEach(function (id) {
+            var button = document.getElementById(id);
+            if (button) button.disabled = true;
+          });
         }
 
         fetch("/status.json", { cache: "no-cache" })

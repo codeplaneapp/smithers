@@ -1,14 +1,27 @@
 {
-  "updatedAt": "2026-08-07T00:00:00Z",
+  "updatedAt": "2026-08-08T05:00:48Z",
   "monitoringSince": "2026-08-07",
   "overall": "operational",
-  "overallNote": "Checked by hand on 2026-08-07. Monitoring for this page started the same day, so there is no history before it.",
+  "overallNote": "Monitoring for this page started 2026-08-07; there is no history before it. Components are checked by hand or by the production canary.",
   "components": [
     {
       "id": "website",
       "name": "Website",
       "url": "https://smithers.sh",
       "description": "smithers.sh",
+      "status": "operational"
+    },
+    {
+      "id": "app",
+      "name": "Smithers Code",
+      "url": "https://code.smithers.sh",
+      "description": "code.smithers.sh, the app frontend",
+      "status": "operational"
+    },
+    {
+      "id": "cloud-api",
+      "name": "Smithers Cloud API",
+      "description": "control plane behind the app: repos, workspaces, runs, billing",
       "status": "operational"
     },
     {
@@ -44,6 +57,10 @@
     "2026-08-07": {
       "status": "operational",
       "note": "First day of monitoring. All listed components checked by hand and responding."
+    },
+    "2026-08-08": {
+      "status": "operational",
+      "note": "Smithers Code and the Smithers Cloud API added to monitoring; production canary green (22 checks)."
     }
   },
   "incidents": []
