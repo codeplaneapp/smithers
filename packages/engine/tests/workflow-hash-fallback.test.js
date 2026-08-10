@@ -55,3 +55,37 @@ describe("readWorkflowGraphHash import cycles", () => {
     }
   });
 });
+
+describe("readWorkflowGraphHash non-module assets", () => {
+  test("hashes .mdx prompts as leaves without scanning their prose for imports", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "smithers-hash-mdx-"));
+    try {
+      // The stock pack's workflows import .mdx prompts whose prose contains
+      // import-shaped examples in code fences. Scanning that prose fails the
+      // whole graph hash, and a run recorded with a null workflowHash can
+      // never resume (RESUME_METADATA_MISMATCH "workflow module graph
+      // unavailable") — which is every approval-gated stock workflow.
+      writeFileSync(
+        join(dir, "prompt.mdx"),
+        [
+          "# Scaffold",
+          "",
+          "Write the workflow to `.smithers/workflows/<workflowName>.tsx`:",
+          "",
+          "```ts",
+          'import { thing } from "../workflows/<workflowName>.tsx";',
+          "```",
+        ].join("\n"),
+      );
+      writeFileSync(join(dir, "wf.tsx"), 'import Prompt from "./prompt.mdx";\nexport const w = 1;');
+      const hash = await readWorkflowGraphHash(join(dir, "wf.tsx"));
+      expect(hash).toMatch(/^[0-9a-f]{64}$/);
+      // The prompt's bytes are still part of the graph: editing it changes
+      // the hash even though it is never import-scanned.
+      writeFileSync(join(dir, "prompt.mdx"), "# changed\n");
+      expect(await readWorkflowGraphHash(join(dir, "wf.tsx"))).not.toBe(hash);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
