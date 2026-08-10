@@ -6,7 +6,7 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
 ## 0.33.1 (2026-08-04)
 
-116 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 359 files changed, +36085 / -1428 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 349 files, +13047 / -1128). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
+117 commits since [v0.33.0](https://github.com/smithersai/smithers/compare/v0.33.0...v0.33.1), plus this changelog update: 359 files changed, +36085 / -1428 lines (most of the insertions are regenerated `llms-*.txt` bundles; excluding those and the lockfiles it is 349 files, +13047 / -1128). Release notes: [smithers.sh/changelogs/0.33.1](https://smithers.sh/changelogs/0.33.1).
 
 ### Features (11)
 
@@ -22,8 +22,9 @@ the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 - feat(pack): docs-home-design-system workflow — Kimi K3 reskins, Fable reviews until LGTM ([bdb6db56f9](https://github.com/smithersai/smithers/commit/bdb6db56f9))
 - feat(pack): upgrade-dependents workflow — fork, upgrade, review, PR every open-source dependent to smthrs ([4cad958237](https://github.com/smithersai/smithers/commit/4cad958237))
 
-### Bug fixes (39)
+### Bug fixes (40)
 
+- fix(engine): hash .mdx prompt imports as graph leaves, unblocking resume of approval-gated prompt workflows ([3dee095d85](https://github.com/smithersai/smithers/commit/3dee095d85))
 - fix(deps): align Effect beta packages ([cafd2ad861](https://github.com/smithersai/smithers/commit/cafd2ad861))
 - fix(test): reclaim temporary workspaces ([68770191b5](https://github.com/smithersai/smithers/commit/68770191b5))
 - fix(tui): restore the empty logs placeholder ([aa5324cdd3](https://github.com/smithersai/smithers/commit/aa5324cdd3))
