@@ -19,6 +19,7 @@ const TUTORIAL_ENGINES = {
   codex: "codex",
   antigravity: "antigravity",
   pi: "pi",
+  omp: "omp",
   kimi: "kimi",
   amp: "amp",
 };

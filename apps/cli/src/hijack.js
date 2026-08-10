@@ -29,6 +29,7 @@ function asNativeHijackEngine(value) {
     value === "antigravity" ||
     value === "codex" ||
     value === "pi" ||
+    value === "omp" ||
     value === "kimi" ||
     value === "forge" ||
     value === "amp"
@@ -299,6 +300,17 @@ export function buildHijackLaunchSpec(candidate, baseEnv = process.env) {
     if (config.model) args.push("--model", config.model);
     return {
       command: "pi",
+      args,
+      cwd: candidate.cwd,
+      env,
+    };
+  }
+  if (candidate.engine === "omp") {
+    const args = ["--resume", candidate.resume, "--cwd", candidate.cwd];
+    if (config.model) args.push("--model", config.model);
+    if (yolo) args.push("--auto-approve");
+    return {
+      command: "omp",
       args,
       cwd: candidate.cwd,
       env,

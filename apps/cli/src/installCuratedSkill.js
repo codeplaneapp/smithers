@@ -42,6 +42,12 @@ export function skillTargets(homeDir) {
       skillsDir: join(homeDir, ".pi", "agent", "skills"),
     },
     {
+      id: "omp",
+      displayName: "Oh My Pi",
+      base: join(homeDir, ".omp"),
+      skillsDir: join(homeDir, ".omp", "agent", "skills"),
+    },
+    {
       id: "codex",
       displayName: "Codex",
       base: join(homeDir, ".codex"),

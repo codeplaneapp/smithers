@@ -39,6 +39,11 @@ test("chat create starts an auto-hijacked run and returns JSON metadata", async 
       "const target = process.env.SMITHERS_CHAT_CREATE_FILE;",
       'if (target) writeFileSync(target, JSON.stringify({ cwd: process.cwd(), args: process.argv.slice(2) }), "utf8");',
       'process.stdout.write(JSON.stringify({ type: "thread.started", thread_id: "chat-thread-1" }) + "\\n");',
+      // The engine hands a codex session off only after the turn completes
+      // (the rollout file `codex resume` reads is not durable before then,
+      // #1502), so the fake must finish a turn like the real CLI does.
+      'process.stdout.write(JSON.stringify({ type: "item.completed", item: { id: "item-1", type: "agent_message", text: "hello" } }) + "\\n");',
+      'process.stdout.write(JSON.stringify({ type: "turn.completed", usage: {} }) + "\\n");',
       "setInterval(() => {}, 1000);",
       "",
     ].join("\n"),

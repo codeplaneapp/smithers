@@ -3017,7 +3017,7 @@ commands[102]:
   - name: chat-create
     purpose: Create and start a one-task auto-hijacked chat run
     flags[5]{name,short,type,default,desc}:
-      agent,,enum,,claude-code|codex|antigravity|pi|kimi|amp
+      agent,,enum,,claude-code|codex|antigravity|pi|omp|kimi|amp
       cwd,,string,.,Working directory for the chat session
       started-by-harness,,string,,Durable self-reported launch harness
       started-by-session,,string,,Durable self-reported harness session

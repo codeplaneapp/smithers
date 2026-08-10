@@ -1,7 +1,7 @@
 import React from "react";
 import { openInlineWorkflowStore } from "./openInlineWorkflowStore.js";
 
-/** @typedef {"claude-code" | "codex" | "antigravity" | "pi" | "kimi" | "amp"} InlineChatEngine */
+/** @typedef {"claude-code" | "codex" | "antigravity" | "pi" | "omp" | "kimi" | "amp"} InlineChatEngine */
 
 /**
  * Agent engines that can host an inline auto-hijacked chat task: each has a
@@ -9,7 +9,15 @@ import { openInlineWorkflowStore } from "./openInlineWorkflowStore.js";
  * buildHijackLaunchSpec, so `smithers hijack` (or an auto-launched hijack) can
  * drop the user straight into the live session.
  */
-export const INLINE_CHAT_ENGINES = /** @type {const} */ (["claude-code", "codex", "antigravity", "pi", "kimi", "amp"]);
+export const INLINE_CHAT_ENGINES = /** @type {const} */ ([
+  "claude-code",
+  "codex",
+  "antigravity",
+  "pi",
+  "omp",
+  "kimi",
+  "amp",
+]);
 
 /** Default bootstrap prompt for `smithers chat create` sessions. */
 export const CHAT_CREATE_PROMPT = [
@@ -49,6 +57,12 @@ async function createChatAgent(engine, cwd) {
     case "pi": {
       const { PiAgent } = await import("@smthrs/agents/PiAgent");
       return new PiAgent({
+        cwd,
+      });
+    }
+    case "omp": {
+      const { OmpAgent } = await import("@smthrs/agents/OmpAgent");
+      return new OmpAgent({
         cwd,
       });
     }

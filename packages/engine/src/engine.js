@@ -1678,6 +1678,15 @@ const TASK_HEARTBEAT_MAX_PAYLOAD_BYTES = 1_000_000;
 const TASK_HEARTBEAT_TIMEOUT_CHECK_MS = 250;
 // Poll for hijack-handoff readiness between agent events; keeps handoff latency low without hot-spinning.
 const HIJACK_COMPLETION_POLL_MS = 100;
+// Engines whose CLI announces its resumable session id before the session is
+// durable on disk: Codex reports its thread id on `thread.started` (and OMP
+// its session id on `session`) but flushes the file `--resume` reads only as
+// the turn progresses. Aborting the CLI the moment the id appears hands the
+// user a dangling session (#1502), so a native-cli hijack handoff for these
+// engines waits for the turn's terminal `completed` event. Engines that
+// persist at session creation (e.g. claude-code) keep the low-latency early
+// handoff.
+const HIJACK_RESUME_AFTER_TURN_ENGINES = new Set(["codex", "omp"]);
 const MAX_CONTINUATION_STATE_BYTES = 10 * 1024 * 1024;
 
 /**
@@ -5888,6 +5897,7 @@ async function legacyExecuteTask(
           }
         }
         const activeCliActions = new Set();
+        let cliTurnCompleted = false;
         let conversationMessages = guidedResumeMessages ? [...guidedResumeMessages] : null;
         /**
          * @param {unknown[] | undefined} messages
@@ -6135,6 +6145,9 @@ async function legacyExecuteTask(
             if (handoffMode === "native-cli" && activeCliActions.size > 0) {
               return;
             }
+            if (handoffMode === "native-cli" && HIJACK_RESUME_AFTER_TURN_ENGINES.has(engine) && !cliTurnCompleted) {
+              return;
+            }
             const handoffConfig = agentHijackConfig(effectiveAgent, attemptMeta);
             const completion = {
               requestedAtMs: hijackState.request.requestedAtMs,
@@ -6209,8 +6222,11 @@ async function legacyExecuteTask(
               agentEngine: event.engine,
               ...(typeof event.resume === "string" ? { agentResume: event.resume } : {}),
             });
-            if (event.type === "completed" && !responseText && event.answer) {
-              responseText = event.answer;
+            if (event.type === "completed") {
+              cliTurnCompleted = true;
+              if (!responseText && event.answer) {
+                responseText = event.answer;
+              }
             }
             if (event.type === "action" && isBlockingAgentActionKind(event.action.kind)) {
               if (event.phase === "started") activeCliActions.add(event.action.id);
