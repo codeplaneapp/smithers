@@ -238,7 +238,7 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
     expect(ledger.rows).toEqual([{ count: 1 }]);
   });
 
-  test("0035 enforces checkpoint nullability without making agent_id required", async () => {
+  test("0037 enforces checkpoint nullability without making agent_id required", async () => {
     const contents = await client.query(`
       SELECT column_name, is_nullable
       FROM information_schema.columns
