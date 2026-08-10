@@ -79,6 +79,7 @@
       "apps/self-healing-site/package.json#name=\"@smthrs/self-healing-site\"",
       "apps/signal/package.json#name=\"@smthrs/signal\"",
       "apps/smithers/package.json#name=\"@smthrs/smithers-ui\"",
+      "apps/status-site/package.json#name=\"@smthrs/status-site\"",
       "apps/storybook-site/package.json#name=\"@smthrs/storybook-site\"",
       "apps/telegram-site/package.json#name=\"@smthrs/telegram-site\"",
       "apps/telegram-summary/package.json#name=\"@smthrs/telegram-summary\"",
