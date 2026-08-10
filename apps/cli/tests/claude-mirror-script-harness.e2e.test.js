@@ -262,13 +262,14 @@ describe("smithers-run.mjs mirror script (harness, real run)", () => {
     const { result, state } = await runMirrorScript(
       repo,
       { runId, cwd: repo.dir, mirrorAllNodes: true },
-      (base) => async (prompt, opts = {}) => {
-        if (nulledTicks === 0 && /^tick #\d+/.test(String(opts.label))) {
-          nulledTicks += 1;
-          return null;
-        }
-        return base(prompt, opts);
-      },
+      (base) =>
+        async (prompt, opts = {}) => {
+          if (nulledTicks === 0 && /^tick #\d+/.test(String(opts.label))) {
+            nulledTicks += 1;
+            return null;
+          }
+          return base(prompt, opts);
+        },
     );
 
     expect(nulledTicks).toBe(1);
