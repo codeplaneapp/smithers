@@ -11,7 +11,7 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TASK_DIR="$(cd "${1:?task_dir}" && pwd)"
-IMAGE="$(awk -F'"' '/docker_image/{print $2; exit}' "$TASK_DIR/task.toml")"
+IMAGE="${RMB_IMAGE_OVERRIDE:-$(awk -F'"' '/docker_image/{print $2; exit}' "$TASK_DIR/task.toml")}"
 WORK="${RMB_WORK:-$TASK_DIR/.validate}"
 rm -rf "$WORK"; mkdir -p "$WORK"
 
