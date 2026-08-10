@@ -175,10 +175,7 @@ describe("status site worker", () => {
         },
       },
     };
-    const response = await createStatusSiteWorker().fetch(
-      new Request("https://status.smithers.sh/status.json"),
-      env,
-    );
+    const response = await createStatusSiteWorker().fetch(new Request("https://status.smithers.sh/status.json"), env);
     expect(response.status).toBe(404);
     expect(response.headers.get("content-type")).toContain("json");
   });

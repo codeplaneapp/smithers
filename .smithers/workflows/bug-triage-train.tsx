@@ -274,10 +274,7 @@ function fileIssue(cluster: Cluster, dryRun: boolean): IssueRow {
     const title = (cluster.kind === "feature" ? "feat: " : "bug: ") + oneLine(cluster.title, 200);
     const bodyPath = join(tmpdir(), "btt-issue-" + cluster.key + ".md");
     writeFileSync(bodyPath, cluster.issueBody + "\n");
-    const url = gh(
-      ["issue", "create", "--repo", REPO, "--title", title, "--body-file", bodyPath],
-      repoRoot,
-    ).trim();
+    const url = gh(["issue", "create", "--repo", REPO, "--title", title, "--body-file", bodyPath], repoRoot).trim();
     const match = url.match(/\/issues\/(\d+)\s*$/);
     return {
       clusterKey: cluster.key,
@@ -545,7 +542,13 @@ function investigatePrompt(cluster: Cluster, issue: IssueRow, lanePath: string):
   return [
     UNTRUSTED,
     "",
-    "You are investigating a " + cluster.kind + " filed against smithers (" + REPO + ") as issue #" + issue.issueNumber + ".",
+    "You are investigating a " +
+      cluster.kind +
+      " filed against smithers (" +
+      REPO +
+      ") as issue #" +
+      issue.issueNumber +
+      ".",
     "Title: " + JSON.stringify(cluster.title),
     "",
     "Curated evidence from the triage pass (verified against main on 2026-08-08):",
@@ -557,7 +560,9 @@ function investigatePrompt(cluster: Cluster, issue: IssueRow, lanePath: string):
       : "This cluster is a direct maintainer feature request; the issue body is the spec:\n" +
         cluster.issueBody.slice(0, 3_000),
     "",
-    "Your working directory " + lanePath + " is a dedicated git worktree on branch-off-origin/main. ALL edits stay inside it.",
+    "Your working directory " +
+      lanePath +
+      " is a dedicated git worktree on branch-off-origin/main. ALL edits stay inside it.",
     "",
     "Do, in order:",
     "1. REPRODUCE: find the shortest deterministic reproduction (a failing focused test is ideal; a script or exact command transcript is acceptable). If you cannot reproduce, say precisely what you tried and why it did not fire.",
@@ -580,9 +585,7 @@ function investigatePrompt(cluster: Cluster, issue: IssueRow, lanePath: string):
 export default smithers((ctx) => {
   const input = parseInput(ctx.input);
   const key = runKey(ctx.runId);
-  const clusters = CLUSTERS.filter(
-    (cluster) => !input.clusterKeys.length || input.clusterKeys.includes(cluster.key),
-  );
+  const clusters = CLUSTERS.filter((cluster) => !input.clusterKeys.length || input.clusterKeys.includes(cluster.key));
 
   const issueRow = (clusterKey: string) => latest<IssueRow>(ctx, outputs.bttIssue, "issue-" + clusterKey);
   const setupRow = (clusterKey: string) => latest<LaneSetup>(ctx, outputs.bttLaneSetup, "lane-setup-" + clusterKey);
