@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { closeSingleRunnerRuntime, runWorkflow } from "smithers-orchestrator";
+import { closeSingleRunnerRuntime, runWorkflow } from "smthrs";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { buildGenericAgentCheckpointWorkflow, type GenericCheckpointMode } from "./genericAgentCheckpointWorkflow.ts";
 

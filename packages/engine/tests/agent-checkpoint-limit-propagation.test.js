@@ -3,8 +3,8 @@ import { describe, expect, test } from "bun:test";
 import { DEFAULT_AGENT_CHECKPOINT_MAX_BYTES } from "@smthrs/agents";
 import { Effect } from "effect";
 import { z } from "zod";
-import { runWorkflow, Task, Workflow } from "smithers-orchestrator";
-import { jsx } from "smithers-orchestrator/jsx-runtime";
+import { runWorkflow, Task, Workflow } from "smthrs";
+import { jsx } from "smthrs/jsx-runtime";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 
 const CONFIGURED_CHECKPOINT_LIMIT = 4_096;

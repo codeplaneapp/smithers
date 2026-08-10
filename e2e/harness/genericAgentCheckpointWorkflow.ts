@@ -2,7 +2,7 @@ import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import React from "react";
 import { z } from "zod";
-import { Task, Workflow, createSmithers, type AgentLike } from "smithers-orchestrator";
+import { Task, Workflow, createSmithers, type AgentLike } from "smthrs";
 
 export const CHECKPOINT_CODEC = "e2e.generic-agent-state";
 export const CHECKPOINT = {
