@@ -93,6 +93,7 @@ describe("local orchestration workflows C", () => {
         "solo-fable",
         "fable-fable-fable",
         "fable-plan-impl-review",
+        "fable-plan-impl-review-blind",
       ];
       for (const pattern of patterns) {
         const bench = await render("orchbench.tsx", {

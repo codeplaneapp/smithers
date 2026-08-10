@@ -67,6 +67,7 @@ const conditions = [
   "solo-fable",
   "fable-fable-fable",
   "fable-plan-impl-review",
+  "fable-plan-impl-review-blind",
 ] as const;
 type Condition = (typeof conditions)[number];
 type PipelineCondition =
@@ -77,7 +78,8 @@ type PipelineCondition =
   | "sol-work-sol-review"
   | "sol-work-fable-review"
   | "fable-fable-fable"
-  | "fable-plan-impl-review";
+  | "fable-plan-impl-review"
+  | "fable-plan-impl-review-blind";
 
 const pipelineConditions = new Set<Condition>([
   "sol-sol-sol",
@@ -88,6 +90,7 @@ const pipelineConditions = new Set<Condition>([
   "sol-work-fable-review",
   "fable-fable-fable",
   "fable-plan-impl-review",
+  "fable-plan-impl-review-blind",
 ]);
 
 const finiteReward = (value: unknown): value is number =>
@@ -106,6 +109,7 @@ const expectedModels: Record<Condition, Record<string, string>> = {
   "solo-fable": { solo: "claude-fable-5" },
   "fable-fable-fable": { plan: "claude-fable-5", implement: "claude-fable-5", review: "claude-fable-5" },
   "fable-plan-impl-review": { plan: "claude-fable-5", implement: "gpt-5.6-luna", review: "claude-fable-5" },
+  "fable-plan-impl-review-blind": { plan: "claude-fable-5", implement: "gpt-5.6-luna", review: "claude-fable-5" },
 };
 
 const integrityError = (result: Result, pattern: Condition): string | null => {
@@ -371,7 +375,7 @@ const missingCells = rows.flatMap((row) =>
   conditions.filter((condition) => !row.results[condition]).map((condition) => `${row.slug}/${condition}`),
 );
 if (!allowIncomplete && allResults.some((result) => result.runId.startsWith(runPrefix)) && missingCells.length > 0) {
-  throw new Error(`confirmatory analysis is incomplete: ${missingCells.length}/300 clean cells are missing`);
+  throw new Error(`confirmatory analysis is incomplete: ${missingCells.length}/330 clean cells are missing`);
 }
 
 const cleanResults = rows.flatMap((row) => Object.values(row.results).filter((result): result is Result => !!result));
@@ -590,6 +594,7 @@ const secondaryHypotheses = {
   h2TeacherInteraction: inference(interaction),
   h3SolReviewDelta: inference(reviewDelta("plan-impl-review")),
   h3FableReviewDelta: inference(reviewDelta("fable-plan-impl-review")),
+  h4FableReportVisibility: inference(pairedDifference("fable-plan-impl-review", "fable-plan-impl-review-blind")),
 };
 
 const analysis = {
@@ -657,9 +662,13 @@ const analysis = {
     solVisibleFractionGapClosed: inference(fractionGapClosed("plan-impl-review")),
     solBlindFractionGapClosed: inference(fractionGapClosed("plan-impl-review-blind")),
     fableWeakMinusStrongReviewDelta: inference(reviewDeltaDifference("fable-plan-impl-review", "fable-fable-fable")),
+    fableVisibleMinusBlindReviewDelta: inference(reviewDeltaDifference("fable-plan-impl-review", "fable-plan-impl-review-blind")),
+    fableVisibleMinusBlindCheckpoint: inference(checkpointDifference("fable-plan-impl-review", "fable-plan-impl-review-blind")),
+    fableVisibleFractionGapClosed: inference(fractionGapClosed("fable-plan-impl-review")),
+    fableBlindFractionGapClosed: inference(fractionGapClosed("fable-plan-impl-review-blind")),
   },
   gapClosureDiagnostics: Object.fromEntries(
-    ["plan-impl-review", "plan-impl-review-blind", "fable-plan-impl-review"].map((condition) => [
+    ["plan-impl-review", "plan-impl-review-blind", "fable-plan-impl-review", "fable-plan-impl-review-blind"].map((condition) => [
       condition,
       gapClosureSummary(condition as PipelineCondition),
     ]),
@@ -674,10 +683,14 @@ const analysis = {
     fableMinusSolReviewerOnCombinedWork: inference(pairedDifference("sol-work-fable-review", "sol-work-sol-review")),
     fableAllTeacherMinusSolo: inference(pairedDifference("fable-fable-fable", "solo-fable")),
     fableDelegatedMinusSolo: inference(pairedDifference("fable-plan-impl-review", "solo-fable")),
+    fableBlindDelegatedMinusSolo: inference(pairedDifference("fable-plan-impl-review-blind", "solo-fable")),
   },
   projectClusteredSensitivity: {
     h1SolStudentReplacement: clusteredInference(pairedDifferenceClustered("plan-impl-review", "sol-sol-sol")),
     h4ReportVisibility: clusteredInference(pairedDifferenceClustered("plan-impl-review", "plan-impl-review-blind")),
+    h4FableReportVisibility: clusteredInference(
+      pairedDifferenceClustered("fable-plan-impl-review", "fable-plan-impl-review-blind"),
+    ),
     h1SolTerraStudentReplacement: clusteredInference(pairedDifferenceClustered("sol-terra-sol", "sol-sol-sol")),
     h1SolLunaMinusTerra: clusteredInference(pairedDifferenceClustered("plan-impl-review", "sol-terra-sol")),
     h1FableStudentReplacement: clusteredInference(
@@ -761,7 +774,7 @@ const taskRows = rows
       const value = result(condition);
       return `${fmt(value?.implementationReward)} → ${fmt(value?.reward)}`;
     };
-    return `| ${row.slug} | ${row.language} | ${fmt(result("solo-sol")?.reward)} | ${pipeline("sol-sol-sol")} | ${pipeline("sol-terra-sol")} | ${pipeline("plan-impl-review")} | ${pipeline("plan-impl-review-blind")} | ${pipeline("sol-work-sol-review")} | ${pipeline("sol-work-fable-review")} | ${fmt(result("solo-fable")?.reward)} | ${pipeline("fable-fable-fable")} | ${pipeline("fable-plan-impl-review")} |`;
+    return `| ${row.slug} | ${row.language} | ${fmt(result("solo-sol")?.reward)} | ${pipeline("sol-sol-sol")} | ${pipeline("sol-terra-sol")} | ${pipeline("plan-impl-review")} | ${pipeline("plan-impl-review-blind")} | ${pipeline("sol-work-sol-review")} | ${pipeline("sol-work-fable-review")} | ${fmt(result("solo-fable")?.reward)} | ${pipeline("fable-fable-fable")} | ${pipeline("fable-plan-impl-review")} | ${pipeline("fable-plan-impl-review-blind")} |`;
   })
   .join("\n");
 const invalidRows = Object.entries(validation)
@@ -771,7 +784,7 @@ const invalidRows = Object.entries(validation)
       `| ${slug} | ${decision.language} | ${decision.rank} | ${decision.detail?.replaceAll("|", "\\|") ?? "—"} |`,
   )
   .join("\n");
-const markdown = `# Persuasion Gap analysis\n\nGenerated ${analysis.generatedAt}. Run prefix: \`${runPrefix}\`.\n\n## Conditions\n\n| Condition | n | Mean reward | Resolved | Mean cost $ | Mean wall min |\n|---|---:|---:|---:|---:|---:|\n${conditionRows}\n\n## Primary paired hypotheses\n\nH1 tests the middle-model substitution; H4 tests whether showing the implementer's report changes reviewed quality. Positive win/tie/loss means the named contrast is positive.\n\n| Contrast | n | Mean | 95% paired bootstrap CI | permutation p | W/T/L |\n|---|---:|---:|---:|---:|---:|\n${hypothesisRows}\n\n## Secondary paired hypotheses\n\nThese contrasts are exploratory and are not included in the primary-family Holm correction.\n\n| Contrast | n | Mean | 95% paired bootstrap CI | permutation p | W/T/L |\n|---|---:|---:|---:|---:|---:|\n${secondaryRows}\n\n## Mechanism contrasts\n\nRaw review deltas are accompanied by fraction-of-available-gap-closed because the score ceiling mechanically limits improvement from stronger checkpoints.\n\n| Contrast | n | Mean | 95% paired bootstrap CI | permutation p | W/T/L |\n|---|---:|---:|---:|---:|---:|\n${mechanismRows}\n\nCheckpoint=1 cells have no available gap and are excluded from the ratio, then counted explicitly.\n\n| Condition | Ratio-eligible | Checkpoint=1 | Mean fraction gap closed |\n|---|---:|---:|---:|\n${gapClosureRows}\n\n## Operational and workflow controls\n\nThese preserve practical end-to-end comparisons and test the plan/implementation context break and reviewer family.\n\n| Contrast | n | Mean | 95% paired bootstrap CI | permutation p | W/T/L |\n|---|---:|---:|---:|---:|---:|\n${operationalRows}\n\n## Project-clustered sensitivity\n\n| Contrast | n | Projects | Mean | 95% cluster bootstrap CI | cluster sign-flip p |\n|---|---:|---:|---:|---:|---:|\n${clusteredRows}\n\n## Language-stratified descriptive means\n\nEach cell is mean reward (n).\n\n| Language | solo Sol | Sol→Sol→Sol | Sol→Terra→Sol | Sol→Luna→Sol | Sol→Luna→Sol blind | Sol(work)→Sol | Sol(work)→Fable | solo Fable | Fable→Fable→Fable | Fable→Luna→Fable |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n${languageRows}\n\n## Task-level scores\n\nPipeline cells show implementation checkpoint → final reviewed score.\n\n| Task | Language | solo Sol | Sol→Sol→Sol | Sol→Terra→Sol | Sol→Luna→Sol | Sol→Luna→Sol blind | Sol(work)→Sol | Sol(work)→Fable | solo Fable | Fable→Fable→Fable | Fable→Luna→Fable |\n|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n${taskRows}\n\n## Selection\n\n${Object.entries(
+const markdown = `# Persuasion Gap analysis\n\nGenerated ${analysis.generatedAt}. Run prefix: \`${runPrefix}\`.\n\n## Conditions\n\n| Condition | n | Mean reward | Resolved | Mean cost $ | Mean wall min |\n|---|---:|---:|---:|---:|---:|\n${conditionRows}\n\n## Primary paired hypotheses\n\nH1 tests the middle-model substitution; H4 tests whether showing the implementer's report changes reviewed quality. Positive win/tie/loss means the named contrast is positive.\n\n| Contrast | n | Mean | 95% paired bootstrap CI | permutation p | W/T/L |\n|---|---:|---:|---:|---:|---:|\n${hypothesisRows}\n\n## Secondary paired hypotheses\n\nThese contrasts are exploratory and are not included in the primary-family Holm correction.\n\n| Contrast | n | Mean | 95% paired bootstrap CI | permutation p | W/T/L |\n|---|---:|---:|---:|---:|---:|\n${secondaryRows}\n\n## Mechanism contrasts\n\nRaw review deltas are accompanied by fraction-of-available-gap-closed because the score ceiling mechanically limits improvement from stronger checkpoints.\n\n| Contrast | n | Mean | 95% paired bootstrap CI | permutation p | W/T/L |\n|---|---:|---:|---:|---:|---:|\n${mechanismRows}\n\nCheckpoint=1 cells have no available gap and are excluded from the ratio, then counted explicitly.\n\n| Condition | Ratio-eligible | Checkpoint=1 | Mean fraction gap closed |\n|---|---:|---:|---:|\n${gapClosureRows}\n\n## Operational and workflow controls\n\nThese preserve practical end-to-end comparisons and test the plan/implementation context break and reviewer family.\n\n| Contrast | n | Mean | 95% paired bootstrap CI | permutation p | W/T/L |\n|---|---:|---:|---:|---:|---:|\n${operationalRows}\n\n## Project-clustered sensitivity\n\n| Contrast | n | Projects | Mean | 95% cluster bootstrap CI | cluster sign-flip p |\n|---|---:|---:|---:|---:|---:|\n${clusteredRows}\n\n## Language-stratified descriptive means\n\nEach cell is mean reward (n).\n\n| Language | solo Sol | Sol→Sol→Sol | Sol→Terra→Sol | Sol→Luna→Sol | Sol→Luna→Sol blind | Sol(work)→Sol | Sol(work)→Fable | solo Fable | Fable→Fable→Fable | Fable→Luna→Fable | Fable→Luna→Fable blind |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n${languageRows}\n\n## Task-level scores\n\nPipeline cells show implementation checkpoint → final reviewed score.\n\n| Task | Language | solo Sol | Sol→Sol→Sol | Sol→Terra→Sol | Sol→Luna→Sol | Sol→Luna→Sol blind | Sol(work)→Sol | Sol(work)→Fable | solo Fable | Fable→Fable→Fable | Fable→Luna→Fable | Fable→Luna→Fable blind |\n|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n${taskRows}\n\n## Selection\n\n${Object.entries(
   selection,
 )
   .map(([language, slugs]) => `- ${language}: ${slugs.join(", ") || "not yet filled"}`)

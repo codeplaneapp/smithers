@@ -410,7 +410,8 @@
     "sol-work-fable-review",
     "solo-fable",
     "fable-fable-fable",
-    "fable-plan-impl-review"
+    "fable-plan-impl-review",
+    "fable-plan-impl-review-blind"
   ],
   "tasks": [
     {

@@ -135,10 +135,21 @@ session, followed by either Sol or Fable review. The planned total is therefore
 270 cells. A final independent design audit, still before any confirmatory model
 cell, identified that report-mediated persuasion was otherwise untestable. We
 therefore added a blinded Sol-review condition, bringing the final design to
-300 cells. The frozen tasks and outcomes do not change. No further protocol
-amendment is permitted after the first confirmatory model cell starts.
+300 cells. On 2026-08-08, still before any confirmatory model cell, a further
+design review identified that the blinded-review condition existed only for the
+Sol teacher family: if the Luna-substitution penalty differs by teacher family
+(H2), the design could not distinguish differential narrative anchoring from
+differential repair ability. We therefore added condition 11,
+`fable-plan-impl-review-blind` (Fable plans, Luna implements, a fresh Fable
+reviews with the implementer's self-report hidden), completing the
+{Sol, Fable} × {visible, blinded} factorial and adding secondary hypothesis
+H4-Fable. This brings the final design to 330 cells. With eleven conditions and
+thirty tasks, rotated condition order no longer balances launch positions
+exactly (30 is not a multiple of 11); position remains balanced approximately
+and is reported. The frozen tasks and outcomes do not change. No further
+protocol amendment is permitted after the first confirmatory model cell starts.
 
-Every included task runs in ten conditions with the same initial checkout,
+Every included task runs in eleven conditions with the same initial checkout,
 roadmap, tool policy, and hidden scorer. Within each student-replacement pair,
 the graph, prompts, stage budgets, handoffs, planner, and reviewer are identical;
 only the implementation-stage model changes. Agent
@@ -166,6 +177,9 @@ exit, nonnumeric reward, or missing reward metadata.
 9. `fable-fable-fable`: fresh Fable instances plan, implement, and review/fix.
 10. `fable-plan-impl-review`: Fable plans, Luna implements, a fresh Fable reviews
     and fixes.
+11. `fable-plan-impl-review-blind`: the same roles and budgets as condition 10,
+    but the reviewer is not given Luna's self-report and reconstructs the work
+    from the roadmap, diff, repository, and tests.
 
 Cells run one at a time. Condition order rotates across tasks to balance
 provider drift and time-of-day effects. Fallback chains are disabled. A quota
@@ -237,12 +251,18 @@ implementation and after review. This yields a within-cell review delta.
   `visible-report final − blinded-report final ≠ 0`. A negative estimate supports
   the persuasion-gap mechanism; a null result leaves the broader delegation
   penalty intact but does not support report-mediated anchoring.
+- **H4-Fable (secondary):** the same visibility contrast under the Fable
+  teacher: `Fable→Luna→Fable − Fable→Luna→Fable-blind ≠ 0`. Together with H4
+  this completes the teacher × report-visibility factorial, so a
+  teacher-family difference in the visibility effect (differential
+  susceptibility to the implementer's narrative) is separable from a
+  teacher-family difference in general repair ability.
 
 ## Analysis
 
 The two primary tests are H1-Sol and H4; report raw and Holm-adjusted p-values
-for this family. Terra, Fable, H2, H3, mechanism, and operational contrasts are
-prespecified secondary analyses. Report every task-level score. For paired
+for this family. Terra, Fable, H2, H3, H4-Fable, mechanism, and operational
+contrasts are prespecified secondary analyses. Report every task-level score. For paired
 contrasts, report paired mean differences,
 95% paired bootstrap confidence intervals, and two-sided paired permutation
 p-values; directional language follows the sign of the estimate rather than a

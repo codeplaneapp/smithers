@@ -21,7 +21,7 @@ INVALIDATED="$OUT/invalidated"
 CLI=(bun run "$ROOT/apps/cli/src/index.js")
 WF="$ROOT/.smithers/workflows/orchbench.tsx"
 SELECTED="$ROOT/benchmarks/orchbench/persuasion-gap-selected.json"
-CANONICAL_PATTERNS="solo-sol,sol-sol-sol,sol-terra-sol,plan-impl-review,plan-impl-review-blind,sol-work-sol-review,sol-work-fable-review,solo-fable,fable-fable-fable,fable-plan-impl-review"
+CANONICAL_PATTERNS="solo-sol,sol-sol-sol,sol-terra-sol,plan-impl-review,plan-impl-review-blind,sol-work-sol-review,sol-work-fable-review,solo-fable,fable-fable-fable,fable-plan-impl-review,fable-plan-impl-review-blind"
 mkdir -p "$OUT/results" "$OUT/runs" "$OUT/validated" "$INVALIDATED"
 
 ROUND="r1"

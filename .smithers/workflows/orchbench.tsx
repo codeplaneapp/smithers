@@ -29,6 +29,7 @@ const inputSchema = z.object({
       "sol-work-sol-review",
       "sol-work-fable-review",
       "fable-plan-impl-review",
+      "fable-plan-impl-review-blind",
       "fable-fable-fable",
       "research-first",
       "panel-review",
@@ -689,6 +690,45 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
             deps={{ implement: outputs.implement }}
           >
             {reviewFixPrompt}
+          </Task>
+        </Sequence>
+      ) : null}
+
+      {pattern === "fable-plan-impl-review-blind" ? (
+        <Sequence>
+          <Task
+            id="plan"
+            output={outputs.plan}
+            retries={0}
+            agent={fable(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+          >
+            {planPrompt()}
+          </Task>
+          <Task
+            id="implement"
+            output={outputs.implement}
+            retries={0}
+            agent={luna(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+            deps={{ plan: outputs.plan }}
+          >
+            {implementPrompt}
+          </Task>
+          <Task id="implementation-score" output={outputs.checkpoint} retries={0}>
+            {scoreImplementation}
+          </Task>
+          <Task
+            id="review"
+            output={outputs.reviewFix}
+            retries={0}
+            agent={fable(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+          >
+            {reviewFixBlindPrompt}
           </Task>
         </Sequence>
       ) : null}

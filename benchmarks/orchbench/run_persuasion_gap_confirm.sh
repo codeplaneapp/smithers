@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Exact, resumable entrypoint for the frozen 30-task x 10-condition study.
+# Exact, resumable entrypoint for the frozen 30-task x 11-condition study.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SELECTED="$ROOT/benchmarks/orchbench/persuasion-gap-selected.json"
-PATTERNS="solo-sol,sol-sol-sol,sol-terra-sol,plan-impl-review,plan-impl-review-blind,sol-work-sol-review,sol-work-fable-review,solo-fable,fable-fable-fable,fable-plan-impl-review"
+PATTERNS="solo-sol,sol-sol-sol,sol-terra-sol,plan-impl-review,plan-impl-review-blind,sol-work-sol-review,sol-work-fable-review,solo-fable,fable-fable-fable,fable-plan-impl-review,fable-plan-impl-review-blind"
 
 [[ -f "$SELECTED" ]] || { echo "freeze persuasion-gap-selected.json first" >&2; exit 2; }
 TASKS="$(python3 - "$SELECTED" <<'PY'
