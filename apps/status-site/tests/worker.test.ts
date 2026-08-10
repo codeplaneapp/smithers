@@ -73,9 +73,11 @@ describe("status page copy", () => {
   });
 
   test("static component rows agree with the feed", () => {
-    const rows = [...homeHtml.matchAll(/<span class="name">([^<]+)<\/span>\s*<span class="desc">([^<]*)<\/span>\s*<span class="state (\w+)"/g)].map(
-      ([, name, desc, state]) => ({ name, desc, state }),
-    );
+    const rows = [
+      ...homeHtml.matchAll(
+        /<span class="name">([^<]+)<\/span>\s*<span class="desc">([^<]*)<\/span>\s*<span class="state (\w+)"/g,
+      ),
+    ].map(([, name, desc, state]) => ({ name, desc, state }));
     expect(rows).toEqual(
       status.components.map((component) => ({
         name: component.name,
@@ -158,10 +160,7 @@ describe("status site worker", () => {
         },
       },
     };
-    const response = await createStatusSiteWorker().fetch(
-      new Request("https://status.smithers.sh/status.json"),
-      env,
-    );
+    const response = await createStatusSiteWorker().fetch(new Request("https://status.smithers.sh/status.json"), env);
     expect(response.status).toBe(404);
   });
 
@@ -175,10 +174,7 @@ describe("status site worker", () => {
   });
 
   test("reports health without touching static assets", async () => {
-    const response = await createStatusSiteWorker().fetch(
-      new Request("https://status.smithers.sh/healthz"),
-      makeEnv(),
-    );
+    const response = await createStatusSiteWorker().fetch(new Request("https://status.smithers.sh/healthz"), makeEnv());
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, service: "status-site" });
   });
@@ -206,10 +202,7 @@ describe("status site worker", () => {
         },
       },
     };
-    const response = await createStatusSiteWorker().fetch(
-      new Request("https://status.smithers.sh/assets/app.js"),
-      env,
-    );
+    const response = await createStatusSiteWorker().fetch(new Request("https://status.smithers.sh/assets/app.js"), env);
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
