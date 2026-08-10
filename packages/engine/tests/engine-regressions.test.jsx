@@ -1,8 +1,8 @@
 /** @jsxImportSource smthrs */
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Task, Workflow, runWorkflow } from "smthrs";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import { Effect } from "effect";

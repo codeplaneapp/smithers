@@ -1,4 +1,4 @@
-import { createDurableRetryState } from "@smithers-orchestrator/scheduler";
+import { createDurableRetryState } from "@smthrs/scheduler";
 
 export const RETRY_STATE_META_KEY = "retryState";
 
@@ -48,7 +48,7 @@ function retryAfterMs(error) {
  * @param {{
  *   attemptMeta: Record<string, any>;
  *   attempts: ReadonlyArray<{ state?: string | null; errorJson?: string | null; metaJson?: string | null }>;
- *   descriptor: { retries: number; retryPolicy?: import("@smithers-orchestrator/scheduler").RetryPolicy };
+ *   descriptor: { retries: number; retryPolicy?: import("@smthrs/scheduler").RetryPolicy };
  *   error: Record<string, unknown>;
  *   failedAtMs: number;
  * }} input

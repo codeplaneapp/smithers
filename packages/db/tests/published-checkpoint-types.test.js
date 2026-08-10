@@ -32,7 +32,7 @@ describe("published agent checkpoint table types", () => {
     writeFileSync(
       join(tmp, "consumer.ts"),
       [
-        `import { smithersAgentCheckpointContents, smithersAgentCheckpoints } from "@smithers-orchestrator/db";`,
+        `import { smithersAgentCheckpointContents, smithersAgentCheckpoints } from "@smthrs/db";`,
         `type Content = typeof smithersAgentCheckpointContents.$inferSelect;`,
         `type Ref = typeof smithersAgentCheckpoints.$inferSelect;`,
         `const content: Content = { contentHash: "hash", checkpointJson: "{}", sizeBytes: 2, createdAtMs: 1 };`,

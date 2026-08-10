@@ -57,161 +57,6 @@ type AgentCliCompletedEvent$1 = {
 };
 type AgentCliEvent$1 = AgentCliStartedEvent$1 | AgentCliActionEvent$1 | AgentCliCompletedEvent$1;
 
-/**
- * Loosely-typed generation options. The AI SDK passes a dynamic shape here
- * (GenerateTextOptions / StreamTextOptions and provider-specific extensions)
- * so we keep this permissive but avoid raw `any`.
- */
-type AgentGenerateOptions$2 = {
-    prompt?: unknown;
-    messages?: unknown;
-    timeout?: unknown;
-    abortSignal?: AbortSignal;
-    rootDir?: string;
-    resumeSession?: string;
-    maxOutputBytes?: number;
-    onStdout?: (text: string) => void;
-    onStderr?: (text: string) => void;
-    onEvent?: (event: AgentCliEvent$1) => unknown;
-    onProcess?: (event: {
-        phase: "started" | "exited";
-        pid: number | undefined;
-    }) => void;
-    retry?: unknown;
-    isRetry?: unknown;
-    retryAttempt?: unknown;
-    schemaRetry?: unknown;
-    /**
-     * Run context for the task this agent invocation belongs to. Surfaced to the
-     * spawned agent process (and its subprocesses) as SMITHERS_RUN_ID / NODE_ID /
-     * ITERATION / ATTEMPT so the agent can address its own run — e.g. to raise a
-     * blocking `smithers ask-human` request.
-     */
-    taskContext?: {
-        runId?: string;
-        nodeId?: string;
-        iteration?: number;
-        attempt?: number;
-    };
-    [key: string]: unknown;
-};
-
-type BaseCliAgentOptions$2 = {
-    id?: string;
-    model?: string;
-    systemPrompt?: string;
-    instructions?: string;
-    cwd?: string;
-    env?: Record<string, string>;
-    /**
-     * Whether spawned CLI processes inherit `process.env` before applying the
-     * agent, task-context, and command-specific environment layers.
-     *
-     * Defaults to `true` for backwards compatibility. Set to `false` when an
-     * agent must receive only explicitly supplied environment variables.
-     */
-    inheritEnv?: boolean;
-    yolo?: boolean;
-    timeoutMs?: number;
-    idleTimeoutMs?: number;
-    maxOutputBytes?: number;
-    extraArgs?: string[];
-};
-
-type RunCommandResult$2 = {
-    stdout: string;
-    stderr: string;
-    exitCode: number | null;
-    /** True when captured stdout exceeded maxOutputBytes and was truncated. */
-    stdoutTruncated?: boolean;
-    /** True when captured stderr exceeded maxOutputBytes and was truncated. */
-    stderrTruncated?: boolean;
-};
-
-type PiExtensionUiResponse$2 = {
-    type: "extension_ui_response";
-    id: string;
-    value?: string;
-    cancelled?: boolean;
-    [key: string]: unknown;
-};
-
-type PiExtensionUiRequest$2 = {
-    type: "extension_ui_request";
-    id: string;
-    method: string;
-    title?: string;
-    placeholder?: string;
-    [key: string]: unknown;
-};
-
-type CodexConfigOverrides$2 = Record<string, string | number | boolean | object | null> | string[];
-
-type NormalizedTokenUsage$2 = {
-    inputTokens?: number;
-    outputTokens?: number;
-    cacheReadTokens?: number;
-    cacheWriteTokens?: number;
-    reasoningTokens?: number;
-    totalTokens?: number;
-};
-
-type CliUsageInfo$2 = {
-    inputTokens?: number;
-    outputTokens?: number;
-    cacheReadTokens?: number;
-    cacheWriteTokens?: number;
-    reasoningTokens?: number;
-};
-
-type CliOutputInterpreter$2 = {
-    onStdoutLine?: (line: string) => AgentCliEvent$1[] | AgentCliEvent$1 | null | undefined;
-    onStderrLine?: (line: string) => AgentCliEvent$1[] | AgentCliEvent$1 | null | undefined;
-    onExit?: (result: RunCommandResult$2) => AgentCliEvent$1[] | AgentCliEvent$1 | null | undefined;
-};
-<<<<<<<< HEAD:packages/agents/src/index-v44qB0D0.d.ts
-|||||||| parent of d1eee02ad8 (feat: add durable generic agent checkpoints):packages/agents/src/index-CN9hS6LR.d.ts
-
-/**
- * Loosely-typed generation options. The AI SDK passes a dynamic shape here
- * (GenerateTextOptions / StreamTextOptions and provider-specific extensions)
- * so we keep this permissive but avoid raw `any`.
- */
-type AgentGenerateOptions$2 = {
-    prompt?: unknown;
-    messages?: unknown;
-    timeout?: unknown;
-    abortSignal?: AbortSignal;
-    rootDir?: string;
-    resumeSession?: string;
-    maxOutputBytes?: number;
-    onStdout?: (text: string) => void;
-    onStderr?: (text: string) => void;
-    onEvent?: (event: AgentCliEvent$1) => unknown;
-    onProcess?: (event: {
-        phase: "started" | "exited";
-        pid: number | undefined;
-    }) => void;
-    retry?: unknown;
-    isRetry?: unknown;
-    retryAttempt?: unknown;
-    schemaRetry?: unknown;
-    /**
-     * Run context for the task this agent invocation belongs to. Surfaced to the
-     * spawned agent process (and its subprocesses) as SMITHERS_RUN_ID / NODE_ID /
-     * ITERATION / ATTEMPT so the agent can address its own run — e.g. to raise a
-     * blocking `smithers ask-human` request.
-     */
-    taskContext?: {
-        runId?: string;
-        nodeId?: string;
-        iteration?: number;
-        attempt?: number;
-    };
-    [key: string]: unknown;
-};
-========
-
 type AgentCheckpointJsonPrimitive = null | boolean | number | string;
 type AgentCheckpointJsonArray = AgentCheckpointJsonValue[];
 type AgentCheckpointJsonObject = {
@@ -297,7 +142,6 @@ type AgentGenerateOptionsBase = {
     };
     [key: string]: unknown;
 };
->>>>>>>> d1eee02ad8 (feat: add durable generic agent checkpoints):packages/agents/src/index-CKscU_SV.d.ts
 /**
  * Continuation inputs are discriminated so a checkpoint always has an
  * explicit mode and cannot be combined with a provider session id.
@@ -314,6 +158,80 @@ type AgentCheckpointContinuationOptions = {
     resumeSession?: string;
 };
 type AgentGenerateOptions$2 = AgentGenerateOptionsBase & AgentCheckpointContinuationOptions;
+
+type BaseCliAgentOptions$2 = {
+    id?: string;
+    model?: string;
+    systemPrompt?: string;
+    instructions?: string;
+    cwd?: string;
+    env?: Record<string, string>;
+    /**
+     * Whether spawned CLI processes inherit `process.env` before applying the
+     * agent, task-context, and command-specific environment layers.
+     *
+     * Defaults to `true` for backwards compatibility. Set to `false` when an
+     * agent must receive only explicitly supplied environment variables.
+     */
+    inheritEnv?: boolean;
+    yolo?: boolean;
+    timeoutMs?: number;
+    idleTimeoutMs?: number;
+    maxOutputBytes?: number;
+    extraArgs?: string[];
+};
+
+type RunCommandResult$2 = {
+    stdout: string;
+    stderr: string;
+    exitCode: number | null;
+    /** True when captured stdout exceeded maxOutputBytes and was truncated. */
+    stdoutTruncated?: boolean;
+    /** True when captured stderr exceeded maxOutputBytes and was truncated. */
+    stderrTruncated?: boolean;
+};
+
+type PiExtensionUiResponse$2 = {
+    type: "extension_ui_response";
+    id: string;
+    value?: string;
+    cancelled?: boolean;
+    [key: string]: unknown;
+};
+
+type PiExtensionUiRequest$2 = {
+    type: "extension_ui_request";
+    id: string;
+    method: string;
+    title?: string;
+    placeholder?: string;
+    [key: string]: unknown;
+};
+
+type CodexConfigOverrides$2 = Record<string, string | number | boolean | object | null> | string[];
+
+type NormalizedTokenUsage$2 = {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+    reasoningTokens?: number;
+    totalTokens?: number;
+};
+
+type CliUsageInfo$2 = {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+    reasoningTokens?: number;
+};
+
+type CliOutputInterpreter$2 = {
+    onStdoutLine?: (line: string) => AgentCliEvent$1[] | AgentCliEvent$1 | null | undefined;
+    onStderrLine?: (line: string) => AgentCliEvent$1[] | AgentCliEvent$1 | null | undefined;
+    onExit?: (result: RunCommandResult$2) => AgentCliEvent$1[] | AgentCliEvent$1 | null | undefined;
+};
 
 /**
  * @typedef {number | { totalMs?: number; idleMs?: number; } | undefined} TimeoutInput
@@ -679,10 +597,4 @@ type PiExtensionUiRequest = PiExtensionUiRequest$2;
 type PiExtensionUiResponse = PiExtensionUiResponse$2;
 type RunCommandResult = RunCommandResult$2;
 
-<<<<<<<< HEAD:packages/agents/src/index-v44qB0D0.d.ts
-export { type AgentFileChange$1 as A, type BaseCliAgentOptions$2 as B, type CliOutputInterpreter$2 as C, createSyntheticIdGenerator as D, extractPrompt as E, extractTextFromJsonValue as F, extractUsageFromOutput as G, isLikelyRuntimeMetadata as H, isRecord as I, normalizeCodexConfig as J, normalizeTokenUsage as K, parseAnthropicStyleFileChanges as L, pushFlag as M, type NormalizedTokenUsage as N, pushList as O, type PiExtensionUiRequest$2 as P, reconstructUnifiedDiff as Q, type RunCommandResult as R, resolveTimeouts as S, runAgentPromise as T, runCommandEffect as U, runRpcCommandEffect as V, shouldSurfaceUnparsedStdout as W, toolKindFromName as X, truncate as Y, truncateToBytes as Z, tryParseJson as _, type AgentGenerateOptions$2 as a, type BaseCliAgentOptions as b, type PiExtensionUiResponse$2 as c, BaseCliAgent as d, type CodexConfigOverrides$2 as e, type AgentCliEvent$1 as f, type CliOutputInterpreter as g, type AgentCliActionKind$2 as h, type AgentFileChangeKind as i, type AgentCliActionEvent as j, type AgentCliActionKind as k, type AgentCliActionPhase as l, type AgentCliCompletedEvent as m, type AgentCliEvent as n, type AgentCliEventLevel as o, type AgentCliStartedEvent as p, type AgentGenerateOptions as q, type CliUsageInfo as r, type CodexConfigOverrides as s, type PiExtensionUiRequest as t, type PiExtensionUiResponse as u, asNumber as v, asString as w, buildGenerateResult as x, combineNonEmpty as y, createAgentStdoutTextEmitter as z };
-|||||||| parent of d1eee02ad8 (feat: add durable generic agent checkpoints):packages/agents/src/index-CN9hS6LR.d.ts
-export { type AgentGenerateOptions$2 as A, type BaseCliAgentOptions$2 as B, type CliOutputInterpreter$2 as C, extractTextFromJsonValue as D, extractUsageFromOutput as E, isLikelyRuntimeMetadata as F, isRecord as G, normalizeCodexConfig as H, normalizeTokenUsage as I, pushFlag as J, pushList as K, resolveTimeouts as L, runAgentPromise as M, type NormalizedTokenUsage as N, runCommandEffect as O, type PiExtensionUiRequest$2 as P, runRpcCommandEffect as Q, type RunCommandResult as R, shouldSurfaceUnparsedStdout as S, toolKindFromName as T, truncate as U, truncateToBytes as V, tryParseJson as W, type BaseCliAgentOptions as a, type PiExtensionUiResponse$2 as b, BaseCliAgent as c, type CodexConfigOverrides$2 as d, type AgentCliEvent$1 as e, type CliOutputInterpreter as f, type AgentCliActionKind$2 as g, type AgentCliActionEvent as h, type AgentCliActionKind as i, type AgentCliActionPhase as j, type AgentCliCompletedEvent as k, type AgentCliEvent as l, type AgentCliEventLevel as m, type AgentCliStartedEvent as n, type AgentGenerateOptions as o, type CliUsageInfo as p, type CodexConfigOverrides as q, type PiExtensionUiRequest as r, type PiExtensionUiResponse as s, asNumber as t, asString as u, buildGenerateResult as v, combineNonEmpty as w, createAgentStdoutTextEmitter as x, createSyntheticIdGenerator as y, extractPrompt as z };
-========
-export { runCommandEffect as $, type AgentCheckpointCapability as A, type BaseCliAgentOptions$2 as B, type CliOutputInterpreter$2 as C, type CliUsageInfo as D, type CodexConfigOverrides as E, type PiExtensionUiRequest as F, type PiExtensionUiResponse as G, asNumber as H, asString as I, buildGenerateResult as J, combineNonEmpty as K, createAgentStdoutTextEmitter as L, createSyntheticIdGenerator as M, type NormalizedTokenUsage as N, extractPrompt as O, type PiExtensionUiRequest$2 as P, extractTextFromJsonValue as Q, type RunCommandResult as R, extractUsageFromOutput as S, isLikelyRuntimeMetadata as T, isRecord as U, normalizeCodexConfig as V, normalizeTokenUsage as W, pushFlag as X, pushList as Y, resolveTimeouts as Z, runAgentPromise as _, type BaseCliAgentOptions as a, runRpcCommandEffect as a0, shouldSurfaceUnparsedStdout as a1, toolKindFromName as a2, truncate as a3, truncateToBytes as a4, tryParseJson as a5, type PiExtensionUiResponse$2 as b, type AgentCheckpointFormat as c, type AgentGenerateOptions$2 as d, BaseCliAgent as e, type CodexConfigOverrides$2 as f, type AgentCliEvent$1 as g, type CliOutputInterpreter as h, type AgentCheckpointMode as i, type AgentCheckpoint as j, type AgentCliActionKind$2 as k, type AgentCheckpointContinuationOptions as l, type AgentCheckpointJsonArray as m, type AgentCheckpointJsonObject as n, type AgentCheckpointJsonPrimitive as o, type AgentCheckpointJsonValue as p, type AgentCheckpointPublisher as q, type AgentCheckpointResult as r, type AgentCliActionEvent as s, type AgentCliActionKind as t, type AgentCliActionPhase as u, type AgentCliCompletedEvent as v, type AgentCliEvent as w, type AgentCliEventLevel as x, type AgentCliStartedEvent as y, type AgentGenerateOptions as z };
->>>>>>>> d1eee02ad8 (feat: add durable generic agent checkpoints):packages/agents/src/index-CKscU_SV.d.ts
+export { pushList as $, type AgentFileChange$1 as A, type BaseCliAgentOptions$2 as B, type CliOutputInterpreter$2 as C, type AgentCliStartedEvent as D, type AgentGenerateOptions as E, type CliUsageInfo as F, type CodexConfigOverrides as G, type PiExtensionUiRequest as H, type PiExtensionUiResponse as I, asNumber as J, asString as K, buildGenerateResult as L, combineNonEmpty as M, type NormalizedTokenUsage as N, createAgentStdoutTextEmitter as O, type PiExtensionUiRequest$2 as P, createSyntheticIdGenerator as Q, type RunCommandResult as R, extractPrompt as S, extractTextFromJsonValue as T, extractUsageFromOutput as U, isLikelyRuntimeMetadata as V, isRecord as W, normalizeCodexConfig as X, normalizeTokenUsage as Y, parseAnthropicStyleFileChanges as Z, pushFlag as _, type AgentCheckpointCapability as a, reconstructUnifiedDiff as a0, resolveTimeouts as a1, runAgentPromise as a2, runCommandEffect as a3, runRpcCommandEffect as a4, shouldSurfaceUnparsedStdout as a5, toolKindFromName as a6, truncate as a7, truncateToBytes as a8, tryParseJson as a9, type AgentCheckpointFormat as b, type AgentGenerateOptions$2 as c, type BaseCliAgentOptions as d, type PiExtensionUiResponse$2 as e, BaseCliAgent as f, type CodexConfigOverrides$2 as g, type AgentCliEvent$1 as h, type CliOutputInterpreter as i, type AgentCheckpointMode as j, type AgentCheckpoint as k, type AgentCliActionKind$2 as l, type AgentCheckpointContinuationOptions as m, type AgentCheckpointJsonArray as n, type AgentCheckpointJsonObject as o, type AgentCheckpointJsonPrimitive as p, type AgentCheckpointJsonValue as q, type AgentCheckpointPublisher as r, type AgentCheckpointResult as s, type AgentFileChangeKind as t, type AgentCliActionEvent as u, type AgentCliActionKind as v, type AgentCliActionPhase as w, type AgentCliCompletedEvent as x, type AgentCliEvent as y, type AgentCliEventLevel as z };

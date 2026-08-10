@@ -6589,9 +6589,9 @@ async function legacyExecuteTask(
         await Promise.all(pendingOwnershipChecks);
         await captureResultCheckpoint(result, "turn");
         if (traceCollector) {
-        traceCollector.observeResult(result);
-        await traceCollector.flush();
-      }
+          traceCollector.observeResult(result);
+          await traceCollector.flush();
+        }
         agentResult = result;
         // The agent's resolved model id is authoritative only after the
         // call returns. Refresh the span-tag model so it isn't the agent's
