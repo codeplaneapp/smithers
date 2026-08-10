@@ -262,6 +262,7 @@
       "dependencies": {
         "@effect/opentelemetry": "4.0.0-beta.105",
         "@effect/platform-bun": "4.0.0-beta.105",
+        "@effect/platform-node-shared": "4.0.0-beta.105",
         "effect": "4.0.0-beta.105",
       },
       "devDependencies": {
@@ -679,6 +680,7 @@
       "version": "0.33.1",
       "dependencies": {
         "@effect/platform-bun": "4.0.0-beta.105",
+        "@effect/platform-node-shared": "4.0.0-beta.105",
         "@effect/sql-sqlite-bun": "4.0.0-beta.105",
         "@smthrs/agents": "workspace:*",
         "@smthrs/components": "workspace:*",
@@ -1202,6 +1204,7 @@
       "version": "0.33.1",
       "dependencies": {
         "@effect/platform-bun": "4.0.0-beta.105",
+        "@effect/platform-node-shared": "4.0.0-beta.105",
         "@smthrs/db": "workspace:*",
         "@smthrs/driver": "workspace:*",
         "@smthrs/errors": "workspace:*",
@@ -1338,6 +1341,7 @@
       "name": "@smthrs/vcs",
       "version": "0.33.1",
       "dependencies": {
+        "@effect/platform-node-shared": "4.0.0-beta.105",
         "@smthrs/observability": "workspace:*",
         "effect": "4.0.0-beta.105",
       },
