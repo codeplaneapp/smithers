@@ -160,6 +160,7 @@ const workflowOwners = {
     "xcombo-fix-train.tsx",
   ],
   "./tests/workflow-component-inventory.test.ts": [
+    "bug-triage-train.tsx",
     "docs-home-design-system.tsx",
     "federation-approval-polish-hardening.tsx",
     "federation-architecture-fix.tsx",
