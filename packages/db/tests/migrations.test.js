@@ -217,6 +217,23 @@ describe("DB migration edges", () => {
     }
   });
 
+  test("0037 converges stores that recorded the preview 0035 checkpoint id", () => {
+    const { sqlite, db } = setupMemoryDb();
+    try {
+      sqlite.run(
+        "UPDATE _smithers_schema_migrations SET id = '0035_agent_checkpoints' WHERE id = '0037_agent_checkpoints'",
+      );
+
+      expect(() => ensureSmithersTables(db)).not.toThrow();
+
+      const ids = migrationRows(sqlite).map((row) => row.id);
+      expect(ids).toContain("0035_agent_checkpoints");
+      expect(ids).toContain("0037_agent_checkpoints");
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("0037 fails closed when a recorded checkpoint table has an incompatible shape", () => {
     const { sqlite, db } = setupMemoryDb();
     try {
