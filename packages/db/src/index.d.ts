@@ -2,10 +2,9 @@ import * as zod from 'zod';
 import { z } from 'zod';
 import * as drizzle_orm from 'drizzle-orm';
 import { Table as Table$1, and } from 'drizzle-orm';
-import * as _smithers_orchestrator_errors_SmithersError from '@smthrs/errors/SmithersError';
+import * as _smthrs_errors_SmithersError from '@smthrs/errors/SmithersError';
 import { SmithersError as SmithersError$2 } from '@smthrs/errors/SmithersError';
 import * as drizzle_orm_bun_sqlite from 'drizzle-orm/bun-sqlite';
-import * as _smithers_orchestrator_errors_toSmithersError from '@smthrs/errors/toSmithersError';
 import * as bun_sqlite from 'bun:sqlite';
 import { Database as Database$1 } from 'bun:sqlite';
 import { ManagedRuntime, Effect } from 'effect';
@@ -1506,6 +1505,34 @@ declare class SmithersDb {
      */
     listRalph(runId: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
+     * Register a live agent subprocess so a later CLI invocation can reap it if
+     * its engine dies without cleanup (#1464 AWF-3, #1332).
+     * @param {{ pid: number; runId: string; nodeId?: string | null; enginePid: number; startedAtMs: number }} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
+    registerAgentProcess(row: {
+        pid: number;
+        runId: string;
+        nodeId?: string | null;
+        enginePid: number;
+        startedAtMs: number;
+    }): RunnableEffect<void, SmithersError$1>;
+    /**
+     * @param {number} pid
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
+    unregisterAgentProcess(pid: number): RunnableEffect<void, SmithersError$1>;
+    /**
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+     */
+    listAgentProcesses(): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
+    /**
+     * Drop every registry row owned by one engine pid (graceful engine exit).
+     * @param {number} enginePid
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
+    clearAgentProcessesForOwner(enginePid: number): RunnableEffect<void, SmithersError$1>;
+    /**
      * @param {string} runId
      * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
      */
@@ -1673,16 +1700,16 @@ declare class SmithersDb {
      */
     deleteCron(cronId: string): RunnableEffect<void, SmithersError$1>;
     /**
-   * List cross-run memory facts, optionally scoped to a namespace. Reads the
-   * `_smithers_memory_facts` table written by `@smthrs/memory`'s
-   * MemoryStore (`setFact`) — the SAME table the `smithers memory list` CLI reads
-   * — so a fact set by any run/workflow surfaces here. Columns are snake→camel
-   * cased by the storage layer (`value_json → valueJson`, etc.). A null/undefined
-   * namespace returns every namespace's facts; ordering is stable (namespace, key)
-   * so the gateway's `listMemoryFacts` RPC returns a deterministic list.
-   * @param {string | null} [namespace]
-   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
-   */
+     * List cross-run memory facts, optionally scoped to a namespace. Reads the
+     * `_smithers_memory_facts` table written by `@smthrs/memory`'s
+     * MemoryStore (`setFact`) — the SAME table the `smithers memory list` CLI reads
+     * — so a fact set by any run/workflow surfaces here. Columns are snake→camel
+     * cased by the storage layer (`value_json → valueJson`, etc.). A null/undefined
+     * namespace returns every namespace's facts; ordering is stable (namespace, key)
+     * so the gateway's `listMemoryFacts` RPC returns a deterministic list.
+     * @param {string | null} [namespace]
+     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+     */
     listMemoryFacts(namespace?: string | null): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
      * List LIVE docs from `_smithers_docs` (tombstones — `deleted_at_ms IS NOT
@@ -2092,7 +2119,7 @@ type HumanRequestRow = HumanRequestRow$1;
 type OutputKey = OutputKey$1;
 type RunnableEffect<A, E> = Effect.Effect<A, E> & PromiseLike<A>;
 type SignalQuery = SignalQuery$1;
-type SmithersError$1 = _smithers_orchestrator_errors_SmithersError.SmithersError;
+type SmithersError$1 = _smthrs_errors_SmithersError.SmithersError;
 type FrameRow = {
     runId: string;
     frameNo: number;
@@ -2172,7 +2199,7 @@ declare function ensureSmithersTablesEffect(db: _BunSQLiteDatabase<Record<string
  */
 declare function ensureSmithersTables(db: _BunSQLiteDatabase<Record<string, unknown>>): void;
 type _BunSQLiteDatabase = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
-type _SmithersError = _smithers_orchestrator_errors_SmithersError.SmithersError;
+type _SmithersError = _smthrs_errors_SmithersError.SmithersError;
 
 type JsonBounds$2 = {
     maxArrayLength?: number;
@@ -8991,6 +9018,23 @@ declare const smithersRalph: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
             identity: undefined;
             generated: undefined;
         }, {}, {}>;
+        exhausted: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "exhausted";
+            tableName: "_smithers_ralph";
+            dataType: "boolean";
+            columnType: "SQLiteBoolean";
+            data: boolean;
+            driverParam: number;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
         updatedAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
             name: "updated_at_ms";
             tableName: "_smithers_ralph";
@@ -9846,7 +9890,7 @@ declare function isRetryableSqliteWriteError(error: unknown): boolean;
  * @returns {Effect.Effect<A, SmithersError>}
  */
 declare function withSqliteWriteRetryEffect<A>(operation: () => Effect.Effect<A, SmithersError>, opts?: SqliteWriteRetryOptions$1): Effect.Effect<A, SmithersError>;
-type SmithersError = _smithers_orchestrator_errors_SmithersError.SmithersError;
+type SmithersError = _smthrs_errors_SmithersError.SmithersError;
 type SqliteWriteRetryOptions$1 = SqliteWriteRetryOptions$2;
 
 /**

@@ -2,7 +2,7 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { Sequence, SmithersDb, Task, Workflow, runWorkflow } from "smthrs";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { approveNode } from "../src/approvals.js";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { Effect } from "effect";

@@ -1,4 +1,4 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 const RESERVED_PUBLIC_OUTPUT_NAMES = [
   "__smithersSignalProvenanceHorizon",

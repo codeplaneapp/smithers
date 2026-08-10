@@ -8,7 +8,7 @@ import { Effect } from "effect";
 import { Sequence, Task, Workflow, runWorkflow } from "smthrs";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 /**
  * @param {any[]} nodes
  * @param {string} nodeId

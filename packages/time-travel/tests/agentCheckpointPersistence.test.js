@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Effect } from "effect";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
 import {
   AGENT_CHECKPOINT_SQLITE_BIND_BUDGET,
   deleteAgentCheckpointAttemptsByKeys,
