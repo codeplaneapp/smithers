@@ -10781,7 +10781,7 @@ try {
 | `TASK_TIMEOUT` | A task compute callback exceeds its configured timeout. | `{ nodeId, attempt, timeoutMs }` |
 | `TASK_HIJACK_UNSUPPORTED` | A task requests auto-hijack but its agent cannot provide a resumable session or conversation. | `{ nodeId, agentId? }` |
 | `TASK_FORK_SOURCE_NOT_COMPLETE` | A forked task began executing but its fork source hasn't completed, so no session snapshot exists yet. | `{ nodeId, forkSource }` |
-| `TASK_FORK_SESSION_UNAVAILABLE` | A `<Task fork>` source produced neither a compatible checkpoint nor a forkable conversation. | `{ nodeId, forkSource }` |
+| `TASK_FORK_SESSION_UNAVAILABLE` | A `<Task fork>` cannot obtain usable agent state: either the forking task isn't an agent task, or the source produced neither a compatible checkpoint nor a forkable conversation (e.g. a compute/static, skipped, or cancelled source). | `{ nodeId, forkSource }` |
 | `TASK_FORK_CHECKPOINT_INCOMPATIBLE` | A `<Task fork>` source has only a native checkpoint whose codec, version, or fork mode the target cannot consume. | `{ nodeId, forkSource, codec, version, mode }` |
 | `TASK_ABORTED` | A running task is aborted through an AbortSignal or shutdown path. | -- |
 | `RUN_NOT_FOUND` | A CLI or engine command references a run ID missing from the database. | `{ runId }` |
