@@ -297,6 +297,7 @@ the runtime:
 - [Install the agent skill](./skills/smithers): make your coding agent fluent in Smithers.
 - [How It Works](https://smithers.sh/how-it-works): the durable execution model.
 - [Components](https://smithers.sh/components/workflow): the full primitive set.
+- [Orchestration patterns](https://patterns.smithers.sh): a visual field guide to every primitive, composite pattern, and example.
 - [Awesome Smithers](https://github.com/smithersai/awesome-smithers): community projects, workflow packs, examples, and integrations.
 
 ## Docs
