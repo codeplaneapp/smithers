@@ -98,16 +98,16 @@ jobs:
           # Shard 0 is the extras lane: root gates, d.ts freshness, the DDD
           # suite, examples, and the PTY e2e run there in parallel with the
           # package shards instead of serially after a monolithic pass.
-          - os: ubuntu-22.04
+          - os: ubuntu-latest
             shard: 0
             total_shards: 3
-          - os: ubuntu-22.04
+          - os: ubuntu-latest
             shard: 1
             total_shards: 3
-          - os: ubuntu-22.04
+          - os: ubuntu-latest
             shard: 2
             total_shards: 3
-          - os: ubuntu-22.04
+          - os: ubuntu-latest
             shard: 3
             total_shards: 3
           - os: windows-latest
@@ -151,21 +151,30 @@ jobs:
           bun-version: 1.3.13
 
       # The grep tool shells out to ripgrep (`rg`), and Nanocodex tests exercise
-      # the real PID-containment launcher. Linux package tests are pinned to
-      # Ubuntu 22.04 so the required Bubblewrap namespace remains available.
+      # the real PID-containment launcher with checked-in fake payloads.
       - name: Install Linux test dependencies and probe Bubblewrap
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y bubblewrap ripgrep
-          if ! bwrap \
-            --unshare-pid \
-            --die-with-parent \
-            --new-session \
-            --bind / / \
-            --proc /proc \
-            --dev-bind /dev /dev \
-            -- /bin/true; then
+          probe_bwrap() {
+            bwrap \
+              --unshare-pid \
+              --die-with-parent \
+              --new-session \
+              --bind / / \
+              --proc /proc \
+              --dev-bind /dev /dev \
+              -- /bin/true
+          }
+          # Ubuntu >= 23.10 ships kernel.apparmor_restrict_unprivileged_userns=1,
+          # which denies the unprivileged user namespace bwrap needs. Relax it
+          # once on the throwaway runner so the containment tests actually run
+          # instead of silently skipping.
+          if ! probe_bwrap; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          fi
+          if ! probe_bwrap; then
             echo "Bubblewrap namespaces are unavailable on this runner; Nanocodex containment tests will skip."
           fi
 
@@ -284,7 +293,7 @@ jobs:
         run: bun test --timeout=120000 apps/cli/tests/tui-zmux.e2e.test.js
 
   coverage:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     # A second, instrumented pass of the whole workspace (per-package coverage +
     # thresholds). Runs in parallel with `test`; instrumentation makes it slower
     # than the plain suite, so it gets its own generous budget.
@@ -309,20 +318,30 @@ jobs:
         with:
           bun-version: 1.3.13
 
-      # Coverage runs the packages/agents suite, including its real Nanocodex
-      # process-containment tests, on the same supported Ubuntu baseline.
+      # Coverage runs the packages/agents suite, including real Bubblewrap
+      # containment around checked-in fake payloads.
       - name: Install coverage dependencies and probe Bubblewrap
         run: |
           sudo apt-get update
           sudo apt-get install -y bubblewrap ripgrep
-          if ! bwrap \
-            --unshare-pid \
-            --die-with-parent \
-            --new-session \
-            --bind / / \
-            --proc /proc \
-            --dev-bind /dev /dev \
-            -- /bin/true; then
+          probe_bwrap() {
+            bwrap \
+              --unshare-pid \
+              --die-with-parent \
+              --new-session \
+              --bind / / \
+              --proc /proc \
+              --dev-bind /dev /dev \
+              -- /bin/true
+          }
+          # Ubuntu >= 23.10 ships kernel.apparmor_restrict_unprivileged_userns=1,
+          # which denies the unprivileged user namespace bwrap needs. Relax it
+          # once on the throwaway runner so the containment tests actually run
+          # instead of silently skipping.
+          if ! probe_bwrap; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          fi
+          if ! probe_bwrap; then
             echo "Bubblewrap namespaces are unavailable on this runner; Nanocodex containment tests will skip."
           fi
 

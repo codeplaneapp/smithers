@@ -206,7 +206,13 @@ describe("agent checkpoint limit propagation", () => {
       const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(result.status).toBe("finished");
       const rows = db.$client.query("SELECT codec, purpose FROM _smithers_agent_checkpoints ORDER BY sequence").all();
-      expect(rows).toEqual([{ codec: "nanocodex.session-snapshot", purpose: "progress" }]);
+      // Publishing mid-turn (onCheckpoint) and returning the same checkpoint
+      // is the Nanocodex adapter's shape, and the substrate records both a
+      // `progress` and a `turn` ref for it. Every row must still be the
+      // agent's own codec — a `started` event must never synthesize the
+      // legacy CLI-session checkpoint.
+      expect(rows.map((row) => row.purpose)).toEqual(["progress", "turn"]);
+      expect(rows.every((row) => row.codec === "nanocodex.session-snapshot")).toBe(true);
       expect(rows.some((row) => row.codec === "smithers.cli-session")).toBe(false);
     } finally {
       cleanup();
