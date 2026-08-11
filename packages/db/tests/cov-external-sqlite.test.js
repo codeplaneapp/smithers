@@ -196,9 +196,9 @@ describe("SqlMessageStorage external-sqlite connection", () => {
     raw.close();
   });
 
-  test("ensureSchema upgrades a pre-0036 _smithers_attempts table with the effort column", async () => {
+  test("ensureSchema upgrades a pre-0039 _smithers_attempts table with the effort column", async () => {
     const { raw, descriptor } = makeExternalDb();
-    // Simulate an existing external/Cloudflare store created before the 0036
+    // Simulate an existing external/Cloudflare store created before the 0039
     // effort column landed: the attempts table exists WITHOUT effort, so the
     // CREATE TABLE IF NOT EXISTS in ensureSchema cannot add it.
     raw.run(`CREATE TABLE _smithers_attempts (

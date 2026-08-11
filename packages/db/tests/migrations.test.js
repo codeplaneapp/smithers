@@ -598,9 +598,9 @@ describe("DB migration edges", () => {
     sqlite.close();
   });
 
-  test("0036 adds the first-class effort column; a legacy meta_json-only row reads clean", () => {
+  test("0039 adds the first-class effort column; a legacy meta_json-only row reads clean", () => {
     const sqlite = new Database(":memory:");
-    // Pre-0036 attempts table: NO effort column. A legacy row smuggled effort
+    // Pre-0039 attempts table: NO effort column. A legacy row smuggled effort
     // inside meta_json (the old back-compat path).
     sqlite.exec(`
       CREATE TABLE _smithers_attempts (
@@ -626,7 +626,7 @@ describe("DB migration edges", () => {
       .all()
       .map((c) => c.name);
     expect(cols).toContain("effort");
-    expect(migrationRows(sqlite).map((row) => row.id)).toContain("0036_attempt_effort_column");
+    expect(migrationRows(sqlite).map((row) => row.id)).toContain("0039_attempt_effort_column");
 
     // ...and the legacy row still reads clean: the new column is NULL (never
     // backfilled from the blob) while the old meta_json value survives intact.
@@ -732,7 +732,7 @@ describe("DB migration edges", () => {
     sqlite.close();
   });
 
-  test("the migration runner tolerates the reserved 0035 gap before effort and steer migrations", () => {
+  test("effort and steer migrations follow the current 0038 ledger head", () => {
     const sqlite = new Database(":memory:");
     sqlite.exec(`
       CREATE TABLE _smithers_schema_migrations (
@@ -794,22 +794,32 @@ describe("DB migration edges", () => {
       .get();
     expect(index).toBeTruthy();
     const ledger = migrationRows(sqlite).map((row) => row.id);
-    // Migration ids are opaque ledger keys, not a contiguous counter. Leaving
-    // 0035 permanently unused must not block later migrations or their repair.
-    expect(ledger.some((id) => id.startsWith("0035_"))).toBe(false);
-    expect(ledger).toContain("0036_attempt_effort_column");
-    expect(ledger).toContain("0037_add_steers");
+    expect(ledger).toEqual(
+      expect.arrayContaining([
+        "0035_ralph_exhausted",
+        "0036_agent_processes",
+        "0037_agent_checkpoints",
+        "0038_run_token_usage",
+        "0039_attempt_effort_column",
+        "0040_add_steers",
+      ]),
+    );
     sqlite.close();
   });
 
-  test("preview effort/steer ledger aliases coexist and converge to the official ids", () => {
+  test("all preview effort/steer ledger aliases coexist and converge to the 0039/0040 ids", () => {
     const { sqlite, db } = setupMemoryDb();
     try {
       sqlite.run("DELETE FROM _smithers_schema_migrations WHERE id IN (?, ?)", [
+        "0039_attempt_effort_column",
+        "0040_add_steers",
+      ]);
+      for (const id of [
+        "0035_attempt_effort_column",
+        "0036_add_steers",
         "0036_attempt_effort_column",
         "0037_add_steers",
-      ]);
-      for (const id of ["0035_attempt_effort_column", "0036_add_steers"]) {
+      ]) {
         sqlite.run("INSERT INTO _smithers_schema_migrations (id, name, applied_at_ms) VALUES (?, ?, ?)", [id, id, 1]);
       }
       sqlite.run("DROP INDEX _smithers_steers_queued_idx");
@@ -823,12 +833,11 @@ describe("DB migration edges", () => {
           "0036_add_steers",
           "0036_attempt_effort_column",
           "0037_add_steers",
+          "0039_attempt_effort_column",
+          "0040_add_steers",
         ]),
       );
-      // Numeric prefixes are not aliases. The official checkpoint migration is
-      // intentionally absent on this independent branch and remains free to
-      // apply later under its exact 0035_agent_checkpoints id.
-      expect(ids).not.toContain("0035_agent_checkpoints");
+      expect(ids).toContain("0037_agent_checkpoints");
       expect(
         sqlite
           .query("SELECT name FROM sqlite_master WHERE type = 'index' AND name = '_smithers_steers_queued_idx'")
@@ -839,7 +848,7 @@ describe("DB migration edges", () => {
     }
   });
 
-  test("0037 repairs a missing or malformed owned queued index even with a recorded ledger row", () => {
+  test("0040 repairs a missing or malformed owned queued index even with a recorded ledger row", () => {
     const { sqlite, db } = setupMemoryDb();
     try {
       sqlite.run("DROP INDEX _smithers_steers_queued_idx");
@@ -876,7 +885,7 @@ describe("DB migration edges", () => {
     try {
       malformed.sqlite.run("DROP TABLE _smithers_steers");
       malformed.sqlite.run("CREATE TABLE _smithers_steers (steer_id TEXT PRIMARY KEY)");
-      expect(() => ensureSmithersTables(malformed.db)).toThrow(/0037 steer schema mismatch/);
+      expect(() => ensureSmithersTables(malformed.db)).toThrow(/0040 steer schema mismatch/);
     } finally {
       malformed.sqlite.close();
     }

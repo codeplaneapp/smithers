@@ -19,7 +19,7 @@ import { SqlMessageStorage } from "../src/sql-message-storage.js";
 import { zodToTable } from "../src/zodToTable.js";
 import { syncZodTableSchemaPostgres } from "../src/zodToCreateTableSQL.js";
 import { POSTGRES } from "../src/dialect.js";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 // node-postgres returns int8 (BIGINT) as a string by default to avoid precision
 // loss; Smithers stores millisecond timestamps and booleans in BIGINT columns
@@ -509,7 +509,7 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
     }
   });
 
-  test("0037 repairs missing and malformed owned steer indexes with a recorded ledger row", async () => {
+  test("0040 repairs missing and malformed owned steer indexes with a recorded ledger row", async () => {
     const assertCanonicalIndex = async () => {
       const result = await client.query({
         text: `SELECT a.attname AS name, i.indisunique, i.indisvalid, i.indisready,
