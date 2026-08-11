@@ -142,18 +142,33 @@ async function runColdRestartScenario({ authFile, binary: configuredBinary, chil
 
   let initialCheckpoint;
   let initialRef;
+  let initialResumeRef;
   await withReadonlyDb(dbPath, async ({ adapter }) => {
     expect((await Effect.runPromise(adapter.getRun(runId)))?.status).toBe("running");
 
+    // The adapter publishes the snapshot mid-turn through `onCheckpoint` and
+    // returns that same checkpoint from the turn, so every attempt reaching a
+    // completed turn records a `progress` ref plus a companion `turn` ref over
+    // byte-identical content. The `progress` ref is the durable lineage the
+    // later assertions track; the retry resumes from the newest ref of the two.
     const refs = await Effect.runPromise(adapter.listAgentCheckpointRefs(runId, { nodeId: "work" }));
-    expect(refs).toHaveLength(1);
+    expect(refs.map((ref) => ref.purpose)).toEqual(["progress", "turn"]);
     initialRef = refs[0];
+    initialResumeRef = refs[1];
     expect(initialRef).toMatchObject({
       attempt: 1,
       sequence: 0,
       codec: CHECKPOINT_CODEC,
       version: CHECKPOINT_VERSION,
       purpose: "progress",
+    });
+    expect(initialResumeRef).toMatchObject({
+      attempt: 1,
+      sequence: 1,
+      codec: CHECKPOINT_CODEC,
+      version: CHECKPOINT_VERSION,
+      purpose: "turn",
+      contentHash: initialRef.contentHash,
     });
     expect(ready.checkpointHash).toBe(initialRef.contentHash);
 
@@ -167,8 +182,8 @@ async function runColdRestartScenario({ authFile, binary: configuredBinary, chil
     const activeAttempt = attempts.find((attempt) => attempt.state === "in-progress");
     expect(activeAttempt).toBeDefined();
     expect(JSON.parse(activeAttempt?.metaJson ?? "{}").resumedFromCheckpoint).toEqual({
-      contentHash: initialRef.contentHash,
-      sequence: initialRef.sequence,
+      contentHash: initialResumeRef.contentHash,
+      sequence: initialResumeRef.sequence,
       codec: CHECKPOINT_CODEC,
       version: CHECKPOINT_VERSION,
       mode: "resume",
@@ -248,8 +263,8 @@ async function runColdRestartScenario({ authFile, binary: configuredBinary, chil
     expect(successfulAttempt.finishedAtMs).toBeNumber();
     expect(progressRefs[1].attempt).toBe(successfulAttempt.attempt);
     expect(JSON.parse(successfulAttempt.metaJson ?? "{}").resumedFromCheckpoint).toEqual({
-      contentHash: initialRef.contentHash,
-      sequence: initialRef.sequence,
+      contentHash: initialResumeRef.contentHash,
+      sequence: initialResumeRef.sequence,
       codec: CHECKPOINT_CODEC,
       version: CHECKPOINT_VERSION,
       mode: "resume",

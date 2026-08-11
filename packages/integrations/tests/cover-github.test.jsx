@@ -6,6 +6,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import React from "react";
 import { z } from "zod";
 import { Effect, Schema } from "effect";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { createSmithers, renderFrame } from "smthrs";
 import { SmithersCtx } from "@smthrs/react-reconciler/context";
@@ -143,8 +144,16 @@ describe("GitHubClient rate-limit + parsing edge branches", () => {
 
 const NullContext = React.createContext(/** @type {any} */ (null));
 
+// Allocated once, at module scope — see the sibling note in
+// github-components.test.jsx: a per-test `makeTempDirPath` re-arms a
+// `bun:test` hook from inside every test, which intermittently stalls a test
+// for the full 5s timeout on CI.
+const apiRoot = makeTempDirPath("smithers-gh-cov-");
+let apiCount = 0;
+
 function makeApi(schemas) {
-  const dir = makeTempDirPath("smithers-gh-cov-");
+  const dir = join(apiRoot, `api-${(apiCount += 1)}`);
+  mkdirSync(dir, { recursive: true });
   return createSmithers(schemas, { dbPath: join(dir, "db.sqlite") });
 }
 

@@ -292,9 +292,13 @@ describe("agent checkpoint limit propagation", () => {
                   JOIN _smithers_agent_checkpoint_contents contents
                     ON contents.content_hash = refs.content_hash
                  WHERE refs.run_id IN (?, ?)
+                   AND refs.purpose = 'progress'
                  ORDER BY refs.run_id`,
           )
           .all(parentRunId, replay.runId);
+        // Each turn publishes mid-turn through `onCheckpoint` and returns the
+        // same checkpoint, so the substrate holds a `progress` and a `turn` ref
+        // per turn. The progress refs are the one-per-turn durable lineage.
         expect(rows).toHaveLength(2);
         expect(new Set(rows.map((row) => row.content_hash)).size).toBe(1);
         for (const row of rows) {
@@ -373,9 +377,12 @@ describe("agent checkpoint limit propagation", () => {
                 FROM _smithers_agent_checkpoints refs
                 JOIN _smithers_agent_checkpoint_contents contents
                   ON contents.content_hash = refs.content_hash
+               WHERE refs.purpose = 'progress'
                 ORDER BY refs.sequence`,
           )
           .all();
+        // One `progress` ref per correction turn; each turn also stores a
+        // byte-identical `turn` ref that is not part of this lineage.
         expect(rows).toHaveLength(3);
         expect(JSON.parse(rows.at(-1).checkpoint_json).payload.nanocodexSnapshot).toEqual({
           version: 1,
