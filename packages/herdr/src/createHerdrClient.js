@@ -182,7 +182,18 @@ function rpcCall(socketPath, method, params, timeoutMs) {
     });
 
     socket.on("connect", () => {
-      socket.write(`${JSON.stringify({ id: nextRequestId(), method, params: params ?? {} })}\n`);
+      try {
+        socket.write(`${JSON.stringify({ id: nextRequestId(), method, params: params ?? {} })}\n`);
+      } catch (err) {
+        settle(
+          "reject",
+          new HerdrError(`herdr ${method} request could not be serialized`, {
+            method,
+            code: "invalid_request",
+            cause: err,
+          }),
+        );
+      }
     });
 
     socket.connect(socketPath);
@@ -266,9 +277,14 @@ export function createHerdrClient(opts = {}) {
       socket = active;
 
       active.on("connect", () => {
-        active.write(
-          `${JSON.stringify({ id: nextRequestId(), method: "events.subscribe", params: { subscriptions } })}\n`,
-        );
+        try {
+          active.write(
+            `${JSON.stringify({ id: nextRequestId(), method: "events.subscribe", params: { subscriptions } })}\n`,
+          );
+        } catch (err) {
+          log("warn", "herdr subscription request could not be serialized", err);
+          active.destroy();
+        }
       });
 
       active.on("data", (chunk) => {

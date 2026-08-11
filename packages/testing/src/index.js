@@ -8,6 +8,40 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
+// src/virtualClock.ts
+function createVirtualClock(options = {}) {
+  const mode = options.mode === "real" ? "real" : "virtual";
+  let current = typeof options.startMs === "number" && Number.isFinite(options.startMs) ? options.startMs : 0;
+  async function advance(ms) {
+    const n = typeof ms === "number" && Number.isFinite(ms) && ms > 0 ? ms : 0;
+    if (mode === "real") {
+      if (n > 0) {
+        await new Promise((r) => setTimeout(r, n));
+      }
+      return;
+    }
+    current += n;
+  }
+  return {
+    mode,
+    now() {
+      return mode === "real" ? Date.now() : current;
+    },
+    advance,
+    sleep: advance,
+    setNow(ms) {
+      if (mode === "virtual" && typeof ms === "number" && Number.isFinite(ms)) {
+        current = ms;
+      }
+    }
+  };
+}
+var init_virtualClock = __esm({
+  "src/virtualClock.ts"() {
+    "use strict";
+  }
+});
+
 // src/scenario/ast.ts
 var freezeScenario;
 var init_ast = __esm({
@@ -1034,7 +1068,7 @@ var init_CleanupScope = __esm({
         if (pending.length && Date.now() < deadline) {
           await Promise.race([
             Promise.allSettled(pending.map((entry) => entry.operation)),
-            new Promise((resolve4) => setTimeout(resolve4, Math.max(0, deadline - Date.now())))
+            new Promise((resolve3) => setTimeout(resolve3, Math.max(0, deadline - Date.now())))
           ]);
         }
         if (error) throw error;
@@ -1143,6 +1177,7 @@ var init_ambiguity = __esm({
 });
 
 // src/runWorkflowScenario.ts
+import { randomUUID } from "crypto";
 function isEffectLike(value) {
   return typeof value === "object" && value !== null && "pipe" in value && typeof value.pipe === "function";
 }
@@ -1161,13 +1196,8 @@ async function settleRunResult(raw) {
   return { value };
 }
 async function runWorkflowScenario(options) {
-  const runId = typeof options.runId === "string" && options.runId !== "" ? options.runId : `scenario-${Date.now().toString(36)}`;
-  const clock = options.clock ?? {
-    nowMs: () => Date.now(),
-    advance: () => void 0,
-    advanceToNextTimer: () => void 0,
-    pending: () => []
-  };
+  const runId = typeof options.runId === "string" && options.runId !== "" ? options.runId : `scenario-${randomUUID()}`;
+  const clock = options.clock ?? createVirtualClock();
   if (options.beforeRun) {
     await options.beforeRun({ runId, clock });
   }
@@ -1205,6 +1235,7 @@ async function runWorkflowScenario(options) {
 var init_runWorkflowScenario = __esm({
   "src/runWorkflowScenario.ts"() {
     "use strict";
+    init_virtualClock();
   }
 });
 
@@ -1280,7 +1311,7 @@ var init_runScenario = __esm({
       for (let turn = 0; !done && turn < budget; turn++) {
         const progressBefore = kernel.trace.snapshot().length + kernel.controls.consumed();
         for (let microtask = 0; microtask < Math.min(64, Math.max(1, budget)); microtask++) await Promise.resolve();
-        if (!done) await new Promise((resolve4) => setImmediate(resolve4));
+        if (!done) await new Promise((resolve3) => setImmediate(resolve3));
         if (!done) {
           const progressAfter = kernel.trace.snapshot().length + kernel.controls.consumed();
           if (progressAfter === progressBefore) {
@@ -1511,8 +1542,8 @@ var init_runScenario = __esm({
           let release;
           const gate = {
             arrived: /* @__PURE__ */ new Set(),
-            promise: new Promise((resolve4) => {
-              release = resolve4;
+            promise: new Promise((resolve3) => {
+              release = resolve3;
             }),
             release
           };
@@ -1825,7 +1856,7 @@ var init_runScenario = __esm({
                     return value2;
                   });
                 },
-                sleep: (ms) => new Promise((resolve4, reject) => {
+                sleep: (ms) => new Promise((resolve3, reject) => {
                   const wakeup = `${selected.id}:timer:${ms}`;
                   let settled = false;
                   const finish = (action) => {
@@ -1881,7 +1912,7 @@ var init_runScenario = __esm({
                     journal.deliverWakeup(wakeup);
                     if (!suppliedFire) runtimeKernel.controls.append({ type: "timer-fire", timer: timerId });
                     kernel.trace.emit({ type: "wait", id, data: { state: "timer-fired", ms, timer: timerId } });
-                    finish(resolve4);
+                    finish(resolve3);
                   });
                   cleanup.register("virtual-timer", String(timer), () => {
                     kernel.clock.cancel(timer);
@@ -2926,7 +2957,7 @@ function writeFileAt(posix, root, path, name, contents) {
     if (ownsCurrent) closeSync(current);
   }
 }
-async function writeFiles(rootDir, files) {
+async function writeFakeAgentFiles(rootDir, files) {
   if (!files || Object.keys(files).length === 0) return;
   if (!rootDir) {
     throw new TypeError("Fake agent files require a rootDir");
@@ -2980,7 +3011,7 @@ function buildFakeAgent(schema, script, options = {}) {
       calls.push(call);
       const raw = typeof script === "function" ? await script(args) : script;
       const response = normalizeResult(schema, raw);
-      await writeFiles(call.rootDir, response.files);
+      await writeFakeAgentFiles(call.rootDir, response.files);
       const generated = {};
       if ("output" in response) generated.output = response.output;
       if (response.text !== void 0) generated.text = response.text;
@@ -4030,9 +4061,15 @@ function parseTurn(raw, loc) {
     }
     const w = t.when;
     when = {};
-    if (typeof w.callIndex === "number") when.callIndex = w.callIndex;
-    if (typeof w.attempt === "number") when.attempt = w.attempt;
-    if (typeof w.iteration === "number") when.iteration = w.iteration;
+    for (const key of ["callIndex", "attempt", "iteration"]) {
+      if (w[key] !== void 0 && (!Number.isSafeInteger(w[key]) || w[key] < 0)) {
+        throw new TypeError(`when.${key} must be a non-negative safe integer${loc}`);
+      }
+      if (typeof w[key] === "number") when[key] = w[key];
+    }
+    if (w.promptIncludes !== void 0 && typeof w.promptIncludes !== "string") {
+      throw new TypeError(`when.promptIncludes must be a string${loc}`);
+    }
     if (typeof w.promptIncludes === "string") when.promptIncludes = w.promptIncludes;
   }
   return { when, stream, result };
@@ -4041,11 +4078,22 @@ function parseResult(raw, loc) {
   const r = raw;
   const kind = r.kind;
   if (kind === "ok") {
+    let files;
+    if (r.files !== void 0) {
+      if (!r.files || typeof r.files !== "object" || Array.isArray(r.files)) {
+        throw new TypeError(`ok result files must be an object${loc}`);
+      }
+      files = {};
+      for (const [name, contents] of Object.entries(r.files)) {
+        if (typeof contents !== "string") throw new TypeError(`ok result file ${name} must be a string${loc}`);
+        files[name] = contents;
+      }
+    }
     return {
       kind: "ok",
       output: r.output,
       text: typeof r.text === "string" ? r.text : void 0,
-      files: r.files && typeof r.files === "object" && !Array.isArray(r.files) ? r.files : void 0
+      files
     };
   }
   if (kind === "fail") {
@@ -4117,7 +4165,7 @@ function selectTurn(vector, used, ctx) {
     if (used.has(i)) continue;
     const turn = vector.turns[i];
     const w = turn.when;
-    if (!w) continue;
+    if (!w || Object.keys(w).length === 0) continue;
     if (w.callIndex !== void 0 && w.callIndex !== ctx.callIndex) continue;
     if (w.attempt !== void 0 && w.attempt !== ctx.attempt) continue;
     if (w.iteration !== void 0 && w.iteration !== ctx.iteration) continue;
@@ -4135,59 +4183,27 @@ function selectTurn(vector, used, ctx) {
   );
 }
 
-// src/virtualClock.ts
-function createVirtualClock(options = {}) {
-  const mode = options.mode === "real" ? "real" : "virtual";
-  let current = typeof options.startMs === "number" && Number.isFinite(options.startMs) ? options.startMs : 0;
-  async function advance(ms) {
-    const n = typeof ms === "number" && Number.isFinite(ms) && ms > 0 ? ms : 0;
-    if (mode === "real") {
-      if (n > 0) {
-        await new Promise((r) => setTimeout(r, n));
-      }
-      return;
-    }
-    current += n;
-  }
-  return {
-    mode,
-    now() {
-      return mode === "real" ? Date.now() : current;
-    },
-    advance,
-    sleep: advance,
-    setNow(ms) {
-      if (mode === "virtual" && typeof ms === "number" && Number.isFinite(ms)) {
-        current = ms;
-      }
-    }
-  };
-}
+// src/index.ts
+init_virtualClock();
 
 // src/scriptedAgent.ts
-import { mkdir as mkdir2, writeFile } from "fs/promises";
-import { dirname as dirname2, isAbsolute as isAbsolute2, relative as relative2, resolve as resolve2 } from "path";
-function assertSafeRelativePath2(path) {
-  if (isAbsolute2(path) || path.split(/[\\/]+/).includes("..")) {
-    throw new TypeError(`Scripted agent file path must stay inside rootDir: ${path}`);
-  }
-}
-async function writeFiles2(rootDir, files) {
-  if (!files || Object.keys(files).length === 0) return;
-  if (!rootDir) {
-    throw new TypeError("Scripted agent files require a rootDir");
-  }
-  const root = resolve2(rootDir);
-  for (const [name, contents] of Object.entries(files)) {
-    assertSafeRelativePath2(name);
-    const target = resolve2(root, name);
-    const rel = relative2(root, target);
-    if (rel.startsWith("..") || isAbsolute2(rel)) {
-      throw new TypeError(`Scripted agent file path must stay inside rootDir: ${name}`);
-    }
-    await mkdir2(dirname2(target), { recursive: true });
-    await writeFile(target, contents);
-  }
+init_virtualClock();
+function abortableDelay(ms, signal) {
+  return new Promise((resolve3, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      const error = new Error("Scripted agent aborted during hang");
+      error.name = "AbortError";
+      reject(error);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve3();
+    }, ms);
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 function scriptedAgent(vector, options = {}) {
   const clock = options.clock ?? createVirtualClock();
@@ -4266,19 +4282,7 @@ function scriptedAgent(vector, options = {}) {
         const ms = result.ms ?? 6e4;
         if (clock.mode === "real") {
           const signal = args.abortSignal;
-          await Promise.race([
-            clock.advance(ms),
-            signal ? new Promise((_, reject) => {
-              const onAbort = () => {
-                const err = new Error("Scripted agent aborted during hang");
-                err.name = "AbortError";
-                reject(err);
-              };
-              if (signal.aborted) onAbort();
-              else signal.addEventListener("abort", onAbort, { once: true });
-            }) : new Promise(() => {
-            })
-          ]);
+          await abortableDelay(ms, signal);
         } else {
           await clock.advance(ms);
         }
@@ -4308,7 +4312,7 @@ function scriptedAgent(vector, options = {}) {
         }
         output = parsed.data;
       }
-      await writeFiles2(rootDir, result.files);
+      await writeFakeAgentFiles(rootDir, result.files);
       const generated = {};
       if (output !== void 0) generated.output = output;
       if (typeof result.text === "string") generated.text = result.text;
@@ -5250,26 +5254,26 @@ var realDbAdapter = (options) => {
 init_Harness();
 import { realpathSync } from "fs";
 import { fileURLToPath } from "url";
-import { dirname as dirname3, resolve as resolve3 } from "path";
+import { dirname as dirname2, resolve as resolve2 } from "path";
 var repositoryRunner = () => {
-  let dir = dirname3(fileURLToPath(import.meta.url));
+  let dir = dirname2(fileURLToPath(import.meta.url));
   for (let depth = 0; depth < 8; depth++) {
     try {
-      return realpathSync(resolve3(dir, "e2e/harness/engineChildRunner.ts"));
+      return realpathSync(resolve2(dir, "e2e/harness/engineChildRunner.ts"));
     } catch {
-      dir = resolve3(dir, "..");
+      dir = resolve2(dir, "..");
     }
   }
   throw Object.assign(new Error("real process admission requires the repository-owned engineChildRunner"), {
     code: "ADMISSION_FAILED"
   });
 };
-var exited = (child, budgetMs = 1e3) => new Promise((resolve4) => {
-  if (child.exitCode !== null || child.signalCode !== null) return resolve4();
+var exited = (child, budgetMs = 1e3) => new Promise((resolve3) => {
+  if (child.exitCode !== null || child.signalCode !== null) return resolve3();
   let timer;
   const done = () => {
     if (timer) clearTimeout(timer);
-    resolve4();
+    resolve3();
   };
   child.once("exit", done);
   timer = setTimeout(done, budgetMs);
@@ -5303,7 +5307,7 @@ var verifyProtocol = async (resource, expectedRunner, nonce, marker) => {
   });
   const deadline = Date.now() + 250;
   while (!stdout.includes(`${marker}:${nonce}`) && Date.now() < deadline)
-    await new Promise((resolve4) => setTimeout(resolve4, 10));
+    await new Promise((resolve3) => setTimeout(resolve3, 10));
   const nonceInArgv = args.some((arg) => String(arg) === nonce);
   const identityVerified = Boolean(resource.child) && verifiedChild(resource, expectedRunner, nonce) && Number.isInteger(resource.pid) && executable === "bun" && productionRunner && nonceInArgv;
   const markerVerified = stdout.includes(`${marker}:${nonce}`) || identityVerified && await resource.handshake(nonce) === nonce;
@@ -5432,7 +5436,7 @@ var realProcessAdapter = (options) => {
         const deadline = Date.now() + 3e4;
         let inFlight = (await spawned.observeDurableState()).effectApplied;
         while (!inFlight && Date.now() < deadline && spawned.child.exitCode === null && spawned.child.signalCode === null) {
-          await new Promise((resolve4) => setTimeout(resolve4, 50));
+          await new Promise((resolve3) => setTimeout(resolve3, 50));
           inFlight = (await spawned.observeDurableState()).effectApplied;
         }
         if (!inFlight || spawned.child.exitCode !== null || spawned.child.signalCode !== null)
@@ -5532,9 +5536,8 @@ async function runMaybeEffect(value) {
   if (typeof value.then === "function") {
     return value;
   }
-  if (typeof value.pipe === "function") {
-    const effectMod = await import("effect");
-    const Effect6 = effectMod.Effect;
+  const { Effect: Effect6 } = await import("effect");
+  if (Effect6.isEffect(value)) {
     return Effect6.runPromise(value);
   }
   return value;
@@ -5598,6 +5601,10 @@ async function tallyNodeStates(adapter, runId) {
       case "waiting-approval":
       case "waiting-event":
       case "waiting-timer":
+      case "waiting-quota":
+      case "bound":
+      case "waiting-bound":
+      case "bound-stale":
         t.blocked += 1;
         break;
       default:
@@ -5619,21 +5626,23 @@ async function expectSteerConsumed(adapter, runId, opts) {
       `Expected at least ${min} consumed steer(s)${opts?.nodeId ? ` for ${opts.nodeId}` : ""}, got ${filtered.length}`
     );
   }
-  if (adapter.listEventsByType) {
-    const events = await listEventsByType(adapter, runId, "SteerConsumed");
-    if (events.length < min) {
-      throw new Error(`Expected SteerConsumed events >= ${min}, got ${events.length}`);
-    }
+  if (!adapter.listEventsByType) {
+    throw new Error("adapter.listEventsByType required for expectSteerConsumed");
+  }
+  const events = await listEventsByType(adapter, runId, "SteerConsumed");
+  if (events.length < min) {
+    throw new Error(`Expected SteerConsumed events >= ${min}, got ${events.length}`);
   }
 }
 async function expectEventCount(adapter, runId, type, count) {
+  if (!adapter.listEventsByType) throw new Error("adapter.listEventsByType required for expectEventCount");
   const events = await listEventsByType(adapter, runId, type);
   if (events.length !== count) {
     throw new Error(`Expected ${count} ${type} event(s), got ${events.length}`);
   }
 }
 function expectSoftPinBoard(openedNodeIds, opts = {}) {
-  const workerRe = opts.workerPattern ?? /(?:^|[/:._-])(?:worker|fix|shard|leaf)[-_]?\d+$/i;
+  const workerRe = opts.workerPattern ?? /(?:^|[/:._-])(?:worker|fix|shard|leaf|item)[-_]?\d+$/i;
   const maxStages = opts.maxStages ?? 1;
   const allowedFailWorkers = new Set(opts.mustInclude ?? []);
   const workers = openedNodeIds.filter((id) => workerRe.test(id));
@@ -5686,7 +5695,7 @@ async function tryCreateHerdrBridge(opts) {
     if (typeof cliPath !== "string" || cliPath === "") {
       throw new Error("tryCreateHerdrBridge: cliPath is required when stubPanes=false (path to apps/cli/src/index.js)");
     }
-    const bin = process.execPath;
+    const bin = process.versions.bun ? process.execPath : "bun";
     const dbFile = typeof opts.cwd === "string" && opts.cwd !== "" ? `${opts.cwd.replace(/\/$/, "")}/smithers.db` : "smithers.db";
     paneCommands.overviewCommand = () => {
       const argv = [bin, cliPath, "top", "--db", dbFile];
@@ -5793,7 +5802,7 @@ async function snapshotHerdrWorkspace(client, opts) {
   const list = await client.tryCall("workspace.list", {});
   const workspaces = list?.workspaces ?? [];
   const ws = workspaces.find(
-    (w) => typeof w.label === "string" && (w.label === opts.workspaceLabel || w.label.endsWith(` ${opts.runId}`) || w.label.includes(opts.runId))
+    (w) => typeof w.label === "string" && (w.label === opts.workspaceLabel || w.label.replace(/^[✓✗◻]\s+/, "").endsWith(` ${opts.runId}`))
   );
   if (!ws || typeof ws.workspace_id !== "string") {
     return null;
@@ -5849,7 +5858,7 @@ async function tryCloseHerdrWorkspacesForRun(client, runId) {
   const list = await client.tryCall("workspace.list", {});
   let n = 0;
   for (const w of list?.workspaces ?? []) {
-    if (typeof w.label === "string" && w.label.includes(runId) && typeof w.workspace_id === "string") {
+    if (typeof w.label === "string" && w.label.replace(/^[✓✗◻]\s+/, "").endsWith(` ${runId}`) && typeof w.workspace_id === "string") {
       await client.tryCall("workspace.close", { workspace_id: w.workspace_id });
       n += 1;
     }
@@ -5873,12 +5882,18 @@ function sleep(ms) {
 }
 async function runCampaign(options) {
   const log = options.log ?? ((msg) => console.log(msg));
-  const repeat = Math.max(1, options.repeat ?? 1);
+  const repeat = options.repeat ?? 1;
+  if (!Number.isSafeInteger(repeat) || repeat < 1) {
+    throw new TypeError(`campaign repeat must be a positive safe integer, got ${String(repeat)}`);
+  }
   const onFail = options.onFail ?? "stop";
   const herdr = options.herdr === true;
   const campaignId = `camp-${Date.now().toString(36)}`;
   let scenarios = options.scenarios;
   if (options.only?.length) {
+    const known = new Set(scenarios.map((scenario2) => scenario2.id));
+    const unknown = options.only.filter((id) => !known.has(id));
+    if (unknown.length > 0) throw new TypeError(`Unknown campaign scenario id(s): ${unknown.join(", ")}`);
     const allow = new Set(options.only);
     scenarios = scenarios.filter((s) => allow.has(s.id));
   }
@@ -5905,7 +5920,7 @@ async function runCampaign(options) {
           campaignId,
           log
         });
-        if (options.requireHerdr && herdr && out && out.herdr === false) {
+        if (options.requireHerdr && herdr && out?.herdr !== true) {
           throw new Error(
             `herdr required but scenario ${scenario2.id} did not attach a mirror (is herdr --session ${options.herdrSession ?? "default"} running?)`
           );

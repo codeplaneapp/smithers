@@ -36,6 +36,22 @@ import {
 function incrementGauge(metric, delta) {
   return Metric.value(metric).pipe(Effect.flatMap((state) => Metric.update(metric, Number(state.value) + delta)));
 }
+
+function approvalTarget(row) {
+  try {
+    const request = JSON.parse(row?.requestJson ?? "null");
+    if (
+      request?.kind === "ReplayUnsafeApproval" &&
+      typeof request.nodeId === "string" &&
+      Number.isSafeInteger(request.iteration)
+    ) {
+      return { nodeId: request.nodeId, iteration: request.iteration };
+    }
+  } catch {
+    // Malformed metadata uses the approval row's direct target.
+  }
+  return { nodeId: row.nodeId, iteration: row.iteration };
+}
 import {
   assertOptionalStringMaxLength,
   assertPositiveFiniteInteger,
@@ -1834,27 +1850,26 @@ export class SmithersDb {
       });
     }
     const normalizedLimit = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 500;
-    return this.read(`list resumable approval runs ${status}`, () =>
-      this.internalStorage.queryAll(
-        `SELECT r.*
-           FROM _smithers_runs r
-           WHERE r.status = ?
-             AND (r.heartbeat_at_ms IS NULL OR r.heartbeat_at_ms < ?)
-             AND EXISTS (
-               SELECT 1
-               FROM _smithers_approvals a
-               JOIN _smithers_nodes n
-                 ON a.run_id = n.run_id
-                AND a.node_id = n.node_id
-                AND a.iteration = n.iteration
-               WHERE a.run_id = r.run_id
-                 AND a.status IN ('approved', 'denied')
-                 AND n.state IN ('pending', 'failed')
-             )
-           ORDER BY r.created_at_ms DESC, r.run_id ASC
-           LIMIT ?`,
-        [status, staleBeforeMs, normalizedLimit],
-      ),
+    const self = this;
+    return runnableEffect(
+      Effect.gen(function* () {
+        const candidates = yield* self.read(`list resumable approval run candidates ${status}`, () =>
+          self.internalStorage.queryAll(
+            `SELECT r.*
+               FROM _smithers_runs r
+               WHERE r.status = ?
+                 AND (r.heartbeat_at_ms IS NULL OR r.heartbeat_at_ms < ?)
+               ORDER BY r.created_at_ms DESC, r.run_id ASC`,
+            [status, staleBeforeMs],
+          ),
+        );
+        const eligible = [];
+        for (const run of candidates) {
+          if ((yield* self.listResumableDecidedApprovals(run.runId)).length > 0) eligible.push(run);
+          if (eligible.length >= normalizedLimit) break;
+        }
+        return eligible;
+      }),
     );
   }
   /**
@@ -4943,20 +4958,16 @@ export class SmithersDb {
    * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
    */
   listResumableDecidedApprovals(runId) {
-    return this.read(`list resumable decided approvals ${runId}`, () =>
-      this.internalStorage.queryAll(
-        `SELECT a.*
-         FROM _smithers_approvals a
-         JOIN _smithers_nodes n
-           ON a.run_id = n.run_id
-          AND a.node_id = n.node_id
-          AND a.iteration = n.iteration
-         WHERE a.run_id = ?
-           AND a.status IN ('approved', 'denied')
-           AND n.state IN ('pending', 'failed')`,
-        [runId],
-        { booleanColumns: ["autoApproved"] },
-      ),
+    const self = this;
+    return runnableEffect(
+      Effect.gen(function* () {
+        const [approvals, nodes] = yield* Effect.all([self.listAllDecidedApprovals(runId), self.listNodes(runId)]);
+        const stateByTarget = new Map(nodes.map((node) => [`${node.nodeId}\0${node.iteration}`, node.state]));
+        return approvals.filter((approval) => {
+          const target = approvalTarget(approval);
+          return ["pending", "failed"].includes(stateByTarget.get(`${target.nodeId}\0${target.iteration}`));
+        });
+      }),
     );
   }
   /**

@@ -28,7 +28,7 @@ export const TAIL_POLL_INTERVAL_MS = 500;
 
 // Derived run states that mean the run is still producing events, so --follow
 // should keep tailing. Mirrors the logs/watch follow-active set.
-const TAIL_ACTIVE_STATES = new Set(["running", "waiting-approval", "waiting-event", "waiting-timer"]);
+const TAIL_ACTIVE_STATES = new Set(["running", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota"]);
 
 // Per-chunk / high-frequency event types the pretty run-level overview omits so
 // it stays one concise line per significant event. NodeOutput is handled
@@ -187,9 +187,9 @@ export function spawnSteer(options) {
     argv.push("--yes");
   }
   if (typeof options.message === "string" && options.message !== "") {
-    // Trailing positional (after the node option) — `steer` reads it as the
-    // steer message. Passed as a single argv token, so its spaces survive.
-    argv.push(options.message);
+    // An option assignment preserves messages that begin with '-' without
+    // letting the CLI parser reinterpret them as takeover/other flags.
+    argv.push(`--message=${options.message}`);
   }
   try {
     // Message steers default to piped stdio so an alt-screen node HUD is not
@@ -275,6 +275,7 @@ export function attachTailKeyControls(options) {
   let stopped = false;
   let rawModeSet = false;
   let takingOver = false;
+  let takeoverPromise = Promise.resolve();
   // In-pane steer input: while `inputMode` is set the tail collects a line of
   // text ("steer: _") instead of treating keys as controls.
   let inputMode = false;
@@ -387,25 +388,29 @@ export function attachTailKeyControls(options) {
       },
     });
     if (child && typeof child.on === "function") {
-      child.on("close", (code) => {
-        takingOver = false;
-        rearmKeys();
-        if (dock) {
-          dock({
-            mode: "idle",
-            note:
-              code === 0
-                ? inHerdrPane
-                  ? "hijack tab opened — switch tabs to drive"
-                  : "hijack finished"
-                : "hijack failed — see banner",
-          });
-        }
-      });
-      child.on("error", () => {
-        takingOver = false;
-        rearmKeys();
-        if (dock) dock({ mode: "idle", note: "hijack spawn failed" });
+      takeoverPromise = new Promise((resolveTakeover) => {
+        let settled = false;
+        const finishTakeover = (code, failed = false) => {
+          if (settled) return;
+          settled = true;
+          resolveTakeover();
+          takingOver = false;
+          rearmKeys();
+          if (dock) {
+            dock({
+              mode: "idle",
+              note: failed
+                ? "hijack spawn failed"
+                : code === 0
+                  ? inHerdrPane
+                    ? "hijack tab opened — switch tabs to drive"
+                    : "hijack finished"
+                  : "hijack failed — see banner",
+            });
+          }
+        };
+        child.on("close", (code) => finishTakeover(code));
+        child.on("error", () => finishTakeover(undefined, true));
       });
     } else {
       takingOver = false;
@@ -565,6 +570,7 @@ export function attachTailKeyControls(options) {
     emit(`${TAIL_STEER_HINT}\n`);
   }
   return {
+    waitForTakeover: () => takeoverPromise,
     stop() {
       if (stopped) {
         return;
@@ -666,18 +672,20 @@ export function lingerUntilClosed(options = {}) {
               onOutput: emit,
             });
             if (child && typeof child.on === "function") {
-              child.on("close", (code) => {
+              let settled = false;
+              const finishTakeover = (code, error) => {
+                if (settled) return;
+                settled = true;
                 takingOver = false;
                 rearmKeys();
-                if (code && code !== 0) {
+                if (error) {
+                  emit(`hijack error: ${error instanceof Error ? error.message : String(error)}\n`);
+                } else if (code && code !== 0) {
                   emit(`hijack exited with code ${code}\n`);
                 }
-              });
-              child.on("error", (err) => {
-                takingOver = false;
-                rearmKeys();
-                emit(`hijack error: ${err instanceof Error ? err.message : String(err)}\n`);
-              });
+              };
+              child.on("close", (code) => finishTakeover(code));
+              child.on("error", (err) => finishTakeover(undefined, err));
             } else {
               takingOver = false;
               rearmKeys();

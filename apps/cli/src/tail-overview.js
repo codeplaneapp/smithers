@@ -30,6 +30,27 @@ export const OVERVIEW_QUEUE_SUMMARY_THRESHOLD = 8;
 /** Cap on the number of CTA lines appended, so a large fan-out cannot flood the board. */
 export const MAX_OVERVIEW_CTAS = 6;
 
+const OVERVIEW_ACTIVE_RUN_STATES = new Set([
+  "running",
+  "in-progress",
+  "waiting-approval",
+  "waiting-event",
+  "waiting-timer",
+  "waiting-quota",
+  "paused",
+]);
+
+/** Keep only the highest iteration for each logical node. */
+function currentOverviewNodes(nodes) {
+  const byId = new Map();
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    if (!node?.nodeId) continue;
+    const previous = byId.get(node.nodeId);
+    if (!previous || (node.iteration ?? 0) >= (previous.iteration ?? 0)) byId.set(node.nodeId, node);
+  }
+  return [...byId.values()];
+}
+
 /**
  * @param {string | null | undefined} state
  * @returns {string}
@@ -94,7 +115,7 @@ export function colorOverviewState(state, label) {
  * @returns {string}
  */
 export function overviewSignature(status, nodes, digestSig = "", fleetSig = "") {
-  const parts = (Array.isArray(nodes) ? nodes : [])
+  const parts = currentOverviewNodes(nodes)
     .map((n) => `${n.nodeId}\u0000${n.iteration ?? 0}\u0000${n.state ?? ""}\u0000${n.lastAttempt ?? ""}`)
     .sort();
   return `${status ?? ""}\u0001${parts.join("\u0001")}\u0001${digestSig}\u0001${fleetSig}`;
@@ -115,7 +136,7 @@ export function overviewSignature(status, nodes, digestSig = "", fleetSig = "") 
  * @returns {import("@smthrs/herdr").buildDigestBlock extends Function ? Parameters<typeof buildDigestBlock>[0] : any}
  */
 export function buildDigestInputFromOverview(input) {
-  const nodes = Array.isArray(input.nodes) ? input.nodes : [];
+  const nodes = currentOverviewNodes(input.nodes);
   const tallies = tallyNodes(nodes);
   const activeNodeIds = nodes.filter((n) => n.state === "in-progress").map((n) => n.nodeId);
   const attentionLines = [];
@@ -193,7 +214,7 @@ export function tallyNodes(nodes) {
  * @returns {string}
  */
 export function buildOverviewBlock(input) {
-  const nodes = Array.isArray(input.nodes) ? input.nodes : [];
+  const nodes = currentOverviewNodes(input.nodes);
   const pendingApprovals = Array.isArray(input.pendingApprovals) ? input.pendingApprovals : [];
   const queuedSteers = Array.isArray(input.queuedSteers) ? input.queuedSteers : [];
   const total = nodes.length;
@@ -237,7 +258,7 @@ export function buildOverviewBlock(input) {
     lines.push(pc.dim(`  ${"node".padEnd(nameWidth)}  ${"state".padEnd(stateWidth)}  attempt`));
   }
   for (const n of listed) {
-    const attempt = typeof n.lastAttempt === "number" ? n.lastAttempt : 1;
+    const attempt = typeof n.lastAttempt === "number" ? n.lastAttempt : 0;
     const stateLabel = overviewStateLabel(n.state);
     const stateCol = colorOverviewState(n.state, stateLabel.padEnd(stateWidth));
     lines.push(`  ${n.nodeId.padEnd(nameWidth)}  ${stateCol}  ${attempt}`);
@@ -283,15 +304,17 @@ export function buildOverviewBlock(input) {
       addGate(n.nodeId, n.iteration ?? 0);
     }
   }
+  const activeRun = OVERVIEW_ACTIVE_RUN_STATES.has(String(input.status ?? ""));
   for (const n of nodes) {
     if (n.state === "failed" && ctas.length < MAX_OVERVIEW_CTAS) {
-      // One-key first: in the failed node's own tab press `s` to steer it with
-      // a steer (its retry consumes it) or `h` to hijack the run. The full
-      // machine-readable command follows as a secondary dim line.
-      ctas.push(`  ▶ steer    ${n.nodeId} failed — in its node tab press s to steer · h to hijack, or run:`);
-      ctas.push(
-        `             ${pc.dim(`smithers steer ${input.runId} --node ${n.nodeId} "…"  ·  smithers steer ${input.runId} --node ${n.nodeId} --takeover`)}`,
-      );
+      if (activeRun) {
+        ctas.push(`  ▶ steer    ${n.nodeId} failed — in its node tab press s to steer · h to hijack, or run:`);
+        ctas.push(
+          `             ${pc.dim(`smithers steer ${input.runId} --node ${n.nodeId} "…"  ·  smithers steer ${input.runId} --node ${n.nodeId} --takeover`)}`,
+        );
+      } else {
+        ctas.push(`  ▶ hijack   ${n.nodeId} failed — smithers steer ${input.runId} --node ${n.nodeId} --takeover`);
+      }
     }
   }
   lines.push(...ctas);

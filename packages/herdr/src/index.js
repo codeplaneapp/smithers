@@ -12,6 +12,8 @@
 /** @typedef {import("./HerdrProtocol.ts").HerdrReadSource} HerdrReadSource */
 /** @typedef {import("./HerdrProtocol.ts").HerdrReadFormat} HerdrReadFormat */
 /** @typedef {import("./HerdrProtocol.ts").HerdrSplitDirection} HerdrSplitDirection */
+/** @typedef {import("./HerdrProtocol.ts").HerdrToastPosition} HerdrToastPosition */
+/** @typedef {import("./HerdrProtocol.ts").HerdrNotificationSound} HerdrNotificationSound */
 /** @typedef {import("./HerdrProtocol.ts").HerdrOutputMatch} HerdrOutputMatch */
 /** @typedef {import("./HerdrProtocol.ts").HerdrPong} HerdrPong */
 /** @typedef {import("./HerdrProtocol.ts").HerdrServerCapabilities} HerdrServerCapabilities */

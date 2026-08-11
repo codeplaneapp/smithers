@@ -149,20 +149,6 @@ type SignalRow$1 = {
     receivedBy: string | null;
 };
 
-type SteerRow$1 = {
-    steerId: string;
-    runId: string;
-    nodeId: string;
-    message: string;
-    status: string;
-    author: string | null;
-    createdAtMs: number;
-    consumedAtMs: number | null;
-    consumedByAttempt: number | null;
-    consumedByIteration: number | null;
-    expiredAtMs: number | null;
-};
-
 type RunRow$1 = {
     runId: string;
     parentRunId: string | null;
@@ -200,6 +186,20 @@ type PendingHumanRequestRow$1 = HumanRequestRow$1 & {
     workflowName: string | null;
     runStatus: string | null;
     nodeLabel: string | null;
+};
+
+type SteerRow$1 = {
+    steerId: string;
+    runId: string;
+    nodeId: string;
+    message: string;
+    status: string;
+    author: string | null;
+    createdAtMs: number;
+    consumedAtMs: number | null;
+    consumedByAttempt: number | null;
+    consumedByIteration: number | null;
+    expiredAtMs: number | null;
 };
 
 type NodeRow$1 = {
@@ -918,11 +918,15 @@ declare class SmithersDb {
      */
     listStaleRunningRuns(staleBeforeMs: number, limit?: number): RunnableEffect<StaleRunRecord[], SmithersError$1>;
     /**
-   * @param {"waiting-event" | "waiting-approval"} status
-   * @param {number} staleBeforeMs
-   * @param {number} [limit]
-   * @returns {RunnableEffect<RunRow[], SmithersError>}
-   */
+     * List stale parked runs that still have at least one decided approval whose
+     * node is actionable. The EXISTS predicate deduplicates runs and, critically,
+     * applies approval/node eligibility before ORDER BY/LIMIT so an ineligible
+     * newer run cannot crowd an eligible run out of the supervisor page.
+     * @param {"waiting-event" | "waiting-approval"} status
+     * @param {number} staleBeforeMs
+     * @param {number} [limit]
+     * @returns {RunnableEffect<RunRow[], SmithersError>}
+     */
     listResumableApprovalRuns(status: "waiting-event" | "waiting-approval", staleBeforeMs: number, limit?: number): RunnableEffect<RunRow[], SmithersError$1>;
     /**
      * @param {{ runId: string; expectedStatus?: string; expectedRuntimeOwnerId: string | null; expectedHeartbeatAtMs: number | null; staleBeforeMs: number; claimOwnerId: string; claimHeartbeatAtMs: number; requireStale?: boolean; }} params
@@ -1344,7 +1348,12 @@ declare class SmithersDb {
      * @returns {RunnableEffect<SignalRow[], SmithersError>}
      */
     listSignals(runId: string, query?: SignalQuery): RunnableEffect<SignalRow[], SmithersError$1>;
-    /** Insert a queued steer without publishing an event. */
+    /**
+     * Insert a queued steer. Idempotent on the (unique) steer id so a
+     * retried enqueue does not create a duplicate row.
+     * @param {{ steerId: string; runId: string; nodeId: string; message: string; author?: string | null; createdAtMs: number; status?: string; }} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     enqueueSteer(row: {
         steerId: string;
         runId: string;
@@ -1354,7 +1363,16 @@ declare class SmithersDb {
         createdAtMs: number;
         status?: string;
     }): RunnableEffect<void, SmithersError$1>;
-    /** Atomically insert a queued steer and its SteerQueued event. */
+    /**
+     * Atomically publish a queued steer and its durable SteerQueued event. The
+     * insert's own RETURNING verdict decides event ownership: a retry with the
+     * same steerId is a no-op, while an event failure rolls the row back so the
+     * next retry can publish both facts together.
+     * @param {{ steerId: string; runId: string; nodeId: string; message: string; author?: string | null; createdAtMs: number; status?: string; }} row
+     * @param {{ runId: string; timestampMs: number; type: "SteerQueued"; payloadJson: string; }} eventRow
+     * @param {{ requireActiveTarget?: boolean }} [options]
+     * @returns {RunnableEffect<boolean, SmithersError>}
+     */
     enqueueSteerWithEvent(row: {
         steerId: string;
         runId: string;
@@ -1371,15 +1389,46 @@ declare class SmithersDb {
     }, options?: {
         requireActiveTarget?: boolean;
     }): RunnableEffect<boolean, SmithersError$1>;
+    /**
+     * List the queued (not-yet-consumed, not-expired) steers targeting one node,
+     * oldest first. This is the single hot-path read at agent-generate assembly;
+     * it is served by `_smithers_steers_queued_idx (run_id, node_id, status,
+     * created_at_ms)`.
+     * @param {string} runId
+     * @param {string} nodeId
+     * @returns {RunnableEffect<SteerRow[], SmithersError>}
+     */
     listQueuedSteers(runId: string, nodeId: string): RunnableEffect<SteerRow[], SmithersError$1>;
+    /**
+     * List every steer for a run (any status), oldest first, for CLI/inspect.
+     * @param {string} runId
+     * @param {{ nodeId?: string }} [query]
+     * @returns {RunnableEffect<SteerRow[], SmithersError>}
+     */
     listSteers(runId: string, query?: {
         nodeId?: string;
     }): RunnableEffect<SteerRow[], SmithersError$1>;
+    /**
+     * Mark a queued steer consumed by a specific attempt/iteration. The
+     * `status = 'queued'` guard makes consumption idempotent: a re-run cannot
+     * re-consume an already-consumed (or expired) steer.
+     * @param {string} steerId
+     * @param {{ consumedAtMs: number; consumedByAttempt: number; consumedByIteration: number; }} decision
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     markSteerConsumed(steerId: string, decision: {
         consumedAtMs: number;
         consumedByAttempt: number;
         consumedByIteration: number;
     }): RunnableEffect<void, SmithersError$1>;
+    /**
+     * Mark a queued steer expired (its target reached a terminal state with no
+     * further generate call). Guarded on `status = 'queued'` so an already
+     * consumed steer is never overwritten.
+     * @param {string} steerId
+     * @param {number} expiredAtMs
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
     markSteerExpired(steerId: string, expiredAtMs: number): RunnableEffect<void, SmithersError$1>;
     /**
      * @param {Record<string, unknown>} row
@@ -1585,6 +1634,70 @@ declare class SmithersDb {
      */
     listAgentProcesses(): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
+     * Persist one attempt's token usage so a run total is a single SUM instead of
+     * a replay of every `TokenUsageReported` payload in the event log (#1464
+     * AWF-6, #1436). Keyed by attempt identity and written as an upsert, so a
+     * provider that re-reports a cumulative running total for the same attempt
+     * replaces its row rather than inflating the total.
+     *
+     * @param {{
+     *   runId: string;
+     *   nodeId: string;
+     *   iteration?: number | null;
+     *   attempt?: number | null;
+     *   model?: string | null;
+     *   agent?: string | null;
+     *   inputTokens?: number | null;
+     *   outputTokens?: number | null;
+     *   cacheReadTokens?: number | null;
+     *   cacheWriteTokens?: number | null;
+     *   reasoningTokens?: number | null;
+     *   updatedAtMs: number;
+     * }} row
+     * @returns {RunnableEffect<void, SmithersError>}
+     */
+    recordRunTokenUsage(row: {
+        runId: string;
+        nodeId: string;
+        iteration?: number | null;
+        attempt?: number | null;
+        model?: string | null;
+        agent?: string | null;
+        inputTokens?: number | null;
+        outputTokens?: number | null;
+        cacheReadTokens?: number | null;
+        cacheWriteTokens?: number | null;
+        reasoningTokens?: number | null;
+        updatedAtMs: number;
+    }): RunnableEffect<void, SmithersError$1>;
+    /**
+     * Authoritative per-run token total, read straight from `_smithers_run_usage`.
+     * Always resolves (zeros when the run reported no usage) so callers never have
+     * to distinguish "no usage" from "run not found" (#1464 AWF-6).
+     *
+     * @param {string} runId
+     * @returns {RunnableEffect<{
+     *   runId: string;
+     *   inputTokens: number;
+     *   outputTokens: number;
+     *   cacheReadTokens: number;
+     *   cacheWriteTokens: number;
+     *   reasoningTokens: number;
+     *   totalTokens: number;
+     *   attempts: number;
+     * }, SmithersError>}
+     */
+    getRunTokenUsage(runId: string): RunnableEffect<{
+        runId: string;
+        inputTokens: number;
+        outputTokens: number;
+        cacheReadTokens: number;
+        cacheWriteTokens: number;
+        reasoningTokens: number;
+        totalTokens: number;
+        attempts: number;
+    }, SmithersError$1>;
+    /**
      * Drop every registry row owned by one engine pid (graceful engine exit).
      * @param {number} enginePid
      * @returns {RunnableEffect<void, SmithersError>}
@@ -1600,6 +1713,24 @@ declare class SmithersDb {
      * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
      */
     listDecidedApprovals(runId: string): RunnableEffect<ApprovalRow[], SmithersError$1>;
+    /**
+     * Decided approvals whose gate node is still *actionable* — the node is either
+     * `pending` (approved, re-armed to run) or `failed` (denied via the default
+     * onDeny:'fail', not yet consumed). This is the set the supervisor must resume
+     * a detached run for: an approved gate needs its task executed, and a denied
+     * gate needs the engine booted so the denial actually propagates.
+     *
+     * Unlike {@link listDecidedApprovals} (node = 'pending' only) it also catches
+     * a denied gate, whose node the engine moves to `failed` — the exact state a
+     * real `denyNode` produces, which the pending-only filter silently drops so a
+     * denied detached run would otherwise never resume. Unlike
+     * {@link listAllDecidedApprovals} it excludes finished/skipped gates (already
+     * consumed), so a run whose only decided approval was long since executed is
+     * not perpetually re-resumed every time it parks and goes stale.
+     * @param {string} runId
+     * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+     */
+    listResumableDecidedApprovals(runId: string): RunnableEffect<ApprovalRow[], SmithersError$1>;
     /**
      * Returns all decided approvals for a run (approved or denied), regardless of
      * node state. Used by why-diagnosis so denied gates (node state = 'failed')
@@ -2024,10 +2155,11 @@ declare class SmithersDb {
      */
     listStaleRunningRunsEffect(staleBeforeMs: number, limit?: number): RunnableEffect<StaleRunRecord[], SmithersError$1>;
     /**
-   * @param {"waiting-event" | "waiting-approval"} status
-   * @param {number} staleBeforeMs
-   * @param {number} [limit]
-   */
+     * @param {"waiting-event" | "waiting-approval"} status
+     * @param {number} staleBeforeMs
+     * @param {number} [limit]
+     * @returns {RunnableEffect<RunRow[], SmithersError>}
+     */
     listResumableApprovalRunsEffect(status: "waiting-event" | "waiting-approval", staleBeforeMs: number, limit?: number): RunnableEffect<RunRow[], SmithersError$1>;
     /**
      * @param {Parameters<SmithersDb["claimRunForResume"]>[0]} params
@@ -2119,6 +2251,11 @@ declare class SmithersDb {
      * @param {string} runId
      * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
      */
+    listResumableDecidedApprovalsEffect(runId: string): RunnableEffect<ApprovalRow[], SmithersError$1>;
+    /**
+     * @param {string} runId
+     * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+     */
     listAllDecidedApprovalsEffect(runId: string): RunnableEffect<ApprovalRow[], SmithersError$1>;
     /**
      * @param {string} runId
@@ -2166,11 +2303,11 @@ type EvalCaseResultRow = EvalCaseResultRow$1;
 type EvalSuiteRow = EvalSuiteRow$1;
 type IntegrationDeliveryClaim = IntegrationDeliveryClaim$1;
 type NodeRow = NodeRow$1;
+type SteerRow = SteerRow$1;
 type PendingHumanRequestRow = PendingHumanRequestRow$1;
 type RunAncestryRow = RunAncestryRow$1;
 type RunRow = RunRow$1;
 type SignalRow = SignalRow$1;
-type SteerRow = SteerRow$1;
 type StaleRunRecord = StaleRunRecord$1;
 type AlertRow = AlertRow$1;
 type AlertStatus = AlertStatus$1;
@@ -3002,6 +3139,223 @@ declare const smithersOutputProvenance: drizzle_orm_sqlite_core.SQLiteTableWithC
             data: number;
             driverParam: number;
             notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+    };
+    dialect: "sqlite";
+}>;
+
+/**
+ * Durable steering inbox: fire-and-forget user messages queued against a
+ * running node, consumed into that node's next agent `generate()` call (first
+ * start, retry attempt, or loop iteration) and injected as a user turn before
+ * the structured-output schema wrap. A queued steer that is never consumed is
+ * expired deterministically when its run reaches a terminal state. The message
+ * text is captured into the consuming attempt's persisted `agentConversation`,
+ * so this table is only the *pre-consumption* inbox — replay reproduces the
+ * injected turn from the attempt metadata, not from this (mutable) table.
+ */
+declare const smithersSteers: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
+    name: "_smithers_steers";
+    schema: undefined;
+    columns: {
+        steerId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "steer_id";
+            tableName: "_smithers_steers";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: true;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        runId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "run_id";
+            tableName: "_smithers_steers";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        nodeId: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "node_id";
+            tableName: "_smithers_steers";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        message: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "message";
+            tableName: "_smithers_steers";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        status: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "status";
+            tableName: "_smithers_steers";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        author: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "author";
+            tableName: "_smithers_steers";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        createdAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "created_at_ms";
+            tableName: "_smithers_steers";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        consumedAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "consumed_at_ms";
+            tableName: "_smithers_steers";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        consumedByAttempt: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "consumed_by_attempt";
+            tableName: "_smithers_steers";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        consumedByIteration: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "consumed_by_iteration";
+            tableName: "_smithers_steers";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        expiredAtMs: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "expired_at_ms";
+            tableName: "_smithers_steers";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: false;
             hasDefault: false;
             isPrimaryKey: false;
             isAutoincrement: false;
@@ -6543,6 +6897,25 @@ declare const smithersAttempts: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
         }, {}, {
             length: number | undefined;
         }>;
+        effort: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "effort";
+            tableName: "_smithers_attempts";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
     };
     dialect: "sqlite";
 }>;
@@ -10062,4 +10435,4 @@ type AgentCheckpointContentRow = AgentCheckpointContentRow$2;
 type AgentCheckpointRefRow = AgentCheckpointRefRow$2;
 type SchemaRegistryEntry = SchemaRegistryEntry$1;
 
-export { type AgentCheckpointContentRow, type AgentCheckpointRefRow, type AlertRow, type AlertSeverity, type AlertStatus, type AnyColumn, type ApprovalRow, type AttemptRow, type CacheRow, type CacheRowLike, type CountRow, DB_ALERT_ALLOWED_SEVERITIES, DB_ALERT_ALLOWED_STATUSES, DB_ALERT_ID_MAX_LENGTH, DB_ALERT_MESSAGE_MAX_LENGTH, DB_ALERT_POLICY_NAME_MAX_LENGTH, DB_RUN_ALLOWED_STATUSES, DB_RUN_ID_MAX_LENGTH, DB_RUN_WORKFLOW_NAME_MAX_LENGTH, type Database, type Dialect, type DocRow, type EvalCaseResultRow, type EvalSuiteRow, type EventHistoryQuery, type ExternalSqliteDescriptor, FRAME_KEYFRAME_INTERVAL, type FrameDelta, type FrameDeltaOp, type FrameEncoding, type FrameRow, type HumanRequestRow, type IntegrationDeliveryClaim, type JsonBounds, type JsonPath, type JsonPathSegment, NODE_DIFF_MAX_BYTES, NodeDiffCache, type NodeDiffCacheResult, type NodeDiffCacheRow$1 as NodeDiffCacheRow, NodeDiffTooLargeError, type NodeRow, OUTPUT_PROVENANCE_SEQ, type OutputKey, type OutputSnapshot, POSTGRES, type PendingHumanRequestRow, type RalphRow, type RunAncestryRow, type RunRow, type RunnableEffect, SQLITE, type SchemaRegistryEntry, type SignalQuery, type SignalRow, SmithersDb, type SmithersError$1 as SmithersError, SqlMessageStorage, type SqlMessageStorageEventHistoryQuery, type SqliteParam, type SqliteTransactionState, type SqliteWriteRetryOptions, type StaleRunRecord, type SteerRow, type Table, type TxidCapture, type ZodError, type _BunSQLiteDatabase, type _NodeDiffCacheRow, type _OutputKey, type _SmithersDb, type _SmithersError, applyFrameDelta, applyFrameDeltaJson, assertJsonPayloadWithinBounds, assertMaxBytes, assertMaxJsonDepth, assertMaxStringLength, assertNoReservedColumns, assertOptionalArrayMaxLength, assertOptionalStringMaxLength, assertPositiveFiniteInteger, assertPositiveFiniteNumber, beginTransactionSql, buildKeyWhere, buildOutputRow, camelToSnake, capturePostgresTransactionTxid, captureTxid, coerceOutputRowForSnapshot, columnType, createTxidCapture, describeSchemaShape, encodeFrameDelta, ensureSmithersTables, ensureSmithersTablesEffect, ensureSqlMessageStorage, ensureSqlMessageStorageEffect, getAgentOutputSchema, getJsonColumnKeys, getKeyColumns, getSmithersSchemaSignature, getSqlMessageStorage, hasActiveTxidCapture, isPostgresDb, isRealPostgresAdapter, isRetryableSqliteWriteError, jsonExtractText, loadInput, loadInputEffect, loadOutputs, loadOutputsEffect, loadRunOutputRowsEffect, normalizeFrameEncoding, openDurableSqliteDatabase, parseFrameDelta, pgRowToDrizzle, quoteIdentifier, recordCommittedTxid, runWithTxidCapture, schemaSignature, selectOutputRow, selectOutputRowEffect, serializeFrameDelta, shouldCapturePostgresTxid, smithersAgentCheckpointContents, smithersAgentCheckpoints, smithersAlerts, smithersApprovals, smithersAttempts, smithersCache, smithersCron, smithersDocs, smithersEvalCases, smithersEvalSuites, smithersEvents, smithersFrames, smithersHumanRequests, smithersIntegrationCursors, smithersIntegrationDeliveries, smithersMemoryFacts, smithersMemoryMessages, smithersMemoryNoteSupersessions, smithersMemoryNotes, smithersMemoryThreads, smithersNodeDiffs, smithersNodes, smithersOutputProvenance, smithersRalph, smithersRuns, smithersSandboxes, smithersSchemaMigrations, smithersScorers, smithersSignals, smithersTimeTravelAudit, smithersToolCallArchive, smithersToolCalls, smithersVectors, smithersWorkspaceCheckpoints, smithersWorkspaceStates, stripAutoColumns, syncZodTableSchema, syncZodTableSchemaPostgres, translateDdl, translatePlaceholders, unwrapZodType, upsertOutputRow, upsertOutputRowEffect, validateExistingOutput, validateInput, validateOutput, withSqliteWriteRetry, withSqliteWriteRetryEffect, zodSchemaColumns, zodToCreateTableSQL, zodToTable };
+export { type AgentCheckpointContentRow, type AgentCheckpointRefRow, type AlertRow, type AlertSeverity, type AlertStatus, type AnyColumn, type ApprovalRow, type AttemptRow, type CacheRow, type CacheRowLike, type CountRow, DB_ALERT_ALLOWED_SEVERITIES, DB_ALERT_ALLOWED_STATUSES, DB_ALERT_ID_MAX_LENGTH, DB_ALERT_MESSAGE_MAX_LENGTH, DB_ALERT_POLICY_NAME_MAX_LENGTH, DB_RUN_ALLOWED_STATUSES, DB_RUN_ID_MAX_LENGTH, DB_RUN_WORKFLOW_NAME_MAX_LENGTH, type Database, type Dialect, type DocRow, type EvalCaseResultRow, type EvalSuiteRow, type EventHistoryQuery, type ExternalSqliteDescriptor, FRAME_KEYFRAME_INTERVAL, type FrameDelta, type FrameDeltaOp, type FrameEncoding, type FrameRow, type HumanRequestRow, type IntegrationDeliveryClaim, type JsonBounds, type JsonPath, type JsonPathSegment, NODE_DIFF_MAX_BYTES, NodeDiffCache, type NodeDiffCacheResult, type NodeDiffCacheRow$1 as NodeDiffCacheRow, NodeDiffTooLargeError, type NodeRow, OUTPUT_PROVENANCE_SEQ, type OutputKey, type OutputSnapshot, POSTGRES, type PendingHumanRequestRow, type RalphRow, type RunAncestryRow, type RunRow, type RunnableEffect, SQLITE, type SchemaRegistryEntry, type SignalQuery, type SignalRow, SmithersDb, type SmithersError$1 as SmithersError, SqlMessageStorage, type SqlMessageStorageEventHistoryQuery, type SqliteParam, type SqliteTransactionState, type SqliteWriteRetryOptions, type StaleRunRecord, type SteerRow, type Table, type TxidCapture, type ZodError, type _BunSQLiteDatabase, type _NodeDiffCacheRow, type _OutputKey, type _SmithersDb, type _SmithersError, applyFrameDelta, applyFrameDeltaJson, assertJsonPayloadWithinBounds, assertMaxBytes, assertMaxJsonDepth, assertMaxStringLength, assertNoReservedColumns, assertOptionalArrayMaxLength, assertOptionalStringMaxLength, assertPositiveFiniteInteger, assertPositiveFiniteNumber, beginTransactionSql, buildKeyWhere, buildOutputRow, camelToSnake, capturePostgresTransactionTxid, captureTxid, coerceOutputRowForSnapshot, columnType, createTxidCapture, describeSchemaShape, encodeFrameDelta, ensureSmithersTables, ensureSmithersTablesEffect, ensureSqlMessageStorage, ensureSqlMessageStorageEffect, getAgentOutputSchema, getJsonColumnKeys, getKeyColumns, getSmithersSchemaSignature, getSqlMessageStorage, hasActiveTxidCapture, isPostgresDb, isRealPostgresAdapter, isRetryableSqliteWriteError, jsonExtractText, loadInput, loadInputEffect, loadOutputs, loadOutputsEffect, loadRunOutputRowsEffect, normalizeFrameEncoding, openDurableSqliteDatabase, parseFrameDelta, pgRowToDrizzle, quoteIdentifier, recordCommittedTxid, runWithTxidCapture, schemaSignature, selectOutputRow, selectOutputRowEffect, serializeFrameDelta, shouldCapturePostgresTxid, smithersAgentCheckpointContents, smithersAgentCheckpoints, smithersAlerts, smithersApprovals, smithersAttempts, smithersCache, smithersCron, smithersDocs, smithersEvalCases, smithersEvalSuites, smithersEvents, smithersFrames, smithersHumanRequests, smithersIntegrationCursors, smithersIntegrationDeliveries, smithersMemoryFacts, smithersMemoryMessages, smithersMemoryNoteSupersessions, smithersMemoryNotes, smithersMemoryThreads, smithersNodeDiffs, smithersNodes, smithersOutputProvenance, smithersRalph, smithersRuns, smithersSandboxes, smithersSchemaMigrations, smithersScorers, smithersSignals, smithersSteers, smithersTimeTravelAudit, smithersToolCallArchive, smithersToolCalls, smithersVectors, smithersWorkspaceCheckpoints, smithersWorkspaceStates, stripAutoColumns, syncZodTableSchema, syncZodTableSchemaPostgres, translateDdl, translatePlaceholders, unwrapZodType, upsertOutputRow, upsertOutputRowEffect, validateExistingOutput, validateInput, validateOutput, withSqliteWriteRetry, withSqliteWriteRetryEffect, zodSchemaColumns, zodToCreateTableSQL, zodToTable };

@@ -674,7 +674,37 @@ var ambiguity = (outcome, details = {}) => Object.freeze({
   details: Object.freeze({ ...details })
 });
 
+// src/virtualClock.ts
+function createVirtualClock(options = {}) {
+  const mode = options.mode === "real" ? "real" : "virtual";
+  let current = typeof options.startMs === "number" && Number.isFinite(options.startMs) ? options.startMs : 0;
+  async function advance(ms) {
+    const n = typeof ms === "number" && Number.isFinite(ms) && ms > 0 ? ms : 0;
+    if (mode === "real") {
+      if (n > 0) {
+        await new Promise((r) => setTimeout(r, n));
+      }
+      return;
+    }
+    current += n;
+  }
+  return {
+    mode,
+    now() {
+      return mode === "real" ? Date.now() : current;
+    },
+    advance,
+    sleep: advance,
+    setNow(ms) {
+      if (mode === "virtual" && typeof ms === "number" && Number.isFinite(ms)) {
+        current = ms;
+      }
+    }
+  };
+}
+
 // src/runWorkflowScenario.ts
+import { randomUUID } from "crypto";
 function isEffectLike(value) {
   return typeof value === "object" && value !== null && "pipe" in value && typeof value.pipe === "function";
 }
@@ -693,13 +723,8 @@ async function settleRunResult(raw) {
   return { value };
 }
 async function runWorkflowScenario(options) {
-  const runId = typeof options.runId === "string" && options.runId !== "" ? options.runId : `scenario-${Date.now().toString(36)}`;
-  const clock = options.clock ?? {
-    nowMs: () => Date.now(),
-    advance: () => void 0,
-    advanceToNextTimer: () => void 0,
-    pending: () => []
-  };
+  const runId = typeof options.runId === "string" && options.runId !== "" ? options.runId : `scenario-${randomUUID()}`;
+  const clock = options.clock ?? createVirtualClock();
   if (options.beforeRun) {
     await options.beforeRun({ runId, clock });
   }

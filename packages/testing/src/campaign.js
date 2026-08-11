@@ -4,12 +4,18 @@ function sleep(ms) {
 }
 async function runCampaign(options) {
   const log = options.log ?? ((msg) => console.log(msg));
-  const repeat = Math.max(1, options.repeat ?? 1);
+  const repeat = options.repeat ?? 1;
+  if (!Number.isSafeInteger(repeat) || repeat < 1) {
+    throw new TypeError(`campaign repeat must be a positive safe integer, got ${String(repeat)}`);
+  }
   const onFail = options.onFail ?? "stop";
   const herdr = options.herdr === true;
   const campaignId = `camp-${Date.now().toString(36)}`;
   let scenarios = options.scenarios;
   if (options.only?.length) {
+    const known = new Set(scenarios.map((scenario) => scenario.id));
+    const unknown = options.only.filter((id) => !known.has(id));
+    if (unknown.length > 0) throw new TypeError(`Unknown campaign scenario id(s): ${unknown.join(", ")}`);
     const allow = new Set(options.only);
     scenarios = scenarios.filter((s) => allow.has(s.id));
   }
@@ -36,7 +42,7 @@ async function runCampaign(options) {
           campaignId,
           log
         });
-        if (options.requireHerdr && herdr && out && out.herdr === false) {
+        if (options.requireHerdr && herdr && out?.herdr !== true) {
           throw new Error(
             `herdr required but scenario ${scenario.id} did not attach a mirror (is herdr --session ${options.herdrSession ?? "default"} running?)`
           );

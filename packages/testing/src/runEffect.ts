@@ -11,13 +11,9 @@ export async function runMaybeEffect<T>(value: unknown): Promise<T> {
   if (typeof (value as { then?: unknown }).then === "function") {
     return value as Promise<T>;
   }
-  // Effect-like: has pipe
-  if (typeof (value as { pipe?: unknown }).pipe === "function") {
-    const effectMod = await import("effect");
-    const Effect = effectMod.Effect as {
-      runPromise: (effect: unknown) => Promise<T>;
-    };
-    return Effect.runPromise(value);
+  const { Effect } = await import("effect");
+  if (Effect.isEffect(value)) {
+    return Effect.runPromise(value as never) as Promise<T>;
   }
   return value as T;
 }

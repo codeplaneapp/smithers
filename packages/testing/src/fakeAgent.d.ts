@@ -47,10 +47,11 @@ type AutoMock = {
 };
 declare const auto: AutoMock;
 declare function isAuto(value: unknown): value is AutoMock;
+declare function writeFakeAgentFiles(rootDir: string | undefined, files: FakeAgentFiles | undefined): Promise<void>;
 declare function buildFakeAgent<T>(schema: SafeSchema<T>, script: FakeAgentScript<T>, options?: FakeAgentOptions): FakeAgent<T>;
 declare function buildSequenceAgent<T>(schema: SafeSchema<T>, entries: readonly (FakeAgentResult<T> | T | AutoMock)[], options?: FakeAgentOptions): FakeAgent<T>;
 declare const fakeAgent: typeof buildFakeAgent & {
     sequence: typeof buildSequenceAgent;
 };
 
-export { type AutoMock, type FakeAgent, type FakeAgentCall, type FakeAgentFiles, type FakeAgentOptions, type FakeAgentResult, type FakeAgentScript, type SafeSchema, auto, fakeAgent, isAuto };
+export { type AutoMock, type FakeAgent, type FakeAgentCall, type FakeAgentFiles, type FakeAgentOptions, type FakeAgentResult, type FakeAgentScript, type SafeSchema, auto, fakeAgent, isAuto, writeFakeAgentFiles };

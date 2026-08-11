@@ -14,6 +14,11 @@
       "import": "./src/index.js",
       "default": "./src/index.js"
     },
+    "./runScenario": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js",
+      "default": "./src/index.js"
+    },
     "./*": {
       "types": "./src/*.d.ts",
       "import": "./src/*.js",

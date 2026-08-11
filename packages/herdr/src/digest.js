@@ -136,8 +136,8 @@ export function buildDigestBlock(input) {
  * @returns {string}
  */
 export function digestSignature(input) {
-  const active = (input.activeNodeIds ?? []).slice().sort().join(",");
-  const attention = (input.attentionLines ?? []).slice().sort().join("|");
+  const active = (input.activeNodeIds ?? []).join(",");
+  const attention = (input.attentionLines ?? []).join("|");
   return [
     input.runId,
     input.status ?? "",

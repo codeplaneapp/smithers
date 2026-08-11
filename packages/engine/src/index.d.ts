@@ -903,13 +903,14 @@ declare function enqueueSteer(adapter: SmithersDb, runId: string, nodeId: string
  * the committed events are published through the run's in-process event bus.
  *
  * @param {SmithersDb} adapter
- * @param {{ emitEventWithPersist: (event: unknown) => Effect.Effect<void, unknown> }} eventBus
+ * @param {{ emitAndTrack: (event: unknown) => Effect.Effect<void, unknown>; persistLog?: (event: unknown) => Effect.Effect<void, unknown> }} eventBus
  * @param {string} runId
  * @param {number} [timestampMs]
  * @returns {Promise<void>}
  */
 declare function expireQueuedSteersForRun(adapter: SmithersDb, eventBus: {
-    emitEventWithPersist: (event: unknown) => Effect.Effect<void, unknown>;
+    emitAndTrack: (event: unknown) => Effect.Effect<void, unknown>;
+    persistLog?: (event: unknown) => Effect.Effect<void, unknown>;
 }, runId: string, timestampMs?: number): Promise<void>;
 
 /**

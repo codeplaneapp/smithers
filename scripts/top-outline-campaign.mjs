@@ -131,7 +131,7 @@ function detTask(id, label, output, value) {
 async function runOne(scenario) {
   const pacing = scalePacing(scenario.pace ?? 1);
   const schemas = scenario.schemas;
-  const api = createSmithers(schemas, { dbPath });
+  const api = createSmithers(schemas, { backend: "sqlite", dbPath });
   const { smithers, outputs, db } = api;
   const runId = `${scenario.id}-${Date.now().toString(36)}`;
   const t0 = Date.now();
@@ -144,7 +144,7 @@ async function runOne(scenario) {
       : smithers(() => scenario.build({ outputs, pacing, fable, sonnet, codex, gemini, runId }));
 
   try {
-    await Effect.runPromise(
+    const result = await Effect.runPromise(
       runWorkflow(wf, {
         runId,
         rootDir: ROOT,
@@ -152,6 +152,9 @@ async function runOne(scenario) {
         input: scenario.input ?? {},
       }),
     );
+    if (!result || result.status !== "finished" || result.degraded === true) {
+      throw new Error(`run ended with status=${String(result?.status)} degraded=${String(result?.degraded)}`);
+    }
     const sec = ((Date.now() - t0) / 1000).toFixed(1);
     console.log(`[outline-campaign] ✓ ${scenario.id} finished in ${sec}s`);
     return { id: scenario.id, runId, ok: true, sec };
@@ -523,6 +526,11 @@ const scenarios = [
 
 // ── Run ──────────────────────────────────────────────────────────────────────
 const list = only ? scenarios.filter((s) => only.has(s.id)) : scenarios;
+if (only) {
+  const known = new Set(scenarios.map((scenario) => scenario.id));
+  const unknown = [...only].filter((id) => !known.has(id));
+  if (unknown.length) throw new TypeError(`Unknown SMITHERS_OUTLINE_ONLY id(s): ${unknown.join(", ")}`);
+}
 
 console.log(`[outline-campaign] db=${dbPath}`);
 console.log(`[outline-campaign] pacing=${pacingMode}  scenarios=${list.map((s) => s.id).join(",")}`);

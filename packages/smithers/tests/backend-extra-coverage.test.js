@@ -268,7 +268,7 @@ describe("openSmithersStore — read/write and postgres paths", () => {
     });
   });
 
-  test("sqlite read tolerates a transient write lock instead of reporting no run history", async () => {
+  test("sqlite read surfaces an exhausted write lock instead of accepting an unverified store", async () => {
     const cwd = makeWorkspace("open-store-sqlite-locked");
     // Provision a real store with the runs table and a row, then release it.
     const write = await openSmithersStore({ cwd, mode: "write", env: {} });
@@ -286,8 +286,9 @@ describe("openSmithersStore — read/write and postgres paths", () => {
     // Hold an EXCLUSIVE write lock on a separate connection so every other
     // connection's read races straight into a lock — exactly the transient
     // contention the campaign hit under parallel runs. Pre-fix, the run-table
-    // probe swallowed that lock into a false "no run history" and the read failed
-    // CLI_DB_NOT_FOUND; the fix must instead treat a locked, live store as present.
+    // probe swallowed that lock into a false "no run history" or assumed the
+    // file was a Smithers store. Neither answer is safe while the schema is
+    // unreadable, so exhausted contention must remain observable.
     const { Database } = await import("bun:sqlite");
     const locker = new Database(dbPath);
     locker.run("PRAGMA busy_timeout = 0");
@@ -296,10 +297,9 @@ describe("openSmithersStore — read/write and postgres paths", () => {
     locker.run("PRAGMA journal_mode = DELETE");
     locker.run("BEGIN EXCLUSIVE");
     try {
-      const store = await openSmithersStore({ cwd, mode: "read", env: {}, wait: { timeoutMs: 0 } });
-      // The read opened the store rather than denying run history.
-      expect(store.adapter).toBeDefined();
-      await store.cleanup?.();
+      await expect(openSmithersStore({ cwd, mode: "read", env: {}, wait: { timeoutMs: 0 } })).rejects.toMatchObject({
+        code: "SQLITE_BUSY",
+      });
     } finally {
       try {
         locker.run("ROLLBACK");

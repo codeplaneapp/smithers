@@ -85,8 +85,8 @@ type HerdrPaneReadResult = {
     truncated: boolean;
 };
 type HerdrWorkspaceCreateParams = {
-    label?: string;
-    cwd?: string;
+    label?: string | null;
+    cwd?: string | null;
     env?: Record<string, string>;
     focus?: boolean;
 };
@@ -106,7 +106,7 @@ type HerdrWorkspaceRenameParams = {
 };
 /** Result of `workspace.rename` (the renamed workspace record). */
 type HerdrWorkspaceRenameResult = {
-    type: "workspace_renamed";
+    type: "workspace_info";
     workspace: HerdrWorkspaceInfo;
 };
 type HerdrWorkspaceListResult = {
@@ -120,10 +120,10 @@ type HerdrOkResult = {
 type HerdrAgentStartParams = {
     name: string;
     argv: string[];
-    workspace_id?: string;
-    tab_id?: string;
-    split?: HerdrSplitDirection;
-    cwd?: string;
+    workspace_id?: string | null;
+    tab_id?: string | null;
+    split?: HerdrSplitDirection | null;
+    cwd?: string | null;
     env?: Record<string, string>;
     focus?: boolean;
 };
@@ -148,10 +148,10 @@ type HerdrPaneReportAgentParams = {
     source: string;
     agent: string;
     state: HerdrAgentState;
-    message?: string;
-    custom_status?: string;
-    agent_session_id?: string;
-    agent_session_path?: string;
+    message?: string | null;
+    custom_status?: string | null;
+    agent_session_id?: string | null;
+    agent_session_path?: string | null;
     /** Monotonically increasing per pane so herdr can order authority reports. */
     seq?: number;
 };
@@ -159,9 +159,9 @@ type HerdrPaneReportAgentSessionParams = {
     pane_id: string;
     source: string;
     agent: string;
-    agent_session_id?: string;
-    agent_session_path?: string;
-    session_start_source?: string;
+    agent_session_id?: string | null;
+    agent_session_path?: string | null;
+    session_start_source?: string | null;
     seq?: number;
 };
 type HerdrPaneReleaseAgentParams = {
@@ -173,13 +173,13 @@ type HerdrPaneReleaseAgentParams = {
 type HerdrPaneReportMetadataParams = {
     pane_id: string;
     source: string;
-    title?: string;
-    custom_status?: string;
-    display_agent?: string;
-    agent?: string;
-    state_labels?: Record<string, string>;
+    title?: string | null;
+    custom_status?: string | null;
+    display_agent?: string | null;
+    agent?: string | null;
+    state_labels?: Record<string, string> | null;
     ttl_ms?: number;
-    applies_to_source?: string;
+    applies_to_source?: string | null;
     clear_title?: boolean;
     clear_custom_status?: boolean;
     clear_display_agent?: boolean;
@@ -214,9 +214,9 @@ type HerdrPaneWaitForOutputResult = {
 };
 type HerdrNotificationShowParams = {
     title: string;
-    body?: string;
-    sound?: HerdrNotificationSound;
-    position?: HerdrToastPosition;
+    body?: string | null;
+    sound?: HerdrNotificationSound | null;
+    position?: HerdrToastPosition | null;
 };
 type HerdrNotificationShowResult = {
     type: "notification_show";
@@ -305,4 +305,4 @@ type HerdrClient = {
     ping(options?: HerdrPingOptions): Promise<HerdrPong | undefined>;
 };
 
-export type { HerdrPingOptions as A, HerdrPong as B, HerdrReadFormat as C, HerdrReadSource as D, HerdrServerCapabilities as E, HerdrSplitDirection as F, HerdrSubscription as G, HerdrAgentInfo as H, HerdrSubscriptionHandle as I, HerdrTabInfo as J, HerdrWorkspaceCloseParams as K, HerdrWorkspaceCreateParams as L, HerdrWorkspaceCreateResult as M, HerdrWorkspaceInfo as N, HerdrWorkspaceListResult as O, HerdrWorkspaceRenameParams as P, HerdrWorkspaceRenameResult as Q, HerdrAgentListResult as a, HerdrAgentStartParams as b, HerdrAgentStartResult as c, HerdrAgentState as d, HerdrAgentStatus as e, HerdrClient as f, HerdrClientOptions as g, HerdrEvent as h, HerdrLogLevel as i, HerdrLogger as j, HerdrNotificationShowParams as k, HerdrNotificationShowResult as l, HerdrOkResult as m, HerdrOutputMatch as n, HerdrPaneInfo as o, HerdrPaneListParams as p, HerdrPaneListResult as q, HerdrPaneReadParams as r, HerdrPaneReadResult as s, HerdrPaneReadResultEnvelope as t, HerdrPaneReleaseAgentParams as u, HerdrPaneReportAgentParams as v, HerdrPaneReportAgentSessionParams as w, HerdrPaneReportMetadataParams as x, HerdrPaneWaitForOutputParams as y, HerdrPaneWaitForOutputResult as z };
+export type { HerdrPaneWaitForOutputResult as A, HerdrPingOptions as B, HerdrPong as C, HerdrReadFormat as D, HerdrReadSource as E, HerdrServerCapabilities as F, HerdrSplitDirection as G, HerdrAgentInfo as H, HerdrSubscription as I, HerdrSubscriptionHandle as J, HerdrTabInfo as K, HerdrToastPosition as L, HerdrWorkspaceCloseParams as M, HerdrWorkspaceCreateParams as N, HerdrWorkspaceCreateResult as O, HerdrWorkspaceInfo as P, HerdrWorkspaceListResult as Q, HerdrWorkspaceRenameParams as R, HerdrWorkspaceRenameResult as S, HerdrAgentListResult as a, HerdrAgentStartParams as b, HerdrAgentStartResult as c, HerdrAgentState as d, HerdrAgentStatus as e, HerdrClient as f, HerdrClientOptions as g, HerdrEvent as h, HerdrLogLevel as i, HerdrLogger as j, HerdrNotificationShowParams as k, HerdrNotificationShowResult as l, HerdrNotificationSound as m, HerdrOkResult as n, HerdrOutputMatch as o, HerdrPaneInfo as p, HerdrPaneListParams as q, HerdrPaneListResult as r, HerdrPaneReadParams as s, HerdrPaneReadResult as t, HerdrPaneReadResultEnvelope as u, HerdrPaneReleaseAgentParams as v, HerdrPaneReportAgentParams as w, HerdrPaneReportAgentSessionParams as x, HerdrPaneReportMetadataParams as y, HerdrPaneWaitForOutputParams as z };

@@ -127,22 +127,14 @@ function expireQueuedSteersEffect(adapter, runId, expiredAtMs) {
  * Emit events whose database rows were already committed by the surrounding
  * terminal transaction.
  *
- * @param {{ emitEventWithPersist: (event: unknown) => Effect.Effect<void, unknown> }} eventBus
+ * @param {{ emitAndTrack: (event: unknown) => Effect.Effect<void, unknown>; persistLog?: (event: unknown) => Effect.Effect<void, unknown> }} eventBus
  * @param {unknown[]} events
  */
 async function emitPersistedEvents(eventBus, events) {
   for (const event of events) {
-    const committedBus = /** @type {{
-     *   emitAndTrack?: (event: unknown) => Effect.Effect<void, unknown>;
-     *   persistLog?: (event: unknown) => Effect.Effect<void, unknown>;
-     * }} */ (eventBus);
-    if (typeof committedBus.emitAndTrack === "function") {
-      await Effect.runPromise(committedBus.emitAndTrack(event));
-      if (typeof committedBus.persistLog === "function") {
-        await Effect.runPromise(Effect.ignore(committedBus.persistLog(event)));
-      }
-    } else {
-      await Effect.runPromise(eventBus.emitEventWithPersist(event));
+    await Effect.runPromise(eventBus.emitAndTrack(event));
+    if (typeof eventBus.persistLog === "function") {
+      await Effect.runPromise(Effect.ignore(eventBus.persistLog(event)));
     }
   }
 }
@@ -159,7 +151,7 @@ async function emitPersistedEvents(eventBus, events) {
  * the committed events are published through the run's in-process event bus.
  *
  * @param {SmithersDb} adapter
- * @param {{ emitEventWithPersist: (event: unknown) => Effect.Effect<void, unknown> }} eventBus
+ * @param {{ emitAndTrack: (event: unknown) => Effect.Effect<void, unknown>; persistLog?: (event: unknown) => Effect.Effect<void, unknown> }} eventBus
  * @param {string} runId
  * @param {number} [timestampMs]
  * @returns {Promise<void>}

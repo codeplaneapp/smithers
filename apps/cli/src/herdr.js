@@ -142,7 +142,10 @@ function sleep(ms) {
  * @returns {true | string | undefined}
  */
 export function resolveHerdrOption(flagValue, env = process.env) {
-  if (flagValue !== undefined && flagValue !== false) {
+  if (flagValue === false || flagValue === "false") {
+    return undefined;
+  }
+  if (flagValue !== undefined) {
     if (typeof flagValue === "string") {
       // `--herdr` (bare) is rewritten to `--herdr=true` in argv preprocessing
       // (rewriteBareHerdrFlagArgv) so it doesn't swallow the next flag; treat
@@ -150,9 +153,6 @@ export function resolveHerdrOption(flagValue, env = process.env) {
       // "true"/"false".
       if (flagValue === "" || flagValue === "true") {
         return true;
-      }
-      if (flagValue === "false") {
-        return undefined;
       }
       return flagValue;
     }
@@ -364,14 +364,16 @@ function parseMetaJson(metaJson) {
 export function buildAgentNodeFilter(adapter, runId) {
   /** @type {Map<string, boolean>} */
   const cache = new Map();
-  return async ({ nodeId }) => {
+  return async ({ nodeId, iteration, attempt }) => {
     const cached = cache.get(nodeId);
     if (cached !== undefined) {
       return cached;
     }
     try {
-      const attempts = await adapter.listAttemptsForRun(runId);
-      const row = Array.isArray(attempts) ? attempts.find((a) => a && a.nodeId === nodeId) : undefined;
+      const row =
+        Number.isInteger(iteration) && Number.isInteger(attempt)
+          ? await adapter.getAttempt(runId, nodeId, iteration, attempt)
+          : ((await adapter.listAttemptsForRun(runId)) ?? []).find((a) => a && a.nodeId === nodeId);
       const isAgent = parseMetaJson(row?.metaJson).kind === "agent";
       // Only memoize a decision derived from a successful read.
       cache.set(nodeId, isAgent);
@@ -399,10 +401,11 @@ export function isSystemWorkflowSource(workflowPath) {
   }
   try {
     const head = readFileSync(workflowPath, "utf8").slice(0, 4000);
-    if (/smithers-system\s*:\s*true/i.test(head)) {
+    if (/^\s*\/\/\s*smithers-system\s*:\s*true\s*$/im.test(head)) {
       return true;
     }
-    if (/(?:^|\n)\s*system\s*:\s*true\b/m.test(head)) {
+    const frontmatter = head.match(/^\uFEFF?---\s*\n([\s\S]*?)\n---(?:\n|$)/);
+    if (frontmatter && /^\s*system\s*:\s*true\s*$/im.test(frontmatter[1])) {
       return true;
     }
     return false;
@@ -1133,7 +1136,7 @@ export async function openHerdrNodePane(params) {
     await surface.close();
   }
   const nodeId = typeof params.nodeId === "string" && params.nodeId !== "" ? params.nodeId : undefined;
-  const name = nodeId ? `smithers:${params.runId}:${nodeId}` : `smithers:${params.runId}:overview`;
+  const name = nodeId ? `smithers:${params.runId}:node:${nodeId}` : `smithers:${params.runId}:run:overview`;
   const tabLabel = nodeId ? shortNodeId(nodeId) : "overview";
   const opened = await openTabPane(client, {
     workspaceId,

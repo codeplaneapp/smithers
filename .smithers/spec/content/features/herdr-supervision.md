@@ -53,12 +53,12 @@ Answer approval gates with `smithers approve` --watch and auto-resume parked det
 
 ## Observability
 
-- SteerQueued / SteerConsumed / SteerExpired events carry runId, nodeId, steerId, and `attempt/iteration` attribution.
+- SteerQueued and SteerExpired carry runId, nodeId, and steerId; SteerConsumed additionally carries attempt and iteration attribution.
 - RunHijackRequested / RunHijacked mark the park-and-hand-off transition; attempt effort is queryable on \_smithers\_attempts.effort.
 
 ## Debugging
 
-- smithers herdr status reports server version, protocol, and client compatibility; a missing server makes --herdr a silent no-op.
+- smithers herdr status reports server version, protocol, and client compatibility; a missing server emits one stderr warning and the run continues unchanged.
 - `smithers inspect` <runId> lists `queued/consumed/expired` steers; `smithers why` <runId> shows steers alongside blockers.
 
 ## Architecture
@@ -69,7 +69,7 @@ Answer approval gates with `smithers approve` --watch and auto-resume parked det
 
 ## Fixes and diffs
 
-- 2026-07-26 initial record: herdr supervision, steer, hijack, first-class effort, and `approve/deny` auto-resume shipped in 0.32.0.
+- 2026-07-26 initial record: herdr supervision, steer, hijack, first-class effort, and `approve/deny` auto-resume.
 - `packages/herdr/src/HerdrRunSurface.ts`
 - `apps/cli/src/herdr.js`
 - `apps/cli/src/smithers-top.js`

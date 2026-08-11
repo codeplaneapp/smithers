@@ -50,9 +50,10 @@ export function isStubWorkspaceLabel(label) {
 export function sessionAttachHint(opts) {
   const session = opts.sessionName;
   const runId = opts.runId;
+  const quote = (value) => `'${String(value).replace(/'/g, `'"'"'`)}'`;
   return [
     `smithers run ${runId} is mirrored in herdr session "${session}".`,
-    `Attach:  herdr --session ${session}`,
-    `Or:      smithers herdr attach ${runId} --session ${session}`,
+    `Attach:  herdr --session ${quote(session)}`,
+    `Or:      smithers herdr attach ${quote(runId)} --session ${quote(session)}`,
   ].join("\n");
 }

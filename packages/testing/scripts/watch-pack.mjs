@@ -126,6 +126,7 @@ async function runEngineWithOptionalHerdr(ctx, {
 	label,
 	workflow,
 	dbPath,
+	assertEngine,
 	assertHerdr,
 	clock,
 }) {
@@ -149,7 +150,7 @@ async function runEngineWithOptionalHerdr(ctx, {
 			// Ops / dock: human owns left harness. Spawn path B only when not ops.
 			chrome: herdrLive ? "split" : "tabs",
 			harnessCommand: herdrLive && !ctx.opsMode ? "auto" : "none",
-			dock: herdrLive ? true : false,
+			dock: herdrLive && ctx.opsMode ? true : undefined,
 			renameWorkspaceOnDock: false,
 			logger: (level, msg) => ctx.log(`[herdr] ${msg}`),
 		});
@@ -196,9 +197,10 @@ async function runEngineWithOptionalHerdr(ctx, {
 			onProgress: bridge ? bridge.onProgress : undefined,
 			runWorkflowFn: (wf, opts) => runInRoot(wf, dbPath, opts),
 		});
+		if (assertEngine) await assertEngine(result);
 		if (bridge && assertHerdr) {
-			// Allow status reports + overview first paint
-			await new Promise((r) => setTimeout(r, liveUi ? 500 : 200));
+			// Drain the surface's serialized RPC queue before reading daemon state.
+			await bridge.surface.close();
 			await assertHerdr(bridge);
 			await focusHerdrWorkspaceByLabel(bridge.client, {
 				workspaceLabel: label,
@@ -210,7 +212,7 @@ async function runEngineWithOptionalHerdr(ctx, {
 		if (bridge) {
 			await bridge.close();
 			// Leave workspaces open for human watch when herdr mode; campaign can clean.
-			if (!ctx.herdr) {
+			if (!liveUi) {
 				await tryCloseHerdrWorkspacesForRun(bridge.client, runId);
 			}
 		}
@@ -249,6 +251,9 @@ export const watchPackScenarios = [
 						workflow: wf,
 						dbPath,
 						clock,
+						assertEngine: async () => {
+							await expectNodeState(new SmithersDb(db), runId, "hello", "finished");
+						},
 						assertHerdr: async (bridge) => {
 							await assertHerdrBridge(bridge.client, {
 								workspaceLabel: label,
@@ -257,8 +262,6 @@ export const watchPackScenarios = [
 								mustIncludeTabLabels: ["hello"],
 								maxDetailTabs: 3,
 							});
-							const adapter = new SmithersDb(db);
-							await expectNodeState(adapter, runId, "hello", "finished");
 						},
 					});
 					return out;
@@ -317,6 +320,11 @@ export const watchPackScenarios = [
 						workflow: wf,
 						dbPath,
 						clock,
+						assertEngine: async () => {
+							const adapter = new SmithersDb(db);
+							await expectNodeState(adapter, runId, "implement", "finished");
+							await expectNodeState(adapter, runId, "validate", "finished");
+						},
 						assertHerdr: async (bridge) => {
 							const snap = await assertHerdrBridge(bridge.client, {
 								workspaceLabel: label,
@@ -324,9 +332,6 @@ export const watchPackScenarios = [
 								expectCockpit: true,
 								maxDetailTabs: 4,
 							});
-							const adapter = new SmithersDb(db);
-							await expectNodeState(adapter, runId, "implement", "finished");
-							await expectNodeState(adapter, runId, "validate", "finished");
 							ctx.log(`[herdr] tabs=${snap.tabs.map((t) => t.label).join(",")}`);
 						},
 					});
@@ -375,6 +380,9 @@ export const watchPackScenarios = [
 						workflow: wf,
 						dbPath,
 						clock,
+						assertEngine: async () => {
+							await expectNodeState(new SmithersDb(db), runId, "worker-03", "failed");
+						},
 						assertHerdr: async (bridge) => {
 							const snap = await assertHerdrBridge(bridge.client, {
 								workspaceLabel: label,
@@ -384,8 +392,6 @@ export const watchPackScenarios = [
 								mustExcludeTabLabels: ["worker-01", "worker-02", "worker-04"],
 								maxDetailTabs: 2,
 							});
-							const adapter = new SmithersDb(db);
-							await expectNodeState(adapter, runId, "worker-03", "failed");
 							ctx.log(`[herdr] tabs=${snap.tabs.map((t) => t.label).join(",")}`);
 						},
 					});

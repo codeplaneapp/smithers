@@ -378,7 +378,10 @@ function writeFileAt(posix: PosixFs, root: number, path: string, name: string, c
   }
 }
 
-async function writeFiles(rootDir: string | undefined, files: FakeAgentFiles | undefined): Promise<void> {
+export async function writeFakeAgentFiles(
+  rootDir: string | undefined,
+  files: FakeAgentFiles | undefined,
+): Promise<void> {
   if (!files || Object.keys(files).length === 0) return;
   if (!rootDir) {
     throw new TypeError("Fake agent files require a rootDir");
@@ -438,7 +441,7 @@ function buildFakeAgent<T>(
       calls.push(call);
       const raw = typeof script === "function" ? await (script as FakeAgentScriptFn<T>)(args) : script;
       const response = normalizeResult(schema, raw);
-      await writeFiles(call.rootDir, response.files);
+      await writeFakeAgentFiles(call.rootDir, response.files);
       const generated: Record<string, unknown> = {};
       if ("output" in response) generated.output = response.output;
       if (response.text !== undefined) generated.text = response.text;

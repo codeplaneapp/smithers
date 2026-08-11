@@ -3,11 +3,15 @@
  * Uses a virtual clock for delays; emits onStdout text chunks for stream fidelity.
  */
 
-import type { FakeAgent, FakeAgentCall, FakeAgentFiles, FakeAgentResult, SafeSchema } from "./fakeAgent.ts";
+import {
+  type FakeAgent,
+  type FakeAgentCall,
+  type FakeAgentResult,
+  type SafeSchema,
+  writeFakeAgentFiles,
+} from "./fakeAgent.ts";
 import { type AgentTraceVector, flattenGeneratePrompt, selectTurn } from "./agentTraceVector.ts";
 import { type VirtualClock, createVirtualClock } from "./virtualClock.ts";
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
 
 export type ScriptedAgentPacing = {
   /** Inclusive min wall/virtual delay before playing the turn stream (ms). */
@@ -38,28 +42,22 @@ export type ScriptedAgent = FakeAgent<unknown> & {
   readonly usedTurnIndexes: ReadonlySet<number>;
 };
 
-function assertSafeRelativePath(path: string): void {
-  if (isAbsolute(path) || path.split(/[\\/]+/).includes("..")) {
-    throw new TypeError(`Scripted agent file path must stay inside rootDir: ${path}`);
-  }
-}
-
-async function writeFiles(rootDir: string | undefined, files: FakeAgentFiles | undefined): Promise<void> {
-  if (!files || Object.keys(files).length === 0) return;
-  if (!rootDir) {
-    throw new TypeError("Scripted agent files require a rootDir");
-  }
-  const root = resolve(rootDir);
-  for (const [name, contents] of Object.entries(files)) {
-    assertSafeRelativePath(name);
-    const target = resolve(root, name);
-    const rel = relative(root, target);
-    if (rel.startsWith("..") || isAbsolute(rel)) {
-      throw new TypeError(`Scripted agent file path must stay inside rootDir: ${name}`);
-    }
-    await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, contents);
-  }
+function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      const error = new Error("Scripted agent aborted during hang");
+      error.name = "AbortError";
+      reject(error);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /**
@@ -161,20 +159,7 @@ export function scriptedAgent(vector: AgentTraceVector, options: ScriptedAgentOp
         // Real wall hang: only in clock.mode === "real" (opt-in).
         if (clock.mode === "real") {
           const signal = args.abortSignal as AbortSignal | undefined;
-          await Promise.race([
-            clock.advance(ms),
-            signal
-              ? new Promise<never>((_, reject) => {
-                  const onAbort = () => {
-                    const err = new Error("Scripted agent aborted during hang");
-                    (err as { name?: string }).name = "AbortError";
-                    reject(err);
-                  };
-                  if (signal.aborted) onAbort();
-                  else signal.addEventListener("abort", onAbort, { once: true });
-                })
-              : new Promise<void>(() => {}),
-          ]);
+          await abortableDelay(ms, signal);
         } else {
           await clock.advance(ms);
         }
@@ -212,7 +197,7 @@ export function scriptedAgent(vector: AgentTraceVector, options: ScriptedAgentOp
         }
         output = parsed.data;
       }
-      await writeFiles(rootDir, result.files);
+      await writeFakeAgentFiles(rootDir, result.files);
 
       const generated: FakeAgentResult<unknown> = {};
       if (output !== undefined) generated.output = output;

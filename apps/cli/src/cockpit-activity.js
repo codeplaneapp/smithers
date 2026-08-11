@@ -7,6 +7,7 @@
  */
 
 import { parseAgentEvent } from "./chat.js";
+import { sanitizeTerminalText } from "@smthrs/tui/src/sanitizeTerminalText.ts";
 
 /** Fixed height of the activity body (excluding separator / label). */
 export const ACTIVITY_STRIP_LINES = 4;
@@ -300,7 +301,7 @@ export function formatActivityPlain(line) {
   const glyph = line.status === "running" ? "▸" : line.status === "done" ? "✓" : line.status === "error" ? "✗" : "·";
   const title = line.title || line.kind || "action";
   const detail = line.detail ? ` ${line.detail}` : "";
-  return `${glyph} ${title}${detail}`;
+  return sanitizeTerminalText(`${glyph} ${title}${detail}`);
 }
 
 /**
@@ -328,7 +329,7 @@ export async function loadNodeActivity(adapter, runId, nodeId, opts = {}) {
         afterSeq,
         nodeId,
         types: ACTIVITY_EVENT_TYPES,
-        limit: 200,
+        limit: 500,
       })) ?? [];
     return buildActivityLinesFromEvents(rows, nodeId, { limit, detailMax });
   } catch {

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { accountToProviderEnv, getAccount } from "@smthrs/accounts";
 import { closeSync, existsSync, openSync, readSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { SmithersError } from "@smthrs/errors";
 import { registeredAgentLabel } from "./registered-agent-id.js";
 /** @typedef {import("./HijackCandidate.ts").HijackCandidate} HijackCandidate */
@@ -18,13 +18,13 @@ const CLAUDE_TRANSCRIPT_PREFIX_BYTES = 64_000;
  * and each transcript line carries `cwd`.
  *
  * @param {string} sessionId
- * @param {{ home?: string }} [opts]
+ * @param {{ home?: string, configDir?: string }} [opts]
  * @returns {string | null}
  */
 export function resolveClaudeSessionCwd(sessionId, opts = {}) {
   if (typeof sessionId !== "string" || sessionId === "") return null;
   const home = opts.home ?? homedir();
-  const projectsRoot = join(home, ".claude", "projects");
+  const projectsRoot = join(opts.configDir ?? join(home, ".claude"), "projects");
   if (!existsSync(projectsRoot)) return null;
   let projectDirs;
   try {
@@ -185,12 +185,13 @@ export async function resolveHijackCandidate(adapter, runId, target) {
     // 2) Claude session transcript lookup (covers 0.27 / pre-agentCwd runs)
     // 3) jjCwd (worktree isolation)
     // 4) process.cwd() last resort
-    const metaCwd =
+    const persistedCwd =
       (typeof meta.agentCwd === "string" && meta.agentCwd) || (typeof meta.cwd === "string" && meta.cwd) || null;
+    const metaCwd = persistedCwd && isAbsolute(persistedCwd) ? persistedCwd : null;
     const resumeId = extracted.mode === "native-cli" ? extracted.resume : undefined;
     const sessionCwd =
       !metaCwd && extracted.engine === "claude-code" && typeof resumeId === "string"
-        ? resolveClaudeSessionCwd(resumeId)
+        ? resolveClaudeSessionCwd(resumeId, { configDir: extracted.config?.configDir })
         : null;
     return {
       runId,
@@ -243,7 +244,7 @@ export async function resolveHijackCandidate(adapter, runId, target) {
       mode: "native-cli",
       resume,
       accountLabel: registeredAgentLabel(payload.agentId) ?? registeredAgentLabel(matchingMeta.agentId),
-      cwd: typeof payload.cwd === "string" ? payload.cwd : process.cwd(),
+      cwd: typeof payload.cwd === "string" && isAbsolute(payload.cwd) ? payload.cwd : process.cwd(),
       ...(eventConfig ? { config: eventConfig } : {}),
     };
   }

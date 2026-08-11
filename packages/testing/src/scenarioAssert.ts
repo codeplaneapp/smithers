@@ -92,6 +92,10 @@ export async function tallyNodeStates(
       case "waiting-approval":
       case "waiting-event":
       case "waiting-timer":
+      case "waiting-quota":
+      case "bound":
+      case "waiting-bound":
+      case "bound-stale":
         t.blocked += 1;
         break;
       default:
@@ -122,11 +126,12 @@ export async function expectSteerConsumed(
   // listEventsByType is optional (the helper returns [] when absent), so guard
   // on it — otherwise a correctly-consumed steer would falsely fail here on an
   // adapter without event listing. Mirrors the getRun guard in expectRunStatus.
-  if (adapter.listEventsByType) {
-    const events = await listEventsByType(adapter, runId, "SteerConsumed");
-    if (events.length < min) {
-      throw new Error(`Expected SteerConsumed events >= ${min}, got ${events.length}`);
-    }
+  if (!adapter.listEventsByType) {
+    throw new Error("adapter.listEventsByType required for expectSteerConsumed");
+  }
+  const events = await listEventsByType(adapter, runId, "SteerConsumed");
+  if (events.length < min) {
+    throw new Error(`Expected SteerConsumed events >= ${min}, got ${events.length}`);
   }
 }
 
@@ -136,6 +141,7 @@ export async function expectEventCount(
   type: string,
   count: number,
 ): Promise<void> {
+  if (!adapter.listEventsByType) throw new Error("adapter.listEventsByType required for expectEventCount");
   const events = await listEventsByType(adapter, runId, type);
   if (events.length !== count) {
     throw new Error(`Expected ${count} ${type} event(s), got ${events.length}`);
@@ -154,7 +160,7 @@ export function expectSoftPinBoard(
     mustExclude?: string[];
   } = {},
 ): void {
-  const workerRe = opts.workerPattern ?? /(?:^|[/:._-])(?:worker|fix|shard|leaf)[-_]?\d+$/i;
+  const workerRe = opts.workerPattern ?? /(?:^|[/:._-])(?:worker|fix|shard|leaf|item)[-_]?\d+$/i;
   const maxStages = opts.maxStages ?? 1;
   const allowedFailWorkers = new Set(opts.mustInclude ?? []);
   const workers = openedNodeIds.filter((id) => workerRe.test(id));

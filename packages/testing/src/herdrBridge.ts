@@ -108,7 +108,7 @@ export async function tryCreateHerdrBridge(opts: HerdrBridgeOptions): Promise<He
     if (typeof cliPath !== "string" || cliPath === "") {
       throw new Error("tryCreateHerdrBridge: cliPath is required when stubPanes=false (path to apps/cli/src/index.js)");
     }
-    const bin = process.execPath;
+    const bin = process.versions.bun ? process.execPath : "bun";
     // Match apps/cli herdr.js buildOverviewCommand / buildTailCommand.
     // Long-lived portable board (`smithers supervisor`) — discovers runs in this DB
     // (fixes RUN_NOT_FOUND from per-run tail against the wrong cwd).
@@ -263,7 +263,7 @@ export async function snapshotHerdrWorkspace(
   const ws = workspaces.find(
     (w) =>
       typeof w.label === "string" &&
-      (w.label === opts.workspaceLabel || w.label.endsWith(` ${opts.runId}`) || w.label.includes(opts.runId)),
+      (w.label === opts.workspaceLabel || w.label.replace(/^[✓✗◻]\s+/, "").endsWith(` ${opts.runId}`)),
   );
   if (!ws || typeof ws.workspace_id !== "string") {
     return null;
@@ -349,7 +349,11 @@ export async function tryCloseHerdrWorkspacesForRun(client: HerdrBridgeClient, r
     | undefined;
   let n = 0;
   for (const w of list?.workspaces ?? []) {
-    if (typeof w.label === "string" && w.label.includes(runId) && typeof w.workspace_id === "string") {
+    if (
+      typeof w.label === "string" &&
+      w.label.replace(/^[✓✗◻]\s+/, "").endsWith(` ${runId}`) &&
+      typeof w.workspace_id === "string"
+    ) {
       await client.tryCall("workspace.close", { workspace_id: w.workspace_id });
       n += 1;
     }

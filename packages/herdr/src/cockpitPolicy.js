@@ -40,8 +40,12 @@ export function isLikelyWorkerNodeId(nodeId, extraPattern) {
   if (typeof nodeId !== "string" || nodeId === "") {
     return false;
   }
-  if (extraPattern && extraPattern.test(nodeId)) {
-    return true;
+  if (extraPattern) {
+    const previousIndex = extraPattern.lastIndex;
+    extraPattern.lastIndex = 0;
+    const matches = extraPattern.test(nodeId);
+    extraPattern.lastIndex = previousIndex;
+    if (matches) return true;
   }
   // worker-07, fix-3, shard-12, item_1, leaf-0
   if (/(?:^|[/:._-])(?:worker|fix|shard|leaf|item)[-_]?\d+$/i.test(nodeId)) {
@@ -208,7 +212,7 @@ export function updateSoftPinSet(softPins, event, policy = {}) {
   if (isPinnedNodeId(event.nodeId, policy.pin)) {
     return softPins;
   }
-  if (isWorker && !auto.workers) {
+  if (isWorker) {
     return softPins;
   }
   if (!auto.stage) {

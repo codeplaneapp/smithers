@@ -89,7 +89,9 @@ function deepMergeSettings(base, overlay) {
   const out = { ...base };
   for (const [key, overlayValue] of Object.entries(overlay)) {
     const baseValue = out[key];
-    if (Array.isArray(baseValue) && Array.isArray(overlayValue)) {
+    if (key === "fallbackModel") {
+      out[key] = overlayValue;
+    } else if (Array.isArray(baseValue) && Array.isArray(overlayValue)) {
       out[key] = [...baseValue, ...overlayValue];
     } else if (isRecord(baseValue) && isRecord(overlayValue)) {
       out[key] = deepMergeSettings(baseValue, overlayValue);
@@ -668,6 +670,8 @@ export class ClaudeCodeAgent extends BaseCliAgent {
     const ourSettings = { ...settingsObj };
     delete ourSettings.__rawSettingsPath;
     const extra = Array.isArray(this.extraArgs) ? [...this.extraArgs] : [];
+    const terminatorIndex = extra.indexOf("--");
+    const terminatorTail = terminatorIndex >= 0 ? extra.splice(terminatorIndex) : [];
     // Extract and REMOVE every user `--settings` token (`--settings X` or
     // `--settings=X`) from extraArgs, low→high, so none rides through as a
     // duplicate flag; we re-emit exactly one merged flag ourselves.
@@ -770,6 +774,7 @@ export class ClaudeCodeAgent extends BaseCliAgent {
         settingsCleanup = privateSettings.cleanup;
         pushFlag(args, "--settings", privateSettings.filePath);
       }
+      args.push(...terminatorTail);
       if (params.prompt) args.push(params.prompt);
       const accountEnv = {};
       if (durabilitySocket) accountEnv.SMITHERS_SNAPSHOT_SOCK = durabilitySocket;

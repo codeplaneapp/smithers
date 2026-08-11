@@ -12,7 +12,7 @@ import { probeCompatibleHerdr } from "./herdr.js";
  */
 
 /** Run statuses that count as "steerable now": a live engine or a durable wait. */
-const STEER_ACTIVE_STATUSES = ["running", "waiting-approval", "waiting-event", "waiting-timer"];
+const STEER_ACTIVE_STATUSES = ["running", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota"];
 
 /**
  * List the runs a bare `smithers steer` (no run id) could target: every run in a
@@ -42,7 +42,7 @@ export async function listActiveRunsForSteer(adapter, limit = 50) {
       continue;
     }
     for (const row of rows) {
-      if (row && typeof row.runId === "string" && !seen.has(row.runId)) {
+      if (row?.status === status && typeof row.runId === "string" && !seen.has(row.runId)) {
         seen.add(row.runId);
         out.push(row);
       }
