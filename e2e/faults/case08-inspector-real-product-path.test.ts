@@ -6,17 +6,8 @@ import { join } from "node:path";
 import React from "react";
 import { Effect } from "effect";
 import { z } from "zod";
-import {
-  Approval,
-  Sequence,
-  Task,
-  Workflow,
-  approvalDecisionSchema,
-  createSmithers,
-  runWorkflow,
-} from "smthrs";
+import { Approval, Sequence, Task, Workflow, approvalDecisionSchema, createSmithers, runWorkflow } from "smthrs";
 import { SmithersDb } from "@smthrs/db/adapter";
-import type { RunState } from "@smthrs/db/runState/RunState";
 import { getDevToolsSnapshotRoute } from "@smthrs/server/gatewayRoutes/getDevToolsSnapshot";
 import { assertNotIdle } from "./case08InspectorHelpers.ts";
 
@@ -31,6 +22,7 @@ const RESULT_NODE_ID = "deploy";
 const PERSISTENCE_TIMEOUT_MS = 5_000;
 
 type WorkflowMode = "active" | "approval" | "finished";
+type InspectorRunState = NonNullable<Awaited<ReturnType<typeof getDevToolsSnapshotRoute>>["runState"]>["state"];
 
 type ActiveTaskControl = {
   started: Promise<void>;
@@ -40,10 +32,7 @@ type ActiveTaskControl = {
 };
 
 function makeDbPath(): string {
-  return join(
-    tmpdir(),
-    `smithers-case08-real-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
-  );
+  return join(tmpdir(), `smithers-case08-real-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
 }
 
 function createActiveTaskControl(): ActiveTaskControl {
@@ -69,11 +58,7 @@ function createActiveTaskControl(): ActiveTaskControl {
   };
 }
 
-function createCase08Workflow(
-  dbPath: string,
-  mode: WorkflowMode,
-  activeTask?: ActiveTaskControl,
-) {
+function createCase08Workflow(dbPath: string, mode: WorkflowMode, activeTask?: ActiveTaskControl) {
   const api = createSmithers(
     {
       input: z.object({ value: z.number().optional() }),
@@ -135,11 +120,7 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForPersistedRun(
-  adapter: SmithersDb,
-  runId: string,
-  expectedStatus: string,
-) {
+async function waitForPersistedRun(adapter: SmithersDb, runId: string, expectedStatus: string) {
   let observedStatus = "missing";
   const deadline = Date.now() + PERSISTENCE_TIMEOUT_MS;
   while (Date.now() < deadline) {
@@ -150,16 +131,14 @@ async function waitForPersistedRun(
     }
     await wait(25);
   }
-  throw new Error(
-    `Timed out waiting for ${runId} to persist as ${expectedStatus}; last status was ${observedStatus}`,
-  );
+  throw new Error(`Timed out waiting for ${runId} to persist as ${expectedStatus}; last status was ${observedStatus}`);
 }
 
 async function readInspectorState(
   adapter: SmithersDb,
   runId: string,
   expectedStatus: string,
-  expectedState: RunState,
+  expectedState: InspectorRunState,
 ) {
   const persisted = await waitForPersistedRun(adapter, runId, expectedStatus);
   const snapshot = await getDevToolsSnapshotRoute({ adapter, runId });
@@ -213,12 +192,7 @@ describe("case 08: inspector real product path never shows idle", () => {
 
     try {
       await activeTask.started;
-      const { persisted, state } = await readInspectorState(
-        inspector,
-        ACTIVE_RUN_ID,
-        "running",
-        "running",
-      );
+      const { persisted, state } = await readInspectorState(inspector, ACTIVE_RUN_ID, "running", "running");
       expect(persisted.workflowName).toBe(ACTIVE_WORKFLOW_NAME);
       expect(state.blocked).toBeUndefined();
     } finally {
@@ -286,12 +260,7 @@ describe("case 08: inspector real product path never shows idle", () => {
     );
     expect(result.status).toBe("finished");
 
-    const { persisted } = await readInspectorState(
-      inspector,
-      FINISHED_RUN_ID,
-      "finished",
-      "succeeded",
-    );
+    const { persisted } = await readInspectorState(inspector, FINISHED_RUN_ID, "finished", "succeeded");
     expect(persisted.workflowName).toBe(FINISHED_WORKFLOW_NAME);
   }, 30_000);
 });
