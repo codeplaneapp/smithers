@@ -1195,19 +1195,21 @@
         "@smthrs/react-reconciler": "workspace:*",
         "@smthrs/scheduler": "workspace:*",
         "effect": "4.0.0-beta.105",
-        "smthrs": "workspace:*",
         "zod": "^4.4.3",
       },
       "devDependencies": {
         "@types/bun": "latest",
         "koffi": "^2.16.2",
+        "smthrs": "workspace:*",
         "typescript": "~6.0.3",
       },
       "peerDependencies": {
         "koffi": "^2.16.2",
+        "smthrs": "workspace:^",
       },
       "optionalPeers": [
         "koffi",
+        "smthrs",
       ],
     },
     "packages/time-travel": {

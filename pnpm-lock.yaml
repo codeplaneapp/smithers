@@ -2310,9 +2310,6 @@ importers:
       effect:
         specifier: 4.0.0-beta.105
         version: 4.0.0-beta.105
-      smthrs:
-        specifier: workspace:*
-        version: link:../smithers
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -2323,6 +2320,9 @@ importers:
       koffi:
         specifier: ^2.16.2
         version: 2.16.2
+      smthrs:
+        specifier: workspace:*
+        version: link:../smithers
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
