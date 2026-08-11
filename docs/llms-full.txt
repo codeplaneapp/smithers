@@ -19793,7 +19793,7 @@ pin can still receive the provider-free behavioral report, but its
 With the executable on `PATH`, no binary option is needed:
 
 ```tsx
-import { NanocodexAgent } from "smithers-orchestrator";
+import { NanocodexAgent } from "smthrs";
 
 const agent = new NanocodexAgent({
   cwd: "/absolute/path/to/workspace",
