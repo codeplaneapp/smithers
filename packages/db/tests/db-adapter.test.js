@@ -1219,6 +1219,81 @@ describe("SmithersDb adapter", () => {
   });
 });
 
+describe("per-run token usage (#1464 AWF-6)", () => {
+  /**
+   * @param {string} runId
+   * @param {string} nodeId
+   * @param {any} [extra]
+   */
+  function usageRow(runId, nodeId, extra = {}) {
+    return {
+      runId,
+      nodeId,
+      iteration: 0,
+      attempt: 1,
+      model: "claude-haiku-4-5-20251001",
+      agent: "claude",
+      inputTokens: 100,
+      outputTokens: 20,
+      updatedAtMs: now,
+      ...extra,
+    };
+  }
+  test("sums a run's token usage without replaying the event log", async () => {
+    const { adapter } = createTestDb();
+    await adapter.recordRunTokenUsage(usageRow("r1", "one"));
+    await adapter.recordRunTokenUsage(
+      usageRow("r1", "two", { inputTokens: 50, outputTokens: 5, cacheReadTokens: 7, reasoningTokens: 3 }),
+    );
+    await adapter.recordRunTokenUsage(usageRow("r2", "one", { inputTokens: 999, outputTokens: 999 }));
+    const usage = await adapter.getRunTokenUsage("r1");
+    expect(usage).toMatchObject({
+      runId: "r1",
+      inputTokens: 150,
+      outputTokens: 25,
+      cacheReadTokens: 7,
+      reasoningTokens: 3,
+      totalTokens: 175,
+      attempts: 2,
+    });
+    // No TokenUsageReported events were written; the total came from the table.
+    expect(await adapter.listEventsByType("r1", "TokenUsageReported")).toHaveLength(0);
+  });
+  test("re-reporting one attempt replaces its row instead of inflating the total", async () => {
+    const { adapter } = createTestDb();
+    await adapter.recordRunTokenUsage(usageRow("r1", "one", { inputTokens: 100, outputTokens: 10 }));
+    // A provider that re-emits a cumulative running total for the same attempt
+    // (#1436) must not be summed on top of what it already reported.
+    await adapter.recordRunTokenUsage(usageRow("r1", "one", { inputTokens: 300, outputTokens: 30 }));
+    const usage = await adapter.getRunTokenUsage("r1");
+    expect(usage.inputTokens).toBe(300);
+    expect(usage.outputTokens).toBe(30);
+    expect(usage.totalTokens).toBe(330);
+    expect(usage.attempts).toBe(1);
+  });
+  test("retries of the same node accumulate as separate attempts", async () => {
+    const { adapter } = createTestDb();
+    await adapter.recordRunTokenUsage(usageRow("r1", "one", { attempt: 1 }));
+    await adapter.recordRunTokenUsage(usageRow("r1", "one", { attempt: 2 }));
+    const usage = await adapter.getRunTokenUsage("r1");
+    expect(usage.attempts).toBe(2);
+    expect(usage.totalTokens).toBe(240);
+  });
+  test("a run with no usage reads as zero rather than missing", async () => {
+    const { adapter } = createTestDb();
+    const usage = await adapter.getRunTokenUsage("nope");
+    expect(usage).toMatchObject({ runId: "nope", inputTokens: 0, outputTokens: 0, totalTokens: 0, attempts: 0 });
+  });
+  test("negative or non-finite counts are coerced to zero", async () => {
+    const { adapter } = createTestDb();
+    await adapter.recordRunTokenUsage(
+      usageRow("r1", "one", { inputTokens: -5, outputTokens: Number.NaN, cacheWriteTokens: 12 }),
+    );
+    const usage = await adapter.getRunTokenUsage("r1");
+    expect(usage).toMatchObject({ inputTokens: 0, outputTokens: 0, cacheWriteTokens: 12, totalTokens: 0 });
+  });
+});
+
 describe("workspace snapshot tables", () => {
   test("workspace states upsert and dedup by jj commit id", async () => {
     const { adapter } = createTestDb();

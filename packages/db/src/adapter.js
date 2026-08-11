@@ -4442,6 +4442,117 @@ export class SmithersDb {
     );
   }
   /**
+   * Persist one attempt's token usage so a run total is a single SUM instead of
+   * a replay of every `TokenUsageReported` payload in the event log (#1464
+   * AWF-6, #1436). Keyed by attempt identity and written as an upsert, so a
+   * provider that re-reports a cumulative running total for the same attempt
+   * replaces its row rather than inflating the total.
+   *
+   * @param {{
+   *   runId: string;
+   *   nodeId: string;
+   *   iteration?: number | null;
+   *   attempt?: number | null;
+   *   model?: string | null;
+   *   agent?: string | null;
+   *   inputTokens?: number | null;
+   *   outputTokens?: number | null;
+   *   cacheReadTokens?: number | null;
+   *   cacheWriteTokens?: number | null;
+   *   reasoningTokens?: number | null;
+   *   updatedAtMs: number;
+   * }} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+  recordRunTokenUsage(row) {
+    /** @param {unknown} value */
+    const count = (value) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0);
+    const values = [
+      row.runId,
+      row.nodeId,
+      row.iteration ?? 0,
+      row.attempt ?? 0,
+      row.model ?? null,
+      row.agent ?? null,
+      count(row.inputTokens),
+      count(row.outputTokens),
+      count(row.cacheReadTokens),
+      count(row.cacheWriteTokens),
+      count(row.reasoningTokens),
+      row.updatedAtMs,
+    ];
+    const columns = `(run_id, node_id, iteration, attempt, model, agent, input_tokens, output_tokens,
+              cache_read_tokens, cache_write_tokens, reasoning_tokens, updated_at_ms)`;
+    return this.write(`record run token usage ${row.runId}/${row.nodeId}`, () =>
+      this.internalStorage.dialect === POSTGRES
+        ? this.internalStorage.execute(
+            `INSERT INTO _smithers_run_usage ${columns}
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(run_id, node_id, iteration, attempt)
+             DO UPDATE SET model = excluded.model, agent = excluded.agent,
+                           input_tokens = excluded.input_tokens, output_tokens = excluded.output_tokens,
+                           cache_read_tokens = excluded.cache_read_tokens,
+                           cache_write_tokens = excluded.cache_write_tokens,
+                           reasoning_tokens = excluded.reasoning_tokens,
+                           updated_at_ms = excluded.updated_at_ms`,
+            values,
+          )
+        : this.internalStorage.execute(
+            `INSERT OR REPLACE INTO _smithers_run_usage ${columns}
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            values,
+          ),
+    );
+  }
+  /**
+   * Authoritative per-run token total, read straight from `_smithers_run_usage`.
+   * Always resolves (zeros when the run reported no usage) so callers never have
+   * to distinguish "no usage" from "run not found" (#1464 AWF-6).
+   *
+   * @param {string} runId
+   * @returns {RunnableEffect<{
+   *   runId: string;
+   *   inputTokens: number;
+   *   outputTokens: number;
+   *   cacheReadTokens: number;
+   *   cacheWriteTokens: number;
+   *   reasoningTokens: number;
+   *   totalTokens: number;
+   *   attempts: number;
+   * }, SmithersError>}
+   */
+  getRunTokenUsage(runId) {
+    return this.read(`get run token usage ${runId}`, async () => {
+      const row = await this.internalStorage.queryOne(
+        `SELECT COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+                COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
+                COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+                COUNT(*) AS attempts
+         FROM _smithers_run_usage
+         WHERE run_id = ?`,
+        [runId],
+      );
+      const num = (/** @type {unknown} */ value) => {
+        const parsed = Number(value ?? 0);
+        return Number.isFinite(parsed) ? parsed : 0;
+      };
+      const inputTokens = num(row?.input_tokens ?? row?.inputTokens);
+      const outputTokens = num(row?.output_tokens ?? row?.outputTokens);
+      return {
+        runId,
+        inputTokens,
+        outputTokens,
+        cacheReadTokens: num(row?.cache_read_tokens ?? row?.cacheReadTokens),
+        cacheWriteTokens: num(row?.cache_write_tokens ?? row?.cacheWriteTokens),
+        reasoningTokens: num(row?.reasoning_tokens ?? row?.reasoningTokens),
+        totalTokens: inputTokens + outputTokens,
+        attempts: num(row?.attempts),
+      };
+    });
+  }
+  /**
    * Drop every registry row owned by one engine pid (graceful engine exit).
    * @param {number} enginePid
    * @returns {RunnableEffect<void, SmithersError>}

@@ -6600,6 +6600,21 @@ async function legacyExecuteTask(
                   timestampMs: nowMs(),
                 })
                 .catch(() => {});
+              await Effect.runPromise(
+                adapter.recordRunTokenUsage({
+                  runId,
+                  nodeId: desc.nodeId,
+                  iteration: desc.iteration ?? 0,
+                  attempt: attemptNo,
+                  model: reportedModelId,
+                  agent:
+                    (typeof effectiveAgent.id === "string" ? effectiveAgent.id : undefined) ??
+                    effectiveAgent.constructor?.name ??
+                    "unknown",
+                  ...failedUsage,
+                  updatedAtMs: nowMs(),
+                }),
+              ).catch(() => {});
             }
           } catch {
             /* token telemetry must not mask the original provider error */
@@ -6710,6 +6725,30 @@ async function legacyExecuteTask(
               reasoningTokens,
               timestampMs: nowMs(),
             });
+            // Same numbers, persisted as a queryable row. The event log stays
+            // the audit trail; `_smithers_run_usage` is the authoritative
+            // per-run total nobody has to replay events to compute (#1464
+            // AWF-6, #1436). Awaited so the row is durable before the attempt
+            // settles, but swallowed — usage accounting never fails a task.
+            await Effect.runPromise(
+              adapter.recordRunTokenUsage({
+                runId,
+                nodeId: desc.nodeId,
+                iteration: desc.iteration ?? 0,
+                attempt: attemptNo,
+                model: reportedModelId,
+                agent:
+                  (typeof effectiveAgent.id === "string" ? effectiveAgent.id : undefined) ??
+                  effectiveAgent.constructor?.name ??
+                  "unknown",
+                inputTokens,
+                outputTokens,
+                cacheReadTokens,
+                cacheWriteTokens,
+                reasoningTokens,
+                updatedAtMs: nowMs(),
+              }),
+            ).catch(() => {});
           }
         }
         let output;

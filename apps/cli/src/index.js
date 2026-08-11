@@ -10873,16 +10873,41 @@ const cli = Cli.create({
     },
   })
   .command("usage", {
-    description: "Show how much rate limit / subscription quota each registered account has used.",
+    description:
+      "Show how much rate limit / subscription quota each registered account has used, or with --run the token total one run spent.",
     options: z.object({
       account: z.string().optional().describe("Only report this account label"),
       provider: z.string().optional().describe("Only report accounts for this provider"),
+      run: z.string().optional().describe("Report the persisted token total for this run ID instead of account quota"),
       fresh: z
         .boolean()
         .default(false)
         .describe("Bypass the short usage cache (still respects provider rate-limit floors)"),
     }),
     async run(c) {
+      const fail = makeFail(c);
+      if (c.options.run) {
+        // Read from `_smithers_run_usage`, not by replaying TokenUsageReported
+        // events — the whole point of the table is an authoritative total
+        // (#1464 AWF-6).
+        const runId = c.options.run;
+        try {
+          const { adapter, cleanup } = await findAndOpenDb();
+          try {
+            const usage = await adapter.getRunTokenUsage(runId);
+            process.stderr.write(
+              `${runId}: ${usage.totalTokens.toLocaleString()} tokens ` +
+                `(${usage.inputTokens.toLocaleString()} in / ${usage.outputTokens.toLocaleString()} out) ` +
+                `across ${usage.attempts} agent attempt(s)\n`,
+            );
+            return c.ok({ usage });
+          } finally {
+            cleanup();
+          }
+        } catch (err) {
+          return fail({ code: "USAGE_FAILED", message: err?.message ?? String(err), exitCode: 1 });
+        }
+      }
       let accounts = listAccounts();
       if (c.options.account) {
         accounts = accounts.filter((a) => a.label === c.options.account);

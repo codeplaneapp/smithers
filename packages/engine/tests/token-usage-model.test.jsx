@@ -182,3 +182,54 @@ describe("TokenUsageReported model attribution", () => {
     }
   });
 });
+
+/**
+ * @param {string} dbPath
+ * @returns {Array<Record<string, unknown>>}
+ */
+function readRunUsageRows(dbPath) {
+  const db = new Database(dbPath, { readonly: true });
+  try {
+    return db.query("SELECT * FROM _smithers_run_usage ORDER BY node_id").all();
+  } finally {
+    db.close();
+  }
+}
+
+describe("per-run token usage table (#1464 AWF-6)", () => {
+  test("a finished run's token total is queryable without replaying the event log", async () => {
+    const { smithers, outputs, dbPath, cleanup } = createTestSmithers(schemas);
+    try {
+      const workflow = smithers(() => (
+        <Workflow name="run-usage">
+          <Task id="one" output={outputs.a} agent={usageAgent("agent-1", undefined, "claude-opus-test")}>
+            compute
+          </Task>
+          <Task id="two" output={outputs.a} agent={usageAgent("agent-2", undefined, "claude-opus-test")}>
+            compute again
+          </Task>
+        </Workflow>
+      ));
+      const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+      expect(result.status).toBe("finished");
+      const rows = readRunUsageRows(dbPath);
+      expect(rows.map((row) => row.node_id)).toEqual(["one", "two"]);
+      // usageAgent reports 10 in / 5 out per task, so the run total is a SUM
+      // over the table rather than a scan of _smithers_events.payload_json.
+      const db = new Database(dbPath, { readonly: true });
+      try {
+        const total = db
+          .query(
+            "SELECT SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens FROM _smithers_run_usage",
+          )
+          .get();
+        expect(total).toMatchObject({ input_tokens: 20, output_tokens: 10 });
+      } finally {
+        db.close();
+      }
+      expect(rows.every((row) => row.model === "claude-opus-test")).toBe(true);
+    } finally {
+      cleanup();
+    }
+  });
+});

@@ -2128,6 +2128,23 @@ function buildMigrations(context) {
         return { tables: ["_smithers_agent_checkpoint_contents", "_smithers_agent_checkpoints"] };
       },
     },
+    {
+      id: "0038_run_token_usage",
+      name: "Persist per-attempt token usage so run totals are queryable without replaying events",
+      checksum: "packages/db/migrations/0038_add_run_token_usage.sql",
+      isApplied: (sqlite) => tableExists(sqlite, "_smithers_run_usage"),
+      isAppliedPostgres: (pgConn) => tableExistsPostgres(pgConn, "_smithers_run_usage"),
+      up: (sqlite) => {
+        sqlite.run(createTableStatementFor("_smithers_run_usage", context.createTableStatements));
+        return { table: "_smithers_run_usage", created: true };
+      },
+      upPostgres: async (pgConn) => {
+        await pgConn.query({
+          text: translateDdl(POSTGRES, createTableStatementFor("_smithers_run_usage", context.createTableStatements)),
+        });
+        return { table: "_smithers_run_usage", created: true };
+      },
+    },
   ];
 }
 
