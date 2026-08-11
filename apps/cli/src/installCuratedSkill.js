@@ -22,12 +22,26 @@ export const RETIRED_SKILL_NAMES = ["smthrs"];
  * entry's `base` is the agent's config root (used as a presence signal) and
  * `skillsDir` is where per-skill folders live. Directories follow each agent's
  * own convention (matching the incur registry): Kimi and Amp read the shared
- * canonical `~/.config/agents/skills`, Antigravity reads the Gemini home.
+ * canonical `~/.config/agents/skills`, Antigravity reads the Gemini home, and
+ * OMP keeps its coding-agent state under `~/.omp/agent` unless
+ * `PI_CODING_AGENT_DIR` relocates it.
  *
  * @param {string} homeDir
+ * @param {NodeJS.ProcessEnv} [env]
  */
-export function skillTargets(homeDir) {
+export function skillTargets(homeDir, env = process.env) {
   const configHome = join(homeDir, ".config");
+  const ompConfigRoot = join(homeDir, ".omp");
+  const ompAgentDirOverride = env.PI_CODING_AGENT_DIR?.trim();
+  const ompAgentDir = ompAgentDirOverride
+    ? resolve(
+        ompAgentDirOverride === "~"
+          ? homeDir
+          : ompAgentDirOverride.startsWith("~/")
+            ? join(homeDir, ompAgentDirOverride.slice(2))
+            : ompAgentDirOverride,
+      )
+    : join(ompConfigRoot, "agent");
   return [
     {
       id: "claude",
@@ -44,8 +58,8 @@ export function skillTargets(homeDir) {
     {
       id: "omp",
       displayName: "Oh My Pi",
-      base: join(homeDir, ".omp"),
-      skillsDir: join(homeDir, ".omp", "agent", "skills"),
+      base: ompAgentDirOverride ? ompAgentDir : ompConfigRoot,
+      skillsDir: join(ompAgentDir, "skills"),
     },
     {
       id: "codex",
@@ -153,7 +167,7 @@ export function installCuratedSkill(opts = {}) {
     result.skipped.push({ agent: "all", reason: "bundled skill source not found" });
     return result;
   }
-  const all = skillTargets(homeDir);
+  const all = skillTargets(homeDir, env);
   // When the caller supplies an explicit target list (from a multiselect), only
   // install to those agent IDs. Unknown IDs are silently ignored so callers can
   // pass a validated user selection without being coupled to the full target list.
