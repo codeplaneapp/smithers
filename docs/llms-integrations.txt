@@ -3180,11 +3180,25 @@ pushes fast once herdr stops answering. Concretely:
 
 ## Version pinning
 
-This client is built and tested against **herdr 0.7.3 / wire protocol 16**. On a
-protocol other than 16 the client logs a warning and keeps going (it tolerates
-unknown fields rather than hard-failing). `bunx smthrs herdr status`
-reports the server's protocol and whether it matches, which is the quickest
-compatibility check.
+This client is built and tested against **herdr 0.7.3 / wire protocol 16**.
+`bunx smthrs herdr status` reports the server's protocol and whether it
+matches, which is the quickest compatibility check.
+
+A protocol other than 16 is handled two different ways, on purpose:
+
+- **Optional mirroring** (`up --herdr`, auto-detected mirrors, the supervisor's
+  pane integration) degrades softly: one warning, then the run proceeds with no
+  mirror. Nothing about execution or durability depends on herdr.
+- **Explicit `herdr` commands** (`status`, `open`, `attach`, `clean`) fail closed
+  with `HERDR_PROTOCOL_MISMATCH` and exit 4, reporting both protocol numbers and
+  confirming that no mutating call was made. Driving panes over a wire format
+  the server may have redefined is not worth the risk of corrupting a workspace.
+
+Herdr's protocol advances faster than its user-visible version: releases after
+0.7.3 speak higher protocol numbers and are **not** wire-compatible with this
+client, so herdr features are inert (safely) until the client is updated to
+match. Check `herdr status client` against the number above before filing a bug
+about herdr features doing nothing.
 
 ## Remote runs over SSH
 
