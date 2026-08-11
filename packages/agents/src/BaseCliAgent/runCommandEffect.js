@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { spawnCaptureEffect } from "@smthrs/driver/child-process";
+import { fileURLToPath } from "node:url";
 import { sanitizeCliArgs } from "./sanitizeCliArgs.js";
 /**
  * @typedef {{ cwd: string; env: Record<string, string>; input?: string; timeoutMs?: number; idleTimeoutMs?: number; signal?: AbortSignal; maxOutputBytes?: number; truncateKeep?: "head" | "tail"; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onProcess?: (event: { phase: "started" | "exited"; pid: number | undefined }) => void; }} RunCommandOptions
@@ -27,7 +28,12 @@ export function runCommandEffect(command, args, options) {
     onStderr,
     onProcess,
   } = options;
-  return spawnCaptureEffect(command, args, {
+  const containProcessTree = process.platform !== "win32";
+  const spawnCommand = containProcessTree ? process.execPath : command;
+  const spawnArgs = containProcessTree
+    ? [fileURLToPath(new URL("./parentDeathWatchdog.js", import.meta.url)), String(process.pid), command, ...args]
+    : args;
+  return spawnCaptureEffect(spawnCommand, spawnArgs, {
     cwd,
     env,
     input,
@@ -40,7 +46,7 @@ export function runCommandEffect(command, args, options) {
     // can kill the whole group — subagents, MCP servers, tool children —
     // instead of just the wrapper pid, and so an orphan reaper can address
     // the group by pgid after an engine death (#1464 AWF-3, #1332).
-    detached: process.platform !== "win32",
+    detached: containProcessTree,
     onStdout,
     onStderr,
     onProcess,
