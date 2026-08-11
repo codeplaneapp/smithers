@@ -3725,7 +3725,7 @@ function checkCliAgentDocsMatchCurrentModelDefaults() {
     [CLI_AGENTS_INTEGRATION, "VibeAgent,vibe,CLI default,headless session id"],
     [CLI_AGENTS_INTEGRATION, "OpenCodeAgent,opencode,CLI default,not yet"],
     [CLI_AGENTS_INTEGRATION, "OpenClawAgent,openclaw,CLI default,session id"],
-    [CLI_AGENTS_INTEGRATION, "OmpAgent,omp,CLI default,not yet"],
+    [CLI_AGENTS_INTEGRATION, "OmpAgent,omp,CLI default,native session id"],
     [CLI_AGENTS_INTEGRATION, "CursorAgent,cursor-agent,CLI default,not yet"],
     [CLI_AGENT_DETECTION_SOURCE, 'id: "vibe"'],
     [CLI_AGENT_DETECTION_SOURCE, 'id: "openclaw"'],
@@ -3788,7 +3788,7 @@ function checkCliAgentHijackDocsMatchLauncher() {
     [CLI_AGENTS_INTEGRATION, "| `AmpAgent` | `amp threads continue` |"],
     [
       CLI_AGENTS_INTEGRATION,
-      "native `bunx smthrs hijack` support for Cursor, Vibe, OpenCode, OpenClaw, and OMP is not shipped yet",
+      "native `bunx smthrs hijack` support for Cursor, Vibe, OpenCode, and OpenClaw is not shipped yet",
     ],
   ];
   const forbidden = [
