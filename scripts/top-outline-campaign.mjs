@@ -27,7 +27,7 @@ import { z } from "zod";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Effect } from "effect";
-import { Workflow, Task, Sequence, Parallel, Loop, runWorkflow, createSmithers } from "smithers-orchestrator";
+import { Workflow, Task, Sequence, Parallel, Loop, runWorkflow, createSmithers } from "smthrs";
 import { createVirtualClock } from "../packages/testing/src/index.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");

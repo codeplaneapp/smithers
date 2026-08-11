@@ -2739,13 +2739,13 @@ See Time-travel API and Revert for the programmatic surface.
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[102]:
+commands[110]:
   - name: add
     purpose: Install a workflow pack from GitHub, npm, or a local file
     args[1]{name,type,required,desc}:
       spec,string,true,GitHub npm or file pack spec
     flags[2]{name,short,type,default,desc}:
-      global,,boolean,false,Install in ~/.smithers/packs instead of the local project
+      global,g,boolean,false,Install in ~/.smithers/packs instead of the local project
       yes,,boolean,false,Skip trust confirmation
   - name: init
     purpose: Install the local Smithers workflow pack into .smithers/. In an interactive terminal init asks one question (your preferred coding agent), installs the pack with defaults plus that agent's plugin (or skill if no plugin), then opens a hijacked tutorial session hosted by that agent; piped/agent/CI runs (or --yes) install defaults. Pass an optional prompt to also launch the create-workflow builder after init.
@@ -2863,6 +2863,7 @@ commands[102]:
       started-by-harness,,string,,Durable self-reported launch harness; environment may fill when omitted
       started-by-session,,string,,Durable self-reported harness session; environment may fill when omitted
       started-by-prompt,,string,,Explicit durable launch context; never inferred from workflow input
+      herdr,,boolean|string,,Mirror this run into a herdr terminal workspace (one pane per agent node); optionally =SESSION for a named session
   - name: migrate
     purpose: Copy the legacy bun:sqlite smithers.db into PGlite or Postgres and write the migrated.json marker
     flags[3]{name,short,type,default,desc}:
@@ -2921,6 +2922,16 @@ commands[102]:
       interval,i,string,10s,Poll interval
       stale-threshold,t,string,30s,Heartbeat staleness threshold before resume
       max-concurrent,c,number,3,Max runs resumed per poll
+  - name: supervisor
+    purpose: Workflow supervisor live outline of phases and agents; sources through the workspace gateway by default (start-or-attach with a silent fallback to direct smithers.db reads) and doubles as the herdr cockpit right pane. j/k select, Enter opens a detail tab in herdr, [ ] switch runs, f follow live, q quit
+    flags[5]{name,short,type,default,desc}:
+      db,,string,,Path to smithers.db (default: discover from cwd)
+      cwd,,string,,Project directory for DB discovery (default: process.cwd())
+      interval,i,number,0.5,Poll interval in seconds
+      gateway,g,string,,Source through a workspace gateway over RPC: a base URL to attach (hard-fails if unreachable) or auto to start-or-attach; default with no flag is auto with a silent fallback to direct-db
+      direct,,boolean,false,Force direct smithers.db reads and bypass the gateway (escape hatch for a broken gateway)
+  - name: top
+    purpose: Alias for smithers supervisor (workflow supervisor)
   - name: gateway
     purpose: Serve the multi-run Gateway RPC/WS control plane for workspace run state (one singleton per workspace; a second start refuses); unlike up --serve, this is not tied to one run
     args[1]{name,type,required,desc}:
@@ -2986,7 +2997,7 @@ commands[102]:
     args[1]{name,type,required,desc}:
       runId,string,true,Run ID
     flags[5]{name,short,type,default,desc}:
-      follow,f,boolean,true,Poll for new events while run is active
+      follow,f,boolean,,Follow a live run to completion; default follows only when stdout is a TTY (pipes/redirects snapshot and exit); -f forces follow and --no-follow forces snapshot
       from-seq,,number,,Start from event sequence number (exclusive)
       since,,number,,Deprecated alias of --from-seq (an event sequence number, not a duration)
       tail,n,number,50,Last N events
@@ -3005,6 +3016,16 @@ commands[102]:
       watch,w,boolean,false,Append new events as they arrive from the live cursor
       interval,i,number,2,Watch poll seconds
       history,,boolean,false,Replay existing history before tailing in watch mode
+  - name: tail
+    purpose: "Tail a run's output: verbatim node output with --node, or a concise run-level event overview"
+    args[1]{name,type,required,desc}:
+      runId,string,true,Run ID
+    flags[5]{name,short,type,default,desc}:
+      node,n,string,,Filter to a single node and print its output verbatim
+      follow,f,boolean,true,Poll for new events until the run reaches a terminal state
+      format,,enum,pretty,pretty|jsonl
+      linger,,boolean,false,After the run is terminal stay open until q/Enter or Ctrl-C (herdr panes pass this)
+      overview,,boolean,false,Run-level supervision board (per-node state + attempt, approve/steer CTAs, queue summary) above the event scroll
   - name: chat
     purpose: Show agent chat output for the latest run or a specific run
     args[1]{name,type,required,desc}:
@@ -3050,6 +3071,17 @@ commands[102]:
       target,,string,,"Expected engine such as claude-code or codex"
       timeout-ms,,number,30000,Wait time for live handoff
       launch,,boolean,true,Open session immediately
+  - name: steer
+    purpose: "Steer a running workflow in one step: with a message, queue a durable steer for the target node's next agent step (the run never stops); with --takeover, hand off the live agent session (a run-wide hijack that warns before aborting in-flight siblings); bare steer auto-picks the single active run"
+    args[2]{name,type,required,desc}:
+      runId,string,false,Run ID; auto-picks the single active run (or prompts) if omitted
+      message,string,false,Steer message to queue for the target node's next agent step (prompts if omitted and not --takeover)
+    flags[5]{name,short,type,default,desc}:
+      node,n,string,,Node id to steer (default: the run's current in-flight agent node)
+      takeover,t,boolean,false,Hijack the live agent session instead of queuing a steer (run-wide; warns before aborting in-flight siblings)
+      yes,y,boolean,false,Skip the takeover confirmation prompt (answer yes)
+      timeout-ms,,number,30000,Wait time for live handoff (takeover)
+      session,,string,,herdr session hosting the mirror (auto-detected from the pane env by default)
   - name: inspect
     purpose: Output detailed state of a run: steps, agents, approvals, timers, loops, outputs
     args[1]{name,type,required,desc}:
@@ -3119,11 +3151,12 @@ commands[102]:
     purpose: Approve a paused approval gate; auto-detects the node if only one is pending
     args[1]{name,type,required,desc}:
       runId,string,true,Run ID
-    flags[4]{name,short,type,default,desc}:
+    flags[5]{name,short,type,default,desc}:
       node,n,string,,Node ID required if multiple approvals are pending
       iteration,,number,0,Loop iteration
       note,,string,,Approval note
       by,,string,,Approver identifier
+      watch,,boolean,false,Interactively answer each approval gate and human request by keystroke as it appears then linger until the run ends (herdr gate panes)
   - name: deny
     purpose: Deny a paused approval gate
     args[1]{name,type,required,desc}:
@@ -3428,7 +3461,7 @@ commands[102]:
     purpose: Run a discovered workflow by ID
     args[1]{name,type,required,desc}:
       name,string,false,Workflow ID (omit with --interactive to pick one)
-    flags[41]{name,short,type,default,desc}:
+    flags[42]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; preflight the graph, then print runId/pid/logFile once the run is admitted
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -3470,6 +3503,7 @@ commands[102]:
       started-by-harness,,string,,Durable self-reported launch harness; environment may fill when omitted
       started-by-session,,string,,Durable self-reported harness session; environment may fill when omitted
       started-by-prompt,,string,,Explicit durable launch context; never inferred from workflow input
+      herdr,,boolean|string,,Mirror this run into a herdr terminal workspace (one pane per agent node); optionally =SESSION for a named session
   - name: workflow.path
     purpose: Resolve a workflow ID to its entry file path
     args[1]{name,type,required,desc}:
@@ -3624,6 +3658,27 @@ commands[102]:
       no-global,,boolean,false,Install to project instead of globally
   - name: skills.list
     purpose: List available skills
+  - name: herdr.status
+    purpose: Ping the herdr server and report its version, protocol, and client compatibility
+    flags[1]{name,short,type,default,desc}:
+      session,,string,,Target a named herdr session's socket
+  - name: herdr.attach
+    purpose: Mirror an existing run into a herdr workspace and follow its status until the run ends or Ctrl-C
+    args[1]{name,type,required,desc}:
+      runId,string,true,Run ID to mirror into herdr
+    flags[1]{name,short,type,default,desc}:
+      session,,string,,Target a named herdr session's socket
+  - name: herdr.open
+    purpose: "Open (or re-open) an on-demand herdr pane for a run: a node's lingering output tail, or the run-level overview when no node is given; adopts an existing pane instead of duplicating it"
+    args[2]{name,type,required,desc}:
+      runId,string,true,Run ID whose workspace to open a pane in
+      nodeId,string,false,Node ID to open a tail pane for (omit for the run-level overview pane)
+    flags[1]{name,short,type,default,desc}:
+      session,,string,,Target a named herdr session's socket
+  - name: herdr.clean
+    purpose: Close herdr workspaces that mirror a smithers run whose run is terminal in the DB; never touches workspaces that do not map to a known run, and leaves active runs open
+    flags[1]{name,short,type,default,desc}:
+      session,,string,,Target a named herdr session's socket
 ```
 
 ## Operational notes
@@ -11040,6 +11095,7 @@ debugging notes, and open gaps.
 | `durable-engine` | Durable engine, scheduler, and driver | `fixed` | `platform` | How it works |
 | `approvals-human-gates` | Approvals, human tasks, and durable waits | `fixed` | `feature` | Approval |
 | `gateway-server` | Gateway, RPC, and server | `partial` | `platform` | Gateway |
+| `herdr-supervision` | Herdr supervision, steer, and hijack | `partial` | `feature` | herdr |
 | `workflow-uis` | Custom workflow UIs and monitor surfaces | `fixed` | `feature` | Custom workflow UI |
 | `crash-recovery-resume` | Crash recovery, supervisor, and resume | `partial` | `feature` | Durability and resume |
 | `time-travel-replay` | Time travel, rewind, replay, and snapshots | `partial` | `feature` | Time travel quickstart |
@@ -11170,6 +11226,7 @@ Most applications should import from `smthrs`. The workspace packages below are 
 | `@smthrs/gateway-react` | React hooks and root helpers for Gateway-backed UIs | Gateway |
 | `@smthrs/gateway-ui` | Prebuilt React components for Gateway-backed UIs, built on the gateway-react hooks | Gateway UI Components |
 | `@smthrs/graph` | Framework-neutral workflow graph model, XML nodes, task descriptors, and graph snapshots | Planner Internals, Types |
+| `@smthrs/herdr` | Herdr socket client and run surface: mirror a run into a herdr terminal workspace as an optional presentation and steering plane | Herdr |
 | `@smthrs/init-site` | Private Cloudflare Worker deployment for the interactive Smithers init wizard and workflow builder marketing site | Ecosystem |
 | `@smthrs/integrations` | External webhook and polling event sources, cursor storage, signature verification, and delivery helpers for workflow integrations | Integrations, Server |
 | `@smthrs/jj-darwin-arm64` | Vendored jj (Jujutsu) binary for darwin-arm64; auto-installed as an optional dependency of `@smthrs/vcs`, not depended on directly | VCS Guide |
@@ -21224,6 +21281,604 @@ visualization work unmodified on the machine definition.
 
 ---
 
+## Herdr
+
+> Mirror a Smithers run into a herdr terminal workspace with an overview tab, a tab per attention-worthy node, authoritative status, in-pane approvals, and one-key steering (press s to steer, h to hijack, or smithers steer), all optional and degradable.
+
+
+[Herdr](https://herdr.dev) is a terminal workspace manager. Smithers can mirror a
+run into a herdr workspace so you can watch the whole run at a glance, drop into
+any node, answer a parked gate in place, and take an agent over by hand, without
+giving up any of Smithers' guarantees.
+
+Herdr is a **mirrored presentation and steering plane**. Smithers keeps owning
+everything that matters: it spawns the agents, isolates them, records the durable
+event log, and resumes after a crash. Herdr only renders that run and lets you
+steer it. The mirror is fed from Smithers' event stream, so the herdr sidebar
+shows **authoritative** status pushed from Smithers rather than screen-scraped
+guesses.
+
+The integration is **optional and degradable**. If no herdr server is running,
+`--herdr` warns once on stderr and the run proceeds unchanged. If herdr dies
+mid-run, every call soft-fails and the run finishes normally. No herdr code is on
+the engine's hot path.
+
+## Quickstart
+
+Install and start a herdr server (see the herdr docs for
+platform details), then mirror a run:
+
+```bash
+herdr server                                            # start a herdr server (or run the herdr app)
+bunx smthrs up workflow.tsx --herdr      # run and mirror it into herdr
+```
+
+`--herdr` targets herdr's default session. Pass `--herdr=SESSION` to target a
+named session, or set `HERDR_SESSION` / `HERDR_SOCKET_PATH` (herdr's own env) to
+pick the socket.
+
+## The adaptive layout
+
+Smithers maps a run onto herdr's own hierarchy (workspace, then tabs, then panes)
+so the workspace reads like a run and each tab reads like one thing you might need
+to look at.
+
+- One **workspace** per attached run, labelled
+  `WORKFLOW_ID [smithers:v1:ENCODED_RUN_ID]`. The versioned suffix is Smithers'
+  ownership marker. The complete label is the find-or-create key, so a re-attach
+  or resume reuses the same workspace without adopting an operator-created label
+  that merely mentions the same run id.
+- The workspace's **first tab is the cockpit**. By default it is a **split**: left
+  = your harness shell (or a spawned harness), right = portable **`smithers supervisor`**
+  (`top --db <store>` - long-lived fleet board; see The overview board
+  and the workflow supervisor guide). Operator-owned workspaces can
+  pre-split and dock top into the right pane without renaming the workspace.
+- Each mirrored node gets its **own tab**, labelled with the node id, holding
+  **one full-size pane** running that node's live output
+  (`tail RUN_ID --node NODE_ID --hud --linger`) with a **fixed bottom dual-control
+  dock** (`s` steer · `h` hijack · `q` close). Because only one tab renders at a
+  time, every node pane gets the full terminal area instead of a shrinking sliver.
+  The pane is named `smithers:RUN_ID:NODE_ID`.
+
+Why tabs rather than splitting one tab into many panes: herdr splits divide a
+single shared area, so panes halve with each new node (a fourth node is already a
+narrow column, a sixth is an unreadable two-column sliver). Tabs each get the full
+area regardless of how many exist, so a tab per node stays legible where splits do
+not.
+
+### The adaptive cap
+
+Auto-spawning a tab per node breaks down under fan-out: a swarm over dozens of
+issues would open dozens of tabs, most idle then gone. So the mirror uses an
+adaptive cap, **`tabCap` (default 6 tabs including the overview)**, which leaves
+room for five mirrored node tabs. Past the cap an ordinary node stays **unpaned**
+and issues no herdr calls at all, so a large fan-out does not flood the tab bar or
+the socket. The overview tab always reflects every node (see
+the queue summary), and you can pull any unpaned node up on
+demand with `herdr open`.
+
+### Attention promotion (always bypasses the cap)
+
+The cap only holds back *ordinary* nodes. Three kinds of node are
+attention-worthy and **always get a tab, even past the cap**:
+
+- **Parked approval gates** (`NodeWaitingApproval` / `ApprovalRequested`). A pure
+  gate node carries no agent attempt row, so the ordinary agent-only pane filter
+  would drop it; because a parked human gate is exactly what you need to see, it
+  overrides both the filter and the cap and its pane runs
+  `approve --watch` so you can decide in place.
+- **Failed nodes** (`NodeFailed` on the final attempt). A worker that fails deep
+  in a swarm is promoted out of the unpaned pool into its own tab so the one thing
+  that went wrong is visible without hunting for it.
+- **Hijack panes** (see Hijack into a pane).
+
+Loop iterations **reuse their node's tab** rather than opening a new one per
+iteration, so a validation loop that retries three times is one tab, not three.
+**Focus is never stolen** by any of this: a background gate or failure lights up
+the sidebar and fires a notification but never yanks your screen off what you are
+looking at. The one deliberate exception is a hijack pane, which does focus,
+because you asked to drive that agent right now.
+
+Everything in the mirror is soft-fail, replay-idempotent, cross-run-filtered, and
+seq-monotonic: a re-attach or resume adopts the tabs and panes already there
+instead of duplicating them, stale events from other runs are filtered out, and
+out-of-order pushes are dropped rather than flapping a pane's status backward.
+
+## Status mapping
+
+Smithers pushes each pane's status from the run's event stream. `blocked` always
+means "needs a human", so approvals and failures both surface as `blocked` (with a
+notification), which is what makes the herdr sidebar a useful worklist.
+
+| Smithers event | Pane status | Meaning |
+|---|---|---|
+| `NodeStarted`, `NodeRetrying` | `working` | the agent node is executing (retry shows the attempt) |
+| `ApprovalGranted`, `ApprovalAutoApproved` | `working` | a gate cleared; the node resumed |
+| `NodeWaitingApproval`, `ApprovalRequested` | `blocked` | paused on a human approval gate; the message carries the question and a notification fires |
+| `NodeFailed` | `blocked` | the node failed; the message is `failed: SUMMARY` |
+| `NodeFinished` | `idle` | the node completed (custom status `done`) |
+| `NodeCancelled` | `idle` | the node was cancelled (custom status `cancelled`) |
+| `RunFinished` | working panes go `idle` (`done`) | the run completed; a pane already `blocked` on a tolerated failure keeps its failure |
+| `RunFailed`, `RunCancelled` | working or blocked panes go `blocked` | the run ended abnormally |
+
+The gate question is pushed both as the pane's status message and as its queryable
+`custom_status`, so `herdr agent list` shows what needs approving, not just that
+the pane is blocked. When such a gate clears, its pane resolves to `idle` with the
+custom status `approved` rather than the `working`/`done` an ordinary agent node
+reports.
+
+Because `bunx smthrs up` exits when it parks at a gate (exit code
+3, awaiting a decision), you approve and resume in a new process. On resume
+Smithers re-adopts the parked gate pane and re-flags it, so the pane moves from
+`blocked` to `approved` when the resumed run clears the gate instead of staying
+stuck `blocked` in the mirror.
+
+When an agent reports a resumable session id, Smithers also forwards it to the
+pane so herdr can associate the pane with the agent's session.
+
+### Outcome labels
+
+When the run reaches a terminal state, Smithers renames its workspace with an
+outcome marker while keeping the run id, so the sidebar shows the result at a
+glance:
+
+| Marker | Terminal state |
+|---|---|
+| `✓ WORKFLOW_ID [smithers:v1:ENCODED_RUN_ID]` | finished |
+| `✗ WORKFLOW_ID [smithers:v1:ENCODED_RUN_ID]` | failed |
+| `◻ WORKFLOW_ID [smithers:v1:ENCODED_RUN_ID]` | cancelled |
+
+The rename is derived from the clean label and never stacks markers on replay, and
+find-or-create/attach re-adopt a renamed workspace (the marker prefix is tolerated
+when matching), so a resumed run reuses its marked workspace rather than opening a
+fresh one. Panes still linger after the run ends (below), so a `✓` or `✗`
+workspace is a finished run you can still read; close it yourself, or sweep every
+terminal run's workspace at once with `herdr clean`.
+
+## The supervision kit
+
+The mirror is most useful with a few herdr settings turned on, so a parked gate or
+a failed worker rises to the top of the sidebar on its own instead of waiting to
+be found. Configure these in your herdr config (`herdr --default-config` prints
+the full template):
+
+- **Sort the agent panel by attention.** Set `agent_panel_sort = "priority"` in
+  `[ui]`. This flips the agent list from grouped-by-workspace to a flat queue
+  ordered blocked, done, working, idle, unknown. Since Smithers maps every parked
+  gate and every failure to `blocked`, and herdr rolls `blocked` up over
+  `working`/`idle`/`unknown` at the workspace level, the run that needs you is
+  first in the list.
+- **Filter to what is blocked with `prefix+g`.** The session navigator opens on
+  `prefix+g` and gives a searchable tree of every workspace, tab, and pane. Press
+  `/` to fuzzy-find by text, or `b` / `w` / `i` / `d` to filter to blocked /
+  working / idle / done panes. `prefix+g` then `b` is a one-keystroke "show me only
+  what is waiting on a human" across every mirrored run.
+- **Turn on notifications.** Smithers fires a herdr notification when a gate parks,
+  a node fails, a hijack is ready, and when a run ends. herdr only surfaces these
+  if toasts are enabled: set `[ui.toast] delivery = "herdr"` for in-UI toasts (or
+  `system` for desktop notifications). Then `prefix+o`
+  (`open_notification_target`) jumps focus straight to the pane that raised the
+  most recent toast, so an alert is one keystroke from the thing that raised it.
+
+With those on, the day-to-day loop is: leave herdr on the priority agent panel,
+let runs mirror themselves, and act only when a row goes blocked, either by
+clicking it, pressing `prefix+g b`, or following a toast with `prefix+o`.
+
+## Answering a gate in-pane
+
+A parked approval gate is promoted to its own tab whose pane runs an interactive
+watcher:
+
+```bash
+bunx smthrs approve RUN_ID --watch
+```
+
+`approve --watch` polls the run for pending approval gates **and** human requests
+(`ask` / `confirm` / `select` / `json`) and answers each one by keystroke as it
+appears (`y` / `n` for a gate, a picker or prompt for a human request), committing
+through the exact same engine machinery as the single-shot `approve` / `deny` /
+`human answer` commands. After a decision it lingers and waits for the next gate,
+so one pane walks a multi-gate run end to end. It is a standalone command; you can
+run it in any terminal, and the herdr gate tab is simply where the mirror runs it
+for you.
+
+The single-shot forms are unchanged and still the right tool from a script or a
+one-off terminal:
+
+```bash
+bunx smthrs approve RUN_ID                 # auto-detects the pending node
+bunx smthrs approve RUN_ID --node NODE_ID  # when several gates are pending
+bunx smthrs deny RUN_ID --node NODE_ID
+```
+
+## The overview board
+
+The cockpit **right** pane hosts **`smithers supervisor`** - a portable, long-lived
+workflow board (not a scrolling log). Herdr only *places* that process; the board
+itself is a standalone CLI surface. Full guide: workflow supervisor.
+
+```bash
+# Anywhere (including outside herdr)
+smithers supervisor --db /path/to/smithers.db
+
+# Single-run attach still available
+smithers tail RUN_ID --overview --hud --linger
+```
+
+What you see at a glance:
+
+- **Fleet** - multi-run strip when the store has more than one run (`j`/`k` to focus).
+- **Header** - run id, status, elapsed, tallies (working / blocked / failed / done).
+- **Attention** - fails, gates, queued steers (empty when calm).
+- **Board** - per-node status (attention-first); large fan-outs trim to attention + queue summary.
+- **Digest** - deterministic progress (~30s), no LLM.
+- **CTAs** - exact `approve` / steer commands when something needs a human; dual-control
+  keys live on the **node tab dock** (`s` steer · `h` hijack), not on the workflow supervisor outline.
+
+### The browser stays out of the way
+
+Inside a herdr pane (`HERDR_ENV=1`), the commands that would normally launch a
+browser - `monitor`, `ui`, `gui`, and the post-run HTML summary - **print their
+URL instead**. The cockpit is already your live view, and a per-command
+`--no-open` is useless when an *agent* runs the command on your behalf.
+
+```bash
+SMITHERS_NO_BROWSER=1   # suppress anywhere (plain tmux/iTerm split, SSH, CI)
+SMITHERS_NO_BROWSER=0   # force the browser back on, even inside herdr
+```
+
+Nothing is lost: the URL is printed and any report file is still written.
+
+### Packaging: workflow supervisor vs herdr-only
+
+| Layer | Owns | Installs with |
+|---|---|---|
+| **workflow supervisor** (`smithers supervisor`) | Board UI, poll loop, keys, `--db` | Smithers CLI |
+| **herdr integration** | Workspace/tab/pane chrome, dock, soft-pin, harness left | Optional; needs herdr server |
+| **campaign / testing** | Fixtures, watch-pack, bridge that *invokes* top in a pane | Dev/testing |
+
+If you are writing guidance for herdr, document **placement and keys around the
+host**. Do not re-document the whole board - link to workflow supervisor.
+
+
+### Testing without LLMs
+
+Herdr is one **visibility plane**. Agent-trace fixtures and core scenarios are shared
+across HUD, herdr, and other UIs - see
+Token-free visibility testing.
+
+## On-demand panes
+
+The cap deliberately leaves most swarm workers unpaned. When you do want to look
+at a specific one (or re-open a finished node's output), pull it up on demand:
+
+```bash
+bunx smthrs herdr open RUN_ID NODE_ID      # a node's lingering output tail
+bunx smthrs herdr open RUN_ID              # the run-level overview pane
+```
+
+`herdr open` places one full-size pane into the run's mirror workspace. It is
+find-or-create and outcome-tolerant: an outcome-marked (`✓`/`✗`/`◻`) workspace is
+re-adopted, and a node that already has a pane is adopted rather than duplicated,
+so opening the same node twice is idempotent. This is the escape valve for
+"the mirror never paned that worker, but I need to see it now" and works whether
+the run is live or already finished.
+
+### Cleaning up
+
+Finished runs leave their workspaces up on purpose so you can read them. When you
+are done, sweep them:
+
+```bash
+bunx smthrs herdr clean
+```
+
+`herdr clean` closes every herdr workspace that mirrors a Smithers run **whose run
+is terminal in the local store**. Before closing anything, it requires the
+versioned ownership marker and an exact match with the workflow and run identity
+reconstructed from the DB row. Unknown, mismatched, and active-run workspaces are
+left open. It prints each workspace it closed.
+
+## Supervision profiles
+
+Workflows differ in how much a human watches them, and the adaptive layout is
+built to match that spread. Four shapes cover the pack.
+
+### Bounded and steerable
+
+*"I want to watch this whole thing and jump in when it asks."* A short run
+(`hello`, `research`, `review`, `plan`) is one to three agent nodes. It fits under
+the cap comfortably: the overview tab plus a tab per node, and you can read the
+entire run. The interactive members of this shape (`grill-me`, a clarify phase)
+want a focused tab you type into, which is exactly a node tab; nothing steals focus
+away from it while you answer.
+
+### Pipeline
+
+*"I care about the current stage and the gate, not every token."* A sequential
+multi-stage run (`implement`, `research-plan-implement`, `create-workflow`,
+`release`) is a handful of distinct stages with zero to a few approval gates.
+Each stage gets a tab, and loop iterations (a validation loop retrying) reuse that
+stage's tab instead of piling up. The approval gate is promoted to its own tab
+running `approve --watch`, so your attention lands on the gate and the current
+stage, which is where a pipeline's decisions live, and the overview tab carries the
+banner for everything else.
+
+### Swarm and long-horizon
+
+*"I am an exception handler, not a babysitter."* A fan-out over issues, features,
+or tickets (`fix-all-issues`, `merge-train-all-issues`, `mission`, `ralph`) runs
+dozens of mostly-mechanical workers, most with no human gate at all. Here the cap
+earns its keep: the workers stay unpaned, the overview tab is the dashboard (its
+queue summary tallies working/blocked/failed/done across the whole swarm), and only
+attention-worthy nodes take a tab, a failing worker promoted out of the pool, an
+up-front plan-approval gate, a merge or final-report node. When you want a specific
+worker, `herdr open RUN_ID worker-3` pulls it up; when a worker fails, it is
+already waiting in its own tab and the sidebar has gone blocked.
+
+### Co-pilot
+
+*"The agent is asking me questions; I want to answer fast."* Interactive workflows
+put the human upstream of the agents, answering clarify or grill questions rather
+than approving output. These want a single focused, low-latency tab. Because the
+mirror never steals focus, you drive the conversation from the node's tab (reach it
+with `prefix+g` or a click), and a parked human request surfaces the same way a
+gate does: promoted, blocked, and answerable in place with `approve --watch`.
+
+## Attach to a run already in flight
+
+`bunx smthrs herdr attach` mirrors an existing run into herdr and
+follows it live until the run ends or you press Ctrl-C:
+
+```bash
+bunx smthrs herdr attach RUN_ID
+bunx smthrs herdr attach RUN_ID --session SESSION
+```
+
+Attach reconciles against existing herdr state: it finds-or-creates the run's
+workspace by the deterministic label (tolerating an outcome marker), adopts the
+overview and node tabs already there, and creates tabs only for nodes that are
+still active or attention-worthy (long-finished nodes are not replayed). Detaching
+(run end or Ctrl-C) never closes the workspace. Attaching to an already-terminal
+run prints a final status line and creates nothing.
+
+## Check the server
+
+`bunx smthrs herdr status` pings the server and reports its
+version, protocol, and whether this client is compatible. It needs no run and no
+herdr code path beyond the socket:
+
+```bash
+bunx smthrs herdr status
+bunx smthrs herdr status --session SESSION
+```
+
+It exits non-zero with a clear message when no server is reachable.
+
+## Standalone tail
+
+The panes are just `smithers tail`, which is a standalone, herdr-free command.
+Use it directly to follow a run, a single node, or the run-level board from any
+terminal:
+
+```bash
+bunx smthrs tail RUN_ID                  # run-level event overview
+bunx smthrs tail RUN_ID --overview       # run-level supervision board
+```
+
+It reads the run's persisted and live event stream directly from the local store,
+so it works for detached runs and needs no gateway server. It follows a live run
+to completion by default and prints a one-line final status, then exits. Pass
+`--linger` to keep it open after the run reaches a terminal state until you press
+`q`, Enter, or Ctrl-C; this is what mirror panes use so they do not vanish at run
+end. See the CLI overview for the full flag list.
+
+On an interactive **node** tail (a TTY with `--node`, live or lingering), the same
+one-key controls apply - press `s` to steer this node's
+agent, `h` to hijack it, `q` (or Ctrl-C) to close - shown as a subtle
+`s steer · h hijack · q close` hint (a lingering pane after run end drops the
+`s`, since a steer can no longer land once every node is terminal). Piped,
+`--format jsonl`, and non-TTY tails are unaffected: no raw mode, no keys.
+
+## Steer with one key
+
+Steering a live run comes in two gestures, and they differ on one thing: whether
+the run keeps running.
+
+- A **steer** is a short instruction you drop into a running node. The run **never
+  stops** - the steer is consumed on that node's next agent step and the agent
+  carries on.
+- A **takeover** hands you the agent's live session to drive by hand. The run
+  **parks** while you drive, and resumes when you hand control back.
+
+In the mirror each is **one key** on an agent's node tab. No run id, no node id, no
+env vars: the pane already knows its own run and node (it is a `smithers tail
+--node`) and which herdr session it lives in (herdr exports `HERDR_SOCKET_PATH`
+into every pane), so a single keystroke is the whole gesture.
+
+| Key | Where | What it does |
+| --- | --- | --- |
+| `s` | any agent node tab (live) | steer - open an inline `steer:` input line; type an instruction and press Enter to queue it as a steer for this node (Esc cancels) |
+| `h` | any agent node tab (live or lingering) | hijack - hand off this agent's live session as a focused hijack pane (run-wide; warns first if other agents are in flight) |
+| `y` / `n` | a parked gate tab (`approve --watch`) | approve / deny the gate in place |
+| `q` | any node tab, and a pane lingering after run end | close the pane (Ctrl-C also works) |
+
+The live node tab shows a subtle `s steer · h hijack · q close` hint; a pane
+lingering after the run ends drops the `s` (a steer can no longer land once every
+node is terminal) and shows `h hijack · q close`. The overview tab spells the
+same options as text (`in its node tab press s to steer · h to hijack`), so you
+can act from wherever your attention landed.
+
+Prefer to type it? `smithers steer` is the one-word equivalent, with zero env
+ceremony:
+
+```bash
+bunx smthrs steer                          # steer the single active run's current agent
+bunx smthrs steer RUN_ID --node NODE_ID "…"  # target a specific node's agent
+```
+
+With no run id it auto-picks the single active run (or prompts you among several);
+a bare `smithers steer` with no message prompts for one. For a takeover it
+auto-detects the run's herdr mirror from the pane/env session and opens the
+hand-off as a hijack pane there; with no mirror reachable it hands the session off
+in your current terminal instead. Either way there is nothing to set up - this is
+the replacement for the old `cd … && SMITHERS_HERDR=… SMITHERS_HERDR_HIJACK=1 …
+hijack --target …` incantation.
+
+### The steering contract
+
+**Steer - the run never stops.** A queued steer is consumed on the target node's
+**next agent `generate()` call** - its first start, a retry attempt, or the next
+loop iteration - and injected as a user message *before* the structured-output
+schema wrap, so it never breaks a node that returns JSON. Consumption is recorded
+in the attempt's persisted conversation, so a steer is **replay-safe**: resuming
+or replaying the run reproduces the identical turn without re-reading the inbox,
+and never double-injects. A steer that is never consumed - its node already
+finished, or the run ends first - **expires** deterministically when the run
+reaches a terminal state (finished / failed; a cancelled or hijacked run keeps its
+queued steers so a resume can still consume them), emitting `SteerExpired`;
+run-level expiry (rather than per-node) is what keeps a steer aimed at a `<Loop>`
+node's *next* iteration from being thrown away early. The pane you are watching
+renders each step as a one-liner: `↪ steer queued: …`, `✓ steer consumed by
+attempt N`, `✗ steer expired - node finished first; press h to hijack`.
+
+**Hijack - run-wide today.** A hijack is the hijack hand-off:
+Smithers parks the **whole run** (its status goes to `cancelled`) and hands you
+the target node's live session; you resume when you are done. Because the hijack
+aborts the shared run signal, any *other* agent node that was mid-generate is
+cancelled and **re-runs on resume**. So `steer --takeover` (and the `h` key) gate
+on an honest warning: when the run has in-flight agent siblings it prints the
+exact count - `⚠ Takeover is run-wide: it aborts N in-flight siblings (…); they
+re-run on resume.` - and requires a `y` confirmation (`--yes` to skip; on a
+non-TTY without `--yes` it refuses rather than silently aborting the wave).
+Answering `n` leaves the run completely untouched. A **node-scoped** takeover that
+parks only the one node and leaves its siblings running is on the roadmap; it
+needs a per-node interrupt the engine does not have yet, so today taking one worker
+over means taking the run over.
+
+herdr stays a **pure mirror** throughout: it never writes to the engine or the
+run's store. Pressing `s` or `h` in a pane just spawns the same `smithers steer`
+the CLI would, and the pane only *displays* the `SteerQueued` / `SteerConsumed` /
+`SteerExpired` events Smithers emits.
+
+## Hijack into a pane
+
+`smithers steer --takeover` (and the `h` key) is a thin, zero-ceremony front end
+over `bunx smthrs hijack RUN_ID`, the underlying hand-off. `hijack`
+by default launches the interactive agent CLI in your **current terminal**; the
+`SMITHERS_HERDR_HIJACK` env var opts it into a **herdr pane** inside the run's
+mirror workspace instead. `steer --takeover` just sets that up for you after
+auto-detecting the mirror (and after the in-flight-sibling warning above), so you
+rarely reach for the raw form - but it stays available for scripts and for driving
+the pane-vs-terminal decision explicitly. The hijack pane is cap-exempt and does
+take focus, because you asked to drive that agent right now.
+
+Pane hosting is gated on `SMITHERS_HERDR_HIJACK`, and the session it targets comes
+from `SMITHERS_HERDR` (not from herdr's own `HERDR_SESSION`). So to host the pane
+in the same named session your run mirrors into, set **both** variables:
+
+```bash
+SMITHERS_HERDR=SESSION SMITHERS_HERDR_HIJACK=1 bunx smthrs hijack RUN_ID
+```
+
+`SMITHERS_HERDR_HIJACK` accepts `1`, `true`, or an explicit session name. With `1`
+or `true` it reuses the session from `SMITHERS_HERDR`; if `SMITHERS_HERDR` is unset
+the pane carries no explicit session, so the client falls through to herdr's own
+socket resolution (`HERDR_SOCKET_PATH`, then `HERDR_SESSION`, then the default
+session). That is why setting **both** variables, above, is the reliable way to
+host the pane in the same named session your run mirrors into. The hijack pane is
+an agent named `smithers:RUN_ID:hijack:NODE_ID`, marked `blocked` ("hijacked -
+attach to drive"). The command prints the exact agent name and attach command on
+stderr; attach and hijack with herdr's own CLI:
+
+```bash
+herdr agent attach smithers:RUN_ID:hijack:NODE_ID
+```
+
+### Hijack afterlife
+
+A hijack pane does not collapse to a bare shell when your session exits. Smithers
+wraps the launch spec so that when the agent CLI exits, the pane prints a handback
+summary (the exact resume command) and lingers for a keypress instead of vanishing,
+so a hijack you stepped away from is still readable when you come back. The inner
+exit code is preserved, and argv/cwd/env are passed through exactly; only the
+herdr-pane path is wrapped, the current-terminal hijack flow is byte-identical.
+
+Handback is **manual**, and the run does not keep running while you drive the agent
+by hand: on handoff Smithers parks the run (its status goes to `cancelled`), so the
+durable run stops advancing until you return control. Because the pane's process is
+owned by herdr and its exit event carries no exit code, Smithers does not
+auto-resume (auto-resuming after an aborted or errored session could corrupt the
+run). When you are done, hand control back with the resume command the hijack
+prints:
+
+```bash
+bunx smthrs up WORKFLOW_FILE --resume --run-id RUN_ID
+```
+
+If no herdr server is reachable or the pane launch fails, hijack falls back to the
+byte-identical current-terminal flow, so opting in never removes your ability to
+hijack.
+
+## Detached runs
+
+`bunx smthrs up --detach` (`-d`) re-spawns the run in a background
+process and returns immediately. `--herdr` is honored there too: the parent hands
+the setting to the detached child through the `SMITHERS_HERDR` env var (`1` or the
+session name), which the child inherits, so the mirror runs in the process that
+actually executes the run. You do not set `SMITHERS_HERDR` yourself; `--herdr` sets
+it for the handoff. The detach message leads its watch options with
+`herdr attach RUN_ID` so you can re-open the mirror after detaching.
+
+## Degradability
+
+Herdr never affects a run. Every interaction is fire-and-forget with a per-call
+timeout (5s by default) and a consecutive-timeout circuit breaker that drops
+pushes fast once herdr stops answering. Concretely:
+
+- No herdr server reachable: `--herdr` logs one warning on stderr and the run
+  proceeds with no mirror. For a detached run, that warning lands in the detach
+  log file.
+- Herdr dies mid-run: calls soft-fail, the breaker opens, and the run reaches its
+  terminal state normally.
+- Host shutdown is bounded: closing the surface abandons a hung herdr after a
+  short deadline rather than blocking.
+
+## Version pinning
+
+This client is built and tested against **herdr 0.7.3 / wire protocol 16**. On a
+protocol other than 16 the client logs a warning and keeps going (it tolerates
+unknown fields rather than hard-failing). `bunx smthrs herdr status`
+reports the server's protocol and whether it matches, which is the quickest
+compatibility check.
+
+## Remote runs over SSH
+
+Herdr talks to Smithers over a local unix socket, so herdr runs **where your
+agents run**. To watch a run executing on a remote host, run both Smithers and
+herdr on that host and reach them over SSH (for example an SSH session into the
+host, then `bunx smthrs herdr attach RUN_ID` there). Do not try to
+forward or expose the socket itself; SSH to the host and run the client locally.
+
+## Security
+
+The herdr control socket is **unauthenticated local control**. Anything that can
+reach it can start processes and drive panes. Keep it on a trusted local machine
+(the default socket lives under `~/.config/herdr/`). Never expose it over the
+network or forward the raw socket. For a remote host, SSH in and run the client
+there rather than opening the socket up.
+
+## Mirror vs interactive moments
+
+The mirror is the **architecture**: Smithers always owns execution, isolation,
+and durability, and herdr is a read-mostly presentation and steering plane fed
+from Smithers' event stream. In-pane approvals (`approve --watch`) and hijack panes
+are the **interactive escape hatches** for the moments you need to decide or drive
+by hand. A per-task interactive mode, where herdr would own a task's process end to
+end, is explicitly out of scope for this integration.
+
+---
+
 ## Microsandbox Provider
 
 > Run a Smithers <Sandbox> child workflow in a local Microsandbox microVM with createMicrosandboxSandboxProvider.
@@ -22469,6 +23124,9 @@ millis from the stored row) and surface `stateVersion: 0`.
 | `ApprovalGranted` | `runId`, `nodeId`, `iteration`, `timestampMs` |
 | `ApprovalAutoApproved` | `runId`, `nodeId`, `iteration`, `timestampMs` |
 | `ApprovalDenied` | `runId`, `nodeId`, `iteration`, `timestampMs` |
+| `SteerQueued` | `runId`, `nodeId`, `steerId`, `message`, `author?`, `timestampMs` |
+| `SteerConsumed` | `runId`, `nodeId`, `iteration`, `attempt`, `steerId`, `timestampMs` |
+| `SteerExpired` | `runId`, `nodeId`, `steerId`, `timestampMs` |
 | `ToolCallStarted` | `runId`, `nodeId`, `iteration`, `attempt`, `toolCallId`, `toolName`, `seq`, `timestampMs` |
 | `ToolCallFinished` | `runId`, `nodeId`, `iteration`, `attempt`, `toolCallId`, `toolName`, `seq`, `status`, `timestampMs` |
 | `NodeOutput` | `runId`, `nodeId`, `iteration`, `attempt`, `text`, `stream`, `timestampMs` |

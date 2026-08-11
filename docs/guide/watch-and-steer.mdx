@@ -67,7 +67,7 @@ Because every run is durable (render → execute → persist), steering is never
 
 ## The steering contract
 
-Two of those moves - *steer* and *hijack* - are the fine-grained dual-control contract, and they trade off on a single axis: whether the run keeps running. Both are one command family (`smithers steer` / `bunx smithers-orchestrator hijack`).
+Two of those moves - *steer* and *hijack* - are the fine-grained dual-control contract, and they trade off on a single axis: whether the run keeps running. Both are one command family (`smithers steer` / `bunx smthrs hijack`).
 
 **Steer - the run never stops.** A steer is a short instruction dropped into a running node's inbox. It is consumed on that node's **next agent step** (its first start, a retry attempt, or the next loop iteration), injected as a user message *before* any structured-output schema wrap, so it never breaks a node that returns JSON. The run does not park; a loop keeps looping. Because the injected message is captured in the attempt's persisted conversation, a steer is **replay-safe**: resuming or replaying the run reproduces the exact same turn without re-reading the inbox. A steer that is never consumed (its node already finished, or the run ends first) **expires** deterministically when the run reaches a terminal state, so it never silently applies to the wrong step. Lifecycle events (wire names): `SteerQueued`, then `SteerConsumed` (by attempt N), or `SteerExpired`.
 
@@ -76,10 +76,10 @@ Two of those moves - *steer* and *hijack* - are the fine-grained dual-control co
 You ask your agent, or you type it directly:
 
 ```bash
-bunx smithers-orchestrator steer                                          # steer the single active run's current agent
-bunx smithers-orchestrator steer RUN_ID "focus on the failing test only"  # queue a steer for a specific run
-bunx smithers-orchestrator steer RUN_ID --node NODE_ID "…"                # target a specific node
-bunx smithers-orchestrator steer RUN_ID --takeover                        # hijack the live session (warns before aborting siblings)
+bunx smthrs steer                                          # steer the single active run's current agent
+bunx smthrs steer RUN_ID "focus on the failing test only"  # queue a steer for a specific run
+bunx smthrs steer RUN_ID --node NODE_ID "…"                # target a specific node
+bunx smthrs steer RUN_ID --takeover                        # hijack the live session (warns before aborting siblings)
 ```
 
 In a [herdr](/integrations/herdr) mirror it is one key on an agent's tab: press `s` to type a steer, `h` to hijack. See [Steer with one key](/integrations/herdr#steer-with-one-key) for the full `s` / `h` / `y` / `n` / `q` vocabulary.

@@ -1,4 +1,4 @@
-# `@smithers-orchestrator/herdr`
+# `@smthrs/herdr`
 
 Socket client + **run surface** that mirrors a Smithers run into a [herdr](https://herdr.dev)
 workspace (presentation & steering plane). Soft-degradable: missing herdr never

@@ -3,8 +3,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { Database } from "bun:sqlite";
 import { delimiter, resolve } from "node:path";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import {
   buildAgentNodeFilter,
   buildTailCommand,
@@ -15,7 +15,7 @@ import {
   resolveHerdrOption,
   wrapHijackPaneAfterlife,
 } from "../src/herdr.js";
-import { createHerdrClient, createHerdrRunSurface } from "@smithers-orchestrator/herdr";
+import { createHerdrClient, createHerdrRunSurface } from "@smthrs/herdr";
 import {
   createExecutableDir,
   createTempRepo,
@@ -471,8 +471,8 @@ function writeSlowFakeClaude(dir) {
 }
 
 const THREE_AGENT_WORKFLOW = [
-  "/** @jsxImportSource smithers-orchestrator */",
-  'import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";',
+  "/** @jsxImportSource smthrs */",
+  'import { ClaudeCodeAgent, createSmithers } from "smthrs";',
   'import { z } from "zod";',
   "",
   "const schema = z.object({ answer: z.string() });",
@@ -495,8 +495,8 @@ const THREE_AGENT_WORKFLOW = [
 
 // A single-agent workflow (fast) for the concurrent-run collision test.
 const ONE_AGENT_WORKFLOW = [
-  "/** @jsxImportSource smithers-orchestrator */",
-  'import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";',
+  "/** @jsxImportSource smthrs */",
+  'import { ClaudeCodeAgent, createSmithers } from "smthrs";',
   'import { z } from "zod";',
   "",
   "const schema = z.object({ answer: z.string() });",
@@ -515,8 +515,8 @@ const ONE_AGENT_WORKFLOW = [
 // static node's attempt is recorded with kind !== "agent", so the surface's
 // agent-only nodeFilter must NOT give it a pane.
 const MIXED_WORKFLOW = [
-  "/** @jsxImportSource smithers-orchestrator */",
-  'import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";',
+  "/** @jsxImportSource smthrs */",
+  'import { ClaudeCodeAgent, createSmithers } from "smthrs";',
   'import { z } from "zod";',
   "",
   "const schema = z.object({ answer: z.string() });",

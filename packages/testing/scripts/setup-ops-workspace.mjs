@@ -13,7 +13,7 @@
  *   SMITHERS_HERDR_DOCK=1 bun packages/testing/scripts/core-campaign.mjs \
  *     --herdr --watch-pack --session smithers-dev --ops --fresh
  */
-import { createHerdrClient } from "@smithers-orchestrator/herdr";
+import { createHerdrClient } from "@smthrs/herdr";
 
 function parseArgs(argv) {
 	const out = { session: undefined, label: "smithers-ops", help: false };

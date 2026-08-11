@@ -1,4 +1,4 @@
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 
 /**
  * The engine records a cancellation by writing a *denial* approval whose author

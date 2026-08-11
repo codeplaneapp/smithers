@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { trackEvent } from "@smithers-orchestrator/observability/metrics";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { trackEvent } from "@smthrs/observability/metrics";
+import { nowMs } from "@smthrs/scheduler/nowMs";
 
 /** Hard cap on steer message length; a steer is a short instruction. */
 const STEER_MESSAGE_MAX_LENGTH = 20_000;

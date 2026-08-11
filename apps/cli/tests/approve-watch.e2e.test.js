@@ -5,8 +5,8 @@ import { PassThrough } from "node:stream";
 import { resolve } from "node:path";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Effect } from "effect";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { createTempRepo, pinSqliteBackend } from "../../../packages/smithers/tests/e2e-helpers.js";
 import { CANCEL, createKeyReader, findNextPending, parseSelectOptions, runApproveWatch } from "../src/approve-watch.js";
 

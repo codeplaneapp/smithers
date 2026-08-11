@@ -32,7 +32,7 @@ type RunWorkflowScenarioOptions = {
     /** Live progress events from the engine. */
     onProgress?: (event: unknown) => void;
     /**
-     * Injected runWorkflow. Defaults to dynamic import of smithers-orchestrator.
+     * Injected runWorkflow. Defaults to dynamic import of smthrs.
      * May return an Effect or a Promise.
      */
     runWorkflowFn?: (workflow: ScenarioWorkflow, opts: Record<string, unknown>) => unknown;

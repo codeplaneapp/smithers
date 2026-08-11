@@ -17,7 +17,7 @@
  * Plain `herdr` is the default session and will look empty while this campaign
  * writes into smithers-dev.
  */
-import { createHerdrClient } from "@smithers-orchestrator/herdr";
+import { createHerdrClient } from "@smthrs/herdr";
 import { runCampaign } from "../src/campaign.ts";
 import {
 	tryCloseCampaignHerdrWorkspaces,

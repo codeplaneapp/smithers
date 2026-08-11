@@ -1,4 +1,4 @@
-import { createHerdrClient, workspaceLabelMatches } from "@smithers-orchestrator/herdr";
+import { createHerdrClient, workspaceLabelMatches } from "@smthrs/herdr";
 import { probeCompatibleHerdr } from "./herdr.js";
 
 /**
@@ -71,8 +71,8 @@ export async function listActiveRunsForSteer(adapter, limit = 50) {
  *   runId: string,
  *   label: string,
  *   session?: string | undefined,
- *   client?: import("@smithers-orchestrator/herdr").HerdrClient,
- *   logger?: import("@smithers-orchestrator/herdr").HerdrLogger,
+ *   client?: import("@smthrs/herdr").HerdrClient,
+ *   logger?: import("@smthrs/herdr").HerdrLogger,
  * }} params
  * @returns {Promise<{ mirrored: boolean, socketPath: string, workspaceId?: string }>}
  */

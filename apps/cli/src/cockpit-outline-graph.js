@@ -5,7 +5,7 @@
  * Fallback remains flat listNodes heuristics in cockpit-outline.js.
  */
 
-import { getDevToolsSnapshotRoute } from "@smithers-orchestrator/server/gatewayRoutes/getDevToolsSnapshot";
+import { getDevToolsSnapshotRoute } from "@smthrs/server/gatewayRoutes/getDevToolsSnapshot";
 
 /**
  * Local identity helpers (avoid circular import with cockpit-outline.js).
@@ -64,7 +64,7 @@ function identityFromMeta(meta) {
  */
 
 /**
- * @param {import("@smithers-orchestrator/protocol/devtools").DevToolsNode | null | undefined} node
+ * @param {import("@smthrs/protocol/devtools").DevToolsNode | null | undefined} node
  * @param {Record<string, Record<string, unknown>>} metaByNode
  * @param {string} path
  * @returns {OutlineTreeNode | null}

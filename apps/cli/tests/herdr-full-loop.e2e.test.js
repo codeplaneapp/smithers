@@ -82,8 +82,8 @@ function writeSlowFakeClaude(dir) {
 // finished agent's pane (following the RUN's terminal state) stays alive/idle
 // while the next agent works: an observable working -> idle transition.
 const LOOP_WORKFLOW = [
-  "/** @jsxImportSource smithers-orchestrator */",
-  'import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";',
+  "/** @jsxImportSource smthrs */",
+  'import { ClaudeCodeAgent, createSmithers } from "smthrs";',
   'import { z } from "zod";',
   "",
   "const schema = z.object({ answer: z.string() });",

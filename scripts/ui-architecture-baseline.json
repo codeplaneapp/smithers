@@ -112,6 +112,7 @@
       "packages/gateway/package.json#name=\"@smthrs/gateway\"",
       "packages/gcp/package.json#name=\"@smthrs/gcp\"",
       "packages/graph/package.json#name=\"@smthrs/graph\"",
+      "packages/herdr/package.json#name=\"@smthrs/herdr\"",
       "packages/integrations/package.json#name=\"@smthrs/integrations\"",
       "packages/jj-darwin-arm64/package.json#name=\"@smthrs/jj-darwin-arm64\"",
       "packages/jj-darwin-x64/package.json#name=\"@smthrs/jj-darwin-x64\"",

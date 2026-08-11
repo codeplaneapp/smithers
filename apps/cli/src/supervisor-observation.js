@@ -239,7 +239,7 @@ const GATEWAY_EVENT_TO_ACTIVITY_TYPE = new Map([["agent.event", "AgentEvent"]]);
  * is swallowed: a stream drop degrades the strip to last-known/empty and never
  * crashes the TUI. `dispose()` aborts the subscription on exit.
  *
- * @param {import("smithers-orchestrator/gateway-client").SmithersGatewayClient} client
+ * @param {import("smthrs/gateway-client").SmithersGatewayClient} client
  * @param {{ dbPath?: string, cwd?: string }} [_opts] resolved locally for the
  *   still-direct-db herdr detail panes (S2); not needed by the read seam itself.
  * @returns {SupervisorObservationSource}

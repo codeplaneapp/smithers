@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { SmithersDb } from "@smthrs/db/adapter";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
-import { isRetryableSqliteWriteError } from "@smithers-orchestrator/db/isRetryableSqliteWriteError";
+import { isRetryableSqliteWriteError } from "@smthrs/db/isRetryableSqliteWriteError";
 import { SmithersError } from "@smthrs/errors/SmithersError";
 import { openSmithersBackend } from "./openSmithersBackend.js";
 import { resolveSmithersBackendChoice } from "./resolveSmithersBackendChoice.js";

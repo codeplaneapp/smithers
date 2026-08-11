@@ -1,6 +1,6 @@
 import * as ai from 'ai';
 import { Tool as Tool$1, ToolSet, ToolLoopAgentSettings, LanguageModel, ToolLoopAgent } from 'ai';
-import { A as AgentGenerateOptions$4, a as AgentCheckpoint$1, b as AgentFileChange$1, c as AgentCheckpointCapability$1, d as AgentCheckpointFormat$1, B as BaseCliAgentOptions, e as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, f as PiExtensionUiResponse$1, g as BaseCliAgent, C as CliOutputInterpreter$e, h as CodexConfigOverrides, i as AgentCliEvent$1, j as CliOutputInterpreter$f, k as AgentCheckpointResult$1, l as AgentCheckpointMode$1, m as AgentCliActionKind, n as AgentCheckpointContinuationOptions$1, o as AgentCheckpointJsonArray$1, p as AgentCheckpointJsonObject$1, q as AgentCheckpointJsonPrimitive$1, r as AgentCheckpointJsonValue$1, s as AgentCheckpointPublisher$1, t as AgentFileChangeKind$1 } from './index-x_3Jpc_H.js';
+import { A as AgentGenerateOptions$4, a as AgentCheckpoint$1, b as AgentFileChange$1, c as AgentCheckpointCapability$1, d as AgentCheckpointFormat$1, B as BaseCliAgentOptions, e as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, f as PiExtensionUiResponse$1, g as BaseCliAgent, C as CliOutputInterpreter$e, h as CodexConfigOverrides, i as AgentCliEvent$1, j as CliOutputInterpreter$f, k as AgentCheckpointResult$1, l as AgentCheckpointMode$1, m as AgentCliActionKind, n as AgentCheckpointContinuationOptions$1, o as AgentCheckpointJsonArray$1, p as AgentCheckpointJsonObject$1, q as AgentCheckpointJsonPrimitive$1, r as AgentCheckpointJsonValue$1, s as AgentCheckpointPublisher$1, t as AgentFileChangeKind$1 } from './index-GhnOiRTn.js';
 import * as zod from 'zod';
 import '@smthrs/errors/SmithersError';
 import 'effect';
@@ -510,7 +510,14 @@ type OpenCodeAgentOptions$2 = BaseCliAgentOptions$1 & {
     continueSession?: boolean;
     /** Resume a specific session by ID */
     sessionId?: string;
-    /** Provider-specific model variant/reasoning effort level */
+    /**
+     * Provider-specific model variant/reasoning-effort level (OpenCode `--variant`).
+     *
+     * OpenCode has no fixed effort ladder: the shared {@link BaseCliAgentOptions.effort}
+     * option maps onto this provider-defined string when `variant` is unset (an
+     * explicit `variant` always wins). Providers that expose no variant knob
+     * treat `effort` as unsupported.
+     */
     variant?: string;
 };
 

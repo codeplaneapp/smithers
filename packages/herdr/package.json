@@ -1,6 +1,6 @@
 {
-  "name": "@smithers-orchestrator/herdr",
-  "version": "0.32.0",
+  "name": "@smthrs/herdr",
+  "version": "0.33.1",
   "description": "Herdr socket client for Smithers: mirror runs into a herdr presentation & steering plane over its unix-socket control API",
   "type": "module",
   "sideEffects": false,

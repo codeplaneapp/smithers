@@ -9,8 +9,8 @@ import {
   shortNodeId,
   stripOutcomeMarker,
   stubWorkspaceLabel,
-} from "@smithers-orchestrator/herdr";
-import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
+} from "@smthrs/herdr";
+import { computeRunStateFromRow } from "@smthrs/db/runState";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { deriveTailStatus, isTailActiveState } from "./tail.js";
@@ -19,7 +19,7 @@ import { deriveTailStatus, isTailActiveState } from "./tail.js";
  * CLI wiring for the optional herdr mirror plane (`smithers up --herdr`,
  * `smithers herdr attach`, `smithers herdr status`). Everything here is
  * fire-and-forget and degradable: an absent or broken herdr never fails, blocks,
- * or slows a run. The run surface itself lives in `@smithers-orchestrator/herdr`;
+ * or slows a run. The run surface itself lives in `@smthrs/herdr`;
  * this module supplies the CLI-specific bits (option parsing, the deterministic
  * workspace label, the real `smithers tail` pane command, the agent-node filter,
  * and the DB-poll follow loop that feeds an attached surface).
@@ -44,7 +44,7 @@ function quotePosixShellArgument(value) {
  * Prefer tab.close (one full-size pane per detail tab). Never throws.
  *
  * @param {NodeJS.ProcessEnv} [env]
- * @param {import("@smithers-orchestrator/herdr").HerdrClient} [injectedClient]
+ * @param {import("@smthrs/herdr").HerdrClient} [injectedClient]
  * @returns {Promise<void>}
  */
 export async function closeCurrentHerdrDetail(env = process.env, injectedClient) {
@@ -74,10 +74,10 @@ export async function closeCurrentHerdrDetail(env = process.env, injectedClient)
  * socket so explicit commands can return a structured mismatch while optional
  * features retain their soft degradation contract.
  *
- * @param {import("@smithers-orchestrator/herdr").HerdrClient} client
+ * @param {import("@smthrs/herdr").HerdrClient} client
  * @returns {Promise<
- *   | { available: true; pong: import("@smithers-orchestrator/herdr").HerdrPong }
- *   | { available: false; reason: "unavailable" | "protocol_mismatch"; pong?: import("@smithers-orchestrator/herdr").HerdrPong; error?: unknown }
+ *   | { available: true; pong: import("@smthrs/herdr").HerdrPong }
+ *   | { available: false; reason: "unavailable" | "protocol_mismatch"; pong?: import("@smthrs/herdr").HerdrPong; error?: unknown }
  * >}
  */
 export async function probeCompatibleHerdr(client) {
@@ -102,7 +102,7 @@ export async function probeCompatibleHerdr(client) {
     if (candidate?.code === "protocol_mismatch") {
       const pong =
         candidate.cause && typeof candidate.cause === "object"
-          ? /** @type {import("@smithers-orchestrator/herdr").HerdrPong} */ (candidate.cause)
+          ? /** @type {import("@smthrs/herdr").HerdrPong} */ (candidate.cause)
           : undefined;
       return { available: false, reason: "protocol_mismatch", pong, error };
     }
@@ -117,7 +117,7 @@ function protocolMismatchDetail(compatibility) {
 }
 
 // The event types the surface maps to a pane action (`HERDR_SURFACE_EVENT_TYPES`)
-// are imported from `@smithers-orchestrator/herdr` — the surface owns that list,
+// are imported from `@smthrs/herdr` — the surface owns that list,
 // so the follow loop can pre-filter rows against the SAME set the surface's
 // `onEvent` switch handles (skipping every other row, chiefly the high-volume
 // `NodeOutput` stream, BEFORE its `payloadJson` is parsed) with zero drift risk.
@@ -229,7 +229,7 @@ export function herdrRunIdFromWorkspaceLabel(label) {
  * command output stays clean). In a detached `-d` child, stderr is the detach log
  * file, so mirror warnings land there deliberately.
  *
- * @returns {import("@smithers-orchestrator/herdr").HerdrLogger}
+ * @returns {import("@smthrs/herdr").HerdrLogger}
  */
 export function makeHerdrStderrLogger() {
   return (level, message, data) => {
@@ -482,11 +482,11 @@ export function normalizeHerdrCockpitOpts(raw) {
  *   adapter: any;
  *   runId: string;
  *   cliPath: string;
- *   logger?: import("@smithers-orchestrator/herdr").HerdrLogger;
+ *   logger?: import("@smthrs/herdr").HerdrLogger;
  *   cockpit?: ReturnType<typeof normalizeHerdrCockpitOpts>;
- *   client?: import("@smithers-orchestrator/herdr").HerdrClient;
+ *   client?: import("@smthrs/herdr").HerdrClient;
  * }} params
- * @returns {Promise<import("@smithers-orchestrator/herdr").HerdrRunSurface | null>}
+ * @returns {Promise<import("@smthrs/herdr").HerdrRunSurface | null>}
  */
 export async function createUpHerdrSurface(params) {
   const log = params.logger ?? makeHerdrStderrLogger();
@@ -547,8 +547,8 @@ export async function createUpHerdrSurface(params) {
  *   runId: string;
  *   sessionName: string;
  *   cwd?: string;
- *   logger?: import("@smithers-orchestrator/herdr").HerdrLogger;
- *   client?: import("@smithers-orchestrator/herdr").HerdrClient;
+ *   logger?: import("@smthrs/herdr").HerdrLogger;
+ *   client?: import("@smthrs/herdr").HerdrClient;
  * }} params
  * @returns {Promise<void>}
  */
@@ -600,7 +600,7 @@ export async function ensureSessionStubWorkspace(params) {
  * `failedChildren`, ...). Row columns are overlaid defensively.
  *
  * @param {any} row
- * @returns {import("@smithers-orchestrator/herdr").SmithersEventLike | undefined}
+ * @returns {import("@smthrs/herdr").SmithersEventLike | undefined}
  */
 function surfaceEventFromRow(row) {
   const payload = parseMetaJson(row?.payloadJson);
@@ -660,7 +660,7 @@ function parseApprovalRequest(requestJson) {
  * @param {string} runId
  * @param {{ title?: string, summary?: string }} [approvalRequest] enriches a
  *   `waiting-approval` node's blocked message with the real gate question.
- * @returns {import("@smithers-orchestrator/herdr").SmithersEventLike | undefined}
+ * @returns {import("@smthrs/herdr").SmithersEventLike | undefined}
  */
 function synthNodeStateEvent(node, runId, approvalRequest) {
   const base = {
@@ -704,7 +704,7 @@ function synthNodeStateEvent(node, runId, approvalRequest) {
  *
  * @param {any} adapter SmithersDb adapter (read-only)
  * @param {string} runId
- * @param {import("@smithers-orchestrator/herdr").HerdrRunSurface} surface
+ * @param {import("@smthrs/herdr").HerdrRunSurface} surface
  * @returns {Promise<void>}
  */
 export async function reconcileHerdrResumeGates(adapter, runId, surface) {
@@ -759,7 +759,7 @@ export async function reconcileHerdrResumeGates(adapter, runId, surface) {
  *
  * @param {any} adapter SmithersDb adapter (read-only)
  * @param {any} run run row from adapter.getRun
- * @param {import("@smithers-orchestrator/herdr").HerdrRunSurface} surface
+ * @param {import("@smthrs/herdr").HerdrRunSurface} surface
  * @param {{ pollIntervalMs?: number; isCancelled?: () => boolean }} [options]
  * @returns {Promise<string | undefined>} the final derived run status (or undefined if cancelled)
  */
@@ -991,8 +991,8 @@ export function wrapHijackPaneAfterlife(spec, handbackLines) {
  *   session?: string | undefined;
  *   cwd?: string;
  *   resumeCommand?: string | null;
- *   logger?: import("@smithers-orchestrator/herdr").HerdrLogger;
- *   client?: import("@smithers-orchestrator/herdr").HerdrClient;
+ *   logger?: import("@smthrs/herdr").HerdrLogger;
+ *   client?: import("@smthrs/herdr").HerdrClient;
  * }} params
  * @returns {Promise<{ name: string, paneId: string, workspaceId: string | undefined } | null>}
  */
@@ -1087,8 +1087,8 @@ export async function launchHerdrHijackPane(params) {
  *   runId: string;
  *   nodeId?: string;
  *   argv: string[];
- *   logger?: import("@smithers-orchestrator/herdr").HerdrLogger;
- *   client?: import("@smithers-orchestrator/herdr").HerdrClient;
+ *   logger?: import("@smthrs/herdr").HerdrLogger;
+ *   client?: import("@smthrs/herdr").HerdrClient;
  * }} params
  * @returns {Promise<{ name: string, paneId: string, workspaceId: string | undefined, tabLabel: string, nodeId: string | undefined } | null>}
  */

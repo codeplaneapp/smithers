@@ -11,7 +11,7 @@ export default defineConfig({
     renderWorkflow: "src/renderWorkflow.ts",
     renderPrompt: "src/renderPrompt.ts",
     runTask: "src/runTask.ts",
-    // Pre-existing published subpaths — keep building these so `@smithers-orchestrator/testing/{simulate,matchers,browser,runtimeConformance}`
+    // Pre-existing published subpaths — keep building these so `@smthrs/testing/{simulate,matchers,browser,runtimeConformance}`
     // ship regenerated `.js` + `.d.ts` (real consumers in e2e/browser + e2e/runtime).
     simulate: "src/simulate.ts",
     coverWorkflow: "src/coverWorkflow.ts",
@@ -41,8 +41,8 @@ export default defineConfig({
     "effect",
     "zod",
     "react",
-    "smithers-orchestrator",
-    /^@smithers-orchestrator\//,
+    "smthrs",
+    /^@smthrs\//,
     /^node:/,
   ],
 });

@@ -71,8 +71,8 @@ The autopsy only investigates a *genuine, unexpected* task error. When a run fai
 | Terminal cause | Autopsy? | Why |
 | --- | --- | --- |
 | An unexpected task error (a compute task throwing, a schema mismatch, an agent fault) | **yes** | The cause is not yet recorded; that's what the autopsy finds. |
-| A human-denied approval gate that failed the run (`bunx smithers-orchestrator deny`, default `onDeny: 'fail'`) | no | You already decided; the denial and its note are in the ledger. |
-| An operator cancel (`bunx smithers-orchestrator cancel` / `down`) | no | The cancellation is recorded. |
+| A human-denied approval gate that failed the run (`bunx smthrs deny`, default `onDeny: 'fail'`) | no | You already decided; the denial and its note are in the ledger. |
+| An operator cancel (`bunx smthrs cancel` / `down`) | no | The cancellation is recorded. |
 | A quota park (`waiting-quota`) | no | The run is waiting on quota, not broken. |
 
 Skipping these avoids spending agent tokens autopsying a decision whose cause is already known. When a run fails for a non-error reason the CLI prints a single line noting the skip instead of launching the autopsy.

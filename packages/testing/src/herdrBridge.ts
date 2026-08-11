@@ -3,10 +3,10 @@
  * Soft-degrades when no herdr server is reachable.
  */
 
-import { createHerdrClient, createHerdrRunSurface } from "@smithers-orchestrator/herdr";
+import { createHerdrClient, createHerdrRunSurface } from "@smthrs/herdr";
 
-/** @typedef {import("@smithers-orchestrator/herdr").HerdrClient} HerdrClient */
-/** @typedef {import("@smithers-orchestrator/herdr").HerdrRunSurface} HerdrRunSurface */
+/** @typedef {import("@smthrs/herdr").HerdrClient} HerdrClient */
+/** @typedef {import("@smthrs/herdr").HerdrRunSurface} HerdrRunSurface */
 
 export type HerdrBridgeOptions = {
   session?: string;

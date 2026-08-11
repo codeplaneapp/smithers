@@ -1,5 +1,5 @@
 // src/herdrBridge.ts
-import { createHerdrClient, createHerdrRunSurface } from "@smithers-orchestrator/herdr";
+import { createHerdrClient, createHerdrRunSurface } from "@smthrs/herdr";
 var STUB_SLEEP = ["bash", "-c", "exec sleep 3600"];
 async function tryCreateHerdrBridge(opts) {
   const log = opts.logger ?? ((level, msg) => {

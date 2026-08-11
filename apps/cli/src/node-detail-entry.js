@@ -13,8 +13,8 @@
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { Effect } from "effect";
-import { SmithersError } from "@smithers-orchestrator/errors";
-import { enqueueSteer } from "@smithers-orchestrator/engine/steers";
+import { SmithersError } from "@smthrs/errors";
+import { enqueueSteer } from "@smthrs/engine/steers";
 import { findAndOpenDb } from "./find-db.js";
 import { closeCurrentHerdrDetail } from "./herdr.js";
 import { countInFlightAgentSiblings } from "./steer.js";
@@ -53,7 +53,7 @@ async function openDetailStore(args) {
   // Write mode: dual-control `s` steers enqueue steers into this same store.
   // (read-only would accept the keypress then fail the insert silently.)
   if (typeof args.db === "string" && args.db !== "") {
-    const { openSmithersStore } = await import("smithers-orchestrator/openSmithersStore");
+    const { openSmithersStore } = await import("smthrs/openSmithersStore");
     const { resolve, dirname } = await import("node:path");
     const dbPath = resolve(args.db);
     const opened = await openSmithersStore({
@@ -68,7 +68,7 @@ async function openDetailStore(args) {
       dbPath: opened.dbPath ?? dbPath,
     };
   }
-  const { openSmithersStore } = await import("smithers-orchestrator/openSmithersStore");
+  const { openSmithersStore } = await import("smthrs/openSmithersStore");
   try {
     const opened = await openSmithersStore({ cwd: process.cwd(), mode: "write" });
     return { adapter: opened.adapter, cleanup: opened.cleanup, dbPath: opened.dbPath };
@@ -221,7 +221,7 @@ async function main() {
 
     // Seed status from store immediately (before event drain).
     try {
-      const { computeRunStateFromRow } = await import("@smithers-orchestrator/db/runState");
+      const { computeRunStateFromRow } = await import("@smthrs/db/runState");
       const { deriveTailStatus } = await import("./tail.js");
       const derived = deriveTailStatus(await computeRunStateFromRow(adapter, run));
       await onStatusBlock(derived ?? run.status);
