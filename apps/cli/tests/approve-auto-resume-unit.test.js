@@ -40,7 +40,10 @@ beforeAll(async () => {
   harnessDir = mkdtempSync(join(tmpdir(), "approve-resume-unit-"));
   stubExecutable = join(harnessDir, "bun-stub");
   spawnRecord = join(harnessDir, "spawn-argv.txt");
-  writeFileSync(stubExecutable, '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$SMITHERS_TEST_SPAWN_RECORD"\n');
+  writeFileSync(
+    stubExecutable,
+    '#!/bin/sh\ntmp="$SMITHERS_TEST_SPAWN_RECORD.tmp.$$"\nprintf \'%s\\n\' "$@" > "$tmp"\nmv "$tmp" "$SMITHERS_TEST_SPAWN_RECORD"\n',
+  );
   chmodSync(stubExecutable, 0o755);
   process.env.SMITHERS_TEST_SPAWN_RECORD = spawnRecord;
   existingWorkflow = join(harnessDir, "workflow", "workflow.tsx");
