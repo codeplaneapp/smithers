@@ -167,7 +167,8 @@ test("smithers tail --overview prints the run board with node states and a failu
     expect(result.stdout).toContain("alpha");
     expect(result.stdout).toContain("beta");
     expect(result.stdout).toContain("failed");
-    expect(result.stdout).toContain("in its node tab press s to steer · h to hijack");
+    expect(result.stdout).toContain(`smithers steer ${runId} --node beta --takeover`);
+    expect(result.stdout).not.toContain("press s to steer");
     expect(result.stdout).toContain(`smithers steer ${runId} --node beta`);
     // It still ends with the normal terminal status line.
     expect(result.stdout).toContain(`Run ${runId} finished`);

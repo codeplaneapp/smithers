@@ -58,7 +58,23 @@ export async function classifyTerminalCause(adapter, runId, result) {
   // is the real terminal cause and must still be autopsied. A run-global
   // "any historical denial" check would wrongly suppress that autopsy.
   for (const denial of humanDenials) {
-    const node = await Promise.resolve(adapter.getNode(runId, denial.nodeId, denial.iteration)).catch(() => undefined);
+    let targetNodeId = denial.nodeId;
+    let targetIteration = denial.iteration;
+    try {
+      const request = JSON.parse(denial.requestJson ?? "null");
+      if (
+        request?.kind === "ReplayUnsafeApproval" &&
+        request.runId === runId &&
+        typeof request.nodeId === "string" &&
+        Number.isSafeInteger(request.iteration)
+      ) {
+        targetNodeId = request.nodeId;
+        targetIteration = request.iteration;
+      }
+    } catch {
+      // Malformed request metadata falls back to the approval row target.
+    }
+    const node = await Promise.resolve(adapter.getNode(runId, targetNodeId, targetIteration)).catch(() => undefined);
     if (node?.state === "failed") {
       return "human-denied";
     }

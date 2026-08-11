@@ -481,7 +481,7 @@ async function steerSchemaMatchesPostgres(pgConn) {
            JOIN pg_class t ON t.oid = i.indrelid
            JOIN pg_namespace n ON n.oid = t.relnamespace
            JOIN unnest(i.indkey) WITH ORDINALITY keys(attnum, ord) ON true
-           JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = keys.attnum
+           LEFT JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = keys.attnum
            WHERE n.nspname = current_schema() AND idx.relname = $1
            ORDER BY keys.ord`,
     values: [STEERS_QUEUED_INDEX],
@@ -1418,6 +1418,10 @@ function buildMigrations(context) {
             skipped += 1;
             continue;
           }
+          if (target === STEERS_TABLE && statement.includes(STEERS_QUEUED_INDEX)) {
+            skipped += 1;
+            continue;
+          }
           sqlite.run(statement);
           applied += 1;
         }
@@ -1429,6 +1433,10 @@ function buildMigrations(context) {
         for (const statement of [...context.createIndexStatements, ...EXTRA_INDEX_STATEMENTS]) {
           const target = indexTargetTable(statement);
           if (target && !(await tableExistsPostgres(pgConn, target))) {
+            skipped += 1;
+            continue;
+          }
+          if (target === STEERS_TABLE && statement.includes(STEERS_QUEUED_INDEX)) {
             skipped += 1;
             continue;
           }

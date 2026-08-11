@@ -32,7 +32,11 @@ const POLL_MS = 400;
 const FRAME_MS = 200;
 const FLEET_LIMIT = 32;
 const FINISHED_FLEET_CAP = 4;
-const ACTIVE_STATUSES = ["running", "waiting-approval", "waiting-event", "waiting-timer", "paused", "continued"];
+const ACTIVE_STATUSES = ["running", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota", "paused"];
+
+export function isSupervisorActiveState(status) {
+  return isTailActiveState(status) || status === "paused";
+}
 
 /**
  * @param {{ db?: string, cwd?: string }} opts
@@ -95,7 +99,7 @@ export async function listFleetRuns(adapter) {
       /* keep stored */
     }
     const row = { ...r, derivedStatus: derived };
-    if (isTailActiveState(derived)) active.push(row);
+    if (isSupervisorActiveState(derived)) active.push(row);
     else finished.push(row);
   }
   active.sort((a, b) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0));
@@ -116,11 +120,11 @@ function fleetEffectiveStatus(r) {
 export function resolveFocusIndex(fleetRuns, focusIndex, focusedRunId, opts = {}) {
   if (!fleetRuns.length) return 0;
   const pin = opts.pin === true;
-  const activeIdx = fleetRuns.findIndex((r) => isTailActiveState(fleetEffectiveStatus(r)));
+  const activeIdx = fleetRuns.findIndex((r) => isSupervisorActiveState(fleetEffectiveStatus(r)));
   const found = typeof focusedRunId === "string" ? fleetRuns.findIndex((r) => r.runId === focusedRunId) : -1;
   if (pin && found >= 0) return found;
   if (activeIdx >= 0) {
-    if (found >= 0 && isTailActiveState(fleetEffectiveStatus(fleetRuns[found]))) return found;
+    if (found >= 0 && isSupervisorActiveState(fleetEffectiveStatus(fleetRuns[found]))) return found;
     return activeIdx;
   }
   if (found >= 0) return found;
@@ -214,10 +218,10 @@ export async function buildTopPaintInput(adapter, fleetRuns, focusIndex) {
   const workflow =
     run.workflowName || (typeof run.workflowPath === "string" ? run.workflowPath.split(/[/\\]/).pop() : "") || "";
   // "stale"/"orphaned" are not active — engine is dead even if DB said running.
-  const active = isTailActiveState(status);
+  const active = isSupervisorActiveState(status);
   const anyActive = fleetRuns.some((r) => {
     const st = r.derivedStatus ?? r.status;
-    return isTailActiveState(st);
+    return isSupervisorActiveState(st);
   });
   let finishedAtMs = typeof run.finishedAtMs === "number" ? run.finishedAtMs : null;
   if (!finishedAtMs && !active) {
@@ -260,7 +264,7 @@ export async function probeHerdr(client = createHerdrClient({ logger: () => {} }
  *   runId: string,
  *   nodeId: string,
  *   workflowName?: string,
- *   dbPath: string,
+ *   dbPath?: string | null,
  *   cwd: string,
  *   herdrAvailable: boolean,
  *   herdrClient?: import("@smthrs/herdr").HerdrClient | null,
@@ -476,73 +480,68 @@ export async function runSmithersTop(opts = {}) {
   /** @type {"graph" | "flat"} */
   let outlineSource = "flat";
 
-  const refreshData = async () => {
-    fleetCache = await source.listFleet();
-    focusIndex = resolveFocusIndex(fleetCache, focusIndex, focusedRunId, {
-      pin: focusPinned,
-    });
-    const built = await source.focusView(fleetCache, focusIndex);
-    focusIndex = built.focusIndex;
-    focusedRunId = fleetCache[focusIndex]?.runId;
-    lastRun = built.run;
-    lastPollAtMs = Date.now();
-    // sourceKind rides through baseInput → the model → the header tag so the
-    // operator can see whether reads come via the gateway or direct-db.
-    baseInput = { ...built.input, herdrAvailable, sourceKind: source.kind };
-    // Graph-primary outline from last frame BEFORE validating selection —
-    // graph group keys (group:…) are not in the flat listNodes model, so
-    // validating against flat first would snap selection back to Setup.
-    const runId = typeof baseInput.runId === "string" ? baseInput.runId : "";
+  const performRefreshData = async () => {
+    const nextFleet = await source.listFleet();
+    let nextFocusIndex = resolveFocusIndex(nextFleet, focusIndex, focusedRunId, { pin: focusPinned });
+    const built = await source.focusView(nextFleet, nextFocusIndex);
+    nextFocusIndex = built.focusIndex;
+    const nextFocusedRunId = nextFleet[nextFocusIndex]?.runId;
+    const nextPollAtMs = Date.now();
+    const nextBaseInput = { ...built.input, herdrAvailable, sourceKind: source.kind };
+    const runId = typeof nextBaseInput.runId === "string" ? nextBaseInput.runId : "";
+    let nextOutlineRoots = null;
+    let nextOutlineSource = "flat";
     if (runId && !runId.startsWith("(")) {
-      const graph = await source.outlineTree(runId, baseInput.agentMetaByNode ?? {});
+      const graph = await source.outlineTree(runId, nextBaseInput.agentMetaByNode ?? {});
       if (graph?.roots?.length) {
-        outlineRoots = graph.roots;
-        outlineSource = "graph";
-      } else {
-        outlineRoots = null;
-        outlineSource = "flat";
+        nextOutlineRoots = graph.roots;
+        nextOutlineSource = "graph";
       }
-    } else {
-      outlineRoots = null;
-      outlineSource = "flat";
     }
 
     const model = buildCockpitOutlineModel({
-      ...baseInput,
+      ...nextBaseInput,
       selectedKey,
       expandOverrides,
       scrollOffset,
-      lastPollAtMs,
+      lastPollAtMs: nextPollAtMs,
       nowMs: Date.now(),
-      outlineRoots: outlineRoots ?? undefined,
-      outlineSource,
+      outlineRoots: nextOutlineRoots ?? undefined,
+      outlineSource: nextOutlineSource,
     });
-    if (!selectedKey || !model.selectables.some((s) => s.key === selectedKey)) {
-      selectedKey = model.selected?.key;
+    const nextSelectedKey =
+      selectedKey && model.selectables.some((s) => s.key === selectedKey) ? selectedKey : model.selected?.key;
+    const sel = model.selectables.find((s) => s.key === nextSelectedKey) ?? model.selected;
+    let nextSelectedActivity = null;
+    let nextActivityForKey;
+    if (sel?.kind === "agent" && sel.nodeId && runId && !runId.startsWith("(")) {
+      const lines = await source.nodeActivity(runId, sel.nodeId, { limit: ACTIVITY_STRIP_LINES });
+      nextSelectedActivity = { nodeId: sel.nodeId, label: sel.label || sel.nodeId, lines };
+      nextActivityForKey = sel.key;
+    } else if (sel?.key) {
+      nextSelectedActivity = { nodeId: sel.nodeId || sel.key, label: sel.label || sel.key, lines: [] };
+      nextActivityForKey = sel.key;
     }
 
-    // Live activity strip for the focused agent (tool/actions).
-    const sel = model.selectables.find((s) => s.key === selectedKey) ?? model.selected;
-    if (sel?.kind === "agent" && sel.nodeId && runId && !runId.startsWith("(")) {
-      // Direct-db reads durable events; the gateway source drains its
-      // background StreamRunEvents ring for the same lines (last-known on a
-      // stream drop). Either way this is the focused agent's tool activity.
-      const lines = await source.nodeActivity(runId, sel.nodeId, {
-        limit: ACTIVITY_STRIP_LINES,
-      });
-      selectedActivity = {
-        nodeId: sel.nodeId,
-        label: sel.label || sel.nodeId,
-        lines,
-      };
-      activityForKey = sel.key;
-    } else if (sel) {
-      setOptimisticActivity(sel);
-    } else {
-      selectedActivity = null;
-      activityForKey = undefined;
-    }
+    // Publish one coherent refresh only after every awaited read completes.
+    fleetCache = nextFleet;
+    focusIndex = nextFocusIndex;
+    focusedRunId = nextFocusedRunId;
+    lastRun = built.run;
+    lastPollAtMs = nextPollAtMs;
+    baseInput = nextBaseInput;
+    outlineRoots = nextOutlineRoots;
+    outlineSource = nextOutlineSource;
+    selectedKey = nextSelectedKey;
+    selectedActivity = nextSelectedActivity;
+    activityForKey = nextActivityForKey;
     dataTicks += 1;
+  };
+  let refreshChain = Promise.resolve();
+  const refreshData = () => {
+    const next = refreshChain.then(performRefreshData, performRefreshData);
+    refreshChain = next.catch(() => {});
+    return next;
   };
 
   const paintFrame = () => {
@@ -799,7 +798,7 @@ export async function runSmithersTop(opts = {}) {
           return;
         }
         if (sel.kind === "agent" && sel.nodeId && lastRun?.runId) {
-          if (!dbPath) {
+          if (!adapter) {
             // Gateway source with no local smithers.db: detail panes are
             // still direct-db (openNodeDetail pins the store via --db), so
             // there is nothing to open. Hint instead of failing.
@@ -947,6 +946,13 @@ export async function runSmithersTop(opts = {}) {
     // activity WebSocket would dangle until the process exits.
     if (dataTimer) clearInterval(dataTimer);
     if (frameTimer) clearInterval(frameTimer);
+    if (mouseOn) {
+      try {
+        stdout.write("\x1b[?1006l\x1b[?1000l");
+      } catch {
+        /* ignore */
+      }
+    }
     try {
       hud.exit();
     } catch {

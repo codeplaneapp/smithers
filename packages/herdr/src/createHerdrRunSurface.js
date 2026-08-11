@@ -438,7 +438,6 @@ export async function openTabPane(client, opts) {
   /** @type {string | undefined} */
   let workspaceId = opts.workspaceId;
   /** @type {string | undefined} */
-  let lastError;
 
   // Prefer an already-running pane with this agent name (herdr mirror / prior open).
   // Avoids agent_name_taken races and duplicate tails while a run is live.
@@ -469,9 +468,7 @@ export async function openTabPane(client, opts) {
     if (created && created.tab && typeof created.tab.workspace_id === "string") {
       workspaceId = created.tab.workspace_id;
     }
-  } catch (err) {
-    lastError = err instanceof Error ? err.message : String(err);
-  }
+  } catch {}
   if (!tabId) {
     return undefined;
   }
@@ -496,9 +493,8 @@ export async function openTabPane(client, opts) {
     if (res && res.agent && typeof res.agent.workspace_id === "string") {
       workspaceId = res.agent.workspace_id;
     }
-  } catch (err) {
+  } catch {
     // agent_name_taken (replay/attach) or any failure: adopt the existing pane.
-    lastError = err instanceof Error ? err.message : String(err);
     let adopted = await adoptPaneByName(client, opts.name, workspaceId);
     // Brief retry — agent.list can lag agent.start on a busy herdr.
     if (!adopted) {
@@ -531,12 +527,6 @@ export async function openTabPane(client, opts) {
   if (typeof paneId !== "string") {
     // The tab ID came directly from this invocation's tab.create response.
     await client.tryCall("tab.close", { tab_id: tabId });
-    if (lastError) {
-      /** @type {any} */
-      const fail = new Error(lastError);
-      fail.code = "herdr_open_failed";
-      throw fail;
-    }
     return undefined;
   }
   await closeSeedPanes(client, workspaceId, tabId, paneId);
@@ -1043,6 +1033,18 @@ export function createHerdrRunSurface(opts = {}) {
     if (rightPaneId) {
       // Brief beat so the new shell can paint a prompt before we type.
       await new Promise((r) => setTimeout(r, 150));
+      const existingOverview = /** @type {{ read?: { text?: string } } | undefined} */ (
+        await client.tryCall("pane.read", {
+          pane_id: rightPaneId,
+          source: "visible",
+          format: "text",
+          strip_ansi: true,
+        })
+      );
+      if (/Workflow Supervisor|smithers supervisor/i.test(existingOverview?.read?.text ?? "")) {
+        log("debug", "cockpit dock: adopted existing supervisor pane");
+        return;
+      }
       await sendCommandToPane(rightPaneId, overviewArgv);
       log(
         "debug",
@@ -1064,6 +1066,7 @@ export function createHerdrRunSurface(opts = {}) {
   let workspacePromise = null;
   /** @type {string | undefined} */
   let workspaceId;
+  let workspaceDocked = false;
   let workspaceClosed = false;
   let lastWorkspaceAttemptMs = 0;
 
@@ -1163,6 +1166,7 @@ export function createHerdrRunSurface(opts = {}) {
       // Path A: dock into the operator's live harness pane when HERDR_ENV=1.
       const docked = await tryDockIntoHarnessWorkspace();
       if (typeof docked === "string") {
+        workspaceDocked = true;
         workspaceId = docked;
         return workspaceId;
       }
@@ -1274,7 +1278,7 @@ export function createHerdrRunSurface(opts = {}) {
    */
   async function renameWorkspaceOutcome(kind) {
     const id = await ensureWorkspace();
-    if (!id) {
+    if (!id || (workspaceDocked && opts.renameWorkspaceOnDock !== true)) {
       return;
     }
     const marker = OUTCOME_MARKERS[kind];
@@ -1551,6 +1555,12 @@ export function createHerdrRunSurface(opts = {}) {
         const entry = touchNode(event, nodeId);
         const message = approvalMessage(event);
         enqueue(async () => {
+          if (entry.lastState === "blocked") {
+            if (entry.approvalGate && message !== "waiting for approval") {
+              await reportCustomStatus(entry, message);
+            }
+            return;
+          }
           // A node parked on a human approval gate is EXACTLY what the human
           // must see, so its pane must exist even when `nodeFilter` would drop
           // it. Pure gate nodes have no agent attempt row, so the CLI's
@@ -1613,11 +1623,11 @@ export function createHerdrRunSurface(opts = {}) {
           return;
         }
         const entry = touchNode(event, nodeId);
-        updateSoftPinSet(softPins, { nodeId, action: "end" }, cockpitPolicy);
         // A force-surfaced approval gate resolves to "approved"; every other
         // node resolves to "done".
         const status = entry.approvalGate ? "approved" : "done";
         enqueue(async () => {
+          updateSoftPinSet(softPins, { nodeId, action: "end" }, cockpitPolicy);
           // Never open a brand-new pane just to mark done — board-only / unpaned
           // nodes stay unpaned (soft-pin release must not retro-open siblings).
           if (!entry.paneId) {
@@ -1633,7 +1643,6 @@ export function createHerdrRunSurface(opts = {}) {
           return;
         }
         const entry = touchNode(event, nodeId);
-        updateSoftPinSet(softPins, { nodeId, action: "end" }, cockpitPolicy);
         const summary = summarizeError(event.error);
         // Failures always promote when autoOpen.failures is on (default).
         const auto = cockpitPolicy.autoOpen;
@@ -1642,6 +1651,7 @@ export function createHerdrRunSurface(opts = {}) {
           entry.capExempt = true;
         }
         enqueue(async () => {
+          updateSoftPinSet(softPins, { nodeId, action: "end" }, cockpitPolicy);
           if (!failOpen && !entry.paneId) {
             return;
           }
@@ -1657,8 +1667,8 @@ export function createHerdrRunSurface(opts = {}) {
           return;
         }
         const entry = touchNode(event, nodeId);
-        updateSoftPinSet(softPins, { nodeId, action: "end" }, cockpitPolicy);
         enqueue(async () => {
+          updateSoftPinSet(softPins, { nodeId, action: "end" }, cockpitPolicy);
           if (!entry.paneId) {
             return;
           }

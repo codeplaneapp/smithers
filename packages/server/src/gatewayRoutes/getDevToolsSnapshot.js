@@ -352,7 +352,9 @@ export function parseXmlToDevToolsRoot(xml, onWarning, taskIndex = new Map()) {
       type: /** @type {DevToolsNodeType} */ (nodeType),
       name: displayName || "unknown",
       props: serializedProps,
-      task: nodeType === "task" ? extractTaskInfo(serializedProps, taskIndex) : undefined,
+      task: ["task", "timer", "wait-for-event", "subflow"].includes(nodeType)
+        ? extractTaskInfo(serializedProps, taskIndex)
+        : undefined,
       children: [],
       depth,
     };

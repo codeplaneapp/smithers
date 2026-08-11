@@ -6,9 +6,8 @@ async function runMaybeEffect(value) {
   if (typeof value.then === "function") {
     return value;
   }
-  if (typeof value.pipe === "function") {
-    const effectMod = await import("effect");
-    const Effect = effectMod.Effect;
+  const { Effect } = await import("effect");
+  if (Effect.isEffect(value)) {
     return Effect.runPromise(value);
   }
   return value;
@@ -72,6 +71,10 @@ async function tallyNodeStates(adapter, runId) {
       case "waiting-approval":
       case "waiting-event":
       case "waiting-timer":
+      case "waiting-quota":
+      case "bound":
+      case "waiting-bound":
+      case "bound-stale":
         t.blocked += 1;
         break;
       default:
@@ -93,21 +96,23 @@ async function expectSteerConsumed(adapter, runId, opts) {
       `Expected at least ${min} consumed steer(s)${opts?.nodeId ? ` for ${opts.nodeId}` : ""}, got ${filtered.length}`
     );
   }
-  if (adapter.listEventsByType) {
-    const events = await listEventsByType(adapter, runId, "SteerConsumed");
-    if (events.length < min) {
-      throw new Error(`Expected SteerConsumed events >= ${min}, got ${events.length}`);
-    }
+  if (!adapter.listEventsByType) {
+    throw new Error("adapter.listEventsByType required for expectSteerConsumed");
+  }
+  const events = await listEventsByType(adapter, runId, "SteerConsumed");
+  if (events.length < min) {
+    throw new Error(`Expected SteerConsumed events >= ${min}, got ${events.length}`);
   }
 }
 async function expectEventCount(adapter, runId, type, count) {
+  if (!adapter.listEventsByType) throw new Error("adapter.listEventsByType required for expectEventCount");
   const events = await listEventsByType(adapter, runId, type);
   if (events.length !== count) {
     throw new Error(`Expected ${count} ${type} event(s), got ${events.length}`);
   }
 }
 function expectSoftPinBoard(openedNodeIds, opts = {}) {
-  const workerRe = opts.workerPattern ?? /(?:^|[/:._-])(?:worker|fix|shard|leaf)[-_]?\d+$/i;
+  const workerRe = opts.workerPattern ?? /(?:^|[/:._-])(?:worker|fix|shard|leaf|item)[-_]?\d+$/i;
   const maxStages = opts.maxStages ?? 1;
   const allowedFailWorkers = new Set(opts.mustInclude ?? []);
   const workers = openedNodeIds.filter((id) => workerRe.test(id));

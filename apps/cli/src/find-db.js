@@ -55,7 +55,7 @@ export function findSmithersDb(from, markerChecks = realDbMarkerChecks) {
   if (allCandidates.length === 0) {
     throw new SmithersError(
       "CLI_DB_NOT_FOUND",
-      `No smithers workspace found from ${startDir}; pass --db <path> or run from a directory with smithers.db (use 'smithers up <workflow>' / 'smithers init' to create one).`,
+      `No smithers workspace found from ${startDir}; pass --db <path> or run 'smithers up <workflow>' from a Smithers workspace to create smithers.db.`,
       { cwd: startDir },
     );
   }

@@ -6,9 +6,8 @@ async function runMaybeEffect(value) {
   if (typeof value.then === "function") {
     return value;
   }
-  if (typeof value.pipe === "function") {
-    const effectMod = await import("effect");
-    const Effect = effectMod.Effect;
+  const { Effect } = await import("effect");
+  if (Effect.isEffect(value)) {
     return Effect.runPromise(value);
   }
   return value;

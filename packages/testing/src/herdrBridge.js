@@ -27,7 +27,7 @@ async function tryCreateHerdrBridge(opts) {
     if (typeof cliPath !== "string" || cliPath === "") {
       throw new Error("tryCreateHerdrBridge: cliPath is required when stubPanes=false (path to apps/cli/src/index.js)");
     }
-    const bin = process.execPath;
+    const bin = process.versions.bun ? process.execPath : "bun";
     const dbFile = typeof opts.cwd === "string" && opts.cwd !== "" ? `${opts.cwd.replace(/\/$/, "")}/smithers.db` : "smithers.db";
     paneCommands.overviewCommand = () => {
       const argv = [bin, cliPath, "top", "--db", dbFile];
@@ -134,7 +134,7 @@ async function snapshotHerdrWorkspace(client, opts) {
   const list = await client.tryCall("workspace.list", {});
   const workspaces = list?.workspaces ?? [];
   const ws = workspaces.find(
-    (w) => typeof w.label === "string" && (w.label === opts.workspaceLabel || w.label.endsWith(` ${opts.runId}`) || w.label.includes(opts.runId))
+    (w) => typeof w.label === "string" && (w.label === opts.workspaceLabel || w.label.replace(/^[✓✗◻]\s+/, "").endsWith(` ${opts.runId}`))
   );
   if (!ws || typeof ws.workspace_id !== "string") {
     return null;
@@ -190,7 +190,7 @@ async function tryCloseHerdrWorkspacesForRun(client, runId) {
   const list = await client.tryCall("workspace.list", {});
   let n = 0;
   for (const w of list?.workspaces ?? []) {
-    if (typeof w.label === "string" && w.label.includes(runId) && typeof w.workspace_id === "string") {
+    if (typeof w.label === "string" && w.label.replace(/^[✓✗◻]\s+/, "").endsWith(` ${runId}`) && typeof w.workspace_id === "string") {
       await client.tryCall("workspace.close", { workspace_id: w.workspace_id });
       n += 1;
     }

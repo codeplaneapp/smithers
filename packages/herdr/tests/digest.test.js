@@ -73,7 +73,7 @@ describe("sessionLifecycle", () => {
     expect(defaultSessionNameForRun("run-abc")).toBe("smithers-run-abc");
     const label = stubWorkspaceLabel("mission", "run-1", "smithers-run-1");
     expect(isStubWorkspaceLabel(label)).toBe(true);
-    expect(sessionAttachHint({ sessionName: "s", runId: "r" })).toContain("herdr --session s");
+    expect(sessionAttachHint({ sessionName: "s", runId: "r" })).toContain("herdr --session 's'");
   });
 
   test("default interval is 30s", () => {

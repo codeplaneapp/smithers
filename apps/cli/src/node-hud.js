@@ -9,6 +9,7 @@
  */
 
 import pc from "picocolors";
+import { sanitizeTerminalText } from "@smthrs/tui/src/sanitizeTerminalText.ts";
 
 const ESC = "\x1b";
 const ENTER_ALT = `${ESC}[?1049h`;
@@ -36,6 +37,9 @@ function displayWidth(s) {
   let w = 0;
   for (const ch of plain) {
     const c = ch.codePointAt(0) ?? 0;
+    if (/\p{Mark}/u.test(ch) || c === 0x200d || (c >= 0xfe00 && c <= 0xfe0f)) {
+      continue;
+    }
     if (
       (c >= 0xff01 && c <= 0xff60) ||
       (c >= 0xffe0 && c <= 0xffe6) ||
@@ -46,6 +50,7 @@ function displayWidth(s) {
       (c >= 0xfe10 && c <= 0xfe19) ||
       (c >= 0xfe30 && c <= 0xfe6f) ||
       (c >= 0x20000 && c <= 0x3fffd) ||
+      (c >= 0x1f000 && c <= 0x1faff) ||
       c === 0x3000
     ) {
       w += 2;
@@ -109,8 +114,8 @@ function boxRow(content, cols) {
  */
 export function createNodeHud(opts) {
   const stdout = opts.stdout ?? process.stdout;
-  const runId = opts.runId;
-  const nodeId = opts.nodeId;
+  const runId = sanitizeTerminalText(opts.runId);
+  const nodeId = sanitizeTerminalText(opts.nodeId);
   let entered = false;
   /** @type {string[]} */
   const body = [];
@@ -125,6 +130,8 @@ export function createNodeHud(opts) {
   let dockNote = "";
   const MAX_BODY = 400;
   const MAX_BANNER = 8;
+  /** Index of the body row receiving the current stream chunk. */
+  let streamBodyIndex = null;
   // Anti-flicker: diff each frame against the last and rewrite only changed
   // rows, and coalesce bursts of updates into one repaint per tick.
   /** @type {string[] | null} */
@@ -183,10 +190,13 @@ export function createNodeHud(opts) {
     // dock is a closed 4-line box at the bottom; optional banner above it
     const dockH = 4;
     const headerH = 3;
-    const bannerLines = banner.length > 0 ? banner.length + 2 : 0; // + edges
-    const bodyH = Math.max(3, rows - headerH - dockH - bannerLines);
+    const available = Math.max(0, rows - headerH - dockH);
+    const visibleBanner = banner.slice(-Math.max(0, available - 3));
+    const bannerLines = visibleBanner.length > 0 ? visibleBanner.length + 2 : 0; // + edges
+    const bodyH = Math.max(0, available - bannerLines);
 
-    const slice = body.slice(-bodyH).map((b) => fit(b, cols));
+    const visibleBody = stickBottom() ? body.slice(-bodyH) : body.slice(0, bodyH);
+    const slice = visibleBody.map((b) => fit(b, cols));
     const pad = bodyH - slice.length;
     if (stickBottom()) {
       for (let i = 0; i < pad; i++) lines.push(fit("", cols));
@@ -197,9 +207,9 @@ export function createNodeHud(opts) {
     }
 
     // ── Status / error banner (full width, above dock) ───────────────
-    if (banner.length > 0) {
+    if (visibleBanner.length > 0) {
       lines.push(boxEdge("top", cols));
-      for (const b of banner) {
+      for (const b of visibleBanner) {
         const isErr = /error|failed|no conversation/i.test(b);
         lines.push(boxRow(isErr ? pc.red(b) : pc.yellow(b), cols));
       }
@@ -282,8 +292,10 @@ export function createNodeHud(opts) {
 
   /** @param {string} line */
   function pushBody(line) {
-    for (const part of String(line).split("\n")) {
-      if (part === "" && line.endsWith("\n")) continue;
+    streamBodyIndex = null;
+    const safeLine = sanitizeTerminalText(String(line));
+    for (const part of safeLine.split("\n")) {
+      if (part === "" && safeLine.endsWith("\n")) continue;
       body.push(part);
     }
     while (body.length > MAX_BODY) body.shift();
@@ -294,9 +306,9 @@ export function createNodeHud(opts) {
    * @param {{ status?: string, attempt?: number, note?: string }} p
    */
   function setMeta(p) {
-    if (typeof p.status === "string") status = p.status;
+    if (typeof p.status === "string") status = sanitizeTerminalText(p.status);
     if (typeof p.attempt === "number") attempt = p.attempt;
-    if (typeof p.note === "string") dockNote = p.note;
+    if (typeof p.note === "string") dockNote = sanitizeTerminalText(p.note);
     paint();
   }
 
@@ -306,7 +318,7 @@ export function createNodeHud(opts) {
    */
   function setDock(mode, buf) {
     dockMode = mode;
-    if (typeof buf === "string") inputBuf = buf;
+    if (typeof buf === "string") inputBuf = sanitizeTerminalText(buf);
     paint();
   }
 
@@ -318,7 +330,7 @@ export function createNodeHud(opts) {
     const arr = Array.isArray(lines) ? lines : [String(lines ?? "")];
     banner.length = 0;
     for (const ln of arr) {
-      for (const part of String(ln).split("\n")) {
+      for (const part of sanitizeTerminalText(String(ln)).split("\n")) {
         const t = part.trimEnd();
         if (t !== "") banner.push(t);
       }
@@ -329,11 +341,35 @@ export function createNodeHud(opts) {
 
   /** @param {string} line */
   function pushBanner(line) {
-    for (const part of String(line).split("\n")) {
+    for (const part of sanitizeTerminalText(String(line)).split("\n")) {
       const t = part.trimEnd();
       if (t !== "") banner.push(t);
     }
     while (banner.length > MAX_BANNER) banner.shift();
+    paint();
+  }
+
+  /** Append streaming output chunks without turning every token delta into a new row. */
+  function emit(text) {
+    const safe = sanitizeTerminalText(String(text ?? ""));
+    const parts = safe.split("\n");
+    if (streamBodyIndex == null) {
+      body.push("");
+      streamBodyIndex = body.length - 1;
+    }
+    body[streamBodyIndex] += parts[0];
+    for (let i = 1; i < parts.length; i += 1) {
+      if (i === parts.length - 1 && parts[i] === "") {
+        streamBodyIndex = null;
+      } else {
+        body.push(parts[i]);
+        streamBodyIndex = body.length - 1;
+      }
+    }
+    while (body.length > MAX_BODY) {
+      body.shift();
+      if (streamBodyIndex != null) streamBodyIndex -= 1;
+    }
     paint();
   }
 
@@ -347,6 +383,6 @@ export function createNodeHud(opts) {
     setBanner,
     pushBanner,
     /** Route stream text into body */
-    emit: (text) => pushBody(text),
+    emit,
   };
 }

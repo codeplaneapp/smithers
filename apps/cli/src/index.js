@@ -3372,6 +3372,7 @@ const steerArgs = z.object({
 });
 const steerOptions = z.object({
   node: z.string().optional().describe("Node id to steer (default: the run's current agent node)"),
+  message: z.string().optional().describe("Steer message (safe for values beginning with '-')"),
   takeover: z
     .boolean()
     .default(false)
@@ -7969,7 +7970,12 @@ async function runSteerCommand(c) {
     }
     // 3. Steer mode (default). With a message, queue it; without one, prompt
     //    a single input line first (a bare `smithers steer` from a TTY).
-    let message = typeof c.args.message === "string" ? c.args.message.trim() : "";
+    let message =
+      typeof c.options.message === "string"
+        ? c.options.message.trim()
+        : typeof c.args.message === "string"
+          ? c.args.message.trim()
+          : "";
     if (!message) {
       if (!process.stdin.isTTY) {
         return fail({

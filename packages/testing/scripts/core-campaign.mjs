@@ -99,6 +99,12 @@ function parseArgs(argv) {
 	}
 	// Plane resolution: explicit --plane wins; else herdr/--ops → herdr, else engine
 	const planeRaw = typeof out.plane === "string" ? out.plane.toLowerCase() : undefined;
+	if (planeRaw !== undefined && planeRaw !== "herdr" && planeRaw !== "engine") {
+		throw new TypeError(`--plane must be engine or herdr, got ${out.plane}`);
+	}
+	if (!Number.isSafeInteger(out.repeat) || out.repeat < 1) {
+		throw new TypeError(`--repeat must be a positive safe integer, got ${String(out.repeat)}`);
+	}
 	if (planeRaw === "herdr" || planeRaw === "engine") {
 		out.plane = planeRaw;
 	} else if (out.ops || out.herdr) {
@@ -177,6 +183,11 @@ if (args.help) {
 
 // Default to watch-pack for herdr campaigns; full pack can expand later.
 const scenarios = args.watchPack || args.herdr ? watchPackScenarios : watchPackScenarios;
+if (args.only?.length) {
+	const known = new Set(scenarios.map((scenario) => scenario.id));
+	const unknown = args.only.filter((id) => !known.has(id));
+	if (unknown.length) throw new TypeError(`Unknown --only scenario id(s): ${unknown.join(", ")}`);
+}
 
 /** @type {import("../src/herdrBridge.ts").HerdrBridgeClient | null} */
 let herdrClient = null;

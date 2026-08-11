@@ -68,7 +68,7 @@ test("spawnSteer appends a steer message as the trailing positional (spaces pres
     spawnFn,
     execPath: EXEC,
   });
-  expect(calls[0].args).toEqual([ENTRY, "steer", "run-1", "--node", "node-a", "prefer the smaller change"]);
+  expect(calls[0].args).toEqual([ENTRY, "steer", "run-1", "--node", "node-a", "--message=prefer the smaller change"]);
   // Piped so alt-screen HUDs are not torn by CLI chrome.
   expect(calls[0].opts.stdio).toEqual(["ignore", "pipe", "pipe"]);
 });

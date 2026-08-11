@@ -8989,6 +8989,35 @@ a { color: var(--brand); }</style>
             event: event.event,
           },
         };
+      case "ToolCallStarted":
+        return {
+          event: "tool.call.started",
+          payload: {
+            runId: event.runId,
+            nodeId: event.nodeId,
+            iteration: event.iteration,
+            attempt: event.attempt,
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            seq: event.seq,
+            input: event.input,
+          },
+        };
+      case "ToolCallFinished":
+        return {
+          event: "tool.call.finished",
+          payload: {
+            runId: event.runId,
+            nodeId: event.nodeId,
+            iteration: event.iteration,
+            attempt: event.attempt,
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            seq: event.seq,
+            status: event.status,
+            output: event.output,
+          },
+        };
       case "AgentSessionEvent":
         return {
           event: "agent.session",

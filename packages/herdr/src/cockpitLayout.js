@@ -9,6 +9,37 @@ import { delimiter, isAbsolute } from "node:path";
 /** Preferred harness binaries (first hit on PATH wins for "auto"). */
 export const DEFAULT_HARNESS_CANDIDATES = ["grok", "claude", "codex", "opencode", "gemini"];
 
+/** @param {string} input */
+function splitShellWords(input) {
+  const words = [];
+  let word = "";
+  let quote = null;
+  let escaped = false;
+  for (const char of input) {
+    if (escaped) {
+      word += char;
+      escaped = false;
+    } else if (char === "\\" && quote !== "'") {
+      escaped = true;
+    } else if (quote) {
+      if (char === quote) quote = null;
+      else word += char;
+    } else if (char === "'" || char === '"') {
+      quote = char;
+    } else if (/\s/.test(char)) {
+      if (word) {
+        words.push(word);
+        word = "";
+      }
+    } else {
+      word += char;
+    }
+  }
+  if (escaped) word += "\\";
+  if (word) words.push(word);
+  return words;
+}
+
 /**
  * @param {string} bin
  * @param {NodeJS.ProcessEnv} [env]
@@ -63,7 +94,7 @@ export function resolveHarnessCommand(opts = {}, env = process.env) {
     return null;
   }
   if (fromEnv) {
-    const parts = fromEnv.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((p) => p.replace(/^"|"$/g, "")) ?? fromEnv.split(/\s+/);
+    const parts = splitShellWords(fromEnv);
     return parts.filter(Boolean);
   }
 
@@ -120,7 +151,7 @@ export function shouldSplitCockpit(opts = {}, ctx = {}) {
   // auto: split when docking into a live harness pane, or when we have a harness to spawn
   if (ctx.dock === true) return true;
   if (ctx.harnessArgv && ctx.harnessArgv.length > 0) return true;
-  if (opts.harnessCommand === "auto" || opts.harnessCommand === true) {
+  if (!("harnessArgv" in ctx) && (opts.harnessCommand === "auto" || opts.harnessCommand === true)) {
     // Will try detect at setup time; prefer split attempt
     return true;
   }

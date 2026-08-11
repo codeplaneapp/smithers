@@ -12,9 +12,7 @@
  */
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { Effect } from "effect";
 import { SmithersError } from "@smthrs/errors";
-import { enqueueSteer } from "@smthrs/engine/steers";
 import { findAndOpenDb } from "./find-db.js";
 import { closeCurrentHerdrDetail } from "./herdr.js";
 import { countInFlightAgentSiblings } from "./steer.js";
@@ -146,7 +144,8 @@ async function main() {
       } catch {
         /* ignore */
       }
-      process.exit(4);
+      process.exitCode = 4;
+      return;
     }
 
     const runId = args.runId;
@@ -163,6 +162,7 @@ async function main() {
     // Seed tool-call / agent activity history (same source as supervisor strip).
     // Use nearly full terminal width for detail (strip stays compact at 48).
     const cols = Math.max(40, process.stdout.columns || 80);
+    let identityNote = "";
     try {
       const { loadNodeActivity, formatActivityPlainWidth } = await import("./cockpit-activity.js");
       const lines = await loadNodeActivity(adapter, runId, nodeId, {
@@ -200,19 +200,29 @@ async function main() {
         const bits = [];
         if (typeof meta.agentModel === "string") bits.push(meta.agentModel);
         if (effort) bits.push(effort);
-        if (bits.length) nodeHud.setMeta({ note: bits.join(" · ") });
+        if (bits.length) {
+          identityNote = bits.join(" · ");
+          nodeHud.setMeta({ note: identityNote });
+        }
         if (typeof last.attempt === "number") nodeHud.setMeta({ attempt: last.attempt });
       }
     } catch {
       /* soft */
     }
 
+    let lastHudStatus;
     const onStatusBlock = async (status) => {
+      const changed = status !== lastHudStatus;
+      lastHudStatus = status;
       nodeHud?.setMeta({
         status: status ?? "unknown",
-        note: isTailActiveState(status)
-          ? "dual-control dock · always at bottom"
-          : "run finished — steer only while working",
+        ...(changed
+          ? {
+              note: isTailActiveState(status)
+                ? identityNote || "dual-control dock · always at bottom"
+                : "run finished — steer only while working",
+            }
+          : {}),
       });
       if (!isTailActiveState(status)) {
         nodeHud?.setDock("linger");
@@ -253,6 +263,10 @@ async function main() {
           enqueue: (message) => {
             void (async () => {
               try {
+                const [{ Effect }, { enqueueSteer }] = await Promise.all([
+                  import("effect"),
+                  import("@smthrs/engine/steers"),
+                ]);
                 const queued = await Effect.runPromise(
                   enqueueSteer(adapter, runId, nodeId, message, {
                     author: "supervisor",
@@ -309,11 +323,12 @@ async function main() {
         jsonl: false,
         follow: true,
         baseMs,
-        emit: (text) => nodeHud?.pushBody(text),
+        emit: (text) => nodeHud?.emit(text),
         onStatusBlock,
         isCancelled: keyControls ? () => cancelledByKey : undefined,
       });
     } finally {
+      await keyControls?.waitForTakeover?.();
       keyControls?.stop();
     }
 
@@ -350,6 +365,7 @@ async function main() {
                 emit: (t) => nodeHud?.pushBody(t),
               },
         );
+        await closeCurrentHerdrDetail();
       }
     }
   } catch (error) {

@@ -12,6 +12,7 @@
 
 import pc from "picocolors";
 import { buildDigestBlock, formatElapsed, isLikelyWorkerNodeId } from "@smthrs/herdr";
+import { sanitizeTerminalText } from "@smthrs/tui/src/sanitizeTerminalText.ts";
 import { ACTIVITY_STRIP_LINES, formatActivityPlain } from "./cockpit-activity.js";
 import { flattenOutlineTree, outlinePhasesToTree } from "./cockpit-outline-graph.js";
 import { buildDigestInputFromOverview, overviewStateLabel } from "./tail-overview.js";
@@ -830,7 +831,14 @@ export function buildCockpitOutlineModel(input) {
     typeof input.scrollOffset === "number" && input.scrollOffset > 0 ? Math.floor(input.scrollOffset) : 0;
 
   // Deterministic digest (no LLM) — same tallies source as overview HUD.
-  const digestNodes = Array.isArray(input.nodes) ? input.nodes : [];
+  const digestNodes = phasesForTree.flatMap((phase) =>
+    phase.agents.map((agent) => ({
+      nodeId: agent.nodeId,
+      state: agent.state,
+      lastAttempt: agent.attempt,
+      iteration: agent.iteration,
+    })),
+  );
   const digestLines = formatSupervisorDigestLines({
     runId: String(input.runId ?? ""),
     status,
@@ -937,7 +945,13 @@ export function supervisorRunStatus(status, live) {
   if (s === "cancelled" || s === "canceled" || s === "stale" || s === "orphaned") {
     return "stopped";
   }
-  if (s === "waiting-approval" || s === "waiting-event" || s === "waiting-timer" || s === "paused") {
+  if (
+    s === "waiting-approval" ||
+    s === "waiting-event" ||
+    s === "waiting-timer" ||
+    s === "waiting-quota" ||
+    s === "paused"
+  ) {
     return "waiting";
   }
   if (s === "running" || s === "continued" || live === true) return "running";
@@ -1011,7 +1025,7 @@ export function renderCockpitOutlineFrame(model, size) {
   const rows = Math.max(10, Math.min(size.rows || 24, 200));
   /** @type {string[]} */
   const lines = [];
-  const push = (s = "") => lines.push(clipLine(s, cols));
+  const push = (s = "") => lines.push(clipLine(sanitizeTerminalText(String(s), { preserveSgr: true }), cols));
   // Full-width rule — exact `cols` dashes (no trailing …).
   const hline = () => lines.push(brand.bar("─".repeat(cols)));
 

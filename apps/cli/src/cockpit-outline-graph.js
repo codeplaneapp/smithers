@@ -87,7 +87,7 @@ export function mapDevToolsNodeToOutline(node, metaByNode = {}, path = "root") {
     "subflow",
   ]);
 
-  if (type === "task") {
+  if (node.task) {
     const nodeId =
       (node.task && typeof node.task.nodeId === "string" && node.task.nodeId) ||
       (typeof node.props?.id === "string" && node.props.id) ||
@@ -123,7 +123,7 @@ export function mapDevToolsNodeToOutline(node, metaByNode = {}, path = "root") {
     if (kids.length === 1) return kids[0];
     if (kids.length === 0) return null;
     return {
-      key: `group:${path}`,
+      key: `group:${node.id ?? path}`,
       kind: "group",
       groupType: type === "workflow" ? "sequence" : "group",
       label: type === "workflow" ? String(node.name || "workflow") : "group",
@@ -145,7 +145,7 @@ export function mapDevToolsNodeToOutline(node, metaByNode = {}, path = "root") {
     }
     const label =
       type === "parallel" ? "parallel" : type === "loop" ? "loop" : type === "merge-queue" ? "merge-queue" : type;
-    const key = `group:${path}:${type}:${node.id ?? label}`;
+    const key = `group:${type}:${node.id ?? path}`;
     return {
       key,
       kind: "group",
@@ -163,7 +163,7 @@ export function mapDevToolsNodeToOutline(node, metaByNode = {}, path = "root") {
   if (kids.length === 1) return kids[0];
   if (kids.length === 0) return null;
   return {
-    key: `group:${path}:misc`,
+    key: `group:${node.id ?? path}:misc`,
     kind: "group",
     groupType: type,
     label: String(node.name || type),
@@ -178,7 +178,14 @@ export function mapDevToolsNodeToOutline(node, metaByNode = {}, path = "root") {
  * @param {OutlineTreeNode[]} kids
  */
 function aggregateChildState(kids) {
-  if (kids.some((k) => k.state === "in-progress" || k.state === "running")) return "in-progress";
+  if (
+    kids.some((k) =>
+      ["in-progress", "running", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota"].includes(
+        k.state,
+      ),
+    )
+  )
+    return "in-progress";
   if (kids.some((k) => k.state === "failed")) return "failed";
   if (kids.length > 0 && kids.every((k) => k.state === "finished" || k.state === "skipped")) return "finished";
   if (kids.some((k) => k.state === "pending")) return "pending";

@@ -1625,7 +1625,7 @@ async function ensureWorktree(rootDir, worktreePath, branch, baseBranch, owner) 
  * @param {string} runId
  * @param {string} rootDir
  * @param {boolean | undefined} keepWorktrees
- * @returns {Promise<void>}
+ * @returns {Promise<Record<string, unknown>[]>}
  */
 async function reapFinishedRunWorktrees(adapter, runId, rootDir, keepWorktrees) {
   const keep = keepWorktrees ?? ["1", "true"].includes((process.env.SMITHERS_KEEP_WORKTREES ?? "").toLowerCase());
@@ -2248,7 +2248,7 @@ async function continueRunAsNewPostgres(params) {
     ts,
   } = params;
   const storage = adapter.internalStorage;
-  await Effect.runPromise(
+  return Effect.runPromise(
     adapter.withTransactionEffect(
       "continue-as-new handoff",
       Effect.gen(function* () {
@@ -2387,6 +2387,26 @@ async function continueRunAsNewPostgres(params) {
           catch: (cause) =>
             toSmithersError(cause, "append continuation event", { code: "DB_WRITE_FAILED", details: { runId } }),
         });
+        const expiredEvents = [];
+        const queuedSteers = (yield* adapter.listSteers(runId)).filter((steer) => steer.status === "queued");
+        for (const steer of queuedSteers) {
+          yield* adapter.markSteerExpired(steer.steerId, ts);
+          const event = {
+            type: "SteerExpired",
+            runId,
+            nodeId: steer.nodeId,
+            steerId: steer.steerId,
+            timestampMs: ts,
+          };
+          yield* adapter.insertEventWithNextSeq({
+            runId,
+            timestampMs: ts,
+            type: event.type,
+            payloadJson: JSON.stringify(event),
+          });
+          expiredEvents.push(event);
+        }
+        return expiredEvents;
       }),
     ),
   );
@@ -2484,7 +2504,7 @@ async function continueRunAsNew(params) {
     timestampMs: ts,
   };
   if (db && typeof db === "object" && db.dialect === "postgres") {
-    await continueRunAsNewPostgres({
+    const expiredSteerEvents = await continueRunAsNewPostgres({
       adapter,
       inputTableName,
       inputRow,
@@ -2505,8 +2525,10 @@ async function continueRunAsNew(params) {
       newRunId: targetRunId,
       ancestryDepth: ancestryDepth + 1,
       carriedStateBytes,
+      expiredSteerEvents,
     };
   }
+  let expiredSteerEvents = [];
   await withSqliteWriteRetry(
     async () => {
       const client = db.$client;
@@ -2612,7 +2634,7 @@ async function continueRunAsNew(params) {
              WHERE run_id = ?`,
           )
           .run("continued", ts, runId);
-        const nextEventSeq = Number(
+        let nextEventSeq = Number(
           client.query("SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM _smithers_events WHERE run_id = ?").get(runId)
             ?.seq ?? 0,
         );
@@ -2622,7 +2644,34 @@ async function continueRunAsNew(params) {
              VALUES (?, ?, ?, ?, ?)`,
           )
           .run(runId, nextEventSeq, ts, continuationEvent.type, JSON.stringify(continuationEvent));
+        const pendingExpiryEvents = [];
+        const queuedSteers = client
+          .query("SELECT steer_id, node_id FROM _smithers_steers WHERE run_id = ? AND status = 'queued'")
+          .all(runId);
+        for (const steer of queuedSteers) {
+          client
+            .query(
+              "UPDATE _smithers_steers SET status = 'expired', expired_at_ms = ? WHERE steer_id = ? AND status = 'queued'",
+            )
+            .run(ts, steer.steer_id);
+          const event = {
+            type: "SteerExpired",
+            runId,
+            nodeId: steer.node_id,
+            steerId: steer.steer_id,
+            timestampMs: ts,
+          };
+          nextEventSeq += 1;
+          client
+            .query(
+              `INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json)
+               VALUES (?, ?, ?, ?, ?)`,
+            )
+            .run(runId, nextEventSeq, ts, event.type, JSON.stringify(event));
+          pendingExpiryEvents.push(event);
+        }
         client.run("COMMIT");
+        expiredSteerEvents = pendingExpiryEvents;
       } catch (error) {
         try {
           client.run("ROLLBACK");
@@ -2638,6 +2687,7 @@ async function continueRunAsNew(params) {
     newRunId: targetRunId,
     ancestryDepth: ancestryDepth + 1,
     carriedStateBytes,
+    expiredSteerEvents,
   };
 }
 /**
@@ -4554,7 +4604,6 @@ export async function finalizeCancelledRun(adapter, runId, options = {}) {
   if (current.status !== "cancelled" && current.status !== "canceled") {
     return { runId, won: false, status: "already-terminal", terminalStatus: current.status, repaired: false };
   }
-  const cancelEvent = { type: "RunCancelled", runId, timestampMs: cancelledAtMs };
   for (const event of persistedEvents) {
     if (options.eventBus) await Effect.runPromise(options.eventBus.emitAndTrack(event));
     else await Effect.runPromise(trackEvent(event));
@@ -5738,16 +5787,19 @@ async function legacyExecuteTask(
          */
         const effortFromExtraArgs = (extraArgs) => {
           if (!Array.isArray(extraArgs)) return null;
+          let effort = null;
           for (let i = 0; i < extraArgs.length; i++) {
             const a = extraArgs[i];
+            if (a === "--") break;
             if (a === "--settings" && typeof extraArgs[i + 1] === "string") {
-              return effortFromSettings(extraArgs[i + 1]);
+              effort = effortFromSettings(extraArgs[i + 1]) ?? effort;
+              i += 1;
             }
             if (typeof a === "string" && a.startsWith("--settings=")) {
-              return effortFromSettings(a.slice("--settings=".length));
+              effort = effortFromSettings(a.slice("--settings=".length)) ?? effort;
             }
           }
-          return null;
+          return effort;
         };
         /**
          * @param {unknown} config
@@ -5820,7 +5872,7 @@ async function legacyExecuteTask(
           (typeof toolConfig.rootDir === "string" && toolConfig.rootDir) ||
           null;
         if (agentCwdCandidate) {
-          attemptMeta.agentCwd = agentCwdCandidate;
+          attemptMeta.agentCwd = resolve(agentCwdCandidate);
         }
         const heartbeatCheckpoint =
           previousHeartbeat && typeof previousHeartbeat === "object" && !Array.isArray(previousHeartbeat)
@@ -6278,25 +6330,42 @@ async function legacyExecuteTask(
             effectivePrompt = effectivePrompt.length > 0 ? `${effectivePrompt}\n\n${steerText}` : steerText;
           }
           const consumedAtMs = nowMs();
-          for (const steer of queuedSteers) {
-            await Effect.runPromise(
-              adapter.markSteerConsumed(steer.steerId, {
-                consumedAtMs,
-                consumedByAttempt: attemptNo,
-                consumedByIteration: desc.iteration,
-              }),
-            );
-            await Effect.runPromise(
-              eventBus.emitEventWithPersist({
-                type: "SteerConsumed",
-                runId,
-                nodeId: desc.nodeId,
-                iteration: desc.iteration,
-                attempt: attemptNo,
-                steerId: steer.steerId,
-                timestampMs: consumedAtMs,
-              }),
-            );
+          const consumedEvents = await adapter.withTransaction(
+            "consume queued steers",
+            Effect.gen(function* () {
+              const events = [];
+              for (const steer of queuedSteers) {
+                yield* adapter.markSteerConsumed(steer.steerId, {
+                  consumedAtMs,
+                  consumedByAttempt: attemptNo,
+                  consumedByIteration: desc.iteration,
+                });
+                const rawEvent = {
+                  type: "SteerConsumed",
+                  runId,
+                  nodeId: desc.nodeId,
+                  iteration: desc.iteration,
+                  attempt: attemptNo,
+                  steerId: steer.steerId,
+                  timestampMs: consumedAtMs,
+                };
+                const event = eventBus.attachCorrelation ? eventBus.attachCorrelation(rawEvent) : rawEvent;
+                yield* adapter.insertEventWithNextSeq({
+                  runId,
+                  timestampMs: consumedAtMs,
+                  type: rawEvent.type,
+                  payloadJson: JSON.stringify(event),
+                });
+                events.push(event);
+              }
+              return events;
+            }),
+          );
+          for (const event of consumedEvents) {
+            await Effect.runPromise(eventBus.emitAndTrack(event));
+            if (typeof eventBus.persistLog === "function") {
+              await Effect.runPromise(Effect.ignore(eventBus.persistLog(event)));
+            }
           }
         }
         supportsNativeStructuredOutput = effectiveAgent.supportsNativeStructuredOutput === true;
@@ -10657,6 +10726,10 @@ async function runWorkflowBodyDriver(workflow, opts) {
         };
         eventBus.emit("event", continuationEvent);
         Effect.runSync(trackEvent(continuationEvent));
+        for (const expiredEvent of driverTransition.expiredSteerEvents ?? []) {
+          eventBus.emit("event", expiredEvent);
+          Effect.runSync(trackEvent(expiredEvent));
+        }
         logInfo(
           `Continuing run ${runId} as ${driverTransition.newRunId} at iteration ${continuationIteration}`,
           {

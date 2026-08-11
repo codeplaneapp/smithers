@@ -11,7 +11,7 @@ import { resolveSmithersBackendChoice } from "./resolveSmithersBackendChoice.js"
  * commit by a concurrent writer to clear; short enough not to hang a CLI read. */
 const RUNS_TABLE_PROBE_BUSY_TIMEOUT_MS = 500;
 
-/** Retries after the busy_timeout still reports a lock, before assuming present. */
+/** Retries after the busy_timeout still reports a lock, before surfacing contention. */
 const RUNS_TABLE_PROBE_MAX_ATTEMPTS = 3;
 
 async function openSqliteStore(dbPath, opts = {}) {
@@ -69,8 +69,8 @@ async function openSqliteStore(dbPath, opts = {}) {
  *    lets a brief writer lock (a frame commit) clear instead of erroring at once.
  *  - A transient lock/IO race is DISTINGUISHED from a genuinely unreadable file.
  *    A lock means the file IS a live, contended store, which by definition already
- *    has the runs table, so we retry briefly and then assume present rather than
- *    reporting the campaign-observed false "no run history". Only a genuinely
+ *    may or may not have the runs table, so we retry briefly and then surface
+ *    contention rather than accepting an unrelated database. Only a genuinely
  *    unreadable file (missing / corrupt / not-a-database) resolves to `false`.
  *
  * @param {string} dbPath
@@ -94,10 +94,7 @@ async function sqliteHasRunsTable(dbPath) {
         return false;
       }
       if (attempt >= RUNS_TABLE_PROBE_MAX_ATTEMPTS) {
-        // Still locked after busy_timeout + retries: this is a live, contended
-        // store (which has the runs table). Reporting "no run history" here was
-        // the bug — assume present rather than falsely denying run history.
-        return true;
+        throw error;
       }
       await new Promise((resolveFn) => setTimeout(resolveFn, 100));
     } finally {

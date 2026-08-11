@@ -25,6 +25,7 @@ function herdrConfigDir(env) {
  * @returns {string}
  */
 export function sessionSocketPath(name, env = process.env) {
+  if (name === "default") return join(herdrConfigDir(env), "herdr.sock");
   return join(herdrConfigDir(env), "sessions", name, "herdr.sock");
 }
 

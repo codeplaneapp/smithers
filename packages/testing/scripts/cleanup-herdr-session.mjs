@@ -54,7 +54,11 @@ if (args.help) {
 	process.exit(0);
 }
 
-const session = args.session;
+if ((args.stopSession || args.deleteSession) && !args.session && process.env.HERDR_SOCKET_PATH) {
+	throw new Error("--session is required for stop/delete when HERDR_SOCKET_PATH is set");
+}
+
+const session = args.session ?? process.env.HERDR_SESSION;
 const client = createHerdrClient({ session, logger: () => {} });
 const pong = await client.ping().catch(() => undefined);
 if (!pong) {
@@ -77,11 +81,11 @@ if (!pong) {
 			label.startsWith("cockpit-split");
 		if (args.all) {
 			if (isHome) continue;
-			await client.tryCall("workspace.close", { workspace_id: w.workspace_id });
+			await client.call("workspace.close", { workspace_id: w.workspace_id });
 			console.log(`[cleanup] closed ${w.workspace_id}  ${label}`);
 			closed += 1;
 		} else if (isCampaign) {
-			await client.tryCall("workspace.close", { workspace_id: w.workspace_id });
+			await client.call("workspace.close", { workspace_id: w.workspace_id });
 			console.log(`[cleanup] closed ${w.workspace_id}  ${label}`);
 			closed += 1;
 		}

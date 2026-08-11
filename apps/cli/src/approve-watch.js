@@ -365,8 +365,10 @@ export function renderHumanRequestPrompt(request, options) {
  * @returns {Promise<{ kind: "approval" | "human", at: number, item: any } | null>}
  */
 export async function findNextPending(adapter, runId, nodeFilter) {
+  const descendants = await adapter.listRunDescendants(runId);
+  const scopedRunIds = new Set([runId, ...descendants.map((row) => row.runId)]);
   const humanRows = (await adapter.listPendingHumanRequests()).filter(
-    (r) => r && r.runId === runId && (!nodeFilter || r.nodeId === nodeFilter),
+    (r) => r && scopedRunIds.has(r.runId) && (!nodeFilter || r.nodeId === nodeFilter),
   );
   const approvals = (await adapter.listPendingApprovals(runId)).filter(
     (a) => a && (!nodeFilter || a.nodeId === nodeFilter),
@@ -507,6 +509,10 @@ async function readHumanValue(request, options, ctx) {
       return CANCEL;
     }
     const text = typeof line === "string" ? line : "";
+    const trimmed = text.trim();
+    if (trimmed === "q" || trimmed === "Q") {
+      return CANCEL;
+    }
     if (request.kind === "json") {
       try {
         return { value: JSON.parse(text) };
@@ -636,10 +642,11 @@ export async function runApproveWatch(params) {
         // resuming would print a misleading "↻ resuming" for a still-pending gate.
         if (resumeDetached && outcome !== COMMIT_FAILED) {
           try {
-            const decided = await adapter.getRun(runId);
+            const decidedRunId = pending.item.runId ?? runId;
+            const decided = await adapter.getRun(decidedRunId);
             if (decided) {
-              const res = await resumeDetached(adapter, decided, runId);
-              if (res && res.resumed) emit(`↻ resuming ${runId}\n`);
+              const res = await resumeDetached(adapter, decided, decidedRunId);
+              if (res && res.resumed) emit(`↻ resuming ${decidedRunId}\n`);
             }
           } catch {
             // Best-effort: a resume failure must never crash the pane.

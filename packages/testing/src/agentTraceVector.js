@@ -49,9 +49,15 @@ function parseTurn(raw, loc) {
     }
     const w = t.when;
     when = {};
-    if (typeof w.callIndex === "number") when.callIndex = w.callIndex;
-    if (typeof w.attempt === "number") when.attempt = w.attempt;
-    if (typeof w.iteration === "number") when.iteration = w.iteration;
+    for (const key of ["callIndex", "attempt", "iteration"]) {
+      if (w[key] !== void 0 && (!Number.isSafeInteger(w[key]) || w[key] < 0)) {
+        throw new TypeError(`when.${key} must be a non-negative safe integer${loc}`);
+      }
+      if (typeof w[key] === "number") when[key] = w[key];
+    }
+    if (w.promptIncludes !== void 0 && typeof w.promptIncludes !== "string") {
+      throw new TypeError(`when.promptIncludes must be a string${loc}`);
+    }
     if (typeof w.promptIncludes === "string") when.promptIncludes = w.promptIncludes;
   }
   return { when, stream, result };
@@ -60,11 +66,22 @@ function parseResult(raw, loc) {
   const r = raw;
   const kind = r.kind;
   if (kind === "ok") {
+    let files;
+    if (r.files !== void 0) {
+      if (!r.files || typeof r.files !== "object" || Array.isArray(r.files)) {
+        throw new TypeError(`ok result files must be an object${loc}`);
+      }
+      files = {};
+      for (const [name, contents] of Object.entries(r.files)) {
+        if (typeof contents !== "string") throw new TypeError(`ok result file ${name} must be a string${loc}`);
+        files[name] = contents;
+      }
+    }
     return {
       kind: "ok",
       output: r.output,
       text: typeof r.text === "string" ? r.text : void 0,
-      files: r.files && typeof r.files === "object" && !Array.isArray(r.files) ? r.files : void 0
+      files
     };
   }
   if (kind === "fail") {
@@ -136,7 +153,7 @@ function selectTurn(vector, used, ctx) {
     if (used.has(i)) continue;
     const turn = vector.turns[i];
     const w = turn.when;
-    if (!w) continue;
+    if (!w || Object.keys(w).length === 0) continue;
     if (w.callIndex !== void 0 && w.callIndex !== ctx.callIndex) continue;
     if (w.attempt !== void 0 && w.attempt !== ctx.attempt) continue;
     if (w.iteration !== void 0 && w.iteration !== ctx.iteration) continue;

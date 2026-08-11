@@ -3,6 +3,7 @@
 // @smithers-type-exports-end
 
 import pc from "picocolors";
+import { sanitizeTerminalText } from "@smthrs/tui/src/sanitizeTerminalText.ts";
 import { eventCategoryForType } from "./event-categories.js";
 /**
  * Format a timestamp as relative age: "2m ago", "1h ago", "3d ago"
@@ -260,7 +261,7 @@ export function formatEventLine(event, baseMs, options) {
     case "ApprovalDenied":
       return `${prefix}✗ Denied: ${payload?.nodeId ?? "?"}`;
     case "SteerQueued":
-      return `${prefix}↪ steer queued: ${truncateText(String(payload?.message ?? ""), 100)}`.trim();
+      return `${prefix}↪ steer queued: ${truncateText(sanitizeTerminalText(String(payload?.message ?? "")), 100)}`.trim();
     case "SteerConsumed":
       return `${prefix}✓ steer consumed by attempt ${payload?.attempt ?? 1}`;
     case "SteerExpired":

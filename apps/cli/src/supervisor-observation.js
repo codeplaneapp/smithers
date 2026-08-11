@@ -32,7 +32,7 @@ import { deriveTailStatus, isTailActiveState } from "./tail.js";
 // factories below, and this module imports those two helpers — but every use is
 // deferred to a runtime method call, never module top-level, so the live
 // bindings are always initialized by the time they run.
-import { buildTopPaintInput, listFleetRuns } from "./smithers-top.js";
+import { buildTopPaintInput, isSupervisorActiveState, listFleetRuns } from "./smithers-top.js";
 
 // --- Fleet windowing constants (mirror smithers-top.js listFleetRuns) --------
 // Kept local so the gateway impl matches the direct-db listFleetRuns windowing
@@ -222,7 +222,11 @@ const ACTIVITY_RING_CAP = 500;
 // a busy multi-node run's node/approval/heartbeat frames are dropped at push
 // time so they never crowd the focused node's rows out of the bounded ring
 // (matches the direct-db path's SQL `types` filter / loadNodeActivity window).
-const GATEWAY_EVENT_TO_ACTIVITY_TYPE = new Map([["agent.event", "AgentEvent"]]);
+const GATEWAY_EVENT_TO_ACTIVITY_TYPE = new Map([
+  ["agent.event", "AgentEvent"],
+  ["tool.call.started", "ToolCallStarted"],
+  ["tool.call.finished", "ToolCallFinished"],
+]);
 
 /**
  * Build a gateway-backed observation source over a SmithersGatewayClient. The
@@ -422,13 +426,20 @@ export function createGatewayObservationSource(client, _opts = {}) {
           /* soft */
         }
       }
-      const runStateById = await runStatesFor(activeIds);
+      const boundedActiveIds = new Set(
+        [...byId.values()]
+          .filter((run) => activeIds.has(run.runId))
+          .sort((a, b) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0))
+          .slice(0, FLEET_LIMIT)
+          .map((run) => run.runId),
+      );
+      const runStateById = await runStatesFor(boundedActiveIds);
       /** @type {any[]} */
       const active = [];
       /** @type {any[]} */
       const finished = [];
       for (const r of byId.values()) {
-        const derived = activeIds.has(r.runId)
+        const derived = boundedActiveIds.has(r.runId)
           ? deriveDerivedStatusFromRunState(runStateById.get(r.runId), r.status)
           : r.status === "succeeded"
             ? "finished"
@@ -442,7 +453,7 @@ export function createGatewayObservationSource(client, _opts = {}) {
               ? r.workflowKey
               : r.workflowName;
         const row = { ...r, workflowName, derivedStatus: derived };
-        if (isTailActiveState(derived)) active.push(row);
+        if (isSupervisorActiveState(derived)) active.push(row);
         else finished.push(row);
       }
       active.sort((a, b) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0));
@@ -498,10 +509,10 @@ export function createGatewayObservationSource(client, _opts = {}) {
         (typeof getRunRow?.workflowKey === "string" && getRunRow.workflowKey) ||
         (typeof run.workflowKey === "string" && run.workflowKey) ||
         "";
-      const active = isTailActiveState(status);
+      const active = isSupervisorActiveState(status);
       const anyActive = fleetRuns.some((r) => {
         const st = r.derivedStatus ?? r.status;
-        return isTailActiveState(st);
+        return isSupervisorActiveState(st);
       });
       let finishedAtMs =
         typeof getRunRow?.finishedAtMs === "number"

@@ -116,9 +116,19 @@ if (paneCount < 2) {
 // Optional: pre-start top against a shared campaign DB if SMITHERS_CAMPAIGN_DB is set.
 if (rightPaneId) {
 	const campaignDb = process.env.SMITHERS_CAMPAIGN_DB;
-	const placeholder = campaignDb
-		? `clear; printf '%s\\n' '' '  smithers supervisor will dock here' '  or run now:' '    smithers supervisor --db ${campaignDb}' ''; sleep 3600\n`
-		: `clear; printf '%s\\n' '' '  ╔══════════════════════════════════════════════════╗' '  ║  smithers supervisor (waiting for a run)                ║' '  ║  left  = your harness (run: grok)                ║' '  ║  right = this pane → smithers supervisor when a run docks║' '  ╚══════════════════════════════════════════════════╝' ''; sleep 3600\n`;
+	const quote = (value) => `'${String(value).replace(/'/g, `'"'"'`)}'`;
+	const lines = campaignDb
+		? ["", "  smithers supervisor will dock here", "  or run now:", `    smithers supervisor --db ${campaignDb}`, ""]
+		: [
+				"",
+				"  ╔══════════════════════════════════════════════════╗",
+				"  ║  smithers supervisor (waiting for a run)                ║",
+				"  ║  left  = your harness (run: grok)                ║",
+				"  ║  right = this pane → smithers supervisor when a run docks║",
+				"  ╚══════════════════════════════════════════════════╝",
+				"",
+			];
+	const placeholder = `clear; printf '%s\\n' ${lines.map(quote).join(" ")}\n`;
 	await client.tryCall("pane.send_text", {
 		pane_id: rightPaneId,
 		text: placeholder,

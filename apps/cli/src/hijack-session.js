@@ -64,7 +64,7 @@ async function resolveConversationAgent(adapter, candidate) {
         `Takeover needs a real workflow file on disk (typical of \`smithers up <workflow>\`). ` +
         `In-process fixture/campaign runs and some embedded engines never set workflowPath — ` +
         `use mid-run steer (\`s\` while a node is still working) for dual-control on those, ` +
-        `or run a real workflow for full S-takeover. See https://smithers.sh/reference/errors`,
+        `or run a real workflow for full takeover. See https://smithers.sh/reference/errors`,
     );
   }
   const workflow = await loadWorkflow(workflowPath);

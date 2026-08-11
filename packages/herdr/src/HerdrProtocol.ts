@@ -107,8 +107,8 @@ export type HerdrPaneReadResult = {
 // ── workspace.create / workspace.close / workspace.list ──────────────────────
 
 export type HerdrWorkspaceCreateParams = {
-  label?: string;
-  cwd?: string;
+  label?: string | null;
+  cwd?: string | null;
   env?: Record<string, string>;
   focus?: boolean;
 };
@@ -132,7 +132,7 @@ export type HerdrWorkspaceRenameParams = {
 
 /** Result of `workspace.rename` (the renamed workspace record). */
 export type HerdrWorkspaceRenameResult = {
-  type: "workspace_renamed";
+  type: "workspace_info";
   workspace: HerdrWorkspaceInfo;
 };
 
@@ -151,10 +151,10 @@ export type HerdrOkResult = {
 export type HerdrAgentStartParams = {
   name: string;
   argv: string[];
-  workspace_id?: string;
-  tab_id?: string;
-  split?: HerdrSplitDirection;
-  cwd?: string;
+  workspace_id?: string | null;
+  tab_id?: string | null;
+  split?: HerdrSplitDirection | null;
+  cwd?: string | null;
   env?: Record<string, string>;
   focus?: boolean;
 };
@@ -188,10 +188,10 @@ export type HerdrPaneReportAgentParams = {
   source: string;
   agent: string;
   state: HerdrAgentState;
-  message?: string;
-  custom_status?: string;
-  agent_session_id?: string;
-  agent_session_path?: string;
+  message?: string | null;
+  custom_status?: string | null;
+  agent_session_id?: string | null;
+  agent_session_path?: string | null;
   /** Monotonically increasing per pane so herdr can order authority reports. */
   seq?: number;
 };
@@ -200,9 +200,9 @@ export type HerdrPaneReportAgentSessionParams = {
   pane_id: string;
   source: string;
   agent: string;
-  agent_session_id?: string;
-  agent_session_path?: string;
-  session_start_source?: string;
+  agent_session_id?: string | null;
+  agent_session_path?: string | null;
+  session_start_source?: string | null;
   seq?: number;
 };
 
@@ -216,13 +216,13 @@ export type HerdrPaneReleaseAgentParams = {
 export type HerdrPaneReportMetadataParams = {
   pane_id: string;
   source: string;
-  title?: string;
-  custom_status?: string;
-  display_agent?: string;
-  agent?: string;
-  state_labels?: Record<string, string>;
+  title?: string | null;
+  custom_status?: string | null;
+  display_agent?: string | null;
+  agent?: string | null;
+  state_labels?: Record<string, string> | null;
   ttl_ms?: number;
-  applies_to_source?: string;
+  applies_to_source?: string | null;
   clear_title?: boolean;
   clear_custom_status?: boolean;
   clear_display_agent?: boolean;
@@ -266,9 +266,9 @@ export type HerdrPaneWaitForOutputResult = {
 
 export type HerdrNotificationShowParams = {
   title: string;
-  body?: string;
-  sound?: HerdrNotificationSound;
-  position?: HerdrToastPosition;
+  body?: string | null;
+  sound?: HerdrNotificationSound | null;
+  position?: HerdrToastPosition | null;
 };
 
 export type HerdrNotificationShowResult = {

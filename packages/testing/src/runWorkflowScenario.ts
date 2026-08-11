@@ -5,7 +5,8 @@
  * Distinct from the durability-kernel `runScenario(ast, …)` — that API takes a ScenarioAst.
  */
 
-import type { VirtualClock } from "./virtualClock.ts";
+import { type VirtualClock, createVirtualClock } from "./virtualClock.ts";
+import { randomUUID } from "node:crypto";
 
 /** Structural workflow definition (smithers() return value). */
 export type ScenarioWorkflow = {
@@ -70,16 +71,8 @@ async function settleRunResult(raw: unknown): Promise<Record<string, unknown>> {
  * Run a workflow definition to completion (or park). Token-free when agents are scripted.
  */
 export async function runWorkflowScenario(options: RunWorkflowScenarioOptions): Promise<WorkflowScenarioResult> {
-  const runId =
-    typeof options.runId === "string" && options.runId !== "" ? options.runId : `scenario-${Date.now().toString(36)}`;
-  const clock =
-    options.clock ??
-    ({
-      nowMs: () => Date.now(),
-      advance: () => undefined,
-      advanceToNextTimer: () => undefined,
-      pending: () => [],
-    } as unknown as VirtualClock);
+  const runId = typeof options.runId === "string" && options.runId !== "" ? options.runId : `scenario-${randomUUID()}`;
+  const clock = options.clock ?? createVirtualClock();
 
   if (options.beforeRun) {
     await options.beforeRun({ runId, clock });
