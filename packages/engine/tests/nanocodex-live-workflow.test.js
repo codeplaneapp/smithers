@@ -221,18 +221,23 @@ async function runColdRestartScenario({ authFile, binary: configuredBinary, chil
     ).toEqual([{ value: 42, nonce }]);
 
     const refs = await Effect.runPromise(adapter.listAgentCheckpointRefs(runId, { nodeId: "work" }));
-    expect(refs).toHaveLength(2);
-    expect(refs[0]).toEqual(initialRef);
-    expect(refs[1]).toMatchObject({
+    // The adapter publishes mid-turn through `onCheckpoint` and also returns
+    // the same checkpoint, so the substrate additionally records a `turn` ref
+    // for the successful attempt. Assert on the durable progress lineage.
+    const progressRefs = refs.filter((ref) => ref.purpose === "progress");
+    expect(progressRefs).toHaveLength(2);
+    expect(refs.every((ref) => ref.codec === CHECKPOINT_CODEC && ref.version === CHECKPOINT_VERSION)).toBe(true);
+    expect(progressRefs[0]).toEqual(initialRef);
+    expect(progressRefs[1]).toMatchObject({
       sequence: 0,
       codec: CHECKPOINT_CODEC,
       version: CHECKPOINT_VERSION,
       purpose: "progress",
     });
-    expect(refs[1].contentHash).not.toBe(initialRef.contentHash);
+    expect(progressRefs[1].contentHash).not.toBe(initialRef.contentHash);
     expect(await Effect.runPromise(adapter.getAgentCheckpoint(initialRef.contentHash))).not.toBeNull();
-    const secondContent = await Effect.runPromise(adapter.getAgentCheckpoint(refs[1].contentHash));
-    expectStoredCheckpoint(secondContent, refs[1]);
+    const secondContent = await Effect.runPromise(adapter.getAgentCheckpoint(progressRefs[1].contentHash));
+    expectStoredCheckpoint(secondContent, progressRefs[1]);
 
     expect(await Effect.runPromise(adapter.listInProgressAttempts(runId))).toEqual([]);
     const attempts = await Effect.runPromise(adapter.listAttempts(runId, "work", 0));
@@ -241,7 +246,7 @@ async function runColdRestartScenario({ authFile, binary: configuredBinary, chil
     expect(successfulAttempts).toHaveLength(1);
     const successfulAttempt = successfulAttempts[0];
     expect(successfulAttempt.finishedAtMs).toBeNumber();
-    expect(refs[1].attempt).toBe(successfulAttempt.attempt);
+    expect(progressRefs[1].attempt).toBe(successfulAttempt.attempt);
     expect(JSON.parse(successfulAttempt.metaJson ?? "{}").resumedFromCheckpoint).toEqual({
       contentHash: initialRef.contentHash,
       sequence: initialRef.sequence,
