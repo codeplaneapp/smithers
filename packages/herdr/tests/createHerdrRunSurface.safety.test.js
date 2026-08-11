@@ -12,10 +12,10 @@ describe("openTabPane ownership safety (fake client)", () => {
         return { tabs: [{ tab_id: "operator-tab", workspace_id: "ws", label: "build" }] };
       }
       if (method === "tab.create") {
-        return { tab: { tab_id: "smithers-tab", workspace_id: "ws", label: params.label } };
-      }
-      if (method === "agent.start") {
-        return { agent: { pane_id: "smithers-pane", tab_id: "smithers-tab", workspace_id: "ws" } };
+        return {
+          tab: { tab_id: "smithers-tab", workspace_id: "ws", label: params.label },
+          root_pane: { pane_id: "smithers-pane", tab_id: "smithers-tab", workspace_id: "ws" },
+        };
       }
       if (method === "pane.list") {
         return {
@@ -44,7 +44,15 @@ describe("openTabPane ownership safety (fake client)", () => {
     });
 
     expect(opened).toMatchObject({ tabId: "smithers-tab", paneId: "smithers-pane", workspaceId: "ws" });
-    expect(calls.find((call) => call.method === "agent.start")?.params.tab_id).toBe("smithers-tab");
+    expect(calls.find((call) => call.method === "pane.report_agent")?.params).toMatchObject({
+      pane_id: "smithers-pane",
+      agent: "smithers:run-1:build",
+    });
+    expect(calls.find((call) => call.method === "pane.send_input")?.params).toMatchObject({
+      pane_id: "smithers-pane",
+      text: "sleep 30",
+      keys: ["Enter"],
+    });
     expect(calls.filter((call) => call.method === "tab.close")).toEqual([]);
     expect(calls.filter((call) => call.method === "pane.close").map((call) => call.params.pane_id)).toEqual([
       "smithers-seed",

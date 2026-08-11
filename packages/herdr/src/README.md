@@ -3,7 +3,7 @@
 Socket client for [herdr](https://herdr.dev), the terminal workspace manager
 Smithers mirrors runs into as an optional presentation & steering plane. This
 package speaks herdr's newline-delimited-JSON unix-socket control API
-(herdr 0.7.3, protocol 16) with zero runtime dependencies (node builtins only).
+(herdr 0.8.0, protocol 19) with zero runtime dependencies (node builtins only).
 
 Herdr is optional and degradable: nothing here is on the engine hot path, and
 every interaction is meant to be fire-and-forget. Prefer `tryCall()` for
@@ -23,7 +23,7 @@ steering pushes so a broken or absent herdr never affects a run.
   pre-filtering an event stream before feeding the surface.
 - `shortRunId(runId)` - first 8 chars of a run id, DISPLAY-ONLY (never an
   identity key - the surface uses the full run id everywhere).
-- `HERDR_PROTOCOL` - the wire protocol version (`16`) this client targets.
+- `HERDR_PROTOCOL` - the wire protocol version (`19`) this client targets.
 - `HerdrError` - error thrown by `call()` on failure.
 - `resolveSocketPath(opts?, env?)` / `sessionSocketPath(name, env?)` - socket
   path resolution helpers.

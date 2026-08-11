@@ -7,7 +7,7 @@
 // the launch path is byte-identical when the toggle is unset.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
@@ -233,7 +233,10 @@ describe.skipIf(!isCompatibleHerdrInstalled())("hijack into a herdr pane (real h
       expect(cmdline).toContain("--resume");
       expect(cmdline).toContain(RESUME);
 
-      // Cross-check what the fake CLI itself recorded it was launched with.
+      // Cross-check what the fake CLI itself recorded it was launched with. The
+      // pane's shell runs the command, so its first write trails the process
+      // becoming visible in process-info by a beat.
+      expect(await waitFor(() => existsSync(argvFile))).toBe(true);
       const recordedArgv = JSON.parse(readFileSync(argvFile, "utf8"));
       expect(recordedArgv).toEqual(["--resume", RESUME]);
     } finally {

@@ -1,8 +1,8 @@
 /**
  * Typed request params and result shapes for the herdr socket methods Smithers
- * uses (protocol 16, hand-written from `herdr api schema --json`). Unknown
- * extra fields are tolerated everywhere: the client parses responses as loose
- * records and only these documented fields are relied upon.
+ * uses (protocol 19 / herdr 0.8.0, hand-written from `herdr api schema --json`).
+ * Unknown extra fields are tolerated everywhere: the client parses responses as
+ * loose records and only these documented fields are relied upon.
  */
 
 /** `pane.report_agent` accepts only these four states (no `done`). */
@@ -17,8 +17,15 @@ export type HerdrReadSource = "visible" | "recent" | "recent_unwrapped" | "detec
 /** Read output format. */
 export type HerdrReadFormat = "text" | "ansi";
 
-/** Direction to split when launching an agent into an existing workspace/tab. */
+/** Direction to split an existing pane. */
 export type HerdrSplitDirection = "right" | "down";
+
+/**
+ * Free-form display metadata attached to a pane or workspace by a reporting
+ * source. Protocol 19 replaced the single `custom_status` string with this map;
+ * keys must match `[A-Za-z0-9_-]{1,32}`.
+ */
+export type HerdrMetadataTokens = Record<string, string>;
 
 /** Toast corner for `notification.show`. */
 export type HerdrToastPosition = "top-left" | "top-right" | "bottom-left" | "bottom-right";
@@ -57,6 +64,7 @@ export type HerdrWorkspaceInfo = {
   tab_count: number;
   active_tab_id: string;
   agent_status: HerdrAgentStatus;
+  tokens?: HerdrMetadataTokens;
   worktree?: unknown | null;
 };
 
@@ -80,17 +88,28 @@ export type HerdrPaneInfo = {
   revision: number;
   agent?: string | null;
   display_agent?: string | null;
-  custom_status?: string | null;
   title?: string | null;
+  terminal_title?: string | null;
+  terminal_title_stripped?: string | null;
   label?: string | null;
   cwd?: string | null;
   foreground_cwd?: string | null;
   state_labels?: Record<string, string>;
+  tokens?: HerdrMetadataTokens;
 };
 
+/**
+ * `name` is herdr's own registered agent name, set only by `agent.start` /
+ * `agent.rename` and constrained to `[a-z][a-z0-9_-]{0,31}`. Smithers' pane
+ * identity (`smithers:<runId>:<nodeId>`) does not fit it, so ownership keys on
+ * the reported {@link HerdrPaneInfo.agent} instead.
+ */
 export type HerdrAgentInfo = HerdrPaneInfo & {
   name?: string | null;
   screen_detection_skipped?: boolean;
+  launch_pending?: boolean;
+  interactive_ready?: boolean;
+  state_change_seq?: number;
 };
 
 export type HerdrPaneReadResult = {
@@ -146,17 +165,42 @@ export type HerdrOkResult = {
   type: "ok";
 };
 
-// ── agent.start / agent.list ─────────────────────────────────────────────────
+// ── tab.create ───────────────────────────────────────────────────────────────
 
-export type HerdrAgentStartParams = {
-  name: string;
-  argv: string[];
+/**
+ * `tab.create` seeds the tab's root pane with a shell. `cwd`/`env` shape that
+ * shell, which is how Smithers places a pane's command in the run directory now
+ * that protocol 19's `agent.start` no longer forwards them.
+ */
+export type HerdrTabCreateParams = {
   workspace_id?: string | null;
-  tab_id?: string | null;
-  split?: HerdrSplitDirection | null;
+  label?: string | null;
   cwd?: string | null;
   env?: Record<string, string>;
   focus?: boolean;
+};
+
+export type HerdrTabCreateResult = {
+  type: "tab_created";
+  tab: HerdrTabInfo;
+  root_pane: HerdrPaneInfo;
+};
+
+// ── agent.start / agent.list ─────────────────────────────────────────────────
+
+/**
+ * Protocol 19 reshaped `agent.start`: it no longer creates a pane and no longer
+ * accepts an arbitrary `argv`. It attaches one of herdr's KNOWN interactive
+ * agent kinds (`server.agent_manifests`) to an existing shell pane, rejecting
+ * anything else with `unsupported_agent_kind`. Smithers therefore launches its
+ * own commands with `tab.create` + {@link HerdrPaneSendInputParams} instead.
+ */
+export type HerdrAgentStartParams = {
+  name: string;
+  kind: string;
+  pane_id: string;
+  args?: string[];
+  timeout_ms?: number;
 };
 
 export type HerdrAgentStartResult = {
@@ -189,7 +233,6 @@ export type HerdrPaneReportAgentParams = {
   agent: string;
   state: HerdrAgentState;
   message?: string | null;
-  custom_status?: string | null;
   agent_session_id?: string | null;
   agent_session_path?: string | null;
   /** Monotonically increasing per pane so herdr can order authority reports. */
@@ -217,17 +260,29 @@ export type HerdrPaneReportMetadataParams = {
   pane_id: string;
   source: string;
   title?: string | null;
-  custom_status?: string | null;
   display_agent?: string | null;
   agent?: string | null;
   state_labels?: Record<string, string> | null;
+  /** Protocol 19's `custom_status` replacement. A `null` value clears one token. */
+  tokens?: Record<string, string | null>;
+  /** 1..86_400_000 in protocol 19; omit for metadata that persists until cleared. */
   ttl_ms?: number;
   applies_to_source?: string | null;
   clear_title?: boolean;
-  clear_custom_status?: boolean;
   clear_display_agent?: boolean;
   clear_state_labels?: boolean;
   seq?: number;
+};
+
+/**
+ * `pane.send_input`: literal text plus key presses in ONE call — herdr's own
+ * `pane run` (and how protocol 19 `agent.start` submits its command line), so a
+ * command and its Enter can never interleave with another writer.
+ */
+export type HerdrPaneSendInputParams = {
+  pane_id: string;
+  text: string;
+  keys?: string[];
 };
 
 // ── pane.read / pane.wait_for_output ─────────────────────────────────────────

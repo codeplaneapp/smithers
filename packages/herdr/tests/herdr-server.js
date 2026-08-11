@@ -70,6 +70,28 @@ export function isCompatibleHerdrInstalled() {
 }
 
 /**
+ * The Smithers pane identity herdr reports back for an `agent.list` record.
+ *
+ * Protocol 19 restricts herdr's own registered agent `name` to
+ * `[a-z][a-z0-9_-]{0,31}` and only `agent.start`/`agent.rename` may set it, so
+ * `smithers:<runId>:<nodeId>` now lives in the REPORTED agent field. `name` is
+ * still preferred when present so these assertions also hold against a pane
+ * registered by an older herdr.
+ *
+ * @param {{ name?: unknown, agent?: unknown } | null | undefined} agent
+ * @returns {string | undefined}
+ */
+export function agentIdentity(agent) {
+  if (!agent) {
+    return undefined;
+  }
+  if (typeof agent.name === "string" && agent.name !== "") {
+    return agent.name;
+  }
+  return typeof agent.agent === "string" && agent.agent !== "" ? agent.agent : undefined;
+}
+
+/**
  * A throwaway session name. Always prefixed `smithers-test-` so it can never be
  * confused with the `smithers-dev` or default sessions.
  *

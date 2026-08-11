@@ -115,16 +115,16 @@ notification), which is what makes the herdr sidebar a useful worklist.
 | `ApprovalGranted`, `ApprovalAutoApproved` | `working` | a gate cleared; the node resumed |
 | `NodeWaitingApproval`, `ApprovalRequested` | `blocked` | paused on a human approval gate; the message carries the question and a notification fires |
 | `NodeFailed` | `blocked` | the node failed; the message is `failed: SUMMARY` |
-| `NodeFinished` | `idle` | the node completed (custom status `done`) |
-| `NodeCancelled` | `idle` | the node was cancelled (custom status `cancelled`) |
+| `NodeFinished` | `idle` | the node completed (`status` token `done`) |
+| `NodeCancelled` | `idle` | the node was cancelled (`status` token `cancelled`) |
 | `RunFinished` | working panes go `idle` (`done`) | the run completed; a pane already `blocked` on a tolerated failure keeps its failure |
 | `RunFailed`, `RunCancelled` | working or blocked panes go `blocked` | the run ended abnormally |
 
 The gate question is pushed both as the pane's status message and as its queryable
-`custom_status`, so `herdr agent list` shows what needs approving, not just that
-the pane is blocked. When such a gate clears, its pane resolves to `idle` with the
-custom status `approved` rather than the `working`/`done` an ordinary agent node
-reports.
+`status` metadata token, so `herdr agent list` shows what needs approving, not just
+that the pane is blocked. When such a gate clears, its pane resolves to `idle` with
+the `status` token `approved` rather than the `working`/`done` an ordinary agent
+node reports.
 
 Because `bunx smthrs up` exits when it parks at a gate (exit code
 3, awaiting a decision), you approve and resume in a new process. On resume
@@ -570,11 +570,11 @@ pushes fast once herdr stops answering. Concretely:
 
 ## Version pinning
 
-This client is built and tested against **herdr 0.7.3 / wire protocol 16**.
+This client is built and tested against **herdr 0.8.0 / wire protocol 19**.
 `bunx smthrs herdr status` reports the server's protocol and whether it
 matches, which is the quickest compatibility check.
 
-A protocol other than 16 is handled two different ways, on purpose:
+A protocol other than 19 is handled two different ways, on purpose:
 
 - **Optional mirroring** (`up --herdr`, auto-detected mirrors, the supervisor's
   pane integration) degrades softly: one warning, then the run proceeds with no
@@ -584,11 +584,13 @@ A protocol other than 16 is handled two different ways, on purpose:
   confirming that no mutating call was made. Driving panes over a wire format
   the server may have redefined is not worth the risk of corrupting a workspace.
 
-Herdr's protocol advances faster than its user-visible version: releases after
-0.7.3 speak higher protocol numbers and are **not** wire-compatible with this
-client, so herdr features are inert (safely) until the client is updated to
-match. Check `herdr status client` against the number above before filing a bug
-about herdr features doing nothing.
+Herdr's protocol advances faster than its user-visible version, and the changes
+are real: protocol 19 reshaped `agent.start` so it can only attach one of herdr's
+known interactive agent kinds to an existing pane, and replaced each pane's
+`custom_status` with a `tokens` metadata map. Releases speaking a protocol other
+than 19 are **not** wire-compatible with this client, so herdr features are inert
+(safely) until the client is updated to match. Check `herdr status client` against
+the number above before filing a bug about herdr features doing nothing.
 
 ## Remote runs over SSH
 

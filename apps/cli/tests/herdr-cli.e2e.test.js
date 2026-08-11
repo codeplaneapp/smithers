@@ -26,6 +26,7 @@ import {
   writeTestWorkflow,
 } from "../../../packages/smithers/tests/e2e-helpers.js";
 import {
+  agentIdentity,
   isCompatibleHerdrInstalled,
   randomSessionName,
   startHerdrServer,
@@ -373,7 +374,7 @@ function listWorkspaces(session, socketPath) {
  * @returns {string | undefined}
  */
 function statusOf(session, name, socketPath) {
-  const agent = listAgents(session, socketPath).find((a) => a && a.name === name);
+  const agent = listAgents(session, socketPath).find((a) => a && agentIdentity(a) === name);
   return agent?.agent_status;
 }
 
@@ -408,8 +409,8 @@ function workspaceMatches(label, runId) {
  * @returns {string | undefined}
  */
 function customStatusOf(session, name, socketPath) {
-  const agent = listAgents(session, socketPath).find((a) => a && a.name === name);
-  return agent?.custom_status;
+  const agent = listAgents(session, socketPath).find((a) => a && agentIdentity(a) === name);
+  return agent?.tokens?.status;
 }
 
 /**
@@ -422,8 +423,8 @@ function customStatusOf(session, name, socketPath) {
  */
 function runPaneNames(session, runId, socketPath) {
   return listAgents(session, socketPath)
-    .filter((a) => typeof a.name === "string" && a.name.startsWith(`smithers:${runId}:`))
-    .map((a) => a.name)
+    .map((a) => agentIdentity(a))
+    .filter((name) => typeof name === "string" && name.startsWith(`smithers:${runId}:`))
     .sort();
 }
 
@@ -565,7 +566,7 @@ describe.skipIf(!herdrInstalled)("smithers herdr against a real herdr server", (
       timeoutMs: 30_000,
     });
     expect(run.exitCode).toBe(0);
-    expect(run.json?.protocol).toBe(16);
+    expect(run.json?.protocol).toBe(19);
     expect(run.json?.compatible).toBe(true);
     expect(typeof run.json?.version).toBe("string");
   });
@@ -696,9 +697,7 @@ describe.skipIf(!herdrInstalled)("smithers herdr against a real herdr server", (
     });
     expect(attach.exitCode).toBe(0);
     expect(attach.json?.attached).toBe(false);
-    expect(
-      listAgents(server.session).some((a) => typeof a.name === "string" && a.name.startsWith(`smithers:${runId}:`)),
-    ).toBe(false);
+    expect(listAgents(server.session).some((a) => agentIdentity(a)?.startsWith(`smithers:${runId}:`))).toBe(false);
   });
 
   test("nodeFilter: only agent nodes get a pane; the pane runs `smithers tail` in the run dir", async () => {
@@ -731,15 +730,15 @@ describe.skipIf(!herdrInstalled)("smithers herdr against a real herdr server", (
 
       // The agent node gets a pane...
       const paneAppeared = await waitFor(
-        () => Boolean(listAgents(server.session).find((a) => a.name === nameA)),
+        () => Boolean(listAgents(server.session).find((a) => agentIdentity(a) === nameA)),
         60_000,
       );
       expect(paneAppeared).toBe(true);
       // ...the static node never does. Give the sequence a beat past agent-a so a
       // (buggy) static pane would have had time to appear.
       await new Promise((r) => setTimeout(r, 1_500));
-      const paneA = listAgents(server.session).find((a) => a.name === nameA);
-      const paneB = listAgents(server.session).find((a) => a.name === nameB);
+      const paneA = listAgents(server.session).find((a) => agentIdentity(a) === nameA);
+      const paneB = listAgents(server.session).find((a) => agentIdentity(a) === nameB);
       expect(paneA).toBeDefined();
       expect(paneB).toBeUndefined();
 
@@ -815,8 +814,10 @@ describe.skipIf(!herdrInstalled)("smithers herdr against a real herdr server", (
       // Wait until run1's mirror is up before starting run2 — two cold
       // opens of the same SQLite store from detached children can lose a
       // surface. Isolation under test is herdr session (two live mirrors).
-      expect(await waitFor(() => Boolean(listAgents(server.session).find((a) => a.name === name1)), 60_000)).toBe(true);
-      const pane1Early = listAgents(server.session).find((a) => a.name === name1);
+      expect(
+        await waitFor(() => Boolean(listAgents(server.session).find((a) => agentIdentity(a) === name1)), 60_000),
+      ).toBe(true);
+      const pane1Early = listAgents(server.session).find((a) => agentIdentity(a) === name1);
       expect(pane1Early?.workspace_id).toBeTruthy();
 
       // Second store so SQLite single-writer does not contend with run1.
@@ -852,7 +853,7 @@ describe.skipIf(!herdrInstalled)("smithers herdr against a real herdr server", (
       const w2 = listWorkspaces(server.session).find(workspaceMatches(label2, run2));
       if (!w1 || !w2) {
         throw new Error(
-          `workspace isolation failed. labels=${JSON.stringify(listWorkspaces(server.session).map((w) => w.label))} agents=${JSON.stringify(listAgents(server.session).map((a) => ({ n: a.name, w: a.workspace_id })))} early=${pane1Early.workspace_id}`,
+          `workspace isolation failed. labels=${JSON.stringify(listWorkspaces(server.session).map((w) => w.label))} agents=${JSON.stringify(listAgents(server.session).map((a) => ({ n: agentIdentity(a), w: a.workspace_id })))} early=${pane1Early.workspace_id}`,
         );
       }
       expect(w1.workspace_id).toBe(pane1Early.workspace_id);
@@ -980,12 +981,13 @@ describe.skipIf(!herdrInstalled)("smithers herdr against a real herdr server", (
       expect(await waitFor(() => isFinishedAgentStatus(statusOf(server.session, gateName)), 60_000)).toBe(true);
       expect(
         await waitFor(
-          () => listAgents(server.session).find((a) => a && a.name === gateName)?.custom_status === "approved",
+          () =>
+            listAgents(server.session).find((a) => a && agentIdentity(a) === gateName)?.tokens?.status === "approved",
           60_000,
         ),
       ).toBe(true);
       // Adopted, not duplicated.
-      expect(listAgents(server.session).filter((a) => a && a.name === gateName).length).toBe(1);
+      expect(listAgents(server.session).filter((a) => a && agentIdentity(a) === gateName).length).toBe(1);
       await s2.close();
     } finally {
       sqlite.close();
@@ -1057,8 +1059,8 @@ describe.skipIf(!herdrInstalled)("smithers herdr against a real herdr server", (
       // Process 1: parked the gate blocked, then exited (close()) — leaving a pane
       // a fresh attach must adopt (paneId set), not recreate. Its gate message is
       // deliberately DISTINCT from the DB approval's title so the pane's
-      // custom_status is a reliable "process 2 has re-flagged and re-synthed the
-      // gate" signal below (herdr keeps the last pushed custom_status).
+      // The `status` metadata token is a reliable "process 2 has re-flagged and
+      // re-synthed the gate" signal below (herdr keeps the last pushed token).
       const client1 = createHerdrClient({ socketPath: server.socketPath, logger: () => {} });
       const s1 = createHerdrRunSurface({
         client: client1,
@@ -1092,17 +1094,17 @@ describe.skipIf(!herdrInstalled)("smithers herdr against a real herdr server", (
       const run = await adapter.getRun(runId);
       const followDone = followRunIntoHerdr(adapter, run, s2, { pollIntervalMs: 150, isCancelled: () => cancelled });
 
-      // Wait for the adopted pane's custom_status to become the DB gate question.
+      // Wait for the adopted pane's `status` token to become the DB gate question.
       // This is precisely the fix under test: followRunIntoHerdr adopts the pane
       // (entry.paneId set), so the NodeWaitingApproval handler's own `!entry.paneId`
       // self-flag can NOT fire; only followRunIntoHerdr's own markApprovalGate makes
-      // the synth push the gate question as custom_status. Without the fix the pane
+      // the synth push the gate question as the `status` token. Without the fix the pane
       // keeps process 1's "parked by process 1" and never reaches this state. Reaching
       // it also proves setup finished (event-seq snapshot taken) BEFORE we append the
       // resolution events below, so they are guaranteed to be drained live.
       expect(await waitFor(() => customStatusOf(server.session, gateName) === "Ship the haiku?", 60_000)).toBe(true);
       // Adopted, never duplicated.
-      expect(listAgents(server.session).filter((a) => a && a.name === gateName).length).toBe(1);
+      expect(listAgents(server.session).filter((a) => a && agentIdentity(a) === gateName).length).toBe(1);
 
       // Approve + finish the gate LIVE: mark the approval decided and append the
       // events the engine emits, then flip the run terminal so the follow loop
@@ -1155,7 +1157,7 @@ describe.skipIf(!herdrInstalled)("smithers herdr against a real herdr server", (
       expect(await waitFor(() => isFinishedAgentStatus(statusOf(server.session, gateName)), 60_000)).toBe(true);
       expect(await waitFor(() => customStatusOf(server.session, gateName) === "approved", 60_000)).toBe(true);
       // Still a single adopted pane.
-      expect(listAgents(server.session).filter((a) => a && a.name === gateName).length).toBe(1);
+      expect(listAgents(server.session).filter((a) => a && agentIdentity(a) === gateName).length).toBe(1);
     } finally {
       cancelled = true;
       if (s2) {
@@ -1212,9 +1214,9 @@ describe.skipIf(!herdrInstalled)("smithers herdr against a real herdr server", (
       });
       expect(open1.exitCode).toBe(0);
       expect(open1.json?.name).toBe(nodeName);
-      expect(await waitFor(() => Boolean(listAgents(server.session).find((a) => a.name === nodeName)), 30_000)).toBe(
-        true,
-      );
+      expect(
+        await waitFor(() => Boolean(listAgents(server.session).find((a) => agentIdentity(a) === nodeName)), 30_000),
+      ).toBe(true);
 
       // Re-open adopts the same pane (agent name identity), never duplicates.
       const open2 = runSmithers(["herdr", "open", runId, "node-a"], {
@@ -1224,7 +1226,7 @@ describe.skipIf(!herdrInstalled)("smithers herdr against a real herdr server", (
         timeoutMs: 30_000,
       });
       expect(open2.exitCode).toBe(0);
-      expect(listAgents(server.session).filter((a) => a.name === nodeName).length).toBe(1);
+      expect(listAgents(server.session).filter((a) => agentIdentity(a) === nodeName).length).toBe(1);
 
       // No node id → the run-level overview pane.
       const openOverview = runSmithers(["herdr", "open", runId], {
@@ -1236,7 +1238,7 @@ describe.skipIf(!herdrInstalled)("smithers herdr against a real herdr server", (
       expect(openOverview.exitCode).toBe(0);
       expect(openOverview.json?.name).toBe(overviewName);
       expect(
-        await waitFor(() => Boolean(listAgents(server.session).find((a) => a.name === overviewName)), 30_000),
+        await waitFor(() => Boolean(listAgents(server.session).find((a) => agentIdentity(a) === overviewName)), 30_000),
       ).toBe(true);
     } finally {
       const ws = listWorkspaces(server.session).find((w) => herdrRunIdFromWorkspaceLabel(w.label) === runId);

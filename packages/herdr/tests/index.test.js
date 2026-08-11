@@ -14,7 +14,7 @@ import {
 
 describe("package barrel exports", () => {
   test("re-exports the public surface", () => {
-    expect(HERDR_PROTOCOL).toBe(16);
+    expect(HERDR_PROTOCOL).toBe(19);
     expect(HERDR_SURFACE_EVENT_TYPES instanceof Set).toBe(true);
     expect(HERDR_SURFACE_EVENT_TYPES.has("NodeStarted")).toBe(true);
     expect(typeof createHerdrClient).toBe("function");

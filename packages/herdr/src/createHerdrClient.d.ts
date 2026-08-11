@@ -1,4 +1,4 @@
-import { f as HerdrClient$1, g as HerdrClientOptions$1, h as HerdrEvent$1, j as HerdrLogger$1, B as HerdrPingOptions$1, C as HerdrPong$1, I as HerdrSubscription$1, J as HerdrSubscriptionHandle$1 } from './HerdrClientOptions-DncxzfKn.js';
+import { f as HerdrClient$1, g as HerdrClientOptions$1, h as HerdrEvent$1, j as HerdrLogger$1, D as HerdrPingOptions$1, E as HerdrPong$1, K as HerdrSubscription$1, L as HerdrSubscriptionHandle$1 } from './HerdrClientOptions-BtuPmN3E.js';
 
 /**
  * Normalize a herdr event name to its dotted namespace form so consumers can

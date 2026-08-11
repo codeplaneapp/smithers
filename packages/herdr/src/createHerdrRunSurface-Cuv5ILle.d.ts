@@ -1,4 +1,4 @@
-import { g as HerdrClientOptions, f as HerdrClient$1, j as HerdrLogger$1 } from './HerdrClientOptions-DncxzfKn.js';
+import { g as HerdrClientOptions, f as HerdrClient$1, j as HerdrLogger$1 } from './HerdrClientOptions-BtuPmN3E.js';
 
 /**
  * Type surface for the herdr run mirror: {@link createHerdrRunSurface} (mirrors a
@@ -262,8 +262,8 @@ declare function shortNodeId(nodeId: string): string;
  * throughout — returns
  * `undefined` on any failure (dead socket, breaker open, no tab).
  *
- * `agent.start` goes through `client.call` (so a breaker-wrapped client observes
- * its failures); the tab/pane bookkeeping uses `tryCall` (pure best-effort).
+ * `tab.create` goes through `client.call` (so a breaker-wrapped client observes
+ * its failures); the claim/run/bookkeeping calls use `tryCall` (pure best-effort).
  *
  * `workspaceId` may be omitted (herdr targets the focused workspace); the resolved
  * workspace id is returned alongside the tab/pane.
@@ -274,8 +274,14 @@ declare function shortNodeId(nodeId: string): string;
  * (`smithers:<runId>:<nodeId>` name, {@link shortNodeId} label) so a pane opened
  * on demand adopts the surface's existing pane instead of duplicating it.
  *
+ * `seq` orders the identity claim inside the CALLER's per-pane report sequence.
+ * herdr drops any authority report whose seq is `<=` the last one it recorded
+ * for the source, so a claim stamped out of band (a raw `Date.now()` against a
+ * caller counter seeded earlier) would silently swallow every status push that
+ * follows it. Callers with a running counter must pass their next value.
+ *
  * @param {HerdrClient} client
- * @param {{ workspaceId?: string, label: string, name: string, argv: string[], cwd?: string, env?: Record<string, string>, focus?: boolean }} opts
+ * @param {{ workspaceId?: string, label: string, name: string, argv: string[], cwd?: string, env?: Record<string, string>, focus?: boolean, seq?: number }} opts
  * @returns {Promise<{ tabId: string, paneId: string, workspaceId: string | undefined } | undefined>}
  */
 declare function openTabPane(client: HerdrClient, opts: {
@@ -286,6 +292,7 @@ declare function openTabPane(client: HerdrClient, opts: {
     cwd?: string;
     env?: Record<string, string>;
     focus?: boolean;
+    seq?: number;
 }): Promise<{
     tabId: string;
     paneId: string;

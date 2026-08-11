@@ -969,7 +969,7 @@ export function wrapHijackPaneAfterlife(spec, handbackLines) {
  * find-or-create label (`surface.workspaceId()`) so the hijack pane lands
  * alongside the run's mirror panes under the SAME deterministic label
  * `up --herdr` / `herdr attach` use, launches the `HijackLaunchSpec` into a pane
- * (`launchHijackPane` -> `agent.start`, marked `blocked`), and returns where it
+ * (`launchHijackPane` -> `openTabPane`, marked `blocked`), and returns where it
  * landed so the caller can print the agent name and `herdr agent attach <name>`.
  *
  * Fully soft: probes the server first and returns `null` on any failure (no
@@ -1136,7 +1136,10 @@ export async function openHerdrNodePane(params) {
     await surface.close();
   }
   const nodeId = typeof params.nodeId === "string" && params.nodeId !== "" ? params.nodeId : undefined;
-  const name = nodeId ? `smithers:${params.runId}:node:${nodeId}` : `smithers:${params.runId}:run:overview`;
+  // The surface names a node's pane `smithers:<runId>:<nodeId>` — an extra
+  // `node:` segment here would make `herdr open` duplicate the live mirror's
+  // pane instead of adopting it.
+  const name = nodeId ? `smithers:${params.runId}:${nodeId}` : `smithers:${params.runId}:overview`;
   const tabLabel = nodeId ? shortNodeId(nodeId) : "overview";
   const opened = await openTabPane(client, {
     workspaceId,

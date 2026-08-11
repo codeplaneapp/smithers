@@ -21,6 +21,7 @@ import {
   writeExecutable,
 } from "../../../packages/smithers/tests/e2e-helpers.js";
 import {
+  agentIdentity,
   isCompatibleHerdrInstalled,
   randomSessionName,
   startHerdrServer,
@@ -587,7 +588,7 @@ describe.skipIf(!isCompatibleHerdrInstalled())("steer against a real herdr mirro
 
       // The agent really exists in the seeded workspace.
       const agents = herdrCli(server.session, ["agent", "list"]).agents;
-      const agent = agents.find((a) => a && a.name === expectedName);
+      const agent = agents.find((a) => a && agentIdentity(a) === expectedName);
       expect(agent).toBeDefined();
       expect(agent.pane_id).toBe(result.json.herdrPane.paneId);
     } finally {

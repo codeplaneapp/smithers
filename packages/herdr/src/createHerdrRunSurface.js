@@ -26,6 +26,13 @@ import {
 /** The `source` tag all authoritative Smithers reports carry (herdr keys authority by it). */
 const SOURCE = "smithers";
 
+/**
+ * Metadata token carrying a pane's queryable free-form status — protocol 19's
+ * replacement for the removed `custom_status` field. Token keys are constrained
+ * to `[A-Za-z0-9_-]{1,32}`.
+ */
+const STATUS_TOKEN = "status";
+
 /** Per-call timeout used to size the circuit-breaker cooldown and `close()` drain deadline. */
 const DEFAULT_CALL_TIMEOUT_MS = 5000;
 
@@ -223,8 +230,8 @@ export function shortNodeId(nodeId) {
 
 /**
  * Join an argv into a single POSIX-shell command line, single-quoting any token
- * that is not already a bare "safe" word. Used to type an overview command into
- * the run's root shell via `pane.send_text` (herdr's `pane run` semantics).
+ * that is not already a bare "safe" word. Used to type a command into a pane's
+ * root shell via `pane.send_input` (herdr's `pane run` semantics).
  *
  * @param {string[]} argv
  * @returns {string}
@@ -239,6 +246,41 @@ function shellQuoteArgv(argv) {
       return `'${s.replace(/'/g, "'\\''")}'`;
     })
     .join(" ");
+}
+
+/**
+ * Variable carrying the caller's `PATH` into a pane, out of `PATH`'s own way.
+ * See {@link paneCommandLine}.
+ */
+const PATH_HANDOFF_VAR = "SMITHERS_HERDR_PATH";
+
+/**
+ * The command line to type into a pane's shell.
+ *
+ * A pane runs the operator's INTERACTIVE shell. An environment handed to
+ * `tab.create` does reach it, but rc files routinely REBUILD `PATH` (macOS
+ * `path_helper`, version managers), so a PATH-dependent `argv[0]` would resolve
+ * against the operator's PATH rather than the caller's — protocol 16 never hit
+ * this because `agent.start` spawned the argv directly. The caller's PATH rides
+ * in under {@link PATH_HANDOFF_VAR}, which rc has no reason to touch, and `env`
+ * restores it for the launched process; `env` also performs its utility lookup
+ * with the PATH it is given, so `argv[0]` resolves the way the caller meant.
+ *
+ * The handoff is a variable REFERENCE rather than the literal PATH because a
+ * realistic PATH is over a kilobyte, and typing that into a terminal ahead of an
+ * already-long command line is exactly the kind of line an interactive shell
+ * mangles.
+ *
+ * @param {string[]} argv
+ * @param {Record<string, string> | undefined} env
+ * @returns {string}
+ */
+function paneCommandLine(argv, env) {
+  const path = env?.PATH;
+  if (typeof path !== "string" || path === "") {
+    return shellQuoteArgv(argv);
+  }
+  return `env PATH="$${PATH_HANDOFF_VAR}" ${shellQuoteArgv(argv)}`;
 }
 
 /**
@@ -338,9 +380,19 @@ function approvalMessage(event) {
 }
 
 /**
- * Find an existing herdr pane by its agent name via `agent.list` (never by
- * parsing ids out of an `agent_name_taken` error string). A workspace-scoped
- * match wins; failing that we fall back to an UNSCOPED (name-only) match. That
+ * Find an existing herdr pane by its agent identity via `agent.list` (never by
+ * parsing ids out of an `agent_name_taken` error string).
+ *
+ * Protocol 19 removed argv-launching `agent.start`, and the registered agent
+ * `name` it used to set is now constrained to `[a-z][a-z0-9_-]{0,31}` — too
+ * narrow for the `smithers:<runId>:<nodeId>` identity. Ownership therefore keys
+ * on the pane's REPORTED agent (`pane.report_agent {agent}`), which carries that
+ * exact identity; `name` is still accepted so a pane registered by an older
+ * herdr is adopted rather than duplicated. Either way the match is on the full
+ * identity string, never on a presentation label.
+ *
+ * A workspace-scoped match wins; failing that we fall back to an UNSCOPED
+ * (identity-only) match. That
  * fallback is safe because the agent name embeds the full run identity, so a
  * label change between attaches (which moves the pane to a different workspace)
  * must not permanently block re-binding. Soft: returns `undefined` when herdr is
@@ -357,7 +409,7 @@ async function adoptPaneByName(client, name, workspaceId) {
   /** @type {{ paneId: string, tabId: string | undefined, workspaceId: string | undefined } | undefined} */
   let unscoped;
   for (const agent of agents) {
-    if (!agent || agent.name !== name) {
+    if (!agent || (agent.name !== name && agent.agent !== name)) {
       continue;
     }
     const paneId = typeof agent.pane_id === "string" ? agent.pane_id : undefined;
@@ -380,13 +432,12 @@ async function adoptPaneByName(client, name, workspaceId) {
 }
 
 /**
- * Close every pane in `tabId` that is not `keepPaneId`. A freshly created tab
- * always seeds a plain root shell pane; `agent.start {tab_id}` then SPLITS that
- * shell (herdr's default) rather than replacing it, leaving the tab with two panes
- * (the seed + the agent). Closing the seed collapses the agent pane back to the
- * full tab area — the "one full-size pane per tab" the layout design wants. Soft:
- * on replay the seed is already gone, so `pane.list` shows only the agent pane and
- * this is a no-op. Never throws.
+ * Close every pane in `tabId` that is not `keepPaneId`. Protocol 19 runs the
+ * command IN the tab's own root pane, so a healthy tab already holds exactly one
+ * pane and this is a no-op. It stays as a safety net for a tab that picked up an
+ * extra pane (a config-driven default layout, an operator split racing the
+ * create): the "one full-size pane per tab" the layout design wants. Soft — never
+ * throws.
  *
  * @param {HerdrClient} client
  * @param {string | undefined} workspaceId
@@ -418,8 +469,8 @@ async function closeSeedPanes(client, workspaceId, tabId, keepPaneId) {
  * throughout — returns
  * `undefined` on any failure (dead socket, breaker open, no tab).
  *
- * `agent.start` goes through `client.call` (so a breaker-wrapped client observes
- * its failures); the tab/pane bookkeeping uses `tryCall` (pure best-effort).
+ * `tab.create` goes through `client.call` (so a breaker-wrapped client observes
+ * its failures); the claim/run/bookkeeping calls use `tryCall` (pure best-effort).
  *
  * `workspaceId` may be omitted (herdr targets the focused workspace); the resolved
  * workspace id is returned alongside the tab/pane.
@@ -430,8 +481,14 @@ async function closeSeedPanes(client, workspaceId, tabId, keepPaneId) {
  * (`smithers:<runId>:<nodeId>` name, {@link shortNodeId} label) so a pane opened
  * on demand adopts the surface's existing pane instead of duplicating it.
  *
+ * `seq` orders the identity claim inside the CALLER's per-pane report sequence.
+ * herdr drops any authority report whose seq is `<=` the last one it recorded
+ * for the source, so a claim stamped out of band (a raw `Date.now()` against a
+ * caller counter seeded earlier) would silently swallow every status push that
+ * follows it. Callers with a running counter must pass their next value.
+ *
  * @param {HerdrClient} client
- * @param {{ workspaceId?: string, label: string, name: string, argv: string[], cwd?: string, env?: Record<string, string>, focus?: boolean }} opts
+ * @param {{ workspaceId?: string, label: string, name: string, argv: string[], cwd?: string, env?: Record<string, string>, focus?: boolean, seq?: number }} opts
  * @returns {Promise<{ tabId: string, paneId: string, workspaceId: string | undefined } | undefined>}
  */
 export async function openTabPane(client, opts) {
@@ -455,80 +512,99 @@ export async function openTabPane(client, opts) {
 
   /** @type {string | undefined} */
   let tabId;
+  /** @type {string | undefined} */
+  let paneId;
+  // The tab's own root pane IS the command pane: `cwd`/`env` ride on `tab.create`
+  // so the shell herdr seeds already has them (protocol 16 forwarded them through
+  // `agent.start` instead).
   /** @type {Record<string, unknown>} */
-  const createParams = { label: opts.label, focus: false };
+  const createParams = { label: opts.label, focus: opts.focus === true };
   if (opts.workspaceId) {
     createParams.workspace_id = opts.workspaceId;
   }
+  if (opts.cwd) {
+    createParams.cwd = opts.cwd;
+  }
+  if (opts.env) {
+    createParams.env = opts.env.PATH ? { ...opts.env, [PATH_HANDOFF_VAR]: opts.env.PATH } : opts.env;
+  }
   try {
-    const created = /** @type {{ tab?: { tab_id?: string, workspace_id?: string } } | undefined} */ (
-      await client.tryCall("tab.create", createParams)
-    );
+    const created =
+      /** @type {{ tab?: { tab_id?: string, workspace_id?: string }, root_pane?: { pane_id?: string } } | undefined} */ (
+        await client.call("tab.create", createParams)
+      );
     tabId = created && created.tab && typeof created.tab.tab_id === "string" ? created.tab.tab_id : undefined;
+    paneId =
+      created && created.root_pane && typeof created.root_pane.pane_id === "string"
+        ? created.root_pane.pane_id
+        : undefined;
     if (created && created.tab && typeof created.tab.workspace_id === "string") {
       workspaceId = created.tab.workspace_id;
     }
   } catch {}
-  if (!tabId) {
-    return undefined;
-  }
-  /** @type {string | undefined} */
-  let paneId;
-  try {
-    /** @type {Record<string, unknown>} */
-    const startParams = { name: opts.name, argv: opts.argv, tab_id: tabId, focus: opts.focus === true };
-    if (workspaceId) {
-      startParams.workspace_id = workspaceId;
-    }
-    if (opts.cwd) {
-      startParams.cwd = opts.cwd;
-    }
-    if (opts.env) {
-      startParams.env = opts.env;
-    }
-    const res = /** @type {{ agent?: { pane_id?: string, workspace_id?: string } }} */ (
-      await client.call("agent.start", startParams)
-    );
-    paneId = res && res.agent ? res.agent.pane_id : undefined;
-    if (res && res.agent && typeof res.agent.workspace_id === "string") {
-      workspaceId = res.agent.workspace_id;
-    }
-  } catch {
-    // agent_name_taken (replay/attach) or any failure: adopt the existing pane.
-    let adopted = await adoptPaneByName(client, opts.name, workspaceId);
-    // Brief retry — agent.list can lag agent.start on a busy herdr.
-    if (!adopted) {
-      await new Promise((r) => setTimeout(r, 80));
-      adopted = await adoptPaneByName(client, opts.name, workspaceId);
-    }
-    if (adopted) {
-      paneId = adopted.paneId;
-      workspaceId = adopted.workspaceId ?? workspaceId;
-      // Another caller won the agent-name race in a different tab. This tab was
-      // created by THIS invocation, so it is safe to clean up; no label-found or
-      // operator-owned resource is ever closed.
-      if (adopted.tabId && adopted.tabId !== tabId) {
-        await client.tryCall("tab.close", { tab_id: tabId });
-        tabId = adopted.tabId;
-      }
-    }
-  }
-  if (!paneId) {
+  if (typeof tabId !== "string" || typeof paneId !== "string") {
+    // A concurrent caller may have won while this create failed; adopt its pane
+    // rather than reporting no pane at all.
     const adopted = await adoptPaneByName(client, opts.name, workspaceId);
-    if (adopted) {
-      paneId = adopted.paneId;
-      workspaceId = adopted.workspaceId ?? workspaceId;
-      if (adopted.tabId && adopted.tabId !== tabId) {
-        await client.tryCall("tab.close", { tab_id: tabId });
-        tabId = adopted.tabId;
-      }
+    if (typeof tabId === "string" && adopted?.tabId !== tabId) {
+      // The tab ID came directly from this invocation's tab.create response, so
+      // closing it can never touch a label-found or operator-owned tab.
+      await client.tryCall("tab.close", { tab_id: tabId });
     }
+    if (!adopted) {
+      return undefined;
+    }
+    return {
+      tabId: adopted.tabId ?? "",
+      paneId: adopted.paneId,
+      workspaceId: adopted.workspaceId ?? workspaceId,
+    };
   }
-  if (typeof paneId !== "string") {
-    // The tab ID came directly from this invocation's tab.create response.
+
+  // Claim the identity BEFORE running anything. Protocol 19's `agent.start` only
+  // launches a known interactive agent kind into an existing pane, so it can no
+  // longer both spawn the argv and fence the name; the claim moves to
+  // `pane.report_agent`, whose `agent` is exactly what {@link adoptPaneByName}
+  // matches.
+  const claimSeq = typeof opts.seq === "number" ? opts.seq : Date.now();
+  await client.tryCall("pane.report_agent", {
+    pane_id: paneId,
+    source: SOURCE,
+    agent: opts.name,
+    state: "working",
+    seq: claimSeq,
+  });
+
+  // herdr no longer rejects a duplicate claim (`agent_name_taken` guards only
+  // `agent.start`/`agent.rename`), so reconcile against the authoritative list:
+  // a loser releases its claim and closes the tab IT created — never a
+  // label-found or operator-owned resource — and adopts the winner's pane.
+  const claimed = await adoptPaneByName(client, opts.name, workspaceId);
+  if (claimed && claimed.paneId !== paneId) {
+    await client.tryCall("pane.release_agent", {
+      pane_id: paneId,
+      source: SOURCE,
+      agent: opts.name,
+      seq: claimSeq + 1,
+    });
     await client.tryCall("tab.close", { tab_id: tabId });
-    return undefined;
+    return {
+      tabId: claimed.tabId ?? tabId,
+      paneId: claimed.paneId,
+      workspaceId: claimed.workspaceId ?? workspaceId,
+    };
   }
+
+  // Run the command in the pane: literal text plus Enter in ONE call, which is
+  // exactly how herdr itself launches into a pane under protocol 19 (`herdr pane
+  // run` / `agent.start`). Non-atomic send_text + a separate Enter could
+  // interleave with another writer.
+  await client.tryCall("pane.send_input", {
+    pane_id: paneId,
+    text: paneCommandLine(opts.argv, opts.env),
+    keys: ["Enter"],
+  });
+
   await closeSeedPanes(client, workspaceId, tabId, paneId);
   return { tabId, paneId, workspaceId };
 }
@@ -872,8 +948,8 @@ export function createHerdrRunSurface(opts = {}) {
   }
 
   /**
-   * Type argv into a pane as a shell command line + newline (herdr pane-run
-   * semantics). Soft: never throws.
+   * Type argv into a pane as a shell command line plus Enter, in ONE atomic
+   * `pane.send_input` (herdr's own `pane run`). Soft: never throws.
    *
    * @param {string} paneId
    * @param {string[]} argv
@@ -882,9 +958,10 @@ export function createHerdrRunSurface(opts = {}) {
     if (typeof paneId !== "string" || !Array.isArray(argv) || argv.length === 0) {
       return;
     }
-    await client.tryCall("pane.send_text", {
+    await client.tryCall("pane.send_input", {
       pane_id: paneId,
-      text: `${shellQuoteArgv(argv)}\n`,
+      text: shellQuoteArgv(argv),
+      keys: ["Enter"],
     });
   }
 
@@ -1370,9 +1447,9 @@ export function createHerdrRunSurface(opts = {}) {
     if (!Array.isArray(argv) || argv.length === 0) {
       return undefined;
     }
-    // A pane started via agent.start does NOT inherit the workspace cwd — it runs
-    // in the herdr SERVER's cwd. The tail viewer must run in the run's directory
-    // so `smithers tail` can locate the run's store, so forward the surface cwd to
+    // A node's tab does NOT inherit the workspace cwd — its shell starts in the
+    // herdr SERVER's cwd. The tail viewer must run in the run's directory so
+    // `smithers tail` can locate the run's store, so forward the surface cwd to
     // the pane explicitly (the workspace cwd only affects the root/overview pane).
     const opened = await openTabPane(client, {
       workspaceId: wsId,
@@ -1381,6 +1458,9 @@ export function createHerdrRunSurface(opts = {}) {
       argv,
       cwd: opts.cwd,
       focus: false,
+      // Inside this node's own report sequence — a claim stamped above it would
+      // make herdr drop every status push that follows.
+      seq: ++entry.seq,
     });
     if (opened) {
       entry.paneId = opened.paneId;
@@ -1426,6 +1506,11 @@ export function createHerdrRunSurface(opts = {}) {
   }
 
   /**
+   * Push the queryable free-form status for a node's pane. Protocol 19 dropped
+   * `custom_status` in favour of the `tokens` metadata map (see
+   * {@link STATUS_TOKEN}), which herdr echoes back on `pane`/`agent` records and
+   * renders in configurable sidebar row layouts.
+   *
    * @param {NodeEntry} entry
    * @param {string} customStatus
    */
@@ -1437,7 +1522,7 @@ export function createHerdrRunSurface(opts = {}) {
     await client.tryCall("pane.report_metadata", {
       pane_id: entry.paneId,
       source: SOURCE,
-      custom_status: customStatus,
+      tokens: { [STATUS_TOKEN]: customStatus },
       seq,
     });
   }
@@ -1863,6 +1948,11 @@ export async function launchHijackPane(client, spec, ctx) {
     // pane naming so a re-attach adopts, not duplicates.
     const name = `${SOURCE}:${ctx.runId}:hijack:${ctx.nodeId}`;
     const args = Array.isArray(spec.args) ? spec.args : [];
+    // Seed seq from Date.now() (not a hardcoded 1) so a re-launched hijack pane
+    // out-ranks the previous incarnation's seq and herdr applies the report; the
+    // blocked report below must then out-rank this pane's own claim, which two
+    // independent Date.now() reads cannot guarantee inside the same millisecond.
+    const seq = Date.now();
     const opened = await openTabPane(client, {
       workspaceId: ctx.workspaceId,
       label: `hijack ${shortNodeId(ctx.nodeId)}`,
@@ -1871,21 +1961,20 @@ export async function launchHijackPane(client, spec, ctx) {
       cwd: spec.cwd || undefined,
       env: spec.env || undefined,
       focus: ctx.focus !== false,
+      seq,
     });
     if (!opened) {
       return undefined;
     }
 
     const source = ctx.source ?? SOURCE;
-    // Seed seq from Date.now() (not a hardcoded 1) so a re-launched hijack pane
-    // out-ranks the previous incarnation's seq and herdr applies the report.
     await client.tryCall("pane.report_agent", {
       pane_id: opened.paneId,
       source,
       agent: name,
       state: "blocked",
       message: "hijacked - attach to drive",
-      seq: Date.now(),
+      seq: seq + 2,
     });
     await client.tryCall("notification.show", { title: "smithers hijack", body: name, sound: "request" });
     return { paneId: opened.paneId, workspaceId: opened.workspaceId, name };

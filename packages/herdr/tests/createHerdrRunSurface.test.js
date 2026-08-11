@@ -1,13 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHerdrClient } from "../src/createHerdrClient.js";
 import { createHerdrRunSurface, launchHijackPane, openTabPane } from "../src/index.js";
-import { isCompatibleHerdrInstalled, randomSessionName, startHerdrServer } from "./herdr-server.js";
+import { agentIdentity, isCompatibleHerdrInstalled, randomSessionName, startHerdrServer } from "./herdr-server.js";
 
 const herdrInstalled = isCompatibleHerdrInstalled();
 
 /**
  * Wrap a HerdrClient so a test can observe every RPC the surface issues. The
- * surface routes both its hard `call`s (agent.start) and its soft reports
+ * surface routes both its hard `call`s (tab.create) and its soft reports
  * (report_agent etc.) through the underlying client's `call`, so recording
  * `call` captures the full authoritative-push sequence.
  *
@@ -99,7 +99,7 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface against a real herdr ser
    * @returns {Promise<any | undefined>}
    */
   async function agentByName(name) {
-    return (await listAgents()).find((a) => a && a.name === name);
+    return (await listAgents()).find((a) => a && agentIdentity(a) === name);
   }
   /**
    * @param {string} name
@@ -314,7 +314,7 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface against a real herdr ser
     }
   });
 
-  test("forwards the surface cwd to agent.start so the pane runs in the run directory", async () => {
+  test("forwards the surface cwd to tab.create so the pane runs in the run directory", async () => {
     const runId = makeRunId();
     const label = `smithers-test-cwd-${randomSessionName()}`;
     /** @type {{ method: string, params: any }[]} */
@@ -332,11 +332,11 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface against a real herdr ser
     expect(await waitFor(async () => Boolean(await agentByName(name)))).toBe(true);
     await surface.close();
 
-    // A pane started via agent.start does NOT inherit the workspace cwd (it runs
-    // in the herdr server's cwd), so the surface must pass cwd explicitly or the
-    // tail viewer cannot find the run's store.
-    const start = calls.find((c) => c.method === "agent.start" && c.params.name === name);
-    expect(start?.params.cwd).toBe("/tmp/smithers-test-run-dir");
+    // A node tab does NOT inherit the workspace cwd (its shell starts in the
+    // herdr server's cwd), so the surface must pass cwd explicitly or the tail
+    // viewer cannot find the run's store.
+    const created = calls.find((c) => c.method === "tab.create" && c.params.label === "n1");
+    expect(created?.params.cwd).toBe("/tmp/smithers-test-run-dir");
 
     const ws = (await listWorkspaces()).find((w) => w.label === label);
     if (ws) {
@@ -365,7 +365,7 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface against a real herdr ser
     expect(await waitFor(async () => (await statusOf(name)) === "done")).toBe(true);
 
     const agent = await agentByName(name);
-    expect(agent?.custom_status).toBe("done");
+    expect(agent?.tokens?.status).toBe("done");
 
     await surface.close();
     const ws = (await listWorkspaces()).find((w) => w.label === label);
@@ -408,17 +408,17 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface against a real herdr ser
     );
     expect(blockedReport?.params.message).toBe("Ship the haiku?");
 
-    // The question is ALSO pushed as the queryable custom_status (herdr does not
+    // The question is ALSO pushed as the queryable `status` metadata token (herdr does not
     // echo the report_agent `message` back in its agent JSON), so a sidebar /
     // dashboard reading `agent list` sees WHAT needs approving, not just "blocked".
-    expect(await waitFor(async () => (await agentByName(name))?.custom_status === "Ship the haiku?")).toBe(true);
+    expect(await waitFor(async () => (await agentByName(name))?.tokens?.status === "Ship the haiku?")).toBe(true);
 
     // Granting the gate resolves the pane to idle "approved"; herdr rolls the
-    // unviewed idle pane up to "done", with custom_status carrying "approved".
+    // unviewed idle pane up to "done", with the `status` token carrying "approved".
     surface.onEvent(ev("ApprovalGranted", runId, { nodeId: "ship-approval" }));
     expect(await waitFor(async () => (await statusOf(name)) === "done")).toBe(true);
     const agent = await agentByName(name);
-    expect(agent?.custom_status).toBe("approved");
+    expect(agent?.tokens?.status).toBe("approved");
 
     await surface.close();
     const ws = (await listWorkspaces()).find((w) => w.label === label);
@@ -517,11 +517,11 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface against a real herdr ser
     s2.onEvent(ev("NodeFinished", runId, { nodeId: "ship-approval" }));
 
     // It lands idle "approved" — herdr rolls the unviewed idle gate pane up to
-    // "done" (NOT stuck "blocked"), with custom_status "approved".
+    // "done" (NOT stuck "blocked"), with the `status` token "approved".
     expect(await waitFor(async () => (await statusOf(name)) === "done")).toBe(true);
-    expect(await waitFor(async () => (await agentByName(name))?.custom_status === "approved")).toBe(true);
+    expect(await waitFor(async () => (await agentByName(name))?.tokens?.status === "approved")).toBe(true);
     // No duplicate pane: the fresh surface adopted the parked one.
-    expect((await listAgents()).filter((a) => a && a.name === name).length).toBe(1);
+    expect((await listAgents()).filter((a) => a && agentIdentity(a) === name).length).toBe(1);
 
     await s2.close();
     const ws = (await listWorkspaces()).filter((w) => w.label === label);
@@ -540,7 +540,7 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface against a real herdr ser
     s1.onEvent(ev("NodeFinished", runId, { nodeId: "n1" }));
     expect(await waitFor(async () => (await statusOf(name)) === "done")).toBe(true);
 
-    // A fresh surface fed the SAME run: agent.start hits agent_name_taken and
+    // A fresh surface fed the SAME run: the identity is already claimed, so it
     // must adopt the existing pane rather than create a duplicate.
     const s2 = createHerdrRunSurface({ client, workspaceLabel: label, logger: () => {}, tailCommand: STUB_TAIL });
     s2.onEvent(ev("NodeStarted", runId, { nodeId: "n1" }));
@@ -548,7 +548,7 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface against a real herdr ser
     await s2.close();
     await s1.close();
 
-    const named = (await listAgents()).filter((a) => a && a.name === name);
+    const named = (await listAgents()).filter((a) => a && agentIdentity(a) === name);
     expect(named.length).toBe(1);
 
     const ws = (await listWorkspaces()).filter((w) => w.label === label);
@@ -579,7 +579,7 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface against a real herdr ser
     expect(await waitFor(async () => (await statusOf(name)) === "done")).toBe(true);
     await s2.close();
 
-    const named = (await listAgents()).filter((a) => a && a.name === name);
+    const named = (await listAgents()).filter((a) => a && agentIdentity(a) === name);
     expect(named.length).toBe(1);
     const ws = (await listWorkspaces()).filter((w) => w.label === label);
     for (const w of ws) {
@@ -618,11 +618,13 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface against a real herdr ser
 
     // The recording proves ordering directly (a reorder is invisible to a
     // final-state-only assertion): each pane's report_agent states arrive in
-    // exactly the mapped order and its seq strictly increases.
+    // exactly the mapped order and its seq strictly increases. The leading
+    // "working" is openTabPane's identity claim, which shares the node's report
+    // sequence precisely so it cannot out-rank the pushes that follow it.
     const reportsFor = (/** @type {string} */ name) =>
       calls.filter((c) => c.method === "pane.report_agent" && c.params.agent === name);
-    expect(reportsFor(nameA).map((c) => c.params.state)).toEqual(["working", "blocked", "working", "idle"]);
-    expect(reportsFor(nameB).map((c) => c.params.state)).toEqual(["working", "idle"]);
+    expect(reportsFor(nameA).map((c) => c.params.state)).toEqual(["working", "working", "blocked", "working", "idle"]);
+    expect(reportsFor(nameB).map((c) => c.params.state)).toEqual(["working", "working", "idle"]);
     for (const name of [nameA, nameB]) {
       const seqs = reportsFor(name).map((c) => c.params.seq);
       for (let i = 1; i < seqs.length; i++) {
@@ -725,7 +727,7 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface against a real herdr ser
     await client.call("workspace.close", { workspace_id: workspaceId }).catch(() => {});
   });
 
-  test("two rapid NodeStarted for the same node issue exactly one agent.start", async () => {
+  test("two rapid NodeStarted for the same node issue exactly one tab.create", async () => {
     const runId = makeRunId();
     const label = `smithers-test-dup-${randomSessionName()}`;
     /** @type {{ method: string, params: any }[]} */
@@ -740,18 +742,18 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface against a real herdr ser
 
     // Fire two NodeStarted for the same node back-to-back (e.g. a retry): the
     // serial queue must observe entry.paneId set by the first task before the
-    // second runs, so exactly one agent.start happens.
+    // second runs, so exactly one tab.create happens.
     surface.onEvent(ev("NodeStarted", runId, { nodeId: "n1" }));
     surface.onEvent(ev("NodeStarted", runId, { nodeId: "n1" }));
     expect(await waitFor(async () => (await statusOf(name)) === "working")).toBe(true);
     await surface.close();
 
-    // Count agent.start directly: broken serialization would fire a second one
-    // and lean on herdr's name uniqueness (+ adoption) to hide the duplicate.
-    const starts = calls.filter((c) => c.method === "agent.start" && c.params.name === name);
+    // Count tab.create directly: broken serialization would fire a second one
+    // and lean on the post-claim reconcile (+ adoption) to hide the duplicate.
+    const starts = calls.filter((c) => c.method === "tab.create" && c.params.label === "n1");
     expect(starts.length).toBe(1);
 
-    const named = (await listAgents()).filter((a) => a && a.name === name);
+    const named = (await listAgents()).filter((a) => a && agentIdentity(a) === name);
     expect(named.length).toBe(1);
     const ws = (await listWorkspaces()).filter((w) => w.label === label);
     expect(ws.length).toBe(1);
@@ -775,7 +777,7 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface against a real herdr ser
     expect(await waitFor(async () => (await statusOf(name)) === "done")).toBe(true);
 
     await surface.close();
-    const named = (await listAgents()).filter((a) => a && a.name === name);
+    const named = (await listAgents()).filter((a) => a && agentIdentity(a) === name);
     expect(named.length).toBe(1);
     const ws = (await listWorkspaces()).filter((w) => w.label === label);
     expect(ws.length).toBe(1);
@@ -784,7 +786,7 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface against a real herdr ser
 
   test("each node lands in its OWN tab (label = node id), one FULL-SIZE pane per tab", async () => {
     // The core layout claim: instead of N+1 progressively-halved slivers in one
-    // tab (naive agent.start), each node gets its own tab holding a single pane
+    // tab (naive splitting), each node gets its own tab holding a single pane
     // that fills the whole tab area. Asserted structurally via tab.list (one tab
     // per node, pane_count 1) AND pane.layout geometry (the pane rect == the tab
     // area, no splits) per the layout research.
@@ -859,10 +861,12 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface against a real herdr ser
     surface.onEvent(ev("RunStarted", runId));
     expect(await waitFor(async () => (await tabsOfWorkspace(label)).some((t) => t.label === "cockpit"))).toBe(true);
 
-    // The overview command was typed into the root shell as one pane.send_text.
-    const sendText = calls.find((c) => c.method === "pane.send_text");
-    expect(sendText).toBeDefined();
-    expect(sendText.params.text).toContain(marker);
+    // The overview command was typed into the root shell as one pane.send_input
+    // (text + Enter atomically — herdr's own `pane run`).
+    const sendInput = calls.find((c) => c.method === "pane.send_input");
+    expect(sendInput).toBeDefined();
+    expect(sendInput.params.text).toContain(marker);
+    expect(sendInput.params.keys).toEqual(["Enter"]);
 
     // It actually executed: the marker shows up in the overview pane's output, and
     // the workspace survives (a replaced command pane exiting would have closed it).
@@ -1011,7 +1015,7 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface against a real herdr ser
     surface.onEvent(ev("NodeWaitingApproval", runId, { nodeId: "ship-gate", request: { title: "Ship it?" } }));
     expect(await waitFor(async () => (await statusOf(`smithers:${runId}:ship-gate`)) === "blocked")).toBe(true);
     expect(
-      await waitFor(async () => (await agentByName(`smithers:${runId}:ship-gate`))?.custom_status === "Ship it?"),
+      await waitFor(async () => (await agentByName(`smithers:${runId}:ship-gate`))?.tokens?.status === "Ship it?"),
     ).toBe(true);
     const tabs = await tabsOfWorkspace(label);
     expect(tabs.map((t) => t.label).sort()).toEqual(["cockpit", "g1", "g2", "gate:ship-gate"]);
@@ -1046,7 +1050,7 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface against a real herdr ser
     // Exactly one "loop-body" tab and one agent, no matter how many iterations.
     const tabs = await tabsOfWorkspace(label);
     expect(tabs.filter((t) => t.label === "loop-body").length).toBe(1);
-    expect((await listAgents()).filter((a) => a && a.name === name).length).toBe(1);
+    expect((await listAgents()).filter((a) => a && agentIdentity(a) === name).length).toBe(1);
 
     await surface.close();
     const ws = await workspaceByLabel(label);
@@ -1090,7 +1094,7 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface against a real herdr ser
     const tabs = await tabsOfWorkspace(label);
     expect(tabs.filter((t) => t.label === "n1").length).toBe(1);
     expect(tabs.filter((t) => t.label === "cockpit").length).toBe(1);
-    expect((await listAgents()).filter((a) => a && a.name === name).length).toBe(1);
+    expect((await listAgents()).filter((a) => a && agentIdentity(a) === name).length).toBe(1);
 
     const ws = await workspaceByLabel(label);
     if (ws) {
@@ -1271,7 +1275,7 @@ describe.skipIf(!herdrInstalled)("createHerdrRunSurface survives a herdr server 
       const paneUp = await waitFor(async () => {
         const res = /** @type {any} */ (await client.call("agent.list", {}).catch(() => undefined));
         const agents = res && Array.isArray(res.agents) ? res.agents : [];
-        return agents.some((/** @type {any} */ a) => a && a.name === name);
+        return agents.some((/** @type {any} */ a) => a && agentIdentity(a) === name);
       });
       expect(paneUp).toBe(true);
 

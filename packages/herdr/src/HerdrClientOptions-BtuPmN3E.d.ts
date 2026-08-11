@@ -1,8 +1,8 @@
 /**
  * Typed request params and result shapes for the herdr socket methods Smithers
- * uses (protocol 16, hand-written from `herdr api schema --json`). Unknown
- * extra fields are tolerated everywhere: the client parses responses as loose
- * records and only these documented fields are relied upon.
+ * uses (protocol 19 / herdr 0.8.0, hand-written from `herdr api schema --json`).
+ * Unknown extra fields are tolerated everywhere: the client parses responses as
+ * loose records and only these documented fields are relied upon.
  */
 /** `pane.report_agent` accepts only these four states (no `done`). */
 type HerdrAgentState = "idle" | "working" | "blocked" | "unknown";
@@ -12,8 +12,14 @@ type HerdrAgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
 type HerdrReadSource = "visible" | "recent" | "recent_unwrapped" | "detection";
 /** Read output format. */
 type HerdrReadFormat = "text" | "ansi";
-/** Direction to split when launching an agent into an existing workspace/tab. */
+/** Direction to split an existing pane. */
 type HerdrSplitDirection = "right" | "down";
+/**
+ * Free-form display metadata attached to a pane or workspace by a reporting
+ * source. Protocol 19 replaced the single `custom_status` string with this map;
+ * keys must match `[A-Za-z0-9_-]{1,32}`.
+ */
+type HerdrMetadataTokens = Record<string, string>;
 /** Toast corner for `notification.show`. */
 type HerdrToastPosition = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 /** Sound for `notification.show`. */
@@ -42,6 +48,7 @@ type HerdrWorkspaceInfo = {
     tab_count: number;
     active_tab_id: string;
     agent_status: HerdrAgentStatus;
+    tokens?: HerdrMetadataTokens;
     worktree?: unknown | null;
 };
 type HerdrTabInfo = {
@@ -63,16 +70,27 @@ type HerdrPaneInfo = {
     revision: number;
     agent?: string | null;
     display_agent?: string | null;
-    custom_status?: string | null;
     title?: string | null;
+    terminal_title?: string | null;
+    terminal_title_stripped?: string | null;
     label?: string | null;
     cwd?: string | null;
     foreground_cwd?: string | null;
     state_labels?: Record<string, string>;
+    tokens?: HerdrMetadataTokens;
 };
+/**
+ * `name` is herdr's own registered agent name, set only by `agent.start` /
+ * `agent.rename` and constrained to `[a-z][a-z0-9_-]{0,31}`. Smithers' pane
+ * identity (`smithers:<runId>:<nodeId>`) does not fit it, so ownership keys on
+ * the reported {@link HerdrPaneInfo.agent} instead.
+ */
 type HerdrAgentInfo = HerdrPaneInfo & {
     name?: string | null;
     screen_detection_skipped?: boolean;
+    launch_pending?: boolean;
+    interactive_ready?: boolean;
+    state_change_seq?: number;
 };
 type HerdrPaneReadResult = {
     pane_id: string;
@@ -117,15 +135,36 @@ type HerdrWorkspaceListResult = {
 type HerdrOkResult = {
     type: "ok";
 };
-type HerdrAgentStartParams = {
-    name: string;
-    argv: string[];
+/**
+ * `tab.create` seeds the tab's root pane with a shell. `cwd`/`env` shape that
+ * shell, which is how Smithers places a pane's command in the run directory now
+ * that protocol 19's `agent.start` no longer forwards them.
+ */
+type HerdrTabCreateParams = {
     workspace_id?: string | null;
-    tab_id?: string | null;
-    split?: HerdrSplitDirection | null;
+    label?: string | null;
     cwd?: string | null;
     env?: Record<string, string>;
     focus?: boolean;
+};
+type HerdrTabCreateResult = {
+    type: "tab_created";
+    tab: HerdrTabInfo;
+    root_pane: HerdrPaneInfo;
+};
+/**
+ * Protocol 19 reshaped `agent.start`: it no longer creates a pane and no longer
+ * accepts an arbitrary `argv`. It attaches one of herdr's KNOWN interactive
+ * agent kinds (`server.agent_manifests`) to an existing shell pane, rejecting
+ * anything else with `unsupported_agent_kind`. Smithers therefore launches its
+ * own commands with `tab.create` + {@link HerdrPaneSendInputParams} instead.
+ */
+type HerdrAgentStartParams = {
+    name: string;
+    kind: string;
+    pane_id: string;
+    args?: string[];
+    timeout_ms?: number;
 };
 type HerdrAgentStartResult = {
     type: "agent_started";
@@ -149,7 +188,6 @@ type HerdrPaneReportAgentParams = {
     agent: string;
     state: HerdrAgentState;
     message?: string | null;
-    custom_status?: string | null;
     agent_session_id?: string | null;
     agent_session_path?: string | null;
     /** Monotonically increasing per pane so herdr can order authority reports. */
@@ -174,17 +212,28 @@ type HerdrPaneReportMetadataParams = {
     pane_id: string;
     source: string;
     title?: string | null;
-    custom_status?: string | null;
     display_agent?: string | null;
     agent?: string | null;
     state_labels?: Record<string, string> | null;
+    /** Protocol 19's `custom_status` replacement. A `null` value clears one token. */
+    tokens?: Record<string, string | null>;
+    /** 1..86_400_000 in protocol 19; omit for metadata that persists until cleared. */
     ttl_ms?: number;
     applies_to_source?: string | null;
     clear_title?: boolean;
-    clear_custom_status?: boolean;
     clear_display_agent?: boolean;
     clear_state_labels?: boolean;
     seq?: number;
+};
+/**
+ * `pane.send_input`: literal text plus key presses in ONE call — herdr's own
+ * `pane run` (and how protocol 19 `agent.start` submits its command line), so a
+ * command and its Enter can never interleave with another writer.
+ */
+type HerdrPaneSendInputParams = {
+    pane_id: string;
+    text: string;
+    keys?: string[];
 };
 type HerdrPaneReadParams = {
     pane_id: string;
@@ -305,4 +354,4 @@ type HerdrClient = {
     ping(options?: HerdrPingOptions): Promise<HerdrPong | undefined>;
 };
 
-export type { HerdrPaneWaitForOutputResult as A, HerdrPingOptions as B, HerdrPong as C, HerdrReadFormat as D, HerdrReadSource as E, HerdrServerCapabilities as F, HerdrSplitDirection as G, HerdrAgentInfo as H, HerdrSubscription as I, HerdrSubscriptionHandle as J, HerdrTabInfo as K, HerdrToastPosition as L, HerdrWorkspaceCloseParams as M, HerdrWorkspaceCreateParams as N, HerdrWorkspaceCreateResult as O, HerdrWorkspaceInfo as P, HerdrWorkspaceListResult as Q, HerdrWorkspaceRenameParams as R, HerdrWorkspaceRenameResult as S, HerdrAgentListResult as a, HerdrAgentStartParams as b, HerdrAgentStartResult as c, HerdrAgentState as d, HerdrAgentStatus as e, HerdrClient as f, HerdrClientOptions as g, HerdrEvent as h, HerdrLogLevel as i, HerdrLogger as j, HerdrNotificationShowParams as k, HerdrNotificationShowResult as l, HerdrNotificationSound as m, HerdrOkResult as n, HerdrOutputMatch as o, HerdrPaneInfo as p, HerdrPaneListParams as q, HerdrPaneListResult as r, HerdrPaneReadParams as s, HerdrPaneReadResult as t, HerdrPaneReadResultEnvelope as u, HerdrPaneReleaseAgentParams as v, HerdrPaneReportAgentParams as w, HerdrPaneReportAgentSessionParams as x, HerdrPaneReportMetadataParams as y, HerdrPaneWaitForOutputParams as z };
+export type { HerdrPaneSendInputParams as A, HerdrPaneWaitForOutputParams as B, HerdrPaneWaitForOutputResult as C, HerdrPingOptions as D, HerdrPong as E, HerdrReadFormat as F, HerdrReadSource as G, HerdrAgentInfo as H, HerdrServerCapabilities as I, HerdrSplitDirection as J, HerdrSubscription as K, HerdrSubscriptionHandle as L, HerdrTabCreateParams as M, HerdrTabCreateResult as N, HerdrTabInfo as O, HerdrToastPosition as P, HerdrWorkspaceCloseParams as Q, HerdrWorkspaceCreateParams as R, HerdrWorkspaceCreateResult as S, HerdrWorkspaceInfo as T, HerdrWorkspaceListResult as U, HerdrWorkspaceRenameParams as V, HerdrWorkspaceRenameResult as W, HerdrAgentListResult as a, HerdrAgentStartParams as b, HerdrAgentStartResult as c, HerdrAgentState as d, HerdrAgentStatus as e, HerdrClient as f, HerdrClientOptions as g, HerdrEvent as h, HerdrLogLevel as i, HerdrLogger as j, HerdrMetadataTokens as k, HerdrNotificationShowParams as l, HerdrNotificationShowResult as m, HerdrNotificationSound as n, HerdrOkResult as o, HerdrOutputMatch as p, HerdrPaneInfo as q, HerdrPaneListParams as r, HerdrPaneListResult as s, HerdrPaneReadParams as t, HerdrPaneReadResult as u, HerdrPaneReadResultEnvelope as v, HerdrPaneReleaseAgentParams as w, HerdrPaneReportAgentParams as x, HerdrPaneReportAgentSessionParams as y, HerdrPaneReportMetadataParams as z };

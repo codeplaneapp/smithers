@@ -61,10 +61,10 @@ describe.skipIf(!herdrInstalled)("createHerdrClient against a real herdr server"
     await server?.dispose();
   });
 
-  test("ping resolves a protocol-16 pong", async () => {
+  test("ping resolves a protocol-19 pong", async () => {
     const pong = await client.ping();
     expect(pong?.type).toBe("pong");
-    expect(pong?.protocol).toBe(16);
+    expect(pong?.protocol).toBe(19);
     expect(typeof pong?.version).toBe("string");
   });
 

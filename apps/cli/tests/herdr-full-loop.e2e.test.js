@@ -33,6 +33,7 @@ import {
   writeExecutable,
 } from "../../../packages/smithers/tests/e2e-helpers.js";
 import {
+  agentIdentity,
   isCompatibleHerdrInstalled,
   randomSessionName,
   startHerdrServer,
@@ -164,7 +165,7 @@ function listWorkspaces(session) {
  * @returns {string | undefined}
  */
 function statusOf(session, name) {
-  return listAgents(session).find((a) => a && a.name === name)?.agent_status;
+  return listAgents(session).find((a) => a && agentIdentity(a) === name)?.agent_status;
 }
 
 /**
@@ -176,8 +177,8 @@ function statusOf(session, name) {
  */
 function runPaneNames(session, runId) {
   return listAgents(session)
-    .filter((a) => typeof a.name === "string" && a.name.startsWith(`smithers:${runId}:`))
-    .map((a) => a.name)
+    .map((a) => agentIdentity(a))
+    .filter((name) => typeof name === "string" && name.startsWith(`smithers:${runId}:`))
     .sort();
 }
 
@@ -328,7 +329,7 @@ describe.skipIf(!herdrInstalled)("herdr full loop (real herdr server + fake agen
       // by now it has executed - yet it must never have a pane (agent-only filter).
       const aWorking = await waitFor(() => statusOf(server.session, nameA) === "working", 60_000);
       expect(aWorking).toBe(true);
-      expect(listAgents(server.session).some((a) => a.name === nameStatic)).toBe(false);
+      expect(listAgents(server.session).some((a) => agentIdentity(a) === nameStatic)).toBe(false);
 
       // The deterministic workspace exists exactly once (find-or-create key).
       expect(
@@ -387,9 +388,9 @@ describe.skipIf(!herdrInstalled)("herdr full loop (real herdr server + fake agen
         (w) => w.label === label || w.label === `✓ ${label}` || herdrRunIdFromWorkspaceLabel(w.label) === runId,
       );
       if (wsForRun.length !== 1) {
-        const pane = listAgents(server.session).find((a) => a.name === nameA);
+        const pane = listAgents(server.session).find((a) => agentIdentity(a) === nameA);
         throw new Error(
-          `workspace missing for ${label}. labels=${JSON.stringify(listWorkspaces(server.session).map((w) => w.label))} paneWs=${pane?.workspace_id} agents=${JSON.stringify(listAgents(server.session).map((a) => a.name))}`,
+          `workspace missing for ${label}. labels=${JSON.stringify(listWorkspaces(server.session).map((w) => w.label))} paneWs=${pane?.workspace_id} agents=${JSON.stringify(listAgents(server.session).map((a) => agentIdentity(a)))}`,
         );
       }
       expect(wsForRun.length).toBe(1);

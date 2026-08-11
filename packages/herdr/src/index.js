@@ -12,6 +12,7 @@
 /** @typedef {import("./HerdrProtocol.ts").HerdrReadSource} HerdrReadSource */
 /** @typedef {import("./HerdrProtocol.ts").HerdrReadFormat} HerdrReadFormat */
 /** @typedef {import("./HerdrProtocol.ts").HerdrSplitDirection} HerdrSplitDirection */
+/** @typedef {import("./HerdrProtocol.ts").HerdrMetadataTokens} HerdrMetadataTokens */
 /** @typedef {import("./HerdrProtocol.ts").HerdrToastPosition} HerdrToastPosition */
 /** @typedef {import("./HerdrProtocol.ts").HerdrNotificationSound} HerdrNotificationSound */
 /** @typedef {import("./HerdrProtocol.ts").HerdrOutputMatch} HerdrOutputMatch */
@@ -29,6 +30,8 @@
 /** @typedef {import("./HerdrProtocol.ts").HerdrWorkspaceRenameResult} HerdrWorkspaceRenameResult */
 /** @typedef {import("./HerdrProtocol.ts").HerdrWorkspaceListResult} HerdrWorkspaceListResult */
 /** @typedef {import("./HerdrProtocol.ts").HerdrOkResult} HerdrOkResult */
+/** @typedef {import("./HerdrProtocol.ts").HerdrTabCreateParams} HerdrTabCreateParams */
+/** @typedef {import("./HerdrProtocol.ts").HerdrTabCreateResult} HerdrTabCreateResult */
 /** @typedef {import("./HerdrProtocol.ts").HerdrAgentStartParams} HerdrAgentStartParams */
 /** @typedef {import("./HerdrProtocol.ts").HerdrAgentStartResult} HerdrAgentStartResult */
 /** @typedef {import("./HerdrProtocol.ts").HerdrAgentListResult} HerdrAgentListResult */
@@ -38,6 +41,7 @@
 /** @typedef {import("./HerdrProtocol.ts").HerdrPaneReportAgentSessionParams} HerdrPaneReportAgentSessionParams */
 /** @typedef {import("./HerdrProtocol.ts").HerdrPaneReleaseAgentParams} HerdrPaneReleaseAgentParams */
 /** @typedef {import("./HerdrProtocol.ts").HerdrPaneReportMetadataParams} HerdrPaneReportMetadataParams */
+/** @typedef {import("./HerdrProtocol.ts").HerdrPaneSendInputParams} HerdrPaneSendInputParams */
 /** @typedef {import("./HerdrProtocol.ts").HerdrPaneReadParams} HerdrPaneReadParams */
 /** @typedef {import("./HerdrProtocol.ts").HerdrPaneReadResultEnvelope} HerdrPaneReadResultEnvelope */
 /** @typedef {import("./HerdrProtocol.ts").HerdrPaneWaitForOutputParams} HerdrPaneWaitForOutputParams */

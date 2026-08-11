@@ -64,7 +64,10 @@ function fakeHerdrClient(protocol) {
       }
       if (method === "agent.list") return { agents: [] };
       if (method === "tab.create") {
-        return { tab: { tab_id: "tab-detail", workspace_id: params?.workspace_id ?? workspace.workspace_id } };
+        return {
+          tab: { tab_id: "tab-detail", workspace_id: params?.workspace_id ?? workspace.workspace_id },
+          root_pane: { pane_id: "pane-agent", tab_id: "tab-detail", workspace_id: workspace.workspace_id },
+        };
       }
       if (method === "pane.list") {
         return {
@@ -90,8 +93,11 @@ function fakeHerdrClient(protocol) {
         };
       }
       if (method === "agent.list") return { agents: [] };
-      if (method === "agent.start") {
-        return { agent: { pane_id: "pane-agent", workspace_id: params?.workspace_id ?? workspace.workspace_id } };
+      if (method === "tab.create") {
+        return {
+          tab: { tab_id: "tab-detail", workspace_id: params?.workspace_id ?? workspace.workspace_id },
+          root_pane: { pane_id: "pane-agent", tab_id: "tab-detail", workspace_id: workspace.workspace_id },
+        };
       }
       return { type: "ok" };
     },
@@ -251,7 +257,7 @@ describe("CLI Herdr protocol safety", () => {
     expect(opened?.paneId).toBe("pane-agent");
     expect(openFake.operations.some((entry) => entry.method === "workspace.create")).toBe(true);
     expect(openFake.operations.some((entry) => entry.method === "tab.create")).toBe(true);
-    expect(openFake.operations.some((entry) => entry.method === "agent.start")).toBe(true);
+    expect(openFake.operations.some((entry) => entry.method === "pane.send_input")).toBe(true);
   });
 
   test("session stub shell text treats command substitutions and quotes as literal text", async () => {
@@ -336,7 +342,7 @@ describe("CLI Herdr protocol safety", () => {
       });
       expect(opened.mode).toBe("herdr");
       expect(compatible.operations.some((entry) => entry.method === "tab.create")).toBe(true);
-      expect(compatible.operations.some((entry) => entry.method === "agent.start")).toBe(true);
+      expect(compatible.operations.some((entry) => entry.method === "pane.send_input")).toBe(true);
     } finally {
       if (previousWorkspaceId === undefined) delete process.env.HERDR_WORKSPACE_ID;
       else process.env.HERDR_WORKSPACE_ID = previousWorkspaceId;

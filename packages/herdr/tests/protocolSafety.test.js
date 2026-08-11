@@ -59,7 +59,7 @@ describe.skipIf(process.platform === "win32")("createHerdrClient protocol safety
 
     const inspectable = await client.ping();
     expect(inspectable?.protocol).toBe(999);
-    expect(warnings.some((message) => message.includes("client expects 16") && message.includes("999"))).toBe(true);
+    expect(warnings.some((message) => message.includes("client expects 19") && message.includes("999"))).toBe(true);
 
     const error = await client.ping({ requireProtocolMatch: true }).catch((cause) => cause);
     expect(error).toBeInstanceOf(HerdrError);
