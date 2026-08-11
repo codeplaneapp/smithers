@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 import { DEFAULT_AGENT_CHECKPOINT_MAX_BYTES } from "./agent-checkpoint.js";
 import { buildGenerateResult, extractPrompt, resolveTimeouts, toolKindFromName } from "./BaseCliAgent/index.js";

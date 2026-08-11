@@ -6,6 +6,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   runtime-conformance:
     strategy:
@@ -127,7 +130,12 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      # These jobs run only checked-in fake bridge fixtures; they never fetch or
+      # execute the Nanocodex release. Avoid persisting even the read-only token
+      # so process-containment tests cannot inherit repository credentials.
       - uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v6.0.8
         with:
@@ -283,7 +291,10 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      # Coverage uses the checked-in fake bridge, never the release artifact.
       - uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v6.0.8
         with:

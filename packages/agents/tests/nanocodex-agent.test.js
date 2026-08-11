@@ -4,7 +4,7 @@ import { chmod, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
-import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
+import { errorToJson } from "@smthrs/errors/errorToJson";
 
 import { NanocodexAgent } from "../src/NanocodexAgent.js";
 
@@ -168,15 +168,15 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
 
   test("keeps bridge internals private with matching Bun and Node package behavior", async () => {
     const specifiers = [
-      "@smithers-orchestrator/agents/nanocodex/protocol",
-      "@smithers-orchestrator/agents/nanocodex/process",
-      "@smithers-orchestrator/agents/nanocodex/checkpoint",
-      "@smithers-orchestrator/agents/internal/nanocodex/protocol",
+      "@smthrs/agents/nanocodex/protocol",
+      "@smthrs/agents/nanocodex/process",
+      "@smthrs/agents/nanocodex/checkpoint",
+      "@smthrs/agents/internal/nanocodex/protocol",
     ];
     for (const specifier of specifiers) {
       await expect(import(specifier)).rejects.toBeDefined();
     }
-    expect(typeof (await import("@smithers-orchestrator/agents")).NanocodexAgent).toBe("function");
+    expect(typeof (await import("@smthrs/agents")).NanocodexAgent).toBe("function");
 
     const node = Bun.which("node");
     expect(node).toBeTruthy();

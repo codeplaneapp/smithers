@@ -7,7 +7,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 
-import { NanocodexAgent } from "@smithers-orchestrator/agents";
+import { NanocodexAgent } from "@smthrs/agents";
 
 import { runNanocodexCapabilities } from "../packages/agents/internal/nanocodex/process.js";
 
@@ -19,12 +19,9 @@ export const DEFAULT_MANIFEST_PATH = resolve(
 const MAX_UNCOMPRESSED_ARCHIVE_BYTES = 64 * 1024 * 1024;
 const TAR_BLOCK_BYTES = 512;
 const MAX_ARCHIVE_ENTRIES = 10_000;
-const DOWNLOAD_TIMEOUT_MS = 30_000;
-const MAX_DOWNLOAD_REDIRECTS = 3;
 const METADATA_TIMEOUT_MS = 10_000;
 const MAX_METADATA_OUTPUT_BYTES = 1024 * 1024;
 const MAX_METADATA_STDERR_BYTES = 64 * 1024;
-const ALLOWED_DOWNLOAD_HOSTS = new Set(["github.com", "release-assets.githubusercontent.com"]);
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 const POSIX_USTAR_MAGIC = Buffer.from("ustar\0", "ascii");
 const POSIX_USTAR_VERSION = Buffer.from("00", "ascii");
@@ -32,12 +29,17 @@ const POSIX_USTAR_VERSION = Buffer.from("00", "ascii");
 export const PINNED_SOURCE_BUILD = deepFreeze({
   schemaVersion: 1,
   baselineId: "smithers-nanocodex-source-build/v0.0.1/x86_64-unknown-linux-gnu",
-  status: "qualified",,
+  status: "qualified",
+  source: {
+    repository: "N0xMare/smithers-nanocodex",
+    commit: "56d8b4fd54bf14e9f2874e5a010b8e301f8f695b",
+    tree: "b8a092569e579c21e2ae288a470a6881022b61f2",
+    cargoLockBlob: "808504efe6b6ea6c43705205ca3182be0dee1afe",
+    rustVersion: "1.97.0",
+  },
   artifact: {
     target: "x86_64-unknown-linux-gnu",
     fileName: "smithers-nanocodex-v0.0.1-x86_64-unknown-linux-gnu.tar.gz",
-    downloadUrl:
-      "https://github.com/N0xMare/smithers-nanocodex/releases/download/v0.0.1/smithers-nanocodex-v0.0.1-x86_64-unknown-linux-gnu.tar.gz",
     sha256: "3348b8a7818b4c759748e2cf0ecc9e0e4857f33ef6c3a92417655bfc0c73fdff",
     sizeBytes: 6_286_499,
     maximumSizeBytes: 8 * 1024 * 1024,
@@ -355,7 +357,7 @@ export function parseArgs(argv) {
 }
 
 /** Verify and provider-independently preflight the pinned-source bridge. */
-export async function qualifyNanocodexRelease({ archivePath, fetchImpl = globalThis.fetch } = {}) {
+export async function qualifyNanocodexRelease({ archivePath } = {}) {
   if (process.platform !== "linux" || process.arch !== "x64") {
     throw new Error("Nanocodex release qualification requires Linux x64.");
   }
@@ -409,7 +411,7 @@ export async function preflightPublicNanocodexAdapter(binary, scratch, Nanocodex
 export function qualificationResult({ archivePath, glibcVersion, manifest, sha256, sizeBytes }) {
   const pinnedSourceBuild = sha256 === manifest.artifact.sha256 && sizeBytes === manifest.artifact.sizeBytes;
   return {
-    archive: archivePath ? resolve(archivePath) : manifest.artifact.downloadUrl,
+    archive: resolve(archivePath),
     artifactProvenance: pinnedSourceBuild ? "pinned-source-build-sha256" : "unverified-input",
     bridgeVersion: manifest.contract.bridgeVersion,
     glibcVersion,
@@ -448,95 +450,6 @@ async function readPinnedArchive(path, maximumBytes) {
   } finally {
     await handle.close();
   }
-}
-
-export async function downloadArchive(
-  url,
-  exactBytes,
-  fetchImpl,
-  { timeoutMs = DOWNLOAD_TIMEOUT_MS, maxRedirects = MAX_DOWNLOAD_REDIRECTS } = {},
-) {
-  if (typeof fetchImpl !== "function") throw new Error("A fetch implementation is required to download Nanocodex.");
-  if (!Number.isSafeInteger(exactBytes) || exactBytes < 0) throw new TypeError("Pinned archive size is invalid.");
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new TypeError("Download timeout is invalid.");
-  if (!Number.isSafeInteger(maxRedirects) || maxRedirects < 0) throw new TypeError("Redirect limit is invalid.");
-
-  let currentUrl = validateDownloadUrl(new URL(url), { initial: true });
-  const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(new Error(`Nanocodex archive download timed out after ${timeoutMs}ms.`)),
-    timeoutMs,
-  );
-
-  try {
-    for (let redirects = 0; ; redirects++) {
-      const response = await fetchImpl(currentUrl.href, {
-        redirect: "manual",
-        signal: controller.signal,
-        headers: { "user-agent": "smithers-nanocodex-qualifier/1" },
-      });
-
-      if (isRedirectStatus(response.status)) {
-        await response.body?.cancel();
-        if (redirects >= maxRedirects) {
-          throw new Error(`Nanocodex archive download exceeded ${maxRedirects} redirects.`);
-        }
-        const location = response.headers.get("location");
-        if (!location) throw new Error(`Nanocodex archive redirect HTTP ${response.status} has no Location header.`);
-        currentUrl = validateDownloadUrl(new URL(location, currentUrl), { initial: false });
-        continue;
-      }
-
-      if (!response.ok || !response.body) {
-        await response.body?.cancel();
-        throw new Error(`Nanocodex archive download failed with HTTP ${response.status}.`);
-      }
-      const contentLength = response.headers.get("content-length");
-      if (contentLength !== null && contentLength !== String(exactBytes)) {
-        await response.body.cancel();
-        throw new Error(
-          `Nanocodex archive Content-Length mismatch: expected ${exactBytes}, received ${JSON.stringify(contentLength)}.`,
-        );
-      }
-
-      const chunks = [];
-      let bytes = 0;
-      for await (const chunk of response.body) {
-        const buffer = Buffer.from(chunk);
-        bytes += buffer.byteLength;
-        if (bytes > exactBytes) throw new Error(`Nanocodex archive download exceeds pinned size ${exactBytes}.`);
-        chunks.push(buffer);
-      }
-      if (bytes !== exactBytes) {
-        throw new Error(`Nanocodex archive download size mismatch: expected ${exactBytes}, received ${bytes}.`);
-      }
-      return Buffer.concat(chunks, bytes);
-    }
-  } catch (error) {
-    if (controller.signal.aborted)
-      throw new Error(`Nanocodex archive download timed out after ${timeoutMs}ms.`, { cause: error });
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function validateDownloadUrl(url, { initial }) {
-  if (url.protocol !== "https:") throw new Error("Nanocodex release URL and redirects must use HTTPS.");
-  if (url.username || url.password || url.port) {
-    throw new Error("Nanocodex release URL and redirects must not contain credentials or a custom port.");
-  }
-  if (!ALLOWED_DOWNLOAD_HOSTS.has(url.hostname)) {
-    throw new Error(`Nanocodex release redirect host is not allowed: ${url.hostname}.`);
-  }
-  if (initial && url.href !== PINNED_RELEASE.artifact.downloadUrl) {
-    throw new Error("Nanocodex release download must use the immutable v0.0.1 URL.");
-  }
-  return url;
-}
-
-function isRedirectStatus(status) {
-  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
 }
 
 function decodeMetadataOutput(output, label) {
@@ -658,11 +571,10 @@ function deepFreeze(value, seen = new WeakSet()) {
 }
 
 function usage() {
-  return `Usage: node ${basename(fileURLToPath(import.meta.url))} [--archive /path/to/${PINNED_SOURCE_BUILD.artifact.fileName}]
+  return `Usage: node ${basename(fileURLToPath(import.meta.url))} --archive /path/to/${PINNED_SOURCE_BUILD.artifact.fileName}
 
-  
-  Only the pinned SHA-256 receives source-build provenance; other bounded inputs
-  are reported as unverified. This command never downloads release artifacts.`;
+Only the pinned SHA-256 receives source-build provenance; other bounded inputs
+are reported as unverified. This command never downloads release artifacts.`;
 }
 
 async function main() {

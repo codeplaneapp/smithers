@@ -2,11 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { appendFileSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { NanocodexAgent } from "@smithers-orchestrator/agents";
+import { NanocodexAgent } from "@smthrs/agents";
 import { Effect } from "effect";
 import { z } from "zod";
-import { closeSingleRunnerRuntime, createSmithers, runWorkflow, Task, Workflow } from "smithers-orchestrator";
-import { jsx } from "smithers-orchestrator/jsx-runtime";
+import { closeSingleRunnerRuntime, createSmithers, runWorkflow, Task, Workflow } from "smthrs";
+import { jsx } from "smthrs/jsx-runtime";
 
 const CONTROLLED_INVALID_TEXT = "SMITHERS_NANOCODEX_CONTROLLED_INVALID_OUTPUT";
 const NODE_ID = "work";

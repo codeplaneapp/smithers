@@ -10,7 +10,6 @@ import {
   EXPECTED_CAPABILITIES,
   PINNED_SOURCE_BUILD,
   compareVersions,
-  downloadArchive,
   inspectReleaseArchive,
   loadReleaseManifest,
   parseArgs,
@@ -56,7 +55,7 @@ describe("Nanocodex release qualification", () => {
   });
 
   test("parses an explicit offline archive and rejects ambiguous CLI arguments", () => {
-    assert.equal(parseArgs([]).archivePath, undefined);
+    assert.throws(() => parseArgs([]), /--archive is required/);
     const archivePath = parseArgs(["--archive", "release.tar.gz"]).archivePath;
     assert.equal(isAbsolute(archivePath), true);
     assert.equal(basename(archivePath), "release.tar.gz");
@@ -65,91 +64,6 @@ describe("Nanocodex release qualification", () => {
     assert.throws(() => parseArgs(["--archive", "one.tar.gz", "--archive", "two.tar.gz"]), /only be specified once/);
     assert.throws(() => parseArgs(["--help", "-h"]), /only be specified once/);
     assert.throws(() => parseArgs(["--download"]), /Unknown argument/);
-  });
-
-  test("downloads through one approved HTTPS redirect with a bounded manual policy", async () => {
-    const archive = Buffer.from("pinned archive");
-    const calls = [];
-    const fetchImpl = async (url, options) => {
-      calls.push({ url, options });
-      if (calls.length === 1) {
-        return new Response(null, {
-          status: 302,
-          headers: { location: "https://release-assets.githubusercontent.com/pinned/archive" },
-        });
-      }
-      return new Response(archive, { status: 200, headers: { "content-length": String(archive.length) } });
-    };
-
-    const result = await downloadArchive(PINNED_RELEASE.artifact.downloadUrl, archive.length, fetchImpl);
-    assert.deepEqual(result, archive);
-    assert.equal(calls.length, 2);
-    assert.equal(
-      calls.every(({ options }) => options.redirect === "manual" && options.signal instanceof AbortSignal),
-      true,
-    );
-  });
-
-  test("rejects unsafe or excessive redirects", async () => {
-    await assert.rejects(
-      downloadArchive("https://github.com/other/repository/releases/download/v0.0.1/archive.tar.gz", 1, async () => {
-        throw new Error("must not connect");
-      }),
-      /immutable v0\.0\.1 URL/,
-    );
-    for (const [location, error] of [
-      ["https://example.com/archive", /redirect host is not allowed/],
-      ["http://release-assets.githubusercontent.com/archive", /must use HTTPS/],
-      ["https://release-assets.githubusercontent.com:444/archive", /custom port/],
-    ]) {
-      await assert.rejects(
-        downloadArchive(
-          PINNED_RELEASE.artifact.downloadUrl,
-          1,
-          async () => new Response(null, { status: 302, headers: { location } }),
-        ),
-        error,
-      );
-    }
-    await assert.rejects(
-      downloadArchive(
-        PINNED_RELEASE.artifact.downloadUrl,
-        1,
-        async () =>
-          new Response(null, {
-            status: 302,
-            headers: { location: "https://release-assets.githubusercontent.com/redirect-loop" },
-          }),
-        { maxRedirects: 1 },
-      ),
-      /exceeded 1 redirects/,
-    );
-  });
-
-  test("bounds stalled connections and downloads with one overall deadline", async () => {
-    const stalledFetch = (_url, { signal }) =>
-      new Promise((resolve, reject) => {
-        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
-      });
-    await assert.rejects(
-      downloadArchive(PINNED_RELEASE.artifact.downloadUrl, 1, stalledFetch, { timeoutMs: 10 }),
-      /timed out after 10ms/,
-    );
-
-    const stalledBodyFetch = async (_url, { signal }) =>
-      new Response(
-        new ReadableStream({
-          start(controller) {
-            controller.enqueue(Uint8Array.of(0));
-            signal.addEventListener("abort", () => controller.error(signal.reason), { once: true });
-          },
-        }),
-        { status: 200 },
-      );
-    await assert.rejects(
-      downloadArchive(PINNED_RELEASE.artifact.downloadUrl, 2, stalledBodyFetch, { timeoutMs: 10 }),
-      /timed out after 10ms/,
-    );
   });
 
   test("accepts one exact package root containing an executable regular binary", () => {
@@ -599,16 +513,16 @@ exit 64
       JSON.stringify(result, null, 2),
       `{
   "archive": ${JSON.stringify(archivePath)},
-        "artifactProvenance": "pinned-source-build-sha256",
-        "bridgeVersion": "0.0.1",
-        "glibcVersion": "2.35",
-        "providerFreePreflight": true,
-        "sha256": "3348b8a7818b4c759748e2cf0ecc9e0e4857f33ef6c3a92417655bfc0c73fdff",
-        "sizeBytes": 6286499,
-        "sourceCommit": "56d8b4fd54bf14e9f2874e5a010b8e301f8f695b",
-        "sourceTree": "b8a092569e579c21e2ae288a470a6881022b61f2",
-        "target": "x86_64-unknown-linux-gnu"
-      }`,
+  "artifactProvenance": "pinned-source-build-sha256",
+  "bridgeVersion": "0.0.1",
+  "glibcVersion": "2.35",
+  "providerFreePreflight": true,
+  "sha256": "3348b8a7818b4c759748e2cf0ecc9e0e4857f33ef6c3a92417655bfc0c73fdff",
+  "sizeBytes": 6286499,
+  "sourceCommit": "56d8b4fd54bf14e9f2874e5a010b8e301f8f695b",
+  "sourceTree": "b8a092569e579c21e2ae288a470a6881022b61f2",
+  "target": "x86_64-unknown-linux-gnu"
+}`,
     );
 
     const unverified = qualificationResult({

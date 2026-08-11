@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { DEFAULT_AGENT_CHECKPOINT_MAX_BYTES, NanocodexAgent } from "@smthrs/agents";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { replayFromCheckpoint } from "@smithers-orchestrator/time-travel/replay";
-import { loadLatestSnapshot } from "@smithers-orchestrator/time-travel/snapshot";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { replayFromCheckpoint } from "@smthrs/time-travel/replay";
+import { loadLatestSnapshot } from "@smthrs/time-travel/snapshot";
 import { Effect } from "effect";
 import { z } from "zod";
 import { runWorkflow, Task, Workflow } from "smthrs";
