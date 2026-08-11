@@ -61,6 +61,120 @@ describe("openTabPane ownership safety (fake client)", () => {
 });
 
 describe("createHerdrRunSurface workspace barrier (fake client)", () => {
+  test("publishes protocol-19 status tokens before their observable agent state", async () => {
+    /** @type {Array<{ method: string, params: Record<string, any> }>} */
+    const calls = [];
+    let workspaceCreated = false;
+    let paneClaimed = false;
+    const route = async (method, params = {}) => {
+      calls.push({ method, params });
+      if (method === "workspace.list") {
+        return {
+          workspaces: workspaceCreated
+            ? [{ workspace_id: "ws", number: 1, label: "workflow run-order-0000000000" }]
+            : [],
+        };
+      }
+      if (method === "workspace.create") {
+        workspaceCreated = true;
+        return {
+          workspace: { workspace_id: "ws", number: 1, label: params.label },
+          tab: { tab_id: "overview-tab", workspace_id: "ws" },
+          root_pane: { pane_id: "overview-pane", tab_id: "overview-tab", workspace_id: "ws" },
+        };
+      }
+      if (method === "agent.list") {
+        return {
+          agents: paneClaimed
+            ? [
+                {
+                  pane_id: "node-pane",
+                  tab_id: "node-tab",
+                  workspace_id: "ws",
+                  agent: "smithers:run-order-0000000000:approve",
+                },
+              ]
+            : [],
+        };
+      }
+      if (method === "tab.create") {
+        return {
+          tab: { tab_id: "node-tab", workspace_id: "ws", label: params.label },
+          root_pane: { pane_id: "node-pane", tab_id: "node-tab", workspace_id: "ws" },
+        };
+      }
+      if (method === "pane.report_agent") paneClaimed = true;
+      if (method === "pane.list") {
+        return { panes: [{ pane_id: "node-pane", tab_id: "node-tab", workspace_id: "ws" }] };
+      }
+      return { type: "ok" };
+    };
+    const client = {
+      socketPath: "/fake/order-herdr.sock",
+      call: route,
+      tryCall: route,
+      subscribe: () => ({ close() {} }),
+      ping: async () => ({ type: "pong", version: "0.8.0", protocol: 19 }),
+    };
+    const surface = createHerdrRunSurface({
+      client,
+      workspaceLabel: "workflow run-order-0000000000",
+      overviewCommand: () => [],
+      nodeFilter: () => false,
+      tailCommand: () => ["sleep", "30"],
+      logger: () => {},
+    });
+    const event = (type, extra = {}) => ({
+      type,
+      runId: "run-order-0000000000",
+      nodeId: "approve",
+      timestampMs: Date.now(),
+      ...extra,
+    });
+
+    surface.onEvent(event("ApprovalRequested", { request: { title: "Ship it?" } }));
+    await surface.close();
+    const blockedIndex = calls.findIndex(
+      (call) => call.method === "pane.report_agent" && call.params.state === "blocked",
+    );
+    const questionIndex = calls.findIndex(
+      (call) => call.method === "pane.report_metadata" && call.params.tokens?.status === "Ship it?",
+    );
+    expect(questionIndex).toBeGreaterThanOrEqual(0);
+    expect(blockedIndex).toBeGreaterThan(questionIndex);
+
+    calls.length = 0;
+    // close() makes the surface terminal; use a fresh surface to exercise the
+    // resolved transition deterministically against the adopted pane.
+    const resumed = createHerdrRunSurface({
+      client,
+      workspaceLabel: "workflow run-order-0000000000",
+      overviewCommand: () => [],
+      nodeFilter: () => false,
+      tailCommand: () => ["sleep", "30"],
+      logger: () => {},
+    });
+    resumed.onEvent(event("ApprovalRequested", { request: { title: "Ship it?" } }));
+    for (
+      let i = 0;
+      i < 20 && !calls.some((call) => call.method === "pane.report_agent" && call.params.state === "blocked");
+      i += 1
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    resumed.onEvent(event("ApprovalGranted"));
+    await resumed.close();
+    const doneIndex = calls.findIndex(
+      (call) =>
+        call.method === "pane.report_agent" && call.params.state === "idle" && call.params.message === "approved",
+    );
+    const approvedIndex = calls.findIndex(
+      (call) => call.method === "pane.report_metadata" && call.params.tokens?.status === "approved",
+    );
+    expect(approvedIndex).toBeGreaterThanOrEqual(0);
+    expect(doneIndex).toBeGreaterThan(approvedIndex);
+  });
+
   test("does not adopt an operator workspace whose label only shares the run marker", async () => {
     const runId = "run-collision-0000000000";
     const targetLabel = `workflow [smithers:v1:${runId}]`;

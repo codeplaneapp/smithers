@@ -1569,8 +1569,8 @@ export function createHerdrRunSurface(opts = {}) {
           if (entry.lastState !== "working") {
             continue;
           }
-          await reportAgent(entry, "idle", "done");
           await reportCustomStatus(entry, "done");
+          await reportAgent(entry, "idle", "done");
         } else {
           if (entry.lastState !== "working" && entry.lastState !== "blocked") {
             continue;
@@ -1670,16 +1670,18 @@ export function createHerdrRunSurface(opts = {}) {
             // Clear naming: gate tabs are `gate:<nodeId>` (product freeze).
             entry.tabLabel = shortNodeId(gateTabLabel(nodeId));
           }
-          await reportAgent(entry, "blocked", message);
           if (entry.approvalGate) {
             // herdr does NOT echo the report_agent `message` back in its agent
             // query JSON (AgentInfo has no message field), so also push the gate
-            // question as the queryable `custom_status`: a sidebar / dashboard
+            // question as the queryable `status` token: a sidebar / dashboard
             // reading `herdr agent list` then shows WHAT needs approving, not
-            // just that the pane is blocked. Resolution overwrites it with
-            // "approved".
+            // just that the pane is blocked. Publish the token before the state
+            // change so a reader that observes `blocked` cannot still see stale
+            // metadata. Resolution overwrites it with "approved".
+            await ensurePane(entry);
             await reportCustomStatus(entry, message);
           }
+          await reportAgent(entry, "blocked", message);
           await notify("smithers approval needed", message, "request");
         });
         return;
@@ -1695,8 +1697,8 @@ export function createHerdrRunSurface(opts = {}) {
           // so report idle "approved" (not the "working" an agent node resumes
           // into) with a matching custom status.
           enqueue(async () => {
-            await reportAgent(entry, "idle", "approved");
             await reportCustomStatus(entry, "approved");
+            await reportAgent(entry, "idle", "approved");
           });
         } else {
           enqueue(() => reportAgent(entry, "working", "approved"));
@@ -1718,8 +1720,8 @@ export function createHerdrRunSurface(opts = {}) {
           if (!entry.paneId) {
             return;
           }
-          await reportAgent(entry, "idle", status);
           await reportCustomStatus(entry, status);
+          await reportAgent(entry, "idle", status);
         });
         return;
       }
@@ -1757,8 +1759,8 @@ export function createHerdrRunSurface(opts = {}) {
           if (!entry.paneId) {
             return;
           }
-          await reportAgent(entry, "idle", "cancelled");
           await reportCustomStatus(entry, "cancelled");
+          await reportAgent(entry, "idle", "cancelled");
         });
         return;
       }
