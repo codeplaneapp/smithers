@@ -20,7 +20,11 @@ import {
   runSmithers,
   writeExecutable,
 } from "../../../packages/smithers/tests/e2e-helpers.js";
-import { isHerdrInstalled, randomSessionName, startHerdrServer } from "../../../packages/herdr/tests/herdr-server.js";
+import {
+  isCompatibleHerdrInstalled,
+  randomSessionName,
+  startHerdrServer,
+} from "../../../packages/herdr/tests/herdr-server.js";
 import { herdrWorkspaceLabel } from "../src/herdr.js";
 import { workflowIdFromPath } from "../src/monitoring-suggestion.js";
 import {
@@ -511,7 +515,7 @@ test("smithers steer --takeover in a parallel wave warns with the sibling count 
 
 // ── Mirror auto-detection + full command (real throwaway herdr) ──────────────
 
-describe.skipIf(!isHerdrInstalled())("steer against a real herdr mirror", () => {
+describe.skipIf(!isCompatibleHerdrInstalled())("steer against a real herdr mirror", () => {
   /** @type {Awaited<ReturnType<typeof startHerdrServer>>} */
   let server;
 

@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHerdrClient } from "../src/createHerdrClient.js";
 import { createHerdrRunSurface, launchHijackPane, openTabPane } from "../src/index.js";
-import { isHerdrInstalled, randomSessionName, startHerdrServer } from "./herdr-server.js";
+import { isCompatibleHerdrInstalled, randomSessionName, startHerdrServer } from "./herdr-server.js";
 
-const herdrInstalled = isHerdrInstalled();
+const herdrInstalled = isCompatibleHerdrInstalled();
 
 /**
  * Wrap a HerdrClient so a test can observe every RPC the surface issues. The

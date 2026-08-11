@@ -17,9 +17,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHerdrClient } from "../src/createHerdrClient.js";
 import { createHerdrRunSurface } from "../src/index.js";
-import { isHerdrInstalled, randomSessionName, startHerdrServer } from "./herdr-server.js";
+import { isCompatibleHerdrInstalled, randomSessionName, startHerdrServer } from "./herdr-server.js";
 
-const herdrInstalled = isHerdrInstalled();
+const herdrInstalled = isCompatibleHerdrInstalled();
 const describeUnixSocket = process.platform === "win32" ? describe.skip : describe;
 const describeRealHerdr = process.platform === "win32" || !herdrInstalled ? describe.skip : describe;
 

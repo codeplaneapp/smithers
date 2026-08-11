@@ -25,12 +25,16 @@ import {
   writeExecutable,
   writeTestWorkflow,
 } from "../../../packages/smithers/tests/e2e-helpers.js";
-import { isHerdrInstalled, randomSessionName, startHerdrServer } from "../../../packages/herdr/tests/herdr-server.js";
+import {
+  isCompatibleHerdrInstalled,
+  randomSessionName,
+  startHerdrServer,
+} from "../../../packages/herdr/tests/herdr-server.js";
 
 setDefaultTimeout(180_000);
 
 const CLI_ENTRY = resolve(import.meta.dir, "../src/index.js");
-const herdrInstalled = isHerdrInstalled();
+const herdrInstalled = isCompatibleHerdrInstalled();
 /** Set by live-server suite `beforeAll` so herdr CLI listings hit the test socket. */
 let activeHerdrSocketPath = "";
 

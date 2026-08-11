@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readdirSync } from "node:fs";
 import { createHerdrClient } from "../src/createHerdrClient.js";
 import { HerdrError } from "../src/HerdrError.js";
-import { isHerdrInstalled, startHerdrServer } from "./herdr-server.js";
+import { isCompatibleHerdrInstalled, startHerdrServer } from "./herdr-server.js";
 
 /**
  * Count open file descriptors of the current process (Linux `/proc`), or `-1`
@@ -18,7 +18,7 @@ function openFdCount() {
   }
 }
 
-const herdrInstalled = isHerdrInstalled();
+const herdrInstalled = isCompatibleHerdrInstalled();
 
 /**
  * @param {() => boolean | Promise<boolean>} predicate

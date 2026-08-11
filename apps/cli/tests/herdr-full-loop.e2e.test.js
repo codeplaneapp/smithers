@@ -32,13 +32,17 @@ import {
   runSmithers,
   writeExecutable,
 } from "../../../packages/smithers/tests/e2e-helpers.js";
-import { isHerdrInstalled, randomSessionName, startHerdrServer } from "../../../packages/herdr/tests/herdr-server.js";
+import {
+  isCompatibleHerdrInstalled,
+  randomSessionName,
+  startHerdrServer,
+} from "../../../packages/herdr/tests/herdr-server.js";
 
 setDefaultTimeout(180_000);
 
 const BUN_BINARY = process.execPath;
 const CLI_ENTRY = resolve(import.meta.dir, "../src/index.js");
-const herdrInstalled = isHerdrInstalled();
+const herdrInstalled = isCompatibleHerdrInstalled();
 
 // Keep the fake-agent runs' stderr quiet and deterministic: no skill self-heal /
 // update notices (best-effort side effects that just add latency + noise).
