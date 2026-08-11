@@ -83,6 +83,30 @@ describe("Loop boundary modes", () => {
     expect(result.exhaustedLoops).toBeUndefined();
     cleanup();
   });
+  workflowTest("maxIterations={Infinity} runs beyond the default cap and converges (#1492)", async () => {
+    const { Workflow, Task, smithers, outputs, tables, db, cleanup } = createTestSmithers({
+      tick: z.object({ note: z.string() }),
+    });
+    const workflow = smithers((ctx) => (
+      <Workflow name="loop-unbounded-cap">
+        <Loop id="forever" until={ctx.iteration >= 7} maxIterations={Infinity} onMaxReached="return-last">
+          <Task id="tick" output={outputs.tick}>
+            {{ note: `tick-${ctx.iteration}` }}
+          </Task>
+        </Loop>
+      </Workflow>
+    ));
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+    expect(result.status).toBe("finished");
+    const tickRows = db
+      .select()
+      .from(tables.tick)
+      .all()
+      .sort((a, b) => a.iteration - b.iteration);
+    expect(tickRows.map((row) => row.iteration)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    expect(result.exhaustedLoops).toBeUndefined();
+    cleanup();
+  });
   workflowTest("maxIterations=1 with return-last runs the body exactly once", async () => {
     const { Workflow, Task, smithers, outputs, tables, db, cleanup } = createTestSmithers({
       tick: z.object({ note: z.string() }),
