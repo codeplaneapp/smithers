@@ -95,6 +95,9 @@ importers:
       '@smthrs/graph':
         specifier: workspace:*
         version: link:packages/graph
+      '@smthrs/herdr':
+        specifier: workspace:*
+        version: link:packages/herdr
       '@smthrs/integrations':
         specifier: workspace:*
         version: link:packages/integrations
@@ -434,6 +437,9 @@ importers:
       '@smthrs/graph':
         specifier: workspace:*
         version: link:../../packages/graph
+      '@smthrs/herdr':
+        specifier: workspace:*
+        version: link:../../packages/herdr
       '@smthrs/memory':
         specifier: workspace:*
         version: link:../../packages/memory
@@ -1695,6 +1701,15 @@ importers:
         specifier: ~6.0.3
         version: 6.0.3
 
+  packages/herdr:
+    devDependencies:
+      '@types/bun':
+        specifier: latest
+        version: 1.3.14
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
   packages/integrations:
     dependencies:
       '@smthrs/components':
@@ -2283,6 +2298,9 @@ importers:
       '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
+      '@smthrs/herdr':
+        specifier: workspace:*
+        version: link:../herdr
       '@smthrs/react-reconciler':
         specifier: workspace:*
         version: link:../react-reconciler
@@ -2292,6 +2310,9 @@ importers:
       effect:
         specifier: 4.0.0-beta.105
         version: 4.0.0-beta.105
+      smthrs:
+        specifier: workspace:*
+        version: link:../smithers
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -2302,9 +2323,6 @@ importers:
       koffi:
         specifier: ^2.16.2
         version: 2.16.2
-      smthrs:
-        specifier: workspace:*
-        version: link:../smithers
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
@@ -3023,13 +3041,11 @@ packages:
   '@cloudflare/workerd-darwin-arm64@1.20260424.1':
     resolution: {integrity: sha512-LqWKcE7x/9KyC2iQvKPeb20hKST3dYXDZlYTvFymgR1DfLS0OFOCzVGTloVNd7WqvK4SkdzBYfxo7QMIAeBK0w==}
     engines: {node: '>=16'}
-    cpu: [arm64]
     os: [darwin]
 
   '@cloudflare/workerd-darwin-arm64@1.20260601.1':
     resolution: {integrity: sha512-veGpZQGBw07Twt+Y4z3oyo+/obKHt0iWUwvDV5GOiDAYjC/zW+YGstgVzg4SHq+k1sLH3ElqL2TXx20I5WBv3Q==}
     engines: {node: '>=16'}
-    cpu: [arm64]
     os: [darwin]
 
   '@cloudflare/workerd-darwin-arm64@1.20260630.1':
@@ -3041,7 +3057,6 @@ packages:
   '@cloudflare/workerd-linux-64@1.20260424.1':
     resolution: {integrity: sha512-YlEBFbAYZHe/ylzl8WEYQEU/jr+0XMqXaST2oBk5oVjksdb1NGuJaggluCdZAzuJJ8UqdTmyhY5u/qrasbiFWA==}
     engines: {node: '>=16'}
-    cpu: [x64]
     os: [linux]
 
   '@cloudflare/workerd-linux-64@1.20260601.1':
@@ -3059,7 +3074,6 @@ packages:
   '@cloudflare/workerd-linux-arm64@1.20260424.1':
     resolution: {integrity: sha512-qJ0X0m6cL8fWDUPDg8K4IxYZXNJI6XbeOihqjnqKbAClrjdPDn8VUSd+z2XiCQ5NylMtMrpa/skC9UfaR6mh8g==}
     engines: {node: '>=16'}
-    cpu: [arm64]
     os: [linux]
 
   '@cloudflare/workerd-linux-arm64@1.20260601.1':
@@ -3077,7 +3091,6 @@ packages:
   '@cloudflare/workerd-windows-64@1.20260424.1':
     resolution: {integrity: sha512-tZ7Z9qmYNAP6z1/+8r/zKbk8F8DZmpmwNzMeN+zkde2Wnhfr3FBqOkJXT/5zmli8HPoWrIXxSiyqcNDMy8V2Zg==}
     engines: {node: '>=16'}
-    cpu: [x64]
     os: [win32]
 
   '@cloudflare/workerd-windows-64@1.20260601.1':
@@ -6446,26 +6459,31 @@ packages:
   '@superradcompany/microsandbox-darwin-arm64@0.6.6':
     resolution: {integrity: sha512-rw7cg0G9mj1c9/14K/K6PMg78H11rGRA5tDzRbx67kAeoKWpAJnFsIYLvOCHcD+6aM0Xdxote90FVVlt1Kknjw==}
     engines: {node: '>= 22'}
+    cpu: [arm64]
     os: [darwin]
 
   '@superradcompany/microsandbox-linux-arm64-gnu@0.6.6':
     resolution: {integrity: sha512-y4CdSPkSOtCwBNbG8Yhkahxg9yh/jpp4cBMOItCOj0JshU7luE2r4+6ceIrPNAkb8sF0fX7tNTXMDK4fJA8iFA==}
     engines: {node: '>= 22'}
+    cpu: [arm64]
     os: [linux]
 
   '@superradcompany/microsandbox-linux-x64-gnu@0.6.6':
     resolution: {integrity: sha512-9yo6/G454L8ebzZP1qMxjIXRD3zJqQ68w2p9Ust7B7MOj5hr+VyuVZ0kYjSJAc4GSI0fno2xQe5z2tp5ynk78A==}
     engines: {node: '>= 22'}
+    cpu: [x64]
     os: [linux]
 
   '@superradcompany/microsandbox-win32-arm64-msvc@0.6.6':
     resolution: {integrity: sha512-q22t1DVlB8FR90adjBxTf0i//f3yzm7QYsKbsar29zoUAHC/24h6R4LE6YfIDWtPKB8jvTSpCeMehFoyXyLN1Q==}
     engines: {node: '>= 22'}
+    cpu: [arm64]
     os: [win32]
 
   '@superradcompany/microsandbox-win32-x64-msvc@0.6.6':
     resolution: {integrity: sha512-m2ir3DNw+Sc7i2DEg1kgY9bFmFHCFt2KamnXzJMUL9qtkE2n11GqIUhQJtKXwcWyM7nH0AxooMmnbx7UDMG8Ww==}
     engines: {node: '>= 22'}
+    cpu: [x64]
     os: [win32]
 
   '@tanstack/ai-event-client@0.6.8':

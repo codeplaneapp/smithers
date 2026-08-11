@@ -34,6 +34,7 @@
         "@smthrs/gateway-ui": "workspace:*",
         "@smthrs/gcp": "workspace:*",
         "@smthrs/graph": "workspace:*",
+        "@smthrs/herdr": "workspace:*",
         "@smthrs/integrations": "workspace:*",
         "@smthrs/memory": "workspace:*",
         "@smthrs/microsandbox": "workspace:*",
@@ -171,6 +172,7 @@
         "@smthrs/engine": "workspace:*",
         "@smthrs/errors": "workspace:*",
         "@smthrs/graph": "workspace:*",
+        "@smthrs/herdr": "workspace:*",
         "@smthrs/memory": "workspace:*",
         "@smthrs/observability": "workspace:*",
         "@smthrs/openapi": "workspace:*",
@@ -842,6 +844,14 @@
         "typescript": "~6.0.3",
       },
     },
+    "packages/herdr": {
+      "name": "@smthrs/herdr",
+      "version": "0.33.1",
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "~6.0.3",
+      },
+    },
     "packages/integrations": {
       "name": "@smthrs/integrations",
       "version": "0.33.1",
@@ -1181,15 +1191,16 @@
         "@smthrs/driver": "workspace:*",
         "@smthrs/engine": "workspace:*",
         "@smthrs/graph": "workspace:*",
+        "@smthrs/herdr": "workspace:*",
         "@smthrs/react-reconciler": "workspace:*",
         "@smthrs/scheduler": "workspace:*",
         "effect": "4.0.0-beta.105",
+        "smthrs": "workspace:*",
         "zod": "^4.4.3",
       },
       "devDependencies": {
         "@types/bun": "latest",
         "koffi": "^2.16.2",
-        "smthrs": "workspace:*",
         "typescript": "~6.0.3",
       },
       "peerDependencies": {
@@ -2621,6 +2632,8 @@
     "@smthrs/gcp": ["@smthrs/gcp@workspace:packages/gcp"],
 
     "@smthrs/graph": ["@smthrs/graph@workspace:packages/graph"],
+
+    "@smthrs/herdr": ["@smthrs/herdr@workspace:packages/herdr"],
 
     "@smthrs/init-site": ["@smthrs/init-site@workspace:apps/init-site"],
 

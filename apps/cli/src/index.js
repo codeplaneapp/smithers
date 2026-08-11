@@ -27,7 +27,7 @@ import { __engineInternals } from "@smthrs/engine/engine";
 import { readWorkflowEntryHash, readWorkflowGraphHash } from "@smthrs/engine/workflow-hash";
 import { mdxPlugin } from "./mdx-plugin.js";
 import { approveNode, denyNode } from "@smthrs/engine/approvals";
-import { isPidAlive, parseRuntimeOwnerPid } from "@smithers-orchestrator/engine/runtime-owner";
+import { isPidAlive, parseRuntimeOwnerPid } from "@smthrs/engine/runtime-owner";
 import { signalRun } from "@smthrs/engine/signals";
 import { loadInput, loadOutputs } from "@smthrs/db/snapshot";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
@@ -129,14 +129,9 @@ import { runApproveWatch } from "./approve-watch.js";
 import { buildOverviewBlock, overviewDigestSignature, overviewSignature } from "./tail-overview.js";
 import { createNodeHud } from "./node-hud.js";
 import { runTopCommand } from "./smithers-top.js";
-import { SmithersGatewayClient } from "smithers-orchestrator/gateway-client";
+import { SmithersGatewayClient } from "smthrs/gateway-client";
 import { resolveGatewaySource, resolveSupervisorGatewayTarget } from "./supervisor-observation.js";
-import {
-  HERDR_PROTOCOL,
-  createHerdrClient,
-  createHerdrRunSurface,
-  workspaceLabelMatches,
-} from "@smithers-orchestrator/herdr";
+import { HERDR_PROTOCOL, createHerdrClient, createHerdrRunSurface, workspaceLabelMatches } from "@smthrs/herdr";
 import {
   buildAgentNodeFilter,
   buildGateCommand,
@@ -158,7 +153,7 @@ import {
   resolveHerdrHijackOption,
   resolveHerdrOption,
 } from "./herdr.js";
-import { defaultSessionNameForRun } from "@smithers-orchestrator/herdr";
+import { defaultSessionNameForRun } from "@smthrs/herdr";
 import {
   countInFlightAgentSiblings,
   detectHerdrMirrorForRun,
@@ -168,7 +163,7 @@ import {
   resolveSteerAuthor,
   resolveSteerTargetNode,
 } from "./steer.js";
-import { enqueueSteer } from "@smithers-orchestrator/engine/steers";
+import { enqueueSteer } from "@smthrs/engine/steers";
 import { fuzzySelect } from "./fuzzy-select.js";
 import { confirm, isCancel, text } from "@clack/prompts";
 import { EVENT_CATEGORY_VALUES, eventTypesForCategory, normalizeEventCategory } from "./event-categories.js";
@@ -2567,7 +2562,7 @@ async function resolveApprovalCommandTarget(adapter, runId, options) {
  * queued time, and the consuming attempt/iteration once consumed. Oldest first
  * (as `listSteers` returns them).
  *
- * @param {import("@smithers-orchestrator/db/adapter").SteerRow[]} steers
+ * @param {import("@smthrs/db/adapter").SteerRow[]} steers
  * @returns {Array<Record<string, unknown>>}
  */
 function summarizeSteerRows(steers) {
@@ -2589,7 +2584,7 @@ function summarizeSteerRows(steers) {
  * clipped message) so a supervisor sees what is waiting to land. Empty string
  * when there are none, so it appends cleanly.
  *
- * @param {import("@smithers-orchestrator/db/adapter").SteerRow[]} steers
+ * @param {import("@smthrs/db/adapter").SteerRow[]} steers
  * @returns {string}
  */
 function formatWhySteerSection(steers) {
@@ -2785,8 +2780,8 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
     result.steers = summarizeSteerRows(steers);
   }
   if (config) {
-  result.config = config;
-}
+    result.config = config;
+  }
   const ctaCommands = [
     { command: `logs ${runId}`, description: "Tail run logs" },
     { command: `chat ${runId}`, description: "View agent chat" },

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { HERDR_PROTOCOL, HerdrError } from "@smithers-orchestrator/herdr";
+import { HERDR_PROTOCOL, HerdrError } from "@smthrs/herdr";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

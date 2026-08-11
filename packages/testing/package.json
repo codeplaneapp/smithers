@@ -22,12 +22,16 @@
   },
   "files": [
     "src/",
-    "types/"
+    "types/",
+    "fixtures/",
+    "scripts/"
   ],
   "scripts": {
     "build": "node ../../scripts/clean-dts.mjs src && tsup",
     "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
-    "test": "bun test tests --path-ignore-patterns '**/scenarios/**' && bun test tests/scenarios --timeout 30000"
+    "test": "bun test tests --path-ignore-patterns '**/scenarios/**' && bun test tests/scenarios --timeout 30000",
+    "campaign": "bun scripts/core-campaign.mjs",
+    "campaign:herdr": "bun scripts/core-campaign.mjs --herdr --watch-pack --fresh"
   },
   "dependencies": {
     "@smthrs/components": "workspace:*",
@@ -39,6 +43,7 @@
     "@smthrs/react-reconciler": "workspace:*",
     "@smthrs/scheduler": "workspace:*",
     "effect": "4.0.0-beta.105",
+    "smthrs": "workspace:*",
     "zod": "^4.4.3"
   },
   "peerDependencies": {
@@ -52,7 +57,6 @@
   "devDependencies": {
     "@types/bun": "latest",
     "koffi": "^2.16.2",
-    "smthrs": "workspace:*",
     "typescript": "~6.0.3"
   }
 }

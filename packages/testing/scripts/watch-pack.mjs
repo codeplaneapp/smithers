@@ -28,8 +28,8 @@ import { dirname, join, dirname as pathDirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Effect } from "effect";
 import { z } from "zod";
-import { Workflow, Task, Sequence, Parallel, runWorkflow, createSmithers } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { Workflow, Task, Sequence, Parallel, runWorkflow, createSmithers } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
 import {
 	createVirtualClock,
 	expectNodeState,

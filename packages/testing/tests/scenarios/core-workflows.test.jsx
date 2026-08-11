@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * Core workflow scenarios — token-free, real engine + sqlite + scripted vectors.
  *
@@ -18,10 +18,10 @@ import {
   ContinueAsNew,
   runWorkflow,
   approvalDecisionSchema,
-} from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { enqueueSteer } from "@smithers-orchestrator/engine/steers";
-import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
+} from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { enqueueSteer } from "@smthrs/engine/steers";
+import { approveNode, denyNode } from "@smthrs/engine/approvals";
 import { createTestSmithers } from "../../../smithers/tests/helpers.js";
 import { Effect } from "effect";
 import { z } from "zod";

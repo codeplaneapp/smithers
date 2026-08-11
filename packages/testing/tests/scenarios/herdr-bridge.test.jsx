@@ -3,7 +3,7 @@
  * Soft-skips when no herdr server is reachable (CI without herdr stays green).
  */
 import { describe, expect, test } from "bun:test";
-import { createHerdrClient } from "@smithers-orchestrator/herdr";
+import { createHerdrClient } from "@smthrs/herdr";
 import { runCampaign } from "../../src/campaign.ts";
 import { watchPackScenarios } from "../../scripts/watch-pack.mjs";
 import { tryCloseHerdrWorkspacesForRun } from "../../src/herdrBridge.ts";

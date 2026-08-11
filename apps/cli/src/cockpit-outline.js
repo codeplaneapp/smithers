@@ -11,7 +11,7 @@
  */
 
 import pc from "picocolors";
-import { buildDigestBlock, formatElapsed, isLikelyWorkerNodeId } from "@smithers-orchestrator/herdr";
+import { buildDigestBlock, formatElapsed, isLikelyWorkerNodeId } from "@smthrs/herdr";
 import { ACTIVITY_STRIP_LINES, formatActivityPlain } from "./cockpit-activity.js";
 import { flattenOutlineTree, outlinePhasesToTree } from "./cockpit-outline-graph.js";
 import { buildDigestInputFromOverview, overviewStateLabel } from "./tail-overview.js";

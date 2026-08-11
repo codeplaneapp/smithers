@@ -10,11 +10,11 @@
 import { resolve, dirname } from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { SmithersError } from "@smithers-orchestrator/errors";
-import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
-import { createHerdrClient, openTabPane, shortNodeId } from "@smithers-orchestrator/herdr";
+import { SmithersError } from "@smthrs/errors";
+import { computeRunStateFromRow } from "@smthrs/db/runState";
+import { createHerdrClient, openTabPane, shortNodeId } from "@smthrs/herdr";
 import { findAndOpenDb } from "./find-db.js";
-import { openSmithersStore } from "smithers-orchestrator/openSmithersStore";
+import { openSmithersStore } from "smthrs/openSmithersStore";
 import { deriveTailStatus, isTailActiveState } from "./tail.js";
 import { buildCockpitOutlineModel, createCockpitOutlineHud } from "./cockpit-outline.js";
 import { ACTIVITY_STRIP_LINES } from "./cockpit-activity.js";
@@ -263,7 +263,7 @@ export async function probeHerdr(client = createHerdrClient({ logger: () => {} }
  *   dbPath: string,
  *   cwd: string,
  *   herdrAvailable: boolean,
- *   herdrClient?: import("@smithers-orchestrator/herdr").HerdrClient | null,
+ *   herdrClient?: import("@smthrs/herdr").HerdrClient | null,
  *   kind?: "agent" | "gate",
  * }} opts
  */

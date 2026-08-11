@@ -4,11 +4,11 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
-import { getDevToolsSnapshotRoute } from "@smithers-orchestrator/server/gatewayRoutes/getDevToolsSnapshot";
-import { Gateway } from "@smithers-orchestrator/server/gateway";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { computeRunStateFromRow } from "@smthrs/db/runState";
+import { getDevToolsSnapshotRoute } from "@smthrs/server/gatewayRoutes/getDevToolsSnapshot";
+import { Gateway } from "@smthrs/server/gateway";
 import { flattenOutlineTree } from "../src/cockpit-outline-graph.js";
 import {
   createDirectDbObservationSource,
@@ -571,7 +571,7 @@ describe("gateway observation source — streamed activity", () => {
    * envelope mirrors gateway.js `appendRunEventWindow` + `sendEvent`; the inner
    * `payload.event` / `payload.payload` come straight from `mapEvent`.
    *
-   * @param {import("@smithers-orchestrator/server/gateway").SmithersEvent} smithersEvent
+   * @param {import("@smthrs/server/gateway").SmithersEvent} smithersEvent
    * @param {number} seq
    */
   function mappedRunEventFrame(smithersEvent, seq) {

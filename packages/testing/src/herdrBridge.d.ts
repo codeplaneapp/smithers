@@ -3,8 +3,8 @@
  * Optional herdr bridge for core workflow scenarios (T3).
  * Soft-degrades when no herdr server is reachable.
  */
-/** @typedef {import("@smithers-orchestrator/herdr").HerdrClient} HerdrClient */
-/** @typedef {import("@smithers-orchestrator/herdr").HerdrRunSurface} HerdrRunSurface */
+/** @typedef {import("@smthrs/herdr").HerdrClient} HerdrClient */
+/** @typedef {import("@smthrs/herdr").HerdrRunSurface} HerdrRunSurface */
 type HerdrBridgeOptions = {
     session?: string;
     /** Workspace label find-or-create key (should include full runId). */

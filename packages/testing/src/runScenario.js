@@ -716,10 +716,10 @@ async function runWorkflowScenario(options) {
   }
   let runWorkflowFn = options.runWorkflowFn;
   if (!runWorkflowFn) {
-    const mod = await import("smithers-orchestrator");
+    const mod = await import("smthrs");
     const rw = mod.runWorkflow;
     if (typeof rw !== "function") {
-      throw new Error("runWorkflowScenario: smithers-orchestrator.runWorkflow not available; pass runWorkflowFn");
+      throw new Error("runWorkflowScenario: smthrs.runWorkflow not available; pass runWorkflowFn");
     }
     runWorkflowFn = rw;
   }

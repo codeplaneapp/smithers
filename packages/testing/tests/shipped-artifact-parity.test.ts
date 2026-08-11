@@ -67,7 +67,7 @@ describe("published artifact parity", () => {
         "--input-type=module",
         "--eval",
         [
-          'const shipped = await import("@smithers-orchestrator/testing/runScenario");',
+          'const shipped = await import("@smthrs/testing/runScenario");',
           'if (typeof shipped.runScenario !== "function") throw new Error("runScenario export missing");',
           'if (typeof shipped.runKernelScenario !== "function") throw new Error("runKernelScenario export missing");',
         ].join("\n"),

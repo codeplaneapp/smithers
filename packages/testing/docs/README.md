@@ -1,4 +1,4 @@
-# `@smithers-orchestrator/testing` — local docs
+# `@smthrs/testing` — local docs
 
 Package-local notes for contributors. **First-class published guide:**
 

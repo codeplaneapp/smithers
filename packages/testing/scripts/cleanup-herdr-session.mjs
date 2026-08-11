@@ -16,7 +16,7 @@
  *   bun packages/testing/scripts/cleanup-herdr-session.mjs --session smithers-dev --delete-session
  */
 import { spawnSync } from "node:child_process";
-import { createHerdrClient } from "@smithers-orchestrator/herdr";
+import { createHerdrClient } from "@smthrs/herdr";
 import {
 	isCampaignWorkspaceLabel,
 	tryCloseCampaignHerdrWorkspaces,

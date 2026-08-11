@@ -1,5 +1,5 @@
 import pc from "picocolors";
-import { buildDigestBlock, buildFleetStrip, digestSignature } from "@smithers-orchestrator/herdr";
+import { buildDigestBlock, buildFleetStrip, digestSignature } from "@smthrs/herdr";
 
 /**
  * Run-level overview block for `smithers tail <run> --overview`. Renders a
@@ -112,7 +112,7 @@ export function overviewSignature(status, nodes, digestSig = "", fleetSig = "") 
  *   nowMs?: number;
  *   lastEventSummary?: string;
  * }} input
- * @returns {import("@smithers-orchestrator/herdr").buildDigestBlock extends Function ? Parameters<typeof buildDigestBlock>[0] : any}
+ * @returns {import("@smthrs/herdr").buildDigestBlock extends Function ? Parameters<typeof buildDigestBlock>[0] : any}
  */
 export function buildDigestInputFromOverview(input) {
   const nodes = Array.isArray(input.nodes) ? input.nodes : [];

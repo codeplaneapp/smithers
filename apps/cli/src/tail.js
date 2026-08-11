@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
+import { computeRunStateFromRow } from "@smthrs/db/runState";
 import { formatEventLine } from "./format.js";
 
 /**
@@ -110,7 +110,7 @@ export function renderTailEvent(event, options) {
  * Derived run status, with the success state renamed to "finished" to match the
  * rest of the CLI (legacy ps naming).
  *
- * @param {import("@smithers-orchestrator/db/runState").RunStateView | undefined} view
+ * @param {import("@smthrs/db/runState").RunStateView | undefined} view
  * @returns {string | undefined}
  */
 export function deriveTailStatus(view) {

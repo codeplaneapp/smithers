@@ -1,4 +1,4 @@
-# @smithers-orchestrator/herdr - src
+# @smthrs/herdr - src
 
 Socket client for [herdr](https://herdr.dev), the terminal workspace manager
 Smithers mirrors runs into as an optional presentation & steering plane. This
@@ -73,7 +73,7 @@ session) -> the default session socket (`<config>/herdr/herdr.sock`, where
 ## Usage
 
 ```js
-import { createHerdrClient } from "@smithers-orchestrator/herdr";
+import { createHerdrClient } from "@smthrs/herdr";
 
 const herdr = createHerdrClient({ session: "my-session" });
 

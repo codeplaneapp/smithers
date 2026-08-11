@@ -359,11 +359,11 @@ export function buildHijackLaunchSpec(candidate, baseEnv = process.env) {
     // Explicit interactive resume. Do NOT pass a trailing prompt: that would
     // auto-send a user turn. A real TTY is required (caller must not pipe stdin).
     return {
-    command: "claude",
-    args,
-    cwd: candidate.cwd,
-    env,
-  };
+      command: "claude",
+      args,
+      cwd: candidate.cwd,
+      env,
+    };
   }
   if (candidate.engine === "antigravity") {
     const args = ["--conversation", candidate.resume];

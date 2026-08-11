@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 
 // The per-workflow `postFailureAutopsy` opt is a SmithersWorkflowOptions field
 // consumed CLI-side in `up`'s finishRun (which only has `workflow.opts`, not the

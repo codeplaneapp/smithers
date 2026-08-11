@@ -4,7 +4,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Effect } from "effect";
-import { runWorkflow } from "smithers-orchestrator";
+import { runWorkflow } from "smthrs";
 import { loadAgentTraceVector, scriptedAgent, createVirtualClock } from "../../src/index.ts";
 
 export const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../fixtures/agent-traces");

@@ -29,7 +29,7 @@ export type RunWorkflowScenarioOptions = {
   /** Live progress events from the engine. */
   onProgress?: (event: unknown) => void;
   /**
-   * Injected runWorkflow. Defaults to dynamic import of smithers-orchestrator.
+   * Injected runWorkflow. Defaults to dynamic import of smthrs.
    * May return an Effect or a Promise.
    */
   runWorkflowFn?: (workflow: ScenarioWorkflow, opts: Record<string, unknown>) => unknown;
@@ -100,12 +100,12 @@ export async function runWorkflowScenario(options: RunWorkflowScenarioOptions): 
 
   let runWorkflowFn = options.runWorkflowFn;
   if (!runWorkflowFn) {
-    const mod = (await import("smithers-orchestrator")) as unknown as {
+    const mod = (await import("smthrs")) as unknown as {
       runWorkflow?: (wf: ScenarioWorkflow, opts: Record<string, unknown>) => unknown;
     };
     const rw = mod.runWorkflow;
     if (typeof rw !== "function") {
-      throw new Error("runWorkflowScenario: smithers-orchestrator.runWorkflow not available; pass runWorkflowFn");
+      throw new Error("runWorkflowScenario: smthrs.runWorkflow not available; pass runWorkflowFn");
     }
     runWorkflowFn = rw;
   }

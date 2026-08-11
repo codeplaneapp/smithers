@@ -1,7 +1,7 @@
 import { Effect } from "effect";
-import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
-import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
-import { isHumanRequestPastTimeout, validateHumanRequestValue } from "@smithers-orchestrator/engine/human-requests";
+import { computeRunStateFromRow } from "@smthrs/db/runState";
+import { approveNode, denyNode } from "@smthrs/engine/approvals";
+import { isHumanRequestPastTimeout, validateHumanRequestValue } from "@smthrs/engine/human-requests";
 import { deriveTailStatus, formatTailFinalStatusLine, isTailActiveState, lingerUntilClosed } from "./tail.js";
 
 /**

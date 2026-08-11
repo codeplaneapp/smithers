@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * Runtime behaviour of the durable steer primitive: a queued steer is
  * consumed into a node's next agent generate() call (first start, retry
@@ -12,15 +12,15 @@
  * equivalent of a fake CLI recording its stdin/argv.
  */
 import { describe, expect, test } from "bun:test";
-import { Workflow, Task, Sequence, Loop, runWorkflow } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { Workflow, Task, Sequence, Loop, runWorkflow } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { enqueueSteer } from "../src/steers.js";
 import { commitTerminalRunWithSteerExpiry, finalizeCancelledRun } from "../src/engine.js";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 /**
  * Flatten whatever the engine handed the agent into a single searchable string.
