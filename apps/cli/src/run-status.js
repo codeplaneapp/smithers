@@ -508,7 +508,14 @@ export function summarizeRunStatus(params) {
   // was killed stays `running` in the DB forever, so node counts alone happily
   // report "progressing" for a corpse. `ps` already classifies this correctly;
   // `status` is the command an operator actually reaches for, so it must agree.
-  if (liveness?.state === "orphaned" || liveness?.state === "stale") {
+  if (liveness?.state === "cancelled" && status !== "cancelled") {
+    verdict = "cancelled";
+    const since =
+      liveness.unhealthy?.kind === "engine-heartbeat-stale" && liveness.unhealthy.lastHeartbeatAt
+        ? ` (last heartbeat ${liveness.unhealthy.lastHeartbeatAt})`
+        : "";
+    reason = `cancellation was requested, but the engine died before recording the terminal status${since}; re-run \`smithers cancel ${run.runId}\` to finalize bookkeeping`;
+  } else if (liveness?.state === "orphaned" || liveness?.state === "stale") {
     const orphaned = liveness.state === "orphaned";
     verdict = orphaned ? "orphaned" : "stalled";
     const since =

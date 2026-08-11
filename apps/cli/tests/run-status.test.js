@@ -630,6 +630,28 @@ describe("status surfaces liveness, not just the row status", () => {
     }
   });
 
+  test("a cancel-requested run whose engine died reports cancelled, not orphaned (#1496)", async () => {
+    const { sqlite, adapter } = createMemoryDb();
+    try {
+      await seedRun(adapter, "cancel-stuck", {
+        status: "running",
+        heartbeatAtMs: NOW - 14 * MIN,
+        runtimeOwnerId: "pid:999999:owner",
+      });
+      await seedNode(adapter, "cancel-stuck", "implement", "in-progress", NOW - 14 * MIN);
+      await adapter.requestRunCancel("cancel-stuck", NOW - 13 * MIN);
+
+      const summary = await buildRunStatusSummary(adapter, "cancel-stuck", { nowMs: NOW });
+
+      expect(summary.verdict).toBe("cancelled");
+      expect(summary.liveness).toMatchObject({ state: "cancelled" });
+      expect(summary.reason).toContain("smithers cancel cancel-stuck");
+      expect(runStatusCtaCommands(summary).map((entry) => entry.command)).not.toContain("supervise -r cancel-stuck");
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("a stale-but-live engine is `stalled`, never `orphaned`", async () => {
     const { sqlite, adapter } = createMemoryDb();
     try {
