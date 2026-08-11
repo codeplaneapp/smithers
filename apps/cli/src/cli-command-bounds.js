@@ -35,6 +35,7 @@ export function validateCliStringArgument(path, value) {
       assertMaxBytes(path, value, CLI_JSON_ARGUMENT_MAX_BYTES);
       return;
     case "prompt":
+    case "goal":
     case "note":
     case "authToken":
       assertMaxStringLength(path, value, CLI_TEXT_ARGUMENT_MAX_LENGTH);
