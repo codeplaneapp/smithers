@@ -116,7 +116,7 @@ describe("ClaudeCodeAgent option combinations", () => {
 });
 
 describe("CodexAgent approval-mode precedence", () => {
-  test("fullAuto suppresses the dangerous bypass flag on fresh runs", async () => {
+  test("fullAuto emits --sandbox workspace-write and suppresses the dangerous bypass flag on fresh runs", async () => {
     const command = await new CodexAgent({
       fullAuto: true,
       dangerouslyBypassApprovalsAndSandbox: true,
@@ -126,17 +126,19 @@ describe("CodexAgent approval-mode precedence", () => {
       options: {},
     });
     try {
-      expect(command.args).toContain("--full-auto");
+      expect(command.args).not.toContain("--full-auto");
+      const sandboxAt = command.args.indexOf("--sandbox");
+      expect(command.args[sandboxAt + 1]).toBe("workspace-write");
       expect(command.args).not.toContain("--dangerously-bypass-approvals-and-sandbox");
     } finally {
       await command.cleanup?.();
     }
   });
 
-  test("an explicit sandbox suppresses the deprecated --full-auto alias", async () => {
+  test("an explicit sandbox wins over fullAuto without duplicating --sandbox", async () => {
     const command = await new CodexAgent({
       fullAuto: true,
-      sandbox: "workspace-write",
+      sandbox: "danger-full-access",
     }).buildCommand({
       cwd: "/tmp/project",
       prompt: "go",
@@ -144,14 +146,15 @@ describe("CodexAgent approval-mode precedence", () => {
     });
     try {
       expect(command.args).not.toContain("--full-auto");
-      expect(command.args).toContain("--sandbox");
-      expect(command.args).toContain("workspace-write");
+      expect(command.args.filter((arg) => arg === "--sandbox")).toHaveLength(1);
+      expect(command.args).toContain("danger-full-access");
+      expect(command.args).not.toContain("workspace-write");
     } finally {
       await command.cleanup?.();
     }
   });
 
-  test("resume drops --full-auto and falls back to the dangerous bypass flag", async () => {
+  test("resume drops the fullAuto sandbox and falls back to the dangerous bypass flag", async () => {
     const command = await new CodexAgent({
       fullAuto: true,
       dangerouslyBypassApprovalsAndSandbox: true,
@@ -161,7 +164,7 @@ describe("CodexAgent approval-mode precedence", () => {
       options: { resumeSession: "thread-1" },
     });
     try {
-      expect(command.args).not.toContain("--full-auto");
+      expect(command.args).not.toContain("--sandbox");
       expect(command.args).toContain("--dangerously-bypass-approvals-and-sandbox");
     } finally {
       await command.cleanup?.();
