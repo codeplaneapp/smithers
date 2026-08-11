@@ -630,7 +630,7 @@ describe("status surfaces liveness, not just the row status", () => {
     }
   });
 
-  test("a cancel-requested run whose engine died reports cancelled, not orphaned (#1496)", async () => {
+  test("a cancel-requested run whose engine died reports cancel-pending, not terminal or orphaned (#1496)", async () => {
     const { sqlite, adapter } = createMemoryDb();
     try {
       await seedRun(adapter, "cancel-stuck", {
@@ -643,9 +643,9 @@ describe("status surfaces liveness, not just the row status", () => {
 
       const summary = await buildRunStatusSummary(adapter, "cancel-stuck", { nowMs: NOW });
 
-      expect(summary.verdict).toBe("cancelled");
-      expect(summary.liveness).toMatchObject({ state: "cancelled" });
-      expect(summary.reason).toContain("smithers cancel cancel-stuck");
+      expect(summary.verdict).toBe("cancel-pending");
+      expect(summary.liveness).toMatchObject({ state: "cancel-pending" });
+      expect(summary.reason).toContain("do not resume");
       expect(runStatusCtaCommands(summary).map((entry) => entry.command)).not.toContain("supervise -r cancel-stuck");
     } finally {
       sqlite.close();

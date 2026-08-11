@@ -81,7 +81,7 @@ describe("deriveRunState — owner PID verification before orphaned", () => {
     expect(view.state).toBe("orphaned");
   });
 
-  test("cancel requested + demonstrably dead owner → cancelled, not orphaned (#1496)", () => {
+  test("cancel requested + demonstrably dead owner → cancel-pending, not orphaned (#1496)", () => {
     const view = deriveRunState({
       run: makeRun({
         runtimeOwnerId: `pid:${deadPid()}:session`,
@@ -89,7 +89,7 @@ describe("deriveRunState — owner PID verification before orphaned", () => {
       }),
       now: NOW,
     });
-    expect(view.state).toBe("cancelled");
+    expect(view.state).toBe("cancel-pending");
     expect(view.unhealthy?.kind).toBe("engine-heartbeat-stale");
   });
 
