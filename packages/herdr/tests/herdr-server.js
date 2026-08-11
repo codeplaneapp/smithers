@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { HERDR_PROTOCOL } from "../src/HERDR_PROTOCOL.js";
 
 // Surfaces read process.env for dock mode. Isolate the test runner process from
 // a parent herdr TUI (HERDR_ENV=1) so labeled workspaces are created instead of
@@ -16,8 +17,11 @@ if (process.env.SMITHERS_HERDR_TEST_INHERIT_ENV !== "1") {
 }
 
 /**
- * Whether the `herdr` binary is on PATH. Tests that need a real server gate on
- * this via `describe.skipIf(!isHerdrInstalled())` so CI (no herdr) stays green.
+ * Whether the `herdr` binary is on PATH.
+ *
+ * Prefer {@link isCompatibleHerdrInstalled} for `describe.skipIf` gates: a herdr
+ * that is present but speaks a different wire protocol fails every real-server
+ * assertion rather than skipping.
  *
  * @returns {boolean}
  */
@@ -28,6 +32,41 @@ export function isHerdrInstalled() {
   } catch {
     return false;
   }
+}
+
+/**
+ * The wire protocol the installed herdr speaks, or `undefined` when herdr is
+ * absent (or too old to report one).
+ *
+ * `herdr status client` is a local, synchronous introspection of the binary —
+ * it needs no running server, so this is safe to evaluate at module load where
+ * `describe.skipIf` is resolved.
+ *
+ * @returns {number | undefined}
+ */
+export function installedHerdrProtocol() {
+  try {
+    const output = execSync("herdr status client", { stdio: ["ignore", "pipe", "ignore"], encoding: "utf8" });
+    const match = /^protocol:\s*(\d+)\s*$/m.exec(output);
+    return match ? Number(match[1]) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether a herdr that this client can actually talk to is installed. Tests
+ * needing a real server gate on `describe.skipIf(!isCompatibleHerdrInstalled())`
+ * so both a herdr-less CI box AND a developer machine carrying a
+ * different-protocol herdr stay green — the integration deliberately fails
+ * closed on a protocol mismatch (see `probeCompatibleHerdr`), so those suites
+ * would otherwise assert against errors the product is expected to return.
+ *
+ * @returns {boolean}
+ */
+export function isCompatibleHerdrInstalled() {
+  if (!isHerdrInstalled()) return false;
+  return installedHerdrProtocol() === HERDR_PROTOCOL;
 }
 
 /**

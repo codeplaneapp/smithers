@@ -21,7 +21,7 @@ import {
   runSmithers,
   writeExecutable,
 } from "../../../packages/smithers/tests/e2e-helpers.js";
-import { isHerdrInstalled, startHerdrServer } from "../../../packages/herdr/tests/herdr-server.js";
+import { isCompatibleHerdrInstalled, startHerdrServer } from "../../../packages/herdr/tests/herdr-server.js";
 
 const RUN_ID = "hijack-run";
 const NODE_ID = "node-a";
@@ -161,7 +161,7 @@ async function waitFor(predicate, timeoutMs = 8000, intervalMs = 150) {
   return Boolean(await predicate());
 }
 
-describe.skipIf(!isHerdrInstalled())("hijack into a herdr pane (real herdr)", () => {
+describe.skipIf(!isCompatibleHerdrInstalled())("hijack into a herdr pane (real herdr)", () => {
   /** @type {Awaited<ReturnType<typeof startHerdrServer>>} */
   let server;
 
