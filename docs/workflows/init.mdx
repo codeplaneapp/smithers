@@ -27,6 +27,30 @@ bunx smthrs workflow run init --input '{"force":false}'
    coding agent, removing retired installs; disable via `refreshSkills: false`.
 3. **output**: surfaces `{ written, skipped, changed, skills }`.
 
+## What init writes outside the project
+
+`init` reads as project-local, but the **refresh-skills** stage deliberately
+writes machine-wide: it copies the curated `smithers` skill (`SKILL.md` +
+`llms-full.txt`) into the skills directory of every coding agent it detects on
+this machine.
+
+| Agent | Directory |
+| --- | --- |
+| Claude Code | `~/.claude/skills/smithers` |
+| Pi | `~/.pi/agent/skills/smithers` |
+| Codex | `~/.codex/skills/smithers` |
+| OpenCode | `~/.config/opencode/skills/smithers` |
+| Kimi, Amp | `~/.config/agents/skills/smithers` |
+| Antigravity | `~/.gemini/skills/smithers` |
+
+Only detected agents are written to, and each write is a full overwrite of that
+skill folder. Skill opt-outs persist in `~/.smithers/skill-deselections.json`.
+
+Pass `smithers init --no-skill` (or `refreshSkills: false` when running the
+workflow) to keep `init` entirely inside the project. Everything else `init`
+writes stays under `./.smithers/` — except `smithers init --global`, which
+scaffolds the pack into `~/.smithers` (or `SMITHERS_HOME`) instead.
+
 ## Input
 
 | Field | Type | Default | Description |

@@ -58,7 +58,7 @@ export const initOptions = z.object({
     .boolean()
     .default(true)
     .describe(
-      "Install the curated `smithers` skill into your detected coding agents (Claude Code, Pi, Oh My Pi, Codex, OpenCode, Kimi, Amp, Antigravity) and, if a CLAUDE.md or AGENTS.md exists, append guidance on when to use smithers.sh workflows. Use --no-skill to skip.",
+      "Install the curated `smithers` skill into your detected coding agents and, if a CLAUDE.md or AGENTS.md exists, append guidance on when to use smithers.sh workflows. This writes OUTSIDE the project, into each detected agent's machine-wide skills directory: ~/.claude/skills/smithers, ~/.pi/agent/skills/smithers, ~/.omp/agent/skills/smithers (Oh My Pi), ~/.codex/skills/smithers, ~/.config/opencode/skills/smithers, ~/.config/agents/skills/smithers (Kimi, Amp) and ~/.gemini/skills/smithers (Antigravity). Use --no-skill to keep init project-local.",
     ),
   global: z
     .boolean()

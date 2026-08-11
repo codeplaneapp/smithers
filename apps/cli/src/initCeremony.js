@@ -90,6 +90,14 @@ export async function runInitCeremony(opts = {}) {
       if (result.installed.length === 0) return;
       const agents = result.installed.map((entry) => entry.agent).join(", ");
       log.message(`${pc.dim("→")} Installed the ${pc.cyan(result.skill)} skill for you ${pc.dim("(" + agents + ")")}`);
+      // These land outside the project. `init` reads as project-local, so name
+      // the machine-wide paths rather than leaving them to be discovered
+      // later (#1464 AWF-8).
+      const home = env.HOME ?? "";
+      const paths = result.installed
+        .map((entry) => (home && entry.path.startsWith(home) ? `~${entry.path.slice(home.length)}` : entry.path))
+        .join(", ");
+      log.message(`${pc.dim("  outside this project, in")} ${pc.dim(paths)} ${pc.dim("(--no-skill to skip)")}`);
     },
     agentDocsNoted(result) {
       const updated = result.files.filter((file) => file.status === "updated");
