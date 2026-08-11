@@ -42,34 +42,36 @@ afterEach(() => {
 });
 
 describe.skipIf(process.platform === "win32")("agent parent-death containment", () => {
-  test("SIGKILL of the engine kills its agent process group on macOS and Linux (#1464 AWF-3)", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-parent-death-"));
-    cleanupDirs.add(dir);
-    const agentPidFile = join(dir, "agent-pids");
-    const spawnedPidFile = join(dir, "spawned-pid");
-    const engine = spawn(process.execPath, [ENGINE_FIXTURE, agentPidFile, spawnedPidFile], {
-      cwd: process.cwd(),
-      stdio: "ignore",
-    });
-    expect(typeof engine.pid).toBe("number");
-    cleanupPids.add(engine.pid);
+  for (const mode of ["capture", "rpc"]) {
+    test(`SIGKILL of the engine kills its ${mode} agent process group on macOS and Linux (#1464 AWF-3)`, async () => {
+      const dir = mkdtempSync(join(tmpdir(), "smithers-parent-death-"));
+      cleanupDirs.add(dir);
+      const agentPidFile = join(dir, "agent-pids");
+      const spawnedPidFile = join(dir, "spawned-pid");
+      const engine = spawn(process.execPath, [ENGINE_FIXTURE, agentPidFile, spawnedPidFile, mode], {
+        cwd: process.cwd(),
+        stdio: "ignore",
+      });
+      expect(typeof engine.pid).toBe("number");
+      cleanupPids.add(engine.pid);
 
-    expect(
-      await waitFor(() => {
-        try {
-          return readFileSync(agentPidFile, "utf8").includes(":") && Number(readFileSync(spawnedPidFile, "utf8")) > 0;
-        } catch {
-          return false;
-        }
-      }),
-    ).toBe(true);
+      expect(
+        await waitFor(() => {
+          try {
+            return readFileSync(agentPidFile, "utf8").includes(":") && Number(readFileSync(spawnedPidFile, "utf8")) > 0;
+          } catch {
+            return false;
+          }
+        }),
+      ).toBe(true);
 
-    const spawnedPid = Number(readFileSync(spawnedPidFile, "utf8"));
-    const [agentPid, descendantPid] = readFileSync(agentPidFile, "utf8").split(":").map(Number);
-    for (const pid of [spawnedPid, agentPid, descendantPid]) cleanupPids.add(pid);
+      const spawnedPid = Number(readFileSync(spawnedPidFile, "utf8"));
+      const [agentPid, descendantPid] = readFileSync(agentPidFile, "utf8").split(":").map(Number);
+      for (const pid of [spawnedPid, agentPid, descendantPid]) cleanupPids.add(pid);
 
-    process.kill(engine.pid, "SIGKILL");
-    expect(await waitFor(() => !alive(engine.pid))).toBe(true);
-    expect(await waitFor(() => [spawnedPid, agentPid, descendantPid].every((pid) => !alive(pid)))).toBe(true);
-  }, 20_000);
+      process.kill(engine.pid, "SIGKILL");
+      expect(await waitFor(() => !alive(engine.pid))).toBe(true);
+      expect(await waitFor(() => [spawnedPid, agentPid, descendantPid].every((pid) => !alive(pid)))).toBe(true);
+    }, 20_000);
+  }
 });

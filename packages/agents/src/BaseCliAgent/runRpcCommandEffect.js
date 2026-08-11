@@ -8,6 +8,7 @@ import { logDebug, logWarning } from "@smthrs/observability/logging";
 import { toolOutputTruncatedTotal } from "@smthrs/observability/metrics";
 import { extractTextFromJsonValue } from "./extractTextFromJsonValue.js";
 import { normalizeTokenUsage } from "./normalizeTokenUsage.js";
+import { parentDeathCommand } from "./parentDeathCommand.js";
 import { truncateToBytes } from "./truncateToBytes.js";
 import { sanitizeCliArgs, sanitizeCliErrorCause } from "./sanitizeCliArgs.js";
 /** @typedef {import("./PiExtensionUiResponse.ts").PiExtensionUiResponse} PiExtensionUiResponse */
@@ -120,7 +121,8 @@ export function runRpcCommandEffect(command, args, options) {
     let stderrTruncated = false;
     let terminationStarted = false;
     logDebug("starting agent RPC command", logAnnotations, span);
-    const child = spawnFn(command, args, {
+    const invocation = parentDeathCommand(command, args, spawnFn === spawn);
+    const child = spawnFn(invocation.command, invocation.args, {
       cwd,
       env,
       detached: true,
