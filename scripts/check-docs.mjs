@@ -3783,9 +3783,12 @@ function checkCliAgentHijackDocsMatchLauncher() {
     [CLI_AGENTS_INTEGRATION, "| `CodexAgent` | `codex resume` |"],
     [CLI_AGENTS_INTEGRATION, "| `AntigravityAgent` | `agy --conversation` |"],
     [CLI_AGENTS_INTEGRATION, "| `PiAgent` | `pi --session` |"],
+    [CLI_AGENTS_INTEGRATION, "| `OmpAgent` | `omp --resume` |"],
     [CLI_AGENTS_INTEGRATION, "| `KimiAgent` | `kimi --session` |"],
     [CLI_AGENTS_INTEGRATION, "| `ForgeAgent` | `forge --conversation-id` |"],
     [CLI_AGENTS_INTEGRATION, "| `AmpAgent` | `amp threads continue` |"],
+    [CLI_HIJACK_SOURCE, 'candidate.engine === "omp"'],
+    [CLI_HIJACK_SOURCE, 'command: "omp"'],
     [
       CLI_AGENTS_INTEGRATION,
       "native `bunx smthrs hijack` support for Cursor, Vibe, OpenCode, and OpenClaw is not shipped yet",
