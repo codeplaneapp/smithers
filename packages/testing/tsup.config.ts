@@ -20,6 +20,7 @@ export default defineConfig({
     runtimeConformance: "src/runtimeConformance.ts",
     agentTraceVector: "src/agentTraceVector.ts",
     virtualClock: "src/virtualClock.ts",
+    loadOptionalSmthrs: "src/loadOptionalSmthrs.ts",
     scriptedAgent: "src/scriptedAgent.ts",
     runScenario: "src/runScenario.ts",
     runWorkflowScenario: "src/runWorkflowScenario.ts",

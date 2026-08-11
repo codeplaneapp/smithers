@@ -1176,6 +1176,26 @@ var init_ambiguity = __esm({
   }
 });
 
+// src/loadOptionalSmthrs.ts
+async function loadOptionalSmthrs(action) {
+  if (!smthrsPromise) {
+    smthrsPromise = import("smthrs").catch((error) => {
+      smthrsPromise = void 0;
+      throw new Error(
+        `${action}: \`npm install smthrs\`. "smthrs" is an optional peerDependency of @smthrs/testing. Original error: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
+      );
+    });
+  }
+  return smthrsPromise;
+}
+var smthrsPromise;
+var init_loadOptionalSmthrs = __esm({
+  "src/loadOptionalSmthrs.ts"() {
+    "use strict";
+  }
+});
+
 // src/runWorkflowScenario.ts
 import { randomUUID } from "crypto";
 function isEffectLike(value) {
@@ -1214,7 +1234,9 @@ async function runWorkflowScenario(options) {
   }
   let runWorkflowFn = options.runWorkflowFn;
   if (!runWorkflowFn) {
-    const mod = await import("smthrs");
+    const mod = await loadOptionalSmthrs(
+      "Install smthrs to use runWorkflowScenario, or pass runWorkflowFn"
+    );
     const rw = mod.runWorkflow;
     if (typeof rw !== "function") {
       throw new Error("runWorkflowScenario: smthrs.runWorkflow not available; pass runWorkflowFn");
@@ -1236,6 +1258,7 @@ var init_runWorkflowScenario = __esm({
   "src/runWorkflowScenario.ts"() {
     "use strict";
     init_virtualClock();
+    init_loadOptionalSmthrs();
   }
 });
 

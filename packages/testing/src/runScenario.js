@@ -703,6 +703,21 @@ function createVirtualClock(options = {}) {
   };
 }
 
+// src/loadOptionalSmthrs.ts
+var smthrsPromise;
+async function loadOptionalSmthrs(action) {
+  if (!smthrsPromise) {
+    smthrsPromise = import("smthrs").catch((error) => {
+      smthrsPromise = void 0;
+      throw new Error(
+        `${action}: \`npm install smthrs\`. "smthrs" is an optional peerDependency of @smthrs/testing. Original error: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
+      );
+    });
+  }
+  return smthrsPromise;
+}
+
 // src/runWorkflowScenario.ts
 import { randomUUID } from "crypto";
 function isEffectLike(value) {
@@ -741,7 +756,9 @@ async function runWorkflowScenario(options) {
   }
   let runWorkflowFn = options.runWorkflowFn;
   if (!runWorkflowFn) {
-    const mod = await import("smthrs");
+    const mod = await loadOptionalSmthrs(
+      "Install smthrs to use runWorkflowScenario, or pass runWorkflowFn"
+    );
     const rw = mod.runWorkflow;
     if (typeof rw !== "function") {
       throw new Error("runWorkflowScenario: smthrs.runWorkflow not available; pass runWorkflowFn");

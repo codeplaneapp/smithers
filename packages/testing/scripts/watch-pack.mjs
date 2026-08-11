@@ -29,6 +29,7 @@ import { fileURLToPath } from "node:url";
 import { Effect } from "effect";
 import { z } from "zod";
 import { SmithersDb } from "@smthrs/db/adapter";
+import { loadOptionalSmthrs } from "../src/loadOptionalSmthrs.js";
 import {
 	createVirtualClock,
 	expectNodeState,
@@ -43,30 +44,7 @@ import {
 	focusHerdrWorkspaceByLabel,
 } from "../src/herdrBridge.ts";
 
-/**
- * `smthrs` is an optional peer of `@smthrs/testing` — depending on it outright
- * would close a publish-time cycle (smthrs → @smthrs/testing → smthrs). Only
- * the watch-pack scenarios need the facade, so load it lazily and turn the
- * not-installed case into an actionable error instead of ERR_MODULE_NOT_FOUND.
- *
- * @type {Promise<typeof import("smthrs")> | undefined}
- */
-let smthrsPromise;
-
-async function loadSmthrs() {
-	if (!smthrsPromise) {
-		smthrsPromise = import("smthrs").catch((error) => {
-			smthrsPromise = undefined;
-			throw new Error(
-				'watch-pack needs the optional peer "smthrs". Install it with `npm install smthrs` ' +
-					`(it is an optional peerDependency of @smthrs/testing). Original error: ${
-						error instanceof Error ? error.message : String(error)
-					}`,
-			);
-		});
-	}
-	return smthrsPromise;
-}
+const loadSmthrs = () => loadOptionalSmthrs("Install smthrs to use watch-pack");
 
 const HERE = pathDirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(HERE, "../fixtures/agent-traces");

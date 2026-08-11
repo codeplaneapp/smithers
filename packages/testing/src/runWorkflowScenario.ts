@@ -6,6 +6,7 @@
  */
 
 import { type VirtualClock, createVirtualClock } from "./virtualClock.ts";
+import { loadOptionalSmthrs } from "./loadOptionalSmthrs.ts";
 import { randomUUID } from "node:crypto";
 
 /** Structural workflow definition (smithers() return value). */
@@ -93,7 +94,9 @@ export async function runWorkflowScenario(options: RunWorkflowScenarioOptions): 
 
   let runWorkflowFn = options.runWorkflowFn;
   if (!runWorkflowFn) {
-    const mod = (await import("smthrs")) as unknown as {
+    const mod = (await loadOptionalSmthrs(
+      "Install smthrs to use runWorkflowScenario, or pass runWorkflowFn",
+    )) as unknown as {
       runWorkflow?: (wf: ScenarioWorkflow, opts: Record<string, unknown>) => unknown;
     };
     const rw = mod.runWorkflow;
