@@ -172,7 +172,6 @@ export const CLI_AGENT_SURFACE_MANIFEST = [
       "--local-provider",
       "--sandbox",
       "--profile",
-      "--full-auto",
       "--dangerously-bypass-approvals-and-sandbox",
       "--cd",
       "--skip-git-repo-check",
