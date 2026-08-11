@@ -3944,12 +3944,12 @@ export class SmithersDb {
         );
         if (!run) {
           return yield* Effect.fail(
-            new SmithersError("RUN_NOT_FOUND", `Run not found: ${row.runId}`, { runId: row.runId }),
+            new SmithersErrorClass("RUN_NOT_FOUND", `Run not found: ${row.runId}`, { runId: row.runId }),
           );
         }
         if (!STEER_ACTIVE_RUN_STATUSES.has(run.status)) {
           return yield* Effect.fail(
-            new SmithersError("RUN_NOT_ACTIVE", `Run is not active (status: ${run.status})`, {
+            new SmithersErrorClass("RUN_NOT_ACTIVE", `Run is not active (status: ${run.status})`, {
               runId: row.runId,
               status: run.status,
             }),
@@ -3966,7 +3966,7 @@ export class SmithersDb {
         );
         if (!node) {
           return yield* Effect.fail(
-            new SmithersError("NODE_NOT_IN_RUN", `No node "${row.nodeId}" in run ${row.runId}`, {
+            new SmithersErrorClass("NODE_NOT_IN_RUN", `No node "${row.nodeId}" in run ${row.runId}`, {
               runId: row.runId,
               nodeId: row.nodeId,
             }),
