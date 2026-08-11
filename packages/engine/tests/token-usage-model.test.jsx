@@ -138,6 +138,24 @@ describe("TokenUsageReported model attribution", () => {
         cacheWriteTokens: 2,
         reasoningTokens: 3,
       });
+      // A failed attempt still burned tokens, so it has to reach
+      // `_smithers_run_usage` too — otherwise `smithers usage --run` undercounts
+      // exactly the runs whose cost the operator most wants explained (#1464
+      // AWF-6).
+      expect(readRunUsageRows(dbPath)).toMatchObject([
+        {
+          run_id: result.runId,
+          node_id: "t",
+          iteration: 0,
+          attempt: 1,
+          model: "failed-response-model",
+          input_tokens: 17,
+          output_tokens: 4,
+          cache_read_tokens: 8,
+          cache_write_tokens: 2,
+          reasoning_tokens: 3,
+        },
+      ]);
     } finally {
       cleanup();
     }

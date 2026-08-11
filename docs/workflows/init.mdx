@@ -43,12 +43,13 @@ this machine.
 | Kimi, Amp | `~/.config/agents/skills/smithers` |
 | Antigravity | `~/.gemini/skills/smithers` |
 
-Only detected agents are written to, and each write is a full overwrite of that
-skill folder. Skill opt-outs persist in `~/.smithers/skill-deselections.json`.
+Only detected agents are written to, and each write overwrites that folder's
+`SKILL.md` and `llms-full.txt`, leaving any other file already in the folder
+alone. Skill opt-outs persist in `~/.smithers/skill-deselections.json`.
 
-Pass `smithers init --no-skill` (or `refreshSkills: false` when running the
+Pass `bunx smthrs init --no-skill` (or `refreshSkills: false` when running the
 workflow) to keep `init` entirely inside the project. Everything else `init`
-writes stays under `./.smithers/` — except `smithers init --global`, which
+writes stays under `./.smithers/`, except `bunx smthrs init --global`, which
 scaffolds the pack into `~/.smithers` (or `SMITHERS_HOME`) instead.
 
 ## Input

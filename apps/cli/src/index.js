@@ -10894,6 +10894,12 @@ const cli = Cli.create({
         try {
           const { adapter, cleanup } = await findAndOpenDb();
           try {
+            // A run that spent nothing and a run ID that does not exist both sum
+            // to zero. Without this check a typo'd ID reports "0 tokens" and
+            // exits 0, which reads as an answer rather than a miss.
+            if (!(await adapter.getRun(runId))) {
+              return fail({ code: "RUN_NOT_FOUND", message: `Run not found: ${runId}`, exitCode: 4 });
+            }
             const usage = await adapter.getRunTokenUsage(runId);
             process.stderr.write(
               `${runId}: ${usage.totalTokens.toLocaleString()} tokens ` +
