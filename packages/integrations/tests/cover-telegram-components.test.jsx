@@ -13,6 +13,7 @@ import React from "react";
 import { z } from "zod";
 import { Effect } from "effect";
 import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { createSmithers, renderFrame, runWorkflow, signalRun } from "smthrs";
 import { SmithersCtx } from "@smthrs/react-reconciler/context";
@@ -43,8 +44,17 @@ const telegramConfig = { botToken: fixture.token, apiBaseUrl: fixture.apiBaseUrl
 const NullContext = React.createContext(/** @type {any} */ (null));
 const msgSchema = z.object({ text: z.string() }).passthrough();
 
+// Allocated once, at module scope. `makeTempDirPath` re-arms its `bun:test`
+// drain hook whenever the registry is empty, so a per-test allocation
+// registers a hook from inside every test — the mid-test registration that
+// intermittently stalls a test for the full 5s timeout. See the longer note
+// in github-components.test.jsx.
+const apiRoot = makeTempDirPath("smithers-tgc-cov-");
+let apiCount = 0;
+
 function makeApi(schemas) {
-  const dir = makeTempDirPath("smithers-tgc-cov-");
+  const dir = join(apiRoot, `api-${(apiCount += 1)}`);
+  mkdirSync(dir, { recursive: true });
   return createSmithers(schemas, { dbPath: join(dir, "db.sqlite") });
 }
 

@@ -15,6 +15,7 @@ import { Task } from "@smthrs/components";
 import { SendMessage, TelegramSendResultSchema } from "../src/telegram/components/SendMessage.js";
 import { configureTelegram } from "../src/telegram/config.js";
 import { startTelegramFixture } from "./telegram-fixture.js";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 
@@ -25,8 +26,17 @@ afterAll(() => {
 });
 const telegramConfig = { botToken: fixture.token, apiBaseUrl: fixture.apiBaseUrl };
 
+// Allocated once, at module scope. `makeTempDirPath` re-arms its `bun:test`
+// drain hook whenever the registry is empty, so a per-test allocation
+// registers a hook from inside every test — the mid-test registration that
+// intermittently stalls a test for the full 5s timeout. See the longer note
+// in github-components.test.jsx.
+const apiRoot = makeTempDirPath("smithers-telegram-");
+let apiCount = 0;
+
 function makeApi() {
-  const dir = makeTempDirPath("smithers-telegram-");
+  const dir = join(apiRoot, `api-${(apiCount += 1)}`);
+  mkdirSync(dir, { recursive: true });
   return createSmithers(
     {
       note: z.object({ text: z.string() }),

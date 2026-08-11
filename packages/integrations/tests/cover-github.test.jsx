@@ -32,7 +32,13 @@ function startFixture() {
             status: 403,
             headers: {
               "x-ratelimit-remaining": "0",
-              "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 1),
+              // Far enough out to stay in the future after the second is
+              // truncated. `+ 1` leaves a deadline that is only a full second
+              // away when the clock sits exactly on a boundary — at x.999s the
+              // client sees ~1ms, and any scheduling hiccup makes its
+              // `resetMs > 0` check read the window as already elapsed and
+              // return null. Still under the client's 60s cap.
+              "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 30),
             },
           },
         );
@@ -77,7 +83,12 @@ describe("GitHubClient rate-limit + parsing edge branches", () => {
     expect(error.details?.status).toBe(403);
     expect(error.details?.rateLimited).toBe(true);
     expect(error.details?.retryable).toBe(true);
-    expect(typeof error.details?.retryAfterMs).toBe("number");
+    // Derived from the 30s fixture deadline, minus however much of the current
+    // second had elapsed when the header was built and however long the
+    // round-trip took. The lower bound leaves far more slack than the test's
+    // own 10s timeout would ever allow.
+    expect(error.details?.retryAfterMs).toBeGreaterThan(20_000);
+    expect(error.details?.retryAfterMs).toBeLessThanOrEqual(30_000);
   }, 10_000);
 
   test("a past x-ratelimit-reset falls through to a null retryAfterMs", async () => {

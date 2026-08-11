@@ -7,6 +7,7 @@ import React from "react";
 import { z } from "zod";
 import { Effect } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { createSmithers, renderFrame } from "smthrs";
 import { SmithersCtx } from "@smthrs/react-reconciler/context";
@@ -282,8 +283,17 @@ describe("LinearWebhookSource edge branches", () => {
 
 const NullContext = React.createContext(/** @type {any} */ (null));
 
+// Allocated once, at module scope. `makeTempDirPath` re-arms its `bun:test`
+// drain hook whenever the registry is empty, so a per-test allocation
+// registers a hook from inside every test — the mid-test registration that
+// intermittently stalls a test for the full 5s timeout. See the longer note
+// in github-components.test.jsx.
+const apiRoot = makeTempDirPath("smithers-lin-cov-");
+let apiCount = 0;
+
 function makeApi(schemas) {
-  const dir = makeTempDirPath("smithers-lin-cov-");
+  const dir = join(apiRoot, `api-${(apiCount += 1)}`);
+  mkdirSync(dir, { recursive: true });
   return createSmithers(schemas, { dbPath: join(dir, "db.sqlite") });
 }
 
