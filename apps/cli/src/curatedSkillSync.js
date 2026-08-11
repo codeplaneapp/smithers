@@ -94,7 +94,7 @@ export function curatedSkillStatus(opts = {}) {
   // there, so reporting it as stale would be a defect the user cannot fix.
   const deselected = new Set(loadSkillDeselections(homeDir));
 
-  for (const target of skillTargets(homeDir)) {
+  for (const target of skillTargets(homeDir, env)) {
     if (deselected.has(target.id)) continue;
     const dest = join(target.skillsDir, CURATED_SKILL_NAME);
     const skillMd = join(dest, "SKILL.md");

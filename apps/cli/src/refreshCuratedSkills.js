@@ -189,7 +189,7 @@ export function refreshCuratedSkills(opts = {}) {
     result.changed = true;
   };
 
-  for (const target of skillTargets(homeDir)) {
+  for (const target of skillTargets(homeDir, env)) {
     const skillsDir = target.skillsDir;
 
     // A deselected agent skips (re)install of the current skill, but MUST still

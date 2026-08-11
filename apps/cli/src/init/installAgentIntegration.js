@@ -46,7 +46,7 @@ function runCommandSync(command, args) {
  *   run-mirroring, MCP), with the curated skill as the fallback when the
  *   plugin install fails (offline, old CLI).
  * - Hermes / OpenClaw → their native plugin + MCP config (wireExtraAgents).
- * - Codex, Pi, OpenCode, Kimi, Amp, Antigravity → the curated `smithers`
+ * - Codex, Pi, Oh My Pi, OpenCode, Kimi, Amp, Antigravity → the curated `smithers`
  *   skill copied into that agent's skills directory.
  * - Anything else → nothing to install; reported as such.
  *
@@ -97,7 +97,7 @@ export function installAgentIntegration(opts) {
     }
   }
 
-  if (skillTargets(homeDir).some((target) => target.id === agentId)) {
+  if (skillTargets(homeDir, env).some((target) => target.id === agentId)) {
     const skill = installSkillFor(agentId, env, homeDir, detections);
     return { agent: agentId, kind: skill.ok ? "skill" : "none", ok: skill.ok, detail: skill.detail };
   }

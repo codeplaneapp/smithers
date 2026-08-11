@@ -1687,6 +1687,21 @@ const HIJACK_COMPLETION_POLL_MS = 100;
 // persist at session creation (e.g. claude-code) keep the low-latency early
 // handoff.
 const HIJACK_RESUME_AFTER_TURN_ENGINES = new Set(["codex", "omp"]);
+
+function createCliTurnCompletionState() {
+  let completed = false;
+  return {
+    begin() {
+      completed = false;
+    },
+    complete() {
+      completed = true;
+    },
+    isCompleted() {
+      return completed;
+    },
+  };
+}
 const MAX_CONTINUATION_STATE_BYTES = 10 * 1024 * 1024;
 
 /**
@@ -4879,6 +4894,7 @@ async function legacyExecuteTask(
   let cacheKey = null;
   let cacheJjBase = null;
   let responseText = null;
+  const cliTurnCompletion = createCliTurnCompletionState();
   let effectiveAgent = null;
   let generationTools;
   /** @type {number | null} */
@@ -5897,7 +5913,6 @@ async function legacyExecuteTask(
           }
         }
         const activeCliActions = new Set();
-        let cliTurnCompleted = false;
         let conversationMessages = guidedResumeMessages ? [...guidedResumeMessages] : null;
         /**
          * @param {unknown[] | undefined} messages
@@ -6145,7 +6160,11 @@ async function legacyExecuteTask(
             if (handoffMode === "native-cli" && activeCliActions.size > 0) {
               return;
             }
-            if (handoffMode === "native-cli" && HIJACK_RESUME_AFTER_TURN_ENGINES.has(engine) && !cliTurnCompleted) {
+            if (
+              handoffMode === "native-cli" &&
+              HIJACK_RESUME_AFTER_TURN_ENGINES.has(engine) &&
+              !cliTurnCompletion.isCompleted()
+            ) {
               return;
             }
             const handoffConfig = agentHijackConfig(effectiveAgent, attemptMeta);
@@ -6223,7 +6242,7 @@ async function legacyExecuteTask(
               ...(typeof event.resume === "string" ? { agentResume: event.resume } : {}),
             });
             if (event.type === "completed") {
-              cliTurnCompleted = true;
+              cliTurnCompletion.complete();
               if (!responseText && event.answer) {
                 responseText = event.answer;
               }
@@ -6476,8 +6495,9 @@ async function legacyExecuteTask(
                             : {
                                 prompt: effectivePrompt,
                               };
-                      const doGenerate = () =>
-                        effectiveAgent.generate({
+                      const doGenerate = () => {
+                        cliTurnCompletion.begin();
+                        return effectiveAgent.generate({
                           options: undefined,
                           abortSignal: taskSignal,
                           ...agentCall,
@@ -6523,6 +6543,7 @@ async function legacyExecuteTask(
                           onStepEnd: handleSdkStepFinish,
                           outputSchema: desc.outputSchema,
                         });
+                      };
                       return runWithToolContext(toolCtx, doGenerate);
                     },
                     catch: (error) => error,
@@ -6868,6 +6889,7 @@ async function legacyExecuteTask(
               "engine:schema-retry",
             );
             const checkpointPublicationBeforeCorrection = checkpointPublicationCount;
+            cliTurnCompletion.begin();
             const retryResult = await raceAgentCallAbort(
               effectiveAgent.generate({
                 options: undefined,
@@ -7231,6 +7253,7 @@ async function legacyExecuteTask(
       // Append the correction as a user message to the conversation
       const retryMessages = [...schemaCorrectionMessages, { role: "user", content: schemaRetryPrompt }];
       const checkpointPublicationBeforeCorrection = checkpointPublicationCount;
+      cliTurnCompletion.begin();
       const schemaRetryResult = await raceAgentCallAbort(
         effectiveAgent.generate({
           options: undefined,
@@ -10444,6 +10467,7 @@ export function runWorkflow(workflow, opts) {
 }
 
 export const __engineInternals = {
+  createCliTurnCompletionState,
   isSamePath,
   sha256Hex,
   isBlockingAgentActionKind,

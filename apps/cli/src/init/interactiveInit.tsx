@@ -31,7 +31,7 @@ export type SkillOption = { id: string; label: string };
 /** Skill install targets (agent IDs that can receive the smithers skill). */
 export function buildSkillOptions(env: NodeJS.ProcessEnv = process.env): SkillOption[] {
   const homeDir = env.HOME ?? homedir();
-  return skillTargets(homeDir).map((t) => ({ id: t.id, label: t.displayName }));
+  return skillTargets(homeDir, env).map((t) => ({ id: t.id, label: t.displayName }));
 }
 
 /**

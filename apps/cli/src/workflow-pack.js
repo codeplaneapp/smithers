@@ -549,10 +549,11 @@ export function initWorkflowPack(options = {}) {
     // (marker says opted-out, so it is never refreshed). Filtering by the
     // marker keeps disk and marker consistent; an empty marker = install all.
     let targets = options.selectedSkillTargets;
+    const skillEnv = options.skillOptions?.env ?? env;
     if (targets === undefined) {
       const optedOut = new Set(loadSkillDeselections(homeDir));
       if (optedOut.size > 0) {
-        targets = skillTargets(homeDir)
+        targets = skillTargets(homeDir, skillEnv)
           .map((t) => t.id)
           .filter((id) => !optedOut.has(id));
       }
@@ -568,7 +569,7 @@ export function initWorkflowPack(options = {}) {
     // passed an explicit selection (undefined = non-interactive, which honors
     // the existing marker above rather than rewriting it).
     if (options.selectedSkillTargets !== undefined) {
-      const allIds = skillTargets(homeDir).map((t) => t.id);
+      const allIds = skillTargets(homeDir, skillEnv).map((t) => t.id);
       const deselectedIds = allIds.filter((id) => !options.selectedSkillTargets.includes(id));
       try {
         saveSkillDeselections(homeDir, deselectedIds);

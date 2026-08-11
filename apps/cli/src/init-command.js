@@ -58,7 +58,7 @@ export const initOptions = z.object({
     .boolean()
     .default(true)
     .describe(
-      "Install the curated `smithers` skill into your detected coding agents (Claude Code, Pi, Codex, OpenCode, Kimi, Amp, Antigravity) and, if a CLAUDE.md or AGENTS.md exists, append guidance on when to use smithers.sh workflows. Use --no-skill to skip.",
+      "Install the curated `smithers` skill into your detected coding agents (Claude Code, Pi, Oh My Pi, Codex, OpenCode, Kimi, Amp, Antigravity) and, if a CLAUDE.md or AGENTS.md exists, append guidance on when to use smithers.sh workflows. Use --no-skill to skip.",
     ),
   global: z
     .boolean()
