@@ -16,6 +16,7 @@ describe("CLI command input bounds", () => {
           runId: "r".repeat(CLI_IDENTIFIER_MAX_LENGTH),
           workflow: "w".repeat(CLI_ARGUMENT_MAX_LENGTH),
           prompt: "p".repeat(CLI_TEXT_ARGUMENT_MAX_LENGTH),
+          goal: "g".repeat(CLI_TEXT_ARGUMENT_MAX_LENGTH),
           input: "i".repeat(CLI_JSON_ARGUMENT_MAX_BYTES),
           retry: 3,
           unset: null,
@@ -33,6 +34,9 @@ describe("CLI command input bounds", () => {
       new RegExp(`maximum length of ${CLI_ARGUMENT_MAX_LENGTH}`),
     );
     expect(() => assertCliArgumentBounds({ note: "n".repeat(CLI_TEXT_ARGUMENT_MAX_LENGTH + 1) }, "options")).toThrow(
+      new RegExp(`maximum length of ${CLI_TEXT_ARGUMENT_MAX_LENGTH}`),
+    );
+    expect(() => assertCliArgumentBounds({ goal: "g".repeat(CLI_TEXT_ARGUMENT_MAX_LENGTH + 1) }, "args")).toThrow(
       new RegExp(`maximum length of ${CLI_TEXT_ARGUMENT_MAX_LENGTH}`),
     );
     expect(() => assertCliArgumentBounds({ value: "v".repeat(CLI_JSON_ARGUMENT_MAX_BYTES + 1) }, "options")).toThrow(
