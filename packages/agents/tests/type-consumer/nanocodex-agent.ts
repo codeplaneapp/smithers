@@ -6,7 +6,7 @@ import {
   type NanocodexAgentOptions,
   type NanocodexAuth,
   type NanocodexGenerateOptions,
-} from "@smithers-orchestrator/agents";
+} from "@smthrs/agents";
 import type { GenerateTextResult, Output } from "ai";
 import type { NanocodexGenerateOptions as SourceNanocodexGenerateOptions } from "../../src/NanocodexAgentOptions";
 
