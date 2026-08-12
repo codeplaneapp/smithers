@@ -17,4 +17,12 @@ export type TerminalPalette = {
   magenta: string;
   cyan: string;
   white: string;
+  brightBlack: string;
+  brightRed: string;
+  brightGreen: string;
+  brightYellow: string;
+  brightBlue: string;
+  brightMagenta: string;
+  brightCyan: string;
+  brightWhite: string;
 };

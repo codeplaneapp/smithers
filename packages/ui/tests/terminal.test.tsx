@@ -158,6 +158,7 @@ describe("<Terminal> headless rendering", () => {
   test("uses registry terminal palettes", () => {
     expect(terminalThemeFor("fucory", "dark").background).toBe("#07090d");
     expect(terminalThemeFor("rose-pine", "light").red).toBeTruthy();
+    expect(terminalThemeFor("catppuccin", "light").brightRed).toBe("#de293e");
   });
 
   test("disables xterm cursor blinking when reduced motion is preferred", async () => {

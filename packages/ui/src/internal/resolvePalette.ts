@@ -11,7 +11,9 @@ function currentRoot(): PaletteRoot | null {
 /** Resolve `data-palette`, accepting only registered palette keys. */
 export function resolvePalette(root: PaletteRoot | null = currentRoot()): ResolvedPalette {
   const explicit = root?.getAttribute("data-palette");
-  return explicit && explicit in themeRegistry ? (explicit as ResolvedPalette) : DEFAULT_THEME_KEY;
+  return explicit && Object.prototype.hasOwnProperty.call(themeRegistry, explicit)
+    ? (explicit as ResolvedPalette)
+    : DEFAULT_THEME_KEY;
 }
 
 /** Subscribe to palette changes on the document root. */

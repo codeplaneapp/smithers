@@ -23,10 +23,10 @@ describe("agentic response CSS", () => {
 
   test("resolves response and code colors through the dark theme token surface", () => {
     const darkBlock = workflowUiThemeCss.match(/:root\[data-theme='dark'\] \{ ([^}]*) \}/)?.[1] ?? "";
-    expect(darkBlock).toContain("--text-muted:#929eac");
+    expect(darkBlock).toContain("--text-muted:#94a0ae");
     expect(darkBlock).toContain("--code-bg:#011627");
     expect(darkBlock).toContain("--code-text:#d6deeb");
-    expect(agenticResponseCss).toContain("background:var(--text-muted, #7c7b89)");
+    expect(agenticResponseCss).toContain("background:var(--text-muted, #676676)");
     expect(agenticResponseCss).toContain("background:var(--code-bg, #FBFBFB)");
     expect(agenticResponseCss).toContain("color:var(--code-text, #403f53)");
   });

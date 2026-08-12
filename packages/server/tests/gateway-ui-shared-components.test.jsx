@@ -127,10 +127,10 @@ describe("Gateway UI with shared components", () => {
       expect(htmlResponse.status).toBe(200);
       const html = await htmlResponse.text();
       expect(html).toContain("color-scheme:light");
-      expect(html).toContain("--bg:#fafafa");
+      expect(html).toContain("--bg:#FBFBFB");
       expect(html).toContain("@media (prefers-color-scheme: dark)");
       expect(html).toContain(":root[data-theme='dark']");
-      expect(html).toContain("--bg:#09090b");
+      expect(html).toContain("--bg:#011627");
       expect(html).toContain('new URLSearchParams(location.search).get("theme")');
       expect(html).toContain('new URLSearchParams(location.search).get("palette")');
       expect(html).toContain("document.documentElement.dataset.theme=t");
@@ -146,8 +146,8 @@ describe("Gateway UI with shared components", () => {
     expect(bundle).toContain(".sui-button");
     expect(bundle).toContain(".sui-card");
     expect(bundle).toContain(".sui-dialog-content");
-    expect(bundle).toContain("color-mix(in srgb, var(--brand, #8f46b5)");
-    expect(bundle).toContain("var(--surface, #f6f6f7)");
+    expect(bundle).toContain("color-mix(in srgb, var(--brand, #9449bc)");
+    expect(bundle).toContain("var(--surface, #fefefe)");
     expect(bundle).toContain("data-smithers-ui");
     // Note: the component sheet itself carries no dark values (enforced by the
     // ui package's css-contract test); dark comes from the host page flipping
