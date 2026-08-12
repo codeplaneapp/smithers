@@ -1,5 +1,14 @@
-import { plugin } from "bun";
 import mdx from "@mdx-js/esbuild";
+
+/**
+ * Teach the runtime module loader to compile `.mdx` workflow files on import.
+ *
+ * `Bun.plugin` is a Bun built-in with no Node equivalent, and a static
+ * `import { plugin } from "bun"` would break the whole package under Node.
+ * Read it off the global instead, and no-op on Node: the CLI installs an
+ * esbuild-based module loader there, which handles `.mdx` itself.
+ */
 export function mdxPlugin() {
-  plugin(mdx());
+  if (typeof Bun === "undefined") return;
+  Bun.plugin(mdx());
 }

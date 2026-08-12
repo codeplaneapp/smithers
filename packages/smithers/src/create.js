@@ -5,8 +5,7 @@
  */
 // @smithers-type-exports-end
 
-import { Database } from "bun:sqlite";
-import { drizzle } from "drizzle-orm/bun-sqlite";
+import { loadBunSqliteDatabase, loadBunSqliteDrizzle } from "@smthrs/db/bunSqliteRuntime";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
 import React from "react";
 import { createSmithersContext, SmithersContext as GlobalSmithersContext } from "@smthrs/react-reconciler/context";
@@ -438,6 +437,7 @@ export function createSmithers(schemas, opts) {
   const { tables, drizzleSchema, schemaRegistry, outputs, zodToKeyName, ambiguousZodSchemas } =
     prepareSmithersTables(schemas);
   // 2. Create SQLite db
+  const Database = loadBunSqliteDatabase();
   const sqlite = new Database(dbPath);
   sqlite.run(`PRAGMA journal_mode = ${opts?.journalMode ?? "WAL"}`);
   // 30s timeout: concurrent worktrees each spawn agent processes that all write
@@ -487,7 +487,7 @@ export function createSmithers(schemas, opts) {
     syncZodTableSchema(sqlite, tableName, zodSchema);
   }
   // 4. Create Drizzle instance with all tables in the schema
-  const db = drizzle(sqlite, { schema: drizzleSchema });
+  const db = loadBunSqliteDrizzle()(sqlite, { schema: drizzleSchema });
   ensureSmithersTables(db);
   const memoryService = createMemoryService(db);
   // 5. Build the public API around the prepared db + table metadata.

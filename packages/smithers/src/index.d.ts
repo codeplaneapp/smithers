@@ -350,6 +350,14 @@ declare function createExternalSmithers<S extends Record<string, zod.ZodObject<a
 };
 type ExternalSmithersConfig$1<S> = ExternalSmithersConfig$2<S>;
 
+/**
+ * Teach the runtime module loader to compile `.mdx` workflow files on import.
+ *
+ * `Bun.plugin` is a Bun built-in with no Node equivalent, and a static
+ * `import { plugin } from "bun"` would break the whole package under Node.
+ * Read it off the global instead, and no-op on Node: the CLI installs an
+ * esbuild-based module loader there, which handles `.mdx` itself.
+ */
 declare function mdxPlugin(): void;
 
 /**
