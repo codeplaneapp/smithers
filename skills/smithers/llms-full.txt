@@ -252,10 +252,17 @@ See JSX Installation for the package list, TypeScript configuration, and optiona
 
 ## Requirements
 
-- [Bun](https://bun.sh) >= 1.3
+- [Bun](https://bun.sh) >= 1.3, or [Node](https://nodejs.org) >= 22.15
 - TypeScript >= 5
 - Model or provider credentials (e.g. [Anthropic](https://docs.anthropic.com) `ANTHROPIC_API_KEY`)
 - A version control system for snapshotting and isolating agent work: [jj (Jujutsu)](https://github.com/jj-vcs/jj) or [git](https://git-scm.com). jj is preferred and powers durability, time-travel, and per-task worktrees.
+
+### Runtime
+
+Bun is the recommended runtime and the one every example assumes. Node runs the
+library, the CLI, and the gateway too, with two limits: the sqlite backend needs
+Bun (use `SMITHERS_BACKEND=pglite` or `postgres`), and gateway custom-UI bundling
+needs Bun. See Node runtime for the full contract.
 
 ### Version control
 
