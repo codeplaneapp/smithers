@@ -15,6 +15,7 @@
     "test:runtime:browser": "pnpm run test:browser:types && pnpm run test:browser:package && pnpm run test:browser",
     "test:runtime:worker:types": "tsc -p runtime/tsconfig.worker.json",
     "test:runtime:node": "node runtime/run-node.mjs",
+    "test:runtime:node:cli": "node runtime/run-node-cli.mjs",
     "test:runtime:bun": "bun runtime/run-bun.mjs",
     "test:runtime:cloudflare": "pnpm run test:runtime:worker:types && node runtime/run-cloudflare.mjs",
     "test:runtime:vercel": "node runtime/run-vercel.mjs",
