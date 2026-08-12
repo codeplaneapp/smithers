@@ -154,6 +154,9 @@ const SANCTIONED_GATEWAY_UI_PROGRAM_FILES = new Set([
   "packages/gateway-ui/src/SmithersCanvasNode.tsx",
   "packages/gateway-ui/src/hijack.ts",
 ]);
+// Palette resolution is an intentional runtime dependency on the canonical
+// styleguide registry. Keep the exception to the single integration module.
+const SANCTIONED_UI_STYLEGUIDE_CONSUMERS = new Set(["packages/ui/src/internal/resolvePalette.ts"]);
 const CANONICAL_STYLEGUIDE_FILES = new Set([
   "packages/ui-styleguide/src/SmithersTheme.ts",
   "packages/ui-styleguide/src/TerminalPalette.ts",
@@ -162,6 +165,7 @@ const CANONICAL_STYLEGUIDE_FILES = new Set([
   "packages/ui-styleguide/src/contrastRatio.ts",
   "packages/ui-styleguide/src/mixColors.ts",
   "packages/ui-styleguide/src/paletteThemeCss.ts",
+  "packages/ui-styleguide/src/rgbChannels.ts",
   "packages/ui-styleguide/src/serializeThemeVariant.ts",
   "packages/ui-styleguide/src/standaloneThemeCss.ts",
   "packages/ui-styleguide/src/themeRegistry.ts",
@@ -1486,8 +1490,14 @@ export function collectUiArchitectureState(root, kind = "smithers") {
         // uiImports inventory. Any other specifier still inventories.
         const sanctionedBarrelEdge =
           SANCTIONED_GATEWAY_UI_PROGRAM_FILES.has(path) && SANCTIONED_GATEWAY_UI_PROGRAM_SPECIFIERS.has(specifier);
-        if (isUiSpecifier(specifier) && !sanctionedBarrelEdge) inventories.uiImports.push(`${path} -> ${specifier}`);
-        if (isLegacyUiPackage(specifier)) inventories.legacyPackageUsage.push(`${path} -> ${specifier}`);
+        const sanctionedStyleguideEdge =
+          SANCTIONED_UI_STYLEGUIDE_CONSUMERS.has(path) && basePackage(specifier) === "@smthrs/ui-styleguide";
+        if (isUiSpecifier(specifier) && !sanctionedBarrelEdge && !sanctionedStyleguideEdge) {
+          inventories.uiImports.push(`${path} -> ${specifier}`);
+        }
+        if (isLegacyUiPackage(specifier) && !sanctionedStyleguideEdge) {
+          inventories.legacyPackageUsage.push(`${path} -> ${specifier}`);
+        }
         if (STYLE_EXTENSIONS.has(extname(specifier))) inventories.styleEntryPoints.push(`${path} -> ${specifier}`);
       }
       if (matchesPrefix(specifier, FORBIDDEN_REGISTRY_PREFIXES)) {

@@ -1,4 +1,4 @@
-import { DEFAULT_THEME_KEY, themeRegistry } from "../styles";
+import { DEFAULT_THEME_KEY, themeRegistry } from "@smthrs/ui-styleguide";
 
 export type ResolvedPalette = keyof typeof themeRegistry;
 
