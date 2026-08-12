@@ -653,7 +653,7 @@ describe("MessageScroller compound", () => {
       { scrollHeight: 1000, clientHeight: 200, scrollTop: 50 },
     );
     const button = container!.querySelector<HTMLElement>('[data-slot="message-scroller-button"]')!;
-    expect(getComputedStyle(button).color).toBe("#f4f4f5");
+    expect(getComputedStyle(button).color).toBe("#d6deeb");
   });
 
   test("Provider/Scroller composition renders the required compound anatomy through the styled frame", async () => {

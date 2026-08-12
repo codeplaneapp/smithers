@@ -22,11 +22,11 @@ describe("agentic plan css", () => {
 
   test("routes plan and task dots through the shared status colors", () => {
     expect(agenticPlanCss).toContain(
-      ".sui-plan-step[data-status-class='run'] .sui-plan-step-dot { background:var(--brand, #6d56d8); }",
+      ".sui-plan-step[data-status-class='run'] .sui-plan-step-dot { background:var(--brand, #8f46b5); }",
     );
-    expect(agenticPlanCss).toContain(".sui-taskitem-run .sui-taskitem-dot { background:var(--brand, #6d56d8); }");
+    expect(agenticPlanCss).toContain(".sui-taskitem-run .sui-taskitem-dot { background:var(--brand, #8f46b5); }");
     expect(agenticPlanCss).toContain(
-      ".sui-taskitem-muted .sui-taskitem-dot { background:var(--text-muted, #52525b); }",
+      ".sui-taskitem-muted .sui-taskitem-dot { background:var(--text-muted, #7c7b89); }",
     );
     expect(agenticPlanCss).not.toContain(
       ".sui-plan-step[data-status='running'] .sui-plan-step-dot { background:var(--info",

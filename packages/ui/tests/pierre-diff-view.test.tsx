@@ -50,9 +50,10 @@ index 3333333..4444444 100644
 const originalMutationObserver = globalThis.MutationObserver;
 
 describe("theme + layout mapping", () => {
-  test("mode maps onto the DiffsThemeNames GitHub themes", () => {
-    expect(diffsThemeForMode("light")).toBe("github-light");
-    expect(diffsThemeForMode("dark")).toBe("github-dark");
+  test("mode and palette map onto registry Shiki themes", () => {
+    expect(diffsThemeForMode("light")).toBe("night-owl-light");
+    expect(diffsThemeForMode("dark")).toBe("night-owl");
+    expect(diffsThemeForMode("dark", "catppuccin")).toBe("catppuccin-mocha");
   });
 
   test("layout maps onto CodeView diffStyle (split=side-by-side, inline=unified)", () => {
@@ -63,10 +64,10 @@ describe("theme + layout mapping", () => {
   test("maps Pierre chrome and semantic diff colors onto house tokens", () => {
     const rule = smithersUiCss.match(/\.sui-pierre-diff \{[^}]+\}/)?.[0] ?? "";
     for (const token of [
-      "var(--surface, #ffffff)",
-      "var(--text, #18181b)",
-      "var(--success, #087461)",
-      "var(--danger, #c5343f)",
+      "var(--surface, #f6f6f7)",
+      "var(--text, #403f53)",
+      "var(--success, #1f6e67)",
+      "var(--danger, #b33d3a)",
       "var(--success-soft,",
       "var(--danger-soft,",
     ]) {
@@ -154,6 +155,7 @@ describe("PierreDiffView live render (happy-dom)", () => {
     container = undefined;
     document.querySelectorAll(`style[${SMITHERS_UI_STYLE_ATTR}]`).forEach((el) => el.remove());
     document.documentElement.removeAttribute("data-theme");
+    document.documentElement.removeAttribute("data-palette");
     globalThis.MutationObserver = originalMutationObserver;
   });
 
@@ -185,10 +187,10 @@ describe("PierreDiffView live render (happy-dom)", () => {
   }
 
   test("the default Pierre mode follows root data-theme toggles", async () => {
-    let notifyThemeChange: (() => void) | undefined;
+    const notifyThemeChanges: (() => void)[] = [];
     globalThis.MutationObserver = class {
       constructor(callback: MutationCallback) {
-        notifyThemeChange = () => callback([], this as unknown as MutationObserver);
+        notifyThemeChanges.push(() => callback([], this as unknown as MutationObserver));
       }
       disconnect() {}
       observe() {}
@@ -201,11 +203,11 @@ describe("PierreDiffView live render (happy-dom)", () => {
     const el = await mount(<PierreDiffView patch={PATCH} />);
     const adapter = () => el.querySelector('[data-slot="pierre-diff-view"]');
     expect(adapter()?.getAttribute("data-theme-mode")).toBe("light");
-    expect(notifyThemeChange).toBeDefined();
+    expect(notifyThemeChanges.length).toBeGreaterThan(0);
 
     await act(async () => {
       document.documentElement.setAttribute("data-theme", "dark");
-      notifyThemeChange?.();
+      for (const notify of notifyThemeChanges) notify();
       await Promise.resolve();
     });
     expect(adapter()?.getAttribute("data-theme-mode")).toBe("dark");

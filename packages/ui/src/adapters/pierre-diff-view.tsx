@@ -3,8 +3,10 @@ import { useMemo, type ReactNode } from "react";
 import { processPatch, type CodeViewItem, type DiffsThemeNames, type FileDiffMetadata } from "@pierre/diffs";
 import { CodeView } from "@pierre/diffs/react";
 import { cn } from "../cn";
-import { useInjectUiCss } from "../styles";
+import { themeRegistry, useInjectUiCss } from "../styles";
 import { useResolvedTheme } from "../internal/useResolvedTheme";
+import { useResolvedPalette } from "../internal/useResolvedPalette";
+import type { ResolvedPalette } from "../internal/resolvePalette";
 
 /**
  * PierreDiffView is the high-fidelity, syntax-highlighted diff surface: it runs
@@ -29,8 +31,9 @@ export type PierreDiffLayout = "split" | "inline";
  * Map the theme `mode` onto the Shiki-bundled `DiffsThemeNames` value CodeView
  * expects. Replaces Multi's coupling to the app `Theme` store.
  */
-export function diffsThemeForMode(mode: PierreDiffMode): DiffsThemeNames {
-  return mode === "dark" ? "github-dark" : "github-light";
+export function diffsThemeForMode(mode: PierreDiffMode, palette: ResolvedPalette = "night-owl"): DiffsThemeNames {
+  const syntax = themeRegistry[palette].syntax;
+  return mode === "dark" ? syntax.shikiDark : syntax.shikiLight;
 }
 
 /** Map the layout prop onto CodeView's `diffStyle` option. */
@@ -94,6 +97,8 @@ export type PierreDiffViewProps = {
   layout?: PierreDiffLayout;
   /** Theme mode mapped onto a `DiffsThemeNames` value. Defaults to the active house theme. */
   mode?: PierreDiffMode;
+  /** Palette override. Defaults to the active `data-palette` value. */
+  palette?: ResolvedPalette;
   /** When set, only the matching file in a multi-file patch is shown. */
   selectedPath?: string | null;
   /** Extra class on the CodeView (and the empty-state fallback). */
@@ -106,13 +111,16 @@ export function PierreDiffView({
   patch,
   layout = "split",
   mode,
+  palette,
   selectedPath = null,
   className,
   emptyLabel,
 }: PierreDiffViewProps) {
   useInjectUiCss();
   const houseTheme = useResolvedTheme();
+  const housePalette = useResolvedPalette();
   const resolvedMode = mode ?? houseTheme;
+  const resolvedPalette = palette ?? housePalette;
   const items = useMemo(() => patchToCodeViewItems(patch, selectedPath), [patch, selectedPath]);
 
   if (items.length === 0) {
@@ -121,6 +129,7 @@ export function PierreDiffView({
         className={cn("sui-pierre-diff-empty", className)}
         data-slot="pierre-diff-view"
         data-theme-mode={resolvedMode}
+        data-palette={resolvedPalette}
       >
         {emptyLabel ?? "No diff is available for this change."}
       </div>
@@ -138,7 +147,7 @@ export function PierreDiffView({
   };
 
   return (
-    <div className="sui-pierre-diff-frame" data-slot="pierre-diff-view" data-theme-mode={resolvedMode}>
+    <div className="sui-pierre-diff-frame" data-slot="pierre-diff-view" data-theme-mode={resolvedMode} data-palette={resolvedPalette}>
       <CodeView
         className={cn("sui-pierre-diff", className)}
         disableWorkerPool
@@ -150,7 +159,7 @@ export function PierreDiffView({
           hunkSeparators: "metadata",
           overflow: "wrap",
           stickyHeaders: true,
-          theme: diffsThemeForMode(resolvedMode),
+          theme: diffsThemeForMode(resolvedMode, resolvedPalette),
           themeType: resolvedMode,
         }}
         renderHeaderMetadata={(item) => (item.type === "diff" ? renderStats(item.fileDiff) : null)}

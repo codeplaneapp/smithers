@@ -18,31 +18,31 @@ import type { CSSProperties } from "react";
 import { reducedMotionCss } from "@smthrs/ui-styleguide";
 
 export const theme = {
-  bg: "var(--bg, #fafafa)",
-  panel: "var(--surface, #ffffff)",
-  panelAlt: "var(--hover, #f4f4f5)",
-  border: "var(--border-solid, #e4e4e7)",
-  text: "var(--text, #18181b)",
-  textDim: "var(--text-muted, #52525b)",
-  accent: "var(--brand, #6d56d8)",
-  accentSoft: "var(--brand-soft, color-mix(in srgb, var(--brand, #6d56d8) 10%, var(--surface, #ffffff)))",
-  accentBorder: "var(--brand-border, color-mix(in srgb, var(--brand, #6d56d8) 40%, transparent))",
-  success: "var(--success, #087461)",
-  successSoft: "var(--success-soft, color-mix(in srgb, var(--success, #087461) 12%, var(--surface, #ffffff)))",
-  successBorder: "var(--success-border, color-mix(in srgb, var(--success, #087461) 40%, transparent))",
-  danger: "var(--danger, #c5343f)",
-  dangerSoft: "var(--danger-soft, color-mix(in srgb, var(--danger, #c5343f) 10%, var(--surface, #ffffff)))",
-  dangerBorder: "var(--danger-border, color-mix(in srgb, var(--danger, #c5343f) 40%, transparent))",
-  warning: "var(--warning, #916000)",
-  warningSoft: "var(--warning-soft, color-mix(in srgb, var(--warning, #916000) 12%, var(--surface, #ffffff)))",
-  warningBorder: "var(--warning-border, color-mix(in srgb, var(--warning, #916000) 40%, transparent))",
-  info: "var(--info, #2a63c9)",
-  infoSoft: "var(--info-soft, color-mix(in srgb, var(--info, #2a63c9) 10%, var(--surface, #ffffff)))",
-  infoBorder: "var(--info-border, color-mix(in srgb, var(--info, #2a63c9) 40%, transparent))",
-  neutralSoft: "var(--hover-subtle, rgba(24,24,27,0.04))",
-  neutralBorder: "var(--border, rgba(24,24,27,0.08))",
-  ring: "var(--ring, color-mix(in srgb, var(--brand, #6d56d8) 22%, transparent))",
-  ringBorder: "var(--ring-border, color-mix(in srgb, var(--brand, #6d56d8) 50%, transparent))",
+  bg: "var(--bg, #FBFBFB)",
+  panel: "var(--surface, #f6f6f7)",
+  panelAlt: "var(--hover, #f1f1f2)",
+  border: "var(--border-solid, #e6e6e9)",
+  text: "var(--text, #403f53)",
+  textDim: "var(--text-muted, #7c7b89)",
+  accent: "var(--brand, #8f46b5)",
+  accentSoft: "var(--brand-soft, color-mix(in srgb, var(--brand, #8f46b5) 10%, var(--surface, #f6f6f7)))",
+  accentBorder: "var(--brand-border, color-mix(in srgb, var(--brand, #8f46b5) 40%, transparent))",
+  success: "var(--success, #1f6e67)",
+  successSoft: "var(--success-soft, color-mix(in srgb, var(--success, #1f6e67) 12%, var(--surface, #f6f6f7)))",
+  successBorder: "var(--success-border, color-mix(in srgb, var(--success, #1f6e67) 40%, transparent))",
+  danger: "var(--danger, #b33d3a)",
+  dangerSoft: "var(--danger-soft, color-mix(in srgb, var(--danger, #b33d3a) 10%, var(--surface, #f6f6f7)))",
+  dangerBorder: "var(--danger-border, color-mix(in srgb, var(--danger, #b33d3a) 40%, transparent))",
+  warning: "var(--warning, #7b6001)",
+  warningSoft: "var(--warning-soft, color-mix(in srgb, var(--warning, #7b6001) 12%, var(--surface, #f6f6f7)))",
+  warningBorder: "var(--warning-border, color-mix(in srgb, var(--warning, #7b6001) 40%, transparent))",
+  info: "var(--info, #3d62b3)",
+  infoSoft: "var(--info-soft, color-mix(in srgb, var(--info, #3d62b3) 10%, var(--surface, #f6f6f7)))",
+  infoBorder: "var(--info-border, color-mix(in srgb, var(--info, #3d62b3) 40%, transparent))",
+  neutralSoft: "var(--hover-subtle, rgba(64,63,83,0.04))",
+  neutralBorder: "var(--border, rgba(64,63,83,0.08))",
+  ring: "var(--ring, color-mix(in srgb, var(--brand, #8f46b5) 22%, transparent))",
+  ringBorder: "var(--ring-border, color-mix(in srgb, var(--brand, #8f46b5) 50%, transparent))",
   radius: "var(--r-2, 10px)",
   // The canonical house stacks, routed through the styleguide custom
   // properties (identical fallbacks in ui-styleguide and @smthrs/ui
@@ -125,7 +125,7 @@ export const gatewayUiCss = `
 .gw-event-row-json { margin:0 8px 8px 8px; padding:8px; background:${theme.panel}; border:1px solid ${theme.border}; border-radius:6px; font-family:${theme.fontMono}; font-size:11px; line-height:1.5; white-space:pre-wrap; word-break:break-word; overflow:auto; max-height:280px; color:${theme.text}; }
 .gw-event-row-main:focus-visible,.gw-event-row-toggle:focus-visible { outline:none; border-color:${theme.ringBorder}; box-shadow:0 0 0 3px ${theme.ring}; }
 .gw-event-log-body { position:relative; display:flex; flex-direction:column; flex:1 1 auto; min-height:0; }
-.gw-event-jump { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:5; display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border:1px solid ${theme.border}; border-radius:999px; background:${theme.panel}; color:${theme.text}; font-family:${theme.fontSans}; font-size:12px; cursor:pointer; box-shadow:0 1px 2px rgb(var(--shadow-rgb, 24 24 27) / 0.06), 0 8px 24px rgb(var(--shadow-rgb, 24 24 27) / 0.10); transition:background-color .12s ease, border-color .12s ease, color .12s ease; }
+.gw-event-jump { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:5; display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border:1px solid ${theme.border}; border-radius:999px; background:${theme.panel}; color:${theme.text}; font-family:${theme.fontSans}; font-size:12px; cursor:pointer; box-shadow:0 1px 2px rgb(var(--shadow-rgb, 64 63 83) / 0.06), 0 8px 24px rgb(var(--shadow-rgb, 64 63 83) / 0.10); transition:background-color .12s ease, border-color .12s ease, color .12s ease; }
 .gw-event-jump:hover { background:${theme.panelAlt}; }
 .gw-event-jump:focus-visible { outline:none; border-color:${theme.ringBorder}; box-shadow:0 0 0 3px ${theme.ring}; }
 .gw-canvas-node { border-left:3px solid var(--gw-kind, transparent); }

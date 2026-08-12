@@ -3,7 +3,9 @@ import { useEffect, useInsertionEffect, useRef, type ComponentProps } from "reac
 import type { IDisposable, ITheme, Terminal as XTerminal } from "@xterm/xterm";
 import { cn } from "../cn";
 import { useResolvedTheme } from "../internal/useResolvedTheme";
-import { observeReducedMotion, prefersReducedMotion } from "../styles";
+import { useResolvedPalette } from "../internal/useResolvedPalette";
+import type { ResolvedPalette } from "../internal/resolvePalette";
+import { observeReducedMotion, prefersReducedMotion, themeRegistry } from "../styles";
 import { tokens as t } from "../tokens";
 import { xtermBaseCss } from "./xtermCss";
 
@@ -41,35 +43,10 @@ export type TerminalColorTheme = "dark" | "light";
 /** The underlying xterm.js instance, handed back through {@link TerminalProps.onReady}. */
 export type TerminalInstance = XTerminal;
 
-const DARK_THEME: ITheme = {
-  background: "#07090d",
-  foreground: "#f0f2f5",
-  cursor: "#9ba1ad",
-  selectionBackground: "rgba(123, 147, 217, 0.3)",
-  black: "#11151c",
-  red: "#f05252",
-  green: "#59c173",
-  yellow: "#e3b341",
-  blue: "#7b93d9",
-  magenta: "#9061f9",
-  cyan: "#3bc9db",
-  white: "#f0f2f5",
-};
-
-const LIGHT_THEME: ITheme = {
-  background: "#fbfcfd",
-  foreground: "#17202a",
-  cursor: "#315d98",
-  selectionBackground: "rgba(49, 93, 152, 0.22)",
-  black: "#1f2933",
-  red: "#c93f3f",
-  green: "#18794e",
-  yellow: "#9a6700",
-  blue: "#315d98",
-  magenta: "#7c3aed",
-  cyan: "#087f8c",
-  white: "#f8fafc",
-};
+/** Literal xterm palette for a registry key and light/dark mode. */
+export function terminalThemeFor(palette: ResolvedPalette, mode: TerminalColorTheme): ITheme {
+  return themeRegistry[palette].terminal[mode];
+}
 
 /** Idempotent marker for the injected xterm + surface stylesheet. */
 const STYLE_ATTR = "data-smithers-ui-terminal";
@@ -106,6 +83,8 @@ export type TerminalProps = Omit<ComponentProps<"div">, "onResize"> & {
   onReady?: (terminal: TerminalInstance) => void;
   /** Built-in palette selection. Defaults to the active house theme. */
   theme?: TerminalColorTheme;
+  /** Palette override. Defaults to the active `data-palette` value. */
+  palette?: ResolvedPalette;
   /** Per-color overrides merged onto the selected palette. */
   colors?: Partial<ITheme>;
   fontSize?: number;
@@ -145,6 +124,7 @@ export function Terminal({
   onResize,
   onReady,
   theme,
+  palette,
   colors,
   fontSize = 13,
   fontFamily = DEFAULT_FONT_FAMILY,
@@ -157,9 +137,13 @@ export function Terminal({
 }: TerminalProps) {
   useInsertionEffect(injectTerminalStyles, []);
   const houseTheme = useResolvedTheme();
+  const housePalette = useResolvedPalette();
   const resolvedTheme = theme ?? houseTheme;
+  const resolvedPalette = palette ?? housePalette;
   const resolvedThemeRef = useRef(resolvedTheme);
   resolvedThemeRef.current = resolvedTheme;
+  const resolvedPaletteRef = useRef(resolvedPalette);
+  resolvedPaletteRef.current = resolvedPalette;
 
   // Latest-value refs keep the mount effect stable (it only re-runs on config
   // that requires rebuilding the emulator) while still calling current props.
@@ -186,10 +170,10 @@ export function Terminal({
     const term = terminalRef.current;
     if (!term) return;
     term.options.theme = {
-      ...(resolvedTheme === "light" ? LIGHT_THEME : DARK_THEME),
+      ...terminalThemeFor(resolvedPalette, resolvedTheme),
       ...colors,
     };
-  }, [resolvedTheme, colors]);
+  }, [resolvedPalette, resolvedTheme, colors]);
 
   useEffect(() => {
     const host = mountRef.current;
@@ -219,7 +203,7 @@ export function Terminal({
       host.replaceChildren();
 
       const palette = {
-        ...(resolvedThemeRef.current === "light" ? LIGHT_THEME : DARK_THEME),
+        ...terminalThemeFor(resolvedPaletteRef.current, resolvedThemeRef.current),
         ...colorsRef.current,
       };
       term = new XtermTerminal({
@@ -283,12 +267,13 @@ export function Terminal({
     };
   }, [fontSize, fontFamily, cursorBlink, readOnly, scrollback]);
 
-  const surfaceBackground = (resolvedTheme === "light" ? LIGHT_THEME : DARK_THEME).background;
+  const surfaceBackground = terminalThemeFor(resolvedPalette, resolvedTheme).background;
 
   return (
     <div
       data-slot="terminal"
       data-theme-mode={resolvedTheme}
+      data-palette={resolvedPalette}
       className={cn("sui-terminal", className)}
       style={{ background: colors?.background ?? surfaceBackground, ...style }}
       {...rest}

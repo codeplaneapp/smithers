@@ -10,8 +10,8 @@ describe("agentic response CSS", () => {
   });
 
   test("styles code through the house code tokens and pins wrapping anatomy", () => {
-    expect(agenticResponseCss).toContain("background:var(--code-bg, #18181b)");
-    expect(agenticResponseCss).toContain("color:var(--code-text, #f4f4f5)");
+    expect(agenticResponseCss).toContain("background:var(--code-bg, #FBFBFB)");
+    expect(agenticResponseCss).toContain("color:var(--code-text, #403f53)");
     expect(agenticResponseCss).toContain(
       ".sui-codeblock[data-wrap='true'] .sui-codeblock-body code { min-width:0; white-space:pre-wrap; overflow-wrap:anywhere; }",
     );
@@ -23,11 +23,11 @@ describe("agentic response CSS", () => {
 
   test("resolves response and code colors through the dark theme token surface", () => {
     const darkBlock = workflowUiThemeCss.match(/:root\[data-theme='dark'\] \{ ([^}]*) \}/)?.[1] ?? "";
-    expect(darkBlock).toContain("--text-muted:#a1a1aa");
-    expect(darkBlock).toContain("--code-bg:#0c0c0e");
-    expect(darkBlock).toContain("--code-text:#e4e4e7");
-    expect(agenticResponseCss).toContain("background:var(--text-muted, #52525b)");
-    expect(agenticResponseCss).toContain("background:var(--code-bg, #18181b)");
-    expect(agenticResponseCss).toContain("color:var(--code-text, #f4f4f5)");
+    expect(darkBlock).toContain("--text-muted:#929eac");
+    expect(darkBlock).toContain("--code-bg:#011627");
+    expect(darkBlock).toContain("--code-text:#d6deeb");
+    expect(agenticResponseCss).toContain("background:var(--text-muted, #7c7b89)");
+    expect(agenticResponseCss).toContain("background:var(--code-bg, #FBFBFB)");
+    expect(agenticResponseCss).toContain("color:var(--code-text, #403f53)");
   });
 });

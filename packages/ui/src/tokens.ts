@@ -26,89 +26,89 @@
  */
 export const tokens = {
   /** Page background. */
-  background: "var(--bg, #fafafa)",
+  background: "var(--bg, #FBFBFB)",
   /** Default text color. */
-  foreground: "var(--text, #18181b)",
+  foreground: "var(--text, #403f53)",
   /** Card / panel / popover surface. */
-  card: "var(--surface, #ffffff)",
-  cardForeground: "var(--text, #18181b)",
+  card: "var(--surface, #f6f6f7)",
+  cardForeground: "var(--text, #403f53)",
   /** Raised surface one step below card (insets, secondary fills). */
-  surface2: "var(--surface-2, #f4f4f5)",
+  surface2: "var(--surface-2, #f1f1f2)",
   /** Overlay surface (popovers, dialogs). */
-  surface3: "var(--surface-3, #ffffff)",
+  surface3: "var(--surface-3, #f9f9f9)",
   /** Frosted surfaces used by the floating Multi-style chat composer. */
-  glass: "var(--surface-glass, rgba(255,255,255,0.72))",
-  glassStrong: "var(--surface-glass-strong, rgba(255,255,255,0.85))",
-  popover: "var(--surface-3, #ffffff)",
-  popoverForeground: "var(--text, #18181b)",
+  glass: "var(--surface-glass, rgba(246,246,247,0.72))",
+  glassStrong: "var(--surface-glass-strong, rgba(246,246,247,0.85))",
+  popover: "var(--surface-3, #f9f9f9)",
+  popoverForeground: "var(--text, #403f53)",
   /** Brand color. The house "primary" button is TINTED (10% brand surface + brand text), not solid. */
-  primary: "var(--brand, #6d56d8)",
+  primary: "var(--brand, #8f46b5)",
   /** Tinted brand surface/border for soft emphasis (chips, active rows). */
-  primarySoft: "var(--brand-soft, color-mix(in srgb, var(--brand, #6d56d8) 10%, var(--surface, #ffffff)))",
-  primarySoftStrong: "var(--brand-soft-strong, color-mix(in srgb, var(--brand, #6d56d8) 16%, var(--surface, #ffffff)))",
-  primaryBorder: "var(--brand-border, color-mix(in srgb, var(--brand, #6d56d8) 40%, transparent))",
+  primarySoft: "var(--brand-soft, color-mix(in srgb, var(--brand, #8f46b5) 10%, var(--surface, #f6f6f7)))",
+  primarySoftStrong: "var(--brand-soft-strong, color-mix(in srgb, var(--brand, #8f46b5) 16%, var(--surface, #f6f6f7)))",
+  primaryBorder: "var(--brand-border, color-mix(in srgb, var(--brand, #8f46b5) 40%, transparent))",
   /**
    * Text on solid brand fills. --inverse-text is white in light mode and near
    * black in dark mode, which tracks the brand value getting lighter in dark.
    */
-  primaryForeground: "var(--inverse-text, #fafafa)",
+  primaryForeground: "var(--inverse-text, #FBFBFB)",
   /** Subtle raised surface (hover states, secondary buttons, muted fills). */
-  secondary: "var(--hover, #f4f4f5)",
-  secondaryForeground: "var(--text, #18181b)",
-  muted: "var(--hover, #f4f4f5)",
-  mutedForeground: "var(--text-muted, #52525b)",
+  secondary: "var(--hover, #f1f1f2)",
+  secondaryForeground: "var(--text, #403f53)",
+  muted: "var(--hover, #f1f1f2)",
+  mutedForeground: "var(--text-muted, #7c7b89)",
   /**
    * shadcn's "accent" = the hover fill. Trap: the styleguide's page-global
    * `--accent` alias is the BRAND violet -- same word, different color. This
    * bridge deliberately does NOT read `--accent`.
    */
-  accent: "var(--hover, #f4f4f5)",
-  accentForeground: "var(--text, #18181b)",
-  destructive: "var(--danger, #c5343f)",
-  destructiveSoft: "var(--danger-soft, color-mix(in srgb, var(--danger, #c5343f) 10%, var(--surface, #ffffff)))",
-  destructiveBorder: "var(--danger-border, color-mix(in srgb, var(--danger, #c5343f) 40%, transparent))",
-  success: "var(--success, #087461)",
-  successSoft: "var(--success-soft, color-mix(in srgb, var(--success, #087461) 12%, var(--surface, #ffffff)))",
-  successBorder: "var(--success-border, color-mix(in srgb, var(--success, #087461) 40%, transparent))",
-  warning: "var(--warning, #916000)",
-  warningSoft: "var(--warning-soft, color-mix(in srgb, var(--warning, #916000) 12%, var(--surface, #ffffff)))",
-  warningBorder: "var(--warning-border, color-mix(in srgb, var(--warning, #916000) 40%, transparent))",
-  info: "var(--info, #2a63c9)",
-  infoSoft: "var(--info-soft, color-mix(in srgb, var(--info, #2a63c9) 10%, var(--surface, #ffffff)))",
-  infoBorder: "var(--info-border, color-mix(in srgb, var(--info, #2a63c9) 40%, transparent))",
+  accent: "var(--hover, #f1f1f2)",
+  accentForeground: "var(--text, #403f53)",
+  destructive: "var(--danger, #b33d3a)",
+  destructiveSoft: "var(--danger-soft, color-mix(in srgb, var(--danger, #b33d3a) 10%, var(--surface, #f6f6f7)))",
+  destructiveBorder: "var(--danger-border, color-mix(in srgb, var(--danger, #b33d3a) 40%, transparent))",
+  success: "var(--success, #1f6e67)",
+  successSoft: "var(--success-soft, color-mix(in srgb, var(--success, #1f6e67) 12%, var(--surface, #f6f6f7)))",
+  successBorder: "var(--success-border, color-mix(in srgb, var(--success, #1f6e67) 40%, transparent))",
+  warning: "var(--warning, #7b6001)",
+  warningSoft: "var(--warning-soft, color-mix(in srgb, var(--warning, #7b6001) 12%, var(--surface, #f6f6f7)))",
+  warningBorder: "var(--warning-border, color-mix(in srgb, var(--warning, #7b6001) 40%, transparent))",
+  info: "var(--info, #3d62b3)",
+  infoSoft: "var(--info-soft, color-mix(in srgb, var(--info, #3d62b3) 10%, var(--surface, #f6f6f7)))",
+  infoBorder: "var(--info-border, color-mix(in srgb, var(--info, #3d62b3) 40%, transparent))",
   /** Hairline borders. */
-  border: "var(--border, rgba(24,24,27,0.08))",
-  borderStrong: "var(--border-strong, rgba(24,24,27,0.14))",
+  border: "var(--border, rgba(64,63,83,0.08))",
+  borderStrong: "var(--border-strong, rgba(64,63,83,0.14))",
   /** Form control borders (slightly stronger). */
-  input: "var(--border-solid, #e4e4e7)",
+  input: "var(--border-solid, #e6e6e9)",
   /**
    * Focus ring fill; pair with a 50% brand border-color (the house focus
    * rule). Routed through the styleguide's `--ring`/`--ring-border` custom
    * properties so a host that themes the ring re-themes these components too.
    */
-  ring: "var(--ring, color-mix(in srgb, var(--brand, #6d56d8) 22%, transparent))",
-  ringBorder: "var(--ring-border, color-mix(in srgb, var(--brand, #6d56d8) 50%, transparent))",
+  ring: "var(--ring, color-mix(in srgb, var(--brand, #8f46b5) 22%, transparent))",
+  ringBorder: "var(--ring-border, color-mix(in srgb, var(--brand, #8f46b5) 50%, transparent))",
   /** Extra-subtle fill for chips and hover washes. */
-  hoverSubtle: "var(--hover-subtle, rgba(24,24,27,0.04))",
+  hoverSubtle: "var(--hover-subtle, rgba(64,63,83,0.04))",
   /** Faint text (placeholders use --text-placeholder). */
-  textFaint: "var(--text-faint, #6d6d75)",
-  placeholder: "var(--text-placeholder, #8a8a93)",
+  textFaint: "var(--text-faint, #92929d)",
+  placeholder: "var(--text-placeholder, #a5a5ae)",
   /** Inverse surface/text (tooltips, "ink" chips). */
-  inverseBg: "var(--inverse-bg, #18181b)",
-  inverseText: "var(--inverse-text, #fafafa)",
+  inverseBg: "var(--inverse-bg, #403f53)",
+  inverseText: "var(--inverse-text, #FBFBFB)",
   /** Code block colors. */
-  codeBg: "var(--code-bg, #18181b)",
-  codeText: "var(--code-text, #f4f4f5)",
+  codeBg: "var(--code-bg, #FBFBFB)",
+  codeText: "var(--code-text, #403f53)",
   /** Shadow base as space-separated RGB channels, for `rgb(${tokens.shadowRgb} / a)`. */
-  shadowRgb: "var(--shadow-rgb, 24 24 27)",
+  shadowRgb: "var(--shadow-rgb, 64 63 83)",
   /**
    * Elevation shadows, routed through the styleguide's `--shadow-*` custom
    * properties so dark mode gets the stronger house alphas (a fixed light
    * alpha is nearly invisible on dark surfaces) and hosts can theme them.
    */
-  shadow1: "var(--shadow-1, 0 1px 2px rgb(24 24 27 / 0.05))",
-  shadow2: "var(--shadow-2, 0 1px 2px rgb(24 24 27 / 0.04), 0 8px 24px rgb(24 24 27 / 0.07))",
-  shadow3: "var(--shadow-3, 0 4px 12px rgb(24 24 27 / 0.10), 0 16px 48px rgb(24 24 27 / 0.14))",
+  shadow1: "var(--shadow-1, 0 1px 2px rgb(64 63 83 / 0.05))",
+  shadow2: "var(--shadow-2, 0 1px 2px rgb(64 63 83 / 0.04), 0 8px 24px rgb(64 63 83 / 0.07))",
+  shadow3: "var(--shadow-3, 0 4px 12px rgb(64 63 83 / 0.10), 0 16px 48px rgb(64 63 83 / 0.14))",
   /** Card corner radius. Controls use `radiusControl`; chat surfaces use `radiusBubble`. */
   radius: "var(--r-2, 10px)",
   radiusControl: "var(--r-1, 6px)",

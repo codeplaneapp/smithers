@@ -151,7 +151,7 @@ describe("Message", () => {
     );
     expect(document.querySelector(`style[data-smithers-ui-lane="${CONVERSATION_FOUNDATION_CSS_ID}"]`)).not.toBeNull();
     const avatar = container!.querySelector<HTMLElement>('[data-slot="message-avatar"]')!;
-    expect(getComputedStyle(avatar).backgroundColor).toBe("#1f1f24");
+    expect(getComputedStyle(avatar).backgroundColor).toBe("#15293a");
   });
 });
 

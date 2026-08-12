@@ -1,10 +1,8 @@
 import { reducedMotionCss } from "./standaloneThemeCss";
-import { darkTokens, lightTokens, sharedTokens } from "./themeTokens";
+import { paletteThemeCss } from "./paletteThemeCss";
 
 export const workflowUiThemeCss = [
-  `:root { ${lightTokens}; ${sharedTokens}; }`,
-  `@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) { ${darkTokens}; } }`,
-  `:root[data-theme='dark'] { ${darkTokens}; }`,
+  ...paletteThemeCss("'"),
   "* { box-sizing:border-box; }",
   "body { min-width:320px; min-height:100vh; margin:0; background:var(--bg); color:var(--text); font-size:var(--fs-3); line-height:var(--lh-body); font-synthesis:none; text-rendering:optimizeLegibility; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }",
   "::selection { background:color-mix(in srgb, var(--brand) 24%, transparent); }",
@@ -97,3 +95,11 @@ export const workflowUiLayoutCss = [
 
 export const workflowUiStyles = [workflowUiThemeCss, workflowUiLayoutCss].join("\n");
 export { reducedMotionCss, standaloneThemeCss } from "./standaloneThemeCss";
+export { DEFAULT_THEME_KEY, themeRegistry } from "./themeRegistry";
+export { serializeThemeVariant } from "./serializeThemeVariant";
+export { contrastRatio } from "./contrastRatio";
+export { mixColors } from "./mixColors";
+export type { SmithersTheme } from "./SmithersTheme";
+export type { TerminalPalette } from "./TerminalPalette";
+export type { ThemeSyntaxId } from "./ThemeSyntaxId";
+export type { ThemeVariantTokens } from "./ThemeVariantTokens";

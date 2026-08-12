@@ -1233,7 +1233,30 @@ Everything below is the contract those components implement, and what you follow
 
 Every UI declares the same custom properties and reads them everywhere. Never hardcode a color, tint, or shadow alpha inline: reach for a token, or derive one with `color-mix`. This keeps light and dark correct and workflow UIs from drifting apart.
 
-<Note>The Gateway's HTML shell already injects this exact token block (the canonical `workflowUiThemeCss` from `@smthrs/ui-styleguide`) into every `/workflows/<key>` page and stamps `data-theme` on `<html>` from a `?theme=dark|light` query param before first paint, so a UI that just *reads* the tokens is themed automatically, even inside an iframe host forcing a theme via that param. Declaring the block yourself (as below, or via `WorkflowUiStyles` from `gateway-ui`) is still correct, keeps the UI portable outside the shell, and duplicate declarations are harmless.</Note>
+<Note>The Gateway HTML shell injects the canonical `workflowUiThemeCss` from `@smthrs/ui-styleguide`. It stamps `data-theme` from `?theme=dark|light` and `data-palette` from `?palette=<key>` before first paint. A UI that reads the tokens is themed automatically. Declaring the block through `WorkflowUiStyles` remains useful when the UI must run outside the Gateway.</Note>
+
+### Choose a palette
+
+Color mode and color palette are separate axes. `data-theme="light|dark"` continues to override `prefers-color-scheme`. `data-palette` selects a registry palette without changing the color mode. An absent or invalid palette uses `night-owl`.
+
+```html
+<html data-theme="dark" data-palette="catppuccin">
+```
+
+The registry in `@smthrs/ui-styleguide` provides these choices:
+
+| Palette key | Label | Dark Shiki theme | Light Shiki theme |
+| --- | --- | --- | --- |
+| `night-owl` | Night Owl | `night-owl` | `night-owl-light` |
+| `fucory` | Fucory | `github-dark` | `github-light` |
+| `one` | One | `one-dark-pro` | `one-light` |
+| `github` | GitHub | `github-dark` | `github-light` |
+| `catppuccin` | Catppuccin | `catppuccin-mocha` | `catppuccin-latte` |
+| `solarized` | Solarized | `solarized-dark` | `solarized-light` |
+| `gruvbox` | Gruvbox | `gruvbox-dark-medium` | `gruvbox-light-medium` |
+| `rose-pine` | Rosé Pine | `rose-pine` | `rose-pine-dawn` |
+
+The Pierre diff adapter and xterm terminal adapter observe both axes. Their syntax and ANSI colors come from the selected registry record. Use the optional adapter `palette` prop only when one surface must differ from the document.
 
 Paste this `:root` block at the top of your `<style>`: it carries the canonical light values, dark overrides for both the explicit toggle and the OS preference, and the typographic base.
 

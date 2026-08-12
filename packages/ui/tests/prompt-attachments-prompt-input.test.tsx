@@ -562,7 +562,7 @@ describe("PromptInput", () => {
     const form = container!.querySelector<HTMLElement>('[data-slot="prompt-input"]')!;
     expect(form.className).toContain("sui-prompt");
     expect(container!.querySelector('[data-slot="prompt-input-header"]')!.textContent).toBe("queued");
-    expect(getComputedStyle(form).backgroundColor).toBe("#141417");
+    expect(getComputedStyle(form).backgroundColor).toBe("#0d2132");
     expect(document.querySelector('style[data-smithers-ui-lane="prompt-attachments"]')).not.toBeNull();
   });
 });

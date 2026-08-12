@@ -44,7 +44,7 @@ export function NodeRow({ node, depth, activeNodeId, onSelectNode }: NodeRowProp
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {node.cardLabel ?? node.name}
           </span>
-          <span style={{ fontSize: 11, color: "var(--text-muted, #52525b)" }}>{executionMeta}</span>
+          <span style={{ fontSize: 11, color: "var(--text-muted, #7c7b89)" }}>{executionMeta}</span>
         </span>
         <StatusPill status={node.status} />
       </button>
