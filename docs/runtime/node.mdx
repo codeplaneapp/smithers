@@ -47,11 +47,15 @@ node node_modules/smthrs/src/bin/smithers.js up workflow.tsx --input '{"name":"n
 node node_modules/smthrs/src/bin/smithers.js gateway
 ```
 
-`npx smithers` on a machine with no Bun installed resolves the `smthrs` bin and
-runs it under Node, and takes the same path. Every child process the CLI spawns
-(the detached run engine, the supervisor, the monitor, the TUI) is launched with
-the current runtime, so a Node parent produces Node children and no `bun` binary
-has to be on `PATH`.
+`npx smithers` and `node_modules/.bin/smithers` still require Bun on `PATH`. The
+package manager installs the bin as a link to the script, so the operating
+system honours its `#!/usr/bin/env bun` shebang and reports
+`env: bun: No such file or directory` when Bun is missing. Call the script with
+Node, as above, on a machine that has no Bun.
+
+Every child process the CLI spawns (the detached run engine, the supervisor, the
+monitor, the TUI) is launched with the runtime that is executing right now, so a
+Node parent produces Node children and no `bun` binary has to be on `PATH`.
 
 Workflow files are TypeScript and JSX. Bun transpiles them on import; Node does
 not, and its built-in type stripping refuses `.tsx` entirely and refuses any
@@ -75,7 +79,12 @@ node -e "import('smthrs').then(() => console.log('ok'))"
   Bun install rather than serving a stale bundle. Everything else the gateway
   serves, including the RPC and websocket control plane and the run list, works
   under Node.
-- Cross-run memory notes use the main database under Node. Under Bun a Postgres
-  or PGlite run keeps memory in a local sqlite sidecar; under Node there is no
-  sqlite, so memory is stored in the run database instead. The stored facts and
-  the `bunx smthrs memory` surface are the same either way.
+- Cross-run memory uses the main database under Node. Under Bun a Postgres or
+  PGlite run keeps memory in a local sqlite sidecar; under Node there is no
+  sqlite, so memory is stored in the run database instead. Memory facts and
+  message history behave the same either way. Memory notes and note search ride
+  the synchronous sqlite driver and its FTS5 index, so on a Postgres-dialect
+  database they are unavailable and `saveNote`, `searchNotes`, and `deleteThread`
+  fail with `DB_WRITE_FAILED` or `DB_QUERY_FAILED`. That limit already applies to
+  a Bun run that opens the memory store on Postgres directly. Run under Bun on
+  the sqlite backend when a workflow needs notes.
