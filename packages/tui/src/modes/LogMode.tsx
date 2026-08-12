@@ -1,3 +1,4 @@
+/** @jsxImportSource @opentui/react */
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useRunInspectorVm } from "@smthrs/ui-core";

@@ -22,6 +22,7 @@ import { DETACHED_RUN_LOG_FILE_ENV } from "./detachedRunLogEnv.js";
 import { reapDetachedRunLogs } from "./reapDetachedRunLogs.js";
 import { resolveDetachedRunLogFile } from "./resolveDetachedRunLogFile.js";
 import { sanitizeTerminalText } from "@smthrs/tui/src/sanitizeTerminalText.ts";
+import { smithersRuntimeSpawn } from "./node-loader/smithersRuntimeSpawn.js";
 
 export { formatStreamText } from "./tui-format.js";
 
@@ -1295,7 +1296,8 @@ function launchTuiMonitor(tuiEntry, runId, cliIndexPath, gatewayUrl, backend, au
     authToken,
     workspaceRoot: resolveMonitorWorkspaceRoot(),
   });
-  const child = spawn("bun", [tuiEntry, runId], { stdio: "inherit", env });
+  const tuiSpawn = smithersRuntimeSpawn([tuiEntry, runId]);
+  const child = spawn(tuiSpawn.command, tuiSpawn.args, { stdio: "inherit", env });
   const exit = new Promise((resolve, reject) => {
     child.once("error", (err) => reject(err));
     child.once("exit", (code, signal) => resolve({ code, signal }));
@@ -1997,7 +1999,8 @@ export async function runTuiCommand(
       const upArgs = opts.buildDetachedArgs
         ? opts.buildDetachedArgs({ indexPath, workflow, runId, inputs, options: childOptions })
         : buildDetachedUpArgs(indexPath, workflow.entryFile, runId, inputs, childOptions);
-      child = spawn("bun", upArgs, {
+      const upSpawn = smithersRuntimeSpawn(upArgs);
+      child = spawn(upSpawn.command, upSpawn.args, {
         cwd: launchCwd,
         detached: true,
         stdio: ["ignore", fd, fd],

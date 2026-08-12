@@ -1,3 +1,4 @@
+/** @jsxImportSource @opentui/react */
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useKeyboard } from "@opentui/react";
 import { spawn } from "node:child_process";

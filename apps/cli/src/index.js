@@ -26,6 +26,7 @@ import { isRunHeartbeatFresh, runWorkflow, renderFrame, resolveSchema } from "@s
 import { __engineInternals } from "@smthrs/engine/engine";
 import { readWorkflowEntryHash, readWorkflowGraphHash } from "@smthrs/engine/workflow-hash";
 import { mdxPlugin } from "./mdx-plugin.js";
+import { smithersRuntimeSpawn } from "./node-loader/smithersRuntimeSpawn.js";
 import { approveNode, denyNode } from "@smthrs/engine/approvals";
 import { isPidAlive, parseRuntimeOwnerPid } from "@smthrs/engine/runtime-owner";
 import { signalRun } from "@smthrs/engine/signals";
@@ -4061,7 +4062,8 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
       const fd = openSync(logFile, "a");
       let child;
       try {
-        child = spawn("bun", [cliPath, ...childArgs], {
+        const detachedSpawn = smithersRuntimeSpawn([cliPath, ...childArgs]);
+        child = spawn(detachedSpawn.command, detachedSpawn.args, {
           detached: true,
           stdio: ["ignore", fd, fd],
           env: {
@@ -4095,7 +4097,8 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
           supervisorArgs.push("--stale-threshold", options.superviseStaleThreshold);
         if (options.superviseMaxConcurrent !== 3)
           supervisorArgs.push("--max-concurrent", String(options.superviseMaxConcurrent));
-        const supervisor = spawn("bun", supervisorArgs, {
+        const supervisorSpawn = smithersRuntimeSpawn(supervisorArgs);
+        const supervisor = spawn(supervisorSpawn.command, supervisorSpawn.args, {
           detached: true,
           stdio: ["ignore", fd, fd],
           env: process.env,
@@ -4474,7 +4477,8 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
         backend: options.backend,
       });
       if (existingMonitor) monitorArgs.push("--resume", "--force");
-      const child = spawn("bun", [fileURLToPath(import.meta.url), ...monitorArgs], {
+      const monitorSpawn = smithersRuntimeSpawn([fileURLToPath(import.meta.url), ...monitorArgs]);
+      const child = spawn(monitorSpawn.command, monitorSpawn.args, {
         detached: true,
         stdio: "ignore",
         env: buildMonitorLaunchEnv(),
@@ -8154,7 +8158,8 @@ const ONESHOT_UI_ENTRY = fileURLToPath(new URL("./oneshot/oneshot-ui.tsx", impor
 
 /** @param {string} runId @param {string} cwd */
 function openOneshotUi(runId, cwd) {
-  const opener = spawn("bun", [fileURLToPath(import.meta.url), "ui", runId, "--workflow", "oneshot"], {
+  const openerSpawn = smithersRuntimeSpawn([fileURLToPath(import.meta.url), "ui", runId, "--workflow", "oneshot"]);
+  const opener = spawn(openerSpawn.command, openerSpawn.args, {
     cwd,
     detached: true,
     stdio: "ignore",
@@ -8438,7 +8443,8 @@ const cli = Cli.create({
         const fd = openSync(logFile, "a");
         let child;
         try {
-          child = spawn("bun", childArgs, {
+          const oneshotSpawn = smithersRuntimeSpawn(childArgs);
+          child = spawn(oneshotSpawn.command, oneshotSpawn.args, {
             cwd: taskCwd,
             detached: true,
             stdio: ["ignore", fd, fd],

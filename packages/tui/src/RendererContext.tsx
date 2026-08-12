@@ -1,3 +1,4 @@
+/** @jsxImportSource @opentui/react */
 import { createContext, useContext } from "react";
 import type { CliRenderer } from "@opentui/core";
 

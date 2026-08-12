@@ -10,6 +10,7 @@ import {
   findNearestWorkflowLocalCli,
 } from "./smithers-delegation.js";
 import { danglingWorkspaceLinkHint } from "./danglingWorkspaceLinkHint.js";
+import { nodeWorkflowLoaderExecArgv } from "./nodeWorkflowLoaderExecArgv.js";
 
 /**
  * When a project-local `smithers` install exists (the workflow pack's
@@ -40,7 +41,9 @@ function delegateToLocalCliIfPresent() {
     console.error(skew);
     process.exit(4);
   }
-  const proc = spawn(process.execPath, [localTarget, ...process.argv.slice(2)], {
+  // Module hooks do not survive a spawn, so the child has to install the
+  // TypeScript/JSX loader itself before Node reads the CLI entry file.
+  const proc = spawn(process.execPath, [...nodeWorkflowLoaderExecArgv(), localTarget, ...process.argv.slice(2)], {
     stdio: "inherit",
     cwd,
   });
@@ -57,6 +60,14 @@ function delegateToLocalCliIfPresent() {
 
 if (!delegateToLocalCliIfPresent()) {
   try {
+    // The CLI, the packages it imports, and user workflow files are authored in
+    // TypeScript and JSX. Bun transpiles those on import; Node does not, and its
+    // built-in type stripping refuses `.tsx` entirely and refuses any `.ts` under
+    // a `node_modules` directory. Install the esbuild-backed loader first so the
+    // dynamic `import()` below and every module it pulls in can be compiled.
+    // This must run before the import, and only a dynamic import gives us that.
+    const { registerNodeWorkflowLoader } = await import("@smthrs/cli/node-loader/registerNodeWorkflowLoader");
+    registerNodeWorkflowLoader();
     await import("@smthrs/cli");
   } catch (error) {
     // A dangling workspace link (e.g. rewritten to point into a removed

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+/** @jsxImportSource @opentui/react */
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 import { SmithersGatewayClient } from "@smthrs/gateway-client";
