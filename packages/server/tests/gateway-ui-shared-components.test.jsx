@@ -147,7 +147,7 @@ describe("Gateway UI with shared components", () => {
     expect(bundle).toContain(".sui-card");
     expect(bundle).toContain(".sui-dialog-content");
     expect(bundle).toContain("color-mix(in srgb, var(--brand, #8f46b5)");
-    expect(bundle).toContain("var(--surface, #ffffff)");
+    expect(bundle).toContain("var(--surface, #f6f6f7)");
     expect(bundle).toContain("data-smithers-ui");
     // Note: the component sheet itself carries no dark values (enforced by the
     // ui package's css-contract test); dark comes from the host page flipping

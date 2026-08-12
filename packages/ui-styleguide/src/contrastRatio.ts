@@ -1,4 +1,4 @@
-import { rgbChannels } from "./mixColors";
+import { rgbChannels } from "./rgbChannels";
 
 function relativeLuminance(color: string): number {
   const [red, green, blue] = rgbChannels(color).map((channel) => {
