@@ -30,7 +30,7 @@ const accents: Record<string, { dark: string; light: string }> = {
   github: { dark: "#58a6ff", light: "#0969da" },
   catppuccin: { dark: "#cba6f7", light: "#8839ef" },
   solarized: { dark: "#268bd2", light: "#00629d" },
-  gruvbox: { dark: "#d3869b", light: "#9d0006" },
+  gruvbox: { dark: "#d3869b", light: "#8f3f71" },
   rosePine: { dark: "#c4a7e7", light: "#907aa9" },
 };
 
@@ -60,7 +60,7 @@ function contrast(a: string, b: string): number {
 }
 
 /** Adjust a semantic seed until it reaches WCAG AA on its shared soft tint. */
-export function contrastSafe(seed: string, surface: string, amount: number, mode: Mode): string {
+function contrastSafe(seed: string, surface: string, amount: number, mode: Mode): string {
   let value = seed.slice(0, 7);
   const target = mode === "light" ? "#000000" : "#ffffff";
   for (let step = 0; step <= 100 && contrast(value, mix(value, surface, amount)) < 4.5; step += 1) {
@@ -73,6 +73,16 @@ function opaque(value: string | null | undefined, fallback: string): string {
   return value && /^#[\da-f]{6}(?:ff)?$/i.test(value) ? value.slice(0, 7) : fallback;
 }
 
+function secondaryText(text: string, bg: string, backgrounds: string[], initialAmount: number, target: number): string {
+  let amount = initialAmount;
+  let value = mix(text, bg, amount);
+  while (amount < 1 && backgrounds.some((background) => contrast(value, background) < target)) {
+    amount = Math.min(1, amount + 0.01);
+    value = mix(text, bg, amount);
+  }
+  return value;
+}
+
 async function load(id: string): Promise<UpstreamTheme> {
   const modulePath = requireFromPierre.resolve(`@shikijs/themes/${id}`);
   return (await import(modulePath)).default as UpstreamTheme;
@@ -81,6 +91,8 @@ async function load(id: string): Promise<UpstreamTheme> {
 function terminal(theme: UpstreamTheme, bg: string, text: string, semantic: Record<string, string>) {
   const c = theme.colors;
   // Themes without terminal.ansi* use the corresponding UI semantic seed.
+  // Bright fallbacks repeat that mapping; bright black is a text/background
+  // midpoint and bright white uses the editor foreground.
   const ansi = (name: string, fallback: string) => opaque(c[`terminal.ansi${name}`], fallback);
   const selection = c["terminal.selectionBackground"] ?? `rgba(${rgb(semantic.info).join(",")},0.3)`;
   return {
@@ -89,6 +101,10 @@ function terminal(theme: UpstreamTheme, bg: string, text: string, semantic: Reco
     black: ansi("Black", bg), red: ansi("Red", semantic.danger), green: ansi("Green", semantic.success),
     yellow: ansi("Yellow", semantic.warning), blue: ansi("Blue", semantic.info),
     magenta: ansi("Magenta", semantic.brand), cyan: ansi("Cyan", semantic.info), white: ansi("White", text),
+    brightBlack: ansi("BrightBlack", mix(text, bg, 0.45)), brightRed: ansi("BrightRed", semantic.danger),
+    brightGreen: ansi("BrightGreen", semantic.success), brightYellow: ansi("BrightYellow", semantic.warning),
+    brightBlue: ansi("BrightBlue", semantic.info), brightMagenta: ansi("BrightMagenta", semantic.brand),
+    brightCyan: ansi("BrightCyan", semantic.info), brightWhite: ansi("BrightWhite", text),
   };
 }
 
@@ -96,18 +112,22 @@ function variant(theme: UpstreamTheme, mode: Mode, accent: string, name: string)
   const c = theme.colors;
   const bg = opaque(c["editor.background"], mode === "dark" ? "#111111" : "#ffffff");
   const text = opaque(c["editor.foreground"], mode === "dark" ? "#eeeeee" : "#222222");
-  const surface = mix(text, bg, mode === "dark" ? 0.055 : 0.025);
-  const surface2 = mix(text, bg, mode === "dark" ? 0.095 : 0.055);
-  const surface3 = mix(text, bg, mode === "dark" ? 0.135 : 0.01);
+  // Dark surfaces rise by mixing foreground into the editor background. Light
+  // surfaces follow the existing zinc semantics: the page background sits one
+  // step below a near-white card, inset fills darken from that card, and
+  // overlays return to white.
+  const surface = mode === "dark" ? mix(text, bg, 0.055) : mix("#ffffff", bg, 0.75);
+  const surface2 = mode === "dark" ? mix(text, bg, 0.095) : mix(text, surface, 0.055);
+  const surface3 = mode === "dark" ? mix(text, bg, 0.135) : "#ffffff";
   const nightOwlSeeds = mode === "dark"
     ? { success: "#addb67", danger: "#ef5350", warning: "#ecc48d", info: "#82aaff" }
     : { success: "#2AA298", danger: "#E64D49", warning: "#daaa01", info: "#4876d6" };
   const semanticSeeds = {
     brand: accent,
-    success: name === "nightOwl" ? nightOwlSeeds.success : opaque(c["gitDecoration.untrackedResourceForeground"] ?? c["editorGutter.addedBackground"], "#2e9b57"),
+    success: name === "nightOwl" ? nightOwlSeeds.success : opaque(c["gitDecoration.addedResourceForeground"] ?? c["gitDecoration.untrackedResourceForeground"] ?? c["editorGutter.addedBackground"], "#2e9b57"),
     danger: name === "nightOwl" ? nightOwlSeeds.danger : opaque(c["errorForeground"] ?? c["editorError.foreground"], "#d73a49"),
     warning: name === "nightOwl" ? nightOwlSeeds.warning : opaque(c["editorWarning.foreground"] ?? c["gitDecoration.conflictingResourceForeground"], "#b7791f"),
-    info: name === "nightOwl" ? nightOwlSeeds.info : opaque(c["editorInfo.foreground"] ?? c["editorGutter.modifiedBackground"], accent),
+    info: name === "nightOwl" ? nightOwlSeeds.info : opaque(c["editorInfo.foreground"] ?? c["editorGutter.modifiedBackground"], "#2b6cb0"),
   };
   const semantic = Object.fromEntries(Object.entries(semanticSeeds).map(([name, seed]) => {
     const amount = name === "success" || name === "warning" ? 0.12 : 0.1;
@@ -117,10 +137,13 @@ function variant(theme: UpstreamTheme, mode: Mode, accent: string, name: string)
     return [name, value];
   })) as Record<string, string>;
   const t = rgb(text); const s = rgb(surface);
+  const textBackgrounds = [bg, surface, surface2, surface3];
   const rgba = (channels: Rgb, alpha: number) => `rgba(${channels.join(",")},${alpha})`;
   const tokens = {
     colorScheme: mode, bg, text,
-    textMuted: mix(text, bg, 0.68), textFaint: mix(text, bg, mode === "dark" ? 0.7 : 0.56), textPlaceholder: mix(text, bg, 0.46),
+    textMuted: secondaryText(text, bg, textBackgrounds, 0.68, 5),
+    textFaint: secondaryText(text, bg, textBackgrounds, mode === "dark" ? 0.65 : 0.56, 4.75),
+    textPlaceholder: secondaryText(text, bg, textBackgrounds, 0.46, 4.5),
     surface, surface2, surface3, surfaceGlass: rgba(s, 0.72), surfaceGlassStrong: rgba(s, 0.85),
     border: rgba(t, mode === "dark" ? 0.09 : 0.08), borderStrong: rgba(t, mode === "dark" ? 0.16 : 0.14),
     borderSolid: mix(text, bg, mode === "dark" ? 0.15 : 0.11), hover: surface2,

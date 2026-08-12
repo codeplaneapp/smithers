@@ -30,52 +30,52 @@ export const tokens = {
   /** Default text color. */
   foreground: "var(--text, #403f53)",
   /** Card / panel / popover surface. */
-  card: "var(--surface, #f6f6f7)",
+  card: "var(--surface, #fefefe)",
   cardForeground: "var(--text, #403f53)",
   /** Raised surface one step below card (insets, secondary fills). */
-  surface2: "var(--surface-2, #f1f1f2)",
+  surface2: "var(--surface-2, #f4f3f5)",
   /** Overlay surface (popovers, dialogs). */
-  surface3: "var(--surface-3, #f9f9f9)",
+  surface3: "var(--surface-3, #ffffff)",
   /** Frosted surfaces used by the floating Multi-style chat composer. */
-  glass: "var(--surface-glass, rgba(246,246,247,0.72))",
-  glassStrong: "var(--surface-glass-strong, rgba(246,246,247,0.85))",
-  popover: "var(--surface-3, #f9f9f9)",
+  glass: "var(--surface-glass, rgba(254,254,254,0.72))",
+  glassStrong: "var(--surface-glass-strong, rgba(254,254,254,0.85))",
+  popover: "var(--surface-3, #ffffff)",
   popoverForeground: "var(--text, #403f53)",
   /** Brand color. The house "primary" button is TINTED (10% brand surface + brand text), not solid. */
-  primary: "var(--brand, #8f46b5)",
+  primary: "var(--brand, #9449bc)",
   /** Tinted brand surface/border for soft emphasis (chips, active rows). */
-  primarySoft: "var(--brand-soft, color-mix(in srgb, var(--brand, #8f46b5) 10%, var(--surface, #f6f6f7)))",
-  primarySoftStrong: "var(--brand-soft-strong, color-mix(in srgb, var(--brand, #8f46b5) 16%, var(--surface, #f6f6f7)))",
-  primaryBorder: "var(--brand-border, color-mix(in srgb, var(--brand, #8f46b5) 40%, transparent))",
+  primarySoft: "var(--brand-soft, color-mix(in srgb, var(--brand, #9449bc) 10%, var(--surface, #fefefe)))",
+  primarySoftStrong: "var(--brand-soft-strong, color-mix(in srgb, var(--brand, #9449bc) 16%, var(--surface, #fefefe)))",
+  primaryBorder: "var(--brand-border, color-mix(in srgb, var(--brand, #9449bc) 40%, transparent))",
   /**
    * Text on solid brand fills. --inverse-text is white in light mode and near
    * black in dark mode, which tracks the brand value getting lighter in dark.
    */
   primaryForeground: "var(--inverse-text, #FBFBFB)",
   /** Subtle raised surface (hover states, secondary buttons, muted fills). */
-  secondary: "var(--hover, #f1f1f2)",
+  secondary: "var(--hover, #f4f3f5)",
   secondaryForeground: "var(--text, #403f53)",
-  muted: "var(--hover, #f1f1f2)",
-  mutedForeground: "var(--text-muted, #7c7b89)",
+  muted: "var(--hover, #f4f3f5)",
+  mutedForeground: "var(--text-muted, #676676)",
   /**
    * shadcn's "accent" = the hover fill. Trap: the styleguide's page-global
    * `--accent` alias is the BRAND violet -- same word, different color. This
    * bridge deliberately does NOT read `--accent`.
    */
-  accent: "var(--hover, #f1f1f2)",
+  accent: "var(--hover, #f4f3f5)",
   accentForeground: "var(--text, #403f53)",
-  destructive: "var(--danger, #b33d3a)",
-  destructiveSoft: "var(--danger-soft, color-mix(in srgb, var(--danger, #b33d3a) 10%, var(--surface, #f6f6f7)))",
-  destructiveBorder: "var(--danger-border, color-mix(in srgb, var(--danger, #b33d3a) 40%, transparent))",
-  success: "var(--success, #1f6e67)",
-  successSoft: "var(--success-soft, color-mix(in srgb, var(--success, #1f6e67) 12%, var(--surface, #f6f6f7)))",
-  successBorder: "var(--success-border, color-mix(in srgb, var(--success, #1f6e67) 40%, transparent))",
-  warning: "var(--warning, #7b6001)",
-  warningSoft: "var(--warning-soft, color-mix(in srgb, var(--warning, #7b6001) 12%, var(--surface, #f6f6f7)))",
-  warningBorder: "var(--warning-border, color-mix(in srgb, var(--warning, #7b6001) 40%, transparent))",
-  info: "var(--info, #3d62b3)",
-  infoSoft: "var(--info-soft, color-mix(in srgb, var(--info, #3d62b3) 10%, var(--surface, #f6f6f7)))",
-  infoBorder: "var(--info-border, color-mix(in srgb, var(--info, #3d62b3) 40%, transparent))",
+  destructive: "var(--danger, #ba3f3c)",
+  destructiveSoft: "var(--danger-soft, color-mix(in srgb, var(--danger, #ba3f3c) 10%, var(--surface, #fefefe)))",
+  destructiveBorder: "var(--danger-border, color-mix(in srgb, var(--danger, #ba3f3c) 40%, transparent))",
+  success: "var(--success, #21766f)",
+  successSoft: "var(--success-soft, color-mix(in srgb, var(--success, #21766f) 12%, var(--surface, #fefefe)))",
+  successBorder: "var(--success-border, color-mix(in srgb, var(--success, #21766f) 40%, transparent))",
+  warning: "var(--warning, #846701)",
+  warningSoft: "var(--warning-soft, color-mix(in srgb, var(--warning, #846701) 12%, var(--surface, #fefefe)))",
+  warningBorder: "var(--warning-border, color-mix(in srgb, var(--warning, #846701) 40%, transparent))",
+  info: "var(--info, #3f66ba)",
+  infoSoft: "var(--info-soft, color-mix(in srgb, var(--info, #3f66ba) 10%, var(--surface, #fefefe)))",
+  infoBorder: "var(--info-border, color-mix(in srgb, var(--info, #3f66ba) 40%, transparent))",
   /** Hairline borders. */
   border: "var(--border, rgba(64,63,83,0.08))",
   borderStrong: "var(--border-strong, rgba(64,63,83,0.14))",
@@ -86,13 +86,13 @@ export const tokens = {
    * rule). Routed through the styleguide's `--ring`/`--ring-border` custom
    * properties so a host that themes the ring re-themes these components too.
    */
-  ring: "var(--ring, color-mix(in srgb, var(--brand, #8f46b5) 22%, transparent))",
-  ringBorder: "var(--ring-border, color-mix(in srgb, var(--brand, #8f46b5) 50%, transparent))",
+  ring: "var(--ring, color-mix(in srgb, var(--brand, #9449bc) 22%, transparent))",
+  ringBorder: "var(--ring-border, color-mix(in srgb, var(--brand, #9449bc) 50%, transparent))",
   /** Extra-subtle fill for chips and hover washes. */
   hoverSubtle: "var(--hover-subtle, rgba(64,63,83,0.04))",
   /** Faint text (placeholders use --text-placeholder). */
-  textFaint: "var(--text-faint, #92929d)",
-  placeholder: "var(--text-placeholder, #a5a5ae)",
+  textFaint: "var(--text-faint, #6b6a7a)",
+  placeholder: "var(--text-placeholder, #6f6e7d)",
   /** Inverse surface/text (tooltips, "ink" chips). */
   inverseBg: "var(--inverse-bg, #403f53)",
   inverseText: "var(--inverse-text, #FBFBFB)",

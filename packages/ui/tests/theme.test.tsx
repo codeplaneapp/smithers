@@ -24,6 +24,8 @@ describe("palette resolution", () => {
   test("defaults invalid and absent values to Night Owl", () => {
     expect(resolvePalette({ getAttribute: () => null })).toBe("night-owl");
     expect(resolvePalette({ getAttribute: () => "unknown" })).toBe("night-owl");
+    expect(resolvePalette({ getAttribute: () => "toString" })).toBe("night-owl");
+    expect(resolvePalette({ getAttribute: () => "__proto__" })).toBe("night-owl");
     expect(resolvePalette({ getAttribute: () => "gruvbox" })).toBe("gruvbox");
   });
 

@@ -60,7 +60,7 @@ const STYLE_ATTR = "data-smithers-ui-terminal";
  * the IME composition view; the two overrides below retie them to the active
  * house palette (the viewport goes transparent so the themed xterm canvas and
  * surface background show through). Cursor and selection colors are already
- * theme-derived through `ITheme` (LIGHT_THEME/DARK_THEME above).
+ * theme-derived through the selected registry palette.
  */
 const surfaceCss = `
 .sui-terminal { position:relative; box-sizing:border-box; display:flex; flex-direction:column; min-height:0; width:100%; height:100%; padding:12px; border:1px solid ${t.border}; border-radius:${t.radius}; overflow:hidden; font-family:${t.fontMono}; }

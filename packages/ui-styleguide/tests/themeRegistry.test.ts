@@ -22,6 +22,8 @@ describe("theme registry", () => {
       expect(theme.key).toBe(key);
       expect(Object.keys(theme.light).sort()).toEqual(keys);
       expect(Object.keys(theme.dark).sort()).toEqual(keys);
+      expect(Object.keys(theme.terminal.light).sort()).toEqual(Object.keys(themeRegistry[DEFAULT_THEME_KEY].terminal.light).sort());
+      expect(Object.keys(theme.terminal.dark).sort()).toEqual(Object.keys(themeRegistry[DEFAULT_THEME_KEY].terminal.dark).sort());
       expect(SHIKI_IDS.has(theme.syntax.shikiDark)).toBe(true);
       expect(SHIKI_IDS.has(theme.syntax.shikiLight)).toBe(true);
     }
@@ -33,6 +35,58 @@ describe("theme registry", () => {
       for (const [name, amount] of Object.entries(amounts)) {
         const color = variant[name as keyof typeof amounts];
         expect(contrastRatio(color, mixColors(color, variant.surface, amount))).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  test("keeps opposing semantic roles visually distinct", () => {
+    for (const theme of Object.values(themeRegistry)) for (const variant of [theme.light, theme.dark]) {
+      expect(variant.success).not.toBe(variant.warning);
+      expect(variant.brand).not.toBe(variant.danger);
+      expect(variant.brand).not.toBe(variant.info);
+    }
+  });
+
+  test("keeps the surface elevation ramp ordered in both modes", () => {
+    const luminanceAgainstBlack = (color: string) => contrastRatio(color, "#000000");
+    for (const theme of Object.values(themeRegistry)) {
+      expect(luminanceAgainstBlack(theme.light.surface)).toBeGreaterThanOrEqual(luminanceAgainstBlack(theme.light.bg));
+      expect(luminanceAgainstBlack(theme.light.surface2)).toBeLessThan(luminanceAgainstBlack(theme.light.surface));
+      expect(luminanceAgainstBlack(theme.light.surface3)).toBeGreaterThanOrEqual(
+        luminanceAgainstBlack(theme.light.surface),
+      );
+      expect(luminanceAgainstBlack(theme.dark.surface)).toBeGreaterThan(luminanceAgainstBlack(theme.dark.bg));
+      expect(luminanceAgainstBlack(theme.dark.surface2)).toBeGreaterThan(luminanceAgainstBlack(theme.dark.surface));
+      expect(luminanceAgainstBlack(theme.dark.surface3)).toBeGreaterThan(luminanceAgainstBlack(theme.dark.surface2));
+    }
+    expect(luminanceAgainstBlack(themeRegistry[DEFAULT_THEME_KEY].light.surface)).toBeGreaterThan(
+      luminanceAgainstBlack(themeRegistry[DEFAULT_THEME_KEY].light.bg),
+    );
+  });
+
+  test("keeps secondary text ordered from muted through placeholder", () => {
+    for (const theme of Object.values(themeRegistry)) {
+      for (const variant of [theme.light, theme.dark]) {
+        expect(contrastRatio(variant.text, variant.bg)).toBeGreaterThanOrEqual(contrastRatio(variant.textMuted, variant.bg));
+        expect(contrastRatio(variant.textMuted, variant.bg)).toBeGreaterThanOrEqual(
+          contrastRatio(variant.textFaint, variant.bg),
+        );
+        expect(contrastRatio(variant.textFaint, variant.bg)).toBeGreaterThanOrEqual(
+          contrastRatio(variant.textPlaceholder, variant.bg),
+        );
+      }
+    }
+  });
+
+  test("keeps derived secondary text AA when the upstream foreground permits it", () => {
+    for (const [key, theme] of Object.entries(themeRegistry)) for (const variant of [theme.light, theme.dark]) {
+      if (key === "fucory") continue;
+      for (const background of [variant.bg, variant.surface, variant.surface2, variant.surface3]) {
+        if (contrastRatio(variant.text, background) >= 4.5) {
+          expect(contrastRatio(variant.textMuted, background)).toBeGreaterThanOrEqual(4.5);
+          expect(contrastRatio(variant.textFaint, background)).toBeGreaterThanOrEqual(4.5);
+          expect(contrastRatio(variant.textPlaceholder, background)).toBeGreaterThanOrEqual(4.5);
+        }
       }
     }
   });

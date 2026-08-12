@@ -44,10 +44,10 @@ describe("standaloneThemeCss", () => {
     expect(css.match(/@media \(prefers-reduced-motion: reduce\)/g)).toHaveLength(1);
   });
 
-  test("uses the corrected dark faint token in both dark selectors", () => {
+  test("uses the corrected dark secondary tokens in both dark selectors", () => {
     const css = standaloneThemeCss();
-    expect(css.match(/--text-faint:#96a2b0/g)).toHaveLength(2);
-    expect(css.match(/--text-placeholder:#637281/g)).toHaveLength(2);
+    expect(css.match(/--text-faint:#909caa/g)).toHaveLength(2);
+    expect(css.match(/--text-placeholder:#8b98a6/g)).toHaveLength(2);
   });
 
   test("declares every workflow theme token in light and dark mode", () => {
