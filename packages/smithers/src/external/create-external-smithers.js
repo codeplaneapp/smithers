@@ -8,8 +8,7 @@
 // @smithers-type-exports-end
 
 import React from "react";
-import { Database } from "bun:sqlite";
-import { drizzle } from "drizzle-orm/bun-sqlite";
+import { loadBunSqliteDatabase, loadBunSqliteDrizzle } from "@smthrs/db/bunSqliteRuntime";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { zodToTable } from "@smthrs/db/zodToTable";
 import { syncZodTableSchema } from "@smthrs/db/zodToCreateTableSQL";
@@ -83,6 +82,7 @@ export function createExternalSmithers(config) {
   const dbPath = config.dbPath
     ? resolve(config.dbPath)
     : join(mkdtempSync(join(tmpdir(), "smithers-ext-")), "smithers.db");
+  const Database = loadBunSqliteDatabase();
   const sqlite = new Database(dbPath);
   sqlite.run("PRAGMA journal_mode = WAL");
   // 30s timeout: concurrent worktrees each spawn agent processes that all write
@@ -121,7 +121,7 @@ export function createExternalSmithers(config) {
   for (const [key, table] of Object.entries(tables)) {
     drizzleSchema[key] = table;
   }
-  const db = drizzle(sqlite, { schema: drizzleSchema });
+  const db = loadBunSqliteDrizzle()(sqlite, { schema: drizzleSchema });
   const schemaRegistry = new Map();
   for (const [name, zodSchema] of Object.entries(schemas)) {
     if (name === "input") continue;

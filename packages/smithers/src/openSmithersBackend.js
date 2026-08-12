@@ -34,7 +34,13 @@ function attachMemoryBackend(api, env, localMemoryDbPath) {
   const hindsightUrl = env.HINDSIGHT_URL?.trim();
   let contractStore;
   let closeLocalMemory;
-  if (api.db?.dialect !== "postgres") {
+  // The sqlite sidecar exists because the memory store was authored against a
+  // synchronous sqlite client, so a Postgres-dialect main database cannot serve
+  // it directly. `bun:sqlite` has no Node equivalent, so on Node the sidecar is
+  // not available at all: route memory to the main database instead of failing
+  // the whole backend. Bun keeps the sidecar.
+  const canOpenSqliteSidecar = typeof Bun !== "undefined";
+  if (api.db?.dialect !== "postgres" || !canOpenSqliteSidecar) {
     ensureSmithersTables(api.db);
     contractStore = createMemoryStore(api.db);
   } else {
