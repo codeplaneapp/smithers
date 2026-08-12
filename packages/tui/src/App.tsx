@@ -1,3 +1,4 @@
+/** @jsxImportSource @opentui/react */
 import { useState, type ReactNode } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useKeymap } from "./Keybindings.tsx";

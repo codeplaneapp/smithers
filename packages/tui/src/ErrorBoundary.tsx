@@ -1,3 +1,4 @@
+/** @jsxImportSource @opentui/react */
 import { Component, type ReactNode } from "react";
 import { useKeyboard } from "@opentui/react";
 

@@ -1,3 +1,4 @@
+/** @jsxImportSource @opentui/react */
 import { createContext, useContext, type ReactNode } from "react";
 
 export type KeymapEntry = {
