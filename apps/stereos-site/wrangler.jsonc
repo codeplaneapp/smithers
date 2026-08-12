@@ -1,0 +1,18 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "stereos-site",
+  "compatibility_date": "2026-07-02",
+  "workers_dev": true,
+  "assets": {
+    "directory": "site"
+  },
+  "routes": [
+    {
+      "pattern": "stereos.smithers.sh",
+      "custom_domain": true
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
