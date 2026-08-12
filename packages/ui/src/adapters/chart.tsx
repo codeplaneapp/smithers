@@ -35,7 +35,7 @@ import { tokens as t } from "../tokens";
  * The categorical series palette, in fixed slot order. Both columns are one
  * palette — the dark column is the same eight hues re-stepped for the dark
  * surface. Validated (adjacent-pair CVD ΔE ≥ 8, normal-vision ΔE ≥ 15,
- * lightness band, chroma floor) against the smithers light `#ffffff` and dark
+ * lightness band, chroma floor) against the smithers light `#f6f6f7` and dark
  * `#141417` surfaces. Never reorder, cycle, or append generated hues; past
  * eight series fold the tail into "Other" or facet.
  */

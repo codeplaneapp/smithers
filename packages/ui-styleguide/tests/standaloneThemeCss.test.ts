@@ -14,7 +14,7 @@ function themeDeclarations(css: string, theme: "light" | "dark"): Map<string, st
 describe("standaloneThemeCss", () => {
   test("ships both dark-mode strategies and keeps color values in token declarations", () => {
     const css = standaloneThemeCss();
-    expect(css.length).toBeLessThan(8_192);
+    expect(css.length).toBeLessThan(32_768);
     expect(css).toContain('@media (prefers-color-scheme: dark) { :root:not([data-theme="light"])');
     expect(css).toContain(':root[data-theme="dark"]');
     const declarations = css.match(/--[\w-]+:[^;}]+/g) ?? [];
@@ -46,9 +46,8 @@ describe("standaloneThemeCss", () => {
 
   test("uses the corrected dark faint token in both dark selectors", () => {
     const css = standaloneThemeCss();
-    expect(css.match(/--text-faint:#8c8c95/g)).toHaveLength(2);
-    expect(css.match(/--text-placeholder:#75757e/g)).toHaveLength(2);
-    expect(css).not.toContain("--text-faint:#71717a; --text-placeholder:#75757e");
+    expect(css.match(/--text-faint:#96a2b0/g)).toHaveLength(2);
+    expect(css.match(/--text-placeholder:#637281/g)).toHaveLength(2);
   });
 
   test("declares every workflow theme token in light and dark mode", () => {
@@ -61,7 +60,7 @@ describe("standaloneThemeCss", () => {
   test("routes elevation shadows through the theme shadow channels", () => {
     const css = standaloneThemeCss();
     const shadows = css.match(/--shadow-[123]:[^;}]+/g) ?? [];
-    expect(shadows).toHaveLength(9);
+    expect(shadows).toHaveLength(72);
     for (const shadow of shadows) expect(shadow).toContain("rgb(var(--shadow-rgb) /");
     expect(css).not.toMatch(/rgb\((?:24 24 27|0 0 0) \//);
   });

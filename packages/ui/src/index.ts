@@ -39,6 +39,8 @@
 export { cn } from "./cn";
 export { tokens, type SmithersUiTokens } from "./tokens";
 export { resolveTheme, subscribeTheme, type ResolvedTheme } from "./internal/resolveTheme";
+export { resolvePalette, subscribePalette, type ResolvedPalette } from "./internal/resolvePalette";
+export { useResolvedPalette } from "./internal/useResolvedPalette";
 export {
   normalizeStatus,
   statusClass,

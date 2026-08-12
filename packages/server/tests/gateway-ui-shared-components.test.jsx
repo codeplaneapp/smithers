@@ -132,6 +132,7 @@ describe("Gateway UI with shared components", () => {
       expect(html).toContain(":root[data-theme='dark']");
       expect(html).toContain("--bg:#09090b");
       expect(html).toContain('new URLSearchParams(location.search).get("theme")');
+      expect(html).toContain('new URLSearchParams(location.search).get("palette")');
       expect(html).toContain("document.documentElement.dataset.theme=t");
     }
 
@@ -145,7 +146,7 @@ describe("Gateway UI with shared components", () => {
     expect(bundle).toContain(".sui-button");
     expect(bundle).toContain(".sui-card");
     expect(bundle).toContain(".sui-dialog-content");
-    expect(bundle).toContain("color-mix(in srgb, var(--brand, #6d56d8)");
+    expect(bundle).toContain("color-mix(in srgb, var(--brand, #8f46b5)");
     expect(bundle).toContain("var(--surface, #ffffff)");
     expect(bundle).toContain("data-smithers-ui");
     // Note: the component sheet itself carries no dark values (enforced by the

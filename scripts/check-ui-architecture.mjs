@@ -154,6 +154,27 @@ const SANCTIONED_GATEWAY_UI_PROGRAM_FILES = new Set([
   "packages/gateway-ui/src/SmithersCanvasNode.tsx",
   "packages/gateway-ui/src/hijack.ts",
 ]);
+const CANONICAL_STYLEGUIDE_FILES = new Set([
+  "packages/ui-styleguide/src/SmithersTheme.ts",
+  "packages/ui-styleguide/src/TerminalPalette.ts",
+  "packages/ui-styleguide/src/ThemeSyntaxId.ts",
+  "packages/ui-styleguide/src/ThemeVariantTokens.ts",
+  "packages/ui-styleguide/src/contrastRatio.ts",
+  "packages/ui-styleguide/src/mixColors.ts",
+  "packages/ui-styleguide/src/paletteThemeCss.ts",
+  "packages/ui-styleguide/src/serializeThemeVariant.ts",
+  "packages/ui-styleguide/src/standaloneThemeCss.ts",
+  "packages/ui-styleguide/src/themeRegistry.ts",
+  "packages/ui-styleguide/src/themeTokens.ts",
+  "packages/ui-styleguide/src/themes/catppuccin.ts",
+  "packages/ui-styleguide/src/themes/fucory.ts",
+  "packages/ui-styleguide/src/themes/github.ts",
+  "packages/ui-styleguide/src/themes/gruvbox.ts",
+  "packages/ui-styleguide/src/themes/nightOwl.ts",
+  "packages/ui-styleguide/src/themes/one.ts",
+  "packages/ui-styleguide/src/themes/rosePine.ts",
+  "packages/ui-styleguide/src/themes/solarized.ts",
+]);
 // Sanctioned program files are gateway-data bindings: they may import
 // @smthrs/gateway-react (data hooks) in addition to the
 // @smthrs/ui barrel.
@@ -1617,9 +1638,7 @@ export function collectUiArchitectureState(root, kind = "smithers") {
       if (
         (path.startsWith("packages/gateway-ui/src/") ||
           (path.startsWith("packages/ui-styleguide/src/") &&
-            !["packages/ui-styleguide/src/standaloneThemeCss.ts", "packages/ui-styleguide/src/themeTokens.ts"].includes(
-              path,
-            ))) &&
+            !CANONICAL_STYLEGUIDE_FILES.has(path))) &&
         !SANCTIONED_GATEWAY_UI_PROGRAM_FILES.has(path)
       ) {
         violations.push(formatViolation("compatibility-facade-file", `${path} is legacy facade implementation`));

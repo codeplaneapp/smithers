@@ -396,14 +396,10 @@ function safeJsonScript(value) {
 }
 
 /**
- * Pre-paint theme override for gateway-served UI pages. An embedding host (an
- * iframe or a deep link) forces a theme with `?theme=dark` / `?theme=light`;
- * the script stamps it as `data-theme` on `<html>` before first paint, which
- * the injected style-guide tokens (and `color-scheme`) honor. Without the
- * param the page follows the OS via `prefers-color-scheme`.
+ * Pre-paint mode and palette overrides for gateway-served UI pages.
  */
 const GATEWAY_UI_THEME_BOOTSTRAP_SCRIPT =
-  '(function(){var t=new URLSearchParams(location.search).get("theme");if(t==="dark"||t==="light"){document.documentElement.dataset.theme=t;}})();';
+  '(function(){var t=new URLSearchParams(location.search).get("theme"),p=new URLSearchParams(location.search).get("palette"),ps=["night-owl","fucory","one","github","catppuccin","solarized","gruvbox","rose-pine"];if(t==="dark"||t==="light"){document.documentElement.dataset.theme=t;}if(ps.includes(p)){document.documentElement.dataset.palette=p;}})();';
 
 /**
  * @param {string | undefined} rawPath

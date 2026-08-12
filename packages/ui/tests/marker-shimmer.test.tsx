@@ -46,7 +46,7 @@ describe("Marker", () => {
     host.innerHTML = renderToStaticMarkup(<Marker variant="note">Dark note</Marker>);
     document.body.appendChild(host);
     const marker = host.querySelector<HTMLElement>('[data-slot="marker"]')!;
-    expect(getComputedStyle(marker).color).toBe("#a1a1aa");
+    expect(getComputedStyle(marker).color).toBe("#929eac");
     host.remove();
   });
 });
@@ -82,7 +82,7 @@ describe("Shimmer and scroll fade CSS", () => {
     document.body.appendChild(host);
     const shimmer = host.querySelector<HTMLElement>('[data-slot="shimmer"]')!;
     expect(getComputedStyle(shimmer).backgroundImage).toContain(
-      "linear-gradient(90deg, #a1a1aa 35%, #f4f4f5 50%, #a1a1aa 65%)",
+      "linear-gradient(90deg, #929eac 35%, #d6deeb 50%, #929eac 65%)",
     );
     host.remove();
   });
