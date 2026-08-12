@@ -23,11 +23,13 @@ jobs:
             script: test:runtime:vercel
           - lane: Node.js
             script: test:runtime:node
+          - lane: Node.js CLI
+            script: test:runtime:node:cli
           - lane: Bun
             script: test:runtime:bun
     name: Runtime conformance -- ${{ matrix.lane }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: pnpm/action-setup@v6.0.8

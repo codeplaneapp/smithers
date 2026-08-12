@@ -9,7 +9,7 @@
 // Usage: node e2e/runtime/run-node-cli.mjs
 // Slow (packs ~54 tarballs and runs a real npm install), so it is its own
 // script rather than part of `bun test`.
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -161,6 +161,30 @@ export default smithers((ctx) => (
       await sleep(1000);
     }
     assert(status === "finished", `run ended as ${status || "unknown"}`);
+  });
+
+  await check("a foreground run reports the finished status inline", () => {
+    // The detached check above covers the child-process launcher. This covers
+    // the in-process path, which is what the docs tell a Node user to run.
+    const started = smithers(["up", "workflow.tsx", "--input", '{"name":"node"}']);
+    const combined = started.stdout + started.stderr;
+    assert(started.status === 0, `up failed: ${combined.slice(0, 800)}`);
+    assert(/status:\s*finished/.test(combined), `run did not finish: ${combined.slice(0, 800)}`);
+  });
+
+  await check("the bin shim still needs Bun, as documented", () => {
+    // npm links `node_modules/.bin/smithers` to the script, so the operating
+    // system honours its `#!/usr/bin/env bun` shebang. Node users invoke the
+    // script through `node`. Assert the documented failure so a future shebang
+    // change has to update `docs/runtime/node.mdx` with it.
+    const result = spawnSync(join(project, "node_modules/.bin/smithers"), ["--version"], {
+      cwd: project,
+      env,
+      encoding: "utf8",
+    });
+    const combined = String(result.stdout ?? "") + String(result.stderr ?? "");
+    assert(result.status !== 0, `expected the shim to fail without Bun, got: ${combined.slice(0, 300)}`);
+    assert(/bun/i.test(combined), `expected a missing-Bun message, got: ${combined.slice(0, 300)}`);
   });
 
   await check("smithers output returns the task row", () => {
