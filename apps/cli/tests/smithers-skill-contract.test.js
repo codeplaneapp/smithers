@@ -139,3 +139,14 @@ test.each(ORCHESTRATION_SKILLS)("%s guards against recursing into Smithers from 
   expect(guardIndex).toBeGreaterThan(-1);
   expect(routingIndex).toBeGreaterThan(guardIndex);
 });
+
+// The body only reaches the model once the skill is invoked; the frontmatter
+// description is in context from the first turn. An agent that acts on the
+// description alone reads "you are an ORCHESTRATOR, route this through
+// Smithers" and recurses without ever loading the guard section above, which is
+// how the bug reproduced. The guard has to be in both places.
+test.each(ORCHESTRATION_SKILLS)("%s states the guard in its frontmatter description", (path) => {
+  const frontmatter = readRepoFile(path).match(/^---\n([\s\S]*?)\n---/)?.[1] ?? "";
+
+  expect(frontmatter).toContain("SMITHERS_INSIDE_RUN");
+});

@@ -7,7 +7,12 @@ description: >
   "implement this and review it", "keep iterating until tests pass",
   "plan then build", or anything that needs retries, approvals, replay,
   or evals across multiple AI steps. YOU (the agent) run Smithers on the
-  user's behalf; it is not a GUI the human clicks. You are an
+  user's behalf; it is not a GUI the human clicks. HARD RULE 0: if
+  `SMITHERS_INSIDE_RUN` is set in your environment you are ALREADY a
+  worker agent inside a Smithers node, so never invoke the Smithers CLI
+  or MCP tools to launch or steer a run; do the node's task directly
+  with your ordinary tools. Everything below applies only when it is
+  unset. You are otherwise an
   ORCHESTRATOR: run long-running, multi-step, or background work
   *through* Smithers, not through your own ad-hoc subagents; spend your
    time observing the run and reporting. Also governs DELIVERABLE SHAPE

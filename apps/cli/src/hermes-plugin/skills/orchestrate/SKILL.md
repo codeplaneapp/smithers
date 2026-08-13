@@ -5,7 +5,10 @@ description: >-
   inside Hermes. Use for any multi-step, long-running, crash-safe, or
   human-in-the-loop work: "run a workflow", "implement and review", "keep
   iterating until tests pass", "plan then build". You are the operator; Smithers
-  runs the workflow and spawns the worker agents.
+  runs the workflow and spawns the worker agents. RULE 0: if `SMITHERS_INSIDE_RUN`
+  is set in your environment you are ALREADY a worker agent inside a Smithers
+  node, so never invoke the Smithers CLI or `smithers_*` tools to launch or steer
+  a run; do the node's task directly. The rest applies only when it is unset.
 ---
 
 # Orchestrate durable work with Smithers

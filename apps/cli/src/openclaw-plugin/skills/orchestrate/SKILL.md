@@ -4,7 +4,11 @@ description: >-
   Drive Smithers durable workflows from OpenClaw. Use for multi-step,
   long-running, background, human-in-the-loop, retryable, or repeatable work.
   Prefer creating or improving a Smithers workflow over repeating ad-hoc agent
-  turns, and use evals plus optimization to improve workflows over time.
+  turns, and use evals plus optimization to improve workflows over time. RULE 0:
+  if `SMITHERS_INSIDE_RUN` is set in your environment you are ALREADY a worker
+  agent inside a Smithers node, so never invoke the Smithers CLI or `smithers_*`
+  tools to launch or steer a run; do the node's task directly. The rest applies
+  only when it is unset.
 ---
 
 # Smithers From OpenClaw
