@@ -1,0 +1,15 @@
+{
+  "name": "@stereos/smithers",
+  "version": "0.0.0",
+  "private": true,
+  "description": "stereOS sandbox provider for Smithers: the integration a sandbox vendor ships.",
+  "type": "module",
+  "exports": {
+    ".": "./real/stereos-provider.ts",
+    "./workflow": "./real/child-workflow.tsx"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "e2e": "node e2e/stereos.e2e.mjs"
+  }
+}

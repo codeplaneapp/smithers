@@ -1,0 +1,25 @@
+[Unit]
+Description=Public guard and UI for the custom-sandbox.smithers.sh demo
+After=network-online.target stereos-gateway.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@WORKSPACE@/.smithers
+EnvironmentFile=/etc/stereos-demo.env
+Environment=PATH=@HOME@/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=STEREOS_GATEWAY_URL=http://127.0.0.1:7331
+Environment=STEREOS_GUARD_PORT=8787
+ExecStart=@HOME@/.bun/bin/bun @WORKSPACE@/.smithers/guard.ts
+Restart=always
+RestartSec=5
+# The guard holds no credentials of its own beyond the gateway token and never
+# writes to the filesystem.
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
