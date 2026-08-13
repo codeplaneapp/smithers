@@ -114,7 +114,7 @@ import {
   GatewayExtensions,
   isExtensionMethod,
 } from "./GatewayExtensions.js";
-import { workflowUiThemeCss } from "@smthrs/ui-styleguide";
+import { loadWorkflowUiThemeCss } from "./gatewayUi/workflowUiThemeCss.js";
 import { hijackCandidatesFromAttempts } from "./hijackCandidates.js";
 import { createGatewayUiApp } from "./gatewayUi/createGatewayUiApp.js";
 import { renderDefaultConsoleClient } from "./gatewayUi/defaultConsole.js";
@@ -3104,11 +3104,12 @@ export class Gateway {
   /**
    * @param {{ config: GatewayUiMount }} match
    */
-  renderUiIndex(match) {
+  async renderUiIndex(match) {
     const mount = match.config;
     const title = mount.config.title ?? (mount.workflowKey ? `${mount.workflowKey} | Smithers` : "Smithers");
     const boot = this.uiBootConfig(mount);
     const assetSrc = joinUiPath(mount.config.path, `${GATEWAY_UI_ASSET_PREFIX}/client.js`);
+    const workflowUiThemeCss = await loadWorkflowUiThemeCss();
     // The style-guide token block ships in the host page itself so the
     // document is themed (light AND dark, `color-scheme` included) before —
     // and independently of — the client bundle: no white flash for dark
@@ -3140,7 +3141,7 @@ export class Gateway {
     }
     if (match.config.config.builtin === "operator") {
       return {
-        body: renderDefaultConsoleClient(),
+        body: await renderDefaultConsoleClient(),
         contentType: "text/javascript; charset=utf-8",
       };
     }
@@ -3296,12 +3297,13 @@ export class Gateway {
    * @param {IncomingMessage} req
    * @param {ServerResponse} res
    */
-  handleRootRequest(req, res) {
+  async handleRootRequest(req, res) {
     const mounts = this.getUiMounts();
     const operatorMount = mounts.find((mount) => mount.kind === "operator");
     if (operatorMount) {
       return sendRedirect(res, operatorMount.config.path);
     }
+    const workflowUiThemeCss = await loadWorkflowUiThemeCss();
     const uiMounts = mounts.filter((mount) => mount.config.path !== "/");
     const links = [
       { href: "/health", label: "Health" },

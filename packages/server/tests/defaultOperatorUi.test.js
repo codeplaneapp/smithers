@@ -3,7 +3,7 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Gateway } from "../src/gateway.js";
-import { DEFAULT_OPERATOR_UI_CLIENT_JS, DEFAULT_OPERATOR_UI_ENTRY } from "../src/gatewayUi/defaultOperatorUi.js";
+import { DEFAULT_OPERATOR_UI_ENTRY, loadDefaultOperatorUiClientJs } from "../src/gatewayUi/defaultOperatorUi.js";
 import { renderDefaultConsoleClient } from "../src/gatewayUi/defaultConsole.js";
 
 function makeDbPath(name) {
@@ -22,31 +22,40 @@ describe("defaultOperatorUi", () => {
       expect(DEFAULT_OPERATOR_UI_ENTRY).toBe("smithers:default-operator-ui");
     });
 
-    test("DEFAULT_OPERATOR_UI_CLIENT_JS is a non-empty IIFE string", () => {
-      expect(typeof DEFAULT_OPERATOR_UI_CLIENT_JS).toBe("string");
-      expect(DEFAULT_OPERATOR_UI_CLIENT_JS.length).toBeGreaterThan(1000);
+    test("loadDefaultOperatorUiClientJs resolves a non-empty IIFE string", async () => {
+      const clientJs = await loadDefaultOperatorUiClientJs();
+      expect(typeof clientJs).toBe("string");
+      expect(clientJs.length).toBeGreaterThan(1000);
       // The stringified client is wrapped in an IIFE: (function defaultOperatorUiClient(){...})();
-      expect(DEFAULT_OPERATOR_UI_CLIENT_JS).toStartWith("(function defaultOperatorUiClient(");
-      expect(DEFAULT_OPERATOR_UI_CLIENT_JS).toEndWith("();\n");
+      expect(clientJs).toStartWith("(function defaultOperatorUiClient(");
+      expect(clientJs).toEndWith("();\n");
     });
 
-    test("DEFAULT_OPERATOR_UI_CLIENT_JS is syntactically valid JavaScript", () => {
-      // new Function() parses the body — throws SyntaxError if malformed
-      expect(() => new Function(DEFAULT_OPERATOR_UI_CLIENT_JS)).not.toThrow();
+    test("the operator UI client is syntactically valid JavaScript", async () => {
+      // new Function() parses the body and throws SyntaxError if malformed
+      const clientJs = await loadDefaultOperatorUiClientJs();
+      expect(() => new Function(clientJs)).not.toThrow();
     });
 
-    test("DEFAULT_OPERATOR_UI_CLIENT_JS contains expected behavioral landmarks", () => {
-      expect(DEFAULT_OPERATOR_UI_CLIENT_JS).toContain("smithers.gateway.console.token");
-      expect(DEFAULT_OPERATOR_UI_CLIENT_JS).toContain("sessionStorage");
-      expect(DEFAULT_OPERATOR_UI_CLIENT_JS).toContain("submitApproval");
-      expect(DEFAULT_OPERATOR_UI_CLIENT_JS).toContain("launchRun");
-      expect(DEFAULT_OPERATOR_UI_CLIENT_JS).toContain("listWorkflows");
-      expect(DEFAULT_OPERATOR_UI_CLIENT_JS).toContain("listRuns");
-      expect(DEFAULT_OPERATOR_UI_CLIENT_JS).toContain("setInterval");
+    test("the operator UI client contains expected behavioral landmarks", async () => {
+      const clientJs = await loadDefaultOperatorUiClientJs();
+      expect(clientJs).toContain("smithers.gateway.console.token");
+      expect(clientJs).toContain("sessionStorage");
+      expect(clientJs).toContain("submitApproval");
+      expect(clientJs).toContain("launchRun");
+      expect(clientJs).toContain("listWorkflows");
+      expect(clientJs).toContain("listRuns");
+      expect(clientJs).toContain("setInterval");
     });
 
-    test("renderDefaultConsoleClient returns DEFAULT_OPERATOR_UI_CLIENT_JS", () => {
-      expect(renderDefaultConsoleClient()).toBe(DEFAULT_OPERATOR_UI_CLIENT_JS);
+    test("the operator UI client inlines the style-guide theme CSS", async () => {
+      const clientJs = await loadDefaultOperatorUiClientJs();
+      expect(clientJs).not.toContain("__SMITHERS_WORKFLOW_UI_THEME_CSS__");
+      expect(clientJs).toContain("--brand");
+    });
+
+    test("renderDefaultConsoleClient returns the operator UI client", async () => {
+      expect(await renderDefaultConsoleClient()).toBe(await loadDefaultOperatorUiClientJs());
     });
   });
 
@@ -104,7 +113,7 @@ describe("defaultOperatorUi", () => {
       const ct = res.headers.get("content-type") ?? "";
       expect(ct).toContain("text/javascript");
       const body = await res.text();
-      expect(body).toBe(DEFAULT_OPERATOR_UI_CLIENT_JS);
+      expect(body).toBe(await loadDefaultOperatorUiClientJs());
     });
 
     test("GET /console/__smithers_ui/client.js carries no-store cache header", async () => {
