@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { computeRunStateFromRow } from "@smthrs/db/runState";
 import { formatEventLine } from "./format.js";
+import { smithersRuntimeReentry } from "./node-loader/smithersRuntimeSpawn.js";
 
 /**
  * The subtle one-line control hint shown at the start of a steerable LIVE tail:
@@ -175,8 +176,10 @@ export function formatTailFinalStatusLine(runId, status) {
  */
 export function spawnSteer(options) {
   const spawnFn = options.spawnFn ?? spawn;
-  const execPath = options.execPath ?? process.execPath;
-  const argv = [execPath, options.cliEntry, "steer", options.runId];
+  const runtime = options.execPath
+    ? { command: options.execPath, args: [options.cliEntry, "steer", options.runId] }
+    : smithersRuntimeReentry([options.cliEntry, "steer", options.runId]);
+  const argv = [runtime.command, ...runtime.args];
   if (typeof options.nodeId === "string" && options.nodeId !== "") {
     argv.push("--node", options.nodeId);
   }

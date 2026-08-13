@@ -6,6 +6,7 @@ import { DETACHED_RUN_LOG_FILE_ENV } from "./detachedRunLogEnv.js";
 import { workflowIdFromPath } from "./monitoring-suggestion.js";
 import { resolveDetachedRunLogFile } from "./resolveDetachedRunLogFile.js";
 import { resolveWorkflow } from "./workflows.js";
+import { smithersRuntimeReentry } from "./node-loader/smithersRuntimeSpawn.js";
 
 /**
  * Workflows that must never trigger an autopsy of themselves: the autopsy
@@ -76,7 +77,8 @@ export function launchPostFailureAutopsy({
   try {
     mkdirSync(dirname(logFile), { recursive: true });
     const fd = openSync(logFile, "a");
-    const child = spawnFn(process.execPath, [cliPath, "up", entryFile, "--run-id", autopsyRunId, "--input", input], {
+    const runtime = smithersRuntimeReentry([cliPath, "up", entryFile, "--run-id", autopsyRunId, "--input", input]);
+    const child = spawnFn(runtime.command, runtime.args, {
       cwd,
       detached: true,
       stdio: ["ignore", fd, fd],

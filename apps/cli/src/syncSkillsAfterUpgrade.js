@@ -1,6 +1,7 @@
 import { spawn as nodeSpawn } from "node:child_process";
 
 import { formatSkillsAddSummary, syncCuratedSkill } from "./curatedSkillSync.js";
+import { smithersRuntimeReentry } from "./node-loader/smithersRuntimeSpawn.js";
 
 /**
  * Post-upgrade skill sync for `smithers update`.
@@ -80,12 +81,14 @@ function syncCuratedSkillNow(opts) {
  */
 function runUpgradedSkillsAdd(opts) {
   const spawn = opts.spawn ?? nodeSpawn;
-  const execPath = opts.execPath ?? process.execPath;
   const entry = opts.entry ?? process.argv[1];
   if (!entry) return Promise.resolve({ via: "cli", ok: false, notice: null, error: "no CLI entry path" });
+  const runtime = opts.execPath
+    ? { command: opts.execPath, args: [entry, "skills", "add"] }
+    : smithersRuntimeReentry([entry, "skills", "add"]);
   return new Promise((resolve) => {
     try {
-      const child = spawn(execPath, [entry, "skills", "add"], { stdio: "inherit" });
+      const child = spawn(runtime.command, runtime.args, { stdio: "inherit" });
       child.on("error", (err) => resolve({ via: "cli", ok: false, notice: null, error: err.message }));
       child.on("close", (code) =>
         code === 0

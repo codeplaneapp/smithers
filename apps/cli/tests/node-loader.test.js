@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveJsxImportSource } from "../src/node-loader/resolveJsxImportSource.js";
-import { smithersRuntimeSpawn } from "../src/node-loader/smithersRuntimeSpawn.js";
+import { smithersRuntimeReentry, smithersRuntimeSpawn } from "../src/node-loader/smithersRuntimeSpawn.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "smithers-node-loader-"));
 
@@ -62,6 +62,26 @@ describe("smithersRuntimeSpawn", () => {
     const output = runUnderNode(`
       const { smithersRuntimeSpawn } = await import(${JSON.stringify(url)});
       const spawned = smithersRuntimeSpawn(["/entry.js", "up"]);
+      console.log(JSON.stringify({ isNode: spawned.command === process.execPath, args: spawned.args }));
+    `);
+    const spawned = JSON.parse(output);
+    expect(spawned.isNode).toBe(true);
+    expect(spawned.args[0]).toBe("--import");
+    expect(spawned.args[1]).toContain("node-loader/register.js");
+    expect(spawned.args.slice(2)).toEqual(["/entry.js", "up"]);
+  });
+
+  test("preserves Bun's absolute executable for existing re-entry paths", () => {
+    const spawned = smithersRuntimeReentry(["/entry.js", "up"]);
+    expect(spawned.command).toBe(process.execPath);
+    expect(spawned.args).toEqual(["/entry.js", "up"]);
+  });
+
+  test("re-entry uses the Node executable and loader hook under Node", () => {
+    const url = new URL("../src/node-loader/smithersRuntimeSpawn.js", import.meta.url).href;
+    const output = runUnderNode(`
+      const { smithersRuntimeReentry } = await import(${JSON.stringify(url)});
+      const spawned = smithersRuntimeReentry(["/entry.js", "up"]);
       console.log(JSON.stringify({ isNode: spawned.command === process.execPath, args: spawned.args }));
     `);
     const spawned = JSON.parse(output);
