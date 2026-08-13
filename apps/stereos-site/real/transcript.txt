@@ -1,0 +1,60 @@
+$ mb down smithers-stereos
+  ✓ Stopping sandbox... (0ms)
+
+$ mb up   # boot the stereOS coder mixtape
+  ✓ Starting sandbox... (7.0s)
+  ✓ Sandbox "smithers-stereos" launched
+    ssh -p 60398 -i ~/.config/mb/vms/smithers-stereos/ssh_key admin@127.0.0.1
+    mb ssh smithers-stereos
+
+real	0m7.232s
+user	0m0.016s
+sys	0m0.019s
+
+$ eval "$(./bootstrap-vm.sh)"   # key the agent user, export the port
+agent login verified on smithers-stereos (127.0.0.1:60398)
+STEREOS_SSH_PORT=60398
+
+$ ssh agent@stereos -- id; uname -srm   # the VM is real
+agent
+coder
+Linux 6.12.74 aarch64
+PRETTY_NAME="stereOS 2026.03.04.0 (coder)"
+
+$ smithers up stereos-real.tsx   # the sandbox body runs inside that VM
+runId: run-1786588414409
+logFile: /Users/williamcory/smithers/.smithers/logs/run-1786588414409.log
+pid: 1663
+status: finished
+
+$ smithers events run-1786588414409 --type sandbox
+#7  +00:00.167  SandboxCreated        🧪 Sandbox created: stereos-vm (stereos)
+#8  +00:00.170  SandboxShipped        📦 Sandbox shipped: stereos-vm (157 bytes)
+#9  +00:00.621  SandboxBundleReceived  📥 Sandbox bundle received: stereos-vm (0 patches)
+#10  +00:00.622  SandboxCompleted      ✅ Sandbox completed: stereos-vm (finished)
+
+$ smithers node stereos-vm --run-id run-1786588414409   # output produced INSIDE the VM
+{
+  "summary": "ran inside stereOS as agent@coder on Linux 6.12.74 aarch64",
+  "prompt": "hello from the host",
+  "prompt_sha256": "0d7c0ab02bab7f556b0de496bccbb2c99daa7c8aa7be3af9797d3aa8e1a170d5",
+  "guest": {
+    "os": "stereOS 2026.03.04.0",
+    "kernel": "Linux 6.12.74 aarch64",
+    "user": "agent",
+    "hostname": "coder",
+    "uptimeSeconds": 20.31,
+    "cpus": 4,
+    "memTotalKb": 3988572
+  },
+  "restrictions": {
+    "writeOutsideWorkspace": "denied",
+    "writeInsideWorkspace": "allowed",
+    "nixCli": "on PATH",
+    "nixStorePresent": "yes"
+  },
+  "harnesses_on_path": "claude opencode gemini"
+}
+
+$ the guest hashed the host's prompt; verify it here
+0d7c0ab02bab7f556b0de496bccbb2c99daa7c8aa7be3af9797d3aa8e1a170d5  -

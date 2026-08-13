@@ -1,8 +1,9 @@
 // End-to-end check against the deployed site.
 //
-// Boots the real page in headless Chromium, waits for the WebContainer to
-// install smthrs and run the three workflows, clicks the approval in the
-// embedded app, and asserts the engine-reported statuses.
+// Boots the real page in headless Chromium, asserts the tab-3 stereOS-run
+// evidence, then waits for the WebContainer to install smthrs and run the three
+// workflows, clicks the approval in the embedded app, and asserts the
+// engine-reported statuses.
 //
 // Run: node apps/stereos-site/e2e/stereos.e2e.mjs [url]
 import { appendFileSync, writeFileSync } from "node:fs";
@@ -69,8 +70,44 @@ check("tab 1 h1", h1?.includes("stereOS Sandbox Provider"), h1 ?? "");
 check("tab 1 shiki blocks", shikiBlocks > 0, `${shikiBlocks} blocks`);
 await page.screenshot({ path: join(here, "tab1-proposed-api.png"), fullPage: false });
 
-// 3. Tab 2 runs the workflows.
+// 3. Tab 3 carries the real-stereOS evidence.
+await page.click("#tab-real");
+const realTitle = await page.locator("#panel-real h1").first().textContent();
+check("tab 3 h1", realTitle?.includes("real stereOS VM"), realTitle ?? "");
+
+const transcript = (await page.locator("#real-terminal").textContent()) ?? "";
+check("tab 3 shows the recorded run", transcript.includes("$ mb up"), `${transcript.length} chars`);
+check(
+  "transcript proves the guest produced the output",
+  transcript.includes("ran inside stereOS as agent@coder") && transcript.includes("Linux 6.12.74 aarch64"),
+);
+check("transcript shows the sandbox lifecycle", transcript.includes("SandboxCompleted"));
+check("transcript shows the restriction model", transcript.includes('"writeOutsideWorkspace": "denied"'));
+
+const sourceNames = await page.locator("#real-source-select option").allTextContents();
+check(
+  "tab 3 offers the provider source",
+  sourceNames.includes("stereos-provider.ts") && sourceNames.includes("guest-runner.sh"),
+  sourceNames.join(","),
+);
+const providerSource = (await page.locator("#real-source").textContent()) ?? "";
+check(
+  "provider source is the shipped kit",
+  providerSource.includes("createCommandSandboxProvider"),
+  `${providerSource.length} chars`,
+);
+await page.screenshot({ path: join(here, "tab3-real-stereos.png"), fullPage: false });
+
+// The WebContainer tab must still say plainly that it is the simulation.
 await page.click("#tab-demo");
+const demoBanner = (await page.locator("#panel-demo .banner").first().textContent()) ?? "";
+check(
+  "tab 2 is labelled as the simulation",
+  demoBanner.includes("simulates the seam") && demoBanner.includes("Nothing in"),
+  demoBanner.slice(0, 80),
+);
+
+// 4. Tab 2 runs the workflows.
 await page.click("#start");
 
 const installed = await waitFor(
@@ -110,7 +147,7 @@ const approvalStatus = await waitFor(
 );
 check("approval-demo pauses at the gate", approvalStatus === "waiting-approval", String(approvalStatus));
 
-// 4. Click Approve inside the app served from the container.
+// 5. Click Approve inside the app served from the container.
 const appFrame = page.frameLocator("#app-frame");
 const approveButton = appFrame.locator('button:has-text("Approve")').first();
 const approveReady = await waitFor(
