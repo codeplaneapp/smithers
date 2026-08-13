@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>stereOS Sandbox Provider for Smithers — Reference</title>
+<title>stereOS Sandbox Provider for Smithers: Reference</title>
 <style>
   :root {
     --bg: #ffffff; --fg: #1f2328; --muted: #57606a; --border: #d0d7de;
@@ -85,7 +85,7 @@ stereOS facts come from <code>papercomputeco/stereOS@main</code> and its docs as
   <li><a href="#factory">createStereosSandboxProvider options</a></li>
   <li><a href="#mapping">Prop mapping: Smithers control → stereOS behavior</a></li>
   <li><a href="#setup">Getting it up and running</a></li>
-  <li><a href="#gaps">Integration gaps (the real conversation)</a></li>
+  <li><a href="#gaps">Integration gaps</a></li>
 </ol>
 </div>
 
@@ -198,21 +198,21 @@ heartbeats, and audit rows.</p>
 <p>stereOS (<a href="https://github.com/papercomputeco/stereOS">papercomputeco/stereOS</a>, Paper
 Compute) is a NixOS-based Linux OS purpose-built for running coding agents:</p>
 <ul>
-  <li><strong>Mixtapes</strong> — flake-built machine images bundling the hardened OS with an agent
+  <li><strong>Mixtapes.</strong> Flake-built machine images bundling the hardened OS with an agent
   harness: <code>opencode-mixtape</code>, <code>claude-code-mixtape</code>,
   <code>gemini-cli-mixtape</code>, <code>full-mixtape</code>. Each ships a production variant (no SSH)
   and a <code>-dev</code> variant (SSH key injected from <code>~/.config/stereos/ssh-key.pub</code>).</li>
-  <li><strong>Three boot formats</strong> — raw EFI image (<code>stereos.img</code>, Apple
+  <li><strong>Three boot formats.</strong> Raw EFI image (<code>stereos.img</code>, Apple
   Virtualization Framework), QCOW2 (QEMU/KVM), and direct-kernel artifacts
   (<code>bzImage</code>/<code>initrd</code>/<code>cmdline</code>) for 2–3&nbsp;second boots. Plus an
   AWS Lambda MicroVM target.</li>
-  <li><strong>Security model</strong> — restricted <code>agent</code> user confined to
+  <li><strong>Security model.</strong> Restricted <code>agent</code> user confined to
   <code>/home/agent/workspace</code>, denied the Nix daemon and package tools; <code>admin</code> user
   for operations; gVisor sandboxes with a read-only <code>/nix/store</code> rootfs for the inner
   layer; kernel hardening; ephemeral temp storage.</li>
-  <li><strong>Daemons</strong> — <code>stereosd</code> (system control plane) and <code>agentd</code>
+  <li><strong>Daemons.</strong> <code>stereosd</code> (system control plane) and <code>agentd</code>
   (agent lifecycle). Public exec/file APIs for these are not yet documented; see §8.</li>
-  <li><strong>Reproducibility</strong> — the whole system is a Nix flake
+  <li><strong>Reproducibility.</strong> The whole system is a Nix flake
   (<code>nixosConfigurations.base|coder</code> + <code>-dev</code> variants,
   <code>nixosModules.default</code>); an image hash fully determines the environment.</li>
 </ul>
@@ -252,7 +252,7 @@ maps to a real stereOS or hypervisor feature.</p>
 <tr><td><code>sshUser</code></td><td><code>"agent" | "admin"</code></td><td><code>"agent"</code></td><td>Run child workflows as the restricted user. <code>admin</code> only for provisioning debug.</td></tr>
 <tr><td><code>sshPort</code></td><td><code>number</code></td><td>auto</td><td>Host port forwarded to guest 22 (user-mode netdev <code>hostfwd</code>).</td></tr>
 <tr><td><code>command</code></td><td><code>string</code></td><td><code>bun .../run-smithers-sandbox.js</code></td><td>Entry command. Wins over the <code>&lt;Sandbox command&gt;</code> prop.</td></tr>
-<tr><td><code>workdir</code></td><td><code>string</code></td><td><code>/home/agent/workspace</code></td><td>Guest directory for Smithers request/result I/O — the one directory the <code>agent</code> user owns.</td></tr>
+<tr><td><code>workdir</code></td><td><code>string</code></td><td><code>/home/agent/workspace</code></td><td>Guest directory for Smithers request/result I/O. This is the one directory the <code>agent</code> user owns.</td></tr>
 <tr><td><code>env</code></td><td><code>Record&lt;string,string&gt;</code></td><td>—</td><td>Provider-level env (e.g. <code>ANTHROPIC_API_KEY</code> for the baked-in harness), merged above the <code>&lt;Sandbox env&gt;</code> prop, below egress.</td></tr>
 <tr><td><code>shell</code></td><td><code>string</code></td><td><code>/bin/sh</code></td><td>Guest shell for the entry command.</td></tr>
 <tr><td><code>setupFiles</code></td><td><code>Record&lt;string, string | Uint8Array&gt;</code></td><td>—</td><td>Files uploaded after boot, before the request is written (the runner script, repo tarballs, config).</td></tr>
@@ -280,7 +280,7 @@ maps to a real stereOS or hypervisor feature.</p>
 <tr><td><code>cpuLimit</code> / <code>memoryLimit</code></td><td><code>-smp</code> / <code>-m</code>, rounded up (whole vCPUs, MiB).</td></tr>
 <tr><td><code>workspace.persistence: "sticky"</code></td><td>Named copy-on-write QCOW2 overlay kept across runs; the base mixtape image is never written.</td></tr>
 <tr><td><code>workspace.persistence: "ephemeral"</code></td><td>Overlay deleted at cleanup (or QEMU <code>-snapshot</code>: nothing ever hits disk).</td></tr>
-<tr><td><code>workspace.snapshotId</code></td><td>Boot from a saved overlay. Disk state only — cold boot, no memory/process preservation (same caveat as Microsandbox snapshots).</td></tr>
+<tr><td><code>workspace.snapshotId</code></td><td>Boot from a saved overlay. Disk state only. There is no memory or process preservation (the same caveat as Microsandbox snapshots).</td></tr>
 <tr><td><code>command</code></td><td>Executed via the exec channel as the <code>agent</code> user in <code>workdir</code>.</td></tr>
 <tr><td><code>egress.*</code></td><td>Proxy env projected into the command env; <code>caCertPem</code> uploaded into the guest and pointed at by <code>NODE_EXTRA_CA_CERTS</code>.</td></tr>
 <tr><td><code>reviewDiffs</code></td><td>Entry runner emits a <code>diffBundle</code> from the workspace (git/jj diff); Smithers gates application on review as usual.</td></tr>
@@ -396,7 +396,7 @@ booted. This is the ~80-line PR seed for <code>smthrs/stereos</code>.</p>
 <p>The entry runner (<code>run-smithers-sandbox.js</code>, delivered via <code>setupFiles</code> or
 baked into a future smithers mixtape) reads
 <code>SMITHERS_SANDBOX_REQUEST_PATH</code>, executes the child workflow, and writes the result JSON to
-<code>SMITHERS_SANDBOX_RESULT_PATH</code> — the same contract every first-class provider uses. Note
+<code>SMITHERS_SANDBOX_RESULT_PATH</code>. This is the command-provider request/result contract. Note
 the mixtapes ship agent harnesses, not Bun; until a smithers mixtape exists, upload a
 self-contained runner or use the harness itself as the entry.</p>
 
@@ -409,13 +409,13 @@ self-contained runner or use the harness itself as the entry.</p>
   <code>createSandboxProviderContractSuite</code>.</li>
 </ul>
 
-<h2 id="gaps">8. Integration gaps — the real conversation</h2>
+<h2 id="gaps">8. Integration gaps</h2>
 <p>Each gap is a concrete question for Paper Compute, and each is answerable with a small, well-scoped
 contribution:</p>
 <table>
 <tr><th>#</th><th>Gap</th><th>Question / contribution</th></tr>
-<tr><td>1</td><td>Production mixtapes have no SSH, and <code>agentd</code>/<code>stereosd</code> expose no documented exec or file API.</td><td>Is <code>agentd</code> getting a host-facing exec/file API (vsock or HTTP)? That API is exactly Smithers' <code>SandboxSession</code> seam — SSH becomes a dev-only fallback and <code>variant: "prod"</code> becomes usable.</td></tr>
-<tr><td>2</td><td>The entry command currently runs as the <code>agent</code> user directly; stereOS's inner gVisor sandboxes are launched by its own tooling.</td><td>How should third-party orchestrators target the gVisor layer — is "spawn me a sandbox running this command" an <code>agentd</code> verb?</td></tr>
+<tr><td>1</td><td>Production mixtapes have no SSH, and <code>agentd</code>/<code>stereosd</code> expose no documented exec or file API.</td><td>Is <code>agentd</code> getting a host-facing exec/file API (vsock or HTTP)? That API is exactly Smithers' <code>SandboxSession</code> seam. SSH then becomes a dev-only fallback and <code>variant: "prod"</code> becomes usable.</td></tr>
+<tr><td>2</td><td>The entry command currently runs as the <code>agent</code> user directly; stereOS's inner gVisor sandboxes are launched by its own tooling.</td><td>How should third-party orchestrators target the gVisor layer? Is "spawn me a sandbox running this command" an <code>agentd</code> verb?</td></tr>
 <tr><td>3</td><td>No mixtape carries a Smithers runner (or Bun).</td><td>A <code>smithers-mixtape</code> in <code>mixtapes/</code>: Bun + the sandbox runner baked in. PR-sized; makes stereOS a boot-and-go Smithers execution host and gives Paper Compute an orchestrator integration to point at.</td></tr>
 <tr><td>4</td><td>Telemetry stays inside the guest.</td><td>The tapes seam: Smithers persists every run event and supports replay/fork/time-travel; a tapes exporter for Smithers runs gives their console an orchestrator data source. Symmetric to #3.</td></tr>
 <tr><td>5</td><td>Self-hosting story.</td><td>For a customer who requires on-prem agent execution (the Optimism-style requirement), "boot this mixtape" replaces "run our install scripts on your Ubuntu box": reproducible, auditable, hardened by default.</td></tr>

@@ -1,15 +1,21 @@
 // End-to-end check against the deployed site.
 //
-// Boots the real page in headless Chromium, waits for the WebContainer to
-// install smthrs and run the three workflows, clicks the approval in the
-// embedded app, and asserts the engine-reported statuses.
+// Boots the real page in headless Chromium, asserts the tab-3 stereOS-run
+// evidence, then waits for the WebContainer to install smthrs and run the three
+// workflows, clicks the approval in the embedded app, and asserts the
+// engine-reported statuses.
 //
 // Run: node apps/stereos-site/e2e/stereos.e2e.mjs [url]
 import { appendFileSync, writeFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { chromium } from "/Users/williamcory/smithers/e2e/node_modules/playwright/index.mjs";
+
+// apps/cli declares Playwright. Resolve through that package so this works in
+// any checkout and with any pnpm virtual-store layout.
+const require = createRequire(new URL("../../cli/package.json", import.meta.url));
+const { chromium } = require("playwright");
 
 const here = dirname(fileURLToPath(import.meta.url));
 const url = process.argv[2] ?? "https://stereos.smithers.sh/";
@@ -60,16 +66,98 @@ check(
   `coop=${headers["cross-origin-opener-policy"]} coep=${headers["cross-origin-embedder-policy"]}`,
 );
 check("crossOriginIsolated", await page.evaluate(() => window.crossOriginIsolated === true));
+check(
+  "inline favicon",
+  (await page.locator('link[rel="icon"]').getAttribute("href"))?.startsWith("data:image/svg+xml") === true,
+);
+check(
+  "meta description",
+  ((await page.locator('meta[name="description"]').getAttribute("content")) ?? "").includes("real Smithers Sandbox"),
+);
+check("Real stereOS is the default tab", (await page.locator("#tab-real").getAttribute("aria-selected")) === "true");
+check("default real panel is visible", await page.locator("#panel-real").isVisible());
+const registryText = (await page.locator("#panel-real").textContent()) ?? "";
+check(
+  "registry defect is documented",
+  registryText.includes("d335283a5c0c9fde") &&
+    registryText.includes("bf212e026f722ccc") &&
+    registryText.includes("Data corruption detected"),
+);
 
 // 2. Tab 1 renders.
+await page.click("#tab-api");
 const h1 = await page.locator("#panel-api h1").first().textContent();
 const shikiBlocks = await page.locator("#panel-api pre.shiki").count();
 check("tab 1 h1", h1?.includes("stereOS Sandbox Provider"), h1 ?? "");
 check("tab 1 shiki blocks", shikiBlocks > 0, `${shikiBlocks} blocks`);
 await page.screenshot({ path: join(here, "tab1-proposed-api.png"), fullPage: false });
 
-// 3. Tab 2 runs the workflows.
+// 3. Tab 3 carries the real-stereOS evidence.
+await page.click("#tab-real");
+const realTitle = await page.locator("#panel-real h1").first().textContent();
+check("tab 3 h1", realTitle?.includes("real stereOS VM"), realTitle ?? "");
+
+const transcript = (await page.locator("#real-terminal").textContent()) ?? "";
+check(
+  "tab 3 shows the raw recorded run",
+  transcript.includes('mb" status smithers-stereos'),
+  `${transcript.length} chars`,
+);
+check(
+  "transcript proves the guest produced the output",
+  transcript.includes("child workflow executed inside stereOS as agent@coder") &&
+    transcript.includes("Linux 6.12.74 aarch64") &&
+    transcript.includes("Bun 1.2.21 arm64") &&
+    transcript.includes('"primeCount"'),
+);
+check("transcript shows the sandbox lifecycle", transcript.includes("SandboxCompleted"));
+check("transcript shows the restriction model", transcript.includes('"writeOutsideWorkspace": "denied"'));
+
+// Capture the default (macOS) recording before switching hosts, so the two
+// committed tab-3 screenshots both stay reproducible output of this script.
+await page.screenshot({ path: join(here, "tab3-real-stereos.png"), fullPage: false });
+
+// The second recording is the Linux/KVM host, so the page must show both.
+const runNames = await page.locator("#real-run-select option").allTextContents();
+check("tab 3 offers both hosts", runNames.length === 2, runNames.join(" | "));
+await page.selectOption("#real-run-select", { index: 1 });
+const linuxTranscript = (await page.locator("#real-terminal").textContent()) ?? "";
+check(
+  "second recording is the x86_64 KVM run",
+  linuxTranscript.includes("agent@coder-dev on Linux 6.18.33 x86_64") &&
+    linuxTranscript.includes("Bun 1.2.21 x64") &&
+    linuxTranscript.includes("gcloud compute ssh stereos-smithers-demo"),
+  `${linuxTranscript.length} chars`,
+);
+
+const sourceNames = await page.locator("#real-source-select option").allTextContents();
+check(
+  "tab 3 offers the provider source",
+  sourceNames.includes("stereos-provider.ts") &&
+    sourceNames.includes("guest-runner.sh") &&
+    sourceNames.includes("bootstrap-vm.sh") &&
+    sourceNames.includes("README.md"),
+  sourceNames.join(","),
+);
+const providerSource = (await page.locator("#real-source").textContent()) ?? "";
+check(
+  "provider source is the shipped kit",
+  providerSource.includes("createCommandSandboxProvider"),
+  `${providerSource.length} chars`,
+);
+await page.screenshot({ path: join(here, "tab3-real-stereos-linux.png"), fullPage: false });
+
+// The WebContainer tab must still say plainly that it is the simulation.
 await page.click("#tab-demo");
+const demoBanner = (await page.locator("#panel-demo .banner").first().textContent()) ?? "";
+check(
+  "tab 2 is labelled as the simulation",
+  demoBanner.includes("simulates the seam") && demoBanner.includes("Nothing in"),
+  demoBanner.slice(0, 80),
+);
+check("app placeholder starts visible", await page.locator("#app-frame-empty").isVisible());
+
+// 4. Tab 2 runs the workflows.
 await page.click("#start");
 
 const installed = await waitFor(
@@ -109,7 +197,7 @@ const approvalStatus = await waitFor(
 );
 check("approval-demo pauses at the gate", approvalStatus === "waiting-approval", String(approvalStatus));
 
-// 4. Click Approve inside the app served from the container.
+// 5. Click Approve inside the app served from the container.
 const appFrame = page.frameLocator("#app-frame");
 const approveButton = appFrame.locator('button:has-text("Approve")').first();
 const approveReady = await waitFor(
@@ -118,6 +206,11 @@ const approveReady = await waitFor(
   6 * 60 * 1000,
 );
 check("embedded app shows the pending approval", Boolean(approveReady));
+check(
+  "app placeholder hides when iframe is live",
+  (await page.locator("#app-frame-empty").getAttribute("hidden")) !== null &&
+    (await page.locator("#app-frame-empty").evaluate((element) => getComputedStyle(element).display)) === "none",
+);
 await page.screenshot({ path: join(here, "tab2-live-demo.png"), fullPage: false });
 
 if (approveReady) {

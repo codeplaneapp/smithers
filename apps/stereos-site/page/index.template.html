@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A real Smithers Sandbox running its child workflow inside stereOS, plus the proposed provider API and browser demo.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>">
 <title>stereOS × Smithers</title>
 <style>
 __REFERENCE_STYLE__
@@ -10,7 +12,7 @@ __REFERENCE_STYLE__
 <style>
   /* Tab chrome and the live-demo pane. The reference styles above own all
      typography, so this block only adds layout the two-tab page needs. */
-  .tabs { max-width: 940px; margin: 0 auto; padding: 24px 24px 0; display: flex; gap: 4px;
+  .tabs { max-width: 940px; margin: 0 auto; padding: 24px 24px 0; display: flex; flex-wrap: wrap; gap: 4px;
     border-bottom: 1px solid var(--border); }
   .tabs button { font: inherit; font-size: 15px; color: var(--muted); background: none;
     border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0;
@@ -40,20 +42,107 @@ __REFERENCE_STYLE__
   #app-frame { width: 100%; height: 460px; border: 0; background: var(--bg); display: block; }
   #app-frame-empty { height: 460px; display: flex; align-items: center; justify-content: center;
     color: var(--muted); font-size: 14px; padding: 0 24px; text-align: center; }
+  #app-frame-empty[hidden] { display: none; }
+  #app-frame-empty p { margin: 0; }
 
   table.results { width: auto; }
   table.results td:last-child { white-space: normal; }
+
+  /* Tab 3: the recorded real run. */
+  #real-terminal, #real-source { margin: 0; height: 460px; overflow: auto; padding: 12px;
+    font-size: 12px; line-height: 1.5; white-space: pre; background: var(--code-bg); }
+  #real-terminal { white-space: pre-wrap; word-break: break-word; }
+  #real-run-select, #real-source-select { font: inherit; font-size: 12px; background: var(--bg); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
+  @media (prefers-color-scheme: dark) { #real-play, #start { color: #0d1117 !important; } }
 </style>
 </head>
 <body>
 
 <div class="tabs" role="tablist" aria-label="Sections">
-  <button role="tab" id="tab-api" aria-controls="panel-api" aria-selected="true">Proposed API</button>
-  <button role="tab" id="tab-demo" aria-controls="panel-demo" aria-selected="false">Live demo</button>
+  <button role="tab" id="tab-api" aria-controls="panel-api" aria-selected="false" tabindex="-1">Proposed API</button>
+  <button role="tab" id="tab-real" aria-controls="panel-real" aria-selected="true" tabindex="0">Real stereOS</button>
+  <button role="tab" id="tab-demo" aria-controls="panel-demo" aria-selected="false" tabindex="-1">Browser demo (real engine, simulated VM)</button>
 </div>
 
-<div role="tabpanel" id="panel-api" aria-labelledby="tab-api">
+<div role="tabpanel" id="panel-api" aria-labelledby="tab-api" hidden>
 __REFERENCE_MAIN__
+</div>
+
+<div role="tabpanel" id="panel-real" aria-labelledby="tab-real">
+<div class="demo">
+
+<h1>Smithers running inside a real stereOS VM</h1>
+<p class="subtitle">A Smithers <code>&lt;Sandbox&gt;</code> uploads its bundled child workflow, then the
+guest's Bun runtime executes that workflow inside a stereOS mixtape VM.</p>
+
+<div class="banner ok">
+<strong>This one really boots stereOS.</strong> The recordings below are captured output from
+<code>apps/stereos-site/real/</code>, not simulations. Two hosts, one provider: the published
+<code>coder</code> mixtape on Apple's hypervisor (stereOS 2026.03.04.0, Linux 6.12.74 aarch64, booted in
+seven seconds), and an <code>x86_64</code> <code>coder-dev</code> mixtape built from source and booted
+under QEMU/KVM on a nested-virtualization GCE instance (Linux 6.18.33). On each host, the exact command
+shown in the recording drives a <code>&lt;Sandbox&gt;</code> through an SSH provider built on
+<code>createCommandSandboxProvider</code>. The provider bundles <code>child-workflow.tsx</code>, and Bun
+1.2.21 inside the guest executes its guest-facts task and prime-sieve computation.
+</div>
+
+<p>The prompt hash is consistency evidence only. It confirms that the recorded input and guest output
+match, but it is not provenance or attestation. The raw terminal capture also shows the guest-specific
+kernel, runtime architecture, restriction probes, workflow marker, protocol run ID, and computed prime
+result. Pick a host from the dropdown to inspect the complete capture.</p>
+
+<div class="panes">
+  <div class="pane">
+    <header><select id="real-run-select" aria-label="Recorded run"></select><span class="muted" id="real-note">recorded run</span></header>
+    <pre id="real-terminal" tabindex="0">Loading…</pre>
+  </div>
+  <div class="pane">
+    <header><span>Source</span><select id="real-source-select" aria-label="Source file"></select></header>
+    <pre id="real-source" tabindex="0">Loading…</pre>
+  </div>
+</div>
+
+<p><button id="real-play" style="font: inherit; font-size: 15px; padding: 9px 20px; border-radius: 8px;
+  border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer;">Replay</button></p>
+
+<h2>What runs where</h2>
+<table class="results">
+<tr><th>Piece</th><th>Where it runs</th></tr>
+<tr><td>Smithers engine, scheduler, event log</td><td>the host</td></tr>
+<tr><td><code>createCommandSandboxProvider</code> request/result protocol</td><td>the host, unmodified from <code>smthrs/sandbox</code></td></tr>
+<tr><td>The <code>SandboxSession</code> transport</td><td>SSH to the guest's <code>agent</code> user</td></tr>
+<tr><td>The sandbox body</td><td>inside the stereOS VM</td></tr>
+</table>
+
+<h2>The runtime gap, closed for this run</h2>
+<p>Mixtapes ship agent harnesses but no JavaScript runtime. The bootstrap scripts therefore copy the
+official Bun 1.2.21 musl build and its small compatibility libraries into the guest. The provider uploads
+a bundle of the real child workflow. <code>guest-runner.sh</code> only checks the two paths and invokes Bun.
+Bun reads <code>SMITHERS_SANDBOX_REQUEST_PATH</code> and writes all result JSON to
+<code>SMITHERS_SANDBOX_RESULT_PATH</code>. A future mixtape with Bun already installed can omit the bootstrap
+runtime copy.</p>
+
+<h2>What the guest reported</h2>
+<p>Read the tail of the recording. <code>writeOutsideWorkspace: denied</code> is the restriction model
+holding: the <code>agent</code> user cannot write to <code>/etc</code>. <code>nixCli: on PATH</code> remains a
+gap. The restricted PATH comes from the agent's login shell, while a non-interactive SSH exec sees the
+full system profile.</p>
+
+<h2>Found while building this</h2>
+<p>The registry serves the raw blob as
+<code>d335283a5c0c9fdeef22fe48740cb74d0c973b69373bef651e76aaac012a21e2</code>, while its declared digest is
+<code>bf212e026f722ccccd30f273d363f9b8a7245516f7bc1e8d81db67b41245cdeb</code>.
+<code>zstd -t</code> reports <code>Decoding error (36): Data corruption detected</code>. The qcow2 blob is
+clean and reconstructs the expected image. Republishing that one raw blob makes <code>mb pull</code> work.</p>
+
+<footer>
+<p>Sources and raw recordings are committed at
+<a href="https://github.com/smithersai/smithers/tree/main/apps/stereos-site/real"><code>apps/stereos-site/real/</code></a>.
+The Proposed API tab remains a design reference; its parts marked proposed do not exist.</p>
+</footer>
+
+</div>
 </div>
 
 <div role="tabpanel" id="panel-demo" aria-labelledby="tab-demo" hidden>
@@ -64,12 +153,12 @@ __REFERENCE_MAIN__
 real workflows against the PGlite backend.</p>
 
 <div class="banner info">
-<strong>What is real and what is substituted.</strong> The engine below is the published
-<code>smthrs</code> package on npm, running under Node inside a WebContainer in this tab. The workflows,
-the PGlite database, the gateway, and the approval decision are all real. The sandbox provider uses the
-same provider kit and the same request/result contract as the proposed stereOS provider, but its
+<strong>This tab simulates the seam; the “Real stereOS” tab boots the VM.</strong> The engine below is the
+published <code>smthrs</code> package on npm, running under Node inside a WebContainer in this tab. The
+workflows, the PGlite database, the gateway, and the approval decision are all real. The sandbox provider
+uses the same provider kit and the same request/result contract as the stereOS provider, but its
 SSH&nbsp;→&nbsp;microVM transport is swapped for in-container <code>exec</code>, because a browser cannot
-boot QEMU. Nothing here runs stereOS.
+boot QEMU. Nothing in <em>this</em> tab runs stereOS.
 </div>
 
 <p>No API keys and no agent seats are involved. The three workflows use literal-value tasks and a
@@ -93,12 +182,12 @@ human approval gate, so every step is deterministic.</p>
 <div class="panes">
   <div class="pane">
     <header><span>Container output</span><span class="muted" id="term-note">idle</span></header>
-    <pre id="terminal">Press “Start the demo”.</pre>
+    <pre id="terminal" tabindex="0">Press “Start the demo”.</pre>
   </div>
   <div class="pane">
     <header><span>Web app served from inside the container</span><span class="muted" id="frame-note">not started</span></header>
-    <div id="app-frame-empty">The React app is built with <code>smthrs/gateway-react</code> hooks and
-      <code>smthrs/gateway-ui</code> components. It appears here once its vite dev server is up inside the container.</div>
+    <div id="app-frame-empty"><p>The React app is built with <code>smthrs/gateway-react</code> hooks and
+      <code>smthrs/gateway-ui</code> components. It appears here once its vite dev server is up inside the container.</p></div>
     <iframe id="app-frame" hidden title="Smithers run UI" src="about:blank"></iframe>
   </div>
 </div>
@@ -107,9 +196,9 @@ human approval gate, so every step is deterministic.</p>
 <p>Each row is filled in from the run status the engine wrote, not from the fact that a command exited.</p>
 <table class="results">
 <tr><th>Workflow</th><th>Run id</th><th>Status</th></tr>
-<tr><td><code>hello</code></td><td id="hello-run">—</td><td id="hello-status">—</td></tr>
-<tr><td><code>pipeline</code></td><td id="pipeline-run">—</td><td id="pipeline-status">—</td></tr>
-<tr><td><code>approval-demo</code></td><td id="approval-run">—</td><td id="approval-status">—</td></tr>
+<tr><td><code>hello</code></td><td id="hello-run">Not run</td><td id="hello-status">Not run</td></tr>
+<tr><td><code>pipeline</code></td><td id="pipeline-run">Not run</td><td id="pipeline-status">Not run</td></tr>
+<tr><td><code>approval-demo</code></td><td id="approval-run">Not run</td><td id="approval-status">Not run</td></tr>
 </table>
 
 <h2>How the approval works</h2>
@@ -138,30 +227,49 @@ mounted in the container:</p>
 </ul>
 
 <footer>
-<p>The demo project is committed at <code>apps/stereos-site/project</code>. Tab 1 is the design
-reference and describes an integration that does not exist yet.</p>
+<p>The demo project is committed at
+<a href="https://github.com/smithersai/smithers/tree/main/apps/stereos-site/project"><code>apps/stereos-site/project</code></a>.
+The Proposed API tab describes an integration that does not exist yet.</p>
 </footer>
 
 </div>
 </div>
 
 <script type="module" src="./demo.js"></script>
+<script type="module" src="./real.js"></script>
 <script>
   const tabs = [
-    { tab: document.getElementById('tab-api'), panel: document.getElementById('panel-api') },
-    { tab: document.getElementById('tab-demo'), panel: document.getElementById('panel-demo') },
+    { hash: '#api', tab: document.getElementById('tab-api'), panel: document.getElementById('panel-api') },
+    { hash: '#real', tab: document.getElementById('tab-real'), panel: document.getElementById('panel-real') },
+    { hash: '#demo', tab: document.getElementById('tab-demo'), panel: document.getElementById('panel-demo') },
   ];
+  function selectTab(entry, { focus = false, updateHash = true } = {}) {
+    for (const other of tabs) {
+      const selected = other === entry;
+      other.tab.setAttribute('aria-selected', String(selected));
+      other.tab.tabIndex = selected ? 0 : -1;
+      other.panel.hidden = !selected;
+    }
+    if (focus) entry.tab.focus();
+    if (updateHash) history.replaceState(null, '', entry.hash);
+  }
   for (const entry of tabs) {
-    entry.tab.addEventListener('click', () => {
-      for (const other of tabs) {
-        const selected = other === entry;
-        other.tab.setAttribute('aria-selected', String(selected));
-        other.panel.hidden = !selected;
+    entry.tab.addEventListener('click', () => selectTab(entry));
+    entry.tab.addEventListener('keydown', (event) => {
+      const current = tabs.indexOf(entry);
+      let target = null;
+      if (event.key === 'ArrowRight') target = tabs[(current + 1) % tabs.length];
+      if (event.key === 'ArrowLeft') target = tabs[(current - 1 + tabs.length) % tabs.length];
+      if (event.key === 'Home') target = tabs[0];
+      if (event.key === 'End') target = tabs[tabs.length - 1];
+      if (target) {
+        event.preventDefault();
+        selectTab(target, { focus: true });
       }
-      location.hash = entry === tabs[1] ? '#demo' : '#api';
     });
   }
-  if (location.hash === '#demo') { tabs[1].tab.click(); }
+  const opening = tabs.find((entry) => entry.hash === location.hash) ?? tabs[1];
+  selectTab(opening, { updateHash: Boolean(location.hash) });
 </script>
 </body>
 </html>
