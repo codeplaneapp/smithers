@@ -119,7 +119,15 @@ if (connected) {
     check("approval in the embedded UI finishes the run", Boolean(finished), (await status.textContent()) ?? "");
   }
 
-  const tiles = await page.$$eval("#live-tiles .tile dd", (nodes) => nodes.map((node) => node.textContent.trim()));
+  const tiles =
+    (await waitFor(
+      "the guest evidence",
+      async () => {
+        const values = await page.$$eval("#live-tiles .tile dd", (nodes) => nodes.map((node) => node.textContent.trim()));
+        return values.length > 0 ? values : null;
+      },
+      30_000,
+    )) ?? [];
   check("guest evidence is shown for the run", tiles.some((value) => value.includes("coder-dev")), tiles.join(" | "));
   const runId = (await page.locator("#live-runid").textContent()) ?? "";
   check("the run id is reported", /^[0-9a-f-]{36}$/.test(runId.trim()), runId);
@@ -193,7 +201,9 @@ await page.screenshot({ path: join(here, "tab-implementation.png"), fullPage: tr
 await page.click("#tab-api");
 const apiFrame = await waitFor(
   "the reference document",
-  async () => page.frames().find((candidate) => candidate.url().endsWith("proposed-api.html")) ?? null,
+  // Workers Assets serves the document at the extensionless path and redirects
+  // to it, so match the stem rather than the exact href.
+  async () => page.frames().find((candidate) => /\/proposed-api(\.html)?$/.test(candidate.url())) ?? null,
   30_000,
 );
 check("the proposed API reference loads", Boolean(apiFrame));

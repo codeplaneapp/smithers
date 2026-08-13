@@ -156,6 +156,10 @@ window.addEventListener("message", (event) => {
   if (data.status === "idle") return;
   setStatus(data.status, toneOf(data.status));
   if (data.runId) runIdOut.textContent = data.runId;
+  // The embedded UI polls too, and either side can see the terminal state
+  // first. Render its guest facts as soon as they arrive so the status and the
+  // evidence below it never disagree.
+  if (data.guest) showEvidence({ runId: data.runId, elapsedMs: data.elapsedMs, result: { guest: data.guest } });
 });
 
 async function connect() {
