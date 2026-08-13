@@ -18,6 +18,8 @@ const startNote = document.getElementById("start-note");
 // Run smithers under Node: the bin's shebang is bun, and the loader shims map
 // the bun-only specifiers to stubs.
 const SMITHERS = "node --import ./shims/register.mjs --import tsx node_modules/smthrs/src/bin/smithers.js";
+const ENV =
+  "SMITHERS_BACKEND=pglite SMITHERS_PGLITE_INPROCESS=1 SMITHERS_PGLITE_INPROCESS_MODULE=pglite-inprocess.mjs";
 
 let booted = false;
 
@@ -54,6 +56,12 @@ function clean(text) {
  * @returns {Promise<number>} exit code
  */
 async function sh(wc, command, { quiet = false } = {}) {
+  const proc = await spawn(wc, command, { quiet });
+  return await proc.exit;
+}
+
+/** Start one command and stream its output. */
+async function spawn(wc, command, { quiet = false } = {}) {
   const proc = await wc.spawn("jsh", ["-c", command]);
   proc.output.pipeTo(
     new WritableStream({
@@ -64,7 +72,7 @@ async function sh(wc, command, { quiet = false } = {}) {
       },
     }),
   );
-  return await proc.exit;
+  return proc;
 }
 
 /**
@@ -76,26 +84,27 @@ async function sh(wc, command, { quiet = false } = {}) {
  * @returns {Promise<{ exitCode: number, json: unknown }>}
  */
 async function smithersJson(wc, args) {
-  const out = "/tmp/smithers-out.json";
-  // `2>&1 >file` sends stderr to the pane and stdout to the file.
-  const exitCode = await sh(wc, `SMITHERS_BACKEND=pglite ${SMITHERS} ${args} --format json 2>&1 >${out}`);
+  const proc = await wc.spawn("jsh", ["-c", `${ENV} ${SMITHERS} ${args} --format json`]);
+  let output = "";
+  const drained = proc.output.pipeTo(
+    new WritableStream({
+      write(data) {
+        const chunk = clean(String(data));
+        output += chunk;
+        write(chunk);
+      },
+    }),
+  );
+  const exitCode = await proc.exit;
+  await drained;
   let json = null;
   try {
-    json = JSON.parse(await wc.fs.readFile(out, "utf-8"));
+    const start = output.lastIndexOf("\n{");
+    json = JSON.parse((start >= 0 ? output.slice(start + 1) : output).trim());
   } catch {
     json = null;
   }
   return { exitCode, json };
-}
-
-/** Ask the engine what a run's status actually is. */
-async function runStatus(wc, runId) {
-  const { json } = await smithersJson(wc, `inspect ${runId}`);
-  return {
-    status: json?.run?.status ?? "unknown",
-    approvals: json?.approvals ?? [],
-    blocked: json?.runState?.blocked ?? null,
-  };
 }
 
 /** Fill one row of the results table from engine-reported state. */
@@ -153,42 +162,13 @@ async function main() {
   }
   step("install", "done");
 
-  step("gateway", "active");
-  termNote.textContent = "starting gateway";
-  write("\n$ smithers gateway\n");
-  sh(wc, `SMITHERS_BACKEND=pglite ${SMITHERS} gateway --port 7331`).then((code) =>
-    write(`\n[gateway process exited with code ${code}]\n`),
-  );
-  // The gateway binds loopback inside the container, so it never emits a
-  // preview URL. Poll it from inside with node; the container shell has no
-  // wget or curl.
-  const probe =
-    "node -e \"fetch('http://127.0.0.1:7331/v1/api/runs').then(()=>process.exit(0)).catch(()=>process.exit(1))\"";
-  let gatewayUp = false;
-  for (let i = 0; i < 60 && !gatewayUp; i += 1) {
-    gatewayUp = (await sh(wc, probe, { quiet: true })) === 0;
-    if (!gatewayUp) {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
-  }
-  step("gateway", gatewayUp ? "done" : "failed");
-  if (!gatewayUp) {
-    write("\nGateway did not come up.\n");
-    return;
-  }
-
-  step("app", "active");
-  frameNote.textContent = "starting";
-  write("\n$ vite (app/)\n");
-  sh(wc, "cd app && ../node_modules/.bin/vite");
-
   termNote.textContent = "running workflows";
 
   step("hello", "active");
   write("\n$ smithers up workflows/hello.tsx\n");
   const hello = await smithersJson(wc, `up workflows/hello.tsx --input '{"name":"stereOS"}'`);
   const helloId = hello.json?.runId ?? null;
-  const helloState = helloId ? await runStatus(wc, helloId) : { status: "unknown" };
+  const helloState = { status: hello.json?.status ?? "unknown" };
   report("hello", helloId, helloState.status);
   step("hello", helloState.status === "finished" ? "done" : "failed");
 
@@ -199,7 +179,7 @@ async function main() {
     `up workflows/pipeline.tsx --input '{"text":"  Smithers runs real workflows in the browser  "}'`,
   );
   const pipelineId = pipeline.json?.runId ?? null;
-  const pipelineState = pipelineId ? await runStatus(wc, pipelineId) : { status: "unknown" };
+  const pipelineState = { status: pipeline.json?.status ?? "unknown" };
   report("pipeline", pipelineId, pipelineState.status);
   step("pipeline", pipelineState.status === "finished" ? "done" : "failed");
 
@@ -210,7 +190,7 @@ async function main() {
     `up workflows/approval-demo.tsx --input '{"change":"enable the demo"}'`,
   );
   const approvalId = approval.json?.runId ?? null;
-  let approvalState = approvalId ? await runStatus(wc, approvalId) : { status: "unknown" };
+  const approvalState = { status: approval.json?.status ?? "unknown" };
   report("approval", approvalId, approvalState.status);
   step("approval", approvalState.status === "waiting-approval" ? "done" : "failed");
 
@@ -219,33 +199,85 @@ async function main() {
     return;
   }
 
+  // A PGlite store has one in-process owner. Start the gateway only after the
+  // runner exits at the gate, then stop it before resuming the runner.
+  step("gateway", "active");
+  termNote.textContent = "starting gateway";
+  write("\n$ smithers gateway\n");
+  let gateway = await spawn(wc, `${ENV} ${SMITHERS} gateway --port 7331`);
+  const probe =
+    "node -e \"fetch('http://127.0.0.1:7331/v1/api/runs').then(()=>process.exit(0)).catch(()=>process.exit(1))\"";
+  let gatewayUp = false;
+  for (let i = 0; i < 90 && !gatewayUp; i += 1) {
+    gatewayUp = (await sh(wc, probe, { quiet: true })) === 0;
+    if (!gatewayUp) await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  step("gateway", gatewayUp ? "done" : "failed");
+  if (!gatewayUp) {
+    write("\nGateway did not come up.\n");
+    return;
+  }
+
+  step("app", "active");
+  frameNote.textContent = "starting";
+  write("\n$ vite (app/)\n");
+  void sh(wc, "cd app && ../node_modules/.bin/vite");
+
   termNote.textContent = "waiting for your approval";
   startNote.textContent = "Click Approve in the panel on the right.";
   step("approved", "active");
 
-  // Wait for a human decision, then resume. `smithers up` exits at the gate,
-  // so the decision alone does not finish the run.
-  let decided = false;
-  for (let i = 0; i < 300 && !decided; i += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    approvalState = await runStatus(wc, approvalId);
-    decided =
-      approvalState.approvals.some((row) => row.status === "approved" || row.status === "denied") ||
-      approvalState.blocked?.kind === "approval-decided-resume-required";
-  }
+  // The embedded gateway client posts this message after its live approvals
+  // collection observes the decision.
+  const decided = await new Promise((resolve) => {
+    const deadline = setTimeout(() => resolve(false), 10 * 60 * 1000);
+    let sawPending = false;
+    const onMessage = (event) => {
+      if (event.data?.type !== "smithers-approval-count") return;
+      if (event.data.count > 0) {
+        sawPending = true;
+        return;
+      }
+      if (!sawPending || event.data.count !== 0) return;
+      clearTimeout(deadline);
+      window.removeEventListener("message", onMessage);
+      resolve(true);
+    };
+    window.addEventListener("message", onMessage);
+  });
   if (!decided) {
     step("approved", "failed");
     termNote.textContent = "no decision arrived";
     return;
   }
 
+  write("\n$ smithers gateway stop\n");
+  gateway.kill();
+  let stopped = false;
+  await Promise.race([
+    gateway.exit.then(() => {
+      stopped = true;
+    }),
+    new Promise((resolve) => setTimeout(resolve, 15_000)),
+  ]);
+  if (!stopped) {
+    gateway.kill();
+    await gateway.exit;
+  }
+
   write("\n$ smithers up workflows/approval-demo.tsx --resume\n");
-  await smithersJson(wc, `up workflows/approval-demo.tsx --resume --run-id ${approvalId}`);
-  const finalState = await runStatus(wc, approvalId);
+  const resumed = await smithersJson(wc, `up workflows/approval-demo.tsx --resume --run-id ${approvalId}`);
+  const finalState = { status: resumed.json?.status ?? "unknown" };
   report("approval", approvalId, finalState.status);
   step("approved", finalState.status === "finished" ? "done" : "failed");
   termNote.textContent = finalState.status === "finished" ? "done" : finalState.status;
   startNote.textContent = "";
+
+  // Reopen the gateway so the embedded app shows the final engine state.
+  if (finalState.status === "finished") {
+    gateway = await spawn(wc, `${ENV} ${SMITHERS} gateway --port 7331`);
+    void gateway.exit.then((code) => write(`\n[gateway process exited with code ${code}]\n`));
+  }
 }
 
 startButton.addEventListener("click", () => {
