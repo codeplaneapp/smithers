@@ -30,8 +30,8 @@ export const guestResultSchema = z.object({
     primeSum: z.number(),
     lastPrime: z.number(),
   }),
-  runId: z.string(),
-  sandboxId: z.string(),
+  protocolRunId: z.string(),
+  protocolSandboxId: z.string(),
 });
 
 const { Workflow, Task, smithers, outputs } = createSmithers({
@@ -98,8 +98,8 @@ export async function executeGuestWork(prompt: string, protocol: { runId: string
   const kernel = command("uname", "-srm");
   const user = command("id", "-un");
   const hostname = command("hostname");
-  const uptimeSeconds = Number((await Bun.file("/proc/uptime").text()).split(/\s+/)[0] ?? 0);
-  const memTotalKb = Number((await Bun.file("/proc/meminfo").text()).match(/^MemTotal:\s+(\d+)/m)?.[1] ?? 0);
+  const uptimeSeconds = Number(command("sh", "-c", "cut -d' ' -f1 /proc/uptime 2>/dev/null")) || 0;
+  const memTotalKb = Number(command("sh", "-c", "awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null")) || 0;
   const harnesses = ["claude", "opencode", "gemini"].filter((name) => Boolean(Bun.which(name)));
   const promptSha256 = new Bun.CryptoHasher("sha256").update(prompt).digest("hex");
 
@@ -118,7 +118,7 @@ export async function executeGuestWork(prompt: string, protocol: { runId: string
     },
     restrictions: {
       writeOutsideWorkspace: (await canWrite("/etc/stereos-write-probe")) ? "ALLOWED (unexpected)" : "denied",
-      writeInsideWorkspace: (await canWrite(`${process.env.HOME}/workspace/.stereos-write-probe`))
+      writeInsideWorkspace: (await canWrite(`${process.env.HOME ?? "/home/agent"}/workspace/.stereos-write-probe`))
         ? "allowed"
         : "DENIED (unexpected)",
       nixCli: Bun.which("nix") ? "on PATH" : "not on PATH",
@@ -132,8 +132,8 @@ export async function executeGuestWork(prompt: string, protocol: { runId: string
       jqOnPath: Boolean(Bun.which("jq")),
     },
     computation: primesThrough(upperBound),
-    runId: protocol.runId,
-    sandboxId: protocol.sandboxId,
+    protocolRunId: protocol.runId,
+    protocolSandboxId: protocol.sandboxId,
   };
 }
 

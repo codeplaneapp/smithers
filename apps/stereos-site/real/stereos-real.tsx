@@ -14,19 +14,12 @@
  */
 import { createSmithers, Sandbox } from "smthrs";
 import { z } from "zod";
-import childWorkflow from "./child-workflow.tsx";
+import childWorkflow, { guestResultSchema } from "./child-workflow.tsx";
 import { stereosProvider } from "./stereos-provider.ts";
 
 const { Workflow, smithers, outputs } = createSmithers({
   input: z.object({ prompt: z.string().default("hello from the host") }),
-  result: z.object({
-    summary: z.string(),
-    prompt: z.string(),
-    promptSha256: z.string(),
-    guest: z.record(z.string(), z.unknown()),
-    restrictions: z.record(z.string(), z.string()),
-    harnessesOnPath: z.string(),
-  }),
+  result: guestResultSchema,
 });
 
 export default smithers((ctx) => (

@@ -23,6 +23,15 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   qemu-system-x86 qemu-utils git curl xz-utils unzip jq make >/dev/null
 sudo adduser "$USER" kvm >/dev/null 2>&1 || true
 
+if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+  if [ "${STEREOS_KVM_REEXEC:-0}" != 1 ]; then
+    echo "re-entering this script with the new kvm group" >&2
+    exec sg kvm -c "STEREOS_KVM_REEXEC=1 bash $(printf '%q' "$0")"
+  fi
+  echo "current shell still cannot read and write /dev/kvm" >&2
+  exit 1
+fi
+
 log "stereos ssh key"
 mkdir -p ~/.config/stereos
 [ -f ~/.config/stereos/ssh-key ] || ssh-keygen -t ed25519 -f ~/.config/stereos/ssh-key -N "" -q

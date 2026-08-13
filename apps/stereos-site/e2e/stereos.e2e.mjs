@@ -9,8 +9,13 @@
 import { appendFileSync, writeFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { chromium } from "/Users/williamcory/smithers/e2e/node_modules/playwright/index.mjs";
+
+// apps/cli declares Playwright. Resolve through that package so this works in
+// any checkout and with any pnpm virtual-store layout.
+const require = createRequire(new URL("../../cli/package.json", import.meta.url));
+const { chromium } = require("playwright");
 
 const here = dirname(fileURLToPath(import.meta.url));
 const url = process.argv[2] ?? "https://stereos.smithers.sh/";

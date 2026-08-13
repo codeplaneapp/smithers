@@ -14,7 +14,20 @@ set -euo pipefail
 SSH_PORT="${STEREOS_SSH_PORT:-2222}"
 KEY="${STEREOS_SSH_KEY:-$HOME/.config/stereos/ssh-key}"
 IMAGE="${STEREOS_IMAGE:-$HOME/stereOS/result/stereos.qcow2}"
+BUN_VERSION="${STEREOS_BUN_VERSION:-1.2.21}"
+ALPINE_VERSION="3.24.1"
+ALPINE_ROOTFS_SHA256="41f73e3cf5fa919b8aa5ca6b30dc48f0da2720776d7423e2a7748211456fe081"
+ALPINE_GCC_VERSION="15.2.0-r5"
 export PATH="$HOME/.bun/bin:/nix/var/nix/profiles/default/bin:$PATH"
+
+if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+  if [ "${STEREOS_KVM_REEXEC:-0}" != 1 ]; then
+    echo "re-entering with the kvm group so QEMU can open /dev/kvm" >&2
+    exec sg kvm -c "STEREOS_KVM_REEXEC=1 bash $(printf '%q' "$0")"
+  fi
+  echo "current shell cannot read and write /dev/kvm; log out and back in" >&2
+  exit 1
+fi
 
 ssh_guest() {
   ssh -p "$SSH_PORT" -i "$KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
@@ -49,11 +62,53 @@ if ! ssh_guest true 2>/dev/null; then
   done
 fi
 
+echo "== install official Bun v$BUN_VERSION in guest =="
+BUN_CACHE="$HOME/.cache/stereos-bun/v$BUN_VERSION"
+mkdir -p "$BUN_CACHE"
+if [ ! -x "$BUN_CACHE/bun-linux-x64-musl/bun" ]; then
+  curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v$BUN_VERSION/bun-linux-x64-musl.zip" \
+    -o "$BUN_CACHE/bun-linux-x64-musl.zip"
+  unzip -oq "$BUN_CACHE/bun-linux-x64-musl.zip" -d "$BUN_CACHE"
+fi
+if [ ! -x "$BUN_CACHE/lib/ld-musl-x86_64.so.1" ]; then
+  rootfs="$BUN_CACHE/alpine-minirootfs-$ALPINE_VERSION-x86_64.tar.gz"
+  curl -fsSL "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86_64/$(basename "$rootfs")" -o "$rootfs"
+  printf '%s  %s\n' "$ALPINE_ROOTFS_SHA256" "$rootfs" | sha256sum -c -
+  tar -xzf "$rootfs" -C "$BUN_CACHE" ./lib/ld-musl-x86_64.so.1
+fi
+if [ ! -f "$BUN_CACHE/usr/lib/libstdc++.so.6.0.34" ]; then
+  for package in libstdc++ libgcc; do
+    apk="$BUN_CACHE/$package-$ALPINE_GCC_VERSION.apk"
+    curl -fsSL "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/$(basename "$apk")" -o "$apk"
+    tar -xf "$apk" -C "$BUN_CACHE" usr/lib
+  done
+fi
+ssh_guest 'mkdir -p /home/agent/.local/bin /home/agent/.local/lib'
+scp -q -P "$SSH_PORT" -i "$KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  -o LogLevel=ERROR -o IdentitiesOnly=yes "$BUN_CACHE/bun-linux-x64-musl/bun" \
+  agent@127.0.0.1:/home/agent/.local/bin/bun-bin
+scp -q -P "$SSH_PORT" -i "$KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  -o LogLevel=ERROR -o IdentitiesOnly=yes "$BUN_CACHE/lib/ld-musl-x86_64.so.1" \
+  agent@127.0.0.1:/home/agent/.local/lib/ld-musl-x86_64.so.1
+scp -q -P "$SSH_PORT" -i "$KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  -o LogLevel=ERROR -o IdentitiesOnly=yes "$BUN_CACHE/usr/lib/libstdc++.so.6.0.34" \
+  agent@127.0.0.1:/home/agent/.local/lib/libstdc++.so.6
+scp -q -P "$SSH_PORT" -i "$KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  -o LogLevel=ERROR -o IdentitiesOnly=yes "$BUN_CACHE/usr/lib/libgcc_s.so.1" \
+  agent@127.0.0.1:/home/agent/.local/lib/libgcc_s.so.1
+cat <<'WRAPPER' | ssh_guest 'cat > /home/agent/.local/bin/bun && chmod 755 /home/agent/.local/bin/bun /home/agent/.local/bin/bun-bin /home/agent/.local/lib/ld-musl-x86_64.so.1'
+#!/bin/sh
+export LD_LIBRARY_PATH=/home/agent/.local/lib
+exec /home/agent/.local/lib/ld-musl-x86_64.so.1 /home/agent/.local/bin/bun-bin "$@"
+WRAPPER
+ssh_guest '/home/agent/.local/bin/bun --version'
+
 echo "== guest =="
 ssh_guest 'id -un; hostname; uname -srm; grep PRETTY /etc/os-release'
 
 echo "== smithers run =="
 export STEREOS_SSH_PORT="$SSH_PORT" STEREOS_SSH_KEY="$KEY"
-# The published smthrs package installs its CLI as `smithers`.
-exec env -u ANTHROPIC_API_KEY ./node_modules/.bin/smithers \
-  up stereos-real.tsx --input '{"prompt":"hello from the linux host"}'
+SMITHERS_ROOT="${SMITHERS_ROOT:-$(git rev-parse --show-toplevel)}"
+exec env -u ANTHROPIC_API_KEY bun "$SMITHERS_ROOT/apps/cli/src/index.js" \
+  up "$SMITHERS_ROOT/apps/stereos-site/real/stereos-real.tsx" \
+  --input '{"prompt":"hello from the linux host"}' -d
