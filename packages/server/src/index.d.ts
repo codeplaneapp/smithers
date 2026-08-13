@@ -35,83 +35,96 @@ export { JumpToFrameError } from '@smthrs/time-travel/jumpToFrame';
  * `WaitForEvent(event, correlationId)` via the integration runtime.
  */
 type IntegrationsWebhookSourceConfig = {
-    /** Source id — the `:sourceId` path segment of `POST /v1/webhooks/:sourceId`. */
+    /**
+     * Source id, the `:sourceId` path segment of `POST /v1/webhooks/:sourceId`.
+     */
     id: string;
-    /** HMAC-SHA256 shared secret used to verify deliveries. */
+    /**
+     * HMAC-SHA256 shared secret used to verify deliveries.
+     */
     secret: string;
     /**
-     * Header carrying the signature.
-     * @default "x-hub-signature-256"
+     * Header carrying the signature. Defaults to `x-hub-signature-256`.
      */
-    signatureHeader?: string;
+    signatureHeader?: string | undefined;
     /**
-     * Required signature prefix (e.g. GitHub's `sha256=`). When omitted, a
-     * leading `sha256=` is stripped if present and plain hex/base64 digests
-     * are accepted.
+     * Required signature prefix (e.g. GitHub's `sha256=`). When
+     * omitted, a leading `sha256=` is stripped if present and plain hex/base64 digests are accepted.
      */
-    signaturePrefix?: string;
-    /** Signal name to deliver (e.g. `integration:test:ping`). */
+    signaturePrefix?: string | undefined;
+    /**
+     * Signal name to deliver (e.g. `integration:test:ping`).
+     */
     event: string;
-    /** Dot-path into the JSON payload for the correlation id (e.g. `issue.key`). */
-    correlationIdPath?: string;
-    /** Dot-path selecting the signal payload; defaults to the whole body. */
-    payloadPath?: string;
     /**
-     * Dot-path for a provider-stable delivery id used for redelivery dedupe;
-     * defaults to `sha256(rawBody)`.
+     * Dot-path into the JSON payload for the correlation id (e.g. `issue.key`).
      */
-    dedupeKeyPath?: string;
-    /** Bounded ingress queue capacity. @default 256 */
-    capacity?: number;
+    correlationIdPath?: string | undefined;
+    /**
+     * Dot-path selecting the signal payload. Defaults to the whole body.
+     */
+    payloadPath?: string | undefined;
+    /**
+     * Dot-path for a provider-stable delivery id used for redelivery
+     * dedupe. Defaults to `sha256(rawBody)`.
+     */
+    dedupeKeyPath?: string | undefined;
+    /**
+     * Bounded ingress queue capacity. Defaults to 256.
+     */
+    capacity?: number | undefined;
 };
 /**
  * Server-level integrations config (`ServerOptions.integrations`). Requires
- * `ServerOptions.db` — delivered events are deduped and matched against the
+ * `ServerOptions.db`: delivered events are deduped and matched against the
  * server database.
  */
 type IntegrationsConfig = {
-    webhooks?: IntegrationsWebhookSourceConfig[];
+    webhooks?: IntegrationsWebhookSourceConfig[] | undefined;
 };
 
+/**
+ * `IntegrationsConfig` is referenced inline rather than aliased through a local
+ * `@typedef`. A `@typedef` is itself an export, so aliasing here would make both
+ * this module and `./IntegrationsConfig.js` export the same name. `index.js`
+ * re-exports both with `export *`, and a name exported by two star sources is
+ * ambiguous, so the declaration bundler drops `IntegrationsConfig` from the
+ * public types instead of emitting it.
+ */
 type ServerOptions$1 = {
-    port?: number;
+    port?: number | undefined;
     /**
-     * External integrations served by this process: generic HMAC-verified
-     * webhook sources exposed at `POST /v1/webhooks/:sourceId` and delivered
+     * External integrations served by this process:
+     * generic HMAC-verified webhook sources exposed at `POST /v1/webhooks/:sourceId` and delivered
      * to waiting runs through the integration runtime. Requires `db`.
      */
-    integrations?: IntegrationsConfig;
+    integrations?: IntegrationsConfig | undefined;
     /**
      * Network interface to bind. Defaults to the loopback address 127.0.0.1.
-     * Binding a non-loopback host (e.g. 0.0.0.0) requires an authToken unless
-     * `insecure` is set, because the control plane can launch/cancel/approve
-     * arbitrary workflow runs.
-     * @default "127.0.0.1"
+     * Binding a non-loopback host (e.g. 0.0.0.0) requires an authToken unless `insecure` is set,
+     * because the control plane can launch, cancel, and approve arbitrary workflow runs.
      */
-    host?: string;
+    host?: string | undefined;
     /**
-     * Allow binding a non-loopback host with no authToken configured. This
-     * exposes a full-control, unauthenticated HTTP control plane to the network.
-     * @default false
+     * Allow binding a non-loopback host with no authToken configured.
+     * This exposes a full-control, unauthenticated HTTP control plane to the network. Defaults to false.
      */
-    insecure?: boolean;
+    insecure?: boolean | undefined;
     db?: unknown;
-    authToken?: string;
-    maxBodyBytes?: number;
-    rootDir?: string;
-    allowNetwork?: boolean;
+    authToken?: string | undefined;
+    maxBodyBytes?: number | undefined;
+    rootDir?: string | undefined;
+    allowNetwork?: boolean | undefined;
     /**
-     * Maximum time (in milliseconds) allowed for the HTTP parser to receive the
-     * complete headers of a single request. Helps mitigate slowloris attacks.
-     * @default 30000
+     * Maximum time in milliseconds allowed for the HTTP parser to
+     * receive the complete headers of a single request. Helps mitigate slowloris attacks. Defaults to 30000.
      */
-    headersTimeout?: number;
+    headersTimeout?: number | undefined;
     /**
-     * Maximum time (in milliseconds) allowed for a single request to be received
-     * and parsed, including the body. Helps mitigate slowloris attacks.
-     * @default 60000
+     * Maximum time in milliseconds allowed for a single request to be
+     * received and parsed, including the body. Helps mitigate slowloris attacks. Defaults to 60000.
      */
-    requestTimeout?: number;
+    requestTimeout?: number | undefined;
 };
 
 type RequestFrame$1 = {
@@ -1190,7 +1203,7 @@ declare class Gateway {
      */
     renderUiIndex(match: {
         config: GatewayUiMount;
-    }): string;
+    }): Promise<string>;
     /**
      * @param {{ config: GatewayUiMount; assetPath: string | null }} match
      */
@@ -1223,7 +1236,7 @@ declare class Gateway {
      * @param {IncomingMessage} req
      * @param {ServerResponse} res
      */
-    handleRootRequest(req: IncomingMessage, res: ServerResponse$1): void;
+    handleRootRequest(req: IncomingMessage, res: ServerResponse$1): Promise<void>;
     /**
      * @param {string} key
      * @param {RegisteredWorkflow} entry
