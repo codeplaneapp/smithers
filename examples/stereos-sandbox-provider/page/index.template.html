@@ -443,9 +443,14 @@
       }
     });
   }
-  select(tabs.find((entry) => entry.hash === location.hash) ?? tabs[0], { updateHash: Boolean(location.hash) });
+  // The Implementation tab takes a file path after its hash, as in
+  // #impl/real/stereos-provider.ts, so match on the prefix and leave that
+  // deep link in the address bar for the tab to read.
+  const tabFor = (hash) => tabs.find((entry) => hash === entry.hash || hash.startsWith(`${entry.hash}/`));
+  const landing = tabFor(location.hash);
+  select(landing ?? tabs[0], { updateHash: Boolean(location.hash) && !landing });
   window.addEventListener('hashchange', () => {
-    const entry = tabs.find((candidate) => candidate.hash === location.hash);
+    const entry = tabFor(location.hash);
     if (entry) select(entry, { updateHash: false });
   });
 </script>

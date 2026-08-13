@@ -519,8 +519,8 @@ b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121  -</pre></li></
   </div>
 </footer>
 
-<script type="module" src="./live.js?v=202608131913"></script>
-<script type="module" src="./evidence.js?v=202608131913"></script>
+<script type="module" src="./live.js?v=202608131916"></script>
+<script type="module" src="./evidence.js?v=202608131916"></script>
 <script type="module">
   const ids = ['tasks', 'build', 'live', 'impl', 'api'];
   const tabs = ids.map((id) => ({
@@ -541,7 +541,7 @@ b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121  -</pre></li></
     // Both heavy panels load on first view so the landing tab stays light.
     if (entry.hash === '#impl' && !implLoaded) {
       implLoaded = true;
-      import('./impl.js?v=202608131913').catch((error) => {
+      import('./impl.js?v=202608131916').catch((error) => {
         document.getElementById('impl-root').textContent = `Could not load the sources: ${error.message}`;
       });
     }
@@ -565,9 +565,14 @@ b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121  -</pre></li></
       }
     });
   }
-  select(tabs.find((entry) => entry.hash === location.hash) ?? tabs[0], { updateHash: Boolean(location.hash) });
+  // The Implementation tab takes a file path after its hash, as in
+  // #impl/real/stereos-provider.ts, so match on the prefix and leave that
+  // deep link in the address bar for the tab to read.
+  const tabFor = (hash) => tabs.find((entry) => hash === entry.hash || hash.startsWith(`${entry.hash}/`));
+  const landing = tabFor(location.hash);
+  select(landing ?? tabs[0], { updateHash: Boolean(location.hash) && !landing });
   window.addEventListener('hashchange', () => {
-    const entry = tabs.find((candidate) => candidate.hash === location.hash);
+    const entry = tabFor(location.hash);
     if (entry) select(entry, { updateHash: false });
   });
 </script>

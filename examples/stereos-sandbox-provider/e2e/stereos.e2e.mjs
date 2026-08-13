@@ -311,6 +311,25 @@ if (retired instanceof Error) {
   );
 }
 
+// 10. A deep link opens the Implementation tab on one file. Loaded fresh, in a
+// second page, so it measures a cold landing rather than tab state left behind.
+const deepPath = "real/stereos-provider.ts";
+const deep = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
+await deep.goto(`${new URL(url).origin}/#impl/${deepPath}`, { waitUntil: "domcontentloaded", timeout: 60_000 });
+const deepTab = await deep.$eval('[role="tab"][aria-selected="true"]', (node) => node.textContent.trim());
+check("a deep link lands on Implementation", deepTab === "Implementation", deepTab);
+const opened = await waitFor(
+  "the deep-linked file",
+  async () => {
+    const node = deep.locator('[data-testid="impl-code"]');
+    if ((await node.count()) === 0) return null;
+    return (await node.getAttribute("data-path")) === deepPath ? deepPath : null;
+  },
+  30_000,
+);
+check("a deep link opens the file it names", Boolean(opened), (await deep.evaluate(() => location.hash)) || "no hash");
+await deep.close();
+
 await browser.close();
 
 say(failures.length === 0 ? "\nall checks passed" : `\n${failures.length} failed: ${failures.join(", ")}`);
