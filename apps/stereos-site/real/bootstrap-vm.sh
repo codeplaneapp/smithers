@@ -82,15 +82,16 @@ ssh_admin 'sudo install -d -m 755 -o agent -g agent /home/agent/.local/bin /home
   && sudo install -m 755 -o agent -g agent /tmp/stereos-musl-loader /home/agent/.local/lib/ld-musl-aarch64.so.1 \
   && sudo install -m 644 -o agent -g agent /tmp/stereos-libstdc++.so.6 /home/agent/.local/lib/libstdc++.so.6 \
   && sudo install -m 644 -o agent -g agent /tmp/stereos-libgcc_s.so.1 /home/agent/.local/lib/libgcc_s.so.1 \
-  && rm -f /tmp/stereos-bun-bin /tmp/stereos-musl-loader /tmp/stereos-libstdc++.so.6 /tmp/stereos-libgcc_s.so.1'
+  && rm -f /tmp/stereos-bun-bin /tmp/stereos-musl-loader /tmp/stereos-libstdc++.so.6 /tmp/stereos-libgcc_s.so.1' \
+  </dev/null
 cat <<'WRAPPER' | ssh_admin 'sudo tee /home/agent/.local/bin/bun >/dev/null && sudo chown agent:agent /home/agent/.local/bin/bun && sudo chmod 755 /home/agent/.local/bin/bun'
 #!/bin/sh
 export LD_LIBRARY_PATH=/home/agent/.local/lib
 exec /home/agent/.local/lib/ld-musl-aarch64.so.1 /home/agent/.local/bin/bun-bin "$@"
 WRAPPER
 
-ssh -p "$port" -i "$STEREOS_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  -o LogLevel=ERROR -o IdentitiesOnly=yes agent@127.0.0.1 '/home/agent/.local/bin/bun --version'
+ssh -n -p "$port" -i "$STEREOS_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  -o LogLevel=ERROR -o IdentitiesOnly=yes agent@127.0.0.1 '/home/agent/.local/bin/bun --version' >&2
 
 echo "agent login verified on $VM (127.0.0.1:$port)" >&2
 echo "export STEREOS_SSH_PORT=$port"

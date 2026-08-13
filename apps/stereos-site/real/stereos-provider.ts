@@ -61,9 +61,17 @@ async function ssh(cmd: string, stdin?: string, opts: { signal?: AbortSignal; ti
   });
   let timedOut = false;
   let aborted = false;
+  let forceTimer: ReturnType<typeof setTimeout> | undefined;
   const kill = () => {
     try {
       proc.kill("SIGTERM");
+      forceTimer ??= setTimeout(() => {
+        try {
+          proc.kill("SIGKILL");
+        } catch {
+          // The process exited after SIGTERM.
+        }
+      }, 1_000);
     } catch {
       // The process may have exited between the signal and this callback.
     }
@@ -91,6 +99,7 @@ async function ssh(cmd: string, stdin?: string, opts: { signal?: AbortSignal; ti
     return { exitCode, stdout, stderr };
   } finally {
     if (timer) clearTimeout(timer);
+    if (forceTimer) clearTimeout(forceTimer);
     opts.signal?.removeEventListener("abort", onAbort);
   }
 }

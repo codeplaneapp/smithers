@@ -1,36 +1,65 @@
-$ ssh gce:stereos-smithers-demo   # n2-standard-2, nested virt, /dev/kvm
-
-$ ./run-on-linux-host.sh
-== booting /home/…/stereos-overlay.qcow2 under QEMU/KVM ==
+$ gcloud compute ssh stereos-smithers-demo --zone us-east1-b \
+> --command='cd ~/smithers && '\
+> 'apps/stereos-site/real/run-on-linux-host.sh' \
+> | tee /tmp/stereos-linux-run.txt
+== install official Bun v1.2.21 in guest ==
+1.2.21
 == guest ==
 agent
 coder-dev
 Linux 6.18.33 x86_64
 PRETTY_NAME="stereOS dev-f269d96 (coder-dev)"
 == smithers run ==
+info  starting workflow run engine:run=0ms runId=55c1ccb5-9ddf-4912-82eb-eb35efd69767
+      workflowName=workflow
+      workflowPath=/home/willcory10_gmail_com/smithers/apps/stereos-site/real/stereos-real.tsx
+      rootDir=/home/willcory10_gmail_com/smithers maxConcurrency=4 allowNetwork=false
+      hotReload=false resume=false engine=react-driver
 [00:00:00] → stereos-vm (attempt 1, iteration 0)
-[00:00:01] ✓ stereos-vm (attempt 1)
-[00:00:01] ✓ Run finished
-runId: 78635896-cd5e-4a81-bc9a-6b0b224e4304
+[00:00:02] ✓ stereos-vm (attempt 1)
+info  bridge-managed compute task execution finished engine:task=0ms
+      runId=55c1ccb5-9ddf-4912-82eb-eb35efd69767 nodeId=stereos-vm workflowName=stereos-real
+      iteration=0 attempt=1 durationMs=1939 jjPointer=null
+[00:00:02] ✓ Run finished
+info  workflow run finished engine:run=0ms runId=55c1ccb5-9ddf-4912-82eb-eb35efd69767
+      workflowName=stereos-real
+runId: 55c1ccb5-9ddf-4912-82eb-eb35efd69767
 status: finished
-
-$ smithers events 78635896… --type sandbox
-#7  +00:00.256  SandboxCreated        🧪 Sandbox created: stereos-vm (stereos)
-#8  +00:00.265  SandboxShipped        📦 Sandbox shipped: stereos-vm (163 bytes)
-#11  +00:01.306  SandboxBundleReceived  📥 Sandbox bundle received: stereos-vm (0 patches)
-#12  +00:01.311  SandboxCompleted      ✅ Sandbox completed: stereos-vm (finished)
-
-$ smithers node stereos-vm --run-id 78635896…   # output produced INSIDE the VM
+cta:
+  description: "Next steps:\n\nSuggest to the user:\n1. Build the user a custom workflow UI: author .smithers/ui/stereos-real.tsx by composing the smthrs/gateway-ui widgets (WorkflowUiShell, RunTree, RunEventLog, ApprovalPanel, ...) and smthrs/ui primitives over the gateway-react hooks, add `<UI entry=\"../ui/stereos-real.tsx\" />` to the workflow, then open it with `smithers ui 55c1ccb5-9ddf-4912-82eb-eb35efd69767`. `smithers ui --app` opens the full Smithers control-plane UI.\n2. Visualize the workflow and how it works: `smithers graph apps/stereos-site/real/stereos-real.tsx` renders the workflow graph without executing it, `smithers tree 55c1ccb5-9ddf-4912-82eb-eb35efd69767` prints the live run tree, `smithers up --interactive` opens the full-screen TUI.\n3. Ask the user clarifying questions about what they want next, then route it by size: a clear single-agent task runs as `smithers oneshot \"<goal>\"` (background, durable, no workflow file); genuinely multi-stage / approval-gated / reusable work goes through `smithers workflow run create-workflow --prompt \"<what the workflow should do>\"` (or `smithers make-workflow`)."
+  commands[9]{command,description}:
+    smithers inspect 55c1ccb5-9ddf-4912-82eb-eb35efd69767,Inspect run state
+    smithers logs 55c1ccb5-9ddf-4912-82eb-eb35efd69767,View run logs
+    smithers chat 55c1ccb5-9ddf-4912-82eb-eb35efd69767,View agent chat
+    smithers ui 55c1ccb5-9ddf-4912-82eb-eb35efd69767,Open the workflow UI (after authoring .smithers/ui/stereos-real.tsx)
+    smithers ui --app,Open the full Smithers control-plane UI
+    smithers graph apps/stereos-site/real/stereos-real.tsx,Visualize the workflow graph
+    smithers tree 55c1ccb5-9ddf-4912-82eb-eb35efd69767,Visualize the run tree
+    "smithers oneshot \"<goal>\"","Run a clear single-agent task in the background, no workflow file"
+    "smithers workflow run create-workflow --prompt \"<describe the workflow>\"",Have smithers build a new workflow from a description
+$ run_id=$(sed -n 's/^runId: //p' /tmp/stereos-linux-run.txt)
+$ gcloud compute ssh stereos-smithers-demo --zone us-east1-b \
+> --command="cd ~/smithers && ~/.bun/bin/bun apps/cli/src/index.js events \
+> $run_id --type sandbox"
+#7  +00:00.279  SandboxCreated        🧪 Sandbox created: stereos-vm (stereos)
+#8  +00:00.288  SandboxShipped        📦 Sandbox shipped: stereos-vm (163 bytes)
+#12  +00:02.153  SandboxBundleReceived  📥 Sandbox bundle received: stereos-vm (0 patches)
+#13  +00:02.156  SandboxCompleted      ✅ Sandbox completed: stereos-vm (finished)
+$ gcloud compute ssh stereos-smithers-demo --zone us-east1-b \
+> --command="cd ~/smithers && ~/.bun/bin/bun \
+> apps/cli/src/index.js node stereos-vm \
+> --run-id $run_id --format json" \
+> | jq '.output.validated | with_entries(select(.value != null))'
 {
-  "summary": "ran inside stereOS as agent@coder-dev on Linux 6.18.33 x86_64",
+  "summary": "child workflow executed inside stereOS as agent@coder-dev on Linux 6.18.33 x86_64",
   "prompt": "hello from the linux host",
-  "promptSha256": "b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121",
+  "prompt_sha256": "b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121",
   "guest": {
     "os": "stereOS dev-f269d96",
     "kernel": "Linux 6.18.33 x86_64",
     "user": "agent",
     "hostname": "coder-dev",
-    "uptimeSeconds": 145.37,
+    "uptimeSeconds": 10611.22,
     "cpus": 2,
     "memTotalKb": 2973988
   },
@@ -40,8 +69,23 @@ $ smithers node stereos-vm --run-id 78635896…   # output produced INSIDE the V
     "nixCli": "on PATH",
     "nixStorePresent": "yes"
   },
-  "harnessesOnPath": "claude opencode gemini"
+  "harnesses_on_path": "claude opencode gemini",
+  "execution": {
+    "workflow": "stereos-guest-work/guest-facts",
+    "runtime": "Bun 1.2.21 x64",
+    "jsonEmitter": "Bun JSON.stringify",
+    "jqOnPath": true
+  },
+  "computation": {
+    "upperBound": 22423,
+    "primeCount": 2508,
+    "primeSum": 26390031,
+    "lastPrime": 22409
+  },
+  "protocol_run_id": "55c1ccb5-9ddf-4912-82eb-eb35efd69767",
+  "protocol_sandbox_id": "stereos-vm"
 }
-
-$ the guest hashed the host's prompt; verify it here
+$ printf '%s' 'hello from the linux host' | sha256sum
 b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121  -
+$ exit
+exit

@@ -7,8 +7,8 @@ https://stereos.smithers.sh renders those files directly.
 
 | Host | Mixtape | Hypervisor | Result |
 | --- | --- | --- | --- |
-| Apple Silicon Mac | `coder-arm64:latest`, fetched by hand (see Registry defect) | Apple Virtualization.framework through `mb` | `finished`; timing is in `transcript.txt` |
-| GCE n2-standard-2 with nested virtualization | `coder-dev` x86_64, built from source | QEMU/KVM | `finished`; timing is in `transcript-linux.txt` |
+| Apple Silicon Mac | `coder-arm64:latest`, fetched by hand (see Registry defect) | Apple Virtualization.framework through `mb` | `finished`; SandboxCreated to SandboxCompleted: 768 ms |
+| GCE n2-standard-2 with nested virtualization | `coder-dev` x86_64, built from source | QEMU/KVM | `finished`; SandboxCreated to SandboxCompleted: 1,877 ms |
 
 | File | Purpose |
 | --- | --- |

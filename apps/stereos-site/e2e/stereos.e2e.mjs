@@ -98,7 +98,11 @@ const realTitle = await page.locator("#panel-real h1").first().textContent();
 check("tab 3 h1", realTitle?.includes("real stereOS VM"), realTitle ?? "");
 
 const transcript = (await page.locator("#real-terminal").textContent()) ?? "";
-check("tab 3 shows the raw recorded run", transcript.includes("mb up"), `${transcript.length} chars`);
+check(
+  "tab 3 shows the raw recorded run",
+  transcript.includes('mb" status smithers-stereos'),
+  `${transcript.length} chars`,
+);
 check(
   "transcript proves the guest produced the output",
   transcript.includes("child workflow executed inside stereOS as agent@coder") &&
@@ -122,7 +126,7 @@ check(
   "second recording is the x86_64 KVM run",
   linuxTranscript.includes("agent@coder-dev on Linux 6.18.33 x86_64") &&
     linuxTranscript.includes("Bun 1.2.21 x64") &&
-    linuxTranscript.includes("QEMU/KVM"),
+    linuxTranscript.includes("gcloud compute ssh stereos-smithers-demo"),
   `${linuxTranscript.length} chars`,
 );
 
