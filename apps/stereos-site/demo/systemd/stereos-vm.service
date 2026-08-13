@@ -1,0 +1,21 @@
+[Unit]
+Description=stereOS coder-dev mixtape VM (QEMU/KVM) for the stereos.smithers.sh demo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+# QEMU needs /dev/kvm; the demo user is in the kvm group from provisioning.
+SupplementaryGroups=kvm
+Environment=HOME=@HOME@
+Environment=PATH=@HOME@/.bun/bin:/nix/var/nix/profiles/default/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=STEREOS_SSH_PORT=2222
+Environment=STEREOS_SSH_KEY=@HOME@/.config/stereos/ssh-key
+ExecStart=/usr/local/lib/stereos-demo/boot-vm.sh
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

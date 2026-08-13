@@ -3,273 +3,383 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="A real Smithers Sandbox running its child workflow inside stereOS, plus the proposed provider API and browser demo.">
+<meta name="description" content="A Smithers workflow executing inside a real stereOS VM: a live demo on a nested-virtualization host, the recorded evidence, and the implementation sources.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>">
 <title>stereOS × Smithers</title>
 <style>
-__REFERENCE_STYLE__
-</style>
-<style>
-  /* Tab chrome and the live-demo pane. The reference styles above own all
-     typography, so this block only adds layout the two-tab page needs. */
-  .tabs { max-width: 940px; margin: 0 auto; padding: 24px 24px 0; display: flex; flex-wrap: wrap; gap: 4px;
-    border-bottom: 1px solid var(--border); }
-  .tabs button { font: inherit; font-size: 15px; color: var(--muted); background: none;
-    border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0;
-    padding: 9px 18px; cursor: pointer; margin-bottom: -1px; }
-  .tabs button:hover { color: var(--fg); }
-  .tabs button[aria-selected="true"] { color: var(--fg); background: var(--bg);
-    border-color: var(--border); font-weight: 600; }
+  :root {
+    --ink: #17231d; --muted: #65736b; --paper: #f4f1e8; --card: #fffef9;
+    --line: #d7d8ce; --line-soft: #ecebe3; --well: #faf9f3;
+    --orange: #ff6d2e; --orange-soft: #fff0e7;
+    --green: #176b4b; --green-soft: #e4f4ec;
+    --blue: #3767c8; --blue-soft: #e8eefc;
+    --purple: #7753b4; --purple-soft: #f0eafd;
+    --grid: rgba(23, 35, 29, .035);
+    --shadow: 0 14px 34px rgba(30, 43, 36, .07);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #e9e7de; --muted: #98a29b; --paper: #14181a; --card: #1b2124;
+      --line: #2d3538; --line-soft: #242b2e; --well: #171d20;
+      --orange: #ff8a52; --orange-soft: #33211a;
+      --green: #6fd3a6; --green-soft: #163025;
+      --blue: #86aaf5; --blue-soft: #1a2540;
+      --purple: #bda3f0; --purple-soft: #241e38;
+      --grid: rgba(233, 231, 222, .04);
+      --shadow: 0 14px 34px rgba(0, 0, 0, .35);
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; color: var(--ink);
+    background:
+      radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--orange) 12%, transparent), transparent 24rem),
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px),
+      var(--paper);
+    background-size: auto, 28px 28px, 28px 28px, auto;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 15px; line-height: 1.55;
+  }
+  button, input, select { font: inherit; }
+  code, pre, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  a { color: var(--blue); }
+  .shell { width: min(1180px, calc(100% - 40px)); margin: 0 auto; }
+
+  header { padding: 54px 0 22px; }
+  .eyebrow { display: flex; align-items: center; gap: 10px; color: var(--orange);
+    font-size: 12px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+  .eyebrow::before { content: ""; width: 28px; height: 2px; background: currentColor; }
+  h1 { max-width: 940px; margin: 16px 0 12px; font-family: Georgia, "Times New Roman", serif;
+    font-size: clamp(34px, 5.4vw, 62px); font-weight: 500; letter-spacing: -.045em; line-height: .97; }
+  .lede { max-width: 660px; margin: 0; color: var(--muted); font-size: clamp(15px, 1.7vw, 18px); }
+
+  nav.tabs { position: sticky; z-index: 20; top: 0; margin-top: 22px;
+    background: color-mix(in srgb, var(--paper) 88%, transparent);
+    border-block: 1px solid color-mix(in srgb, var(--ink) 9%, transparent); backdrop-filter: blur(14px); }
+  nav.tabs .shell { display: flex; gap: 6px; padding-block: 10px; overflow-x: auto; scrollbar-width: none; }
+  nav.tabs .shell::-webkit-scrollbar { display: none; }
+  nav.tabs button { height: 38px; padding: 0 16px; white-space: nowrap; color: var(--muted);
+    background: transparent; border: 1px solid transparent; border-radius: 999px; cursor: pointer; }
+  nav.tabs button:hover { color: var(--ink); background: color-mix(in srgb, var(--card) 60%, transparent); }
+  nav.tabs button[aria-selected="true"] { color: var(--paper); background: var(--ink); font-weight: 600; }
+
+  main { padding: 34px 0 90px; }
   [role="tabpanel"][hidden] { display: none; }
+  section { margin-bottom: 46px; }
+  .sec-head { display: grid; grid-template-columns: 92px 1fr; align-items: baseline; gap: 18px; margin-bottom: 16px; }
+  .sec-index { color: var(--orange); font: 700 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .1em; }
+  h2 { margin: 0; font: 500 clamp(22px, 3vw, 32px)/1.05 Georgia, serif; letter-spacing: -.03em; }
+  h3 { margin: 0 0 6px; font-size: 16px; letter-spacing: -.01em; }
+  .note { max-width: 640px; margin: 6px 0 0; color: var(--muted); font-size: 14px; }
 
-  .demo { max-width: 1180px; margin: 0 auto; padding: 32px 24px 96px; }
-  .demo h1 { font-size: 26px; margin: 0 0 6px; }
-  .steps { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0; padding: 0; list-style: none; }
-  .steps li { font-size: 13px; border: 1px solid var(--border); border-radius: 999px;
-    padding: 4px 12px; color: var(--muted); background: var(--code-bg); }
-  .steps li[data-state="active"] { border-color: var(--accent); color: var(--accent); }
-  .steps li[data-state="done"] { border-color: var(--ok-border); background: var(--ok-bg); color: var(--fg); }
-  .steps li[data-state="failed"] { border-color: var(--warn-border); background: var(--warn-bg); color: var(--fg); }
+  .card { min-width: 0; overflow: hidden; background: var(--card); border: 1px solid var(--line);
+    border-radius: 16px; }
+  .card > .cap { padding: 10px 14px; color: var(--muted); font-size: 12px;
+    border-bottom: 1px solid var(--line-soft); background: var(--well);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .card > .body { padding: 16px; }
 
-  .panes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-top: 20px; }
-  @media (max-width: 900px) { .panes { grid-template-columns: minmax(0, 1fr); } }
-  .pane { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
-  .pane > header { font-size: 13px; font-weight: 600; padding: 8px 12px;
-    border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; gap: 12px; }
-  .pane > header .muted { font-weight: 400; }
-  #terminal { margin: 0; height: 460px; overflow: auto; padding: 12px;
-    font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; background: var(--code-bg); }
-  #app-frame { width: 100%; height: 460px; border: 0; background: var(--bg); display: block; }
-  #app-frame-empty { height: 460px; display: flex; align-items: center; justify-content: center;
-    color: var(--muted); font-size: 14px; padding: 0 24px; text-align: center; }
-  #app-frame-empty[hidden] { display: none; }
-  #app-frame-empty p { margin: 0; }
+  .diagram { padding: 14px; background: var(--well); border: 1px solid var(--line); border-radius: 16px; }
+  /* Below the stage labels' legible width the diagram scrolls rather than shrinking. */
+  .diagram .scroll { overflow-x: auto; }
+  .diagram svg { display: block; width: 100%; min-width: 760px; height: auto; }
+  .diagram figcaption { margin-top: 8px; color: var(--muted); font-size: 12px; }
+  figure { margin: 0; }
 
-  table.results { width: auto; }
-  table.results td:last-child { white-space: normal; }
+  .row { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+  .tiles { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .tile { padding: 11px 13px; background: var(--well); border: 1px solid var(--line-soft); border-radius: 11px; }
+  .tile dt { margin: 0 0 3px; color: var(--muted); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+  .tile dd { margin: 0; font: 13px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-word; }
 
-  /* Tab 3: the recorded real run. */
-  #real-terminal, #real-source { margin: 0; height: 460px; overflow: auto; padding: 12px;
-    font-size: 12px; line-height: 1.5; white-space: pre; background: var(--code-bg); }
-  #real-terminal { white-space: pre-wrap; word-break: break-word; }
-  #real-run-select, #real-source-select { font: inherit; font-size: 12px; background: var(--bg); color: var(--fg);
-    border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
-  @media (prefers-color-scheme: dark) { #real-play, #start { color: #0d1117 !important; } }
+  .pill { padding: 4px 9px; border-radius: 999px; font-size: 11px; font-weight: 700;
+    letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--line-soft); }
+  .pill.ok { color: var(--green); background: var(--green-soft); }
+  .pill.run { color: var(--blue); background: var(--blue-soft); }
+  .pill.wait { color: var(--orange); background: var(--orange-soft); }
+  .pill.bad { color: #c0392b; background: color-mix(in srgb, #c0392b 12%, transparent); }
+
+  .btn { height: 38px; padding: 0 16px; color: var(--paper); background: var(--ink);
+    border: 1px solid var(--ink); border-radius: 10px; cursor: pointer; }
+  .btn:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 84%, var(--orange)); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.ghost { color: var(--ink); background: transparent; border-color: var(--line); }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+  .banner { padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--card); font-size: 14px; }
+  .banner.warn { border-color: var(--orange); background: var(--orange-soft); }
+  .banner[hidden] { display: none; }
+
+  iframe.embed { display: block; width: 100%; height: 430px; border: 0; background: var(--card); }
+
+  pre.capture { margin: 0; max-height: 420px; overflow: auto; padding: 12px 14px;
+    font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; background: var(--well); }
+  pre.excerpt { margin: 8px 0 0; padding: 10px 12px; overflow-x: auto; font-size: 12px; line-height: 1.5;
+    background: var(--well); border: 1px solid var(--line-soft); border-radius: 10px; }
+
+  ol.walk { margin: 0; padding: 0; list-style: none; counter-reset: step; display: grid; gap: 12px; }
+  ol.walk li { counter-increment: step; padding: 14px 16px 16px 52px; position: relative;
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+  ol.walk li::before { content: counter(step); position: absolute; left: 16px; top: 15px;
+    width: 24px; height: 24px; display: grid; place-items: center; border-radius: 999px;
+    color: var(--paper); background: var(--ink); font: 700 12px/1 ui-monospace, monospace; }
+  ol.walk .stage { color: var(--orange); font: 700 11px/1 ui-monospace, monospace;
+    letter-spacing: .08em; text-transform: uppercase; }
+  ol.walk p { margin: 4px 0 0; font-size: 14px; }
+
+  details { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  details + details { margin-top: 10px; }
+  details > summary { padding: 12px 14px; cursor: pointer; font-size: 14px; font-weight: 600; }
+  details[open] > summary { border-bottom: 1px solid var(--line-soft); }
+
+  footer { padding: 24px 0 44px; color: var(--muted);
+    border-top: 1px solid color-mix(in srgb, var(--ink) 12%, transparent); font-size: 12px; }
+  footer .shell { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 14px; }
+  footer p { margin: 0; max-width: 620px; }
+
+  @media (max-width: 720px) {
+    .shell { width: calc(100% - 24px); }
+    header { padding: 34px 0 16px; }
+    .sec-head { grid-template-columns: 1fr; gap: 4px; }
+    iframe.embed { height: 520px; }
+  }
 </style>
 </head>
 <body>
 
-<div class="tabs" role="tablist" aria-label="Sections">
-  <button role="tab" id="tab-api" aria-controls="panel-api" aria-selected="false" tabindex="-1">Proposed API</button>
-  <button role="tab" id="tab-real" aria-controls="panel-real" aria-selected="true" tabindex="0">Real stereOS</button>
-  <button role="tab" id="tab-demo" aria-controls="panel-demo" aria-selected="false" tabindex="-1">Browser demo (real engine, simulated VM)</button>
+<header class="shell">
+  <div class="eyebrow">stereOS × Smithers</div>
+  <h1>A Smithers workflow executing inside a real stereOS VM</h1>
+  <p class="lede">The sandbox body executes in a stereOS mixtape VM under QEMU/KVM and returns facts only
+  the guest can produce.</p>
+</header>
+
+<nav class="tabs" aria-label="Sections">
+  <div class="shell" role="tablist">
+    <button role="tab" id="tab-live" aria-controls="panel-live" aria-selected="true" tabindex="0">Live demo</button>
+    <button role="tab" id="tab-how" aria-controls="panel-how" aria-selected="false" tabindex="-1">How it works</button>
+    <button role="tab" id="tab-impl" aria-controls="panel-impl" aria-selected="false" tabindex="-1">Implementation</button>
+    <button role="tab" id="tab-api" aria-controls="panel-api" aria-selected="false" tabindex="-1">Proposed API</button>
+  </div>
+</nav>
+
+<main class="shell">
+
+<!-- ───────────────────────── Live demo ───────────────────────── -->
+<div role="tabpanel" id="panel-live" aria-labelledby="tab-live">
+
+  <section>
+    <figure class="diagram">
+      <div class="scroll">__FLOW_SVG__</div>
+      <figcaption>Every stage is real. The guard is the only public surface; the gateway stays on loopback.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-index">01 / 03</span><div>
+      <h2>Run one</h2>
+      <p class="note">Two at a time, five minutes each. The VM stays booted between runs, so a run pays
+      SSH and guest execution rather than a kernel boot.</p>
+    </div></div>
+
+    <div class="banner warn" id="live-offline" hidden>
+      <strong>The demo host is not answering.</strong>
+      Nothing here is simulated, so nothing runs until it is back.
+      <a href="#how">See the recorded runs</a>.
+    </div>
+
+    <div class="controls" style="margin-bottom: 14px">
+      <button class="btn" data-start="hello" disabled>Start hello</button>
+      <button class="btn" data-start="pipeline" disabled>Start pipeline</button>
+      <button class="btn" data-start="approval-demo" disabled>Start approval-demo</button>
+      <span class="pill" id="live-status">connecting</span>
+      <span class="mono" id="live-capacity" style="color: var(--muted); font-size: 12px"></span>
+    </div>
+
+    <div class="row" style="grid-template-columns: minmax(0, 1fr)">
+      <div class="card">
+        <div class="cap"><span>Run UI served from the demo host, built with <code>smthrs/gateway-ui</code></span>
+          <span class="mono" id="live-origin"></span></div>
+        <iframe class="embed" id="live-frame" title="stereOS demo runs" src="about:blank"></iframe>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top: 14px" id="live-evidence" hidden>
+      <div class="cap"><span>Guest evidence from this run</span><span class="mono" id="live-runid"></span></div>
+      <div class="body"><dl class="tiles" id="live-tiles"></dl></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-index">02 / 03</span><div>
+      <h2>The three workflows</h2>
+    </div></div>
+    <div class="row">
+      <div class="card"><div class="body">
+        <h3><code>hello</code></h3>
+        <p class="note">One <code>&lt;Sandbox&gt;</code>. The greeting string is built in the guest.</p>
+      </div></div>
+      <div class="card"><div class="body">
+        <h3><code>pipeline</code></h3>
+        <p class="note">Host prepares, guest computes a prime sieve, host reports what the guest returned.</p>
+      </div></div>
+      <div class="card"><div class="body">
+        <h3><code>approval-demo</code></h3>
+        <p class="note">Parks at <code>&lt;Approval&gt;</code>. Approve above, and the guest writes the file.</p>
+      </div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-index">03 / 03</span><div>
+      <h2>What is exposed</h2>
+      <p class="note">The gateway's RPC surface is not reachable from the internet. The guard is.</p>
+    </div></div>
+    <div class="row" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr))">__GUARD_CARDS__</div>
+  </section>
+
 </div>
 
+<!-- ───────────────────────── How it works ───────────────────────── -->
+<div role="tabpanel" id="panel-how" aria-labelledby="tab-how" hidden>
+
+  <section>
+    <div class="sec-head"><span class="sec-index">01 / 04</span><div>
+      <h2>Two hosts, one provider</h2>
+      <p class="note">Recorded 2026-08-12. Each card summarizes a capture reproduced in full below.</p>
+    </div></div>
+    <div class="row">__HOST_CARDS__</div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-index">02 / 04</span><div>
+      <h2>One run, step by step</h2>
+      <p class="note">Excerpts are verbatim from the GCE capture below.</p>
+    </div></div>
+    <ol class="walk">__WALKTHROUGH__</ol>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-index">03 / 04</span><div>
+      <h2>Full captures</h2>
+      <p class="note">Terminal output as recorded, nothing removed.</p>
+    </div></div>
+    <div id="captures"></div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-index">04 / 04</span><div>
+      <h2>Found while building this</h2>
+    </div></div>
+    <div class="card"><div class="body">
+      <p class="note" style="max-width: 720px">
+        <code>mb pull coder-arm64:latest</code> fails. The registry serves a raw blob whose sha256 is
+        <code>d335283a…12a21e2</code> while its manifest declares <code>bf212e02…1245cdeb</code>, and
+        <code>zstd -t</code> reports <code>Decoding error (36)</code>. The qcow2 blob at the same tag is clean
+        and reconstructs the expected image, so republishing that one raw blob fixes the pull.
+      </p>
+    </div></div>
+  </section>
+
+</div>
+
+<!-- ───────────────────────── Implementation ───────────────────────── -->
+<div role="tabpanel" id="panel-impl" aria-labelledby="tab-impl" hidden>
+  <section>
+    <div class="sec-head"><span class="sec-index">01 / 01</span><div>
+      <h2>Every file behind this page</h2>
+      <p class="note">The provider, the guest workflows, the host provisioning, the demo service, and this
+      page. Tree and viewer are <code>FileTree</code> and <code>CodeBlock</code> from <code>smthrs/ui</code>.</p>
+    </div></div>
+    <div id="impl-root" data-testid="impl-root">
+      <div class="card"><div class="body"><p class="note">Loading the sources…</p></div></div>
+    </div>
+  </section>
+</div>
+
+<!-- ───────────────────────── Proposed API ───────────────────────── -->
 <div role="tabpanel" id="panel-api" aria-labelledby="tab-api" hidden>
-__REFERENCE_MAIN__
+  <section>
+    <div class="sec-head"><span class="sec-index">01 / 01</span><div>
+      <h2>Proposed API</h2>
+      <p class="note">A design reference for a first-class stereOS provider in Smithers. Parts marked proposed
+      do not exist. Everything on the other tabs does.
+      <a href="./proposed-api.html" target="_blank" rel="noopener">Open the full document</a>.</p>
+    </div></div>
+    <div class="card">
+      <div class="cap"><span>stereos-sandbox-provider.html</span><span class="mono">reference</span></div>
+      <iframe class="embed" id="api-frame" style="height: 76vh" title="Proposed API reference" src="about:blank" loading="lazy"></iframe>
+    </div>
+  </section>
 </div>
 
-<div role="tabpanel" id="panel-real" aria-labelledby="tab-real">
-<div class="demo">
-
-<h1>Smithers running inside a real stereOS VM</h1>
-<p class="subtitle">A Smithers <code>&lt;Sandbox&gt;</code> uploads its bundled child workflow, then the
-guest's Bun runtime executes that workflow inside a stereOS mixtape VM.</p>
-
-<div class="banner ok">
-<strong>This one really boots stereOS.</strong> The recordings below are captured output from
-<code>apps/stereos-site/real/</code>, not simulations. Two hosts, one provider: the published
-<code>coder</code> mixtape on Apple's hypervisor (stereOS 2026.03.04.0, Linux 6.12.74 aarch64), and an
-<code>x86_64</code> <code>coder-dev</code> mixtape built from source and booted
-under QEMU/KVM on a nested-virtualization GCE instance (Linux 6.18.33). On each host, the exact command
-shown in the recording drives a <code>&lt;Sandbox&gt;</code> through an SSH provider built on
-<code>createCommandSandboxProvider</code>. The provider bundles <code>child-workflow.tsx</code>, and Bun
-1.2.21 inside the guest executes its guest-facts task and prime-sieve computation.
-</div>
-
-<p>The prompt hash is consistency evidence only. It confirms that the recorded input and guest output
-match, but it is not provenance or attestation. The raw terminal capture also shows the guest-specific
-kernel, runtime architecture, restriction probes, workflow marker, protocol run ID, and computed prime
-result. Pick a host from the dropdown to inspect the complete capture.</p>
-
-<div class="panes">
-  <div class="pane">
-    <header><select id="real-run-select" aria-label="Recorded run"></select><span class="muted" id="real-note">recorded run</span></header>
-    <pre id="real-terminal" tabindex="0">Loading…</pre>
-  </div>
-  <div class="pane">
-    <header><span>Source</span><select id="real-source-select" aria-label="Source file"></select></header>
-    <pre id="real-source" tabindex="0">Loading…</pre>
-  </div>
-</div>
-
-<p><button id="real-play" style="font: inherit; font-size: 15px; padding: 9px 20px; border-radius: 8px;
-  border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer;">Replay</button></p>
-
-<h2>What runs where</h2>
-<table class="results">
-<tr><th>Piece</th><th>Where it runs</th></tr>
-<tr><td>Smithers engine, scheduler, event log</td><td>the host</td></tr>
-<tr><td><code>createCommandSandboxProvider</code> request/result protocol</td><td>the host, unmodified from <code>smthrs/sandbox</code></td></tr>
-<tr><td>The <code>SandboxSession</code> transport</td><td>SSH to the guest's <code>agent</code> user</td></tr>
-<tr><td>The sandbox body</td><td>inside the stereOS VM</td></tr>
-</table>
-
-<h2>The runtime gap, closed for this run</h2>
-<p>Mixtapes ship agent harnesses but no JavaScript runtime. The bootstrap scripts therefore copy the
-official Bun 1.2.21 musl build and its small compatibility libraries into the guest. The provider uploads
-a bundle of the real child workflow. <code>guest-runner.sh</code> only checks the two paths and invokes Bun.
-Bun reads <code>SMITHERS_SANDBOX_REQUEST_PATH</code> and writes all result JSON to
-<code>SMITHERS_SANDBOX_RESULT_PATH</code>. A future mixtape with Bun already installed can omit the bootstrap
-runtime copy.</p>
-
-<h2>What the guest reported</h2>
-<p>Read the tail of the recording. <code>writeOutsideWorkspace: denied</code> is the restriction model
-holding: the <code>agent</code> user cannot write to <code>/etc</code>. <code>nixCli: on PATH</code> remains a
-gap. The restricted PATH comes from the agent's login shell, while a non-interactive SSH exec sees the
-full system profile.</p>
-
-<h2>Found while building this</h2>
-<p>The registry serves the raw blob as
-<code>d335283a5c0c9fdeef22fe48740cb74d0c973b69373bef651e76aaac012a21e2</code>, while its declared digest is
-<code>bf212e026f722ccccd30f273d363f9b8a7245516f7bc1e8d81db67b41245cdeb</code>.
-<code>zstd -t</code> reports <code>Decoding error (36): Data corruption detected</code>. The qcow2 blob is
-clean and reconstructs the expected image. Republishing that one raw blob makes <code>mb pull</code> work.</p>
+</main>
 
 <footer>
-<p>Sources and raw recordings are committed at
-<a href="https://github.com/smithersai/smithers/tree/main/apps/stereos-site/real"><code>apps/stereos-site/real/</code></a>.
-The Proposed API tab remains a design reference; its parts marked proposed do not exist.</p>
+  <div class="shell">
+    <p>An earlier version of this page ran the engine under plain Node in a WebContainer with a simulated
+    VM transport; that work is preserved in
+    <a href="https://github.com/smithersai/smithers/pull/1506">PR #1506</a> and
+    <a href="https://github.com/smithersai/smithers/tree/main/apps/stereos-site/project"><code>apps/stereos-site/project</code></a>.</p>
+    <p>Sources: <a href="https://github.com/smithersai/smithers/tree/main/apps/stereos-site"><code>apps/stereos-site</code></a></p>
+  </div>
 </footer>
 
-</div>
-</div>
-
-<div role="tabpanel" id="panel-demo" aria-labelledby="tab-demo" hidden>
-<div class="demo">
-
-<h1>Smithers running in your browser</h1>
-<p class="subtitle">A WebContainer boots Node, installs the published <code>smthrs</code> package, and runs
-real workflows against the PGlite backend.</p>
-
-<div class="banner info">
-<strong>This tab simulates the seam; the “Real stereOS” tab boots the VM.</strong> The engine below is the
-published <code>smthrs</code> package on npm, running under Node inside a WebContainer in this tab. The
-workflows, the PGlite database, the gateway, and the approval decision are all real. The sandbox provider
-uses the same provider kit and the same request/result contract as the stereOS provider, but its
-SSH&nbsp;→&nbsp;microVM transport is swapped for in-container <code>exec</code>, because a browser cannot
-boot QEMU. Nothing in <em>this</em> tab runs stereOS.
-</div>
-
-<p>No API keys and no agent seats are involved. The three workflows use literal-value tasks and a
-human approval gate, so every step is deterministic.</p>
-
-<p><button id="start" style="font: inherit; font-size: 15px; padding: 9px 20px; border-radius: 8px;
-  border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer;">Start the demo</button>
-<span id="start-note" class="muted" style="margin-left: 10px; font-size: 14px;"></span></p>
-
-<ol class="steps" id="steps">
-  <li data-step="boot">Boot container</li>
-  <li data-step="install">npm install smthrs</li>
-  <li data-step="hello">Run hello</li>
-  <li data-step="pipeline">Run pipeline</li>
-  <li data-step="approval">Run approval-demo</li>
-  <li data-step="gateway">Start gateway</li>
-  <li data-step="app">Start web app</li>
-  <li data-step="approved">Approval granted</li>
-</ol>
-
-<div class="panes">
-  <div class="pane">
-    <header><span>Container output</span><span class="muted" id="term-note">idle</span></header>
-    <pre id="terminal" tabindex="0">Press “Start the demo”.</pre>
-  </div>
-  <div class="pane">
-    <header><span>Web app served from inside the container</span><span class="muted" id="frame-note">not started</span></header>
-    <div id="app-frame-empty"><p>The React app is built with <code>smthrs/gateway-react</code> hooks and
-      <code>smthrs/gateway-ui</code> components. It appears here once its vite dev server is up inside the container.</p></div>
-    <iframe id="app-frame" hidden title="Smithers run UI" src="about:blank"></iframe>
-  </div>
-</div>
-
-<h2>Engine-reported results</h2>
-<p>Each row is filled in from the run status the engine wrote, not from the fact that a command exited.</p>
-<table class="results">
-<tr><th>Workflow</th><th>Run id</th><th>Status</th></tr>
-<tr><td><code>hello</code></td><td id="hello-run">Not run</td><td id="hello-status">Not run</td></tr>
-<tr><td><code>pipeline</code></td><td id="pipeline-run">Not run</td><td id="pipeline-status">Not run</td></tr>
-<tr><td><code>approval-demo</code></td><td id="approval-run">Not run</td><td id="approval-status">Not run</td></tr>
-</table>
-
-<h2>How the approval works</h2>
-<p><code>smithers up</code> exits when it reaches the gate, leaving the run in
-<code>waiting-approval</code>. Clicking <strong>Approve</strong> in the panel on the right posts the
-decision through the gateway. The page then resumes the run with
-<code>smithers up workflows/approval-demo.tsx --resume --run-id &lt;id&gt;</code>, and the second task runs.</p>
-
-<h2>Running smthrs under Node</h2>
-<p>The published package targets Bun. Six things make it run under Node, all applied to the project
-mounted in the container:</p>
-<ul>
-  <li><code>overrides.effect</code> pinned to a single version. Without it npm installs about twenty
-    copies of <code>effect</code> and the engine fails its Context lookup.</li>
-  <li>Loader shims that map <code>bun</code>, <code>bun:sqlite</code>, <code>bun:test</code>, and
-    <code>drizzle-orm/bun-sqlite</code> to stubs. Node rejects the <code>bun:</code> URL scheme before
-    any runtime guard can run.</li>
-  <li><code>SMITHERS_BACKEND=pglite</code>, so the store never reaches for <code>bun:sqlite</code>.</li>
-  <li>A one-line postinstall patch to <code>openSmithersBackend.js</code>, so the cross-run memory
-    sidecar is skipped when <code>Bun</code> is undefined.</li>
-  <li>An in-process PGlite client. The PGlite socket server accepts a WebContainer connection but does
-    not complete its PostgreSQL handshake.</li>
-  <li>A single-writer transaction path. Effect 4 does not unwind a nested transaction operation after
-    successful PGlite writes in WebContainer. The demo keeps every write and omits only multi-writer
-    grouping. It runs one writer at a time.</li>
-</ul>
-
-<footer>
-<p>The demo project is committed at
-<a href="https://github.com/smithersai/smithers/tree/main/apps/stereos-site/project"><code>apps/stereos-site/project</code></a>.
-The Proposed API tab describes an integration that does not exist yet.</p>
-</footer>
-
-</div>
-</div>
-
-<script type="module" src="./demo.js?v=20260813-blank-lines"></script>
-<script type="module" src="./real.js?v=20260813-bun-guest-2"></script>
-<script>
-  const tabs = [
-    { hash: '#api', tab: document.getElementById('tab-api'), panel: document.getElementById('panel-api') },
-    { hash: '#real', tab: document.getElementById('tab-real'), panel: document.getElementById('panel-real') },
-    { hash: '#demo', tab: document.getElementById('tab-demo'), panel: document.getElementById('panel-demo') },
-  ];
-  function selectTab(entry, { focus = false, updateHash = true } = {}) {
+<script type="module" src="./live.js?v=__V__"></script>
+<script type="module" src="./evidence.js?v=__V__"></script>
+<script type="module">
+  const ids = ['live', 'how', 'impl', 'api'];
+  const tabs = ids.map((id) => ({
+    hash: `#${id}`,
+    tab: document.getElementById(`tab-${id}`),
+    panel: document.getElementById(`panel-${id}`),
+  }));
+  let implLoaded = false;
+  function select(entry, { focus = false, updateHash = true } = {}) {
     for (const other of tabs) {
-      const selected = other === entry;
-      other.tab.setAttribute('aria-selected', String(selected));
-      other.tab.tabIndex = selected ? 0 : -1;
-      other.panel.hidden = !selected;
+      const on = other === entry;
+      other.tab.setAttribute('aria-selected', String(on));
+      other.tab.tabIndex = on ? 0 : -1;
+      other.panel.hidden = !on;
     }
     if (focus) entry.tab.focus();
     if (updateHash) history.replaceState(null, '', entry.hash);
+    // Both heavy panels load on first view so the landing tab stays light.
+    if (entry.hash === '#impl' && !implLoaded) {
+      implLoaded = true;
+      import('./impl.js?v=__V__').catch((error) => {
+        document.getElementById('impl-root').textContent = `Could not load the sources: ${error.message}`;
+      });
+    }
+    if (entry.hash === '#api') {
+      const frame = document.getElementById('api-frame');
+      if (frame.src === 'about:blank') frame.src = './proposed-api.html';
+    }
   }
   for (const entry of tabs) {
-    entry.tab.addEventListener('click', () => selectTab(entry));
+    entry.tab.addEventListener('click', () => select(entry));
     entry.tab.addEventListener('keydown', (event) => {
-      const current = tabs.indexOf(entry);
-      let target = null;
-      if (event.key === 'ArrowRight') target = tabs[(current + 1) % tabs.length];
-      if (event.key === 'ArrowLeft') target = tabs[(current - 1 + tabs.length) % tabs.length];
-      if (event.key === 'Home') target = tabs[0];
-      if (event.key === 'End') target = tabs[tabs.length - 1];
-      if (target) {
+      const at = tabs.indexOf(entry);
+      let next = null;
+      if (event.key === 'ArrowRight') next = tabs[(at + 1) % tabs.length];
+      if (event.key === 'ArrowLeft') next = tabs[(at - 1 + tabs.length) % tabs.length];
+      if (event.key === 'Home') next = tabs[0];
+      if (event.key === 'End') next = tabs[tabs.length - 1];
+      if (next) {
         event.preventDefault();
-        selectTab(target, { focus: true });
+        select(next, { focus: true });
       }
     });
   }
-  const opening = tabs.find((entry) => entry.hash === location.hash) ?? tabs[1];
-  selectTab(opening, { updateHash: Boolean(location.hash) });
+  select(tabs.find((entry) => entry.hash === location.hash) ?? tabs[0], { updateHash: Boolean(location.hash) });
+  window.addEventListener('hashchange', () => {
+    const entry = tabs.find((candidate) => candidate.hash === location.hash);
+    if (entry) select(entry, { updateHash: false });
+  });
 </script>
 </body>
 </html>
