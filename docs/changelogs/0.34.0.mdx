@@ -1,19 +1,30 @@
 ---
-title: "0.33.1"
-description: "Smithers 0.33.1 makes agent file edits legible: one file-change contract across every CLI harness, expandable diffs in the run UI, and diffs you can read while the run is still executing. Plus fallbackAgents subscription-pool failover, a subscription headroom dashboard, the validated Trellis v2 runtime, resume, retry-task, Gateway UI discovery, and truthful run status."
+title: "0.34.0"
+description: "Smithers 0.34.0 adds live workflow supervision: steer a running agent, hijack its session, and watch the whole graph from a terminal cockpit. Plus one file-change contract across every CLI harness with live diffs in the run UI, per-run token usage, durable agent checkpoints, the Nanocodex backend, fallbackAgents subscription-pool failover, and a UI theme registry."
 ---
 
-**Smithers 0.33.1 makes agent edits legible.** Every CLI harness reported file
+**Smithers 0.34.0 puts you in the cockpit of a running workflow.** Mirror a
+run into a [herdr](https://herdr.sh) terminal workspace and supervise it from
+the same terminal as your coding agent: a pane per agent node, a cockpit
+outline of the whole graph, and a dual-control dock that lets you steer a
+running agent with one keystroke or hijack its session and drive it yourself.
+Smithers keeps owning execution, isolation, and durability; herdr only renders
+and relays, and everything degrades to a silent no-op when no herdr server is
+running.
+
+**0.34.0 also makes agent edits legible.** Every CLI harness reported file
 edits differently, so the run UI could only show a flat "Edited src/foo.ts"
 note. Agents now normalize a file-mutating tool call into one
 `AgentFileChange` shape, the node chat stream renders each confirmed change as
 an expandable diff, and the Diff tab works while the run is still executing
 instead of only after it finishes.
 
-The rest of the release is hardening: 40 of its 97 commits are fixes for the
-places 0.33.0 and daily production use exposed cracks, notably resuming and
-retrying runs, agent fallback chains, Gateway workflow-UI discovery, and a run
-status that stops overstating how healthy a run is.
+The rest of the release is volume: 254 commits since 0.33.0, 97 of them fixes
+for the places daily production use exposed cracks, notably resuming and
+retrying runs, agent fallback chains, steer delivery, Gateway workflow-UI
+discovery, and a run status that stops overstating how healthy a run is.
+(0.33.1 was tagged but never published to npm; everything it contained ships
+here.)
 
 ## Upgrading
 
@@ -24,6 +35,44 @@ bunx smthrs packs update  # refresh installed workflow packs
 ```
 
 Behavior changes are collected in the [upgrade notes](#upgrade-notes).
+
+## Live workflow supervision: steer, hijack, and a terminal cockpit
+
+A long-running workflow used to be observable but not steerable: you could
+watch the logs, or kill the run. 0.34.0 adds a supervision layer with three
+levels of control.
+
+**Steer.** `bunx smthrs steer RUN_ID "focus on the failing test first"` queues
+a durable instruction that lands as a user turn at the target node's next
+agent step; the run never stops. `--node` picks a specific node (the default
+is the run's current agent node), bare `bunx smthrs steer` auto-picks the
+single active run, and delivery is tracked through `SteerQueued` and
+`SteerConsumed` events with expiry at terminal states. Steers survive
+restarts because they live in the store (`_smithers_steers`), not in process
+memory.
+
+**Take over.** `bunx smthrs steer --takeover` parks the run resumably and
+hands you the agent's live session to drive yourself. It is run-wide, so it
+warns and asks before aborting in-flight sibling agents.
+
+**Cockpit.** `bunx smthrs supervisor` (alias `top`) opens a live outline of
+phases and agents: j/k to select, Enter to open a node detail tab (in herdr
+when available), an approve/deny surface for a waiting gate, and `[` `]` to
+switch runs. It sources through the workspace Gateway by default and silently
+falls back to direct `smithers.db` reads when none is reachable.
+
+With a [herdr](https://herdr.sh) terminal server running, `bunx smthrs herdr
+attach` mirrors the run into a terminal workspace: a workspace per run, a
+cockpit tab, and a tab or pane per agent node with attention promotion and
+terminal outcome markers. `bunx smthrs herdr status|attach|open|clean` manage
+the mirror. The client speaks herdr wire protocol 19 (herdr 0.8.0); a protocol
+mismatch fails closed before any mutating call, and the optional mirror paths
+degrade to silent no-ops, so a missing or older herdr never affects the run
+itself.
+
+Reasoning effort is now first class along the way: it is derived at spawn,
+persisted per attempt (`_smithers_attempts.effort`), and rendered on both the
+direct-db and gateway display paths.
 
 ## Agent file edits are one contract, and the UI renders them as diffs
 
@@ -302,8 +351,76 @@ independent reviewer re-checks the diff and a draft PR is opened.
 bunx smthrs up upgrade-dependents
 ```
 
+## Per-run token usage in one query
+
+"How many tokens did this run spend" used to mean replaying the event log and
+parsing `TokenUsageReported` payloads out of JSON. The engine now persists a
+usage row per attempt (`_smithers_run_usage`, keyed by run, node, iteration,
+and attempt) alongside each usage event it already emits, on both success and
+failure paths. `bunx smthrs usage --run RUN_ID` prints the total, and
+`SmithersDb.getRunTokenUsage(runId)` is a single SUM. Rows are upserts keyed
+by attempt identity, so a provider that re-reports a cumulative running total
+replaces its row instead of inflating the total, while genuine retries stay
+separate attempts.
+
+## Durable agent checkpoints
+
+Agents can now declare `checkpointCapabilities` and persist a final
+`AgentCheckpoint` per attempt. `<Task id={B} fork={A}>` starts `B` from a copy
+of `A`'s final checkpoint when the target declares an exact codec, version,
+and `"fork"` match, and falls back to the source attempt's recorded forkable
+conversation messages otherwise. Forking never mutates the source: multiple
+tasks can fork the same source, and a forked task can itself be forked.
+
+## Nanocodex: a pinned-source sandboxed agent backend
+
+`NanocodexAgent` connects Smithers to the external
+[`smithers-nanocodex`](https://github.com/N0xMare/smithers-nanocodex) bridge:
+a pinned stock Nanocodex agent run as a short-lived, checkpoint-aware worker
+inside a Bubblewrap sandbox. The v0.0.1 integration is deliberately fixed
+(one fresh `serve` worker and one stock Nanocodex turn per `generate()` call,
+no daemon or worker pool) and fails closed when the sandbox requirements are
+not met. Linux x64 only; see the
+[Nanocodex integration page](/integrations/nanocodex) for the requirements.
+
+## A theme registry for the UI kit
+
+`@smthrs/ui-styleguide` now ships a generated theme registry with eight
+palettes: Catppuccin, Fucory, GitHub, Gruvbox, Night Owl (new in this
+release), One, Rosé Pine, and Solarized. A generator script keeps every
+palette's light and dark variants, contrast ratios, and CSS custom properties
+in sync, so run UIs built on `smthrs/ui` pick up a coherent theme with one
+setting.
+
+## stereOS in the browser, and three new sites
+
+- [stereos.smithers.sh](https://stereos.smithers.sh) runs the stereOS demo
+  entirely in your browser inside a WebContainer, so the sandbox-provider demo
+  needs no local checkout.
+- [patterns.smithers.sh](https://patterns.smithers.sh) is a field guide to
+  orchestration patterns.
+- [research.smithers.sh](https://research.smithers.sh) hosts the
+  persuasion-gap paper.
+- [status.smithers.sh](https://status.smithers.sh) gained Smithers Code and
+  Smithers Cloud API components, each verified live before listing, and a
+  missing feed now answers a real 404 instead of an HTML page labelled as
+  status.
+
 ## Other improvements
 
+- The bug-triage-train workflow ships in the pack with a live UI: file a
+  batch of bug reports through triage, reproduction, and fix lanes.
+- `CodexAgent` emits `--sandbox workspace-write` now that codex-cli 0.147
+  removed `--full-auto`, so full-auto-configured workflows keep launching on
+  current codex installs.
+- Queued steers expire inside the terminal cancel transaction, and steer
+  enqueue is fenced against terminal runs, so an instruction can no longer
+  land on a run that is already ending.
+- Detached built-in runs resume correctly after approval decisions.
+- A Codex agent configured through the array form keeps its reasoning effort
+  instead of silently dropping it.
+- `bunx smthrs tail --format jsonl` emits raw event JSON per line and nothing
+  else, so scripted consumers stop parsing banner noise.
 - `bunx smthrs bug --run RUN_ID` attaches the run's lifecycle events instead
   of a ~25 second window of TaskHeartbeat noise, and generates a correct
   report title ([#1484](https://github.com/smithersai/smithers/issues/1484)).
@@ -396,10 +513,21 @@ bunx smthrs up upgrade-dependents
   died.
 - `bunx smthrs up --resume RUN_ID` without a workflow path is now valid; the
   stored workflow is relaunched.
-- Migrations 0035 and 0036 add `_smithers_ralph.exhausted` and the
-  `_smithers_agent_processes` table. They apply on first open, so no manual
-  step is needed, but an older CLI pointed at a migrated database will not
-  read the new columns.
+- This release adds several store migrations: the `_smithers_attempts.effort`
+  column, the `_smithers_steers` table, `_smithers_ralph.exhausted`, the
+  `_smithers_agent_processes` table, agent checkpoints, the
+  `_smithers_run_usage` table, and the Herdr supervision tables. They apply on
+  first open, so no manual step is needed, but an older CLI pointed at a
+  migrated database will not read the new columns.
+- The herdr client pins wire protocol 19 (herdr 0.8.0). Explicit `bunx smthrs
+  herdr` commands against another protocol fail closed with
+  `HERDR_PROTOCOL_MISMATCH` before any mutating call; the optional mirror
+  paths log and continue. herdr remains fully optional.
+- `CodexAgent` maps full-auto to `--sandbox workspace-write` instead of the
+  removed `--full-auto` flag. codex-cli releases that predate `--sandbox`
+  need an upgrade before Codex tasks will launch.
+- 0.33.1 was tagged but never published to npm. If you tracked its changelog,
+  every entry ships in 0.34.0; there is no npm artifact to migrate through.
 - `bunx smthrs status` can now return the verdict `degraded` for a finished
   run whose loop never satisfied its `until` condition. The run row `status`
   stays `finished` and `RunState` stays `succeeded`, so scripts that key off
@@ -411,10 +539,11 @@ bunx smthrs up upgrade-dependents
 
 ## The full changelog
 
-96 commits, plus this changelog update, touching 350 files: 35,854 insertions,
-1,249 deletions. Most of that insertion count is regenerated `llms-*.txt` docs
-bundles; excluding those and the lockfiles it is 340 files, 12,816 insertions,
-949 deletions. The complete commit-level list is in
+254 commits since 0.33.0, plus this changelog update, touching 901 files:
+127,655 insertions, 6,718 deletions. Much of that insertion count is
+regenerated `llms-*.txt` docs bundles; excluding those, the lockfiles, and
+declaration bundles it is 839 files, 91,632 insertions, 3,524 deletions. The
+complete commit-level list is in
 [CHANGELOG.md](https://github.com/smithersai/smithers/blob/main/CHANGELOG.md).
 
 Hit a bug? `bunx smthrs bug` files a report in seconds, and `--run RUN_ID`
