@@ -216,6 +216,15 @@ export default smithers((ctx) => (
         { encoding: "utf8" },
       );
       assert(rpc.includes(runId), `listRuns did not include ${runId}: ${rpc.slice(0, 300)}`);
+      // The served HTML inlines the style-guide theme CSS. The style guide is a
+      // `.ts` package, so this is the check that the gateway reaches it through
+      // the CLI's loader and its lazy import rather than at module load, where
+      // it would break `import("smthrs")` outright.
+      await check("the gateway serves a themed HTML page under Node", () => {
+        const page = execFileSync("curl", ["-sL", `${url}/`], { encoding: "utf8" });
+        assert(page.includes("<!doctype html>"), `gateway root did not serve HTML: ${page.slice(0, 300)}`);
+        assert(page.includes("--brand"), `gateway root carried no style-guide tokens: ${page.slice(0, 300)}`);
+      });
     } finally {
       gateway.kill("SIGTERM");
     }
