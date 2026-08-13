@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A real Smithers Sandbox running its child workflow inside stereOS, plus the proposed provider API and browser demo.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>">
 <title>stereOS × Smithers</title>
 <style>
 :root {
@@ -63,7 +65,7 @@
 <style>
   /* Tab chrome and the live-demo pane. The reference styles above own all
      typography, so this block only adds layout the two-tab page needs. */
-  .tabs { max-width: 940px; margin: 0 auto; padding: 24px 24px 0; display: flex; gap: 4px;
+  .tabs { max-width: 940px; margin: 0 auto; padding: 24px 24px 0; display: flex; flex-wrap: wrap; gap: 4px;
     border-bottom: 1px solid var(--border); }
   .tabs button { font: inherit; font-size: 15px; color: var(--muted); background: none;
     border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0;
@@ -93,6 +95,8 @@
   #app-frame { width: 100%; height: 460px; border: 0; background: var(--bg); display: block; }
   #app-frame-empty { height: 460px; display: flex; align-items: center; justify-content: center;
     color: var(--muted); font-size: 14px; padding: 0 24px; text-align: center; }
+  #app-frame-empty[hidden] { display: none; }
+  #app-frame-empty p { margin: 0; }
 
   table.results { width: auto; }
   table.results td:last-child { white-space: normal; }
@@ -103,17 +107,18 @@
   #real-terminal { white-space: pre-wrap; word-break: break-word; }
   #real-run-select, #real-source-select { font: inherit; font-size: 12px; background: var(--bg); color: var(--fg);
     border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
+  @media (prefers-color-scheme: dark) { #real-play, #start { color: #0d1117 !important; } }
 </style>
 </head>
 <body>
 
 <div class="tabs" role="tablist" aria-label="Sections">
-  <button role="tab" id="tab-api" aria-controls="panel-api" aria-selected="true">Proposed API</button>
-  <button role="tab" id="tab-real" aria-controls="panel-real" aria-selected="false">Real stereOS</button>
-  <button role="tab" id="tab-demo" aria-controls="panel-demo" aria-selected="false">In-browser simulation</button>
+  <button role="tab" id="tab-api" aria-controls="panel-api" aria-selected="false" tabindex="-1">Proposed API</button>
+  <button role="tab" id="tab-real" aria-controls="panel-real" aria-selected="true" tabindex="0">Real stereOS</button>
+  <button role="tab" id="tab-demo" aria-controls="panel-demo" aria-selected="false" tabindex="-1">Browser demo (real engine, simulated VM)</button>
 </div>
 
-<div role="tabpanel" id="panel-api" aria-labelledby="tab-api">
+<div role="tabpanel" id="panel-api" aria-labelledby="tab-api" hidden>
 <main>
 
 <h1>stereOS Sandbox Provider for Smithers</h1>
@@ -137,7 +142,7 @@ stereOS facts come from <code>papercomputeco/stereOS@main</code> and its docs as
   <li><a href="#factory">createStereosSandboxProvider options</a></li>
   <li><a href="#mapping">Prop mapping: Smithers control → stereOS behavior</a></li>
   <li><a href="#setup">Getting it up and running</a></li>
-  <li><a href="#gaps">Integration gaps (the real conversation)</a></li>
+  <li><a href="#gaps">Integration gaps</a></li>
 </ol>
 </div>
 
@@ -250,21 +255,21 @@ heartbeats, and audit rows.</p>
 <p>stereOS (<a href="https://github.com/papercomputeco/stereOS">papercomputeco/stereOS</a>, Paper
 Compute) is a NixOS-based Linux OS purpose-built for running coding agents:</p>
 <ul>
-  <li><strong>Mixtapes</strong> — flake-built machine images bundling the hardened OS with an agent
+  <li><strong>Mixtapes.</strong> Flake-built machine images bundling the hardened OS with an agent
   harness: <code>opencode-mixtape</code>, <code>claude-code-mixtape</code>,
   <code>gemini-cli-mixtape</code>, <code>full-mixtape</code>. Each ships a production variant (no SSH)
   and a <code>-dev</code> variant (SSH key injected from <code>~/.config/stereos/ssh-key.pub</code>).</li>
-  <li><strong>Three boot formats</strong> — raw EFI image (<code>stereos.img</code>, Apple
+  <li><strong>Three boot formats.</strong> Raw EFI image (<code>stereos.img</code>, Apple
   Virtualization Framework), QCOW2 (QEMU/KVM), and direct-kernel artifacts
   (<code>bzImage</code>/<code>initrd</code>/<code>cmdline</code>) for 2–3&nbsp;second boots. Plus an
   AWS Lambda MicroVM target.</li>
-  <li><strong>Security model</strong> — restricted <code>agent</code> user confined to
+  <li><strong>Security model.</strong> Restricted <code>agent</code> user confined to
   <code>/home/agent/workspace</code>, denied the Nix daemon and package tools; <code>admin</code> user
   for operations; gVisor sandboxes with a read-only <code>/nix/store</code> rootfs for the inner
   layer; kernel hardening; ephemeral temp storage.</li>
-  <li><strong>Daemons</strong> — <code>stereosd</code> (system control plane) and <code>agentd</code>
+  <li><strong>Daemons.</strong> <code>stereosd</code> (system control plane) and <code>agentd</code>
   (agent lifecycle). Public exec/file APIs for these are not yet documented; see §8.</li>
-  <li><strong>Reproducibility</strong> — the whole system is a Nix flake
+  <li><strong>Reproducibility.</strong> The whole system is a Nix flake
   (<code>nixosConfigurations.base|coder</code> + <code>-dev</code> variants,
   <code>nixosModules.default</code>); an image hash fully determines the environment.</li>
 </ul>
@@ -304,7 +309,7 @@ maps to a real stereOS or hypervisor feature.</p>
 <tr><td><code>sshUser</code></td><td><code>"agent" | "admin"</code></td><td><code>"agent"</code></td><td>Run child workflows as the restricted user. <code>admin</code> only for provisioning debug.</td></tr>
 <tr><td><code>sshPort</code></td><td><code>number</code></td><td>auto</td><td>Host port forwarded to guest 22 (user-mode netdev <code>hostfwd</code>).</td></tr>
 <tr><td><code>command</code></td><td><code>string</code></td><td><code>bun .../run-smithers-sandbox.js</code></td><td>Entry command. Wins over the <code>&lt;Sandbox command&gt;</code> prop.</td></tr>
-<tr><td><code>workdir</code></td><td><code>string</code></td><td><code>/home/agent/workspace</code></td><td>Guest directory for Smithers request/result I/O — the one directory the <code>agent</code> user owns.</td></tr>
+<tr><td><code>workdir</code></td><td><code>string</code></td><td><code>/home/agent/workspace</code></td><td>Guest directory for Smithers request/result I/O. This is the one directory the <code>agent</code> user owns.</td></tr>
 <tr><td><code>env</code></td><td><code>Record&lt;string,string&gt;</code></td><td>—</td><td>Provider-level env (e.g. <code>ANTHROPIC_API_KEY</code> for the baked-in harness), merged above the <code>&lt;Sandbox env&gt;</code> prop, below egress.</td></tr>
 <tr><td><code>shell</code></td><td><code>string</code></td><td><code>/bin/sh</code></td><td>Guest shell for the entry command.</td></tr>
 <tr><td><code>setupFiles</code></td><td><code>Record&lt;string, string | Uint8Array&gt;</code></td><td>—</td><td>Files uploaded after boot, before the request is written (the runner script, repo tarballs, config).</td></tr>
@@ -332,7 +337,7 @@ maps to a real stereOS or hypervisor feature.</p>
 <tr><td><code>cpuLimit</code> / <code>memoryLimit</code></td><td><code>-smp</code> / <code>-m</code>, rounded up (whole vCPUs, MiB).</td></tr>
 <tr><td><code>workspace.persistence: "sticky"</code></td><td>Named copy-on-write QCOW2 overlay kept across runs; the base mixtape image is never written.</td></tr>
 <tr><td><code>workspace.persistence: "ephemeral"</code></td><td>Overlay deleted at cleanup (or QEMU <code>-snapshot</code>: nothing ever hits disk).</td></tr>
-<tr><td><code>workspace.snapshotId</code></td><td>Boot from a saved overlay. Disk state only — cold boot, no memory/process preservation (same caveat as Microsandbox snapshots).</td></tr>
+<tr><td><code>workspace.snapshotId</code></td><td>Boot from a saved overlay. Disk state only. There is no memory or process preservation (the same caveat as Microsandbox snapshots).</td></tr>
 <tr><td><code>command</code></td><td>Executed via the exec channel as the <code>agent</code> user in <code>workdir</code>.</td></tr>
 <tr><td><code>egress.*</code></td><td>Proxy env projected into the command env; <code>caCertPem</code> uploaded into the guest and pointed at by <code>NODE_EXTRA_CA_CERTS</code>.</td></tr>
 <tr><td><code>reviewDiffs</code></td><td>Entry runner emits a <code>diffBundle</code> from the workspace (git/jj diff); Smithers gates application on review as usual.</td></tr>
@@ -448,7 +453,7 @@ booted. This is the ~80-line PR seed for <code>smthrs/stereos</code>.</p>
 <p>The entry runner (<code>run-smithers-sandbox.js</code>, delivered via <code>setupFiles</code> or
 baked into a future smithers mixtape) reads
 <code>SMITHERS_SANDBOX_REQUEST_PATH</code>, executes the child workflow, and writes the result JSON to
-<code>SMITHERS_SANDBOX_RESULT_PATH</code> — the same contract every first-class provider uses. Note
+<code>SMITHERS_SANDBOX_RESULT_PATH</code>. This is the command-provider request/result contract. Note
 the mixtapes ship agent harnesses, not Bun; until a smithers mixtape exists, upload a
 self-contained runner or use the harness itself as the entry.</p>
 
@@ -461,13 +466,13 @@ self-contained runner or use the harness itself as the entry.</p>
   <code>createSandboxProviderContractSuite</code>.</li>
 </ul>
 
-<h2 id="gaps">8. Integration gaps — the real conversation</h2>
+<h2 id="gaps">8. Integration gaps</h2>
 <p>Each gap is a concrete question for Paper Compute, and each is answerable with a small, well-scoped
 contribution:</p>
 <table>
 <tr><th>#</th><th>Gap</th><th>Question / contribution</th></tr>
-<tr><td>1</td><td>Production mixtapes have no SSH, and <code>agentd</code>/<code>stereosd</code> expose no documented exec or file API.</td><td>Is <code>agentd</code> getting a host-facing exec/file API (vsock or HTTP)? That API is exactly Smithers' <code>SandboxSession</code> seam — SSH becomes a dev-only fallback and <code>variant: "prod"</code> becomes usable.</td></tr>
-<tr><td>2</td><td>The entry command currently runs as the <code>agent</code> user directly; stereOS's inner gVisor sandboxes are launched by its own tooling.</td><td>How should third-party orchestrators target the gVisor layer — is "spawn me a sandbox running this command" an <code>agentd</code> verb?</td></tr>
+<tr><td>1</td><td>Production mixtapes have no SSH, and <code>agentd</code>/<code>stereosd</code> expose no documented exec or file API.</td><td>Is <code>agentd</code> getting a host-facing exec/file API (vsock or HTTP)? That API is exactly Smithers' <code>SandboxSession</code> seam. SSH then becomes a dev-only fallback and <code>variant: "prod"</code> becomes usable.</td></tr>
+<tr><td>2</td><td>The entry command currently runs as the <code>agent</code> user directly; stereOS's inner gVisor sandboxes are launched by its own tooling.</td><td>How should third-party orchestrators target the gVisor layer? Is "spawn me a sandbox running this command" an <code>agentd</code> verb?</td></tr>
 <tr><td>3</td><td>No mixtape carries a Smithers runner (or Bun).</td><td>A <code>smithers-mixtape</code> in <code>mixtapes/</code>: Bun + the sandbox runner baked in. PR-sized; makes stereOS a boot-and-go Smithers execution host and gives Paper Compute an orchestrator integration to point at.</td></tr>
 <tr><td>4</td><td>Telemetry stays inside the guest.</td><td>The tapes seam: Smithers persists every run event and supports replay/fork/time-travel; a tapes exporter for Smithers runs gives their console an orchestrator data source. Symmetric to #3.</td></tr>
 <tr><td>5</td><td>Self-hosting story.</td><td>For a customer who requires on-prem agent execution (the Optimism-style requirement), "boot this mixtape" replaces "run our install scripts on your Ubuntu box": reproducible, auditable, hardened by default.</td></tr>
@@ -487,36 +492,37 @@ Proposed-status items (§5, §7.4) do not exist in either codebase yet.</p>
 </main>
 </div>
 
-<div role="tabpanel" id="panel-real" aria-labelledby="tab-real" hidden>
+<div role="tabpanel" id="panel-real" aria-labelledby="tab-real">
 <div class="demo">
 
 <h1>Smithers running inside a real stereOS VM</h1>
-<p class="subtitle">A stereOS mixtape boots under a hypervisor, and a Smithers
-<code>&lt;Sandbox&gt;</code> runs its body inside that VM over the shipped provider kit.</p>
+<p class="subtitle">A Smithers <code>&lt;Sandbox&gt;</code> uploads its bundled child workflow, then the
+guest's Bun runtime executes that workflow inside a stereOS mixtape VM.</p>
 
 <div class="banner ok">
 <strong>This one really boots stereOS.</strong> The recordings below are captured output from
 <code>apps/stereos-site/real/</code>, not simulations. Two hosts, one provider: the published
 <code>coder</code> mixtape on Apple's hypervisor (stereOS 2026.03.04.0, Linux 6.12.74 aarch64, booted in
 seven seconds), and an <code>x86_64</code> <code>coder-dev</code> mixtape built from source and booted
-under QEMU/KVM on a nested-virtualization GCE instance (Linux 6.18.33). In both,
-<code>smithers up stereos-real.tsx</code> drives a <code>&lt;Sandbox&gt;</code> whose provider is 80 lines
-of SSH on top of <code>createCommandSandboxProvider</code> from <code>smthrs/sandbox</code>, and every
-value in the run output was measured inside the guest by the <code>agent</code> user.
+under QEMU/KVM on a nested-virtualization GCE instance (Linux 6.18.33). On each host, the exact command
+shown in the recording drives a <code>&lt;Sandbox&gt;</code> through an SSH provider built on
+<code>createCommandSandboxProvider</code>. The provider bundles <code>child-workflow.tsx</code>, and Bun
+1.2.21 inside the guest executes its guest-facts task and prime-sieve computation.
 </div>
 
-<p>The proof that the work happened in the VM, and not on the host that started it: the guest hashes the
-prompt the host sent it, and reports its own kernel, user, and restriction state. Nothing in that output
-is available to the host except through the VM. Pick a host from the dropdown to see its run.</p>
+<p>The prompt hash is consistency evidence only. It confirms that the recorded input and guest output
+match, but it is not provenance or attestation. The raw terminal capture also shows the guest-specific
+kernel, runtime architecture, restriction probes, workflow marker, protocol run ID, and computed prime
+result. Pick a host from the dropdown to inspect the complete capture.</p>
 
 <div class="panes">
   <div class="pane">
     <header><select id="real-run-select" aria-label="Recorded run"></select><span class="muted" id="real-note">recorded run</span></header>
-    <pre id="real-terminal">Loading…</pre>
+    <pre id="real-terminal" tabindex="0">Loading…</pre>
   </div>
   <div class="pane">
     <header><span>Source</span><select id="real-source-select" aria-label="Source file"></select></header>
-    <pre id="real-source">Loading…</pre>
+    <pre id="real-source" tabindex="0">Loading…</pre>
   </div>
 </div>
 
@@ -532,23 +538,31 @@ is available to the host except through the VM. Pick a host from the dropdown to
 <tr><td>The sandbox body</td><td>inside the stereOS VM</td></tr>
 </table>
 
-<h2>The entry-runner gap</h2>
-<p>Mixtapes ship agent harnesses, not Bun or Node, so the usual
-<code>bun run-smithers-sandbox.js</code> entry does not exist in the guest. This run uses the
-dependency-free alternative: a POSIX shell runner uploaded with the request, which reads
-<code>SMITHERS_SANDBOX_REQUEST_PATH</code> and writes <code>SMITHERS_SANDBOX_RESULT_PATH</code> — the same
-contract every first-class provider uses. A <code>smithers-mixtape</code> carrying Bun and the standard
-runner would remove this file entirely.</p>
+<h2>The runtime gap, closed for this run</h2>
+<p>Mixtapes ship agent harnesses but no JavaScript runtime. The bootstrap scripts therefore copy the
+official Bun 1.2.21 musl build and its small compatibility libraries into the guest. The provider uploads
+a bundle of the real child workflow. <code>guest-runner.sh</code> only checks the two paths and invokes Bun.
+Bun reads <code>SMITHERS_SANDBOX_REQUEST_PATH</code> and writes all result JSON to
+<code>SMITHERS_SANDBOX_RESULT_PATH</code>. A future mixtape with Bun already installed can omit the bootstrap
+runtime copy.</p>
 
 <h2>What the guest reported</h2>
 <p>Read the tail of the recording. <code>writeOutsideWorkspace: denied</code> is the restriction model
-holding: the <code>agent</code> user cannot write to <code>/etc</code>. <code>nixCli: on PATH</code> is a
-gap — the restricted PATH comes from the agent's login shell, so a non-interactive SSH exec still sees the
+holding: the <code>agent</code> user cannot write to <code>/etc</code>. <code>nixCli: on PATH</code> remains a
+gap. The restricted PATH comes from the agent's login shell, while a non-interactive SSH exec sees the
 full system profile.</p>
 
+<h2>Found while building this</h2>
+<p>The registry serves the raw blob as
+<code>d335283a5c0c9fdeef22fe48740cb74d0c973b69373bef651e76aaac012a21e2</code>, while its declared digest is
+<code>bf212e026f722ccccd30f273d363f9b8a7245516f7bc1e8d81db67b41245cdeb</code>.
+<code>zstd -t</code> reports <code>Decoding error (36): Data corruption detected</code>. The qcow2 blob is
+clean and reconstructs the expected image. Republishing that one raw blob makes <code>mb pull</code> work.</p>
+
 <footer>
-<p>Sources and the recording are committed at <code>apps/stereos-site/real/</code>. Tab 1 is the design
-reference for the first-class package; the parts marked proposed there still do not exist.</p>
+<p>Sources and raw recordings are committed at
+<a href="https://github.com/smithersai/smithers/tree/main/apps/stereos-site/real"><code>apps/stereos-site/real/</code></a>.
+The Proposed API tab remains a design reference; its parts marked proposed do not exist.</p>
 </footer>
 
 </div>
@@ -591,12 +605,12 @@ human approval gate, so every step is deterministic.</p>
 <div class="panes">
   <div class="pane">
     <header><span>Container output</span><span class="muted" id="term-note">idle</span></header>
-    <pre id="terminal">Press “Start the demo”.</pre>
+    <pre id="terminal" tabindex="0">Press “Start the demo”.</pre>
   </div>
   <div class="pane">
     <header><span>Web app served from inside the container</span><span class="muted" id="frame-note">not started</span></header>
-    <div id="app-frame-empty">The React app is built with <code>smthrs/gateway-react</code> hooks and
-      <code>smthrs/gateway-ui</code> components. It appears here once its vite dev server is up inside the container.</div>
+    <div id="app-frame-empty"><p>The React app is built with <code>smthrs/gateway-react</code> hooks and
+      <code>smthrs/gateway-ui</code> components. It appears here once its vite dev server is up inside the container.</p></div>
     <iframe id="app-frame" hidden title="Smithers run UI" src="about:blank"></iframe>
   </div>
 </div>
@@ -605,9 +619,9 @@ human approval gate, so every step is deterministic.</p>
 <p>Each row is filled in from the run status the engine wrote, not from the fact that a command exited.</p>
 <table class="results">
 <tr><th>Workflow</th><th>Run id</th><th>Status</th></tr>
-<tr><td><code>hello</code></td><td id="hello-run">—</td><td id="hello-status">—</td></tr>
-<tr><td><code>pipeline</code></td><td id="pipeline-run">—</td><td id="pipeline-status">—</td></tr>
-<tr><td><code>approval-demo</code></td><td id="approval-run">—</td><td id="approval-status">—</td></tr>
+<tr><td><code>hello</code></td><td id="hello-run">Not run</td><td id="hello-status">Not run</td></tr>
+<tr><td><code>pipeline</code></td><td id="pipeline-run">Not run</td><td id="pipeline-status">Not run</td></tr>
+<tr><td><code>approval-demo</code></td><td id="approval-run">Not run</td><td id="approval-status">Not run</td></tr>
 </table>
 
 <h2>How the approval works</h2>
@@ -636,8 +650,9 @@ mounted in the container:</p>
 </ul>
 
 <footer>
-<p>The demo project is committed at <code>apps/stereos-site/project</code>. Tab 1 is the design
-reference and describes an integration that does not exist yet.</p>
+<p>The demo project is committed at
+<a href="https://github.com/smithersai/smithers/tree/main/apps/stereos-site/project"><code>apps/stereos-site/project</code></a>.
+The Proposed API tab describes an integration that does not exist yet.</p>
 </footer>
 
 </div>
@@ -651,18 +666,33 @@ reference and describes an integration that does not exist yet.</p>
     { hash: '#real', tab: document.getElementById('tab-real'), panel: document.getElementById('panel-real') },
     { hash: '#demo', tab: document.getElementById('tab-demo'), panel: document.getElementById('panel-demo') },
   ];
+  function selectTab(entry, { focus = false, updateHash = true } = {}) {
+    for (const other of tabs) {
+      const selected = other === entry;
+      other.tab.setAttribute('aria-selected', String(selected));
+      other.tab.tabIndex = selected ? 0 : -1;
+      other.panel.hidden = !selected;
+    }
+    if (focus) entry.tab.focus();
+    if (updateHash) history.replaceState(null, '', entry.hash);
+  }
   for (const entry of tabs) {
-    entry.tab.addEventListener('click', () => {
-      for (const other of tabs) {
-        const selected = other === entry;
-        other.tab.setAttribute('aria-selected', String(selected));
-        other.panel.hidden = !selected;
+    entry.tab.addEventListener('click', () => selectTab(entry));
+    entry.tab.addEventListener('keydown', (event) => {
+      const current = tabs.indexOf(entry);
+      let target = null;
+      if (event.key === 'ArrowRight') target = tabs[(current + 1) % tabs.length];
+      if (event.key === 'ArrowLeft') target = tabs[(current - 1 + tabs.length) % tabs.length];
+      if (event.key === 'Home') target = tabs[0];
+      if (event.key === 'End') target = tabs[tabs.length - 1];
+      if (target) {
+        event.preventDefault();
+        selectTab(target, { focus: true });
       }
-      location.hash = entry.hash;
     });
   }
-  const opening = tabs.find((entry) => entry.hash === location.hash);
-  if (opening) { opening.tab.click(); }
+  const opening = tabs.find((entry) => entry.hash === location.hash) ?? tabs[1];
+  selectTab(opening, { updateHash: Boolean(location.hash) });
 </script>
 </body>
 </html>

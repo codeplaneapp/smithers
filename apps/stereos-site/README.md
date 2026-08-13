@@ -9,7 +9,7 @@ Three-tab page at https://stereos.smithers.sh.
   body executed inside booted stereOS mixtape VMs, plus the sources that
   produced them. Both come from `real/`; see `real/README.md` for the boot
   recipe, the host details, and the integration gaps.
-- **In-browser simulation** — a WebContainer that boots Node, installs the
+- **Browser demo (real engine, simulated VM)** — a WebContainer that boots Node, installs the
   published `smthrs` package, and runs three real workflows against the PGlite
   backend. The provider seam is the same; the SSH → microVM transport is
   swapped for in-container `exec`, so this tab does not run stereOS.
@@ -57,13 +57,14 @@ The API is self-hosted rather than loaded from a CDN because the page sets
 ## Test
 
 ```sh
+pnpm install --frozen-lockfile                           # supplies apps/cli's Playwright dependency
 node apps/stereos-site/e2e/stereos.e2e.mjs [url]
 ```
 
-The check asserts the COOP/COEP pair and `crossOriginIsolated`, that tab 1
-renders, that tab 3 carries both recorded stereOS runs with their sandbox
-lifecycle and restriction output plus the provider source, that tab 2 is
-labelled as the simulation, that `hello` and `pipeline` reach the
+The check asserts the COOP/COEP pair and `crossOriginIsolated`, metadata and
+favicon, the Real stereOS default tab, both recorded stereOS runs and registry
+diagnosis, provider sources, the browser demo's honest simulation label, and
+that `hello` and `pipeline` reach the
 engine-reported `finished` state, that `approval-demo` stops at
 `waiting-approval`, and that clicking Approve in the embedded app lets it
 finish. It writes screenshots next to itself. Budget 10–20 minutes: npm install

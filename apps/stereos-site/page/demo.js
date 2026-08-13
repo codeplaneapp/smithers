@@ -18,8 +18,7 @@ const startNote = document.getElementById("start-note");
 // Run smithers under Node: the bin's shebang is bun, and the loader shims map
 // the bun-only specifiers to stubs.
 const SMITHERS = "node --import ./shims/register.mjs --import tsx node_modules/smthrs/src/bin/smithers.js";
-const ENV =
-  "SMITHERS_BACKEND=pglite SMITHERS_PGLITE_INPROCESS=1 SMITHERS_PGLITE_INPROCESS_MODULE=pglite-inprocess.mjs";
+const ENV = "SMITHERS_BACKEND=pglite SMITHERS_PGLITE_INPROCESS=1 SMITHERS_PGLITE_INPROCESS_MODULE=pglite-inprocess.mjs";
 
 let booted = false;
 
@@ -29,6 +28,7 @@ function write(chunk) {
     terminal.textContent = "";
   }
   terminal.textContent += chunk;
+  terminal.textContent = terminal.textContent.replace(/\n{3,}/g, "\n\n");
   const lines = terminal.textContent.split("\n");
   if (lines.length > 400) {
     terminal.textContent = lines.slice(-400).join("\n");
@@ -47,7 +47,10 @@ function step(name, state) {
 /** Strip ANSI escapes so the log pane stays readable. */
 function clean(text) {
   // eslint-disable-next-line no-control-regex
-  return text.replace(/\[[0-9;]*[A-Za-z]/g, "").replace(/\[[0-9]+[GK]/g, "");
+  return text
+    .replace(/\[[0-9;]*[A-Za-z]/g, "")
+    .replace(/\[[0-9]+[GK]/g, "")
+    .replace(/\n{3,}/g, "\n\n");
 }
 
 /**
@@ -109,8 +112,8 @@ async function smithersJson(wc, args) {
 
 /** Fill one row of the results table from engine-reported state. */
 function report(prefix, runId, status) {
-  document.getElementById(`${prefix}-run`).textContent = runId ?? "—";
-  document.getElementById(`${prefix}-status`).textContent = status ?? "—";
+  document.getElementById(`${prefix}-run`).textContent = runId ?? "Not run";
+  document.getElementById(`${prefix}-status`).textContent = status ?? "Not run";
 }
 
 async function main() {
@@ -185,10 +188,7 @@ async function main() {
 
   step("approval", "active");
   write("\n$ smithers up workflows/approval-demo.tsx\n");
-  const approval = await smithersJson(
-    wc,
-    `up workflows/approval-demo.tsx --input '{"change":"enable the demo"}'`,
-  );
+  const approval = await smithersJson(wc, `up workflows/approval-demo.tsx --input '{"change":"enable the demo"}'`);
   const approvalId = approval.json?.runId ?? null;
   const approvalState = { status: approval.json?.status ?? "unknown" };
   report("approval", approvalId, approvalState.status);

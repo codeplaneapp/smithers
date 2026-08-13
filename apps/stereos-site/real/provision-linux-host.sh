@@ -20,7 +20,7 @@ log() { printf '\n=== %s ===\n' "$*"; }
 log "packages"
 sudo apt-get update -qq
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-  qemu-system-x86 qemu-utils git curl xz-utils unzip jq make >/dev/null
+  qemu-system-x86 qemu-utils git curl xz-utils unzip jq make nodejs npm >/dev/null
 sudo adduser "$USER" kvm >/dev/null 2>&1 || true
 
 if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
@@ -51,6 +51,10 @@ log "bun"
 command -v bun >/dev/null 2>&1 || curl -fsSL https://bun.sh/install | bash
 export PATH="$HOME/.bun/bin:$PATH"
 bun --version
+
+log "pnpm"
+command -v pnpm >/dev/null 2>&1 || sudo npm install -g pnpm@10.15.0 >/dev/null
+pnpm --version
 
 log "stereOS source"
 [ -d ~/stereOS ] || git clone --depth 1 https://github.com/papercomputeco/stereOS ~/stereOS

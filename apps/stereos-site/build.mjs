@@ -76,7 +76,11 @@ const realRun = {
   sources: {
     "stereos-provider.ts": await realFile("stereos-provider.ts"),
     "guest-runner.sh": await realFile("guest-runner.sh"),
+    "child-workflow.tsx": await realFile("child-workflow.tsx"),
     "stereos-real.tsx": await realFile("stereos-real.tsx"),
+    "bootstrap-vm.sh": await realFile("bootstrap-vm.sh"),
+    "provision-linux-host.sh": await realFile("provision-linux-host.sh"),
+    "README.md": await realFile("README.md"),
     "jcard.toml": await realFile("jcard.toml"),
     "run-on-linux-host.sh": await realFile("run-on-linux-host.sh"),
   },
