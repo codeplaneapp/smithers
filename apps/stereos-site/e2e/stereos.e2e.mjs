@@ -132,6 +132,12 @@ if (approveReady) {
     8 * 60 * 1000,
   );
   check("approval-demo finishes after the click", finished === "finished", String(finished));
+  const iframeFinished = await waitFor(
+    "gateway final state",
+    async () => ((await appFrame.locator('[data-testid="run-row"][data-status="finished"]').count()) > 0 ? true : null),
+    4 * 60 * 1000,
+  );
+  check("embedded app shows an engine-finished run", Boolean(iframeFinished));
 }
 
 await page.screenshot({ path: join(here, "tab2-live-demo-final.png"), fullPage: false });

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useGatewayRuns } from "smthrs/gateway-react";
+import { useGatewayApprovals, useGatewayRuns } from "smthrs/gateway-react";
 import {
   ApprovalPanel,
   ConnectionBadge,
@@ -8,6 +8,7 @@ import {
   StatusPill,
   WorkflowUiShell,
 } from "smthrs/gateway-ui";
+import { Card, CardContent, CardHeader, CardTitle } from "smthrs/ui";
 
 /**
  * Live view of every run in the container workspace.
@@ -18,6 +19,7 @@ import {
  */
 export function App() {
   const { data: runs, error } = useGatewayRuns();
+  const { data: approvals } = useGatewayApprovals();
   const [activeRunId, setActiveRunId] = useState(undefined);
   const list = runs ?? [];
 
@@ -28,6 +30,10 @@ export function App() {
     }
   }, [activeRunId, list]);
 
+  useEffect(() => {
+    window.parent.postMessage({ type: "smithers-approval-count", count: approvals?.length ?? 0 }, "*");
+  }, [approvals]);
+
   return (
     <WorkflowUiShell
       title="Smithers in a WebContainer"
@@ -36,8 +42,9 @@ export function App() {
     >
       {error ? <p data-testid="gateway-error">Gateway error: {String(error)}</p> : null}
 
-      <section data-testid="runs">
-        <h2>Runs ({list.length})</h2>
+      <Card data-testid="runs">
+        <CardHeader><CardTitle>Runs ({list.length})</CardTitle></CardHeader>
+        <CardContent>
         <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
           {list.map((run) => {
             const id = run.id ?? run.runId;
@@ -67,22 +74,29 @@ export function App() {
             );
           })}
         </ul>
-      </section>
+        </CardContent>
+      </Card>
 
-      <section data-testid="approvals">
-        <h2>Approvals</h2>
+      <Card data-testid="approvals">
+        <CardHeader><CardTitle>Approvals</CardTitle></CardHeader>
+        <CardContent>
         <ApprovalPanel empty={<p data-testid="no-approvals">No gate is waiting.</p>} />
-      </section>
+        </CardContent>
+      </Card>
 
-      <section data-testid="run-tree">
-        <h2>Nodes</h2>
+      <Card data-testid="run-tree">
+        <CardHeader><CardTitle>Nodes</CardTitle></CardHeader>
+        <CardContent>
         <RunTree runId={activeRunId} />
-      </section>
+        </CardContent>
+      </Card>
 
-      <section data-testid="run-events">
-        <h2>Events</h2>
+      <Card data-testid="run-events">
+        <CardHeader><CardTitle>Events</CardTitle></CardHeader>
+        <CardContent>
         <RunEventLog runId={activeRunId} maxEvents={200} />
-      </section>
+        </CardContent>
+      </Card>
     </WorkflowUiShell>
   );
 }

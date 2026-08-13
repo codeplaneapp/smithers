@@ -505,11 +505,11 @@ human approval gate, so every step is deterministic.</p>
 <ol class="steps" id="steps">
   <li data-step="boot">Boot container</li>
   <li data-step="install">npm install smthrs</li>
-  <li data-step="gateway">Start gateway</li>
-  <li data-step="app">Start web app</li>
   <li data-step="hello">Run hello</li>
   <li data-step="pipeline">Run pipeline</li>
   <li data-step="approval">Run approval-demo</li>
+  <li data-step="gateway">Start gateway</li>
+  <li data-step="app">Start web app</li>
   <li data-step="approved">Approval granted</li>
 </ol>
 
@@ -542,7 +542,7 @@ decision through the gateway. The page then resumes the run with
 <code>smithers up workflows/approval-demo.tsx --resume --run-id &lt;id&gt;</code>, and the second task runs.</p>
 
 <h2>Running smthrs under Node</h2>
-<p>The published package targets Bun. Four things make it run under Node, all applied to the project
+<p>The published package targets Bun. Six things make it run under Node, all applied to the project
 mounted in the container:</p>
 <ul>
   <li><code>overrides.effect</code> pinned to a single version. Without it npm installs about twenty
@@ -553,6 +553,11 @@ mounted in the container:</p>
   <li><code>SMITHERS_BACKEND=pglite</code>, so the store never reaches for <code>bun:sqlite</code>.</li>
   <li>A one-line postinstall patch to <code>openSmithersBackend.js</code>, so the cross-run memory
     sidecar is skipped when <code>Bun</code> is undefined.</li>
+  <li>An in-process PGlite client. The PGlite socket server accepts a WebContainer connection but does
+    not complete its PostgreSQL handshake.</li>
+  <li>A single-writer transaction path. Effect 4 does not unwind a nested transaction operation after
+    successful PGlite writes in WebContainer. The demo keeps every write and omits only multi-writer
+    grouping. It runs one writer at a time.</li>
 </ul>
 
 <footer>

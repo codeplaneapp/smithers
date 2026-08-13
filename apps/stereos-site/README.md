@@ -60,7 +60,7 @@ itself. Budget 10–20 minutes: npm install runs inside the browser.
 
 ## Running smthrs under Node
 
-The published package targets Bun. The mounted project applies four things, all
+The published package targets Bun. The mounted project applies six things, all
 verified before deploy:
 
 1. `overrides.effect` pins one `effect` version. Without it npm nests about
@@ -73,6 +73,13 @@ verified before deploy:
    `jsxImportSource: smthrs` so tsx compiles JSX with the automatic runtime.
 4. `patch-smthrs.mjs`, a postinstall patch that skips the cross-run memory
    sidecar when `Bun` is undefined.
+5. An in-process PGlite client replaces `PGLiteSocketServer`. The socket server
+   accepts a WebContainer connection but does not complete its PostgreSQL
+   handshake.
+6. A single-writer transaction path keeps every engine write but omits
+   transaction grouping. Effect 4 does not unwind the nested transaction
+   operation after successful PGlite writes in WebContainer. The demo runs one
+   writer at a time and stops the gateway before it resumes a workflow.
 
 Workflows use `await openSmithersBackend(...)`, not `createSmithers()` — the
 latter is the synchronous `bun:sqlite` path and refuses PGlite.
