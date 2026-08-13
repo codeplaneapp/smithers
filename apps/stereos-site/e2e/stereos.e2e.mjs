@@ -83,6 +83,10 @@ check(
 check("transcript shows the sandbox lifecycle", transcript.includes("SandboxCompleted"));
 check("transcript shows the restriction model", transcript.includes('"writeOutsideWorkspace": "denied"'));
 
+// Capture the default (macOS) recording before switching hosts, so the two
+// committed tab-3 screenshots both stay reproducible output of this script.
+await page.screenshot({ path: join(here, "tab3-real-stereos.png"), fullPage: false });
+
 // The second recording is the Linux/KVM host, so the page must show both.
 const runNames = await page.locator("#real-run-select option").allTextContents();
 check("tab 3 offers both hosts", runNames.length === 2, runNames.join(" | "));
@@ -106,7 +110,7 @@ check(
   providerSource.includes("createCommandSandboxProvider"),
   `${providerSource.length} chars`,
 );
-await page.screenshot({ path: join(here, "tab3-real-stereos.png"), fullPage: false });
+await page.screenshot({ path: join(here, "tab3-real-stereos-linux.png"), fullPage: false });
 
 // The WebContainer tab must still say plainly that it is the simulation.
 await page.click("#tab-demo");

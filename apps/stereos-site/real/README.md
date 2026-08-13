@@ -156,7 +156,7 @@ macOS host, pulled `coder-arm64` mixtape:
 ```
 summary            ran inside stereOS as agent@coder on Linux 6.12.74 aarch64
 prompt             hello from the host
-prompt_sha256      0d7c0ab02bab7f556b0de496bccbb2c99daa7c8aa7be3af9797d3aa8e1a170d5
+promptSha256       0d7c0ab02bab7f556b0de496bccbb2c99daa7c8aa7be3af9797d3aa8e1a170d5
 guest              stereOS 2026.03.04.0, Linux 6.12.74 aarch64, agent@coder, 4 cpus, 3.8 GiB
 restrictions       writeOutsideWorkspace=denied, writeInsideWorkspace=allowed,
                    nixCli=on PATH, nixStorePresent=yes
@@ -168,13 +168,13 @@ GCE/KVM host, `coder-dev` x86_64 mixtape built on the box:
 ```
 summary            ran inside stereOS as agent@coder-dev on Linux 6.18.33 x86_64
 prompt             hello from the linux host
-prompt_sha256      b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121
+promptSha256       b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121
 guest              stereOS dev-f269d96, Linux 6.18.33 x86_64, agent@coder-dev, 2 cpus, 2.8 GiB
 restrictions       writeOutsideWorkspace=denied, writeInsideWorkspace=allowed,
                    nixCli=on PATH, nixStorePresent=yes
 harnessesOnPath    claude opencode gemini
 ```
 
-In both runs `prompt_sha256` is computed in the guest and matches
+In both runs `promptSha256` is computed in the guest and matches
 `printf '%s' '<the prompt>' | shasum -a 256` on the host, which is what makes
 the output traceable to the VM rather than to whoever wrote this file.

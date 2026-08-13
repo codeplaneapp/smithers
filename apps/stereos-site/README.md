@@ -1,12 +1,18 @@
 # stereos-site
 
-Two-tab page at https://stereos.smithers.sh.
+Three-tab page at https://stereos.smithers.sh.
 
 - **Proposed API** — the stereOS sandbox provider design reference. Tab content
-  is lifted verbatim from `reference/stereos-sandbox-provider.html` at build
+  is lifted verbatim from `tab1-source/stereos-sandbox-provider.html` at build
   time; edit that file, not the generated page.
-- **Live demo** — a WebContainer that boots Node, installs the published
-  `smthrs` package, and runs three real workflows against the PGlite backend.
+- **Real stereOS** — recorded transcripts of Smithers runs whose `<Sandbox>`
+  body executed inside booted stereOS mixtape VMs, plus the sources that
+  produced them. Both come from `real/`; see `real/README.md` for the boot
+  recipe, the host details, and the integration gaps.
+- **In-browser simulation** — a WebContainer that boots Node, installs the
+  published `smthrs` package, and runs three real workflows against the PGlite
+  backend. The provider seam is the same; the SSH → microVM transport is
+  swapped for in-container `exec`, so this tab does not run stereOS.
 
 There is deliberately no `package.json` in this directory, so the app stays out
 of the pnpm workspace and the `check:docs` gates, matching `apps/patterns-site`.
@@ -15,9 +21,11 @@ of the pnpm workspace and the `check:docs` gates, matching `apps/patterns-site`.
 
 | Path | What it is |
 | --- | --- |
-| `page/index.template.html` | Page shell, tab chrome, and tab-2 copy. |
+| `page/index.template.html` | Page shell, tab chrome, and tab-2/tab-3 copy. |
 | `page/demo.js` | Drives the container: boot, install, gateway, app, workflows. |
+| `page/real.js` | Replays the tab-3 transcripts and shows the provider sources. |
 | `tab1-source/` | Source document for tab 1. |
+| `real/` | The stereOS provider, guest runner, workflow, host scripts, and the recorded run transcripts that tab 3 renders. |
 | `project/` | The tree mounted into the WebContainer. |
 | `project/workflows/` | `hello`, `pipeline`, `approval-demo`. |
 | `project/app/` | Vite + React UI built on `smthrs/gateway-react` and `smthrs/gateway-ui`. |
@@ -53,10 +61,13 @@ node apps/stereos-site/e2e/stereos.e2e.mjs [url]
 ```
 
 The check asserts the COOP/COEP pair and `crossOriginIsolated`, that tab 1
-renders, that `hello` and `pipeline` reach the engine-reported `finished`
-state, that `approval-demo` stops at `waiting-approval`, and that clicking
-Approve in the embedded app lets it finish. It writes screenshots next to
-itself. Budget 10–20 minutes: npm install runs inside the browser.
+renders, that tab 3 carries both recorded stereOS runs with their sandbox
+lifecycle and restriction output plus the provider source, that tab 2 is
+labelled as the simulation, that `hello` and `pipeline` reach the
+engine-reported `finished` state, that `approval-demo` stops at
+`waiting-approval`, and that clicking Approve in the embedded app lets it
+finish. It writes screenshots next to itself. Budget 10–20 minutes: npm install
+runs inside the browser.
 
 ## Running smthrs under Node
 

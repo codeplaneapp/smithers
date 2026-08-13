@@ -37,7 +37,7 @@ $ smithers node stereos-vm --run-id run-1786588414409   # output produced INSIDE
 {
   "summary": "ran inside stereOS as agent@coder on Linux 6.12.74 aarch64",
   "prompt": "hello from the host",
-  "prompt_sha256": "0d7c0ab02bab7f556b0de496bccbb2c99daa7c8aa7be3af9797d3aa8e1a170d5",
+  "promptSha256": "0d7c0ab02bab7f556b0de496bccbb2c99daa7c8aa7be3af9797d3aa8e1a170d5",
   "guest": {
     "os": "stereOS 2026.03.04.0",
     "kernel": "Linux 6.12.74 aarch64",
@@ -53,7 +53,7 @@ $ smithers node stereos-vm --run-id run-1786588414409   # output produced INSIDE
     "nixCli": "on PATH",
     "nixStorePresent": "yes"
   },
-  "harnesses_on_path": "claude opencode gemini"
+  "harnessesOnPath": "claude opencode gemini"
 }
 
 $ the guest hashed the host's prompt; verify it here

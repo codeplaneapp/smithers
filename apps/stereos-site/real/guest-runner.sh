@@ -33,7 +33,15 @@ fi
 # Every value below is produced by the stereOS VM, not by the host.
 one_line() { tr -d '"\\' | tr '\n' ' ' | sed 's/  */ /g; s/ *$//'; }
 
-os_name=$(. /etc/os-release 2>/dev/null && printf '%s %s' "${NAME:-unknown}" "${VERSION:-}" | one_line)
+# Guarded by a file test rather than `. /etc/os-release 2>/dev/null && …`:
+# `.` is a POSIX special builtin, so a missing file is a fatal error that exits
+# a non-interactive shell outright — `&&` and `||` do not catch it. The old form
+# aborted the whole runner on any guest without /etc/os-release, which reaches
+# the host as the opaque "Sandbox produced no result JSON". Same failure class
+# as the `:` redirect noted in real/README.md. The subshell also keeps
+# os-release's variables out of the rest of this script.
+os_name=$( (if [ -r /etc/os-release ]; then . /etc/os-release; fi
+  printf '%s %s' "${NAME:-unknown}" "${VERSION:-}") | one_line)
 kernel=$(uname -srm | one_line)
 guest_user=$(id -un | one_line)
 guest_host=$(hostname | one_line)
