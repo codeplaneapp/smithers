@@ -3,7 +3,7 @@
 //
 // The transcripts are captured output, not simulations: apps/stereos-site/real/
 // holds both the recordings and the code, and build.mjs serializes them here.
-import { realRun } from "./real-run.js";
+import { realRun } from "./real-run.js?v=20260813-bun-guest-2";
 
 const term = document.getElementById("real-terminal");
 const playBtn = document.getElementById("real-play");

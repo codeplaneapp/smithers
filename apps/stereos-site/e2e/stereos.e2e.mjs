@@ -171,7 +171,7 @@ const helloStatus = await waitFor(
   "hello",
   async () => {
     const text = await page.locator("#hello-status").textContent();
-    return text && text !== "—" ? text : null;
+    return text && text !== "—" && text !== "Not run" ? text : null;
   },
   10 * 60 * 1000,
 );
@@ -181,7 +181,7 @@ const pipelineStatus = await waitFor(
   "pipeline",
   async () => {
     const text = await page.locator("#pipeline-status").textContent();
-    return text && text !== "—" ? text : null;
+    return text && text !== "—" && text !== "Not run" ? text : null;
   },
   10 * 60 * 1000,
 );
@@ -191,7 +191,7 @@ const approvalStatus = await waitFor(
   "approval gate",
   async () => {
     const text = await page.locator("#approval-status").textContent();
-    return text && text !== "—" ? text : null;
+    return text && text !== "—" && text !== "Not run" ? text : null;
   },
   10 * 60 * 1000,
 );

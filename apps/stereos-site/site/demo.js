@@ -28,7 +28,7 @@ function write(chunk) {
     terminal.textContent = "";
   }
   terminal.textContent += chunk;
-  terminal.textContent = terminal.textContent.replace(/\n{3,}/g, "\n\n");
+  terminal.textContent = terminal.textContent.replace(/\n(?:[ \t]*\n){2,}/g, "\n\n");
   const lines = terminal.textContent.split("\n");
   if (lines.length > 400) {
     terminal.textContent = lines.slice(-400).join("\n");
@@ -48,9 +48,10 @@ function step(name, state) {
 function clean(text) {
   // eslint-disable-next-line no-control-regex
   return text
+    .replace(/\r\n?/g, "\n")
     .replace(/\[[0-9;]*[A-Za-z]/g, "")
     .replace(/\[[0-9]+[GK]/g, "")
-    .replace(/\n{3,}/g, "\n\n");
+    .replace(/\n(?:[ \t]*\n){2,}/g, "\n\n");
 }
 
 /**
