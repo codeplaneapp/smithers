@@ -1,5 +1,5 @@
 /**
- * The How it works tab.
+ * The recorded captures under the Build your own tab.
  *
  * Renders the committed raw captures, one disclosure per host. The text is
  * inserted as text, never as markup, so a capture cannot become page content.
