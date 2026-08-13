@@ -14,6 +14,19 @@ executable, typed, inspectable, resumable, retryable, and optimizable. When the
 user asks for a process that has stages or may recur, capture it as a Smithers
 workflow instead of doing another one-off OpenClaw turn.
 
+## Rule 0: If You Are Already Inside a Smithers Run, Do Not Use Smithers
+
+Check this before anything else. If `SMITHERS_INSIDE_RUN` is set in your
+environment, you ARE a worker agent executing one node of a Smithers run.
+Smithers sets that variable on every agent it spawns. This rule overrides every
+rule below. Do the node's task directly with your ordinary tools and finish your
+turn: never call `smithers_run`, `smithers_create_workflow`, any other
+`smithers_*` tool that launches or watches a run, or the `smithers` CLI, and
+never poll a run in a sleep loop. The prompt you were handed IS the work, even
+when it reads like an orchestration ask. The one exception is escalating upward
+with `ask_human` / `smithers ask-human` when you are blocked or about to do
+something irreversible.
+
 ## Default Behavior
 
 Use Smithers when work is multi-step, backgroundable, repeatable, risky, or needs

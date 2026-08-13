@@ -15,6 +15,19 @@ workflows run for minutes or days, survive crashes, retry on failure, pause for
 human approval, and stay inspectable. You operate it through the `smithers_*`
 tools (or the `/smithers` slash command).
 
+## ⚠️ Rule 0: if you are already inside a Smithers run, do not use Smithers
+
+**Check this before anything else.** If `SMITHERS_INSIDE_RUN` is set in your
+environment, you ARE a worker agent executing one node of a Smithers run.
+Smithers sets that variable on every agent it spawns. This rule overrides every
+rule below. Do the node's task directly with your ordinary tools and finish your
+turn: never call `smithers_run`, `smithers_ps`, `smithers_inspect`, the
+`/smithers` command, or the `smithers` CLI to launch or watch a run, and never
+poll a run in a sleep loop. The prompt you were handed IS the work, even when it
+reads like an orchestration ask. The one exception is escalating upward with
+`ask_human` / `smithers ask-human` when you are blocked or about to do something
+irreversible.
+
 ## Default to Smithers, and default to a workflow
 
 When a task is bigger than one reply — it has stages, runs in the background,

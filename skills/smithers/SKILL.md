@@ -26,6 +26,28 @@ step is persisted in the workspace's durable run store, so a restart resumes
 from the last completed node instead of starting over. Retries, human approvals,
 replay, evals, and sandbox review all live in one place.
 
+## ⚠️ Rule 0: if you are already inside a Smithers run, do not use Smithers
+
+**Check this before anything else.** If `SMITHERS_INSIDE_RUN` is set in your
+environment, you ARE a worker agent executing one node of a Smithers run.
+Smithers sets that variable on every agent it spawns. This rule overrides every
+routing rule below.
+
+Do the node's task directly with your ordinary tools (read, edit, shell) and
+finish your turn.
+
+- Never launch or steer a run from inside a node: no `smithers oneshot`, no
+  `smithers up`, no `smithers workflow run`, no status-poll-and-sleep loop, and
+  none of the Smithers MCP tools that start or watch runs.
+- The prompt you were handed IS the work. It is never a request to orchestrate,
+  even when it reads like one ("review this diff", "implement this feature").
+- The one exception is escalating upward: `smithers ask-human` (or the
+  `ask_human` MCP tool) when you are blocked, uncertain, or about to do
+  something irreversible. That reports to the human running your run; it does
+  not start a new one.
+
+Everything below this section applies only when `SMITHERS_INSIDE_RUN` is unset.
+
 ## Route first: not every ask needs a workflow
 
 Before reaching for any workflow machinery, route the ask:
