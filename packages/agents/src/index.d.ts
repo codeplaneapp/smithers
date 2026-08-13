@@ -1076,6 +1076,7 @@ type CodexAgentOptions$1 = BaseCliAgentOptions & {
     localProvider?: string;
     sandbox?: "read-only" | "workspace-write" | "danger-full-access";
     profile?: string;
+    /** Emits `--sandbox workspace-write` (codex-cli removed the old `--full-auto` alias). */
     fullAuto?: boolean;
     dangerouslyBypassApprovalsAndSandbox?: boolean;
     cd?: string;
