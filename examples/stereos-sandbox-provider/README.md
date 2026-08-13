@@ -30,6 +30,12 @@ child workflow, uploads it, and runs it in the guest.
 There is deliberately no `package.json` here, so the example stays out of the
 pnpm workspace and the root `check:docs` gates, matching `apps/patterns-site`.
 
+`pnpm typecheck:examples` covers the provider, the guard, and the guest modules.
+The four host workflows and `project/` are excluded in `examples/tsconfig.json`:
+`<Sandbox workflow>` is typed `WorkflowDefinition<unknown>`, and a
+`WorkflowDefinition<TSpec>` built from a Zod spec is not assignable to it.
+Widening that prop is a change to `packages/components`, not to this example.
+
 ## The site
 
 Four tabs:
