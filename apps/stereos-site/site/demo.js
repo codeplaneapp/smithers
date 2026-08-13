@@ -28,6 +28,7 @@ function write(chunk) {
     terminal.textContent = "";
   }
   terminal.textContent += chunk;
+  terminal.textContent = terminal.textContent.replace(/\n{3,}/g, "\n\n");
   const lines = terminal.textContent.split("\n");
   if (lines.length > 400) {
     terminal.textContent = lines.slice(-400).join("\n");
@@ -46,7 +47,10 @@ function step(name, state) {
 /** Strip ANSI escapes so the log pane stays readable. */
 function clean(text) {
   // eslint-disable-next-line no-control-regex
-  return text.replace(/\[[0-9;]*[A-Za-z]/g, "").replace(/\[[0-9]+[GK]/g, "");
+  return text
+    .replace(/\[[0-9;]*[A-Za-z]/g, "")
+    .replace(/\[[0-9]+[GK]/g, "")
+    .replace(/\n{3,}/g, "\n\n");
 }
 
 /**
@@ -108,8 +112,8 @@ async function smithersJson(wc, args) {
 
 /** Fill one row of the results table from engine-reported state. */
 function report(prefix, runId, status) {
-  document.getElementById(`${prefix}-run`).textContent = runId ?? "—";
-  document.getElementById(`${prefix}-status`).textContent = status ?? "—";
+  document.getElementById(`${prefix}-run`).textContent = runId ?? "Not run";
+  document.getElementById(`${prefix}-status`).textContent = status ?? "Not run";
 }
 
 async function main() {
