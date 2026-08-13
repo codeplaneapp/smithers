@@ -101,7 +101,7 @@
   #real-terminal, #real-source { margin: 0; height: 460px; overflow: auto; padding: 12px;
     font-size: 12px; line-height: 1.5; white-space: pre; background: var(--code-bg); }
   #real-terminal { white-space: pre-wrap; word-break: break-word; }
-  #real-source-select { font: inherit; font-size: 12px; background: var(--bg); color: var(--fg);
+  #real-run-select, #real-source-select { font: inherit; font-size: 12px; background: var(--bg); color: var(--fg);
     border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
 </style>
 </head>
@@ -495,22 +495,23 @@ Proposed-status items (§5, §7.4) do not exist in either codebase yet.</p>
 <code>&lt;Sandbox&gt;</code> runs its body inside that VM over the shipped provider kit.</p>
 
 <div class="banner ok">
-<strong>This one really boots stereOS.</strong> The recording below is captured output from
-<code>apps/stereos-site/real/</code>, not a simulation. <code>mb up</code> boots the published
-<code>coder</code> mixtape (stereOS 2026.03.04.0, Linux 6.12.74 aarch64) on Apple's hypervisor in about
-seven seconds. <code>smithers up stereos-real.tsx</code> then drives a <code>&lt;Sandbox&gt;</code> whose
-provider is 80 lines of SSH on top of <code>createCommandSandboxProvider</code> from
-<code>smthrs/sandbox</code>. Every value in the run output was measured inside the guest by the
-<code>agent</code> user.
+<strong>This one really boots stereOS.</strong> The recordings below are captured output from
+<code>apps/stereos-site/real/</code>, not simulations. Two hosts, one provider: the published
+<code>coder</code> mixtape on Apple's hypervisor (stereOS 2026.03.04.0, Linux 6.12.74 aarch64, booted in
+seven seconds), and an <code>x86_64</code> <code>coder-dev</code> mixtape built from source and booted
+under QEMU/KVM on a nested-virtualization GCE instance (Linux 6.18.33). In both,
+<code>smithers up stereos-real.tsx</code> drives a <code>&lt;Sandbox&gt;</code> whose provider is 80 lines
+of SSH on top of <code>createCommandSandboxProvider</code> from <code>smthrs/sandbox</code>, and every
+value in the run output was measured inside the guest by the <code>agent</code> user.
 </div>
 
 <p>The proof that the work happened in the VM, and not on the host that started it: the guest hashes the
 prompt the host sent it, and reports its own kernel, user, and restriction state. Nothing in that output
-is available to the host except through the VM.</p>
+is available to the host except through the VM. Pick a host from the dropdown to see its run.</p>
 
 <div class="panes">
   <div class="pane">
-    <header><span>Recorded run</span><span class="muted" id="real-note">recorded run</span></header>
+    <header><select id="real-run-select" aria-label="Recorded run"></select><span class="muted" id="real-note">recorded run</span></header>
     <pre id="real-terminal">Loading…</pre>
   </div>
   <div class="pane">

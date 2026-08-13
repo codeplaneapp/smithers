@@ -26,7 +26,5 @@ const { Workflow, smithers, outputs } = createSmithers({
 export { outputs as childOutputs };
 
 export default smithers(() => (
-  <Workflow name="stereos-guest-work">
-    {/* Executed by the guest runner inside the VM, not by the host. */}
-  </Workflow>
+  <Workflow name="stereos-guest-work">{/* Executed by the guest runner inside the VM, not by the host. */}</Workflow>
 ));

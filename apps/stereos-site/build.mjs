@@ -69,12 +69,16 @@ await copyFile(join(here, "page/real.js"), join(siteDir, "real.js"));
 const realDir = join(here, "real");
 const realFile = (name) => readFile(join(realDir, name), "utf8");
 const realRun = {
-  transcript: await realFile("transcript.txt"),
+  transcripts: {
+    "macOS / Apple hypervisor / aarch64 mixtape": await realFile("transcript.txt"),
+    "GCE nested virt / KVM / x86_64 mixtape": await realFile("transcript-linux.txt"),
+  },
   sources: {
     "stereos-provider.ts": await realFile("stereos-provider.ts"),
     "guest-runner.sh": await realFile("guest-runner.sh"),
     "stereos-real.tsx": await realFile("stereos-real.tsx"),
     "jcard.toml": await realFile("jcard.toml"),
+    "run-on-linux-host.sh": await realFile("run-on-linux-host.sh"),
   },
 };
 await writeFile(

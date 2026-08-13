@@ -57,8 +57,7 @@ const response = await page.goto(url, { waitUntil: "load" });
 const headers = response.headers();
 check(
   "COOP/COEP headers",
-  headers["cross-origin-opener-policy"] === "same-origin" &&
-    headers["cross-origin-embedder-policy"] === "require-corp",
+  headers["cross-origin-opener-policy"] === "same-origin" && headers["cross-origin-embedder-policy"] === "require-corp",
   `coop=${headers["cross-origin-opener-policy"]} coep=${headers["cross-origin-embedder-policy"]}`,
 );
 check("crossOriginIsolated", await page.evaluate(() => window.crossOriginIsolated === true));
@@ -83,6 +82,17 @@ check(
 );
 check("transcript shows the sandbox lifecycle", transcript.includes("SandboxCompleted"));
 check("transcript shows the restriction model", transcript.includes('"writeOutsideWorkspace": "denied"'));
+
+// The second recording is the Linux/KVM host, so the page must show both.
+const runNames = await page.locator("#real-run-select option").allTextContents();
+check("tab 3 offers both hosts", runNames.length === 2, runNames.join(" | "));
+await page.selectOption("#real-run-select", { index: 1 });
+const linuxTranscript = (await page.locator("#real-terminal").textContent()) ?? "";
+check(
+  "second recording is the x86_64 KVM run",
+  linuxTranscript.includes("agent@coder-dev on Linux 6.18.33 x86_64") && linuxTranscript.includes("QEMU/KVM"),
+  `${linuxTranscript.length} chars`,
+);
 
 const sourceNames = await page.locator("#real-source-select option").allTextContents();
 check(

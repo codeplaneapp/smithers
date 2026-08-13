@@ -54,7 +54,7 @@ const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
 async function ssh(cmd: string, stdin?: string) {
   const proc = Bun.spawn(["ssh", ...SSH_ARGS, cmd], {
-    stdin: stdin === undefined ? "ignore" : new Response(stdin).body ?? "ignore",
+    stdin: stdin === undefined ? "ignore" : (new Response(stdin).body ?? "ignore"),
     stdout: "pipe",
     stderr: "pipe",
   });

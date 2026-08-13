@@ -1,9 +1,14 @@
 # Running Smithers inside a real stereOS VM
 
-This directory boots an actual stereOS mixtape and runs a Smithers
-`<Sandbox>` body inside it. Nothing here is simulated: `transcript.txt` is
-captured output from the run recorded on 2026-08-12, and tab 3 of
-https://stereos.smithers.sh renders it from these files.
+This directory boots actual stereOS mixtapes and runs a Smithers `<Sandbox>`
+body inside them. Nothing here is simulated: the two transcripts are captured
+output from runs recorded on 2026-08-12, and tab 3 of
+https://stereos.smithers.sh renders them from these files.
+
+| Host | Mixtape | Hypervisor | Result |
+| --- | --- | --- | --- |
+| Apple Silicon Mac | `coder-arm64:latest`, pulled | Apple Virtualization.framework via `mb` | `finished`, sandbox node 557 ms |
+| GCE n2-standard-2, nested virt | `coder-dev` x86_64, built from source | QEMU/KVM | `finished`, sandbox node 1183 ms |
 
 | File | What it is |
 | --- | --- |
@@ -14,7 +19,9 @@ https://stereos.smithers.sh renders it from these files.
 | `jcard.toml` | The masterblaster VM spec. |
 | `bootstrap-vm.sh` | Installs the stereos key for the guest `agent` user and prints the provider env. |
 | `provision-linux-host.sh` | Turns a fresh nested-virt Linux box into a stereOS execution host. |
-| `transcript.txt` | The recorded run, rendered on the site. |
+| `run-on-linux-host.sh` | Boots the built x86_64 image under QEMU/KVM and runs the workflow. |
+| `transcript.txt` | The recorded macOS run, rendered on the site. |
+| `transcript-linux.txt` | The recorded GCE/KVM run, rendered on the site. |
 
 ## Recipe (Apple Silicon)
 
@@ -84,12 +91,25 @@ x86_64 `coder-dev` mixtape from source. A source build is unavoidable there:
 the registry publishes `coder-arm64` only, and `mb mixtapes list coder-x86`
 returns no tags.
 
-Two things that cost time and are easy to avoid:
+The build takes about 25 minutes on 2 vCPU and produces a 1.01 GiB qcow2. The
+`-dev` profile bakes `~/.config/stereos/ssh-key.pub` in for both `admin` and
+`agent`, so this path needs no `bootstrap-vm.sh` step.
+
+Four things that cost time and are easy to avoid:
 
 - Install Determinate Nix **with** its systemd init. `--init none` leaves the
   multi-user store without a daemon and every build fails on
   `opening lock file "/nix/var/nix/db/big-lock": Permission denied`.
 - `make` is not in a default Debian 12 image.
+- The built image lives read-only in the Nix store, so boot a
+  `qemu-img create -b` overlay rather than the store path.
+- Mixtapes boot through GRUB under UEFI. Without OVMF pflash drives QEMU's
+  default SeaBIOS never hands off and the serial log stays empty with no error.
+
+Reference host: `stereos-smithers-demo`, n2-standard-2, 100 GB pd-balanced,
+us-east1-b, project `plue-prod-1771780303`, `--enable-nested-virtualization`.
+About $81/month at list price. No inbound rules beyond the VPC default SSH; no
+gateway is exposed and nothing anonymous can trigger a run.
 
 ## Registry defect
 
@@ -129,7 +149,9 @@ Numbered to continue tab 1 §8, which listed five.
    it makes `mb pull` work and deletes this README's whole manual-fetch
    section.
 
-## What the run reported
+## What the runs reported
+
+macOS host, pulled `coder-arm64` mixtape:
 
 ```
 summary            ran inside stereOS as agent@coder on Linux 6.12.74 aarch64
@@ -141,6 +163,18 @@ restrictions       writeOutsideWorkspace=denied, writeInsideWorkspace=allowed,
 harnessesOnPath    claude opencode gemini
 ```
 
-`prompt_sha256` is computed in the guest and matches
-`printf '%s' 'hello from the host' | shasum -a 256` on the host, which is what
-makes the output traceable to the VM rather than to whoever wrote this file.
+GCE/KVM host, `coder-dev` x86_64 mixtape built on the box:
+
+```
+summary            ran inside stereOS as agent@coder-dev on Linux 6.18.33 x86_64
+prompt             hello from the linux host
+prompt_sha256      b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121
+guest              stereOS dev-f269d96, Linux 6.18.33 x86_64, agent@coder-dev, 2 cpus, 2.8 GiB
+restrictions       writeOutsideWorkspace=denied, writeInsideWorkspace=allowed,
+                   nixCli=on PATH, nixStorePresent=yes
+harnessesOnPath    claude opencode gemini
+```
+
+In both runs `prompt_sha256` is computed in the guest and matches
+`printf '%s' '<the prompt>' | shasum -a 256` on the host, which is what makes
+the output traceable to the VM rather than to whoever wrote this file.
