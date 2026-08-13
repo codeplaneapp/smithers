@@ -63,6 +63,10 @@ targets.push("!**/*.d.{ts,mts,cts}", "!**/*.generated.*");
 // packages/testing ships tsup-bundled .js in src/ (the publish drift gate
 // rebuilds and byte-compares them), so formatting them guarantees drift.
 targets.push("!packages/testing/src/**/*.js");
+// apps/stereos-site/site is deploy output that `node apps/stereos-site/build.mjs`
+// re-emits with its own layout (JSON.stringify payloads, verbatim page copies),
+// so formatting it guarantees drift on the next build.
+targets.push("!apps/stereos-site/site/**/*.js");
 
 // Extra flags from the npm script (e.g. `--check` or `--write`).
 const passthrough = process.argv.slice(2);
