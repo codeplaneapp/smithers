@@ -41,21 +41,32 @@ function rgb(hex: string): Rgb {
 }
 
 function hex(channels: Rgb): string {
-  return `#${channels.map((n) => Math.round(Math.max(0, Math.min(255, n))).toString(16).padStart(2, "0")).join("")}`;
+  return `#${channels
+    .map((n) =>
+      Math.round(Math.max(0, Math.min(255, n)))
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
 }
 
 function mix(a: string, b: string, amount: number): string {
-  const ar = rgb(a); const br = rgb(b);
+  const ar = rgb(a);
+  const br = rgb(b);
   return hex(ar.map((n, i) => n * amount + br[i]! * (1 - amount)) as Rgb);
 }
 
 function luminance(value: string): number {
-  const channels = rgb(value).map((n) => { const c = n / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+  const channels = rgb(value).map((n) => {
+    const c = n / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
   return channels[0]! * 0.2126 + channels[1]! * 0.7152 + channels[2]! * 0.0722;
 }
 
 function contrast(a: string, b: string): number {
-  const al = luminance(a); const bl = luminance(b);
+  const al = luminance(a);
+  const bl = luminance(b);
   return (Math.max(al, bl) + 0.05) / (Math.min(al, bl) + 0.05);
 }
 
@@ -96,15 +107,26 @@ function terminal(theme: UpstreamTheme, bg: string, text: string, semantic: Reco
   const ansi = (name: string, fallback: string) => opaque(c[`terminal.ansi${name}`], fallback);
   const selection = c["terminal.selectionBackground"] ?? `rgba(${rgb(semantic.info).join(",")},0.3)`;
   return {
-    background: opaque(c["terminal.background"], bg), foreground: opaque(c["terminal.foreground"], text),
-    cursor: opaque(c["terminalCursor.foreground"], text), selectionBackground: selection,
-    black: ansi("Black", bg), red: ansi("Red", semantic.danger), green: ansi("Green", semantic.success),
-    yellow: ansi("Yellow", semantic.warning), blue: ansi("Blue", semantic.info),
-    magenta: ansi("Magenta", semantic.brand), cyan: ansi("Cyan", semantic.info), white: ansi("White", text),
-    brightBlack: ansi("BrightBlack", mix(text, bg, 0.45)), brightRed: ansi("BrightRed", semantic.danger),
-    brightGreen: ansi("BrightGreen", semantic.success), brightYellow: ansi("BrightYellow", semantic.warning),
-    brightBlue: ansi("BrightBlue", semantic.info), brightMagenta: ansi("BrightMagenta", semantic.brand),
-    brightCyan: ansi("BrightCyan", semantic.info), brightWhite: ansi("BrightWhite", text),
+    background: opaque(c["terminal.background"], bg),
+    foreground: opaque(c["terminal.foreground"], text),
+    cursor: opaque(c["terminalCursor.foreground"], text),
+    selectionBackground: selection,
+    black: ansi("Black", bg),
+    red: ansi("Red", semantic.danger),
+    green: ansi("Green", semantic.success),
+    yellow: ansi("Yellow", semantic.warning),
+    blue: ansi("Blue", semantic.info),
+    magenta: ansi("Magenta", semantic.brand),
+    cyan: ansi("Cyan", semantic.info),
+    white: ansi("White", text),
+    brightBlack: ansi("BrightBlack", mix(text, bg, 0.45)),
+    brightRed: ansi("BrightRed", semantic.danger),
+    brightGreen: ansi("BrightGreen", semantic.success),
+    brightYellow: ansi("BrightYellow", semantic.warning),
+    brightBlue: ansi("BrightBlue", semantic.info),
+    brightMagenta: ansi("BrightMagenta", semantic.brand),
+    brightCyan: ansi("BrightCyan", semantic.info),
+    brightWhite: ansi("BrightWhite", text),
   };
 }
 
@@ -119,40 +141,80 @@ function variant(theme: UpstreamTheme, mode: Mode, accent: string, name: string)
   const surface = mode === "dark" ? mix(text, bg, 0.055) : mix("#ffffff", bg, 0.75);
   const surface2 = mode === "dark" ? mix(text, bg, 0.095) : mix(text, surface, 0.055);
   const surface3 = mode === "dark" ? mix(text, bg, 0.135) : "#ffffff";
-  const nightOwlSeeds = mode === "dark"
-    ? { success: "#addb67", danger: "#ef5350", warning: "#ecc48d", info: "#82aaff" }
-    : { success: "#2AA298", danger: "#E64D49", warning: "#daaa01", info: "#4876d6" };
+  const nightOwlSeeds =
+    mode === "dark"
+      ? { success: "#addb67", danger: "#ef5350", warning: "#ecc48d", info: "#82aaff" }
+      : { success: "#2AA298", danger: "#E64D49", warning: "#daaa01", info: "#4876d6" };
   const semanticSeeds = {
     brand: accent,
-    success: name === "nightOwl" ? nightOwlSeeds.success : opaque(c["gitDecoration.addedResourceForeground"] ?? c["gitDecoration.untrackedResourceForeground"] ?? c["editorGutter.addedBackground"], "#2e9b57"),
-    danger: name === "nightOwl" ? nightOwlSeeds.danger : opaque(c["errorForeground"] ?? c["editorError.foreground"], "#d73a49"),
-    warning: name === "nightOwl" ? nightOwlSeeds.warning : opaque(c["editorWarning.foreground"] ?? c["gitDecoration.conflictingResourceForeground"], "#b7791f"),
-    info: name === "nightOwl" ? nightOwlSeeds.info : opaque(c["editorInfo.foreground"] ?? c["editorGutter.modifiedBackground"], "#2b6cb0"),
+    success:
+      name === "nightOwl"
+        ? nightOwlSeeds.success
+        : opaque(
+            c["gitDecoration.addedResourceForeground"] ??
+              c["gitDecoration.untrackedResourceForeground"] ??
+              c["editorGutter.addedBackground"],
+            "#2e9b57",
+          ),
+    danger:
+      name === "nightOwl"
+        ? nightOwlSeeds.danger
+        : opaque(c["errorForeground"] ?? c["editorError.foreground"], "#d73a49"),
+    warning:
+      name === "nightOwl"
+        ? nightOwlSeeds.warning
+        : opaque(c["editorWarning.foreground"] ?? c["gitDecoration.conflictingResourceForeground"], "#b7791f"),
+    info:
+      name === "nightOwl"
+        ? nightOwlSeeds.info
+        : opaque(c["editorInfo.foreground"] ?? c["editorGutter.modifiedBackground"], "#2b6cb0"),
   };
-  const semantic = Object.fromEntries(Object.entries(semanticSeeds).map(([name, seed]) => {
-    const amount = name === "success" || name === "warning" ? 0.12 : 0.1;
-    let value = contrastSafe(seed, surface, amount, mode);
-    const target = mode === "light" ? "#000000" : "#ffffff";
-    for (let step = 0; step <= 100 && contrast(value, surface3) < 4.5; step += 1) value = mix(target, value, 0.035);
-    return [name, value];
-  })) as Record<string, string>;
-  const t = rgb(text); const s = rgb(surface);
+  const semantic = Object.fromEntries(
+    Object.entries(semanticSeeds).map(([name, seed]) => {
+      const amount = name === "success" || name === "warning" ? 0.12 : 0.1;
+      let value = contrastSafe(seed, surface, amount, mode);
+      const target = mode === "light" ? "#000000" : "#ffffff";
+      for (let step = 0; step <= 100 && contrast(value, surface3) < 4.5; step += 1) value = mix(target, value, 0.035);
+      return [name, value];
+    }),
+  ) as Record<string, string>;
+  const t = rgb(text);
+  const s = rgb(surface);
   const textBackgrounds = [bg, surface, surface2, surface3];
   const rgba = (channels: Rgb, alpha: number) => `rgba(${channels.join(",")},${alpha})`;
   const tokens = {
-    colorScheme: mode, bg, text,
+    colorScheme: mode,
+    bg,
+    text,
     textMuted: secondaryText(text, bg, textBackgrounds, 0.68, 5),
     textFaint: secondaryText(text, bg, textBackgrounds, mode === "dark" ? 0.65 : 0.56, 4.75),
     textPlaceholder: secondaryText(text, bg, textBackgrounds, 0.46, 4.5),
-    surface, surface2, surface3, surfaceGlass: rgba(s, 0.72), surfaceGlassStrong: rgba(s, 0.85),
-    border: rgba(t, mode === "dark" ? 0.09 : 0.08), borderStrong: rgba(t, mode === "dark" ? 0.16 : 0.14),
-    borderSolid: mix(text, bg, mode === "dark" ? 0.15 : 0.11), hover: surface2,
-    hoverSubtle: rgba(t, mode === "dark" ? 0.05 : 0.04), inverseBg: text, inverseText: bg,
-    codeBg: bg, codeText: text, inlineCodeBg: rgba(t, mode === "dark" ? 0.08 : 0.06), ...semantic,
+    surface,
+    surface2,
+    surface3,
+    surfaceGlass: rgba(s, 0.72),
+    surfaceGlassStrong: rgba(s, 0.85),
+    border: rgba(t, mode === "dark" ? 0.09 : 0.08),
+    borderStrong: rgba(t, mode === "dark" ? 0.16 : 0.14),
+    borderSolid: mix(text, bg, mode === "dark" ? 0.15 : 0.11),
+    hover: surface2,
+    hoverSubtle: rgba(t, mode === "dark" ? 0.05 : 0.04),
+    inverseBg: text,
+    inverseText: bg,
+    codeBg: bg,
+    codeText: text,
+    inlineCodeBg: rgba(t, mode === "dark" ? 0.08 : 0.06),
+    ...semantic,
     shadowRgb: mode === "dark" ? "0 0 0" : t.join(" "),
     shadow1: `0 1px 2px rgb(var(--shadow-rgb) / ${mode === "dark" ? "0.35" : "0.05"})`,
-    shadow2: mode === "dark" ? "0 1px 2px rgb(var(--shadow-rgb) / 0.30), 0 8px 24px rgb(var(--shadow-rgb) / 0.40)" : "0 1px 2px rgb(var(--shadow-rgb) / 0.04), 0 8px 24px rgb(var(--shadow-rgb) / 0.07)",
-    shadow3: mode === "dark" ? "0 4px 12px rgb(var(--shadow-rgb) / 0.45), 0 16px 48px rgb(var(--shadow-rgb) / 0.50)" : "0 4px 12px rgb(var(--shadow-rgb) / 0.10), 0 16px 48px rgb(var(--shadow-rgb) / 0.14)",
+    shadow2:
+      mode === "dark"
+        ? "0 1px 2px rgb(var(--shadow-rgb) / 0.30), 0 8px 24px rgb(var(--shadow-rgb) / 0.40)"
+        : "0 1px 2px rgb(var(--shadow-rgb) / 0.04), 0 8px 24px rgb(var(--shadow-rgb) / 0.07)",
+    shadow3:
+      mode === "dark"
+        ? "0 4px 12px rgb(var(--shadow-rgb) / 0.45), 0 16px 48px rgb(var(--shadow-rgb) / 0.50)"
+        : "0 4px 12px rgb(var(--shadow-rgb) / 0.10), 0 16px 48px rgb(var(--shadow-rgb) / 0.14)",
   };
   return { tokens, terminal: terminal(theme, bg, text, semantic) };
 }
@@ -162,7 +224,14 @@ for (const [name, label, shikiDark, shikiLight] of specs) {
   const dark = variant(darkSource, "dark", accents[name].dark, name);
   const light = variant(lightSource, "light", accents[name].light, name);
   const key = keyForFile[name] ?? name;
-  const record = { key, label, light: light.tokens, dark: dark.tokens, syntax: { shikiDark, shikiLight }, terminal: { dark: dark.terminal, light: light.terminal } };
+  const record = {
+    key,
+    label,
+    light: light.tokens,
+    dark: dark.tokens,
+    syntax: { shikiDark, shikiLight },
+    terminal: { dark: dark.terminal, light: light.terminal },
+  };
   const source = `// Generated by scripts/generate-theme-registry.ts from @shikijs/themes 3.23.0. Do not edit.\nimport type { SmithersTheme } from "../SmithersTheme";\n\nexport const ${name}: SmithersTheme = ${JSON.stringify(record, null, 2)};\n`;
   writeFileSync(resolve(outputDir, `${name}.ts`), source);
 }

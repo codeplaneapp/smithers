@@ -147,7 +147,12 @@ export function PierreDiffView({
   };
 
   return (
-    <div className="sui-pierre-diff-frame" data-slot="pierre-diff-view" data-theme-mode={resolvedMode} data-palette={resolvedPalette}>
+    <div
+      className="sui-pierre-diff-frame"
+      data-slot="pierre-diff-view"
+      data-theme-mode={resolvedMode}
+      data-palette={resolvedPalette}
+    >
       <CodeView
         className={cn("sui-pierre-diff", className)}
         disableWorkerPool

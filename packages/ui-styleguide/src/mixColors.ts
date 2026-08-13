@@ -1,9 +1,12 @@
 import { rgbChannels } from "./rgbChannels";
 
 function toHex(channels: readonly number[]): string {
-  return `#${channels.map((c) => Math.round(Math.min(255, Math.max(0, c)))
-    .toString(16)
-    .padStart(2, "0"))
+  return `#${channels
+    .map((c) =>
+      Math.round(Math.min(255, Math.max(0, c)))
+        .toString(16)
+        .padStart(2, "0"),
+    )
     .join("")}`;
 }
 

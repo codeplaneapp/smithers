@@ -42,7 +42,10 @@ describe("palette resolution", () => {
     root = createRoot(container);
     await act(async () => root?.render(<Probe />));
     expect(container.querySelector("output")?.getAttribute("data-palette")).toBe("one");
-    await act(async () => { document.documentElement.setAttribute("data-palette", "solarized"); await Promise.resolve(); });
+    await act(async () => {
+      document.documentElement.setAttribute("data-palette", "solarized");
+      await Promise.resolve();
+    });
     expect(seen).toContain("solarized");
   });
 });

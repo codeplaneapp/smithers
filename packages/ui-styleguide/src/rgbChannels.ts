@@ -8,9 +8,5 @@ export function rgbChannels(color: string): [number, number, number] {
           .map((channel) => channel + channel)
           .join("")
       : hex.slice(0, 6);
-  return [0, 2, 4].map((offset) => Number.parseInt(full.slice(offset, offset + 2), 16)) as [
-    number,
-    number,
-    number,
-  ];
+  return [0, 2, 4].map((offset) => Number.parseInt(full.slice(offset, offset + 2), 16)) as [number, number, number];
 }

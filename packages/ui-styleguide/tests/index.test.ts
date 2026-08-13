@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_THEME_KEY, reducedMotionCss, themeRegistry, workflowUiLayoutCss, workflowUiStyles, workflowUiThemeCss } from "../src/index";
+import {
+  DEFAULT_THEME_KEY,
+  reducedMotionCss,
+  themeRegistry,
+  workflowUiLayoutCss,
+  workflowUiStyles,
+  workflowUiThemeCss,
+} from "../src/index";
 
 describe("ui styleguide", () => {
   test("exports the combined theme and layout styles", () => {

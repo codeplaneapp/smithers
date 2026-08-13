@@ -56,8 +56,7 @@ const response = await page.goto(url, { waitUntil: "load" });
 const headers = response.headers();
 check(
   "COOP/COEP headers",
-  headers["cross-origin-opener-policy"] === "same-origin" &&
-    headers["cross-origin-embedder-policy"] === "require-corp",
+  headers["cross-origin-opener-policy"] === "same-origin" && headers["cross-origin-embedder-policy"] === "require-corp",
   `coop=${headers["cross-origin-opener-policy"]} coep=${headers["cross-origin-embedder-policy"]}`,
 );
 check("crossOriginIsolated", await page.evaluate(() => window.crossOriginIsolated === true));

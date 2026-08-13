@@ -1647,8 +1647,7 @@ export function collectUiArchitectureState(root, kind = "smithers") {
       }
       if (
         (path.startsWith("packages/gateway-ui/src/") ||
-          (path.startsWith("packages/ui-styleguide/src/") &&
-            !CANONICAL_STYLEGUIDE_FILES.has(path))) &&
+          (path.startsWith("packages/ui-styleguide/src/") && !CANONICAL_STYLEGUIDE_FILES.has(path))) &&
         !SANCTIONED_GATEWAY_UI_PROGRAM_FILES.has(path)
       ) {
         violations.push(formatViolation("compatibility-facade-file", `${path} is legacy facade implementation`));

@@ -18,8 +18,7 @@ const startNote = document.getElementById("start-note");
 // Run smithers under Node: the bin's shebang is bun, and the loader shims map
 // the bun-only specifiers to stubs.
 const SMITHERS = "node --import ./shims/register.mjs --import tsx node_modules/smthrs/src/bin/smithers.js";
-const ENV =
-  "SMITHERS_BACKEND=pglite SMITHERS_PGLITE_INPROCESS=1 SMITHERS_PGLITE_INPROCESS_MODULE=pglite-inprocess.mjs";
+const ENV = "SMITHERS_BACKEND=pglite SMITHERS_PGLITE_INPROCESS=1 SMITHERS_PGLITE_INPROCESS_MODULE=pglite-inprocess.mjs";
 
 let booted = false;
 
@@ -185,10 +184,7 @@ async function main() {
 
   step("approval", "active");
   write("\n$ smithers up workflows/approval-demo.tsx\n");
-  const approval = await smithersJson(
-    wc,
-    `up workflows/approval-demo.tsx --input '{"change":"enable the demo"}'`,
-  );
+  const approval = await smithersJson(wc, `up workflows/approval-demo.tsx --input '{"change":"enable the demo"}'`);
   const approvalId = approval.json?.runId ?? null;
   const approvalState = { status: approval.json?.status ?? "unknown" };
   report("approval", approvalId, approvalState.status);
