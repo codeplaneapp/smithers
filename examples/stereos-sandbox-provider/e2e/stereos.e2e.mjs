@@ -281,6 +281,20 @@ for (const scheme of ["light", "dark"]) {
 await page.emulateMedia({ colorScheme: "light" });
 await page.setViewportSize({ width: 390, height: 844 });
 await page.screenshot({ path: join(here, "mobile-tasks-and-sandboxes.png"), fullPage: false });
+// A wide code pane must scroll inside its own card. If one widens its grid
+// track instead, the whole document scrolls sideways on a phone.
+for (const id of ["tasks", "build", "live", "impl", "api"]) {
+  await page.click(`#tab-${id}`);
+  const overflow = await page.evaluate(() => ({
+    document: document.documentElement.scrollWidth,
+    viewport: document.documentElement.clientWidth,
+  }));
+  check(
+    `no horizontal overflow at 390px on the ${id} tab`,
+    overflow.document <= overflow.viewport + 1,
+    `${overflow.document}px in a ${overflow.viewport}px viewport`,
+  );
+}
 await page.click("#tab-live");
 await page.screenshot({ path: join(here, "mobile-live-demo.png"), fullPage: false });
 

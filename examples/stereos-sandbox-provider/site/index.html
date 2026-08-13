@@ -519,8 +519,8 @@ b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121  -</pre></li></
   </div>
 </footer>
 
-<script type="module" src="./live.js?v=202608131904"></script>
-<script type="module" src="./evidence.js?v=202608131904"></script>
+<script type="module" src="./live.js?v=202608131913"></script>
+<script type="module" src="./evidence.js?v=202608131913"></script>
 <script type="module">
   const ids = ['tasks', 'build', 'live', 'impl', 'api'];
   const tabs = ids.map((id) => ({
@@ -541,7 +541,7 @@ b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121  -</pre></li></
     // Both heavy panels load on first view so the landing tab stays light.
     if (entry.hash === '#impl' && !implLoaded) {
       implLoaded = true;
-      import('./impl.js?v=202608131904').catch((error) => {
+      import('./impl.js?v=202608131913').catch((error) => {
         document.getElementById('impl-root').textContent = `Could not load the sources: ${error.message}`;
       });
     }
