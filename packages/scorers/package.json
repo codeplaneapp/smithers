@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/scorers",
-  "version": "0.33.1",
+  "version": "0.34.0",
   "description": "Smithers scorer definitions, execution, aggregation, and persistence helpers",
   "type": "module",
   "sideEffects": false,

@@ -154,7 +154,7 @@
     },
     "apps/cli": {
       "name": "@smthrs/cli",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@clack/core": "^1.4.2",
         "@clack/prompts": "^1.6.0",
@@ -260,7 +260,7 @@
     },
     "apps/observability": {
       "name": "@smthrs/observability",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@effect/opentelemetry": "4.0.0-beta.105",
         "@effect/platform-bun": "4.0.0-beta.105",
@@ -303,7 +303,7 @@
     },
     "apps/review": {
       "name": "@smthrs/review",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "bin": {
         "smithers-review": "./src/cli/main.ts",
       },
@@ -468,7 +468,7 @@
     },
     "packages/accounts": {
       "name": "@smthrs/accounts",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/errors": "workspace:*",
       },
@@ -479,7 +479,7 @@
     },
     "packages/agent-eliza": {
       "name": "@smthrs/agent-eliza",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@elizaos/core": "~1.7.2",
         "@smthrs/agents": "workspace:*",
@@ -495,7 +495,7 @@
     },
     "packages/agents": {
       "name": "@smthrs/agents",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@ai-sdk/anthropic": "^4.0.5",
         "@ai-sdk/openai": "^4.0.5",
@@ -516,7 +516,7 @@
     },
     "packages/aws": {
       "name": "@smthrs/aws",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/errors": "workspace:*",
         "@smthrs/sandbox": "workspace:*",
@@ -544,7 +544,7 @@
     },
     "packages/cloudflare": {
       "name": "@smthrs/cloudflare",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/sandbox": "workspace:*",
       },
@@ -563,7 +563,7 @@
     },
     "packages/components": {
       "name": "@smthrs/components",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/agents": "workspace:*",
         "@smthrs/db": "workspace:*",
@@ -589,7 +589,7 @@
     },
     "packages/control-plane": {
       "name": "@smthrs/control-plane",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/errors": "workspace:*",
       },
@@ -600,7 +600,7 @@
     },
     "packages/daytona": {
       "name": "@smthrs/daytona",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/errors": "workspace:*",
         "@smthrs/sandbox": "workspace:*",
@@ -619,7 +619,7 @@
     },
     "packages/db": {
       "name": "@smthrs/db",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/errors": "workspace:*",
         "@smthrs/graph": "workspace:*",
@@ -640,7 +640,7 @@
     },
     "packages/devtools": {
       "name": "@smthrs/devtools",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "~6.0.3",
@@ -648,7 +648,7 @@
     },
     "packages/driver": {
       "name": "@smthrs/driver",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/db": "workspace:*",
         "@smthrs/errors": "workspace:*",
@@ -665,7 +665,7 @@
     },
     "packages/electric-proxy": {
       "name": "@smthrs/electric-proxy",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "bin": {
         "smithers-electric-proxy": "./bin/smithers-electric-proxy.js",
       },
@@ -679,7 +679,7 @@
     },
     "packages/engine": {
       "name": "@smthrs/engine",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@effect/platform-bun": "4.0.0-beta.105",
         "@effect/platform-node-shared": "4.0.0-beta.105",
@@ -718,7 +718,7 @@
     },
     "packages/errors": {
       "name": "@smthrs/errors",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "effect": "4.0.0-beta.105",
       },
@@ -729,7 +729,7 @@
     },
     "packages/gateway": {
       "name": "@smthrs/gateway",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/protocol": "workspace:*",
       },
@@ -740,7 +740,7 @@
     },
     "packages/gateway-client": {
       "name": "@smthrs/gateway-client",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/electric-proxy": "workspace:^",
         "@smthrs/gateway": "workspace:*",
@@ -760,7 +760,7 @@
     },
     "packages/gateway-react": {
       "name": "@smthrs/gateway-react",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/gateway-client": "workspace:*",
         "@tanstack/react-db": "0.1.91",
@@ -785,7 +785,7 @@
     },
     "packages/gateway-ui": {
       "name": "@smthrs/gateway-ui",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/gateway-client": "workspace:*",
         "@smthrs/gateway-react": "workspace:*",
@@ -811,7 +811,7 @@
     },
     "packages/gcp": {
       "name": "@smthrs/gcp",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/errors": "workspace:*",
         "@smthrs/sandbox": "workspace:*",
@@ -833,7 +833,7 @@
     },
     "packages/graph": {
       "name": "@smthrs/graph",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/errors": "workspace:*",
         "drizzle-orm": "^0.45.2",
@@ -846,7 +846,7 @@
     },
     "packages/herdr": {
       "name": "@smthrs/herdr",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "~6.0.3",
@@ -854,7 +854,7 @@
     },
     "packages/integrations": {
       "name": "@smthrs/integrations",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/components": "workspace:*",
         "@smthrs/db": "workspace:*",
@@ -875,42 +875,42 @@
     },
     "packages/jj-darwin-arm64": {
       "name": "@smthrs/jj-darwin-arm64",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "bin": {
         "jj": "bin/jj",
       },
     },
     "packages/jj-darwin-x64": {
       "name": "@smthrs/jj-darwin-x64",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "bin": {
         "jj": "bin/jj",
       },
     },
     "packages/jj-linux-arm64": {
       "name": "@smthrs/jj-linux-arm64",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "bin": {
         "jj": "bin/jj",
       },
     },
     "packages/jj-linux-x64": {
       "name": "@smthrs/jj-linux-x64",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "bin": {
         "jj": "bin/jj",
       },
     },
     "packages/jj-win32-x64": {
       "name": "@smthrs/jj-win32-x64",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "bin": {
         "jj": "bin/jj.exe",
       },
     },
     "packages/memory": {
       "name": "@smthrs/memory",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/db": "workspace:*",
         "@smthrs/errors": "workspace:*",
@@ -929,7 +929,7 @@
     },
     "packages/microsandbox": {
       "name": "@smthrs/microsandbox",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/errors": "workspace:*",
         "@smthrs/sandbox": "workspace:*",
@@ -954,7 +954,7 @@
     },
     "packages/openapi": {
       "name": "@smthrs/openapi",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/errors": "workspace:*",
         "@smthrs/observability": "workspace:*",
@@ -971,7 +971,7 @@
     },
     "packages/pi-plugin": {
       "name": "@smthrs/pi-plugin",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.29.0",
         "@sinclair/typebox": "^0.34.49",
@@ -1000,7 +1000,7 @@
     },
     "packages/protocol": {
       "name": "@smthrs/protocol",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "~6.0.3",
@@ -1008,7 +1008,7 @@
     },
     "packages/react-reconciler": {
       "name": "@smthrs/react-reconciler",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/devtools": "workspace:*",
         "@smthrs/driver": "workspace:*",
@@ -1027,7 +1027,7 @@
     },
     "packages/sandbox": {
       "name": "@smthrs/sandbox",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/db": "workspace:*",
         "@smthrs/driver": "workspace:*",
@@ -1043,7 +1043,7 @@
     },
     "packages/scheduler": {
       "name": "@smthrs/scheduler",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/errors": "workspace:*",
         "@smthrs/graph": "workspace:*",
@@ -1056,7 +1056,7 @@
     },
     "packages/scorers": {
       "name": "@smthrs/scorers",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/agents": "workspace:*",
         "@smthrs/db": "workspace:*",
@@ -1075,7 +1075,7 @@
     },
     "packages/server": {
       "name": "@smthrs/server",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/accounts": "workspace:*",
         "@smthrs/components": "workspace:*",
@@ -1117,7 +1117,7 @@
     },
     "packages/smithers": {
       "name": "smthrs",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "bin": {
         "smithers": "./src/bin/smithers.js",
       },
@@ -1176,7 +1176,7 @@
     },
     "packages/telegram": {
       "name": "@smthrs/telegram",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "~6.0.3",
@@ -1184,7 +1184,7 @@
     },
     "packages/testing": {
       "name": "@smthrs/testing",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/components": "workspace:*",
         "@smthrs/db": "workspace:*",
@@ -1214,7 +1214,7 @@
     },
     "packages/time-travel": {
       "name": "@smthrs/time-travel",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@effect/platform-bun": "4.0.0-beta.105",
         "@effect/platform-node-shared": "4.0.0-beta.105",
@@ -1238,7 +1238,7 @@
     },
     "packages/tool-context": {
       "name": "@smthrs/tool-context",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "ai": "^7.0.10",
         "zod": "^4.4.3",
@@ -1250,7 +1250,7 @@
     },
     "packages/tui": {
       "name": "@smthrs/tui",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "bin": {
         "smithers-mon": "./src/index.tsx",
       },
@@ -1273,7 +1273,7 @@
     },
     "packages/tui-ui": {
       "name": "@smthrs/tui-ui",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@opentui/core": "^0.4.2",
         "@opentui/react": "^0.4.2",
@@ -1287,7 +1287,7 @@
     },
     "packages/ui": {
       "name": "@smthrs/ui",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@milkdown/crepe": "7.21.2",
         "@milkdown/kit": "7.21.2",
@@ -1319,7 +1319,7 @@
     },
     "packages/ui-core": {
       "name": "@smthrs/ui-core",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/gateway-client": "workspace:*",
         "@smthrs/gateway-react": "workspace:*",
@@ -1337,11 +1337,11 @@
     },
     "packages/ui-styleguide": {
       "name": "@smthrs/ui-styleguide",
-      "version": "0.33.1",
+      "version": "0.34.0",
     },
     "packages/usage": {
       "name": "@smthrs/usage",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/accounts": "workspace:*",
       },
@@ -1352,7 +1352,7 @@
     },
     "packages/vcs": {
       "name": "@smthrs/vcs",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@effect/platform-node-shared": "4.0.0-beta.105",
         "@smthrs/observability": "workspace:*",
@@ -1373,7 +1373,7 @@
     },
     "packages/vercel": {
       "name": "@smthrs/vercel",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/errors": "workspace:*",
         "@smthrs/sandbox": "workspace:*",
@@ -1392,7 +1392,7 @@
     },
     "packages/xstate": {
       "name": "@smthrs/xstate",
-      "version": "0.33.1",
+      "version": "0.34.0",
       "dependencies": {
         "@smthrs/errors": "workspace:*",
         "@smthrs/react-reconciler": "workspace:*",

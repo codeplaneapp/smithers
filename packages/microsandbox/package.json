@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/microsandbox",
-  "version": "0.33.1",
+  "version": "0.34.0",
   "description": "Microsandbox provider for Smithers: run sandboxed workflows in local microVMs",
   "type": "module",
   "sideEffects": false,

@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/tui-ui",
-  "version": "0.33.1",
+  "version": "0.34.0",
   "description": "opentui leaf component library for the Smithers terminal UI: props-in/callbacks-out visual components mirroring the @smthrs/ui and gateway-ui vocabulary",
   "type": "module",
   "sideEffects": false,

@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/vercel",
-  "version": "0.33.1",
+  "version": "0.34.0",
   "description": "Vercel Sandbox provider for Smithers: run durable workflow sandboxes on Vercel Sandbox compute",
   "type": "module",
   "sideEffects": false,

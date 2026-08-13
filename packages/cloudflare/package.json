@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/cloudflare",
-  "version": "0.33.1",
+  "version": "0.34.0",
   "description": "Cloudflare Workers, Durable Object SQLite, D1, and Sandbox SDK integration for Smithers",
   "type": "module",
   "sideEffects": false,

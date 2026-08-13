@@ -1,6 +1,6 @@
 {
   "name": "@smthrs/gcp",
-  "version": "0.33.1",
+  "version": "0.34.0",
   "description": "Google Cloud sandbox provider for Smithers: Cloud Run Jobs execution with Cloud Storage bundle transport",
   "type": "module",
   "sideEffects": false,
