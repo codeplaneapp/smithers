@@ -91,9 +91,10 @@ to park at its gate, clicks Approve inside the embedded run UI, and asserts the
 engine-reported `finished`. It also asserts the five tabs and their order, that
 Tasks & sandboxes is the default, that both concept diagrams render, that the
 tutorial panes are the real source, that the Implementation tree opens a file
-whose text matches this repository, and that `stereos.smithers.sh` no longer
-serves this site. Budget five minutes; a run waits on a real VM. Screenshots
-land next to the script.
+whose text matches this repository, that an `#impl/<path>` deep link lands on
+that file, that no tab scrolls sideways in a 390px viewport, and that
+`stereos.smithers.sh` no longer serves this site. Budget five minutes; a run
+waits on a real VM. Screenshots land next to the script.
 
 ## Demo host
 
