@@ -99,8 +99,7 @@ export function createInContainerSandboxProvider(options: InContainerProviderOpt
           const target = path.startsWith("/") ? path : join(root, path);
           return await readFile(target, "utf8");
         },
-        exec: (command, execOpts) =>
-          execInContainer(command, { ...execOpts, cwd: root }, projectDir, options.onLog),
+        exec: (command, execOpts) => execInContainer(command, { ...execOpts, cwd: root }, projectDir, options.onLog),
         async destroy() {
           await rm(root, { recursive: true, force: true });
         },
