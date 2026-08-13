@@ -204,7 +204,10 @@ export function App() {
             <StageStrip stages={stages} style={{ marginBottom: 12 }} />
 
             {waiting ? (
-              <div data-testid="approval-panel" style={{ display: "flex", alignItems: "center", gap: 8, margin: "8px 0" }}>
+              <div
+                data-testid="approval-panel"
+                style={{ display: "flex", alignItems: "center", gap: 8, margin: "8px 0" }}
+              >
                 <span style={{ fontSize: 13 }}>Apply the change inside the VM?</span>
                 <Button type="button" size="sm" disabled={busy} data-testid="approve" onClick={() => decide(true)}>
                   Approve

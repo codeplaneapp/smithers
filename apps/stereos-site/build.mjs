@@ -95,16 +95,24 @@ function flowSvg() {
 // ───────────────────────────── guard rules ─────────────────────────────
 
 const guardCards = [
-  ["Three workflow ids", "<code>hello</code>, <code>pipeline</code>, <code>approval-demo</code>. A workflow id from the request is never forwarded."],
+  [
+    "Three workflow ids",
+    "<code>hello</code>, <code>pipeline</code>, <code>approval-demo</code>. A workflow id from the request is never forwarded.",
+  ],
   ["Server-chosen input", "The guard picks each run's input, so a visitor cannot steer what executes in the guest."],
-  ["Five RPC methods", "Named as literals in <code>guard.ts</code>. No method name from a request reaches the gateway."],
+  [
+    "Five RPC methods",
+    "Named as literals in <code>guard.ts</code>. No method name from a request reaches the gateway.",
+  ],
   ["2 concurrent, queue of 8", "Six starts per IP per ten minutes, counted on the Cloudflare edge IP."],
-  ["256-bit approval token", "Minted at start, compared with <code>timingSafeEqual</code>. Nothing else resolves a gate."],
+  [
+    "256-bit approval token",
+    "Minted at start, compared with <code>timingSafeEqual</code>. Nothing else resolves a gate.",
+  ],
   ["Five minute hard cap", "The guard cancels the run and frees its slot. Responses are built field by field."],
 ]
   .map(
-    ([title, body]) =>
-      `<div class="card"><div class="body"><h3>${title}</h3><p class="note">${body}</p></div></div>`,
+    ([title, body]) => `<div class="card"><div class="body"><h3>${title}</h3><p class="note">${body}</p></div></div>`,
   )
   .join("\n");
 

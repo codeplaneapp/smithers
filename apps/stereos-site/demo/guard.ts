@@ -106,9 +106,11 @@ async function rpc<T>(method: RpcMethod, params: unknown): Promise<T> {
     body: JSON.stringify(params ?? {}),
     signal: AbortSignal.timeout(30_000),
   });
-  const frame = (await response.json().catch(() => null)) as
-    | { ok?: boolean; payload?: T; error?: { message?: string } }
-    | null;
+  const frame = (await response.json().catch(() => null)) as {
+    ok?: boolean;
+    payload?: T;
+    error?: { message?: string };
+  } | null;
   if (!frame || frame.ok === false) {
     throw new Error(`gateway ${method} failed: ${frame?.error?.message ?? response.status}`);
   }

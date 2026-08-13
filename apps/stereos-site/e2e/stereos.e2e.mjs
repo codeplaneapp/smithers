@@ -174,7 +174,10 @@ check("two full captures, collapsed", (await captures.count()) === 2);
 check("captures start closed", (await captures.first().evaluate((node) => node.open)) === false);
 await captures.first().locator("summary").click();
 const capture = (await captures.first().locator("pre").textContent()) ?? "";
-check("capture is the raw terminal output", capture.includes("== smithers run ==") && capture.includes("SandboxCreated"));
+check(
+  "capture is the raw terminal output",
+  capture.includes("== smithers run ==") && capture.includes("SandboxCreated"),
+);
 const walk = await page.locator("ol.walk li").count();
 check("stepped walkthrough", walk >= 5 && walk <= 7, String(walk));
 await page.screenshot({ path: join(here, "tab-how-it-works.png"), fullPage: true });
@@ -222,7 +225,10 @@ check(
   (await viewer.locator("span[style*='color']").count()) > 20,
   String(await viewer.locator("span[style*='color']").count()),
 );
-check("per-file GitHub link", (await viewer.locator('a[href*="github.com"]').getAttribute("href")).includes("real/stereos-provider.ts"));
+check(
+  "per-file GitHub link",
+  (await viewer.locator('a[href*="github.com"]').getAttribute("href")).includes("real/stereos-provider.ts"),
+);
 await page.screenshot({ path: join(here, "tab-implementation.png"), fullPage: true });
 
 // ── 6. Proposed API is demoted but intact ────────────────────────────────────

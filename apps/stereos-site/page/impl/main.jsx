@@ -56,8 +56,7 @@ function App() {
 
   // The highlighter seam. Returns the prebuilt tokens for the file on screen.
   const highlight = useMemo(
-    () => () =>
-      file ? file[theme].map((line) => line.map(([text, slot]) => ({ text, color: palette[slot] }))) : null,
+    () => () => (file ? file[theme].map((line) => line.map(([text, slot]) => ({ text, color: palette[slot] }))) : null),
     [file, theme],
   );
 
