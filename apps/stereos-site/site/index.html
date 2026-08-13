@@ -3,121 +3,504 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="A real Smithers Sandbox running its child workflow inside stereOS, plus the proposed provider API and browser demo.">
+<meta name="description" content="A real Smithers Sandbox running its child workflow inside a stereOS VM: a live demo on real VMs, the recorded evidence, and the implementation sources.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>">
 <title>stereOS × Smithers</title>
+
+<!-- The Proposed API reference document keeps its own stylesheet. build.mjs
+     scopes every rule to #panel-api so it cannot reach the rest of the page. -->
 <style>
-:root {
+#panel-api {
     --bg: #ffffff; --fg: #1f2328; --muted: #57606a; --border: #d0d7de;
     --code-bg: #f6f8fa; --accent: #0969da; --warn-bg: #fff8c5; --warn-border: #d4a72c;
     --ok-bg: #dafbe1; --ok-border: #2da44e; --prop-bg: #ddf4ff; --prop-border: #54aeff;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
+@media (prefers-color-scheme: dark) {#panel-api {
       --bg: #0d1117; --fg: #e6edf3; --muted: #8d96a0; --border: #30363d;
       --code-bg: #161b22; --accent: #4493f8; --warn-bg: #3a2d12; --warn-border: #9e6a03;
       --ok-bg: #12261e; --ok-border: #2ea043; --prop-bg: #0c2d6b22; --prop-border: #1f6feb;
     }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--fg);
-    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-  main { max-width: 940px; margin: 0 auto; padding: 40px 24px 96px; }
-  h1 { font-size: 30px; line-height: 1.25; margin: 0 0 4px; }
-  h2 { font-size: 22px; margin: 48px 0 12px; padding-top: 16px; border-top: 1px solid var(--border); }
-  h3 { font-size: 17px; margin: 28px 0 8px; }
-  p, ul, ol { margin: 10px 0; }
-  li { margin: 4px 0; }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  .subtitle { color: var(--muted); margin: 0 0 20px; font-size: 17px; }
-  .banner { border: 1px solid; border-radius: 8px; padding: 12px 16px; margin: 20px 0; font-size: 15px; }
-  .banner.warn { background: var(--warn-bg); border-color: var(--warn-border); }
-  .banner.ok { background: var(--ok-bg); border-color: var(--ok-border); }
-  .banner.info { background: var(--prop-bg); border-color: var(--prop-border); }
-  code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
-  code { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px;
-    padding: 1px 5px; font-size: 13.5px; }
-  pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
-    padding: 14px 16px; overflow-x: auto; font-size: 13.5px; line-height: 1.55; }
-  pre code { background: none; border: none; padding: 0; }
-  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; display: block; overflow-x: auto; }
-  th, td { border: 1px solid var(--border); padding: 7px 11px; text-align: left; vertical-align: top; }
-  th { background: var(--code-bg); white-space: nowrap; }
-  td code { white-space: nowrap; }
-  td:first-child { white-space: nowrap; }
-  .tag { display: inline-block; font-size: 11.5px; font-weight: 600; border-radius: 10px;
-    padding: 1px 9px; vertical-align: 2px; margin-left: 6px; }
-  .tag.shipped { background: var(--ok-bg); border: 1px solid var(--ok-border); }
-  .tag.proposed { background: var(--prop-bg); border: 1px solid var(--prop-border); }
-  .toc { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
-    padding: 14px 20px; margin: 24px 0; }
-  .toc ol { margin: 6px 0; padding-left: 22px; }
-  .muted { color: var(--muted); }
-  footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--border);
-    color: var(--muted); font-size: 13.5px; }
 
-  pre.shiki { background: var(--code-bg); }
-  @media (prefers-color-scheme: dark) {
-    pre.shiki span { color: var(--shiki-dark) !important; }
+  }
+#panel-api, #panel-api * { box-sizing: border-box; }
+#panel-api { margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+#panel-api main { max-width: 940px; margin: 0 auto; padding: 40px 24px 96px; }
+#panel-api h1 { font-size: 30px; line-height: 1.25; margin: 0 0 4px; }
+#panel-api h2 { font-size: 22px; margin: 48px 0 12px; padding-top: 16px; border-top: 1px solid var(--border); }
+#panel-api h3 { font-size: 17px; margin: 28px 0 8px; }
+#panel-api p, #panel-api ul, #panel-api ol { margin: 10px 0; }
+#panel-api li { margin: 4px 0; }
+#panel-api a { color: var(--accent); text-decoration: none; }
+#panel-api a:hover { text-decoration: underline; }
+#panel-api .subtitle { color: var(--muted); margin: 0 0 20px; font-size: 17px; }
+#panel-api .banner { border: 1px solid; border-radius: 8px; padding: 12px 16px; margin: 20px 0; font-size: 15px; }
+#panel-api .banner.warn { background: var(--warn-bg); border-color: var(--warn-border); }
+#panel-api .banner.ok { background: var(--ok-bg); border-color: var(--ok-border); }
+#panel-api .banner.info { background: var(--prop-bg); border-color: var(--prop-border); }
+#panel-api code, #panel-api pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+#panel-api code { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px;
+    padding: 1px 5px; font-size: 13.5px; }
+#panel-api pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px; overflow-x: auto; font-size: 13.5px; line-height: 1.55; }
+#panel-api pre code { background: none; border: none; padding: 0; }
+#panel-api table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+#panel-api th, #panel-api td { border: 1px solid var(--border); padding: 7px 11px; text-align: left; vertical-align: top; }
+#panel-api th { background: var(--code-bg); white-space: nowrap; }
+#panel-api td code { white-space: nowrap; }
+#panel-api td:first-child { white-space: nowrap; }
+#panel-api .tag { display: inline-block; font-size: 11.5px; font-weight: 600; border-radius: 10px;
+    padding: 1px 9px; vertical-align: 2px; margin-left: 6px; }
+#panel-api .tag.shipped { background: var(--ok-bg); border: 1px solid var(--ok-border); }
+#panel-api .tag.proposed { background: var(--prop-bg); border: 1px solid var(--prop-border); }
+#panel-api .toc { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 20px; margin: 24px 0; }
+#panel-api .toc ol { margin: 6px 0; padding-left: 22px; }
+#panel-api .muted { color: var(--muted); }
+#panel-api footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--border);
+    color: var(--muted); font-size: 13.5px; }
+#panel-api pre.shiki { background: var(--code-bg); }
+@media (prefers-color-scheme: dark) {#panel-api pre.shiki span { color: var(--shiki-dark) !important; }
+
   }
 </style>
+
 <style>
-  /* Tab chrome and the live-demo pane. The reference styles above own all
-     typography, so this block only adds layout the two-tab page needs. */
-  .tabs { max-width: 940px; margin: 0 auto; padding: 24px 24px 0; display: flex; flex-wrap: wrap; gap: 4px;
-    border-bottom: 1px solid var(--border); }
-  .tabs button { font: inherit; font-size: 15px; color: var(--muted); background: none;
-    border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0;
-    padding: 9px 18px; cursor: pointer; margin-bottom: -1px; }
-  .tabs button:hover { color: var(--fg); }
-  .tabs button[aria-selected="true"] { color: var(--fg); background: var(--bg);
-    border-color: var(--border); font-weight: 600; }
+  :root {
+    --ink: #17231d; --muted: #65736b; --paper: #f4f1e8; --card: #fffef9;
+    --line: #d7d8ce; --rule: rgba(23, 35, 29, .09);
+    --orange: #ff6d2e; --orange-soft: #fff0e7;
+    --green: #176b4b; --green-soft: #e4f4ec;
+    --blue: #3767c8; --blue-soft: #e8eefc;
+    --purple: #7753b4; --purple-soft: #f0eafd;
+    --grid: rgba(23, 35, 29, .035);
+    --diagram: #faf9f3; --diagram-line: #e4e3d9; --dot: #c7cbc2;
+    --shadow: 0 14px 34px rgba(30, 43, 36, .07);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #e7ece7; --muted: #9aa79f; --paper: #12160f; --card: #1a1f18;
+      --line: #2c3329; --rule: rgba(231, 236, 231, .12);
+      --orange: #ff8a55; --orange-soft: #35211a;
+      --green: #6ad3a4; --green-soft: #14271e;
+      --blue: #8fb2ff; --blue-soft: #182031;
+      --purple: #c0a4f0; --purple-soft: #221b30;
+      --grid: rgba(231, 236, 231, .035);
+      --diagram: #161b13; --diagram-line: #2c3329; --dot: #3b453a;
+      --shadow: 0 14px 34px rgba(0, 0, 0, .35);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; color: var(--ink);
+    background:
+      radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--orange) 12%, transparent), transparent 24rem),
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px),
+      var(--paper);
+    background-size: auto, 28px 28px, 28px 28px, auto;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  button, input, select { font: inherit; }
+  .shell { width: min(1180px, calc(100% - 40px)); margin: 0 auto; }
+  a { color: var(--blue); }
+
+  header.top { padding: 60px 0 26px; }
+  .eyebrow { display: flex; align-items: center; gap: 10px; color: var(--orange);
+    font-size: 12px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+  .eyebrow::before { content: ""; width: 28px; height: 2px; background: currentColor; }
+  h1 { max-width: 900px; margin: 16px 0 12px; font-family: Georgia, "Times New Roman", serif;
+    font-size: clamp(40px, 6vw, 74px); font-weight: 500; letter-spacing: -.05em; line-height: .95; }
+  .lede { display: flex; justify-content: space-between; align-items: end; gap: 36px; flex-wrap: wrap; }
+  .lede p { max-width: 620px; margin: 0; color: var(--muted); font-size: clamp(15px, 1.7vw, 19px); line-height: 1.5; }
+  .stamp { flex: none; color: var(--muted); font-size: 12px; text-align: right; }
+  .stamp strong { display: block; color: var(--ink); font-family: Georgia, serif; font-size: 32px; font-weight: 500; line-height: 1; }
+
+  /* Tabs */
+  .tabs { position: sticky; top: 0; z-index: 20; padding: 12px 0;
+    background: color-mix(in srgb, var(--paper) 88%, transparent);
+    border-block: 1px solid var(--rule); backdrop-filter: blur(14px); }
+  .tabs-inner { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; }
+  .tabs-inner::-webkit-scrollbar { display: none; }
+  .tabs button { height: 38px; padding: 0 16px; white-space: nowrap; color: var(--muted);
+    background: transparent; border: 1px solid transparent; border-radius: 999px; cursor: pointer; }
+  .tabs button:hover { color: var(--ink); background: color-mix(in srgb, var(--card) 60%, transparent); }
+  .tabs button[aria-selected="true"] { color: var(--paper); background: var(--ink); font-weight: 600; }
   [role="tabpanel"][hidden] { display: none; }
 
-  .demo { max-width: 1180px; margin: 0 auto; padding: 32px 24px 96px; }
-  .demo h1 { font-size: 26px; margin: 0 0 6px; }
-  .steps { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0; padding: 0; list-style: none; }
-  .steps li { font-size: 13px; border: 1px solid var(--border); border-radius: 999px;
-    padding: 4px 12px; color: var(--muted); background: var(--code-bg); }
-  .steps li[data-state="active"] { border-color: var(--accent); color: var(--accent); }
-  .steps li[data-state="done"] { border-color: var(--ok-border); background: var(--ok-bg); color: var(--fg); }
-  .steps li[data-state="failed"] { border-color: var(--warn-border); background: var(--warn-bg); color: var(--fg); }
+  main { padding: 34px 0 90px; }
+  .section { margin-bottom: 46px; }
+  .section-head { display: grid; grid-template-columns: 108px 1fr; align-items: baseline; gap: 18px; margin-bottom: 18px; }
+  .section-index { color: var(--orange); font: 700 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .1em; }
+  .section h2 { margin: 0; font: 500 clamp(24px, 3.2vw, 34px)/1.05 Georgia, serif; letter-spacing: -.03em; }
+  .section h2 + .sub { margin: 6px 0 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
 
-  .panes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-top: 20px; }
-  @media (max-width: 900px) { .panes { grid-template-columns: minmax(0, 1fr); } }
-  .pane { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
-  .pane > header { font-size: 13px; font-weight: 600; padding: 8px 12px;
-    border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; gap: 12px; }
-  .pane > header .muted { font-weight: 400; }
-  #terminal { margin: 0; height: 460px; overflow: auto; padding: 12px;
-    font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; background: var(--code-bg); }
-  #app-frame { width: 100%; height: 460px; border: 0; background: var(--bg); display: block; }
-  #app-frame-empty { height: 460px; display: flex; align-items: center; justify-content: center;
-    color: var(--muted); font-size: 14px; padding: 0 24px; text-align: center; }
-  #app-frame-empty[hidden] { display: none; }
-  #app-frame-empty p { margin: 0; }
+  /* Cards */
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .card { min-width: 0; overflow: hidden; background: var(--card); border: 1px solid var(--line);
+    border-radius: 16px; }
+  .card-body { padding: 16px 18px; }
+  .card h3 { margin: 0 0 6px; font-size: 16px; line-height: 1.2; letter-spacing: -.01em; }
+  .card p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+  .kind { display: inline-block; padding: 4px 8px; border-radius: 999px; font-size: 10px;
+    font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+  .kind.host { color: var(--blue); background: var(--blue-soft); }
+  .kind.guest { color: var(--green); background: var(--green-soft); }
+  .kind.live { color: var(--orange); background: var(--orange-soft); }
 
-  table.results { width: auto; }
-  table.results td:last-child { white-space: normal; }
+  /* KPI tiles */
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .kpi { padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+  .kpi dt { margin: 0 0 4px; color: var(--muted); font-size: 11px; font-weight: 700;
+    letter-spacing: .08em; text-transform: uppercase; }
+  .kpi dd { margin: 0; font: 500 15px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+    word-break: break-word; }
 
-  /* Tab 3: the recorded real run. */
-  #real-terminal, #real-source { margin: 0; height: 460px; overflow: auto; padding: 12px;
-    font-size: 12px; line-height: 1.5; white-space: pre; background: var(--code-bg); }
-  #real-terminal { white-space: pre-wrap; word-break: break-word; }
-  #real-run-select, #real-source-select { font: inherit; font-size: 12px; background: var(--bg); color: var(--fg);
-    border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
-  @media (prefers-color-scheme: dark) { #real-play, #start { color: #0d1117 !important; } }
+  /* Diagram */
+  .diagram { position: relative; padding: 14px; background: var(--diagram);
+    border: 1px solid var(--diagram-line); border-radius: 16px; overflow: hidden; }
+  .diagram::before { content: ""; position: absolute; inset: 0; opacity: .45;
+    background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 14px 14px; }
+  .diagram svg { position: relative; display: block; width: 100%; height: auto; overflow: visible; }
+  .caption { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+  /* Panes */
+  .pane { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .pane > header { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    padding: 9px 14px; border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 600; }
+  .pane > header .muted { color: var(--muted); font-weight: 400; }
+  .pane pre { margin: 0; padding: 12px 14px; overflow: auto; background: transparent;
+    font: 11.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+
+  /* Steps */
+  .steps { margin: 0; padding: 0; list-style: none; counter-reset: step; display: grid; gap: 10px; }
+  .steps li { counter-increment: step; display: grid; grid-template-columns: 30px minmax(0, 1fr);
+    gap: 12px; align-items: start; }
+  .steps li::before { content: counter(step); display: grid; place-items: center; width: 28px; height: 28px;
+    color: var(--orange); background: var(--orange-soft); border-radius: 999px;
+    font: 700 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .steps h3 { margin: 4px 0 6px; font-size: 14px; font-weight: 600; }
+  .steps pre { margin: 0; padding: 10px 12px; overflow-x: auto; background: var(--card);
+    border: 1px solid var(--line); border-radius: 10px;
+    font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+
+  details.raw { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 12px 16px; margin-bottom: 10px; }
+  details.raw > summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+  details.raw pre { margin: 12px 0 0; max-height: 460px; overflow: auto;
+    font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+
+  .btn { height: 38px; padding: 0 16px; color: var(--paper); background: var(--ink);
+    border: 1px solid var(--ink); border-radius: 999px; cursor: pointer; font-weight: 600; font-size: 13px; }
+  .btn:hover:not(:disabled) { background: var(--orange); border-color: var(--orange); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.ghost { color: var(--ink); background: transparent; border-color: var(--line); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+  .banner { display: flex; gap: 10px; align-items: flex-start; padding: 12px 16px; margin: 0 0 14px;
+    border: 1px solid var(--line); border-radius: 12px; font-size: 13px; line-height: 1.5; background: var(--card); }
+  .banner.warn { color: var(--ink); background: var(--orange-soft); border-color: var(--orange); }
+  .banner[hidden] { display: none; }
+
+  #demo-frame { width: 100%; height: 440px; border: 0; display: block; background: transparent; }
+  #impl-root { min-height: 460px; }
+
+  footer.bottom { padding: 24px 0 44px; color: var(--muted); border-top: 1px solid var(--rule); font-size: 12px; }
+  footer.bottom .shell { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+
+  @media (max-width: 1000px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 720px) {
+    .shell { width: min(100% - 24px, 1180px); }
+    header.top { padding: 36px 0 20px; }
+    .lede { align-items: start; flex-direction: column; gap: 16px; }
+    .stamp { text-align: left; }
+    .section-head { grid-template-columns: 1fr; gap: 4px; }
+    .grid, .grid.two { grid-template-columns: 1fr; }
+    #demo-frame { height: 520px; }
+  }
 </style>
 </head>
 <body>
 
-<div class="tabs" role="tablist" aria-label="Sections">
-  <button role="tab" id="tab-api" aria-controls="panel-api" aria-selected="false" tabindex="-1">Proposed API</button>
-  <button role="tab" id="tab-real" aria-controls="panel-real" aria-selected="true" tabindex="0">Real stereOS</button>
-  <button role="tab" id="tab-demo" aria-controls="panel-demo" aria-selected="false" tabindex="-1">Browser demo (real engine, simulated VM)</button>
+<header class="top shell">
+  <div class="eyebrow">stereOS × Smithers</div>
+  <h1>Smithers inside a real VM</h1>
+  <div class="lede">
+    <p>A Smithers workflow executing inside a real stereOS VM. Live below.</p>
+    <div class="stamp"><strong id="stamp-value">2.2 s</strong><span>warm run, host to guest and back</span></div>
+  </div>
+</header>
+
+<nav class="tabs" aria-label="Sections">
+  <div class="shell tabs-inner" role="tablist">
+    <button role="tab" id="tab-live" aria-controls="panel-live" aria-selected="true" tabindex="0">Live demo</button>
+    <button role="tab" id="tab-real" aria-controls="panel-real" aria-selected="false" tabindex="-1">How it works</button>
+    <button role="tab" id="tab-impl" aria-controls="panel-impl" aria-selected="false" tabindex="-1">Implementation</button>
+    <button role="tab" id="tab-api" aria-controls="panel-api" aria-selected="false" tabindex="-1">Proposed API</button>
+  </div>
+</nav>
+
+<main>
+
+<!-- ── Live demo ─────────────────────────────────────────────────────────── -->
+<div role="tabpanel" id="panel-live" aria-labelledby="tab-live">
+<div class="shell">
+
+  <div class="banner warn" id="offline-banner" hidden>
+    <span>The demo host is unreachable, so nothing is running now. The
+    <a href="#real" id="offline-link">recorded runs</a> are unedited captures of the same workflows.</span>
+  </div>
+
+  <div class="section">
+    <div class="section-head">
+      <span class="section-index">01 / 03</span>
+      <div>
+        <h2>Start a run</h2>
+        <p class="sub">Each button launches a real workflow on a booted stereOS VM.</p>
+      </div>
+    </div>
+
+    <div class="diagram" id="flow-diagram"><svg viewBox="0 0 1080 210" role="img" aria-label="Flow: the Smithers engine on the host drives a Sandbox provider over SSH into a stereOS VM, where Bun runs the child workflow and returns result JSON to the host.">
+  <defs>
+    <marker id="fd-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="currentColor" />
+    </marker>
+  </defs>
+  <g font-family="Inter, ui-sans-serif, system-ui, sans-serif" color="var(--muted)">
+
+    <!-- Host side -->
+    <rect x="4" y="30" width="392" height="104" rx="14" fill="none" stroke="var(--blue)" stroke-width="1" stroke-dasharray="4 4" opacity=".7" />
+    <text x="18" y="22" font-size="11" font-weight="800" letter-spacing=".08em" fill="var(--blue)">HOST · DEBIAN ON GCE</text>
+
+    <rect x="22" y="52" width="164" height="60" rx="11" fill="var(--card)" stroke="var(--line)" />
+    <text x="104" y="78" font-size="13" font-weight="600" text-anchor="middle" fill="var(--ink)">Smithers engine</text>
+    <text x="104" y="96" font-size="11" text-anchor="middle" fill="var(--muted)">scheduler, event log</text>
+
+    <rect x="214" y="52" width="164" height="60" rx="11" fill="var(--card)" stroke="var(--line)" />
+    <text x="296" y="78" font-size="13" font-weight="600" text-anchor="middle" fill="var(--ink)">&#60;Sandbox&#62; provider</text>
+    <text x="296" y="96" font-size="11" text-anchor="middle" fill="var(--muted)">createCommandSandboxProvider</text>
+
+    <path d="M186 82 H210" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#fd-arrow)" />
+
+    <!-- SSH hop -->
+    <path d="M378 82 H452" stroke="var(--orange)" stroke-width="1.8" fill="none" marker-end="url(#fd-arrow)" />
+    <text x="415" y="72" font-size="11" font-weight="700" text-anchor="middle" fill="var(--orange)">SSH</text>
+
+    <!-- Guest side -->
+    <rect x="456" y="30" width="620" height="104" rx="14" fill="none" stroke="var(--green)" stroke-width="1" stroke-dasharray="4 4" opacity=".7" />
+    <text x="470" y="22" font-size="11" font-weight="800" letter-spacing=".08em" fill="var(--green)">GUEST · stereOS MIXTAPE VM · QEMU/KVM</text>
+
+    <rect x="474" y="52" width="180" height="60" rx="11" fill="var(--card)" stroke="var(--line)" />
+    <text x="564" y="78" font-size="13" font-weight="600" text-anchor="middle" fill="var(--ink)">guest-runner.sh</text>
+    <text x="564" y="96" font-size="11" text-anchor="middle" fill="var(--muted)">checks paths, execs Bun</text>
+
+    <path d="M654 82 H682" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#fd-arrow)" />
+
+    <rect x="686" y="52" width="188" height="60" rx="11" fill="var(--card)" stroke="var(--line)" />
+    <text x="780" y="78" font-size="13" font-weight="600" text-anchor="middle" fill="var(--ink)">Bun 1.2.21</text>
+    <text x="780" y="96" font-size="11" text-anchor="middle" fill="var(--muted)">runs child-workflow.js</text>
+
+    <path d="M874 82 H902" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#fd-arrow)" />
+
+    <rect x="906" y="52" width="152" height="60" rx="11" fill="var(--green-soft)" stroke="var(--green)" />
+    <text x="982" y="78" font-size="13" font-weight="600" text-anchor="middle" fill="var(--ink)">guest facts</text>
+    <text x="982" y="96" font-size="11" text-anchor="middle" fill="var(--muted)">+ computed result</text>
+
+    <!-- Return path -->
+    <path d="M982 118 V166 H104 V116" stroke="var(--muted)" stroke-width="1.5" fill="none" stroke-dasharray="5 4" marker-end="url(#fd-arrow)" />
+    <text x="543" y="182" font-size="11" font-weight="700" text-anchor="middle" fill="var(--muted)">result JSON, written to SMITHERS_SANDBOX_RESULT_PATH</text>
+  </g>
+</svg></div>
+    <p class="caption">The engine stays on the host. The sandbox body runs in the guest.</p>
+
+    <div class="row" style="margin: 16px 0 12px;">
+      <button class="btn" id="run-hello" data-workflow="hello">hello</button>
+      <button class="btn" id="run-pipeline" data-workflow="pipeline">pipeline</button>
+      <button class="btn" id="run-approval" data-workflow="approval-demo">approval-demo</button>
+      <span class="muted" id="live-status" style="color: var(--muted); font-size: 13px;">idle</span>
+    </div>
+
+    <div class="pane">
+      <header><span>Run UI, served from the demo host</span><span class="muted" id="frame-note">connecting</span></header>
+      <iframe id="demo-frame" title="stereOS demo runs" src="about:blank"></iframe>
+    </div>
+    <p class="caption">Built from <code>smthrs/ui</code> components. Approve here to release a parked run.</p>
+  </div>
+
+  <div class="section">
+    <div class="section-head">
+      <span class="section-index">02 / 03</span>
+      <div>
+        <h2>Guest evidence</h2>
+        <p class="sub">From the finished run's own output. The host is Debian on GCE.</p>
+      </div>
+    </div>
+    <dl class="kpis" id="live-kpis">
+      <div class="kpi"><dt>Guest host</dt><dd id="kpi-host">—</dd></div>
+      <div class="kpi"><dt>Guest kernel</dt><dd id="kpi-kernel">—</dd></div>
+      <div class="kpi"><dt>Guest OS</dt><dd id="kpi-os">—</dd></div>
+      <div class="kpi"><dt>Guest runtime</dt><dd id="kpi-bun">—</dd></div>
+      <div class="kpi"><dt>Run duration</dt><dd id="kpi-elapsed">—</dd></div>
+      <div class="kpi"><dt>Write outside workspace</dt><dd id="kpi-restrict">—</dd></div>
+    </dl>
+  </div>
+
+  <div class="section">
+    <div class="section-head">
+      <span class="section-index">03 / 03</span>
+      <div>
+        <h2>What the edge allows</h2>
+        <p class="sub">A guard exposes four routes. The Smithers RPC surface is not public.</p>
+      </div>
+    </div>
+    <div class="grid">
+      <div class="card"><div class="card-body"><span class="kind live">Allowlist</span>
+        <h3>Three workflow ids</h3><p>Input is chosen server-side.</p></div></div>
+      <div class="card"><div class="card-body"><span class="kind live">Capacity</span>
+        <h3>2 concurrent, queued</h3><p>Extra starts queue. Per IP: 6 starts per 10 minutes.</p></div></div>
+      <div class="card"><div class="card-body"><span class="kind live">Authority</span>
+        <h3>Per-run approval token</h3><p>256 bits, compared in constant time.</p></div></div>
+      <div class="card"><div class="card-body"><span class="kind live">Lifetime</span>
+        <h3>5 minute ceiling</h3><p>The guard cancels anything that outlives it.</p></div></div>
+      <div class="card"><div class="card-body"><span class="kind live">Transport</span>
+        <h3>Outbound tunnel only</h3><p>cloudflared dials out. No inbound port.</p></div></div>
+      <div class="card"><div class="card-body"><span class="kind live">Isolation</span>
+        <h3>Loopback gateway</h3><p>Bearer token in a root-owned 0600 file.</p></div></div>
+    </div>
+  </div>
+
+</div>
 </div>
 
+<!-- ── How it works ──────────────────────────────────────────────────────── -->
+<div role="tabpanel" id="panel-real" aria-labelledby="tab-real" hidden>
+<div class="shell">
+
+  <div class="section">
+    <div class="section-head">
+      <span class="section-index">01 / 04</span>
+      <div>
+        <h2>Two hosts, one provider</h2>
+        <p class="sub">Recorded 2026-08-12, committed beside the code that produced them.</p>
+      </div>
+    </div>
+    <div class="diagram"><svg viewBox="0 0 1080 210" role="img" aria-label="Flow: the Smithers engine on the host drives a Sandbox provider over SSH into a stereOS VM, where Bun runs the child workflow and returns result JSON to the host.">
+  <defs>
+    <marker id="fd-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="currentColor" />
+    </marker>
+  </defs>
+  <g font-family="Inter, ui-sans-serif, system-ui, sans-serif" color="var(--muted)">
+
+    <!-- Host side -->
+    <rect x="4" y="30" width="392" height="104" rx="14" fill="none" stroke="var(--blue)" stroke-width="1" stroke-dasharray="4 4" opacity=".7" />
+    <text x="18" y="22" font-size="11" font-weight="800" letter-spacing=".08em" fill="var(--blue)">HOST · DEBIAN ON GCE</text>
+
+    <rect x="22" y="52" width="164" height="60" rx="11" fill="var(--card)" stroke="var(--line)" />
+    <text x="104" y="78" font-size="13" font-weight="600" text-anchor="middle" fill="var(--ink)">Smithers engine</text>
+    <text x="104" y="96" font-size="11" text-anchor="middle" fill="var(--muted)">scheduler, event log</text>
+
+    <rect x="214" y="52" width="164" height="60" rx="11" fill="var(--card)" stroke="var(--line)" />
+    <text x="296" y="78" font-size="13" font-weight="600" text-anchor="middle" fill="var(--ink)">&#60;Sandbox&#62; provider</text>
+    <text x="296" y="96" font-size="11" text-anchor="middle" fill="var(--muted)">createCommandSandboxProvider</text>
+
+    <path d="M186 82 H210" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#fd-arrow)" />
+
+    <!-- SSH hop -->
+    <path d="M378 82 H452" stroke="var(--orange)" stroke-width="1.8" fill="none" marker-end="url(#fd-arrow)" />
+    <text x="415" y="72" font-size="11" font-weight="700" text-anchor="middle" fill="var(--orange)">SSH</text>
+
+    <!-- Guest side -->
+    <rect x="456" y="30" width="620" height="104" rx="14" fill="none" stroke="var(--green)" stroke-width="1" stroke-dasharray="4 4" opacity=".7" />
+    <text x="470" y="22" font-size="11" font-weight="800" letter-spacing=".08em" fill="var(--green)">GUEST · stereOS MIXTAPE VM · QEMU/KVM</text>
+
+    <rect x="474" y="52" width="180" height="60" rx="11" fill="var(--card)" stroke="var(--line)" />
+    <text x="564" y="78" font-size="13" font-weight="600" text-anchor="middle" fill="var(--ink)">guest-runner.sh</text>
+    <text x="564" y="96" font-size="11" text-anchor="middle" fill="var(--muted)">checks paths, execs Bun</text>
+
+    <path d="M654 82 H682" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#fd-arrow)" />
+
+    <rect x="686" y="52" width="188" height="60" rx="11" fill="var(--card)" stroke="var(--line)" />
+    <text x="780" y="78" font-size="13" font-weight="600" text-anchor="middle" fill="var(--ink)">Bun 1.2.21</text>
+    <text x="780" y="96" font-size="11" text-anchor="middle" fill="var(--muted)">runs child-workflow.js</text>
+
+    <path d="M874 82 H902" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#fd-arrow)" />
+
+    <rect x="906" y="52" width="152" height="60" rx="11" fill="var(--green-soft)" stroke="var(--green)" />
+    <text x="982" y="78" font-size="13" font-weight="600" text-anchor="middle" fill="var(--ink)">guest facts</text>
+    <text x="982" y="96" font-size="11" text-anchor="middle" fill="var(--muted)">+ computed result</text>
+
+    <!-- Return path -->
+    <path d="M982 118 V166 H104 V116" stroke="var(--muted)" stroke-width="1.5" fill="none" stroke-dasharray="5 4" marker-end="url(#fd-arrow)" />
+    <text x="543" y="182" font-size="11" font-weight="700" text-anchor="middle" fill="var(--muted)">result JSON, written to SMITHERS_SANDBOX_RESULT_PATH</text>
+  </g>
+</svg></div>
+    <p class="caption">The path both recordings take.</p>
+    <div class="grid two" id="host-cards" style="margin-top: 14px;"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-head">
+      <span class="section-index">02 / 04</span>
+      <div>
+        <h2>One run, step by step</h2>
+        <p class="sub">Every excerpt is lifted from the committed x86_64 KVM capture.</p>
+      </div>
+    </div>
+    <ol class="steps" id="walkthrough"></ol>
+  </div>
+
+  <div class="section">
+    <div class="section-head">
+      <span class="section-index">03 / 04</span>
+      <div>
+        <h2>Full captures</h2>
+        <p class="sub">Unedited terminal output, one per host.</p>
+      </div>
+    </div>
+    <div id="raw-captures"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-head">
+      <span class="section-index">04 / 04</span>
+      <div>
+        <h2>Found while building this</h2>
+        <p class="sub">A registry defect that blocks <code>mb pull coder-arm64:latest</code>.</p>
+      </div>
+    </div>
+    <div class="grid two">
+      <div class="card"><div class="card-body"><span class="kind host">Served blob</span>
+        <h3><code style="font-size:12px">d335283a5c0c9fde…</code></h3>
+        <p>752,461,648 stable bytes. <code>zstd -t</code> reports <code>Decoding error (36): Data corruption detected</code>.</p></div></div>
+      <div class="card"><div class="card-body"><span class="kind guest">Declared digest</span>
+        <h3><code style="font-size:12px">bf212e026f722ccc…</code></h3>
+        <p>The qcow2 blob at the same tag is clean and rebuilds the expected image. Republishing the one raw blob fixes the pull.</p></div></div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ── Implementation ────────────────────────────────────────────────────── -->
+<div role="tabpanel" id="panel-impl" aria-labelledby="tab-impl" hidden>
+<div class="shell">
+  <div class="section">
+    <div class="section-head">
+      <span class="section-index">01 / 01</span>
+      <div>
+        <h2>Every source that runs this</h2>
+        <p class="sub">Provider, guest workflows, demo service, and this page. Read from the repository at build time.</p>
+      </div>
+    </div>
+    <div id="impl-root"></div>
+  </div>
+</div>
+</div>
+
+<!-- ── Proposed API ──────────────────────────────────────────────────────── -->
 <div role="tabpanel" id="panel-api" aria-labelledby="tab-api" hidden>
 <main>
 
@@ -492,180 +875,24 @@ Proposed-status items (§5, §7.4) do not exist in either codebase yet.</p>
 </main>
 </div>
 
-<div role="tabpanel" id="panel-real" aria-labelledby="tab-real">
-<div class="demo">
+</main>
 
-<h1>Smithers running inside a real stereOS VM</h1>
-<p class="subtitle">A Smithers <code>&lt;Sandbox&gt;</code> uploads its bundled child workflow, then the
-guest's Bun runtime executes that workflow inside a stereOS mixtape VM.</p>
-
-<div class="banner ok">
-<strong>This one really boots stereOS.</strong> The recordings below are captured output from
-<code>apps/stereos-site/real/</code>, not simulations. Two hosts, one provider: the published
-<code>coder</code> mixtape on Apple's hypervisor (stereOS 2026.03.04.0, Linux 6.12.74 aarch64), and an
-<code>x86_64</code> <code>coder-dev</code> mixtape built from source and booted
-under QEMU/KVM on a nested-virtualization GCE instance (Linux 6.18.33). On each host, the exact command
-shown in the recording drives a <code>&lt;Sandbox&gt;</code> through an SSH provider built on
-<code>createCommandSandboxProvider</code>. The provider bundles <code>child-workflow.tsx</code>, and Bun
-1.2.21 inside the guest executes its guest-facts task and prime-sieve computation.
-</div>
-
-<p>The prompt hash is consistency evidence only. It confirms that the recorded input and guest output
-match, but it is not provenance or attestation. The raw terminal capture also shows the guest-specific
-kernel, runtime architecture, restriction probes, workflow marker, protocol run ID, and computed prime
-result. Pick a host from the dropdown to inspect the complete capture.</p>
-
-<div class="panes">
-  <div class="pane">
-    <header><select id="real-run-select" aria-label="Recorded run"></select><span class="muted" id="real-note">recorded run</span></header>
-    <pre id="real-terminal" tabindex="0">Loading…</pre>
+<footer class="bottom">
+  <div class="shell">
+    <span>Sources: <a href="https://github.com/smithersai/smithers/tree/main/apps/stereos-site">apps/stereos-site</a>. Parts of the Proposed API tab marked proposed do not exist.</span>
+    <span>An earlier tab ran this engine under plain Node in a WebContainer, kept at <a href="https://github.com/smithersai/smithers/tree/main/apps/stereos-site/project">project/</a> and <a href="https://github.com/smithersai/smithers/pull/1506">PR #1506</a>.</span>
   </div>
-  <div class="pane">
-    <header><span>Source</span><select id="real-source-select" aria-label="Source file"></select></header>
-    <pre id="real-source" tabindex="0">Loading…</pre>
-  </div>
-</div>
-
-<p><button id="real-play" style="font: inherit; font-size: 15px; padding: 9px 20px; border-radius: 8px;
-  border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer;">Replay</button></p>
-
-<h2>What runs where</h2>
-<table class="results">
-<tr><th>Piece</th><th>Where it runs</th></tr>
-<tr><td>Smithers engine, scheduler, event log</td><td>the host</td></tr>
-<tr><td><code>createCommandSandboxProvider</code> request/result protocol</td><td>the host, unmodified from <code>smthrs/sandbox</code></td></tr>
-<tr><td>The <code>SandboxSession</code> transport</td><td>SSH to the guest's <code>agent</code> user</td></tr>
-<tr><td>The sandbox body</td><td>inside the stereOS VM</td></tr>
-</table>
-
-<h2>The runtime gap, closed for this run</h2>
-<p>Mixtapes ship agent harnesses but no JavaScript runtime. The bootstrap scripts therefore copy the
-official Bun 1.2.21 musl build and its small compatibility libraries into the guest. The provider uploads
-a bundle of the real child workflow. <code>guest-runner.sh</code> only checks the two paths and invokes Bun.
-Bun reads <code>SMITHERS_SANDBOX_REQUEST_PATH</code> and writes all result JSON to
-<code>SMITHERS_SANDBOX_RESULT_PATH</code>. A future mixtape with Bun already installed can omit the bootstrap
-runtime copy.</p>
-
-<h2>What the guest reported</h2>
-<p>Read the tail of the recording. <code>writeOutsideWorkspace: denied</code> is the restriction model
-holding: the <code>agent</code> user cannot write to <code>/etc</code>. <code>nixCli: on PATH</code> remains a
-gap. The restricted PATH comes from the agent's login shell, while a non-interactive SSH exec sees the
-full system profile.</p>
-
-<h2>Found while building this</h2>
-<p>The registry serves the raw blob as
-<code>d335283a5c0c9fdeef22fe48740cb74d0c973b69373bef651e76aaac012a21e2</code>, while its declared digest is
-<code>bf212e026f722ccccd30f273d363f9b8a7245516f7bc1e8d81db67b41245cdeb</code>.
-<code>zstd -t</code> reports <code>Decoding error (36): Data corruption detected</code>. The qcow2 blob is
-clean and reconstructs the expected image. Republishing that one raw blob makes <code>mb pull</code> work.</p>
-
-<footer>
-<p>Sources and raw recordings are committed at
-<a href="https://github.com/smithersai/smithers/tree/main/apps/stereos-site/real"><code>apps/stereos-site/real/</code></a>.
-The Proposed API tab remains a design reference; its parts marked proposed do not exist.</p>
 </footer>
 
-</div>
-</div>
-
-<div role="tabpanel" id="panel-demo" aria-labelledby="tab-demo" hidden>
-<div class="demo">
-
-<h1>Smithers running in your browser</h1>
-<p class="subtitle">A WebContainer boots Node, installs the published <code>smthrs</code> package, and runs
-real workflows against the PGlite backend.</p>
-
-<div class="banner info">
-<strong>This tab simulates the seam; the “Real stereOS” tab boots the VM.</strong> The engine below is the
-published <code>smthrs</code> package on npm, running under Node inside a WebContainer in this tab. The
-workflows, the PGlite database, the gateway, and the approval decision are all real. The sandbox provider
-uses the same provider kit and the same request/result contract as the stereOS provider, but its
-SSH&nbsp;→&nbsp;microVM transport is swapped for in-container <code>exec</code>, because a browser cannot
-boot QEMU. Nothing in <em>this</em> tab runs stereOS.
-</div>
-
-<p>No API keys and no agent seats are involved. The three workflows use literal-value tasks and a
-human approval gate, so every step is deterministic.</p>
-
-<p><button id="start" style="font: inherit; font-size: 15px; padding: 9px 20px; border-radius: 8px;
-  border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer;">Start the demo</button>
-<span id="start-note" class="muted" style="margin-left: 10px; font-size: 14px;"></span></p>
-
-<ol class="steps" id="steps">
-  <li data-step="boot">Boot container</li>
-  <li data-step="install">npm install smthrs</li>
-  <li data-step="hello">Run hello</li>
-  <li data-step="pipeline">Run pipeline</li>
-  <li data-step="approval">Run approval-demo</li>
-  <li data-step="gateway">Start gateway</li>
-  <li data-step="app">Start web app</li>
-  <li data-step="approved">Approval granted</li>
-</ol>
-
-<div class="panes">
-  <div class="pane">
-    <header><span>Container output</span><span class="muted" id="term-note">idle</span></header>
-    <pre id="terminal" tabindex="0">Press “Start the demo”.</pre>
-  </div>
-  <div class="pane">
-    <header><span>Web app served from inside the container</span><span class="muted" id="frame-note">not started</span></header>
-    <div id="app-frame-empty"><p>The React app is built with <code>smthrs/gateway-react</code> hooks and
-      <code>smthrs/gateway-ui</code> components. It appears here once its vite dev server is up inside the container.</p></div>
-    <iframe id="app-frame" hidden title="Smithers run UI" src="about:blank"></iframe>
-  </div>
-</div>
-
-<h2>Engine-reported results</h2>
-<p>Each row is filled in from the run status the engine wrote, not from the fact that a command exited.</p>
-<table class="results">
-<tr><th>Workflow</th><th>Run id</th><th>Status</th></tr>
-<tr><td><code>hello</code></td><td id="hello-run">Not run</td><td id="hello-status">Not run</td></tr>
-<tr><td><code>pipeline</code></td><td id="pipeline-run">Not run</td><td id="pipeline-status">Not run</td></tr>
-<tr><td><code>approval-demo</code></td><td id="approval-run">Not run</td><td id="approval-status">Not run</td></tr>
-</table>
-
-<h2>How the approval works</h2>
-<p><code>smithers up</code> exits when it reaches the gate, leaving the run in
-<code>waiting-approval</code>. Clicking <strong>Approve</strong> in the panel on the right posts the
-decision through the gateway. The page then resumes the run with
-<code>smithers up workflows/approval-demo.tsx --resume --run-id &lt;id&gt;</code>, and the second task runs.</p>
-
-<h2>Running smthrs under Node</h2>
-<p>The published package targets Bun. Six things make it run under Node, all applied to the project
-mounted in the container:</p>
-<ul>
-  <li><code>overrides.effect</code> pinned to a single version. Without it npm installs about twenty
-    copies of <code>effect</code> and the engine fails its Context lookup.</li>
-  <li>Loader shims that map <code>bun</code>, <code>bun:sqlite</code>, <code>bun:test</code>, and
-    <code>drizzle-orm/bun-sqlite</code> to stubs. Node rejects the <code>bun:</code> URL scheme before
-    any runtime guard can run.</li>
-  <li><code>SMITHERS_BACKEND=pglite</code>, so the store never reaches for <code>bun:sqlite</code>.</li>
-  <li>A one-line postinstall patch to <code>openSmithersBackend.js</code>, so the cross-run memory
-    sidecar is skipped when <code>Bun</code> is undefined.</li>
-  <li>An in-process PGlite client. The PGlite socket server accepts a WebContainer connection but does
-    not complete its PostgreSQL handshake.</li>
-  <li>A single-writer transaction path. Effect 4 does not unwind a nested transaction operation after
-    successful PGlite writes in WebContainer. The demo keeps every write and omits only multi-writer
-    grouping. It runs one writer at a time.</li>
-</ul>
-
-<footer>
-<p>The demo project is committed at
-<a href="https://github.com/smithersai/smithers/tree/main/apps/stereos-site/project"><code>apps/stereos-site/project</code></a>.
-The Proposed API tab describes an integration that does not exist yet.</p>
-</footer>
-
-</div>
-</div>
-
-<script type="module" src="./demo.js?v=20260813-blank-lines"></script>
-<script type="module" src="./real.js?v=20260813-bun-guest-2"></script>
+<script type="module" src="./live.js?v=667984c0efec"></script>
+<script type="module" src="./evidence.js?v=667984c0efec"></script>
+<script type="module" src="./impl.js?v=667984c0efec"></script>
 <script>
-  const tabs = [
-    { hash: '#api', tab: document.getElementById('tab-api'), panel: document.getElementById('panel-api') },
-    { hash: '#real', tab: document.getElementById('tab-real'), panel: document.getElementById('panel-real') },
-    { hash: '#demo', tab: document.getElementById('tab-demo'), panel: document.getElementById('panel-demo') },
-  ];
+  const tabs = ['live', 'real', 'impl', 'api'].map((key) => ({
+    hash: `#${key}`,
+    tab: document.getElementById(`tab-${key}`),
+    panel: document.getElementById(`panel-${key}`),
+  }));
   function selectTab(entry, { focus = false, updateHash = true } = {}) {
     for (const other of tabs) {
       const selected = other === entry;
@@ -675,6 +902,7 @@ The Proposed API tab describes an integration that does not exist yet.</p>
     }
     if (focus) entry.tab.focus();
     if (updateHash) history.replaceState(null, '', entry.hash);
+    window.dispatchEvent(new CustomEvent('stereos-tab', { detail: entry.hash.slice(1) }));
   }
   for (const entry of tabs) {
     entry.tab.addEventListener('click', () => selectTab(entry));
@@ -691,7 +919,11 @@ The Proposed API tab describes an integration that does not exist yet.</p>
       }
     });
   }
-  const opening = tabs.find((entry) => entry.hash === location.hash) ?? tabs[1];
+  document.getElementById('offline-link')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    selectTab(tabs[1]);
+  });
+  const opening = tabs.find((entry) => entry.hash === location.hash) ?? tabs[0];
   selectTab(opening, { updateHash: Boolean(location.hash) });
 </script>
 </body>

@@ -1,0 +1,51 @@
+<svg viewBox="0 0 1080 210" role="img" aria-label="Flow: the Smithers engine on the host drives a Sandbox provider over SSH into a stereOS VM, where Bun runs the child workflow and returns result JSON to the host.">
+  <defs>
+    <marker id="fd-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="currentColor" />
+    </marker>
+  </defs>
+  <g font-family="Inter, ui-sans-serif, system-ui, sans-serif" color="var(--muted)">
+
+    <!-- Host side -->
+    <rect x="4" y="30" width="392" height="104" rx="14" fill="none" stroke="var(--blue)" stroke-width="1" stroke-dasharray="4 4" opacity=".7" />
+    <text x="18" y="22" font-size="11" font-weight="800" letter-spacing=".08em" fill="var(--blue)">HOST · DEBIAN ON GCE</text>
+
+    <rect x="22" y="52" width="164" height="60" rx="11" fill="var(--card)" stroke="var(--line)" />
+    <text x="104" y="78" font-size="13" font-weight="600" text-anchor="middle" fill="var(--ink)">Smithers engine</text>
+    <text x="104" y="96" font-size="11" text-anchor="middle" fill="var(--muted)">scheduler, event log</text>
+
+    <rect x="214" y="52" width="164" height="60" rx="11" fill="var(--card)" stroke="var(--line)" />
+    <text x="296" y="78" font-size="13" font-weight="600" text-anchor="middle" fill="var(--ink)">&#60;Sandbox&#62; provider</text>
+    <text x="296" y="96" font-size="11" text-anchor="middle" fill="var(--muted)">createCommandSandboxProvider</text>
+
+    <path d="M186 82 H210" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#fd-arrow)" />
+
+    <!-- SSH hop -->
+    <path d="M378 82 H452" stroke="var(--orange)" stroke-width="1.8" fill="none" marker-end="url(#fd-arrow)" />
+    <text x="415" y="72" font-size="11" font-weight="700" text-anchor="middle" fill="var(--orange)">SSH</text>
+
+    <!-- Guest side -->
+    <rect x="456" y="30" width="620" height="104" rx="14" fill="none" stroke="var(--green)" stroke-width="1" stroke-dasharray="4 4" opacity=".7" />
+    <text x="470" y="22" font-size="11" font-weight="800" letter-spacing=".08em" fill="var(--green)">GUEST · stereOS MIXTAPE VM · QEMU/KVM</text>
+
+    <rect x="474" y="52" width="180" height="60" rx="11" fill="var(--card)" stroke="var(--line)" />
+    <text x="564" y="78" font-size="13" font-weight="600" text-anchor="middle" fill="var(--ink)">guest-runner.sh</text>
+    <text x="564" y="96" font-size="11" text-anchor="middle" fill="var(--muted)">checks paths, execs Bun</text>
+
+    <path d="M654 82 H682" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#fd-arrow)" />
+
+    <rect x="686" y="52" width="188" height="60" rx="11" fill="var(--card)" stroke="var(--line)" />
+    <text x="780" y="78" font-size="13" font-weight="600" text-anchor="middle" fill="var(--ink)">Bun 1.2.21</text>
+    <text x="780" y="96" font-size="11" text-anchor="middle" fill="var(--muted)">runs child-workflow.js</text>
+
+    <path d="M874 82 H902" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#fd-arrow)" />
+
+    <rect x="906" y="52" width="152" height="60" rx="11" fill="var(--green-soft)" stroke="var(--green)" />
+    <text x="982" y="78" font-size="13" font-weight="600" text-anchor="middle" fill="var(--ink)">guest facts</text>
+    <text x="982" y="96" font-size="11" text-anchor="middle" fill="var(--muted)">+ computed result</text>
+
+    <!-- Return path -->
+    <path d="M982 118 V166 H104 V116" stroke="var(--muted)" stroke-width="1.5" fill="none" stroke-dasharray="5 4" marker-end="url(#fd-arrow)" />
+    <text x="543" y="182" font-size="11" font-weight="700" text-anchor="middle" fill="var(--muted)">result JSON, written to SMITHERS_SANDBOX_RESULT_PATH</text>
+  </g>
+</svg>

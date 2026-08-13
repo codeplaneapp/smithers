@@ -1,36 +1,43 @@
 # stereos-site
 
-Three-tab page at https://stereos.smithers.sh.
+Four-tab page at https://stereos.smithers.sh.
 
-- **Proposed API** — the stereOS sandbox provider design reference. Tab content
-  is lifted verbatim from `tab1-source/stereos-sandbox-provider.html` at build
-  time; edit that file, not the generated page.
-- **Real stereOS** — recorded transcripts of Smithers runs whose `<Sandbox>`
-  body executed inside booted stereOS mixtape VMs, plus the sources that
-  produced them. Both come from `real/`; see `real/README.md` for the boot
-  recipe, the host details, and the integration gaps.
-- **Browser demo (real engine, simulated VM)** — a WebContainer that boots Node, installs the
-  published `smthrs` package, and runs three real workflows against the PGlite
-  backend. The provider seam is the same; the SSH → microVM transport is
-  swapped for in-container `exec`, so this tab does not run stereOS.
+- **Live demo** — starts real `hello`, `pipeline`, and `approval-demo` runs on
+  the demo host. Each run's sandbox body executes inside a booted stereOS
+  mixtape VM. The page embeds the run UI the host serves and shows the guest
+  facts the run returned. If the host is unreachable the tab says so and points
+  at the recorded runs; it never fabricates a run.
+- **How it works** — the two recorded runs, as a flow diagram, per-host result
+  cards, a stepped walkthrough whose excerpts are sliced out of the committed
+  captures at render time, and the full unedited captures behind disclosures.
+- **Implementation** — a file tree over the sources that actually run the demo,
+  with a viewer and per-file GitHub links. Built from `smthrs/ui` `FileTree`,
+  `Card`, `Badge`, `Button`, and `EmptyState` plus `smthrs/gateway-ui`
+  `StatusPill`.
+- **Proposed API** — the provider design reference, demoted to a secondary tab.
+  Content is lifted verbatim from `tab1-source/stereos-sandbox-provider.html` at
+  build time; edit that file, not the generated page. `build.mjs` scopes the
+  reference stylesheet to `#panel-api` so it cannot reach the rest of the page.
 
 There is deliberately no `package.json` in this directory, so the app stays out
 of the pnpm workspace and the `check:docs` gates, matching `apps/patterns-site`.
+
+The design follows `apps/patterns-site`: card grid, tight type scale, inline
+SVG diagrams, near-zero prose. The page holds about 500 words of visible prose.
 
 ## Layout
 
 | Path | What it is |
 | --- | --- |
-| `page/index.template.html` | Page shell, tab chrome, and tab-2/tab-3 copy. |
-| `page/demo.js` | Drives the container: boot, install, gateway, app, workflows. |
-| `page/real.js` | Replays the tab-3 transcripts and shows the provider sources. |
-| `tab1-source/` | Source document for tab 1. |
-| `real/` | The stereOS provider, guest runner, workflow, host scripts, and the recorded run transcripts that tab 3 renders. |
-| `project/` | The tree mounted into the WebContainer. |
-| `project/workflows/` | `hello`, `pipeline`, `approval-demo`. |
-| `project/app/` | Vite + React UI built on `smthrs/gateway-react` and `smthrs/gateway-ui`. |
-| `project/sandbox/` | The stereOS-shaped provider seam, with in-container exec. |
-| `project/shims/` | Loader shims that let the Bun-targeted package run under Node. |
+| `page/index.template.html` | Page shell, design system, tab chrome, and all copy. |
+| `page/flow-diagram.svg` | The host-to-guest flow diagram, inlined into two tabs. |
+| `page/live.js` | Live demo: backend discovery, run control, guest evidence. |
+| `page/evidence.js` | How it works: result cards, walkthrough excerpts, captures. |
+| `page/impl/main.jsx` | Implementation file tree, bundled by esbuild into `site/impl.js`. |
+| `tab1-source/` | Source document for the Proposed API tab. |
+| `real/` | The provider, guest workflow, host scripts, and recorded captures. |
+| `service/` | The demo service that runs on the GCE host. See `service/README.md`. |
+| `project/` | The retired WebContainer demo, kept for reference (PR #1506). |
 | `site/` | Generated deploy output. Do not edit by hand. |
 | `e2e/` | Playwright check against the deployed site. |
 
@@ -42,56 +49,21 @@ cd apps/stereos-site
 ../status-site/node_modules/.bin/wrangler deploy
 ```
 
-`site/webcontainer-api.js` is bundled separately and only needs regenerating
-when `@webcontainer/api` changes:
-
-```sh
-npx esbuild node_modules/@webcontainer/api/dist/index.js \
-  --bundle --format=esm --minify --outfile=site/webcontainer-api.js
-```
-
-The API is self-hosted rather than loaded from a CDN because the page sets
-`Cross-Origin-Embedder-Policy: require-corp`, which WebContainer needs for
-`crossOriginIsolated`.
+`build.mjs` reads the implementation sources out of the repository, so the
+Implementation tab cannot drift from the code that runs.
 
 ## Test
 
 ```sh
-pnpm install --frozen-lockfile                           # supplies apps/cli's Playwright dependency
+pnpm install --frozen-lockfile                       # supplies apps/cli's Playwright dependency
 node apps/stereos-site/e2e/stereos.e2e.mjs [url]
 ```
 
-The check asserts the COOP/COEP pair and `crossOriginIsolated`, metadata and
-favicon, the Real stereOS default tab, both recorded stereOS runs and registry
-diagnosis, provider sources, the browser demo's honest simulation label, and
-that `hello` and `pipeline` reach the
-engine-reported `finished` state, that `approval-demo` stops at
-`waiting-approval`, and that clicking Approve in the embedded app lets it
-finish. It writes screenshots next to itself. Budget 10–20 minutes: npm install
-runs inside the browser.
-
-## Running smthrs under Node
-
-The published package targets Bun. The mounted project applies six things, all
-verified before deploy:
-
-1. `overrides.effect` pins one `effect` version. Without it npm nests about
-   twenty copies and the engine fails a Context lookup with
-   `Cannot read properties of undefined (reading 'get')`.
-2. `shims/` maps `bun`, `bun:sqlite`, `bun:test`, and `drizzle-orm/bun-sqlite`
-   to stubs. Node rejects the `bun:` URL scheme at load time, before any
-   runtime guard can run.
-3. `SMITHERS_BACKEND=pglite`, plus `tsconfig.json` with `jsx: react-jsx` and
-   `jsxImportSource: smthrs` so tsx compiles JSX with the automatic runtime.
-4. `patch-smthrs.mjs`, a postinstall patch that skips the cross-run memory
-   sidecar when `Bun` is undefined.
-5. An in-process PGlite client replaces `PGLiteSocketServer`. The socket server
-   accepts a WebContainer connection but does not complete its PostgreSQL
-   handshake.
-6. A single-writer transaction path keeps every engine write but omits
-   transaction grouping. Effect 4 does not unwind the nested transaction
-   operation after successful PGlite writes in WebContainer. The demo runs one
-   writer at a time and stops the gateway before it resumes a workflow.
-
-Workflows use `await openSmithersBackend(...)`, not `createSmithers()` — the
-latter is the synchronous `bun:sqlite` path and refuses PGlite.
+The check asserts that the WebContainer simulation tab and its assets are gone,
+that the Live demo tab starts a real run that reaches the engine-reported
+`finished` state and reports `coder-dev` guest facts, that `approval-demo` parks
+at its gate and finishes after the Approve click inside the embedded UI, that
+the guard does not expose gateway RPC, that the file tree opens `service/guard.ts`
+and shows source byte-identical to the repository, and that both recorded
+captures and the Proposed API document still hold their claims. Budget 3-6
+minutes; a cold VM boot on the demo host adds about 30 seconds.
