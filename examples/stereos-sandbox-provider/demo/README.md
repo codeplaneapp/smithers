@@ -76,14 +76,15 @@ in-guest execution.
 
 ## Latency
 
-Measured on the reference host, 2026-08-13, `hello` and `pipeline`:
+Measured on the reference host, 2026-08-13:
 
 | | |
 | --- | --- |
-| Cold boot to guest Bun ready | 25.5 s |
-| Cold boot to a finished demo run | 27.7 s |
-| Warm run, public HTTPS request to finished | 3.2 - 3.5 s |
-| Warm run, engine-reported elapsed | 2.2 - 3.0 s |
+| Cold boot to guest sshd | 25 s |
+| Cold boot to a finished run | 29 s |
+| First run after a cold boot | 4.2 s |
+| Warm run, public HTTPS to finished | 2.2 - 4.1 s |
+| Sandbox node alone | 1.9 - 2.3 s |
 
 A demo run does not pay a kernel boot: `stereos-vm.service` keeps the guest up
 and every run reuses it, so the cold numbers apply only after a host reboot or

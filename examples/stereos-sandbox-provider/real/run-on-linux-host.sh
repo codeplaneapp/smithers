@@ -110,5 +110,5 @@ echo "== smithers run =="
 export STEREOS_SSH_PORT="$SSH_PORT" STEREOS_SSH_KEY="$KEY"
 SMITHERS_ROOT="${SMITHERS_ROOT:-$(git rev-parse --show-toplevel)}"
 exec env -u ANTHROPIC_API_KEY bun "$SMITHERS_ROOT/apps/cli/src/index.js" \
-  up "$SMITHERS_ROOT/apps/stereos-site/real/stereos-real.tsx" \
+  up "$SMITHERS_ROOT/examples/stereos-sandbox-provider/real/stereos-real.tsx" \
   --input '{"prompt":"hello from the linux host"}'

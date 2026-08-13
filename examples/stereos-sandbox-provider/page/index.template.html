@@ -136,6 +136,20 @@
   details > summary { padding: 12px 14px; cursor: pointer; font-size: 14px; font-weight: 600; }
   details[open] > summary { border-bottom: 1px solid var(--line-soft); }
 
+  /* The Implementation tab: smthrs/ui owns the tree and the viewer; this only
+     gives them a two-column frame and bounded scroll areas. */
+  .impl { display: grid; gap: 14px; grid-template-columns: minmax(230px, 310px) minmax(0, 1fr); align-items: start; }
+  .impl-tree .body { max-height: 66vh; overflow: auto; padding: 10px; }
+  .impl-view { position: sticky; top: 68px; }
+  .impl-view [data-slot="code-block-body"] { max-height: 62vh; overflow: auto; }
+  .impl-view [data-slot="code-block"] { border: 0; border-radius: 0; }
+  .impl-bytes { color: var(--muted); font-size: 11px; }
+  @media (max-width: 860px) {
+    .impl { grid-template-columns: minmax(0, 1fr); }
+    .impl-view { position: static; }
+    .impl-tree .body { max-height: 260px; }
+  }
+
   footer { padding: 24px 0 44px; color: var(--muted);
     border-top: 1px solid color-mix(in srgb, var(--ink) 12%, transparent); font-size: 12px; }
   footer .shell { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 14px; }
@@ -152,10 +166,11 @@
 <body>
 
 <header class="shell">
-  <div class="eyebrow">stereOS × Smithers</div>
+  <div class="eyebrow">Example · custom sandbox provider</div>
   <h1>A Smithers workflow executing inside a real stereOS VM</h1>
-  <p class="lede">The sandbox body executes in a stereOS mixtape VM under QEMU/KVM and returns facts only
-  the guest can produce.</p>
+  <p class="lede">The sandbox body runs in a stereOS mixtape VM under QEMU/KVM. Smithers ships providers for
+  Microsandbox, Daytona, Vercel, AWS, GCP, and Cloudflare, plus local bubblewrap and Docker; this example
+  adds one more through the same seam.</p>
 </header>
 
 <nav class="tabs" aria-label="Sections">
@@ -174,16 +189,16 @@
 
   <section>
     <figure class="diagram">
-      <div class="scroll"><svg viewBox="0 0 1140 140" role="img" aria-label="A run travels from the visitor through the guard and the loopback gateway into a Smithers Sandbox, over SSH into a stereOS VM where Bun executes the child workflow, and the result returns the same way."><defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="var(--line)"/></marker><marker id="arrow-orange" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="var(--orange)"/></marker></defs><g><rect x="0.0" y="34" width="138" height="62" rx="12" fill="var(--card)" stroke="var(--muted)" stroke-width="1.5"/><text x="69.0" y="60" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">Visitor</text><text x="69.0" y="78" text-anchor="middle" font-size="11" fill="var(--muted)">browser</text></g><path d="M142.0 65 H163.0" stroke="var(--line)" stroke-width="1.5" marker-end="url(#arrow)"/><g><rect x="167.0" y="34" width="138" height="62" rx="12" fill="var(--card)" stroke="var(--orange)" stroke-width="1.5"/><text x="236.0" y="60" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">Guard</text><text x="236.0" y="78" text-anchor="middle" font-size="11" fill="var(--muted)">Bun, allowlist</text></g><path d="M309.0 65 H330.0" stroke="var(--line)" stroke-width="1.5" marker-end="url(#arrow)"/><g><rect x="334.0" y="34" width="138" height="62" rx="12" fill="var(--card)" stroke="var(--muted)" stroke-width="1.5"/><text x="403.0" y="60" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">Gateway</text><text x="403.0" y="78" text-anchor="middle" font-size="11" fill="var(--muted)">loopback only</text></g><path d="M476.0 65 H497.0" stroke="var(--line)" stroke-width="1.5" marker-end="url(#arrow)"/><g><rect x="501.0" y="34" width="138" height="62" rx="12" fill="var(--card)" stroke="var(--blue)" stroke-width="1.5"/><text x="570.0" y="60" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">Smithers</text><text x="570.0" y="78" text-anchor="middle" font-size="11" fill="var(--muted)">&lt;Sandbox&gt;</text></g><path d="M643.0 65 H664.0" stroke="var(--line)" stroke-width="1.5" marker-end="url(#arrow)"/><g><rect x="668.0" y="34" width="138" height="62" rx="12" fill="var(--card)" stroke="var(--muted)" stroke-width="1.5"/><text x="737.0" y="60" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">SSH</text><text x="737.0" y="78" text-anchor="middle" font-size="11" fill="var(--muted)">provider seam</text></g><path d="M810.0 65 H831.0" stroke="var(--line)" stroke-width="1.5" marker-end="url(#arrow)"/><g><rect x="835.0" y="34" width="138" height="62" rx="12" fill="var(--card)" stroke="var(--green)" stroke-width="1.5"/><text x="904.0" y="60" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">stereOS VM</text><text x="904.0" y="78" text-anchor="middle" font-size="11" fill="var(--muted)">QEMU/KVM</text></g><path d="M977.0 65 H998.0" stroke="var(--line)" stroke-width="1.5" marker-end="url(#arrow)"/><g><rect x="1002.0" y="34" width="138" height="62" rx="12" fill="var(--card)" stroke="var(--green)" stroke-width="1.5"/><text x="1071.0" y="60" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">Bun in guest</text><text x="1071.0" y="78" text-anchor="middle" font-size="11" fill="var(--muted)">child workflow</text></g><path d="M1071.0 96 V126 H69.0 V96" fill="none" stroke="var(--orange)" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrow-orange)"/><text x="570.0" y="119" text-anchor="middle" font-size="11" fill="var(--orange)">result JSON written by Bun inside the guest</text></svg></div>
-      <figcaption>Every stage is real. The guard is the only public surface; the gateway stays on loopback.</figcaption>
+      __FLOW_DIAGRAM__
+      <figcaption>The guard is the only public surface. The gateway stays on loopback.</figcaption>
     </figure>
   </section>
 
   <section>
     <div class="sec-head"><span class="sec-index">01 / 03</span><div>
       <h2>Run one</h2>
-      <p class="note">Two at a time, five minutes each. The VM stays booted between runs, so a run pays
-      SSH and guest execution rather than a kernel boot.</p>
+      <p class="note">Two at a time, five minutes each. The VM stays booted, so a run pays SSH and guest
+      execution, not a kernel boot.</p>
     </div></div>
 
     <div class="banner warn" id="live-offline" hidden>
@@ -239,12 +254,7 @@
       <h2>What is exposed</h2>
       <p class="note">The gateway's RPC surface is not reachable from the internet. The guard is.</p>
     </div></div>
-    <div class="row" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr))"><div class="card"><div class="body"><h3>Three workflow ids</h3><p class="note"><code>hello</code>, <code>pipeline</code>, <code>approval-demo</code>. A workflow id from the request is never forwarded.</p></div></div>
-<div class="card"><div class="body"><h3>Server-chosen input</h3><p class="note">The guard picks each run's input, so a visitor cannot steer what executes in the guest.</p></div></div>
-<div class="card"><div class="body"><h3>Five RPC methods</h3><p class="note">Named as literals in <code>guard.ts</code>. No method name from a request reaches the gateway.</p></div></div>
-<div class="card"><div class="body"><h3>2 concurrent, queue of 8</h3><p class="note">Six starts per IP per ten minutes, counted on the Cloudflare edge IP.</p></div></div>
-<div class="card"><div class="body"><h3>256-bit approval token</h3><p class="note">Minted at start, compared with <code>timingSafeEqual</code>. Nothing else resolves a gate.</p></div></div>
-<div class="card"><div class="body"><h3>Five minute hard cap</h3><p class="note">The guard cancels the run and frees its slot. Responses are built field by field.</p></div></div></div>
+    __GUARD_RULES__
   </section>
 
 </div>
@@ -255,41 +265,23 @@
   <section>
     <div class="sec-head"><span class="sec-index">01 / 04</span><div>
       <h2>Two hosts, one provider</h2>
-      <p class="note">Recorded 2026-08-12. Each card summarizes a capture reproduced in full below.</p>
+      <p class="note">Recorded 2026-08-12. Both captures appear in full below.</p>
     </div></div>
-    <div class="row"><div class="card"><div class="cap"><span>QEMU/KVM</span><span class="pill ok">finished</span></div><div class="body"><h3>GCE n2-standard-2, nested virtualization</h3><dl class="tiles" style="margin-top:10px"><div class="tile"><dt>Mixtape</dt><dd>coder-dev x86_64, built from source</dd></div><div class="tile"><dt>Guest</dt><dd>stereOS dev-f269d96, Linux 6.18.33 x86_64</dd></div><div class="tile"><dt>Run id</dt><dd>55c1ccb5-9ddf-4912-82eb-eb35efd69767</dd></div><div class="tile"><dt>Sandbox</dt><dd>1,877 ms</dd></div></dl><p class="note" style="margin-top:10px">primeCount 2508 below 22423, computed by Bun 1.2.21 x64 in the guest</p></div></div>
-<div class="card"><div class="cap"><span>Apple Virtualization.framework via mb</span><span class="pill ok">finished</span></div><div class="body"><h3>Apple Silicon Mac</h3><dl class="tiles" style="margin-top:10px"><div class="tile"><dt>Mixtape</dt><dd>coder-arm64:latest, fetched by hand</dd></div><div class="tile"><dt>Guest</dt><dd>stereOS 2026.03.04.0, Linux 6.12.74 aarch64</dd></div><div class="tile"><dt>Run id</dt><dd>c69a9b7f-762d-478e-9716-114e22f6c308</dd></div><div class="tile"><dt>Sandbox</dt><dd>768 ms</dd></div></dl><p class="note" style="margin-top:10px">primeCount 2448 below 21831, computed by Bun 1.2.21 arm64 in the guest</p></div></div></div>
+    __EVIDENCE_CARDS__
   </section>
 
   <section>
     <div class="sec-head"><span class="sec-index">02 / 04</span><div>
       <h2>One run, step by step</h2>
-      <p class="note">Excerpts are verbatim from the GCE capture below.</p>
+      <p class="note">Excerpts are verbatim from the GCE capture.</p>
     </div></div>
-    <ol class="walk"><li><span class="stage">stereOS VM</span><p>The host boots the mixtape under QEMU/KVM and waits for the guest to answer on SSH.</p><pre class="excerpt">== guest ==
-agent
-coder-dev
-Linux 6.18.33 x86_64
-PRETTY_NAME=&quot;stereOS dev-f269d96 (coder-dev)&quot;</pre></li>
-<li><span class="stage">Smithers</span><p>Smithers starts the run on the host. The workflow holds one node.</p><pre class="excerpt">info  starting workflow run engine:run=0ms runId=55c1ccb5-9ddf-4912-82eb-eb35efd69767
-      workflowName=workflow
-      workflowPath=/home/willcory10_gmail_com/smithers/apps/stereos-site/real/stereos-real.tsx</pre></li>
-<li><span class="stage">SSH · provider seam</span><p>The provider bundles the child workflow, uploads it over SSH, and runs the guest launcher.</p><pre class="excerpt">#7  +00:00.279  SandboxCreated        🧪 Sandbox created: stereos-vm (stereos)
-#8  +00:00.288  SandboxShipped        📦 Sandbox shipped: stereos-vm (163 bytes)</pre></li>
-<li><span class="stage">Bun in guest</span><p>The guest's Bun executes the bundle and writes the result the engine collects.</p><pre class="excerpt">#12  +00:02.153  SandboxBundleReceived  📥 Sandbox bundle received: stereos-vm (0 patches)
-#13  +00:02.156  SandboxCompleted      ✅ Sandbox completed: stereos-vm (finished)</pre></li>
-<li><span class="stage">result JSON</span><p>The output is the guest's own report: its OS, kernel, and hostname, none of which exist on the host.</p><pre class="excerpt">    &quot;os&quot;: &quot;stereOS dev-f269d96&quot;,
-    &quot;kernel&quot;: &quot;Linux 6.18.33 x86_64&quot;,
-    &quot;user&quot;: &quot;agent&quot;,
-    &quot;hostname&quot;: &quot;coder-dev&quot;,</pre></li>
-<li><span class="stage">audit</span><p>The prompt hash reproduces on the host. It shows input and output agree; it is not provenance.</p><pre class="excerpt">$ printf '%s' 'hello from the linux host' | sha256sum
-b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121  -</pre></li></ol>
+    __WALKTHROUGH__
   </section>
 
   <section>
     <div class="sec-head"><span class="sec-index">03 / 04</span><div>
       <h2>Full captures</h2>
-      <p class="note">Terminal output as recorded, nothing removed.</p>
+      <p class="note">As recorded, nothing removed.</p>
     </div></div>
     <div id="captures"></div>
   </section>
@@ -300,10 +292,10 @@ b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121  -</pre></li></
     </div></div>
     <div class="card"><div class="body">
       <p class="note" style="max-width: 720px">
-        <code>mb pull coder-arm64:latest</code> fails. The registry serves a raw blob whose sha256 is
-        <code>d335283a…12a21e2</code> while its manifest declares <code>bf212e02…1245cdeb</code>, and
-        <code>zstd -t</code> reports <code>Decoding error (36)</code>. The qcow2 blob at the same tag is clean
-        and reconstructs the expected image, so republishing that one raw blob fixes the pull.
+        <code>mb pull coder-arm64:latest</code> fails: the raw blob hashes to <code>d335283a…12a21e2</code>
+        while its manifest declares <code>bf212e02…1245cdeb</code>, and <code>zstd -t</code> reports
+        <code>Decoding error (36)</code>. The qcow2 blob at that tag is clean and reconstructs the image, so
+        republishing the raw blob fixes the pull.
       </p>
     </div></div>
   </section>
@@ -315,8 +307,8 @@ b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121  -</pre></li></
   <section>
     <div class="sec-head"><span class="sec-index">01 / 01</span><div>
       <h2>Every file behind this page</h2>
-      <p class="note">The provider, the guest workflows, the host provisioning, the demo service, and this
-      page. Tree and viewer are <code>FileTree</code> and <code>CodeBlock</code> from <code>smthrs/ui</code>.</p>
+      <p class="note">Provider, guest workflows, provisioning, demo service, page. Tree and viewer are
+      <code>FileTree</code> and <code>CodeBlock</code> from <code>smthrs/ui</code>.</p>
     </div></div>
     <div id="impl-root" data-testid="impl-root">
       <div class="card"><div class="body"><p class="note">Loading the sources…</p></div></div>
@@ -329,9 +321,8 @@ b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121  -</pre></li></
   <section>
     <div class="sec-head"><span class="sec-index">01 / 01</span><div>
       <h2>Proposed API</h2>
-      <p class="note">A design reference for a first-class stereOS provider in Smithers. Parts marked proposed
-      do not exist. Everything on the other tabs does.
-      <a href="./proposed-api.html" target="_blank" rel="noopener">Open the full document</a>.</p>
+      <p class="note">The full spec for a first-class stereOS provider. Parts marked proposed do not exist yet.
+      <a href="./proposed-api.html" target="_blank" rel="noopener">Open the document</a>.</p>
     </div></div>
     <div class="card">
       <div class="cap"><span>stereos-sandbox-provider.html</span><span class="mono">reference</span></div>
@@ -347,13 +338,13 @@ b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121  -</pre></li></
     <p>An earlier version of this page ran the engine under plain Node in a WebContainer with a simulated
     VM transport; that work is preserved in
     <a href="https://github.com/smithersai/smithers/pull/1506">PR #1506</a> and
-    <a href="https://github.com/smithersai/smithers/tree/main/apps/stereos-site/project"><code>apps/stereos-site/project</code></a>.</p>
-    <p>Sources: <a href="https://github.com/smithersai/smithers/tree/main/apps/stereos-site"><code>apps/stereos-site</code></a></p>
+    <a href="https://github.com/smithersai/smithers/tree/main/examples/stereos-sandbox-provider/project"><code>examples/stereos-sandbox-provider/project</code></a>.</p>
+    <p>Sources: <a href="https://github.com/smithersai/smithers/tree/main/examples/stereos-sandbox-provider"><code>examples/stereos-sandbox-provider</code></a></p>
   </div>
 </footer>
 
-<script type="module" src="./live.js?v=202608131709"></script>
-<script type="module" src="./evidence.js?v=202608131709"></script>
+<script type="module" src="./live.js?v=__STAMP__"></script>
+<script type="module" src="./evidence.js?v=__STAMP__"></script>
 <script type="module">
   const ids = ['live', 'how', 'impl', 'api'];
   const tabs = ids.map((id) => ({
@@ -374,7 +365,7 @@ b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121  -</pre></li></
     // Both heavy panels load on first view so the landing tab stays light.
     if (entry.hash === '#impl' && !implLoaded) {
       implLoaded = true;
-      import('./impl.js?v=202608131709').catch((error) => {
+      import('./impl.js?v=__STAMP__').catch((error) => {
         document.getElementById('impl-root').textContent = `Could not load the sources: ${error.message}`;
       });
     }

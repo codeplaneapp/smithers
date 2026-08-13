@@ -5846,6 +5846,11 @@ The entry command either prints the result JSON to stdout or writes it to
 instead transport those files through S3 or GCS, injecting extra vars that
 point the entry at the object keys.
 
+For a worked example of a provider outside the shipped set, see
+[`examples/stereos-sandbox-provider`](https://github.com/smithersai/smithers/tree/main/examples/stereos-sandbox-provider),
+which reaches stereOS microVMs over SSH and publishes live runs at
+[stereos.smithers.sh](https://stereos.smithers.sh).
+
 ## Selecting a provider
 
 Three ways to pick a provider, in precedence order:

@@ -4,7 +4,7 @@
  *
  * Boot the VM first, then run this workflow:
  *
- *   cd apps/stereos-site/real
+ *   cd examples/stereos-sandbox-provider/real
  *   mb up                                   # boots the mixtape (~8s)
  *   eval "$(./bootstrap-vm.sh)"             # keys the agent user, exports the port
  *   env -u ANTHROPIC_API_KEY bun ../../../apps/cli/src/index.js up stereos-real.tsx \

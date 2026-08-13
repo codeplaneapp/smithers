@@ -63,7 +63,7 @@ test "$ACTUAL" = "$EXPECTED" && printf 'digest verified: %s\n' "$ACTUAL" || {
 Boot, install the guest runtime, and run the source CLI:
 
 ```sh
-cd apps/stereos-site/real
+cd examples/stereos-sandbox-provider/real
 "$HOME/.local/bin/mb" up
 eval "$(MB="$HOME/.local/bin/mb" ./bootstrap-vm.sh)"
 env -u ANTHROPIC_API_KEY bun ../../../apps/cli/src/index.js up stereos-real.tsx \
@@ -103,9 +103,9 @@ cd "$HOME/smithers"
 Prepare and run the host:
 
 ```sh
-./apps/stereos-site/real/provision-linux-host.sh
+./examples/stereos-sandbox-provider/real/provision-linux-host.sh
 pnpm install --frozen-lockfile
-cd apps/stereos-site/real
+cd examples/stereos-sandbox-provider/real
 ./run-on-linux-host.sh
 ```
 
