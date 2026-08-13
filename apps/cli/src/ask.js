@@ -13,6 +13,7 @@ import { PiAgent } from "@smthrs/agents/PiAgent";
 import { SmithersError } from "@smthrs/errors";
 import { createSmithersAgentContract, renderSmithersAgentPromptGuidance } from "@smthrs/agents/agent-contract";
 import { describeUnavailableAgent, detectAvailableAgents, formatNoUsableAgentsMessage } from "./agent-detection.js";
+import { smithersRuntimeReentry } from "./node-loader/smithersRuntimeSpawn.js";
 /**
  * @typedef {typeof ASK_AGENT_IDS[number]} AskAgentId
  */
@@ -122,10 +123,12 @@ function bootstrapRank(mode) {
  * @returns {{ command: string; args: string[] }}
  */
 function buildSmithersMcpLaunchSpec(toolSurface = "semantic") {
-  return {
-    command: process.execPath,
-    args: ["run", resolve(dirname(fileURLToPath(import.meta.url)), "index.js"), "--mcp", "--surface", toolSurface],
-  };
+  return smithersRuntimeReentry([
+    resolve(dirname(fileURLToPath(import.meta.url)), "index.js"),
+    "--mcp",
+    "--surface",
+    toolSurface,
+  ]);
 }
 /**
  * @param {SmithersToolSurface} toolSurface
