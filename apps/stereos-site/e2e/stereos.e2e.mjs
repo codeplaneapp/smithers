@@ -102,9 +102,12 @@ check(
 
 // ── 3. the Live demo tab runs on a real VM ───────────────────────────────────
 const status = page.locator("#live-status");
+await status.waitFor({ state: "visible", timeout: 20_000 });
+// "ready" is the only state that means the guard answered; an empty or missing
+// status must not read as success.
 const connected = await waitFor(
   "the demo host to answer",
-  async () => !["connecting", "host offline"].includes(((await status.textContent()) ?? "").trim()),
+  async () => ((await status.textContent()) ?? "").trim() === "ready",
   CONNECT_MS,
 );
 check("demo host reachable", Boolean(connected), (await status.textContent()) ?? "");
