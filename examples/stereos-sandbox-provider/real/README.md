@@ -3,7 +3,7 @@
 This directory boots actual stereOS mixtapes and runs the bundled Smithers
 `<Sandbox>` child workflow inside them. The two transcripts are raw terminal
 captures from runs recorded on 2026-08-12. The Real stereOS tab at
-https://stereos.smithers.sh renders those files directly.
+https://custom-sandbox.smithers.sh renders those files directly.
 
 | Host | Mixtape | Hypervisor | Result |
 | --- | --- | --- | --- |

@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="A Smithers workflow executing inside a real stereOS VM: a live demo on a nested-virtualization host, the recorded evidence, and the implementation sources.">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>">
-<title>stereOS × Smithers</title>
+<meta name="description" content="How to add a custom sandbox to Smithers: how tasks and sandboxes relate, the provider seam, and a worked example that runs Smithers tasks inside real stereOS VMs.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>">
+<title>How to add a custom sandbox to Smithers</title>
 <style>
   :root {
     --ink: #17231d; --muted: #65736b; --paper: #f4f1e8; --card: #fffef9;
@@ -121,8 +121,19 @@
   pre.excerpt { margin: 8px 0 0; padding: 10px 12px; overflow-x: auto; font-size: 12px; line-height: 1.5;
     background: var(--well); border: 1px solid var(--line-soft); border-radius: 10px; }
 
+  /* Tutorial code panes. Shiki emits one span per token carrying both themes;
+     the dark rule swaps to the second color without a second copy of the code. */
+  .pane { margin-top: 10px; max-width: 100%; }
+  .pane pre.shiki { margin: 0; padding: 12px 14px; overflow-x: auto;
+    font-size: 12.5px; line-height: 1.55; background: var(--well) !important; }
+  @media (prefers-color-scheme: dark) {
+    .pane pre.shiki span { color: var(--shiki-dark) !important; }
+  }
+
   ol.walk { margin: 0; padding: 0; list-style: none; counter-reset: step; display: grid; gap: 12px; }
-  ol.walk li { counter-increment: step; padding: 14px 16px 16px 52px; position: relative;
+  /* min-width:0 keeps a wide code pane from widening the grid track, which would
+     otherwise push the whole page into horizontal overflow on a phone. */
+  ol.walk li { counter-increment: step; padding: 14px 16px 16px 52px; position: relative; min-width: 0;
     background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
   ol.walk li::before { content: counter(step); position: absolute; left: 16px; top: 15px;
     width: 24px; height: 24px; display: grid; place-items: center; border-radius: 999px;
@@ -166,31 +177,114 @@
 <body>
 
 <header class="shell">
-  <div class="eyebrow">Example · custom sandbox provider</div>
-  <h1>A Smithers workflow executing inside a real stereOS VM</h1>
-  <p class="lede">The sandbox body runs in a stereOS mixtape VM under QEMU/KVM. Smithers ships providers for
-  Microsandbox, Daytona, Vercel, AWS, GCP, and Cloudflare, plus local bubblewrap and Docker; this example
-  adds one more through the same seam.</p>
+  <div class="eyebrow">Guide · custom sandboxes</div>
+  <h1>How to add a custom sandbox to Smithers</h1>
+  <p class="lede">Any task can run in its own sandbox, and Smithers reaches every sandbox through one provider
+  interface. This guide builds a provider for stereOS microVMs, ships it as <code>@stereos/smithers</code>, and
+  runs it on real hardware.</p>
 </header>
 
 <nav class="tabs" aria-label="Sections">
   <div class="shell" role="tablist">
-    <button role="tab" id="tab-live" aria-controls="panel-live" aria-selected="true" tabindex="0">Live demo</button>
-    <button role="tab" id="tab-how" aria-controls="panel-how" aria-selected="false" tabindex="-1">How it works</button>
+    <button role="tab" id="tab-tasks" aria-controls="panel-tasks" aria-selected="true" tabindex="0">Tasks &amp; sandboxes</button>
+    <button role="tab" id="tab-build" aria-controls="panel-build" aria-selected="false" tabindex="-1">Build your own</button>
+    <button role="tab" id="tab-live" aria-controls="panel-live" aria-selected="false" tabindex="-1">Live demo</button>
     <button role="tab" id="tab-impl" aria-controls="panel-impl" aria-selected="false" tabindex="-1">Implementation</button>
-    <button role="tab" id="tab-api" aria-controls="panel-api" aria-selected="false" tabindex="-1">Proposed API</button>
+    <button role="tab" id="tab-api" aria-controls="panel-api" aria-selected="false" tabindex="-1">Documenting your API</button>
   </div>
 </nav>
 
 <main class="shell">
 
+<!-- ───────────────────────── Tasks & sandboxes ───────────────────────── -->
+<div role="tabpanel" id="panel-tasks" aria-labelledby="tab-tasks">
+
+  <section>
+    <div class="sec-head"><span class="sec-index">01 / 03</span><div>
+      <h2>A workflow renders to tasks</h2>
+      <p class="note">A workflow is React. It renders to a graph of tasks. By default a task runs in the host
+      process, next to your files. Wrap a task in <code>&lt;Sandbox provider={…}&gt;</code> and that task alone runs
+      somewhere else. Isolation is per task, so one workflow mixes both freely.</p>
+    </div></div>
+    <figure class="diagram">
+      __TASK_DIAGRAM__
+      <figcaption>Two tasks stay in the host process. Two cross the provider seam into their own machine.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-index">02 / 03</span><div>
+      <h2>The provider seam</h2>
+      <p class="note">A provider is the code on the far side of that wrap. Smithers hands it a request as JSON; the
+      provider gets that request into the sandbox, executes there, and returns the result as JSON. Nothing else
+      about the sandbox is Smithers' concern.</p>
+    </div></div>
+    <figure class="diagram">
+      __CONTRACT_DIAGRAM__
+      <figcaption>Request JSON in, execution in the sandbox, result JSON out.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-index">03 / 03</span><div>
+      <h2>What ships, and what you add</h2>
+      <p class="note">Smithers ships first-class providers for these, plus bubblewrap and Docker transports for the
+      local machine. Every other sandbox plugs into the same seam. The rest of this guide builds one.</p>
+    </div></div>
+    __SHIPPED_PROVIDERS__
+  </section>
+
+</div>
+
+<!-- ───────────────────────── Build your own ───────────────────────── -->
+<div role="tabpanel" id="panel-build" aria-labelledby="tab-build" hidden>
+
+  <section>
+    <div class="sec-head"><span class="sec-index">01 / 02</span><div>
+      <h2>Eight steps, one package</h2>
+      <p class="note">The worked example is stereOS, a microVM distribution reachable over SSH. Every pane below is
+      a slice of a real file in <code>@stereos/smithers</code>, located by anchor text at build time.</p>
+    </div></div>
+    __TUTORIAL__
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-index">02 / 02</span><div>
+      <h2>Evidence</h2>
+      <p class="note">Recorded 2026-08-12 on two hypervisors. Nothing here is reconstructed.</p>
+    </div></div>
+    __EVIDENCE_CARDS__
+    <details style="margin-top:14px">
+      <summary>One recorded run, step by step</summary>
+      <div class="body" style="padding:14px">__WALKTHROUGH__</div>
+    </details>
+    <details>
+      <summary>The raw captures, unedited</summary>
+      <div class="body" style="padding:14px"><div id="captures"></div></div>
+    </details>
+    <details>
+      <summary>Registry forensics found while building this</summary>
+      <div class="body" style="padding:14px">
+        <p class="note" style="max-width: 720px">
+          <code>mb pull coder-arm64:latest</code> fails: the raw blob hashes to <code>d335283a…12a21e2</code>
+          while its manifest declares <code>bf212e02…1245cdeb</code>, and <code>zstd -t</code> reports
+          <code>Decoding error (36)</code>. The qcow2 blob at that tag is clean and reconstructs the image, so
+          republishing the raw blob fixes the pull.
+        </p>
+      </div>
+    </details>
+  </section>
+
+</div>
+
 <!-- ───────────────────────── Live demo ───────────────────────── -->
-<div role="tabpanel" id="panel-live" aria-labelledby="tab-live">
+<div role="tabpanel" id="panel-live" aria-labelledby="tab-live" hidden>
 
   <section>
     <figure class="diagram">
       __FLOW_DIAGRAM__
-      <figcaption>The guard is the only public surface. The gateway stays on loopback.</figcaption>
+      <figcaption>The provider you just read, running real VMs. The guard is the only public surface; the
+      gateway stays on loopback.</figcaption>
     </figure>
   </section>
 
@@ -204,7 +298,7 @@
     <div class="banner warn" id="live-offline" hidden>
       <strong>The demo host is not answering.</strong>
       Nothing here is simulated, so nothing runs until it is back.
-      <a href="#how">See the recorded runs</a>.
+      <a href="#build">See the recorded runs</a>.
     </div>
 
     <div class="controls" style="margin-bottom: 14px">
@@ -217,7 +311,8 @@
 
     <div class="row" style="grid-template-columns: minmax(0, 1fr)">
       <div class="card">
-        <div class="cap"><span>Run UI served from the demo host, built with <code>smthrs/gateway-ui</code></span>
+        <div class="cap"><span>Run UI served from the demo host, built with <code>smthrs/gateway-ui</code>. Approve
+          the gate here.</span>
           <span class="mono" id="live-origin"></span></div>
         <iframe class="embed" id="live-frame" title="stereOS demo runs" src="about:blank"></iframe>
       </div>
@@ -259,56 +354,14 @@
 
 </div>
 
-<!-- ───────────────────────── How it works ───────────────────────── -->
-<div role="tabpanel" id="panel-how" aria-labelledby="tab-how" hidden>
-
-  <section>
-    <div class="sec-head"><span class="sec-index">01 / 04</span><div>
-      <h2>Two hosts, one provider</h2>
-      <p class="note">Recorded 2026-08-12. Both captures appear in full below.</p>
-    </div></div>
-    __EVIDENCE_CARDS__
-  </section>
-
-  <section>
-    <div class="sec-head"><span class="sec-index">02 / 04</span><div>
-      <h2>One run, step by step</h2>
-      <p class="note">Excerpts are verbatim from the GCE capture.</p>
-    </div></div>
-    __WALKTHROUGH__
-  </section>
-
-  <section>
-    <div class="sec-head"><span class="sec-index">03 / 04</span><div>
-      <h2>Full captures</h2>
-      <p class="note">As recorded, nothing removed.</p>
-    </div></div>
-    <div id="captures"></div>
-  </section>
-
-  <section>
-    <div class="sec-head"><span class="sec-index">04 / 04</span><div>
-      <h2>Found while building this</h2>
-    </div></div>
-    <div class="card"><div class="body">
-      <p class="note" style="max-width: 720px">
-        <code>mb pull coder-arm64:latest</code> fails: the raw blob hashes to <code>d335283a…12a21e2</code>
-        while its manifest declares <code>bf212e02…1245cdeb</code>, and <code>zstd -t</code> reports
-        <code>Decoding error (36)</code>. The qcow2 blob at that tag is clean and reconstructs the image, so
-        republishing the raw blob fixes the pull.
-      </p>
-    </div></div>
-  </section>
-
-</div>
-
 <!-- ───────────────────────── Implementation ───────────────────────── -->
 <div role="tabpanel" id="panel-impl" aria-labelledby="tab-impl" hidden>
   <section>
     <div class="sec-head"><span class="sec-index">01 / 01</span><div>
-      <h2>Every file behind this page</h2>
-      <p class="note">Provider, guest workflows, provisioning, demo service, page. Tree and viewer are
-      <code>FileTree</code> and <code>CodeBlock</code> from <code>smthrs/ui</code>.</p>
+      <h2>Every file in <code>@stereos/smithers</code></h2>
+      <p class="note">The integration a sandbox vendor ships: provider, guest workflows, provisioning, demo
+      service, page. Tree and viewer are <code>FileTree</code> and <code>CodeBlock</code> from
+      <code>smthrs/ui</code>.</p>
     </div></div>
     <div id="impl-root" data-testid="impl-root">
       <div class="card"><div class="body"><p class="note">Loading the sources…</p></div></div>
@@ -316,17 +369,18 @@
   </section>
 </div>
 
-<!-- ───────────────────────── Proposed API ───────────────────────── -->
+<!-- ───────────────────────── Documenting your API ───────────────────────── -->
 <div role="tabpanel" id="panel-api" aria-labelledby="tab-api" hidden>
   <section>
     <div class="sec-head"><span class="sec-index">01 / 01</span><div>
-      <h2>Proposed API</h2>
-      <p class="note">The full spec for a first-class stereOS provider. Parts marked proposed do not exist yet.
-      <a href="./proposed-api.html" target="_blank" rel="noopener">Open the document</a>.</p>
+      <h2>Documenting your API</h2>
+      <p class="note">This is the reference documentation you would ship with your provider package. Parts marked
+      proposed do not exist yet.
+      <a href="./provider-api.html" target="_blank" rel="noopener">Open the document</a>.</p>
     </div></div>
     <div class="card">
-      <div class="cap"><span>stereos-sandbox-provider.html</span><span class="mono">reference</span></div>
-      <iframe class="embed" id="api-frame" style="height: 76vh" title="Proposed API reference" src="about:blank" loading="lazy"></iframe>
+      <div class="cap"><span>@stereos/smithers reference</span><span class="mono">reference</span></div>
+      <iframe class="embed" id="api-frame" style="height: 76vh" title="@stereos/smithers API reference" src="about:blank" loading="lazy"></iframe>
     </div>
   </section>
 </div>
@@ -339,14 +393,14 @@
     VM transport; that work is preserved in
     <a href="https://github.com/smithersai/smithers/pull/1506">PR #1506</a> and
     <a href="https://github.com/smithersai/smithers/tree/main/examples/stereos-sandbox-provider/project"><code>examples/stereos-sandbox-provider/project</code></a>.</p>
-    <p>Sources: <a href="https://github.com/smithersai/smithers/tree/main/examples/stereos-sandbox-provider"><code>examples/stereos-sandbox-provider</code></a></p>
+    <p>Sources: <a href="https://github.com/smithersai/smithers/tree/main/examples/stereos-sandbox-provider"><code>@stereos/smithers</code> at <code>examples/stereos-sandbox-provider</code></a>. Not published to npm.</p>
   </div>
 </footer>
 
 <script type="module" src="./live.js?v=__STAMP__"></script>
 <script type="module" src="./evidence.js?v=__STAMP__"></script>
 <script type="module">
-  const ids = ['live', 'how', 'impl', 'api'];
+  const ids = ['tasks', 'build', 'live', 'impl', 'api'];
   const tabs = ids.map((id) => ({
     hash: `#${id}`,
     tab: document.getElementById(`tab-${id}`),
@@ -371,7 +425,7 @@
     }
     if (entry.hash === '#api') {
       const frame = document.getElementById('api-frame');
-      if (frame.src === 'about:blank') frame.src = './proposed-api.html';
+      if (frame.src === 'about:blank') frame.src = './provider-api.html';
     }
   }
   for (const entry of tabs) {

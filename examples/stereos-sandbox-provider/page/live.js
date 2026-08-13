@@ -27,6 +27,19 @@ const originOut = el("live-origin");
 let base = null;
 let poll = null;
 let token = null;
+let adopt = null; // the message the embedded UI needs in order to own this run
+let frameRunId = null; // the run the embedded UI says it is showing
+
+/**
+ * The embedded UI may still be loading when a run starts, in which case the
+ * adopt message lands on nothing and its Approve button never appears. Repeat
+ * the message until the UI reports it is showing this run. Adopting twice is
+ * harmless: it sets the same run and the same token.
+ */
+function sendAdopt() {
+  if (!adopt || !base || frameRunId === adopt.runId) return;
+  frame.contentWindow?.postMessage(adopt, new URL(base).origin);
+}
 
 function setStatus(text, tone = "") {
   statusPill.textContent = text;
@@ -110,6 +123,7 @@ function watch(runId) {
     try {
       const run = await (await fetch(`${base}/api/runs/${runId}`)).json();
       if (run.error) return;
+      sendAdopt();
       setStatus(run.status, toneOf(run.status));
       showEvidence(run);
       if (TERMINAL.has(run.status)) clearInterval(poll);
@@ -134,10 +148,9 @@ async function start(workflow) {
     if (!response.ok || body.error) throw new Error(body.error ?? `start failed (${response.status})`);
     token = body.token;
     // Hand the run to the embedded UI so its Approve button can resolve it.
-    frame.contentWindow?.postMessage(
-      { type: "stereos-adopt", runId: body.runId, token, workflow },
-      new URL(base).origin,
-    );
+    adopt = { type: "stereos-adopt", runId: body.runId, token, workflow };
+    frameRunId = null;
+    sendAdopt();
     setStatus("running", "run");
     watch(body.runId);
   } catch (error) {
@@ -153,7 +166,12 @@ window.addEventListener("message", (event) => {
   if (!base || event.origin !== new URL(base).origin) return;
   const data = event.data;
   if (data?.type !== "stereos-state" || typeof data.status !== "string") return;
-  if (data.status === "idle") return;
+  // Any message proves the embedded UI is mounted, so a queued adopt can land.
+  if (data.runId) frameRunId = data.runId;
+  if (data.status === "idle") {
+    sendAdopt();
+    return;
+  }
   setStatus(data.status, toneOf(data.status));
   if (data.runId) runIdOut.textContent = data.runId;
   // The embedded UI polls too, and either side can see the terminal state
@@ -167,6 +185,7 @@ async function connect() {
     const { origin, health } = await discover();
     base = origin;
     originOut.textContent = new URL(origin).host;
+    frame.addEventListener("load", sendAdopt);
     frame.src = `${origin}/`;
     capacity.textContent = `${health.active}/${health.capacity} slots in use`;
     setStatus("ready", "ok");

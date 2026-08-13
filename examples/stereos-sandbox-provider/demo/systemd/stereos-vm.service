@@ -1,5 +1,5 @@
 [Unit]
-Description=stereOS coder-dev mixtape VM (QEMU/KVM) for the stereos.smithers.sh demo
+Description=stereOS coder-dev mixtape VM (QEMU/KVM) for the custom-sandbox.smithers.sh demo
 After=network-online.target
 Wants=network-online.target
 

@@ -1,4 +1,4 @@
-# The stereos.smithers.sh demo service
+# The custom-sandbox.smithers.sh demo service
 
 What runs on the GCE host `stereos-smithers-demo` (n2-standard-2, us-east1-b,
 nested virtualization) so that the Live demo tab drives real stereOS VMs.

@@ -1,6 +1,6 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "stereos-site",
+  "name": "custom-sandbox-site",
   "compatibility_date": "2026-07-02",
   "workers_dev": true,
   "assets": {
@@ -8,7 +8,7 @@
   },
   "routes": [
     {
-      "pattern": "stereos.smithers.sh",
+      "pattern": "custom-sandbox.smithers.sh",
       "custom_domain": true
     }
   ],

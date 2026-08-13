@@ -1,5 +1,5 @@
 [Unit]
-Description=cloudflared tunnel publishing the stereos.smithers.sh demo guard
+Description=cloudflared tunnel publishing the custom-sandbox.smithers.sh demo guard
 After=network-online.target stereos-guard.service
 Wants=network-online.target
 

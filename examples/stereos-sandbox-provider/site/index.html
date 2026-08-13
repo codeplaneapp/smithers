@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="A Smithers workflow executing inside a real stereOS VM: a live demo on a nested-virtualization host, the recorded evidence, and the implementation sources.">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>">
-<title>stereOS × Smithers</title>
+<meta name="description" content="How to add a custom sandbox to Smithers: how tasks and sandboxes relate, the provider seam, and a worked example that runs Smithers tasks inside real stereOS VMs.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>">
+<title>How to add a custom sandbox to Smithers</title>
 <style>
   :root {
     --ink: #17231d; --muted: #65736b; --paper: #f4f1e8; --card: #fffef9;
@@ -121,8 +121,19 @@
   pre.excerpt { margin: 8px 0 0; padding: 10px 12px; overflow-x: auto; font-size: 12px; line-height: 1.5;
     background: var(--well); border: 1px solid var(--line-soft); border-radius: 10px; }
 
+  /* Tutorial code panes. Shiki emits one span per token carrying both themes;
+     the dark rule swaps to the second color without a second copy of the code. */
+  .pane { margin-top: 10px; max-width: 100%; }
+  .pane pre.shiki { margin: 0; padding: 12px 14px; overflow-x: auto;
+    font-size: 12.5px; line-height: 1.55; background: var(--well) !important; }
+  @media (prefers-color-scheme: dark) {
+    .pane pre.shiki span { color: var(--shiki-dark) !important; }
+  }
+
   ol.walk { margin: 0; padding: 0; list-style: none; counter-reset: step; display: grid; gap: 12px; }
-  ol.walk li { counter-increment: step; padding: 14px 16px 16px 52px; position: relative;
+  /* min-width:0 keeps a wide code pane from widening the grid track, which would
+     otherwise push the whole page into horizontal overflow on a phone. */
+  ol.walk li { counter-increment: step; padding: 14px 16px 16px 52px; position: relative; min-width: 0;
     background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
   ol.walk li::before { content: counter(step); position: absolute; left: 16px; top: 15px;
     width: 24px; height: 24px; display: grid; place-items: center; border-radius: 999px;
@@ -166,31 +177,231 @@
 <body>
 
 <header class="shell">
-  <div class="eyebrow">Example · custom sandbox provider</div>
-  <h1>A Smithers workflow executing inside a real stereOS VM</h1>
-  <p class="lede">The sandbox body runs in a stereOS mixtape VM under QEMU/KVM. Smithers ships providers for
-  Microsandbox, Daytona, Vercel, AWS, GCP, and Cloudflare, plus local bubblewrap and Docker; this example
-  adds one more through the same seam.</p>
+  <div class="eyebrow">Guide · custom sandboxes</div>
+  <h1>How to add a custom sandbox to Smithers</h1>
+  <p class="lede">Any task can run in its own sandbox, and Smithers reaches every sandbox through one provider
+  interface. This guide builds a provider for stereOS microVMs, ships it as <code>@stereos/smithers</code>, and
+  runs it on real hardware.</p>
 </header>
 
 <nav class="tabs" aria-label="Sections">
   <div class="shell" role="tablist">
-    <button role="tab" id="tab-live" aria-controls="panel-live" aria-selected="true" tabindex="0">Live demo</button>
-    <button role="tab" id="tab-how" aria-controls="panel-how" aria-selected="false" tabindex="-1">How it works</button>
+    <button role="tab" id="tab-tasks" aria-controls="panel-tasks" aria-selected="true" tabindex="0">Tasks &amp; sandboxes</button>
+    <button role="tab" id="tab-build" aria-controls="panel-build" aria-selected="false" tabindex="-1">Build your own</button>
+    <button role="tab" id="tab-live" aria-controls="panel-live" aria-selected="false" tabindex="-1">Live demo</button>
     <button role="tab" id="tab-impl" aria-controls="panel-impl" aria-selected="false" tabindex="-1">Implementation</button>
-    <button role="tab" id="tab-api" aria-controls="panel-api" aria-selected="false" tabindex="-1">Proposed API</button>
+    <button role="tab" id="tab-api" aria-controls="panel-api" aria-selected="false" tabindex="-1">Documenting your API</button>
   </div>
 </nav>
 
 <main class="shell">
 
+<!-- ───────────────────────── Tasks & sandboxes ───────────────────────── -->
+<div role="tabpanel" id="panel-tasks" aria-labelledby="tab-tasks">
+
+  <section>
+    <div class="sec-head"><span class="sec-index">01 / 03</span><div>
+      <h2>A workflow renders to tasks</h2>
+      <p class="note">A workflow is React. It renders to a graph of tasks. By default a task runs in the host
+      process, next to your files. Wrap a task in <code>&lt;Sandbox provider={…}&gt;</code> and that task alone runs
+      somewhere else. Isolation is per task, so one workflow mixes both freely.</p>
+    </div></div>
+    <figure class="diagram">
+      <div class="scroll"><svg viewBox="0 0 1140 320" role="img" aria-label="A workflow renders to four tasks. Two run in the host process. Two are wrapped in Sandbox and cross the provider seam into a Microsandbox VM and a stereOS VM."><defs><marker id="t-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="var(--line)"/></marker></defs><rect x="0" y="44" width="300" height="252" rx="16" fill="var(--card)" stroke="var(--line)"/><text x="16" y="68" font-size="11" font-weight="700" letter-spacing="1.2" fill="var(--muted)">WORKFLOW</text><g><rect x="16" y="84" width="268" height="44" rx="10" fill="var(--well)" stroke="var(--line-soft)"/><text x="30" y="103" font-size="12.5" font-family="ui-monospace, Menlo, monospace" fill="var(--ink)">&lt;Task id=&quot;plan&quot;&gt;</text><text x="30" y="118" font-size="10.5" fill="var(--muted)">runs in the host process</text></g><g><rect x="16" y="136" width="268" height="44" rx="10" fill="var(--well)" stroke="var(--line-soft)"/><text x="30" y="155" font-size="12.5" font-family="ui-monospace, Menlo, monospace" fill="var(--ink)">&lt;Task id=&quot;lint&quot;&gt;</text><text x="30" y="170" font-size="10.5" fill="var(--muted)">runs in the host process</text></g><g><rect x="16" y="188" width="268" height="44" rx="10" fill="var(--well)" stroke="var(--line-soft)"/><text x="30" y="207" font-size="12.5" font-family="ui-monospace, Menlo, monospace" fill="var(--ink)">&lt;Task id=&quot;build&quot;&gt;</text><text x="30" y="222" font-size="10.5" fill="var(--muted)">wrapped in &lt;Sandbox provider={microsandbox}&gt;</text></g><g><rect x="16" y="240" width="268" height="44" rx="10" fill="var(--well)" stroke="var(--line-soft)"/><text x="30" y="259" font-size="12.5" font-family="ui-monospace, Menlo, monospace" fill="var(--ink)">&lt;Task id=&quot;verify&quot;&gt;</text><text x="30" y="274" font-size="10.5" fill="var(--muted)">wrapped in &lt;Sandbox provider={stereos}&gt;</text></g><path d="M740 36 V306" stroke="var(--orange)" stroke-width="1.5" stroke-dasharray="5 4"/><text x="740" y="24" text-anchor="middle" font-size="11" font-weight="700" fill="var(--orange)">provider seam · SandboxProvider</text><g><rect x="420" y="84" width="250" height="96" rx="14" fill="var(--card)" stroke="var(--blue)" stroke-width="1.5"/><text x="440" y="112" font-size="13" font-weight="600" fill="var(--ink)">Host process</text><text x="440" y="129" font-size="11" fill="var(--muted)">the default for every task</text></g><g><rect x="800" y="176" width="340" height="52" rx="14" fill="var(--card)" stroke="var(--purple)" stroke-width="1.5"/><text x="820" y="204" font-size="13" font-weight="600" fill="var(--ink)">Microsandbox VM</text><text x="820" y="221" font-size="11" fill="var(--muted)">provider ships with Smithers</text></g><g><rect x="800" y="240" width="340" height="52" rx="14" fill="var(--card)" stroke="var(--green)" stroke-width="1.5"/><text x="820" y="268" font-size="13" font-weight="600" fill="var(--ink)">stereOS VM</text><text x="820" y="285" font-size="11" fill="var(--muted)">the provider this guide builds</text></g><path d="M306 106 H414" stroke="var(--line)" stroke-width="1.5" marker-end="url(#t-arrow)"/><path d="M306 158 H414" stroke="var(--line)" stroke-width="1.5" marker-end="url(#t-arrow)"/><path d="M306 210 H794" stroke="var(--line)" stroke-width="1.5" marker-end="url(#t-arrow)"/><path d="M306 262 H794" stroke="var(--line)" stroke-width="1.5" marker-end="url(#t-arrow)"/></svg></div>
+      <figcaption>Two tasks stay in the host process. Two cross the provider seam into their own machine.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-index">02 / 03</span><div>
+      <h2>The provider seam</h2>
+      <p class="note">A provider is the code on the far side of that wrap. Smithers hands it a request as JSON; the
+      provider gets that request into the sandbox, executes there, and returns the result as JSON. Nothing else
+      about the sandbox is Smithers' concern.</p>
+    </div></div>
+    <figure class="diagram">
+      <div class="scroll"><svg viewBox="0 0 900 150" role="img" aria-label="Smithers writes a request JSON file into the sandbox, the session executes the command there, and the sandbox writes a result JSON file back."><defs><marker id="c-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="var(--line)"/></marker></defs><g><rect x="0" y="36" width="216" height="76" rx="14" fill="var(--card)" stroke="var(--blue)" stroke-width="1.5"/><text x="108" y="63" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">request JSON</text><text x="108" y="81" text-anchor="middle" font-size="11" fill="var(--muted)">input, env,</text><text x="108" y="96" text-anchor="middle" font-size="11" fill="var(--muted)">bundled workflow</text></g><g><rect x="310" y="26" width="280" height="96" rx="14" fill="var(--card)" stroke="var(--green)" stroke-width="1.5"/><text x="450" y="53" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">SandboxSession</text><text x="450" y="71" text-anchor="middle" font-size="11" fill="var(--muted)">writeFile · readFile</text><text x="450" y="86" text-anchor="middle" font-size="11" fill="var(--muted)">exec · destroy</text></g><g><rect x="684" y="36" width="216" height="76" rx="14" fill="var(--card)" stroke="var(--orange)" stroke-width="1.5"/><text x="792" y="63" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">result JSON</text><text x="792" y="81" text-anchor="middle" font-size="11" fill="var(--muted)">status, output</text></g><path d="M222 74 H304" stroke="var(--line)" stroke-width="1.5" marker-end="url(#c-arrow)"/><text x="263" y="64" text-anchor="middle" font-size="10.5" fill="var(--muted)">writeFile</text><path d="M596 74 H678" stroke="var(--line)" stroke-width="1.5" marker-end="url(#c-arrow)"/><text x="637" y="64" text-anchor="middle" font-size="10.5" fill="var(--muted)">readFile</text></svg></div>
+      <figcaption>Request JSON in, execution in the sandbox, result JSON out.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-index">03 / 03</span><div>
+      <h2>What ships, and what you add</h2>
+      <p class="note">Smithers ships first-class providers for these, plus bubblewrap and Docker transports for the
+      local machine. Every other sandbox plugs into the same seam. The rest of this guide builds one.</p>
+    </div></div>
+    <div class="row" style="grid-template-columns: repeat(auto-fit, minmax(190px, 1fr))"><div class="card"><div class="body"><h3>Microsandbox</h3><p class="note mono" style="font-size:12px">smthrs/microsandbox</p></div></div><div class="card"><div class="body"><h3>Daytona</h3><p class="note mono" style="font-size:12px">smthrs/daytona</p></div></div><div class="card"><div class="body"><h3>Vercel</h3><p class="note mono" style="font-size:12px">smthrs/vercel</p></div></div><div class="card"><div class="body"><h3>AWS</h3><p class="note mono" style="font-size:12px">smthrs/aws</p></div></div><div class="card"><div class="body"><h3>GCP</h3><p class="note mono" style="font-size:12px">smthrs/gcp</p></div></div><div class="card"><div class="body"><h3>Cloudflare</h3><p class="note mono" style="font-size:12px">smthrs/cloudflare</p></div></div><div class="card"><div class="body"><h3>Local machine</h3><p class="note mono" style="font-size:12px">bubblewrap · docker</p></div></div></div>
+  </section>
+
+</div>
+
+<!-- ───────────────────────── Build your own ───────────────────────── -->
+<div role="tabpanel" id="panel-build" aria-labelledby="tab-build" hidden>
+
+  <section>
+    <div class="sec-head"><span class="sec-index">01 / 02</span><div>
+      <h2>Eight steps, one package</h2>
+      <p class="note">The worked example is stereOS, a microVM distribution reachable over SSH. Every pane below is
+      a slice of a real file in <code>@stereos/smithers</code>, located by anchor text at build time.</p>
+    </div></div>
+    <ol class="walk"><li><span class="stage">Reach the machine</span><p>The provider does not own the VM lifecycle. <code>mb up</code> boots the mixtape; this script reads the forwarded SSH port off it and opens an admin channel.</p><div class="card pane"><div class="cap"><span class="mono">real/bootstrap-vm.sh</span><span class="mono">@stereos/smithers</span></div><pre class="shiki shiki-themes github-light github-dark" style="background-color:#fff;--shiki-dark-bg:#24292e;color:#24292e;--shiki-dark:#e1e4e8" tabindex="0"><code><span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">port</span><span style="color:#D73A49;--shiki-dark:#F97583">=</span><span style="color:#24292E;--shiki-dark:#E1E4E8">$(</span><span style="color:#6F42C1;--shiki-dark:#B392F0">"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">$MB</span><span style="color:#6F42C1;--shiki-dark:#B392F0">"</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> status</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> "</span><span style="color:#24292E;--shiki-dark:#E1E4E8">$VM</span><span style="color:#032F62;--shiki-dark:#9ECBFF">"</span><span style="color:#D73A49;--shiki-dark:#F97583"> 2></span><span style="color:#032F62;--shiki-dark:#9ECBFF">/dev/null</span><span style="color:#D73A49;--shiki-dark:#F97583"> |</span><span style="color:#6F42C1;--shiki-dark:#B392F0"> sed</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> -n</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> 's/.*127\.0\.0\.1:\([0-9]*\).*/\1/p'</span><span style="color:#D73A49;--shiki-dark:#F97583"> |</span><span style="color:#6F42C1;--shiki-dark:#B392F0"> head</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> -1</span><span style="color:#24292E;--shiki-dark:#E1E4E8">)</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">[ </span><span style="color:#D73A49;--shiki-dark:#F97583">-n</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> "</span><span style="color:#24292E;--shiki-dark:#E1E4E8">$port</span><span style="color:#032F62;--shiki-dark:#9ECBFF">"</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> ] </span><span style="color:#D73A49;--shiki-dark:#F97583">||</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> { </span><span style="color:#005CC5;--shiki-dark:#79B8FF">echo</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> "could not read an SSH port from: </span><span style="color:#24292E;--shiki-dark:#E1E4E8">$MB</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> status </span><span style="color:#24292E;--shiki-dark:#E1E4E8">$VM</span><span style="color:#032F62;--shiki-dark:#9ECBFF">"</span><span style="color:#D73A49;--shiki-dark:#F97583"> >&#x26;2</span><span style="color:#24292E;--shiki-dark:#E1E4E8">; </span><span style="color:#005CC5;--shiki-dark:#79B8FF">exit</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> 1</span><span style="color:#24292E;--shiki-dark:#E1E4E8">; }</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#6F42C1;--shiki-dark:#B392F0">ssh_admin</span><span style="color:#24292E;--shiki-dark:#E1E4E8">() {</span></span>
+<span class="line"><span style="color:#6F42C1;--shiki-dark:#B392F0">  ssh</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> -p</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> "</span><span style="color:#24292E;--shiki-dark:#E1E4E8">$port</span><span style="color:#032F62;--shiki-dark:#9ECBFF">"</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> -i</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> "</span><span style="color:#24292E;--shiki-dark:#E1E4E8">$ADMIN_KEY</span><span style="color:#032F62;--shiki-dark:#9ECBFF">"</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> -o</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> StrictHostKeyChecking=no</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> -o</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> UserKnownHostsFile=/dev/null</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> \</span></span>
+<span class="line"><span style="color:#005CC5;--shiki-dark:#79B8FF">    -o</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> LogLevel=ERROR</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> -o</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> IdentitiesOnly=yes</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> admin@127.0.0.1</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> "</span><span style="color:#005CC5;--shiki-dark:#79B8FF">$@</span><span style="color:#032F62;--shiki-dark:#9ECBFF">"</span></span></code></pre></div></li>
+<li><span class="stage">Declare the provider</span><p><code>createCommandSandboxProvider</code> supplies request shipping, the environment contract, result parsing, secret scrubbing, and cleanup. You supply an id, a workdir, the command that runs the bundle, and a session factory.</p><div class="card pane"><div class="cap"><span class="mono">real/stereos-provider.ts</span><span class="mono">@stereos/smithers</span></div><pre class="shiki shiki-themes github-light github-dark" style="background-color:#fff;--shiki-dark-bg:#24292e;color:#24292e;--shiki-dark:#e1e4e8" tabindex="0"><code><span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">export</span><span style="color:#D73A49;--shiki-dark:#F97583"> const</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> stereosProvider</span><span style="color:#D73A49;--shiki-dark:#F97583"> =</span><span style="color:#6F42C1;--shiki-dark:#B392F0"> createCommandSandboxProvider</span><span style="color:#24292E;--shiki-dark:#E1E4E8">({</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">  id: </span><span style="color:#032F62;--shiki-dark:#9ECBFF">"stereos"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">  workdir: </span><span style="color:#005CC5;--shiki-dark:#79B8FF">WORKDIR</span><span style="color:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#6A737D;--shiki-dark:#6A737D">  // The host uploads this tiny launcher and a bundle of child-workflow.tsx.</span></span>
+<span class="line"><span style="color:#6A737D;--shiki-dark:#6A737D">  // bootstrap-vm.sh/run-on-linux-host.sh install the official static Bun build.</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">  command: </span><span style="color:#032F62;--shiki-dark:#9ECBFF">`sh ${</span><span style="color:#005CC5;--shiki-dark:#79B8FF">RUNNER_PATH</span><span style="color:#032F62;--shiki-dark:#9ECBFF">}`</span><span style="color:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">  cleanup: </span><span style="color:#032F62;--shiki-dark:#9ECBFF">"keep"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">, </span><span style="color:#6A737D;--shiki-dark:#6A737D">// VM lifecycle stays with `mb up` / `mb down`.</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">  async</span><span style="color:#6F42C1;--shiki-dark:#B392F0"> createSession</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(</span><span style="color:#E36209;--shiki-dark:#FFAB70">request</span><span style="color:#24292E;--shiki-dark:#E1E4E8">)</span><span style="color:#D73A49;--shiki-dark:#F97583">:</span><span style="color:#6F42C1;--shiki-dark:#B392F0"> Promise</span><span style="color:#24292E;--shiki-dark:#E1E4E8">&#x3C;</span><span style="color:#6F42C1;--shiki-dark:#B392F0">SandboxSession</span><span style="color:#24292E;--shiki-dark:#E1E4E8">> {</span></span></code></pre></div></li>
+<li><span class="stage">Choose a transport</span><p>A session is one transport to the sandbox. Here it is <code>ssh</code> with a fixed argument list.</p><div class="card pane"><div class="cap"><span class="mono">real/stereos-provider.ts</span><span class="mono">@stereos/smithers</span></div><pre class="shiki shiki-themes github-light github-dark" style="background-color:#fff;--shiki-dark-bg:#24292e;color:#24292e;--shiki-dark:#e1e4e8" tabindex="0"><code><span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">const</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> SSH_HOST</span><span style="color:#D73A49;--shiki-dark:#F97583"> =</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> process.env.</span><span style="color:#005CC5;--shiki-dark:#79B8FF">STEREOS_SSH_HOST</span><span style="color:#D73A49;--shiki-dark:#F97583"> ??</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> "127.0.0.1"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">;</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">const</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> SSH_PORT</span><span style="color:#D73A49;--shiki-dark:#F97583"> =</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> process.env.</span><span style="color:#005CC5;--shiki-dark:#79B8FF">STEREOS_SSH_PORT</span><span style="color:#D73A49;--shiki-dark:#F97583"> ??</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> "2222"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">;</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">const</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> SSH_KEY</span><span style="color:#D73A49;--shiki-dark:#F97583"> =</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> process.env.</span><span style="color:#005CC5;--shiki-dark:#79B8FF">STEREOS_SSH_KEY</span><span style="color:#D73A49;--shiki-dark:#F97583"> ??</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> `${</span><span style="color:#005CC5;--shiki-dark:#79B8FF">HOME</span><span style="color:#032F62;--shiki-dark:#9ECBFF">}/.config/stereos/ssh-key`</span><span style="color:#24292E;--shiki-dark:#E1E4E8">;</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">const</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> SSH_USER</span><span style="color:#D73A49;--shiki-dark:#F97583"> =</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> process.env.</span><span style="color:#005CC5;--shiki-dark:#79B8FF">STEREOS_SSH_USER</span><span style="color:#D73A49;--shiki-dark:#F97583"> ??</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> "agent"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">;</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">const</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> SSH_ARGS</span><span style="color:#D73A49;--shiki-dark:#F97583"> =</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> [</span></span>
+<span class="line"><span style="color:#032F62;--shiki-dark:#9ECBFF">  "-p"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#005CC5;--shiki-dark:#79B8FF">  SSH_PORT</span><span style="color:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#032F62;--shiki-dark:#9ECBFF">  "-i"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#005CC5;--shiki-dark:#79B8FF">  SSH_KEY</span><span style="color:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#032F62;--shiki-dark:#9ECBFF">  "-o"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#032F62;--shiki-dark:#9ECBFF">  "StrictHostKeyChecking=no"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#032F62;--shiki-dark:#9ECBFF">  "-o"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#032F62;--shiki-dark:#9ECBFF">  "UserKnownHostsFile=/dev/null"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#032F62;--shiki-dark:#9ECBFF">  "-o"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#032F62;--shiki-dark:#9ECBFF">  "LogLevel=ERROR"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#032F62;--shiki-dark:#9ECBFF">  "-o"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#032F62;--shiki-dark:#9ECBFF">  "IdentitiesOnly=yes"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#032F62;--shiki-dark:#9ECBFF">  "-o"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#032F62;--shiki-dark:#9ECBFF">  "ConnectTimeout=10"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#032F62;--shiki-dark:#9ECBFF">  `${</span><span style="color:#005CC5;--shiki-dark:#79B8FF">SSH_USER</span><span style="color:#032F62;--shiki-dark:#9ECBFF">}@${</span><span style="color:#005CC5;--shiki-dark:#79B8FF">SSH_HOST</span><span style="color:#032F62;--shiki-dark:#9ECBFF">}`</span><span style="color:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">];</span></span></code></pre></div></li>
+<li><span class="stage">Implement the session</span><p><code>writeFile</code>, <code>readFile</code>, and <code>exec</code> are the whole seam. <code>destroy</code> is optional: this provider sets <code>cleanup: "keep"</code> because <code>mb up</code> and <code>mb down</code> own the VM.</p><div class="card pane"><div class="cap"><span class="mono">real/stereos-provider.ts</span><span class="mono">@stereos/smithers</span></div><pre class="shiki shiki-themes github-light github-dark" style="background-color:#fff;--shiki-dark-bg:#24292e;color:#24292e;--shiki-dark:#e1e4e8" tabindex="0"><code><span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">    const</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> session</span><span style="color:#D73A49;--shiki-dark:#F97583">:</span><span style="color:#6F42C1;--shiki-dark:#B392F0"> SandboxSession</span><span style="color:#D73A49;--shiki-dark:#F97583"> =</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> {</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">      remoteId: </span><span style="color:#032F62;--shiki-dark:#9ECBFF">`stereos-${</span><span style="color:#24292E;--shiki-dark:#E1E4E8">request</span><span style="color:#032F62;--shiki-dark:#9ECBFF">.</span><span style="color:#24292E;--shiki-dark:#E1E4E8">sandboxId</span><span style="color:#032F62;--shiki-dark:#9ECBFF">}`</span><span style="color:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">      async</span><span style="color:#6F42C1;--shiki-dark:#B392F0"> writeFile</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(</span><span style="color:#E36209;--shiki-dark:#FFAB70">path</span><span style="color:#24292E;--shiki-dark:#E1E4E8">, </span><span style="color:#E36209;--shiki-dark:#FFAB70">content</span><span style="color:#24292E;--shiki-dark:#E1E4E8">) {</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">        const</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> r</span><span style="color:#D73A49;--shiki-dark:#F97583"> =</span><span style="color:#D73A49;--shiki-dark:#F97583"> await</span><span style="color:#6F42C1;--shiki-dark:#B392F0"> ssh</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(</span><span style="color:#032F62;--shiki-dark:#9ECBFF">`mkdir -p "$(dirname ${</span><span style="color:#6F42C1;--shiki-dark:#B392F0">q</span><span style="color:#032F62;--shiki-dark:#9ECBFF">(</span><span style="color:#24292E;--shiki-dark:#E1E4E8">path</span><span style="color:#032F62;--shiki-dark:#9ECBFF">)</span><span style="color:#032F62;--shiki-dark:#9ECBFF">})" &#x26;&#x26; cat > ${</span><span style="color:#6F42C1;--shiki-dark:#B392F0">q</span><span style="color:#032F62;--shiki-dark:#9ECBFF">(</span><span style="color:#24292E;--shiki-dark:#E1E4E8">path</span><span style="color:#032F62;--shiki-dark:#9ECBFF">)</span><span style="color:#032F62;--shiki-dark:#9ECBFF">}`</span><span style="color:#24292E;--shiki-dark:#E1E4E8">, content, {</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">          signal: request.signal,</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">          timeoutMs: </span><span style="color:#005CC5;--shiki-dark:#79B8FF">30_000</span><span style="color:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">        });</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">        if</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> (r.exitCode </span><span style="color:#D73A49;--shiki-dark:#F97583">!==</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> 0</span><span style="color:#24292E;--shiki-dark:#E1E4E8">) </span><span style="color:#D73A49;--shiki-dark:#F97583">throw</span><span style="color:#D73A49;--shiki-dark:#F97583"> new</span><span style="color:#6F42C1;--shiki-dark:#B392F0"> Error</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(</span><span style="color:#032F62;--shiki-dark:#9ECBFF">`stereos writeFile ${</span><span style="color:#24292E;--shiki-dark:#E1E4E8">path</span><span style="color:#032F62;--shiki-dark:#9ECBFF">} failed: ${</span><span style="color:#24292E;--shiki-dark:#E1E4E8">r</span><span style="color:#032F62;--shiki-dark:#9ECBFF">.</span><span style="color:#24292E;--shiki-dark:#E1E4E8">stderr</span><span style="color:#032F62;--shiki-dark:#9ECBFF">.</span><span style="color:#6F42C1;--shiki-dark:#B392F0">trim</span><span style="color:#032F62;--shiki-dark:#9ECBFF">()</span><span style="color:#032F62;--shiki-dark:#9ECBFF">}`</span><span style="color:#24292E;--shiki-dark:#E1E4E8">);</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">      },</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">      async</span><span style="color:#6F42C1;--shiki-dark:#B392F0"> readFile</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(</span><span style="color:#E36209;--shiki-dark:#FFAB70">path</span><span style="color:#24292E;--shiki-dark:#E1E4E8">) {</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">        const</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> r</span><span style="color:#D73A49;--shiki-dark:#F97583"> =</span><span style="color:#D73A49;--shiki-dark:#F97583"> await</span><span style="color:#6F42C1;--shiki-dark:#B392F0"> ssh</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(</span><span style="color:#032F62;--shiki-dark:#9ECBFF">`cat ${</span><span style="color:#6F42C1;--shiki-dark:#B392F0">q</span><span style="color:#032F62;--shiki-dark:#9ECBFF">(</span><span style="color:#24292E;--shiki-dark:#E1E4E8">path</span><span style="color:#032F62;--shiki-dark:#9ECBFF">)</span><span style="color:#032F62;--shiki-dark:#9ECBFF">}`</span><span style="color:#24292E;--shiki-dark:#E1E4E8">, </span><span style="color:#005CC5;--shiki-dark:#79B8FF">undefined</span><span style="color:#24292E;--shiki-dark:#E1E4E8">, { signal: request.signal, timeoutMs: </span><span style="color:#005CC5;--shiki-dark:#79B8FF">30_000</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> });</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">        if</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> (r.exitCode </span><span style="color:#D73A49;--shiki-dark:#F97583">!==</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> 0</span><span style="color:#24292E;--shiki-dark:#E1E4E8">) </span><span style="color:#D73A49;--shiki-dark:#F97583">throw</span><span style="color:#D73A49;--shiki-dark:#F97583"> new</span><span style="color:#6F42C1;--shiki-dark:#B392F0"> Error</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(</span><span style="color:#032F62;--shiki-dark:#9ECBFF">`stereos readFile ${</span><span style="color:#24292E;--shiki-dark:#E1E4E8">path</span><span style="color:#032F62;--shiki-dark:#9ECBFF">} failed: ${</span><span style="color:#24292E;--shiki-dark:#E1E4E8">r</span><span style="color:#032F62;--shiki-dark:#9ECBFF">.</span><span style="color:#24292E;--shiki-dark:#E1E4E8">stderr</span><span style="color:#032F62;--shiki-dark:#9ECBFF">.</span><span style="color:#6F42C1;--shiki-dark:#B392F0">trim</span><span style="color:#032F62;--shiki-dark:#9ECBFF">()</span><span style="color:#032F62;--shiki-dark:#9ECBFF">}`</span><span style="color:#24292E;--shiki-dark:#E1E4E8">);</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">        return</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> r.stdout;</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">      },</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">      async</span><span style="color:#6F42C1;--shiki-dark:#B392F0"> exec</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(</span><span style="color:#E36209;--shiki-dark:#FFAB70">command</span><span style="color:#24292E;--shiki-dark:#E1E4E8">, </span><span style="color:#E36209;--shiki-dark:#FFAB70">opts</span><span style="color:#24292E;--shiki-dark:#E1E4E8">) {</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">        const</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> env</span><span style="color:#D73A49;--shiki-dark:#F97583"> =</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> Object.</span><span style="color:#6F42C1;--shiki-dark:#B392F0">entries</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(opts.env)</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">          .</span><span style="color:#6F42C1;--shiki-dark:#B392F0">map</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(([</span><span style="color:#E36209;--shiki-dark:#FFAB70">k</span><span style="color:#24292E;--shiki-dark:#E1E4E8">, </span><span style="color:#E36209;--shiki-dark:#FFAB70">v</span><span style="color:#24292E;--shiki-dark:#E1E4E8">]) </span><span style="color:#D73A49;--shiki-dark:#F97583">=></span><span style="color:#032F62;--shiki-dark:#9ECBFF"> `${</span><span style="color:#24292E;--shiki-dark:#E1E4E8">k</span><span style="color:#032F62;--shiki-dark:#9ECBFF">}=${</span><span style="color:#6F42C1;--shiki-dark:#B392F0">q</span><span style="color:#032F62;--shiki-dark:#9ECBFF">(</span><span style="color:#6F42C1;--shiki-dark:#B392F0">String</span><span style="color:#032F62;--shiki-dark:#9ECBFF">(</span><span style="color:#24292E;--shiki-dark:#E1E4E8">v</span><span style="color:#032F62;--shiki-dark:#9ECBFF">))</span><span style="color:#032F62;--shiki-dark:#9ECBFF">}`</span><span style="color:#24292E;--shiki-dark:#E1E4E8">)</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">          .</span><span style="color:#6F42C1;--shiki-dark:#B392F0">join</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(</span><span style="color:#032F62;--shiki-dark:#9ECBFF">" "</span><span style="color:#24292E;--shiki-dark:#E1E4E8">);</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">        const</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> seconds</span><span style="color:#D73A49;--shiki-dark:#F97583"> =</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> Math.</span><span style="color:#6F42C1;--shiki-dark:#B392F0">max</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(</span><span style="color:#005CC5;--shiki-dark:#79B8FF">1</span><span style="color:#24292E;--shiki-dark:#E1E4E8">, Math.</span><span style="color:#6F42C1;--shiki-dark:#B392F0">ceil</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(opts.timeoutMs </span><span style="color:#D73A49;--shiki-dark:#F97583">/</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> 1000</span><span style="color:#24292E;--shiki-dark:#E1E4E8">));</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">        return</span><span style="color:#6F42C1;--shiki-dark:#B392F0"> ssh</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(</span><span style="color:#032F62;--shiki-dark:#9ECBFF">`cd ${</span><span style="color:#6F42C1;--shiki-dark:#B392F0">q</span><span style="color:#032F62;--shiki-dark:#9ECBFF">(</span><span style="color:#24292E;--shiki-dark:#E1E4E8">opts</span><span style="color:#032F62;--shiki-dark:#9ECBFF">.</span><span style="color:#24292E;--shiki-dark:#E1E4E8">cwd</span><span style="color:#032F62;--shiki-dark:#9ECBFF">)</span><span style="color:#032F62;--shiki-dark:#9ECBFF">} &#x26;&#x26; env ${</span><span style="color:#24292E;--shiki-dark:#E1E4E8">env</span><span style="color:#032F62;--shiki-dark:#9ECBFF">} timeout ${</span><span style="color:#24292E;--shiki-dark:#E1E4E8">seconds</span><span style="color:#032F62;--shiki-dark:#9ECBFF">}s sh -c ${</span><span style="color:#6F42C1;--shiki-dark:#B392F0">q</span><span style="color:#032F62;--shiki-dark:#9ECBFF">(</span><span style="color:#24292E;--shiki-dark:#E1E4E8">command</span><span style="color:#032F62;--shiki-dark:#9ECBFF">)</span><span style="color:#032F62;--shiki-dark:#9ECBFF">}`</span><span style="color:#24292E;--shiki-dark:#E1E4E8">, </span><span style="color:#005CC5;--shiki-dark:#79B8FF">undefined</span><span style="color:#24292E;--shiki-dark:#E1E4E8">, {</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">          signal: opts.signal,</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">          timeoutMs: opts.timeoutMs </span><span style="color:#D73A49;--shiki-dark:#F97583">+</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> 5_000</span><span style="color:#24292E;--shiki-dark:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">        });</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">      },</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">    };</span></span></code></pre></div></li>
+<li><span class="stage">Ship the runtime</span><p>The guest needs a launcher and the child workflow. Upload both as the session opens, next to the request file the kit is about to write.</p><div class="card pane"><div class="cap"><span class="mono">real/stereos-provider.ts</span><span class="mono">@stereos/smithers</span></div><pre class="shiki shiki-themes github-light github-dark" style="background-color:#fff;--shiki-dark-bg:#24292e;color:#24292e;--shiki-dark:#e1e4e8" tabindex="0"><code><span class="line"><span style="color:#6A737D;--shiki-dark:#6A737D">    // Upload the entry runner alongside the request the kit is about to write.</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">    await</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> session.</span><span style="color:#6F42C1;--shiki-dark:#B392F0">writeFile</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(</span><span style="color:#005CC5;--shiki-dark:#79B8FF">RUNNER_PATH</span><span style="color:#24292E;--shiki-dark:#E1E4E8">, </span><span style="color:#6F42C1;--shiki-dark:#B392F0">readFileSync</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(</span><span style="color:#6F42C1;--shiki-dark:#B392F0">join</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(</span><span style="color:#005CC5;--shiki-dark:#79B8FF">HERE</span><span style="color:#24292E;--shiki-dark:#E1E4E8">, </span><span style="color:#032F62;--shiki-dark:#9ECBFF">"guest-runner.sh"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">), </span><span style="color:#032F62;--shiki-dark:#9ECBFF">"utf8"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">));</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">    await</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> session.</span><span style="color:#6F42C1;--shiki-dark:#B392F0">writeFile</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(</span><span style="color:#005CC5;--shiki-dark:#79B8FF">WORKFLOW_PATH</span><span style="color:#24292E;--shiki-dark:#E1E4E8">, </span><span style="color:#D73A49;--shiki-dark:#F97583">await</span><span style="color:#6F42C1;--shiki-dark:#B392F0"> buildGuestWorkflow</span><span style="color:#24292E;--shiki-dark:#E1E4E8">());</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">    return</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> session;</span></span></code></pre></div></li>
+<li><span class="stage">Launch inside the guest</span><p>The launcher is a shell script. It execs the guest's own Bun on the uploaded bundle.</p><div class="card pane"><div class="cap"><span class="mono">real/guest-runner.sh</span><span class="mono">@stereos/smithers</span></div><pre class="shiki shiki-themes github-light github-dark" style="background-color:#fff;--shiki-dark-bg:#24292e;color:#24292e;--shiki-dark:#e1e4e8" tabindex="0"><code><span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">BUN_PATH</span><span style="color:#D73A49;--shiki-dark:#F97583">=</span><span style="color:#032F62;--shiki-dark:#9ECBFF">"${</span><span style="color:#24292E;--shiki-dark:#E1E4E8">STEREOS_GUEST_BUN</span><span style="color:#D73A49;--shiki-dark:#F97583">:-/</span><span style="color:#24292E;--shiki-dark:#E1E4E8">home</span><span style="color:#D73A49;--shiki-dark:#F97583">/</span><span style="color:#24292E;--shiki-dark:#E1E4E8">agent</span><span style="color:#D73A49;--shiki-dark:#F97583">/</span><span style="color:#032F62;--shiki-dark:#9ECBFF">.</span><span style="color:#24292E;--shiki-dark:#E1E4E8">local</span><span style="color:#D73A49;--shiki-dark:#F97583">/</span><span style="color:#24292E;--shiki-dark:#E1E4E8">bin</span><span style="color:#D73A49;--shiki-dark:#F97583">/</span><span style="color:#24292E;--shiki-dark:#E1E4E8">bun</span><span style="color:#032F62;--shiki-dark:#9ECBFF">}"</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">WORKFLOW_PATH</span><span style="color:#D73A49;--shiki-dark:#F97583">=</span><span style="color:#032F62;--shiki-dark:#9ECBFF">"${</span><span style="color:#24292E;--shiki-dark:#E1E4E8">STEREOS_GUEST_WORKFLOW</span><span style="color:#D73A49;--shiki-dark:#F97583">:-/</span><span style="color:#24292E;--shiki-dark:#E1E4E8">home</span><span style="color:#D73A49;--shiki-dark:#F97583">/</span><span style="color:#24292E;--shiki-dark:#E1E4E8">agent</span><span style="color:#D73A49;--shiki-dark:#F97583">/</span><span style="color:#24292E;--shiki-dark:#E1E4E8">workspace</span><span style="color:#D73A49;--shiki-dark:#F97583">/</span><span style="color:#032F62;--shiki-dark:#9ECBFF">.</span><span style="color:#24292E;--shiki-dark:#E1E4E8">smithers</span><span style="color:#D73A49;--shiki-dark:#F97583">/</span><span style="color:#24292E;--shiki-dark:#E1E4E8">child-workflow</span><span style="color:#032F62;--shiki-dark:#9ECBFF">.</span><span style="color:#24292E;--shiki-dark:#E1E4E8">js</span><span style="color:#032F62;--shiki-dark:#9ECBFF">}"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">[ </span><span style="color:#D73A49;--shiki-dark:#F97583">-x</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> "</span><span style="color:#24292E;--shiki-dark:#E1E4E8">$BUN_PATH</span><span style="color:#032F62;--shiki-dark:#9ECBFF">"</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> ] </span><span style="color:#D73A49;--shiki-dark:#F97583">||</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> { </span><span style="color:#005CC5;--shiki-dark:#79B8FF">echo</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> "guest Bun is missing or not executable: </span><span style="color:#24292E;--shiki-dark:#E1E4E8">$BUN_PATH</span><span style="color:#032F62;--shiki-dark:#9ECBFF">"</span><span style="color:#D73A49;--shiki-dark:#F97583"> >&#x26;2</span><span style="color:#24292E;--shiki-dark:#E1E4E8">; </span><span style="color:#005CC5;--shiki-dark:#79B8FF">exit</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> 127</span><span style="color:#24292E;--shiki-dark:#E1E4E8">; }</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">[ </span><span style="color:#D73A49;--shiki-dark:#F97583">-r</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> "</span><span style="color:#24292E;--shiki-dark:#E1E4E8">$WORKFLOW_PATH</span><span style="color:#032F62;--shiki-dark:#9ECBFF">"</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> ] </span><span style="color:#D73A49;--shiki-dark:#F97583">||</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> { </span><span style="color:#005CC5;--shiki-dark:#79B8FF">echo</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> "guest child workflow is missing: </span><span style="color:#24292E;--shiki-dark:#E1E4E8">$WORKFLOW_PATH</span><span style="color:#032F62;--shiki-dark:#9ECBFF">"</span><span style="color:#D73A49;--shiki-dark:#F97583"> >&#x26;2</span><span style="color:#24292E;--shiki-dark:#E1E4E8">; </span><span style="color:#005CC5;--shiki-dark:#79B8FF">exit</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> 127</span><span style="color:#24292E;--shiki-dark:#E1E4E8">; }</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#005CC5;--shiki-dark:#79B8FF">exec</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> "</span><span style="color:#24292E;--shiki-dark:#E1E4E8">$BUN_PATH</span><span style="color:#032F62;--shiki-dark:#9ECBFF">"</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> "</span><span style="color:#24292E;--shiki-dark:#E1E4E8">$WORKFLOW_PATH</span><span style="color:#032F62;--shiki-dark:#9ECBFF">"</span></span></code></pre></div></li>
+<li><span class="stage">Write the result</span><p>The guest writes <code>{ status, output }</code> to the path Smithers named in the environment. That file becomes the task's output on the host.</p><div class="card pane"><div class="cap"><span class="mono">real/child-workflow.tsx</span><span class="mono">@stereos/smithers</span></div><pre class="shiki shiki-themes github-light github-dark" style="background-color:#fff;--shiki-dark-bg:#24292e;color:#24292e;--shiki-dark:#e1e4e8" tabindex="0"><code><span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">if</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> (</span><span style="color:#D73A49;--shiki-dark:#F97583">import</span><span style="color:#24292E;--shiki-dark:#E1E4E8">.</span><span style="color:#005CC5;--shiki-dark:#79B8FF">meta</span><span style="color:#24292E;--shiki-dark:#E1E4E8">.main) {</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">  const</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> requestPath</span><span style="color:#D73A49;--shiki-dark:#F97583"> =</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> process.env.</span><span style="color:#005CC5;--shiki-dark:#79B8FF">SMITHERS_SANDBOX_REQUEST_PATH</span><span style="color:#24292E;--shiki-dark:#E1E4E8">;</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">  const</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> resultPath</span><span style="color:#D73A49;--shiki-dark:#F97583"> =</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> process.env.</span><span style="color:#005CC5;--shiki-dark:#79B8FF">SMITHERS_SANDBOX_RESULT_PATH</span><span style="color:#24292E;--shiki-dark:#E1E4E8">;</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">  if</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> (</span><span style="color:#D73A49;--shiki-dark:#F97583">!</span><span style="color:#24292E;--shiki-dark:#E1E4E8">requestPath </span><span style="color:#D73A49;--shiki-dark:#F97583">||</span><span style="color:#D73A49;--shiki-dark:#F97583"> !</span><span style="color:#24292E;--shiki-dark:#E1E4E8">resultPath) </span><span style="color:#D73A49;--shiki-dark:#F97583">throw</span><span style="color:#D73A49;--shiki-dark:#F97583"> new</span><span style="color:#6F42C1;--shiki-dark:#B392F0"> Error</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(</span><span style="color:#032F62;--shiki-dark:#9ECBFF">"Smithers sandbox protocol paths are unset"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">);</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">  const</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> request</span><span style="color:#D73A49;--shiki-dark:#F97583"> =</span><span style="color:#D73A49;--shiki-dark:#F97583"> await</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> Bun.</span><span style="color:#6F42C1;--shiki-dark:#B392F0">file</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(requestPath).</span><span style="color:#6F42C1;--shiki-dark:#B392F0">json</span><span style="color:#24292E;--shiki-dark:#E1E4E8">();</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">  const</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> prompt</span><span style="color:#D73A49;--shiki-dark:#F97583"> =</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> z.</span><span style="color:#6F42C1;--shiki-dark:#B392F0">string</span><span style="color:#24292E;--shiki-dark:#E1E4E8">().</span><span style="color:#6F42C1;--shiki-dark:#B392F0">parse</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(request.input?.prompt);</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">  const</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> output</span><span style="color:#D73A49;--shiki-dark:#F97583"> =</span><span style="color:#D73A49;--shiki-dark:#F97583"> await</span><span style="color:#6F42C1;--shiki-dark:#B392F0"> executeGuestWork</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(prompt, {</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">    runId: z.</span><span style="color:#6F42C1;--shiki-dark:#B392F0">string</span><span style="color:#24292E;--shiki-dark:#E1E4E8">().</span><span style="color:#6F42C1;--shiki-dark:#B392F0">parse</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(request.runId),</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">    sandboxId: z.</span><span style="color:#6F42C1;--shiki-dark:#B392F0">string</span><span style="color:#24292E;--shiki-dark:#E1E4E8">().</span><span style="color:#6F42C1;--shiki-dark:#B392F0">parse</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(request.sandboxId),</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">  });</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">  const</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> result</span><span style="color:#D73A49;--shiki-dark:#F97583"> =</span><span style="color:#005CC5;--shiki-dark:#79B8FF"> JSON</span><span style="color:#24292E;--shiki-dark:#E1E4E8">.</span><span style="color:#6F42C1;--shiki-dark:#B392F0">stringify</span><span style="color:#24292E;--shiki-dark:#E1E4E8">({ status: </span><span style="color:#032F62;--shiki-dark:#9ECBFF">"finished"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">, output });</span></span>
+<span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">  await</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> Bun.</span><span style="color:#6F42C1;--shiki-dark:#B392F0">write</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(resultPath, result);</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">  process.stdout.</span><span style="color:#6F42C1;--shiki-dark:#B392F0">write</span><span style="color:#24292E;--shiki-dark:#E1E4E8">(</span><span style="color:#032F62;--shiki-dark:#9ECBFF">`${</span><span style="color:#24292E;--shiki-dark:#E1E4E8">result</span><span style="color:#032F62;--shiki-dark:#9ECBFF">}</span><span style="color:#005CC5;--shiki-dark:#79B8FF">\n</span><span style="color:#032F62;--shiki-dark:#9ECBFF">`</span><span style="color:#24292E;--shiki-dark:#E1E4E8">);</span></span></code></pre></div></li>
+<li><span class="stage">Use it</span><p>Point a <code>&lt;Sandbox&gt;</code> at the provider. Nothing else in the workflow changes.</p><div class="card pane"><div class="cap"><span class="mono">real/stereos-real.tsx</span><span class="mono">@stereos/smithers</span></div><pre class="shiki shiki-themes github-light github-dark" style="background-color:#fff;--shiki-dark-bg:#24292e;color:#24292e;--shiki-dark:#e1e4e8" tabindex="0"><code><span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">export</span><span style="color:#D73A49;--shiki-dark:#F97583"> default</span><span style="color:#6F42C1;--shiki-dark:#B392F0"> smithers</span><span style="color:#24292E;--shiki-dark:#E1E4E8">((</span><span style="color:#E36209;--shiki-dark:#FFAB70">ctx</span><span style="color:#24292E;--shiki-dark:#E1E4E8">) </span><span style="color:#D73A49;--shiki-dark:#F97583">=></span><span style="color:#24292E;--shiki-dark:#E1E4E8"> (</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">  &#x3C;</span><span style="color:#005CC5;--shiki-dark:#79B8FF">Workflow</span><span style="color:#6F42C1;--shiki-dark:#B392F0"> name</span><span style="color:#D73A49;--shiki-dark:#F97583">=</span><span style="color:#032F62;--shiki-dark:#9ECBFF">"stereos-real"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">></span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">    &#x3C;</span><span style="color:#005CC5;--shiki-dark:#79B8FF">Sandbox</span></span>
+<span class="line"><span style="color:#6F42C1;--shiki-dark:#B392F0">      id</span><span style="color:#D73A49;--shiki-dark:#F97583">=</span><span style="color:#032F62;--shiki-dark:#9ECBFF">"stereos-vm"</span></span>
+<span class="line"><span style="color:#6F42C1;--shiki-dark:#B392F0">      provider</span><span style="color:#D73A49;--shiki-dark:#F97583">=</span><span style="color:#24292E;--shiki-dark:#E1E4E8">{stereosProvider}</span></span>
+<span class="line"><span style="color:#6F42C1;--shiki-dark:#B392F0">      workflow</span><span style="color:#D73A49;--shiki-dark:#F97583">=</span><span style="color:#24292E;--shiki-dark:#E1E4E8">{childWorkflow}</span></span>
+<span class="line"><span style="color:#6F42C1;--shiki-dark:#B392F0">      input</span><span style="color:#D73A49;--shiki-dark:#F97583">=</span><span style="color:#24292E;--shiki-dark:#E1E4E8">{{ prompt: ctx.input.prompt }}</span></span>
+<span class="line"><span style="color:#6F42C1;--shiki-dark:#B392F0">      output</span><span style="color:#D73A49;--shiki-dark:#F97583">=</span><span style="color:#24292E;--shiki-dark:#E1E4E8">{outputs.result}</span></span>
+<span class="line"><span style="color:#6F42C1;--shiki-dark:#B392F0">      allowNetwork</span></span>
+<span class="line"><span style="color:#6F42C1;--shiki-dark:#B392F0">      reviewDiffs</span><span style="color:#D73A49;--shiki-dark:#F97583">=</span><span style="color:#24292E;--shiki-dark:#E1E4E8">{</span><span style="color:#005CC5;--shiki-dark:#79B8FF">false</span><span style="color:#24292E;--shiki-dark:#E1E4E8">}</span></span>
+<span class="line"><span style="color:#6F42C1;--shiki-dark:#B392F0">      timeoutMs</span><span style="color:#D73A49;--shiki-dark:#F97583">=</span><span style="color:#24292E;--shiki-dark:#E1E4E8">{</span><span style="color:#005CC5;--shiki-dark:#79B8FF">120_000</span><span style="color:#24292E;--shiki-dark:#E1E4E8">}</span></span>
+<span class="line"><span style="color:#6F42C1;--shiki-dark:#B392F0">      retries</span><span style="color:#D73A49;--shiki-dark:#F97583">=</span><span style="color:#24292E;--shiki-dark:#E1E4E8">{</span><span style="color:#005CC5;--shiki-dark:#79B8FF">1</span><span style="color:#24292E;--shiki-dark:#E1E4E8">}</span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">    /></span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">  &#x3C;/</span><span style="color:#005CC5;--shiki-dark:#79B8FF">Workflow</span><span style="color:#24292E;--shiki-dark:#E1E4E8">></span></span>
+<span class="line"><span style="color:#24292E;--shiki-dark:#E1E4E8">));</span></span></code></pre></div></li></ol>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-index">02 / 02</span><div>
+      <h2>Evidence</h2>
+      <p class="note">Recorded 2026-08-12 on two hypervisors. Nothing here is reconstructed.</p>
+    </div></div>
+    <div class="row"><div class="card"><div class="cap"><span>QEMU/KVM</span><span class="pill ok">finished</span></div><div class="body"><h3>GCE n2-standard-2, nested virtualization</h3><dl class="tiles" style="margin-top:10px"><div class="tile"><dt>Mixtape</dt><dd>coder-dev x86_64, built from source</dd></div><div class="tile"><dt>Guest</dt><dd>stereOS dev-f269d96, Linux 6.18.33 x86_64</dd></div><div class="tile"><dt>Run id</dt><dd>55c1ccb5-9ddf-4912-82eb-eb35efd69767</dd></div><div class="tile"><dt>Sandbox</dt><dd>1,877 ms</dd></div></dl><p class="note" style="margin-top:10px">primeCount 2508 below 22423, computed by Bun 1.2.21 x64 in the guest</p></div></div>
+<div class="card"><div class="cap"><span>Apple Virtualization.framework via mb</span><span class="pill ok">finished</span></div><div class="body"><h3>Apple Silicon Mac</h3><dl class="tiles" style="margin-top:10px"><div class="tile"><dt>Mixtape</dt><dd>coder-arm64:latest, fetched by hand</dd></div><div class="tile"><dt>Guest</dt><dd>stereOS 2026.03.04.0, Linux 6.12.74 aarch64</dd></div><div class="tile"><dt>Run id</dt><dd>c69a9b7f-762d-478e-9716-114e22f6c308</dd></div><div class="tile"><dt>Sandbox</dt><dd>768 ms</dd></div></dl><p class="note" style="margin-top:10px">primeCount 2448 below 21831, computed by Bun 1.2.21 arm64 in the guest</p></div></div></div>
+    <details style="margin-top:14px">
+      <summary>One recorded run, step by step</summary>
+      <div class="body" style="padding:14px"><ol class="walk"><li><span class="stage">stereOS VM</span><p>The host boots the mixtape under QEMU/KVM and waits for the guest to answer on SSH.</p><pre class="excerpt">== guest ==
+agent
+coder-dev
+Linux 6.18.33 x86_64
+PRETTY_NAME=&quot;stereOS dev-f269d96 (coder-dev)&quot;</pre></li>
+<li><span class="stage">Smithers</span><p>Smithers starts the run on the host. The workflow holds one node.</p><pre class="excerpt">info  starting workflow run engine:run=0ms runId=55c1ccb5-9ddf-4912-82eb-eb35efd69767
+      workflowName=workflow
+      workflowPath=/home/willcory10_gmail_com/smithers/apps/stereos-site/real/stereos-real.tsx</pre></li>
+<li><span class="stage">SSH · provider seam</span><p>The provider bundles the child workflow, uploads it over SSH, and runs the guest launcher.</p><pre class="excerpt">#7  +00:00.279  SandboxCreated        🧪 Sandbox created: stereos-vm (stereos)
+#8  +00:00.288  SandboxShipped        📦 Sandbox shipped: stereos-vm (163 bytes)</pre></li>
+<li><span class="stage">Bun in guest</span><p>The guest's Bun executes the bundle and writes the result the engine collects.</p><pre class="excerpt">#12  +00:02.153  SandboxBundleReceived  📥 Sandbox bundle received: stereos-vm (0 patches)
+#13  +00:02.156  SandboxCompleted      ✅ Sandbox completed: stereos-vm (finished)</pre></li>
+<li><span class="stage">result JSON</span><p>The output is the guest's own report: its OS, kernel, and hostname, none of which exist on the host.</p><pre class="excerpt">    &quot;os&quot;: &quot;stereOS dev-f269d96&quot;,
+    &quot;kernel&quot;: &quot;Linux 6.18.33 x86_64&quot;,
+    &quot;user&quot;: &quot;agent&quot;,
+    &quot;hostname&quot;: &quot;coder-dev&quot;,</pre></li>
+<li><span class="stage">audit</span><p>The prompt hash reproduces on the host. It shows input and output agree; it is not provenance.</p><pre class="excerpt">$ printf '%s' 'hello from the linux host' | sha256sum
+b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121  -</pre></li></ol></div>
+    </details>
+    <details>
+      <summary>The raw captures, unedited</summary>
+      <div class="body" style="padding:14px"><div id="captures"></div></div>
+    </details>
+    <details>
+      <summary>Registry forensics found while building this</summary>
+      <div class="body" style="padding:14px">
+        <p class="note" style="max-width: 720px">
+          <code>mb pull coder-arm64:latest</code> fails: the raw blob hashes to <code>d335283a…12a21e2</code>
+          while its manifest declares <code>bf212e02…1245cdeb</code>, and <code>zstd -t</code> reports
+          <code>Decoding error (36)</code>. The qcow2 blob at that tag is clean and reconstructs the image, so
+          republishing the raw blob fixes the pull.
+        </p>
+      </div>
+    </details>
+  </section>
+
+</div>
+
 <!-- ───────────────────────── Live demo ───────────────────────── -->
-<div role="tabpanel" id="panel-live" aria-labelledby="tab-live">
+<div role="tabpanel" id="panel-live" aria-labelledby="tab-live" hidden>
 
   <section>
     <figure class="diagram">
       <div class="scroll"><svg viewBox="0 0 1140 140" role="img" aria-label="A run travels from the visitor through the guard and the loopback gateway into a Smithers Sandbox, over SSH into a stereOS VM where Bun executes the child workflow, and the result returns the same way."><defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="var(--line)"/></marker><marker id="arrow-orange" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="var(--orange)"/></marker></defs><g><rect x="0.0" y="34" width="138" height="62" rx="12" fill="var(--card)" stroke="var(--muted)" stroke-width="1.5"/><text x="69.0" y="60" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">Visitor</text><text x="69.0" y="78" text-anchor="middle" font-size="11" fill="var(--muted)">browser</text></g><g><rect x="167.0" y="34" width="138" height="62" rx="12" fill="var(--card)" stroke="var(--orange)" stroke-width="1.5"/><text x="236.0" y="60" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">Guard</text><text x="236.0" y="78" text-anchor="middle" font-size="11" fill="var(--muted)">Bun, allowlist</text></g><g><rect x="334.0" y="34" width="138" height="62" rx="12" fill="var(--card)" stroke="var(--muted)" stroke-width="1.5"/><text x="403.0" y="60" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">Gateway</text><text x="403.0" y="78" text-anchor="middle" font-size="11" fill="var(--muted)">loopback only</text></g><g><rect x="501.0" y="34" width="138" height="62" rx="12" fill="var(--card)" stroke="var(--blue)" stroke-width="1.5"/><text x="570.0" y="60" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">Smithers</text><text x="570.0" y="78" text-anchor="middle" font-size="11" fill="var(--muted)">&lt;Sandbox&gt;</text></g><g><rect x="668.0" y="34" width="138" height="62" rx="12" fill="var(--card)" stroke="var(--muted)" stroke-width="1.5"/><text x="737.0" y="60" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">SSH</text><text x="737.0" y="78" text-anchor="middle" font-size="11" fill="var(--muted)">provider seam</text></g><g><rect x="835.0" y="34" width="138" height="62" rx="12" fill="var(--card)" stroke="var(--green)" stroke-width="1.5"/><text x="904.0" y="60" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">stereOS VM</text><text x="904.0" y="78" text-anchor="middle" font-size="11" fill="var(--muted)">QEMU/KVM</text></g><g><rect x="1002.0" y="34" width="138" height="62" rx="12" fill="var(--card)" stroke="var(--green)" stroke-width="1.5"/><text x="1071.0" y="60" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">Bun in guest</text><text x="1071.0" y="78" text-anchor="middle" font-size="11" fill="var(--muted)">child workflow</text></g><path d="M142.0 65 H163.0" stroke="var(--line)" stroke-width="1.5" marker-end="url(#arrow)"/><path d="M309.0 65 H330.0" stroke="var(--line)" stroke-width="1.5" marker-end="url(#arrow)"/><path d="M476.0 65 H497.0" stroke="var(--line)" stroke-width="1.5" marker-end="url(#arrow)"/><path d="M643.0 65 H664.0" stroke="var(--line)" stroke-width="1.5" marker-end="url(#arrow)"/><path d="M810.0 65 H831.0" stroke="var(--line)" stroke-width="1.5" marker-end="url(#arrow)"/><path d="M977.0 65 H998.0" stroke="var(--line)" stroke-width="1.5" marker-end="url(#arrow)"/><path d="M1071.0 96 V126 H69.0 V96" fill="none" stroke="var(--orange)" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrow-orange)"/><text x="570.0" y="119" text-anchor="middle" font-size="11" fill="var(--orange)">result JSON written by Bun inside the guest</text></svg></div>
-      <figcaption>The guard is the only public surface. The gateway stays on loopback.</figcaption>
+      <figcaption>The provider you just read, running real VMs. The guard is the only public surface; the
+      gateway stays on loopback.</figcaption>
     </figure>
   </section>
 
@@ -204,7 +415,7 @@
     <div class="banner warn" id="live-offline" hidden>
       <strong>The demo host is not answering.</strong>
       Nothing here is simulated, so nothing runs until it is back.
-      <a href="#how">See the recorded runs</a>.
+      <a href="#build">See the recorded runs</a>.
     </div>
 
     <div class="controls" style="margin-bottom: 14px">
@@ -217,7 +428,8 @@
 
     <div class="row" style="grid-template-columns: minmax(0, 1fr)">
       <div class="card">
-        <div class="cap"><span>Run UI served from the demo host, built with <code>smthrs/gateway-ui</code></span>
+        <div class="cap"><span>Run UI served from the demo host, built with <code>smthrs/gateway-ui</code>. Approve
+          the gate here.</span>
           <span class="mono" id="live-origin"></span></div>
         <iframe class="embed" id="live-frame" title="stereOS demo runs" src="about:blank"></iframe>
       </div>
@@ -264,74 +476,14 @@
 
 </div>
 
-<!-- ───────────────────────── How it works ───────────────────────── -->
-<div role="tabpanel" id="panel-how" aria-labelledby="tab-how" hidden>
-
-  <section>
-    <div class="sec-head"><span class="sec-index">01 / 04</span><div>
-      <h2>Two hosts, one provider</h2>
-      <p class="note">Recorded 2026-08-12. Both captures appear in full below.</p>
-    </div></div>
-    <div class="row"><div class="card"><div class="cap"><span>QEMU/KVM</span><span class="pill ok">finished</span></div><div class="body"><h3>GCE n2-standard-2, nested virtualization</h3><dl class="tiles" style="margin-top:10px"><div class="tile"><dt>Mixtape</dt><dd>coder-dev x86_64, built from source</dd></div><div class="tile"><dt>Guest</dt><dd>stereOS dev-f269d96, Linux 6.18.33 x86_64</dd></div><div class="tile"><dt>Run id</dt><dd>55c1ccb5-9ddf-4912-82eb-eb35efd69767</dd></div><div class="tile"><dt>Sandbox</dt><dd>1,877 ms</dd></div></dl><p class="note" style="margin-top:10px">primeCount 2508 below 22423, computed by Bun 1.2.21 x64 in the guest</p></div></div>
-<div class="card"><div class="cap"><span>Apple Virtualization.framework via mb</span><span class="pill ok">finished</span></div><div class="body"><h3>Apple Silicon Mac</h3><dl class="tiles" style="margin-top:10px"><div class="tile"><dt>Mixtape</dt><dd>coder-arm64:latest, fetched by hand</dd></div><div class="tile"><dt>Guest</dt><dd>stereOS 2026.03.04.0, Linux 6.12.74 aarch64</dd></div><div class="tile"><dt>Run id</dt><dd>c69a9b7f-762d-478e-9716-114e22f6c308</dd></div><div class="tile"><dt>Sandbox</dt><dd>768 ms</dd></div></dl><p class="note" style="margin-top:10px">primeCount 2448 below 21831, computed by Bun 1.2.21 arm64 in the guest</p></div></div></div>
-  </section>
-
-  <section>
-    <div class="sec-head"><span class="sec-index">02 / 04</span><div>
-      <h2>One run, step by step</h2>
-      <p class="note">Excerpts are verbatim from the GCE capture.</p>
-    </div></div>
-    <ol class="walk"><li><span class="stage">stereOS VM</span><p>The host boots the mixtape under QEMU/KVM and waits for the guest to answer on SSH.</p><pre class="excerpt">== guest ==
-agent
-coder-dev
-Linux 6.18.33 x86_64
-PRETTY_NAME=&quot;stereOS dev-f269d96 (coder-dev)&quot;</pre></li>
-<li><span class="stage">Smithers</span><p>Smithers starts the run on the host. The workflow holds one node.</p><pre class="excerpt">info  starting workflow run engine:run=0ms runId=55c1ccb5-9ddf-4912-82eb-eb35efd69767
-      workflowName=workflow
-      workflowPath=/home/willcory10_gmail_com/smithers/apps/stereos-site/real/stereos-real.tsx</pre></li>
-<li><span class="stage">SSH · provider seam</span><p>The provider bundles the child workflow, uploads it over SSH, and runs the guest launcher.</p><pre class="excerpt">#7  +00:00.279  SandboxCreated        🧪 Sandbox created: stereos-vm (stereos)
-#8  +00:00.288  SandboxShipped        📦 Sandbox shipped: stereos-vm (163 bytes)</pre></li>
-<li><span class="stage">Bun in guest</span><p>The guest's Bun executes the bundle and writes the result the engine collects.</p><pre class="excerpt">#12  +00:02.153  SandboxBundleReceived  📥 Sandbox bundle received: stereos-vm (0 patches)
-#13  +00:02.156  SandboxCompleted      ✅ Sandbox completed: stereos-vm (finished)</pre></li>
-<li><span class="stage">result JSON</span><p>The output is the guest's own report: its OS, kernel, and hostname, none of which exist on the host.</p><pre class="excerpt">    &quot;os&quot;: &quot;stereOS dev-f269d96&quot;,
-    &quot;kernel&quot;: &quot;Linux 6.18.33 x86_64&quot;,
-    &quot;user&quot;: &quot;agent&quot;,
-    &quot;hostname&quot;: &quot;coder-dev&quot;,</pre></li>
-<li><span class="stage">audit</span><p>The prompt hash reproduces on the host. It shows input and output agree; it is not provenance.</p><pre class="excerpt">$ printf '%s' 'hello from the linux host' | sha256sum
-b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121  -</pre></li></ol>
-  </section>
-
-  <section>
-    <div class="sec-head"><span class="sec-index">03 / 04</span><div>
-      <h2>Full captures</h2>
-      <p class="note">As recorded, nothing removed.</p>
-    </div></div>
-    <div id="captures"></div>
-  </section>
-
-  <section>
-    <div class="sec-head"><span class="sec-index">04 / 04</span><div>
-      <h2>Found while building this</h2>
-    </div></div>
-    <div class="card"><div class="body">
-      <p class="note" style="max-width: 720px">
-        <code>mb pull coder-arm64:latest</code> fails: the raw blob hashes to <code>d335283a…12a21e2</code>
-        while its manifest declares <code>bf212e02…1245cdeb</code>, and <code>zstd -t</code> reports
-        <code>Decoding error (36)</code>. The qcow2 blob at that tag is clean and reconstructs the image, so
-        republishing the raw blob fixes the pull.
-      </p>
-    </div></div>
-  </section>
-
-</div>
-
 <!-- ───────────────────────── Implementation ───────────────────────── -->
 <div role="tabpanel" id="panel-impl" aria-labelledby="tab-impl" hidden>
   <section>
     <div class="sec-head"><span class="sec-index">01 / 01</span><div>
-      <h2>Every file behind this page</h2>
-      <p class="note">Provider, guest workflows, provisioning, demo service, page. Tree and viewer are
-      <code>FileTree</code> and <code>CodeBlock</code> from <code>smthrs/ui</code>.</p>
+      <h2>Every file in <code>@stereos/smithers</code></h2>
+      <p class="note">The integration a sandbox vendor ships: provider, guest workflows, provisioning, demo
+      service, page. Tree and viewer are <code>FileTree</code> and <code>CodeBlock</code> from
+      <code>smthrs/ui</code>.</p>
     </div></div>
     <div id="impl-root" data-testid="impl-root">
       <div class="card"><div class="body"><p class="note">Loading the sources…</p></div></div>
@@ -339,17 +491,18 @@ b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121  -</pre></li></
   </section>
 </div>
 
-<!-- ───────────────────────── Proposed API ───────────────────────── -->
+<!-- ───────────────────────── Documenting your API ───────────────────────── -->
 <div role="tabpanel" id="panel-api" aria-labelledby="tab-api" hidden>
   <section>
     <div class="sec-head"><span class="sec-index">01 / 01</span><div>
-      <h2>Proposed API</h2>
-      <p class="note">The full spec for a first-class stereOS provider. Parts marked proposed do not exist yet.
-      <a href="./proposed-api.html" target="_blank" rel="noopener">Open the document</a>.</p>
+      <h2>Documenting your API</h2>
+      <p class="note">This is the reference documentation you would ship with your provider package. Parts marked
+      proposed do not exist yet.
+      <a href="./provider-api.html" target="_blank" rel="noopener">Open the document</a>.</p>
     </div></div>
     <div class="card">
-      <div class="cap"><span>stereos-sandbox-provider.html</span><span class="mono">reference</span></div>
-      <iframe class="embed" id="api-frame" style="height: 76vh" title="Proposed API reference" src="about:blank" loading="lazy"></iframe>
+      <div class="cap"><span>@stereos/smithers reference</span><span class="mono">reference</span></div>
+      <iframe class="embed" id="api-frame" style="height: 76vh" title="@stereos/smithers API reference" src="about:blank" loading="lazy"></iframe>
     </div>
   </section>
 </div>
@@ -362,14 +515,14 @@ b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121  -</pre></li></
     VM transport; that work is preserved in
     <a href="https://github.com/smithersai/smithers/pull/1506">PR #1506</a> and
     <a href="https://github.com/smithersai/smithers/tree/main/examples/stereos-sandbox-provider/project"><code>examples/stereos-sandbox-provider/project</code></a>.</p>
-    <p>Sources: <a href="https://github.com/smithersai/smithers/tree/main/examples/stereos-sandbox-provider"><code>examples/stereos-sandbox-provider</code></a></p>
+    <p>Sources: <a href="https://github.com/smithersai/smithers/tree/main/examples/stereos-sandbox-provider"><code>@stereos/smithers</code> at <code>examples/stereos-sandbox-provider</code></a>. Not published to npm.</p>
   </div>
 </footer>
 
-<script type="module" src="./live.js?v=202608131809"></script>
-<script type="module" src="./evidence.js?v=202608131809"></script>
+<script type="module" src="./live.js?v=202608131904"></script>
+<script type="module" src="./evidence.js?v=202608131904"></script>
 <script type="module">
-  const ids = ['live', 'how', 'impl', 'api'];
+  const ids = ['tasks', 'build', 'live', 'impl', 'api'];
   const tabs = ids.map((id) => ({
     hash: `#${id}`,
     tab: document.getElementById(`tab-${id}`),
@@ -388,13 +541,13 @@ b626119e7fd00e1ddbc4c11525b2081af555d3743974490ccaea1df96d228121  -</pre></li></
     // Both heavy panels load on first view so the landing tab stays light.
     if (entry.hash === '#impl' && !implLoaded) {
       implLoaded = true;
-      import('./impl.js?v=202608131809').catch((error) => {
+      import('./impl.js?v=202608131904').catch((error) => {
         document.getElementById('impl-root').textContent = `Could not load the sources: ${error.message}`;
       });
     }
     if (entry.hash === '#api') {
       const frame = document.getElementById('api-frame');
-      if (frame.src === 'about:blank') frame.src = './proposed-api.html';
+      if (frame.src === 'about:blank') frame.src = './provider-api.html';
     }
   }
   for (const entry of tabs) {

@@ -1,5 +1,5 @@
 [Unit]
-Description=Smithers gateway for the stereos.smithers.sh demo (loopback only)
+Description=Smithers gateway for the custom-sandbox.smithers.sh demo (loopback only)
 After=network-online.target stereos-vm.service
 Wants=network-online.target
 

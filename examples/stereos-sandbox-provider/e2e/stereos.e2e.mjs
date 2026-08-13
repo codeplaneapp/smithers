@@ -3,9 +3,10 @@
 // Everything asserted here is real: the Live demo tab starts a workflow on the
 // demo host, the run parks at its approval gate, the Approve button inside the
 // embedded run UI resolves it, and the engine reports `finished`. The check also
-// asserts that the old WebContainer simulation tab is gone, that the recorded
-// evidence renders, and that the Implementation tree opens a file whose text
-// matches the repository.
+// asserts the tutorial tab set and its default tab, the tasks-and-sandboxes
+// diagram, the recorded evidence, that the Implementation tree opens a file
+// whose text matches the repository, and that the old stereos.smithers.sh
+// hostname no longer serves this site.
 //
 // Run: node examples/stereos-sandbox-provider/e2e/stereos.e2e.mjs [url]
 import { appendFileSync, writeFileSync } from "node:fs";
@@ -21,7 +22,8 @@ const { chromium } = require("playwright");
 
 const here = dirname(fileURLToPath(import.meta.url));
 const example = join(here, "..");
-const url = process.argv[2] ?? "https://stereos.smithers.sh/";
+const url = process.argv[2] ?? "https://custom-sandbox.smithers.sh/";
+const RETIRED_URL = "https://stereos.smithers.sh/";
 const logPath = join(here, "last-run.log");
 const failures = [];
 
@@ -62,13 +64,16 @@ page.on("request", (request) => requested.push(request.url()));
 const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
 check("page responds 200", response?.status() === 200, String(response?.status()));
 
-// 1. Tab set: four tabs, and no simulation tab.
+// 1. The tutorial's tab set, in order, with Tasks & sandboxes selected first.
 const tabNames = await page.$$eval('[role="tab"]', (nodes) => nodes.map((node) => node.textContent.trim()));
 check(
-  "four tabs with first-read names",
-  JSON.stringify(tabNames) === JSON.stringify(["Live demo", "How it works", "Implementation", "Proposed API"]),
+  "five tabs in tutorial order",
+  JSON.stringify(tabNames) ===
+    JSON.stringify(["Tasks & sandboxes", "Build your own", "Live demo", "Implementation", "Documenting your API"]),
   tabNames.join(" · "),
 );
+const selected = await page.$eval('[role="tab"][aria-selected="true"]', (node) => node.textContent.trim());
+check("Tasks & sandboxes is the default tab", selected === "Tasks & sandboxes", selected);
 check("no simulation tab", !tabNames.some((name) => /browser demo|simulat/i.test(name)));
 const panels = await page.$$eval('[role="tabpanel"]', (nodes) => nodes.map((node) => node.id));
 check("no simulation panel", !panels.includes("panel-demo"), panels.join(" · "));
@@ -79,8 +84,57 @@ check(
 // The WebContainer work is preserved as one footer sentence and nothing more.
 const footer = (await page.locator("footer").textContent()) ?? "";
 check("the WebContainer work survives only as a footer credit", /WebContainer/.test(footer));
+check("the page is framed as @stereos/smithers", /@stereos\/smithers/.test(await page.content()));
 
-// 2. Live demo against the real backend.
+// 2. Tasks & sandboxes: both explanatory diagrams render.
+const taskLabel = (await page.getAttribute("#panel-tasks figure:nth-of-type(1) svg", "aria-label")) ?? "";
+check(
+  "the tasks-and-sandboxes diagram is present",
+  /host process/.test(taskLabel) && /provider seam/.test(taskLabel),
+  taskLabel.slice(0, 70),
+);
+const diagrams = await page.$$eval("#panel-tasks svg", (nodes) => nodes.length);
+check("both diagrams render as inline SVG", diagrams === 2, String(diagrams));
+const shipped = await page.$$eval("#panel-tasks .row .card h3", (nodes) => nodes.map((node) => node.textContent.trim()));
+check(
+  "the shipped providers are named",
+  ["Microsandbox", "Daytona", "Vercel", "AWS", "GCP", "Cloudflare"].every((name) => shipped.includes(name)),
+  shipped.join(" · "),
+);
+await page.screenshot({ path: join(here, "tab-tasks-and-sandboxes.png"), fullPage: true });
+
+// 3. Build your own: the tutorial panes are real, highlighted source.
+await page.click("#tab-build");
+const steps = await page.$$eval("#panel-build section:first-of-type ol.walk > li", (nodes) => nodes.length);
+check("the tutorial has 8 steps", steps === 8, String(steps));
+const paneFiles = await page.$$eval("#panel-build .pane .cap span:first-child", (nodes) =>
+  nodes.map((node) => node.textContent.trim()),
+);
+check(
+  "panes are labelled with the file they came from",
+  paneFiles.includes("real/stereos-provider.ts") && paneFiles.includes("real/guest-runner.sh"),
+  paneFiles.join(" · "),
+);
+const providerPane = (await page.locator("#panel-build .pane pre").nth(1).textContent()) ?? "";
+check(
+  "the provider pane is the real source",
+  providerPane.includes("createCommandSandboxProvider("),
+  providerPane.slice(0, 60).replace(/\n/g, " "),
+);
+const paneTokens = await page.$$eval('#panel-build .pane pre span[style*="color"]', (nodes) => nodes.length);
+check("tutorial panes are syntax highlighted", paneTokens > 100, `${paneTokens} colored tokens`);
+const evidenceSummaries = await page.$$eval("#panel-build section > details > summary", (nodes) =>
+  nodes.map((node) => node.textContent.trim()),
+);
+check(
+  "the evidence stays available behind disclosures",
+  evidenceSummaries.length === 3 && evidenceSummaries.some((label) => /raw captures/i.test(label)),
+  evidenceSummaries.join(" · "),
+);
+await page.screenshot({ path: join(here, "tab-build-your-own.png"), fullPage: true });
+
+// 4. Live demo against the real backend.
+await page.click("#tab-live");
 const status = page.locator("#live-status");
 const connected = await waitFor(
   "the demo host to answer",
@@ -98,6 +152,10 @@ if (connected) {
     60_000,
   );
   check("embedded run UI loads", Boolean(frame));
+  // The Live demo is no longer the landing tab, so the frame can still be
+  // mounting. live.js repeats its adopt message until the UI owns the run;
+  // waiting here keeps a failure legible instead of blaming the Approve button.
+  if (frame) await frame.locator('[data-testid="stereos-demo-app"]').waitFor({ state: "visible", timeout: 60_000 });
 
   await page.click('[data-start="approval-demo"]');
   const parked = await waitFor(
@@ -134,21 +192,22 @@ if (connected) {
 }
 await page.screenshot({ path: join(here, "tab-live-demo.png"), fullPage: true });
 
-// 3. How it works: cards, walkthrough, raw captures.
-await page.click("#tab-how");
-const hostCards = await page.$$eval('#panel-how .card .cap span:first-child', (nodes) =>
+// 5. The evidence, subordinated to the tutorial but intact.
+await page.click("#tab-build");
+const hostCards = await page.$$eval("#panel-build .row .card .cap span:first-child", (nodes) =>
   nodes.map((node) => node.textContent.trim()),
 );
 check("both recorded hosts have a result card", hostCards.length >= 2, hostCards.join(" · "));
-const steps = await page.$$eval("#panel-how ol.walk li", (nodes) => nodes.length);
-check("the walkthrough has 5-7 steps", steps >= 5 && steps <= 7, String(steps));
-const excerpt = await page.locator("#panel-how ol.walk pre.excerpt").first().textContent();
+for (const summary of await page.$$("#panel-build section > details > summary")) await summary.click();
+const walkSteps = await page.$$eval("#panel-build section:last-of-type ol.walk > li", (nodes) => nodes.length);
+check("the recorded walkthrough has 5-7 steps", walkSteps >= 5 && walkSteps <= 7, String(walkSteps));
+const excerpt = await page.locator("#panel-build pre.excerpt").first().textContent();
 check("walkthrough excerpts are verbatim capture text", (excerpt ?? "").includes("== guest =="), (excerpt ?? "").slice(0, 40));
 const captures = await page.$$eval("#captures details summary", (nodes) => nodes.map((node) => node.textContent.trim()));
 check("full captures are collapsed disclosures", captures.length === 2 && captures.every((label) => label.startsWith("Full capture (unedited)")), captures.join(" · "));
-await page.screenshot({ path: join(here, "tab-how-it-works.png"), fullPage: true });
+await page.screenshot({ path: join(here, "tab-build-evidence.png"), fullPage: true });
 
-// 4. Implementation tree and viewer.
+// 6. Implementation tree and viewer.
 await page.click("#tab-impl");
 const treeFiles = await waitFor(
   "the file tree",
@@ -197,27 +256,46 @@ if (shown) {
 }
 await page.screenshot({ path: join(here, "tab-implementation.png"), fullPage: true });
 
-// 5. Proposed API is the secondary reference.
+// 7. Documenting your API is the secondary reference.
 await page.click("#tab-api");
 const apiFrame = await waitFor(
   "the reference document",
   // Workers Assets serves the document at the extensionless path and redirects
   // to it, so match the stem rather than the exact href.
-  async () => page.frames().find((candidate) => /\/proposed-api(\.html)?$/.test(candidate.url())) ?? null,
+  async () => page.frames().find((candidate) => /\/provider-api(\.html)?$/.test(candidate.url())) ?? null,
   30_000,
 );
-check("the proposed API reference loads", Boolean(apiFrame));
-await page.screenshot({ path: join(here, "tab-proposed-api.png"), fullPage: true });
+check("the provider API reference loads", Boolean(apiFrame));
+if (apiFrame) {
+  const heading = (await apiFrame.locator("h1").first().textContent()) ?? "";
+  check("the reference is titled @stereos/smithers", heading.trim() === "@stereos/smithers", heading.trim());
+}
+await page.screenshot({ path: join(here, "tab-documenting-your-api.png"), fullPage: true });
 
-// 6. Both themes and a phone viewport, for the design review.
+// 8. Both themes and a phone viewport, for the design review.
 for (const scheme of ["light", "dark"]) {
   await page.emulateMedia({ colorScheme: scheme });
-  await page.click("#tab-live");
+  await page.click("#tab-tasks");
   await page.screenshot({ path: join(here, `theme-${scheme}.png`), fullPage: false });
 }
 await page.emulateMedia({ colorScheme: "light" });
 await page.setViewportSize({ width: 390, height: 844 });
+await page.screenshot({ path: join(here, "mobile-tasks-and-sandboxes.png"), fullPage: false });
+await page.click("#tab-live");
 await page.screenshot({ path: join(here, "mobile-live-demo.png"), fullPage: false });
+
+// 9. The retired hostname must not serve this site any more.
+const retired = await page.request.get(RETIRED_URL, { failOnStatusCode: false }).catch((error) => error);
+if (retired instanceof Error) {
+  check("the old hostname no longer resolves", true, retired.message.split("\n")[0]);
+} else {
+  const body = await retired.text().catch(() => "");
+  check(
+    "the old hostname no longer serves this site",
+    retired.status() >= 400 || !/custom sandbox|stereOS/i.test(body),
+    `${retired.status()} · ${body.slice(0, 60).replace(/\s+/g, " ")}`,
+  );
+}
 
 await browser.close();
 

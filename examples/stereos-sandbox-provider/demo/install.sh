@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the stereos.smithers.sh demo service on a host already prepared by
+# Install the custom-sandbox.smithers.sh demo service on a host already prepared by
 # real/provision-linux-host.sh (QEMU/KVM, Nix, Bun, the built coder-dev image).
 #
 #   ./install.sh                 install units, reload systemd, start everything

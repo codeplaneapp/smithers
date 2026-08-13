@@ -3,7 +3,7 @@ import { StatusPill, WorkflowUiShell } from "smthrs/gateway-ui";
 import { Button, Card, CardContent, CardHeader, CardTitle, EmptyState, KpiStat, StageStrip } from "smthrs/ui";
 
 /**
- * The run surface embedded in the Live demo tab of stereos.smithers.sh.
+ * The run surface embedded in the Live demo tab of custom-sandbox.smithers.sh.
  *
  * Every value on screen comes from the guard's projection of engine state.
  * Nothing is simulated: a status is the status the engine recorded, and the

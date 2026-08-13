@@ -1,5 +1,5 @@
 [Unit]
-Description=Public guard and UI for the stereos.smithers.sh demo
+Description=Public guard and UI for the custom-sandbox.smithers.sh demo
 After=network-online.target stereos-gateway.service
 Wants=network-online.target
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>stereOS Sandbox Provider for Smithers: Reference</title>
+<title>@stereos/smithers: API reference</title>
 <style>
   :root {
     --bg: #ffffff; --fg: #1f2328; --muted: #57606a; --border: #d0d7de;
@@ -64,15 +64,16 @@
 <body>
 <main>
 
-<h1>stereOS Sandbox Provider for Smithers</h1>
-<p class="subtitle">Reference for running Smithers <code>&lt;Sandbox&gt;</code> child workflows inside stereOS microVMs.</p>
+<h1>@stereos/smithers</h1>
+<p class="subtitle">API reference for the stereOS sandbox provider. Running Smithers <code>&lt;Sandbox&gt;</code> child workflows inside stereOS microVMs.</p>
 
 <div class="banner warn">
-<strong>Status: design reference.</strong> The <code>smthrs/stereos</code> package does not exist yet.
-Everything in §2–§4 (the <code>&lt;Sandbox&gt;</code> contract, the provider kit, the session seam) is
-shipped Smithers, verified against the repo source. §5 is the proposed provider, modeled on the shipped
-Microsandbox provider. §6 includes a working inline adapter you can run today with no new package.
-stereOS facts come from <code>papercomputeco/stereOS@main</code> and its docs as of 2026-08-12.
+<strong>Status: design reference.</strong> <code>@stereos/smithers</code> is not published to npm; it lives in the
+Smithers repository as a worked example. Everything in §2–§4 (the <code>&lt;Sandbox&gt;</code> contract, the
+provider kit, the session seam) is shipped Smithers, verified against the repo source. §5 is the proposed
+first-class factory, modeled on the shipped Microsandbox provider, and does not exist yet. §6 includes the
+working adapter you can run today. stereOS facts come from <code>papercomputeco/stereOS@main</code> and its
+docs as of 2026-08-12.
 </div>
 
 <div class="toc">
@@ -218,7 +219,7 @@ Compute) is a NixOS-based Linux OS purpose-built for running coding agents:</p>
 </ul>
 
 <h2 id="factory">5. <code>createStereosSandboxProvider(options)</code> <span class="tag proposed">proposed</span></h2>
-<p>Proposed package <code>smthrs/stereos</code>, provider id <code>stereos</code>. Option surface
+<p>Proposed package <code>@stereos/smithers</code>, provider id <code>stereos</code>. Option surface
 mirrors the shipped Microsandbox provider so nothing here is novel to Smithers users. Every option
 maps to a real stereOS or hypervisor feature.</p>
 
@@ -325,7 +326,7 @@ outside <code>~/workspace</code> fail.</p>
 <h3>7.3 Wire it into Smithers today (no new package needed)</h3>
 <p>This inline provider is complete and uses only shipped Smithers APIs
 (<code>createCommandSandboxProvider</code> + an SSH-backed session). It assumes the VM from §7.2 is
-booted. This is the ~80-line PR seed for <code>smthrs/stereos</code>.</p>
+booted. This is the ~80-line PR seed for <code>@stereos/smithers</code>.</p>
 <pre class="shiki"><code><span class="line"><span style="color:#6A737D;--shiki-dark:#6A737D">/** </span><span style="color:#D73A49;--shiki-dark:#F97583">@jsxImportSource</span><span style="color:#6A737D;--shiki-dark:#6A737D"> smthrs */</span></span>
 <span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">import</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> { createSmithers, Sandbox } </span><span style="color:#D73A49;--shiki-dark:#F97583">from</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> "smthrs"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">;</span></span>
 <span class="line"><span style="color:#D73A49;--shiki-dark:#F97583">import</span><span style="color:#24292E;--shiki-dark:#E1E4E8"> { createCommandSandboxProvider } </span><span style="color:#D73A49;--shiki-dark:#F97583">from</span><span style="color:#032F62;--shiki-dark:#9ECBFF"> "smthrs/sandbox"</span><span style="color:#24292E;--shiki-dark:#E1E4E8">;</span></span>

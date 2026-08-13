@@ -421,7 +421,7 @@ Bun.serve({
           runId: run.runId,
           nodeId: "gate",
           approved: approved === true,
-          decision: { approved: approved === true, note: "decided from stereos.smithers.sh" },
+          decision: { approved: approved === true, note: "decided from custom-sandbox.smithers.sh" },
         });
         return json({ ok: true, approved: approved === true });
       } catch (error) {
