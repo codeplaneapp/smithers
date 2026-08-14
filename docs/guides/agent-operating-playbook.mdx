@@ -16,6 +16,18 @@ workflows. The human talks to you. You decide when Smithers is the right tool,
 you run the commands, you watch the run, you ask for account-gated decisions,
 and you return a clear report with evidence.
 
+Before any of that, check one thing:
+
+> **If `SMITHERS_INSIDE_RUN` is set in your environment, none of this page
+> applies to you.** That variable means you are already a worker agent executing
+> one node of a Smithers run; Smithers sets it on every agent it spawns. Do the
+> node's task directly with your ordinary tools and finish your turn. Never
+> invoke the Smithers CLI or MCP tools to launch, poll, or steer a run from
+> inside a node; the prompt you were handed is the work, not a request to
+> orchestrate. The one exception is escalating upward with
+> `bunx smthrs ask-human` (or the `ask_human` MCP tool) when you are blocked or
+> about to do something irreversible.
+
 If you remember one rule, remember this:
 
 > Do not ask the human to run Smithers commands. The human's job is to state the
