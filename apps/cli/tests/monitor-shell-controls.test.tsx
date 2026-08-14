@@ -153,6 +153,27 @@ function executionTree(overrides: Record<string, unknown> = {}): ReactElement {
   );
 }
 
+type EventLogState = Parameters<typeof EventLog>[0]["eventsState"];
+
+function eventLogState(overrides: Partial<EventLogState> = {}): EventLogState {
+  return {
+    events: [],
+    lastHeartbeat: undefined,
+    error: undefined,
+    streaming: true,
+    loading: false,
+    refetch: async () => {},
+    connectionStatus: "online",
+    ...overrides,
+  };
+}
+
+function buttonNamed(name: string): HTMLButtonElement {
+  const button = [...document.querySelectorAll("button")].find((candidate) => candidate.textContent?.trim() === name);
+  if (!button) throw new Error(`missing button named ${name}`);
+  return button;
+}
+
 describe("shared control styling contract", () => {
   test("mounting shell controls injects the sui sheet with focus/disabled recipes exactly once", async () => {
     const { element } = toolbarHarness();
@@ -600,6 +621,125 @@ describe("migrated monitor surfaces", () => {
   });
 });
 
+describe("monitor event states", () => {
+  test("distinguishes initial loading, durable emptiness, and both filtered-empty views", async () => {
+    await render(<EventLog runId="run-events" eventsState={eventLogState({ loading: true, streaming: false })} />);
+    expect(byTestId("monitor-events-state").getAttribute("data-state")).toBe("loading");
+    expect(byTestId("monitor-events-state").getAttribute("role")).toBe("status");
+    expect(byTestId("monitor-events-state").textContent).toContain("Loading events");
+
+    await rerender(<EventLog runId="run-events" eventsState={eventLogState()} />);
+    expect(byTestId("monitor-events-state").getAttribute("data-state")).toBe("empty");
+    expect(byTestId("monitor-events-state").textContent).toContain("No events recorded for this run yet");
+
+    const chatter = eventLogState({
+      events: [{ event: "AgentSessionEvent", seq: 1, stateVersion: 0, payload: {} }],
+    });
+    await rerender(<EventLog runId="run-events" eventsState={chatter} />);
+    expect(byTestId("monitor-events-state").getAttribute("data-state")).toBe("filtered-activity");
+    expect(byTestId("monitor-events-state").textContent).toContain("Switch to All");
+
+    await click(buttonNamed("Notable"));
+    expect(byTestId("monitor-events-state").getAttribute("data-state")).toBe("filtered-notable");
+    expect(byTestId("monitor-events-state").textContent).toContain("Switch to Activity or All");
+
+    await click(buttonNamed("All"));
+    expect(document.querySelectorAll(".mon-event").length).toBe(1);
+    expect(document.querySelector('[data-testid="monitor-events-state"]')).toBeNull();
+  });
+
+  test("surfaces an empty query failure with guidance and a retry action", async () => {
+    let retries = 0;
+    await render(
+      <EventLog
+        runId="run-events"
+        eventsState={eventLogState({
+          error: new Error("event query failed"),
+          streaming: false,
+          refetch: async () => {
+            retries++;
+          },
+        })}
+      />,
+    );
+    expect(byTestId("monitor-events-error").getAttribute("data-state")).toBe("error");
+    expect(byTestId("monitor-events-error").textContent).toContain("Couldn't load events");
+    expect(byTestId("monitor-events-error").textContent).toContain("Check the gateway connection and credentials");
+    expect(document.querySelector('[data-testid="monitor-events-state"]')).toBeNull();
+    await click(byTestId("monitor-events-retry"));
+    expect(retries).toBe(1);
+  });
+
+  test("keeps buffered events visible and labels them last-known when live updates fail", async () => {
+    let retries = 0;
+    await render(
+      <EventLog
+        runId="run-events"
+        eventsState={eventLogState({
+          events: [{ event: "NodeStarted", seq: 7, stateVersion: 0, payload: { nodeId: "build" } }],
+          error: new Error("stream disconnected"),
+          streaming: false,
+          refetch: async () => {
+            retries++;
+          },
+        })}
+      />,
+    );
+    expect(byTestId("monitor-events-error").getAttribute("data-state")).toBe("stale");
+    expect(byTestId("monitor-events-error").textContent).toContain("Showing last-known events");
+    expect(document.querySelector(".mon-event")?.textContent).toContain("NodeStarted");
+    await click(byTestId("monitor-events-retry"));
+    expect(retries).toBe(1);
+  });
+
+  test("distinguishes an offline stream and explains whether cached events are last-known", async () => {
+    await render(
+      <EventLog
+        runId="run-events"
+        eventsState={eventLogState({
+          events: [{ event: "NodeStarted", seq: 7, stateVersion: 0, payload: { nodeId: "build" } }],
+          error: new Error("Run event stream failed."),
+          streaming: false,
+          connectionStatus: "offline",
+        })}
+      />,
+    );
+    expect(byTestId("monitor-events-error").getAttribute("data-state")).toBe("offline-stale");
+    expect(byTestId("monitor-events-error").textContent).toContain("Live event connection lost");
+    expect(byTestId("monitor-events-error").textContent).toContain("Showing last-known events");
+    expect(byTestId("monitor-events-error").textContent).toContain("reconnects automatically");
+
+    await rerender(
+      <EventLog
+        runId="run-events"
+        eventsState={eventLogState({
+          error: new Error("Run event stream failed."),
+          streaming: false,
+          connectionStatus: "offline",
+        })}
+      />,
+    );
+    expect(byTestId("monitor-events-error").getAttribute("data-state")).toBe("offline");
+    expect(byTestId("monitor-events-error").textContent).toContain("No last-known events are available");
+  });
+
+  test("gives an unauthorized stream a credential-specific recovery path", async () => {
+    await render(
+      <EventLog
+        runId="run-events"
+        eventsState={eventLogState({
+          error: new Error("Run event stream failed."),
+          streaming: false,
+          connectionStatus: "unauthorized",
+        })}
+      />,
+    );
+    expect(byTestId("monitor-events-error").getAttribute("data-state")).toBe("unauthorized");
+    expect(byTestId("monitor-events-error").textContent).toContain("Event stream unauthorized");
+    expect(byTestId("monitor-events-error").textContent).toContain("Re-open with smithers monitor");
+    expect(byTestId("monitor-events-error").textContent).toContain("fresh gateway credentials");
+  });
+});
 describe("event log accessibility", () => {
   const eventsState = (
     overrides: Partial<Parameters<typeof EventLog>[0]["eventsState"]> = {},

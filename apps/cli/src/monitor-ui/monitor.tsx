@@ -2914,7 +2914,7 @@ const EVENT_VIEW_LABELS: Record<EventView, string> = {
 type RunEventsState = ReturnType<typeof useGatewayRunEvents>;
 
 export function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEventsState }) {
-  const { events: allEvents, lastHeartbeat, streaming, error, loading } = eventsState;
+  const { events: allEvents, lastHeartbeat, streaming, error, loading, refetch, connectionStatus } = eventsState;
   const containerRef = useRef<HTMLOListElement | null>(null);
   const [following, setFollowing] = useState(true);
   // Default to Activity: lifecycle transitions plus the agent's visible work
@@ -2960,6 +2960,36 @@ export function EventLog({ runId, eventsState }: { runId: string; eventsState: R
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_THRESHOLD_PX;
     setFollowing(nearBottom);
   };
+
+  const hasLastKnownEvents = allEvents.length > 0;
+  const errorState =
+    connectionStatus === "unauthorized"
+      ? "unauthorized"
+      : connectionStatus === "offline"
+        ? hasLastKnownEvents
+          ? "offline-stale"
+          : "offline"
+        : hasLastKnownEvents
+          ? "stale"
+          : "error";
+  const errorTitle =
+    connectionStatus === "unauthorized"
+      ? "Event stream unauthorized."
+      : connectionStatus === "offline"
+        ? "Live event connection lost."
+        : hasLastKnownEvents
+          ? "Live event updates interrupted."
+          : "Couldn't load events.";
+  const errorDetail =
+    connectionStatus === "unauthorized"
+      ? `${hasLastKnownEvents ? "Showing last-known events. " : "No event history is available. "}Re-open with smithers monitor to mint fresh gateway credentials.`
+      : connectionStatus === "offline"
+        ? hasLastKnownEvents
+          ? "Showing last-known events while the gateway reconnects automatically."
+          : "No last-known events are available. The gateway is reconnecting automatically."
+        : hasLastKnownEvents
+          ? `Showing last-known events. ${error?.message ?? "Live updates are unavailable."}`
+          : `${error?.message ?? "The event query failed."} Check the gateway connection and credentials, then retry.`;
   const eventListId = `monitor-events-${runId}`;
   const followStatusId = `${eventListId}-follow-status`;
 
@@ -3035,9 +3065,17 @@ export function EventLog({ runId, eventsState }: { runId: string; eventsState: R
       </CardHeader>
       <CardContent>
         {error ? (
-          <Alert variant="destructive">
-            <AlertTitle>Couldn&apos;t load events.</AlertTitle>
-            <AlertDescription>{error.message}</AlertDescription>
+          <Alert
+            variant="destructive"
+            className="mon-events-error"
+            data-testid="monitor-events-error"
+            data-state={errorState}
+          >
+            <AlertTitle>{errorTitle}</AlertTitle>
+            <AlertDescription>{errorDetail}</AlertDescription>
+            <Button variant="outline" data-testid="monitor-events-retry" onClick={() => void refetch()}>
+              Retry
+            </Button>
           </Alert>
         ) : null}
         <ol
@@ -3054,15 +3092,20 @@ export function EventLog({ runId, eventsState }: { runId: string; eventsState: R
           aria-atomic={false}
           aria-busy={loading}
         >
-          {events.length === 0 ? (
-            <li className="mon-empty">
+          {events.length === 0 && !error ? (
+            <li
+              className="mon-empty"
+              data-testid="monitor-events-state"
+              data-state={loading ? "loading" : allEvents.length === 0 ? "empty" : `filtered-${view}`}
+              role={loading ? "status" : undefined}
+            >
               {loading
                 ? "Loading events…"
                 : allEvents.length === 0
-                  ? "No events yet."
+                  ? "No events recorded for this run yet."
                   : view === "notable"
-                    ? "No notable events yet."
-                    : "No activity yet."}
+                    ? "No notable events in this buffer. Switch to Activity or All to inspect other events."
+                    : "No activity events in this buffer. Switch to All to inspect session and heartbeat events."}
             </li>
           ) : null}
           {events.map((frame) => {
