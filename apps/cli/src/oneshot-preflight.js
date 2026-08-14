@@ -255,10 +255,10 @@ export function buildPreflightNotice(summary, runId, options = {}) {
   const activeWarning =
     activeRunIds.length > 0
       ? `; ACTIVE RUNS: ${activeRunIds.join(", ")}. ${
-          options.forceCommit
-            ? "--preflight-force-commit overrides the commit guard"
-            : "Auto preflight will not commit pre-existing paths; wait for them to finish or use an isolated worktree"
-        }`
+          options.forceCommit ? "--preflight-force-commit overrides the commit guard; " : ""
+        }${
+          options.forceCommit ? "prefer waiting" : "Auto preflight will not commit pre-existing paths; wait"
+        } for them to finish or use an isolated worktree`
       : options.activeRunCheckFailed
         ? "; ACTIVE-RUN CHECK FAILED. Auto preflight will not commit pre-existing paths; retry, wait, or use an isolated worktree"
         : "";

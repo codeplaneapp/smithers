@@ -247,6 +247,7 @@ describe("active-run commit guard", () => {
       forceCommit: true,
     });
     expect(notice.warning).toContain("--preflight-force-commit overrides the commit guard");
+    expect(notice.warning).toContain("prefer waiting for them to finish or use an isolated worktree");
     expect(notice.preamble).toContain("chore(preflight): preserve pre-existing working-copy changes");
   });
 });
