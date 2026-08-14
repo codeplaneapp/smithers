@@ -16,7 +16,7 @@ import {
 } from "./argv-utils.js";
 import { CHAT_CREATE_PROMPT, INLINE_CHAT_ENGINES, buildInlineChatWorkflow } from "./buildInlineChatWorkflow.js";
 import { parseJsonArgument, tryParseJsonInput } from "./json-args.js";
-import { wrapCliCommandHandlersWithInputBounds } from "./cli-command-bounds.js";
+import { CLI_TEXT_ARGUMENT_MAX_LENGTH, wrapCliCommandHandlersWithInputBounds } from "./cli-command-bounds.js";
 import { resolve, dirname, basename, relative, join, isAbsolute } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { closeSync, readFileSync, existsSync, mkdirSync, openSync, statSync, writeFileSync, writeSync } from "node:fs";
@@ -174,6 +174,7 @@ import { buildRunStatusSummary, renderRunStatusHuman, runStatusCtaCommands } fro
 import { detectAvailableAgents, formatNoUsableAgentsMessage } from "./agent-detection.js";
 import { buildOneshotWorkflow } from "./oneshot/buildOneshotWorkflow.js";
 import { buildOneshotChildArgs } from "./oneshot/buildOneshotChildArgs.js";
+import { findActiveRunsInCwd } from "./oneshot/findActiveRunsInCwd.js";
 import { loadOneshotConfig } from "./oneshot/loadOneshotConfig.js";
 import { saveOneshotConfig } from "./oneshot/saveOneshotConfig.js";
 import { resolveOneshotChain } from "./oneshot/resolveOneshotChain.js";
@@ -2648,6 +2649,14 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
   } catch {
     steers = [];
   }
+  // Soft for the same read-mode compatibility reason as steers: stores last
+  // written before the run-usage migrations must remain inspectable.
+  let tokenUsage;
+  try {
+    tokenUsage = await adapter.getRunTokenUsage(runId);
+  } catch {
+    tokenUsage = undefined;
+  }
   const ancestry = await adapter.listRunAncestry(runId, 1_000);
   const continuedFromRunIds = ancestry.slice(1).map((row) => row.runId);
   const lineagePageSize = 100;
@@ -2740,6 +2749,7 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
     },
     ...(runState ? { runState } : {}),
     ...(failedChildren > 0 ? { failedChildren, failedChildKeys } : {}),
+    ...(tokenUsage ? { tokenUsage } : {}),
     steps,
     nodes: canonicalNodes,
   };
@@ -2984,10 +2994,10 @@ const oneshotOptions = z
     status: z.boolean().default(false).describe("Print usable agents, model chain, and preferences as JSON"),
     cwd: z.string().default(".").describe("Working directory for the task"),
     preflight: z
-      .enum(["auto", "warn", "off"])
+      .enum(["auto", "warn", "off", "force-commit"])
       .default("auto")
       .describe(
-        "Dirty-working-copy preflight: auto warns and has the agent triage the tree first, warn only warns, off skips it",
+        "Dirty-working-copy preflight: auto warns and has the agent triage the tree first, warn only warns, off skips it, force-commit lets the agent snapshot the tree even while another run works in the same cwd",
       ),
     runId: z.string().optional().describe("Run ID to create or resume (used by `smithers supervise` to recover a run)"),
     resume: z
@@ -7310,6 +7320,14 @@ const worktreeCli = Cli.create({
           const verb = result.dryRun ? "Would remove" : "Removed";
           for (const entry of result.removed) {
             console.log(`${verb} ${entry.path} (${entry.runId}, ${formatBytes(entry.bytes)})`);
+            if (entry.ignoredPaths.length > 0) {
+              const count = entry.ignoredPathsTruncated
+                ? `${entry.ignoredPaths.length}+`
+                : String(entry.ignoredPaths.length);
+              const preview = entry.ignoredPaths.slice(0, 3).join(", ");
+              const more = entry.ignoredPaths.length > 3 || entry.ignoredPathsTruncated ? ", ..." : "";
+              console.log(`${result.dryRun ? "Would delete" : "Deleted"} ${count} ignored path(s): ${preview}${more}`);
+            }
           }
           for (const entry of result.skipped) {
             console.log(`Keeping ${entry.path} (${entry.runId}): ${entry.reason}`);
@@ -7893,9 +7911,19 @@ async function runHijackFlow(params) {
     exitCode = result.code;
   }
   if (exitCode === 0 && runIsLive && run.workflowPath) {
-    const pid = resumeRunDetached(run.workflowPath, runId);
-    resumedBySmithers = true;
-    process.stderr.write(`[smithers] returned control to Smithers${pid ? ` (pid ${pid})` : ""}\n`);
+    // The hijack itself succeeded; a failed handoff (e.g. an unopenable
+    // detached log) must not fail the command, only fall back to the manual
+    // resume instructions.
+    try {
+      const pid = resumeRunDetached(run.workflowPath, runId);
+      resumedBySmithers = true;
+      process.stderr.write(`[smithers] returned control to Smithers${pid ? ` (pid ${pid})` : ""}\n`);
+    } catch (error) {
+      process.stderr.write(`[smithers] could not return control to Smithers: ${error?.message ?? error}\n`);
+      if (resumeCommand) {
+        process.stderr.write(`[smithers] return control to Smithers with:\n  ${resumeCommand}\n`);
+      }
+    }
   } else if (resumeCommand) {
     process.stderr.write(`[smithers] return control to Smithers with:\n  ${resumeCommand}\n`);
   }
@@ -8259,6 +8287,17 @@ const cli = Cli.create({
     alias: { detach: "d" },
     async run(c) {
       const fail = makeFail(c);
+      if (
+        !c.options.goalFile &&
+        typeof c.args.goal === "string" &&
+        Buffer.byteLength(c.args.goal, "utf8") > CLI_TEXT_ARGUMENT_MAX_LENGTH
+      ) {
+        return fail({
+          code: "ONESHOT_GOAL_TOO_LARGE",
+          message: "Inline goals above 64KB must be supplied with --goal-file <path>.",
+          exitCode: 4,
+        });
+      }
       const taskCwd = resolve(process.cwd(), c.options.cwd);
       if (!existsSync(taskCwd))
         return fail({ code: "PATH_NOT_FOUND", message: `Path does not exist: ${taskCwd}`, exitCode: 4 });
@@ -8317,13 +8356,6 @@ const cli = Cli.create({
           exitCode: 4,
         });
       }
-      if (Buffer.byteLength(goal, "utf8") > 64 * 1024 && !c.options.goalFile) {
-        return fail({
-          code: "ONESHOT_GOAL_TOO_LARGE",
-          message: "Goals above 64KB must be supplied with --goal-file.",
-          exitCode: 4,
-        });
-      }
       if (usable.length === 0)
         return fail({ code: "NO_USABLE_AGENTS", message: formatNoUsableAgentsMessage(relevant), exitCode: 4 });
       const review = (c.options.review ?? config.review ?? "off") === "on";
@@ -8340,9 +8372,33 @@ const cli = Cli.create({
       // that work the agent's first job.
       const preflightMode = c.options.resume ? "off" : c.options.preflight;
       const preflightSummary = preflightMode === "off" ? null : assessWorkingCopy(taskCwd);
+      // Concurrent runs in one cwd. "Pre-existing work" is only pre-existing if
+      // no other run is producing it. Three oneshot runs sharing a cwd on
+      // 2026-08-13 each treated the others' in-flight diffs as inert and
+      // committed them (bug 01kzzaqfx1g9qaefqxrderdz4m). `force-commit` is the
+      // explicit opt-in to the old behavior. Read-only and soft: an unreadable
+      // store yields no active runs and the launch proceeds as before.
+      const activeRunsInCwd =
+        preflightMode === "off" || preflightMode === "force-commit"
+          ? []
+          : await (async () => {
+              let opened;
+              try {
+                opened = await findAndOpenDb(taskCwd);
+              } catch {
+                return [];
+              }
+              try {
+                return await findActiveRunsInCwd(opened.adapter, taskCwd, { excludeRunId: effectiveRunId });
+              } catch {
+                return [];
+              } finally {
+                await opened.cleanup?.();
+              }
+            })();
       const preflightNotice =
-        preflightSummary && needsPreflightNotice(preflightSummary)
-          ? buildPreflightNotice(preflightSummary, effectiveRunId)
+        preflightSummary && (needsPreflightNotice(preflightSummary) || activeRunsInCwd.length > 0)
+          ? buildPreflightNotice(preflightSummary, effectiveRunId, activeRunsInCwd)
           : null;
       if (preflightNotice) {
         runSync(
@@ -8352,6 +8408,9 @@ const cli = Cli.create({
               cwd: taskCwd,
               ...preflightSummary.dirty,
               detachedHead: preflightSummary.detachedHead,
+              ...(activeRunsInCwd.length > 0
+                ? { activeRunsInCwd: activeRunsInCwd.map((run) => run.runId).join(",") }
+                : {}),
             }),
           ),
         );
@@ -8361,7 +8420,9 @@ const cli = Cli.create({
       // preamble: a detached launch re-runs this command in the child, which
       // assesses the same tree itself.
       const goalForWorkflow =
-        preflightNotice && preflightMode === "auto" ? `${preflightNotice.preamble}\n\n${goal}` : goal;
+        preflightNotice && (preflightMode === "auto" || preflightMode === "force-commit")
+          ? `${preflightNotice.preamble}\n\n${goal}`
+          : goal;
       if (c.options.interactive) {
         if (!Boolean(process.stdin.isTTY && process.stdout.isTTY)) {
           return fail({
@@ -8518,7 +8579,7 @@ const cli = Cli.create({
             oneshot: {
               review,
               goal: goal.length > 500 ? `${goal.slice(0, 500)}…` : goal,
-              preflight: preflightConfigEntry(preflightMode, preflightSummary),
+              preflight: preflightConfigEntry(preflightMode, preflightSummary, activeRunsInCwd),
             },
           },
         );
@@ -8605,7 +8666,7 @@ const cli = Cli.create({
                 chain: selected.chain,
                 review,
                 goal: goal.length > 500 ? `${goal.slice(0, 500)}…` : goal,
-                preflight: preflightConfigEntry(preflightMode, preflightSummary),
+                preflight: preflightConfigEntry(preflightMode, preflightSummary, activeRunsInCwd),
               },
               [BUILTIN_RESUME_CONFIG_KEY]: builtinResume,
             },
@@ -10048,7 +10109,7 @@ const cli = Cli.create({
   // =========================================================================
   .command("inspect", {
     description:
-      "Output detailed run state. Structured output canonically uses nodes[].nodeId (legacy steps[].id remains for compatibility); --pool tallies attempt engine/model usage.",
+      "Output detailed run state and authoritative token/cost usage. Structured output canonically uses nodes[].nodeId (legacy steps[].id remains for compatibility); --pool tallies attempt engine/model usage.",
     args: inspectArgs,
     options: inspectOptions,
     alias: { watch: "w", interval: "i" },
@@ -12619,9 +12680,13 @@ const cli = Cli.create({
               return fail({ code: "RUN_NOT_FOUND", message: `Run not found: ${runId}`, exitCode: 4 });
             }
             const usage = await adapter.getRunTokenUsage(runId);
+            const cost = usage.costUsd == null ? "" : ` / ~$${usage.costUsd.toFixed(4)}`;
             process.stderr.write(
-              `${runId}: ${usage.totalTokens.toLocaleString()} tokens ` +
-                `(${usage.inputTokens.toLocaleString()} in / ${usage.outputTokens.toLocaleString()} out) ` +
+              `${runId}: ${usage.totalTokens.toLocaleString()} tokens${cost} ` +
+                `(${usage.freshInputTokens.toLocaleString()} fresh / ` +
+                `${usage.cacheReadTokens.toLocaleString()} cache read / ` +
+                `${usage.cacheWriteTokens.toLocaleString()} cache write / ` +
+                `${usage.outputTokens.toLocaleString()} out) ` +
                 `across ${usage.attempts} agent attempt(s)\n`,
             );
             return c.ok({ usage });

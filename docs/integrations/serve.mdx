@@ -144,9 +144,12 @@ Approve a pending approval gate. All fields optional. Returns `{ "runId": "run-1
 {
   "iteration": 0,
   "note": "Looks good",
-  "decidedBy": "alice"
+  "decidedBy": "alice",
+  "decision": { "selected": "balanced", "notes": "best fit" }
 }
 ```
+
+For `select` and `rank` approvals, `decision` must contain a valid selection or ranking. A stable decision envelope with `value` is also accepted.
 
 ### POST /deny/:nodeId
 

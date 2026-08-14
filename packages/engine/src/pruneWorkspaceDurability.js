@@ -5,7 +5,7 @@
 //
 // Called from startDurability.stop() (per attempt, run-scoped) so it needs no
 // edit to the engine's hot finalize path. jj `util gc` retention must exceed this
-// window, since operation_id is the durable handle behind a kept commit.
+// window. Kept rows restore by commit_id; stored operation_ids do not pin commits.
 
 /**
  * @typedef {object} PruneConfig
