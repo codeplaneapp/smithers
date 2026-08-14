@@ -9,9 +9,7 @@ import { errorToJson } from "@smthrs/errors/errorToJson";
 import { NanocodexAgent } from "../src/NanocodexAgent.js";
 
 const HOST_TARGET =
-  process.platform === "darwin" && process.arch === "arm64"
-    ? "aarch64-apple-darwin"
-    : "x86_64-unknown-linux-gnu";
+  process.platform === "darwin" && process.arch === "arm64" ? "aarch64-apple-darwin" : "x86_64-unknown-linux-gnu";
 
 const CAPABILITIES = {
   bridgeVersion: "0.0.2",
@@ -763,7 +761,9 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
   });
 
   test("rejects a 0.0.1 / Nanocodex 0.3.0 envelope before spawn", async () => {
-    const rejected = JSON.parse(await readFile(new URL("./fixtures/nanocodex/checkpoint-v0.0.1-rejected.json", import.meta.url), "utf8"));
+    const rejected = JSON.parse(
+      await readFile(new URL("./fixtures/nanocodex/checkpoint-v0.0.1-rejected.json", import.meta.url), "utf8"),
+    );
     await expect(
       agent().generate({
         prompt: "old envelope",

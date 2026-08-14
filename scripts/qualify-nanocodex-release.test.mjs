@@ -28,7 +28,10 @@ const DARWIN_ROOT = "smithers-nanocodex-v0.0.2-aarch64-apple-darwin";
 describe("Nanocodex release qualification", () => {
   test("keeps the prepared v0.0.2 consumer contract digest-free and dual-target", async () => {
     const prepared = JSON.parse(
-      await readFile(new URL("../packages/agents/tests/fixtures/nanocodex/release-v0.0.2.json", import.meta.url), "utf8"),
+      await readFile(
+        new URL("../packages/agents/tests/fixtures/nanocodex/release-v0.0.2.json", import.meta.url),
+        "utf8",
+      ),
     );
     assert.equal(prepared.release.version, "0.0.2");
     assert.equal(prepared.contract.bridgeVersion, EXPECTED_CAPABILITIES.bridgeVersion);
@@ -38,7 +41,10 @@ describe("Nanocodex release qualification", () => {
       prepared.artifacts.map((artifact) => artifact.target),
       ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"],
     );
-    assert.equal(prepared.artifacts.every((artifact) => !artifact.sha256 && !artifact.sizeBytes), true);
+    assert.equal(
+      prepared.artifacts.every((artifact) => !artifact.sha256 && !artifact.sizeBytes),
+      true,
+    );
     assert.match(prepared.qualification.notes, /does not duplicate those digests/);
   });
 
@@ -189,12 +195,11 @@ describe("Nanocodex release qualification", () => {
 
   test("pins exact version and capability surface", () => {
     assert.doesNotThrow(() => validateRuntimeMetadata("smithers-nanocodex 0.0.2\n", EXPECTED_CAPABILITIES));
-    assert.doesNotThrow(
-      () =>
-        validateRuntimeMetadata("smithers-nanocodex 0.0.2\n", {
-          ...EXPECTED_CAPABILITIES,
-          target: "aarch64-apple-darwin",
-        }),
+    assert.doesNotThrow(() =>
+      validateRuntimeMetadata("smithers-nanocodex 0.0.2\n", {
+        ...EXPECTED_CAPABILITIES,
+        target: "aarch64-apple-darwin",
+      }),
     );
     assert.throws(() => validateRuntimeMetadata("smithers-nanocodex 0.0.1", EXPECTED_CAPABILITIES), /version mismatch/);
     assert.throws(
@@ -302,9 +307,12 @@ describe("Nanocodex release qualification", () => {
     });
   });
 
-  test("runs both metadata commands through the real direct-spawn supervisor", async () => {
-    const capabilitiesOutput = `${JSON.stringify(EXPECTED_CAPABILITIES)}\n`;
-    const fakeBridge = Buffer.from(`#!/bin/sh
+  test(
+    "runs both metadata commands through the real direct-spawn supervisor",
+    { skip: process.platform === "win32" },
+    async () => {
+      const capabilitiesOutput = `${JSON.stringify(EXPECTED_CAPABILITIES)}\n`;
+      const fakeBridge = Buffer.from(`#!/bin/sh
 if [ "$#" -eq 1 ] && [ "$1" = "--version" ]; then
   printf '%s\\n' 'smithers-nanocodex 0.0.2'
   exit 0
@@ -315,19 +323,20 @@ if [ "$#" -eq 2 ] && [ "$1" = "capabilities" ] && [ "$2" = "--json" ]; then
 fi
 exit 64
 `);
-    let scratch;
-    const metadata = await withQualificationScratch(fakeBridge, async (paths) => {
-      scratch = paths.scratch;
-      return await probeRuntimeMetadata(paths.binary, paths.scratch);
-    });
-    assert.deepEqual(metadata, {
-      capabilities: EXPECTED_CAPABILITIES,
-      capabilitiesOutput,
-      versionOutput: "smithers-nanocodex 0.0.2\n",
-    });
-    assert.doesNotThrow(() => validateRuntimeMetadata(metadata.versionOutput, metadata.capabilities));
-    await assert.rejects(access(scratch), (error) => error.code === "ENOENT");
-  });
+      let scratch;
+      const metadata = await withQualificationScratch(fakeBridge, async (paths) => {
+        scratch = paths.scratch;
+        return await probeRuntimeMetadata(paths.binary, paths.scratch);
+      });
+      assert.deepEqual(metadata, {
+        capabilities: EXPECTED_CAPABILITIES,
+        capabilitiesOutput,
+        versionOutput: "smithers-nanocodex 0.0.2\n",
+      });
+      assert.doesNotThrow(() => validateRuntimeMetadata(metadata.versionOutput, metadata.capabilities));
+      await assert.rejects(access(scratch), (error) => error.code === "ENOENT");
+    },
+  );
 
   test("shell-quotes the verified bridge path and removes its launcher after supervised failure", async () => {
     await withQualificationScratch(Buffer.from("fixture"), async ({ scratch }) => {
@@ -556,10 +565,7 @@ exit 64
         hostTarget: "x86_64-unknown-linux-gnu",
         glibcVersion: "2.35",
       });
-      assert.throws(
-        () => assertSupportedQualificationHost({ header: { glibcVersionRuntime: "2.34" } }),
-        /glibc 2.35/,
-      );
+      assert.throws(() => assertSupportedQualificationHost({ header: { glibcVersionRuntime: "2.34" } }), /glibc 2.35/);
 
       Object.defineProperty(process, "platform", { configurable: true, value: "darwin" });
       Object.defineProperty(process, "arch", { configurable: true, value: "arm64" });

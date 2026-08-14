@@ -424,7 +424,12 @@ describe("runNanocodexProcess", () => {
     writeFileSync(executable, "#!/bin/sh\nexit 99\n", "utf8");
     chmodSync(executable, 0o755);
     try {
-      const spec = createNanocodexSpawnSpec(NODE_EXECUTABLE, ["serve", "--protocol-version", "1"], { PATH: "." }, directory);
+      const spec = createNanocodexSpawnSpec(
+        NODE_EXECUTABLE,
+        ["serve", "--protocol-version", "1"],
+        { PATH: "." },
+        directory,
+      );
       expect(spec.command).toBe(realpathSync(NODE_EXECUTABLE));
       expect(spec.args).toEqual(["serve", "--protocol-version", "1"]);
       expect(spec.command).not.toBe(realpathSync(executable));
@@ -1155,7 +1160,10 @@ describe("runNanocodexProcess", () => {
         );
         expect(error).toMatchObject({ code: "bridge_cleanup_failed" });
         expect(error.terminal).toBe(terminal);
-        expect(Object.getOwnPropertyDescriptor(error, "terminal")).toMatchObject({ enumerable: false, value: terminal });
+        expect(Object.getOwnPropertyDescriptor(error, "terminal")).toMatchObject({
+          enumerable: false,
+          value: terminal,
+        });
         expect(JSON.stringify(error)).not.toContain("terminal-marker");
       } finally {
         for (const pid of linuxPidsWithSentinel(sentinel)) {

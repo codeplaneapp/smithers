@@ -1067,7 +1067,7 @@ stock Nanocodex turn per `generate()` call. There is no daemon, worker pool, or
 bridge-session reuse. `generate()` also performs a short, provider-free
 capability check before starting that worker. The worker is spawned directly,
 the same class as other Smithers CLI agents. Isolation, if required, is an
-outer Smithers `<Sandbox>` — the adapter must not wrap this binary in
+outer Smithers `<Sandbox>`. The adapter must not wrap this binary in
 Bubblewrap or `sandbox-exec`.
 
 v0.0.1 / Nanocodex 0.3.0 checkpoints do not resume. The tool profile is
@@ -1094,10 +1094,10 @@ archive for your host and verify it against the release's `.sha256` sidecar
 before putting the binary on `PATH`. Smithers does not duplicate those sidecars
 as an in-repo pin digest.
 
-| Host        | rustc target                 | Archive |
-| ----------- | ---------------------------- | ------- |
-| Linux x86_64 | `x86_64-unknown-linux-gnu`  | `smithers-nanocodex-v0.0.2-x86_64-unknown-linux-gnu.tar.gz` |
-| macOS arm64 | `aarch64-apple-darwin`       | `smithers-nanocodex-v0.0.2-aarch64-apple-darwin.tar.gz` |
+| Host         | rustc target               | Archive                                                     |
+| ------------ | -------------------------- | ----------------------------------------------------------- |
+| Linux x86_64 | `x86_64-unknown-linux-gnu` | `smithers-nanocodex-v0.0.2-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS arm64  | `aarch64-apple-darwin`     | `smithers-nanocodex-v0.0.2-aarch64-apple-darwin.tar.gz`     |
 
 ```bash
 # Linux x86_64. On macOS arm64 use target=aarch64-apple-darwin and `shasum -a 256 -c`.
@@ -1203,18 +1203,18 @@ repository secrets.
 
 ## Fixed v0.0.2 surface
 
-| Capability                               | v0.0.2 behavior                                            |
-| ---------------------------------------- | ---------------------------------------------------------- |
+| Capability                               | v0.0.2 behavior                                                                                                                                                                                                  |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Model                                    | Allowlisted `gpt-5.6-sol` (default), `gpt-5.6-terra`, `gpt-5.6-luna`; aliases `sol` / `terra` / `luna`. Fixed per native thread; resume rejects a mismatched constructor model (absent checkpoint model is Sol). |
-| Native tools and Code Mode               | Enabled                                                    |
-| Transport                                | WebSocket preferred, with stock sticky HTTPS fallback      |
-| Checkpoints                              | `nanocodex.session-snapshot/1`, resume only                |
-| Structured output                        | Prompt-based Smithers extraction, not native schema output |
-| JavaScript tools and MCP                 | Unsupported                                                |
-| Subagents and steering                   | Unsupported                                                |
-| Custom provider endpoints                | Unsupported                                                |
-| Code Mode disablement                    | Unsupported                                                |
-| Workspace relocation and checkpoint fork | Unsupported                                                |
+| Native tools and Code Mode               | Enabled                                                                                                                                                                                                          |
+| Transport                                | WebSocket preferred, with stock sticky HTTPS fallback                                                                                                                                                            |
+| Checkpoints                              | `nanocodex.session-snapshot/1`, resume only                                                                                                                                                                      |
+| Structured output                        | Prompt-based Smithers extraction, not native schema output                                                                                                                                                       |
+| JavaScript tools and MCP                 | Unsupported                                                                                                                                                                                                      |
+| Subagents and steering                   | Unsupported                                                                                                                                                                                                      |
+| Custom provider endpoints                | Unsupported                                                                                                                                                                                                      |
+| Code Mode disablement                    | Unsupported                                                                                                                                                                                                      |
+| Workspace relocation and checkpoint fork | Unsupported                                                                                                                                                                                                      |
 
 `instructions` replaces the stock instructions completely. Per-call system
 messages, JavaScript tools, provider options, and `resumeSession` are rejected.

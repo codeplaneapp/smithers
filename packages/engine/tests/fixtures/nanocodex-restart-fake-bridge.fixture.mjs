@@ -6,9 +6,7 @@ import { createInterface } from "node:readline";
 const capabilities = {
   bridgeVersion: "0.0.2",
   target:
-    process.platform === "darwin" && process.arch === "arm64"
-      ? "aarch64-apple-darwin"
-      : "x86_64-unknown-linux-gnu",
+    process.platform === "darwin" && process.arch === "arm64" ? "aarch64-apple-darwin" : "x86_64-unknown-linux-gnu",
   nanocodexVersion: "0.5.0",
   protocol: { name: "smithers.nanocodex", versions: [1] },
   checkpoint: {

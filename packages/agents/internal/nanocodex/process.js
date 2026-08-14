@@ -926,12 +926,7 @@ export async function runNanocodexCapabilities(options) {
       stderrTruncated: false,
     });
   }
-  const spawnSpec = createNanocodexSpawnSpec(
-    options.command,
-    ["capabilities", "--json"],
-    effectiveEnv,
-    options.cwd,
-  );
+  const spawnSpec = createNanocodexSpawnSpec(options.command, ["capabilities", "--json"], effectiveEnv, options.cwd);
 
   return new Promise((resolvePromise, rejectPromise) => {
     const output = createBoundedBufferCapture(maxOutputBytes);
@@ -1217,12 +1212,7 @@ export async function runNanocodexCapabilities(options) {
  * @param {Record<string, string | undefined>} [environment]
  * @param {string} [cwd]
  */
-export function createNanocodexSpawnSpec(
-  command,
-  args = [],
-  environment = process.env,
-  cwd = process.cwd(),
-) {
+export function createNanocodexSpawnSpec(command, args = [], environment = process.env, cwd = process.cwd()) {
   return {
     command: resolveNanocodexExecutable(command, cwd, environment),
     args: [...args],

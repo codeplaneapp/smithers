@@ -156,12 +156,7 @@ export class NanocodexAgent {
     const maxCheckpointBytes = resolveCheckpointLimit(this.opts.maxCheckpointBytes, args.maxAgentCheckpointBytes);
     let continuation = null;
     if (Object.hasOwn(args, "resumeCheckpoint")) {
-      const stored = resolveResumeCheckpoint(
-        args.resumeCheckpoint,
-        workspace,
-        policyFingerprint,
-        maxCheckpointBytes,
-      );
+      const stored = resolveResumeCheckpoint(args.resumeCheckpoint, workspace, policyFingerprint, maxCheckpointBytes);
       const storedModel = stored.payload.model ?? NANOCODEX_DEFAULT_MODEL;
       if (this.opts.model !== undefined && this.model !== storedModel) {
         throw new SmithersError(
@@ -625,9 +620,7 @@ function assertSupportedHost() {
     return;
   }
   if (process.platform !== "linux" || process.arch !== "x64") {
-    throw configError(
-      "Nanocodex protocol v1 supports Linux x86_64 (glibc 2.35+) and macOS arm64 only.",
-    );
+    throw configError("Nanocodex protocol v1 supports Linux x86_64 (glibc 2.35+) and macOS arm64 only.");
   }
   let glibcVersion;
   try {
@@ -1049,7 +1042,11 @@ function mapProcessError(error) {
       },
     );
   }
-  if (code === "bridge_spawn_failed" || code === "bridge_capabilities_failed" || code === "bridge_capabilities_timeout") {
+  if (
+    code === "bridge_spawn_failed" ||
+    code === "bridge_capabilities_failed" ||
+    code === "bridge_capabilities_timeout"
+  ) {
     return configError(
       code.startsWith("bridge_capabilities")
         ? "Nanocodex bridge capability preflight failed."

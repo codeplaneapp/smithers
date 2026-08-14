@@ -455,7 +455,14 @@ export async function preflightPublicNanocodexAdapter(binary, scratch, Nanocodex
 }
 
 /** Preserve the existing stable success JSON surface and key order. */
-export function qualificationResult({ archivePath, glibcVersion, manifest = PINNED_SOURCE_BUILD, sha256, sizeBytes, target }) {
+export function qualificationResult({
+  archivePath,
+  glibcVersion,
+  manifest = PINNED_SOURCE_BUILD,
+  sha256,
+  sizeBytes,
+  target,
+}) {
   const pinnedSourceBuild = sha256 === manifest.artifact.sha256 && sizeBytes === manifest.artifact.sizeBytes;
   return {
     archive: resolve(archivePath),

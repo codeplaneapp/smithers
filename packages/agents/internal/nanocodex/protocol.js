@@ -5,10 +5,7 @@ export const NANOCODEX_PROTOCOL_NAME = "smithers.nanocodex";
 export const NANOCODEX_PROTOCOL_VERSION = 1;
 export const NANOCODEX_BRIDGE_VERSION = "0.0.2";
 export const NANOCODEX_VERSION = "0.5.0";
-export const NANOCODEX_SHIPPED_TARGETS = Object.freeze([
-  "x86_64-unknown-linux-gnu",
-  "aarch64-apple-darwin",
-]);
+export const NANOCODEX_SHIPPED_TARGETS = Object.freeze(["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]);
 export const NANOCODEX_MODELS = Object.freeze(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
 export const NANOCODEX_DEFAULT_MODEL = "gpt-5.6-sol";
 export const NANOCODEX_THINKING_LEVELS = Object.freeze(["none", "low", "medium", "high", "xhigh", "max"]);
