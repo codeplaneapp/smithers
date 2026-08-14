@@ -1906,6 +1906,18 @@ workflows. The human talks to you. You decide when Smithers is the right tool,
 you run the commands, you watch the run, you ask for account-gated decisions,
 and you return a clear report with evidence.
 
+Before any of that, check one thing:
+
+> **If `SMITHERS_INSIDE_RUN` is set in your environment, none of this page
+> applies to you.** That variable means you are already a worker agent executing
+> one node of a Smithers run; Smithers sets it on every agent it spawns. Do the
+> node's task directly with your ordinary tools and finish your turn. Never
+> invoke the Smithers CLI or MCP tools to launch, poll, or steer a run from
+> inside a node; the prompt you were handed is the work, not a request to
+> orchestrate. The one exception is escalating upward with
+> `bunx smthrs ask-human` (or the `ask_human` MCP tool) when you are blocked or
+> about to do something irreversible.
+
 If you remember one rule, remember this:
 
 > Do not ask the human to run Smithers commands. The human's job is to state the
@@ -6405,6 +6417,8 @@ Both use the graph resolver, so they match the path Smithers gives worker tasks.
   symlink node_modules from, or write into, the parent checkout. An install through a shared
   node_modules link rewrites the parent checkout's workspace links to point into the
   worktree, all of which dangle once the worktree is removed.
+- **Worktree lanes are disposable, including ignored files.** Reaping deletes the lane
+  directory after the run ends. Commit anything valuable or copy it outside the lane first.
 - **jj continuously snapshots a worktree's working copy onto its bookmark.** A compute
   `<Task>` (or helper) that checks for changes with `git status --porcelain` can see a
   *clean* tree and skip its work, because jj has already committed the working-copy edits to
@@ -16499,6 +16513,8 @@ routes[15]{method,path,purpose,auth}:
   POST,/signal/:runId/:signalName,Legacy alias for signals,bearer
 ```
 
+Approval requests may include `iteration`, `note`, `decidedBy`, and `decision`. For `select` and `rank` approvals, `decision` must contain a valid selection or ranking. A stable decision envelope with `value` is also accepted.
+
 JSON requests/responses use `Content-Type: application/json`, `Cache-Control: no-store`, and `X-Content-Type-Options: nosniff`. SSE events are named `smithers` and carry `SmithersEvent` JSON; the stream sends a keep-alive comment every 10 s and closes on terminal state.
 
 Errors use the envelope `{ "error": { "code", "message", "details" } }`. Common codes: `INVALID_REQUEST`, `INVALID_JSON`, `PAYLOAD_TOO_LARGE`, `RUN_ID_REQUIRED`, `RUN_NOT_FOUND`, `RUN_ALREADY_EXISTS`, `RUN_NOT_ACTIVE`, `NOT_FOUND`, `UNAUTHORIZED`, `WORKFLOW_PATH_OUTSIDE_ROOT`, `DB_NOT_CONFIGURED`, `SERVER_ERROR`.
@@ -16690,9 +16706,12 @@ Approve a pending approval gate. All fields optional. Returns `{ "runId": "run-1
 {
   "iteration": 0,
   "note": "Looks good",
-  "decidedBy": "alice"
+  "decidedBy": "alice",
+  "decision": { "selected": "balanced", "notes": "best fit" }
 }
 ```
+
+For `select` and `rank` approvals, `decision` must contain a valid selection or ranking. A stable decision envelope with `value` is also accepted.
 
 ### POST /deny/:nodeId
 
@@ -19816,7 +19835,9 @@ const agent = new NanocodexAgent({
 When `inheritEnv` is `false`, ambient process variables are not inherited. The
 `serve` worker receives variables configured in `env` plus any Smithers
 task-context identifiers supplied for the call: `SMITHERS_RUN_ID`,
-`SMITHERS_NODE_ID`, `SMITHERS_ITERATION`, and `SMITHERS_ATTEMPT`. Include `PATH`
+`SMITHERS_NODE_ID`, `SMITHERS_ITERATION`, `SMITHERS_ATTEMPT`, and
+`SMITHERS_INSIDE_RUN` (the recursion marker that tells the worker it is already
+running inside a node and must not launch or steer another run). Include `PATH`
 in `env` if `binary` is a command name; ambient `PATH` is not used in this mode.
 Prompts, credentials, and snapshots never appear in process arguments.
 

@@ -7300,6 +7300,14 @@ const worktreeCli = Cli.create({
           const verb = result.dryRun ? "Would remove" : "Removed";
           for (const entry of result.removed) {
             console.log(`${verb} ${entry.path} (${entry.runId}, ${formatBytes(entry.bytes)})`);
+            if (entry.ignoredPaths.length > 0) {
+              const count = entry.ignoredPathsTruncated
+                ? `${entry.ignoredPaths.length}+`
+                : String(entry.ignoredPaths.length);
+              const preview = entry.ignoredPaths.slice(0, 3).join(", ");
+              const more = entry.ignoredPaths.length > 3 || entry.ignoredPathsTruncated ? ", ..." : "";
+              console.log(`${result.dryRun ? "Would delete" : "Deleted"} ${count} ignored path(s): ${preview}${more}`);
+            }
           }
           for (const entry of result.skipped) {
             console.log(`Keeping ${entry.path} (${entry.runId}): ${entry.reason}`);

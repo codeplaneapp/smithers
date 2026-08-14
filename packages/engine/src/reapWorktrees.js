@@ -8,9 +8,11 @@ import { getPlatformLayer } from "./platform-layer.js";
 import { runGit } from "./runGit.js";
 
 /** @typedef {import("./listSmithersWorktrees.js").SmithersWorktree} SmithersWorktree */
-/** @typedef {{ path: string; runId: string; bytes: number }} ReapedWorktree */
+/** @typedef {{ path: string; runId: string; bytes: number; ignoredPaths: string[]; ignoredPathsTruncated: boolean }} ReapedWorktree */
 /** @typedef {{ path: string; runId: string; reason: string }} SkippedWorktree */
 /** @typedef {{ removed: ReapedWorktree[]; skipped: SkippedWorktree[]; bytesFreed: number; dryRun: boolean }} ReapWorktreesResult */
+
+const IGNORED_PATH_LIMIT = 20;
 
 /**
  * A run in any of these states will never schedule another task, so nothing can
@@ -159,6 +161,23 @@ async function removeWorktree(worktree, rootDir) {
 }
 
 /**
+ * List ignored paths that will disappear with a disposable worktree. A failed
+ * probe must not block an otherwise safe reap.
+ *
+ * @param {string} worktreePath
+ * @returns {Promise<{ ignoredPaths: string[]; ignoredPathsTruncated: boolean }>}
+ */
+async function listIgnoredPaths(worktreePath) {
+  const result = await runGit(worktreePath, ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory"]);
+  if (result.code !== 0) return { ignoredPaths: [], ignoredPathsTruncated: false };
+  const paths = result.stdout.split(/\r?\n/).filter(Boolean);
+  return {
+    ignoredPaths: paths.slice(0, IGNORED_PATH_LIMIT),
+    ignoredPathsTruncated: paths.length > IGNORED_PATH_LIMIT,
+  };
+}
+
+/**
  * Reclaim the worktrees of runs that are over. A `<Worktree>` lane is a full
  * checkout; a 64-lane run leaves 64 of them behind, and nothing ever removed
  * them, so repositories accumulated hundreds of registrations and tens of GB.
@@ -168,6 +187,9 @@ async function removeWorktree(worktree, rootDir) {
  *   - the worktree carries a Smithers ownership record (we created it);
  *   - its owning run is in a terminal state;
  *   - it holds no uncommitted, untracked, or unpushed work.
+ *
+ * Gitignored files are disposable: the guard does not protect them. They are
+ * deleted with the worktree and reported in each removed result entry.
  *
  * @param {{
  *   rootDir: string,
@@ -224,12 +246,15 @@ export async function reapWorktrees(options) {
       skipped.push({ ...entry, reason: "unsaved-work" });
       continue;
     }
+    const ignored = worktree.exists
+      ? await listIgnoredPaths(worktree.path)
+      : { ignoredPaths: [], ignoredPathsTruncated: false };
     const bytes = worktree.exists ? await directorySizeBytes(worktree.path) : 0;
     if (!dryRun && worktree.exists) {
       await removeWorktree(worktree, root);
     }
     bytesFreed += bytes;
-    removed.push({ ...entry, bytes });
+    removed.push({ ...entry, bytes, ...ignored });
   }
 
   if (!dryRun && removed.length > 0) {
