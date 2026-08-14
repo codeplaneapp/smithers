@@ -170,7 +170,7 @@ describe("case 07: continueAsNew lineage walk", () => {
 
   test("schema migrations declare parent_run_id and its lookup index", () => {
     const migrationSource = readFileSync(
-      resolve(process.cwd(), "../packages/db/src/schema-migrations.js"),
+      resolve(import.meta.dir, "../../packages/db/src/schema-migrations.js"),
       "utf8",
     );
 

@@ -1,5 +1,6 @@
+import { StatusPill } from "@smthrs/ui";
 import type { RunNode } from "./Run";
-import { statusLabel, statusTone } from "./statusMeta";
+import { statusLabel } from "./statusMeta";
 
 /** One row in the run tree: indent + chevron/leaf + name + mono state tag. */
 export function RunTreeRow({
@@ -38,9 +39,11 @@ export function RunTreeRow({
         {hasChildren ? (collapsed ? "▸" : "▾") : "·"}
       </span>
       <span className="tree-name">{node.name}</span>
-      <span className={`tree-tag tone-${statusTone(node.status)}`}>
-        {node.meta && node.meta !== statusLabel(node.status) ? node.meta : statusLabel(node.status)}
-      </span>
+      <StatusPill
+        className="tree-tag"
+        status={node.status}
+        label={node.meta && node.meta !== statusLabel(node.status) ? node.meta : statusLabel(node.status)}
+      />
     </button>
   );
 }

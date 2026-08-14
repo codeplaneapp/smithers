@@ -378,10 +378,12 @@ const CREATE_TABLE_STATEMENTS = [
     model TEXT,
     agent TEXT,
     input_tokens INTEGER NOT NULL DEFAULT 0,
+    fresh_input_tokens INTEGER,
     output_tokens INTEGER NOT NULL DEFAULT 0,
     cache_read_tokens INTEGER NOT NULL DEFAULT 0,
     cache_write_tokens INTEGER NOT NULL DEFAULT 0,
     reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_usd REAL,
     updated_at_ms INTEGER NOT NULL,
     PRIMARY KEY (run_id, node_id, iteration, attempt)
   )`,

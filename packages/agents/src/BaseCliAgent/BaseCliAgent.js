@@ -644,6 +644,27 @@ function extractErrorFromJsonPayload(raw) {
   }
   return undefined;
 }
+
+const CLI_FAILURE_PREVIEW_CHARS = 200;
+
+/**
+ * Keep structured stdout useful when it is the only failure signal without
+ * copying an arbitrarily large provider event into the durable error/log line.
+ *
+ * @param {string} raw
+ * @returns {string}
+ */
+function summarizeStructuredFailureOutput(raw) {
+  const trimmed = stripOscSequences(raw).trim();
+  if (!trimmed) return "";
+  const metadataPrefix = trimmed.slice(0, 4_096);
+  const type = /"type"\s*:\s*"([^"\\]{1,80})"/.exec(metadataPrefix)?.[1];
+  const subtype = /"subtype"\s*:\s*"([^"\\]{1,80})"/.exec(metadataPrefix)?.[1];
+  const event = type ? (subtype ? `${type}/${subtype}` : type) : "unknown";
+  const preview = trimmed.slice(0, CLI_FAILURE_PREVIEW_CHARS).replace(/\r/g, "\\r").replace(/\n/g, "\\n");
+  const suffix = trimmed.length > CLI_FAILURE_PREVIEW_CHARS ? "…" : "";
+  return `CLI stdout fallback (event=${event}, bytes=${Buffer.byteLength(trimmed, "utf8")}, preview=${preview}${suffix})`;
+}
 /**
  * @param {string[]} args
  * @returns {string | undefined}
@@ -1037,6 +1058,7 @@ export class BaseCliAgent {
           let stdoutBuffer = "";
           let stderrBuffer = "";
           let completedEvent = null;
+          let lastStructuredFailureOutput = "";
           /**
            * @param {AgentCliEvent[] | AgentCliEvent | null | undefined} eventPayload
            */
@@ -1067,6 +1089,9 @@ export class BaseCliAgent {
             }
             for (const line of lines) {
               if (!line) continue;
+              if (stream === "stdout" && (outputFormat === "json" || outputFormat === "stream-json")) {
+                lastStructuredFailureOutput = summarizeStructuredFailureOutput(line);
+              }
               emitEvents(stream === "stdout" ? interpreter.onStdoutLine?.(line) : interpreter.onStderrLine?.(line));
             }
             if (stream === "stdout") {
@@ -1144,7 +1169,7 @@ export class BaseCliAgent {
               const filteredStderr = filterBenignStderr(result.stderr, commandSpec.benignStderrPatterns);
               if (!(commandSpec.command === "codex" && filteredStderr.length === 0)) {
                 const structuredError =
-                  commandSpec.outputFormat === "json" || commandSpec.outputFormat === "stream-json"
+                  outputFormat === "json" || outputFormat === "stream-json"
                     ? extractErrorFromJsonPayload(result.stdout)
                     : undefined;
                 // Prefer a distilled error over the raw stdout tail: a
@@ -1160,11 +1185,16 @@ export class BaseCliAgent {
                 // exited with code N") carries less signal than stderr;
                 // only a real distilled message may outrank it.
                 const interpreterError = /exited with code/i.test(rawInterpreterError) ? "" : rawInterpreterError;
+                const rawStdout = result.stdout.trim();
+                const stdoutFallback =
+                  outputFormat === "json" || outputFormat === "stream-json"
+                    ? lastStructuredFailureOutput || summarizeStructuredFailureOutput(rawStdout)
+                    : rawStdout;
                 const errorText =
                   structuredError ||
                   interpreterError ||
                   filteredStderr ||
-                  result.stdout.trim() ||
+                  stdoutFallback ||
                   `CLI exited with code ${result.exitCode}`;
                 const quota = classifyQuota(errorText, commandSpec.command);
                 if (quota) {
