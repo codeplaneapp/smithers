@@ -234,4 +234,116 @@ describe("quota failover across an agent chain", () => {
     },
     TIMEOUT_MS,
   );
+
+  test(
+    "run-wide quota disable survives pause and resume",
+    async () => {
+      const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);
+      const adapter = new SmithersDb(db);
+      const runId = "quota-disable-resume-run";
+      try {
+        let deadCalls = 0;
+        let healthyCalls = 0;
+        const dead = {
+          id: "quota-dead",
+          tools: {},
+          async generate() {
+            deadCalls += 1;
+            throw quotaError(Date.now() + 3_600_000);
+          },
+        };
+        const healthy = {
+          id: "healthy",
+          tools: {},
+          async generate() {
+            healthyCalls += 1;
+            if (healthyCalls === 1) {
+              await Effect.runPromise(adapter.requestRunPause(runId, Date.now()));
+              await new Promise((resolve) => setTimeout(resolve, 350));
+            }
+            return { output: { value: healthyCalls } };
+          },
+        };
+        const workflow = smithers(() => (
+          <Workflow name="quota-disable-resume">
+            <Task id="first" output={outputs.outputA} agent={[dead, healthy]} retries={0}>
+              disable the dead engine
+            </Task>
+            <Task id="after-resume" output={outputs.outputB} agent={[dead, healthy]} retries={0}>
+              resume without probing it
+            </Task>
+          </Workflow>
+        ));
+
+        const paused = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId, maxConcurrency: 1 }));
+        expect(paused.status).toBe("paused");
+        expect(deadCalls).toBe(1);
+        expect(healthyCalls).toBe(1);
+
+        const resumed = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId, resume: true }));
+        expect(resumed.status).toBe("finished");
+        expect(deadCalls).toBe(1);
+        expect(healthyCalls).toBe(2);
+      } finally {
+        cleanup();
+      }
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "bad API-key preflight remains run-wide while healthy engines are never skipped",
+    async () => {
+      const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);
+      const adapter = new SmithersDb(db);
+      const runId = "auth-disable-resume-run";
+      try {
+        let badPreflights = 0;
+        let healthyCalls = 0;
+        const badKey = {
+          id: "bad-api-key",
+          tools: {},
+          async preflight() {
+            badPreflights += 1;
+            throw new SmithersError("AGENT_CONFIG_INVALID", "401 invalid API key", { preflight: true });
+          },
+          async generate() {
+            throw new Error("bad API-key engine must never generate");
+          },
+        };
+        const healthy = {
+          id: "healthy-auth-fallback",
+          tools: {},
+          async generate() {
+            healthyCalls += 1;
+            if (healthyCalls === 1) {
+              await Effect.runPromise(adapter.requestRunPause(runId, Date.now()));
+              await new Promise((resolve) => setTimeout(resolve, 350));
+            }
+            return { output: { value: healthyCalls } };
+          },
+        };
+        const workflow = smithers(() => (
+          <Workflow name="auth-disable-resume">
+            <Task id="first" output={outputs.outputA} agent={[badKey, healthy]} retries={0}>
+              skip the bad key
+            </Task>
+            <Task id="after-resume" output={outputs.outputB} agent={[badKey, healthy]} retries={0}>
+              keep the healthy engine available
+            </Task>
+          </Workflow>
+        ));
+
+        const paused = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId, maxConcurrency: 1 }));
+        expect(paused.status).toBe("paused");
+        const resumed = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId, resume: true }));
+        expect(resumed.status).toBe("finished");
+        expect(badPreflights).toBe(1);
+        expect(healthyCalls).toBe(2);
+      } finally {
+        cleanup();
+      }
+    },
+    TIMEOUT_MS,
+  );
 });
