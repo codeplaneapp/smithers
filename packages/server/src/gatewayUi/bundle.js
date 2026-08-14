@@ -1,6 +1,7 @@
 import { SmithersError } from "@smthrs/errors/SmithersError";
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
+import { statSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,6 +18,8 @@ const tanstackSpecifierRe = /^@tanstack\//;
 const smithersUiSpecifierRe =
   /^(?:smthrs\/gateway-(?:react|client)|@smthrs\/(?:gateway-react|gateway-client|gateway)(?:\/.*)?)$/;
 const INLINE_UI_NAMESPACE = "smithers-inline-ui";
+/** @type {WeakMap<Map<string, string>, Map<string, Map<string, string>>>} */
+const uiCacheInputSnapshots = new WeakMap();
 
 /**
  * Bun's createRequire.resolve can return the original bare specifier when a
@@ -195,27 +198,107 @@ function noCacheRequested() {
 }
 
 /**
+ * @param {string} input
+ * @param {string} buildRoot
+ * @returns {string | null}
+ */
+function buildInputFilePath(input, buildRoot) {
+  if (input.startsWith("file://")) {
+    return fileURLToPath(input);
+  }
+  if (isAbsolute(input)) {
+    return input;
+  }
+  // Bun includes virtual plugin namespaces in the metafile alongside real
+  // files. They have no filesystem freshness signal; their config-derived
+  // entry key already changes when their contents change.
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(input)) {
+    return null;
+  }
+  return resolve(buildRoot, input);
+}
+
+/**
+ * @param {import("bun").BuildMetafile | undefined} metafile
+ * @param {string} buildRoot
+ * @returns {string[]}
+ */
+function buildInputFiles(metafile, buildRoot) {
+  return [
+    ...new Set(
+      Object.keys(metafile?.inputs ?? {})
+        .map((input) => buildInputFilePath(input, buildRoot))
+        .filter((input) => input !== null),
+    ),
+  ];
+}
+
+/**
+ * @param {string} file
+ * @returns {string | null}
+ */
+function inputFingerprint(file) {
+  try {
+    const stat = statSync(file, { bigint: true });
+    return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {string[]} files
+ * @returns {Map<string, string>}
+ */
+function snapshotBuildInputs(files) {
+  const snapshot = new Map();
+  for (const file of files) {
+    const fingerprint = inputFingerprint(file);
+    if (fingerprint !== null) {
+      snapshot.set(file, fingerprint);
+    }
+  }
+  return snapshot;
+}
+
+/**
+ * @param {Map<string, string>} snapshot
+ * @returns {boolean}
+ */
+function buildInputsAreFresh(snapshot) {
+  for (const [file, fingerprint] of snapshot) {
+    if (inputFingerprint(file) !== fingerprint) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * @param {Record<string, unknown>} config
  * @param {Map<string, string>} cache
  */
 export async function bundleGatewayUiEntry(config, cache) {
-  // Dev mode: SMITHERS_GATEWAY_UI_NO_CACHE rebuilds the UI bundle on every
-  // request so edits to the entry OR any of its imported modules show up on a
-  // plain page reload — no gateway restart needed. Default (unset) keeps the
-  // build-once cache for production serving.
+  // SMITHERS_GATEWAY_UI_NO_CACHE still forces a build on every request. The
+  // default cache is dependency-aware: unchanged bundles stay cheap to serve,
+  // while editing the entry or any bundled import invalidates it on refresh.
   const noCache = noCacheRequested();
   const inlineEntry = inlineEntrypoint(config);
   const cacheKey = inlineEntry ?? String(config.entry);
   const cached = noCache ? undefined : cache.get(cacheKey);
   if (cached) {
-    return cached;
+    const inputSnapshot = uiCacheInputSnapshots.get(cache)?.get(cacheKey);
+    // Preserve explicitly pre-populated caches that predate input metadata.
+    if (!inputSnapshot || buildInputsAreFresh(inputSnapshot)) {
+      return cached;
+    }
   }
   if (typeof Bun === "undefined" || typeof Bun.build !== "function") {
     throw new SmithersError("INVALID_INPUT", "Gateway UI bundling requires Bun.build.");
   }
-  let body;
+  let bundle;
   try {
-    body = await buildGatewayUiBundle(config);
+    bundle = await buildGatewayUiBundleWithInputs(config);
   } catch (inProcessError) {
     // Globally registered Bun runtime plugins leak into every in-process
     // Bun.build call that passes a `plugins` array. The engine's
@@ -223,18 +306,24 @@ export async function bundleGatewayUiEntry(config, cache) {
     // specifiers ("react", ...), which the bundler then resolves to
     // non-absolute paths and fails. A pristine subprocess has an empty
     // runtime-module registry, so retry there before giving up.
-    body = await buildGatewayUiBundleInSubprocess(config, inProcessError);
+    bundle = await buildGatewayUiBundleInSubprocess(config, inProcessError);
   }
   if (!noCache) {
-    cache.set(cacheKey, body);
+    cache.set(cacheKey, bundle.body);
+    let snapshots = uiCacheInputSnapshots.get(cache);
+    if (!snapshots) {
+      snapshots = new Map();
+      uiCacheInputSnapshots.set(cache, snapshots);
+    }
+    snapshots.set(cacheKey, snapshotBuildInputs(bundle.inputFiles));
   }
-  return body;
+  return bundle.body;
 }
 
 /**
  * @param {Record<string, unknown>} config
  * @param {unknown} inProcessError
- * @returns {Promise<string>}
+ * @returns {Promise<{ body: string; inputFiles: string[] }>}
  */
 async function buildGatewayUiBundleInSubprocess(config, inProcessError) {
   if (typeof Bun.spawn !== "function") {
@@ -256,16 +345,40 @@ async function buildGatewayUiBundleInSubprocess(config, inProcessError) {
     // carries the log-derived message callers already rely on.
     throw inProcessError;
   }
-  return stdout;
+  try {
+    const separator = stdout.indexOf("\n");
+    if (separator === -1) {
+      throw new Error("Gateway UI bundle worker omitted its input manifest.");
+    }
+    const inputFiles = JSON.parse(stdout.slice(0, separator));
+    if (!Array.isArray(inputFiles) || inputFiles.some((input) => typeof input !== "string")) {
+      throw new Error("Gateway UI bundle worker returned an invalid input manifest.");
+    }
+    return { body: stdout.slice(separator + 1), inputFiles };
+  } catch {
+    throw inProcessError;
+  }
 }
 
 /**
  * @param {Record<string, unknown>} config
+ * @param {(inputFiles: string[]) => void} [onBuildInputs]
  * @returns {Promise<string>}
  */
-export async function buildGatewayUiBundle(config) {
+export async function buildGatewayUiBundle(config, onBuildInputs) {
+  const bundle = await buildGatewayUiBundleWithInputs(config);
+  onBuildInputs?.(bundle.inputFiles);
+  return bundle.body;
+}
+
+/**
+ * @param {Record<string, unknown>} config
+ * @returns {Promise<{ body: string; inputFiles: string[] }>}
+ */
+async function buildGatewayUiBundleWithInputs(config) {
   const noCache = noCacheRequested();
   const inlineEntry = inlineEntrypoint(config);
+  const buildRoot = process.cwd();
   const result = await Bun.build({
     entrypoints: [inlineEntry ?? String(config.entry)],
     root: process.cwd(),
@@ -276,6 +389,7 @@ export async function buildGatewayUiBundle(config) {
     // debug against them); minify stays off so stack traces read cleanly.
     define: { "process.env.NODE_ENV": JSON.stringify(noCache ? "development" : "production") },
     sourcemap: "inline",
+    metafile: true,
     minify: false,
     jsx: {
       runtime: "automatic",
@@ -311,5 +425,8 @@ export async function buildGatewayUiBundle(config) {
     throw new SmithersError("INVALID_INPUT", message);
   }
   const output = result.outputs.find((entry) => entry.path.endsWith(".js")) ?? result.outputs[0];
-  return output.text();
+  return {
+    body: await output.text(),
+    inputFiles: buildInputFiles(result.metafile, buildRoot),
+  };
 }
