@@ -1633,6 +1633,8 @@ export function RunsTable({
                 className={`mon-runs-table-row${run.runId === cursorRunId ? " is-kbcursor" : ""}`}
                 data-run-id={run.runId}
                 role="button"
+                aria-current={run.runId === cursorRunId ? "true" : undefined}
+                aria-label={`${run.workflowKey ?? "unknown workflow"}, run ${run.runId}, ${labelForStatus(run.status)}${lastKnown ? ", last-known" : ""}`}
                 tabIndex={0}
                 ref={
                   run.runId === cursorRunId

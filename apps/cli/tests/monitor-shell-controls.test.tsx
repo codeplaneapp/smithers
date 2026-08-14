@@ -424,6 +424,7 @@ describe("migrated monitor surfaces", () => {
         page={1}
         onPageChange={() => {}}
         onSelect={(runId) => selected.push(runId)}
+        cursorRunId={run.runId}
       />,
     );
 
@@ -435,6 +436,8 @@ describe("migrated monitor surfaces", () => {
     const row = document.querySelector<HTMLElement>(".mon-runs-table-row")!;
     expect(row.tabIndex).toBe(0);
     expect(row.getAttribute("role")).toBe("button");
+    expect(row.getAttribute("aria-current")).toBe("true");
+    expect(row.getAttribute("aria-label")).toBe(`rendered-coverage, run ${run.runId}, failed`);
     await act(async () => row.focus());
     expect(document.activeElement).toBe(row);
 
@@ -499,6 +502,8 @@ describe("migrated monitor surfaces", () => {
     // The j/k cursor row carries its marker class for the highlight styles.
     expect(document.querySelector('[data-run-id="run-b"]')!.className).toContain("is-kbcursor");
     expect(document.querySelector('[data-run-id="run-a"]')!.className).not.toContain("is-kbcursor");
+    expect(document.querySelector('[data-run-id="run-b"]')!.getAttribute("aria-current")).toBe("true");
+    expect(document.querySelector('[data-run-id="run-a"]')!.getAttribute("aria-current")).toBeNull();
   });
 });
 
@@ -755,6 +760,7 @@ describe("monitor theme contract", () => {
       ".mon-events:focus-visible",
       ".mon-timeline-row:focus-visible",
       ".mon-approval-main:focus-visible",
+      ".mon-runs-table-row:focus-visible",
       ".mon-diff-summary:focus-visible",
       ".mon-scores-summary:focus-visible",
     ]) {
@@ -945,10 +951,14 @@ describe("RunRailRow", () => {
   test("active: the selected row is a shared RowButton with data-active", async () => {
     await render(row(true));
     const el = byTestId("monitor-run-row");
+    expect(el.tagName).toBe("BUTTON");
+    expect((el as HTMLButtonElement).type).toBe("button");
     expect(el.className).toContain("sui-row-button");
     expect(el.getAttribute("data-slot")).toBe("row-button");
     expect(el.getAttribute("data-active")).toBe("true");
     expect(el.getAttribute("data-run-id")).toBe("run-42");
+    expect(el.getAttribute("aria-current")).toBe("true");
+    expect(el.getAttribute("aria-label")).toBe("hello, run run-42");
   });
 
   test("inactive rows drop data-active, stay focusable, and select on click", async () => {
@@ -956,6 +966,8 @@ describe("RunRailRow", () => {
     await render(row(false, (runId) => selected.push(runId)));
     const el = byTestId("monitor-run-row");
     expect(el.getAttribute("data-active")).toBeNull();
+    expect(el.getAttribute("aria-current")).toBeNull();
+    expect(el.getAttribute("aria-label")).toBe("hello, run run-42");
     await act(async () => el.focus());
     expect(document.activeElement).toBe(el);
     await click(el);
