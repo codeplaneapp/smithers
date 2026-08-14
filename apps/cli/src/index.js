@@ -7891,9 +7891,19 @@ async function runHijackFlow(params) {
     exitCode = result.code;
   }
   if (exitCode === 0 && runIsLive && run.workflowPath) {
-    const pid = resumeRunDetached(run.workflowPath, runId);
-    resumedBySmithers = true;
-    process.stderr.write(`[smithers] returned control to Smithers${pid ? ` (pid ${pid})` : ""}\n`);
+    // The hijack itself succeeded; a failed handoff (e.g. an unopenable
+    // detached log) must not fail the command, only fall back to the manual
+    // resume instructions.
+    try {
+      const pid = resumeRunDetached(run.workflowPath, runId);
+      resumedBySmithers = true;
+      process.stderr.write(`[smithers] returned control to Smithers${pid ? ` (pid ${pid})` : ""}\n`);
+    } catch (error) {
+      process.stderr.write(`[smithers] could not return control to Smithers: ${error?.message ?? error}\n`);
+      if (resumeCommand) {
+        process.stderr.write(`[smithers] return control to Smithers with:\n  ${resumeCommand}\n`);
+      }
+    }
   } else if (resumeCommand) {
     process.stderr.write(`[smithers] return control to Smithers with:\n  ${resumeCommand}\n`);
   }
