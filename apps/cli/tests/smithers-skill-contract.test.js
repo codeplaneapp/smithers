@@ -110,3 +110,43 @@ test("smithers skill documents current agents command and LoopUntilScored source
   expect(seededComponentsLayout).toContain("LoopUntilScored");
   expect(seededComponentsLayout).toMatch(/seeded local-pack/i);
 });
+
+// Bug 01kzweq27e2645ty9x5yezkrwk: a review node dispatched a codex agent whose
+// harness had this skill installed. The "route any clear single-goal ask through
+// oneshot" rule hijacked the node's own prompt — the agent launched a CHILD
+// oneshot, polled `smithers status` in a sleep loop for ~30 minutes, then edited
+// the tree it was told to review. Smithers now sets SMITHERS_INSIDE_RUN on every
+// agent it spawns; every skill that teaches orchestration must state the guard
+// FIRST, ahead of the routing rules it overrides.
+const ORCHESTRATION_SKILLS = [
+  "skills/smithers/SKILL.md",
+  "apps/cli/docs/SKILL.md",
+  "codex-plugin/skills/smithers/SKILL.md",
+  "claude-plugin/skills/smithers/SKILL.md",
+  "apps/cli/src/hermes-plugin/skills/orchestrate/SKILL.md",
+  "apps/cli/src/openclaw-plugin/skills/orchestrate/SKILL.md",
+];
+
+test.each(ORCHESTRATION_SKILLS)("%s guards against recursing into Smithers from inside a node", (path) => {
+  const skill = readRepoFile(path);
+
+  expect(skill).toContain("SMITHERS_INSIDE_RUN");
+  expect(skill).toMatch(/if you are already inside a smithers run, do not use smithers/i);
+  // The guard must come before the routing rules it overrides, or an agent that
+  // reads top-down acts on "route this through oneshot" first.
+  const guardIndex = skill.search(/##[^\n]*already inside a Smithers run/i);
+  const routingIndex = skill.search(/^##[^\n]*(Right-size the route|Route first|Default)/im);
+  expect(guardIndex).toBeGreaterThan(-1);
+  expect(routingIndex).toBeGreaterThan(guardIndex);
+});
+
+// The body only reaches the model once the skill is invoked; the frontmatter
+// description is in context from the first turn. An agent that acts on the
+// description alone reads "you are an ORCHESTRATOR, route this through
+// Smithers" and recurses without ever loading the guard section above, which is
+// how the bug reproduced. The guard has to be in both places.
+test.each(ORCHESTRATION_SKILLS)("%s states the guard in its frontmatter description", (path) => {
+  const frontmatter = readRepoFile(path).match(/^---\n([\s\S]*?)\n---/)?.[1] ?? "";
+
+  expect(frontmatter).toContain("SMITHERS_INSIDE_RUN");
+});

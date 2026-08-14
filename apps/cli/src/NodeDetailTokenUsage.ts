@@ -1,5 +1,6 @@
 export type NodeDetailTokenUsage = {
   inputTokens: number;
+  freshInputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;

@@ -21,6 +21,8 @@ type AgentGenerateOptionsBase = {
   onStderr?: (text: string) => void;
   onEvent?: (event: AgentCliEvent) => unknown;
   onProcess?: (event: { phase: "started" | "exited"; pid: number | undefined }) => void;
+  onToolExecutionStart?: (event: { callId?: string; toolCall?: { toolCallId?: string } }) => unknown;
+  onToolExecutionEnd?: (event: { callId?: string; toolCall?: { toolCallId?: string } }) => unknown;
   retry?: unknown;
   isRetry?: unknown;
   retryAttempt?: unknown;
@@ -29,7 +31,9 @@ type AgentGenerateOptionsBase = {
    * Run context for the task this agent invocation belongs to. Surfaced to the
    * spawned agent process (and its subprocesses) as SMITHERS_RUN_ID / NODE_ID /
    * ITERATION / ATTEMPT so the agent can address its own run — e.g. to raise a
-   * blocking `smithers ask-human` request.
+   * blocking `smithers ask-human` request. It also sets SMITHERS_INSIDE_RUN,
+   * the recursion marker telling the agent's own skills that it is already
+   * executing inside a run and must not launch or steer Smithers runs.
    */
   taskContext?: {
     runId?: string;

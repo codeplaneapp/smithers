@@ -444,6 +444,7 @@ describe("OmpAgent", () => {
       CUSTOM: "1",
       SMITHERS_RUN_ID: "run-1",
       SMITHERS_NODE_ID: "node-1",
+      SMITHERS_INSIDE_RUN: "run-1/node-1",
       SMITHERS_ITERATION: "2",
       SMITHERS_ATTEMPT: "3",
     });

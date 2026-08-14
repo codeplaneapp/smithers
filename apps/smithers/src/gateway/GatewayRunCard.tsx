@@ -1,7 +1,7 @@
-import { EmptyState, Skeleton } from "@smthrs/ui";
+import { EmptyState, Skeleton, StatusPill } from "@smthrs/ui";
 import { openSurface } from "../app/navigation";
-import { StatusPill } from "../cards/StatusPill";
 import { RunTree } from "../runs/RunTree";
+import { statusLabel } from "../runs/statusMeta";
 import { useGatewayRunTree } from "../sync/useGatewayRunTree";
 
 export function GatewayRunCard({ workflowKey, runId }: { workflowKey: string; runId: string }) {
@@ -19,7 +19,7 @@ export function GatewayRunCard({ workflowKey, runId }: { workflowKey: string; ru
           <div className="card-sub">gateway run {runId}</div>
         </div>
         <div className="card-head-right">
-          <StatusPill status={runTree.status} />
+          <StatusPill status={runTree.status} label={statusLabel(runTree.status)} />
         </div>
       </header>
 
