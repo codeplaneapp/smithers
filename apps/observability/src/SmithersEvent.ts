@@ -122,6 +122,14 @@ export type SmithersEvent =
       timestampMs: number;
     }
   | {
+      type: "RunConcurrencySaturated";
+      runId: string;
+      requestedDemand: number;
+      effectiveCap: number;
+      remediationCommand: string;
+      timestampMs: number;
+    }
+  | {
       type: "RunFinished";
       runId: string;
       timestampMs: number;

@@ -6,6 +6,7 @@ export type WhyDiagnosis = {
   summary: string;
   generatedAtMs: number;
   blockers: WhyBlocker[];
+  warnings?: string[];
   information: string[];
   currentNodeId: string | null;
 };
