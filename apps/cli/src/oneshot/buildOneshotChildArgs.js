@@ -8,6 +8,7 @@
  *   model?: string;
  *   agent?: string;
  *   preflight?: "auto" | "warn" | "off";
+ *   preflightForceCommit?: boolean;
  *   runId?: string;
  *   resume?: boolean;
  *   force?: boolean;
@@ -29,6 +30,7 @@ export function buildOneshotChildArgs(options) {
   if (options.model) args.push("--model", options.model);
   if (options.agent) args.push("--agent", options.agent);
   if (options.preflight) args.push("--preflight", options.preflight);
+  if (options.preflightForceCommit) args.push("--preflight-force-commit");
   if (options.runId) args.push("--run-id", options.runId);
   if (options.resume) args.push("--resume", "true");
   if (options.force) args.push("--force", "true");

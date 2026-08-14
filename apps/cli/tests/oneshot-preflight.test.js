@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { assessWorkingCopy, buildPreflightNotice, needsPreflightNotice } from "../src/oneshot-preflight.js";
+import {
+  assessWorkingCopy,
+  buildPreflightNotice,
+  findActiveRunsForWorkingCopy,
+  needsPreflightNotice,
+} from "../src/oneshot-preflight.js";
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../..");
 const cliEntry = join(repoRoot, "apps/cli/src/index.js");
@@ -145,6 +150,107 @@ test("buildPreflightNotice renders the warning and compact agent triage from the
   expect(notice.preamble.split("\n").length).toBeLessThan(27);
 });
 
+function storedRun(cwd, overrides = {}) {
+  const now = Date.now();
+  return {
+    runId: "other-run",
+    status: "running",
+    createdAtMs: now - 2_000,
+    startedAtMs: now - 2_000,
+    heartbeatAtMs: now - 1_000,
+    runtimeOwnerId: `pid:${process.pid}:test`,
+    cancelRequestedAtMs: null,
+    errorJson: null,
+    configJson: JSON.stringify({ rootDir: cwd }),
+    ...overrides,
+  };
+}
+
+function runAdapter(rows) {
+  return {
+    listRuns: async () => rows,
+    listSandboxes: async () => [],
+  };
+}
+
+describe("active-run commit guard", () => {
+  test("finds live non-terminal runs only for the normalized working directory", async () => {
+    const cwd = fixtureRepo();
+    const nested = join(cwd, ".", "nested", "..");
+    const runs = [
+      storedRun(nested, { runId: "active-a" }),
+      storedRun(temp("smithers-other-cwd-"), { runId: "other-cwd" }),
+    ];
+    expect(await findActiveRunsForWorkingCopy(runAdapter(runs), cwd)).toEqual(["active-a"]);
+  });
+
+  test("finished runs do not suppress the normal snapshot commit", async () => {
+    const cwd = fixtureRepo();
+    const activeRunIds = await findActiveRunsForWorkingCopy(
+      runAdapter([
+        storedRun(cwd, {
+          runId: "finished-run",
+          status: "finished",
+          finishedAtMs: Date.now(),
+          heartbeatAtMs: null,
+          runtimeOwnerId: null,
+        }),
+      ]),
+      cwd,
+    );
+    expect(activeRunIds).toEqual([]);
+    writeFileSync(join(cwd, "tracked.txt"), "finished run dirt\n");
+    const notice = buildPreflightNotice(assessWorkingCopy(cwd), "new-run", { activeRunIds });
+    expect(notice.preamble).toContain("chore(preflight): preserve pre-existing working-copy changes");
+    expect(notice.preamble).not.toContain("DO NOT commit any pre-existing path");
+  });
+
+  test("stale-heartbeat and dead-pid runs do not block commits", async () => {
+    const cwd = fixtureRepo();
+    const old = Date.now() - 10 * 60_000;
+    const activeRunIds = await findActiveRunsForWorkingCopy(
+      runAdapter([
+        storedRun(cwd, {
+          runId: "stale-heartbeat",
+          heartbeatAtMs: old,
+          startedAtMs: old,
+        }),
+        storedRun(cwd, {
+          runId: "dead-pid",
+          heartbeatAtMs: old,
+          startedAtMs: old,
+          runtimeOwnerId: "pid:2147483647:dead",
+        }),
+      ]),
+      cwd,
+    );
+    expect(activeRunIds).toEqual([]);
+  });
+
+  test("active runs produce a loud id-bearing warning and prohibit pre-existing commits", () => {
+    const cwd = fixtureRepo();
+    writeFileSync(join(cwd, "tracked.txt"), "active run dirt\n");
+    const notice = buildPreflightNotice(assessWorkingCopy(cwd), "new-run", {
+      activeRunIds: ["active-a", "active-b"],
+    });
+    expect(notice.warning).toContain("ACTIVE RUNS: active-a, active-b");
+    expect(notice.warning).toContain("wait for them to finish or use an isolated worktree");
+    expect(notice.preamble).toContain("DO NOT commit any pre-existing path");
+    expect(notice.preamble).not.toContain("chore(preflight): preserve pre-existing working-copy changes");
+  });
+
+  test("force-commit escape hatch is explicit in warning and restores snapshot guidance", () => {
+    const cwd = fixtureRepo();
+    writeFileSync(join(cwd, "tracked.txt"), "forced dirt\n");
+    const notice = buildPreflightNotice(assessWorkingCopy(cwd), "new-run", {
+      activeRunIds: ["active-a"],
+      forceCommit: true,
+    });
+    expect(notice.warning).toContain("--preflight-force-commit overrides the commit guard");
+    expect(notice.preamble).toContain("chore(preflight): preserve pre-existing working-copy changes");
+  });
+});
+
 test("oneshot flag schema parses preflight as auto by default", () => {
   const result = spawnSync(process.execPath, ["run", cliEntry, "oneshot", "--schema", "--format", "json"], {
     cwd: repoRoot,
@@ -153,6 +259,7 @@ test("oneshot flag schema parses preflight as auto by default", () => {
   expect(result.status).toBe(0);
   const preflight = JSON.parse(result.stdout).options.properties.preflight;
   expect(preflight).toMatchObject({ default: "auto", enum: ["auto", "warn", "off"] });
+  expect(JSON.parse(result.stdout).options.properties.preflightForceCommit).toMatchObject({ default: false });
 }, 30_000);
 
 test("oneshot warns for dirty and detached cwd states and stays quiet for a clean one", () => {

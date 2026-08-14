@@ -8,13 +8,32 @@
 // detects that state cheaply and renders the two things the CLI needs from a
 // single source of truth: the operator warning and the agent triage preamble.
 import { spawnSync } from "node:child_process";
-import { readdirSync } from "node:fs";
+import { readdirSync, realpathSync } from "node:fs";
+import { resolve } from "node:path";
+import { computeRunStateFromRow } from "@smthrs/db/runState";
 
 const GIT_TIMEOUT_MS = 10_000;
 const GIT_MAX_BUFFER = 32 * 1024 * 1024;
 // Porcelain v1 status codes for unmerged (conflicted) entries.
 const UNMERGED_CODES = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
 const JJ_CONFLICT_PREFIX = ".jjconflict";
+const ACTIVE_RUN_STATES = new Set([
+  "running",
+  "waiting-approval",
+  "waiting-event",
+  "waiting-timer",
+  "waiting-quota",
+  "paused",
+  "recovering",
+]);
+const NON_TERMINAL_RUN_STATUSES = [
+  "running",
+  "waiting-approval",
+  "waiting-event",
+  "waiting-timer",
+  "waiting-quota",
+  "paused",
+];
 
 /**
  * @typedef {{ modified: number; untracked: number; staged: number; conflicted: number }} DirtyCounts
@@ -156,6 +175,53 @@ export function needsPreflightNotice(summary) {
   return summary.vcs === "git" && (!summary.clean || summary.detachedHead);
 }
 
+/** @param {string} path */
+function normalizedCwd(path) {
+  try {
+    return realpathSync(resolve(path));
+  } catch {
+    return resolve(path);
+  }
+}
+
+/** @param {string | null | undefined} configJson */
+function storedRootDir(configJson) {
+  if (!configJson) return null;
+  try {
+    const rootDir = JSON.parse(configJson)?.rootDir;
+    return typeof rootDir === "string" && rootDir.length > 0 ? normalizedCwd(rootDir) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Find genuinely active runs sharing this working directory. The derived-state
+ * classifier verifies owner PIDs, so stale heartbeats and dead owners do not
+ * turn historical rows into commit blockers.
+ *
+ * @param {any} adapter
+ * @param {string} taskCwd
+ * @param {{ excludeRunId?: string; limit?: number }} [options]
+ * @returns {Promise<string[]>}
+ */
+export async function findActiveRunsForWorkingCopy(adapter, taskCwd, options = {}) {
+  const cwd = normalizedCwd(taskCwd);
+  const byId = new Map();
+  for (const status of NON_TERMINAL_RUN_STATUSES) {
+    for (const row of (await adapter.listRuns(options.limit ?? 1_000, status)) ?? []) {
+      if (row?.runId) byId.set(row.runId, row);
+    }
+  }
+  const active = [];
+  for (const row of byId.values()) {
+    if (!row || row.runId === options.excludeRunId || storedRootDir(row.configJson) !== cwd) continue;
+    const view = await computeRunStateFromRow(adapter, row);
+    if (ACTIVE_RUN_STATES.has(view.state)) active.push(row.runId);
+  }
+  return [...new Set(active)].sort();
+}
+
 /** @param {GitWorkingCopySummary} summary */
 function describeInventory(summary) {
   const counts = [
@@ -179,35 +245,61 @@ function describeInventory(summary) {
  *
  * @param {GitWorkingCopySummary} summary
  * @param {string} runId
+ * @param {{ activeRunIds?: string[]; activeRunCheckFailed?: boolean; forceCommit?: boolean }} [options]
  * @returns {{ warning: string; preamble: string }}
  */
-export function buildPreflightNotice(summary, runId) {
+export function buildPreflightNotice(summary, runId, options = {}) {
   const inventory = describeInventory(summary);
-  const warning = `oneshot preflight: working copy at ${summary.cwd} requires attention: ${inventory}; commits can absorb pre-existing work or be left on an unreferenced detached lineage`;
+  const activeRunIds = [...new Set(options.activeRunIds ?? [])].sort();
+  const commitGuarded = !options.forceCommit && (activeRunIds.length > 0 || options.activeRunCheckFailed);
+  const activeWarning =
+    activeRunIds.length > 0
+      ? `; ACTIVE RUNS: ${activeRunIds.join(", ")}. ${
+          options.forceCommit
+            ? "--preflight-force-commit overrides the commit guard"
+            : "Auto preflight will not commit pre-existing paths; wait for them to finish or use an isolated worktree"
+        }`
+      : options.activeRunCheckFailed
+        ? "; ACTIVE-RUN CHECK FAILED. Auto preflight will not commit pre-existing paths; retry, wait, or use an isolated worktree"
+        : "";
+  const warning = `oneshot preflight: working copy at ${summary.cwd} requires attention: ${inventory}; commits can absorb pre-existing work or be left on an unreferenced detached lineage${activeWarning}`;
   const initialTriage = summary.clean
     ? [
         `This working copy is clean but is on a detached HEAD: ${summary.cwd}.`,
         "Create or select a branch before making any goal commit so the resulting lineage stays referenced.",
         "",
       ]
-    : [
-        `This working copy was NOT clean when the run started: ${summary.cwd} has ${inventory}.`,
-        "None of it is yours. Before you start the goal below, bring the tree to a clean",
-        "baseline, judging every pre-existing path on its merits:",
-        "",
-        "- Build artifacts, caches, logs, or junk that should never be tracked: add the",
-        "  narrowest sensible pattern to `.gitignore`.",
-        "- Meaningful pre-existing work: preserve it in its own snapshot commit",
-        `  (\`chore(preflight): preserve pre-existing working-copy changes before ${runId}\`).`,
-        "  Never let it ride along in a goal commit.",
-        "- Ambiguous or half-finished experiments: `git stash push` them with a message",
-        `  describing what they are and naming this run (\`preflight ${runId}: ...\`).`,
-        "- Conflicted/`UU` files or `.jjconflict*` trees: do NOT resolve, commit, or delete",
-        "  them. Stop, surface them in your run output as a blocker note, and continue with",
-        "  the goal only if the goal does not touch those paths.",
-        ...(summary.detachedHead ? ["- Detached HEAD: create or select a branch before making any goal commit."] : []),
-        "",
-      ];
+    : commitGuarded
+      ? [
+          `This working copy was NOT clean when the run started: ${summary.cwd} has ${inventory}.`,
+          activeRunIds.length > 0
+            ? `Other Smithers runs are active here: ${activeRunIds.join(", ")}.`
+            : "Smithers could not verify whether another run is active here.",
+          "DO NOT commit any pre-existing path. Do not stash, reset, resolve, delete, or otherwise",
+          "take ownership of existing changes. Work only on disjoint goal paths; if that is not",
+          "possible, stop and recommend waiting or launching from an isolated worktree.",
+          "",
+        ]
+      : [
+          `This working copy was NOT clean when the run started: ${summary.cwd} has ${inventory}.`,
+          "None of it is yours. Before you start the goal below, bring the tree to a clean",
+          "baseline, judging every pre-existing path on its merits:",
+          "",
+          "- Build artifacts, caches, logs, or junk that should never be tracked: add the",
+          "  narrowest sensible pattern to `.gitignore`.",
+          "- Meaningful pre-existing work: preserve it in its own snapshot commit",
+          `  (\`chore(preflight): preserve pre-existing working-copy changes before ${runId}\`).`,
+          "  Never let it ride along in a goal commit.",
+          "- Ambiguous or half-finished experiments: `git stash push` them with a message",
+          `  describing what they are and naming this run (\`preflight ${runId}: ...\`).`,
+          "- Conflicted/`UU` files or `.jjconflict*` trees: do NOT resolve, commit, or delete",
+          "  them. Stop, surface them in your run output as a blocker note, and continue with",
+          "  the goal only if the goal does not touch those paths.",
+          ...(summary.detachedHead
+            ? ["- Detached HEAD: create or select a branch before making any goal commit."]
+            : []),
+          "",
+        ];
   const preamble = [
     "## Working-copy preflight",
     "",

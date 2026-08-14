@@ -185,6 +185,7 @@ import { oneshotCta } from "./oneshot/oneshotCta.js";
 import {
   assessWorkingCopy,
   buildPreflightNotice,
+  findActiveRunsForWorkingCopy,
   needsPreflightNotice,
   preflightConfigEntry,
 } from "./oneshot-preflight.js";
@@ -2989,6 +2990,10 @@ const oneshotOptions = z
       .describe(
         "Dirty-working-copy preflight: auto warns and has the agent triage the tree first, warn only warns, off skips it",
       ),
+    preflightForceCommit: z
+      .boolean()
+      .default(false)
+      .describe("Allow auto preflight to snapshot dirty paths even when another run is active in the same cwd"),
     runId: z.string().optional().describe("Run ID to create or resume (used by `smithers supervise` to recover a run)"),
     resume: z
       .boolean()
@@ -8329,9 +8334,30 @@ const cli = Cli.create({
       // that work the agent's first job.
       const preflightMode = c.options.resume ? "off" : c.options.preflight;
       const preflightSummary = preflightMode === "off" ? null : assessWorkingCopy(taskCwd);
+      let activeRunIds = [];
+      let activeRunCheckFailed = false;
+      if (preflightMode === "auto" && preflightSummary?.vcs === "git" && !preflightSummary.clean) {
+        let opened;
+        try {
+          opened = await findAndOpenDb(taskCwd, { timeoutMs: 0 });
+          activeRunIds = await findActiveRunsForWorkingCopy(opened.adapter, taskCwd, {
+            excludeRunId: effectiveRunId,
+          });
+        } catch (error) {
+          if (!(error instanceof SmithersError) || error.code !== "CLI_DB_NOT_FOUND") {
+            activeRunCheckFailed = true;
+          }
+        } finally {
+          opened?.cleanup();
+        }
+      }
       const preflightNotice =
         preflightSummary && needsPreflightNotice(preflightSummary)
-          ? buildPreflightNotice(preflightSummary, effectiveRunId)
+          ? buildPreflightNotice(preflightSummary, effectiveRunId, {
+              activeRunIds,
+              activeRunCheckFailed,
+              forceCommit: c.options.preflightForceCommit,
+            })
           : null;
       if (preflightNotice) {
         runSync(
@@ -8398,6 +8424,7 @@ const cli = Cli.create({
                 model: c.options.model,
                 agent: c.options.agent,
                 preflight: preflightMode,
+                preflightForceCommit: c.options.preflightForceCommit,
                 runId: c.options.runId,
                 resume: c.options.resume,
                 force: c.options.force,
@@ -8427,6 +8454,7 @@ const cli = Cli.create({
           model: c.options.model,
           agent: c.options.agent,
           preflight: preflightMode,
+          preflightForceCommit: c.options.preflightForceCommit,
           runId: c.options.runId,
           resume: c.options.resume,
           force: c.options.force,
@@ -8569,6 +8597,7 @@ const cli = Cli.create({
             review ? "on" : "off",
             "--preflight",
             preflightMode,
+            ...(c.options.preflightForceCommit ? ["--preflight-force-commit"] : []),
             ...(c.options.model ? ["--model", c.options.model] : []),
             ...(c.options.agent ? ["--agent", c.options.agent] : []),
           ],

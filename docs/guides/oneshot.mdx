@@ -118,6 +118,13 @@ Oneshot runs directly in `--cwd`, so a stale detached lineage, foreign WIP, or
 `.jjconflict*` tree can be swept into a goal commit and make landing unsafe.
 The default `--preflight auto` warns and prepends agent-judged triage
 instructions; use `warn` to warn without injection or `off` to skip assessment.
+Before auto preflight permits a snapshot commit, it checks the workspace store
+for non-terminal runs using the PID-verified run-state taxonomy. If another run
+is active in the same normalized working directory, the warning names every run
+ID and tells the agent not to commit pre-existing paths; finished, stale, and
+dead-PID runs do not block. Wait for the active run or use an isolated worktree.
+`--preflight-force-commit` explicitly overrides this guard when the operator has
+verified that sharing the dirty tree is safe.
 
 ## Watching and steering a oneshot
 
