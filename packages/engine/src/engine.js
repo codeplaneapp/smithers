@@ -13,7 +13,7 @@ import {
 } from "@smthrs/db/snapshot";
 import { FRAME_KEYFRAME_INTERVAL } from "@smthrs/db/frame-codec";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
-import { SmithersDb } from "@smthrs/db/adapter";
+import { runCancellationSourceFromRow, SmithersDb } from "@smthrs/db/adapter";
 import {
   selectOutputRow,
   validateOutput,
@@ -4520,7 +4520,21 @@ function isHijackCancellation(errorJson) {
  * the durable wait cleanup and the cancellation event/metric inseparable.
  * @param {SmithersDb} adapter
  * @param {string} runId
- * @param {{ now?: number; eventBus?: EventBus; errorJson?: string | null }} [options]
+ * @param {{
+ *   now?: number;
+ *   eventBus?: EventBus;
+ *   errorJson?: string | null;
+ *   attribution?: {
+ *     requestId?: string | null;
+ *     kind?: string | null;
+ *     source?: string | null;
+ *     transport?: string | null;
+ *     detail?: string | null;
+ *     signal?: string | null;
+ *     clientIdentity?: string | null;
+ *     clientPid?: number | null;
+ *   };
+ * }} [options]
  */
 export async function finalizeCancelledRun(adapter, runId, options = {}) {
   let cancelledAtMs = options.now ?? nowMs();
@@ -4535,7 +4549,9 @@ export async function finalizeCancelledRun(adapter, runId, options = {}) {
   await adapter.withTransaction(
     "cancel-finalization",
     Effect.promise(async () => {
-      claimed = await Effect.runPromise(adapter.claimRunCancellation(runId, cancelledAtMs, options.errorJson ?? null));
+      claimed = await Effect.runPromise(
+        adapter.claimRunCancellation(runId, cancelledAtMs, options.errorJson ?? null, options.attribution ?? null),
+      );
       current = await Promise.resolve(adapter.getRun(runId));
       if (current && (current.status === "cancelled" || current.status === "canceled")) {
         // The terminal row retains cancelRequestedAtMs as a durable
@@ -4549,7 +4565,13 @@ export async function finalizeCancelledRun(adapter, runId, options = {}) {
         cleanupChanged = cleanup.changed;
         approvalWaitDurations = cleanup.approvalWaitDurations;
         asyncApprovalDecrements = cleanup.asyncApprovalDecrements;
-        const cancelEvent = { type: "RunCancelled", runId, timestampMs: cancelledAtMs };
+        const source = runCancellationSourceFromRow(current);
+        const cancelEvent = {
+          type: "RunCancelled",
+          runId,
+          timestampMs: cancelledAtMs,
+          ...(source ? { source } : {}),
+        };
         const existing = await Effect.runPromise(adapter.listEventsByType(runId, "RunCancelled"));
         const legacy = await Effect.runPromise(adapter.listEventsByType(runId, "RunCanceled"));
         if (existing.length === 0 && legacy.length === 0) {

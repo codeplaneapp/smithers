@@ -13,6 +13,7 @@
  * @typedef {import("./DevToolsSnapshotV1.ts").DevToolsSnapshotV1} DevToolsSnapshotV1
  * @typedef {import("./DevToolsDelta.ts").DevToolsDelta} DevToolsDelta
  * @typedef {import("./DevToolsDeltaOp.ts").DevToolsDeltaOp} DevToolsDeltaOp
+ * @typedef {import("./DevToolsEngineEvent.ts").RunCancellationSource} RunCancellationSource
  */
 
 export { countNodes } from "./countNodes.js";

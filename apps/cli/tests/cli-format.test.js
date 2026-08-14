@@ -155,8 +155,15 @@ describe("formatEventLine", () => {
     expect(line).toContain("✗ Run failed: boom");
   });
   test("formats RunCancelled", () => {
-    const line = formatEventLine({ timestampMs: 2000, type: "RunCancelled", payloadJson: "{}" }, base);
-    expect(line).toContain("⊘ Run cancelled");
+    const line = formatEventLine(
+      {
+        timestampMs: 2000,
+        type: "RunCancelled",
+        payloadJson: JSON.stringify({ source: { kind: "signal", signal: "SIGTERM" } }),
+      },
+      base,
+    );
+    expect(line).toContain("⊘ Run cancelled (signal SIGTERM)");
   });
   test("formats ApprovalRequested", () => {
     const line = formatEventLine(

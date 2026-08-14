@@ -456,10 +456,11 @@ describe("Gateway.mapEvent — SmithersEvent→wire mapping", () => {
       type: "RunCancelled",
       runId: "run-1",
       timestampMs: 1000,
+      source: { kind: "signal", signal: "SIGTERM" },
     });
     expect(result).toEqual({
       event: "run.completed",
-      payload: { runId: "run-1", status: "cancelled" },
+      payload: { runId: "run-1", status: "cancelled", source: { kind: "signal", signal: "SIGTERM" } },
     });
   });
 

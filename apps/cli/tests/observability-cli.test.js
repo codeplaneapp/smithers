@@ -134,6 +134,55 @@ describe("CLI observability", () => {
   );
 
   test(
+    "inspect exposes structured cancellation attribution in JSON and human output",
+    async () => {
+      const repo = createTempRepo();
+      const { sqlite, adapter } = openRepoDb(repo);
+      try {
+        await insertFinishedRun(adapter, "inspect-cancelled-run");
+        await adapter.updateRun("inspect-cancelled-run", {
+          status: "cancelled",
+          cancelRequestSource: "signal",
+          cancelRequestDetail: "worker received SIGTERM",
+          cancelRequestSignal: "SIGTERM",
+          cancelRequestClientPid: 4321,
+          cancelRequestId: "request-inspect",
+          cancelRequestClientIdentity: "operator",
+        });
+
+        const structured = runSmithers(["inspect", "inspect-cancelled-run"], {
+          cwd: repo.dir,
+          format: "json",
+          timeoutMs: TIMEOUT_MS,
+        });
+        expect(structured.exitCode, `${structured.stdout}\n${structured.stderr}`).toBe(0);
+        expect(structured.json.run.cancellationSource).toEqual({
+          kind: "signal",
+          detail: "worker received SIGTERM",
+          signal: "SIGTERM",
+          clientPid: 4321,
+          requestId: "request-inspect",
+          clientIdentity: "operator",
+        });
+
+        const human = runSmithers(["inspect", "inspect-cancelled-run"], {
+          cwd: repo.dir,
+          format: null,
+          timeoutMs: TIMEOUT_MS,
+        });
+        expect(human.exitCode, `${human.stdout}\n${human.stderr}`).toBe(0);
+        expect(human.stdout).toContain("cancellationSource:");
+        expect(human.stdout).toContain("worker received SIGTERM");
+        expect(human.stdout).toContain("SIGTERM");
+        expect(human.stdout).toContain("request-inspect");
+      } finally {
+        sqlite.close();
+      }
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
     "inspect reads the degraded outcome from RunFinished instead of node rows",
     async () => {
       const repo = createTempRepo();

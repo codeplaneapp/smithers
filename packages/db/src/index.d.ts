@@ -5,6 +5,7 @@ import { Table as Table$1, and } from 'drizzle-orm';
 import * as _smthrs_errors_SmithersError from '@smthrs/errors/SmithersError';
 import { SmithersError as SmithersError$2 } from '@smthrs/errors/SmithersError';
 import * as drizzle_orm_bun_sqlite from 'drizzle-orm/bun-sqlite';
+import * as _smthrs_observability from '@smthrs/observability';
 import * as bun_sqlite from 'bun:sqlite';
 import { Database as Database$1 } from 'bun:sqlite';
 import { ManagedRuntime, Effect } from 'effect';
@@ -164,6 +165,8 @@ type RunRow$1 = {
     cancelRequestedAtMs: number | null;
     cancelRequestId: string | null;
     cancelRequestSource: string | null;
+    cancelRequestDetail: string | null;
+    cancelRequestSignal: string | null;
     cancelRequestClientIdentity: string | null;
     cancelRequestClientPid: number | null;
     pauseRequestedAtMs?: number | null;
@@ -654,6 +657,13 @@ declare class SqlError extends SqlError$1 {
     constructor(options: any);
 }
 
+/**
+ * Project the flat persisted run fields into the canonical cancellation-source
+ * contract. Historical transport values remain readable as RPC attribution.
+ * @param {Partial<RunRow> | null | undefined} row
+ * @returns {import("@smthrs/observability").RunCancellationSource | undefined}
+ */
+declare function runCancellationSourceFromRow(row: Partial<RunRow> | null | undefined): _smthrs_observability.RunCancellationSource | undefined;
 /** @typedef {import("./adapter/AlertRow.ts").AlertRow} AlertRow */
 /** @typedef {import("./adapter/AlertStatus.ts").AlertStatus} AlertStatus */
 /** @typedef {import("./adapter/AttemptRow.ts").AttemptRow} AttemptRow */
@@ -822,8 +832,11 @@ declare class SmithersDb {
      * @param {number} cancelRequestedAtMs
      * @param {{
      *   requestId?: string | null;
+     *   kind?: string | null;
      *   source?: string | null;
      *   transport?: string | null;
+     *   detail?: string | null;
+     *   signal?: string | null;
      *   clientIdentity?: string | null;
      *   clientPid?: number | null;
      * }} [attribution]
@@ -831,8 +844,11 @@ declare class SmithersDb {
      */
     requestRunCancel(runId: string, cancelRequestedAtMs: number, attribution?: {
         requestId?: string | null;
+        kind?: string | null;
         source?: string | null;
         transport?: string | null;
+        detail?: string | null;
+        signal?: string | null;
         clientIdentity?: string | null;
         clientPid?: number | null;
     }): RunnableEffect<boolean, SmithersError$1>;
@@ -844,8 +860,11 @@ declare class SmithersDb {
      * @param {string | null} [errorJson]
      * @param {{
      *   requestId?: string | null;
+     *   kind?: string | null;
      *   source?: string | null;
      *   transport?: string | null;
+     *   detail?: string | null;
+     *   signal?: string | null;
      *   clientIdentity?: string | null;
      *   clientPid?: number | null;
      * } | null} [attribution]
@@ -853,8 +872,11 @@ declare class SmithersDb {
      */
     claimRunCancellation(runId: string, cancelledAtMs: number, errorJson?: string | null, attribution?: {
         requestId?: string | null;
+        kind?: string | null;
         source?: string | null;
         transport?: string | null;
+        detail?: string | null;
+        signal?: string | null;
         clientIdentity?: string | null;
         clientPid?: number | null;
     } | null): RunnableEffect<boolean, SmithersError$1>;
@@ -6280,6 +6302,44 @@ declare const smithersRuns: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
         }, {}, {
             length: number | undefined;
         }>;
+        cancelRequestDetail: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "cancel_request_detail";
+            tableName: "_smithers_runs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        cancelRequestSignal: drizzle_orm_sqlite_core.SQLiteColumn<{
+            name: "cancel_request_signal";
+            tableName: "_smithers_runs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
         cancelRequestClientIdentity: drizzle_orm_sqlite_core.SQLiteColumn<{
             name: "cancel_request_client_identity";
             tableName: "_smithers_runs";
@@ -10435,4 +10495,4 @@ type AgentCheckpointContentRow = AgentCheckpointContentRow$2;
 type AgentCheckpointRefRow = AgentCheckpointRefRow$2;
 type SchemaRegistryEntry = SchemaRegistryEntry$1;
 
-export { type AgentCheckpointContentRow, type AgentCheckpointRefRow, type AlertRow, type AlertSeverity, type AlertStatus, type AnyColumn, type ApprovalRow, type AttemptRow, type CacheRow, type CacheRowLike, type CountRow, DB_ALERT_ALLOWED_SEVERITIES, DB_ALERT_ALLOWED_STATUSES, DB_ALERT_ID_MAX_LENGTH, DB_ALERT_MESSAGE_MAX_LENGTH, DB_ALERT_POLICY_NAME_MAX_LENGTH, DB_RUN_ALLOWED_STATUSES, DB_RUN_ID_MAX_LENGTH, DB_RUN_WORKFLOW_NAME_MAX_LENGTH, type Database, type Dialect, type DocRow, type EvalCaseResultRow, type EvalSuiteRow, type EventHistoryQuery, type ExternalSqliteDescriptor, FRAME_KEYFRAME_INTERVAL, type FrameDelta, type FrameDeltaOp, type FrameEncoding, type FrameRow, type HumanRequestRow, type IntegrationDeliveryClaim, type JsonBounds, type JsonPath, type JsonPathSegment, NODE_DIFF_MAX_BYTES, NodeDiffCache, type NodeDiffCacheResult, type NodeDiffCacheRow$1 as NodeDiffCacheRow, NodeDiffTooLargeError, type NodeRow, OUTPUT_PROVENANCE_SEQ, type OutputKey, type OutputSnapshot, POSTGRES, type PendingHumanRequestRow, type RalphRow, type RunAncestryRow, type RunRow, type RunnableEffect, SQLITE, type SchemaRegistryEntry, type SignalQuery, type SignalRow, SmithersDb, type SmithersError$1 as SmithersError, SqlMessageStorage, type SqlMessageStorageEventHistoryQuery, type SqliteParam, type SqliteTransactionState, type SqliteWriteRetryOptions, type StaleRunRecord, type SteerRow, type Table, type TxidCapture, type ZodError, type _BunSQLiteDatabase, type _NodeDiffCacheRow, type _OutputKey, type _SmithersDb, type _SmithersError, applyFrameDelta, applyFrameDeltaJson, assertJsonPayloadWithinBounds, assertMaxBytes, assertMaxJsonDepth, assertMaxStringLength, assertNoReservedColumns, assertOptionalArrayMaxLength, assertOptionalStringMaxLength, assertPositiveFiniteInteger, assertPositiveFiniteNumber, beginTransactionSql, buildKeyWhere, buildOutputRow, camelToSnake, capturePostgresTransactionTxid, captureTxid, coerceOutputRowForSnapshot, columnType, createTxidCapture, describeSchemaShape, encodeFrameDelta, ensureSmithersTables, ensureSmithersTablesEffect, ensureSqlMessageStorage, ensureSqlMessageStorageEffect, getAgentOutputSchema, getJsonColumnKeys, getKeyColumns, getSmithersSchemaSignature, getSqlMessageStorage, hasActiveTxidCapture, isPostgresDb, isRealPostgresAdapter, isRetryableSqliteWriteError, jsonExtractText, loadInput, loadInputEffect, loadOutputs, loadOutputsEffect, loadRunOutputRowsEffect, normalizeFrameEncoding, openDurableSqliteDatabase, parseFrameDelta, pgRowToDrizzle, quoteIdentifier, recordCommittedTxid, runWithTxidCapture, schemaSignature, selectOutputRow, selectOutputRowEffect, serializeFrameDelta, shouldCapturePostgresTxid, smithersAgentCheckpointContents, smithersAgentCheckpoints, smithersAlerts, smithersApprovals, smithersAttempts, smithersCache, smithersCron, smithersDocs, smithersEvalCases, smithersEvalSuites, smithersEvents, smithersFrames, smithersHumanRequests, smithersIntegrationCursors, smithersIntegrationDeliveries, smithersMemoryFacts, smithersMemoryMessages, smithersMemoryNoteSupersessions, smithersMemoryNotes, smithersMemoryThreads, smithersNodeDiffs, smithersNodes, smithersOutputProvenance, smithersRalph, smithersRuns, smithersSandboxes, smithersSchemaMigrations, smithersScorers, smithersSignals, smithersSteers, smithersTimeTravelAudit, smithersToolCallArchive, smithersToolCalls, smithersVectors, smithersWorkspaceCheckpoints, smithersWorkspaceStates, stripAutoColumns, syncZodTableSchema, syncZodTableSchemaPostgres, translateDdl, translatePlaceholders, unwrapZodType, upsertOutputRow, upsertOutputRowEffect, validateExistingOutput, validateInput, validateOutput, withSqliteWriteRetry, withSqliteWriteRetryEffect, zodSchemaColumns, zodToCreateTableSQL, zodToTable };
+export { type AgentCheckpointContentRow, type AgentCheckpointRefRow, type AlertRow, type AlertSeverity, type AlertStatus, type AnyColumn, type ApprovalRow, type AttemptRow, type CacheRow, type CacheRowLike, type CountRow, DB_ALERT_ALLOWED_SEVERITIES, DB_ALERT_ALLOWED_STATUSES, DB_ALERT_ID_MAX_LENGTH, DB_ALERT_MESSAGE_MAX_LENGTH, DB_ALERT_POLICY_NAME_MAX_LENGTH, DB_RUN_ALLOWED_STATUSES, DB_RUN_ID_MAX_LENGTH, DB_RUN_WORKFLOW_NAME_MAX_LENGTH, type Database, type Dialect, type DocRow, type EvalCaseResultRow, type EvalSuiteRow, type EventHistoryQuery, type ExternalSqliteDescriptor, FRAME_KEYFRAME_INTERVAL, type FrameDelta, type FrameDeltaOp, type FrameEncoding, type FrameRow, type HumanRequestRow, type IntegrationDeliveryClaim, type JsonBounds, type JsonPath, type JsonPathSegment, NODE_DIFF_MAX_BYTES, NodeDiffCache, type NodeDiffCacheResult, type NodeDiffCacheRow$1 as NodeDiffCacheRow, NodeDiffTooLargeError, type NodeRow, OUTPUT_PROVENANCE_SEQ, type OutputKey, type OutputSnapshot, POSTGRES, type PendingHumanRequestRow, type RalphRow, type RunAncestryRow, type RunRow, type RunnableEffect, SQLITE, type SchemaRegistryEntry, type SignalQuery, type SignalRow, SmithersDb, type SmithersError$1 as SmithersError, SqlMessageStorage, type SqlMessageStorageEventHistoryQuery, type SqliteParam, type SqliteTransactionState, type SqliteWriteRetryOptions, type StaleRunRecord, type SteerRow, type Table, type TxidCapture, type ZodError, type _BunSQLiteDatabase, type _NodeDiffCacheRow, type _OutputKey, type _SmithersDb, type _SmithersError, applyFrameDelta, applyFrameDeltaJson, assertJsonPayloadWithinBounds, assertMaxBytes, assertMaxJsonDepth, assertMaxStringLength, assertNoReservedColumns, assertOptionalArrayMaxLength, assertOptionalStringMaxLength, assertPositiveFiniteInteger, assertPositiveFiniteNumber, beginTransactionSql, buildKeyWhere, buildOutputRow, camelToSnake, capturePostgresTransactionTxid, captureTxid, coerceOutputRowForSnapshot, columnType, createTxidCapture, describeSchemaShape, encodeFrameDelta, ensureSmithersTables, ensureSmithersTablesEffect, ensureSqlMessageStorage, ensureSqlMessageStorageEffect, getAgentOutputSchema, getJsonColumnKeys, getKeyColumns, getSmithersSchemaSignature, getSqlMessageStorage, hasActiveTxidCapture, isPostgresDb, isRealPostgresAdapter, isRetryableSqliteWriteError, jsonExtractText, loadInput, loadInputEffect, loadOutputs, loadOutputsEffect, loadRunOutputRowsEffect, normalizeFrameEncoding, openDurableSqliteDatabase, parseFrameDelta, pgRowToDrizzle, quoteIdentifier, recordCommittedTxid, runCancellationSourceFromRow, runWithTxidCapture, schemaSignature, selectOutputRow, selectOutputRowEffect, serializeFrameDelta, shouldCapturePostgresTxid, smithersAgentCheckpointContents, smithersAgentCheckpoints, smithersAlerts, smithersApprovals, smithersAttempts, smithersCache, smithersCron, smithersDocs, smithersEvalCases, smithersEvalSuites, smithersEvents, smithersFrames, smithersHumanRequests, smithersIntegrationCursors, smithersIntegrationDeliveries, smithersMemoryFacts, smithersMemoryMessages, smithersMemoryNoteSupersessions, smithersMemoryNotes, smithersMemoryThreads, smithersNodeDiffs, smithersNodes, smithersOutputProvenance, smithersRalph, smithersRuns, smithersSandboxes, smithersSchemaMigrations, smithersScorers, smithersSignals, smithersSteers, smithersTimeTravelAudit, smithersToolCallArchive, smithersToolCalls, smithersVectors, smithersWorkspaceCheckpoints, smithersWorkspaceStates, stripAutoColumns, syncZodTableSchema, syncZodTableSchemaPostgres, translateDdl, translatePlaceholders, unwrapZodType, upsertOutputRow, upsertOutputRowEffect, validateExistingOutput, validateInput, validateOutput, withSqliteWriteRetry, withSqliteWriteRetryEffect, zodSchemaColumns, zodToCreateTableSQL, zodToTable };

@@ -5,6 +5,7 @@
 /** @typedef {import("./_coreMetricsShape.ts").MetricsServiceShape} MetricsServiceShape */
 /** @typedef {import("./_coreMetricsShape.ts").MetricsSnapshot} MetricsSnapshot */
 /** @typedef {import("./ResolvedSmithersObservabilityOptions.ts").ResolvedSmithersObservabilityOptions} ResolvedSmithersObservabilityOptions */
+/** @typedef {import("./SmithersEvent.ts").RunCancellationSource} RunCancellationSource */
 /** @typedef {import("./SmithersEvent.ts").SmithersEvent} SmithersEvent */
 /** @typedef {import("./SmithersLogFormat.ts").SmithersLogFormat} SmithersLogFormat */
 /** @typedef {import("./SmithersMetricDefinition.ts").SmithersMetricDefinition} SmithersMetricDefinition */
