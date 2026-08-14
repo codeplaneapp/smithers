@@ -4,7 +4,7 @@
 // disjoint areas); an independent Codex reviewer loops each lane until it says LGTM
 // (verdict=approve); Codex Luna commits (serialized, pathspec-scoped) and closes the
 // issue after the fix verifiably lands on origin/main. Each wave gates locally
-// (pnpm typecheck && pnpm test) with a Sol fixup loop before a deterministic
+// (the full root check set) with a Sol fixup loop before a deterministic
 // fast-forward push of the train head to main.
 //
 // BLOCKED PATH: any issue that triages needs_human, or whose lane ends blocked /
@@ -33,7 +33,8 @@ import { z } from "zod/v4";
 import { codexFirst } from "../lib/codexAccounts";
 
 const REPO = "smithersai/smithers";
-const GATE_COMMAND = "pnpm typecheck && pnpm test";
+const GATE_COMMAND =
+  "pnpm typecheck && pnpm lint && pnpm check:docs && pnpm check:llms && pnpm check:deps && pnpm check:dts && pnpm test";
 const OPS_VAULT = join(homedir(), "smithers-ops");
 // Owned by the concurrently running xcombo-fix-train (subflow audit defects + umbrella).
 const XCOMBO_OWNED = Array.from({ length: 1412 - 1386 + 1 }, (_, i) => 1386 + i);
@@ -206,6 +207,7 @@ const inputSchema = z.object({
   waveSize: z.number().int().min(1).max(16).default(8),
   reviewIterations: z.number().int().min(1).max(5).default(3),
   gateFixIterations: z.number().int().min(1).max(5).default(3),
+  gateCommand: z.string().trim().min(1).default(GATE_COMMAND),
   dryRun: z.boolean().default(false),
 });
 
@@ -322,6 +324,8 @@ function parseInput(raw: unknown): Input {
     waveSize: Math.min(asInt(record.waveSize, 8), 16),
     reviewIterations: Math.min(asInt(record.reviewIterations, 3), 5),
     gateFixIterations: Math.min(asInt(record.gateFixIterations, 3), 5),
+    gateCommand:
+      typeof record.gateCommand === "string" && record.gateCommand.trim() ? record.gateCommand.trim() : GATE_COMMAND,
     dryRun: record.dryRun === true || record.dryRun === "true" || record.dryRun === 1,
   };
 }
@@ -734,27 +738,47 @@ function finishSync(cwd: string, waveIndex: number): Sync {
   }
 }
 
-/** Full gate with flake absorption. Waves 0 and 1 each burned their whole gate
- *  loop on load-induced reds that passed clean on re-run (vite build, bun test
- *  timeouts, the 1500ms jj-pointer probe), so a single all-or-nothing
- *  `pnpm test` never goes green on a busy machine. Instead: typecheck, then the
- *  full recursive suite, then ONE serial re-run of just the packages that
- *  failed; the wave is green when every re-run is. */
-async function runGateUnsafe(cwd: string, waveIndex: number): Promise<Gate> {
+function gateTreeError(cwd: string, headSha: string): string {
+  const currentHeadSha = git(["rev-parse", "HEAD"], cwd);
+  if (currentHeadSha !== headSha) {
+    return "Gate changed HEAD from " + headSha + " to " + currentHeadSha + ".";
+  }
+  const status = git(["status", "--porcelain=v1", "--untracked-files=all"], cwd);
+  return status ? "Gate requires a clean committed tree; git status:\n" + status : "";
+}
+
+/** Full, input-tunable root gate with flake absorption. It refuses to run on
+ *  uncommitted state and verifies that the command leaves the exact gated
+ *  commit clean. A failed recursive package suite gets one serial re-run of
+ *  each failed package; every root check still runs in the first pass. */
+export async function runGateUnsafe(cwd: string, waveIndex: number, gateCommand: string = GATE_COMMAND): Promise<Gate> {
   const headSha = git(["rev-parse", "HEAD"], cwd);
-  const typecheck = await runProcess("bash", ["-lc", "pnpm typecheck"], cwd, 40 * 60_000);
-  if (typecheck.exitCode !== 0) {
+  const beforeError = gateTreeError(cwd, headSha);
+  if (beforeError) {
     return {
       waveIndex,
       passed: false,
-      exitCode: typecheck.exitCode,
+      exitCode: 1,
       headSha,
-      logTail: (typecheck.stdout + "\n" + typecheck.stderr).slice(-24_000),
-      summary: "Gate failed in typecheck (exit " + typecheck.exitCode + ").",
+      logTail: beforeError.slice(-24_000),
+      summary: "Gate refused an uncommitted or moving tree.",
     };
   }
-  const tests = await runProcess("bash", ["-lc", "pnpm -r --no-bail test"], cwd, GATE_TIMEOUT_MS);
-  if (tests.exitCode === 0) {
+
+  const gate = await runProcess("bash", ["-lc", gateCommand], cwd, GATE_TIMEOUT_MS);
+  const combined = gate.stdout + "\n" + gate.stderr;
+  const afterError = gateTreeError(cwd, headSha);
+  if (afterError) {
+    return {
+      waveIndex,
+      passed: false,
+      exitCode: gate.exitCode || 1,
+      headSha,
+      logTail: (combined + "\n" + afterError).slice(-24_000),
+      summary: "Gate left the committed tree dirty or changed HEAD.",
+    };
+  }
+  if (gate.exitCode === 0) {
     return {
       waveIndex,
       passed: true,
@@ -764,7 +788,6 @@ async function runGateUnsafe(cwd: string, waveIndex: number): Promise<Gate> {
       summary: "Gate green on " + headSha.slice(0, 12) + ".",
     };
   }
-  const combined = tests.stdout + "\n" + tests.stderr;
   const failedDirs = [...new Set([...combined.matchAll(/^(\/[^\n:]+):\n\s+ERROR\s/gm)].map((match) => match[1]))]
     .filter((dir) => dir.startsWith(cwd))
     .slice(0, 8);
@@ -772,10 +795,10 @@ async function runGateUnsafe(cwd: string, waveIndex: number): Promise<Gate> {
     return {
       waveIndex,
       passed: false,
-      exitCode: tests.exitCode,
+      exitCode: gate.exitCode,
       headSha,
       logTail: combined.slice(-24_000),
-      summary: "Gate failed (exit " + tests.exitCode + "); no per-package failure parsed, so no re-run.",
+      summary: "Gate failed (exit " + gate.exitCode + "); no per-package failure parsed, so no re-run.",
     };
   }
   let rerunTail = "";
@@ -793,22 +816,25 @@ async function runGateUnsafe(cwd: string, waveIndex: number): Promise<Gate> {
         (rerun.stdout + "\n" + rerun.stderr).slice(-6_000);
     }
   }
-  const passed = worst === 0;
+  const rerunTreeError = gateTreeError(cwd, headSha);
+  const passed = worst === 0 && !rerunTreeError;
   return {
     waveIndex,
     passed,
-    exitCode: passed ? 0 : worst,
+    exitCode: passed ? 0 : worst || 1,
     headSha,
-    logTail: passed ? "" : (rerunTail + "\n\n(first pass tail)\n" + combined.slice(-8_000)).slice(-24_000),
+    logTail: passed
+      ? ""
+      : (rerunTail + "\n\n(first pass tail)\n" + combined.slice(-8_000) + "\n" + rerunTreeError).slice(-24_000),
     summary: passed
       ? "Gate green after serial re-run of " + failedDirs.length + " flaky package(s) on " + headSha.slice(0, 12) + "."
-      : "Gate failed after per-package re-runs (exit " + worst + ").",
+      : rerunTreeError || "Gate failed after per-package re-runs (exit " + worst + ").",
   };
 }
 
-async function runGate(cwd: string, waveIndex: number): Promise<Gate> {
+async function runGate(cwd: string, waveIndex: number, gateCommand: string): Promise<Gate> {
   try {
-    return await runGateUnsafe(cwd, waveIndex);
+    return await runGateUnsafe(cwd, waveIndex, gateCommand);
   } catch (error) {
     return {
       waveIndex,
@@ -1106,12 +1132,12 @@ function commitPrompt(issue: Issue, paths: string[]): string {
     "Never push. Never touch other paths. Never amend or rebase.",
   ].join("\n");
 }
-function waveFixPrompt(waveIndex: number, gate: Gate, committedPaths: string[]): string {
+function waveFixPrompt(waveIndex: number, gate: Gate, committedPaths: string[], gateCommand: string): string {
   return [
     "You are Codex Sol. Wave " +
       waveIndex +
       " of the sol issue train just failed the local gate (`" +
-      GATE_COMMAND +
+      gateCommand +
       "`).",
     "Gate log tail:",
     "---",
@@ -1595,7 +1621,7 @@ export default smithers((ctx) => {
                         timeoutMs={GATE_TIMEOUT_MS + 5 * 60_000}
                         continueOnFail
                       >
-                        {() => runGate(trainPath, w)}
+                        {() => runGate(trainPath, w, input.gateCommand)}
                       </Task>
                     ) : null}
                     {gate && !gate.passed ? (
@@ -1608,7 +1634,7 @@ export default smithers((ctx) => {
                         heartbeatTimeoutMs={HEARTBEAT_MS}
                         continueOnFail
                       >
-                        {waveFixPrompt(w, gate, committedPaths)}
+                        {waveFixPrompt(w, gate, committedPaths, input.gateCommand)}
                       </Task>
                     ) : null}
                     {gate && !gate.passed && waveFix ? (
