@@ -2,9 +2,9 @@ import { describe, test, expect } from "bun:test";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
-import { Effect } from "effect";
+import { Effect, Logger, References } from "effect";
 import * as BunContext from "@effect/platform-bun/BunServices";
-import { workspaceAdd } from "../src/jj.js";
+import { captureWorkspaceSnapshot, revertToJjPointer, workspaceAdd } from "../src/jj.js";
 import { resolveJjBinary } from "../src/resolveJjBinary.js";
 import * as barrel from "../src/index.js";
 
@@ -41,6 +41,21 @@ async function withFakeJj(script, fn) {
 /** @param {import("effect").Effect.Effect<any, any, any>} effect */
 function runVcs(effect) {
   return Effect.runPromise(effect.pipe(Effect.provide(BunContext.layer)));
+}
+
+/** @param {import("effect").Effect.Effect<any, any, any>} effect */
+function runVcsCapturingLogs(effect) {
+  const records = [];
+  const logger = Logger.make((options) => {
+    records.push({
+      level: String(options.logLevel).toUpperCase(),
+      message: Array.isArray(options.message) ? options.message.join(" ") : String(options.message),
+      annotations: { ...options.fiber.getRef(References.CurrentLogAnnotations) },
+    });
+  });
+  return Effect.runPromise(effect.pipe(Effect.provide(BunContext.layer), Effect.provide(Logger.layer([logger])))).then(
+    (value) => ({ value, records }),
+  );
 }
 
 // Every jj invocation reports a permission-denied spawn error, so all
@@ -80,6 +95,42 @@ describe("workspaceAdd permission-denied hint", () => {
     } finally {
       Object.defineProperty(process, "platform", { value: prevPlatform, configurable: true });
     }
+  });
+});
+
+describe("jj failure diagnostics", () => {
+  test("explains when a restore target is no longer reachable", async () => {
+    const script = `
+if [[ "$1" == "restore" ]]; then
+  echo "Error: Revision does not exist" 1>&2
+  exit 1
+fi
+if [[ "$1" == "log" ]]; then
+  echo "Error: Revision does not exist" 1>&2
+  exit 1
+fi
+exit 2`;
+    await withFakeJj(script, async () => {
+      const pointer = "a".repeat(40);
+      const result = await runVcs(revertToJjPointer(pointer, "/tmp"));
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Error: Revision does not exist");
+      expect(result.error).toContain(`Checkpoint commit ${pointer} is no longer reachable`);
+      expect(result.error).toContain("jj util gc");
+      expect(result.error).toContain("checkpoint retention window");
+    });
+  });
+
+  test("classifies snapshot.max-new-file-size failures with an actionable hint", async () => {
+    const script = `echo "Error: Refused to snapshot some files: blob.bin exceeds snapshot.max-new-file-size" 1>&2; exit 1`;
+    await withFakeJj(script, async () => {
+      const { value, records } = await runVcsCapturingLogs(captureWorkspaceSnapshot("/tmp"));
+      expect(value).toBeNull();
+      const gap = records.find((record) => record.level === "WARN" && record.message.includes("durability gap"));
+      expect(gap).toBeDefined();
+      expect(gap.annotations.reason).toContain("Raise snapshot.max-new-file-size in jj config");
+      expect(gap.annotations.reason).toContain("gitignore the file");
+    });
   });
 });
 

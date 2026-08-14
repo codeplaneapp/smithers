@@ -41,6 +41,7 @@ export const DEFAULT_DECLARATION_PACKAGES = [
   "packages/protocol",
   "packages/sandbox",
   "packages/scheduler",
+  "packages/server",
   "packages/smithers",
   "packages/xstate",
 ];
