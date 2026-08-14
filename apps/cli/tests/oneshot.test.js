@@ -1336,6 +1336,7 @@ describe("oneshot workflow", () => {
       const children = review ? root.props.children.props.children : [root.props.children];
       expect(children.map((child) => child.props.id)).toEqual(taskIds);
       expect(children.every((child) => child.props.hijack === undefined)).toBe(true);
+      expect(children.every((child) => child.props.heartbeatTimeoutMs === 10 * 60_000)).toBe(true);
       expect([...workflow.schemaRegistry.keys()]).toEqual(
         review ? ["oneshotResult", "oneshotReview"] : ["oneshotResult"],
       );

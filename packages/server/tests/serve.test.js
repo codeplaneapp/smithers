@@ -165,6 +165,37 @@ export default smithers((ctx) => (
     );
     return workflowPath;
   }
+  function writeSelectApprovalWorkflow(name, dbPath) {
+    const workflowPath = resolve(testDir, `${name}.tsx`);
+    writeFileSync(
+      workflowPath,
+      `/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
+import { z } from "zod";
+
+const { smithers, Workflow, Approval, outputs } = createSmithers(
+  { selection: z.object({ selected: z.string(), notes: z.string().nullable() }) },
+  { dbPath: ${JSON.stringify(dbPath)} },
+);
+
+export default smithers(() => (
+  <Workflow name="${name}">
+    <Approval
+      id="task1"
+      mode="select"
+      output={outputs.selection}
+      request={{ title: "Pick a plan" }}
+      options={[
+        { key: "balanced", label: "Balanced" },
+        { key: "light", label: "Light" },
+      ]}
+    />
+  </Workflow>
+));
+`,
+    );
+    return workflowPath;
+  }
   /**
    * @param {string} workflowPath
    * @returns {Promise<SmithersWorkflow<any>>}
@@ -442,6 +473,61 @@ export default smithers((ctx) => (
       expect(status).toBe(200);
       expect(data.runId).toBe(runId);
     });
+    test("persists a select decision", async () => {
+      const dbPath = resolve(testDir, "approve-select.db");
+      const workflowPath = writeSelectApprovalWorkflow("approve-select", dbPath);
+      const { adapter, runId } = await startServeApp(workflowPath);
+      await waitForServeRunStatus(["waiting-approval"]);
+      const { status, data } = await request("/approve/task1", {
+        method: "POST",
+        body: { decision: { selected: "balanced", notes: "best fit" } },
+      });
+      expect(status).toBe(200);
+      expect(data.runId).toBe(runId);
+      const approval = await adapter.getApproval(runId, "task1", 0);
+      expect(approval?.status).toBe("approved");
+      expect(JSON.parse(approval?.decisionJson ?? "null")).toEqual({
+        selected: "balanced",
+        notes: "best fit",
+      });
+    });
+    test("rejects a select approval without a usable decision", async () => {
+      const dbPath = resolve(testDir, "approve-select-invalid.db");
+      const workflowPath = writeSelectApprovalWorkflow("approve-select-invalid", dbPath);
+      const { adapter, runId } = await startServeApp(workflowPath);
+      await waitForServeRunStatus(["waiting-approval"]);
+      const { status, data } = await request("/approve/task1", {
+        method: "POST",
+        body: { decision: { selected: "unknown" } },
+      });
+      expect(status).toBe(400);
+      expect(data.error.code).toBe("INVALID_REQUEST");
+      expect(data.error.message).toContain("unknown");
+      expect((await adapter.getApproval(runId, "task1", 0))?.status).toBe("requested");
+    });
+    test("unwraps and persists a stable nested select decision", async () => {
+      const dbPath = resolve(testDir, "approve-select-nested.db");
+      const workflowPath = writeSelectApprovalWorkflow("approve-select-nested", dbPath);
+      const { adapter, runId } = await startServeApp(workflowPath);
+      await waitForServeRunStatus(["waiting-approval"]);
+      const { status } = await request("/approve/task1", {
+        method: "POST",
+        body: {
+          decision: {
+            approved: true,
+            value: { selected: "balanced", notes: "best fit" },
+            note: "lgtm",
+          },
+        },
+      });
+      expect(status).toBe(200);
+      const approval = await adapter.getApproval(runId, "task1", 0);
+      expect(JSON.parse(approval?.decisionJson ?? "null")).toEqual({
+        selected: "balanced",
+        notes: "best fit",
+      });
+      expect(approval?.note).toBe("lgtm");
+    });
   });
   describe("POST /deny/:nodeId", () => {
     test("denies a waiting-approval task", async () => {
@@ -449,7 +535,7 @@ export default smithers((ctx) => (
       const workflowPath = writeTestWorkflow("deny", dbPath, {
         needsApproval: true,
       });
-      const { runId } = await startServeApp(workflowPath, {
+      const { adapter, runId } = await startServeApp(workflowPath, {
         needsApproval: true,
       });
       await waitForServeRunStatus(["waiting-approval"]);
@@ -457,12 +543,15 @@ export default smithers((ctx) => (
         method: "POST",
         body: {
           iteration: 0,
-          note: "denied by test",
+          decision: { approved: false, value: { reason: "unsafe" }, note: "denied by test" },
           decidedBy: "test-user",
         },
       });
       expect(status).toBe(200);
       expect(data.runId).toBe(runId);
+      const approval = await adapter.getApproval(runId, "task1", 0);
+      expect(approval?.note).toBe("denied by test");
+      expect(JSON.parse(approval?.decisionJson ?? "null")).toEqual({ reason: "unsafe" });
     });
   });
   // =========================================================================
