@@ -216,7 +216,7 @@ describe("Durability", () => {
     rmSync(dir, { recursive: true, force: true });
     cleanup();
   });
-  test("acceptWorkflowChange resumes the same run and re-stamps current workflow hashes", async () => {
+  test("acceptWorkflowChange re-stamps hashes for later flagless resumes (#1493)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "smithers-accept-workflow-change-"));
     const workflowPath = join(dir, "workflow.tsx");
     writeFileSync(workflowPath, "export default 'v1';\n", "utf8");
@@ -272,6 +272,20 @@ describe("Durability", () => {
         (value) => value && typeof value === "object" && "entryWorkflowHash" in value,
       );
       expect(durability?.entryWorkflowHash).toBe(currentEntryHash);
+
+      // Quota and supervisor auto-resumes do not repeat the operator's
+      // one-shot flag; the persisted hashes must make an ordinary resume safe.
+      const automaticallyResumed = await Effect.runPromise(
+        runWorkflow(workflow, {
+          input: {},
+          runId,
+          resume: true,
+          workflowPath,
+        }),
+      );
+      expect(automaticallyResumed.runId).toBe(runId);
+      expect(automaticallyResumed.status).toBe("waiting-timer");
+      expect(automaticallyResumed.error).toBeUndefined();
     } finally {
       rmSync(dir, { recursive: true, force: true });
       cleanup();

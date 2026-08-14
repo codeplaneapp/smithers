@@ -327,6 +327,43 @@ describe("Gateway approval decision validation", () => {
     await operator.close();
     await approver.close();
   });
+  test("HTTP approval submissions persist select decisions", async () => {
+    const dbPath = makeDbPath("http-select-decision");
+    dbPaths.push(dbPath);
+    const bundle = createSelectApprovalWorkflow(dbPath, []);
+    const port = await startGateway(bundle, "http-select-approval");
+    const operator = await connectGateway(port, "operator-token");
+    const runId = await createRunAndAwaitApproval(operator, "http-select-approval");
+    let response;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const httpResponse = await fetch(
+        `http://127.0.0.1:${port}/v1/api/approvals/${encodeURIComponent(`${runId}:pick-plan:0`)}`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: "Bearer operator-token",
+          },
+          body: JSON.stringify({ decision: { selected: "balanced", notes: "best fit" }, approved: true }),
+        },
+      );
+      response = { status: httpResponse.status, body: await httpResponse.json() };
+      if (response.body.ok || !String(response.body.error?.message ?? "").includes("not waiting for approval")) {
+        break;
+      }
+      await sleep(50);
+    }
+    expect(response.status).toBe(200);
+    expect(response.body.ok).toBe(true);
+    const adapter = new SmithersDb(bundle.db);
+    const approval = await adapter.getApproval(runId, "pick-plan", 0);
+    expect(approval?.status).toBe("approved");
+    expect(JSON.parse(approval?.decisionJson ?? "{}")).toEqual({
+      selected: "balanced",
+      notes: "best fit",
+    });
+    await operator.close();
+  });
   test("custom allowedScopes require a literal grant instead of falling back to run:read", async () => {
     const dbPath = makeDbPath("custom-scope");
     dbPaths.push(dbPath);

@@ -18,7 +18,7 @@ import {
 } from "../src/monitor-ui/usagePrediction.ts";
 
 describe("token usage folding", () => {
-  test("sums every reported counter and treats missing fields as zero", () => {
+  test("does not double-count cache/reasoning breakdowns and treats missing fields as zero", () => {
     expect(
       totalTokensOf({
         nodeId: "build",
@@ -28,7 +28,7 @@ describe("token usage folding", () => {
         cacheWriteTokens: 3,
         reasoningTokens: 2,
       }),
-    ).toBe(27);
+    ).toBe(15);
 
     const fold = foldTokenUsage([
       { nodeId: "build", inputTokens: 10, outputTokens: 5 },
@@ -46,18 +46,45 @@ describe("token usage folding", () => {
       { nodeId: "test" },
     ]);
 
-    expect(fold.grandTotal).toBe(30);
+    expect(fold.grandTotal).toBe(19);
     expect(fold.eventCount).toBe(3);
+    expect(fold.freshInputTokens).toBe(10);
+    expect(fold.cacheReadTokens).toBe(6);
+    expect(fold.cacheWriteTokens).toBe(2);
+    expect(fold.costUsd).toBeNull();
     expect([...fold.perNode]).toEqual([
-      ["build", 30],
+      ["build", 19],
       ["test", 0],
     ]);
-    expect([...fold.perAgent]).toEqual([["codex", 15]]);
-    expect([...fold.perModel]).toEqual([["model-a", 15]]);
+    expect([...fold.perAgent]).toEqual([["codex", 4]]);
+    expect([...fold.perModel]).toEqual([["model-a", 4]]);
     expect([...fold.perNodeAttempts.get("build")!]).toEqual([
       ["0:0", 15],
-      ["1:2", 15],
+      ["1:2", 4],
     ]);
+  });
+
+  test("keeps only the last cumulative record for an attempt", () => {
+    const fold = foldTokenUsage([
+      { nodeId: "build", iteration: 0, attempt: 1, inputTokens: 10, outputTokens: 2 },
+      {
+        nodeId: "build",
+        iteration: 0,
+        attempt: 1,
+        inputTokens: 20,
+        freshInputTokens: 4,
+        outputTokens: 5,
+        cacheReadTokens: 16,
+        costUsd: 0.01,
+      },
+    ]);
+    expect(fold).toMatchObject({
+      grandTotal: 25,
+      freshInputTokens: 4,
+      cacheReadTokens: 16,
+      costUsd: 0.01,
+      eventCount: 1,
+    });
   });
 });
 
@@ -275,15 +302,15 @@ describe("token formatting", () => {
 describe("token burn buckets", () => {
   test("aligns per-bucket totals ending at the bucket containing nowMs", () => {
     const events: TokenUsageEvent[] = [
-      { nodeId: "a", outputTokens: 10, timestampMs: 61_000 },
-      { nodeId: "a", outputTokens: 5, cacheReadTokens: 5, timestampMs: 119_000 },
+      { nodeId: "a", iteration: 1, outputTokens: 10, timestampMs: 61_000 },
+      { nodeId: "a", iteration: 2, outputTokens: 5, cacheReadTokens: 5, timestampMs: 119_000 },
       { nodeId: "b", outputTokens: 30, timestampMs: 125_000 },
-      { nodeId: "a", outputTokens: 99, timestampMs: 5_000 },
+      { nodeId: "a", iteration: 0, outputTokens: 99, timestampMs: 5_000 },
     ];
     const buckets = tokenBurnBuckets(events, 60_000, 130_000, 3);
     expect(buckets).toEqual([
       { startMs: 0, tokens: 99 },
-      { startMs: 60_000, tokens: 20 },
+      { startMs: 60_000, tokens: 15 },
       { startMs: 120_000, tokens: 30 },
     ]);
   });
@@ -356,7 +383,16 @@ describe("node usage breakdown", () => {
         outputTokens: 5,
         cacheReadTokens: 2,
       },
-      { nodeId: "build", iteration: 0, attempt: 1, model: "model-a", outputTokens: 3, reasoningTokens: 1 },
+      {
+        nodeId: "build",
+        iteration: 0,
+        attempt: 1,
+        model: "model-a",
+        inputTokens: 10,
+        outputTokens: 8,
+        cacheReadTokens: 2,
+        reasoningTokens: 1,
+      },
       { nodeId: "build", iteration: 0, attempt: 2, model: "model-b", outputTokens: 8, cacheWriteTokens: 4 },
       { nodeId: "other", outputTokens: 100 },
     ];
@@ -366,10 +402,10 @@ describe("node usage breakdown", () => {
     expect(breakdown.cacheRead).toBe(2);
     expect(breakdown.cacheWrite).toBe(4);
     expect(breakdown.reasoning).toBe(1);
-    expect(breakdown.total).toBe(33);
+    expect(breakdown.total).toBe(26);
     expect(breakdown.attempts).toEqual([
-      { iteration: 0, attempt: 1, model: "model-a", total: 21 },
-      { iteration: 0, attempt: 2, model: "model-b", total: 12 },
+      { iteration: 0, attempt: 1, model: "model-a", total: 18 },
+      { iteration: 0, attempt: 2, model: "model-b", total: 8 },
     ]);
   });
 

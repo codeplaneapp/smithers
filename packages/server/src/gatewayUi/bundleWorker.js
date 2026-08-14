@@ -12,7 +12,11 @@ try {
   if (cwd) {
     process.chdir(cwd);
   }
-  const body = await buildGatewayUiBundle(config);
+  let inputFiles = [];
+  const body = await buildGatewayUiBundle(config, (inputs) => {
+    inputFiles = inputs;
+  });
+  process.stdout.write(`${JSON.stringify(inputFiles)}\n`);
   process.stdout.write(body);
 } catch (error) {
   process.stderr.write(error instanceof Error ? error.message : String(error));
