@@ -257,6 +257,8 @@ describe("migrated monitor surfaces", () => {
     expect(document.querySelector('[data-status="waiting-approval"]')?.className).toContain("tone-waiting");
     expect(document.querySelector('[data-status="finished"]')?.className).toContain("tone-ok");
     expect(document.querySelector('[data-status="failed"]')?.className).toContain("tone-failed");
+    expect(byTestId("monitor-stat-test").getAttribute("data-slot")).toBe("card");
+    expect(byTestId("monitor-stat-test").querySelector('[data-slot="card-content"]')).not.toBeNull();
     expect(byTestId("monitor-stat-test").className).toContain("tone-waiting");
     expect(byTestId("monitor-stat-test").textContent).toContain("active runs");
     expect(byTestId("monitor-run-progress").textContent).toContain("4/5");
@@ -346,7 +348,9 @@ describe("migrated monitor surfaces", () => {
   test("renders a populated shared table panel", async () => {
     await render(<RunsTable runs={[run]} loading={false} page={1} onPageChange={() => {}} onSelect={() => {}} />);
     expect(byTestId("monitor-runs-table")).toBeDefined();
-    expect(document.querySelector(".mon-panel.mon-runs-table-panel")).not.toBeNull();
+    expect(document.querySelector(".mon-runs-table-panel")?.getAttribute("data-slot")).toBe("card");
+    expect(document.querySelector(".mon-runs-table-panel [data-slot='card-header']")).not.toBeNull();
+    expect(document.querySelector(".mon-runs-table-panel [data-slot='card-content']")).not.toBeNull();
     expect(byTestId("monitor-run-progress").textContent).toContain("1 failed");
   });
 
@@ -640,7 +644,6 @@ describe("monitor theme contract", () => {
       [".mon-shell", "overflow: hidden"],
       [".mon-filter-input", "min-width"],
       [".mon-pill", "var(--tone)"],
-      [".mon-stat", "var(--surface)"],
       [".mon-banner", "var(--tone)"],
       [".mon-progress-fill", "var(--brand)"],
       [".mon-modal { width: min(1280px, 96vw)", "var(--surface)"],
@@ -652,6 +655,7 @@ describe("monitor theme contract", () => {
       expect(start).toBeGreaterThanOrEqual(0);
       expect(monitorCss.slice(start, start + 500)).toContain(declaration);
     }
+    expect(smithersUiCss).toContain(".sui-card");
     expect(monitorCss).not.toMatch(/#[0-9a-f]{3,8}\b/i);
     expect(monitorCss).not.toContain("background: white");
     expect(monitorCss).not.toContain("color-mix");
