@@ -174,6 +174,7 @@ import { buildRunStatusSummary, renderRunStatusHuman, runStatusCtaCommands } fro
 import { detectAvailableAgents, formatNoUsableAgentsMessage } from "./agent-detection.js";
 import { buildOneshotWorkflow } from "./oneshot/buildOneshotWorkflow.js";
 import { buildOneshotChildArgs } from "./oneshot/buildOneshotChildArgs.js";
+import { findActiveRunsInCwd } from "./oneshot/findActiveRunsInCwd.js";
 import { loadOneshotConfig } from "./oneshot/loadOneshotConfig.js";
 import { saveOneshotConfig } from "./oneshot/saveOneshotConfig.js";
 import { resolveOneshotChain } from "./oneshot/resolveOneshotChain.js";
@@ -2984,10 +2985,10 @@ const oneshotOptions = z
     status: z.boolean().default(false).describe("Print usable agents, model chain, and preferences as JSON"),
     cwd: z.string().default(".").describe("Working directory for the task"),
     preflight: z
-      .enum(["auto", "warn", "off"])
+      .enum(["auto", "warn", "off", "force-commit"])
       .default("auto")
       .describe(
-        "Dirty-working-copy preflight: auto warns and has the agent triage the tree first, warn only warns, off skips it",
+        "Dirty-working-copy preflight: auto warns and has the agent triage the tree first, warn only warns, off skips it, force-commit lets the agent snapshot the tree even while another run works in the same cwd",
       ),
     runId: z.string().optional().describe("Run ID to create or resume (used by `smithers supervise` to recover a run)"),
     resume: z
@@ -8329,9 +8330,33 @@ const cli = Cli.create({
       // that work the agent's first job.
       const preflightMode = c.options.resume ? "off" : c.options.preflight;
       const preflightSummary = preflightMode === "off" ? null : assessWorkingCopy(taskCwd);
+      // Concurrent runs in one cwd. "Pre-existing work" is only pre-existing if
+      // no other run is producing it. Three oneshot runs sharing a cwd on
+      // 2026-08-13 each treated the others' in-flight diffs as inert and
+      // committed them (bug 01kzzaqfx1g9qaefqxrderdz4m). `force-commit` is the
+      // explicit opt-in to the old behavior. Read-only and soft: an unreadable
+      // store yields no active runs and the launch proceeds as before.
+      const activeRunsInCwd =
+        preflightMode === "off" || preflightMode === "force-commit"
+          ? []
+          : await (async () => {
+              let opened;
+              try {
+                opened = await findAndOpenDb(taskCwd);
+              } catch {
+                return [];
+              }
+              try {
+                return await findActiveRunsInCwd(opened.adapter, taskCwd, { excludeRunId: effectiveRunId });
+              } catch {
+                return [];
+              } finally {
+                await opened.cleanup?.();
+              }
+            })();
       const preflightNotice =
-        preflightSummary && needsPreflightNotice(preflightSummary)
-          ? buildPreflightNotice(preflightSummary, effectiveRunId)
+        preflightSummary && (needsPreflightNotice(preflightSummary) || activeRunsInCwd.length > 0)
+          ? buildPreflightNotice(preflightSummary, effectiveRunId, activeRunsInCwd)
           : null;
       if (preflightNotice) {
         runSync(
@@ -8341,6 +8366,9 @@ const cli = Cli.create({
               cwd: taskCwd,
               ...preflightSummary.dirty,
               detachedHead: preflightSummary.detachedHead,
+              ...(activeRunsInCwd.length > 0
+                ? { activeRunsInCwd: activeRunsInCwd.map((run) => run.runId).join(",") }
+                : {}),
             }),
           ),
         );
@@ -8350,7 +8378,9 @@ const cli = Cli.create({
       // preamble: a detached launch re-runs this command in the child, which
       // assesses the same tree itself.
       const goalForWorkflow =
-        preflightNotice && preflightMode === "auto" ? `${preflightNotice.preamble}\n\n${goal}` : goal;
+        preflightNotice && (preflightMode === "auto" || preflightMode === "force-commit")
+          ? `${preflightNotice.preamble}\n\n${goal}`
+          : goal;
       if (c.options.interactive) {
         if (!Boolean(process.stdin.isTTY && process.stdout.isTTY)) {
           return fail({
@@ -8507,7 +8537,7 @@ const cli = Cli.create({
             oneshot: {
               review,
               goal: goal.length > 500 ? `${goal.slice(0, 500)}…` : goal,
-              preflight: preflightConfigEntry(preflightMode, preflightSummary),
+              preflight: preflightConfigEntry(preflightMode, preflightSummary, activeRunsInCwd),
             },
           },
         );
@@ -8594,7 +8624,7 @@ const cli = Cli.create({
                 chain: selected.chain,
                 review,
                 goal: goal.length > 500 ? `${goal.slice(0, 500)}…` : goal,
-                preflight: preflightConfigEntry(preflightMode, preflightSummary),
+                preflight: preflightConfigEntry(preflightMode, preflightSummary, activeRunsInCwd),
               },
               [BUILTIN_RESUME_CONFIG_KEY]: builtinResume,
             },
