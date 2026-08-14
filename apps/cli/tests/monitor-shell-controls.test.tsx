@@ -309,44 +309,44 @@ describe("migrated monitor surfaces", () => {
   });
 
   test("renders populated, loading, empty, offline, and unauthorized run-rail states", async () => {
-  await render(
-    <RunsRail runs={[run]} loading={false} connStatus="online" selectedRunId={run.runId} onSelect={() => {}} />,
-  );
-  expect(byTestId("monitor-runs")).toBeDefined();
-  expect(byTestId("monitor-run-row").getAttribute("data-active")).toBe("true");
-  expect(byTestId("monitor-run-row").textContent).toContain("rendered-coverage");
+    await render(
+      <RunsRail runs={[run]} loading={false} connStatus="online" selectedRunId={run.runId} onSelect={() => {}} />,
+    );
+    expect(byTestId("monitor-runs")).toBeDefined();
+    expect(byTestId("monitor-run-row").getAttribute("data-active")).toBe("true");
+    expect(byTestId("monitor-run-row").textContent).toContain("rendered-coverage");
 
-  await rerender(
-    <RunsRail runs={[]} loading connStatus="connecting" selectedRunId={undefined} onSelect={() => {}} />,
-  );
-  expect(byTestId("monitor-runs").textContent).toContain("Loading runs");
-  await rerender(
-    <RunsRail runs={[]} loading={false} connStatus="online" selectedRunId={undefined} onSelect={() => {}} />,
-  );
-  expect(byTestId("monitor-empty").textContent).toContain("No runs yet");
-  await rerender(
-    <RunsRail runs={[]} loading={false} connStatus="offline" selectedRunId={undefined} onSelect={() => {}} />,
-  );
-  expect(byTestId("monitor-runs-offline").textContent?.toLowerCase()).toContain("gateway");
-  expect(byTestId("monitor-runs-offline").getAttribute("data-slot")).toBe("alert");
-  await rerender(
-    <RunsRail runs={[]} loading={false} connStatus="unauthorized" selectedRunId={undefined} onSelect={() => {}} />,
-  );
-  expect(byTestId("monitor-runs-unauthorized").textContent?.toLowerCase()).toContain("credentials");
-  expect(byTestId("monitor-runs-unauthorized").getAttribute("data-slot")).toBe("alert");
-  await rerender(
-    <RunsRail
-      runs={[{ ...run, status: "running" }]}
-      loading={false}
-      connStatus="offline"
-      selectedRunId={undefined}
-      onSelect={() => {}}
-    />,
-  );
-  expect(byTestId("monitor-runs-offline").textContent).toContain("last-known data");
-  expect(byTestId("monitor-run-row").textContent).toContain("last-known");
-  expect(byTestId("monitor-run-row").querySelector(".mon-status-pulse")).toBeNull();
-});
+    await rerender(
+      <RunsRail runs={[]} loading connStatus="connecting" selectedRunId={undefined} onSelect={() => {}} />,
+    );
+    expect(byTestId("monitor-runs").textContent).toContain("Loading runs");
+    await rerender(
+      <RunsRail runs={[]} loading={false} connStatus="online" selectedRunId={undefined} onSelect={() => {}} />,
+    );
+    expect(byTestId("monitor-empty").textContent).toContain("No runs yet");
+    await rerender(
+      <RunsRail runs={[]} loading={false} connStatus="offline" selectedRunId={undefined} onSelect={() => {}} />,
+    );
+    expect(byTestId("monitor-runs-offline").textContent?.toLowerCase()).toContain("gateway");
+    expect(byTestId("monitor-runs-offline").getAttribute("data-slot")).toBe("alert");
+    await rerender(
+      <RunsRail runs={[]} loading={false} connStatus="unauthorized" selectedRunId={undefined} onSelect={() => {}} />,
+    );
+    expect(byTestId("monitor-runs-unauthorized").textContent?.toLowerCase()).toContain("credentials");
+    expect(byTestId("monitor-runs-unauthorized").getAttribute("data-slot")).toBe("alert");
+    await rerender(
+      <RunsRail
+        runs={[{ ...run, status: "running" }]}
+        loading={false}
+        connStatus="offline"
+        selectedRunId={undefined}
+        onSelect={() => {}}
+      />,
+    );
+    expect(byTestId("monitor-runs-offline").textContent).toContain("last-known data");
+    expect(byTestId("monitor-run-row").textContent).toContain("last-known");
+    expect(byTestId("monitor-run-row").querySelector(".mon-status-pulse")).toBeNull();
+  });
 
   test("renders loading, error, no-runs, and filtered-out table states", async () => {
     let resets = 0;
