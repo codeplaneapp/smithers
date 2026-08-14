@@ -345,8 +345,10 @@ type NanocodexGenerateOptions$1 = AgentGenerateOptions$4 & {
  * Configuration for one stock, headless Nanocodex worker per generate call.
  * Native Code Mode remains enabled; JavaScript tools, MCP, subagents, custom
  * endpoints, and workspace relocation are intentionally not configurable.
- * Protocol v1 requires Linux x86_64, glibc >=2.35, and a working Bubblewrap
- * installation.
+ * Protocol v1 supports Linux x86_64 (glibc >= 2.35) and macOS arm64. The
+ * adapter spawns the worker directly; Bubblewrap / sandbox-exec are not
+ * required and must not wrap this binary. Isolation is optional outer
+ * Smithers `<Sandbox>`.
  */
 type NanocodexAgentOptions$2 = {
     id?: string;
@@ -356,6 +358,13 @@ type NanocodexAgentOptions$2 = {
     auth?: NanocodexAuth$1;
     /** Complete instruction replacement, at most 4 MiB encoded as UTF-8. */
     instructions?: string;
+    /**
+     * Stock Nanocodex 0.5.0 model. Default `gpt-5.6-sol`. Wire ids and the
+     * `sol` / `terra` / `luna` aliases are accepted. The model is fixed for a
+     * native thread; resume rejects a constructor model that does not match the
+     * checkpoint (absent checkpoint model is Sol).
+     */
+    model?: "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" | "sol" | "terra" | "luna";
     thinking?: NanocodexThinking$1;
     reasoningMode?: NanocodexReasoningMode$1;
     fastMode?: boolean;

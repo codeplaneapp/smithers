@@ -3,9 +3,26 @@ import { isAbsolute } from "node:path";
 
 export const NANOCODEX_PROTOCOL_NAME = "smithers.nanocodex";
 export const NANOCODEX_PROTOCOL_VERSION = 1;
-export const NANOCODEX_BRIDGE_VERSION = "0.0.1";
-export const NANOCODEX_VERSION = "0.3.0";
-export const NANOCODEX_TARGET = "x86_64-unknown-linux-gnu";
+export const NANOCODEX_BRIDGE_VERSION = "0.0.2";
+export const NANOCODEX_VERSION = "0.5.0";
+export const NANOCODEX_SHIPPED_TARGETS = Object.freeze(["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]);
+export const NANOCODEX_MODELS = Object.freeze(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
+export const NANOCODEX_DEFAULT_MODEL = "gpt-5.6-sol";
+export const NANOCODEX_THINKING_LEVELS = Object.freeze(["none", "low", "medium", "high", "xhigh", "max"]);
+export const NANOCODEX_DEFAULT_THINKING = "high";
+export const NANOCODEX_REASONING_MODES = Object.freeze(["standard", "pro"]);
+
+/**
+ * @param {unknown} value
+ * @returns {"gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" | undefined}
+ */
+export function normalizeNanocodexModel(value) {
+  if (value === "gpt-5.6-sol" || value === "sol") return "gpt-5.6-sol";
+  if (value === "gpt-5.6-terra" || value === "terra") return "gpt-5.6-terra";
+  if (value === "gpt-5.6-luna" || value === "luna") return "gpt-5.6-luna";
+  return undefined;
+}
+
 export const NANOCODEX_LIMITS = Object.freeze({
   maxInputRecordBytes: 25_165_824,
   maxOutputRecordBytes: 41_943_040,
@@ -131,11 +148,20 @@ export function validateNanocodexCapabilities(value) {
     "checkpoint",
     "authenticationModes",
     "transportModes",
+    "models",
+    "defaultModel",
+    "thinkingLevels",
+    "defaultThinking",
+    "reasoningModes",
     "features",
     "limits",
   ]);
-  assertLiteral(value.bridgeVersion, NANOCODEX_BRIDGE_VERSION, "bridge_version_mismatch");
-  assertLiteral(value.target, NANOCODEX_TARGET, "target_mismatch");
+  if (typeof value.bridgeVersion !== "string" || value.bridgeVersion.length === 0 || value.bridgeVersion.length > 128) {
+    fail("bridge_version_mismatch", "Nanocodex protocol capability is incompatible.");
+  }
+  if (typeof value.target !== "string" || !NANOCODEX_SHIPPED_TARGETS.includes(value.target)) {
+    fail("target_mismatch", "Nanocodex protocol capability is incompatible.");
+  }
   assertLiteral(value.nanocodexVersion, NANOCODEX_VERSION, "nanocodex_version_mismatch");
 
   assertExactObject(value.protocol, ["name", "versions"]);
@@ -157,6 +183,11 @@ export function validateNanocodexCapabilities(value) {
 
   assertExactTuple(value.authenticationModes, ["api-key-env", "chatgpt"], "authentication_mode_mismatch");
   assertExactTuple(value.transportModes, ["websocket"], "transport_mode_mismatch");
+  assertExactTuple(value.models, NANOCODEX_MODELS, "model_mismatch");
+  assertLiteral(value.defaultModel, NANOCODEX_DEFAULT_MODEL, "model_mismatch");
+  assertExactTuple(value.thinkingLevels, NANOCODEX_THINKING_LEVELS, "feature_mismatch");
+  assertLiteral(value.defaultThinking, NANOCODEX_DEFAULT_THINKING, "feature_mismatch");
+  assertExactTuple(value.reasoningModes, NANOCODEX_REASONING_MODES, "feature_mismatch");
 
   assertExactObject(value.features, [
     "codeMode",
@@ -654,9 +685,10 @@ function validateTurnCancelCommand(value) {
 
 /** @param {unknown} value */
 function validateCompletedData(value) {
-  assertExactObject(value, ["finalMessage", "usage", "snapshotVersion", "snapshot", "canonicalWorkspace"]);
+  assertExactObject(value, ["finalMessage", "usage", "model", "snapshotVersion", "snapshot", "canonicalWorkspace"]);
   assertBoundedString(value.finalMessage, 0, Number.MAX_SAFE_INTEGER, "invalid_completed_data");
   validateUsage(value.usage);
+  assertNanocodexWireModel(value.model);
   assertLiteral(value.snapshotVersion, 1, "snapshot_version_mismatch");
   assertStrictJsonValue(value.snapshot);
   if (!isPlainObject(value.snapshot)) fail("invalid_snapshot", "Nanocodex snapshot must be a JSON object.");
@@ -665,7 +697,8 @@ function validateCompletedData(value) {
 
 /** @param {unknown} value */
 function validateRecoveryData(value) {
-  assertExactObject(value, ["snapshotVersion", "snapshot", "canonicalWorkspace"]);
+  assertExactObject(value, ["model", "snapshotVersion", "snapshot", "canonicalWorkspace"]);
+  assertNanocodexWireModel(value.model);
   assertLiteral(value.snapshotVersion, 1, "snapshot_version_mismatch");
   assertStrictJsonValue(value.snapshot);
   if (!isPlainObject(value.snapshot)) fail("invalid_snapshot", "Nanocodex snapshot must be a JSON object.");
@@ -814,7 +847,7 @@ function validateTransport(value) {
 
 /** @param {unknown} value */
 function validateTurnOptions(value) {
-  assertExactObject(value, [], ["instructions", "thinking", "reasoningMode", "fastMode"]);
+  assertExactObject(value, [], ["instructions", "model", "thinking", "reasoningMode", "fastMode"]);
   if ("instructions" in value && value.instructions !== null) {
     if (typeof value.instructions !== "string") {
       fail("invalid_turn_options", "Nanocodex instructions must be a nonempty bounded string or null.");
@@ -826,6 +859,9 @@ function validateTurnOptions(value) {
     ) {
       fail("invalid_turn_options", "Nanocodex instructions must be a nonempty bounded string or null.");
     }
+  }
+  if ("model" in value && value.model !== null && normalizeNanocodexModel(value.model) === undefined) {
+    fail("invalid_turn_options", "Nanocodex model is not supported by protocol v1.");
   }
   if ("thinking" in value && value.thinking !== null && !THINKING_LEVELS.has(value.thinking)) {
     fail("invalid_turn_options", "Nanocodex thinking level is not supported by protocol v1.");
@@ -939,7 +975,13 @@ function assertNonNegativeSafeInteger(value, code) {
   if (!Number.isSafeInteger(value) || value < 0) fail(code, "Nanocodex protocol integer is invalid.");
 }
 
-/** @param {unknown} value @param {unknown} expected @param {string} code */
+/** @param {unknown} value */
+function assertNanocodexWireModel(value) {
+  if (typeof value !== "string" || !NANOCODEX_MODELS.includes(value)) {
+    fail("invalid_completed_data", "Nanocodex model is not supported by protocol v1.");
+  }
+}
+
 function assertLiteral(value, expected, code) {
   if (value !== expected) fail(code, "Nanocodex protocol capability is incompatible.");
 }

@@ -10,6 +10,11 @@ import { gunzipSync } from "node:zlib";
 import { NanocodexAgent } from "@smthrs/agents";
 
 import { runNanocodexCapabilities } from "../packages/agents/internal/nanocodex/process.js";
+import {
+  NANOCODEX_BRIDGE_VERSION,
+  NANOCODEX_SHIPPED_TARGETS,
+  NANOCODEX_VERSION,
+} from "../packages/agents/internal/nanocodex/protocol.js";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_MANIFEST_PATH = resolve(
@@ -65,10 +70,15 @@ export const PINNED_SOURCE_BUILD = deepFreeze({
   },
 });
 
+export const CONSUMER_PACKAGE_ROOTS = Object.freeze([
+  "smithers-nanocodex-v0.0.2-x86_64-unknown-linux-gnu",
+  "smithers-nanocodex-v0.0.2-aarch64-apple-darwin",
+]);
+
 export const EXPECTED_CAPABILITIES = deepFreeze({
-  bridgeVersion: "0.0.1",
+  bridgeVersion: NANOCODEX_BRIDGE_VERSION,
   target: "x86_64-unknown-linux-gnu",
-  nanocodexVersion: "0.3.0",
+  nanocodexVersion: NANOCODEX_VERSION,
   protocol: { name: "smithers.nanocodex", versions: [1] },
   checkpoint: {
     codec: "nanocodex.session-snapshot",
@@ -79,6 +89,11 @@ export const EXPECTED_CAPABILITIES = deepFreeze({
   },
   authenticationModes: ["api-key-env", "chatgpt"],
   transportModes: ["websocket"],
+  models: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+  defaultModel: "gpt-5.6-sol",
+  thinkingLevels: ["none", "low", "medium", "high", "xhigh", "max"],
+  defaultThinking: "high",
+  reasoningModes: ["standard", "pro"],
   features: {
     codeMode: true,
     codeModeDisable: false,
@@ -139,7 +154,7 @@ export function verifyArchiveIdentity(archive, artifact = PINNED_SOURCE_BUILD.ar
  * type are rejected; the qualified archive needs only POSIX regular files and
  * directories under one exact package root.
  */
-export function inspectReleaseArchive(archive, manifest = PINNED_SOURCE_BUILD) {
+export function inspectReleaseArchive(archive, manifest) {
   let tar;
   try {
     tar = gunzipSync(archive, { maxOutputLength: MAX_UNCOMPRESSED_ARCHIVE_BYTES });
@@ -147,11 +162,9 @@ export function inspectReleaseArchive(archive, manifest = PINNED_SOURCE_BUILD) {
     throw new Error("Nanocodex archive is not a bounded valid gzip stream.", { cause: error });
   }
 
-  const packageRoot = manifest.artifact.fileName.replace(/\.tar\.gz$/, "");
-  if (!packageRoot || packageRoot === manifest.artifact.fileName) {
-    throw new Error("Nanocodex manifest archive name must end in .tar.gz.");
-  }
-  const binaryMember = `${packageRoot}/smithers-nanocodex`;
+  const allowedRoots = packageRootsFrom(manifest);
+  let packageRoot;
+  let binaryMember;
   const entries = new Map();
   let binary;
   let offset = 0;
@@ -179,6 +192,18 @@ export function inspectReleaseArchive(archive, manifest = PINNED_SOURCE_BUILD) {
 
     const name = readTarPath(header);
     const type = String.fromCharCode(header[156] || 0x30);
+    if (!packageRoot) {
+      const top = firstPathSegment(name);
+      if (!top || !allowedRoots.includes(top)) {
+        throw new Error(
+          top
+            ? `Nanocodex tar package root is not a shipped v0.0.2 target: ${JSON.stringify(top)}.`
+            : `Nanocodex tar contains unsafe member path ${JSON.stringify(name)}.`,
+        );
+      }
+      packageRoot = top;
+      binaryMember = `${packageRoot}/smithers-nanocodex`;
+    }
     if (type !== "0" && type !== "5") {
       throw new Error(`Nanocodex tar member ${JSON.stringify(name)} has forbidden type ${JSON.stringify(type)}.`);
     }
@@ -222,25 +247,32 @@ export function inspectReleaseArchive(archive, manifest = PINNED_SOURCE_BUILD) {
     }
   }
   if (!binary) throw new Error(`Nanocodex tar is missing regular executable ${binaryMember}.`);
-  return { binary, binaryMember, entries: [...entries.entries()] };
+  return { binary, binaryMember, entries: [...entries.entries()], packageRoot };
 }
 
-export function validateRuntimeMetadata(versionOutput, capabilities, manifest = PINNED_SOURCE_BUILD) {
-  const expectedVersionOutput = `smithers-nanocodex ${manifest.contract.bridgeVersion}\n`;
+export function validateRuntimeMetadata(versionOutput, capabilities) {
+  const expectedVersionOutput = `smithers-nanocodex ${EXPECTED_CAPABILITIES.bridgeVersion}\n`;
   if (versionOutput !== expectedVersionOutput) {
     throw new Error(`Nanocodex version mismatch: expected ${JSON.stringify(expectedVersionOutput)}.`);
   }
-  if (stableJson(capabilities) !== stableJson(EXPECTED_CAPABILITIES)) {
-    throw new Error("Nanocodex capabilities do not match the fixed v0.0.1 Smithers surface.");
+  if (!capabilities || typeof capabilities !== "object" || Array.isArray(capabilities)) {
+    throw new Error("Nanocodex capabilities do not match the fixed v0.0.2 Smithers surface.");
+  }
+  if (!NANOCODEX_SHIPPED_TARGETS.includes(capabilities.target)) {
+    throw new Error("Nanocodex capabilities do not match the fixed v0.0.2 Smithers surface.");
+  }
+  const comparable = { ...capabilities, target: EXPECTED_CAPABILITIES.target };
+  if (stableJson(comparable) !== stableJson(EXPECTED_CAPABILITIES)) {
+    throw new Error("Nanocodex capabilities do not match the fixed v0.0.2 Smithers surface.");
   }
 }
 
 /**
- * Run both fixed metadata commands through the exact supervised Bubblewrap
- * capability runner. The captured text is decoded without normalization so
- * qualification validates the bridge's exact stdout.
+ * Run both fixed metadata commands through the same direct-spawn capability
+ * supervisor used by the adapter. The captured text is decoded without
+ * normalization so qualification validates the bridge's exact stdout.
  */
-export async function probeRuntimeMetadata(binary, cwd, runContainedProbeImpl = runContainedMetadataProbe) {
+export async function probeRuntimeMetadata(binary, cwd, runMetadataProbeImpl = runSupervisedMetadataProbe) {
   const processOptions = Object.freeze({
     binary,
     cwd,
@@ -253,7 +285,7 @@ export async function probeRuntimeMetadata(binary, cwd, runContainedProbeImpl = 
   let versionOutput;
   try {
     versionOutput = decodeMetadataOutput(
-      await runContainedProbeImpl({ ...processOptions, args: ["--version"] }),
+      await runMetadataProbeImpl({ ...processOptions, args: ["--version"] }),
       "version",
     );
   } catch {
@@ -263,7 +295,7 @@ export async function probeRuntimeMetadata(binary, cwd, runContainedProbeImpl = 
   let capabilitiesOutput;
   try {
     capabilitiesOutput = decodeMetadataOutput(
-      await runContainedProbeImpl({ ...processOptions, args: ["capabilities", "--json"] }),
+      await runMetadataProbeImpl({ ...processOptions, args: ["capabilities", "--json"] }),
       "capabilities",
     );
   } catch {
@@ -280,13 +312,12 @@ export async function probeRuntimeMetadata(binary, cwd, runContainedProbeImpl = 
 }
 
 /**
- * Adapt one exact metadata argv to the repository's authoritative capability
- * runner without adding a second, less rigorous child-process implementation.
- * The private launcher is itself the Bubblewrap payload and replaces itself
- * with the verified bridge, so the downloaded executable never runs above the
- * containment/supervision boundary.
+ * Adapt one exact metadata argv to the repository's capability supervisor
+ * without adding a second child-process implementation. The supervisor always
+ * launches `capabilities --json`; the private launcher replaces itself with
+ * the intended `--version` or `capabilities --json` command.
  */
-export async function runContainedMetadataProbe(options, runSupervisedImpl = runNanocodexCapabilities) {
+export async function runSupervisedMetadataProbe(options, runSupervisedImpl = runNanocodexCapabilities) {
   assertMetadataProbeOptions(options);
   const launcherDirectory = await mkdtemp(join(options.cwd, ".smithers-nanocodex-metadata-"));
   const launcher = join(launcherDirectory, "probe");
@@ -304,6 +335,19 @@ export async function runContainedMetadataProbe(options, runSupervisedImpl = run
   } finally {
     await rm(launcherDirectory, { recursive: true, force: true });
   }
+}
+
+export function assertSupportedQualificationHost(report = process.report?.getReport?.()) {
+  if (process.platform === "darwin" && process.arch === "arm64") {
+    return { hostTarget: "aarch64-apple-darwin", glibcVersion: null };
+  }
+  if (process.platform === "linux" && process.arch === "x64") {
+    return {
+      hostTarget: "x86_64-unknown-linux-gnu",
+      glibcVersion: assertSupportedGlibc("2.35", report),
+    };
+  }
+  throw new Error("Nanocodex release qualification requires Linux x86_64 (glibc 2.35+) or macOS arm64.");
 }
 
 export function assertSupportedGlibc(minimumVersion, report = process.report?.getReport?.()) {
@@ -352,32 +396,35 @@ export function parseArgs(argv) {
     }
   }
   if (help) return { help: true };
-  if (!archivePath) throw new Error("--archive is required; build it from the pinned source commit.");
+  if (!archivePath) throw new Error("--archive is required; pass a local v0.0.2 archive.");
   return { archivePath };
 }
 
 /** Verify and provider-independently preflight the pinned-source bridge. */
 export async function qualifyNanocodexRelease({ archivePath } = {}) {
-  if (process.platform !== "linux" || process.arch !== "x64") {
-    throw new Error("Nanocodex release qualification requires Linux x64.");
-  }
+  const host = assertSupportedQualificationHost();
   const manifest = await loadReleaseManifest();
-  const glibcVersion = assertSupportedGlibc(manifest.artifact.minimumGlibcVersion);
   if (typeof archivePath !== "string" || archivePath.length === 0) {
-    throw new Error("Nanocodex qualification requires an archive built from the pinned source commit.");
+    throw new Error("Nanocodex qualification requires a local v0.0.2 archive.");
   }
   const archive = await readPinnedArchive(archivePath, manifest.artifact.maximumSizeBytes);
-  const sha256 = verifyArchiveIdentity(archive, manifest.artifact);
-  const inspected = inspectReleaseArchive(archive, manifest);
+  const sha256 = verifyArchiveIdentity(archive, { maximumSizeBytes: manifest.artifact.maximumSizeBytes });
+  const inspected = inspectReleaseArchive(archive);
   return await withQualificationScratch(inspected.binary, async ({ binary, scratch }) => {
-    await preflightVerifiedBinary(binary, scratch, manifest);
+    await preflightVerifiedBinary(binary, scratch);
 
-    return qualificationResult({ archivePath, glibcVersion, manifest, sha256, sizeBytes: archive.byteLength });
+    return qualificationResult({
+      archivePath,
+      glibcVersion: host.glibcVersion,
+      sha256,
+      sizeBytes: archive.byteLength,
+      target: targetFromPackageRoot(inspected.packageRoot),
+    });
   });
 }
 
 /**
- * Validate the contained metadata surface before exercising the same extracted
+ * Validate the supervised metadata surface before exercising the same extracted
  * executable through the public Smithers adapter. The injectable collaborators
  * keep the ordering and failure boundary deterministic in unit tests.
  */
@@ -408,19 +455,26 @@ export async function preflightPublicNanocodexAdapter(binary, scratch, Nanocodex
 }
 
 /** Preserve the existing stable success JSON surface and key order. */
-export function qualificationResult({ archivePath, glibcVersion, manifest, sha256, sizeBytes }) {
+export function qualificationResult({
+  archivePath,
+  glibcVersion,
+  manifest = PINNED_SOURCE_BUILD,
+  sha256,
+  sizeBytes,
+  target,
+}) {
   const pinnedSourceBuild = sha256 === manifest.artifact.sha256 && sizeBytes === manifest.artifact.sizeBytes;
   return {
     archive: resolve(archivePath),
     artifactProvenance: pinnedSourceBuild ? "pinned-source-build-sha256" : "unverified-input",
-    bridgeVersion: manifest.contract.bridgeVersion,
+    bridgeVersion: EXPECTED_CAPABILITIES.bridgeVersion,
     glibcVersion,
     providerFreePreflight: true,
     sha256,
     sizeBytes,
     sourceCommit: pinnedSourceBuild ? manifest.source.commit : null,
     sourceTree: pinnedSourceBuild ? manifest.source.tree : null,
-    target: manifest.artifact.target,
+    target: target ?? manifest.artifact.target,
   };
 }
 
@@ -570,11 +624,34 @@ function deepFreeze(value, seen = new WeakSet()) {
   return Object.freeze(value);
 }
 
-function usage() {
-  return `Usage: node ${basename(fileURLToPath(import.meta.url))} --archive /path/to/${PINNED_SOURCE_BUILD.artifact.fileName}
+function packageRootsFrom(manifest) {
+  if (manifest?.artifact?.fileName) {
+    const root = manifest.artifact.fileName.replace(/\.tar\.gz$/, "");
+    if (!root || root === manifest.artifact.fileName) {
+      throw new Error("Nanocodex manifest archive name must end in .tar.gz.");
+    }
+    return [root];
+  }
+  return CONSUMER_PACKAGE_ROOTS;
+}
 
-Only the pinned SHA-256 receives source-build provenance; other bounded inputs
-are reported as unverified. This command never downloads release artifacts.`;
+function targetFromPackageRoot(packageRoot) {
+  if (packageRoot === "smithers-nanocodex-v0.0.2-aarch64-apple-darwin") return "aarch64-apple-darwin";
+  if (packageRoot === "smithers-nanocodex-v0.0.2-x86_64-unknown-linux-gnu") return "x86_64-unknown-linux-gnu";
+  return undefined;
+}
+
+function firstPathSegment(path) {
+  const normalized = path.endsWith("/") ? path.slice(0, -1) : path;
+  return normalized.split("/")[0] ?? "";
+}
+
+function usage() {
+  return `Usage: node ${basename(fileURLToPath(import.meta.url))} --archive /path/to/smithers-nanocodex-v0.0.2-<target>.tar.gz
+
+Current v0.0.2 archives are reported as unverified-input because this command
+does not embed published sidecar digests. This command never downloads release
+artifacts.`;
 }
 
 async function main() {
