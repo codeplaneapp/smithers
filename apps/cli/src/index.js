@@ -16,7 +16,7 @@ import {
 } from "./argv-utils.js";
 import { CHAT_CREATE_PROMPT, INLINE_CHAT_ENGINES, buildInlineChatWorkflow } from "./buildInlineChatWorkflow.js";
 import { parseJsonArgument, tryParseJsonInput } from "./json-args.js";
-import { wrapCliCommandHandlersWithInputBounds } from "./cli-command-bounds.js";
+import { CLI_TEXT_ARGUMENT_MAX_LENGTH, wrapCliCommandHandlersWithInputBounds } from "./cli-command-bounds.js";
 import { resolve, dirname, basename, relative, join, isAbsolute } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { closeSync, readFileSync, existsSync, mkdirSync, openSync, statSync, writeFileSync, writeSync } from "node:fs";
@@ -174,6 +174,7 @@ import { buildRunStatusSummary, renderRunStatusHuman, runStatusCtaCommands } fro
 import { detectAvailableAgents, formatNoUsableAgentsMessage } from "./agent-detection.js";
 import { buildOneshotWorkflow } from "./oneshot/buildOneshotWorkflow.js";
 import { buildOneshotChildArgs } from "./oneshot/buildOneshotChildArgs.js";
+import { findActiveRunsInCwd } from "./oneshot/findActiveRunsInCwd.js";
 import { loadOneshotConfig } from "./oneshot/loadOneshotConfig.js";
 import { saveOneshotConfig } from "./oneshot/saveOneshotConfig.js";
 import { resolveOneshotChain } from "./oneshot/resolveOneshotChain.js";
@@ -2649,6 +2650,14 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
   } catch {
     steers = [];
   }
+  // Soft for the same read-mode compatibility reason as steers: stores last
+  // written before the run-usage migrations must remain inspectable.
+  let tokenUsage;
+  try {
+    tokenUsage = await adapter.getRunTokenUsage(runId);
+  } catch {
+    tokenUsage = undefined;
+  }
   const ancestry = await adapter.listRunAncestry(runId, 1_000);
   const continuedFromRunIds = ancestry.slice(1).map((row) => row.runId);
   const lineagePageSize = 100;
@@ -2741,6 +2750,7 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
     },
     ...(runState ? { runState } : {}),
     ...(failedChildren > 0 ? { failedChildren, failedChildKeys } : {}),
+    ...(tokenUsage ? { tokenUsage } : {}),
     steps,
     nodes: canonicalNodes,
   };
@@ -2985,10 +2995,10 @@ const oneshotOptions = z
     status: z.boolean().default(false).describe("Print usable agents, model chain, and preferences as JSON"),
     cwd: z.string().default(".").describe("Working directory for the task"),
     preflight: z
-      .enum(["auto", "warn", "off"])
+      .enum(["auto", "warn", "off", "force-commit"])
       .default("auto")
       .describe(
-        "Dirty-working-copy preflight: auto warns and has the agent triage the tree first, warn only warns, off skips it",
+        "Dirty-working-copy preflight: auto warns and has the agent triage the tree first, warn only warns, off skips it, force-commit lets the agent snapshot the tree even while another run works in the same cwd",
       ),
     runId: z.string().optional().describe("Run ID to create or resume (used by `smithers supervise` to recover a run)"),
     resume: z
@@ -3124,7 +3134,12 @@ const bugOptions = z.object({
       "Bug endpoint URL (default https://bug.smithers.sh/api/bugs; the SMITHERS_BUG_ENDPOINT env var takes precedence)",
     ),
 });
+const workspaceCwdOption = z
+  .string()
+  .optional()
+  .describe("Workspace directory for store discovery (default: current directory)");
 const psOptions = z.object({
+  cwd: workspaceCwdOption,
   status: z
     .string()
     .optional()
@@ -3221,6 +3236,7 @@ const chatArgs = z.object({
   runId: z.string().optional().describe("Run ID to inspect (default: latest run)"),
 });
 const chatOptions = z.object({
+  cwd: workspaceCwdOption,
   all: z.boolean().default(false).describe("Show all agent attempts in the run (default: latest only)"),
   follow: z.boolean().default(false).describe("Watch for new agent output"),
   tail: z.number().int().min(1).optional().describe("Show only the last N chat blocks"),
@@ -3246,6 +3262,7 @@ const inspectArgs = z.object({
   runId: z.string().describe("Run ID to inspect"),
 });
 const inspectOptions = z.object({
+  cwd: workspaceCwdOption,
   watch: z.boolean().default(false).describe("Watch mode: refresh output continuously"),
   interval: z.number().positive().default(2).describe("Watch refresh interval in seconds"),
   pool: z.boolean().default(false).describe("Tally attempts by agent engine/model"),
@@ -3271,6 +3288,7 @@ const statusArgs = z.object({
   runId: z.string().describe("Run ID to summarize"),
 });
 const statusOptions = z.object({
+  cwd: workspaceCwdOption,
   json: z.boolean().default(false).describe("Output the structured summary as JSON"),
   window: z
     .number()
@@ -3354,13 +3372,16 @@ const signalOptions = z.object({
 const cancelArgs = z.object({
   runId: z.string().describe("Run ID to cancel"),
 });
+const cancelOptions = z.object({ cwd: workspaceCwdOption });
 const pauseArgs = z.object({
   runId: z.string().describe("Run ID to pause"),
 });
+const pauseOptions = z.object({ cwd: workspaceCwdOption });
 const hijackArgs = z.object({
   runId: z.string().describe("Run ID whose latest agent session should be hijacked"),
 });
 const hijackOptions = z.object({
+  cwd: workspaceCwdOption,
   target: z.string().optional().describe("Agent engine (e.g. claude-code, codex) or node id whose session to hand off"),
   timeoutMs: z.number().int().min(1).default(30_000).describe("How long to wait for a live run to hand off"),
   launch: z.boolean().default(true).describe("Open the hijacked session immediately"),
@@ -7300,6 +7321,14 @@ const worktreeCli = Cli.create({
           const verb = result.dryRun ? "Would remove" : "Removed";
           for (const entry of result.removed) {
             console.log(`${verb} ${entry.path} (${entry.runId}, ${formatBytes(entry.bytes)})`);
+            if (entry.ignoredPaths.length > 0) {
+              const count = entry.ignoredPathsTruncated
+                ? `${entry.ignoredPaths.length}+`
+                : String(entry.ignoredPaths.length);
+              const preview = entry.ignoredPaths.slice(0, 3).join(", ");
+              const more = entry.ignoredPaths.length > 3 || entry.ignoredPathsTruncated ? ", ..." : "";
+              console.log(`${result.dryRun ? "Would delete" : "Deleted"} ${count} ignored path(s): ${preview}${more}`);
+            }
           }
           for (const entry of result.skipped) {
             console.log(`Keeping ${entry.path} (${entry.runId}): ${entry.reason}`);
@@ -7883,9 +7912,19 @@ async function runHijackFlow(params) {
     exitCode = result.code;
   }
   if (exitCode === 0 && runIsLive && run.workflowPath) {
-    const pid = resumeRunDetached(run.workflowPath, runId);
-    resumedBySmithers = true;
-    process.stderr.write(`[smithers] returned control to Smithers${pid ? ` (pid ${pid})` : ""}\n`);
+    // The hijack itself succeeded; a failed handoff (e.g. an unopenable
+    // detached log) must not fail the command, only fall back to the manual
+    // resume instructions.
+    try {
+      const pid = resumeRunDetached(run.workflowPath, runId);
+      resumedBySmithers = true;
+      process.stderr.write(`[smithers] returned control to Smithers${pid ? ` (pid ${pid})` : ""}\n`);
+    } catch (error) {
+      process.stderr.write(`[smithers] could not return control to Smithers: ${error?.message ?? error}\n`);
+      if (resumeCommand) {
+        process.stderr.write(`[smithers] return control to Smithers with:\n  ${resumeCommand}\n`);
+      }
+    }
   } else if (resumeCommand) {
     process.stderr.write(`[smithers] return control to Smithers with:\n  ${resumeCommand}\n`);
   }
@@ -8249,6 +8288,17 @@ const cli = Cli.create({
     alias: { detach: "d" },
     async run(c) {
       const fail = makeFail(c);
+      if (
+        !c.options.goalFile &&
+        typeof c.args.goal === "string" &&
+        Buffer.byteLength(c.args.goal, "utf8") > CLI_TEXT_ARGUMENT_MAX_LENGTH
+      ) {
+        return fail({
+          code: "ONESHOT_GOAL_TOO_LARGE",
+          message: "Inline goals above 64KB must be supplied with --goal-file <path>.",
+          exitCode: 4,
+        });
+      }
       const taskCwd = resolve(process.cwd(), c.options.cwd);
       if (!existsSync(taskCwd))
         return fail({ code: "PATH_NOT_FOUND", message: `Path does not exist: ${taskCwd}`, exitCode: 4 });
@@ -8363,13 +8413,6 @@ const cli = Cli.create({
           exitCode: 4,
         });
       }
-      if (Buffer.byteLength(goal, "utf8") > 64 * 1024 && !goalFile) {
-        return fail({
-          code: "ONESHOT_GOAL_TOO_LARGE",
-          message: "Goals above 64KB must be supplied with --goal-file.",
-          exitCode: 4,
-        });
-      }
       if (usable.length === 0)
         return fail({ code: "NO_USABLE_AGENTS", message: formatNoUsableAgentsMessage(relevant), exitCode: 4 });
       const model = resumeSettings?.model ?? c.options.model;
@@ -8388,9 +8431,33 @@ const cli = Cli.create({
       // that work the agent's first job.
       const preflightMode = c.options.resume ? "off" : c.options.preflight;
       const preflightSummary = preflightMode === "off" ? null : assessWorkingCopy(taskCwd);
+      // Concurrent runs in one cwd. "Pre-existing work" is only pre-existing if
+      // no other run is producing it. Three oneshot runs sharing a cwd on
+      // 2026-08-13 each treated the others' in-flight diffs as inert and
+      // committed them (bug 01kzzaqfx1g9qaefqxrderdz4m). `force-commit` is the
+      // explicit opt-in to the old behavior. Read-only and soft: an unreadable
+      // store yields no active runs and the launch proceeds as before.
+      const activeRunsInCwd =
+        preflightMode === "off" || preflightMode === "force-commit"
+          ? []
+          : await (async () => {
+              let opened;
+              try {
+                opened = await findAndOpenDb(taskCwd);
+              } catch {
+                return [];
+              }
+              try {
+                return await findActiveRunsInCwd(opened.adapter, taskCwd, { excludeRunId: effectiveRunId });
+              } catch {
+                return [];
+              } finally {
+                await opened.cleanup?.();
+              }
+            })();
       const preflightNotice =
-        preflightSummary && needsPreflightNotice(preflightSummary)
-          ? buildPreflightNotice(preflightSummary, effectiveRunId)
+        preflightSummary && (needsPreflightNotice(preflightSummary) || activeRunsInCwd.length > 0)
+          ? buildPreflightNotice(preflightSummary, effectiveRunId, activeRunsInCwd)
           : null;
       if (preflightNotice) {
         runSync(
@@ -8400,6 +8467,9 @@ const cli = Cli.create({
               cwd: taskCwd,
               ...preflightSummary.dirty,
               detachedHead: preflightSummary.detachedHead,
+              ...(activeRunsInCwd.length > 0
+                ? { activeRunsInCwd: activeRunsInCwd.map((run) => run.runId).join(",") }
+                : {}),
             }),
           ),
         );
@@ -8409,7 +8479,9 @@ const cli = Cli.create({
       // preamble: a detached launch re-runs this command in the child, which
       // assesses the same tree itself.
       const goalForWorkflow =
-        preflightNotice && preflightMode === "auto" ? `${preflightNotice.preamble}\n\n${goal}` : goal;
+        preflightNotice && (preflightMode === "auto" || preflightMode === "force-commit")
+          ? `${preflightNotice.preamble}\n\n${goal}`
+          : goal;
       if (c.options.interactive) {
         if (!Boolean(process.stdin.isTTY && process.stdout.isTTY)) {
           return fail({
@@ -8528,7 +8600,7 @@ const cli = Cli.create({
         return c.ok(
           { runId: effectiveRunId, pid: child.pid, logFile, workflowName: "oneshot" },
           {
-            cta: oneshotCta(effectiveRunId),
+            cta: oneshotCta(effectiveRunId, taskCwd),
           },
         );
       }
@@ -8536,7 +8608,7 @@ const cli = Cli.create({
         if (c.options.open) openOneshotUi(effectiveRunId, taskCwd);
         const overrideContext = {
           ...c,
-          ok: (data) => c.ok(data, { cta: oneshotCta(effectiveRunId) }),
+          ok: (data) => c.ok(data, { cta: oneshotCta(effectiveRunId, taskCwd) }),
         };
         return executeUpCommand(
           overrideContext,
@@ -8565,7 +8637,7 @@ const cli = Cli.create({
             oneshot: {
               review,
               goal: goal.length > 500 ? `${goal.slice(0, 500)}…` : goal,
-              preflight: preflightConfigEntry(preflightMode, preflightSummary),
+              preflight: preflightConfigEntry(preflightMode, preflightSummary, activeRunsInCwd),
             },
           },
         );
@@ -8652,7 +8724,7 @@ const cli = Cli.create({
                 chain: selected.chain,
                 review,
                 goal: goal.length > 500 ? `${goal.slice(0, 500)}…` : goal,
-                preflight: preflightConfigEntry(preflightMode, preflightSummary),
+                preflight: preflightConfigEntry(preflightMode, preflightSummary, activeRunsInCwd),
               },
               [BUILTIN_RESUME_CONFIG_KEY]: builtinResume,
             },
@@ -8664,7 +8736,9 @@ const cli = Cli.create({
           }),
         );
         process.exitCode = formatStatusExitCode(result.status);
-        return c.ok(summarizeRunResult(result), { cta: result.runId ? oneshotCta(result.runId) : undefined });
+        return c.ok(summarizeRunResult(result), {
+          cta: result.runId ? oneshotCta(result.runId, taskCwd) : undefined,
+        });
       } catch (error) {
         return fail({
           code: error instanceof SmithersError ? error.code : "ONESHOT_FAILED",
@@ -9342,7 +9416,7 @@ const cli = Cli.create({
     async run(c) {
       const fail = makeFail(c);
       try {
-        const { adapter, cleanup } = await findAndOpenDb();
+        const { adapter, cleanup } = await findAndOpenDb(c.options.cwd);
         try {
           if (c.options.watch) {
             const intervalMs = resolveWatchIntervalMsOrFail("ps", c.options.interval, fail);
@@ -9705,7 +9779,7 @@ const cli = Cli.create({
     async *run(c) {
       let cleanup;
       try {
-        const db = await findAndOpenDb();
+        const db = await findAndOpenDb(c.options.cwd);
         const adapter = db.adapter;
         cleanup = db.cleanup;
         let run;
@@ -10046,7 +10120,7 @@ const cli = Cli.create({
     options: hijackOptions,
     async run(c) {
       const fail = makeFail(c);
-      const { adapter, cleanup } = await findAndOpenDb();
+      const { adapter, cleanup } = await findAndOpenDb(c.options.cwd);
       try {
         const run = await adapter.getRun(c.args.runId);
         if (!run) {
@@ -10093,14 +10167,14 @@ const cli = Cli.create({
   // =========================================================================
   .command("inspect", {
     description:
-      "Output detailed run state. Structured output canonically uses nodes[].nodeId (legacy steps[].id remains for compatibility); --pool tallies attempt engine/model usage.",
+      "Output detailed run state and authoritative token/cost usage. Structured output canonically uses nodes[].nodeId (legacy steps[].id remains for compatibility); --pool tallies attempt engine/model usage.",
     args: inspectArgs,
     options: inspectOptions,
     alias: { watch: "w", interval: "i" },
     async run(c) {
       const fail = makeFail(c);
       try {
-        const { adapter, cleanup } = await findAndOpenDb();
+        const { adapter, cleanup } = await findAndOpenDb(c.options.cwd);
         try {
           /**
            * @param {InspectSnapshot} snapshot
@@ -10340,7 +10414,7 @@ const cli = Cli.create({
     async run(c) {
       const fail = makeFail(c);
       try {
-        const { adapter, cleanup } = await findAndOpenDb();
+        const { adapter, cleanup } = await findAndOpenDb(c.options.cwd);
         try {
           const summary = await buildRunStatusSummary(adapter, c.args.runId, {
             ...(c.options.window ? { recentWindowMs: Math.floor(c.options.window * 60_000) } : {}),
@@ -11026,10 +11100,11 @@ const cli = Cli.create({
   .command("cancel", {
     description: "Safely halt agents and terminate a run.",
     args: cancelArgs,
+    options: cancelOptions,
     async run(c) {
       const fail = makeFail(c);
       try {
-        const { adapter, cleanup } = await findAndOpenDb();
+        const { adapter, cleanup } = await findAndOpenDb(c.options.cwd);
         try {
           const run = await adapter.getRun(c.args.runId);
           if (!run) {
@@ -11147,13 +11222,14 @@ const cli = Cli.create({
     description:
       "Gracefully pause a run: stop scheduling new tasks, let in-flight tasks finish, then park it resumably.",
     args: pauseArgs,
+    options: pauseOptions,
     async run(c) {
       const fail = (opts) => {
         commandExitOverride = opts.exitCode ?? 1;
         return c.error(opts);
       };
       try {
-        const { adapter, cleanup } = await findAndOpenDb();
+        const { adapter, cleanup } = await findAndOpenDb(c.options.cwd);
         try {
           const run = await adapter.getRun(c.args.runId);
           if (!run) {
@@ -12353,6 +12429,7 @@ const cli = Cli.create({
       runId: z.string().optional().describe("Run to open. Defaults to the most recent run."),
     }),
     options: z.object({
+      cwd: workspaceCwdOption,
       gateway: z.string().optional().describe("Gateway base URL (default http://127.0.0.1:<port>)."),
       port: z.number().int().min(1).max(65535).default(7331).describe("Gateway port when --gateway is not set."),
       host: z
@@ -12413,6 +12490,7 @@ const cli = Cli.create({
         .describe("Focus this run; built-in oneshots open their dedicated transcript, steer, and restart monitor."),
     }),
     options: z.object({
+      cwd: workspaceCwdOption,
       gateway: z.string().optional().describe("Gateway base URL (default http://127.0.0.1:<port>)."),
       port: z.number().int().min(1).max(65535).default(7331).describe("Gateway port when --gateway is not set."),
       host: z
@@ -12660,9 +12738,13 @@ const cli = Cli.create({
               return fail({ code: "RUN_NOT_FOUND", message: `Run not found: ${runId}`, exitCode: 4 });
             }
             const usage = await adapter.getRunTokenUsage(runId);
+            const cost = usage.costUsd == null ? "" : ` / ~$${usage.costUsd.toFixed(4)}`;
             process.stderr.write(
-              `${runId}: ${usage.totalTokens.toLocaleString()} tokens ` +
-                `(${usage.inputTokens.toLocaleString()} in / ${usage.outputTokens.toLocaleString()} out) ` +
+              `${runId}: ${usage.totalTokens.toLocaleString()} tokens${cost} ` +
+                `(${usage.freshInputTokens.toLocaleString()} fresh / ` +
+                `${usage.cacheReadTokens.toLocaleString()} cache read / ` +
+                `${usage.cacheWriteTokens.toLocaleString()} cache write / ` +
+                `${usage.outputTokens.toLocaleString()} out) ` +
                 `across ${usage.attempts} agent attempt(s)\n`,
             );
             return c.ok({ usage });

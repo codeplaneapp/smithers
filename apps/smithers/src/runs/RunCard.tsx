@@ -1,10 +1,10 @@
+import { StatusPill } from "@smthrs/ui";
 import { openSurface } from "../app/navigation";
-import { StatusPill } from "../cards/StatusPill";
 import { runSteps } from "./Run";
 import { useElapsed } from "./useElapsed";
 import { useRunsStore } from "./runsStore";
 import { selectRun } from "./selectRun";
-import { statusTone } from "./statusMeta";
+import { statusLabel, statusTone } from "./statusMeta";
 
 function BoltIcon() {
   return (
@@ -50,7 +50,7 @@ export function RunCard({ runId }: { runId: string }) {
           </div>
         </div>
         <div className="card-head-right">
-          <StatusPill status={run.status} />
+          <StatusPill status={run.status} label={statusLabel(run.status)} />
           {running ? <span className="card-elapsed">{elapsed}</span> : null}
         </div>
       </header>

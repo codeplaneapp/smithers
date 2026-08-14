@@ -1,6 +1,8 @@
 import React from "react";
 import { openInlineWorkflowStore } from "../openInlineWorkflowStore.js";
 
+const ONESHOT_HEARTBEAT_TIMEOUT_MS = 10 * 60_000;
+
 /**
  * @param {{ cwd: string; goal: string; agents: any[]; reviewAgents: any[]; review: boolean }} options
  * @returns {Promise<import("@smthrs/components/SmithersWorkflow").SmithersWorkflow<any>>}
@@ -28,6 +30,7 @@ export async function buildOneshotWorkflow(options) {
       id: "implement",
       output: oneshotResult,
       agent: options.agents,
+      heartbeatTimeoutMs: ONESHOT_HEARTBEAT_TIMEOUT_MS,
     },
     goalPrompt,
   );
@@ -47,7 +50,12 @@ export async function buildOneshotWorkflow(options) {
             implement,
             React.createElement(
               Task,
-              { id: "review", output: oneshotReview, agent: options.reviewAgents },
+              {
+                id: "review",
+                output: oneshotReview,
+                agent: options.reviewAgents,
+                heartbeatTimeoutMs: ONESHOT_HEARTBEAT_TIMEOUT_MS,
+              },
               reviewPrompt,
             ),
           )

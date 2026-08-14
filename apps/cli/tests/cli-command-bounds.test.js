@@ -36,11 +36,16 @@ describe("CLI command input bounds", () => {
     expect(() => assertCliArgumentBounds({ note: "n".repeat(CLI_TEXT_ARGUMENT_MAX_LENGTH + 1) }, "options")).toThrow(
       new RegExp(`maximum length of ${CLI_TEXT_ARGUMENT_MAX_LENGTH}`),
     );
-    expect(() => assertCliArgumentBounds({ goal: "g".repeat(CLI_TEXT_ARGUMENT_MAX_LENGTH + 1) }, "args")).toThrow(
-      new RegExp(`maximum length of ${CLI_TEXT_ARGUMENT_MAX_LENGTH}`),
-    );
     expect(() => assertCliArgumentBounds({ value: "v".repeat(CLI_JSON_ARGUMENT_MAX_BYTES + 1) }, "options")).toThrow(
       new RegExp(`maximum size of ${CLI_JSON_ARGUMENT_MAX_BYTES}`),
+    );
+  });
+
+  test("defers only args.goal to oneshot's actionable byte-aware limit", () => {
+    const oversized = "g".repeat(CLI_TEXT_ARGUMENT_MAX_LENGTH + 1);
+    expect(() => assertCliArgumentBounds({ goal: oversized }, "args")).not.toThrow();
+    expect(() => assertCliArgumentBounds({ goal: oversized }, "options")).toThrow(
+      new RegExp(`maximum length of ${CLI_TEXT_ARGUMENT_MAX_LENGTH}`),
     );
   });
 

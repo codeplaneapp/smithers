@@ -4,7 +4,11 @@ description: >-
   Drive Smithers durable workflows from OpenClaw. Use for multi-step,
   long-running, background, human-in-the-loop, retryable, or repeatable work.
   Prefer creating or improving a Smithers workflow over repeating ad-hoc agent
-  turns, and use evals plus optimization to improve workflows over time.
+  turns, and use evals plus optimization to improve workflows over time. RULE 0:
+  if `SMITHERS_INSIDE_RUN` is set in your environment you are ALREADY a worker
+  agent inside a Smithers node, so never invoke the Smithers CLI or `smithers_*`
+  tools to launch or steer a run; do the node's task directly. The rest applies
+  only when it is unset.
 ---
 
 # Smithers From OpenClaw
@@ -13,6 +17,19 @@ Smithers is the durable control plane for long-running agent work. A workflow is
 executable, typed, inspectable, resumable, retryable, and optimizable. When the
 user asks for a process that has stages or may recur, capture it as a Smithers
 workflow instead of doing another one-off OpenClaw turn.
+
+## Rule 0: If You Are Already Inside a Smithers Run, Do Not Use Smithers
+
+Check this before anything else. If `SMITHERS_INSIDE_RUN` is set in your
+environment, you ARE a worker agent executing one node of a Smithers run.
+Smithers sets that variable on every agent it spawns. This rule overrides every
+rule below. Do the node's task directly with your ordinary tools and finish your
+turn: never call `smithers_run`, `smithers_create_workflow`, any other
+`smithers_*` tool that launches or watches a run, or the `smithers` CLI, and
+never poll a run in a sleep loop. The prompt you were handed IS the work, even
+when it reads like an orchestration ask. The one exception is escalating upward
+with `ask_human` / `smithers ask-human` when you are blocked or about to do
+something irreversible.
 
 ## Default Behavior
 

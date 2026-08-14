@@ -37,6 +37,7 @@ import {
 } from "../../../packages/smithers/tests/e2e-helpers.js";
 import { detectAvailableAgents } from "../src/agent-detection.js";
 import { selectOneshotAgents } from "../src/oneshot/selectOneshotAgents.js";
+import { CLI_TEXT_ARGUMENT_MAX_LENGTH } from "../src/cli-command-bounds.js";
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../..");
 const cliEntry = join(repoRoot, "apps/cli/src/index.js");
@@ -591,6 +592,21 @@ describe("oneshot monitor controls", () => {
       command: "monitor oneshot-123",
       description: "Open the live monitor with steer and restart controls",
     });
+  });
+
+  test("CTA pins operator commands to the oneshot workspace", () => {
+    const cta = oneshotCta("oneshot-123", "/tmp/work tree's");
+    expect(cta.description).toContain("workspace /tmp/work tree's");
+    expect(cta.commands.map((entry) => entry.command)).toEqual([
+      "monitor oneshot-123 --cwd '/tmp/work tree'\\''s'",
+      "status oneshot-123 --cwd '/tmp/work tree'\\''s'",
+      "inspect oneshot-123 --cwd '/tmp/work tree'\\''s'",
+      "ui oneshot-123 --cwd '/tmp/work tree'\\''s'",
+      "chat oneshot-123 --cwd '/tmp/work tree'\\''s'",
+      "hijack oneshot-123 --cwd '/tmp/work tree'\\''s'",
+      "pause oneshot-123 --cwd '/tmp/work tree'\\''s'",
+      "cancel oneshot-123 --cwd '/tmp/work tree'\\''s'",
+    ]);
   });
 
   function controlDb(status = "running") {
@@ -1448,6 +1464,7 @@ describe("oneshot workflow", () => {
       const children = review ? root.props.children.props.children : [root.props.children];
       expect(children.map((child) => child.props.id)).toEqual(taskIds);
       expect(children.every((child) => child.props.hijack === undefined)).toBe(true);
+      expect(children.every((child) => child.props.heartbeatTimeoutMs === 10 * 60_000)).toBe(true);
       expect([...workflow.schemaRegistry.keys()]).toEqual(
         review ? ["oneshotResult", "oneshotReview"] : ["oneshotResult"],
       );
@@ -1459,6 +1476,28 @@ describe("oneshot workflow", () => {
     }
   });
 });
+
+test.skipIf(process.platform === "win32")(
+  "oversized inline goals return actionable goal-file guidance",
+  () => {
+    const home = temp("smithers-oneshot-goal-limit-");
+    const result = spawnSync(
+      process.execPath,
+      ["run", cliEntry, "oneshot", "g".repeat(CLI_TEXT_ARGUMENT_MAX_LENGTH + 1), "--format", "json"],
+      {
+        cwd: home,
+        env: { ...process.env, HOME: home, SMITHERS_HOME: home, SMITHERS_NO_SKILL_REFRESH: "1" },
+        encoding: "utf8",
+      },
+    );
+
+    expect(result.status).toBe(4);
+    const body = JSON.parse(result.stdout);
+    expect(body.code).toBe("ONESHOT_GOAL_TOO_LARGE");
+    expect(body.message).toContain("--goal-file <path>");
+  },
+  30_000,
+);
 
 test("status is JSON and the availability gate fails without supported CLIs", () => {
   const home = temp("smithers-oneshot-cli-");
