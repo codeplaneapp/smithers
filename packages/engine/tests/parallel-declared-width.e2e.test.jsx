@@ -39,6 +39,7 @@ describe("declared Parallel width derives the default run concurrency", () => {
     const barrier = new Promise((resolveBarrier) => {
       releaseBarrier = () => resolveBarrier(undefined);
     });
+    const barrierDeadline = sleep(8000);
     const workflow = smithers(() => (
       <Workflow name="declared-width-64">
         <Parallel maxConcurrency={64}>
@@ -54,10 +55,10 @@ describe("declared Parallel width derives the default run concurrency", () => {
                 // All 64 tasks must be in flight AT ONCE for the barrier
                 // to open. If the engine capped the run at the default 4
                 // or the auto-raise ceiling of 16, the barrier never opens
-                // and every task falls back to the sleep — the run still
-                // finishes and the assertions below fail cleanly instead
-                // of hanging.
-                await Promise.race([barrier, sleep(8000)]);
+                // and the shared deadline releases every current and future
+                // task so the assertions below fail cleanly instead of
+                // timing out one queued batch at a time.
+                await Promise.race([barrier, barrierDeadline]);
                 running--;
                 return { v: i };
               }}
@@ -78,7 +79,7 @@ describe("declared Parallel width derives the default run concurrency", () => {
     expect(config.maxConcurrency).toBe(4);
     expect(config.maxConcurrencyPinned).toBeUndefined();
     cleanup();
-  });
+  }, 20_000);
 
   test("Parallel subtreeConcurrency={24} runs 24 wide with no --max-concurrency flag (not capped at the auto-raise ceiling)", async () => {
     // subtreeConcurrency caps concurrent child SUBTREES, not tasks — but it
@@ -97,6 +98,7 @@ describe("declared Parallel width derives the default run concurrency", () => {
     const barrier = new Promise((resolveBarrier) => {
       releaseBarrier = () => resolveBarrier(undefined);
     });
+    const barrierDeadline = sleep(4000);
     const workflow = smithers(() => (
       <Workflow name="declared-subtree-width-24">
         <Parallel subtreeConcurrency={24}>
@@ -110,9 +112,10 @@ describe("declared Parallel width derives the default run concurrency", () => {
                   releaseBarrier();
                 }
                 // Same barrier shape as the maxConcurrency case: a run
-                // capped at 4 or at the ceiling of 16 never opens it, falls
-                // back to the sleep, and fails the assertions cleanly.
-                await Promise.race([barrier, sleep(4000)]);
+                // capped at 4 or at the ceiling of 16 never opens it; the
+                // shared deadline drains the queue so the assertions fail
+                // cleanly.
+                await Promise.race([barrier, barrierDeadline]);
                 running--;
                 return { v: i };
               }}
@@ -131,7 +134,7 @@ describe("declared Parallel width derives the default run concurrency", () => {
     expect(barrierReached).toBe(true);
     expect(peak).toBe(WIDTH);
     cleanup();
-  });
+  }, 12_000);
 
   test("an explicit maxConcurrency pin beats the declared subtree width", async () => {
     const { smithers, outputs, cleanup } = createTestSmithers({
