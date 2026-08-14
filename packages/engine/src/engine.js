@@ -61,6 +61,8 @@ import {
 import { appendGap, defaultGapSpoolPath } from "./durabilityGapSpool.js";
 import { runWithToolContext } from "@smthrs/tool-context";
 import { createToolJournalContext } from "./createToolJournalContext.js";
+import { agentIdentityLabel } from "./agentIdentityLabel.js";
+import { runWideDeadAgentIds } from "./runWideDeadAgentIds.js";
 import { vcsToolingStatus } from "@smthrs/vcs/vcsToolingStatus";
 import { getDefaultPlatformLayer, getPlatformLayer, withPlatformLayer } from "./platform-layer.js";
 import { sleep } from "./sleep.js";
@@ -3998,18 +4000,11 @@ function preflightFailedChainIndices(priorAttempts, currentAttemptMeta) {
  * @param {unknown[]} chain
  * @param {number | null} chainIndex
  * @param {number | null} resetAtMs
- * @param {Set<unknown>} [disabledAgents]
+ * @param {(agent: unknown) => boolean} [isDeadAgent]
  * @param {Set<number>} [preflightFailedIndices]
  * @returns {{ failoverPending: boolean; earliestResetAtMs: number | null }}
  */
-function resolveQuotaChainFailover(
-  priorAttempts,
-  chain,
-  chainIndex,
-  resetAtMs,
-  disabledAgents,
-  preflightFailedIndices,
-) {
+function resolveQuotaChainFailover(priorAttempts, chain, chainIndex, resetAtMs, isDeadAgent, preflightFailedIndices) {
   const round = quotaBlockedChainRound(priorAttempts, chain.length);
   const blocked = new Set(round.blocked);
   const resets = new Map(round.resetAtMs);
@@ -4018,7 +4013,7 @@ function resolveQuotaChainFailover(
     if (resetAtMs != null) resets.set(chainIndex, resetAtMs);
   }
   const failoverPending = chain.some(
-    (agent, index) => !blocked.has(index) && !disabledAgents?.has(agent) && !preflightFailedIndices?.has(index),
+    (agent, index) => !blocked.has(index) && !isDeadAgent?.(agent) && !preflightFailedIndices?.has(index),
   );
   const resetTimes = [...resets.values()];
   return {
@@ -4673,6 +4668,24 @@ async function legacyExecuteTask(
 ) {
   const taskStartMs = performance.now();
   const attempts = await Effect.runPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
+  // Run-wide breaker state, derived from the run's durable attempt rows rather
+  // than kept in memory: an engine that exhausted its quota (or repeatedly
+  // failed to establish a session) is skipped by every later node of the run,
+  // and a resumed run rebuilds the same set from the same rows.
+  const deadAgentIds = runWideDeadAgentIds(await Effect.runPromise(adapter.listAttemptsForRun(runId)), {
+    nowMs: nowMs(),
+  });
+  /**
+   * Whether the chain must skip this agent: disabled by the in-process auth
+   * breaker, or proved terminal for this run by a durable attempt row.
+   * @param {any} agent
+   * @returns {boolean}
+   */
+  const isDeadAgent = (agent) => {
+    if (disabledAgents?.has(agent)) return true;
+    const label = agentIdentityLabel(agent);
+    return label !== null && deadAgentIds.has(label);
+  };
   const resumeAttempts = resumeEligibleAttempts(attempts);
   const maxSchemaRetries =
     Number.isSafeInteger(desc.maxSchemaRetries) && desc.maxSchemaRetries >= 0 ? desc.maxSchemaRetries : 3;
@@ -5411,9 +5424,7 @@ async function legacyExecuteTask(
     if (!payload) {
       const allAgents = Array.isArray(desc.agent) ? desc.agent : desc.agent ? [desc.agent] : [];
       const chainEntries = allAgents.map((agent, chainIndex) => ({ agent, chainIndex }));
-      const enabledEntries = disabledAgents
-        ? chainEntries.filter((entry) => !disabledAgents.has(entry.agent))
-        : chainEntries;
+      const enabledEntries = chainEntries.filter((entry) => !isDeadAgent(entry.agent));
       const selectionPool = enabledEntries.length > 0 ? enabledEntries : chainEntries; // fall back to disabled agents if all disabled
       // Which rung of the failover chain this attempt lands on. Attempts are
       // 1-based, so attempt N normally maps to rung N-1.
@@ -5738,7 +5749,7 @@ async function legacyExecuteTask(
         if (effectiveChainIndex != null) {
           attemptMeta.agentChainIndex = effectiveChainIndex;
         }
-        attemptMeta.agentId = effectiveAgent.id ?? effectiveAgent.constructor?.name ?? null;
+        attemptMeta.agentId = agentIdentityLabel(effectiveAgent);
         attemptMeta.agentModel = effectiveAgent.model ?? effectiveAgent.modelId ?? null;
         const hijackCapableEngine =
           typeof effectiveAgent.cliEngine === "string"
@@ -8148,7 +8159,7 @@ async function legacyExecuteTask(
         agentChain,
         effectiveChainIndex,
         quotaResetAtMs,
-        disabledAgents,
+        isDeadAgent,
         preflightFailedChainIndices(priorAttempts, attemptMeta),
       );
       if (failoverPending) {

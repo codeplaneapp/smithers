@@ -58,6 +58,7 @@ The pieces, as implemented:
 
 - **Quota failures don't advance the rung.** A provider quota wall says nothing about the agent's health, so quota-failed attempts are discounted when picking the rung - otherwise one Codex quota blip would silently demote every task onto its fallback for the rest of the run.
 - **A run-wide breaker for dead agents.** An agent that fails preflight (e.g. a 401 from a bad API key) is disabled run-wide and selection skips it - a per-agent circuit breaker in the [Hystrix](https://resilience4j.readme.io/docs/circuitbreaker) sense, so a documented fallback actually engages instead of every task dying on the broken rung first.
+- **The breaker is keyed by agent, not by chain rung, and it is durable.** `runWideDeadAgentIds` (`packages/engine/src/runWideDeadAgentIds.js`) derives the skip set from the run's attempt rows, so it covers every node of the run and a resumed run rebuilds it from the same rows. Two classifications are terminal for the run: a provider quota wall, until the reset time the provider reported (an attempt that reported no reset time holds for the rest of the run), and two `AGENT_SESSION_LOST` failures on one engine, which mean the CLI is not establishing sessions at all. The set never empties a chain: if every rung is dead, selection falls back to the full chain so the terminal error still surfaces.
 
 ### Quota exhaustion: park, don't burn
 
