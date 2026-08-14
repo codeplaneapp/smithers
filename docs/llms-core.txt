@@ -6377,6 +6377,8 @@ Both use the graph resolver, so they match the path Smithers gives worker tasks.
   symlink node_modules from, or write into, the parent checkout. An install through a shared
   node_modules link rewrites the parent checkout's workspace links to point into the
   worktree, all of which dangle once the worktree is removed.
+- **Worktree lanes are disposable, including ignored files.** Reaping deletes the lane
+  directory after the run ends. Commit anything valuable or copy it outside the lane first.
 - **jj continuously snapshots a worktree's working copy onto its bookmark.** A compute
   `<Task>` (or helper) that checks for changes with `git status --porcelain` can see a
   *clean* tree and skip its work, because jj has already committed the working-copy edits to
