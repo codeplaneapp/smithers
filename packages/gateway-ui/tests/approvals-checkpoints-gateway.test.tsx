@@ -532,6 +532,7 @@ describe("GatewayCheckpointControls", () => {
     );
     const alert = rows[0]!.querySelector("[data-slot='checkpoint-error']")!;
     expect(alert.getAttribute("role")).toBe("alert");
+    expect(alert.className).toContain("sui-alert-destructive");
     expect(alert.textContent).toContain("Rewind failed");
     // No fake success: nothing was rewound, nothing reported, actions recover.
     expect(rewound).toHaveLength(0);

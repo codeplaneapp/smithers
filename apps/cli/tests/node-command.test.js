@@ -197,7 +197,7 @@ test("node command shows enriched retry chain details by default", async () => {
     expect(result.stdout).toContain("output.confidence must be number");
     expect(result.stdout).toContain("Attempt 2 - failed");
     expect(result.stdout).toContain("Attempt 3 - finished");
-    expect(result.stdout).toContain("Tokens: 1,204 in / 312 out");
+    expect(result.stdout).toContain("Tokens: 1,204 in (1,204 fresh / 0 cache read / 0 cache write) / 312 out");
     expect(result.stdout).toContain("web-search");
     expect(result.stdout).toContain("read-file");
     expect(result.stdout).toContain("Output (validated):");
