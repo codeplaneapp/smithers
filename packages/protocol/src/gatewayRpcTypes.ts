@@ -383,10 +383,12 @@ export type RunTokenUsageEvent = {
   model: string;
   agent: string;
   inputTokens: number;
+  freshInputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
   reasoningTokens: number;
+  costUsd: number | null;
   timestampMs: number;
 };
 

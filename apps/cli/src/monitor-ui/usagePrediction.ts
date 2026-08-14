@@ -14,10 +14,12 @@ export type TokenUsageEvent = {
   model?: string;
   agent?: string;
   inputTokens?: number;
+  freshInputTokens?: number;
   outputTokens?: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
   reasoningTokens?: number;
+  costUsd?: number | null;
   timestampMs?: number;
 };
 
@@ -48,6 +50,10 @@ export type TokenUsageFold = {
   perModel: Map<string, number>;
   perNodeAttempts: Map<string, Map<string, number>>;
   grandTotal: number;
+  freshInputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd: number | null;
   eventCount: number;
 };
 
@@ -95,18 +101,12 @@ export type RunUsagePrediction = {
 };
 
 /**
- * Sum every counter reported by a provider. Cache-read tokens can overlap
- * input tokens for some providers; monitor display totals intentionally add
- * every reported counter rather than attempting provider-specific deduction.
+ * Total input/output are the two disjoint top-level counters. Cache and
+ * reasoning values are breakdowns of those counters and must not be added
+ * again (#1436).
  */
 export function totalTokensOf(event: TokenUsageEvent): number {
-  return (
-    (event.inputTokens ?? 0) +
-    (event.outputTokens ?? 0) +
-    (event.cacheReadTokens ?? 0) +
-    (event.cacheWriteTokens ?? 0) +
-    (event.reasoningTokens ?? 0)
-  );
+  return (event.inputTokens ?? 0) + (event.outputTokens ?? 0);
 }
 
 function attemptKey(iteration: number | undefined, attempt: number | undefined): string {
@@ -115,6 +115,16 @@ function attemptKey(iteration: number | undefined, attempt: number | undefined):
 
 function executionKey(nodeId: string, iteration: number | undefined, attempt: number | undefined): string {
   return `${nodeId}\u0000${attemptKey(iteration, attempt)}`;
+}
+
+/**
+ * Old runtimes emitted cumulative usage repeatedly during one attempt. Keep
+ * only its last record; current runtimes already emit exactly one final row.
+ */
+export function latestTokenUsageByAttempt(events: readonly TokenUsageEvent[]): TokenUsageEvent[] {
+  const latest = new Map<string, TokenUsageEvent>();
+  for (const event of events) latest.set(executionKey(event.nodeId, event.iteration, event.attempt), event);
+  return [...latest.values()];
 }
 
 function increment<K>(map: Map<K, number>, key: K, amount: number): void {
@@ -128,10 +138,23 @@ export function foldTokenUsage(events: readonly TokenUsageEvent[]): TokenUsageFo
   const perModel = new Map<string, number>();
   const perNodeAttempts = new Map<string, Map<string, number>>();
   let grandTotal = 0;
+  let freshInputTokens = 0;
+  let cacheReadTokens = 0;
+  let cacheWriteTokens = 0;
+  let costUsd = 0;
+  let pricedEvents = 0;
 
-  for (const event of events) {
+  const latestEvents = latestTokenUsageByAttempt(events);
+  for (const event of latestEvents) {
     const total = totalTokensOf(event);
     grandTotal += total;
+    freshInputTokens += event.freshInputTokens ?? event.inputTokens ?? 0;
+    cacheReadTokens += event.cacheReadTokens ?? 0;
+    cacheWriteTokens += event.cacheWriteTokens ?? 0;
+    if (typeof event.costUsd === "number" && Number.isFinite(event.costUsd)) {
+      costUsd += event.costUsd;
+      pricedEvents += 1;
+    }
     increment(perNode, event.nodeId, total);
     if (event.agent !== undefined) increment(perAgent, event.agent, total);
     if (event.model !== undefined) increment(perModel, event.model, total);
@@ -144,7 +167,18 @@ export function foldTokenUsage(events: readonly TokenUsageEvent[]): TokenUsageFo
     increment(attempts, attemptKey(event.iteration, event.attempt), total);
   }
 
-  return { perNode, perAgent, perModel, perNodeAttempts, grandTotal, eventCount: events.length };
+  return {
+    perNode,
+    perAgent,
+    perModel,
+    perNodeAttempts,
+    grandTotal,
+    freshInputTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+    costUsd: latestEvents.length > 0 && pricedEvents === latestEvents.length ? costUsd : null,
+    eventCount: latestEvents.length,
+  };
 }
 
 function quantile(values: readonly number[], fraction: number): number | undefined {
@@ -199,7 +233,7 @@ export function buildRateModel(events: readonly TokenUsageEvent[], timings: read
   const modelByNode = new Map<string, string>();
   const tokensByAttempt = new Map<string, AttemptTokens>();
 
-  for (const event of events) {
+  for (const event of latestTokenUsageByAttempt(events)) {
     if (event.model !== undefined) modelByNode.set(event.nodeId, event.model);
     const key = executionKey(event.nodeId, event.iteration, event.attempt);
     const existing = tokensByAttempt.get(key);
@@ -574,7 +608,7 @@ export function tokenBurnBuckets(
   const lastStart = Math.floor(nowMs / bucketMs) * bucketMs;
   const firstStart = lastStart - (bucketCount - 1) * bucketMs;
   const totals = new Map<number, number>();
-  for (const event of events) {
+  for (const event of latestTokenUsageByAttempt(events)) {
     if (event.timestampMs === undefined) continue;
     const start = Math.floor(event.timestampMs / bucketMs) * bucketMs;
     if (start < firstStart || start > lastStart) continue;
@@ -643,7 +677,7 @@ export function nodeUsageBreakdown(events: readonly TokenUsageEvent[], nodeId: s
   let cacheWrite = 0;
   let reasoning = 0;
   const byAttempt = new Map<string, NodeAttemptUsage>();
-  for (const event of events) {
+  for (const event of latestTokenUsageByAttempt(events)) {
     if (event.nodeId !== nodeId) continue;
     found = true;
     input += event.inputTokens ?? 0;
@@ -675,7 +709,7 @@ export function nodeUsageBreakdown(events: readonly TokenUsageEvent[], nodeId: s
     cacheRead,
     cacheWrite,
     reasoning,
-    total: input + output + cacheRead + cacheWrite + reasoning,
+    total: input + output,
     attempts,
   };
 }

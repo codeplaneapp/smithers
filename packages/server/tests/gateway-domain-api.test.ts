@@ -617,6 +617,7 @@ describe("Gateway run token usage", () => {
           model: "gpt-test",
           agent: "test-agent",
           inputTokens: index + 10,
+          ...(index === 0 ? { freshInputTokens: 5, costUsd: 0.001 } : {}),
           outputTokens: index + 20,
           cacheReadTokens: index + 30,
           cacheWriteTokens: index + 40,
@@ -663,10 +664,12 @@ describe("Gateway run token usage", () => {
       model: "gpt-test",
       agent: "test-agent",
       inputTokens: 10,
+      freshInputTokens: 5,
       outputTokens: 20,
       cacheReadTokens: 30,
       cacheWriteTokens: 40,
       reasoningTokens: 50,
+      costUsd: 0.001,
       timestampMs: 50_000,
     });
     expect((rpc as any).payload.events.at(-1)).toEqual({
@@ -676,10 +679,12 @@ describe("Gateway run token usage", () => {
       model: "gpt-test",
       agent: "test-agent",
       inputTokens: 1_035,
+      freshInputTokens: 1_035,
       outputTokens: 1_045,
       cacheReadTokens: 1_055,
       cacheWriteTokens: 1_065,
       reasoningTokens: 1_075,
+      costUsd: null,
       timestampMs: 91_025,
     });
   }, 60_000);

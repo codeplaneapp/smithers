@@ -6,7 +6,6 @@ import * as _smthrs_errors_SmithersError from '@smthrs/errors/SmithersError';
 import { SmithersError as SmithersError$2 } from '@smthrs/errors/SmithersError';
 import * as drizzle_orm_bun_sqlite from 'drizzle-orm/bun-sqlite';
 import * as bun_sqlite from 'bun:sqlite';
-import { Database as Database$1 } from 'bun:sqlite';
 import { ManagedRuntime, Effect } from 'effect';
 import * as SqlClient from 'effect/unstable/sql/SqlClient';
 import { SqlError as SqlError$1 } from 'effect/unstable/sql/SqlError';
@@ -1648,10 +1647,12 @@ declare class SmithersDb {
      *   model?: string | null;
      *   agent?: string | null;
      *   inputTokens?: number | null;
+     *   freshInputTokens?: number | null;
      *   outputTokens?: number | null;
      *   cacheReadTokens?: number | null;
      *   cacheWriteTokens?: number | null;
      *   reasoningTokens?: number | null;
+     *   costUsd?: number | null;
      *   updatedAtMs: number;
      * }} row
      * @returns {RunnableEffect<void, SmithersError>}
@@ -1664,10 +1665,12 @@ declare class SmithersDb {
         model?: string | null;
         agent?: string | null;
         inputTokens?: number | null;
+        freshInputTokens?: number | null;
         outputTokens?: number | null;
         cacheReadTokens?: number | null;
         cacheWriteTokens?: number | null;
         reasoningTokens?: number | null;
+        costUsd?: number | null;
         updatedAtMs: number;
     }): RunnableEffect<void, SmithersError$1>;
     /**
@@ -1679,22 +1682,28 @@ declare class SmithersDb {
      * @returns {RunnableEffect<{
      *   runId: string;
      *   inputTokens: number;
+     *   freshInputTokens: number;
      *   outputTokens: number;
      *   cacheReadTokens: number;
      *   cacheWriteTokens: number;
      *   reasoningTokens: number;
      *   totalTokens: number;
+     *   costUsd: number | null;
+     *   pricedAttempts: number;
      *   attempts: number;
      * }, SmithersError>}
      */
     getRunTokenUsage(runId: string): RunnableEffect<{
         runId: string;
         inputTokens: number;
+        freshInputTokens: number;
         outputTokens: number;
         cacheReadTokens: number;
         cacheWriteTokens: number;
         reasoningTokens: number;
         totalTokens: number;
+        costUsd: number | null;
+        pricedAttempts: number;
         attempts: number;
     }, SmithersError$1>;
     /**
@@ -10039,11 +10048,14 @@ type BunSQLiteDatabase$1 = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
  * Keeping the raw constructor in the DB package preserves the repository's
  * storage ownership boundary.
  *
+ * Requires Bun. Callers that must also run on Node route around this: see
+ * `attachMemoryBackend` in `smthrs/src/openSmithersBackend.js`.
+ *
  * @param {string} path
  */
 declare function openDurableSqliteDatabase(path: string): {
     db: drizzle_orm_bun_sqlite.BunSQLiteDatabase<Record<string, never>> & {
-        $client: Database$1;
+        $client: bun_sqlite.Database;
     };
     close: () => void;
 };
