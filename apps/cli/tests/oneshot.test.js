@@ -13,6 +13,7 @@ import { saveOneshotConfig } from "../src/oneshot/saveOneshotConfig.js";
 import { resolveOneshotChain } from "../src/oneshot/resolveOneshotChain.js";
 import { classifyOneshotGoal } from "../src/oneshot/classifyOneshotGoal.js";
 import { rewriteOneshotBooleanValues } from "../src/oneshot/rewriteOneshotBooleanValues.js";
+import { resolveOneshotResumeSettings } from "../src/oneshot/resolveOneshotResumeSettings.js";
 import {
   cleanStatusLine,
   ONESHOT_NARRATOR_MODELS,
@@ -1180,6 +1181,118 @@ test("oneshot persists goal-file contents, not the transient path, for builtin r
     sqlite.close();
   }
 }, 120_000);
+
+test("oneshot resume recovers its persisted launch inputs from only the run id", () => {
+  const workspace = temp("smithers-oneshot-persisted-resume-");
+  const binDir = createExecutableDir();
+  writeFakeCodexBinary(binDir);
+  const codexHome = join(workspace, ".codex");
+  mkdirSync(codexHome, { recursive: true });
+  writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ tokens: { access_token: "test" } }));
+  const env = prependPath(binDir, {
+    ...process.env,
+    CODEX_HOME: codexHome,
+    OPENAI_API_KEY: "",
+    SMITHERS_HOME: join(workspace, ".smithers-home"),
+    SMITHERS_NO_SKILL_REFRESH: "1",
+  });
+  const goal = "Recover this exact persisted goal without asking the operator to repeat it.";
+  const runId = "oneshot-persisted-resume";
+  const initial = spawnSync(
+    process.execPath,
+    [
+      "run",
+      cliEntry,
+      "oneshot",
+      goal,
+      "--cwd",
+      workspace,
+      "--detach",
+      "false",
+      "--open",
+      "false",
+      "--review",
+      "off",
+      "--preflight",
+      "off",
+      "--agent",
+      "codex",
+      "--run-id",
+      runId,
+      "--format",
+      "json",
+    ],
+    { cwd: workspace, env, encoding: "utf8", timeout: 90_000 },
+  );
+  expect(initial.status, `${initial.stdout}\n${initial.stderr}`).toBe(0);
+
+  const resumed = spawnSync(
+    process.execPath,
+    [
+      "run",
+      cliEntry,
+      "oneshot",
+      "--cwd",
+      workspace,
+      "--run-id",
+      runId,
+      "--resume",
+      "--force",
+      "--detach",
+      "false",
+      "--open",
+      "false",
+      "--format",
+      "json",
+    ],
+    { cwd: workspace, env, encoding: "utf8", timeout: 90_000 },
+  );
+  expect(resumed.status, `${resumed.stdout}\n${resumed.stderr}`).toBe(0);
+  expect(`${resumed.stdout}\n${resumed.stderr}`).not.toContain("ONESHOT_GOAL_REQUIRED");
+
+  const changed = spawnSync(
+    process.execPath,
+    [
+      "run",
+      cliEntry,
+      "oneshot",
+      "different goal",
+      "--cwd",
+      workspace,
+      "--run-id",
+      runId,
+      "--resume",
+      "--force",
+      "--detach",
+      "false",
+      "--open",
+      "false",
+      "--format",
+      "json",
+    ],
+    { cwd: workspace, env, encoding: "utf8", timeout: 90_000 },
+  );
+  expect(changed.status).toBe(4);
+  expect(JSON.parse(changed.stdout).code).toBe("ONESHOT_RESUME_INPUT_MISMATCH");
+}, 180_000);
+
+test("persisted oneshot settings resolve durable goal files and reject truncated legacy summaries", () => {
+  const descriptor = buildBuiltinResumeConfig({
+    command: "oneshot",
+    args: ["--goal-file", "resume-goal.txt", "--review", "on", "--model=terra", "--agent", "codex"],
+    cwd: "/workspace",
+  });
+  expect(
+    resolveOneshotResumeSettings({ builtinResume: descriptor }, { readText: (path) => `goal from ${path}` }),
+  ).toEqual({
+    goal: "goal from /workspace/resume-goal.txt",
+    goalFile: "/workspace/resume-goal.txt",
+    review: "on",
+    model: "terra",
+    agent: "codex",
+  });
+  expect(resolveOneshotResumeSettings({ oneshot: { goal: "truncated…", review: false } })).toBeNull();
+});
 
 test("oneshot accepts explicit boolean values for default-true flags", () => {
   expect(rewriteOneshotBooleanValues(["oneshot", "goal", "--detach", "false", "--open=true"])).toEqual([
