@@ -1,7 +1,7 @@
 /** @jsxImportSource react */
 import type { CSSProperties } from "react";
 import { useGatewayConnectionStatus } from "@smthrs/gateway-react";
-import { theme } from "./theme";
+import { Badge, type BadgeProps } from "@smthrs/ui";
 
 export type ConnectionBadgeProps = {
   className?: string;
@@ -16,10 +16,20 @@ const LABEL: Record<string, string> = {
   connecting: "Connecting…",
 };
 
-const COLOR: Record<string, string> = {
-  online: theme.success,
-  offline: theme.danger,
-  unauthorized: theme.warning,
+const DESCRIPTION: Record<string, string> = {
+  online: "Gateway connected.",
+  offline: "Gateway connection lost. Displayed data may be last known.",
+  unauthorized: "Gateway authentication failed. Check your credentials, then reconnect.",
+  idle: "Connecting to the gateway.",
+  connecting: "Connecting to the gateway.",
+};
+
+const VARIANT: Record<string, NonNullable<BadgeProps["variant"]>> = {
+  online: "success",
+  offline: "destructive",
+  unauthorized: "warning",
+  idle: "muted",
+  connecting: "muted",
 };
 
 /**
@@ -30,23 +40,18 @@ const COLOR: Record<string, string> = {
  */
 export function ConnectionBadge({ className, style }: ConnectionBadgeProps) {
   const { status } = useGatewayConnectionStatus();
-  const color = COLOR[status] ?? theme.textDim;
   return (
-    <span
+    <Badge
+      variant={VARIANT[status] ?? "muted"}
       className={className}
       data-status={status}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        fontFamily: theme.fontSans,
-        fontSize: 12,
-        color: theme.textDim,
-        ...style,
-      }}
+      role="status"
+      aria-live="polite"
+      title={DESCRIPTION[status]}
+      style={style}
     >
-      <span aria-hidden style={{ width: 8, height: 8, borderRadius: 999, background: color }} />
+      <span aria-hidden className="sui-status-dot" />
       {LABEL[status] ?? status}
-    </span>
+    </Badge>
   );
 }
