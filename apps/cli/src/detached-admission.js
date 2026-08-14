@@ -17,6 +17,11 @@ export const DETACHED_ADMISSION_TIMEOUT_MS = resolveDefaultAdmissionTimeoutMs();
 const LOG_TAIL_BYTES = 32 * 1024;
 const POLL_INTERVAL_MS = 50;
 
+// A child that is still alive at the deadline is booting slowly, not stuck:
+// module-graph parse alone can exceed the window on a loaded machine. Live
+// children get this multiple of the timeout before the launcher gives up.
+const LIVE_CHILD_GRACE_MULTIPLE = 4;
+
 /**
  * @param {string} nonce
  */
@@ -54,12 +59,20 @@ export function readDetachedLogTail(logFile, maxBytes = LOG_TAIL_BYTES) {
  * the nonce from its RunStarted progress event, which is published only after
  * insertRun/activateRunForResume completes.
  *
+ * The timeout bounds a child that died or wedged. A child that is still alive
+ * at the deadline is given a grace window (`maxWaitMs`, default 4x the
+ * timeout) because a loaded machine can spend the whole window on module
+ * parse before the engine runs a line; `onSlowBoot` fires once when the grace
+ * window begins.
+ *
  * @param {{
  *   child: import("node:child_process").ChildProcess;
  *   logFile: string;
  *   nonce: string;
  *   timeoutMs?: number;
+ *   maxWaitMs?: number;
  *   intervalMs?: number;
+ *   onSlowBoot?: (info: { pid: number | undefined; elapsedMs: number; maxWaitMs: number }) => void;
  * }} options
  * @returns {Promise<
  *   { admitted: true; tail: string } |
@@ -68,9 +81,18 @@ export function readDetachedLogTail(logFile, maxBytes = LOG_TAIL_BYTES) {
  */
 export async function waitForDetachedAdmission(options) {
   const timeoutMs = Math.max(1, options.timeoutMs ?? DETACHED_ADMISSION_TIMEOUT_MS);
+  const maxWaitMs = Math.max(timeoutMs, options.maxWaitMs ?? timeoutMs * LIVE_CHILD_GRACE_MULTIPLE);
   const intervalMs = Math.max(1, options.intervalMs ?? POLL_INTERVAL_MS);
+  const onSlowBoot =
+    options.onSlowBoot ??
+    ((info) => {
+      process.stderr.write(
+        `smithers: detached engine (pid ${info.pid ?? "unknown"}) is still booting after ${Math.round(info.elapsedMs / 1000)}s; waiting up to ${Math.round(info.maxWaitMs / 1000)}s. Set ${DETACHED_ADMISSION_TIMEOUT_ENV} to change the window.\n`,
+      );
+    });
   const marker = detachedAdmissionMarker(options.nonce);
   const startedAt = Date.now();
+  let slowBootNotified = false;
   let childError;
   let wake;
 
@@ -100,8 +122,17 @@ export async function waitForDetachedAdmission(options) {
         return { admitted: false, reason: `Detached engine exited before admission (${status}).`, tail };
       }
       const elapsedMs = Date.now() - startedAt;
-      if (elapsedMs >= timeoutMs) {
-        return { admitted: false, reason: `Detached engine did not reach admission within ${timeoutMs}ms.`, tail };
+      // Reaching here means the child is alive (dead children returned above).
+      if (elapsedMs >= maxWaitMs) {
+        return {
+          admitted: false,
+          reason: `Detached engine did not reach admission within ${maxWaitMs}ms. The engine process (pid ${options.child.pid ?? "unknown"}) was still alive and was terminated. Set ${DETACHED_ADMISSION_TIMEOUT_ENV} to raise the window on a slow or heavily loaded machine.`,
+          tail,
+        };
+      }
+      if (elapsedMs >= timeoutMs && !slowBootNotified) {
+        slowBootNotified = true;
+        onSlowBoot({ pid: options.child.pid, elapsedMs, maxWaitMs });
       }
 
       await new Promise((resolvePromise) => {
@@ -113,7 +144,7 @@ export async function waitForDetachedAdmission(options) {
           wake = undefined;
           resolvePromise(undefined);
         };
-        const timer = setTimeout(finish, Math.min(intervalMs, timeoutMs - elapsedMs));
+        const timer = setTimeout(finish, Math.min(intervalMs, maxWaitMs - elapsedMs));
         wake = finish;
       });
     }
