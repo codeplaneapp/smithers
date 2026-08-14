@@ -1,9 +1,14 @@
-/** @typedef {import("./IntegrationsConfig.js").IntegrationsConfig} IntegrationsConfig */
-
 /**
+ * `IntegrationsConfig` is referenced inline rather than aliased through a local
+ * `@typedef`. A `@typedef` is itself an export, so aliasing here would make both
+ * this module and `./IntegrationsConfig.js` export the same name. `index.js`
+ * re-exports both with `export *`, and a name exported by two star sources is
+ * ambiguous, so the declaration bundler drops `IntegrationsConfig` from the
+ * public types instead of emitting it.
+ *
  * @typedef {object} ServerOptions
  * @property {number} [port]
- * @property {IntegrationsConfig} [integrations] External integrations served by this process:
+ * @property {import("./IntegrationsConfig.js").IntegrationsConfig} [integrations] External integrations served by this process:
  *   generic HMAC-verified webhook sources exposed at `POST /v1/webhooks/:sourceId` and delivered
  *   to waiting runs through the integration runtime. Requires `db`.
  * @property {string} [host] Network interface to bind. Defaults to the loopback address 127.0.0.1.

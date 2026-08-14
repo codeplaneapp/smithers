@@ -1,8 +1,7 @@
 import "./runsList.css";
-import { EmptyState, Skeleton } from "@smthrs/ui";
+import { Alert, AlertDescription, Badge, EmptyState, Skeleton, StatusPill } from "@smthrs/ui";
 import { openSurface } from "../app/navigation";
 import { useUiStore } from "../app/uiStore";
-import { StatusPill } from "../cards/StatusPill";
 import { MenuBackdrop } from "../components/MenuBackdrop";
 import { CheckIcon } from "../icons/CheckIcon";
 import { ChevronDownIcon } from "../icons/ChevronDownIcon";
@@ -171,13 +170,22 @@ function RunRow({ run }: { run: RunSummary }) {
         </div>
       ) : null}
 
-      {run.status === "failed" && run.errorText ? <div className="runs-error">{run.errorText}</div> : null}
+      {run.status === "failed" && run.errorText ? (
+        <Alert variant="destructive" className="runs-error">
+          <AlertDescription>{run.errorText}</AlertDescription>
+        </Alert>
+      ) : null}
 
       {run.status === "waiting" && run.blockedNodeLabel ? (
-        <div className="runs-approval" data-testid="runs-approval" onClick={(event) => event.stopPropagation()}>
-          <span>
+        <Alert
+          variant="warning"
+          className="runs-approval"
+          data-testid="runs-approval"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <AlertDescription>
             Waiting for approval: <span className="runs-approval-node">{run.blockedNodeLabel}</span>
-          </span>
+          </AlertDescription>
           <div className="runs-approval-actions">
             <button className="btn btn-brand tone-ok" type="button" onClick={() => approve(run.runId)}>
               Approve
@@ -186,7 +194,7 @@ function RunRow({ run }: { run: RunSummary }) {
               Deny
             </button>
           </div>
-        </div>
+        </Alert>
       ) : null}
 
       <div className="runs-row-actions" onClick={(event) => event.stopPropagation()}>
@@ -283,14 +291,19 @@ export function RunsCanvas() {
     <section className="surface" data-testid="runs-canvas">
       <header className="surface-head">
         <span className="surface-title">Runs</span>
-        <button
-          type="button"
-          className={`runs-stream-badge ${live ? "is-live" : "is-poll"}`}
-          onClick={() => setStreamMode(live ? "polling" : "live")}
-          data-testid="runs-stream-badge"
-        >
-          {streamLabel}
-        </button>
+        <Badge asChild variant={live ? "success" : "muted"}>
+          <button
+            type="button"
+            className="runs-stream-badge"
+            onClick={() => setStreamMode(live ? "polling" : "live")}
+            data-live={live ? "true" : undefined}
+            data-status={connectionStatus}
+            data-testid="runs-stream-badge"
+          >
+            <span aria-hidden className="sui-status-dot" />
+            {streamLabel}
+          </button>
+        </Badge>
         <span className="surface-sub">
           {shown.length} run{shown.length === 1 ? "" : "s"}
         </span>
@@ -333,13 +346,14 @@ export function RunsCanvas() {
 
       <div className="runs-scroll">
         {freshnessMessage ? (
-          <div
+          <Alert
+            variant="warning"
             className="runs-freshness"
             data-testid="runs-last-known"
             role={connectionStatus === "unauthorized" ? "alert" : "status"}
           >
-            {freshnessMessage}
-          </div>
+            <AlertDescription>{freshnessMessage}</AlertDescription>
+          </Alert>
         ) : null}
 
         {connectionStatus === "unauthorized" ? (

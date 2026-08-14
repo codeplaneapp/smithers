@@ -6,28 +6,13 @@
    decoration. */
 
 /* ---- Approval banner above the tree (waiting run) ---- */
-.runs-approval {
-  display: flex;
+.runs-inspector-approval {
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
   margin: 12px 14px 0;
-  padding: 10px 14px;
-  border: 1px solid color-mix(in srgb, var(--st-waiting) 40%, var(--border));
-  border-radius: 11px;
-  background: color-mix(in srgb, var(--st-waiting) 9%, var(--surface));
-  font-size: 13.5px;
 }
-.runs-approval::before {
-  content: "";
-  flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--st-waiting);
-  animation: dot-pulse 1.2s ease-in-out infinite;
-}
-.runs-approval b { font-weight: 650; }
-.runs-approval-actions { margin-left: auto; display: flex; gap: 8px; }
+.runs-inspector-approval b { font-weight: 650; }
+.runs-inspector-approval-actions { grid-column: 2; grid-row: 1; display: flex; gap: 8px; }
 
 /* ---- Resume button in the surface-head cluster (failed/cancelled) ---- */
 .run-resume { margin-left: 4px; }
