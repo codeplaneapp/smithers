@@ -4741,7 +4741,13 @@ async function legacyExecuteTask(
   let heartbeatWriteTimer;
   let traceCollector;
   const liveOwnedPids = new Set();
+  const pendingOwnedPids = new Set();
+  const activeCliActions = new Set();
+  const activeSdkToolExecutions = new Set();
+  const pendingSdkToolExecutions = new Set();
+  let streamActivityLeaseUntilMs = 0;
   let agentProcessObserved = false;
+  let agentProcessExited = false;
   // Construct the abort race only for an agent call that consumes it. A
   // static/compute attempt may never observe the promise; constructing it
   // eagerly would leave a rejected promise behind when the watchdog fires.
@@ -4843,6 +4849,11 @@ async function legacyExecuteTask(
         heartbeatHasPendingWrite = false;
         heartbeatOwnerLost = true;
         liveOwnedPids.clear();
+        pendingOwnedPids.clear();
+        activeCliActions.clear();
+        activeSdkToolExecutions.clear();
+        pendingSdkToolExecutions.clear();
+        streamActivityLeaseUntilMs = 0;
         traceCollector?.discard();
         heartbeatEvidenceAtMs = Math.max(startedAtMs, heartbeatLastPersistedWriteAtMs);
         if (!taskSignal.aborted) {
@@ -4950,7 +4961,15 @@ async function legacyExecuteTask(
    * @param {unknown} [data]
    */
   const recordInternalHeartbeat = (data) => {
+    if (agentProcessExited) return;
     queueHeartbeat(data, { internal: true });
+  };
+  const recordStreamActivityHeartbeat = () => {
+    if (agentProcessExited) return;
+    streamActivityLeaseUntilMs = desc.heartbeatTimeoutMs
+      ? nowMs() + desc.heartbeatTimeoutMs + TASK_HEARTBEAT_TIMEOUT_CHECK_MS
+      : 0;
+    recordInternalHeartbeat();
   };
   const waitForHeartbeatWriteDrain = async () => {
     while (heartbeatWriteInFlight) {
@@ -5077,6 +5096,8 @@ async function legacyExecuteTask(
   let handleAgentEvent;
   let handleSdkStepFinish;
   let handleProcess;
+  let handleToolExecutionStart;
+  let handleToolExecutionEnd;
   let latestAgentCheckpoint = null;
   let captureResultCheckpoint = async () => {};
   let enqueueAgentCheckpoint = async () => null;
@@ -5148,7 +5169,12 @@ async function legacyExecuteTask(
             return Effect.void;
           }
           const lastHeartbeatAtMs = Math.max(startedAtMs, heartbeatEvidenceAtMs);
-          if ([...liveOwnedPids].some((pid) => isPidAlive(pid))) {
+          const hasLiveActivity =
+            [...liveOwnedPids].some((pid) => isPidAlive(pid)) ||
+            activeCliActions.size > 0 ||
+            activeSdkToolExecutions.size > 0 ||
+            nowMs() < streamActivityLeaseUntilMs;
+          if (hasLiveActivity) {
             recordInternalHeartbeat();
             return Effect.void;
           }
@@ -6207,7 +6233,6 @@ async function legacyExecuteTask(
             );
           }
         }
-        const activeCliActions = new Set();
         let conversationMessages = guidedResumeMessages ? [...guidedResumeMessages] : null;
         /**
          * @param {unknown[] | undefined} messages
@@ -6604,6 +6629,7 @@ async function legacyExecuteTask(
           if (heartbeatOwnerLost) return;
           recordInternalHeartbeat();
           afterHeartbeatOwnership(async () => {
+            if (agentProcessExited) return;
             attemptMeta.agentEngine = event.engine ?? attemptMeta.agentEngine;
             let checkpointWrite = null;
             if ("resume" in event && typeof event.resume === "string") {
@@ -6688,16 +6714,48 @@ async function legacyExecuteTask(
             })
             .catch(() => {});
         };
-        handleProcess = ({ phase, pid }) => {
-          if (typeof pid !== "number" || pid <= 0 || heartbeatOwnerLost) return;
-          if (phase === "started") agentProcessObserved = true;
-          // A process callback is evidence only after the same fenced
-          // heartbeat used by stdout/stderr has proved ownership.
+        const toolExecutionKey = (event) =>
+          `${typeof event?.callId === "string" ? event.callId : "call"}:${
+            typeof event?.toolCall?.toolCallId === "string" ? event.toolCall.toolCallId : "tool"
+          }`;
+        handleToolExecutionStart = (event) => {
+          if (heartbeatOwnerLost) return;
+          const key = toolExecutionKey(event);
+          pendingSdkToolExecutions.add(key);
           recordInternalHeartbeat();
           afterHeartbeatOwnership(() => {
-            if (phase === "started") liveOwnedPids.add(pid);
-            else liveOwnedPids.delete(pid);
+            if (pendingSdkToolExecutions.has(key)) activeSdkToolExecutions.add(key);
           });
+        };
+        handleToolExecutionEnd = (event) => {
+          const key = toolExecutionKey(event);
+          pendingSdkToolExecutions.delete(key);
+          activeSdkToolExecutions.delete(key);
+          if (!heartbeatOwnerLost) recordInternalHeartbeat();
+        };
+        handleProcess = ({ phase, pid }) => {
+          if (typeof pid !== "number" || pid <= 0 || heartbeatOwnerLost) return;
+          if (phase === "exited") {
+            agentProcessExited = true;
+            pendingOwnedPids.delete(pid);
+            liveOwnedPids.delete(pid);
+            activeCliActions.clear();
+            pendingSdkToolExecutions.clear();
+            activeSdkToolExecutions.clear();
+            streamActivityLeaseUntilMs = 0;
+          } else {
+            agentProcessObserved = true;
+            agentProcessExited = false;
+          }
+          // A process callback is evidence only after the same fenced
+          // heartbeat used by stdout/stderr has proved ownership.
+          if (phase === "started") {
+            pendingOwnedPids.add(pid);
+            recordInternalHeartbeat();
+            afterHeartbeatOwnership(() => {
+              if (pendingOwnedPids.has(pid)) liveOwnedPids.add(pid);
+            });
+          }
           // Durable registry of live agent subprocesses: if this engine dies
           // without running cleanup (SIGKILL, OOM), the next CLI invocation
           // reaps whatever is still registered here instead of leaving
@@ -6901,7 +6959,7 @@ async function legacyExecuteTask(
                           timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
                           onStdout: (text) => {
                             if (heartbeatOwnerLost) return;
-                            recordInternalHeartbeat();
+                            recordStreamActivityHeartbeat();
                             afterHeartbeatOwnership(() => {
                               emitOutput(text, "stdout");
                               traceCollector?.onStdout(text);
@@ -6909,13 +6967,15 @@ async function legacyExecuteTask(
                           },
                           onStderr: (text) => {
                             if (heartbeatOwnerLost) return;
-                            recordInternalHeartbeat();
+                            recordStreamActivityHeartbeat();
                             afterHeartbeatOwnership(() => {
                               emitOutput(text, "stderr");
                               traceCollector?.onStderr(text);
                             });
                           },
                           onProcess: handleProcess,
+                          onToolExecutionStart: handleToolExecutionStart,
+                          onToolExecutionEnd: handleToolExecutionEnd,
                           onEvent: handleAgentEvent,
                           onCheckpoint: async (checkpoint) => {
                             await enqueueAgentCheckpoint(checkpoint, "progress");
@@ -7333,19 +7393,21 @@ async function legacyExecuteTask(
                 timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
                 onStdout: (text) => {
                   if (heartbeatOwnerLost) return;
-                  recordInternalHeartbeat();
+                  recordStreamActivityHeartbeat();
                   afterHeartbeatOwnership(() => {
                     emitOutput(text, "stdout");
                   });
                 },
                 onStderr: (text) => {
                   if (heartbeatOwnerLost) return;
-                  recordInternalHeartbeat();
+                  recordStreamActivityHeartbeat();
                   afterHeartbeatOwnership(() => {
                     emitOutput(text, "stderr");
                   });
                 },
                 onProcess: handleProcess,
+                onToolExecutionStart: handleToolExecutionStart,
+                onToolExecutionEnd: handleToolExecutionEnd,
                 onEvent: handleAgentEvent,
                 onCheckpoint: async (checkpoint) => {
                   await enqueueAgentCheckpoint(checkpoint, "progress");
@@ -7696,19 +7758,21 @@ async function legacyExecuteTask(
           timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
           onStdout: (text) => {
             if (heartbeatOwnerLost) return;
-            recordInternalHeartbeat();
+            recordStreamActivityHeartbeat();
             afterHeartbeatOwnership(() => {
               emitOutput(text, "stdout");
             });
           },
           onStderr: (text) => {
             if (heartbeatOwnerLost) return;
-            recordInternalHeartbeat();
+            recordStreamActivityHeartbeat();
             afterHeartbeatOwnership(() => {
               emitOutput(text, "stderr");
             });
           },
           onProcess: handleProcess,
+          onToolExecutionStart: handleToolExecutionStart,
+          onToolExecutionEnd: handleToolExecutionEnd,
           onEvent: handleAgentEvent,
           onCheckpoint: async (checkpoint) => {
             await enqueueAgentCheckpoint(checkpoint, "progress");
@@ -8276,6 +8340,12 @@ async function legacyExecuteTask(
   } finally {
     taskCompleted = true;
     heartbeatClosed = true;
+    pendingOwnedPids.clear();
+    liveOwnedPids.clear();
+    activeCliActions.clear();
+    pendingSdkToolExecutions.clear();
+    activeSdkToolExecutions.clear();
+    streamActivityLeaseUntilMs = 0;
     if (heartbeatWatchdogFiber) {
       await Effect.runPromise(Fiber.interrupt(heartbeatWatchdogFiber)).catch(() => {});
       heartbeatWatchdogFiber = null;

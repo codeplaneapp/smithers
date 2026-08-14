@@ -82,6 +82,14 @@ structured-output agents, validates the returned row, and persists to the
 matching table. Set `outputSchema={...}` only for a custom Drizzle table or
 string key it can't infer a schema from.
 
+`heartbeatTimeoutMs` is opt-in and does not change the global timeout. While
+an agent tool is executing, Smithers emits fenced periodic heartbeats until
+that tool finishes; streamed stdout/stderr and a live owned CLI subprocess also
+count as activity. A stalled agent with no stream, tool, subprocess, or explicit
+`runtime.heartbeat()` still fails when the window expires. Process-exit and
+task-completion cleanup remove liveness before a later timer tick, so stale
+activity cannot keep a dead attempt alive.
+
 <Warning>
 **Don't name an output field `iteration`, `runId`, or `nodeId`.** Smithers persists every output alongside those internal columns, so declaring one collides and the workflow fails to load (`bunx smthrs graph` errors before running). Loop counters hit this most: use `round`, `pass`, or `attempt` instead.
 </Warning>

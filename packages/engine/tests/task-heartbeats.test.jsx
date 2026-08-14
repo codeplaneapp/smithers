@@ -84,6 +84,53 @@ class NeverResolvingAgent {
     await new Promise(() => {});
   }
 }
+class SleepingToolAgent {
+  id = "sleeping-tool-agent";
+  async generate(options) {
+    const toolCall = { toolCallId: "sleep-1", toolName: "sleep", input: {} };
+    options.onToolExecutionStart?.({ callId: "call-1", messages: [], toolCall, toolContext: undefined });
+    await sleep(900);
+    options.onToolExecutionEnd?.({
+      callId: "call-1",
+      messages: [],
+      toolCall,
+      toolContext: undefined,
+      toolExecutionMs: 900,
+      toolOutput: { type: "tool-result", output: "awake" },
+    });
+    return { text: JSON.stringify({ value: 1 }) };
+  }
+}
+class PausedStreamingAgent {
+  id = "paused-streaming-agent";
+  async generate(options) {
+    options.onStdout?.("stream-started");
+    await sleep(650);
+    return { text: JSON.stringify({ value: 1 }) };
+  }
+}
+class CompletedToolThenHungAgent {
+  id = "completed-tool-then-hung-agent";
+  async generate(options) {
+    const event = { callId: "call-1", messages: [], toolCall: { toolCallId: "done-1" } };
+    options.onToolExecutionStart?.(event);
+    options.onToolExecutionEnd?.(event);
+    await new Promise(() => {});
+  }
+}
+class ProcessLifecycleAgent {
+  id = "process-lifecycle-agent";
+  exitedAtMs = 0;
+  async generate(options) {
+    options.onProcess?.({ phase: "started", pid: process.pid });
+    await sleep(700);
+    this.exitedAtMs = Date.now();
+    await sleep(5);
+    options.onProcess?.({ phase: "exited", pid: process.pid });
+    await sleep(100);
+    return { text: JSON.stringify({ value: 1 }) };
+  }
+}
 class CallbackCheckpointAgent {
   id = "callback-checkpoint-agent";
   constructor(db, checkpointJson) {
@@ -375,6 +422,88 @@ describe("task heartbeats", () => {
     expect(result.status).toBe("failed");
     const attempts = await new SmithersDb(db).listAttempts(result.runId, "silent", 0);
     expect(attempts[0]?.errorJson).toContain("TASK_HEARTBEAT_TIMEOUT");
+    cleanup();
+  }, 10_000);
+  test("an in-flight agent tool keeps the task alive beyond its heartbeat timeout", async () => {
+    const { smithers, outputs, db, cleanup } = buildSmithers();
+    const workflow = smithers(() => (
+      <Workflow name="heartbeat-live-tool">
+        <Task
+          id="tool"
+          output={outputs.outputA}
+          agent={new SleepingToolAgent()}
+          retries={0}
+          noRetry
+          heartbeatTimeoutMs={300}
+        >
+          Run a slow but live tool.
+        </Task>
+      </Workflow>
+    ));
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+    expect(result.status).toBe("finished");
+    const attempts = await new SmithersDb(db).listAttempts(result.runId, "tool", 0);
+    expect(attempts[0]?.heartbeatAtMs).toBeNumber();
+    cleanup();
+  }, 10_000);
+  test("an active stream lease keeps the task alive beyond its heartbeat timeout", async () => {
+    const { smithers, outputs, cleanup } = buildSmithers();
+    const workflow = smithers(() => (
+      <Workflow name="heartbeat-live-stream">
+        <Task
+          id="stream"
+          output={outputs.outputA}
+          agent={new PausedStreamingAgent()}
+          retries={0}
+          noRetry
+          heartbeatTimeoutMs={300}
+        >
+          Keep a live stream alive across a quiet provider interval.
+        </Task>
+      </Workflow>
+    ));
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+    expect(result.status).toBe("finished");
+    cleanup();
+  }, 10_000);
+  test("a completed tool cannot keep a subsequently hung agent alive", async () => {
+    const { smithers, outputs, db, cleanup } = buildSmithers();
+    const workflow = smithers(() => (
+      <Workflow name="heartbeat-completed-tool">
+        <Task
+          id="tool"
+          output={outputs.outputA}
+          agent={new CompletedToolThenHungAgent()}
+          retries={0}
+          noRetry
+          heartbeatTimeoutMs={200}
+        >
+          Finish the tool, then hang without activity.
+        </Task>
+      </Workflow>
+    ));
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+    expect(result.status).toBe("failed");
+    const attempts = await new SmithersDb(db).listAttempts(result.runId, "tool", 0);
+    expect(attempts[0]?.errorJson).toContain("TASK_HEARTBEAT_TIMEOUT");
+    cleanup();
+  }, 10_000);
+  test("process exit stops lifecycle heartbeats", async () => {
+    const { smithers, outputs, db, cleanup } = buildSmithers();
+    const agent = new ProcessLifecycleAgent();
+    const workflow = smithers(() => (
+      <Workflow name="heartbeat-process-exit">
+        <Task id="process" output={outputs.outputA} agent={agent} retries={0} noRetry>
+          Stop heartbeating when the reported process exits.
+        </Task>
+      </Workflow>
+    ));
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+    expect(result.status).toBe("finished");
+    const events = await new SmithersDb(db).listEventHistory(result.runId, { limit: 200 });
+    expect(
+      events.filter((event) => event.type === "TaskHeartbeat" && event.timestampMs > agent.exitedAtMs),
+    ).toHaveLength(0);
     cleanup();
   }, 10_000);
   test("legacy compute watchdog abort has no unhandled task-abort rejection", async () => {
