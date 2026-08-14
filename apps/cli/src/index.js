@@ -179,6 +179,7 @@ import { saveOneshotConfig } from "./oneshot/saveOneshotConfig.js";
 import { resolveOneshotChain } from "./oneshot/resolveOneshotChain.js";
 import { classifyOneshotGoal } from "./oneshot/classifyOneshotGoal.js";
 import { rewriteOneshotBooleanValues } from "./oneshot/rewriteOneshotBooleanValues.js";
+import { resolveOneshotResumeSettings } from "./oneshot/resolveOneshotResumeSettings.js";
 import { selectOneshotAgents } from "./oneshot/selectOneshotAgents.js";
 import { createOneshotMonitorControl } from "./oneshot/monitor-control.js";
 import { oneshotCta } from "./oneshot/oneshotCta.js";
@@ -8291,12 +8292,68 @@ const cli = Cli.create({
         });
       }
       let goal = c.args.goal;
-      if (c.options.goalFile) {
+      let goalFile = c.options.goalFile ? resolve(process.cwd(), c.options.goalFile) : undefined;
+      if (goalFile) {
         try {
-          goal = readFileSync(resolve(process.cwd(), c.options.goalFile), "utf8");
+          goal = readFileSync(goalFile, "utf8");
         } catch (error) {
           return fail({ code: "GOAL_FILE_READ_FAILED", message: error?.message ?? String(error), exitCode: 4 });
         }
+      }
+      let resumeSettings;
+      if (c.options.resume) {
+        if (!c.options.runId) {
+          return fail({
+            code: "ONESHOT_RESUME_RUN_ID_REQUIRED",
+            message: "Pass --run-id to resume an existing oneshot run.",
+            exitCode: 4,
+          });
+        }
+        let cleanup;
+        try {
+          const opened = await findAndOpenDb(taskCwd);
+          cleanup = opened.cleanup;
+          const run = await opened.adapter.getRun(c.options.runId);
+          if (!run) {
+            return fail({
+              code: "RUN_NOT_FOUND",
+              message: `Run not found: ${c.options.runId}`,
+              exitCode: 4,
+            });
+          }
+          resumeSettings = resolveOneshotResumeSettings(run.configJson);
+          if (!resumeSettings) {
+            return fail({
+              code: "ONESHOT_RESUME_CONFIG_MISSING",
+              message: `Run ${c.options.runId} does not contain a complete persisted oneshot goal.`,
+              exitCode: 4,
+            });
+          }
+        } catch (error) {
+          return fail({
+            code: error instanceof SmithersError ? error.code : "ONESHOT_RESUME_LOAD_FAILED",
+            message: error?.message ?? String(error),
+            exitCode: 4,
+          });
+        } finally {
+          cleanup?.();
+        }
+
+        const changed = [
+          goal?.trim() && goal !== resumeSettings.goal ? "goal" : null,
+          c.options.review !== undefined && c.options.review !== resumeSettings.review ? "review" : null,
+          c.options.model !== undefined && c.options.model !== resumeSettings.model ? "model" : null,
+          c.options.agent !== undefined && c.options.agent !== resumeSettings.agent ? "agent" : null,
+        ].filter(Boolean);
+        if (changed.length > 0) {
+          return fail({
+            code: "ONESHOT_RESUME_INPUT_MISMATCH",
+            message: `Cannot change persisted oneshot ${changed.join(", ")} while resuming; omit the override or start a new run.`,
+            exitCode: 4,
+          });
+        }
+        goal = resumeSettings.goal;
+        goalFile ??= resumeSettings.goalFile;
       }
       if (!goal?.trim()) {
         if (c.options.setReview || c.options.setTrivial) return c.ok({ preferences: config });
@@ -8306,7 +8363,7 @@ const cli = Cli.create({
           exitCode: 4,
         });
       }
-      if (Buffer.byteLength(goal, "utf8") > 64 * 1024 && !c.options.goalFile) {
+      if (Buffer.byteLength(goal, "utf8") > 64 * 1024 && !goalFile) {
         return fail({
           code: "ONESHOT_GOAL_TOO_LARGE",
           message: "Goals above 64KB must be supplied with --goal-file.",
@@ -8315,7 +8372,9 @@ const cli = Cli.create({
       }
       if (usable.length === 0)
         return fail({ code: "NO_USABLE_AGENTS", message: formatNoUsableAgentsMessage(relevant), exitCode: 4 });
-      const review = (c.options.review ?? config.review ?? "off") === "on";
+      const model = resumeSettings?.model ?? c.options.model;
+      const agent = resumeSettings?.agent ?? c.options.agent;
+      const review = (resumeSettings?.review ?? c.options.review ?? config.review ?? "off") === "on";
       const localPack = resolvePackDirs(taskCwd).find((entry) => entry.scope === "local");
       const overrideEntry = localPack ? join(localPack.packDir, "workflows", "oneshot.tsx") : undefined;
       const hasOverride = Boolean(overrideEntry && existsSync(overrideEntry));
@@ -8359,7 +8418,6 @@ const cli = Cli.create({
             exitCode: 4,
           });
         }
-        const goalFile = c.options.goalFile ? resolve(process.cwd(), c.options.goalFile) : undefined;
         return runTuiCommand(
           {
             ...c,
@@ -8395,8 +8453,8 @@ const cli = Cli.create({
                 goalFile,
                 cwd: taskCwd,
                 review: review ? "on" : "off",
-                model: c.options.model,
-                agent: c.options.agent,
+                model,
+                agent,
                 preflight: preflightMode,
                 runId: c.options.runId,
                 resume: c.options.resume,
@@ -8421,11 +8479,11 @@ const cli = Cli.create({
         const childArgs = buildOneshotChildArgs({
           cliPath: fileURLToPath(import.meta.url),
           goal,
-          goalFile: c.options.goalFile ? resolve(process.cwd(), c.options.goalFile) : undefined,
+          goalFile,
           cwd: taskCwd,
           review: review ? "on" : "off",
-          model: c.options.model,
-          agent: c.options.agent,
+          model,
+          agent,
           preflight: preflightMode,
           runId: c.options.runId,
           resume: c.options.resume,
@@ -8495,7 +8553,7 @@ const cli = Cli.create({
             input: JSON.stringify({
               goal: goalForWorkflow,
               review: review ? "on" : "off",
-              model: c.options.model ?? "auto",
+              model: model ?? "auto",
             }),
             root: taskCwd,
             startedByHarness: c.options.startedByHarness,
@@ -8515,8 +8573,8 @@ const cli = Cli.create({
       try {
         const selected = await selectOneshotAgents(detections, {
           cwd: taskCwd,
-          model: c.options.model,
-          agent: c.options.agent,
+          model,
+          agent,
           goal,
         });
         const workflow = await buildOneshotWorkflow({
@@ -8569,8 +8627,8 @@ const cli = Cli.create({
             review ? "on" : "off",
             "--preflight",
             preflightMode,
-            ...(c.options.model ? ["--model", c.options.model] : []),
-            ...(c.options.agent ? ["--agent", c.options.agent] : []),
+            ...(model ? ["--model", model] : []),
+            ...(agent ? ["--agent", agent] : []),
           ],
           cwd: taskCwd,
         });
