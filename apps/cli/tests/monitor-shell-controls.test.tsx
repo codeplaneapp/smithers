@@ -262,6 +262,28 @@ describe("migrated monitor surfaces", () => {
     expect(byTestId("monitor-stat-test").textContent).toContain("active runs");
     expect(byTestId("monitor-run-progress").textContent).toContain("4/5");
     expect(byTestId("monitor-run-progress").textContent).toContain("1 failed");
+    const progress = byTestId("monitor-run-progress").querySelector('[data-slot="progress"]');
+    expect(progress).not.toBeNull();
+    expect(progress?.getAttribute("role")).toBe("progressbar");
+    expect(progress?.getAttribute("aria-label")).toBe("4 of 5 nodes complete");
+    expect(progress?.getAttribute("aria-valuenow")).toBe("4");
+    expect(progress?.getAttribute("aria-valuemax")).toBe("5");
+    expect(progress?.className).toContain("mon-table-progress");
+  });
+
+  test("preserves complete and missing-summary progress semantics", async () => {
+    await render(<RunProgressCell run={{ ...run, status: "finished", summary: { finished: 2, skipped: 1 } }} />);
+    const complete = byTestId("monitor-run-progress");
+    const progress = complete.querySelector('[data-slot="progress"]');
+    expect(complete.textContent).toContain("3/3");
+    expect(complete.textContent).not.toContain("failed");
+    expect(progress?.getAttribute("aria-valuenow")).toBe("3");
+    expect(progress?.getAttribute("aria-valuemax")).toBe("3");
+
+    await rerender(<RunProgressCell run={{ ...run, summary: undefined }} />);
+    expect(document.body.textContent).toContain("—");
+    expect(document.querySelector('[data-testid="monitor-run-progress"]')).toBeNull();
+    expect(document.querySelector('[data-slot="progress"]')).toBeNull();
   });
 
   test("renders populated, loading, empty, offline, and unauthorized run-rail states", async () => {
@@ -396,7 +418,7 @@ describe("migrated monitor surfaces", () => {
     let retries = 0;
     await render(<RunsTable runs={[run]} loading page={1} onPageChange={() => {}} onSelect={() => {}} />);
     expect(byTestId("monitor-runs-table")).toBeDefined();
-    expect(document.querySelector('[data-state="loading"]')).toBeNull();
+    expect(document.querySelector('[data-testid="monitor-empty-detail"][data-state="loading"]')).toBeNull();
 
     await rerender(
       <RunsTable
