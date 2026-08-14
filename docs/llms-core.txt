@@ -1886,6 +1886,18 @@ workflows. The human talks to you. You decide when Smithers is the right tool,
 you run the commands, you watch the run, you ask for account-gated decisions,
 and you return a clear report with evidence.
 
+Before any of that, check one thing:
+
+> **If `SMITHERS_INSIDE_RUN` is set in your environment, none of this page
+> applies to you.** That variable means you are already a worker agent executing
+> one node of a Smithers run; Smithers sets it on every agent it spawns. Do the
+> node's task directly with your ordinary tools and finish your turn. Never
+> invoke the Smithers CLI or MCP tools to launch, poll, or steer a run from
+> inside a node; the prompt you were handed is the work, not a request to
+> orchestrate. The one exception is escalating upward with
+> `bunx smthrs ask-human` (or the `ask_human` MCP tool) when you are blocked or
+> about to do something irreversible.
+
 If you remember one rule, remember this:
 
 > Do not ask the human to run Smithers commands. The human's job is to state the
@@ -2395,6 +2407,27 @@ Oneshot runs directly in `--cwd`, so a stale detached lineage, foreign WIP, or
 `.jjconflict*` tree can be swept into a goal commit and make landing unsafe.
 The default `--preflight auto` warns and prepends agent-judged triage
 instructions; use `warn` to warn without injection or `off` to skip assessment.
+
+### Sharing a directory with another run
+
+Preflight treats dirty paths as pre-existing work the agent may snapshot into
+its own commit. That is only true when nothing else is producing them. Launch
+therefore asks the workspace store which runs are still working in `--cwd`,
+using the same PID-verified liveness `bunx smthrs ps` reports. A run whose engine
+is dead does not count.
+
+When another run is live there, preflight names it, and the injected
+instructions flip: the agent commits only the paths its own goal work touches,
+by explicit pathspec, and leaves every other path alone. It does not snapshot,
+stash, revert, or gitignore anything, because those changes belong to a run
+that is still editing them.
+
+The two clean fixes are to wait for that run, or to relaunch with `--cwd`
+pointing at an isolated worktree. `--preflight force-commit` keeps the old
+behavior for the case where you know the tree is yours.
+
+Two launches that race inside the scan window can still each see an empty
+store and proceed. Sequential launches, the common case, are covered.
 
 ## Watching and steering a oneshot
 
@@ -6397,6 +6430,8 @@ Both use the graph resolver, so they match the path Smithers gives worker tasks.
   symlink node_modules from, or write into, the parent checkout. An install through a shared
   node_modules link rewrites the parent checkout's workspace links to point into the
   worktree, all of which dangle once the worktree is removed.
+- **Worktree lanes are disposable, including ignored files.** Reaping deletes the lane
+  directory after the run ends. Commit anything valuable or copy it outside the lane first.
 - **jj continuously snapshots a worktree's working copy onto its bookmark.** A compute
   `<Task>` (or helper) that checks for changes with `git status --porcelain` can see a
   *clean* tree and skip its work, because jj has already committed the working-copy edits to

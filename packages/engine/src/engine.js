@@ -197,7 +197,10 @@ function acquireWorktreeCreationSlot(root) {
 function resolveBinary(cmd) {
   const bunRuntime = typeof Bun !== "undefined" ? Bun : null;
   if (typeof bunRuntime?.which === "function") {
-    return bunRuntime.which(cmd);
+    const resolved = bunRuntime.which(cmd);
+    if (resolved) {
+      return resolved;
+    }
   }
   const pathEnv = typeof process !== "undefined" ? process.env.PATH : undefined;
   if (!pathEnv) {
@@ -3923,6 +3926,112 @@ function attemptQuotaResetAtMs(attempt) {
     return null;
   }
 }
+
+const RUN_DISABLED_AGENTS_META_KEY = "runDisabledAgents";
+
+/**
+ * Stable identity for a run-scoped agent circuit breaker. Registered/custom
+ * agents already carry durable ids; anonymous CLI agents fall back to their
+ * engine, model, and account config directory so a fresh process can rebuild
+ * the same identity on resume without persisting credentials.
+ * @param {any} agent
+ * @returns {string | null}
+ */
+function agentRunDisableKey(agent) {
+  if (!agent || typeof agent !== "object") return null;
+  const opts =
+    agent.opts && typeof agent.opts === "object"
+      ? agent.opts
+      : agent.options && typeof agent.options === "object"
+        ? agent.options
+        : null;
+  const explicitId = typeof opts?.id === "string" && opts.id ? opts.id : null;
+  if (explicitId) return `id:${explicitId}`;
+  if (agent.constructor?.name === "Object" && typeof agent.id === "string" && agent.id) {
+    return `id:${agent.id}`;
+  }
+  const engine =
+    typeof agent.cliEngine === "string" && agent.cliEngine
+      ? agent.cliEngine
+      : typeof agent.constructor?.name === "string" && agent.constructor.name
+        ? agent.constructor.name
+        : null;
+  if (!engine) return typeof agent.id === "string" && agent.id ? `id:${agent.id}` : null;
+  const model = typeof agent.model === "string" ? agent.model : typeof opts?.model === "string" ? opts.model : "";
+  const configDir = typeof opts?.configDir === "string" ? opts.configDir : "";
+  return `engine:${engine}:${model}:${configDir}`;
+}
+
+/** @param {Set<any> | undefined} disabledAgents @param {any} agent */
+function isAgentDisabledForRun(disabledAgents, agent) {
+  const key = agentRunDisableKey(agent);
+  return Boolean(disabledAgents?.has(agent) || (key && disabledAgents?.has(key)));
+}
+
+/**
+ * Persist a circuit-breaker decision on the attempt that observed it while
+ * applying it immediately to the live run.
+ * @param {Set<any> | undefined} disabledAgents
+ * @param {Record<string, any>} attemptMeta
+ * @param {any} agent
+ * @param {string} reason
+ */
+function disableAgentForRun(disabledAgents, attemptMeta, agent, reason) {
+  const key = agentRunDisableKey(agent);
+  if (!disabledAgents || !key) return;
+  disabledAgents.add(agent);
+  disabledAgents.add(key);
+  const existing = Array.isArray(attemptMeta[RUN_DISABLED_AGENTS_META_KEY])
+    ? attemptMeta[RUN_DISABLED_AGENTS_META_KEY]
+    : [];
+  if (!existing.some((entry) => entry?.key === key)) {
+    attemptMeta[RUN_DISABLED_AGENTS_META_KEY] = [...existing, { key, reason }];
+  }
+}
+
+/** @param {AttemptRow[]} attempts */
+function durableDisabledAgentsFromAttempts(attempts) {
+  const disabled = new Set();
+  for (const attempt of attempts) {
+    const entries = parseAttemptMetaJson(attempt.metaJson)?.[RUN_DISABLED_AGENTS_META_KEY];
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      if (typeof entry?.key === "string" && entry.key) disabled.add(entry.key);
+    }
+  }
+  return disabled;
+}
+
+/**
+ * Kimi can identify a discarded broken session precisely. Two such failures
+ * from the same engine are enough to stop opening more sessions in this run.
+ * @param {Record<string, unknown>} errorJson
+ * @param {Record<string, unknown>} attemptMeta
+ */
+function isKimiBrokenSessionFailure(errorJson, attemptMeta) {
+  if (errorJson.code !== "AGENT_SESSION_LOST") return false;
+  const details = errorJson.details;
+  if (!details || typeof details !== "object") return false;
+  const typed = /** @type {{ discardResumeSession?: unknown; command?: unknown }} */ (details);
+  return typed.discardResumeSession === true && (typed.command === "kimi" || attemptMeta.agentEngine === "kimi");
+}
+
+/** @param {AttemptRow[]} attempts @param {string | null} key */
+function priorKimiBrokenSessionCount(attempts, key) {
+  if (!key) return 0;
+  let count = 0;
+  for (const attempt of attempts) {
+    if (attempt.state !== "failed" || !attempt.errorJson) continue;
+    const meta = parseAttemptMetaJson(attempt.metaJson);
+    if (meta.agentRunKey !== key) continue;
+    try {
+      if (isKimiBrokenSessionFailure(JSON.parse(attempt.errorJson), meta)) count += 1;
+    } catch {
+      // Malformed legacy failures cannot justify disabling an engine.
+    }
+  }
+  return count;
+}
 /**
  * Chain rungs that are rate-limited in the CURRENT failover round, with the
  * provider reset time each one reported.
@@ -4024,7 +4133,8 @@ function resolveQuotaChainFailover(
     if (resetAtMs != null) resets.set(chainIndex, resetAtMs);
   }
   const failoverPending = chain.some(
-    (agent, index) => !blocked.has(index) && !disabledAgents?.has(agent) && !preflightFailedIndices?.has(index),
+    (agent, index) =>
+      !blocked.has(index) && !isAgentDisabledForRun(disabledAgents, agent) && !preflightFailedIndices?.has(index),
   );
   const resetTimes = [...resets.values()];
   return {
@@ -5449,7 +5559,7 @@ async function legacyExecuteTask(
       const allAgents = Array.isArray(desc.agent) ? desc.agent : desc.agent ? [desc.agent] : [];
       const chainEntries = allAgents.map((agent, chainIndex) => ({ agent, chainIndex }));
       const enabledEntries = disabledAgents
-        ? chainEntries.filter((entry) => !disabledAgents.has(entry.agent))
+        ? chainEntries.filter((entry) => !isAgentDisabledForRun(disabledAgents, entry.agent))
         : chainEntries;
       const selectionPool = enabledEntries.length > 0 ? enabledEntries : chainEntries; // fall back to disabled agents if all disabled
       // Which rung of the failover chain this attempt lands on. Attempts are
@@ -5548,7 +5658,7 @@ async function legacyExecuteTask(
           const isAuthError =
             /invalid_authentication|401|api.key.*invalid|expired.*credentials|authentication.*failed/i.test(errStr);
           if (isAuthError && disabledAgents && i < selectionPool.length - 1) {
-            disabledAgents.add(candidate);
+            disableAgentForRun(disabledAgents, attemptMeta, candidate, "authentication");
           }
           // Advance to the next candidate; if this was the last one,
           // the backward scan below gets a chance before the preflight
@@ -5776,6 +5886,7 @@ async function legacyExecuteTask(
           attemptMeta.agentChainIndex = effectiveChainIndex;
         }
         attemptMeta.agentId = effectiveAgent.id ?? effectiveAgent.constructor?.name ?? null;
+        attemptMeta.agentRunKey = agentRunDisableKey(effectiveAgent);
         attemptMeta.agentModel = effectiveAgent.model ?? effectiveAgent.modelId ?? null;
         const hijackCapableEngine =
           typeof effectiveAgent.cliEngine === "string"
@@ -8210,6 +8321,26 @@ async function legacyExecuteTask(
     );
     const failedAtMs = nowMs();
     const failureErrorJson = errorToJson(effectiveError);
+    const failureText = String(effectiveError?.message ?? effectiveError ?? "") + (responseText ?? "");
+    const isAuthError = /invalid_authentication|401|api.key.*invalid|expired.*credentials|authentication.*failed/i.test(
+      failureText,
+    );
+    if (effectiveAgent && isQuotaErrorPayload(failureErrorJson)) {
+      disableAgentForRun(disabledAgents, attemptMeta, effectiveAgent, "quota");
+    } else if (effectiveAgent && isAuthError) {
+      disableAgentForRun(disabledAgents, attemptMeta, effectiveAgent, "authentication");
+    } else if (
+      effectiveAgent &&
+      isKimiBrokenSessionFailure(failureErrorJson, attemptMeta) &&
+      priorKimiBrokenSessionCount(
+        await Effect.runPromise(adapter.listAttemptsForRun(runId)),
+        agentRunDisableKey(effectiveAgent),
+      ) +
+        1 >=
+        2
+    ) {
+      disableAgentForRun(disabledAgents, attemptMeta, effectiveAgent, "kimi-broken-session");
+    }
     // A rate limit on one rung of a failover chain is not a reason to stall the
     // whole lane: tell the scheduler to retry the task on the next agent that
     // is not itself rate-limited. The run only parks (waiting-quota) once every
@@ -8281,26 +8412,19 @@ async function legacyExecuteTask(
       }),
     );
     if (!failureClaimed) return;
-    // Circuit-breaker: disable agents that fail with auth errors
-    if (disabledAgents && effectiveAgent) {
-      const errStr = String(effectiveError?.message ?? effectiveError ?? "") + (responseText ?? "");
-      const isAuthError =
-        /invalid_authentication|401|api.key.*invalid|expired.*credentials|authentication.*failed/i.test(errStr);
-      if (isAuthError) {
-        disabledAgents.add(effectiveAgent);
-        const agentName = effectiveAgent?.model ?? effectiveAgent?.id ?? "unknown";
-        logWarning(
-          "disabled agent after auth failure",
-          {
-            runId,
-            nodeId: desc.nodeId,
-            iteration: desc.iteration,
-            attempt: attemptNo,
-            agentName,
-          },
-          "engine:task-circuit-breaker",
-        );
-      }
+    if (disabledAgents && effectiveAgent && isAuthError) {
+      const agentName = effectiveAgent?.model ?? effectiveAgent?.id ?? "unknown";
+      logWarning(
+        "disabled agent after auth failure",
+        {
+          runId,
+          nodeId: desc.nodeId,
+          iteration: desc.iteration,
+          attempt: attemptNo,
+          agentName,
+        },
+        "engine:task-circuit-breaker",
+      );
     }
     /** @type {any} */ (toolConfig).reportError?.(effectiveError, {
       phase: "node",
@@ -8860,7 +8984,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
     );
   let workflowSession;
   const renderer = new SmithersRenderer();
-  const disabledAgents = new Set();
+  const disabledAgents = durableDisabledAgentsFromAttempts(await Effect.runPromise(adapter.listAttemptsForRun(runId)));
   const toolConfig = {
     rootDir,
     allowNetwork,
@@ -11040,6 +11164,7 @@ export const __engineInternals = {
   cloneRalphStateMap,
   buildCarriedInputRow,
   continueRunAsNew,
+  resolveBinary,
   resolveRootDir,
   resolveLogDir,
   getWorkflowImportScanLoader,

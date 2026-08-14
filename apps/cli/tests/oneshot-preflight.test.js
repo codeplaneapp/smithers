@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { assessWorkingCopy, buildPreflightNotice, needsPreflightNotice } from "../src/oneshot-preflight.js";
+import {
+  assessWorkingCopy,
+  buildPreflightNotice,
+  needsPreflightNotice,
+  preflightConfigEntry,
+} from "../src/oneshot-preflight.js";
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../..");
 const cliEntry = join(repoRoot, "apps/cli/src/index.js");
@@ -145,14 +150,82 @@ test("buildPreflightNotice renders the warning and compact agent triage from the
   expect(notice.preamble.split("\n").length).toBeLessThan(27);
 });
 
-test("oneshot flag schema parses preflight as auto by default", () => {
+// Bug 01kzzaqfx1g9qaefqxrderdz4m: with another run mid-flight in the same
+// directory, the dirty paths are that run's work, so the preamble must not
+// instruct the agent to snapshot, stash, or gitignore any of it.
+describe("buildPreflightNotice with another run active in the cwd", () => {
+  const dirtySummary = {
+    vcs: "git",
+    clean: false,
+    cwd: "/workspace",
+    root: "/workspace",
+    dirty: { modified: 3, untracked: 1, staged: 2, conflicted: 0 },
+    jjConflictPaths: [],
+    detachedHead: false,
+  };
+  const activeRuns = [
+    { runId: "oneshot-mssgmr3t", state: "running" },
+    { runId: "oneshot-mssgvuua", state: "waiting-approval" },
+  ];
+
+  test("names every active run and points at the two real options", () => {
+    const notice = buildPreflightNotice(dirtySummary, "oneshot-new", activeRuns);
+    expect(notice.warning).toContain("2 other runs are still working in /workspace");
+    expect(notice.warning).toContain("oneshot-mssgmr3t (running)");
+    expect(notice.warning).toContain("oneshot-mssgvuua (waiting-approval)");
+    expect(notice.warning).toContain("will NOT commit");
+    expect(notice.warning).toContain("isolated worktree");
+    expect(notice.warning).toContain("--preflight force-commit");
+  });
+
+  test("the preamble never instructs the agent to absorb the other run's work", () => {
+    const notice = buildPreflightNotice(dirtySummary, "oneshot-new", activeRuns);
+    expect(notice.preamble).not.toContain("chore(preflight): preserve pre-existing working-copy changes");
+    expect(notice.preamble).not.toContain("git stash push");
+    expect(notice.preamble).not.toContain(".gitignore`");
+    expect(notice.preamble).toContain("Another run is working in this same directory right now");
+    expect(notice.preamble).toContain("oneshot-mssgmr3t (running)");
+    expect(notice.preamble).toContain("Do NOT commit, stash, revert, `git add`, or gitignore any path you did not");
+    expect(notice.preamble).toContain("Never `git add -A` or `git commit -a`");
+    // The goal-work rules still apply.
+    expect(notice.preamble).toContain("`git add` every NEW file");
+  });
+
+  test("with no active run the original triage is unchanged", () => {
+    const notice = buildPreflightNotice(dirtySummary, "oneshot-new", []);
+    expect(notice.preamble).toContain(
+      "chore(preflight): preserve pre-existing working-copy changes before oneshot-new",
+    );
+    expect(notice.preamble).toContain("git stash push");
+  });
+
+  test("a clean tree shared with an active run still warns", () => {
+    const notice = buildPreflightNotice(
+      { ...dirtySummary, clean: true, dirty: { modified: 0, untracked: 0, staged: 0, conflicted: 0 } },
+      "oneshot-new",
+      activeRuns,
+    );
+    expect(notice.warning).toContain("still working in /workspace");
+    expect(notice.warning).toContain("no pending file changes");
+  });
+
+  test("the durable config records which runs were active", () => {
+    expect(preflightConfigEntry("auto", dirtySummary, activeRuns)).toMatchObject({
+      mode: "auto",
+      activeRunsInCwd: ["oneshot-mssgmr3t", "oneshot-mssgvuua"],
+    });
+    expect(preflightConfigEntry("auto", dirtySummary, [])).not.toHaveProperty("activeRunsInCwd");
+  });
+});
+
+test("oneshot flag schema parses preflight as auto by default and offers the escape hatch", () => {
   const result = spawnSync(process.execPath, ["run", cliEntry, "oneshot", "--schema", "--format", "json"], {
     cwd: repoRoot,
     encoding: "utf8",
   });
   expect(result.status).toBe(0);
   const preflight = JSON.parse(result.stdout).options.properties.preflight;
-  expect(preflight).toMatchObject({ default: "auto", enum: ["auto", "warn", "off"] });
+  expect(preflight).toMatchObject({ default: "auto", enum: ["auto", "warn", "off", "force-commit"] });
 }, 30_000);
 
 test("oneshot warns for dirty and detached cwd states and stays quiet for a clean one", () => {
@@ -187,7 +260,7 @@ export default smithers(() => <Workflow name="custom-oneshot"><Task id="done" ou
     OPENAI_API_KEY: "sk-oneshot-preflight-fixture",
   };
   let runNumber = 0;
-  const run = () =>
+  const run = (...extra) =>
     spawnSync(
       process.execPath,
       [
@@ -203,6 +276,7 @@ export default smithers(() => <Workflow name="custom-oneshot"><Task id="done" ou
         "false",
         "--review",
         "off",
+        ...extra,
       ],
       { cwd, env, encoding: "utf8", timeout: 30_000 },
     );
@@ -245,5 +319,56 @@ export default smithers(() => <Workflow name="custom-oneshot"><Task id="done" ou
     });
   } finally {
     db.close();
+  }
+
+  // Bug 01kzzaqfx1g9qaefqxrderdz4m: another run is live in this same tree.
+  // Seed it the way a real concurrent launch would: a running row whose
+  // config names this rootDir, owned by a pid that is demonstrably alive.
+  const seed = new Database(join(cwd, "smithers.db"));
+  try {
+    seed.run(
+      "update _smithers_runs set status = 'running', finished_at_ms = null, heartbeat_at_ms = ?," +
+        " runtime_owner_id = ?, config_json = ? where run_id = ?",
+      [Date.now(), `pid:${process.pid}`, JSON.stringify({ rootDir: cwd }), "preflight-e2e-3"],
+    );
+  } finally {
+    seed.close();
+  }
+
+  const shared = run();
+  if (shared.status !== 0) {
+    throw new Error(`shared-cwd oneshot failed:\nstdout=${shared.stdout}\nstderr=${shared.stderr}`);
+  }
+  const sharedOutput = `${shared.stdout}${shared.stderr}`;
+  expect(sharedOutput).toContain("still working in");
+  expect(sharedOutput).toContain("preflight-e2e-3");
+  expect(sharedOutput).toContain("will NOT commit");
+  const sharedDb = new Database(join(cwd, "smithers.db"), { readonly: true });
+  try {
+    const row = sharedDb
+      .query("select config_json as configJson from _smithers_runs where run_id = ?")
+      .get("preflight-e2e-4");
+    expect(JSON.parse(row.configJson).oneshot.preflight.activeRunsInCwd).toEqual(["preflight-e2e-3"]);
+  } finally {
+    sharedDb.close();
+  }
+
+  // The escape hatch keeps the old behavior explicit: no scan, no shared-cwd
+  // warning, and nothing recorded about other runs.
+  const forced = run("--preflight", "force-commit");
+  if (forced.status !== 0) {
+    throw new Error(`force-commit oneshot failed:\nstdout=${forced.stdout}\nstderr=${forced.stderr}`);
+  }
+  expect(`${forced.stdout}${forced.stderr}`).not.toContain("still working in");
+  const forcedDb = new Database(join(cwd, "smithers.db"), { readonly: true });
+  try {
+    const row = forcedDb
+      .query("select config_json as configJson from _smithers_runs where run_id = ?")
+      .get("preflight-e2e-5");
+    const preflight = JSON.parse(row.configJson).oneshot.preflight;
+    expect(preflight.mode).toBe("force-commit");
+    expect(preflight.activeRunsInCwd).toBeUndefined();
+  } finally {
+    forcedDb.close();
   }
 }, 60_000);

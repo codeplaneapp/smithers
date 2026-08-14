@@ -125,6 +125,27 @@ Oneshot runs directly in `--cwd`, so a stale detached lineage, foreign WIP, or
 The default `--preflight auto` warns and prepends agent-judged triage
 instructions; use `warn` to warn without injection or `off` to skip assessment.
 
+### Sharing a directory with another run
+
+Preflight treats dirty paths as pre-existing work the agent may snapshot into
+its own commit. That is only true when nothing else is producing them. Launch
+therefore asks the workspace store which runs are still working in `--cwd`,
+using the same PID-verified liveness `bunx smthrs ps` reports. A run whose engine
+is dead does not count.
+
+When another run is live there, preflight names it, and the injected
+instructions flip: the agent commits only the paths its own goal work touches,
+by explicit pathspec, and leaves every other path alone. It does not snapshot,
+stash, revert, or gitignore anything, because those changes belong to a run
+that is still editing them.
+
+The two clean fixes are to wait for that run, or to relaunch with `--cwd`
+pointing at an isolated worktree. `--preflight force-commit` keeps the old
+behavior for the case where you know the tree is yours.
+
+Two launches that race inside the scan window can still each see an empty
+store and proceed. Sequential launches, the common case, are covered.
+
 ## Watching and steering a oneshot
 
 Every launch CTA tells the operator to offer the monitor to the user. Open it
