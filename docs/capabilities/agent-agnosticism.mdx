@@ -76,9 +76,9 @@ Retries walk the chain in order. For explicit cheap-model-first escalation with 
 The engine (`packages/engine/src/engine.js`) treats `AGENT_QUOTA_EXCEEDED` specially:
 
 - A quota-limited attempt **never consumes the retry budget** - the retry happens as if the attempt never occurred.
-- A rate limit is a property of the *provider*, not the task, so the next attempt fails over to the next non-blocked rung in the agent chain rather than hammering the blocked one. The blocked-rung set and each provider's reported reset time are persisted in attempt metadata, so failover survives a restart.
+- A rate limit is a property of the *provider*, not the task, so that engine is disabled for the rest of the run. Every later attempt of every node skips it and fails over to the next usable rung. The run-wide disable is persisted in attempt metadata, so a resumed process does not probe the exhausted engine again.
 - Only when **every** rung is blocked does the run park in `waiting-quota` - with the *earliest* reset among the blocked providers, so it wakes as soon as any of them frees up. The gateway's timer/quota sweep resumes it automatically.
-- Chain rungs disabled for repeated *genuine* failures exclude quota-failed attempts from that count - otherwise a Codex quota wall would permanently pin every task to its Claude fallback even after the quota reset.
+- Authentication failures use the same durable run-wide circuit breaker. Clearly identified Kimi broken-session failures disable that engine after two occurrences; unrelated failures remain governed by the task's normal retry chain.
 
 ### Seats: subscriptions and API keys
 
