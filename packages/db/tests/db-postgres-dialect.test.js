@@ -841,7 +841,7 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
     expect(rows).toHaveLength(0);
   });
 
-  test("listNodeEvents escapes LIKE wildcards for postgres transcripts", async () => {
+  test("listNodeEvents treats underscores literally for postgres transcripts", async () => {
     const adapter = new SmithersDb(new Database(":memory:"));
     adapter.internalStorage = storage;
     adapter.db = { _: { fullSchema: {} } };
@@ -862,6 +862,29 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
     const events = await adapter.listNodeEvents("pg-events", "build_step");
     expect(events).toHaveLength(1);
     expect(events[0].payloadJson).toContain('"build_step"');
+  });
+
+  test("listNodeEvents scopes postgres transcripts to iteration and attempt", async () => {
+    const adapter = new SmithersDb(new Database(":memory:"));
+    adapter.internalStorage = storage;
+    adapter.db = { _: { fullSchema: {} } };
+    await adapter.insertRun({ runId: "pg-scoped-events", workflowName: "wf", status: "running", createdAtMs: 1 });
+    for (const payload of [
+      { nodeId: "build", iteration: 0, attempt: 1, text: "old iteration" },
+      { nodeId: "build", iteration: 1, attempt: 1, text: "old attempt" },
+      { nodeId: "build", iteration: 1, attempt: 2, text: "target" },
+    ]) {
+      await adapter.insertEventWithNextSeq({
+        runId: "pg-scoped-events",
+        timestampMs: 1,
+        type: "NodeOutput",
+        payloadJson: JSON.stringify(payload),
+      });
+    }
+
+    const events = await adapter.listNodeEvents("pg-scoped-events", "build", { iteration: 1, attempt: 2 });
+    expect(events).toHaveLength(1);
+    expect(JSON.parse(events[0].payloadJson).text).toBe("target");
   });
 
   test("integration delivery claims coordinate across independent postgres adapters", async () => {

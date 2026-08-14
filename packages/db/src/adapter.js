@@ -4580,14 +4580,14 @@ export class SmithersDb {
     return this.read(`list event history ${runId}`, () => this.internalStorage.listEventHistory(runId, query));
   }
   /**
-   * The newest events naming one node, ascending. One SQL pass (LIKE on the
-   * payload) instead of paging the whole history through JS: node transcripts
-   * on long runs need this to stay interactive, and unlike a bounded recency
-   * scan it finds OLD nodes' events too.
+   * The newest events naming one node, ascending. One SQL pass with exact
+   * top-level payload filters instead of paging the whole history through JS:
+   * node transcripts on long runs need this to stay interactive, and unlike a
+   * bounded recency scan it finds OLD nodes' events too.
    *
    * @param {string} runId
-   * @param {string} nodeId Validated upstream (no quotes/percent — node id charset).
-   * @param {{ afterSeq?: number; limit?: number }} [query]
+   * @param {string} nodeId
+   * @param {{ afterSeq?: number; limit?: number; iteration?: number; attempt?: number }} [query]
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
   listNodeEvents(runId, nodeId, query = {}) {
@@ -4595,17 +4595,21 @@ export class SmithersDb {
     // Event sequences start at zero. With no cursor, include that first
     // event; an explicit cursor remains exclusive and non-negative.
     const afterSeq = query.afterSeq === undefined ? -1 : Math.max(0, Math.floor(query.afterSeq));
-    const escapedNodeId = nodeId.replaceAll(`\\`, `\\\\`).replaceAll(`%`, `\\%`).replaceAll(`_`, `\\_`);
-    const needle = `%"nodeId":"${escapedNodeId}"%`;
+    const { whereSql, params } = this.internalStorage.buildEventHistoryWhere(runId, {
+      afterSeq,
+      nodeId,
+      iteration: query.iteration,
+      attempt: query.attempt,
+    });
     return this.read(`list node events ${nodeId}`, () =>
       this.internalStorage.queryAll(
         `SELECT * FROM (
            SELECT * FROM _smithers_events
-           WHERE run_id = ? AND seq > ? AND payload_json LIKE ? ESCAPE '\\'
+           WHERE ${whereSql}
            ORDER BY seq DESC
            LIMIT ?
          ) ORDER BY seq ASC`,
-        [runId, afterSeq, needle, limit],
+        [...params, limit],
       ),
     );
   }

@@ -1440,6 +1440,15 @@ export class SqlMessageStorage {
       clauses.push(`${jsonExtractText(this.dialect, "payload_json", "$.nodeId")} = ?`);
       params.push(query.nodeId);
     }
+    for (const key of ["iteration", "attempt"]) {
+      const value = query[key];
+      if (typeof value !== "number") continue;
+      // jsonExtractText returns a scalar with dialect-specific affinity:
+      // SQLite preserves JSON numbers while PostgreSQL returns text. Casting
+      // both sides to text keeps the same exact-match contract on each backend.
+      clauses.push(`CAST(${jsonExtractText(this.dialect, "payload_json", `$.${key}`)} AS TEXT) = ?`);
+      params.push(String(value));
+    }
     return {
       whereSql: clauses.join(" AND "),
       params,
