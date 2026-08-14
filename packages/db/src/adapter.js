@@ -106,6 +106,7 @@ import { normalizeWaitForEventCorrelationId, parseWaitForEventAttemptSnapshot } 
 
 export const DB_ALERT_ID_MAX_LENGTH = 256;
 const DB_RUN_CANCEL_ATTRIBUTION_MAX_LENGTH = 1024;
+const DB_RUN_CANCELLATION_SOURCE_KINDS = new Set(["signal", "rpc", "cli", "engine"]);
 const STEER_ACTIVE_RUN_STATUSES = new Set(["running", "waiting-approval", "waiting-event", "waiting-timer"]);
 export const DB_ALERT_POLICY_NAME_MAX_LENGTH = 256;
 export const DB_ALERT_MESSAGE_MAX_LENGTH = 4096;
@@ -457,6 +458,19 @@ function validateOptionalPositiveTimestamp(row, field) {
 function validateRunCancellationAttribution(row) {
   assertOptionalStringMaxLength("cancelRequestId", row.cancelRequestId, DB_RUN_CANCEL_ATTRIBUTION_MAX_LENGTH);
   assertOptionalStringMaxLength("cancelRequestSource", row.cancelRequestSource, DB_RUN_CANCEL_ATTRIBUTION_MAX_LENGTH);
+  assertOptionalStringMaxLength("cancelRequestDetail", row.cancelRequestDetail, DB_RUN_CANCEL_ATTRIBUTION_MAX_LENGTH);
+  assertOptionalStringMaxLength("cancelRequestSignal", row.cancelRequestSignal, DB_RUN_CANCEL_ATTRIBUTION_MAX_LENGTH);
+  if (
+    row.cancelRequestSource !== undefined &&
+    row.cancelRequestSource !== null &&
+    !DB_RUN_CANCELLATION_SOURCE_KINDS.has(row.cancelRequestSource)
+  ) {
+    throw toSmithersError(
+      new Error("Invalid cancellation source"),
+      "Cancellation source must be one of: signal, rpc, cli, engine",
+      { code: "INVALID_INPUT", details: { source: row.cancelRequestSource } },
+    );
+  }
   assertOptionalStringMaxLength(
     "cancelRequestClientIdentity",
     row.cancelRequestClientIdentity,
@@ -469,21 +483,61 @@ function validateRunCancellationAttribution(row) {
 /**
  * @param {{
  *   requestId?: string | null;
+ *   kind?: string | null;
  *   source?: string | null;
  *   transport?: string | null;
+ *   detail?: string | null;
+ *   signal?: string | null;
  *   clientIdentity?: string | null;
  *   clientPid?: number | null;
  * }} attribution
  */
 function runCancellationAttributionPatch(attribution) {
+  const requestedSource = attribution.kind ?? attribution.source ?? attribution.transport ?? null;
+  const legacyTransport =
+    requestedSource === "http" || requestedSource === "websocket" || requestedSource === "gateway"
+      ? requestedSource
+      : null;
   const patch = {
     cancelRequestId: attribution.requestId ?? null,
-    cancelRequestSource: attribution.source ?? attribution.transport ?? null,
+    cancelRequestSource: legacyTransport ? "rpc" : requestedSource,
+    cancelRequestDetail: attribution.detail ?? (legacyTransport ? `${legacyTransport} cancellation request` : null),
+    cancelRequestSignal: attribution.signal ?? null,
     cancelRequestClientIdentity: attribution.clientIdentity ?? null,
     cancelRequestClientPid: attribution.clientPid ?? null,
   };
   validateRunCancellationAttribution(patch);
   return patch;
+}
+
+/**
+ * Project the flat persisted run fields into the canonical cancellation-source
+ * contract. Historical transport values remain readable as RPC attribution.
+ * @param {Partial<RunRow> | null | undefined} row
+ * @returns {import("@smthrs/observability").RunCancellationSource | undefined}
+ */
+export function runCancellationSourceFromRow(row) {
+  if (!row || typeof row.cancelRequestSource !== "string") return undefined;
+  const rawKind = row.cancelRequestSource;
+  const legacyTransport = rawKind === "http" || rawKind === "websocket" || rawKind === "gateway";
+  const kind = legacyTransport ? "rpc" : rawKind;
+  if (!DB_RUN_CANCELLATION_SOURCE_KINDS.has(kind)) return undefined;
+  const detail =
+    typeof row.cancelRequestDetail === "string"
+      ? row.cancelRequestDetail
+      : legacyTransport
+        ? `${rawKind} cancellation request`
+        : undefined;
+  return {
+    kind: /** @type {"signal" | "rpc" | "cli" | "engine"} */ (kind),
+    ...(detail !== undefined ? { detail } : {}),
+    ...(typeof row.cancelRequestSignal === "string" ? { signal: row.cancelRequestSignal } : {}),
+    ...(Number.isSafeInteger(row.cancelRequestClientPid) && Number(row.cancelRequestClientPid) > 0
+      ? { clientPid: Number(row.cancelRequestClientPid) }
+      : {}),
+    ...(typeof row.cancelRequestId === "string" ? { requestId: row.cancelRequestId } : {}),
+    ...(typeof row.cancelRequestClientIdentity === "string" ? { clientIdentity: row.cancelRequestClientIdentity } : {}),
+  };
 }
 /**
  * @param {unknown} row
@@ -1459,8 +1513,11 @@ export class SmithersDb {
    * @param {number} cancelRequestedAtMs
    * @param {{
    *   requestId?: string | null;
+   *   kind?: string | null;
    *   source?: string | null;
    *   transport?: string | null;
+   *   detail?: string | null;
+   *   signal?: string | null;
    *   clientIdentity?: string | null;
    *   clientPid?: number | null;
    * }} [attribution]
@@ -1489,8 +1546,11 @@ export class SmithersDb {
    * @param {string | null} [errorJson]
    * @param {{
    *   requestId?: string | null;
+   *   kind?: string | null;
    *   source?: string | null;
    *   transport?: string | null;
+   *   detail?: string | null;
+   *   signal?: string | null;
    *   clientIdentity?: string | null;
    *   clientPid?: number | null;
    * } | null} [attribution]

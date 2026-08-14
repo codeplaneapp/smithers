@@ -61,6 +61,11 @@ describe("format helpers", () => {
       ["RunFinished", {}, "Run finished"],
       ["RunFailed", { error: "failed badly" }, "Run failed: failed badly"],
       ["RunCancelled", {}, "Run cancelled"],
+      [
+        "RunCancelled",
+        { source: { kind: "signal", signal: "SIGTERM", detail: "worker stopped" } },
+        "Run cancelled (signal SIGTERM: worker stopped)",
+      ],
       ["RunContinuedAsNew", { newRunId: "run-2", iteration: 3 }, "Continued as new: run-2"],
       ["RunHijackRequested", {}, "Hijack requested"],
       ["SandboxCreated", { sandboxId: "sb", runtime: "vm" }, "Sandbox created: sb (vm)"],

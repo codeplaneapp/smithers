@@ -156,6 +156,14 @@ type AgentCliCompletedEvent = {
     usage?: Record<string, unknown>;
 };
 type AgentCliEvent = AgentCliStartedEvent | AgentCliActionEvent | AgentCliCompletedEvent;
+type RunCancellationSource$1 = {
+    kind: "signal" | "rpc" | "cli" | "engine";
+    detail?: string;
+    signal?: string;
+    clientPid?: number;
+    requestId?: string;
+    clientIdentity?: string;
+};
 type SmithersEvent$2 = {
     type: "SupervisorStarted";
     runId: string;
@@ -217,6 +225,8 @@ type SmithersEvent$2 = {
     type: "RunCancelled";
     runId: string;
     timestampMs: number;
+    /** Missing only on historical or unattributed cancellation events. */
+    source?: RunCancellationSource$1;
 } | {
     type: "RunContinuedAsNew";
     runId: string;

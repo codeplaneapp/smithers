@@ -1848,12 +1848,36 @@ declare function resolveSchema(db: {
  * the durable wait cleanup and the cancellation event/metric inseparable.
  * @param {SmithersDb} adapter
  * @param {string} runId
- * @param {{ now?: number; eventBus?: EventBus; errorJson?: string | null }} [options]
+ * @param {{
+ *   now?: number;
+ *   eventBus?: EventBus;
+ *   errorJson?: string | null;
+ *   attribution?: {
+ *     requestId?: string | null;
+ *     kind?: string | null;
+ *     source?: string | null;
+ *     transport?: string | null;
+ *     detail?: string | null;
+ *     signal?: string | null;
+ *     clientIdentity?: string | null;
+ *     clientPid?: number | null;
+ *   };
+ * }} [options]
  */
 declare function finalizeCancelledRun(adapter: SmithersDb$1, runId: string, options?: {
     now?: number;
     eventBus?: EventBus$1;
     errorJson?: string | null;
+    attribution?: {
+        requestId?: string | null;
+        kind?: string | null;
+        source?: string | null;
+        transport?: string | null;
+        detail?: string | null;
+        signal?: string | null;
+        clientIdentity?: string | null;
+        clientPid?: number | null;
+    };
 }): Promise<{
     runId: string;
     won: boolean;

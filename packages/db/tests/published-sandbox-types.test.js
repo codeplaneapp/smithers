@@ -33,6 +33,8 @@ describe("published cancellation attribution declarations", () => {
     for (const field of [
       "cancelRequestId: string | null;",
       "cancelRequestSource: string | null;",
+      "cancelRequestDetail: string | null;",
+      "cancelRequestSignal: string | null;",
       "cancelRequestClientIdentity: string | null;",
       "cancelRequestClientPid: number | null;",
     ]) {
@@ -45,6 +47,8 @@ describe("published cancellation attribution declarations", () => {
     for (const column of [
       'name: "cancel_request_id";',
       'name: "cancel_request_source";',
+      'name: "cancel_request_detail";',
+      'name: "cancel_request_signal";',
       'name: "cancel_request_client_identity";',
       'name: "cancel_request_client_pid";',
     ]) {

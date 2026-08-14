@@ -1185,7 +1185,7 @@ describe("DB migration edges", () => {
     }
   });
 
-  test("forward migration adds nullable cancellation attribution to legacy runs", async () => {
+  test("forward migrations add nullable cancellation attribution to legacy runs", async () => {
     const sqlite = new Database(":memory:");
     try {
       sqlite.exec(`CREATE TABLE _smithers_runs (
@@ -1209,6 +1209,8 @@ describe("DB migration edges", () => {
         expect.arrayContaining([
           "cancel_request_id",
           "cancel_request_source",
+          "cancel_request_detail",
+          "cancel_request_signal",
           "cancel_request_client_identity",
           "cancel_request_client_pid",
         ]),
@@ -1217,10 +1219,13 @@ describe("DB migration edges", () => {
         cancelRequestedAtMs: 2,
         cancelRequestId: null,
         cancelRequestSource: null,
+        cancelRequestDetail: null,
+        cancelRequestSignal: null,
         cancelRequestClientIdentity: null,
         cancelRequestClientPid: null,
       });
       expect(migrationRows(sqlite).map((row) => row.id)).toContain("0034_run_cancellation_attribution");
+      expect(migrationRows(sqlite).map((row) => row.id)).toContain("0042_run_cancellation_source_details");
     } finally {
       sqlite.close();
     }

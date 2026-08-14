@@ -14,6 +14,8 @@ export const smithersRuns = sqliteTable("_smithers_runs", {
   cancelRequestedAtMs: integer("cancel_requested_at_ms"),
   cancelRequestId: text("cancel_request_id"),
   cancelRequestSource: text("cancel_request_source"),
+  cancelRequestDetail: text("cancel_request_detail"),
+  cancelRequestSignal: text("cancel_request_signal"),
   cancelRequestClientIdentity: text("cancel_request_client_identity"),
   cancelRequestClientPid: integer("cancel_request_client_pid"),
   pauseRequestedAtMs: integer("pause_requested_at_ms"),

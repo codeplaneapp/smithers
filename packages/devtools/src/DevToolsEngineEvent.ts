@@ -34,6 +34,15 @@ type NodeEventBase = RunEventBase & {
   iteration: number;
 };
 
+export type RunCancellationSource = {
+  kind: "signal" | "rpc" | "cli" | "engine";
+  detail?: string;
+  signal?: string;
+  clientPid?: number;
+  requestId?: string;
+  clientIdentity?: string;
+};
+
 export type RunStartedEvent = RunEventBase & { type: "RunStarted" };
 export type RunFinishedEvent = RunEventBase & {
   type: "RunFinished";
@@ -47,7 +56,11 @@ export type RunFinishedEvent = RunEventBase & {
   }[];
 };
 export type RunFailedEvent = RunEventBase & { type: "RunFailed"; error?: unknown };
-export type RunCancelledEvent = RunEventBase & { type: "RunCancelled" };
+export type RunCancelledEvent = RunEventBase & {
+  type: "RunCancelled";
+  /** Missing only on historical or unattributed cancellation events. */
+  source?: RunCancellationSource;
+};
 
 export type FrameCommittedEvent = RunEventBase & {
   type: "FrameCommitted";

@@ -32,7 +32,7 @@ import { isPidAlive, parseRuntimeOwnerPid } from "@smthrs/engine/runtime-owner";
 import { signalRun } from "@smthrs/engine/signals";
 import { loadInput, loadOutputs } from "@smthrs/db/snapshot";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
-import { SmithersDb } from "@smthrs/db/adapter";
+import { runCancellationSourceFromRow, SmithersDb } from "@smthrs/db/adapter";
 import { computeRunStateFromRow, deriveRunState } from "@smthrs/db/runState";
 import { parseStateKey } from "@smthrs/scheduler/parseStateKey";
 import { normalizeRunStartedBy, SmithersCtx } from "@smthrs/driver";
@@ -2726,6 +2726,7 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
       return undefined;
     }
   });
+  const cancellationSource = runCancellationSourceFromRow(r);
   const result = {
     run: {
       id: r.runId,
@@ -2735,6 +2736,7 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
       started: r.startedAtMs ? new Date(r.startedAtMs).toISOString() : "—",
       elapsed: r.startedAtMs ? formatElapsedCompact(r.startedAtMs, r.finishedAtMs ?? undefined) : "—",
       ...(r.finishedAtMs ? { finished: new Date(r.finishedAtMs).toISOString() } : {}),
+      ...(cancellationSource ? { cancellationSource } : {}),
       ...(activeDescendantRunId && activeDescendantRunId !== r.runId ? { activeDescendantRunId } : {}),
       ...(error ? { error } : {}),
       ...(config

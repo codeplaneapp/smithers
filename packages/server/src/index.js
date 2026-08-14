@@ -598,6 +598,12 @@ function buildMirrorOnProgress(adapter, runId, workflowName, workflowPath, confi
             startedAtMs: event.timestampMs,
             heartbeatAtMs: event.timestampMs,
             cancelRequestedAtMs: null,
+            cancelRequestId: null,
+            cancelRequestSource: null,
+            cancelRequestDetail: null,
+            cancelRequestSignal: null,
+            cancelRequestClientIdentity: null,
+            cancelRequestClientPid: null,
           });
           break;
         case "RunStatusChanged":
@@ -638,6 +644,16 @@ function buildMirrorOnProgress(adapter, runId, workflowName, workflowPath, confi
             heartbeatAtMs: null,
             runtimeOwnerId: null,
             cancelRequestedAtMs: null,
+            ...(event.source
+              ? {
+                  cancelRequestSource: event.source.kind,
+                  cancelRequestDetail: event.source.detail ?? null,
+                  cancelRequestSignal: event.source.signal ?? null,
+                  cancelRequestClientPid: event.source.clientPid ?? null,
+                  cancelRequestId: event.source.requestId ?? null,
+                  cancelRequestClientIdentity: event.source.clientIdentity ?? null,
+                }
+              : {}),
           });
           break;
         case "NodePending":

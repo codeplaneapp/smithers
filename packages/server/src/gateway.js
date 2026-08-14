@@ -9044,6 +9044,7 @@ a { color: var(--brand); }</style>
           payload: {
             runId: event.runId,
             status: "cancelled",
+            ...(event.source ? { source: event.source } : {}),
           },
         };
       default:

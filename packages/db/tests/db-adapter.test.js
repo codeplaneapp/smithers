@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { SmithersDb } from "../src/adapter.js";
+import { runCancellationSourceFromRow, SmithersDb } from "../src/adapter.js";
 import { ensureSmithersTables } from "../src/ensure.js";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
@@ -1105,16 +1105,28 @@ describe("SmithersDb adapter", () => {
     await adapter.insertRun(runRow("r1"));
     await adapter.requestRunCancel("r1", now + 500, {
       requestId: "request-123",
-      transport: "http",
+      kind: "signal",
+      detail: "worker received SIGTERM",
+      signal: "SIGTERM",
       clientIdentity: "user:operator",
       clientPid: 4321,
     });
     const run = await adapter.getRun("r1");
     expect(run.cancelRequestedAtMs).toBe(now + 500);
     expect(run.cancelRequestId).toBe("request-123");
-    expect(run.cancelRequestSource).toBe("http");
+    expect(run.cancelRequestSource).toBe("signal");
+    expect(run.cancelRequestDetail).toBe("worker received SIGTERM");
+    expect(run.cancelRequestSignal).toBe("SIGTERM");
     expect(run.cancelRequestClientIdentity).toBe("user:operator");
     expect(run.cancelRequestClientPid).toBe(4321);
+    expect(runCancellationSourceFromRow(run)).toEqual({
+      kind: "signal",
+      detail: "worker received SIGTERM",
+      signal: "SIGTERM",
+      clientPid: 4321,
+      requestId: "request-123",
+      clientIdentity: "user:operator",
+    });
   });
   test("requestRunCancel preserves the first cancellation attribution", async () => {
     const { adapter } = createTestDb();
@@ -1134,7 +1146,9 @@ describe("SmithersDb adapter", () => {
     const run = await adapter.getRun("r1");
     expect(run.cancelRequestedAtMs).toBe(now + 500);
     expect(run.cancelRequestId).toBe("request-first");
-    expect(run.cancelRequestSource).toBe("websocket");
+    expect(run.cancelRequestSource).toBe("rpc");
+    expect(run.cancelRequestDetail).toBe("websocket cancellation request");
+    expect(run.cancelRequestSignal).toBeNull();
     expect(run.cancelRequestClientIdentity).toBeNull();
     expect(run.cancelRequestClientPid).toBeNull();
   });
@@ -1144,7 +1158,8 @@ describe("SmithersDb adapter", () => {
     expect(
       await adapter.claimRunCancellation("direct", now + 500, null, {
         requestId: "request-direct",
-        source: "cli",
+        kind: "cli",
+        detail: "smithers cancel direct",
         clientIdentity: "local-user",
         clientPid: 1234,
       }),
@@ -1153,6 +1168,8 @@ describe("SmithersDb adapter", () => {
       status: "cancelled",
       cancelRequestId: "request-direct",
       cancelRequestSource: "cli",
+      cancelRequestDetail: "smithers cancel direct",
+      cancelRequestSignal: null,
       cancelRequestClientIdentity: "local-user",
       cancelRequestClientPid: 1234,
     });
@@ -1166,7 +1183,9 @@ describe("SmithersDb adapter", () => {
     expect(await adapter.getRun("requested")).toMatchObject({
       status: "cancelled",
       cancelRequestId: "request-first",
-      cancelRequestSource: "http",
+      cancelRequestSource: "rpc",
+      cancelRequestDetail: "http cancellation request",
+      cancelRequestSignal: null,
       cancelRequestClientIdentity: null,
       cancelRequestClientPid: null,
     });
@@ -1175,6 +1194,23 @@ describe("SmithersDb adapter", () => {
     const { adapter } = createTestDb();
     await adapter.insertRun(runRow("r1"));
     expect(() => adapter.requestRunCancel("r1", now + 500, { clientPid: 1.5 })).toThrow(/cancelRequestClientPid/);
+    expect(() => adapter.requestRunCancel("r1", now + 500, { kind: "unknown" })).toThrow(
+      /Cancellation source must be one of/,
+    );
+  });
+  test("runCancellationSourceFromRow normalizes legacy transport values", () => {
+    expect(
+      runCancellationSourceFromRow({
+        cancelRequestSource: "http",
+        cancelRequestId: "legacy-request",
+        cancelRequestClientPid: 42,
+      }),
+    ).toEqual({
+      kind: "rpc",
+      detail: "http cancellation request",
+      clientPid: 42,
+      requestId: "legacy-request",
+    });
   });
   test("requestRunPause sets pauseRequestedAtMs without touching cancel", async () => {
     const { adapter } = createTestDb();

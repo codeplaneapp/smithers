@@ -74,6 +74,10 @@ const RUN_CANCELLATION_ATTRIBUTION_COLUMNS = [
   ["cancel_request_client_identity", "cancel_request_client_identity TEXT"],
   ["cancel_request_client_pid", "cancel_request_client_pid INTEGER"],
 ];
+const RUN_CANCELLATION_SOURCE_DETAIL_COLUMNS = [
+  ["cancel_request_detail", "cancel_request_detail TEXT"],
+  ["cancel_request_signal", "cancel_request_signal TEXT"],
+];
 
 const RUN_OWNED_FOREIGN_KEY_TABLES = [
   {
@@ -2430,6 +2434,45 @@ function buildMigrations(context) {
         return { table: "_smithers_steers", createdIndex: !hadIndex, rebuiltIndex: hadIndex };
       },
     },
+    {
+      id: "0042_run_cancellation_source_details",
+      name: "Add cancellation detail and signal columns to runs",
+      checksum: checksumForStatements(
+        RUN_CANCELLATION_SOURCE_DETAIL_COLUMNS.map(
+          ([, definition]) => `ALTER TABLE _smithers_runs ADD COLUMN ${definition}`,
+        ),
+      ),
+      isApplied: (sqlite) => {
+        const columns = tableColumnNames(sqlite, "_smithers_runs");
+        return RUN_CANCELLATION_SOURCE_DETAIL_COLUMNS.every(([column]) => columns.has(column));
+      },
+      isAppliedPostgres: async (pgConn) => {
+        const columns = await tableColumnNamesPostgres(pgConn, "_smithers_runs");
+        return RUN_CANCELLATION_SOURCE_DETAIL_COLUMNS.every(([column]) => columns.has(column));
+      },
+      up: (sqlite) => {
+        if (!tableExists(sqlite, "_smithers_runs")) {
+          return { table: "_smithers_runs", addedColumns: [], skipped: "missing_table" };
+        }
+        const addedColumns = [];
+        for (const [column, definition] of RUN_CANCELLATION_SOURCE_DETAIL_COLUMNS) {
+          if (addColumnIfMissing(sqlite, "_smithers_runs", column, definition)) addedColumns.push(column);
+        }
+        return { table: "_smithers_runs", addedColumns };
+      },
+      upPostgres: async (pgConn) => {
+        if (!(await tableExistsPostgres(pgConn, "_smithers_runs"))) {
+          return { table: "_smithers_runs", addedColumns: [], skipped: "missing_table" };
+        }
+        const addedColumns = [];
+        for (const [column, definition] of RUN_CANCELLATION_SOURCE_DETAIL_COLUMNS) {
+          if (await addColumnIfMissingPostgres(pgConn, "_smithers_runs", column, definition)) {
+            addedColumns.push(column);
+          }
+        }
+        return { table: "_smithers_runs", addedColumns };
+      },
+    },
   ];
 }
 
@@ -2501,6 +2544,11 @@ export async function runSmithersSchemaInitSqliteAsync(storage, context) {
       .filter((name) => typeof name === "string"),
   );
   for (const [column, definition] of RUN_CANCELLATION_ATTRIBUTION_COLUMNS) {
+    if (!runColumns.has(column)) {
+      await storage.execute(`ALTER TABLE _smithers_runs ADD COLUMN ${definition}`);
+    }
+  }
+  for (const [column, definition] of RUN_CANCELLATION_SOURCE_DETAIL_COLUMNS) {
     if (!runColumns.has(column)) {
       await storage.execute(`ALTER TABLE _smithers_runs ADD COLUMN ${definition}`);
     }
