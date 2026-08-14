@@ -21,6 +21,8 @@ type AgentGenerateOptionsBase = {
   onStderr?: (text: string) => void;
   onEvent?: (event: AgentCliEvent) => unknown;
   onProcess?: (event: { phase: "started" | "exited"; pid: number | undefined }) => void;
+  onToolExecutionStart?: (event: { callId?: string; toolCall?: { toolCallId?: string } }) => unknown;
+  onToolExecutionEnd?: (event: { callId?: string; toolCall?: { toolCallId?: string } }) => unknown;
   retry?: unknown;
   isRetry?: unknown;
   retryAttempt?: unknown;

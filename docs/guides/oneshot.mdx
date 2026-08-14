@@ -7,6 +7,12 @@ description: Run one well-scoped goal with a single strong agent in the backgrou
 authoring. It launches in the background by default and serves a live
 dashboard with chat, diff, hijack, pause, and cancel controls.
 
+Its long-running `implement` and optional `review` tasks use the existing
+per-task `heartbeatTimeoutMs` override with a 10-minute inactivity window. Live
+tool execution, output streaming, and owned CLI subprocesses refresh that
+window; an agent with no activity still fails. This does not raise the global
+heartbeat default.
+
 ```bash
 bunx smthrs oneshot "add a loading spinner to the login button"
 bunx smthrs oneshot --goal-file TICKET.md

@@ -1679,6 +1679,12 @@ const RUN_CANCEL_POLL_MS = 250;
 const TASK_HEARTBEAT_THROTTLE_MS = 500;
 const TASK_HEARTBEAT_MAX_PAYLOAD_BYTES = 1_000_000;
 const TASK_HEARTBEAT_TIMEOUT_CHECK_MS = 250;
+// A tool call that is genuinely executing keeps the task alive past the
+// heartbeat window, but not forever. An adapter that reports a tool start and
+// then wedges reports no further activity, so the lease expires and the task
+// times out as a hung agent. The lease scales with the node's configured
+// heartbeat timeout: raising `heartbeatTimeoutMs` also buys longer tool calls.
+const TASK_TOOL_EXECUTION_LEASE_MULTIPLIER = 12;
 // Poll for hijack-handoff readiness between agent events; keeps handoff latency low without hot-spinning.
 const HIJACK_COMPLETION_POLL_MS = 100;
 // Engines whose CLI announces its resumable session id before the session is
@@ -4851,7 +4857,14 @@ async function legacyExecuteTask(
   let heartbeatWriteTimer;
   let traceCollector;
   const liveOwnedPids = new Set();
+  const pendingOwnedPids = new Set();
+  const activeCliActions = new Set();
+  const activeSdkToolExecutions = new Set();
+  const pendingSdkToolExecutions = new Set();
+  let streamActivityLeaseUntilMs = 0;
+  let toolActivityLeaseUntilMs = 0;
   let agentProcessObserved = false;
+  let agentProcessExited = false;
   // Construct the abort race only for an agent call that consumes it. A
   // static/compute attempt may never observe the promise; constructing it
   // eagerly would leave a rejected promise behind when the watchdog fires.
@@ -4953,6 +4966,12 @@ async function legacyExecuteTask(
         heartbeatHasPendingWrite = false;
         heartbeatOwnerLost = true;
         liveOwnedPids.clear();
+        pendingOwnedPids.clear();
+        activeCliActions.clear();
+        activeSdkToolExecutions.clear();
+        pendingSdkToolExecutions.clear();
+        streamActivityLeaseUntilMs = 0;
+        toolActivityLeaseUntilMs = 0;
         traceCollector?.discard();
         heartbeatEvidenceAtMs = Math.max(startedAtMs, heartbeatLastPersistedWriteAtMs);
         if (!taskSignal.aborted) {
@@ -5061,6 +5080,18 @@ async function legacyExecuteTask(
    */
   const recordInternalHeartbeat = (data) => {
     queueHeartbeat(data, { internal: true });
+  };
+  const recordStreamActivityHeartbeat = () => {
+    if (agentProcessExited) return;
+    streamActivityLeaseUntilMs = desc.heartbeatTimeoutMs
+      ? nowMs() + desc.heartbeatTimeoutMs + TASK_HEARTBEAT_TIMEOUT_CHECK_MS
+      : 0;
+    recordInternalHeartbeat();
+  };
+  const extendToolActivityLease = () => {
+    toolActivityLeaseUntilMs = desc.heartbeatTimeoutMs
+      ? nowMs() + desc.heartbeatTimeoutMs * TASK_TOOL_EXECUTION_LEASE_MULTIPLIER
+      : 0;
   };
   const waitForHeartbeatWriteDrain = async () => {
     while (heartbeatWriteInFlight) {
@@ -5187,6 +5218,8 @@ async function legacyExecuteTask(
   let handleAgentEvent;
   let handleSdkStepFinish;
   let handleProcess;
+  let handleToolExecutionStart;
+  let handleToolExecutionEnd;
   let latestAgentCheckpoint = null;
   let captureResultCheckpoint = async () => {};
   let enqueueAgentCheckpoint = async () => null;
@@ -5258,7 +5291,11 @@ async function legacyExecuteTask(
             return Effect.void;
           }
           const lastHeartbeatAtMs = Math.max(startedAtMs, heartbeatEvidenceAtMs);
-          if ([...liveOwnedPids].some((pid) => isPidAlive(pid))) {
+          const hasLiveActivity =
+            [...liveOwnedPids].some((pid) => isPidAlive(pid)) ||
+            ((activeCliActions.size > 0 || activeSdkToolExecutions.size > 0) && nowMs() < toolActivityLeaseUntilMs) ||
+            nowMs() < streamActivityLeaseUntilMs;
+          if (hasLiveActivity) {
             recordInternalHeartbeat();
             return Effect.void;
           }
@@ -6318,7 +6355,6 @@ async function legacyExecuteTask(
             );
           }
         }
-        const activeCliActions = new Set();
         let conversationMessages = guidedResumeMessages ? [...guidedResumeMessages] : null;
         /**
          * @param {unknown[] | undefined} messages
@@ -6740,8 +6776,10 @@ async function legacyExecuteTask(
               }
             }
             if (event.type === "action" && isBlockingAgentActionKind(event.action.kind)) {
-              if (event.phase === "started") activeCliActions.add(event.action.id);
-              else if (event.phase === "completed") activeCliActions.delete(event.action.id);
+              if (event.phase === "started") {
+                activeCliActions.add(event.action.id);
+                extendToolActivityLease();
+              } else if (event.phase === "completed") activeCliActions.delete(event.action.id);
             }
             void eventBus.emitEventQueued({
               type: "AgentEvent",
@@ -6799,16 +6837,53 @@ async function legacyExecuteTask(
             })
             .catch(() => {});
         };
-        handleProcess = ({ phase, pid }) => {
-          if (typeof pid !== "number" || pid <= 0 || heartbeatOwnerLost) return;
-          if (phase === "started") agentProcessObserved = true;
-          // A process callback is evidence only after the same fenced
-          // heartbeat used by stdout/stderr has proved ownership.
+        const toolExecutionKey = (event) =>
+          `${typeof event?.callId === "string" ? event.callId : "call"}:${
+            typeof event?.toolCall?.toolCallId === "string" ? event.toolCall.toolCallId : "tool"
+          }`;
+        // A tool event that arrives after the reported agent process exited is
+        // stale: it describes work that is already over and must not count as
+        // evidence that the attempt is still alive.
+        handleToolExecutionStart = (event) => {
+          if (heartbeatOwnerLost || agentProcessExited) return;
+          const key = toolExecutionKey(event);
+          pendingSdkToolExecutions.add(key);
+          extendToolActivityLease();
           recordInternalHeartbeat();
           afterHeartbeatOwnership(() => {
-            if (phase === "started") liveOwnedPids.add(pid);
-            else liveOwnedPids.delete(pid);
+            if (pendingSdkToolExecutions.has(key)) activeSdkToolExecutions.add(key);
           });
+        };
+        handleToolExecutionEnd = (event) => {
+          const key = toolExecutionKey(event);
+          pendingSdkToolExecutions.delete(key);
+          activeSdkToolExecutions.delete(key);
+          if (!heartbeatOwnerLost && !agentProcessExited) recordInternalHeartbeat();
+        };
+        handleProcess = ({ phase, pid }) => {
+          if (typeof pid !== "number" || pid <= 0 || heartbeatOwnerLost) return;
+          if (phase === "exited") {
+            agentProcessExited = true;
+            pendingOwnedPids.delete(pid);
+            liveOwnedPids.delete(pid);
+            activeCliActions.clear();
+            pendingSdkToolExecutions.clear();
+            activeSdkToolExecutions.clear();
+            streamActivityLeaseUntilMs = 0;
+            toolActivityLeaseUntilMs = 0;
+          } else {
+            agentProcessObserved = true;
+            agentProcessExited = false;
+          }
+          // A process callback is evidence only after the same fenced
+          // heartbeat used by stdout/stderr has proved ownership.
+          if (phase === "started") {
+            pendingOwnedPids.add(pid);
+            recordInternalHeartbeat();
+            afterHeartbeatOwnership(() => {
+              if (pendingOwnedPids.has(pid)) liveOwnedPids.add(pid);
+            });
+          }
           // Durable registry of live agent subprocesses: if this engine dies
           // without running cleanup (SIGKILL, OOM), the next CLI invocation
           // reaps whatever is still registered here instead of leaving
@@ -7012,7 +7087,7 @@ async function legacyExecuteTask(
                           timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
                           onStdout: (text) => {
                             if (heartbeatOwnerLost) return;
-                            recordInternalHeartbeat();
+                            recordStreamActivityHeartbeat();
                             afterHeartbeatOwnership(() => {
                               emitOutput(text, "stdout");
                               traceCollector?.onStdout(text);
@@ -7020,13 +7095,15 @@ async function legacyExecuteTask(
                           },
                           onStderr: (text) => {
                             if (heartbeatOwnerLost) return;
-                            recordInternalHeartbeat();
+                            recordStreamActivityHeartbeat();
                             afterHeartbeatOwnership(() => {
                               emitOutput(text, "stderr");
                               traceCollector?.onStderr(text);
                             });
                           },
                           onProcess: handleProcess,
+                          onToolExecutionStart: handleToolExecutionStart,
+                          onToolExecutionEnd: handleToolExecutionEnd,
                           onEvent: handleAgentEvent,
                           onCheckpoint: async (checkpoint) => {
                             await enqueueAgentCheckpoint(checkpoint, "progress");
@@ -7444,19 +7521,21 @@ async function legacyExecuteTask(
                 timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
                 onStdout: (text) => {
                   if (heartbeatOwnerLost) return;
-                  recordInternalHeartbeat();
+                  recordStreamActivityHeartbeat();
                   afterHeartbeatOwnership(() => {
                     emitOutput(text, "stdout");
                   });
                 },
                 onStderr: (text) => {
                   if (heartbeatOwnerLost) return;
-                  recordInternalHeartbeat();
+                  recordStreamActivityHeartbeat();
                   afterHeartbeatOwnership(() => {
                     emitOutput(text, "stderr");
                   });
                 },
                 onProcess: handleProcess,
+                onToolExecutionStart: handleToolExecutionStart,
+                onToolExecutionEnd: handleToolExecutionEnd,
                 onEvent: handleAgentEvent,
                 onCheckpoint: async (checkpoint) => {
                   await enqueueAgentCheckpoint(checkpoint, "progress");
@@ -7807,19 +7886,21 @@ async function legacyExecuteTask(
           timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
           onStdout: (text) => {
             if (heartbeatOwnerLost) return;
-            recordInternalHeartbeat();
+            recordStreamActivityHeartbeat();
             afterHeartbeatOwnership(() => {
               emitOutput(text, "stdout");
             });
           },
           onStderr: (text) => {
             if (heartbeatOwnerLost) return;
-            recordInternalHeartbeat();
+            recordStreamActivityHeartbeat();
             afterHeartbeatOwnership(() => {
               emitOutput(text, "stderr");
             });
           },
           onProcess: handleProcess,
+          onToolExecutionStart: handleToolExecutionStart,
+          onToolExecutionEnd: handleToolExecutionEnd,
           onEvent: handleAgentEvent,
           onCheckpoint: async (checkpoint) => {
             await enqueueAgentCheckpoint(checkpoint, "progress");
@@ -8400,6 +8481,13 @@ async function legacyExecuteTask(
   } finally {
     taskCompleted = true;
     heartbeatClosed = true;
+    pendingOwnedPids.clear();
+    liveOwnedPids.clear();
+    activeCliActions.clear();
+    pendingSdkToolExecutions.clear();
+    activeSdkToolExecutions.clear();
+    streamActivityLeaseUntilMs = 0;
+    toolActivityLeaseUntilMs = 0;
     if (heartbeatWatchdogFiber) {
       await Effect.runPromise(Fiber.interrupt(heartbeatWatchdogFiber)).catch(() => {});
       heartbeatWatchdogFiber = null;
