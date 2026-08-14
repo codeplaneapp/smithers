@@ -250,7 +250,20 @@ test.describe.serial("served Smithers Monitor", () => {
     const dialog = page.getByRole("dialog", { name: "e2e-task custom UI" });
     await expect(dialog).toBeVisible();
     await expect(dialog).toHaveAttribute("aria-modal", "true");
+    await expect(dialog).toHaveAttribute("data-slot", "dialog-content");
+    await expect(dialog).toHaveAccessibleDescription("Embedded workflow interface for e2e-task.");
     await expect(dialog.locator("iframe")).toHaveAttribute("title", "e2e-task custom UI");
+    await expect(dialog.getByRole("link", { name: "Open in new tab" })).toBeFocused();
+    await dialog.getByRole("button", { name: "Close" }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(open).toBeFocused();
+
+    await open.click();
+    await page.locator('[data-slot="dialog-overlay"]').click({ position: { x: 4, y: 4 } });
+    await expect(dialog).toHaveCount(0);
+    await expect(open).toBeFocused();
+
+    await open.click();
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
     await expect(open).toBeFocused();
@@ -261,10 +274,21 @@ test.describe.serial("served Smithers Monitor", () => {
     const hijack = page.getByTestId("monitor-hijack-button");
     await expect(hijack).toBeVisible();
     await hijack.click();
-    const terminalDialog = page.getByTestId("monitor-hijack-modal").getByRole("dialog");
+    const terminalDialog = page.getByTestId("monitor-hijack-modal");
     await expect(terminalDialog).toBeVisible();
+    await expect(terminalDialog).toHaveRole("dialog", { name: "Reopen session: intake · codex" });
     await expect(terminalDialog).toHaveAttribute("aria-modal", "true");
-    await expect(page.getByTestId("monitor-hijack-terminal")).toBeVisible();
+    await expect(terminalDialog).toHaveAttribute("data-slot", "dialog-content");
+    await expect(terminalDialog).toHaveAccessibleDescription(
+      "Interactive run controls, activity, changes, and terminal for Reopen session: intake · codex.",
+    );
+    await expect(page.getByTestId("oneshot-hijack-terminal")).toBeVisible();
+    await terminalDialog.getByRole("button", { name: "Close" }).click();
+    await expect(terminalDialog).toHaveCount(0);
+    await expect(hijack).toBeFocused();
+
+    await hijack.click();
+    await expect(terminalDialog).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(terminalDialog).toHaveCount(0);
     await expect(hijack).toBeFocused();

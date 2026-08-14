@@ -28,6 +28,54 @@ import { selectOutputRow } from '@smthrs/db/output';
 import * as _smthrs_time_travel_jumpToFrame from '@smthrs/time-travel/jumpToFrame';
 export { JumpToFrameError } from '@smthrs/time-travel/jumpToFrame';
 
+declare namespace approvalDecision {
+    export { parseApprovalRequest };
+    export { validateApprovalDecision };
+    export { normalizeDecision };
+    export function unwrapDecision(value: any): unknown;
+}
+type ApprovalRequestRecord$1 = {
+    mode: "gate" | "select" | "rank" | "decision";
+    title: string | null;
+    summary: string | null;
+    options: Array<{
+        key: string;
+        label: string;
+        summary?: string;
+    }>;
+    allowedScopes: string[];
+    allowedUsers: string[];
+    restrictionError: string | null;
+    autoApprove: Record<string, unknown> | null;
+};
+/**
+ * @param {unknown} value
+ * @param {string | null} fallbackTitle
+ * @returns {ApprovalRequestRecord}
+ */
+declare function parseApprovalRequest(value: unknown, fallbackTitle: string | null): ApprovalRequestRecord$1;
+/**
+ * @param {ApprovalRequestRecord} request
+ * @param {unknown} decision
+ */
+declare function validateApprovalDecision(request: ApprovalRequestRecord$1, decision: unknown): {
+    ok: boolean;
+    code: string;
+    message: string;
+} | {
+    ok: boolean;
+    code?: undefined;
+    message?: undefined;
+};
+/**
+ * @param {unknown} value
+ * @param {unknown} explicitNote
+ */
+declare function normalizeDecision(value: unknown, explicitNote: unknown): {
+    decision: unknown;
+    note: string | undefined;
+};
+
 /**
  * A generic HMAC-verified webhook event source served at
  * `POST /v1/webhooks/:id`. Each verified delivery becomes ONE external event
@@ -35,83 +83,96 @@ export { JumpToFrameError } from '@smthrs/time-travel/jumpToFrame';
  * `WaitForEvent(event, correlationId)` via the integration runtime.
  */
 type IntegrationsWebhookSourceConfig = {
-    /** Source id — the `:sourceId` path segment of `POST /v1/webhooks/:sourceId`. */
+    /**
+     * Source id, the `:sourceId` path segment of `POST /v1/webhooks/:sourceId`.
+     */
     id: string;
-    /** HMAC-SHA256 shared secret used to verify deliveries. */
+    /**
+     * HMAC-SHA256 shared secret used to verify deliveries.
+     */
     secret: string;
     /**
-     * Header carrying the signature.
-     * @default "x-hub-signature-256"
+     * Header carrying the signature. Defaults to `x-hub-signature-256`.
      */
-    signatureHeader?: string;
+    signatureHeader?: string | undefined;
     /**
-     * Required signature prefix (e.g. GitHub's `sha256=`). When omitted, a
-     * leading `sha256=` is stripped if present and plain hex/base64 digests
-     * are accepted.
+     * Required signature prefix (e.g. GitHub's `sha256=`). When
+     * omitted, a leading `sha256=` is stripped if present and plain hex/base64 digests are accepted.
      */
-    signaturePrefix?: string;
-    /** Signal name to deliver (e.g. `integration:test:ping`). */
+    signaturePrefix?: string | undefined;
+    /**
+     * Signal name to deliver (e.g. `integration:test:ping`).
+     */
     event: string;
-    /** Dot-path into the JSON payload for the correlation id (e.g. `issue.key`). */
-    correlationIdPath?: string;
-    /** Dot-path selecting the signal payload; defaults to the whole body. */
-    payloadPath?: string;
     /**
-     * Dot-path for a provider-stable delivery id used for redelivery dedupe;
-     * defaults to `sha256(rawBody)`.
+     * Dot-path into the JSON payload for the correlation id (e.g. `issue.key`).
      */
-    dedupeKeyPath?: string;
-    /** Bounded ingress queue capacity. @default 256 */
-    capacity?: number;
+    correlationIdPath?: string | undefined;
+    /**
+     * Dot-path selecting the signal payload. Defaults to the whole body.
+     */
+    payloadPath?: string | undefined;
+    /**
+     * Dot-path for a provider-stable delivery id used for redelivery
+     * dedupe. Defaults to `sha256(rawBody)`.
+     */
+    dedupeKeyPath?: string | undefined;
+    /**
+     * Bounded ingress queue capacity. Defaults to 256.
+     */
+    capacity?: number | undefined;
 };
 /**
  * Server-level integrations config (`ServerOptions.integrations`). Requires
- * `ServerOptions.db` — delivered events are deduped and matched against the
+ * `ServerOptions.db`: delivered events are deduped and matched against the
  * server database.
  */
 type IntegrationsConfig = {
-    webhooks?: IntegrationsWebhookSourceConfig[];
+    webhooks?: IntegrationsWebhookSourceConfig[] | undefined;
 };
 
+/**
+ * `IntegrationsConfig` is referenced inline rather than aliased through a local
+ * `@typedef`. A `@typedef` is itself an export, so aliasing here would make both
+ * this module and `./IntegrationsConfig.js` export the same name. `index.js`
+ * re-exports both with `export *`, and a name exported by two star sources is
+ * ambiguous, so the declaration bundler drops `IntegrationsConfig` from the
+ * public types instead of emitting it.
+ */
 type ServerOptions$1 = {
-    port?: number;
+    port?: number | undefined;
     /**
-     * External integrations served by this process: generic HMAC-verified
-     * webhook sources exposed at `POST /v1/webhooks/:sourceId` and delivered
+     * External integrations served by this process:
+     * generic HMAC-verified webhook sources exposed at `POST /v1/webhooks/:sourceId` and delivered
      * to waiting runs through the integration runtime. Requires `db`.
      */
-    integrations?: IntegrationsConfig;
+    integrations?: IntegrationsConfig | undefined;
     /**
      * Network interface to bind. Defaults to the loopback address 127.0.0.1.
-     * Binding a non-loopback host (e.g. 0.0.0.0) requires an authToken unless
-     * `insecure` is set, because the control plane can launch/cancel/approve
-     * arbitrary workflow runs.
-     * @default "127.0.0.1"
+     * Binding a non-loopback host (e.g. 0.0.0.0) requires an authToken unless `insecure` is set,
+     * because the control plane can launch, cancel, and approve arbitrary workflow runs.
      */
-    host?: string;
+    host?: string | undefined;
     /**
-     * Allow binding a non-loopback host with no authToken configured. This
-     * exposes a full-control, unauthenticated HTTP control plane to the network.
-     * @default false
+     * Allow binding a non-loopback host with no authToken configured.
+     * This exposes a full-control, unauthenticated HTTP control plane to the network. Defaults to false.
      */
-    insecure?: boolean;
+    insecure?: boolean | undefined;
     db?: unknown;
-    authToken?: string;
-    maxBodyBytes?: number;
-    rootDir?: string;
-    allowNetwork?: boolean;
+    authToken?: string | undefined;
+    maxBodyBytes?: number | undefined;
+    rootDir?: string | undefined;
+    allowNetwork?: boolean | undefined;
     /**
-     * Maximum time (in milliseconds) allowed for the HTTP parser to receive the
-     * complete headers of a single request. Helps mitigate slowloris attacks.
-     * @default 30000
+     * Maximum time in milliseconds allowed for the HTTP parser to
+     * receive the complete headers of a single request. Helps mitigate slowloris attacks. Defaults to 30000.
      */
-    headersTimeout?: number;
+    headersTimeout?: number | undefined;
     /**
-     * Maximum time (in milliseconds) allowed for a single request to be received
-     * and parsed, including the body. Helps mitigate slowloris attacks.
-     * @default 60000
+     * Maximum time in milliseconds allowed for a single request to be
+     * received and parsed, including the body. Helps mitigate slowloris attacks. Defaults to 60000.
      */
-    requestTimeout?: number;
+    requestTimeout?: number | undefined;
 };
 
 type RequestFrame$1 = {
@@ -1190,7 +1251,7 @@ declare class Gateway {
      */
     renderUiIndex(match: {
         config: GatewayUiMount;
-    }): string;
+    }): Promise<string>;
     /**
      * @param {{ config: GatewayUiMount; assetPath: string | null }} match
      */
@@ -1223,7 +1284,7 @@ declare class Gateway {
      * @param {IncomingMessage} req
      * @param {ServerResponse} res
      */
-    handleRootRequest(req: IncomingMessage, res: ServerResponse$1): void;
+    handleRootRequest(req: IncomingMessage, res: ServerResponse$1): Promise<void>;
     /**
      * @param {string} key
      * @param {RegisteredWorkflow} entry
@@ -2363,23 +2424,6 @@ declare class Gateway {
      */
     cleanupExtensionSubscriptions(connection: GatewayRequestContext): Promise<void>;
 }
-/**
- * Normalized approval request stored in an approval row's requestJson.
- */
-type ApprovalRequestRecord = {
-    mode: "gate" | "select" | "rank" | "decision";
-    title: string | null;
-    summary: string | null;
-    options: Array<{
-        key: string;
-        label: string;
-        summary?: string;
-    }>;
-    allowedScopes: string[];
-    allowedUsers: string[];
-    restrictionError: string | null;
-    autoApprove: Record<string, unknown> | null;
-};
 type EventFrame = EventFrame$1;
 type GatewayDefaults = GatewayDefaults$1;
 type GatewayRegisterOptions = GatewayRegisterOptions$1;
@@ -2986,6 +3030,7 @@ declare namespace __serverTestInternals {
 }
 type ServerResponse = node_http.ServerResponse;
 type ServerOptions = ServerOptions$1;
+type ApprovalRequestRecord = ApprovalRequestRecord$1;
 
 /**
  * @param {SmithersDb | null} adapter
@@ -3016,4 +3061,4 @@ declare function scheduleRunCleanup(runRegistry: Map<string, RunRecord>, runId: 
  */
 declare function clearRunCleanupTimer(record: RunRecord | undefined): void;
 
-export { type ApprovalRequestRecord, type AttemptRow, type ConnectRequest, type ConnectionEventWriterState, type ConnectionState, DEVTOOLS_BACKPRESSURE_LIMIT, DEVTOOLS_EMPTY_ROOT_ID, DEVTOOLS_MAX_FRAME_NO, DEVTOOLS_POLL_INTERVAL_MS, DEVTOOLS_REBASELINE_INTERVAL, DEVTOOLS_RUN_ID_PATTERN, DEVTOOLS_TASK_PROMPT_MAX_CHARS, DEVTOOLS_TREE_MAX_DEPTH, type DevToolsAgentRef, type DevToolsAgentSummary, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, DevToolsRouteError, type DiffSummary, EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_METHOD_PREFIX, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_METHOD_PREFIX, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, type EventFrame, GATEWAY_FRAME_ID_MAX_LENGTH, GATEWAY_METHOD_NAME_MAX_LENGTH, GATEWAY_RPC_INPUT_MAX_BYTES, GATEWAY_RPC_INPUT_MAX_DEPTH, GATEWAY_RPC_MAX_ARRAY_LENGTH, GATEWAY_RPC_MAX_DEPTH, GATEWAY_RPC_MAX_PAYLOAD_BYTES, GATEWAY_RPC_MAX_STRING_LENGTH, GATEWAY_SESSION_COOKIE, Gateway, type GatewayAuthConfig, type GatewayDefaults, type GatewayExtensionAction, type GatewayExtensionContext, type GatewayExtensionDefinition, type GatewayExtensionResource, type GatewayExtensionStream, type GatewayExtensionStreamContext, GatewayExtensions, type GatewayMetricLabels, type GatewayOperatorUiConfig, type GatewayOptions, type GatewayRegisterOptions, type GatewayRequestContext, type GatewayScope, type GatewayTokenGrant, type GatewayTransport, type GatewayUiConfig, type GatewayUiMount, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GetNodeDiffRouteResult, type HelloResponse, ITERATION_MAX, type IncomingMessage, type IntegrationsConfig, type IntegrationsWebhookSourceConfig, type JumpResult, NODE_ID_PATTERN, NODE_OUTPUT_MAX_BYTES, NODE_OUTPUT_WARN_BYTES, type NodeOutputErrorCode, type NodeOutputResponse, NodeOutputRouteError, RUN_DIFF_MAX_BYTES, RUN_ID_PATTERN, type RegisteredWorkflow, type RequestFrame, type ResolvedExtension, type ResolvedGatewayUiConfig, type ResolvedRun, type ResolvedWorkflowTuiConfig, type ResponseFrame, type RunEventStreamState, type RunStartAuthContext, type ServeOptions, type ServerOptions, type ServerResponse, type SmithersWorkflow, type UsageReport, __serverTestInternals, assertGatewayInputDepthWithinBounds, attachAgentAttemptsToDevToolsRoot, attachNodeStatesToDevToolsRoot, clampFrameStartedByPrompt, createBrowserSessionRegistry, createServeApp, emptyDevToolsRoot, extensionMethodName, getDevToolsSnapshotRoute, getGatewayInputDepth, getNodeDiffRoute, getNodeOutputRoute, getRunDiffRoute, isExtensionMethod, jumpToFrameRoute, parseGatewayRequestFrame, parseXmlToDevToolsRoot, resolveCommitPointer, runFork, runPromise, runSync, snapshotFromFrameRow, startServer, startServerEffect, statusForRpcError, streamDevToolsRoute, summarizeBundle, validateFrameNoInput, validateFromSeqInput, validateGatewayMethodName, validateRequestedFrameNo, validateRunId };
+export { type ApprovalRequestRecord, type AttemptRow, type ConnectRequest, type ConnectionEventWriterState, type ConnectionState, DEVTOOLS_BACKPRESSURE_LIMIT, DEVTOOLS_EMPTY_ROOT_ID, DEVTOOLS_MAX_FRAME_NO, DEVTOOLS_POLL_INTERVAL_MS, DEVTOOLS_REBASELINE_INTERVAL, DEVTOOLS_RUN_ID_PATTERN, DEVTOOLS_TASK_PROMPT_MAX_CHARS, DEVTOOLS_TREE_MAX_DEPTH, type DevToolsAgentRef, type DevToolsAgentSummary, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, DevToolsRouteError, type DiffSummary, EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_METHOD_PREFIX, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_METHOD_PREFIX, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, type EventFrame, GATEWAY_FRAME_ID_MAX_LENGTH, GATEWAY_METHOD_NAME_MAX_LENGTH, GATEWAY_RPC_INPUT_MAX_BYTES, GATEWAY_RPC_INPUT_MAX_DEPTH, GATEWAY_RPC_MAX_ARRAY_LENGTH, GATEWAY_RPC_MAX_DEPTH, GATEWAY_RPC_MAX_PAYLOAD_BYTES, GATEWAY_RPC_MAX_STRING_LENGTH, GATEWAY_SESSION_COOKIE, Gateway, type GatewayAuthConfig, type GatewayDefaults, type GatewayExtensionAction, type GatewayExtensionContext, type GatewayExtensionDefinition, type GatewayExtensionResource, type GatewayExtensionStream, type GatewayExtensionStreamContext, GatewayExtensions, type GatewayMetricLabels, type GatewayOperatorUiConfig, type GatewayOptions, type GatewayRegisterOptions, type GatewayRequestContext, type GatewayScope, type GatewayTokenGrant, type GatewayTransport, type GatewayUiConfig, type GatewayUiMount, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GetNodeDiffRouteResult, type HelloResponse, ITERATION_MAX, type IncomingMessage, type IntegrationsConfig, type IntegrationsWebhookSourceConfig, type JumpResult, NODE_ID_PATTERN, NODE_OUTPUT_MAX_BYTES, NODE_OUTPUT_WARN_BYTES, type NodeOutputErrorCode, type NodeOutputResponse, NodeOutputRouteError, RUN_DIFF_MAX_BYTES, RUN_ID_PATTERN, type RegisteredWorkflow, type RequestFrame, type ResolvedExtension, type ResolvedGatewayUiConfig, type ResolvedRun, type ResolvedWorkflowTuiConfig, type ResponseFrame, type RunEventStreamState, type RunStartAuthContext, type ServeOptions, type ServerOptions, type ServerResponse, type SmithersWorkflow, type UsageReport, __serverTestInternals, approvalDecision, assertGatewayInputDepthWithinBounds, attachAgentAttemptsToDevToolsRoot, attachNodeStatesToDevToolsRoot, clampFrameStartedByPrompt, createBrowserSessionRegistry, createServeApp, emptyDevToolsRoot, extensionMethodName, getDevToolsSnapshotRoute, getGatewayInputDepth, getNodeDiffRoute, getNodeOutputRoute, getRunDiffRoute, isExtensionMethod, jumpToFrameRoute, parseGatewayRequestFrame, parseXmlToDevToolsRoot, resolveCommitPointer, runFork, runPromise, runSync, snapshotFromFrameRow, startServer, startServerEffect, statusForRpcError, streamDevToolsRoute, summarizeBundle, validateFrameNoInput, validateFromSeqInput, validateGatewayMethodName, validateRequestedFrameNo, validateRunId };

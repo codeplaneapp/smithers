@@ -213,8 +213,11 @@ export function captureWorkspaceSnapshot(cwd) {
  * @returns {Effect.Effect<null, never, never>}
  */
 function snapshotGap(step, code, reason) {
-  return Effect.logWarning(`jj workspace snapshot unavailable (durability gap): ${reason}`).pipe(
-    Effect.annotateLogs({ snapshotStep: step, jjExit: String(code), reason }),
+  const gapReason = /max-new-file-size|too large to be snapshotted/i.test(reason)
+    ? `Snapshot blocked by jj snapshot.max-new-file-size. Raise snapshot.max-new-file-size in jj config or gitignore the file. ${reason}`
+    : reason;
+  return Effect.logWarning(`jj workspace snapshot unavailable (durability gap): ${gapReason}`).pipe(
+    Effect.annotateLogs({ snapshotStep: step, jjExit: String(code), reason: gapReason }),
     Effect.as(null),
   );
 }
@@ -258,11 +261,22 @@ export function revertToJjPointer(pointer, cwd) {
       Effect.withLogSpan("vcs:jj-revert"),
     );
   }
-  return runJj(["restore", "--from", pointer], { cwd }).pipe(
-    Effect.map((res) => (res.code === 0 ? { success: true } : { success: false, error: jjError(res) })),
-    Effect.annotateLogs({ cwd: cwd ?? "", pointer }),
-    Effect.withLogSpan("vcs:jj-revert"),
-  );
+  return Effect.gen(function* () {
+    const restore = yield* runJj(["restore", "--from", pointer], { cwd });
+    if (restore.code === 0) return { success: true };
+    const restoreError = jjError(restore);
+    const reachable = yield* withJjTimeout(
+      runJj(["log", "-r", pointer, "--ignore-working-copy", "-T", "commit_id"], { cwd }),
+      "jj restore target probe",
+    );
+    if (reachable.code !== 0 || !reachable.stdout.trim()) {
+      return {
+        success: false,
+        error: `${restoreError}. Checkpoint commit ${pointer} is no longer reachable, most likely because it was collected by \`jj util gc\`. JJ garbage-collection retention must exceed the checkpoint retention window; see packages/engine/src/pruneWorkspaceDurability.js.`,
+      };
+    }
+    return { success: false, error: restoreError };
+  }).pipe(Effect.annotateLogs({ cwd: cwd ?? "", pointer }), Effect.withLogSpan("vcs:jj-revert"));
 }
 /**
  * Quick repo detection by executing a read-only jj command.

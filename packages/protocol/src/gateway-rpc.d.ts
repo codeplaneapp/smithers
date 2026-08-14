@@ -364,10 +364,12 @@ type RunTokenUsageEvent$1 = {
     model: string;
     agent: string;
     inputTokens: number;
+    freshInputTokens: number;
     outputTokens: number;
     cacheReadTokens: number;
     cacheWriteTokens: number;
     reasoningTokens: number;
+    costUsd: number | null;
     timestampMs: number;
 };
 type ListRunTokenUsageRequest$1 = {

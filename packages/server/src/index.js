@@ -21,8 +21,12 @@ import { errorToJson } from "@smthrs/errors/errorToJson";
 import { SmithersError } from "@smthrs/errors/SmithersError";
 import { assertMaxBytes, assertMaxJsonDepth } from "@smthrs/db/input-bounds";
 import { prometheusContentType, renderPrometheusMetrics } from "@smthrs/observability";
+import { approvalDecision } from "./approvalDecision.js";
 /** @typedef {import("node:http").ServerResponse} ServerResponse */
 /** @typedef {import("./ServerOptions.js").ServerOptions} ServerOptions */
+// @smithers-type-exports-begin
+/** @typedef {import("./approvalDecision.js").ApprovalRequestRecord} ApprovalRequestRecord */
+// @smithers-type-exports-end
 
 // Re-export the full public surface so the tsup-bundled `src/index.d.ts`
 // covers every module reachable via the `./*` wildcard export.
@@ -40,6 +44,7 @@ export * from "./gatewayRoutes/getNodeOutput.js";
 export * from "./gatewayRoutes/jumpToFrame.js";
 export * from "./gatewayRoutes/streamDevTools.js";
 export * from "./browser.js";
+export { approvalDecision } from "./approvalDecision.js";
 // Type-only stubs reachable via `./*` that are NOT already transitively
 // re-exported through the JS modules above.
 export * from "./ServerOptions.js";
@@ -1344,7 +1349,22 @@ function startServerInternal(opts = {}) {
           return sendJson(res, 404, {
             error: { code: "NOT_FOUND", message: "Run not found" },
           });
-        await Effect.runPromise(approveNode(adapter, runId, nodeId, body.iteration ?? 0, body.note, body.decidedBy));
+        const iteration = body.iteration ?? 0;
+        let requestJson = null;
+        const approval = await adapter.getApproval(runId, nodeId, iteration);
+        try {
+          requestJson = approval?.requestJson ? JSON.parse(approval.requestJson) : null;
+        } catch {}
+        const { decision, note } = approvalDecision.normalizeDecision(body.decision, body.note);
+        const request = approvalDecision.parseApprovalRequest(requestJson, nodeId);
+        if (request.restrictionError) {
+          throw new HttpError(400, "INVALID_REQUEST", `Malformed approval request: ${request.restrictionError}`);
+        }
+        const validation = approvalDecision.validateApprovalDecision(request, decision);
+        if (!validation.ok) {
+          throw new HttpError(400, validation.code, validation.message);
+        }
+        await Effect.runPromise(approveNode(adapter, runId, nodeId, iteration, note, body.decidedBy, decision));
         return sendJson(res, 200, { runId });
       }
       const denyMatch = url.pathname.match(/^\/v1\/runs\/([^/]+)\/nodes\/([^/]+)\/deny$/);
@@ -1362,7 +1382,8 @@ function startServerInternal(opts = {}) {
           return sendJson(res, 404, {
             error: { code: "NOT_FOUND", message: "Run not found" },
           });
-        await Effect.runPromise(denyNode(adapter, runId, nodeId, body.iteration ?? 0, body.note, body.decidedBy));
+        const { decision, note } = approvalDecision.normalizeDecision(body.decision, body.note);
+        await Effect.runPromise(denyNode(adapter, runId, nodeId, body.iteration ?? 0, note, body.decidedBy, decision));
         return sendJson(res, 200, { runId });
       }
       const signalMatch =

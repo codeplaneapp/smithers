@@ -1,6 +1,5 @@
-import { EmptyState, Skeleton } from "@smthrs/ui";
+import { EmptyState, Skeleton, StatusPill } from "@smthrs/ui";
 import { openSurface } from "../app/navigation";
-import { StatusPill } from "../cards/StatusPill";
 import { runDisplayName, runLifecycleStatus, runStatusLabel, runStatusToNode, summarizeRuns } from "./runsList";
 import { useRunsListStore } from "./runsListStore";
 

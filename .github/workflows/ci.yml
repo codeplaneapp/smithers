@@ -413,11 +413,7 @@ jobs:
           bun test packages/db/tests/db-postgres-dialect.test.js
           bun test packages/smithers/tests/agentCheckpointRestart.pg.test.js
           bun test packages/smithers/tests/sharedPostgresPool.pg.test.js
-          # Keep the two storage-only regressions in the real-PG lane. The
-          # workflow E2E in this file is already exercised with the engine
-          # PostgreSQL tests below and currently shares their upstream Effect
-          # Workflow.make compatibility blocker; re-enable it in #1466.
-          bun test packages/time-travel/tests/jumpToFrame.postgres.test.ts --test-name-pattern 'bulk checkpoint restoration|claims stale audits'
+          bun test packages/time-travel/tests/jumpToFrame.postgres.test.ts
           bun test apps/cli/tests/*postgres*
           for test_file in \
             packages/smithers/tests/migrateSmithersStore.test.js \

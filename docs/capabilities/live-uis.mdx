@@ -95,7 +95,7 @@ Steering is first-class, not read-only: approvals decide in place, `useGatewayAc
 
 ### Hot reload
 
-Workflow code hot-reloads under `RunOptions.hot` (schema-shape changes are blocked; in-flight tasks finish on the code they launched with - see [Recipes](/recipes#hot-reload-while-authoring)). For UI iteration, set `SMITHERS_GATEWAY_UI_NO_CACHE=1` on the Gateway to rebuild the bundle on every request, so edits to the entry or any import show up on a plain page reload.
+Workflow code hot-reloads under `RunOptions.hot` (schema-shape changes are blocked; in-flight tasks finish on the code they launched with - see [Recipes](/recipes#hot-reload-while-authoring)). Gateway UI bundles rebuild automatically on browser refresh when the entry or any bundled import changes; unchanged bundles stay cached. Set `SMITHERS_GATEWAY_UI_NO_CACHE=1` only when you need to force a rebuild on every request.
 
 ## Guarantees and limits
 
@@ -104,7 +104,6 @@ Workflow code hot-reloads under `RunOptions.hot` (schema-shape changes are block
 **Honest limits, verified in source and the tracker:**
 
 - **Pack-extension UIs have no domain-data path.** The client side of the Gateway extension surface ships (`SmithersGatewayClient.extensionRpc`, `useGatewayExtensionResource` / `useGatewayExtensionAction` / `useGatewayExtensionStream`), but `smithers gateway` cannot load pack-declared extension *servers*, so a custom UI cannot yet read pack-specific domain data through the Gateway ([smithers#1438](https://github.com/smithersai/smithers/issues/1438), open). Workaround: ship the data as node outputs and read them with `useGatewayNodeOutput`.
-- **UI bundle caching is build-once by default.** Without `SMITHERS_GATEWAY_UI_NO_CACHE=1` a long-lived Gateway serves the cached bundle, so UI edits do not appear on refresh ([smithers#1440](https://github.com/smithersai/smithers/issues/1440), open).
 - The Monitor is workspace-local by design; multi-workspace fleet views are not a shipped surface.
 
 ## Operating it
