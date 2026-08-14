@@ -11,7 +11,9 @@ apiVersion: v1
 - Request: `{ runId }`
 - Response: `{ runId, events: RunTokenUsageEvent[] }`
 
-Each event is one persisted `TokenUsageReported` attempt event, ordered by event sequence: `{ nodeId, iteration, attempt, model, agent, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens, timestampMs }`. The engine emits one per agent attempt, including failed attempts when the provider error carries usage, so summing `events` gives the run's total spend and grouping by `nodeId` gives per-node spend.
+Each event is one persisted `TokenUsageReported` attempt event, ordered by event sequence: `{ nodeId, iteration, attempt, model, agent, inputTokens, freshInputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens, costUsd, timestampMs }`. The engine emits one final cumulative record per agent attempt, including failed attempts when the provider error carries usage.
+
+`inputTokens + outputTokens` is the token total. `freshInputTokens`, cache read/write, and reasoning are breakdown fields and must not be added again. When an exact non-cached breakdown is unavailable, `freshInputTokens` falls back to the provider's `inputTokens` counter for compatibility with CLI adapters and historical logs. `costUsd` is an estimate and is `null` when the model is absent from Smithers' built-in price table. Historical runtimes around `0.20` could persist multiple cumulative records for the same attempt; consumers of those logs must group by `nodeId + iteration + attempt` and keep the last event rather than summing every sample. The current monitor does this automatically; `bunx smthrs inspect` and `bunx smthrs usage --run` read the upserted aggregate table directly.
 
 `model` is the resolved provider model id and `agent` is the agent id or adapter name that ran the attempt. A run with no persisted usage yields an empty `events` array.
 

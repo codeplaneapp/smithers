@@ -51,6 +51,7 @@ describe("RunsCanvas collection states", () => {
     expect(canvas.querySelector(".runs-loading-message")).not.toBeNull();
     expect(canvas.textContent).toContain("Connecting to the gateway…");
     expect(canvas.querySelector('[data-testid="runs-stream-badge"]')?.textContent).toBe("Connecting");
+    expect(canvas.querySelector('[data-testid="runs-stream-badge"]')?.getAttribute("data-slot")).toBe("badge");
     expect(canvas.textContent).not.toContain("No runs yet.");
 
     act(() => {
@@ -153,6 +154,7 @@ describe("RunsCanvas collection states", () => {
     expect(canvas.querySelector('[data-testid="runs-row"]')).not.toBeNull();
     expect(canvas.querySelector('[data-testid="runs-last-known"]')).toBeNull();
     expect(canvas.querySelector('[data-testid="runs-stream-badge"]')?.textContent).toBe("Live");
+    expect(canvas.querySelector('[data-testid="runs-stream-badge"]')?.getAttribute("data-live")).toBe("true");
 
     act(() => {
       useRunsListStore.setState({
@@ -164,7 +166,9 @@ describe("RunsCanvas collection states", () => {
     expect(canvas.querySelector('[data-testid="runs-last-known"]')?.textContent).toContain(
       "Every run shown below is last-known data",
     );
+    expect(canvas.querySelector('[data-testid="runs-last-known"]')?.getAttribute("data-slot")).toBe("alert");
     expect(canvas.querySelector('[data-testid="runs-stream-badge"]')?.textContent).toBe("Last-known");
+    expect(canvas.querySelector('[data-testid="runs-stream-badge"]')?.hasAttribute("data-live")).toBe(false);
 
     act(() => {
       useRunsListStore.setState({

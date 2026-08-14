@@ -536,6 +536,8 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
         const search = new URLSearchParams();
         append(search, "runId", params.runId);
         append(search, "nodeId", params.nodeId);
+        append(search, "iteration", params.iteration);
+        append(search, "attempt", params.attempt);
         append(search, "afterSeq", params.afterSeq);
         append(search, "limit", params.limit);
         const rows = await request<unknown[]>("GET", withSearch("/v1/api/events", search));

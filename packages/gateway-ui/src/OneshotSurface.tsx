@@ -45,6 +45,7 @@ import {
   ChatTranscript,
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogTitle,
   EmptyState,
   KpiStat,
@@ -976,6 +977,7 @@ export function OneshotSurface({
     <Dialog open onOpenChange={(open: boolean) => !open && onClose?.()}>
       <DialogContent
         showCloseButton={false}
+        aria-modal="true"
         className={`oneshot-surface-panel${className ? ` ${className}` : ""}`}
         data-maximized={maximized}
         data-testid={testId}
@@ -1001,6 +1003,9 @@ export function OneshotSurface({
         <DialogTitle style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>
           {surfaceTitle}
         </DialogTitle>
+        <DialogDescription className="sui-sr-only">
+          Interactive run controls, activity, changes, and terminal for {surfaceTitle}.
+        </DialogDescription>
         {shell}
       </DialogContent>
     </Dialog>

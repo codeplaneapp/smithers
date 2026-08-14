@@ -1,8 +1,9 @@
-import { useMemo, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
 import type { GatewayEventFrame, GatewayRunEventRow } from "@smthrs/gateway-client";
 import { normalizeError } from "./GatewayAsyncState.ts";
 import { useSmithersCollections } from "./useSmithersCollections.ts";
+import type { GatewayConnectionStatus } from "./sync/GatewayConnectionState.ts";
 
 const DEFAULT_MAX_EVENTS = 1000;
 /** Mirrors the `runEvents` collection's default `maxRows` ring size. */
@@ -52,6 +53,8 @@ export function useGatewayRunEvents(
   error: Error | undefined;
   streaming: boolean;
   loading: boolean;
+  refetch: () => Promise<void>;
+  connectionStatus: GatewayConnectionStatus;
 } {
   const { client, collections } = useSmithersCollections();
   const connection = useSyncExternalStore(client.stream.subscribeStatus, client.stream.status, client.stream.status);
@@ -80,6 +83,9 @@ export function useGatewayRunEvents(
 
   const streamFailed = Boolean(runId) && (connection.status === "offline" || connection.status === "unauthorized");
   const sourceError = normalizeError(collection?.utils?.lastError);
+  const refetch = useCallback(async () => {
+    await collections.invalidate(["runEvents"]);
+  }, [collections]);
 
   return {
     events,
@@ -89,5 +95,7 @@ export function useGatewayRunEvents(
     // True only during the collection's initial pull: consumers must render a
     // loading state, not an authoritative-looking "no events" empty state.
     loading: Boolean(runId) && !live.isReady && events.length === 0,
+    refetch,
+    connectionStatus: connection.status,
   };
 }

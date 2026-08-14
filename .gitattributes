@@ -27,3 +27,6 @@
 *.zip binary
 *.exe binary
 *.node binary
+
+# This source fixture exercises NUL-delimited run-node keys; always diff it as text.
+packages/gateway-ui/tests/components.test.tsx text eol=lf diff

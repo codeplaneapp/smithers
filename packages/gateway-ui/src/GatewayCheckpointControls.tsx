@@ -2,6 +2,8 @@
 import { useState } from "react";
 import { useGatewayActions } from "@smthrs/gateway-react";
 import {
+  Alert,
+  AlertDescription,
   Checkpoint,
   CheckpointActions,
   CheckpointIcon,
@@ -148,10 +150,12 @@ export function GatewayCheckpointControls({
               onAction={(kind) => void handleAction(kind, checkpoint)}
             />
             {rowFailure !== null ? (
-              <div data-slot="checkpoint-error" role="alert" className="sui-checkpoint-error">
-                {rowFailure.kind[0]!.toUpperCase()}
-                {rowFailure.kind.slice(1)} failed: {rowFailure.message}
-              </div>
+              <Alert variant="destructive" data-slot="checkpoint-error" className="sui-checkpoint-error">
+                <AlertDescription>
+                  {rowFailure.kind[0]!.toUpperCase()}
+                  {rowFailure.kind.slice(1)} failed: {rowFailure.message}
+                </AlertDescription>
+              </Alert>
             ) : null}
           </Checkpoint>
         );

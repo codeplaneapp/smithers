@@ -196,10 +196,23 @@ browserTest(
 
       browser = await CHROMIUM.launch({ headless: true });
       const page = await browser.newPage();
+      const scopedTranscriptRequest = page.waitForRequest(
+        (request) => {
+          const url = new URL(request.url());
+          return (
+            url.pathname === `/v1/api/runs/${runId}/events` &&
+            url.searchParams.get("nodeId") === "probe" &&
+            url.searchParams.get("iteration") === "0" &&
+            url.searchParams.get("attempt") === "1"
+          );
+        },
+        { timeout: 30_000 },
+      );
       // Deep-link straight into the node inspector while the task is RUNNING.
       await page.goto(`${base}/monitor?runId=${runId}&nodeId=probe`, { waitUntil: "domcontentloaded" });
       await page.waitForSelector('[data-testid="monitor-root"]', { timeout: 20_000 });
       await page.waitForSelector('[data-testid="monitor-inspector"]', { timeout: 30_000 });
+      await scopedTranscriptRequest;
 
       // Sections are collapsible <details> elements, open by default.
       for (const testId of ["monitor-node-details", "monitor-node-output", "monitor-node-transcript"]) {

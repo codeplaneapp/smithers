@@ -2365,7 +2365,7 @@ function serializeGatewayApiPayload(method, payload) {
  * shape. Persisted event payloads are authoritative; the row timestamp only
  * fills the timestampMs field for older payloads that predate it.
  * @param {Record<string, unknown>} row
- * @returns {Record<string, string | number> | null}
+ * @returns {Record<string, string | number | null> | null}
  */
 function parseRunTokenUsageRow(row) {
   const payloadJson = asString(row.payloadJson);
@@ -2388,10 +2388,12 @@ function parseRunTokenUsageRow(row) {
     model: asString(payload.model) ?? "unknown",
     agent: asString(payload.agent) ?? "unknown",
     inputTokens: asNumber(payload.inputTokens) ?? 0,
+    freshInputTokens: asNumber(payload.freshInputTokens) ?? asNumber(payload.inputTokens) ?? 0,
     outputTokens: asNumber(payload.outputTokens) ?? 0,
     cacheReadTokens: asNumber(payload.cacheReadTokens) ?? 0,
     cacheWriteTokens: asNumber(payload.cacheWriteTokens) ?? 0,
     reasoningTokens: asNumber(payload.reasoningTokens) ?? 0,
+    costUsd: asNumber(payload.costUsd) ?? null,
     timestampMs: asNumber(payload.timestampMs) ?? asNumber(row.timestampMs) ?? 0,
   };
 }
@@ -4529,6 +4531,8 @@ a { color: var(--brand); }</style>
         params: {
           runId: runEvents ? decodeURIComponent(runEvents[1]) : queryString(url.searchParams, "runId"),
           nodeId: queryString(url.searchParams, "nodeId"),
+          iteration: queryNonNegativeInt(url.searchParams, "iteration"),
+          attempt: queryNonNegativeInt(url.searchParams, "attempt"),
           afterSeq: queryNonNegativeInt(url.searchParams, "afterSeq"),
           limit: queryPositiveInt(url.searchParams, "limit"),
         },
@@ -4704,9 +4708,13 @@ a { color: var(--brand); }</style>
     }
     const nodeId = asString(params.nodeId);
     const limit = asOptionalPositiveInt(params.limit, "limit") ?? 100;
+    const iteration = asOptionalNonNegativeInt(params.iteration, "iteration");
+    const attempt = asOptionalNonNegativeInt(params.attempt, "attempt");
     if (!nodeId) {
       const rows = await resolved.adapter.listEventHistory(runId, {
         afterSeq: asOptionalNonNegativeInt(params.afterSeq, "afterSeq"),
+        iteration,
+        attempt,
         limit,
       });
       return rows.map((row) => serializeRunEventRow(row));
@@ -4720,6 +4728,8 @@ a { color: var(--brand); }</style>
     }
     const matches = await resolved.adapter.listNodeEvents(runId, nodeId, {
       afterSeq: asOptionalNonNegativeInt(params.afterSeq, "afterSeq"),
+      iteration,
+      attempt,
       limit,
     });
     return matches.map((row) => serializeRunEventRow(row));
@@ -8970,10 +8980,12 @@ a { color: var(--brand); }</style>
             model: event.model,
             agent: event.agent,
             inputTokens: event.inputTokens,
+            freshInputTokens: event.freshInputTokens,
             outputTokens: event.outputTokens,
             cacheReadTokens: event.cacheReadTokens,
             cacheWriteTokens: event.cacheWriteTokens,
             reasoningTokens: event.reasoningTokens,
+            costUsd: event.costUsd,
             timestampMs: event.timestampMs,
           },
         };
