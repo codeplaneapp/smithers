@@ -10,6 +10,10 @@
 // we snapshot, and watching that would loop.
 
 import * as fs from "node:fs";
+import { runGit } from "./runGit.js";
+
+const MAX_PENDING_PATHS = 500;
+const CHECK_IGNORE_TIMEOUT_MS = 1_000;
 
 /**
  * @param {string} relPath
@@ -49,12 +53,32 @@ function defaultWatch(cwd, onChange) {
 }
 
 /**
+ * Return false only when git confirms that every changed path is ignored.
+ * Every error is relevant so watcher failures cannot hide durability work.
+ *
+ * @param {string} cwd
+ * @param {readonly string[]} paths
+ * @returns {Promise<boolean>}
+ */
+async function defaultClassify(cwd, paths) {
+  if (paths.length === 0) return true;
+  const result = await runGit(cwd, ["check-ignore", "--stdin"], {
+    input: `${paths.join("\n")}\n`,
+    timeoutMs: CHECK_IGNORE_TIMEOUT_MS,
+  });
+  if (result.code !== 0) return true;
+  const ignoredPathCount = result.stdout.split(/\r?\n/).filter(Boolean).length;
+  return ignoredPathCount !== paths.length;
+}
+
+/**
  * @typedef {object} WorkspaceWatcherDeps
  * @property {string} cwd
  * @property {() => void} onSettle
  * @property {number} [debounceMs]
  * @property {readonly string[]} [ignoreDirs]
  * @property {(cwd: string, onChange: (relPath: string) => void) => ({ close: () => void } | null)} [watch]
+ * @property {(cwd: string, paths: readonly string[]) => Promise<boolean>} [classify] Returns whether a batch is relevant.
  * @property {(fn: () => void, ms: number) => unknown} [setTimeoutFn]
  * @property {(handle: unknown) => void} [clearTimeoutFn]
  */
@@ -70,25 +94,50 @@ export function createWorkspaceWatcher(deps) {
     debounceMs = 150,
     ignoreDirs = [".jj", ".git"],
     watch = defaultWatch,
+    classify = defaultClassify,
     setTimeoutFn = setTimeout,
     clearTimeoutFn = clearTimeout,
   } = deps;
 
   let timer = null;
   let closed = false;
+  const pendingPaths = new Set();
+  let pendingPathsCapped = false;
+
+  const settle = async () => {
+    if (closed) return;
+    const paths = [...pendingPaths];
+    const capped = pendingPathsCapped;
+    pendingPaths.clear();
+    pendingPathsCapped = false;
+    if (paths.length === 0) return;
+    let relevant = true;
+    if (!capped) {
+      try {
+        relevant = (await classify(cwd, paths)) !== false;
+      } catch {
+        relevant = true;
+      }
+    }
+    if (!closed && relevant) onSettle();
+  };
 
   const arm = () => {
     if (closed) return;
     if (timer != null) clearTimeoutFn(timer);
     timer = setTimeoutFn(() => {
       timer = null;
-      if (!closed) onSettle();
+      void settle();
     }, debounceMs);
   };
 
   const handle = watch(cwd, (relPath) => {
     if (closed) return;
     if (isIgnored(relPath, ignoreDirs)) return;
+    if (!pendingPaths.has(relPath)) {
+      if (pendingPaths.size < MAX_PENDING_PATHS) pendingPaths.add(relPath);
+      if (pendingPaths.size >= MAX_PENDING_PATHS) pendingPathsCapped = true;
+    }
     arm();
   });
 
@@ -97,6 +146,7 @@ export function createWorkspaceWatcher(deps) {
     close() {
       closed = true;
       if (timer != null) clearTimeoutFn(timer);
+      pendingPaths.clear();
       handle?.close?.();
     },
   };

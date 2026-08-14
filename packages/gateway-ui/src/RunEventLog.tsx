@@ -11,8 +11,8 @@ import {
 } from "react";
 import { useGatewayRunEvents } from "@smthrs/gateway-react";
 import type { GatewayEventFrame } from "@smthrs/gateway-client";
-import { Badge, type BadgeProps, Button, EmptyState } from "@smthrs/ui";
-import { ensureGatewayUiStyles, theme } from "./theme";
+import { Alert, AlertDescription, Badge, type BadgeProps, Button, EmptyState } from "@smthrs/ui";
+import { ensureGatewayUiStyles } from "./theme";
 
 export type RunEventLogProps = {
   /** The run to stream events for. When undefined, renders an empty state. */
@@ -554,22 +554,16 @@ export function RunEventLog({
           <div ref={endRef} />
         </div>
         {error && error.message !== dismissedError ? (
-          <div
+          <Alert
+            variant="destructive"
             data-slot="run-event-log-error"
             role="alert"
             style={{
-              display: "flex",
+              gridTemplateColumns: "minmax(0, 1fr) auto",
               alignItems: "center",
-              gap: 8,
-              padding: "6px 8px",
-              borderTop: `1px solid ${theme.dangerBorder}`,
-              background: theme.dangerSoft,
-              color: theme.danger,
-              fontFamily: theme.fontSans,
-              fontSize: 12,
             }}
           >
-            <span style={{ flex: 1, minWidth: 0 }}>Event stream interrupted. {error.message}</span>
+            <AlertDescription>Event stream interrupted. {error.message}</AlertDescription>
             <Button
               variant="ghost"
               size="sm"
@@ -578,7 +572,7 @@ export function RunEventLog({
             >
               Dismiss
             </Button>
-          </div>
+          </Alert>
         ) : null}
         {jumpVisible ? (
           <button type="button" className="gw-event-jump" onClick={jumpToLatest}>

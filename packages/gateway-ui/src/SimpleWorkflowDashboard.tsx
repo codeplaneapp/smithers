@@ -1,13 +1,13 @@
 /** @jsxImportSource react */
 import { useEffect, useMemo, useState } from "react";
 import { useGatewayActions, useGatewayRuns } from "@smthrs/gateway-react";
-import { RelativeTime } from "@smthrs/ui";
-import { formatStatus, statusClass } from "./theme";
+import { Alert, AlertDescription, Badge, RelativeTime } from "@smthrs/ui";
 import { ConnectionBadge } from "./ConnectionBadge";
 import { MonitorButton } from "./MonitorButton";
 import { NodeChatStream } from "./NodeChatStream";
 import { RunEventLog } from "./RunEventLog";
 import { RunTree } from "./RunTree";
+import { StatusPill } from "./StatusPill";
 import { WorkflowUiShell } from "./styleguide";
 
 export type SimpleWorkflowRun = {
@@ -102,7 +102,7 @@ export function SimpleWorkflowDashboard({
     <WorkflowUiShell
       title={title}
       testId={testId}
-      meta={<span className="pill">{runs.length || (runsRaw.loading ? "..." : "0")} runs</span>}
+      meta={<Badge variant="secondary">{runs.length || (runsRaw.loading ? "..." : "0")} runs</Badge>}
       actions={
         <>
           <MonitorButton runId={activeRunId} />
@@ -123,7 +123,11 @@ export function SimpleWorkflowDashboard({
             {busy ? "Starting..." : "Start"}
           </button>
         </div>
-        {error ? <div className="alert err">{error}</div> : null}
+        {error ? (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
       </section>
 
       <section className="workflow-dashboard">
@@ -149,7 +153,7 @@ export function SimpleWorkflowDashboard({
                     )}
                   </span>
                 </span>
-                <span className={`badge ${statusClass(run.status)}`}>{formatStatus(run.status ?? "running")}</span>
+                <StatusPill status={run.status ?? "running"} />
               </button>
             ))
           )}

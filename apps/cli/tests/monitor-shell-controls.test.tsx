@@ -32,7 +32,9 @@ const { workflowUiThemeCss } = await import("smthrs/gateway-ui");
 const { Chip, MonitorToolbar, RunLifecycleActions, RunLifecycleControls, RunRailRow, RunsPagination } =
   await import("../src/monitor-ui/monitorShell.tsx");
 const {
+  CronStatusTag,
   createMonitorKeydownHandler,
+  EventLog,
   ExecutionTree,
   monitorCss,
   RunProgressCell,
@@ -292,14 +294,59 @@ describe("migrated monitor surfaces", () => {
         <RunProgressCell run={run} />
       </div>,
     );
-    expect(document.querySelector('[data-status="running"]')?.className).toContain("tone-running");
-    expect(document.querySelector('[data-status="waiting-approval"]')?.className).toContain("tone-waiting");
-    expect(document.querySelector('[data-status="finished"]')?.className).toContain("tone-ok");
-    expect(document.querySelector('[data-status="failed"]')?.className).toContain("tone-failed");
+    expect(document.querySelector('[data-status="running"]')?.className).toContain("sui-badge-default");
+    expect(document.querySelector('[data-status="waiting-approval"]')?.className).toContain("sui-badge-warning");
+    expect(document.querySelector('[data-status="finished"]')?.className).toContain("sui-badge-success");
+    expect(document.querySelector('[data-status="failed"]')?.className).toContain("sui-badge-destructive");
+    expect(byTestId("monitor-stat-test").getAttribute("data-slot")).toBe("card");
+    expect(byTestId("monitor-stat-test").querySelector('[data-slot="card-content"]')).not.toBeNull();
+    for (const status of document.querySelectorAll("[data-status]")) {
+      expect(status.getAttribute("data-slot")).toBe("badge");
+      expect(status.className).toContain("sui-badge");
+    }
     expect(byTestId("monitor-stat-test").className).toContain("tone-waiting");
     expect(byTestId("monitor-stat-test").textContent).toContain("active runs");
     expect(byTestId("monitor-run-progress").textContent).toContain("4/5");
     expect(byTestId("monitor-run-progress").textContent).toContain("1 failed");
+    const progress = byTestId("monitor-run-progress").querySelector('[data-slot="progress"]');
+    expect(progress).not.toBeNull();
+    expect(progress?.getAttribute("role")).toBe("progressbar");
+    expect(progress?.getAttribute("aria-label")).toBe("4 of 5 nodes complete");
+    expect(progress?.getAttribute("aria-valuenow")).toBe("4");
+    expect(progress?.getAttribute("aria-valuemax")).toBe("5");
+    expect(progress?.className).toContain("mon-table-progress");
+  });
+
+  test("uses shared status pills for enabled and disabled crons", async () => {
+    await render(
+      <div>
+        <CronStatusTag enabled />
+        <CronStatusTag enabled={false} />
+      </div>,
+    );
+    const enabled = document.querySelector('[data-status="enabled"]');
+    const disabled = document.querySelector('[data-status="disabled"]');
+    expect(enabled?.getAttribute("data-slot")).toBe("badge");
+    expect(enabled?.className).toContain("sui-badge-success");
+    expect(enabled?.textContent).toContain("enabled");
+    expect(disabled?.getAttribute("data-slot")).toBe("badge");
+    expect(disabled?.className).toContain("sui-badge-muted");
+    expect(disabled?.textContent).toContain("disabled");
+  });
+
+  test("preserves complete and missing-summary progress semantics", async () => {
+    await render(<RunProgressCell run={{ ...run, status: "finished", summary: { finished: 2, skipped: 1 } }} />);
+    const complete = byTestId("monitor-run-progress");
+    const progress = complete.querySelector('[data-slot="progress"]');
+    expect(complete.textContent).toContain("3/3");
+    expect(complete.textContent).not.toContain("failed");
+    expect(progress?.getAttribute("aria-valuenow")).toBe("3");
+    expect(progress?.getAttribute("aria-valuemax")).toBe("3");
+
+    await rerender(<RunProgressCell run={{ ...run, summary: undefined }} />);
+    expect(document.body.textContent).toContain("—");
+    expect(document.querySelector('[data-testid="monitor-run-progress"]')).toBeNull();
+    expect(document.querySelector('[data-slot="progress"]')).toBeNull();
   });
 
   test("renders populated, loading, empty, offline, and unauthorized run-rail states", async () => {
@@ -322,10 +369,12 @@ describe("migrated monitor surfaces", () => {
       <RunsRail runs={[]} loading={false} connStatus="offline" selectedRunId={undefined} onSelect={() => {}} />,
     );
     expect(byTestId("monitor-runs-offline").textContent?.toLowerCase()).toContain("gateway");
+    expect(byTestId("monitor-runs-offline").getAttribute("data-slot")).toBe("alert");
     await rerender(
       <RunsRail runs={[]} loading={false} connStatus="unauthorized" selectedRunId={undefined} onSelect={() => {}} />,
     );
     expect(byTestId("monitor-runs-unauthorized").textContent?.toLowerCase()).toContain("credentials");
+    expect(byTestId("monitor-runs-unauthorized").getAttribute("data-slot")).toBe("alert");
     await rerender(
       <RunsRail
         runs={[{ ...run, status: "running" }]}
@@ -337,7 +386,7 @@ describe("migrated monitor surfaces", () => {
     );
     expect(byTestId("monitor-runs-offline").textContent).toContain("last-known data");
     expect(byTestId("monitor-run-row").textContent).toContain("last-known");
-    expect(byTestId("monitor-run-row").querySelector(".mon-dot")?.className).not.toContain("mon-dot-pulse");
+    expect(byTestId("monitor-run-row").querySelector(".mon-status-pulse")).toBeNull();
   });
 
   test("renders loading, error, no-runs, and filtered-out table states", async () => {
@@ -385,7 +434,9 @@ describe("migrated monitor surfaces", () => {
   test("renders a populated shared table panel", async () => {
     await render(<RunsTable runs={[run]} loading={false} page={1} onPageChange={() => {}} onSelect={() => {}} />);
     expect(byTestId("monitor-runs-table")).toBeDefined();
-    expect(document.querySelector(".mon-panel.mon-runs-table-panel")).not.toBeNull();
+    expect(document.querySelector(".mon-runs-table-panel")?.getAttribute("data-slot")).toBe("card");
+    expect(document.querySelector(".mon-runs-table-panel [data-slot='card-header']")).not.toBeNull();
+    expect(document.querySelector(".mon-runs-table-panel [data-slot='card-content']")).not.toBeNull();
     expect(byTestId("monitor-run-progress").textContent).toContain("1 failed");
   });
 
@@ -410,6 +461,7 @@ describe("migrated monitor surfaces", () => {
 
     await rerender(table({ connStatus: "offline", queryError: new Error("connection refused") }));
     expect(byTestId("monitor-empty-detail").getAttribute("data-state")).toBe("offline-without-cache");
+    expect(byTestId("monitor-empty-detail").getAttribute("data-slot")).toBe("alert");
     expect(byTestId("monitor-empty-detail").textContent).toContain("No last-known runs are available");
     expect(byTestId("monitor-empty-detail").textContent).not.toContain("No runs yet");
 
@@ -419,13 +471,15 @@ describe("migrated monitor surfaces", () => {
 
     await rerender(table({ connStatus: "offline", runs: [cachedRun], totalCount: 1, hasCachedData: true }));
     expect(byTestId("monitor-runs-last-known").textContent).toContain("Every run shown below is last-known data");
+    expect(byTestId("monitor-runs-last-known").getAttribute("data-slot")).toBe("alert");
     expect(document.querySelector(".mon-runs-table-panel")?.getAttribute("data-state")).toBe("offline-with-cache");
     expect(document.querySelector(".mon-runs-table-row")?.textContent).toContain("running · last-known");
-    expect(document.querySelector(".mon-runs-table-row .mon-dot")?.className).not.toContain("mon-dot-pulse");
+    expect(document.querySelector(".mon-runs-table-row .mon-status-pulse")).toBeNull();
     expect([...document.querySelectorAll(".mon-runs-table-row td")].at(-1)?.textContent).toBe("last-known");
 
     await rerender(table({ connStatus: "unauthorized", runs: [cachedRun], totalCount: 1, hasCachedData: true }));
     expect(byTestId("monitor-empty-detail").getAttribute("data-state")).toBe("unauthorized");
+    expect(byTestId("monitor-empty-detail").getAttribute("data-slot")).toBe("alert");
     expect(byTestId("monitor-empty-detail").textContent).toContain("fresh gateway credentials");
     expect(document.querySelector(".mon-runs-table-row")).toBeNull();
   });
@@ -434,7 +488,7 @@ describe("migrated monitor surfaces", () => {
     let retries = 0;
     await render(<RunsTable runs={[run]} loading page={1} onPageChange={() => {}} onSelect={() => {}} />);
     expect(byTestId("monitor-runs-table")).toBeDefined();
-    expect(document.querySelector('[data-state="loading"]')).toBeNull();
+    expect(document.querySelector('[data-testid="monitor-empty-detail"][data-state="loading"]')).toBeNull();
 
     await rerender(
       <RunsTable
@@ -449,6 +503,7 @@ describe("migrated monitor surfaces", () => {
     );
     expect(document.querySelector(".mon-runs-table-row")?.textContent).toContain("rendered-coverage");
     expect(byTestId("monitor-runs-table-query-error").textContent).toContain("refresh failed");
+    expect(byTestId("monitor-runs-table-query-error").getAttribute("data-slot")).toBe("alert");
     await click(byTestId("monitor-runs-table-query-error-retry"));
     expect(retries).toBe(1);
   });
@@ -462,6 +517,7 @@ describe("migrated monitor surfaces", () => {
         page={1}
         onPageChange={() => {}}
         onSelect={(runId) => selected.push(runId)}
+        cursorRunId={run.runId}
       />,
     );
 
@@ -473,6 +529,8 @@ describe("migrated monitor surfaces", () => {
     const row = document.querySelector<HTMLElement>(".mon-runs-table-row")!;
     expect(row.tabIndex).toBe(0);
     expect(row.getAttribute("role")).toBe("button");
+    expect(row.getAttribute("aria-current")).toBe("true");
+    expect(row.getAttribute("aria-label")).toBe(`rendered-coverage, run ${run.runId}, failed`);
     await act(async () => row.focus());
     expect(document.activeElement).toBe(row);
 
@@ -537,6 +595,98 @@ describe("migrated monitor surfaces", () => {
     // The j/k cursor row carries its marker class for the highlight styles.
     expect(document.querySelector('[data-run-id="run-b"]')!.className).toContain("is-kbcursor");
     expect(document.querySelector('[data-run-id="run-a"]')!.className).not.toContain("is-kbcursor");
+    expect(document.querySelector('[data-run-id="run-b"]')!.getAttribute("aria-current")).toBe("true");
+    expect(document.querySelector('[data-run-id="run-a"]')!.getAttribute("aria-current")).toBeNull();
+  });
+});
+
+describe("event log accessibility", () => {
+  const eventsState = (
+    overrides: Partial<Parameters<typeof EventLog>[0]["eventsState"]> = {},
+  ): Parameters<typeof EventLog>[0]["eventsState"] => ({
+    events: [
+      {
+        type: "event",
+        event: "NodeStarted",
+        payload: { nodeId: "task-1" },
+        seq: 1,
+        stateVersion: 1,
+        timestampMs: Date.now() - 2_000,
+      },
+      {
+        type: "event",
+        event: "AgentEvent",
+        payload: { text: "working" },
+        seq: 2,
+        stateVersion: 2,
+        timestampMs: Date.now() - 1_000,
+      },
+    ],
+    lastHeartbeat: undefined,
+    error: undefined,
+    streaming: true,
+    loading: false,
+    ...overrides,
+  });
+
+  test("exposes a focusable live list, row semantics, and selected filter state", async () => {
+    await render(<EventLog runId="run-events" eventsState={eventsState()} />);
+
+    const list = byTestId("monitor-events");
+    expect(list.tagName).toBe("OL");
+    expect(list.tabIndex).toBe(0);
+    expect(list.getAttribute("aria-label")).toBe("Activity event stream");
+    expect(list.getAttribute("aria-live")).toBe("polite");
+    expect(list.getAttribute("aria-relevant")).toBe("additions text");
+    expect(list.getAttribute("aria-busy")).toBe("false");
+    await act(async () => list.focus());
+    expect(document.activeElement).toBe(list);
+
+    const rows = [...list.querySelectorAll(".mon-event")];
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.tagName === "LI")).toBe(true);
+
+    const activity = byTestId("monitor-events-filter-activity");
+    const notable = byTestId("monitor-events-filter-notable");
+    expect(activity.getAttribute("aria-pressed")).toBe("true");
+    expect(notable.getAttribute("aria-pressed")).toBe("false");
+    expect(activity.getAttribute("aria-controls")).toBe(list.id);
+
+    await act(async () => notable.focus());
+    expect(document.activeElement).toBe(notable);
+    await click(notable);
+    expect(notable.getAttribute("aria-pressed")).toBe("true");
+    expect(activity.getAttribute("aria-pressed")).toBe("false");
+    expect(list.getAttribute("aria-label")).toBe("Notable event stream");
+    expect(list.querySelectorAll(".mon-event")).toHaveLength(1);
+  });
+
+  test("announces paused following and provides a keyboard-focusable resume control", async () => {
+    await render(<EventLog runId="run-follow" eventsState={eventsState()} />);
+
+    const list = byTestId("monitor-events");
+    Object.defineProperty(list, "scrollHeight", { configurable: true, value: 1_000 });
+    Object.defineProperty(list, "clientHeight", { configurable: true, value: 100 });
+    list.scrollTop = 100;
+    await act(async () => list.dispatchEvent(new Event("scroll", { bubbles: true })));
+
+    const follow = byTestId("monitor-events-follow");
+    const status = byTestId("monitor-events-follow-status");
+    expect(follow.getAttribute("aria-pressed")).toBe("false");
+    expect(follow.getAttribute("aria-label")).toBe("Resume following new events");
+    expect(follow.textContent).toContain("Resume follow");
+    expect(status.textContent).toContain("paused");
+    expect(list.getAttribute("aria-live")).toBe("off");
+
+    await act(async () => follow.focus());
+    expect(document.activeElement).toBe(follow);
+    await click(follow);
+    expect(follow.getAttribute("aria-pressed")).toBe("true");
+    expect(follow.getAttribute("aria-label")).toBe("Following new events");
+    expect(follow.textContent).toContain("Following");
+    expect(status.textContent).toContain("Following new events");
+    expect(list.getAttribute("aria-live")).toBe("polite");
+    expect(list.scrollTop).toBe(1_000);
   });
 });
 
@@ -678,9 +828,9 @@ describe("monitor theme contract", () => {
     const rules = [
       [".mon-shell", "overflow: hidden"],
       [".mon-filter-input", "min-width"],
-      [".mon-pill", "var(--tone)"],
-      [".mon-stat", "var(--surface)"],
-      [".mon-banner", "var(--tone)"],
+      // The stat surface itself moved to the shared Card slot (data-slot="card",
+      // asserted above); .mon-stat keeps only its flex sizing.
+      [".mon-stat {", "flex: 1 1 120px"],
       [".mon-progress-fill", "var(--brand)"],
       [".mon-modal.sui-dialog-content", "max-width: none"],
       [".mon-empty", "var(--muted)"],
@@ -693,6 +843,10 @@ describe("monitor theme contract", () => {
     }
     expect(smithersUiCss).toContain(".sui-dialog-content");
     expect(monitorCss).not.toContain(".mon-modal-backdrop");
+    expect(smithersUiCss).toContain(".sui-card");
+    for (const selector of [".sui-badge", ".sui-alert"]) {
+      expect(smithersUiCss).toContain(selector);
+    }
     expect(monitorCss).not.toMatch(/#[0-9a-f]{3,8}\b/i);
     expect(monitorCss).not.toContain("background: white");
     expect(monitorCss).not.toContain("color-mix");
@@ -702,8 +856,10 @@ describe("monitor theme contract", () => {
     for (const selector of [
       ".mon-tree-chevron:focus-visible",
       ".mon-tree-main:focus-visible",
+      ".mon-events:focus-visible",
       ".mon-timeline-row:focus-visible",
       ".mon-approval-main:focus-visible",
+      ".mon-runs-table-row:focus-visible",
       ".mon-diff-summary:focus-visible",
       ".mon-scores-summary:focus-visible",
     ]) {
@@ -894,10 +1050,14 @@ describe("RunRailRow", () => {
   test("active: the selected row is a shared RowButton with data-active", async () => {
     await render(row(true));
     const el = byTestId("monitor-run-row");
+    expect(el.tagName).toBe("BUTTON");
+    expect((el as HTMLButtonElement).type).toBe("button");
     expect(el.className).toContain("sui-row-button");
     expect(el.getAttribute("data-slot")).toBe("row-button");
     expect(el.getAttribute("data-active")).toBe("true");
     expect(el.getAttribute("data-run-id")).toBe("run-42");
+    expect(el.getAttribute("aria-current")).toBe("true");
+    expect(el.getAttribute("aria-label")).toBe("hello, run run-42");
   });
 
   test("inactive rows drop data-active, stay focusable, and select on click", async () => {
@@ -905,6 +1065,8 @@ describe("RunRailRow", () => {
     await render(row(false, (runId) => selected.push(runId)));
     const el = byTestId("monitor-run-row");
     expect(el.getAttribute("data-active")).toBeNull();
+    expect(el.getAttribute("aria-current")).toBeNull();
+    expect(el.getAttribute("aria-label")).toBe("hello, run run-42");
     await act(async () => el.focus());
     expect(document.activeElement).toBe(el);
     await click(el);

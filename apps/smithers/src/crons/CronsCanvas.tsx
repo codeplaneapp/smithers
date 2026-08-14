@@ -1,5 +1,5 @@
 import { useGatewayWorkflows } from "@smthrs/gateway-react";
-import { EmptyState, Skeleton } from "@smthrs/ui";
+import { Alert, AlertDescription, Badge, EmptyState, Skeleton } from "@smthrs/ui";
 import "./crons.css";
 import { describeCron, sortCrons, summarizeCrons, toneForCronEnabled, validateCreate } from "./crons";
 import { useCronsStore } from "./cronsStore";
@@ -163,12 +163,12 @@ export function CronsCanvas() {
       </header>
 
       {actionError ? (
-        <div className="crons-action-banner tone-failed" data-testid="crons-action-banner">
-          <span>{actionError}</span>
+        <Alert variant="destructive" className="crons-action-banner" data-testid="crons-action-banner">
+          <AlertDescription>{actionError}</AlertDescription>
           <button className="btn" type="button" onClick={dismissActionError}>
             Dismiss
           </button>
-        </div>
+        </Alert>
       ) : null}
 
       <div className="rev-body">
@@ -198,9 +198,9 @@ export function CronsCanvas() {
                     <span>{cron.nextHint}</span>
                   </div>
                 </div>
-                <span className={`state-badge ${toneForCronEnabled(cron.enabled)}`}>
+                <Badge variant={cron.enabled ? "success" : "muted"} data-status={cron.enabled ? "enabled" : "disabled"}>
                   {cron.enabled ? "ENABLED" : "DISABLED"}
-                </span>
+                </Badge>
               </button>
             ))
           ) : (
@@ -218,9 +218,12 @@ export function CronsCanvas() {
             <div className="rev-detail-scroll">
               <div className="rev-detail-head">
                 <div className="rev-detail-title">{selected.name}</div>
-                <span className={`state-badge ${toneForCronEnabled(selected.enabled)}`}>
+                <Badge
+                  variant={selected.enabled ? "success" : "muted"}
+                  data-status={selected.enabled ? "enabled" : "disabled"}
+                >
                   {selected.enabled ? "ENABLED" : "DISABLED"}
-                </span>
+                </Badge>
               </div>
               <div className="rev-row-meta">
                 <code className="cron-pattern">{selected.pattern}</code>

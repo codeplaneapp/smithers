@@ -45,6 +45,8 @@ export class AnthropicAgent extends ToolLoopAgent {
         ...outputArgs,
         ...toolArgs,
         timeout: args.timeout,
+        onToolExecutionStart: args.onToolExecutionStart,
+        onToolExecutionEnd: args.onToolExecutionEnd,
         onStepEnd,
       });
     }
@@ -56,6 +58,8 @@ export class AnthropicAgent extends ToolLoopAgent {
         ...outputArgs,
         ...toolArgs,
         timeout: args.timeout,
+        onToolExecutionStart: args.onToolExecutionStart,
+        onToolExecutionEnd: args.onToolExecutionEnd,
         onStepEnd,
       })
       .then((stream) => streamResultToGenerateResult(stream, args.onStdout));
