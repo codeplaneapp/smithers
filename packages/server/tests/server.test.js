@@ -222,8 +222,8 @@ const fakeAgent = {
     const workflowPath = resolve(testDir, `${name}.tsx`);
     writeFileSync(
       workflowPath,
-      `/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+      `/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { smithers, Workflow, Approval, outputs } = createSmithers(
