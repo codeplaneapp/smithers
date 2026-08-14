@@ -5183,8 +5183,7 @@ async function legacyExecuteTask(
           const lastHeartbeatAtMs = Math.max(startedAtMs, heartbeatEvidenceAtMs);
           const hasLiveActivity =
             [...liveOwnedPids].some((pid) => isPidAlive(pid)) ||
-            ((activeCliActions.size > 0 || activeSdkToolExecutions.size > 0) &&
-              nowMs() < toolActivityLeaseUntilMs) ||
+            ((activeCliActions.size > 0 || activeSdkToolExecutions.size > 0) && nowMs() < toolActivityLeaseUntilMs) ||
             nowMs() < streamActivityLeaseUntilMs;
           if (hasLiveActivity) {
             recordInternalHeartbeat();
