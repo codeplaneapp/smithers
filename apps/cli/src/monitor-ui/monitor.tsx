@@ -34,6 +34,12 @@ import {
   Card,
   CardContent,
   CardHeader,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
   observeReducedMotion,
   prefersReducedMotion,
   Progress,
@@ -396,9 +402,11 @@ export function createMonitorKeydownHandler(
 ): (event: KeyboardEvent) => void {
   return (event) => {
     if (event.metaKey || event.ctrlKey || event.altKey) return;
-    if (document.querySelector(".mon-modal-backdrop")) return;
-    const state = keyState.current;
     const target = event.target instanceof HTMLElement ? event.target : null;
+    if (target?.closest('[data-slot="dialog-content"]') || document.querySelector('[data-slot="dialog-content"]')) {
+      return;
+    }
+    const state = keyState.current;
     const typing =
       target !== null &&
       (target.tagName === "INPUT" ||
@@ -3801,6 +3809,11 @@ function NodeInspector({
     engine: string;
     action: { kind: "hijack" | "reopen"; label: string };
   } | null>(null);
+  const hijackReturnFocusRef = useRef<HTMLElement | null>(null);
+  const closeHijackSession = () => {
+    setHijackSession(null);
+    queueMicrotask(() => hijackReturnFocusRef.current?.focus());
+  };
   // Containers (parallel, sequence, loop, worktree, merge-queue, …) group
   // other nodes and never own a transcript or structured output — showing
   // those panels there is pure noise. Leaf kinds keep the full inspector.
@@ -3874,7 +3887,10 @@ function NodeInspector({
           nodeId={nodeId}
           runStatus={runStatus}
           nodeLive={isLive}
-          onOpen={(candidate, action) => setHijackSession({ engine: candidate.engine, action })}
+          onOpen={(candidate, action) => {
+            hijackReturnFocusRef.current = document.activeElement as HTMLElement | null;
+            setHijackSession({ engine: candidate.engine, action });
+          }}
         />
         <StatusTag status={node.status} />
         <Chip
@@ -3897,7 +3913,7 @@ function NodeInspector({
           initialTab="terminal"
           hijackNodeId={nodeId}
           title={`${hijackSession.action.label}: ${nodeId} · ${hijackSession.engine}`}
-          onClose={() => setHijackSession(null)}
+          onClose={closeHijackSession}
           className="mon-hijack-surface"
           data-testid="monitor-hijack-modal"
         />
@@ -4243,22 +4259,8 @@ function RunDetail({
   const [busyAction, setBusyAction] = useState<"cancel" | "resume" | "pause" | null>(null);
   const [showCustomUi, setShowCustomUi] = useState(false);
   const [creatingUi, setCreatingUi] = useState(false);
-  const customUiDialogRef = useRef<HTMLDivElement | null>(null);
-  const customUiReturnFocusRef = useRef<HTMLElement | null>(null);
+  const customUiInitialFocusRef = useRef<HTMLAnchorElement | null>(null);
   const workflowsRefetch = workflowsQuery.refetch;
-  const closeCustomUi = () => {
-    setShowCustomUi(false);
-    queueMicrotask(() => customUiReturnFocusRef.current?.focus());
-  };
-  useEffect(() => {
-    if (!showCustomUi) return;
-    customUiDialogRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeCustomUi();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [showCustomUi]);
   // While a create-ui run is authoring this workflow's UI, poll the workflow
   // list so the Open UI button appears the moment the file lands (the gateway
   // resolves .smithers/ui/<key>.tsx by convention with no restart).
@@ -4391,16 +4393,35 @@ function RunDetail({
         )}
         <div className="mon-detail-actions">
           {customUiUrl ? (
-            <Button
-              variant="outline"
-              onClick={() => {
-                customUiReturnFocusRef.current = document.activeElement as HTMLElement | null;
-                setShowCustomUi(true);
-              }}
-              title={`Open this workflow's custom UI (${customUiPath})`}
-            >
-              Open UI
-            </Button>
+            <Dialog open={showCustomUi} onOpenChange={setShowCustomUi}>
+              <DialogTrigger asChild>
+                <Button variant="outline" title={`Open this workflow's custom UI (${customUiPath})`}>
+                  Open UI
+                </Button>
+              </DialogTrigger>
+              <DialogContent
+                className="mon-modal"
+                data-testid="monitor-ui-modal"
+                aria-modal="true"
+                onOpenAutoFocus={(event) => {
+                  event.preventDefault();
+                  customUiInitialFocusRef.current?.focus();
+                }}
+              >
+                <DialogHeader className="mon-modal-head">
+                  <DialogTitle className="mon-kicker">{workflowKey} custom UI</DialogTitle>
+                  <DialogDescription className="sui-sr-only">
+                    Embedded workflow interface for {workflowKey}.
+                  </DialogDescription>
+                  <Chip asChild>
+                    <a ref={customUiInitialFocusRef} href={customUiUrl} target="_blank" rel="noreferrer">
+                      Open in new tab
+                    </a>
+                  </Chip>
+                </DialogHeader>
+                <iframe className="mon-modal-frame" src={customUiUrl} title={`${workflowKey} custom UI`} />
+              </DialogContent>
+            </Dialog>
           ) : workflowRow && workflowKey !== "create-ui" ? (
             <Button
               variant="outline"
@@ -4452,31 +4473,6 @@ function RunDetail({
       />
 
       <ScoresPanel scores={scores} />
-
-      {showCustomUi && customUiUrl ? (
-        <div className="mon-modal-backdrop" onClick={closeCustomUi} data-testid="monitor-ui-modal">
-          <div
-            className="mon-modal"
-            ref={customUiDialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label={`${workflowKey} custom UI`}
-            tabIndex={-1}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <header className="mon-modal-head">
-              <span className="mon-kicker">{workflowKey} UI</span>
-              <Chip asChild>
-                <a href={customUiUrl} target="_blank" rel="noreferrer">
-                  Open in new tab
-                </a>
-              </Chip>
-              <Chip onClick={closeCustomUi}>Close</Chip>
-            </header>
-            <iframe className="mon-modal-frame" src={customUiUrl} title={`${workflowKey} custom UI`} />
-          </div>
-        </div>
-      ) : null}
 
       <ExecutionPanel
         runId={runId}
@@ -4905,8 +4901,6 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 
   .mon-panel-head, .mon-detail-actions, .mon-progress, .mon-scrub { flex-wrap: wrap; }
   .mon-metrics-grid { grid-template-columns: minmax(0, 1fr); }
-  .mon-modal-backdrop { padding: var(--sp-3); }
-  .mon-modal { width: min(1280px, 100%); height: min(860px, 100%); }
 }
 
 .mon-inbox { border: 1px solid var(--warning-border); border-radius: var(--r-3); padding: var(--panel-pad); background: var(--warning-soft); animation: mon-in 140ms ease-out; }
@@ -5135,9 +5129,8 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-health-approval { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; width: 100%; padding: var(--sp-2) 0; border-top: 1px solid var(--tone-border); }
 .mon-health-approval-title { font-weight: 600; }
 .mon-health-approval .mon-approval-actions { margin-left: auto; flex: none; min-width: 220px; }
-.mon-modal-backdrop { position: fixed; inset: 0; z-index: 60; background: rgb(var(--shadow-rgb) / 0.55); display: flex; align-items: center; justify-content: center; padding: var(--sp-6); }
-.mon-modal { width: min(1280px, 96vw); height: min(860px, 92vh); display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-3); overflow: hidden; box-shadow: 0 18px 60px rgb(var(--shadow-rgb) / 0.45); }
-.mon-modal-head { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); }
+.mon-modal.sui-dialog-content { width: min(1280px, 96vw); max-width: none; height: min(860px, 92vh); display: flex; flex-direction: column; gap: 0; padding: 0; overflow: hidden; }
+.mon-modal-head.sui-dialog-header { display: flex; flex-direction: row; align-items: center; gap: var(--sp-2); padding: var(--sp-2) calc(var(--sp-6) + 26px) var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); }
 .mon-modal-head .mon-kicker { flex: 1; }
 .mon-modal-frame { flex: 1; border: 0; width: 100%; background: var(--bg); }
 
