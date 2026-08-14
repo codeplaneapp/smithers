@@ -5846,6 +5846,12 @@ The entry command either prints the result JSON to stdout or writes it to
 instead transport those files through S3 or GCS, injecting extra vars that
 point the entry at the object keys.
 
+For a worked example of a provider outside the shipped set, see
+[`examples/stereos-sandbox-provider`](https://github.com/smithersai/smithers/tree/main/examples/stereos-sandbox-provider).
+It is packaged as `@stereos/smithers`, reaches stereOS microVMs over SSH, and is
+published as a guide with live runs at
+[custom-sandbox.smithers.sh](https://custom-sandbox.smithers.sh).
+
 ## Selecting a provider
 
 Three ways to pick a provider, in precedence order:
@@ -6371,6 +6377,8 @@ Both use the graph resolver, so they match the path Smithers gives worker tasks.
   symlink node_modules from, or write into, the parent checkout. An install through a shared
   node_modules link rewrites the parent checkout's workspace links to point into the
   worktree, all of which dangle once the worktree is removed.
+- **Worktree lanes are disposable, including ignored files.** Reaping deletes the lane
+  directory after the run ends. Commit anything valuable or copy it outside the lane first.
 - **jj continuously snapshots a worktree's working copy onto its bookmark.** A compute
   `<Task>` (or helper) that checks for changes with `git status --porcelain` can see a
   *clean* tree and skip its work, because jj has already committed the working-copy edits to
@@ -9066,6 +9074,7 @@ type NanocodexAgentOptions = {
   cwd?: string;                    // absolute workspace fallback
   auth?: NanocodexAuth;            // defaults to OPENAI_API_KEY environment mode
   instructions?: string;           // replaces stock instructions completely
+  model?: "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" | "sol" | "terra" | "luna"; // default gpt-5.6-sol
   thinking?: NanocodexThinking;
   reasoningMode?: NanocodexReasoningMode;
   fastMode?: boolean;

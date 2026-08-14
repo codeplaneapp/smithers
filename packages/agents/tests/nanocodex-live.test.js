@@ -54,9 +54,50 @@ describe.skipIf(!RUN_LIVE)("NanocodexAgent live bridge (managed ChatGPT auth)", 
     });
   }
 
-  test("preflights the real bridge, containment, protocol, target, and provider-free adapter configuration", async () => {
+  /**
+   * @param {{
+   *   model: "sol" | "luna";
+   *   thinking: "low" | "medium";
+   *   expected: "gpt-5.6-sol" | "gpt-5.6-luna";
+   * }} request
+   */
+  async function expectRequestedLiveModel(request) {
+    const sentinel = exactToken(request.model.toUpperCase());
+    const published = [];
+    const lifecycle = [];
+    const result = await agent({ model: request.model, thinking: request.thinking }).generate({
+      prompt: `Do not use tools. Reply with exactly ${sentinel}`,
+      rootDir: workspace,
+      onCheckpoint: async (checkpoint) => published.push(checkpoint),
+      onProcess: (event) => lifecycle.push(event),
+    });
+    expect(result.text).toBe(sentinel);
+    expect(result.response.modelId).toBe(request.expected);
+    expect(result.checkpoint.payload.model).toBe(request.expected);
+    expect(published).toHaveLength(1);
+    expect(result.checkpoint).toBe(published[0]);
+    await expectCleanProcessLifecycle(lifecycle);
+  }
+
+  test("preflights the real bridge, protocol, target, and provider-free adapter configuration", async () => {
     await agent().preflight({ rootDir: workspace });
   }, 30_000);
+
+  test(
+    "live Sol low returns the requested wire model on the result and checkpoint",
+    async () => {
+      await expectRequestedLiveModel({ model: "sol", thinking: "low", expected: "gpt-5.6-sol" });
+    },
+    LIVE_TIMEOUT_MS + 10_000,
+  );
+
+  test(
+    "live Luna medium returns the requested wire model on the result and checkpoint",
+    async () => {
+      await expectRequestedLiveModel({ model: "luna", thinking: "medium", expected: "gpt-5.6-luna" });
+    },
+    LIVE_TIMEOUT_MS + 10_000,
+  );
 
   test(
     "fresh generation returns an exact sentinel and publishes the identical checkpoint object",

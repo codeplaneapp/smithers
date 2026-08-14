@@ -17,6 +17,8 @@ import {
   NanocodexProtocolValidationError,
   NANOCODEX_BRIDGE_VERSION,
   NANOCODEX_LIMITS,
+  NANOCODEX_SHIPPED_TARGETS,
+  NANOCODEX_VERSION,
   createServerRecordValidator,
   createTurnCancelCommand,
   createTurnStartCommand,
@@ -152,8 +154,8 @@ describe("strict Nanocodex JSON parsing", () => {
 function capabilities() {
   return {
     bridgeVersion: NANOCODEX_BRIDGE_VERSION,
-    target: "x86_64-unknown-linux-gnu",
-    nanocodexVersion: "0.3.0",
+    target: NANOCODEX_SHIPPED_TARGETS[0],
+    nanocodexVersion: NANOCODEX_VERSION,
     protocol: { name: "smithers.nanocodex", versions: [1] },
     checkpoint: {
       codec: "nanocodex.session-snapshot",
@@ -164,6 +166,11 @@ function capabilities() {
     },
     authenticationModes: ["api-key-env", "chatgpt"],
     transportModes: ["websocket"],
+    models: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+    defaultModel: "gpt-5.6-sol",
+    thinkingLevels: ["none", "low", "medium", "high", "xhigh", "max"],
+    defaultThinking: "high",
+    reasoningModes: ["standard", "pro"],
     features: {
       codeMode: true,
       codeModeDisable: false,
@@ -232,6 +239,7 @@ function completedData() {
   return {
     finalMessage: "done",
     usage: usage(),
+    model: "gpt-5.6-sol",
     snapshotVersion: 1,
     snapshot: { version: 1, history: [{ role: "assistant", text: "done" }] },
     canonicalWorkspace: "/tmp/worktree",
@@ -239,8 +247,8 @@ function completedData() {
 }
 
 function recoveryData() {
-  const { snapshotVersion, snapshot, canonicalWorkspace } = completedData();
-  return { snapshotVersion, snapshot, canonicalWorkspace };
+  const { model, snapshotVersion, snapshot, canonicalWorkspace } = completedData();
+  return { model, snapshotVersion, snapshot, canonicalWorkspace };
 }
 
 function correlatedRecord(type, seq, data, extras = {}) {
@@ -337,8 +345,8 @@ describe("Nanocodex capability and server protocol validation", () => {
 
   test("fails closed on protocol, library, checkpoint, feature, and limit mismatches", () => {
     const mutations = [
-      (value) => (value.bridgeVersion = "0.0.2"),
-      (value) => (value.nanocodexVersion = "0.3.1"),
+      (value) => (value.bridgeVersion = ""),
+      (value) => (value.nanocodexVersion = "0.3.0"),
       (value) => (value.protocol.name = "other"),
       (value) => (value.protocol.versions = [1, 2]),
       (value) => (value.checkpoint.codecVersions = [2]),
@@ -346,6 +354,11 @@ describe("Nanocodex capability and server protocol validation", () => {
       (value) => (value.checkpoint.continuationModes = ["fork"]),
       (value) => (value.checkpoint.resumeRequiresSameCanonicalWorkspace = false),
       (value) => (value.target = "aarch64-unknown-linux-gnu"),
+      (value) => (value.models = ["gpt-5.6-sol"]),
+      (value) => (value.defaultModel = "gpt-5.6-terra"),
+      (value) => (value.thinkingLevels = ["low", "medium", "high"]),
+      (value) => (value.defaultThinking = "medium"),
+      (value) => (value.reasoningModes = ["standard"]),
       (value) => (value.features.codeMode = false),
       (value) => (value.features.mcp = true),
       (value) => (value.features.subagents = true),
@@ -359,7 +372,7 @@ describe("Nanocodex capability and server protocol validation", () => {
     }
   });
 
-  test("requires all 15 authoritative v0.0.1 limit fields and values", () => {
+  test("requires all 15 authoritative v0.0.2 limit fields and values", () => {
     expect(Object.keys(capabilities().limits)).toHaveLength(15);
     expect(capabilities().limits).toEqual(NANOCODEX_LIMITS);
     for (const key of Object.keys(NANOCODEX_LIMITS)) {
@@ -380,7 +393,7 @@ describe("Nanocodex capability and server protocol validation", () => {
     expect(Buffer.byteLength(`${JSON.stringify(body)}\n`, "utf8")).toBe(NANOCODEX_LIMITS.maxInputRecordBytes + 1);
   });
 
-  test("consumes Smithers-owned copies of the authoritative v0.0.1 wire fixtures", () => {
+  test("consumes Smithers-owned copies of the authoritative v0.0.2 wire fixtures", () => {
     const clientStart = parseNanocodexJson(fixture("client-success-v1.jsonl").trimEnd());
     expect(
       createTurnStartCommand({
@@ -439,6 +452,25 @@ describe("Nanocodex capability and server protocol validation", () => {
     ];
 
     for (const record of records) expect(validateServerRecord(record)).toBe(record);
+
+    const missingCompletedModel = completedData();
+    delete missingCompletedModel.model;
+    expect(() => validateServerRecord(correlatedRecord("turn.completed", 7, missingCompletedModel))).toThrow(
+      "invalid field set",
+    );
+    expect(() =>
+      validateServerRecord(correlatedRecord("turn.completed", 7, { ...completedData(), model: "gpt-4o" })),
+    ).toThrow("model");
+    const missingRecoveryModel = recoveryData();
+    delete missingRecoveryModel.model;
+    expect(() =>
+      validateServerRecord(
+        correlatedRecord("turn.failed", 8, {
+          error: publicError({ category: "cleanup", code: "cleanup_failed" }),
+          completed: missingRecoveryModel,
+        }),
+      ),
+    ).toThrow("invalid field set");
     for (const record of records) {
       const withExtra = { ...record, unexpected: true };
       expect(() => validateServerRecord(withExtra)).toThrow("invalid field set");
@@ -457,7 +489,7 @@ describe("Nanocodex capability and server protocol validation", () => {
     );
   });
 
-  test("enforces exact safe projections for every v0.0.1 agent event family", () => {
+  test("enforces exact safe projections for every protocol v1 agent event family", () => {
     const [toolCall, toolResult] = projectedToolEvents();
     const projected = [
       assistantEvent(),
@@ -1107,6 +1139,11 @@ describe("Nanocodex client commands", () => {
       createTurnStartCommand({ ...valid, auth: { mode: "api-key-env", environmentVariable: "BAD-NAME" } }),
     ).toThrow("environment variable");
     expect(() => createTurnStartCommand({ ...valid, options: { thinking: "ultra" } })).toThrow("thinking");
+    expect(() => createTurnStartCommand({ ...valid, options: { model: "gpt-4o" } })).toThrow("model");
+    expect(createTurnStartCommand({ ...valid, options: { model: "terra" } }).data.options.model).toBe("terra");
+    expect(createTurnStartCommand({ ...valid, options: { model: "gpt-5.6-luna" } }).data.options.model).toBe(
+      "gpt-5.6-luna",
+    );
     expect(() => createTurnStartCommand({ ...valid, options: { instructions: "  " } })).toThrow("nonempty");
     expect(() => createTurnStartCommand({ ...valid, auth: { mode: "chatgpt", authFile: "relative.json" } })).toThrow(
       "absolute",
@@ -1175,16 +1212,14 @@ describe("Nanocodex checkpoint codec", () => {
       fingerprintVersion: 1,
       instructions: null,
       tools: {
-        profile: "nanocodex-stock-0.3.0",
+        profile: "nanocodex-stock-0.5.0",
         codeMode: true,
         mcp: false,
         subagents: false,
       },
     });
-    expect(fingerprint).toBe("sha256:e4580c36cd5e0b89d1bdc7aeda2c3664ca61d239fdd9807e6b62019b81dbde86");
-    expect(createNanocodexPolicyFingerprint("Follow the task exactly.")).toBe(
-      "sha256:41ba0705cc5b1aaf4a5eac581890027227efd21579bcc267845d436b9a3f19c4",
-    );
+    expect(fingerprint).toBe("sha256:1faa485a45bd4bf1977f3cfb92b66656e3be9e3348dcee9490c8b0f7eb47fbd4");
+    expect(createNanocodexPolicyFingerprint("Follow the task exactly.")).not.toBe(fingerprint);
     expect(createNanocodexPolicyFingerprint("")).not.toBe(fingerprint);
     expect(() => createNanocodexPolicyFingerprint(undefined)).not.toThrow();
     expect(() => createNanocodexPolicyFingerprint(42)).toThrow("string or null");
@@ -1238,14 +1273,24 @@ describe("Nanocodex checkpoint codec", () => {
       version: 1,
       payload: {
         bridgeProtocolVersion: 1,
-        nanocodexVersion: "0.3.0",
+        nanocodexVersion: NANOCODEX_VERSION,
         snapshotVersion: 1,
+        model: "gpt-5.6-sol",
         canonicalWorkspace: workspace,
         policyFingerprint: fingerprint,
         nanocodexSnapshot: snapshot,
       },
     });
     expect(created.payload.nanocodexSnapshot).not.toBe(snapshot);
+    expect(
+      createNanocodexCheckpoint({
+        snapshot,
+        snapshotVersion: 1,
+        canonicalWorkspace: workspace,
+        policyFingerprint: fingerprint,
+        model: "gpt-5.6-terra",
+      }).payload.model,
+    ).toBe("gpt-5.6-terra");
   });
 
   test("consumes the authoritative checkpoint fixture from the Smithers-owned copy", () => {
@@ -1256,6 +1301,26 @@ describe("Nanocodex checkpoint codec", () => {
     });
     expect(validated).toEqual(authoritative);
     expect(validated).not.toBe(authoritative);
+    expect(authoritative.payload.model).toBeUndefined();
+  });
+
+  test("rejects a 0.0.1 / Nanocodex 0.3.0 envelope before resume", () => {
+    const rejected = JSON.parse(fixture("checkpoint-v0.0.1-rejected.json"));
+    expect(rejected.payload.nanocodexVersion).toBe("0.3.0");
+    expect(() =>
+      validateNanocodexCheckpoint(rejected, {
+        canonicalWorkspace: "/workspace",
+        policyFingerprint: createNanocodexPolicyFingerprint(null),
+      }),
+    ).toThrow("library version");
+  });
+
+  test("accepts both shipped rustc targets at the protocol layer", () => {
+    for (const target of NANOCODEX_SHIPPED_TARGETS) {
+      const value = capabilities();
+      value.target = target;
+      expect(validateNanocodexCapabilities(value).target).toBe(target);
+    }
   });
 
   test("validates and isolates one same-workspace resume snapshot", () => {
@@ -1282,8 +1347,9 @@ describe("Nanocodex checkpoint codec", () => {
       ["codec", (value) => (value.codec = "other")],
       ["codec version", (value) => (value.version = 2)],
       ["bridge protocol", (value) => (value.payload.bridgeProtocolVersion = 2)],
-      ["library version", (value) => (value.payload.nanocodexVersion = "0.3.1")],
+      ["library version", (value) => (value.payload.nanocodexVersion = "0.3.0")],
       ["snapshot version", (value) => (value.payload.snapshotVersion = 2)],
+      ["model", (value) => (value.payload.model = "gpt-4o")],
       ["workspace", (value) => (value.payload.canonicalWorkspace = "/tmp/other")],
       ["policy", (value) => (value.payload.policyFingerprint = createNanocodexPolicyFingerprint("other"))],
       ["exact payload", (value) => (value.payload.extra = true)],
@@ -1380,7 +1446,7 @@ describe("Nanocodex checkpoint codec", () => {
       prompt: "r",
       workspace,
       auth: { mode: "chatgpt", authFile: null },
-      options: { instructions: null, thinking: null, reasoningMode: null, fastMode: null },
+      options: { instructions: null, model: null, thinking: null, reasoningMode: null, fastMode: null },
       continuation: { mode: "resume", snapshot: baseSnapshot },
     });
     const addedNullNodes = NANOCODEX_LIMITS.maxJsonNodes - jsonNodeCount(baseResumeCommand);
@@ -1396,7 +1462,7 @@ describe("Nanocodex checkpoint codec", () => {
           prompt: "r",
           workspace,
           auth: { mode: "chatgpt", authFile: null },
-          options: { instructions: null, thinking: null, reasoningMode: null, fastMode: null },
+          options: { instructions: null, model: null, thinking: null, reasoningMode: null, fastMode: null },
           continuation: { mode: "resume", snapshot: exactNodeSnapshot },
         }),
       ),

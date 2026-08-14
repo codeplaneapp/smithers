@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 2,
+  "baselineId": "smithers-nanocodex/v0.0.2",
+  "status": "prepared",
+  "release": {
+    "version": "0.0.2",
+    "tag": "v0.0.2",
+    "url": "https://github.com/N0xMare/smithers-nanocodex/releases/tag/v0.0.2"
+  },
+  "artifacts": [
+    {
+      "target": "x86_64-unknown-linux-gnu",
+      "fileName": "smithers-nanocodex-v0.0.2-x86_64-unknown-linux-gnu.tar.gz",
+      "downloadUrl": "https://github.com/N0xMare/smithers-nanocodex/releases/download/v0.0.2/smithers-nanocodex-v0.0.2-x86_64-unknown-linux-gnu.tar.gz",
+      "minimumGlibcVersion": "2.35"
+    },
+    {
+      "target": "aarch64-apple-darwin",
+      "fileName": "smithers-nanocodex-v0.0.2-aarch64-apple-darwin.tar.gz",
+      "downloadUrl": "https://github.com/N0xMare/smithers-nanocodex/releases/download/v0.0.2/smithers-nanocodex-v0.0.2-aarch64-apple-darwin.tar.gz",
+      "minimumMacosVersion": "15"
+    }
+  ],
+  "contract": {
+    "bridgeVersion": "0.0.2",
+    "nanocodexVersion": "0.5.0",
+    "protocol": "smithers.nanocodex/1",
+    "checkpointCodec": "nanocodex.session-snapshot/1",
+    "snapshotVersion": 1,
+    "policyFingerprint": "smithers.nanocodex.policy-fingerprint/1",
+    "toolProfile": "nanocodex-stock-0.5.0"
+  },
+  "qualification": {
+    "bridgeArtifact": false,
+    "smithersAdapter": false,
+    "notes": "GitHub release sidecar checksums are the published pin. This file remains the prepared consumer contract and does not duplicate those digests. contract.policyFingerprint is the algorithm identifier; the checkpoint envelope field of the same name is the SHA-256 digest.",
+    "checks": [
+      "provider-independent suite on Linux and macOS",
+      "capabilities report the compiled rustc target",
+      "direct process spawn; adapter Bubblewrap is not required",
+      "stock Nanocodex 0.5.0 with nanocodex-stock-0.5.0 policy profile",
+      "closed models gpt-5.6-sol (default), gpt-5.6-terra, gpt-5.6-luna",
+      "thinking/effort, reasoningMode including pro, and fastMode",
+      "reject 0.0.1 / Nanocodex 0.3.0 / nanocodex-stock-0.3.0 envelopes before spawn"
+    ]
+  }
+}

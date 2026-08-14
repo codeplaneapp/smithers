@@ -14,6 +14,7 @@ import { computeRunStateFromRow } from "@smthrs/db/runState";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { deriveTailStatus, isTailActiveState } from "./tail.js";
+import { smithersRuntimeReentry } from "./node-loader/smithersRuntimeSpawn.js";
 
 /**
  * CLI wiring for the optional herdr mirror plane (`smithers up --herdr`,
@@ -277,8 +278,9 @@ export function buildTailCommand(cliPath, opts = {}) {
   const dbPath = typeof opts.dbPath === "string" && opts.dbPath.endsWith("smithers.db") ? opts.dbPath : undefined;
   if (existsSync(thinEntry)) {
     return (ctx) => {
+      const runtime = smithersRuntimeReentry([thinEntry, ctx.runId, "--node", ctx.nodeId, "--linger"]);
       /** @type {string[]} */
-      const argv = [process.execPath, thinEntry, ctx.runId, "--node", ctx.nodeId, "--linger"];
+      const argv = [runtime.command, ...runtime.args];
       // Pin the store the supervisor is reading so mid-run opens cannot
       // resolve a different/empty smithers.db via cwd walk.
       if (dbPath) argv.push("--db", dbPath);
@@ -288,7 +290,10 @@ export function buildTailCommand(cliPath, opts = {}) {
 
   // Fallback: full CLI tail + HUD dock (s steer · h hijack · q).
   // Note: `smithers tail` has no `--db` flag — relies on cwd discovery.
-  return (ctx) => [process.execPath, cliPath, "tail", ctx.runId, "--node", ctx.nodeId, "--hud", "--linger"];
+  return (ctx) => {
+    const runtime = smithersRuntimeReentry([cliPath, "tail", ctx.runId, "--node", ctx.nodeId, "--hud", "--linger"]);
+    return [runtime.command, ...runtime.args];
+  };
 }
 
 /**
@@ -304,7 +309,10 @@ export function buildTailCommand(cliPath, opts = {}) {
  * @returns {(ctx: { runId: string, nodeId: string }) => string[]}
  */
 export function buildGateCommand(cliPath) {
-  return (ctx) => [process.execPath, cliPath, "approve", ctx.runId, "--watch", "--node", ctx.nodeId];
+  return (ctx) => {
+    const runtime = smithersRuntimeReentry([cliPath, "approve", ctx.runId, "--watch", "--node", ctx.nodeId]);
+    return [runtime.command, ...runtime.args];
+  };
 }
 
 /**
@@ -318,8 +326,9 @@ export function buildGateCommand(cliPath) {
  * @returns {(ctx: { runId: string }) => string[]}
  */
 export function buildOverviewCommand(cliPath, opts = {}) {
+  const runtime = smithersRuntimeReentry([cliPath, "supervisor"]);
   /** @type {string[]} */
-  const argv = [process.execPath, cliPath, "supervisor"];
+  const argv = [runtime.command, ...runtime.args];
   if (typeof opts.dbPath === "string" && opts.dbPath !== "") {
     argv.push("--db", opts.dbPath);
   }

@@ -240,7 +240,7 @@ harness can do the edits.
 | Codex | CLI harness |
 | Cursor | CLI harness |
 | [Pi](./docs/integrations/pi-integration.mdx) | CLI harness |
-| [Nanocodex](./docs/integrations/nanocodex.mdx) | External pinned stock-agent bridge (Linux x86_64, glibc 2.35+, Bubblewrap) |
+| [Nanocodex](./docs/integrations/nanocodex.mdx) | External pinned stock-agent bridge (Linux x86_64 / macOS arm64; direct spawn) |
 | Antigravity | CLI harness |
 | Hermes | CLI harness |
 | OpenClaw | CLI harness |

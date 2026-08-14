@@ -12,15 +12,15 @@ import { z } from "zod";
 import { runWorkflow, Task, Workflow } from "smthrs";
 import { jsx } from "smthrs/jsx-runtime";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
-import { nanocodexTestSupported } from "./nanocodex-host-support.js";
+import { nanocodexHostTarget, nanocodexTestSupported } from "./nanocodex-host-support.js";
 
 const CONFIGURED_CHECKPOINT_LIMIT = 4_096;
 const nTest = nanocodexTestSupported ? test : test.skip;
 
 const NANOCODEX_CAPABILITIES = {
-  bridgeVersion: "0.0.1",
-  target: "x86_64-unknown-linux-gnu",
-  nanocodexVersion: "0.3.0",
+  bridgeVersion: "0.0.2",
+  target: nanocodexHostTarget,
+  nanocodexVersion: "0.5.0",
   protocol: { name: "smithers.nanocodex", versions: [1] },
   checkpoint: {
     codec: "nanocodex.session-snapshot",
@@ -31,6 +31,11 @@ const NANOCODEX_CAPABILITIES = {
   },
   authenticationModes: ["api-key-env", "chatgpt"],
   transportModes: ["websocket"],
+  models: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+  defaultModel: "gpt-5.6-sol",
+  thinkingLevels: ["none", "low", "medium", "high", "xhigh", "max"],
+  defaultThinking: "high",
+  reasoningModes: ["standard", "pro"],
   features: {
     codeMode: true,
     codeModeDisable: false,
@@ -563,6 +568,7 @@ if (process.argv[2] === "capabilities") {
         outputTokens: 1, reasoningOutputTokens: 0, totalTokens: turn + 1,
         estimatedUsd: null, costStatus: "usage_not_reported", serviceTier: null,
       },
+      model: command.data.options?.model ?? "gpt-5.6-sol",
       snapshotVersion: 1,
       snapshot: { version: 1, turns: [...priorTurns, turn] },
       canonicalWorkspace: command.data.workspace,
@@ -571,6 +577,7 @@ if (process.argv[2] === "capabilities") {
       emit("turn.failed", {
         error: { code: "cleanup_failed", category: "cleanup", message: "Cleanup failed.", retry: "safe" },
         completed: {
+          model: completed.model,
           snapshotVersion: completed.snapshotVersion,
           snapshot: completed.snapshot,
           canonicalWorkspace: completed.canonicalWorkspace,

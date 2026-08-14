@@ -5,6 +5,7 @@ import { Effect, Schedule } from "effect";
 import { toSmithersError } from "@smthrs/errors/toSmithersError";
 import { runPromise } from "./smithersRuntime.js";
 import { findAndOpenDb } from "./find-db.js";
+import { smithersRuntimeReentry } from "./node-loader/smithersRuntimeSpawn.js";
 const CLI_ENTRYPOINT = fileURLToPath(new URL("./index.js", import.meta.url));
 /** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /**
@@ -46,7 +47,8 @@ function acquireSchedulerDbEffect() {
  * @param {typeof spawn} [spawnProcess]
  */
 export function launchCronWorkflow(job, spawnProcess = spawn) {
-  const proc = spawnProcess(process.execPath, [CLI_ENTRYPOINT, "up", job.workflowPath, "-d"], {
+  const runtime = smithersRuntimeReentry([CLI_ENTRYPOINT, "up", job.workflowPath, "-d"]);
+  const proc = spawnProcess(runtime.command, runtime.args, {
     cwd: process.cwd(),
     detached: true,
     stdio: "ignore",

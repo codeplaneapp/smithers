@@ -26,7 +26,7 @@ import { isRunHeartbeatFresh, runWorkflow, renderFrame, resolveSchema } from "@s
 import { __engineInternals } from "@smthrs/engine/engine";
 import { readWorkflowEntryHash, readWorkflowGraphHash } from "@smthrs/engine/workflow-hash";
 import { mdxPlugin } from "./mdx-plugin.js";
-import { smithersRuntimeSpawn } from "./node-loader/smithersRuntimeSpawn.js";
+import { smithersRuntimeReentry, smithersRuntimeSpawn } from "./node-loader/smithersRuntimeSpawn.js";
 import { approveNode, denyNode } from "@smthrs/engine/approvals";
 import { isPidAlive, parseRuntimeOwnerPid } from "@smthrs/engine/runtime-owner";
 import { signalRun } from "@smthrs/engine/signals";
@@ -4952,29 +4952,26 @@ async function ensureWorkspaceGateway(workspace, preferredPort, opts = {}) {
     const autostartIdleMs = process.env.SMITHERS_GATEWAY_IDLE_MS
       ? String(Math.max(0, Math.floor(Number(process.env.SMITHERS_GATEWAY_IDLE_MS) || 0)))
       : "300000";
-    child = spawn(
-      process.argv[0],
-      [
-        process.argv[1],
-        "gateway",
-        "--host",
-        host,
-        "--port",
-        String(preferredPort),
-        "--idle-timeout",
-        autostartIdleMs,
-        // The gateway refuses an unauthenticated non-loopback bind (it would
-        // be a full-control open control plane), so autostart on a remote-
-        // reachable host always mints a token; the state file hands it to
-        // this client, which passes it through the browser session handoff.
-        ...(GATEWAY_LOOPBACK_HOSTS.has(host) ? [] : ["--mint-token"]),
-      ],
-      {
-        stdio: ["ignore", stderrFd, stderrFd],
-        detached: true,
-        cwd: workspace,
-      },
-    );
+    const gatewaySpawn = smithersRuntimeReentry([
+      process.argv[1],
+      "gateway",
+      "--host",
+      host,
+      "--port",
+      String(preferredPort),
+      "--idle-timeout",
+      autostartIdleMs,
+      // The gateway refuses an unauthenticated non-loopback bind (it would
+      // be a full-control open control plane), so autostart on a remote-
+      // reachable host always mints a token; the state file hands it to
+      // this client, which passes it through the browser session handoff.
+      ...(GATEWAY_LOOPBACK_HOSTS.has(host) ? [] : ["--mint-token"]),
+    ]);
+    child = spawn(gatewaySpawn.command, gatewaySpawn.args, {
+      stdio: ["ignore", stderrFd, stderrFd],
+      detached: true,
+      cwd: workspace,
+    });
     child.unref();
   } catch (error) {
     if (stderrFd !== undefined) {
@@ -5689,11 +5686,14 @@ async function runGatewayCommand(options) {
     // finished runs reopen the recorded agent session for a post-mortem.
     const cliEntry = fileURLToPath(new URL("./index.js", import.meta.url));
     /** @type {(params: { runId: string; nodeId?: string }) => { command: string[]; cwd?: string; env?: Record<string, string | undefined> }} */
-    const hijackPty = ({ runId, nodeId }) => ({
-      command: [process.execPath, cliEntry, "hijack", runId, ...(nodeId ? ["--target", nodeId] : [])],
-      cwd: workspace,
-      env: { ...process.env, FORCE_COLOR: process.env.FORCE_COLOR ?? "1" },
-    });
+    const hijackPty = ({ runId, nodeId }) => {
+      const runtime = smithersRuntimeReentry([cliEntry, "hijack", runId, ...(nodeId ? ["--target", nodeId] : [])]);
+      return {
+        command: [runtime.command, ...runtime.args],
+        cwd: workspace,
+        env: { ...process.env, FORCE_COLOR: process.env.FORCE_COLOR ?? "1" },
+      };
+    };
     const oneshotMonitor = createOneshotMonitorControl({
       cliEntry,
       cancelRun: (adapter, runId) => cascadeCancelRun(adapter, runId),
@@ -7299,6 +7299,14 @@ const worktreeCli = Cli.create({
           const verb = result.dryRun ? "Would remove" : "Removed";
           for (const entry of result.removed) {
             console.log(`${verb} ${entry.path} (${entry.runId}, ${formatBytes(entry.bytes)})`);
+            if (entry.ignoredPaths.length > 0) {
+              const count = entry.ignoredPathsTruncated
+                ? `${entry.ignoredPaths.length}+`
+                : String(entry.ignoredPaths.length);
+              const preview = entry.ignoredPaths.slice(0, 3).join(", ");
+              const more = entry.ignoredPaths.length > 3 || entry.ignoredPathsTruncated ? ", ..." : "";
+              console.log(`${result.dryRun ? "Would delete" : "Deleted"} ${count} ignored path(s): ${preview}${more}`);
+            }
           }
           for (const entry of result.skipped) {
             console.log(`Keeping ${entry.path} (${entry.runId}): ${entry.reason}`);
@@ -13314,10 +13322,12 @@ async function relaunchForConflictedWorkspaceManifest() {
   // the conflicted cwd while it waits for a child.
   if (typeof process.execve === "function") {
     process.chdir(cliPackageDir);
-    process.execve(process.execPath, [process.execPath, cliEntry, ...process.argv.slice(2)], childEnv);
+    const runtime = smithersRuntimeReentry([cliEntry, ...process.argv.slice(2)]);
+    process.execve(runtime.command, [runtime.command, ...runtime.args], childEnv);
   }
   process.chdir(cliPackageDir);
-  const child = spawn(process.execPath, [cliEntry, ...process.argv.slice(2)], {
+  const runtime = smithersRuntimeReentry([cliEntry, ...process.argv.slice(2)]);
+  const child = spawn(runtime.command, runtime.args, {
     env: childEnv,
     stdio: "inherit",
   });

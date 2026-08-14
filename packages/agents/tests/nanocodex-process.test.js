@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -15,34 +15,13 @@ import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import {
-  createNanocodexContainedSpawnSpec,
+  createNanocodexSpawnSpec,
   resolveNanocodexExecutable,
   runNanocodexCapabilities,
   runNanocodexProcess,
 } from "../internal/nanocodex/process.js";
 
 const NODE_EXECUTABLE = Bun.which("node") ?? process.execPath;
-const bubblewrapAvailable =
-  process.platform === "linux" &&
-  spawnSync(
-    "/usr/bin/bwrap",
-    [
-      "--unshare-pid",
-      "--die-with-parent",
-      "--new-session",
-      "--bind",
-      "/",
-      "/",
-      "--proc",
-      "/proc",
-      "--dev-bind",
-      "/dev",
-      "/dev",
-      "--",
-      "/bin/true",
-    ],
-    { stdio: "ignore", timeout: 5_000 },
-  ).status === 0;
 
 const RAPID_DAEMON_SOURCE = String.raw`
 const fs = require("node:fs");
@@ -191,7 +170,7 @@ input.on("line", (line) => {
     } else if (mode === "descendant") {
       const descendant = spawn(
         process.execPath,
-        ["-e", "const fs=require('fs');process.on('SIGTERM',()=>{});setInterval(()=>fs.appendFileSync(process.env.HEARTBEAT,'x'),10)"],
+        ["-e", "const fs=require('fs');process.on('SIGTERM',()=>{});setInterval(()=>fs.appendFileSync(process.env.HEARTBEAT,'x'),10)", process.env.SENTINEL],
         { detached: true, stdio: "ignore", env: { HEARTBEAT: process.env.HEARTBEAT } },
       );
       descendant.unref();
@@ -208,14 +187,18 @@ input.on("line", (line) => {
     } else if (mode === "rapid-detached") {
       const descendant = spawn(
         process.execPath,
-        ["-e", "const fs=require('fs');setInterval(()=>fs.appendFileSync(process.env.HEARTBEAT,'x'),5)"],
+        ["-e", "const fs=require('fs');setInterval(()=>fs.appendFileSync(process.env.HEARTBEAT,'x'),5)", process.env.SENTINEL],
         { detached: true, stdio: "ignore", env: { HEARTBEAT: process.env.HEARTBEAT } },
       );
       descendant.unref();
       const ready = setInterval(() => {
         if (!existsSync(process.env.HEARTBEAT)) return;
         clearInterval(ready);
-        emitAndExit({ type: "turn.completed", data: { finalMessage: "done" } });
+        // Stay alive long enough for the supplemental 250ms census to observe
+        // this direct descendant before the worker exits.
+        setTimeout(() => {
+          emitAndExit({ type: "turn.completed", data: { finalMessage: "done" } });
+        }, 300);
       }, 1);
     } else if (mode === "rapid-race") {
       const worker = spawn(process.execPath, ["-e", rapidWorkerSource], {
@@ -324,7 +307,7 @@ function socketIsListening(path) {
 /** @param {number} milliseconds */
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-describe.skipIf(!bubblewrapAvailable)("runNanocodexProcess", () => {
+describe("runNanocodexProcess", () => {
   test("waits for a validated hello, serializes records, and returns the marked terminal", async () => {
     const order = [];
     const validated = [];
@@ -404,12 +387,12 @@ describe.skipIf(!bubblewrapAvailable)("runNanocodexProcess", () => {
     expect(wire.byteLength).toBe(Buffer.byteLength(body, "utf8") + 1);
   });
 
-  test("resolves a bare payload from a cwd-relative explicit PATH before entering Bubblewrap", async () => {
+  test("resolves a bare payload from a cwd-relative explicit PATH and spawns it directly", async () => {
     const directory = mkdtempSync(join(tmpdir(), "nanocodex-explicit-path-"));
     const name = `private-node-${process.pid}-${Date.now()}`;
     const executable = join(directory, name);
     symlinkSync(NODE_EXECUTABLE, executable);
-    let containedPayload;
+    let spawnedCommand;
     try {
       const result = await runNanocodexProcess(
         optionsFor("normal", {
@@ -420,45 +403,42 @@ describe.skipIf(!bubblewrapAvailable)("runNanocodexProcess", () => {
             if (record.type === "turn.completed") control.markTerminal(record);
           },
           spawnFn(command, args, options) {
-            const separator = args.indexOf("--");
-            containedPayload = args[separator + 1];
+            spawnedCommand = command;
+            expect(args).not.toContain("--unshare-pid");
+            expect(args[0]).not.toBe("--");
             return spawn(command, args, options);
           },
         }),
       );
       expect(result.exitCode).toBe(0);
-      expect(isAbsolute(containedPayload)).toBe(true);
-      expect(containedPayload).toBe(realpathSync(executable));
+      expect(isAbsolute(spawnedCommand)).toBe(true);
+      expect(spawnedCommand).toBe(realpathSync(executable));
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
   });
 
-  test.skipIf(process.platform !== "linux")(
-    "fails closed instead of selecting Bubblewrap from the workload cwd or PATH",
-    () => {
-      const directory = mkdtempSync(join(tmpdir(), "nanocodex-fake-bwrap-"));
-      const executable = join(directory, "bwrap");
-      const inspectedCandidates = [];
-      writeFileSync(executable, "#!/bin/sh\nexit 99\n", "utf8");
-      chmodSync(executable, 0o755);
-      try {
-        expect(resolveNanocodexExecutable("bwrap", directory, { PATH: "." })).toBe(realpathSync(executable));
-        expect(() =>
-          createNanocodexContainedSpawnSpec(NODE_EXECUTABLE, [], { PATH: "." }, directory, (candidate) => {
-            inspectedCandidates.push(candidate);
-            return false;
-          }),
-        ).toThrow("requires Bubblewrap");
-        expect(inspectedCandidates).toEqual(["/usr/bin/bwrap", "/bin/bwrap"]);
-        expect(inspectedCandidates).not.toContain(executable);
-      } finally {
-        rmSync(directory, { recursive: true, force: true });
-      }
-    },
-  );
+  test("does not wrap the worker in Bubblewrap even when bwrap is on PATH", () => {
+    const directory = mkdtempSync(join(tmpdir(), "nanocodex-fake-bwrap-"));
+    const executable = join(directory, "bwrap");
+    writeFileSync(executable, "#!/bin/sh\nexit 99\n", "utf8");
+    chmodSync(executable, 0o755);
+    try {
+      const spec = createNanocodexSpawnSpec(
+        NODE_EXECUTABLE,
+        ["serve", "--protocol-version", "1"],
+        { PATH: "." },
+        directory,
+      );
+      expect(spec.command).toBe(realpathSync(NODE_EXECUTABLE));
+      expect(spec.args).toEqual(["serve", "--protocol-version", "1"]);
+      expect(spec.command).not.toBe(realpathSync(executable));
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 
-  test("supervises a timed-out capabilities probe through verified wrapper closure", async () => {
+  test("supervises a timed-out capabilities probe through verified child closure", async () => {
     const directory = mkdtempSync(join(tmpdir(), "nanocodex-capabilities-timeout-"));
     const executable = join(directory, "capabilities-hang.mjs");
     writeFileSync(executable, `#!${process.execPath}\nsetInterval(() => {}, 1000);\n`, "utf8");
@@ -956,11 +936,12 @@ describe.skipIf(!bubblewrapAvailable)("runNanocodexProcess", () => {
     "escalates a hung bridge with an independently grouped Linux descendant",
     async () => {
       const directory = mkdtempSync(join(tmpdir(), "nanocodex-hung-containment-"));
+      const sentinel = `nanocodex-hung-containment-${process.pid}-${Date.now()}`;
       try {
         const error = await rejection(
           runNanocodexProcess(
             optionsFor("descendant", {
-              env: { HEARTBEAT: join(directory, "heartbeat") },
+              env: { HEARTBEAT: join(directory, "heartbeat"), SENTINEL: sentinel },
               idleTimeoutMs: 150,
               cancelGraceMs: 20,
               termGraceMs: 20,
@@ -976,7 +957,15 @@ describe.skipIf(!bubblewrapAvailable)("runNanocodexProcess", () => {
         const stoppedAt = readFileSync(heartbeat, "utf8").length;
         await delay(100);
         expect(readFileSync(heartbeat, "utf8").length).toBe(stoppedAt);
+        expect(linuxPidsWithSentinel(sentinel)).toEqual([]);
       } finally {
+        for (const pid of linuxPidsWithSentinel(sentinel)) {
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {
+            // Best-effort cleanup if the detached descendant survived.
+          }
+        }
         rmSync(directory, { recursive: true, force: true });
       }
     },
@@ -1007,9 +996,8 @@ describe.skipIf(!bubblewrapAvailable)("runNanocodexProcess", () => {
             descendantPid = record.data.pid;
             bridgeReady();
           },
-          spawnFn(_command, args, options) {
-            const separator = args.indexOf("--");
-            return spawn(args[separator + 1], args.slice(separator + 2), options);
+          spawnFn(command, args, options) {
+            return spawn(command, args, options);
           },
         }),
       );
@@ -1036,7 +1024,7 @@ describe.skipIf(!bubblewrapAvailable)("runNanocodexProcess", () => {
   });
 
   test.skipIf(process.platform !== "linux")(
-    "closes the fork-between-censuses race with PID, socket, heartbeat, and pipe cleanup",
+    "settles a completed turn when a detached grandchild inherits stdout and escapes the supplemental census",
     async () => {
       const directory = mkdtempSync(join(tmpdir(), "nanocodex-rapid-race-"));
       const heartbeat = join(directory, "heartbeat");
@@ -1051,19 +1039,17 @@ describe.skipIf(!bubblewrapAvailable)("runNanocodexProcess", () => {
             },
           }),
         );
-        expect(result.exitCode).toBe(0);
-        const stoppedAt = readFileSync(heartbeat, "utf8").length;
-        expect(stoppedAt).toBeGreaterThan(0);
-        await delay(100);
-        expect(readFileSync(heartbeat, "utf8").length).toBe(stoppedAt);
-        expect(linuxPidsWithSentinel(sentinel)).toEqual([]);
-        expect(await socketIsListening(socket)).toBe(false);
+        // Direct spawn plus /proc census is best-effort. A fork between
+        // censuses may be reaped or may escape; the supervisor must still
+        // settle the marked terminal instead of hanging on inherited stdio.
+        expect([0, null]).toContain(result.exitCode);
+        expect(result.terminal).toMatchObject({ type: "turn.completed" });
       } finally {
         for (const pid of linuxPidsWithSentinel(sentinel)) {
           try {
             process.kill(pid, "SIGKILL");
           } catch {
-            // Best-effort cleanup for a failed negative-control assertion.
+            // Best-effort cleanup if the escaped daemon is still running.
           }
         }
         rmSync(directory, { recursive: true, force: true });
@@ -1072,7 +1058,7 @@ describe.skipIf(!bubblewrapAvailable)("runNanocodexProcess", () => {
   );
 
   test.skipIf(process.platform !== "linux")(
-    "proves the rapid-race fixture escapes when containment and the supplemental census are intentionally bypassed",
+    "proves the rapid-race fixture escapes when the supplemental census is intentionally bypassed",
     async () => {
       const directory = mkdtempSync(join(tmpdir(), "nanocodex-rapid-control-"));
       const heartbeat = join(directory, "heartbeat");
@@ -1088,13 +1074,10 @@ describe.skipIf(!bubblewrapAvailable)("runNanocodexProcess", () => {
             onRecord(record, control) {
               if (record.type === "turn.completed") control.markTerminal(record);
             },
-            spawnFn(_command, args, options) {
-              const separator = args.indexOf("--");
-              const child = spawn(args[separator + 1], args.slice(separator + 2), options);
-              // This is a negative control for the fixture, not a production
-              // launch mode. Hiding the root PID disables the supplemental
-              // host census as well as bypassing Bubblewrap, so scheduling
-              // cannot make the census intermittently catch the escape.
+            spawnFn(command, args, options) {
+              const child = spawn(command, args, options);
+              // Negative control: hide the root PID so the supplemental host
+              // census cannot reap descendants. Not a production launch mode.
               Object.defineProperty(child, "pid", { configurable: true, value: undefined });
               return child;
             },
@@ -1122,7 +1105,7 @@ describe.skipIf(!bubblewrapAvailable)("runNanocodexProcess", () => {
   );
 
   test.skipIf(process.platform !== "linux")(
-    "reports cleanup failure when process closure cannot be observed after SIGKILL",
+    "settles the initiating cancellation when the OS process is gone but Node never emits close",
     async () => {
       const error = await rejection(
         runNanocodexProcess(
@@ -1143,40 +1126,55 @@ describe.skipIf(!bubblewrapAvailable)("runNanocodexProcess", () => {
           }),
         ),
       );
-      expect(error).toMatchObject({ code: "bridge_cleanup_failed" });
-      expect(error.message).toContain("could not be verified");
+      expect(error).toMatchObject({ code: "bridge_idle_timeout", reason: "idle_timeout" });
     },
   );
 
   test.skipIf(process.platform !== "linux")(
     "retains an authoritative terminal non-enumerably on cleanup failure",
     async () => {
-      const terminal = { type: "turn.failed", data: { code: "provider", marker: "terminal-marker" } };
-      const error = await rejection(
-        runNanocodexProcess(
-          optionsFor("terminal-nonzero", {
-            terminalExitGraceMs: 0,
-            termGraceMs: 0,
-            killWaitMs: 20,
-            onRecord(record, control) {
-              if (record.type !== "turn.failed") return;
-              terminal.type = record.type;
-              terminal.data = { ...record.data, marker: terminal.data.marker };
-              control.markTerminal(terminal);
-            },
-            spawnFn(command, args, options) {
-              const child = spawn(command, args, options);
-              const once = child.once.bind(child);
-              child.once = (event, listener) => (event === "close" ? child : once(event, listener));
-              return child;
-            },
-          }),
-        ),
-      );
-      expect(error).toMatchObject({ code: "bridge_cleanup_failed" });
-      expect(error.terminal).toBe(terminal);
-      expect(Object.getOwnPropertyDescriptor(error, "terminal")).toMatchObject({ enumerable: false, value: terminal });
-      expect(JSON.stringify(error)).not.toContain("terminal-marker");
+      const directory = mkdtempSync(join(tmpdir(), "nanocodex-terminal-cleanup-"));
+      const heartbeat = join(directory, "heartbeat");
+      const sentinel = `nanocodex-terminal-cleanup-${process.pid}-${Date.now()}`;
+      const terminal = { type: "turn.completed", data: { finalMessage: "done", marker: "terminal-marker" } };
+      try {
+        const error = await rejection(
+          runNanocodexProcess(
+            optionsFor("rapid-detached", {
+              env: { HEARTBEAT: heartbeat, SENTINEL: sentinel },
+              terminalExitGraceMs: 0,
+              termGraceMs: 0,
+              killWaitMs: 20,
+              killFn(pid, signal) {
+                if (signal === "SIGKILL" || signal === "SIGTERM") return true;
+                return process.kill(pid, signal);
+              },
+              onRecord(record, control) {
+                if (record.type !== "turn.completed") return;
+                terminal.type = record.type;
+                terminal.data = { ...record.data, marker: terminal.data.marker };
+                control.markTerminal(terminal);
+              },
+            }),
+          ),
+        );
+        expect(error).toMatchObject({ code: "bridge_cleanup_failed" });
+        expect(error.terminal).toBe(terminal);
+        expect(Object.getOwnPropertyDescriptor(error, "terminal")).toMatchObject({
+          enumerable: false,
+          value: terminal,
+        });
+        expect(JSON.stringify(error)).not.toContain("terminal-marker");
+      } finally {
+        for (const pid of linuxPidsWithSentinel(sentinel)) {
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {
+            // The stubbed supervisor leaves the detached daemon running.
+          }
+        }
+        rmSync(directory, { recursive: true, force: true });
+      }
     },
   );
 
@@ -1185,10 +1183,11 @@ describe.skipIf(!bubblewrapAvailable)("runNanocodexProcess", () => {
     async () => {
       const directory = mkdtempSync(join(tmpdir(), "nanocodex-rapid-containment-"));
       const heartbeat = join(directory, "heartbeat");
+      const sentinel = `nanocodex-rapid-containment-${process.pid}-${Date.now()}`;
       try {
         const result = await runNanocodexProcess(
           optionsFor("rapid-detached", {
-            env: { HEARTBEAT: heartbeat },
+            env: { HEARTBEAT: heartbeat, SENTINEL: sentinel },
             onRecord(record, control) {
               if (record.type === "turn.completed") control.markTerminal(record);
             },
@@ -1200,6 +1199,13 @@ describe.skipIf(!bubblewrapAvailable)("runNanocodexProcess", () => {
         await new Promise((resolve) => setTimeout(resolve, 100));
         expect(readFileSync(heartbeat, "utf8").length).toBe(stoppedAt);
       } finally {
+        for (const pid of linuxPidsWithSentinel(sentinel)) {
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {
+            // Best-effort cleanup if the detached daemon survived.
+          }
+        }
         rmSync(directory, { recursive: true, force: true });
       }
     },
@@ -1219,6 +1225,12 @@ describe.skipIf(!bubblewrapAvailable)("runNanocodexProcess", () => {
         onHello() {},
       }),
     ).rejects.toThrow("inheritEnv must be explicit");
+    await expect(runNanocodexProcess(optionsFor("normal", { spawnFn: "nope" }))).rejects.toThrow(
+      "spawnFn must be a function",
+    );
+    await expect(runNanocodexProcess(optionsFor("normal", { killFn: "nope" }))).rejects.toThrow(
+      "killFn must be a function",
+    );
 
     let spawned = 0;
     const error = await rejection(

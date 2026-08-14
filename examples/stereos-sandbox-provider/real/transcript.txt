@@ -1,0 +1,116 @@
+$ "$HOME/.local/bin/mb" status smithers-stereos
+NAME              STATE    MIXTAPE             CPUs  MEMORY  SSH            
+smithers-stereos  running  coder-arm64:latest  4     4GiB    127.0.0.1:50759
+$ eval "$(MB="$HOME/.local/bin/mb" ./bootstrap-vm.sh)"
+1.2.21
+agent login verified on smithers-stereos (127.0.0.1:50759)
+$ env -u ANTHROPIC_API_KEY bun ../../../apps/cli/src/index.js up \
+> stereos-real.tsx --input '{"prompt":"hello from the host"}' \
+> | tee /tmp/stereos-mac-run.txt
+↻ Smithers refreshed the `smithers` agent skill (Claude Code, Pi, Codex, OpenCode, Kimi, Antigravity).
+⚠ Found 10 run(s) still marked as 'running':
+  oneshot-msr2tjzn-3e757ce0 (started 2026-08-13T05:27:28.055Z)
+    cancel it:  smithers cancel oneshot-msr2tjzn-3e757ce0
+    resume it:  smithers up <workflow-file> --resume --run-id oneshot-msr2tjzn-3e757ce0
+  oneshot-msqvzlkm-7fa363bb (started 2026-08-13T02:16:16.603Z)
+    cancel it:  smithers cancel oneshot-msqvzlkm-7fa363bb
+    resume it:  smithers up <workflow-file> --resume --run-id oneshot-msqvzlkm-7fa363bb
+  oneshot-status-site-20260807 (started 2026-08-08T03:46:36.453Z)
+    cancel it:  smithers cancel oneshot-status-site-20260807
+    resume it:  smithers up <workflow-file> --resume --run-id oneshot-status-site-20260807
+  oneshot-msh1wqvk-8e43a80b (started 2026-08-06T05:08:36.724Z)
+    cancel it:  smithers cancel oneshot-msh1wqvk-8e43a80b
+    resume it:  smithers up <workflow-file> --resume --run-id oneshot-msh1wqvk-8e43a80b
+  oneshot-msh1k757-fb35862f (started 2026-08-06T04:58:03.638Z)
+    cancel it:  smithers cancel oneshot-msh1k757-fb35862f
+    resume it:  smithers up <workflow-file> --resume --run-id oneshot-msh1k757-fb35862f
+  oneshot-uirev-mdstream (started 2026-07-30T01:28:01.809Z)
+    cancel it:  smithers cancel oneshot-uirev-mdstream
+    resume it:  smithers up <workflow-file> --resume --run-id oneshot-uirev-mdstream
+  oneshot-uirev-m5 (started 2026-07-30T01:28:00.490Z)
+    cancel it:  smithers cancel oneshot-uirev-m5
+    resume it:  smithers up <workflow-file> --resume --run-id oneshot-uirev-m5
+  oneshot-uirev-autosave (started 2026-07-30T01:27:58.488Z)
+    cancel it:  smithers cancel oneshot-uirev-autosave
+    resume it:  smithers up <workflow-file> --resume --run-id oneshot-uirev-autosave
+  run-1785357909890 (started 2026-07-29T20:45:24.781Z)
+    cancel it:  smithers cancel run-1785357909890
+    resume it:  smithers up /Users/williamcory/smithers/.smithers/workflows/release-content.tsx --resume --run-id run-1785357909890
+  cbbe03b4-8cf6-4e30-b457-6ce7e79a5fa4 (started 2026-07-28T16:31:54.134Z)
+    cancel it:  smithers cancel cbbe03b4-8cf6-4e30-b457-6ce7e79a5fa4
+    resume it:  smithers up /Users/williamcory/smithers/.smithers/workflows/federation-standalone-manifest-hardening.tsx --resume --run-id cbbe03b4-8cf6-4e30-b457-6ce7e79a5fa4
+info  starting workflow run engine:run=0ms runId=c69a9b7f-762d-478e-9716-114e22f6c308
+      workflowName=workflow
+      workflowPath=/Users/williamcory/smithers/apps/stereos-site/real/stereos-real.tsx
+      rootDir=/Users/williamcory/smithers maxConcurrency=4 allowNetwork=false hotReload=false
+      resume=false engine=react-driver
+[00:00:02] → stereos-vm (attempt 1, iteration 0)
+[00:00:03] ✓ stereos-vm (attempt 1)
+info  bridge-managed compute task execution finished engine:task=0ms
+      runId=c69a9b7f-762d-478e-9716-114e22f6c308 nodeId=stereos-vm workflowName=stereos-real
+      iteration=0 attempt=1 durationMs=866 jjPointer=d048b22d29529883673db9aa8c414f79ce32af8e
+[00:00:03] ✓ Run finished
+info  workflow run finished engine:run=0ms runId=c69a9b7f-762d-478e-9716-114e22f6c308
+      workflowName=stereos-real
+runId: c69a9b7f-762d-478e-9716-114e22f6c308
+status: finished
+cta:
+  description: "Next steps:\n\nSuggest to the user:\n1. Build the user a custom workflow UI: author .smithers/ui/stereos-real.tsx by composing the smthrs/gateway-ui widgets (WorkflowUiShell, RunTree, RunEventLog, ApprovalPanel, ...) and smthrs/ui primitives over the gateway-react hooks, add `<UI entry=\"../ui/stereos-real.tsx\" />` to the workflow, then open it with `smithers ui c69a9b7f-762d-478e-9716-114e22f6c308`. `smithers ui --app` opens the full Smithers control-plane UI.\n2. Visualize the workflow and how it works: `smithers graph stereos-real.tsx` renders the workflow graph without executing it, `smithers tree c69a9b7f-762d-478e-9716-114e22f6c308` prints the live run tree, `smithers up --interactive` opens the full-screen TUI.\n3. Ask the user clarifying questions about what they want next, then route it by size: a clear single-agent task runs as `smithers oneshot \"<goal>\"` (background, durable, no workflow file); genuinely multi-stage / approval-gated / reusable work goes through `smithers workflow run create-workflow --prompt \"<what the workflow should do>\"` (or `smithers make-workflow`)."
+  commands[9]{command,description}:
+    smithers inspect c69a9b7f-762d-478e-9716-114e22f6c308,Inspect run state
+    smithers logs c69a9b7f-762d-478e-9716-114e22f6c308,View run logs
+    smithers chat c69a9b7f-762d-478e-9716-114e22f6c308,View agent chat
+    smithers ui c69a9b7f-762d-478e-9716-114e22f6c308,Open the workflow UI (after authoring .smithers/ui/stereos-real.tsx)
+    smithers ui --app,Open the full Smithers control-plane UI
+    smithers graph stereos-real.tsx,Visualize the workflow graph
+    smithers tree c69a9b7f-762d-478e-9716-114e22f6c308,Visualize the run tree
+    "smithers oneshot \"<goal>\"","Run a clear single-agent task in the background, no workflow file"
+    "smithers workflow run create-workflow --prompt \"<describe the workflow>\"",Have smithers build a new workflow from a description
+$ run_id=$(sed -n 's/^runId: //p' /tmp/stereos-mac-run.txt)
+$ bun ../../../apps/cli/src/index.js events "$run_id" --type sandbox
+#7  +00:00.193  SandboxCreated        🧪 Sandbox created: stereos-vm (stereos)
+#8  +00:00.195  SandboxShipped        📦 Sandbox shipped: stereos-vm (157 bytes)
+#10  +00:00.960  SandboxBundleReceived  📥 Sandbox bundle received: stereos-vm (0 patches)
+#11  +00:00.961  SandboxCompleted      ✅ Sandbox completed: stereos-vm (finished)
+$ bun ../../../apps/cli/src/index.js node stereos-vm \
+> --run-id "$run_id" --format json \
+> | jq '.output.validated | with_entries(select(.value != null))'
+{
+  "summary": "child workflow executed inside stereOS as agent@coder on Linux 6.12.74 aarch64",
+  "prompt": "hello from the host",
+  "prompt_sha256": "0d7c0ab02bab7f556b0de496bccbb2c99daa7c8aa7be3af9797d3aa8e1a170d5",
+  "guest": {
+    "os": "stereOS 2026.03.04.0",
+    "kernel": "Linux 6.12.74 aarch64",
+    "user": "agent",
+    "hostname": "coder",
+    "uptimeSeconds": 211.4,
+    "cpus": 4,
+    "memTotalKb": 3988568
+  },
+  "restrictions": {
+    "writeOutsideWorkspace": "denied",
+    "writeInsideWorkspace": "allowed",
+    "nixCli": "on PATH",
+    "nixStorePresent": "yes"
+  },
+  "harnesses_on_path": "claude opencode gemini",
+  "execution": {
+    "workflow": "stereos-guest-work/guest-facts",
+    "runtime": "Bun 1.2.21 arm64",
+    "jsonEmitter": "Bun JSON.stringify",
+    "jqOnPath": true
+  },
+  "computation": {
+    "upperBound": 21831,
+    "primeCount": 2448,
+    "primeSum": 25063021,
+    "lastPrime": 21821
+  },
+  "protocol_run_id": "c69a9b7f-762d-478e-9716-114e22f6c308",
+  "protocol_sandbox_id": "stereos-vm"
+}
+$ printf '%s' 'hello from the host' | shasum -a 256
+0d7c0ab02bab7f556b0de496bccbb2c99daa7c8aa7be3af9797d3aa8e1a170d5  -
+$ exit
+exit

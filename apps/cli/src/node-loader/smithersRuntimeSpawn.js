@@ -20,3 +20,16 @@ export function smithersRuntimeSpawn(args) {
   const register = fileURLToPath(new URL("./register.js", import.meta.url));
   return { command: process.execPath, args: ["--import", register, ...args] };
 }
+
+/**
+ * Re-enter a CLI file while preserving the absolute Bun executable used by
+ * call sites that already relied on `process.execPath`. Node still needs the
+ * loader hook installed in the child process.
+ *
+ * @param {string[]} args arguments after the executable, starting with the entry file
+ * @returns {{ command: string; args: string[] }}
+ */
+export function smithersRuntimeReentry(args) {
+  if (typeof Bun !== "undefined") return { command: process.execPath, args };
+  return smithersRuntimeSpawn(args);
+}

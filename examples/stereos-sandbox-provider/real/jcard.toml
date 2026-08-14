@@ -1,0 +1,18 @@
+# jcard.toml — the stereOS VM that Smithers runs sandbox bodies inside.
+#
+# Boot it with `mb up` from this directory. masterblaster resolves the mixtape
+# from the local store (~/.config/mb/mixtapes); see real/README.md for how to
+# populate that store, since `mb pull` cannot fetch this mixtape today.
+mixtape = "coder-arm64:latest"
+name = "smithers-stereos"
+
+[resources]
+cpus   = 4
+memory = "4GiB"
+disk   = "20GiB"
+
+[network]
+mode = "nat"
+
+# No [[agents]] block: Smithers drives the work over the provider's exec
+# channel, so agentd should not auto-launch a harness at boot.

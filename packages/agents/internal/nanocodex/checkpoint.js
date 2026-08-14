@@ -4,7 +4,9 @@ import { isAbsolute } from "node:path";
 
 import { cloneAgentCheckpoint, DEFAULT_AGENT_CHECKPOINT_MAX_BYTES } from "../../src/agent-checkpoint.js";
 import {
+  NANOCODEX_DEFAULT_MODEL,
   NANOCODEX_LIMITS,
+  NANOCODEX_MODELS,
   NANOCODEX_PROTOCOL_NAME,
   NANOCODEX_PROTOCOL_VERSION,
   NANOCODEX_VERSION,
@@ -15,7 +17,7 @@ export const NANOCODEX_CHECKPOINT_CODEC = "nanocodex.session-snapshot";
 export const NANOCODEX_CHECKPOINT_VERSION = 1;
 export const NANOCODEX_SNAPSHOT_VERSION = 1;
 export const NANOCODEX_POLICY_FINGERPRINT_VERSION = 1;
-export const NANOCODEX_TOOL_PROFILE = "nanocodex-stock-0.3.0";
+export const NANOCODEX_TOOL_PROFILE = "nanocodex-stock-0.5.0";
 
 /** @type {readonly import("../../src/AgentCheckpoint.ts").AgentCheckpointFormat[]} */
 export const NANOCODEX_CHECKPOINT_FORMATS = Object.freeze([
@@ -32,7 +34,7 @@ export const NANOCODEX_CHECKPOINT_CAPABILITIES = Object.freeze([
 ]);
 
 /**
- * Return the canonical, continuation-sensitive stock Nanocodex v0.3.0 policy.
+ * Return the canonical, continuation-sensitive stock Nanocodex 0.5.0 policy.
  * Property insertion order is part of the fingerprint version 1 definition.
  *
  * @param {string | null} [instructions]
@@ -79,7 +81,7 @@ export function createNanocodexPolicyFingerprintInput(instructions = null) {
   }
   const encodedInstructions = instructions === null ? "null" : encodeJsonScalarString(instructions);
   return Buffer.from(
-    `{"fingerprintVersion":1,"instructions":${encodedInstructions},"tools":{"profile":"nanocodex-stock-0.3.0","codeMode":true,"mcp":false,"subagents":false}}`,
+    `{"fingerprintVersion":1,"instructions":${encodedInstructions},"tools":{"profile":"nanocodex-stock-0.5.0","codeMode":true,"mcp":false,"subagents":false}}`,
     "utf8",
   );
 }
@@ -98,7 +100,8 @@ export function createNanocodexPolicyFingerprintInput(instructions = null) {
  * @returns {import("./protocol-types.ts").NanocodexCheckpoint}
  */
 export function createNanocodexCheckpoint(completed, maxBytes = DEFAULT_AGENT_CHECKPOINT_MAX_BYTES) {
-  assertExactObject(completed, ["snapshot", "snapshotVersion", "canonicalWorkspace", "policyFingerprint"]);
+  assertExactObject(completed, ["snapshot", "snapshotVersion", "canonicalWorkspace", "policyFingerprint"], ["model"]);
+  const model = completed.model ?? NANOCODEX_DEFAULT_MODEL;
   const checkpoint = {
     codec: NANOCODEX_CHECKPOINT_CODEC,
     version: NANOCODEX_CHECKPOINT_VERSION,
@@ -106,6 +109,7 @@ export function createNanocodexCheckpoint(completed, maxBytes = DEFAULT_AGENT_CH
       bridgeProtocolVersion: NANOCODEX_PROTOCOL_VERSION,
       nanocodexVersion: NANOCODEX_VERSION,
       snapshotVersion: completed.snapshotVersion,
+      model,
       canonicalWorkspace: completed.canonicalWorkspace,
       policyFingerprint: completed.policyFingerprint,
       nanocodexSnapshot: completed.snapshot,
@@ -148,14 +152,18 @@ export function validateNanocodexCheckpoint(checkpoint, options) {
   if (checkpoint.version !== NANOCODEX_CHECKPOINT_VERSION) {
     fail("Nanocodex checkpoint codec version is not supported.");
   }
-  assertExactObject(checkpoint.payload, [
-    "bridgeProtocolVersion",
-    "nanocodexVersion",
-    "snapshotVersion",
-    "canonicalWorkspace",
-    "policyFingerprint",
-    "nanocodexSnapshot",
-  ]);
+  assertExactObject(
+    checkpoint.payload,
+    [
+      "bridgeProtocolVersion",
+      "nanocodexVersion",
+      "snapshotVersion",
+      "canonicalWorkspace",
+      "policyFingerprint",
+      "nanocodexSnapshot",
+    ],
+    ["model"],
+  );
   if (checkpoint.payload.bridgeProtocolVersion !== NANOCODEX_PROTOCOL_VERSION) {
     fail("Nanocodex checkpoint bridge protocol version is not supported.");
   }
@@ -164,6 +172,12 @@ export function validateNanocodexCheckpoint(checkpoint, options) {
   }
   if (checkpoint.payload.snapshotVersion !== NANOCODEX_SNAPSHOT_VERSION) {
     fail("Nanocodex checkpoint snapshot version is not supported.");
+  }
+  if (
+    "model" in checkpoint.payload &&
+    (typeof checkpoint.payload.model !== "string" || !NANOCODEX_MODELS.includes(checkpoint.payload.model))
+  ) {
+    fail("Nanocodex checkpoint model is not supported.");
   }
   assertCanonicalWorkspace(checkpoint.payload.canonicalWorkspace);
   if (checkpoint.payload.canonicalWorkspace !== options.canonicalWorkspace) {
@@ -275,7 +289,7 @@ function assertResumeEnvelopeFits(snapshot, canonicalWorkspace) {
       workspace: canonicalWorkspace,
       auth: { mode: "chatgpt", authFile: null },
       transport: { kind: "websocket" },
-      options: { instructions: null, thinking: null, reasoningMode: null, fastMode: null },
+      options: { instructions: null, model: null, thinking: null, reasoningMode: null, fastMode: null },
       continuation: { mode: "resume", snapshot },
     },
   };

@@ -10,7 +10,7 @@
 // Slow (packs ~54 tarballs and runs a real npm install), so it is its own
 // script rather than part of `bun test`.
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,12 +20,18 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const workspace = mkdtempSync(join(tmpdir(), "smithers-node-cli-"));
 const tarballDir = join(workspace, "tarballs");
 const project = join(workspace, "project");
+const fakeBin = join(workspace, "bin");
 
 // Node with no Bun anywhere on PATH. `spawn("bun", ...)` used to be hardcoded
 // in the detached run launcher, and a PATH that still had Bun hid that.
 const nodeBin = dirname(process.execPath);
-const nodeOnlyPath = ["/usr/bin", "/bin", "/usr/sbin", "/sbin", nodeBin].join(":");
-const env = { ...process.env, PATH: nodeOnlyPath, SMITHERS_BACKEND: "pglite" };
+const nodeOnlyPath = [fakeBin, "/usr/bin", "/bin", "/usr/sbin", "/sbin", nodeBin].join(":");
+const env = {
+  ...process.env,
+  PATH: nodeOnlyPath,
+  OPENAI_API_KEY: "sk-node-conformance-placeholder",
+  SMITHERS_BACKEND: "pglite",
+};
 delete env.BUN_INSTALL;
 
 const failures = [];
@@ -70,6 +76,10 @@ function assert(condition, message) {
 }
 
 try {
+  mkdirSync(fakeBin, { recursive: true });
+  const fakeCodex = join(fakeBin, "codex");
+  writeFileSync(fakeCodex, "#!/bin/sh\nexit 0\n");
+  chmodSync(fakeCodex, 0o755);
   console.log("packing workspace tarballs...");
   const tarballs = packWorkspaceTarballs(tarballDir, repoRoot);
   mkdirSync(project, { recursive: true });
@@ -141,7 +151,10 @@ export default smithers((ctx) => (
     const result = smithers(["up", "workflow.tsx", "--backend", "sqlite", "--input", '{"name":"node"}', "-d"]);
     const combined = result.stdout + result.stderr;
     assert(result.status !== 0, "expected a non-zero exit");
-    assert(combined.includes("DB_REQUIRES_BUN_SQLITE"), `expected DB_REQUIRES_BUN_SQLITE, got: ${combined.slice(0, 400)}`);
+    assert(
+      combined.includes("DB_REQUIRES_BUN_SQLITE"),
+      `expected DB_REQUIRES_BUN_SQLITE, got: ${combined.slice(0, 400)}`,
+    );
     assert(combined.includes("SMITHERS_BACKEND=pglite"), "the error must name the pglite fix");
     assert(!combined.includes("ERR_UNSUPPORTED_ESM_URL_SCHEME"), "a loader crash leaked instead of the SmithersError");
   });
@@ -187,6 +200,15 @@ export default smithers((ctx) => (
     assert(/bun/i.test(combined), `expected a missing-Bun message, got: ${combined.slice(0, 300)}`);
   });
 
+  await check("smithers ask probes MCP and prints a Node-valid bootstrap", () => {
+    const result = smithers(["ask", "--agent", "codex", "--print-bootstrap"]);
+    const combined = result.stdout + result.stderr;
+    assert(result.status === 0, `ask bootstrap failed: ${combined.slice(0, 800)}`);
+    assert(combined.includes("bootstrapMode: mcp-config-inline"), `unexpected bootstrap: ${combined.slice(0, 800)}`);
+    assert(combined.includes("--import"), `bootstrap omitted the Node loader: ${combined.slice(0, 800)}`);
+    assert(!combined.includes('"run"'), `bootstrap retained Bun's run subcommand: ${combined.slice(0, 800)}`);
+  });
+
   await check("smithers output returns the task row", () => {
     const output = smithers(["output", runId, "greet"]);
     assert(output.status === 0, `output failed: ${output.stderr.slice(0, 400)}`);
@@ -212,7 +234,16 @@ export default smithers((ctx) => (
       assert(url, `gateway never reported a listening URL: ${log.slice(0, 600)}`);
       const rpc = execFileSync(
         "curl",
-        ["-s", "-X", "POST", `${url}/rpc`, "-H", "content-type: application/json", "-d", '{"method":"listRuns","params":{}}'],
+        [
+          "-s",
+          "-X",
+          "POST",
+          `${url}/rpc`,
+          "-H",
+          "content-type: application/json",
+          "-d",
+          '{"method":"listRuns","params":{}}',
+        ],
         { encoding: "utf8" },
       );
       assert(rpc.includes(runId), `listRuns did not include ${runId}: ${rpc.slice(0, 300)}`);
