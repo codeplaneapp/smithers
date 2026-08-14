@@ -1,4 +1,4 @@
-import { EmptyState, Skeleton } from "@smthrs/ui";
+import { Badge, EmptyState, Skeleton } from "@smthrs/ui";
 import { openSurface } from "../app/navigation";
 import { sortCrons, summarizeCrons } from "./crons";
 import { useCronsStore } from "./cronsStore";
@@ -59,7 +59,12 @@ export function CronsCard() {
                   </div>
                 </div>
                 <div className="list-tags">
-                  <span className={`ready-dot${cron.enabled ? " is-on" : ""}`} />
+                  <Badge
+                    variant={cron.enabled ? "success" : "muted"}
+                    data-status={cron.enabled ? "enabled" : "disabled"}
+                  >
+                    {cron.enabled ? "Enabled" : "Disabled"}
+                  </Badge>
                 </div>
               </div>
             ))}

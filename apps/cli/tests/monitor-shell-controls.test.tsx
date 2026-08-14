@@ -32,6 +32,7 @@ const { workflowUiThemeCss } = await import("smthrs/gateway-ui");
 const { Chip, MonitorToolbar, RunLifecycleActions, RunLifecycleControls, RunRailRow, RunsPagination } =
   await import("../src/monitor-ui/monitorShell.tsx");
 const {
+  CronStatusTag,
   createMonitorKeydownHandler,
   EventLog,
   ExecutionTree,
@@ -254,10 +255,14 @@ describe("migrated monitor surfaces", () => {
         <RunProgressCell run={run} />
       </div>,
     );
-    expect(document.querySelector('[data-status="running"]')?.className).toContain("tone-running");
-    expect(document.querySelector('[data-status="waiting-approval"]')?.className).toContain("tone-waiting");
-    expect(document.querySelector('[data-status="finished"]')?.className).toContain("tone-ok");
-    expect(document.querySelector('[data-status="failed"]')?.className).toContain("tone-failed");
+    expect(document.querySelector('[data-status="running"]')?.className).toContain("sui-badge-default");
+    expect(document.querySelector('[data-status="waiting-approval"]')?.className).toContain("sui-badge-warning");
+    expect(document.querySelector('[data-status="finished"]')?.className).toContain("sui-badge-success");
+    expect(document.querySelector('[data-status="failed"]')?.className).toContain("sui-badge-destructive");
+    for (const status of document.querySelectorAll("[data-status]")) {
+      expect(status.getAttribute("data-slot")).toBe("badge");
+      expect(status.className).toContain("sui-badge");
+    }
     expect(byTestId("monitor-stat-test").className).toContain("tone-waiting");
     expect(byTestId("monitor-stat-test").textContent).toContain("active runs");
     expect(byTestId("monitor-run-progress").textContent).toContain("4/5");
@@ -269,6 +274,23 @@ describe("migrated monitor surfaces", () => {
     expect(progress?.getAttribute("aria-valuenow")).toBe("4");
     expect(progress?.getAttribute("aria-valuemax")).toBe("5");
     expect(progress?.className).toContain("mon-table-progress");
+  });
+
+  test("uses shared status pills for enabled and disabled crons", async () => {
+    await render(
+      <div>
+        <CronStatusTag enabled />
+        <CronStatusTag enabled={false} />
+      </div>,
+    );
+    const enabled = document.querySelector('[data-status="enabled"]');
+    const disabled = document.querySelector('[data-status="disabled"]');
+    expect(enabled?.getAttribute("data-slot")).toBe("badge");
+    expect(enabled?.className).toContain("sui-badge-success");
+    expect(enabled?.textContent).toContain("enabled");
+    expect(disabled?.getAttribute("data-slot")).toBe("badge");
+    expect(disabled?.className).toContain("sui-badge-muted");
+    expect(disabled?.textContent).toContain("disabled");
   });
 
   test("preserves complete and missing-summary progress semantics", async () => {
@@ -306,10 +328,12 @@ describe("migrated monitor surfaces", () => {
       <RunsRail runs={[]} loading={false} connStatus="offline" selectedRunId={undefined} onSelect={() => {}} />,
     );
     expect(byTestId("monitor-runs-offline").textContent?.toLowerCase()).toContain("gateway");
+    expect(byTestId("monitor-runs-offline").getAttribute("data-slot")).toBe("alert");
     await rerender(
       <RunsRail runs={[]} loading={false} connStatus="unauthorized" selectedRunId={undefined} onSelect={() => {}} />,
     );
     expect(byTestId("monitor-runs-unauthorized").textContent?.toLowerCase()).toContain("credentials");
+    expect(byTestId("monitor-runs-unauthorized").getAttribute("data-slot")).toBe("alert");
     await rerender(
       <RunsRail
         runs={[{ ...run, status: "running" }]}
@@ -321,7 +345,7 @@ describe("migrated monitor surfaces", () => {
     );
     expect(byTestId("monitor-runs-offline").textContent).toContain("last-known data");
     expect(byTestId("monitor-run-row").textContent).toContain("last-known");
-    expect(byTestId("monitor-run-row").querySelector(".mon-dot")?.className).not.toContain("mon-dot-pulse");
+    expect(byTestId("monitor-run-row").querySelector(".mon-status-pulse")).toBeNull();
   });
 
   test("renders loading, error, no-runs, and filtered-out table states", async () => {
@@ -394,6 +418,7 @@ describe("migrated monitor surfaces", () => {
 
     await rerender(table({ connStatus: "offline", queryError: new Error("connection refused") }));
     expect(byTestId("monitor-empty-detail").getAttribute("data-state")).toBe("offline-without-cache");
+    expect(byTestId("monitor-empty-detail").getAttribute("data-slot")).toBe("alert");
     expect(byTestId("monitor-empty-detail").textContent).toContain("No last-known runs are available");
     expect(byTestId("monitor-empty-detail").textContent).not.toContain("No runs yet");
 
@@ -403,13 +428,15 @@ describe("migrated monitor surfaces", () => {
 
     await rerender(table({ connStatus: "offline", runs: [cachedRun], totalCount: 1, hasCachedData: true }));
     expect(byTestId("monitor-runs-last-known").textContent).toContain("Every run shown below is last-known data");
+    expect(byTestId("monitor-runs-last-known").getAttribute("data-slot")).toBe("alert");
     expect(document.querySelector(".mon-runs-table-panel")?.getAttribute("data-state")).toBe("offline-with-cache");
     expect(document.querySelector(".mon-runs-table-row")?.textContent).toContain("running · last-known");
-    expect(document.querySelector(".mon-runs-table-row .mon-dot")?.className).not.toContain("mon-dot-pulse");
+    expect(document.querySelector(".mon-runs-table-row .mon-status-pulse")).toBeNull();
     expect([...document.querySelectorAll(".mon-runs-table-row td")].at(-1)?.textContent).toBe("last-known");
 
     await rerender(table({ connStatus: "unauthorized", runs: [cachedRun], totalCount: 1, hasCachedData: true }));
     expect(byTestId("monitor-empty-detail").getAttribute("data-state")).toBe("unauthorized");
+    expect(byTestId("monitor-empty-detail").getAttribute("data-slot")).toBe("alert");
     expect(byTestId("monitor-empty-detail").textContent).toContain("fresh gateway credentials");
     expect(document.querySelector(".mon-runs-table-row")).toBeNull();
   });
@@ -433,6 +460,7 @@ describe("migrated monitor surfaces", () => {
     );
     expect(document.querySelector(".mon-runs-table-row")?.textContent).toContain("rendered-coverage");
     expect(byTestId("monitor-runs-table-query-error").textContent).toContain("refresh failed");
+    expect(byTestId("monitor-runs-table-query-error").getAttribute("data-slot")).toBe("alert");
     await click(byTestId("monitor-runs-table-query-error-retry"));
     expect(retries).toBe(1);
   });
@@ -757,9 +785,7 @@ describe("monitor theme contract", () => {
     const rules = [
       [".mon-shell", "overflow: hidden"],
       [".mon-filter-input", "min-width"],
-      [".mon-pill", "var(--tone)"],
-      [".mon-stat", "var(--surface)"],
-      [".mon-banner", "var(--tone)"],
+      [".mon-stat {", "var(--surface)"],
       [".mon-progress-fill", "var(--brand)"],
       [".mon-modal { width: min(1280px, 96vw)", "var(--surface)"],
       [".mon-empty", "var(--muted)"],
@@ -769,6 +795,9 @@ describe("monitor theme contract", () => {
       const start = monitorCss.indexOf(selector);
       expect(start).toBeGreaterThanOrEqual(0);
       expect(monitorCss.slice(start, start + 500)).toContain(declaration);
+    }
+    for (const selector of [".sui-badge", ".sui-alert"]) {
+      expect(smithersUiCss).toContain(selector);
     }
     expect(monitorCss).not.toMatch(/#[0-9a-f]{3,8}\b/i);
     expect(monitorCss).not.toContain("background: white");

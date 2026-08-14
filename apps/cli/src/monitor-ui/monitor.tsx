@@ -26,11 +26,16 @@ import {
 import { snapshotToGatewayRunNode, type DevToolsSnapshot } from "smthrs/gateway-client";
 import { HijackCandidateButton, OneshotSurface, WorkflowUiStyles } from "smthrs/gateway-ui";
 import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+  Badge,
   Button,
   observeReducedMotion,
   prefersReducedMotion,
   Progress,
   SmithersUiStyles,
+  StatusPill,
   Table,
   TableBody,
   TableCell,
@@ -234,6 +239,14 @@ function ApprovalWait({ requestedAtMs }: { requestedAtMs: number | undefined }) 
 // Shared atoms.
 // ---------------------------------------------------------------------------
 
+function badgeVariantForTone(tone: Tone): "default" | "success" | "warning" | "destructive" | "muted" {
+  if (tone === "ok") return "success";
+  if (tone === "waiting") return "warning";
+  if (tone === "failed") return "destructive";
+  if (tone === "idle") return "muted";
+  return "default";
+}
+
 /**
  * Arm-then-confirm: the monitor's ONE confirmation idiom for destructive or
  * irreversible actions (deny, cancel, retry). First click arms the control
@@ -274,10 +287,12 @@ export function StatusTag({
 }) {
   const tone = toneForStatus(status);
   return (
-    <span className={`mon-pill tone-${tone}`} data-status={labelForStatus(status)}>
-      <span className={`mon-dot${pulse && tone === "running" ? " mon-dot-pulse" : ""}`} aria-hidden />
-      {label ?? labelForStatus(status)}
-    </span>
+    <StatusPill
+      status={status}
+      label={label ?? labelForStatus(status)}
+      className={pulse && tone === "running" ? "mon-status-pulse" : undefined}
+      data-status={labelForStatus(status)}
+    />
   );
 }
 
@@ -291,9 +306,17 @@ function ConnectionBadge() {
   const { status } = useGatewayConnectionStatus();
   const view = connectionViewFor(status);
   return (
-    <span className={`mon-conn tone-${view.tone}`} data-testid="monitor-conn" data-conn={status}>
-      <ToneDot tone={view.tone} pulse={view.pulse} />
-      {view.label}
+    <span className="mon-conn-wrap">
+      <Badge
+        variant={badgeVariantForTone(view.tone)}
+        className="mon-conn"
+        data-testid="monitor-conn"
+        data-conn={status}
+        data-status={status}
+      >
+        <ToneDot tone={view.tone} pulse={view.pulse} />
+        {view.label}
+      </Badge>
       {view.hint ? (
         <span className="mon-conn-hint" data-testid="monitor-conn-hint">
           {view.hint}
@@ -727,12 +750,12 @@ export function RunsRail({
   return (
     <nav className="mon-rail-runs" data-testid="monitor-runs">
       {banner ? (
-        <div className="mon-banner tone-failed" data-testid={`monitor-runs-${connStatus}`}>
-          <div>{banner.title}</div>
+        <Alert variant="destructive" data-testid={`monitor-runs-${connStatus}`}>
+          <AlertTitle>{banner.title}</AlertTitle>
           {/* With cached rows below, the banner must say they are last-known
               rather than reuse the no-data copy — the rows are still on screen. */}
-          <div className="mon-dim">{lastKnown && connection.hint ? connection.hint : banner.detail}</div>
-        </div>
+          <AlertDescription>{lastKnown && connection.hint ? connection.hint : banner.detail}</AlertDescription>
+        </Alert>
       ) : null}
       {!banner && zeroState !== "ready" ? (
         <RunsZeroState
@@ -745,15 +768,15 @@ export function RunsRail({
         />
       ) : null}
       {queryError && zeroState === "ready" && !banner ? (
-        <div className="mon-banner tone-failed" data-testid="monitor-runs-query-error" role="alert">
-          <div>Couldn&apos;t refresh runs.</div>
-          <div className="mon-dim">{queryError.message}</div>
+        <Alert variant="destructive" data-testid="monitor-runs-query-error">
+          <AlertTitle>Couldn&apos;t refresh runs.</AlertTitle>
+          <AlertDescription>{queryError.message}</AlertDescription>
           {onRetry ? (
             <Button variant="outline" data-testid="monitor-runs-query-error-retry" onClick={() => void onRetry()}>
               Retry
             </Button>
           ) : null}
-        </div>
+        </Alert>
       ) : null}
       {!blocked &&
         groups.map((group) => (
@@ -1134,10 +1157,7 @@ function CronsPanel() {
                     {cron.workflow}
                   </TableCell>
                   <TableCell>
-                    <span className={`mon-pill tone-${cron.enabled ? "ok" : "idle"}`}>
-                      <span className="mon-dot" aria-hidden />
-                      {cron.enabled ? "enabled" : "disabled"}
-                    </span>
+                    <CronStatusTag enabled={cron.enabled} />
                   </TableCell>
                   <TableCell className="mon-dim">
                     <Ago ms={cron.lastRunAtMs} />
@@ -1164,6 +1184,16 @@ function CronsPanel() {
   );
 }
 
+export function CronStatusTag({ enabled }: { enabled: boolean }) {
+  return (
+    <StatusPill
+      status={enabled ? "finished" : "disabled"}
+      label={enabled ? "enabled" : "disabled"}
+      data-status={enabled ? "enabled" : "disabled"}
+    />
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Scores. Scorer results are per-run rows in [0,1] (see scoreRowsOf); the run
 // panel collapses to a one-line summary past a handful, and the whole panel
@@ -1182,12 +1212,12 @@ function useRunScores(runId: string | undefined, live: boolean): RunScores {
 }
 
 function ScoreRowLine({ row }: { row: ScoreRow }) {
+  const tone = scoreTone(row.score);
   return (
     <div className="mon-score-row" data-testid="monitor-score-row">
-      <span className={`mon-pill tone-${scoreTone(row.score)} mon-score-pill`}>
-        <span className="mon-dot" aria-hidden />
+      <Badge variant={badgeVariantForTone(tone)} className="mon-score-pill">
         {formatScore(row.score)}
-      </span>
+      </Badge>
       <span className="mon-score-name">{row.scorerName}</span>
       <span className="mon-mono mon-dim mon-score-node" title={row.nodeId}>
         {row.nodeId}
@@ -1246,13 +1276,14 @@ function NodeScoreChips({ nodeId, scores: { rows, loaded } }: { nodeId: string; 
   return (
     <div className="mon-node-scores" data-testid="monitor-node-scores">
       {nodeScores.map((row) => (
-        <span
+        <Badge
           key={`${row.scorerId}:${row.iteration}:${row.attempt}`}
-          className={`mon-chip mon-score-chip tone-${scoreTone(row.score)}`}
+          variant={badgeVariantForTone(scoreTone(row.score))}
+          className="mon-score-chip"
           title={row.reason ?? row.scorerName}
         >
           {row.scorerName} {formatScore(row.score)}
-        </span>
+        </Badge>
       ))}
     </div>
   );
@@ -1314,7 +1345,7 @@ function MetricsPanel() {
     <section className="mon-panel mon-metrics-panel" data-testid="monitor-metrics">
       <header className="mon-panel-head">
         <h2 className="mon-kicker">Metrics</h2>
-        {failed ? <span className="mon-conn tone-failed">scrape failing — showing last data</span> : null}
+        {failed ? <Badge variant="destructive">scrape failing — showing last data</Badge> : null}
         <span className="mon-dim mon-count-note">
           {scrapedAtMs ? `scraped ${Math.max(0, Math.round((now - scrapedAtMs) / 1000))}s ago` : ""}
           {uptime !== undefined ? ` · gateway up ${formatElapsed(now - uptime * 1000, now)}` : ""}
@@ -1523,28 +1554,28 @@ export function RunsTable({
   }
   if (landingState === "offline-without-cache") {
     return (
-      <div
+      <Alert
+        variant="destructive"
         className="mon-empty mon-empty-hero tone-failed"
         data-testid="monitor-empty-detail"
         data-state={landingState}
-        role="alert"
       >
-        <div>Gateway offline.</div>
-        <div className="mon-dim">No last-known runs are available. Reconnecting automatically.</div>
-      </div>
+        <AlertTitle>Gateway offline.</AlertTitle>
+        <AlertDescription>No last-known runs are available. Reconnecting automatically.</AlertDescription>
+      </Alert>
     );
   }
   if (landingState === "unauthorized") {
     return (
-      <div
+      <Alert
+        variant="destructive"
         className="mon-empty mon-empty-hero tone-failed"
         data-testid="monitor-empty-detail"
         data-state={landingState}
-        role="alert"
       >
-        <div>Unauthorized.</div>
-        <div className="mon-dim">Re-open with smithers monitor to provide fresh gateway credentials.</div>
-      </div>
+        <AlertTitle>Unauthorized.</AlertTitle>
+        <AlertDescription>Re-open with smithers monitor to provide fresh gateway credentials.</AlertDescription>
+      </Alert>
     );
   }
   if (landingState !== "ready" && landingState !== "offline-with-cache") {
@@ -1590,20 +1621,21 @@ export function RunsTable({
         {sort === "default" ? <span className="mon-dim mon-sort-note">attention first · newest first</span> : null}
       </header>
       {lastKnown ? (
-        <div className="mon-banner tone-waiting" data-testid="monitor-runs-last-known" role="status">
-          Gateway offline. Every run shown below is last-known data and may be out of date.
-        </div>
+        <Alert variant="warning" data-testid="monitor-runs-last-known" role="status">
+          <AlertTitle>Gateway offline.</AlertTitle>
+          <AlertDescription>Every run shown below is last-known data and may be out of date.</AlertDescription>
+        </Alert>
       ) : null}
       {queryError ? (
-        <div className="mon-banner tone-failed" data-testid="monitor-runs-table-query-error" role="alert">
-          <div>Couldn&apos;t refresh runs.</div>
-          <div className="mon-dim">{queryError.message}</div>
+        <Alert variant="destructive" data-testid="monitor-runs-table-query-error">
+          <AlertTitle>Couldn&apos;t refresh runs.</AlertTitle>
+          <AlertDescription>{queryError.message}</AlertDescription>
           {onRetry ? (
             <Button variant="outline" data-testid="monitor-runs-table-query-error-retry" onClick={() => void onRetry()}>
               Retry
             </Button>
           ) : null}
-        </div>
+        </Alert>
       ) : null}
       <div className="mon-runs-scroll" role="region" aria-label="Runs table" tabIndex={0}>
         <Table className="mon-runs-table" data-testid="monitor-runs-table">
@@ -2972,7 +3004,12 @@ export function EventLog({ runId, eventsState }: { runId: string; eventsState: R
           {following ? "Following new events." : "Event stream paused."}
         </span>
       </header>
-      {error ? <div className="mon-banner tone-failed">{error.message}</div> : null}
+      {error ? (
+        <Alert variant="destructive">
+          <AlertTitle>Couldn&apos;t load events.</AlertTitle>
+          <AlertDescription>{error.message}</AlertDescription>
+        </Alert>
+      ) : null}
       <ol
         id={eventListId}
         className="mon-events"
@@ -3105,11 +3142,11 @@ function HealthStrip({
   // an empty tree ("no tasks yet") is wrong, not neutral. Say loading.
   if (tree.isLoading && treeNodes.length === 0) {
     return (
-      <div className="mon-banner tone-waiting mon-health" data-testid="monitor-health-strip">
-        <div className="mon-health-headline">
+      <Alert variant="warning" className="mon-health" data-testid="monitor-health-strip" role="status">
+        <AlertTitle className="mon-health-headline">
           <span className="mon-dot mon-dot-pulse" aria-hidden /> <b>Assessing run health…</b>
-        </div>
-      </div>
+        </AlertTitle>
+      </Alert>
     );
   }
   const diagnosis = diagnoseRun({
@@ -3122,9 +3159,10 @@ function HealthStrip({
     failureSample,
   });
   const tone = diagnosis.tone === "ok" ? "tone-ok" : diagnosis.tone === "crit" ? "tone-failed" : "tone-waiting";
+  const alertVariant = diagnosis.tone === "ok" ? "success" : diagnosis.tone === "crit" ? "destructive" : "warning";
   return (
-    <div className={`mon-banner ${tone} mon-health`} data-testid="monitor-health-strip">
-      <div className="mon-health-headline">
+    <Alert variant={alertVariant} className={`mon-health ${tone}`} data-testid="monitor-health-strip" role="status">
+      <AlertTitle className="mon-health-headline">
         <span className={`mon-health-dot ${tone}`} />
         <b>{diagnosis.headline}</b>
         {status === "waiting-quota" && quota?.resetAtMs ? (
@@ -3133,8 +3171,8 @@ function HealthStrip({
             {new Date(quota.resetAtMs).toLocaleTimeString()} (<Countdown untilMs={quota.resetAtMs} />)
           </span>
         ) : null}
-      </div>
-      <div className="mon-health-detail">{diagnosis.detail}</div>
+      </AlertTitle>
+      <AlertDescription className="mon-health-detail">{diagnosis.detail}</AlertDescription>
       {quota?.blocked.length ? (
         <ul className="mon-quota-list">
           {quota.blocked.map((entry) => (
@@ -3168,7 +3206,7 @@ function HealthStrip({
           {resumeNote ? <span className="mon-dim">{resumeNote}</span> : null}
         </div>
       ) : null}
-    </div>
+    </Alert>
   );
 }
 
@@ -3961,11 +3999,13 @@ function NodeInspector({
       ) : null}
       {failure && !isContainer ? (
         <InspectorSection title="Failure" testId="monitor-node-failure">
-          <div className="mon-banner tone-failed">
-            {[failure.name, failure.code].filter(Boolean).join(" · ")}
-            {typeof failure.attempt === "number" ? ` · attempt ${failure.attempt}` : ""}
-            {failure.agent ? ` · ${failure.agent}` : ""}
-          </div>
+          <Alert variant="destructive">
+            <AlertTitle>
+              {[failure.name, failure.code].filter(Boolean).join(" · ")}
+              {typeof failure.attempt === "number" ? ` · attempt ${failure.attempt}` : ""}
+              {failure.agent ? ` · ${failure.agent}` : ""}
+            </AlertTitle>
+          </Alert>
           <pre className="mon-output mon-failure">{failure.message}</pre>
         </InspectorSection>
       ) : null}
@@ -4624,10 +4664,10 @@ function App() {
       ) : null}
 
       {banner ? (
-        <div className={`mon-banner mon-banner-app tone-${banner.kind === "ok" ? "ok" : "failed"}`} role="status">
-          {banner.text}
+        <Alert variant={banner.kind === "ok" ? "success" : "destructive"} className="mon-banner-app" role="status">
+          <AlertTitle>{banner.text}</AlertTitle>
           <Chip onClick={() => setBanner(null)}>Dismiss</Chip>
-        </div>
+        </Alert>
       ) : null}
 
       <div className={`mon-body${inspectorOpen ? "" : " mon-body-no-inspector"}${railOpen ? "" : " mon-body-no-rail"}`}>
@@ -4758,9 +4798,10 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-brand { display: flex; align-items: center; gap: var(--sp-2); }
 .mon-brand h1 { margin: 0; font-size: var(--fs-4); font-weight: 650; letter-spacing: -0.01em; }
 .mon-brand-mark { width: 10px; height: 10px; border-radius: var(--r-full); background: var(--brand); box-shadow: 0 0 8px var(--brand-border); }
-.mon-conn { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-1); font-weight: 600; color: var(--tone); }
+.mon-conn-wrap { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.mon-conn { font-size: var(--fs-1); }
 .mon-conn-hint { color: var(--muted); font-weight: 400; }
-.mon-conn .mon-chip { height: 20px; padding: 0 var(--sp-2); border-radius: var(--r-full); margin-left: var(--sp-1); }
+.mon-conn-wrap .mon-chip { height: 20px; padding: 0 var(--sp-2); border-radius: var(--r-full); margin-left: var(--sp-1); }
 .mon-toolbar { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .mon-count-note { font-size: var(--fs-1); font-variant-numeric: tabular-nums; }
 
@@ -4799,10 +4840,8 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 
 .mon-dot { width: 8px; height: 8px; border-radius: var(--r-full); background: var(--tone, var(--muted)); flex: none; }
 .mon-dot-pulse { animation: mon-pulse 1.2s ease-in-out infinite; }
-.mon-pill { display: inline-flex; align-items: center; gap: var(--sp-1); height: 20px; padding: 0 var(--sp-2); border-radius: var(--r-full); font-size: var(--fs-1); font-weight: 600; color: var(--tone); background: var(--tone-soft); border: 1px solid var(--tone-border); white-space: nowrap; }
+.mon-status-pulse .sui-status-dot { animation: mon-pulse 1.6s ease-in-out infinite; }
 
-/* Banners (app-level, health strip, inline errors) share one geometry. */
-.mon-banner { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin: 0 0 var(--sp-4); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-2); font-weight: 600; font-size: var(--fs-2); color: var(--tone); background: var(--tone-soft); border: 1px solid var(--tone-border); animation: mon-in 140ms ease-out; }
 .mon-banner-app { margin: var(--sp-2) var(--sp-4) 0; }
 
 .mon-body { display: grid; grid-template-columns: 320px minmax(420px, 1fr) minmax(0, 380px); flex: 1; overflow: hidden; }
@@ -4940,8 +4979,8 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-tree-duration { flex: none; margin-left: auto; font-size: var(--fs-1); font-variant-numeric: tabular-nums; }
 /* The status pill hugs the right edge — after the duration when one shows,
    self-aligned when it doesn't. */
-.mon-tree-main .mon-pill { margin-left: auto; }
-.mon-tree-duration ~ .mon-pill { margin-left: var(--sp-2); }
+.mon-tree-main .sui-badge { margin-left: auto; }
+.mon-tree-duration ~ .sui-badge { margin-left: var(--sp-2); }
 .mon-tree.is-static .mon-tree-main { cursor: default; }
 .mon-tree.is-static { opacity: 0.92; }
 .mon-tree-state { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); flex-wrap: wrap; margin-bottom: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-2); color: var(--muted); background: var(--panel); font-size: var(--fs-1); }
@@ -4955,7 +4994,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 /* Tree token labels sit beside the duration; alone they take the right edge. */
 .mon-tree-tokens { flex: none; margin-left: auto; font-size: var(--fs-1); font-variant-numeric: tabular-nums; }
 .mon-tree-duration ~ .mon-tree-tokens { margin-left: var(--sp-2); }
-.mon-tree-tokens ~ .mon-pill { margin-left: var(--sp-2); }
+.mon-tree-tokens ~ .sui-badge { margin-left: var(--sp-2); }
 
 /* Usage panel: rate-limit bars show REMAINING quota, toned by headroom. */
 .mon-usage-panel { display: flex; flex-direction: column; gap: var(--sp-4); }

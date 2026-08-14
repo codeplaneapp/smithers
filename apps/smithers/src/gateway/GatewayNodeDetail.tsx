@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 import { useGatewayNodeOutput } from "@smthrs/gateway-react";
-import { Button, EmptyState, Skeleton } from "@smthrs/ui";
-import { StatusPill } from "../cards/StatusPill";
+import { Button, EmptyState, Skeleton, StatusPill } from "@smthrs/ui";
 import type { RunNode } from "../runs/Run";
+import { statusLabel } from "../runs/statusMeta";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -52,7 +52,7 @@ export function GatewayNodeDetail({ loadOutput, runId, node }: { loadOutput: boo
     <div className="gw-node-detail" data-testid="gateway-node-detail">
       <div className="gw-node-head">
         <span className="gw-node-name">{node.name}</span>
-        <StatusPill status={node.status} />
+        <StatusPill status={node.status} label={statusLabel(node.status)} />
       </div>
       <div className="gw-node-section">
         <span className="gw-node-label">Output</span>
