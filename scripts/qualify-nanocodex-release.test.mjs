@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { access, readFile, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
@@ -9,6 +8,7 @@ import { describe, test } from "node:test";
 import {
   EXPECTED_CAPABILITIES,
   PINNED_SOURCE_BUILD,
+  assertSupportedQualificationHost,
   compareVersions,
   inspectReleaseArchive,
   loadReleaseManifest,
@@ -16,15 +16,32 @@ import {
   preflightVerifiedBinary,
   probeRuntimeMetadata,
   qualificationResult,
-  runContainedMetadataProbe,
+  runSupervisedMetadataProbe,
   validateRuntimeMetadata,
   verifyArchiveIdentity,
   withQualificationScratch,
 } from "./qualify-nanocodex-release.mjs";
 
-const ROOT = "smithers-nanocodex-v0.0.1-x86_64-unknown-linux-gnu";
+const ROOT = "smithers-nanocodex-v0.0.2-x86_64-unknown-linux-gnu";
+const DARWIN_ROOT = "smithers-nanocodex-v0.0.2-aarch64-apple-darwin";
 
 describe("Nanocodex release qualification", () => {
+  test("keeps the prepared v0.0.2 consumer contract digest-free and dual-target", async () => {
+    const prepared = JSON.parse(
+      await readFile(new URL("../packages/agents/tests/fixtures/nanocodex/release-v0.0.2.json", import.meta.url), "utf8"),
+    );
+    assert.equal(prepared.release.version, "0.0.2");
+    assert.equal(prepared.contract.bridgeVersion, EXPECTED_CAPABILITIES.bridgeVersion);
+    assert.equal(prepared.contract.nanocodexVersion, EXPECTED_CAPABILITIES.nanocodexVersion);
+    assert.equal(prepared.contract.toolProfile, "nanocodex-stock-0.5.0");
+    assert.deepEqual(
+      prepared.artifacts.map((artifact) => artifact.target),
+      ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"],
+    );
+    assert.equal(prepared.artifacts.every((artifact) => !artifact.sha256 && !artifact.sizeBytes), true);
+    assert.match(prepared.qualification.notes, /does not duplicate those digests/);
+  });
+
   test("loads the immutable source-build pin without a published-release checksum claim", async () => {
     const manifest = await loadReleaseManifest();
     assert.deepEqual(manifest, PINNED_SOURCE_BUILD);
@@ -75,6 +92,17 @@ describe("Nanocodex release qualification", () => {
     const inspected = inspectReleaseArchive(archive);
     assert.equal(inspected.binary.toString(), "ELF fixture");
     assert.equal(inspected.binaryMember, `${ROOT}/smithers-nanocodex`);
+    assert.equal(inspected.packageRoot, ROOT);
+  });
+
+  test("accepts the shipped macOS arm64 package root", () => {
+    const archive = tar([
+      entry(`${DARWIN_ROOT}/`, "5"),
+      entry(`${DARWIN_ROOT}/smithers-nanocodex`, "0", "Mach-O fixture", 0o755),
+    ]);
+    const inspected = inspectReleaseArchive(archive);
+    assert.equal(inspected.packageRoot, DARWIN_ROOT);
+    assert.equal(inspected.binary.toString(), "Mach-O fixture");
   });
 
   test("rejects traversal, absolute paths, backslashes, and a second package root", () => {
@@ -160,23 +188,30 @@ describe("Nanocodex release qualification", () => {
   });
 
   test("pins exact version and capability surface", () => {
-    assert.doesNotThrow(() => validateRuntimeMetadata("smithers-nanocodex 0.0.1\n", EXPECTED_CAPABILITIES));
-    assert.throws(() => validateRuntimeMetadata("smithers-nanocodex 0.0.2", EXPECTED_CAPABILITIES), /version mismatch/);
+    assert.doesNotThrow(() => validateRuntimeMetadata("smithers-nanocodex 0.0.2\n", EXPECTED_CAPABILITIES));
+    assert.doesNotThrow(
+      () =>
+        validateRuntimeMetadata("smithers-nanocodex 0.0.2\n", {
+          ...EXPECTED_CAPABILITIES,
+          target: "aarch64-apple-darwin",
+        }),
+    );
+    assert.throws(() => validateRuntimeMetadata("smithers-nanocodex 0.0.1", EXPECTED_CAPABILITIES), /version mismatch/);
     assert.throws(
-      () => validateRuntimeMetadata("smithers-nanocodex 0.0.1\nextra", EXPECTED_CAPABILITIES),
+      () => validateRuntimeMetadata("smithers-nanocodex 0.0.2\nextra", EXPECTED_CAPABILITIES),
       /version mismatch/,
     );
     assert.throws(
       () =>
-        validateRuntimeMetadata("smithers-nanocodex 0.0.1\n", {
+        validateRuntimeMetadata("smithers-nanocodex 0.0.2\n", {
           ...EXPECTED_CAPABILITIES,
           features: { codeMode: false },
         }),
-      /fixed v0.0.1 Smithers surface/,
+      /fixed v0.0.2 Smithers surface/,
     );
   });
 
-  test("routes exact metadata argv through bounded contained probes with PATH-only state", async () => {
+  test("routes exact metadata argv through bounded supervised probes with PATH-only state", async () => {
     const calls = [];
     const capabilitiesOutput = `${JSON.stringify(EXPECTED_CAPABILITIES, null, 2)}\n`;
     const metadata = await probeRuntimeMetadata(
@@ -184,14 +219,14 @@ describe("Nanocodex release qualification", () => {
       "/scratch/qualification",
       async (options) => {
         calls.push(options);
-        return calls.length === 1 ? Buffer.from("smithers-nanocodex 0.0.1\n") : Buffer.from(capabilitiesOutput);
+        return calls.length === 1 ? Buffer.from("smithers-nanocodex 0.0.2\n") : Buffer.from(capabilitiesOutput);
       },
     );
 
     assert.deepEqual(metadata, {
       capabilities: EXPECTED_CAPABILITIES,
       capabilitiesOutput,
-      versionOutput: "smithers-nanocodex 0.0.1\n",
+      versionOutput: "smithers-nanocodex 0.0.2\n",
     });
     const expectedEnvironment = { PATH: process.env.PATH ?? "/usr/bin:/bin" };
     assert.deepEqual(calls, [
@@ -224,11 +259,11 @@ describe("Nanocodex release qualification", () => {
     const binaryBytes = Buffer.from("verified binary fixture");
     await withQualificationScratch(binaryBytes, async ({ binary, scratch }) => {
       for (const [args, expectedOutput] of [
-        [["--version"], "smithers-nanocodex 0.0.1\n"],
+        [["--version"], "smithers-nanocodex 0.0.2\n"],
         [["capabilities", "--json"], `${JSON.stringify(EXPECTED_CAPABILITIES)}\n`],
       ]) {
         let launcherDirectory;
-        const output = await runContainedMetadataProbe(
+        const output = await runSupervisedMetadataProbe(
           {
             args,
             binary,
@@ -267,44 +302,11 @@ describe("Nanocodex release qualification", () => {
     });
   });
 
-  test("runs both metadata commands through the real Bubblewrap supervisor", async (context) => {
-    if (process.platform !== "linux") return context.skip("Nanocodex containment is Linux-only.");
-    let bubblewrap = "/usr/bin/bwrap";
-    try {
-      await access(bubblewrap);
-    } catch {
-      bubblewrap = "/bin/bwrap";
-      try {
-        await access(bubblewrap);
-      } catch {
-        return context.skip("Bubblewrap is not installed.");
-      }
-    }
-    const containmentProbe = spawnSync(
-      bubblewrap,
-      [
-        "--unshare-pid",
-        "--die-with-parent",
-        "--new-session",
-        "--bind",
-        "/",
-        "/",
-        "--proc",
-        "/proc",
-        "--dev-bind",
-        "/dev",
-        "/dev",
-        "--",
-        "/bin/true",
-      ],
-      { stdio: "ignore", timeout: 5_000 },
-    );
-    if (containmentProbe.status !== 0) return context.skip("Bubblewrap namespaces are unavailable.");
-
+  test("runs both metadata commands through the real direct-spawn supervisor", async () => {
     const capabilitiesOutput = `${JSON.stringify(EXPECTED_CAPABILITIES)}\n`;
     const fakeBridge = Buffer.from(`#!/bin/sh
 if [ "$#" -eq 1 ] && [ "$1" = "--version" ]; then
-  printf '%s\\n' 'smithers-nanocodex 0.0.1'
+  printf '%s\\n' 'smithers-nanocodex 0.0.2'
   exit 0
 fi
 if [ "$#" -eq 2 ] && [ "$1" = "capabilities" ] && [ "$2" = "--json" ]; then
@@ -321,18 +323,18 @@ exit 64
     assert.deepEqual(metadata, {
       capabilities: EXPECTED_CAPABILITIES,
       capabilitiesOutput,
-      versionOutput: "smithers-nanocodex 0.0.1\n",
+      versionOutput: "smithers-nanocodex 0.0.2\n",
     });
     assert.doesNotThrow(() => validateRuntimeMetadata(metadata.versionOutput, metadata.capabilities));
     await assert.rejects(access(scratch), (error) => error.code === "ENOENT");
   });
 
-  test("shell-quotes the contained bridge path and removes its launcher after supervised failure", async () => {
+  test("shell-quotes the verified bridge path and removes its launcher after supervised failure", async () => {
     await withQualificationScratch(Buffer.from("fixture"), async ({ scratch }) => {
       const binary = `${scratch}/bridge'with-quote`;
       let launcherDirectory;
       await assert.rejects(
-        runContainedMetadataProbe(
+        runSupervisedMetadataProbe(
           {
             args: ["--version"],
             binary,
@@ -367,7 +369,7 @@ exit 64
             throw Object.assign(new Error("private child-process failure"), { stderr: "private child stderr" });
           }
           return Buffer.from(
-            failedCall === 1 && call > 1 ? JSON.stringify(EXPECTED_CAPABILITIES) : "smithers-nanocodex 0.0.1\n",
+            failedCall === 1 && call > 1 ? JSON.stringify(EXPECTED_CAPABILITIES) : "smithers-nanocodex 0.0.2\n",
           );
         }),
         (error) => {
@@ -382,7 +384,7 @@ exit 64
     let call = 0;
     await assert.rejects(
       probeRuntimeMetadata("/verified/smithers-nanocodex", "/scratch/qualification", async () =>
-        Buffer.from(call++ === 0 ? "smithers-nanocodex 0.0.1\n" : "private malformed output"),
+        Buffer.from(call++ === 0 ? "smithers-nanocodex 0.0.2\n" : "private malformed output"),
       ),
       (error) => {
         assert.equal(error.message, "Nanocodex capabilities output is not JSON.");
@@ -455,7 +457,7 @@ exit 64
             assert.deepEqual(await readFile(metadataBinary), binaryBytes);
             return {
               capabilities: EXPECTED_CAPABILITIES,
-              versionOutput: "smithers-nanocodex 0.0.1\n",
+              versionOutput: "smithers-nanocodex 0.0.2\n",
             };
           },
         });
@@ -489,7 +491,7 @@ exit 64
   });
 
   test("preserves the exact provider-free qualification success JSON", () => {
-    const archivePath = resolve("/ci-built/smithers-nanocodex-v0.0.1-x86_64-unknown-linux-gnu.tar.gz");
+    const archivePath = resolve("/ci-built/smithers-nanocodex-v0.0.2-x86_64-unknown-linux-gnu.tar.gz");
     const result = qualificationResult({
       archivePath,
       glibcVersion: "2.35",
@@ -514,7 +516,7 @@ exit 64
       `{
   "archive": ${JSON.stringify(archivePath)},
   "artifactProvenance": "pinned-source-build-sha256",
-  "bridgeVersion": "0.0.1",
+  "bridgeVersion": "0.0.2",
   "glibcVersion": "2.35",
   "providerFreePreflight": true,
   "sha256": "3348b8a7818b4c759748e2cf0ecc9e0e4857f33ef6c3a92417655bfc0c73fdff",
@@ -542,6 +544,37 @@ exit 64
     assert.equal(compareVersions("2.39", "2.35"), 1);
     assert.equal(compareVersions("2.34.9", "2.35"), -1);
     assert.throws(() => compareVersions("glibc-2.35", "2.35"), /Invalid numeric version/);
+  });
+
+  test("accepts Linux x86_64 glibc 2.35+ and macOS arm64 qualification hosts", () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+    const originalArch = Object.getOwnPropertyDescriptor(process, "arch");
+    try {
+      Object.defineProperty(process, "platform", { configurable: true, value: "linux" });
+      Object.defineProperty(process, "arch", { configurable: true, value: "x64" });
+      assert.deepEqual(assertSupportedQualificationHost({ header: { glibcVersionRuntime: "2.35" } }), {
+        hostTarget: "x86_64-unknown-linux-gnu",
+        glibcVersion: "2.35",
+      });
+      assert.throws(
+        () => assertSupportedQualificationHost({ header: { glibcVersionRuntime: "2.34" } }),
+        /glibc 2.35/,
+      );
+
+      Object.defineProperty(process, "platform", { configurable: true, value: "darwin" });
+      Object.defineProperty(process, "arch", { configurable: true, value: "arm64" });
+      assert.deepEqual(assertSupportedQualificationHost({ header: {} }), {
+        hostTarget: "aarch64-apple-darwin",
+        glibcVersion: null,
+      });
+
+      Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
+      Object.defineProperty(process, "arch", { configurable: true, value: "x64" });
+      assert.throws(() => assertSupportedQualificationHost(), /Linux x86_64 \(glibc 2.35\+\) or macOS arm64/);
+    } finally {
+      if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform);
+      if (originalArch) Object.defineProperty(process, "arch", originalArch);
+    }
   });
 });
 

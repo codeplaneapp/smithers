@@ -12,14 +12,17 @@ import {
   NANOCODEX_CHECKPOINT_FORMATS,
   createNanocodexCheckpoint,
   createNanocodexPolicyFingerprint,
-  getNanocodexResumeSnapshot,
+  validateNanocodexCheckpoint,
 } from "../internal/nanocodex/checkpoint.js";
 import {
+  NANOCODEX_DEFAULT_MODEL,
+  NANOCODEX_SHIPPED_TARGETS,
   createServerRecordValidator,
   createTurnCancelCommand,
   createTurnStartCommand,
   isHelloRecord,
   isTerminalServerRecord,
+  normalizeNanocodexModel,
   parseNanocodexJson,
   validateNanocodexCapabilities,
 } from "../internal/nanocodex/protocol.js";
@@ -36,8 +39,6 @@ import {
 /** @typedef {import("../internal/nanocodex/protocol-types.ts").NanocodexCapabilities} NanocodexCapabilities */
 /** @typedef {import("../internal/nanocodex/protocol-types.ts").NanocodexServerRecord} NanocodexServerRecord */
 
-const FIXED_MODEL = "gpt-5.6-sol";
-const SUPPORTED_TARGET = "x86_64-unknown-linux-gnu";
 const MAX_CAPABILITIES_BYTES = 1024 * 1024;
 const MAX_PROTOCOL_LINE_BYTES = 40 * 1024 * 1024;
 const MAX_PROTOCOL_BYTES = 64 * 1024 * 1024;
@@ -52,6 +53,7 @@ const OPTION_KEYS = new Set([
   "cwd",
   "auth",
   "instructions",
+  "model",
   "thinking",
   "reasoningMode",
   "fastMode",
@@ -75,7 +77,7 @@ const MANAGED_AUTH_TURN_GATES = new Map();
 export class NanocodexAgent {
   /** @type {string} */
   id;
-  model = FIXED_MODEL;
+  model = NANOCODEX_DEFAULT_MODEL;
   supportsNativeStructuredOutput = false;
   checkpointFormats = NANOCODEX_CHECKPOINT_FORMATS;
   checkpointCapabilities = NANOCODEX_CHECKPOINT_CAPABILITIES;
@@ -91,6 +93,7 @@ export class NanocodexAgent {
       env: opts.env ? { ...opts.env } : undefined,
     };
     this.id = opts.id ?? randomUUID();
+    this.model = normalizeNanocodexModel(opts.model) ?? NANOCODEX_DEFAULT_MODEL;
   }
 
   /**
@@ -151,12 +154,27 @@ export class NanocodexAgent {
     assertConfiguredAuthentication(configuredAuth, effectiveEnvironment);
     const policyFingerprint = createNanocodexPolicyFingerprint(this.opts.instructions ?? null);
     const maxCheckpointBytes = resolveCheckpointLimit(this.opts.maxCheckpointBytes, args.maxAgentCheckpointBytes);
-    const continuation = Object.hasOwn(args, "resumeCheckpoint")
-      ? {
-          mode: "resume",
-          snapshot: resolveResumeSnapshot(args.resumeCheckpoint, workspace, policyFingerprint, maxCheckpointBytes),
-        }
-      : null;
+    let continuation = null;
+    if (Object.hasOwn(args, "resumeCheckpoint")) {
+      const stored = resolveResumeCheckpoint(
+        args.resumeCheckpoint,
+        workspace,
+        policyFingerprint,
+        maxCheckpointBytes,
+      );
+      const storedModel = stored.payload.model ?? NANOCODEX_DEFAULT_MODEL;
+      if (this.opts.model !== undefined && this.model !== storedModel) {
+        throw new SmithersError(
+          "AGENT_CHECKPOINT_INVALID",
+          "Nanocodex resume model does not match the checkpoint model.",
+          { failureRetryable: false, bridgeCode: "model_mismatch" },
+        );
+      }
+      continuation = {
+        mode: "resume",
+        snapshot: stored.payload.nanocodexSnapshot,
+      };
+    }
     const auth = await resolveTurnAuthentication(configuredAuth, effectiveEnvironment, workspace);
     const requestId = randomUUID();
     const startCommandId = randomUUID();
@@ -168,6 +186,7 @@ export class NanocodexAgent {
       auth,
       options: compactObject({
         instructions: this.opts.instructions,
+        model: continuation ? (this.opts.model === undefined ? undefined : this.model) : this.model,
         thinking: this.opts.thinking,
         reasoningMode: this.opts.reasoningMode,
         fastMode: this.opts.fastMode,
@@ -347,7 +366,7 @@ export class NanocodexAgent {
   async completedResult(completed, context) {
     const checkpoint = await this.publishCheckpoint(completed, context);
     const usage = mapUsage(completed.usage);
-    const result = buildGenerateResult(completed.finalMessage, undefined, FIXED_MODEL, usage);
+    const result = buildGenerateResult(completed.finalMessage, undefined, completed.model, usage);
     result.response.messages = [{ role: "assistant", content: [{ type: "text", text: completed.finalMessage }] }];
     result.providerMetadata = {
       nanocodex: {
@@ -380,6 +399,7 @@ export class NanocodexAgent {
           snapshotVersion: completed.snapshotVersion,
           canonicalWorkspace: context.workspace,
           policyFingerprint: context.policyFingerprint,
+          model: completed.model,
         },
         context.maxCheckpointBytes,
       );
@@ -451,6 +471,9 @@ function validateOptions(options) {
     throw configError(
       `NanocodexAgent instructions must be non-empty Unicode scalar text no larger than ${MAX_INSTRUCTIONS_BYTES} UTF-8 bytes.`,
     );
+  }
+  if (options.model !== undefined && normalizeNanocodexModel(options.model) === undefined) {
+    throw new TypeError("NanocodexAgent model is unsupported.");
   }
   if (
     options.env !== undefined &&
@@ -579,9 +602,9 @@ function attachRecoveryCheckpoint(error, checkpoint) {
  * @param {string} policyFingerprint
  * @param {number} maxCheckpointBytes
  */
-function resolveResumeSnapshot(checkpoint, workspace, policyFingerprint, maxCheckpointBytes) {
+function resolveResumeCheckpoint(checkpoint, workspace, policyFingerprint, maxCheckpointBytes) {
   try {
-    return getNanocodexResumeSnapshot(checkpoint, {
+    return validateNanocodexCheckpoint(checkpoint, {
       mode: "resume",
       canonicalWorkspace: workspace,
       policyFingerprint,
@@ -598,8 +621,13 @@ function resolveResumeSnapshot(checkpoint, workspace, policyFingerprint, maxChec
 }
 
 function assertSupportedHost() {
+  if (process.platform === "darwin" && process.arch === "arm64") {
+    return;
+  }
   if (process.platform !== "linux" || process.arch !== "x64") {
-    throw configError("Nanocodex protocol v1 currently supports Linux x86_64 only.");
+    throw configError(
+      "Nanocodex protocol v1 supports Linux x86_64 (glibc 2.35+) and macOS arm64 only.",
+    );
   }
   let glibcVersion;
   try {
@@ -611,6 +639,12 @@ function assertSupportedHost() {
   if (!parsed || compareVersionPair(parsed, MIN_GLIBC_VERSION) < 0) {
     throw configError("Nanocodex protocol v1 requires GNU libc 2.35 or newer; musl is not supported.");
   }
+}
+
+function expectedTargetForHost() {
+  if (process.platform === "darwin" && process.arch === "arm64") return "aarch64-apple-darwin";
+  if (process.platform === "linux" && process.arch === "x64") return "x86_64-unknown-linux-gnu";
+  return undefined;
 }
 
 /** @param {unknown} value @returns {[number, number] | undefined} */
@@ -631,7 +665,8 @@ function compareVersionPair(left, right) {
 
 /** @param {NanocodexCapabilities} capabilities */
 function assertCompatibleTarget(capabilities) {
-  if (capabilities.target !== SUPPORTED_TARGET) {
+  const expected = expectedTargetForHost();
+  if (!NANOCODEX_SHIPPED_TARGETS.includes(capabilities.target) || capabilities.target !== expected) {
     throw configError("Nanocodex bridge target is not supported by this adapter.");
   }
   if (
@@ -639,7 +674,7 @@ function assertCompatibleTarget(capabilities) {
     capabilities.limits.maxEventTotalBytes + capabilities.limits.maxOutputRecordBytes > MAX_PROTOCOL_BYTES ||
     capabilities.limits.maxStderrBytes > MAX_STDERR_BYTES
   ) {
-    throw configError("Nanocodex bridge limits exceed this adapter's containment limits.");
+    throw configError("Nanocodex bridge limits exceed this adapter's protocol limits.");
   }
 }
 
@@ -1014,18 +1049,11 @@ function mapProcessError(error) {
       },
     );
   }
-  if (
-    code === "bridge_spawn_failed" ||
-    code === "bridge_containment_unavailable" ||
-    code === "bridge_capabilities_failed" ||
-    code === "bridge_capabilities_timeout"
-  ) {
+  if (code === "bridge_spawn_failed" || code === "bridge_capabilities_failed" || code === "bridge_capabilities_timeout") {
     return configError(
-      code === "bridge_containment_unavailable"
-        ? "Nanocodex process containment is unavailable."
-        : code.startsWith("bridge_capabilities")
-          ? "Nanocodex bridge capability preflight failed."
-          : "Nanocodex bridge executable could not be started.",
+      code.startsWith("bridge_capabilities")
+        ? "Nanocodex bridge capability preflight failed."
+        : "Nanocodex bridge executable could not be started.",
       { bridgeCode: code, failureRetryable: false },
       error,
     );

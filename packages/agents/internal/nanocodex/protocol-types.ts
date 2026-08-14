@@ -2,7 +2,8 @@ import type { AgentCheckpoint, AgentCheckpointJsonObject } from "../../src/Agent
 
 export type NanocodexProtocolName = "smithers.nanocodex";
 export type NanocodexProtocolVersion = 1;
-export type NanocodexBridgeVersion = "0.0.1";
+export type NanocodexBridgeVersion = "0.0.2";
+export type NanocodexShippedTarget = "x86_64-unknown-linux-gnu" | "aarch64-apple-darwin";
 export type NanocodexCheckpointCodec = "nanocodex.session-snapshot";
 export type NanocodexCheckpointVersion = 1;
 export type NanocodexSnapshotVersion = 1;
@@ -83,13 +84,18 @@ export type NanocodexProtocolLimits = {
 
 /** The value returned by `capabilities --json` and carried by `hello.data`. */
 export type NanocodexCapabilities = {
-  bridgeVersion: NanocodexBridgeVersion;
-  target: "x86_64-unknown-linux-gnu";
-  nanocodexVersion: "0.3.0";
+  bridgeVersion: string;
+  target: NanocodexShippedTarget;
+  nanocodexVersion: "0.5.0";
   protocol: NanocodexProtocolCapabilities;
   checkpoint: NanocodexCheckpointCapabilities;
   authenticationModes: ["api-key-env", "chatgpt"];
   transportModes: ["websocket"];
+  models: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
+  defaultModel: "gpt-5.6-sol";
+  thinkingLevels: ["none", "low", "medium", "high", "xhigh", "max"];
+  defaultThinking: "high";
+  reasoningModes: ["standard", "pro"];
   features: NanocodexFeatureCapabilities;
   limits: NanocodexProtocolLimits;
 };
@@ -106,15 +112,21 @@ export type NanocodexUsage = {
   serviceTier: string | null;
 };
 
+export type NanocodexWireModel = "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna";
+
 export type NanocodexCompletedData = {
   finalMessage: string;
   usage: NanocodexUsage;
+  model: NanocodexWireModel;
   snapshotVersion: NanocodexSnapshotVersion;
   snapshot: AgentCheckpointJsonObject;
   canonicalWorkspace: string;
 };
 
-export type NanocodexRecoveryData = Pick<NanocodexCompletedData, "snapshotVersion" | "snapshot" | "canonicalWorkspace">;
+export type NanocodexRecoveryData = Pick<
+  NanocodexCompletedData,
+  "model" | "snapshotVersion" | "snapshot" | "canonicalWorkspace"
+>;
 
 export type NanocodexServerRecordType =
   | "hello"
@@ -299,6 +311,7 @@ export type NanocodexAuthConfig =
 
 export type NanocodexTurnOptions = {
   instructions?: string | null;
+  model?: NanocodexWireModel | "sol" | "terra" | "luna" | null;
   thinking?: NanocodexThinkingLevel | null;
   reasoningMode?: NanocodexReasoningMode | null;
   fastMode?: boolean | null;
@@ -339,8 +352,9 @@ export type NanocodexTurnCancelCommand = {
 
 export type NanocodexCheckpointPayload = {
   bridgeProtocolVersion: NanocodexProtocolVersion;
-  nanocodexVersion: "0.3.0";
+  nanocodexVersion: "0.5.0";
   snapshotVersion: NanocodexSnapshotVersion;
+  model?: NanocodexWireModel;
   canonicalWorkspace: string;
   policyFingerprint: `sha256:${string}`;
   nanocodexSnapshot: AgentCheckpointJsonObject;
@@ -356,7 +370,7 @@ export type NanocodexPolicy = {
   fingerprintVersion: 1;
   instructions: string | null;
   tools: {
-    profile: "nanocodex-stock-0.3.0";
+    profile: "nanocodex-stock-0.5.0";
     codeMode: true;
     mcp: false;
     subagents: false;

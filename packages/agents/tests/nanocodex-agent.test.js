@@ -8,10 +8,15 @@ import { errorToJson } from "@smthrs/errors/errorToJson";
 
 import { NanocodexAgent } from "../src/NanocodexAgent.js";
 
+const HOST_TARGET =
+  process.platform === "darwin" && process.arch === "arm64"
+    ? "aarch64-apple-darwin"
+    : "x86_64-unknown-linux-gnu";
+
 const CAPABILITIES = {
-  bridgeVersion: "0.0.1",
-  target: "x86_64-unknown-linux-gnu",
-  nanocodexVersion: "0.3.0",
+  bridgeVersion: "0.0.2",
+  target: HOST_TARGET,
+  nanocodexVersion: "0.5.0",
   protocol: { name: "smithers.nanocodex", versions: [1] },
   checkpoint: {
     codec: "nanocodex.session-snapshot",
@@ -22,6 +27,11 @@ const CAPABILITIES = {
   },
   authenticationModes: ["api-key-env", "chatgpt"],
   transportModes: ["websocket"],
+  models: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+  defaultModel: "gpt-5.6-sol",
+  thinkingLevels: ["none", "low", "medium", "high", "xhigh", "max"],
+  defaultThinking: "high",
+  reasoningModes: ["standard", "pro"],
   features: {
     codeMode: true,
     codeModeDisable: false,
@@ -53,29 +63,11 @@ const CAPABILITIES = {
 
 const runtimeGlibc = process.report?.getReport?.().header?.glibcVersionRuntime;
 const [glibcMajor = 0, glibcMinor = 0] = typeof runtimeGlibc === "string" ? runtimeGlibc.split(".").map(Number) : [];
-const bubblewrapAvailable =
-  process.platform === "linux" &&
-  spawnSync(
-    "/usr/bin/bwrap",
-    [
-      "--unshare-pid",
-      "--die-with-parent",
-      "--new-session",
-      "--bind",
-      "/",
-      "/",
-      "--proc",
-      "/proc",
-      "--dev-bind",
-      "/dev",
-      "/dev",
-      "--",
-      "/bin/true",
-    ],
-    { stdio: "ignore", timeout: 5_000 },
-  ).status === 0;
 const supportedNanocodexHost =
-  process.arch === "x64" && (glibcMajor > 2 || (glibcMajor === 2 && glibcMinor >= 35)) && bubblewrapAvailable;
+  (process.platform === "darwin" && process.arch === "arm64") ||
+  (process.platform === "linux" &&
+    process.arch === "x64" &&
+    (glibcMajor > 2 || (glibcMajor === 2 && glibcMinor >= 35)));
 
 describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
   let directory;
@@ -227,6 +219,8 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
     });
 
     expect(result.text).toBe("deterministic answer");
+    expect(result.response.modelId).toBe("gpt-5.6-sol");
+    expect(result.checkpoint.payload.model).toBe("gpt-5.6-sol");
     expect(result.response.messages).toEqual([
       { role: "assistant", content: [{ type: "text", text: "deterministic answer" }] },
     ]);
@@ -287,6 +281,7 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
       expect(command.data.auth).toEqual({ mode: "chatgpt", authFile: join(directory, "managed-auth.json") });
       expect(command.data.options).toEqual({
         instructions: "Complete replacement instructions.",
+        model: "gpt-5.6-sol",
         thinking: "xhigh",
         reasoningMode: "pro",
         fastMode: true,
@@ -295,6 +290,16 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
       await rm(constructorWorkspace, { recursive: true, force: true });
       await rm(callWorkspace, { recursive: true, force: true });
     }
+  });
+
+  test("forwards allowlisted Sol/Terra/Luna models and stamps the completed wire model", async () => {
+    const result = await agent({ model: "terra" }).generate({ prompt: "terra", rootDir: directory });
+    expect(result.response.modelId).toBe("gpt-5.6-terra");
+    expect(result.checkpoint.payload.model).toBe("gpt-5.6-terra");
+    expect((await capturedCommands(capture))[0].data.options.model).toBe("gpt-5.6-terra");
+    const luna = await agent({ model: "luna" }).generate({ prompt: "luna", rootDir: directory });
+    expect(luna.response.modelId).toBe("gpt-5.6-luna");
+    expect(luna.checkpoint.payload.model).toBe("gpt-5.6-luna");
   });
 
   test("matches Rust Unicode whitespace and scalar rules at the public adapter boundary", async () => {
@@ -309,6 +314,9 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
     expect(accepted.text).toBe("deterministic answer");
     expect((await capturedCommands(capture))[0].data.prompt).toBe("\ufeff");
 
+    expect(new NanocodexAgent().model).toBe("gpt-5.6-sol");
+    expect(new NanocodexAgent({ model: "luna" }).model).toBe("gpt-5.6-luna");
+    expect(() => new NanocodexAgent({ model: "gpt-4o" })).toThrow("unsupported");
     expect(() => new NanocodexAgent({ instructions: "\u0085" })).toThrow("non-empty Unicode scalar text");
     expect(() => new NanocodexAgent({ instructions: "\ufeff" })).not.toThrow();
     expect(() => new NanocodexAgent({ auth: { mode: "chatgpt", authFile: "/\ud800" } })).toThrow("managed authFile");
@@ -679,12 +687,57 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
       checkpointMode: "resume",
     });
     expect(resumed.text).toBe("deterministic answer");
+    expect(first.checkpoint.payload.model).toBe("gpt-5.6-sol");
     const commands = await capturedCommands(capture);
     expect(commands).toHaveLength(2);
+    expect(commands[0].data.options.model).toBe("gpt-5.6-sol");
+    expect(commands[1].data.options.model).toBeUndefined();
     expect(commands[1].data.continuation).toEqual({
       mode: "resume",
       snapshot: first.checkpoint.payload.nanocodexSnapshot,
     });
+
+    const matching = await agent({ model: "sol" }).generate({
+      prompt: "matching model",
+      rootDir: directory,
+      resumeCheckpoint: first.checkpoint,
+      checkpointMode: "resume",
+    });
+    expect(matching.text).toBe("deterministic answer");
+    expect((await capturedCommands(capture))[2].data.options.model).toBe("gpt-5.6-sol");
+    await expect(
+      agent({ model: "gpt-5.6-terra" }).generate({
+        prompt: "mismatched model",
+        rootDir: directory,
+        resumeCheckpoint: first.checkpoint,
+        checkpointMode: "resume",
+      }),
+    ).rejects.toMatchObject({
+      code: "AGENT_CHECKPOINT_INVALID",
+      details: { bridgeCode: "model_mismatch", failureRetryable: false },
+    });
+
+    const modelLess = structuredClone(first.checkpoint);
+    delete modelLess.payload.model;
+    await agent({ model: "sol" }).generate({
+      prompt: "absent model is Sol",
+      rootDir: directory,
+      resumeCheckpoint: modelLess,
+      checkpointMode: "resume",
+    });
+    const afterAbsentSol = await capturedCommands(capture);
+    await expect(
+      agent({ model: "terra" }).generate({
+        prompt: "absent model rejects Terra",
+        rootDir: directory,
+        resumeCheckpoint: modelLess,
+        checkpointMode: "resume",
+      }),
+    ).rejects.toMatchObject({
+      code: "AGENT_CHECKPOINT_INVALID",
+      details: { bridgeCode: "model_mismatch", failureRetryable: false },
+    });
+    expect(await capturedCommands(capture)).toHaveLength(afterAbsentSol.length);
 
     await expect(
       agent({ instructions: "different complete instructions" }).generate({
@@ -707,6 +760,19 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
     } finally {
       await rm(otherWorkspace, { recursive: true, force: true });
     }
+  });
+
+  test("rejects a 0.0.1 / Nanocodex 0.3.0 envelope before spawn", async () => {
+    const rejected = JSON.parse(await readFile(new URL("./fixtures/nanocodex/checkpoint-v0.0.1-rejected.json", import.meta.url), "utf8"));
+    await expect(
+      agent().generate({
+        prompt: "old envelope",
+        rootDir: directory,
+        resumeCheckpoint: rejected,
+        checkpointMode: "resume",
+      }),
+    ).rejects.toMatchObject({ code: "AGENT_CHECKPOINT_INVALID" });
+    expect(await readFile(capture, "utf8").catch(() => "")).toBe("");
   });
 
   test("enforces the runtime continuation discriminant and classifies invalid checkpoints", async () => {
@@ -806,7 +872,7 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
     expect(JSON.stringify(cleanupError)).not.toContain(snapshotSecret);
   });
 
-  test("maps wrapper cleanup failure as non-retryable", () => {
+  test("maps bridge cleanup failure as non-retryable", () => {
     const processModule = new URL("../internal/nanocodex/process.js", import.meta.url).href;
     const agentModule = new URL("../src/NanocodexAgent.js", import.meta.url).href;
     const script = `
@@ -816,7 +882,7 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
         resolveNanocodexExecutable: (command) => command,
         runNanocodexCapabilities: async () => new TextEncoder().encode(JSON.stringify(capabilities)),
         runNanocodexProcess: async () => {
-          throw Object.assign(new Error("wrapper cleanup failed"), { code: "bridge_cleanup_failed" });
+          throw Object.assign(new Error("bridge cleanup failed"), { code: "bridge_cleanup_failed" });
         },
       }));
       const { NanocodexAgent } = await import(${JSON.stringify(`${agentModule}?cleanup-mapping`)});
@@ -841,7 +907,7 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
     });
   });
 
-  test("publishes an authoritative completion despite a later abnormal wrapper exit", async () => {
+  test("publishes an authoritative completion despite a later abnormal bridge exit", async () => {
     for (const mode of ["completion-nonzero", "completion-signal"]) {
       const published = [];
       const result = await agent({ env: { FAKE_MODE: mode } }).generate({
@@ -1007,7 +1073,7 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
     });
   });
 
-  test("rejects unsupported libc before any bridge process starts", async () => {
+  test.skipIf(process.platform !== "linux")("rejects unsupported libc before any bridge process starts", async () => {
     const original = process.report.getReport;
     process.report.getReport = () => ({ header: { glibcVersionRuntime: "2.34" } });
     try {
@@ -1018,13 +1084,14 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
     }
   });
 
-  test("rejects non-Linux and non-x64 hosts before any bridge process starts", async () => {
+  test("rejects unshipped hosts before any bridge process starts", async () => {
     const originalPlatform = process.platform;
     const originalArch = process.arch;
     try {
       for (const [platform, arch] of [
         ["darwin", "x64"],
         ["linux", "arm64"],
+        ["win32", "x64"],
       ]) {
         process.platform = platform;
         process.arch = arch;
@@ -1033,6 +1100,30 @@ describe.skipIf(!supportedNanocodexHost)("NanocodexAgent", () => {
         });
       }
       expect(await readFile(lifecycle, "utf8").catch(() => "")).toBe("");
+    } finally {
+      process.platform = originalPlatform;
+      process.arch = originalArch;
+    }
+  });
+
+  test("accepts macOS arm64 at the host gate", async () => {
+    const originalPlatform = process.platform;
+    const originalArch = process.arch;
+    try {
+      process.platform = "darwin";
+      process.arch = "arm64";
+      const pending = agent().preflight({ rootDir: directory });
+      if (HOST_TARGET === "aarch64-apple-darwin") {
+        await expect(pending).resolves.toBeUndefined();
+      } else {
+        // Fake capabilities still report this host's compiled target, so the
+        // later target check fails. The host gate itself must have passed.
+        await expect(pending).rejects.toMatchObject({ code: "AGENT_CONFIG_INVALID" });
+      }
+      expect((await readFile(lifecycle, "utf8")).trim().split("\n")).toEqual([
+        "capabilities-start",
+        "capabilities-close",
+      ]);
     } finally {
       process.platform = originalPlatform;
       process.arch = originalArch;
@@ -1198,13 +1289,14 @@ if (process.argv[2] === "capabilities") {
   }) + "\\n");
   const exitSoon = () => setTimeout(() => process.exit(process.exitCode ?? 0), 5);
   const signalSoon = () => setTimeout(() => process.kill(process.pid, "SIGKILL"), 5);
-  const completed = (workspace) => ({
+  const completed = (workspace, command) => ({
     finalMessage: "deterministic answer",
     usage: {
       inputTokens: 11, cachedInputTokens: 3, cacheWriteInputTokens: 2,
       outputTokens: 7, reasoningOutputTokens: 2, totalTokens: 18,
       estimatedUsd: "0.001", costStatus: "estimated_from_usage", serviceTier: "standard",
     },
+    model: command?.data?.options?.model ?? "gpt-5.6-sol",
     snapshotVersion: 1,
     snapshot: { version: 1, workspace, history: [{ role: "assistant", content: "deterministic answer" }] },
     canonicalWorkspace: workspace,
@@ -1255,7 +1347,7 @@ if (process.argv[2] === "capabilities") {
             return;
           }
           recordManagedAuthEnd();
-          write("turn.completed", completed(command.data.workspace), {
+          write("turn.completed", completed(command.data.workspace, command), {
             requestId, sessionId: "fake-session",
           });
           lines.close();
@@ -1282,7 +1374,7 @@ if (process.argv[2] === "capabilities") {
           durationNs: 10, startedAfterNs: null,
         },
       } }, { requestId, sessionId: "fake-session" });
-      const result = completed(command.data.workspace);
+      const result = completed(command.data.workspace, command);
       if (process.env.FAKE_MODE === "large-checkpoint") {
         result.snapshot = { version: 1, nested: { unicode: "🙂".repeat(130000) } };
       }
@@ -1291,6 +1383,7 @@ if (process.argv[2] === "capabilities") {
         write("turn.failed", {
           error: { code: "cleanup_failed", category: "cleanup", message: "Cleanup failed.", retry: "safe" },
           completed: {
+            model: result.model,
             snapshotVersion: result.snapshotVersion,
             snapshot: result.snapshot,
             canonicalWorkspace: result.canonicalWorkspace,

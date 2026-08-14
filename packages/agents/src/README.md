@@ -13,13 +13,17 @@ Agent adapters for Smithers. Three families:
   `NanocodexAgent` starts one `smithers-nanocodex` process and one stock
   Nanocodex turn per call. It uses generic resume-only checkpoints instead of
   CLI session capture and deliberately rejects JavaScript tools, MCP,
-  subagents, custom endpoints, and workspace relocation. Protocol v1 is Linux
-  x86_64 only and requires Bubblewrap for PID-namespace process containment.
+  subagents, custom endpoints, and workspace relocation. Protocol v1 ships
+  Linux x86_64 (glibc 2.35+) and macOS arm64 workers. The adapter spawns the
+  matching `smithers-nanocodex` binary directly — Bubblewrap / `sandbox-exec`
+  must not wrap it. Isolation, if required, is an outer Smithers `<Sandbox>`.
   The bridge executable is an external pinned release: it is never bundled or
   downloaded by runtime code. `binary` selects a path or a command on `PATH`.
   Public preflight is provider-free; each `generate()` starts one fresh serve
-  worker. Resume requires the same canonical workspace, and opaque checkpoints
-  must be treated as secrets. PID containment is not filesystem, network,
+  worker. The stock model is allowlisted (`gpt-5.6-sol` default, plus
+  `gpt-5.6-terra` / `gpt-5.6-luna`) and fixed for a native thread. Resume
+  requires the same canonical workspace, and opaque checkpoints must be treated
+  as secrets. Process-group cleanup is best-effort, not filesystem, network,
   device, or credential isolation.
 
 Support directories: `BaseCliAgent/` (shared CLI lifecycle), `agent-contract/`,
