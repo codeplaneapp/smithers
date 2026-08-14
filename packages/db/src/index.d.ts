@@ -73,6 +73,8 @@ type EventHistoryQuery$1 = {
     afterSeq?: number;
     limit?: number;
     nodeId?: string;
+    iteration?: number;
+    attempt?: number;
     types?: readonly string[];
     sinceTimestampMs?: number;
 };
@@ -290,6 +292,8 @@ type SqlMessageStorageEventHistoryQuery$1 = {
     afterSeq?: number;
     limit?: number;
     nodeId?: string;
+    iteration?: number;
+    attempt?: number;
     types?: readonly string[];
     sinceTimestampMs?: number;
 };
@@ -1568,19 +1572,21 @@ declare class SmithersDb {
      */
     listEventHistory(runId: string, query?: EventHistoryQuery): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
-     * The newest events naming one node, ascending. One SQL pass (LIKE on the
-     * payload) instead of paging the whole history through JS: node transcripts
-     * on long runs need this to stay interactive, and unlike a bounded recency
-     * scan it finds OLD nodes' events too.
+     * The newest events naming one node, ascending. One SQL pass with exact
+     * top-level payload filters instead of paging the whole history through JS:
+     * node transcripts on long runs need this to stay interactive, and unlike a
+     * bounded recency scan it finds OLD nodes' events too.
      *
      * @param {string} runId
-     * @param {string} nodeId Validated upstream (no quotes/percent — node id charset).
-     * @param {{ afterSeq?: number; limit?: number }} [query]
+     * @param {string} nodeId
+     * @param {{ afterSeq?: number; limit?: number; iteration?: number; attempt?: number }} [query]
      * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
      */
     listNodeEvents(runId: string, nodeId: string, query?: {
         afterSeq?: number;
         limit?: number;
+        iteration?: number;
+        attempt?: number;
     }): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
      * @param {string} runId

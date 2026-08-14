@@ -3379,7 +3379,19 @@ function formatSessionTranscriptLine(payload: unknown): { text: string; kind: "c
  * the first poll returns a bounded tail of this node's history, and each
  * subsequent poll reads only past the last seen seq.
  */
-function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string; live: boolean }) {
+function NodeLiveOutput({
+  runId,
+  nodeId,
+  iteration,
+  attempt,
+  live,
+}: {
+  runId: string;
+  nodeId: string;
+  iteration: number;
+  attempt: number;
+  live: boolean;
+}) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [lines, setLines] = useState<Array<{ seq: number; text: string; kind: "cmd" | "text" | "meta" }>>([]);
   const [failed, setFailed] = useState(false);
@@ -3401,6 +3413,8 @@ function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string
       inFlight = true;
       try {
         const search = new URLSearchParams({ nodeId, limit: "120" });
+        search.set("iteration", String(iteration));
+        search.set("attempt", String(attempt));
         if (afterSeq !== undefined) search.set("afterSeq", String(afterSeq));
         const response = await fetch(`/v1/api/runs/${encodeURIComponent(runId)}/events?${search}`);
         if (!response.ok) throw new Error(`events ${response.status}`);
@@ -3455,7 +3469,7 @@ function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string
       cancelled = true;
       if (timer) clearInterval(timer);
     };
-  }, [runId, nodeId, live]);
+  }, [runId, nodeId, iteration, attempt, live]);
   useEffect(() => {
     const el = containerRef.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -4125,7 +4139,13 @@ function NodeInspector({
               />
             }
           >
-            <NodeLiveOutput runId={runId} nodeId={nodeId} live={isLive} />
+            <NodeLiveOutput
+              runId={runId}
+              nodeId={nodeId}
+              iteration={node.iteration ?? 0}
+              attempt={nodeAttempt ?? 0}
+              live={isLive}
+            />
           </InspectorSection>
           <InspectorSection title="Output" testId="monitor-node-output">
             {row ? (

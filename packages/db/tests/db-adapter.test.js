@@ -892,6 +892,42 @@ describe("SmithersDb adapter", () => {
     expect(events[0].seq).toBe(31);
     expect(events.at(-1)?.seq).toBe(150);
   });
+  test("listNodeEvents isolates one iteration and attempt while advancing its cursor", async () => {
+    const { adapter } = createTestDb();
+    const payloads = [
+      { nodeId: "task-a", iteration: 0, attempt: 1, text: "older iteration" },
+      { nodeId: "task-a", iteration: 1, attempt: 1, text: "older attempt" },
+      { nodeId: "task-a", iteration: 1, attempt: 2, text: "target" },
+      { nodeId: "task-b", iteration: 1, attempt: 2, text: "other node" },
+    ];
+    for (const [seq, payload] of payloads.entries()) {
+      await adapter.insertEvent({
+        runId: "r1",
+        seq,
+        timestampMs: now + seq,
+        type: "NodeOutput",
+        payloadJson: JSON.stringify(payload),
+      });
+    }
+
+    const first = await adapter.listNodeEvents("r1", "task-a", { iteration: 1, attempt: 2, limit: 120 });
+    expect(first.map((event) => event.seq)).toEqual([2]);
+
+    await adapter.insertEvent({
+      runId: "r1",
+      seq: 4,
+      timestampMs: now + 4,
+      type: "NodeOutput",
+      payloadJson: JSON.stringify({ nodeId: "task-a", iteration: 1, attempt: 2, text: "next" }),
+    });
+    const incremental = await adapter.listNodeEvents("r1", "task-a", {
+      iteration: 1,
+      attempt: 2,
+      afterSeq: 2,
+      limit: 120,
+    });
+    expect(incremental.map((event) => event.seq)).toEqual([4]);
+  });
   test("listEventHistory composes type and since filters", async () => {
     const { adapter } = createTestDb();
     await adapter.insertEvent({

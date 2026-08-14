@@ -4531,6 +4531,8 @@ a { color: var(--brand); }</style>
         params: {
           runId: runEvents ? decodeURIComponent(runEvents[1]) : queryString(url.searchParams, "runId"),
           nodeId: queryString(url.searchParams, "nodeId"),
+          iteration: queryNonNegativeInt(url.searchParams, "iteration"),
+          attempt: queryNonNegativeInt(url.searchParams, "attempt"),
           afterSeq: queryNonNegativeInt(url.searchParams, "afterSeq"),
           limit: queryPositiveInt(url.searchParams, "limit"),
         },
@@ -4706,9 +4708,13 @@ a { color: var(--brand); }</style>
     }
     const nodeId = asString(params.nodeId);
     const limit = asOptionalPositiveInt(params.limit, "limit") ?? 100;
+    const iteration = asOptionalNonNegativeInt(params.iteration, "iteration");
+    const attempt = asOptionalNonNegativeInt(params.attempt, "attempt");
     if (!nodeId) {
       const rows = await resolved.adapter.listEventHistory(runId, {
         afterSeq: asOptionalNonNegativeInt(params.afterSeq, "afterSeq"),
+        iteration,
+        attempt,
         limit,
       });
       return rows.map((row) => serializeRunEventRow(row));
@@ -4722,6 +4728,8 @@ a { color: var(--brand); }</style>
     }
     const matches = await resolved.adapter.listNodeEvents(runId, nodeId, {
       afterSeq: asOptionalNonNegativeInt(params.afterSeq, "afterSeq"),
+      iteration,
+      attempt,
       limit,
     });
     return matches.map((row) => serializeRunEventRow(row));
