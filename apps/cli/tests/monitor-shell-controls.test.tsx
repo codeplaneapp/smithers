@@ -229,6 +229,45 @@ describe("monitor global keyboard selection", () => {
       window.removeEventListener("keydown", onKeyDown);
     }
   });
+
+  test("leaves Escape handling to an open shared dialog", async () => {
+    let clearedNodes = 0;
+    const keyState = {
+      current: {
+        selectedRunId: "run-42",
+        selectedNodeKey: "node-7",
+        sortedTableRuns: [],
+        railOrderRuns: [],
+        cursorRunId: undefined,
+        selectNode: () => clearedNodes++,
+        selectRun: () => {},
+      },
+    } as any;
+    const onKeyDown = createMonitorKeydownHandler(
+      keyState,
+      () => {},
+      () => {},
+    );
+    const dialog = document.createElement("div");
+    dialog.dataset.slot = "dialog-content";
+    const close = document.createElement("button");
+    dialog.appendChild(close);
+    document.body.appendChild(dialog);
+    window.addEventListener("keydown", onKeyDown);
+    try {
+      await keydown(document.body, "Escape");
+      expect(clearedNodes).toBe(0);
+      close.addEventListener("keydown", () => dialog.remove(), { once: true });
+      await keydown(close, "Escape");
+      expect(clearedNodes).toBe(0);
+      dialog.remove();
+      await keydown(document.body, "Escape");
+      expect(clearedNodes).toBe(1);
+    } finally {
+      dialog.remove();
+      window.removeEventListener("keydown", onKeyDown);
+    }
+  });
 });
 
 describe("migrated monitor surfaces", () => {
@@ -643,7 +682,7 @@ describe("monitor theme contract", () => {
       [".mon-stat", "var(--surface)"],
       [".mon-banner", "var(--tone)"],
       [".mon-progress-fill", "var(--brand)"],
-      [".mon-modal { width: min(1280px, 96vw)", "var(--surface)"],
+      [".mon-modal.sui-dialog-content", "max-width: none"],
       [".mon-empty", "var(--muted)"],
       [".mon-hijack-surface", "var(--sp-2)"],
     ];
@@ -652,6 +691,8 @@ describe("monitor theme contract", () => {
       expect(start).toBeGreaterThanOrEqual(0);
       expect(monitorCss.slice(start, start + 500)).toContain(declaration);
     }
+    expect(smithersUiCss).toContain(".sui-dialog-content");
+    expect(monitorCss).not.toContain(".mon-modal-backdrop");
     expect(monitorCss).not.toMatch(/#[0-9a-f]{3,8}\b/i);
     expect(monitorCss).not.toContain("background: white");
     expect(monitorCss).not.toContain("color-mix");
