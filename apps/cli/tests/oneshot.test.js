@@ -1345,6 +1345,66 @@ describe("oneshot workflow", () => {
       workflow.db.$client.close();
     }
   });
+
+  test("omitting the liveness window leaves the graph default in place", async () => {
+    const cwd = temp("smithers-oneshot-heartbeat-default-");
+    const workflow = await buildOneshotWorkflow({
+      cwd,
+      goal: "Make the focused test change",
+      agents: [agent],
+      reviewAgents: [agent],
+      review: true,
+    });
+    try {
+      const children = workflow.build().props.children.props.children;
+      expect(children.map((child) => child.props.heartbeatTimeoutMs)).toEqual([undefined, undefined]);
+    } finally {
+      workflow.db.$client.close();
+    }
+  });
+
+  test("--heartbeat-timeout-ms reaches both long-running nodes", async () => {
+    const cwd = temp("smithers-oneshot-heartbeat-");
+    const workflow = await buildOneshotWorkflow({
+      cwd,
+      goal: "Make the focused test change",
+      agents: [agent],
+      reviewAgents: [agent],
+      review: true,
+      heartbeatTimeoutMs: 3_600_000,
+    });
+    try {
+      const children = workflow.build().props.children.props.children;
+      expect(children.map((child) => child.props.id)).toEqual(["implement", "review"]);
+      expect(children.map((child) => child.props.heartbeatTimeoutMs)).toEqual([3_600_000, 3_600_000]);
+    } finally {
+      workflow.db.$client.close();
+    }
+  });
+});
+
+test("the detached child carries the liveness window through the re-exec", () => {
+  const args = buildOneshotChildArgs({
+    cliPath: "cli.js",
+    goal: "focused goal",
+    cwd: "workspace",
+    review: "off",
+    heartbeatTimeoutMs: 3_600_000,
+    open: false,
+  });
+  expect(args).toContain("--heartbeat-timeout-ms");
+  expect(args[args.indexOf("--heartbeat-timeout-ms") + 1]).toBe("3600000");
+});
+
+test("the detached child omits the liveness window when it was not set", () => {
+  const args = buildOneshotChildArgs({
+    cliPath: "cli.js",
+    goal: "focused goal",
+    cwd: "workspace",
+    review: "off",
+    open: false,
+  });
+  expect(args).not.toContain("--heartbeat-timeout-ms");
 });
 
 test("status is JSON and the availability gate fails without supported CLIs", () => {

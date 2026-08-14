@@ -17,17 +17,17 @@ import { completeToolJournalCall } from "./completeToolJournalCall.js";
  * }} params
  */
 export function createToolJournalContext(params) {
-  /** @type {Map<number, { promise: Promise<void>; resolve: () => void }>} */
+  /** @type {Map<number, { promise: Promise<void>; resolve: () => void; startedAtMs: number }>} */
   const pendingToolCalls = new Map();
   /** @type {Map<number, { callToken: string; call: Record<string, unknown> }>} */
   const callTokens = new Map();
-  const beginToolCall = (seq) => {
+  const beginToolCall = (seq, startedAtMs) => {
     if (pendingToolCalls.has(seq)) return;
     let resolve = () => {};
     const promise = new Promise((next) => {
       resolve = next;
     });
-    pendingToolCalls.set(seq, { promise, resolve });
+    pendingToolCalls.set(seq, { promise, resolve, startedAtMs });
   };
   const finishToolCall = (seq) => {
     const pending = pendingToolCalls.get(seq);
@@ -76,7 +76,7 @@ export function createToolJournalContext(params) {
         };
         yield* params.adapter.insertToolCall(row);
         callTokens.set(seq, { callToken, call });
-        beginToolCall(seq);
+        beginToolCall(seq, timestampMs);
         yield* params.eventBus.emitEventWithPersist({
           type: "ToolCallStarted",
           ...row,
@@ -158,6 +158,22 @@ export function createToolJournalContext(params) {
         },
         { discard: true },
       ),
+    /**
+     * When the oldest tool call still executing under this context started, or
+     * `null` when none is in flight. The heartbeat watchdog reads this as
+     * liveness evidence: a tool call the engine is executing in-process is the
+     * same class of evidence as a live agent subprocess pid, and an agent
+     * waiting on one is not hung.
+     *
+     * @returns {number | null}
+     */
+    oldestPendingToolCallStartedAtMs: () => {
+      let oldest = null;
+      for (const entry of pendingToolCalls.values()) {
+        if (oldest === null || entry.startedAtMs < oldest) oldest = entry.startedAtMs;
+      }
+      return oldest;
+    },
     waitForPendingToolCalls: async (graceMs) => {
       const pending = [...pendingToolCalls.values()].map((entry) => entry.promise);
       if (pending.length === 0) return true;

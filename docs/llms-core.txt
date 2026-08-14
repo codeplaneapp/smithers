@@ -2383,6 +2383,25 @@ Two stored preferences shape routing, kept in the global Smithers config:
 
 `--review on|off` overrides the stored review preference for one run.
 
+## Liveness window
+
+Both oneshot nodes are long-running agents, and the engine fails an attempt
+whose liveness window elapses with no evidence of progress. Tool execution
+counts as evidence, so a verification command that runs for an hour keeps the
+attempt alive. A window still matters for an agent that goes silent between
+tool calls: on a wide workspace, or behind a slow provider, the gap can exceed
+the default.
+
+`--heartbeat-timeout-ms <ms>` sets the window for the implement and review
+nodes of one run. It survives the detached re-exec. Omit it to keep the default.
+
+```bash
+bunx smthrs oneshot "port the adapter and run the full suite" --heartbeat-timeout-ms 3600000
+```
+
+Raise it per run rather than globally: a large window on a genuinely hung
+attempt delays the retry by exactly that much.
+
 ## Dirty working copies
 
 Oneshot runs directly in `--cwd`, so a stale detached lineage, foreign WIP, or

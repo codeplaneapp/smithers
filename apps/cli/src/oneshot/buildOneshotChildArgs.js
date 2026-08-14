@@ -8,6 +8,7 @@
  *   model?: string;
  *   agent?: string;
  *   preflight?: "auto" | "warn" | "off";
+ *   heartbeatTimeoutMs?: number;
  *   runId?: string;
  *   resume?: boolean;
  *   force?: boolean;
@@ -29,6 +30,9 @@ export function buildOneshotChildArgs(options) {
   if (options.model) args.push("--model", options.model);
   if (options.agent) args.push("--agent", options.agent);
   if (options.preflight) args.push("--preflight", options.preflight);
+  // The detached child rebuilds the workflow, so the liveness window has to
+  // survive the re-exec or the child reverts to the graph default.
+  if (options.heartbeatTimeoutMs !== undefined) args.push("--heartbeat-timeout-ms", String(options.heartbeatTimeoutMs));
   if (options.runId) args.push("--run-id", options.runId);
   if (options.resume) args.push("--resume", "true");
   if (options.force) args.push("--force", "true");

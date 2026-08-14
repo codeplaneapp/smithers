@@ -5085,6 +5085,12 @@ async function legacyExecuteTask(
   let taskEffectJournalContext = null;
   /** @type {Array<ReturnType<typeof createToolJournalContext>>} */
   const activeToolJournalContexts = [];
+  /**
+   * Whether any tool call this attempt started is still executing.
+   * @returns {boolean}
+   */
+  const hasToolCallInFlight = () =>
+    activeToolJournalContexts.some((context) => context.oldestPendingToolCallStartedAtMs() !== null);
   // Callback output is only durable evidence after the same fenced heartbeat
   // has proved this executor still owns the attempt. Keep this shared by the
   // primary generation and every schema-repair generation.
@@ -5139,8 +5145,9 @@ async function legacyExecuteTask(
     );
     await annotateTaskSpan({ status: "running" });
     // This poll is an evidence probe, not a liveness pulse: it only writes
-    // when an adapter-owned child PID is demonstrably alive, and every
-    // write remains owner/attempt fenced by heartbeatAttempt.
+    // when the attempt has demonstrable work in progress — an adapter-owned
+    // child PID that is alive, or a tool call the engine is still executing —
+    // and every write remains owner/attempt fenced by heartbeatAttempt.
     heartbeatWatchdogFiber = Effect.runFork(
       Effect.repeat(
         Effect.suspend(() => {
@@ -5149,6 +5156,18 @@ async function legacyExecuteTask(
           }
           const lastHeartbeatAtMs = Math.max(startedAtMs, heartbeatEvidenceAtMs);
           if ([...liveOwnedPids].some((pid) => isPidAlive(pid))) {
+            recordInternalHeartbeat();
+            return Effect.void;
+          }
+          // A tool call in flight is the in-process equivalent of a live child
+          // PID. An agent that runs its tools inside the engine (SDK mode,
+          // compute callbacks) reports no PID, so before this a single long
+          // tool call — a recursive test suite over a large workspace — read as
+          // a hung agent and the watchdog killed a healthy attempt an hour into
+          // its work (bug 01kzzgg77q1wawmy5pvp1b35qc). The evidence ends the
+          // moment the call settles, so an agent that goes silent AFTER a tool
+          // call still fails, and a task that finishes emits nothing further.
+          if (hasToolCallInFlight()) {
             recordInternalHeartbeat();
             return Effect.void;
           }

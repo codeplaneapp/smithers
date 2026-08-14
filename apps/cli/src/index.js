@@ -2989,6 +2989,14 @@ const oneshotOptions = z
       .describe(
         "Dirty-working-copy preflight: auto warns and has the agent triage the tree first, warn only warns, off skips it",
       ),
+    heartbeatTimeoutMs: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe(
+        "Liveness window for the implement and review nodes in ms; raise it for goals whose verification stays silent longer than the default",
+      ),
     runId: z.string().optional().describe("Run ID to create or resume (used by `smithers supervise` to recover a run)"),
     resume: z
       .boolean()
@@ -8398,6 +8406,7 @@ const cli = Cli.create({
                 model: c.options.model,
                 agent: c.options.agent,
                 preflight: preflightMode,
+                heartbeatTimeoutMs: c.options.heartbeatTimeoutMs,
                 runId: c.options.runId,
                 resume: c.options.resume,
                 force: c.options.force,
@@ -8427,6 +8436,7 @@ const cli = Cli.create({
           model: c.options.model,
           agent: c.options.agent,
           preflight: preflightMode,
+          heartbeatTimeoutMs: c.options.heartbeatTimeoutMs,
           runId: c.options.runId,
           resume: c.options.resume,
           force: c.options.force,
@@ -8525,6 +8535,7 @@ const cli = Cli.create({
           agents: selected.agents,
           reviewAgents: selected.reviewAgents,
           review,
+          ...(c.options.heartbeatTimeoutMs !== undefined ? { heartbeatTimeoutMs: c.options.heartbeatTimeoutMs } : {}),
         });
         setupSqliteCleanup(workflow);
         if (c.options.open) openOneshotUi(effectiveRunId, taskCwd);
@@ -8571,6 +8582,12 @@ const cli = Cli.create({
             preflightMode,
             ...(c.options.model ? ["--model", c.options.model] : []),
             ...(c.options.agent ? ["--agent", c.options.agent] : []),
+            // The detached child rebuilds the workflow, so the liveness
+            // window has to survive the re-exec or the child silently
+            // reverts to the default.
+            ...(c.options.heartbeatTimeoutMs !== undefined
+              ? ["--heartbeat-timeout-ms", String(c.options.heartbeatTimeoutMs)]
+              : []),
           ],
           cwd: taskCwd,
         });

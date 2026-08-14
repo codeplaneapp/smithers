@@ -2,7 +2,14 @@ import React from "react";
 import { openInlineWorkflowStore } from "../openInlineWorkflowStore.js";
 
 /**
- * @param {{ cwd: string; goal: string; agents: any[]; reviewAgents: any[]; review: boolean }} options
+ * @param {{
+ *   cwd: string;
+ *   goal: string;
+ *   agents: any[];
+ *   reviewAgents: any[];
+ *   review: boolean;
+ *   heartbeatTimeoutMs?: number;
+ * }} options
  * @returns {Promise<import("@smthrs/components/SmithersWorkflow").SmithersWorkflow<any>>}
  */
 export async function buildOneshotWorkflow(options) {
@@ -22,12 +29,17 @@ export async function buildOneshotWorkflow(options) {
     options.goal,
     "Keep the change minimal and focused. Verify the work. Report a concise summary and every file changed.",
   ].join("\n\n");
+  // Both oneshot nodes are long-running agents. `--heartbeat-timeout-ms`
+  // reaches them here; omitting it leaves the graph default in place.
+  const heartbeat =
+    typeof options.heartbeatTimeoutMs === "number" ? { heartbeatTimeoutMs: options.heartbeatTimeoutMs } : {};
   const implement = React.createElement(
     Task,
     {
       id: "implement",
       output: oneshotResult,
       agent: options.agents,
+      ...heartbeat,
     },
     goalPrompt,
   );
@@ -47,7 +59,7 @@ export async function buildOneshotWorkflow(options) {
             implement,
             React.createElement(
               Task,
-              { id: "review", output: oneshotReview, agent: options.reviewAgents },
+              { id: "review", output: oneshotReview, agent: options.reviewAgents, ...heartbeat },
               reviewPrompt,
             ),
           )
