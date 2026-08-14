@@ -1906,6 +1906,18 @@ workflows. The human talks to you. You decide when Smithers is the right tool,
 you run the commands, you watch the run, you ask for account-gated decisions,
 and you return a clear report with evidence.
 
+Before any of that, check one thing:
+
+> **If `SMITHERS_INSIDE_RUN` is set in your environment, none of this page
+> applies to you.** That variable means you are already a worker agent executing
+> one node of a Smithers run; Smithers sets it on every agent it spawns. Do the
+> node's task directly with your ordinary tools and finish your turn. Never
+> invoke the Smithers CLI or MCP tools to launch, poll, or steer a run from
+> inside a node; the prompt you were handed is the work, not a request to
+> orchestrate. The one exception is escalating upward with
+> `bunx smthrs ask-human` (or the `ask_human` MCP tool) when you are blocked or
+> about to do something irreversible.
+
 If you remember one rule, remember this:
 
 > Do not ask the human to run Smithers commands. The human's job is to state the
@@ -2298,6 +2310,12 @@ Before closing:
 authoring. It launches in the background by default and serves a live
 dashboard with chat, diff, hijack, pause, and cancel controls.
 
+Its long-running `implement` and optional `review` tasks use the existing
+per-task `heartbeatTimeoutMs` override with a 10-minute inactivity window. Live
+tool execution, output streaming, and owned CLI subprocesses refresh that
+window; an agent with no activity still fails. This does not raise the global
+heartbeat default.
+
 ```bash
 bunx smthrs oneshot "add a loading spinner to the login button"
 bunx smthrs oneshot --goal-file TICKET.md
@@ -2407,6 +2425,27 @@ Oneshot runs directly in `--cwd`, so a stale detached lineage, foreign WIP, or
 `.jjconflict*` tree can be swept into a goal commit and make landing unsafe.
 The default `--preflight auto` warns and prepends agent-judged triage
 instructions; use `warn` to warn without injection or `off` to skip assessment.
+
+### Sharing a directory with another run
+
+Preflight treats dirty paths as pre-existing work the agent may snapshot into
+its own commit. That is only true when nothing else is producing them. Launch
+therefore asks the workspace store which runs are still working in `--cwd`,
+using the same PID-verified liveness `bunx smthrs ps` reports. A run whose engine
+is dead does not count.
+
+When another run is live there, preflight names it, and the injected
+instructions flip: the agent commits only the paths its own goal work touches,
+by explicit pathspec, and leaves every other path alone. It does not snapshot,
+stash, revert, or gitignore anything, because those changes belong to a run
+that is still editing them.
+
+The two clean fixes are to wait for that run, or to relaunch with `--cwd`
+pointing at an isolated worktree. `--preflight force-commit` keeps the old
+behavior for the case where you know the tree is yours.
+
+Two launches that race inside the scan window can still each see an empty
+store and proceed. Sequential launches, the common case, are covered.
 
 ## Watching and steering a oneshot
 
@@ -4175,6 +4214,20 @@ Smithers infers `outputSchema` from it, passes that to native
 structured-output agents, validates the returned row, and persists to the
 matching table. Set `outputSchema={...}` only for a custom Drizzle table or
 string key it can't infer a schema from.
+
+`heartbeatTimeoutMs` is opt-in and does not change the global timeout. While
+an agent tool is executing, Smithers emits fenced periodic heartbeats until
+that tool finishes; streamed stdout/stderr and a live owned CLI subprocess also
+count as activity. A stalled agent with no stream, tool, subprocess, or explicit
+`runtime.heartbeat()` still fails when the window expires. Process-exit and
+task-completion cleanup remove liveness before a later timer tick, so stale
+activity cannot keep a dead attempt alive.
+
+A single tool call holds the task alive for at most twelve heartbeat windows.
+An adapter that reports a tool start and then wedges emits nothing further, so
+that lease expires and the attempt fails as a hung agent rather than running
+forever. Raise `heartbeatTimeoutMs` when a node runs tools that legitimately
+take longer than the lease allows.
 
 <Warning>
 **Don't name an output field `iteration`, `runId`, or `nodeId`.** Smithers persists every output alongside those internal columns, so declaring one collides and the workflow fails to load (`bunx smthrs graph` errors before running). Loop counters hit this most: use `round`, `pass`, or `attempt` instead.
@@ -6384,6 +6437,8 @@ Both use the graph resolver, so they match the path Smithers gives worker tasks.
   symlink node_modules from, or write into, the parent checkout. An install through a shared
   node_modules link rewrites the parent checkout's workspace links to point into the
   worktree, all of which dangle once the worktree is removed.
+- **Worktree lanes are disposable, including ignored files.** Reaping deletes the lane
+  directory after the run ends. Commit anything valuable or copy it outside the lane first.
 - **jj continuously snapshots a worktree's working copy onto its bookmark.** A compute
   `<Task>` (or helper) that checks for changes with `git status --porcelain` can see a
   *clean* tree and skip its work, because jj has already committed the working-copy edits to
@@ -16478,6 +16533,8 @@ routes[15]{method,path,purpose,auth}:
   POST,/signal/:runId/:signalName,Legacy alias for signals,bearer
 ```
 
+Approval requests may include `iteration`, `note`, `decidedBy`, and `decision`. For `select` and `rank` approvals, `decision` must contain a valid selection or ranking. A stable decision envelope with `value` is also accepted.
+
 JSON requests/responses use `Content-Type: application/json`, `Cache-Control: no-store`, and `X-Content-Type-Options: nosniff`. SSE events are named `smithers` and carry `SmithersEvent` JSON; the stream sends a keep-alive comment every 10 s and closes on terminal state.
 
 Errors use the envelope `{ "error": { "code", "message", "details" } }`. Common codes: `INVALID_REQUEST`, `INVALID_JSON`, `PAYLOAD_TOO_LARGE`, `RUN_ID_REQUIRED`, `RUN_NOT_FOUND`, `RUN_ALREADY_EXISTS`, `RUN_NOT_ACTIVE`, `NOT_FOUND`, `UNAUTHORIZED`, `WORKFLOW_PATH_OUTSIDE_ROOT`, `DB_NOT_CONFIGURED`, `SERVER_ERROR`.
@@ -16669,9 +16726,12 @@ Approve a pending approval gate. All fields optional. Returns `{ "runId": "run-1
 {
   "iteration": 0,
   "note": "Looks good",
-  "decidedBy": "alice"
+  "decidedBy": "alice",
+  "decision": { "selected": "balanced", "notes": "best fit" }
 }
 ```
+
+For `select` and `rank` approvals, `decision` must contain a valid selection or ranking. A stable decision envelope with `value` is also accepted.
 
 ### POST /deny/:nodeId
 
@@ -19795,7 +19855,9 @@ const agent = new NanocodexAgent({
 When `inheritEnv` is `false`, ambient process variables are not inherited. The
 `serve` worker receives variables configured in `env` plus any Smithers
 task-context identifiers supplied for the call: `SMITHERS_RUN_ID`,
-`SMITHERS_NODE_ID`, `SMITHERS_ITERATION`, and `SMITHERS_ATTEMPT`. Include `PATH`
+`SMITHERS_NODE_ID`, `SMITHERS_ITERATION`, `SMITHERS_ATTEMPT`, and
+`SMITHERS_INSIDE_RUN` (the recursion marker that tells the worker it is already
+running inside a node and must not launch or steer another run). Include `PATH`
 in `env` if `binary` is a command name; ambient `PATH` is not used in this mode.
 Prompts, credentials, and snapshots never appear in process arguments.
 
@@ -22817,6 +22879,40 @@ type AttemptScoped   = NodeScoped   & { attempt: number };
 ```
 
 Every event has `type`, `runId`, `timestampMs`; node-scoped adds `nodeId`/`iteration`; attempt-scoped adds `attempt`.
+
+## Token usage semantics
+
+`TokenUsageReported` is a final cumulative total for one agent attempt, not an
+incremental sample. Current runtimes emit one record when the attempt settles,
+including a failed attempt when its provider error carries usage:
+
+```ts
+{
+  type: "TokenUsageReported",
+  nodeId, iteration, attempt, model, agent,
+  inputTokens,       // provider-reported input counter
+  freshInputTokens,  // non-cached input
+  cacheReadTokens,   // input breakdown; do not add to inputTokens
+  cacheWriteTokens,  // input breakdown; do not add to inputTokens
+  outputTokens,      // total provider output
+  reasoningTokens,   // output breakdown; do not add to outputTokens
+  costUsd,           // optional estimate from Smithers' model price table
+}
+```
+
+The token total is `inputTokens + outputTokens`. Cache and reasoning fields
+explain that total; they are not extra tokens. `costUsd` is absent when the
+resolved model is not in the built-in price table. When a provider omits the
+exact non-cached breakdown, `freshInputTokens` falls back to its reported
+`inputTokens` counter for compatibility with CLI adapters and historical logs.
+
+Smithers versions around `0.20` could write the growing cumulative total more
+than once during an attempt. When reading those historical logs, group by
+`nodeId + iteration + attempt` and keep the last record; summing every record
+over-counts the run. Current persistence does this automatically:
+`_smithers_run_usage` upserts by that attempt identity, while retries use new
+attempt numbers and remain separate. Use `bunx smthrs inspect RUN_ID` or
+`bunx smthrs usage --run RUN_ID` for the authoritative aggregate.
 
 ## Event categories
 

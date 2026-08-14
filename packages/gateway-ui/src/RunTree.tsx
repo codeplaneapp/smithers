@@ -2,6 +2,7 @@
 import { useInsertionEffect, type CSSProperties } from "react";
 import { useGatewayRunTree } from "@smthrs/gateway-react";
 import type { GatewayRunNode } from "@smthrs/gateway-client";
+import { Alert, AlertDescription } from "@smthrs/ui";
 import { NodeRow } from "./NodeRow";
 import { ensureGatewayUiStyles, theme } from "./theme";
 
@@ -41,7 +42,11 @@ export function RunTree({ runId, onSelectNode, activeNodeId, className, style }:
       }}
     >
       {!runId ? <div style={{ color: theme.textDim, fontSize: 13, padding: 10 }}>Select a run.</div> : null}
-      {error ? <div style={{ color: theme.danger, fontSize: 13, padding: 10 }}>{error.message}</div> : null}
+      {error ? (
+        <Alert variant="destructive">
+          <AlertDescription>{error.message}</AlertDescription>
+        </Alert>
+      ) : null}
       {runId && isLoading && !root ? (
         <div style={{ color: theme.textDim, fontSize: 13, padding: 10 }}>Loading…</div>
       ) : null}

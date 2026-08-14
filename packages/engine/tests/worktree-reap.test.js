@@ -132,6 +132,27 @@ describe("worktree reaping", () => {
     expect(await listSmithersWorktrees(repo)).toHaveLength(0);
   });
 
+  test("a lane containing only an ignored file is reaped and reports the path", async () => {
+    writeFileSync(join(repo, ".gitignore"), "ignored.txt\n");
+    await git(repo, ["add", ".gitignore"]);
+    await git(repo, ["commit", "-m", "ignore disposable output"]);
+    const path = await createLane("lane-a", "run-1");
+    writeFileSync(join(path, "ignored.txt"), "disposable\n");
+    runStatuses.set("run-1", "finished");
+
+    const result = await reapWorktrees({ rootDir: repo, getRunStatus });
+
+    expect(result.skipped).toHaveLength(0);
+    expect(result.removed).toHaveLength(1);
+    expect(result.removed[0]).toMatchObject({
+      path,
+      runId: "run-1",
+      ignoredPaths: ["ignored.txt"],
+      ignoredPathsTruncated: false,
+    });
+    expect(existsSync(path)).toBe(false);
+  });
+
   test.each([["running"], ["paused"], ["waiting-approval"], ["waiting-event"]])(
     "a %s run's worktree is never removed",
     async (status) => {
@@ -155,7 +176,7 @@ describe("worktree reaping", () => {
     expect(existsSync(path)).toBe(true);
   });
 
-  test("uncommitted work survives a terminal run unless forced", async () => {
+  test("an untracked non-ignored file blocks reaping with unsaved-work unless forced", async () => {
     const path = await createLane("lane-a", "run-1");
     runStatuses.set("run-1", "finished");
     writeFileSync(join(path, "agent-work.txt"), "hours of work\n");

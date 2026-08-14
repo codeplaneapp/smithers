@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { useGatewayMutation, useGatewayRuns, useGatewayWorkflows } from "@smthrs/gateway-react";
 import { gatewayKeys } from "@smthrs/gateway-client";
-import { EmptyState, Skeleton } from "@smthrs/ui";
+import { Badge, EmptyState, Skeleton, StatusPill } from "@smthrs/ui";
 import { openSurface } from "../app/navigation";
-import { StatusPill } from "../cards/StatusPill";
+import { statusLabel } from "../runs/statusMeta";
 import { useGatewayConnectionStatus } from "../sync/useGatewayConnectionStatus";
 import type { GatewayRun, GatewayWorkflow } from "./gatewayTypes";
 import { toNodeStatus } from "./toNodeStatus";
@@ -91,7 +91,12 @@ export function GatewayWorkflowsSection() {
     <section className="gw-live" data-testid="gateway-live">
       <div className="gw-live-head">
         <h2 className="gw-live-title">Live workflows</h2>
-        <span className="gw-live-status">{status}</span>
+        <Badge
+          variant={status === "online" ? "success" : status === "unauthorized" ? "warning" : "muted"}
+          data-status={status}
+        >
+          {status}
+        </Badge>
       </div>
 
       {status === "unauthorized" && workflows.length === 0 ? (
@@ -136,7 +141,7 @@ export function GatewayWorkflowsSection() {
               {workflowRuns.map((run) => (
                 <div className="gw-run-row" key={run.runId}>
                   <span className="gw-run-id">{run.runId}</span>
-                  <StatusPill status={run.status} />
+                  <StatusPill status={run.status} label={statusLabel(run.status)} />
                   <button
                     className="gw-btn"
                     type="button"
