@@ -3133,7 +3133,12 @@ const bugOptions = z.object({
       "Bug endpoint URL (default https://bug.smithers.sh/api/bugs; the SMITHERS_BUG_ENDPOINT env var takes precedence)",
     ),
 });
+const workspaceCwdOption = z
+  .string()
+  .optional()
+  .describe("Workspace directory for store discovery (default: current directory)");
 const psOptions = z.object({
+  cwd: workspaceCwdOption,
   status: z
     .string()
     .optional()
@@ -3230,6 +3235,7 @@ const chatArgs = z.object({
   runId: z.string().optional().describe("Run ID to inspect (default: latest run)"),
 });
 const chatOptions = z.object({
+  cwd: workspaceCwdOption,
   all: z.boolean().default(false).describe("Show all agent attempts in the run (default: latest only)"),
   follow: z.boolean().default(false).describe("Watch for new agent output"),
   tail: z.number().int().min(1).optional().describe("Show only the last N chat blocks"),
@@ -3255,6 +3261,7 @@ const inspectArgs = z.object({
   runId: z.string().describe("Run ID to inspect"),
 });
 const inspectOptions = z.object({
+  cwd: workspaceCwdOption,
   watch: z.boolean().default(false).describe("Watch mode: refresh output continuously"),
   interval: z.number().positive().default(2).describe("Watch refresh interval in seconds"),
   pool: z.boolean().default(false).describe("Tally attempts by agent engine/model"),
@@ -3280,6 +3287,7 @@ const statusArgs = z.object({
   runId: z.string().describe("Run ID to summarize"),
 });
 const statusOptions = z.object({
+  cwd: workspaceCwdOption,
   json: z.boolean().default(false).describe("Output the structured summary as JSON"),
   window: z
     .number()
@@ -3363,13 +3371,16 @@ const signalOptions = z.object({
 const cancelArgs = z.object({
   runId: z.string().describe("Run ID to cancel"),
 });
+const cancelOptions = z.object({ cwd: workspaceCwdOption });
 const pauseArgs = z.object({
   runId: z.string().describe("Run ID to pause"),
 });
+const pauseOptions = z.object({ cwd: workspaceCwdOption });
 const hijackArgs = z.object({
   runId: z.string().describe("Run ID whose latest agent session should be hijacked"),
 });
 const hijackOptions = z.object({
+  cwd: workspaceCwdOption,
   target: z.string().optional().describe("Agent engine (e.g. claude-code, codex) or node id whose session to hand off"),
   timeoutMs: z.number().int().min(1).default(30_000).describe("How long to wait for a live run to hand off"),
   launch: z.boolean().default(true).describe("Open the hijacked session immediately"),
@@ -8531,7 +8542,7 @@ const cli = Cli.create({
         return c.ok(
           { runId: effectiveRunId, pid: child.pid, logFile, workflowName: "oneshot" },
           {
-            cta: oneshotCta(effectiveRunId),
+            cta: oneshotCta(effectiveRunId, taskCwd),
           },
         );
       }
@@ -8539,7 +8550,7 @@ const cli = Cli.create({
         if (c.options.open) openOneshotUi(effectiveRunId, taskCwd);
         const overrideContext = {
           ...c,
-          ok: (data) => c.ok(data, { cta: oneshotCta(effectiveRunId) }),
+          ok: (data) => c.ok(data, { cta: oneshotCta(effectiveRunId, taskCwd) }),
         };
         return executeUpCommand(
           overrideContext,
@@ -8667,7 +8678,9 @@ const cli = Cli.create({
           }),
         );
         process.exitCode = formatStatusExitCode(result.status);
-        return c.ok(summarizeRunResult(result), { cta: result.runId ? oneshotCta(result.runId) : undefined });
+        return c.ok(summarizeRunResult(result), {
+          cta: result.runId ? oneshotCta(result.runId, taskCwd) : undefined,
+        });
       } catch (error) {
         return fail({
           code: error instanceof SmithersError ? error.code : "ONESHOT_FAILED",
@@ -9345,7 +9358,7 @@ const cli = Cli.create({
     async run(c) {
       const fail = makeFail(c);
       try {
-        const { adapter, cleanup } = await findAndOpenDb();
+        const { adapter, cleanup } = await findAndOpenDb(c.options.cwd);
         try {
           if (c.options.watch) {
             const intervalMs = resolveWatchIntervalMsOrFail("ps", c.options.interval, fail);
@@ -9708,7 +9721,7 @@ const cli = Cli.create({
     async *run(c) {
       let cleanup;
       try {
-        const db = await findAndOpenDb();
+        const db = await findAndOpenDb(c.options.cwd);
         const adapter = db.adapter;
         cleanup = db.cleanup;
         let run;
@@ -10049,7 +10062,7 @@ const cli = Cli.create({
     options: hijackOptions,
     async run(c) {
       const fail = makeFail(c);
-      const { adapter, cleanup } = await findAndOpenDb();
+      const { adapter, cleanup } = await findAndOpenDb(c.options.cwd);
       try {
         const run = await adapter.getRun(c.args.runId);
         if (!run) {
@@ -10103,7 +10116,7 @@ const cli = Cli.create({
     async run(c) {
       const fail = makeFail(c);
       try {
-        const { adapter, cleanup } = await findAndOpenDb();
+        const { adapter, cleanup } = await findAndOpenDb(c.options.cwd);
         try {
           /**
            * @param {InspectSnapshot} snapshot
@@ -10343,7 +10356,7 @@ const cli = Cli.create({
     async run(c) {
       const fail = makeFail(c);
       try {
-        const { adapter, cleanup } = await findAndOpenDb();
+        const { adapter, cleanup } = await findAndOpenDb(c.options.cwd);
         try {
           const summary = await buildRunStatusSummary(adapter, c.args.runId, {
             ...(c.options.window ? { recentWindowMs: Math.floor(c.options.window * 60_000) } : {}),
@@ -11029,10 +11042,11 @@ const cli = Cli.create({
   .command("cancel", {
     description: "Safely halt agents and terminate a run.",
     args: cancelArgs,
+    options: cancelOptions,
     async run(c) {
       const fail = makeFail(c);
       try {
-        const { adapter, cleanup } = await findAndOpenDb();
+        const { adapter, cleanup } = await findAndOpenDb(c.options.cwd);
         try {
           const run = await adapter.getRun(c.args.runId);
           if (!run) {
@@ -11150,13 +11164,14 @@ const cli = Cli.create({
     description:
       "Gracefully pause a run: stop scheduling new tasks, let in-flight tasks finish, then park it resumably.",
     args: pauseArgs,
+    options: pauseOptions,
     async run(c) {
       const fail = (opts) => {
         commandExitOverride = opts.exitCode ?? 1;
         return c.error(opts);
       };
       try {
-        const { adapter, cleanup } = await findAndOpenDb();
+        const { adapter, cleanup } = await findAndOpenDb(c.options.cwd);
         try {
           const run = await adapter.getRun(c.args.runId);
           if (!run) {
@@ -12356,6 +12371,7 @@ const cli = Cli.create({
       runId: z.string().optional().describe("Run to open. Defaults to the most recent run."),
     }),
     options: z.object({
+      cwd: workspaceCwdOption,
       gateway: z.string().optional().describe("Gateway base URL (default http://127.0.0.1:<port>)."),
       port: z.number().int().min(1).max(65535).default(7331).describe("Gateway port when --gateway is not set."),
       host: z
@@ -12416,6 +12432,7 @@ const cli = Cli.create({
         .describe("Focus this run; built-in oneshots open their dedicated transcript, steer, and restart monitor."),
     }),
     options: z.object({
+      cwd: workspaceCwdOption,
       gateway: z.string().optional().describe("Gateway base URL (default http://127.0.0.1:<port>)."),
       port: z.number().int().min(1).max(65535).default(7331).describe("Gateway port when --gateway is not set."),
       host: z
