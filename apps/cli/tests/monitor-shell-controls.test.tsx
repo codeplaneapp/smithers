@@ -789,7 +789,9 @@ describe("monitor theme contract", () => {
     const rules = [
       [".mon-shell", "overflow: hidden"],
       [".mon-filter-input", "min-width"],
-      [".mon-stat {", "var(--surface)"],
+      // The stat surface itself moved to the shared Card slot (data-slot="card",
+      // asserted above); .mon-stat keeps only its flex sizing.
+      [".mon-stat {", "flex: 1 1 120px"],
       [".mon-progress-fill", "var(--brand)"],
       [".mon-modal { width: min(1280px, 96vw)", "var(--surface)"],
       [".mon-empty", "var(--muted)"],
