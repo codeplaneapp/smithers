@@ -31,6 +31,9 @@ import {
   AlertTitle,
   Badge,
   Button,
+  Card,
+  CardContent,
+  CardHeader,
   observeReducedMotion,
   prefersReducedMotion,
   Progress,
@@ -898,19 +901,21 @@ export function StatCard({
   testId?: string;
 }) {
   return (
-    <div className={`mon-stat${tone ? ` tone-${tone}` : ""}`} data-testid={testId ?? "monitor-stat"}>
-      <div className="mon-stat-value" title={value}>
-        {value}
-      </div>
-      <div className="mon-stat-label" title={label}>
-        {label}
-      </div>
-      {sub ? (
-        <div className="mon-stat-sub mon-dim" title={sub}>
-          {sub}
+    <Card className={`mon-stat${tone ? ` tone-${tone}` : ""}`} data-testid={testId ?? "monitor-stat"}>
+      <CardContent>
+        <div className="mon-stat-value" title={value}>
+          {value}
         </div>
-      ) : null}
-    </div>
+        <div className="mon-stat-label" title={label}>
+          {label}
+        </div>
+        {sub ? (
+          <div className="mon-stat-sub mon-dim" title={sub}>
+            {sub}
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1031,26 +1036,28 @@ function ActiveNowBand({ runs, onSelectRun }: { runs: RunRow[]; onSelectRun: (ru
   const active = useMemo(() => groupRuns(runs).find((group) => group.group === "active")?.runs ?? [], [runs]);
   if (active.length === 0) return null;
   return (
-    <section className="mon-panel mon-active-band" data-testid="monitor-active-now">
-      <header className="mon-panel-head">
+    <Card className="mon-active-band" data-testid="monitor-active-now">
+      <CardHeader className="mon-panel-head">
         <h2 className="mon-kicker">
           Active now <span className="mon-count">{active.length}</span>
         </h2>
-      </header>
-      {active.map((run) => (
-        <button type="button" className="mon-active-row" key={run.runId} onClick={() => onSelectRun(run.runId)}>
-          <ToneDot tone={toneForStatus(run.status)} pulse={toneForStatus(run.status) === "running"} />
-          <span className="mon-active-name">{middleTruncate(run.workflowKey ?? "unknown", 56)}</span>
-          <span className="mon-mono mon-dim">{shortRunId(run.runId)}</span>
-          <span className="mon-active-progress">
-            <RunProgressCell run={run} />
-          </span>
-          <span className="mon-mono mon-dim mon-active-elapsed">
-            <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={undefined} />
-          </span>
-        </button>
-      ))}
-    </section>
+      </CardHeader>
+      <CardContent>
+        {active.map((run) => (
+          <button type="button" className="mon-active-row" key={run.runId} onClick={() => onSelectRun(run.runId)}>
+            <ToneDot tone={toneForStatus(run.status)} pulse={toneForStatus(run.status) === "running"} />
+            <span className="mon-active-name">{middleTruncate(run.workflowKey ?? "unknown", 56)}</span>
+            <span className="mon-mono mon-dim">{shortRunId(run.runId)}</span>
+            <span className="mon-active-progress">
+              <RunProgressCell run={run} />
+            </span>
+            <span className="mon-mono mon-dim mon-active-elapsed">
+              <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={undefined} />
+            </span>
+          </button>
+        ))}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1116,71 +1123,73 @@ function CronsPanel() {
   const cronsApi = useJsonApi("/v1/api/crons", 30_000);
   const crons = useMemo(() => cronRowsOf(cronsApi.body), [cronsApi.body]);
   return (
-    <section className="mon-panel mon-crons-panel" data-testid="monitor-crons">
-      <header className="mon-panel-head">
+    <Card className="mon-crons-panel" data-testid="monitor-crons">
+      <CardHeader className="mon-panel-head">
         <h2 className="mon-kicker">
           Crons <span className="mon-count">{cronsApi.loaded ? crons.length : ""}</span>
         </h2>
-      </header>
-      {!cronsApi.loaded ? (
-        <div className="mon-empty mon-dim">
-          {cronsApi.failed ? (
-            "Could not load crons — the gateway did not answer."
-          ) : (
-            <span className="mon-live-pending">
-              <span className="mon-dot mon-dot-pulse" aria-hidden /> loading crons…
-            </span>
-          )}
-        </div>
-      ) : crons.length === 0 ? (
-        <div className="mon-empty mon-dim">
-          No crons registered. Add one with <code>smithers cron add &lt;pattern&gt; &lt;workflow&gt;</code>.
-        </div>
-      ) : (
-        <div className="mon-crons-scroll">
-          <Table className="mon-runs-table mon-crons-table">
-            <TableHeader>
-              <TableRow>
-                <TableHead scope="col">Pattern</TableHead>
-                <TableHead scope="col">Workflow</TableHead>
-                <TableHead scope="col">Enabled</TableHead>
-                <TableHead scope="col">Last run</TableHead>
-                <TableHead scope="col">Next run</TableHead>
-                <TableHead scope="col">Last error</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {crons.map((cron) => (
-                <TableRow key={cron.cronId} data-cron-id={cron.cronId}>
-                  <TableCell className="mon-mono">{cron.pattern}</TableCell>
-                  <TableCell className="mon-table-workflow" title={cron.workflowPath ?? cron.workflow}>
-                    {cron.workflow}
-                  </TableCell>
-                  <TableCell>
-                    <CronStatusTag enabled={cron.enabled} />
-                  </TableCell>
-                  <TableCell className="mon-dim">
-                    <Ago ms={cron.lastRunAtMs} />
-                  </TableCell>
-                  <TableCell className="mon-mono">
-                    {cron.nextRunAtMs === undefined ? (
-                      <span className="mon-dim">—</span>
-                    ) : now >= cron.nextRunAtMs ? (
-                      "due now"
-                    ) : (
-                      <Countdown untilMs={cron.nextRunAtMs} />
-                    )}
-                  </TableCell>
-                  <TableCell className={cron.error ? "tone-failed mon-cron-error" : "mon-dim"} title={cron.error}>
-                    {cron.error ? cron.error.slice(0, 80) : "—"}
-                  </TableCell>
+      </CardHeader>
+      <CardContent>
+        {!cronsApi.loaded ? (
+          <div className="mon-empty mon-dim">
+            {cronsApi.failed ? (
+              "Could not load crons — the gateway did not answer."
+            ) : (
+              <span className="mon-live-pending">
+                <span className="mon-dot mon-dot-pulse" aria-hidden /> loading crons…
+              </span>
+            )}
+          </div>
+        ) : crons.length === 0 ? (
+          <div className="mon-empty mon-dim">
+            No crons registered. Add one with <code>smithers cron add &lt;pattern&gt; &lt;workflow&gt;</code>.
+          </div>
+        ) : (
+          <div className="mon-crons-scroll">
+            <Table className="mon-runs-table mon-crons-table">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Pattern</TableHead>
+                  <TableHead scope="col">Workflow</TableHead>
+                  <TableHead scope="col">Enabled</TableHead>
+                  <TableHead scope="col">Last run</TableHead>
+                  <TableHead scope="col">Next run</TableHead>
+                  <TableHead scope="col">Last error</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
-    </section>
+              </TableHeader>
+              <TableBody>
+                {crons.map((cron) => (
+                  <TableRow key={cron.cronId} data-cron-id={cron.cronId}>
+                    <TableCell className="mon-mono">{cron.pattern}</TableCell>
+                    <TableCell className="mon-table-workflow" title={cron.workflowPath ?? cron.workflow}>
+                      {cron.workflow}
+                    </TableCell>
+                    <TableCell>
+                      <CronStatusTag enabled={cron.enabled} />
+                    </TableCell>
+                    <TableCell className="mon-dim">
+                      <Ago ms={cron.lastRunAtMs} />
+                    </TableCell>
+                    <TableCell className="mon-mono">
+                      {cron.nextRunAtMs === undefined ? (
+                        <span className="mon-dim">—</span>
+                      ) : now >= cron.nextRunAtMs ? (
+                        "due now"
+                      ) : (
+                        <Countdown untilMs={cron.nextRunAtMs} />
+                      )}
+                    </TableCell>
+                    <TableCell className={cron.error ? "tone-failed mon-cron-error" : "mon-dim"} title={cron.error}>
+                      {cron.error ? cron.error.slice(0, 80) : "—"}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1245,27 +1254,29 @@ function ScoresPanel({ scores: { rows, loaded } }: { scores: RunScores }) {
     </div>
   );
   return (
-    <section className="mon-panel mon-scores-panel" data-testid="monitor-scores">
-      <header className="mon-panel-head">
+    <Card className="mon-scores-panel" data-testid="monitor-scores">
+      <CardHeader className="mon-panel-head">
         <h2 className="mon-kicker">
           Scores <span className="mon-count">{summary.count}</span>
         </h2>
         <span className="mon-dim mon-mono">avg {formatScore(summary.avg)}</span>
-      </header>
-      {rows.length > SCORES_COLLAPSE_THRESHOLD ? (
-        <details className="mon-scores-details">
-          <summary className="mon-scores-summary" data-testid="monitor-scores-summary">
-            <span className="mon-diff-caret" aria-hidden>
-              ▸
-            </span>
-            {summary.count} scores · avg {formatScore(summary.avg)}
-          </summary>
-          {list}
-        </details>
-      ) : (
-        list
-      )}
-    </section>
+      </CardHeader>
+      <CardContent>
+        {rows.length > SCORES_COLLAPSE_THRESHOLD ? (
+          <details className="mon-scores-details">
+            <summary className="mon-scores-summary" data-testid="monitor-scores-summary">
+              <span className="mon-diff-caret" aria-hidden>
+                ▸
+              </span>
+              {summary.count} scores · avg {formatScore(summary.avg)}
+            </summary>
+            {list}
+          </details>
+        ) : (
+          list
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1323,36 +1334,38 @@ function MetricsPanel() {
   const errors = useMemo(() => (scrape ? nonZeroErrorCounters(scrape) : []), [scrape]);
   if (!scrape) {
     return (
-      <section className="mon-panel mon-metrics-panel" data-testid="monitor-metrics">
-        <header className="mon-panel-head">
+      <Card className="mon-metrics-panel" data-testid="monitor-metrics">
+        <CardHeader className="mon-panel-head">
           <h2 className="mon-kicker">Metrics</h2>
-        </header>
-        <div className="mon-empty mon-dim">
-          {failed ? (
-            "Could not scrape /metrics — the gateway did not answer."
-          ) : (
-            <span className="mon-live-pending">
-              <span className="mon-dot mon-dot-pulse" aria-hidden /> scraping /metrics…
-            </span>
-          )}
-        </div>
-      </section>
+        </CardHeader>
+        <CardContent>
+          <div className="mon-empty mon-dim">
+            {failed ? (
+              "Could not scrape /metrics — the gateway did not answer."
+            ) : (
+              <span className="mon-live-pending">
+                <span className="mon-dot mon-dot-pulse" aria-hidden /> scraping /metrics…
+              </span>
+            )}
+          </div>
+        </CardContent>
+      </Card>
     );
   }
   const num = (value: number | undefined): string => (value === undefined ? "—" : String(Math.round(value)));
   const uptime = metricValue(scrape, "smithers_process_uptime_seconds");
   return (
-    <section className="mon-panel mon-metrics-panel" data-testid="monitor-metrics">
-      <header className="mon-panel-head">
+    <Card className="mon-metrics-panel" data-testid="monitor-metrics">
+      <CardHeader className="mon-panel-head">
         <h2 className="mon-kicker">Metrics</h2>
         {failed ? <Badge variant="destructive">scrape failing — showing last data</Badge> : null}
         <span className="mon-dim mon-count-note">
           {scrapedAtMs ? `scraped ${Math.max(0, Math.round((now - scrapedAtMs) / 1000))}s ago` : ""}
           {uptime !== undefined ? ` · gateway up ${formatElapsed(now - uptime * 1000, now)}` : ""}
         </span>
-      </header>
+      </CardHeader>
 
-      <div className="mon-metrics-grid">
+      <CardContent className="mon-metrics-grid">
         <div className="mon-metrics-section" data-testid="monitor-metrics-agents">
           <h3 className="mon-kicker">Agent latency (this gateway process)</h3>
           {agentLatency.length === 0 ? (
@@ -1458,8 +1471,8 @@ function MetricsPanel() {
             </div>
           )}
         </div>
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1609,124 +1622,130 @@ export function RunsTable({
   const lastRow = Math.min(shownPage * RUNS_PAGE_SIZE, total);
   const startedIndicator = sort === "newest" ? "▾" : sort === "oldest" ? "▴" : "";
   return (
-    <section
-      className="mon-panel mon-runs-table-panel"
+    <Card
+      className="mon-runs-table-panel"
       data-state={landingState}
       aria-label={lastKnown ? "Last-known runs" : "Runs"}
     >
-      <header className="mon-panel-head">
+      <CardHeader className="mon-panel-head">
         <h2 className="mon-kicker">
           {lastKnown ? "Last-known runs" : "All runs"} <span className="mon-count">{total}</span>
         </h2>
         {sort === "default" ? <span className="mon-dim mon-sort-note">attention first · newest first</span> : null}
-      </header>
-      {lastKnown ? (
-        <Alert variant="warning" data-testid="monitor-runs-last-known" role="status">
-          <AlertTitle>Gateway offline.</AlertTitle>
-          <AlertDescription>Every run shown below is last-known data and may be out of date.</AlertDescription>
-        </Alert>
-      ) : null}
-      {queryError ? (
-        <Alert variant="destructive" data-testid="monitor-runs-table-query-error">
-          <AlertTitle>Couldn&apos;t refresh runs.</AlertTitle>
-          <AlertDescription>{queryError.message}</AlertDescription>
-          {onRetry ? (
-            <Button variant="outline" data-testid="monitor-runs-table-query-error-retry" onClick={() => void onRetry()}>
-              Retry
-            </Button>
-          ) : null}
-        </Alert>
-      ) : null}
-      <div className="mon-runs-scroll" role="region" aria-label="Runs table" tabIndex={0}>
-        <Table className="mon-runs-table" data-testid="monitor-runs-table">
-          <TableHeader>
-            <TableRow>
-              <TableHead scope="col">Status</TableHead>
-              <TableHead scope="col">Workflow</TableHead>
-              <TableHead scope="col">Progress</TableHead>
-              <TableHead
-                scope="col"
-                aria-sort={sort === "default" ? undefined : sort === "newest" ? "descending" : "ascending"}
+      </CardHeader>
+      <CardContent>
+        {lastKnown ? (
+          <Alert variant="warning" data-testid="monitor-runs-last-known" role="status">
+            <AlertTitle>Gateway offline.</AlertTitle>
+            <AlertDescription>Every run shown below is last-known data and may be out of date.</AlertDescription>
+          </Alert>
+        ) : null}
+        {queryError ? (
+          <Alert variant="destructive" data-testid="monitor-runs-table-query-error">
+            <AlertTitle>Couldn&apos;t refresh runs.</AlertTitle>
+            <AlertDescription>{queryError.message}</AlertDescription>
+            {onRetry ? (
+              <Button
+                variant="outline"
+                data-testid="monitor-runs-table-query-error-retry"
+                onClick={() => void onRetry()}
               >
-                <button
-                  type="button"
-                  className="mon-th-sort"
-                  data-testid="monitor-sort-started"
-                  title="Sort by start time"
-                  onClick={() => setSort(sort === "default" ? "newest" : sort === "newest" ? "oldest" : "default")}
+                Retry
+              </Button>
+            ) : null}
+          </Alert>
+        ) : null}
+        <div className="mon-runs-scroll" role="region" aria-label="Runs table" tabIndex={0}>
+          <Table className="mon-runs-table" data-testid="monitor-runs-table">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Status</TableHead>
+                <TableHead scope="col">Workflow</TableHead>
+                <TableHead scope="col">Progress</TableHead>
+                <TableHead
+                  scope="col"
+                  aria-sort={sort === "default" ? undefined : sort === "newest" ? "descending" : "ascending"}
                 >
-                  Started
-                  {startedIndicator ? (
-                    <span className="mon-sort-arrow" aria-hidden>
-                      {" "}
-                      {startedIndicator}
-                    </span>
-                  ) : null}
-                </button>
-              </TableHead>
-              <TableHead scope="col">Duration</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {pageRows.map((run) => (
-              <TableRow
-                key={run.runId}
-                className={`mon-runs-table-row${run.runId === cursorRunId ? " is-kbcursor" : ""}`}
-                data-run-id={run.runId}
-                role="button"
-                aria-current={run.runId === cursorRunId ? "true" : undefined}
-                aria-label={`${run.workflowKey ?? "unknown workflow"}, run ${run.runId}, ${labelForStatus(run.status)}${lastKnown ? ", last-known" : ""}`}
-                tabIndex={0}
-                ref={
-                  run.runId === cursorRunId
-                    ? (el: HTMLTableRowElement | null) => el?.scrollIntoView({ block: "nearest" })
-                    : undefined
-                }
-                onClick={() => onSelect(run.runId)}
-                onKeyDown={(event) => {
-                  if (event.key !== "Enter" && event.key !== " ") return;
-                  event.preventDefault();
-                  onSelect(run.runId);
-                }}
-              >
-                <TableCell>
-                  <StatusTag
-                    status={run.status}
-                    label={lastKnown ? `${labelForStatus(run.status)} · last-known` : undefined}
-                    pulse={!lastKnown}
-                  />
-                </TableCell>
-                <TableCell className="mon-table-workflow" title={run.workflowKey ?? "unknown workflow"}>
-                  <span className="mon-table-workflow-name">{middleTruncate(run.workflowKey ?? "unknown", 56)}</span>
-                  <span className="mon-mono mon-dim mon-table-runid">{shortRunId(run.runId)}</span>
-                </TableCell>
-                <TableCell>
-                  <RunProgressCell run={run} />
-                </TableCell>
-                <TableCell className="mon-dim">
-                  <Ago ms={run.startedAtMs ?? run.createdAtMs} />
-                </TableCell>
-                <TableCell className="mon-dim mon-mono">
-                  {lastKnown && !isTerminalStatus(run.status) ? (
-                    "last-known"
-                  ) : (
-                    <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={run.finishedAtMs} />
-                  )}
-                </TableCell>
+                  <button
+                    type="button"
+                    className="mon-th-sort"
+                    data-testid="monitor-sort-started"
+                    title="Sort by start time"
+                    onClick={() => setSort(sort === "default" ? "newest" : sort === "newest" ? "oldest" : "default")}
+                  >
+                    Started
+                    {startedIndicator ? (
+                      <span className="mon-sort-arrow" aria-hidden>
+                        {" "}
+                        {startedIndicator}
+                      </span>
+                    ) : null}
+                  </button>
+                </TableHead>
+                <TableHead scope="col">Duration</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-      <RunsPagination
-        page={shownPage}
-        pageCount={pageCount}
-        firstRow={firstRow}
-        lastRow={lastRow}
-        total={total}
-        onPageChange={onPageChange}
-      />
-    </section>
+            </TableHeader>
+            <TableBody>
+              {pageRows.map((run) => (
+                <TableRow
+                  key={run.runId}
+                  className={`mon-runs-table-row${run.runId === cursorRunId ? " is-kbcursor" : ""}`}
+                  data-run-id={run.runId}
+                  role="button"
+                  aria-current={run.runId === cursorRunId ? "true" : undefined}
+                  aria-label={`${run.workflowKey ?? "unknown workflow"}, run ${run.runId}, ${labelForStatus(run.status)}${lastKnown ? ", last-known" : ""}`}
+                  tabIndex={0}
+                  ref={
+                    run.runId === cursorRunId
+                      ? (el: HTMLTableRowElement | null) => el?.scrollIntoView({ block: "nearest" })
+                      : undefined
+                  }
+                  onClick={() => onSelect(run.runId)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    onSelect(run.runId);
+                  }}
+                >
+                  <TableCell>
+                    <StatusTag
+                      status={run.status}
+                      label={lastKnown ? `${labelForStatus(run.status)} · last-known` : undefined}
+                      pulse={!lastKnown}
+                    />
+                  </TableCell>
+                  <TableCell className="mon-table-workflow" title={run.workflowKey ?? "unknown workflow"}>
+                    <span className="mon-table-workflow-name">{middleTruncate(run.workflowKey ?? "unknown", 56)}</span>
+                    <span className="mon-mono mon-dim mon-table-runid">{shortRunId(run.runId)}</span>
+                  </TableCell>
+                  <TableCell>
+                    <RunProgressCell run={run} />
+                  </TableCell>
+                  <TableCell className="mon-dim">
+                    <Ago ms={run.startedAtMs ?? run.createdAtMs} />
+                  </TableCell>
+                  <TableCell className="mon-dim mon-mono">
+                    {lastKnown && !isTerminalStatus(run.status) ? (
+                      "last-known"
+                    ) : (
+                      <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={run.finishedAtMs} />
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+        <RunsPagination
+          page={shownPage}
+          pageCount={pageCount}
+          firstRow={firstRow}
+          lastRow={lastRow}
+          total={total}
+          onPageChange={onPageChange}
+        />
+      </CardContent>
+    </Card>
   );
 }
 
@@ -2517,8 +2536,8 @@ function ExecutionPanel({
     return map.size > 0 ? map : undefined;
   }, [predictionTree, usagePrediction]);
   return (
-    <section className="mon-panel mon-tree-panel">
-      <header className="mon-panel-head">
+    <Card className="mon-tree-panel">
+      <CardHeader className="mon-panel-head">
         <h2 className="mon-kicker">Execution</h2>
         {selectedNode && !scrubbing ? <Chip onClick={() => onSelectNode(undefined)}>Clear selection</Chip> : null}
         <Chip
@@ -2596,86 +2615,88 @@ function ExecutionPanel({
         >
           Debug
         </Chip>
-      </header>
-      {scrubbing && !showTimeline && !showUsage ? (
-        <div className="mon-scrub" data-testid="monitor-scrub">
-          <Chip
-            onClick={() => step(-1)}
-            disabled={latestFrameNo === undefined || shownFrame <= bounds.min}
-            aria-label="Previous frame"
-          >
-            ◀
-          </Chip>
-          <input
-            className="mon-scrub-range"
-            type="range"
-            min={bounds.min}
-            max={bounds.max}
-            step={1}
-            value={shownFrame}
-            disabled={latestFrameNo === undefined}
-            onChange={(event) => {
-              if (latestFrameNo === undefined) return;
-              setFrame(clampFrameNo(Number(event.currentTarget.value), latestFrameNo));
-            }}
-            aria-label="Frame"
-          />
-          <Chip
-            onClick={() => step(1)}
-            disabled={latestFrameNo === undefined || shownFrame >= bounds.max}
-            aria-label="Next frame"
-          >
-            ▶
-          </Chip>
-          <span className="mon-mono mon-dim mon-scrub-note">
-            frame {latestFrameNo === undefined ? "… / …" : `${shownFrame} / ${bounds.max}`}
-          </span>
-          {scrubLoading ? <span className="mon-dim mon-scrub-loading">loading…</span> : null}
-          {scrubError && !scrubLoading ? (
-            <span className="mon-dim mon-scrub-note" title={scrubError.message}>
-              frame unavailable
+      </CardHeader>
+      <CardContent>
+        {scrubbing && !showTimeline && !showUsage ? (
+          <div className="mon-scrub" data-testid="monitor-scrub">
+            <Chip
+              onClick={() => step(-1)}
+              disabled={latestFrameNo === undefined || shownFrame <= bounds.min}
+              aria-label="Previous frame"
+            >
+              ◀
+            </Chip>
+            <input
+              className="mon-scrub-range"
+              type="range"
+              min={bounds.min}
+              max={bounds.max}
+              step={1}
+              value={shownFrame}
+              disabled={latestFrameNo === undefined}
+              onChange={(event) => {
+                if (latestFrameNo === undefined) return;
+                setFrame(clampFrameNo(Number(event.currentTarget.value), latestFrameNo));
+              }}
+              aria-label="Frame"
+            />
+            <Chip
+              onClick={() => step(1)}
+              disabled={latestFrameNo === undefined || shownFrame >= bounds.max}
+              aria-label="Next frame"
+            >
+              ▶
+            </Chip>
+            <span className="mon-mono mon-dim mon-scrub-note">
+              frame {latestFrameNo === undefined ? "… / …" : `${shownFrame} / ${bounds.max}`}
             </span>
-          ) : null}
-          <Chip onClick={goLive} title="Return to the live tree">
-            Live
-          </Chip>
-        </div>
-      ) : null}
-      {showUsage ? (
-        <UsagePanel usageEvents={usageEvents} usageLoading={usageLoading} usageFailed={usageFailed} />
-      ) : showTimeline ? (
-        <TimelinePanel
-          nodeStates={nodeStates}
-          treeNodes={treeQuery.nodes as TreeNode[]}
-          selectedNode={selectedNode}
-          onSelectNode={onSelectNode}
-        />
-      ) : (
-        <ExecutionTree
-          runId={runId}
-          treeQuery={treeQuery}
-          selectedNodeKey={selectedNode ? treeNodeKey(selectedNode) : undefined}
-          onSelectNode={onSelectNode}
-          autoSelectNodeId={autoSelectNodeId}
-          onAutoSelected={onAutoSelected}
-          onRetry={() => location.reload()}
-          frameOverride={
-            scrubbing
-              ? {
-                  root: scrubTree,
-                  loading: scrubLoading,
-                  error: scrubError,
-                  onRetry: () => void retryScrub(),
-                  onReturnToLive: goLive,
-                }
-              : undefined
-          }
-          asXml={asXml}
-          durations={durations}
-          tokensById={tokensById}
-        />
-      )}
-    </section>
+            {scrubLoading ? <span className="mon-dim mon-scrub-loading">loading…</span> : null}
+            {scrubError && !scrubLoading ? (
+              <span className="mon-dim mon-scrub-note" title={scrubError.message}>
+                frame unavailable
+              </span>
+            ) : null}
+            <Chip onClick={goLive} title="Return to the live tree">
+              Live
+            </Chip>
+          </div>
+        ) : null}
+        {showUsage ? (
+          <UsagePanel usageEvents={usageEvents} usageLoading={usageLoading} usageFailed={usageFailed} />
+        ) : showTimeline ? (
+          <TimelinePanel
+            nodeStates={nodeStates}
+            treeNodes={treeQuery.nodes as TreeNode[]}
+            selectedNode={selectedNode}
+            onSelectNode={onSelectNode}
+          />
+        ) : (
+          <ExecutionTree
+            runId={runId}
+            treeQuery={treeQuery}
+            selectedNodeKey={selectedNode ? treeNodeKey(selectedNode) : undefined}
+            onSelectNode={onSelectNode}
+            autoSelectNodeId={autoSelectNodeId}
+            onAutoSelected={onAutoSelected}
+            onRetry={() => location.reload()}
+            frameOverride={
+              scrubbing
+                ? {
+                    root: scrubTree,
+                    loading: scrubLoading,
+                    error: scrubError,
+                    onRetry: () => void retryScrub(),
+                    onReturnToLive: goLive,
+                  }
+                : undefined
+            }
+            asXml={asXml}
+            durations={durations}
+            tokensById={tokensById}
+          />
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -2935,8 +2956,8 @@ export function EventLog({ runId, eventsState }: { runId: string; eventsState: R
   const followStatusId = `${eventListId}-follow-status`;
 
   return (
-    <section className="mon-panel mon-events-panel">
-      <header className="mon-panel-head">
+    <Card className="mon-events-panel">
+      <CardHeader className="mon-panel-head">
         <h2 className="mon-kicker">
           Events{" "}
           <span className="mon-count">
@@ -3003,62 +3024,64 @@ export function EventLog({ runId, eventsState }: { runId: string; eventsState: R
         >
           {following ? "Following new events." : "Event stream paused."}
         </span>
-      </header>
-      {error ? (
-        <Alert variant="destructive">
-          <AlertTitle>Couldn&apos;t load events.</AlertTitle>
-          <AlertDescription>{error.message}</AlertDescription>
-        </Alert>
-      ) : null}
-      <ol
-        id={eventListId}
-        className="mon-events"
-        ref={containerRef}
-        onScroll={onScroll}
-        data-testid="monitor-events"
-        tabIndex={0}
-        aria-label={`${EVENT_VIEW_LABELS[view]} event stream`}
-        aria-describedby={followStatusId}
-        aria-live={following ? "polite" : "off"}
-        aria-relevant="additions text"
-        aria-atomic={false}
-        aria-busy={loading}
-      >
-        {events.length === 0 ? (
-          <li className="mon-empty">
-            {loading
-              ? "Loading events…"
-              : allEvents.length === 0
-                ? "No events yet."
-                : view === "notable"
-                  ? "No notable events yet."
-                  : "No activity yet."}
-          </li>
+      </CardHeader>
+      <CardContent>
+        {error ? (
+          <Alert variant="destructive">
+            <AlertTitle>Couldn&apos;t load events.</AlertTitle>
+            <AlertDescription>{error.message}</AlertDescription>
+          </Alert>
         ) : null}
-        {events.map((frame) => {
-          if (frame.event === "__heartbeats__") {
-            const count = isRecord(frame.payload) ? (asNumber(frame.payload.count) ?? 0) : 0;
+        <ol
+          id={eventListId}
+          className="mon-events"
+          ref={containerRef}
+          onScroll={onScroll}
+          data-testid="monitor-events"
+          tabIndex={0}
+          aria-label={`${EVENT_VIEW_LABELS[view]} event stream`}
+          aria-describedby={followStatusId}
+          aria-live={following ? "polite" : "off"}
+          aria-relevant="additions text"
+          aria-atomic={false}
+          aria-busy={loading}
+        >
+          {events.length === 0 ? (
+            <li className="mon-empty">
+              {loading
+                ? "Loading events…"
+                : allEvents.length === 0
+                  ? "No events yet."
+                  : view === "notable"
+                    ? "No notable events yet."
+                    : "No activity yet."}
+            </li>
+          ) : null}
+          {events.map((frame) => {
+            if (frame.event === "__heartbeats__") {
+              const count = isRecord(frame.payload) ? (asNumber(frame.payload.count) ?? 0) : 0;
+              return (
+                <li className="mon-event mon-event-heartbeats" key={`${runId}:heartbeats`}>
+                  <span className="mon-mono mon-dim">#{frame.seq}</span>
+                  <span className="mon-event-name mon-dim">TaskHeartbeat</span>
+                  <span className="mon-event-detail mon-dim">×{count} — collapsed; the engine is alive</span>
+                  <EventWhen ms={frame.timestampMs} />
+                </li>
+              );
+            }
+            const line = formatEventLine(frame);
             return (
-              <li className="mon-event mon-event-heartbeats" key={`${runId}:heartbeats`}>
-                <span className="mon-mono mon-dim">#{frame.seq}</span>
-                <span className="mon-event-name mon-dim">TaskHeartbeat</span>
-                <span className="mon-event-detail mon-dim">×{count} — collapsed; the engine is alive</span>
+              <li className="mon-event" key={`${runId}:${line.seq}`}>
+                <span className="mon-mono mon-dim">#{line.seq}</span>
+                <span className="mon-event-name">{line.name}</span>
+                <span className="mon-event-detail mon-dim">{line.detail}</span>
                 <EventWhen ms={frame.timestampMs} />
               </li>
             );
-          }
-          const line = formatEventLine(frame);
-          return (
-            <li className="mon-event" key={`${runId}:${line.seq}`}>
-              <span className="mon-mono mon-dim">#{line.seq}</span>
-              <span className="mon-event-name">{line.name}</span>
-              <span className="mon-event-detail mon-dim">{line.detail}</span>
-              <EventWhen ms={frame.timestampMs} />
-            </li>
-          );
-        })}
-      </ol>
-    </section>
+          })}
+        </ol>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -4325,7 +4348,7 @@ function RunDetail({
 
   return (
     <div className="mon-detail" data-testid="monitor-run-detail">
-      <header className="mon-detail-head mon-panel">
+      <Card className="mon-detail-head">
         <div className="mon-detail-title">
           <StatusTag status={status} />
           {unhealthy ? <StatusTag status={healthState} label={healthState} /> : null}
@@ -4417,7 +4440,7 @@ function RunDetail({
             onAction={(kind) => void act(kind)}
           />
         </div>
-      </header>
+      </Card>
 
       <HealthStrip
         runId={runId}
@@ -4920,6 +4943,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
    panel (sticky header), never the page. */
 .mon-runs-table-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; margin: 0; }
 .mon-runs-table-panel .mon-panel-head { margin-bottom: var(--sp-2); }
+.mon-runs-table-panel > [data-slot="card-content"] { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .mon-runs-scroll { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: var(--r-2); }
 .mon-runs-scroll:focus-visible, .mon-tree:focus-visible, .mon-events:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--ring-border); }
 /* The shared Table wraps itself in an overflow-x container; inside the
@@ -4948,12 +4972,11 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-runs-pagination { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding-top: var(--sp-3); flex-wrap: wrap; }
 .mon-runs-pagination-controls { display: inline-flex; align-items: center; gap: var(--sp-2); }
 
-/* All panels share one padding, radius, and stacking rhythm. */
-.mon-panel { border: 1px solid var(--border); border-radius: var(--r-3); background: var(--surface); box-shadow: var(--shadow-1); padding: var(--panel-pad); margin: 0 0 var(--sp-4); animation: mon-in 140ms ease-out; }
 .mon-panel-head { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--ctl-h); margin-bottom: var(--sp-3); }
 .mon-panel-head .mon-kicker { margin-right: auto; }
 
 .mon-detail-head { display: flex; flex-direction: column; gap: var(--sp-2); }
+.mon-detail > [data-slot="card"] { margin: 0 0 var(--sp-4); }
 .mon-detail-title { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .mon-detail-workflow { font-weight: 700; font-size: var(--fs-4); line-height: var(--lh-tight); letter-spacing: -0.01em; }
 .mon-detail-actions { display: flex; gap: var(--sp-2); }
@@ -5160,7 +5183,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-runs-table-row.is-kbcursor { background: var(--hover); box-shadow: inset 2px 0 0 var(--brand); }
 
 .mon-ops-strip { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: 0 0 var(--sp-4); }
-.mon-stat { flex: 1 1 120px; min-width: 0; max-width: 240px; border: 1px solid var(--border); border-radius: var(--r-2); background: var(--surface); box-shadow: var(--shadow-1); padding: var(--sp-3) var(--sp-3); }
+.mon-stat { flex: 1 1 120px; min-width: 0; max-width: 240px; }
 .mon-stat-value { font-size: var(--fs-6); font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: var(--lh-tight); color: var(--tone, var(--text)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Labels and subs wrap to two lines before ever clipping mid-word — the value
    carries the glance, the label must stay readable. */
