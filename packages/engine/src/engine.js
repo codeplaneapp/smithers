@@ -6730,8 +6730,11 @@ async function legacyExecuteTask(
           `${typeof event?.callId === "string" ? event.callId : "call"}:${
             typeof event?.toolCall?.toolCallId === "string" ? event.toolCall.toolCallId : "tool"
           }`;
+        // A tool event that arrives after the reported agent process exited is
+        // stale: it describes work that is already over and must not count as
+        // evidence that the attempt is still alive.
         handleToolExecutionStart = (event) => {
-          if (heartbeatOwnerLost) return;
+          if (heartbeatOwnerLost || agentProcessExited) return;
           const key = toolExecutionKey(event);
           pendingSdkToolExecutions.add(key);
           extendToolActivityLease();
@@ -6744,7 +6747,7 @@ async function legacyExecuteTask(
           const key = toolExecutionKey(event);
           pendingSdkToolExecutions.delete(key);
           activeSdkToolExecutions.delete(key);
-          if (!heartbeatOwnerLost) recordInternalHeartbeat();
+          if (!heartbeatOwnerLost && !agentProcessExited) recordInternalHeartbeat();
         };
         handleProcess = ({ phase, pid }) => {
           if (typeof pid !== "number" || pid <= 0 || heartbeatOwnerLost) return;

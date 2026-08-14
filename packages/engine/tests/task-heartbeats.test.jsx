@@ -125,6 +125,24 @@ class StartedToolThenHungAgent {
     await new Promise(() => {});
   }
 }
+class ToolEventsAfterExitAgent {
+  id = "tool-events-after-exit-agent";
+  exitedAtMs = 0;
+  async generate(options) {
+    options.onProcess?.({ phase: "started", pid: process.pid });
+    await sleep(200);
+    this.exitedAtMs = Date.now();
+    await sleep(5);
+    options.onProcess?.({ phase: "exited", pid: process.pid });
+    // A late adapter emits tool traffic after its child is already gone.
+    const event = { callId: "call-late", messages: [], toolCall: { toolCallId: "late-1" } };
+    options.onToolExecutionStart?.(event);
+    await sleep(50);
+    options.onToolExecutionEnd?.(event);
+    await sleep(50);
+    return { text: JSON.stringify({ value: 1 }) };
+  }
+}
 class ProcessLifecycleAgent {
   id = "process-lifecycle-agent";
   exitedAtMs = 0;
@@ -515,6 +533,24 @@ describe("task heartbeats", () => {
     expect(result.status).toBe("failed");
     const attempts = await new SmithersDb(db).listAttempts(result.runId, "tool", 0);
     expect(attempts[0]?.errorJson).toContain("TASK_HEARTBEAT_TIMEOUT");
+    cleanup();
+  }, 30_000);
+  test("tool events arriving after process exit emit no heartbeat", async () => {
+    const { smithers, outputs, db, cleanup } = buildSmithers();
+    const agent = new ToolEventsAfterExitAgent();
+    const workflow = smithers(() => (
+      <Workflow name="heartbeat-tool-after-exit">
+        <Task id="late" output={outputs.outputA} agent={agent} retries={0} noRetry>
+          Emit tool traffic after the child process is gone.
+        </Task>
+      </Workflow>
+    ));
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+    expect(result.status).toBe("finished");
+    const events = await new SmithersDb(db).listEventHistory(result.runId, { limit: 200 });
+    expect(
+      events.filter((event) => event.type === "TaskHeartbeat" && event.timestampMs > agent.exitedAtMs),
+    ).toHaveLength(0);
     cleanup();
   }, 30_000);
   test("process exit stops lifecycle heartbeats", async () => {
