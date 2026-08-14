@@ -1676,6 +1676,12 @@ const RUN_CANCEL_POLL_MS = 250;
 const TASK_HEARTBEAT_THROTTLE_MS = 500;
 const TASK_HEARTBEAT_MAX_PAYLOAD_BYTES = 1_000_000;
 const TASK_HEARTBEAT_TIMEOUT_CHECK_MS = 250;
+// A tool call that is genuinely executing keeps the task alive past the
+// heartbeat window, but not forever. An adapter that reports a tool start and
+// then wedges reports no further activity, so the lease expires and the task
+// times out as a hung agent. The lease scales with the node's configured
+// heartbeat timeout: raising `heartbeatTimeoutMs` also buys longer tool calls.
+const TASK_TOOL_EXECUTION_LEASE_MULTIPLIER = 12;
 // Poll for hijack-handoff readiness between agent events; keeps handoff latency low without hot-spinning.
 const HIJACK_COMPLETION_POLL_MS = 100;
 // Engines whose CLI announces its resumable session id before the session is
@@ -4746,6 +4752,7 @@ async function legacyExecuteTask(
   const activeSdkToolExecutions = new Set();
   const pendingSdkToolExecutions = new Set();
   let streamActivityLeaseUntilMs = 0;
+  let toolActivityLeaseUntilMs = 0;
   let agentProcessObserved = false;
   let agentProcessExited = false;
   // Construct the abort race only for an agent call that consumes it. A
@@ -4854,6 +4861,7 @@ async function legacyExecuteTask(
         activeSdkToolExecutions.clear();
         pendingSdkToolExecutions.clear();
         streamActivityLeaseUntilMs = 0;
+        toolActivityLeaseUntilMs = 0;
         traceCollector?.discard();
         heartbeatEvidenceAtMs = Math.max(startedAtMs, heartbeatLastPersistedWriteAtMs);
         if (!taskSignal.aborted) {
@@ -4969,6 +4977,11 @@ async function legacyExecuteTask(
       ? nowMs() + desc.heartbeatTimeoutMs + TASK_HEARTBEAT_TIMEOUT_CHECK_MS
       : 0;
     recordInternalHeartbeat();
+  };
+  const extendToolActivityLease = () => {
+    toolActivityLeaseUntilMs = desc.heartbeatTimeoutMs
+      ? nowMs() + desc.heartbeatTimeoutMs * TASK_TOOL_EXECUTION_LEASE_MULTIPLIER
+      : 0;
   };
   const waitForHeartbeatWriteDrain = async () => {
     while (heartbeatWriteInFlight) {
@@ -5170,8 +5183,8 @@ async function legacyExecuteTask(
           const lastHeartbeatAtMs = Math.max(startedAtMs, heartbeatEvidenceAtMs);
           const hasLiveActivity =
             [...liveOwnedPids].some((pid) => isPidAlive(pid)) ||
-            activeCliActions.size > 0 ||
-            activeSdkToolExecutions.size > 0 ||
+            ((activeCliActions.size > 0 || activeSdkToolExecutions.size > 0) &&
+              nowMs() < toolActivityLeaseUntilMs) ||
             nowMs() < streamActivityLeaseUntilMs;
           if (hasLiveActivity) {
             recordInternalHeartbeat();
@@ -6653,8 +6666,10 @@ async function legacyExecuteTask(
               }
             }
             if (event.type === "action" && isBlockingAgentActionKind(event.action.kind)) {
-              if (event.phase === "started") activeCliActions.add(event.action.id);
-              else if (event.phase === "completed") activeCliActions.delete(event.action.id);
+              if (event.phase === "started") {
+                activeCliActions.add(event.action.id);
+                extendToolActivityLease();
+              } else if (event.phase === "completed") activeCliActions.delete(event.action.id);
             }
             void eventBus.emitEventQueued({
               type: "AgentEvent",
@@ -6720,6 +6735,7 @@ async function legacyExecuteTask(
           if (heartbeatOwnerLost) return;
           const key = toolExecutionKey(event);
           pendingSdkToolExecutions.add(key);
+          extendToolActivityLease();
           recordInternalHeartbeat();
           afterHeartbeatOwnership(() => {
             if (pendingSdkToolExecutions.has(key)) activeSdkToolExecutions.add(key);
@@ -6741,6 +6757,7 @@ async function legacyExecuteTask(
             pendingSdkToolExecutions.clear();
             activeSdkToolExecutions.clear();
             streamActivityLeaseUntilMs = 0;
+            toolActivityLeaseUntilMs = 0;
           } else {
             agentProcessObserved = true;
             agentProcessExited = false;
@@ -8344,6 +8361,7 @@ async function legacyExecuteTask(
     pendingSdkToolExecutions.clear();
     activeSdkToolExecutions.clear();
     streamActivityLeaseUntilMs = 0;
+    toolActivityLeaseUntilMs = 0;
     if (heartbeatWatchdogFiber) {
       await Effect.runPromise(Fiber.interrupt(heartbeatWatchdogFiber)).catch(() => {});
       heartbeatWatchdogFiber = null;

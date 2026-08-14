@@ -118,6 +118,13 @@ class CompletedToolThenHungAgent {
     await new Promise(() => {});
   }
 }
+class StartedToolThenHungAgent {
+  id = "started-tool-then-hung-agent";
+  async generate(options) {
+    options.onToolExecutionStart?.({ callId: "call-1", messages: [], toolCall: { toolCallId: "stuck-1" } });
+    await new Promise(() => {});
+  }
+}
 class ProcessLifecycleAgent {
   id = "process-lifecycle-agent";
   exitedAtMs = 0;
@@ -488,6 +495,28 @@ describe("task heartbeats", () => {
     expect(attempts[0]?.errorJson).toContain("TASK_HEARTBEAT_TIMEOUT");
     cleanup();
   }, 10_000);
+  test("a tool that never finishes cannot keep a hung agent alive forever", async () => {
+    const { smithers, outputs, db, cleanup } = buildSmithers();
+    const workflow = smithers(() => (
+      <Workflow name="heartbeat-wedged-tool">
+        <Task
+          id="tool"
+          output={outputs.outputA}
+          agent={new StartedToolThenHungAgent()}
+          retries={0}
+          noRetry
+          heartbeatTimeoutMs={100}
+        >
+          Report a tool start, then wedge without any further activity.
+        </Task>
+      </Workflow>
+    ));
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+    expect(result.status).toBe("failed");
+    const attempts = await new SmithersDb(db).listAttempts(result.runId, "tool", 0);
+    expect(attempts[0]?.errorJson).toContain("TASK_HEARTBEAT_TIMEOUT");
+    cleanup();
+  }, 30_000);
   test("process exit stops lifecycle heartbeats", async () => {
     const { smithers, outputs, db, cleanup } = buildSmithers();
     const agent = new ProcessLifecycleAgent();

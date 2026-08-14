@@ -4177,6 +4177,12 @@ count as activity. A stalled agent with no stream, tool, subprocess, or explicit
 task-completion cleanup remove liveness before a later timer tick, so stale
 activity cannot keep a dead attempt alive.
 
+A single tool call holds the task alive for at most twelve heartbeat windows.
+An adapter that reports a tool start and then wedges emits nothing further, so
+that lease expires and the attempt fails as a hung agent rather than running
+forever. Raise `heartbeatTimeoutMs` when a node runs tools that legitimately
+take longer than the lease allows.
+
 <Warning>
 **Don't name an output field `iteration`, `runId`, or `nodeId`.** Smithers persists every output alongside those internal columns, so declaring one collides and the workflow fails to load (`bunx smthrs graph` errors before running). Loop counters hit this most: use `round`, `pass`, or `attempt` instead.
 </Warning>
