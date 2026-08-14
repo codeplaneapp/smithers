@@ -161,6 +161,9 @@ type SmithersWorktree = {
  *   - its owning run is in a terminal state;
  *   - it holds no uncommitted, untracked, or unpushed work.
  *
+ * Gitignored files are disposable: the guard does not protect them. They are
+ * deleted with the worktree and reported in each removed result entry.
+ *
  * @param {{
  *   rootDir: string,
  *   getRunStatus: (runId: string) => Promise<string | null | undefined>,
@@ -181,10 +184,6 @@ declare function reapWorktrees(options: {
     olderThanMs?: number;
     nowMs?: number;
 }): Promise<ReapWorktreesResult>;
-/** @typedef {import("./listSmithersWorktrees.js").SmithersWorktree} SmithersWorktree */
-/** @typedef {{ path: string; runId: string; bytes: number }} ReapedWorktree */
-/** @typedef {{ path: string; runId: string; reason: string }} SkippedWorktree */
-/** @typedef {{ removed: ReapedWorktree[]; skipped: SkippedWorktree[]; bytesFreed: number; dryRun: boolean }} ReapWorktreesResult */
 /**
  * A run in any of these states will never schedule another task, so nothing can
  * reach into its worktrees again. Everything else — running, paused, and every
@@ -195,6 +194,8 @@ type ReapedWorktree = {
     path: string;
     runId: string;
     bytes: number;
+    ignoredPaths: string[];
+    ignoredPathsTruncated: boolean;
 };
 type SkippedWorktree = {
     path: string;

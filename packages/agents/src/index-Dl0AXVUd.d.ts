@@ -124,6 +124,18 @@ type AgentGenerateOptionsBase = {
         phase: "started" | "exited";
         pid: number | undefined;
     }) => void;
+    onToolExecutionStart?: (event: {
+        callId?: string;
+        toolCall?: {
+            toolCallId?: string;
+        };
+    }) => unknown;
+    onToolExecutionEnd?: (event: {
+        callId?: string;
+        toolCall?: {
+            toolCallId?: string;
+        };
+    }) => unknown;
     retry?: unknown;
     isRetry?: unknown;
     retryAttempt?: unknown;

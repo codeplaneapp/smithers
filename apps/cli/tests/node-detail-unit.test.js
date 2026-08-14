@@ -155,6 +155,7 @@ function baseDetail(overrides = {}) {
     toolCalls: [],
     tokenUsage: {
       inputTokens: 0,
+      freshInputTokens: 0,
       outputTokens: 0,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
@@ -316,9 +317,25 @@ describe("node detail aggregation", () => {
               attempt: 3,
               model: "gpt-test",
               agent: "codex",
-              inputTokens: 3,
-              outputTokens: 4,
-              costUsd: 0.01,
+              inputTokens: 1003,
+              freshInputTokens: 992,
+              outputTokens: 2004,
+              cacheReadTokens: 5,
+              cacheWriteTokens: 6,
+              reasoningTokens: 7,
+              costUsd: 0.13,
+            }),
+          ),
+          eventRow(
+            "TokenUsageReported",
+            JSON.stringify({
+              nodeId: "task-a",
+              iteration: 1,
+              attempt: 4,
+              model: "unpriced-model",
+              agent: "codex",
+              inputTokens: 1,
+              outputTokens: 1,
             }),
           ),
         ],
@@ -367,16 +384,18 @@ describe("node detail aggregation", () => {
     expect(detail.toolCalls.find((call) => call.name === "raw-error")?.error).toBe("plain error");
     expect(detail.attempts[2].tokenUsage).toMatchObject({
       inputTokens: 1003,
+      freshInputTokens: 992,
       outputTokens: 2004,
       cacheReadTokens: 5,
       cacheWriteTokens: 6,
       reasoningTokens: 7,
       costUsd: 0.13,
-      eventCount: 2,
+      eventCount: 1,
       models: ["gpt-test"],
       agents: ["codex"],
     });
-    expect(detail.tokenUsage.inputTokens).toBe(1003);
+    expect(detail.tokenUsage.inputTokens).toBe(1004);
+    expect(detail.tokenUsage.costUsd).toBeNull();
     expect(detail.scorers.map((scorer) => scorer.scorerName)).toEqual(["Risk", "Quality"]);
     expect(detail.output).toEqual({
       validated: normalizedRaw,
@@ -394,7 +413,7 @@ describe("node detail aggregation", () => {
     expect(human).toContain("Attempts: 4 (1 failed, 1 cancelled, 1 succeeded, 1 other)");
     expect(human).toContain("Attempt 1 - failed");
     expect(human).toContain("Error: TaskError: bad output");
-    expect(human).toContain("Tokens: 1,003 in / 2,004 out ($0.1300)");
+    expect(human).toContain("Tokens: 1,003 in (992 fresh / 5 cache read / 6 cache write) / 2,004 out (~$0.1300)");
     expect(human).toContain("write (800ms) -> failed: ToolError: write failed");
     expect(human).toContain("search (100ms) -> 2 results");
     expect(human).toContain("Input:");
@@ -617,6 +636,7 @@ describe("node detail aggregation", () => {
 function emptyUsage() {
   return {
     inputTokens: 0,
+    freshInputTokens: 0,
     outputTokens: 0,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,

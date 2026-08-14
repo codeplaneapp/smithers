@@ -74,7 +74,11 @@ test("smithers usage --run reports a run's persisted token total (#1464 AWF-6)",
       iteration: 0,
       attempt: 1,
       inputTokens: 1200,
+      freshInputTokens: 200,
       outputTokens: 340,
+      cacheReadTokens: 900,
+      cacheWriteTokens: 100,
+      costUsd: 0.012,
       updatedAtMs: now,
     });
     await adapter.recordRunTokenUsage({
@@ -83,7 +87,11 @@ test("smithers usage --run reports a run's persisted token total (#1464 AWF-6)",
       iteration: 0,
       attempt: 1,
       inputTokens: 800,
+      freshInputTokens: 150,
       outputTokens: 60,
+      cacheReadTokens: 600,
+      cacheWriteTokens: 50,
+      costUsd: 0.008,
       updatedAtMs: now,
     });
   } finally {
@@ -96,11 +104,18 @@ test("smithers usage --run reports a run's persisted token total (#1464 AWF-6)",
   expect(result.json?.usage).toMatchObject({
     runId: "usage-run",
     inputTokens: 2000,
+    freshInputTokens: 350,
     outputTokens: 400,
+    cacheReadTokens: 1500,
+    cacheWriteTokens: 150,
     totalTokens: 2400,
+    costUsd: 0.02,
+    pricedAttempts: 2,
     attempts: 2,
   });
   expect(result.stderr).toContain("2,400 tokens");
+  expect(result.stderr).toContain("350 fresh / 1,500 cache read / 150 cache write / 400 out");
+  expect(result.stderr).toContain("~$0.0200");
 }, 30_000);
 
 test("smithers usage --run rejects an unknown run instead of reporting zero (#1464 AWF-6)", async () => {

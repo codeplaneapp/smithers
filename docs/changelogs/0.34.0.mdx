@@ -455,11 +455,16 @@ setting.
   configs now clean the emitted `index.d.ts` first.
 - Hermes and OpenClaw are listed in the README harness table and the npm
   package description alongside the other CLI harnesses.
-- The detached launch admission wait is configurable. `bunx smthrs up -d`
-  waited a fixed 30 seconds for the engine child to prove it persisted the run
-  row, which a heavily loaded machine can miss. Set
-  `SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS` to raise or lower that window. The
-  default is still 30 seconds, and a value below 1000ms falls back to it.
+- The detached launch admission wait is configurable, and a live engine child
+  is no longer killed at the deadline. `bunx smthrs up -d` waited a fixed 30
+  seconds for the engine child to prove it persisted the run row, which a
+  heavily loaded machine can miss on module parse alone; the launcher then
+  terminated the healthy child and reported an empty log. A child that is
+  still alive at the deadline now gets a grace window of four times the
+  timeout, with a progress note on stderr, and the final failure names the
+  live pid instead of "(empty)". Set `SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS`
+  to raise or lower the base window. The default is still 30 seconds, and a
+  value below 1000ms falls back to it.
 - The Trellis benchmark lab pin now carries the validated v2 authoring ladder:
   kit-only scripts, static validation, fuel accounting, evidence-bound
   settlement, mission CLI, and hardened batched ARC evaluation planning. It is
