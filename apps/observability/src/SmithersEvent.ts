@@ -685,10 +685,14 @@ export type SmithersEvent =
       model: string;
       agent: string;
       inputTokens: number;
+      /** Non-cached input tokens. Falls back to inputTokens when the provider omits the breakdown. */
+      freshInputTokens?: number;
       outputTokens: number;
       cacheReadTokens?: number;
       cacheWriteTokens?: number;
       reasoningTokens?: number;
+      /** Estimated USD cost from Smithers' built-in model price table. */
+      costUsd?: number;
       timestampMs: number;
     }
   | {

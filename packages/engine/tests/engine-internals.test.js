@@ -82,6 +82,29 @@ async function insertRun(adapter, runId, overrides = {}) {
 }
 
 describe("engine internals: errors, heartbeat and continuation helpers", () => {
+  test("resolveBinary falls back to PATH when Bun.which cannot resolve", () => {
+    const dir = mkdtempSync(join(tmpdir(), "smithers-resolve-binary-"));
+    const command = process.platform === "win32" ? "fallback-tool.exe" : "fallback-tool";
+    const candidate = join(dir, command);
+    const originalPath = process.env.PATH;
+    const originalWhich = Bun.which;
+    writeFileSync(candidate, "");
+
+    try {
+      process.env.PATH = dir;
+      Bun.which = () => null;
+      expect(I.resolveBinary(command)).toBe(candidate);
+    } finally {
+      Bun.which = originalWhich;
+      if (originalPath === undefined) {
+        delete process.env.PATH;
+      } else {
+        process.env.PATH = originalPath;
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("cancellation resolves pending approvals and human requests", async () => {
     const { adapter, sqlite } = makeContinueDb();
     try {

@@ -133,6 +133,8 @@ export class OpenAIAgent extends ToolLoopAgent {
           ...outputArgs,
           ...toolArgs,
           timeout: args.timeout,
+          onToolExecutionStart: args.onToolExecutionStart,
+          onToolExecutionEnd: args.onToolExecutionEnd,
           onStepEnd,
         });
         return attachParsedZodOutput(result, args.outputSchema, this.supportsNativeStructuredOutput);
@@ -144,6 +146,8 @@ export class OpenAIAgent extends ToolLoopAgent {
         ...outputArgs,
         ...toolArgs,
         timeout: args.timeout,
+        onToolExecutionStart: args.onToolExecutionStart,
+        onToolExecutionEnd: args.onToolExecutionEnd,
         onStepEnd,
       });
       const result = await streamResultToGenerateResult(stream, args.onStdout);

@@ -48,8 +48,8 @@ export function buildResumeArgs(target, runId) {
  * (`.smithers/logs/<runId>.log`, the same file `up -d` writes) so a resume
  * that crashes at startup leaves a diagnosable trace instead of vanishing
  * (issue #1361). Successful admission consumes and removes the log; a crash
- * leaves it in place. If the log file cannot be opened the spawn still
- * proceeds with discarded output, since resuming beats diagnosability.
+ * leaves it in place. The log is opened before spawning so a resume can never
+ * start without a durable output stream.
  *
  * @param {string | ResumeTarget} targetOrWorkflowPath
  * @param {string} runId
@@ -79,20 +79,19 @@ export function resumeRunDetached(targetOrWorkflowPath, runId, claim, options = 
   } catch (cause) {
     throw new Error(`Cannot resume run ${runId}: recorded cwd is unavailable at ${cwd}`, { cause });
   }
-  /** @type {number | null} */
-  let logFd = null;
+  const logFile = resolveDetachedRunLogFile(runId, { cwd });
+  let logFd;
   try {
-    const logFile = resolveDetachedRunLogFile(runId, { cwd });
     mkdirSync(dirname(logFile), { recursive: true });
     logFd = openSync(logFile, "a");
-  } catch {
-    logFd = null;
+  } catch (cause) {
+    throw new Error(`Cannot resume run ${runId}: detached log is unavailable at ${logFile}`, { cause });
   }
   try {
     const runtime = options.executable ? { command: options.executable, args } : smithersRuntimeSpawn(args);
     const child = spawn(runtime.command, runtime.args, {
       cwd,
-      stdio: logFd === null ? "ignore" : ["ignore", logFd, logFd],
+      stdio: ["ignore", logFd, logFd],
       env: process.env,
       detached: true,
     });
@@ -106,9 +105,7 @@ export function resumeRunDetached(targetOrWorkflowPath, runId, claim, options = 
     child.unref();
     return child.pid;
   } finally {
-    if (logFd !== null) {
-      closeSync(logFd);
-    }
+    closeSync(logFd);
   }
 }
 
