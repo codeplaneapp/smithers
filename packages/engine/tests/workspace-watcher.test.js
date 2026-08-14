@@ -5,6 +5,7 @@ import * as os from "node:os";
 import { createWorkspaceWatcher } from "../src/workspaceWatcher.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const alwaysRelevant = async () => true;
 
 /** A controllable fake watch backend: returns a `fire` to inject change events. */
 function fakeWatch() {
@@ -34,6 +35,7 @@ describe("createWorkspaceWatcher debounce + ignore (fake backend)", () => {
       onSettle: () => settles++,
       debounceMs: 20,
       watch: fake.backend,
+      classify: alwaysRelevant,
     });
     expect(w.watching).toBe(true);
     fake.fire("a.txt");
@@ -52,6 +54,7 @@ describe("createWorkspaceWatcher debounce + ignore (fake backend)", () => {
       onSettle: () => settles++,
       debounceMs: 20,
       watch: fake.backend,
+      classify: alwaysRelevant,
     });
     fake.fire("a.txt");
     await sleep(40);
@@ -69,6 +72,7 @@ describe("createWorkspaceWatcher debounce + ignore (fake backend)", () => {
       onSettle: () => settles++,
       debounceMs: 20,
       watch: fake.backend,
+      classify: alwaysRelevant,
     });
     fake.fire(".jj/working_copy/checkout");
     fake.fire(".git/index");
@@ -85,6 +89,7 @@ describe("createWorkspaceWatcher debounce + ignore (fake backend)", () => {
       onSettle: () => settles++,
       debounceMs: 20,
       watch: fake.backend,
+      classify: alwaysRelevant,
     });
     fake.fire("a.txt");
     w.close();
@@ -101,6 +106,85 @@ describe("createWorkspaceWatcher debounce + ignore (fake backend)", () => {
     });
     expect(w.watching).toBe(false);
     expect(() => w.close()).not.toThrow();
+  });
+
+  test("an all-ignored batch suppresses settle", async () => {
+    const fake = fakeWatch();
+    const batches = [];
+    let settles = 0;
+    const w = createWorkspaceWatcher({
+      cwd: "/wt",
+      onSettle: () => settles++,
+      debounceMs: 20,
+      watch: fake.backend,
+      classify: async (cwd, paths) => {
+        batches.push([cwd, [...paths]]);
+        return false;
+      },
+    });
+    fake.fire("node_modules/pkg/a.js");
+    fake.fire("node_modules/pkg/a.js");
+    fake.fire("dist/app.js");
+    await sleep(50);
+    expect(batches).toEqual([["/wt", ["node_modules/pkg/a.js", "dist/app.js"]]]);
+    expect(settles).toBe(0);
+    w.close();
+  });
+
+  test("a mixed batch fires settle", async () => {
+    const fake = fakeWatch();
+    let settles = 0;
+    const w = createWorkspaceWatcher({
+      cwd: "/wt",
+      onSettle: () => settles++,
+      debounceMs: 20,
+      watch: fake.backend,
+      classify: async () => true,
+    });
+    fake.fire("node_modules/pkg/a.js");
+    fake.fire("src/app.js");
+    await sleep(50);
+    expect(settles).toBe(1);
+    w.close();
+  });
+
+  test("a classifier failure fires settle", async () => {
+    const fake = fakeWatch();
+    let settles = 0;
+    const w = createWorkspaceWatcher({
+      cwd: "/wt",
+      onSettle: () => settles++,
+      debounceMs: 20,
+      watch: fake.backend,
+      classify: async () => {
+        throw new Error("git unavailable");
+      },
+    });
+    fake.fire("src/app.js");
+    await sleep(50);
+    expect(settles).toBe(1);
+    w.close();
+  });
+
+  test("pending-path cap overflow fires settle without classification", async () => {
+    const fake = fakeWatch();
+    let settles = 0;
+    let classifications = 0;
+    const w = createWorkspaceWatcher({
+      cwd: "/wt",
+      onSettle: () => settles++,
+      debounceMs: 20,
+      watch: fake.backend,
+      classify: async () => {
+        classifications++;
+        return false;
+      },
+    });
+    for (let i = 0; i <= 500; i++) fake.fire(`generated/file-${i}.js`);
+    await sleep(50);
+    expect(classifications).toBe(0);
+    expect(settles).toBe(1);
+    w.close();
   });
 });
 

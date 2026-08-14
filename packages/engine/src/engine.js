@@ -197,7 +197,10 @@ function acquireWorktreeCreationSlot(root) {
 function resolveBinary(cmd) {
   const bunRuntime = typeof Bun !== "undefined" ? Bun : null;
   if (typeof bunRuntime?.which === "function") {
-    return bunRuntime.which(cmd);
+    const resolved = bunRuntime.which(cmd);
+    if (resolved) {
+      return resolved;
+    }
   }
   const pathEnv = typeof process !== "undefined" ? process.env.PATH : undefined;
   if (!pathEnv) {
@@ -11073,6 +11076,7 @@ export const __engineInternals = {
   cloneRalphStateMap,
   buildCarriedInputRow,
   continueRunAsNew,
+  resolveBinary,
   resolveRootDir,
   resolveLogDir,
   getWorkflowImportScanLoader,

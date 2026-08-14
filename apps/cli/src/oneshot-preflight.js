@@ -175,14 +175,73 @@ function describeInventory(summary) {
 }
 
 /**
+ * The warning and preamble for a directory another run is still working in.
+ *
+ * @param {GitWorkingCopySummary} summary
+ * @param {string} inventory
+ * @param {ReadonlyArray<{ runId: string; state: string }>} activeRuns
+ * @returns {{ warning: string; preamble: string }}
+ */
+function buildSharedCwdNotice(summary, inventory, activeRuns) {
+  const named = activeRuns.map((run) => `${run.runId} (${run.state})`).join(", ");
+  const plural = activeRuns.length === 1 ? "run is" : "runs are";
+  const warning = [
+    `oneshot preflight: ${activeRuns.length} other ${plural} still working in ${summary.cwd}: ${named}.`,
+    `Working copy: ${inventory}. Those changes may belong to that work, so this run will NOT commit,`,
+    "stash, or gitignore any of them. Wait for the other run to finish, or relaunch with",
+    "--cwd pointing at an isolated worktree. Pass --preflight force-commit to snapshot the tree anyway.",
+  ].join(" ");
+  const preamble = [
+    "## Working-copy preflight: shared directory",
+    "",
+    `Another run is working in this same directory right now: ${named}.`,
+    "",
+    "The pending changes here may be that run's in-flight work. Snapshotting them",
+    "would commit another run's work under your message and change the tree it is",
+    "editing, so:",
+    "",
+    "- Do NOT commit, stash, revert, `git add`, or gitignore any path you did not",
+    '  create yourself. Not even to "preserve" it.',
+    "- Do NOT run `git checkout`, `git reset`, `git rebase`, or any branch switch.",
+    "- Commit ONLY the files your own goal work creates or edits, by explicit",
+    "  pathspec. Never `git add -A` or `git commit -a`.",
+    "- If your goal cannot be done without touching those paths, stop and report",
+    "  that as a blocker instead of proceeding.",
+    ...(summary.detachedHead
+      ? ["- This tree is on a detached HEAD. Report it as a blocker rather than switching branches."]
+      : []),
+    "",
+    "Then, while doing the goal itself:",
+    "",
+    "- `git add` every NEW file you create and include it in your commits. A previous",
+    "  run pushed code importing a file it never committed and left the CLI unbootable.",
+    "- Goal commits contain only goal work: no pre-existing changes, no unrelated paths.",
+    "",
+    "---",
+  ].join("\n");
+  return { warning, preamble };
+}
+
+/**
  * Render the operator warning and the agent triage preamble from one summary.
+ *
+ * `activeRunIds` names the OTHER runs still working in this same directory.
+ * When any exist, the dirty paths are not pre-existing work: they are another
+ * run's in-flight diff, and snapshotting them commits that run's work under a
+ * foreign message and mutates its tree underneath it. So the triage flips from
+ * "clear the tree" to "touch none of it", and the operator warning names the
+ * runs to wait for.
  *
  * @param {GitWorkingCopySummary} summary
  * @param {string} runId
+ * @param {ReadonlyArray<{ runId: string; state: string }>} [activeRuns]
  * @returns {{ warning: string; preamble: string }}
  */
-export function buildPreflightNotice(summary, runId) {
+export function buildPreflightNotice(summary, runId, activeRuns = []) {
   const inventory = describeInventory(summary);
+  if (activeRuns.length > 0) {
+    return buildSharedCwdNotice(summary, inventory, activeRuns);
+  }
   const warning = `oneshot preflight: working copy at ${summary.cwd} requires attention: ${inventory}; commits can absorb pre-existing work or be left on an unreferenced detached lineage`;
   const initialTriage = summary.clean
     ? [
@@ -227,12 +286,14 @@ export function buildPreflightNotice(summary, runId) {
  * Durable record of what the preflight saw, stored in the run config next to
  * the rest of the oneshot launch metadata.
  *
- * @param {"auto" | "warn" | "off"} mode
+ * @param {"auto" | "warn" | "off" | "force-commit"} mode
  * @param {WorkingCopySummary | null} summary
+ * @param {ReadonlyArray<{ runId: string; state: string }>} [activeRuns]
  */
-export function preflightConfigEntry(mode, summary) {
-  if (!summary) return { mode };
-  if (summary.vcs !== "git") return { mode, vcs: summary.vcs };
+export function preflightConfigEntry(mode, summary, activeRuns = []) {
+  const shared = activeRuns.length > 0 ? { activeRunsInCwd: activeRuns.map((run) => run.runId) } : {};
+  if (!summary) return { mode, ...shared };
+  if (summary.vcs !== "git") return { mode, vcs: summary.vcs, ...shared };
   return {
     mode,
     vcs: summary.vcs,
@@ -240,5 +301,6 @@ export function preflightConfigEntry(mode, summary) {
     dirty: summary.dirty,
     detachedHead: summary.detachedHead,
     jjConflictPaths: summary.jjConflictPaths.length,
+    ...shared,
   };
 }
