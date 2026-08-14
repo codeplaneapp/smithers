@@ -4,9 +4,10 @@ import { appendFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
 const capabilities = {
-  bridgeVersion: "0.0.1",
-  target: "x86_64-unknown-linux-gnu",
-  nanocodexVersion: "0.3.0",
+  bridgeVersion: "0.0.2",
+  target:
+    process.platform === "darwin" && process.arch === "arm64" ? "aarch64-apple-darwin" : "x86_64-unknown-linux-gnu",
+  nanocodexVersion: "0.5.0",
   protocol: { name: "smithers.nanocodex", versions: [1] },
   checkpoint: {
     codec: "nanocodex.session-snapshot",
@@ -17,6 +18,11 @@ const capabilities = {
   },
   authenticationModes: ["api-key-env", "chatgpt"],
   transportModes: ["websocket"],
+  models: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+  defaultModel: "gpt-5.6-sol",
+  thinkingLevels: ["none", "low", "medium", "high", "xhigh", "max"],
+  defaultThinking: "high",
+  reasoningModes: ["standard", "pro"],
   features: {
     codeMode: true,
     codeModeDisable: false,
@@ -121,6 +127,7 @@ function serve() {
           costStatus: "usage_not_reported",
           serviceTier: null,
         },
+        model: command.data.options?.model ?? "gpt-5.6-sol",
         snapshotVersion: 1,
         snapshot,
         canonicalWorkspace: command.data.workspace,

@@ -3,10 +3,10 @@
   "version": 1,
   "payload": {
     "bridgeProtocolVersion": 1,
-    "nanocodexVersion": "0.5.0",
+    "nanocodexVersion": "0.3.0",
     "snapshotVersion": 1,
     "canonicalWorkspace": "/workspace",
-    "policyFingerprint": "sha256:1faa485a45bd4bf1977f3cfb92b66656e3be9e3348dcee9490c8b0f7eb47fbd4",
+    "policyFingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
     "nanocodexSnapshot": {}
   }
 }

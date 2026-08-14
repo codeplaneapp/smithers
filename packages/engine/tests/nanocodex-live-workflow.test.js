@@ -68,23 +68,25 @@ describe.skipIf(!nanocodexTestSupported)("Nanocodex provider-free Smithers cold 
  *   SMITHERS_NANOCODEX_AUTH_FILE=/absolute/path/to/auth.json \
  *   bun test packages/engine/tests/nanocodex-live-workflow.test.js
  */
-describe.skipIf(!RUN_LIVE)("Nanocodex live Smithers cold restart", () => {
-  test(
-    "resumes an exact real checkpoint from SQLite after the first Smithers process is SIGKILLed",
-    async () => {
-      if (process.platform !== "linux") throw new Error("This opt-in cold-restart test requires Linux process groups.");
-      const binary = await requireLiveFile("SMITHERS_NANOCODEX_BINARY", { executable: true });
-      const authFile = await requireLiveFile("SMITHERS_NANOCODEX_AUTH_FILE");
-      await runColdRestartScenario({
-        authFile,
-        binary,
-        childTimeoutMs: LIVE_CHILD_TIMEOUT_MS,
-        kind: "live",
-      });
-    },
-    LIVE_TIMEOUT_MS * 2 + 90_000,
-  );
-});
+describe.skipIf(!RUN_LIVE || process.platform !== "linux" || !nanocodexTestSupported)(
+  "Nanocodex live Smithers cold restart",
+  () => {
+    test(
+      "resumes an exact real checkpoint from SQLite after the first Smithers process is SIGKILLed",
+      async () => {
+        const binary = await requireLiveFile("SMITHERS_NANOCODEX_BINARY", { executable: true });
+        const authFile = await requireLiveFile("SMITHERS_NANOCODEX_AUTH_FILE");
+        await runColdRestartScenario({
+          authFile,
+          binary,
+          childTimeoutMs: LIVE_CHILD_TIMEOUT_MS,
+          kind: "live",
+        });
+      },
+      LIVE_TIMEOUT_MS * 2 + 90_000,
+    );
+  },
+);
 
 async function runColdRestartScenario({ authFile, binary: configuredBinary, childTimeoutMs, kind }) {
   const root = await mkdtemp(join(tmpdir(), `smithers-nanocodex-${kind}-restart-`));
@@ -407,8 +409,9 @@ function signalTrackedProcess(identity, signal) {
 
 function killTrackedProcessGroup(identity) {
   if (!sameProcessIdentity(identity, readProcessIdentity(identity?.pid))) return;
+  const target = process.platform === "linux" ? -identity.pid : identity.pid;
   try {
-    process.kill(process.platform === "win32" ? identity.pid : -identity.pid, "SIGKILL");
+    process.kill(target, "SIGKILL");
   } catch (error) {
     if (error?.code !== "ESRCH") throw error;
   }
@@ -420,7 +423,11 @@ async function expectCleanLifecycle(lifecycle) {
   const exited = lifecycle[1];
   expect(started?.pid).toBeInteger();
   expect(started?.pid).toBeGreaterThan(0);
-  expect(started?.startTimeTicks).toMatch(/^\d+$/u);
+  if (process.platform === "linux") {
+    expect(started?.startTimeTicks).toMatch(/^\d+$/u);
+  } else {
+    expect(started?.startTimeTicks).toBeNull();
+  }
   expect(exited).toEqual(started && { ...started, phase: "exited" });
   const identity = { pid: started.pid, startTimeTicks: started.startTimeTicks };
   cleanupBridgeGroups.set(processIdentityKey(identity), identity);
@@ -441,7 +448,9 @@ async function cleanupRecordedBridgeGroups() {
 function activeLifecycleIdentities(lifecycle) {
   const active = new Map();
   for (const event of lifecycle) {
-    if (!Number.isInteger(event?.pid) || event.pid <= 0 || !/^\d+$/u.test(event?.startTimeTicks ?? "")) continue;
+    const trackedTicks =
+      process.platform === "linux" ? /^\d+$/u.test(event?.startTimeTicks ?? "") : event?.startTimeTicks === null;
+    if (!Number.isInteger(event?.pid) || event.pid <= 0 || !trackedTicks) continue;
     const identity = { pid: event.pid, startTimeTicks: event.startTimeTicks };
     const key = processIdentityKey(identity);
     if (event.phase === "started") active.set(key, identity);
@@ -461,7 +470,14 @@ async function expectProcessTreeGone(identity) {
 
 function readProcessIdentity(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return null;
-  if (process.platform !== "linux") return { pid, startTimeTicks: null };
+  if (process.platform !== "linux") {
+    try {
+      process.kill(pid, 0);
+      return { pid, startTimeTicks: null };
+    } catch {
+      return null;
+    }
+  }
   try {
     const procStat = readFileSync(`/proc/${pid}/stat`, "utf8");
     const fieldsAfterCommand = procStat
@@ -495,7 +511,7 @@ function processIdentityKey(identity) {
 }
 
 function processGroupIsAlive(pid) {
-  return process.platform !== "win32" && signalTargetIsAlive(-pid);
+  return process.platform === "linux" && signalTargetIsAlive(-pid);
 }
 
 function signalTargetIsAlive(target) {

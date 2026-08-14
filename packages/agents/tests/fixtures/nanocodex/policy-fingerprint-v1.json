@@ -4,72 +4,95 @@
     "canonicalUtf8Hex is authoritative and is lowercase hexadecimal without a prefix",
     "object member order is fixed by the algorithm and never taken from a caller-supplied object",
     "fingerprintVersion is the JSON integer 1; no floating-point number formatting is involved",
-    "Unicode is not normalized"
+    "Unicode is not normalized",
+    "control-escapes, other-c0, and unescaped-slash lock the remaining J(s) branches",
+    "unpaired UTF-16 surrogates are a reject-before-hash case, not a digest vector"
   ],
   "constructionChecks": [
     {
       "name": "reordered-policy-and-exponent-number",
-      "rawPolicyJson": "{\"tools\":{\"subagents\":false,\"mcp\":false,\"codeMode\":true,\"profile\":\"nanocodex-stock-0.3.0\"},\"instructions\":null,\"fingerprintVersion\":1e0}",
+      "rawPolicyJson": "{\"tools\":{\"subagents\":false,\"mcp\":false,\"codeMode\":true,\"profile\":\"nanocodex-stock-0.5.0\"},\"instructions\":null,\"fingerprintVersion\":1e0}",
       "normalizedCanonicalVector": "stock-instructions",
-      "fingerprint": "sha256:e4580c36cd5e0b89d1bdc7aeda2c3664ca61d239fdd9807e6b62019b81dbde86"
+      "fingerprint": "sha256:1faa485a45bd4bf1977f3cfb92b66656e3be9e3348dcee9490c8b0f7eb47fbd4"
     }
   ],
   "vectors": [
     {
       "name": "stock-instructions",
       "instructions": null,
-      "canonicalUtf8": "{\"fingerprintVersion\":1,\"instructions\":null,\"tools\":{\"profile\":\"nanocodex-stock-0.3.0\",\"codeMode\":true,\"mcp\":false,\"subagents\":false}}",
-      "canonicalUtf8Hex": "7b2266696e6765727072696e7456657273696f6e223a312c22696e737472756374696f6e73223a6e756c6c2c22746f6f6c73223a7b2270726f66696c65223a226e616e6f636f6465782d73746f636b2d302e332e30222c22636f64654d6f6465223a747275652c226d6370223a66616c73652c227375626167656e7473223a66616c73657d7d",
-      "fingerprint": "sha256:e4580c36cd5e0b89d1bdc7aeda2c3664ca61d239fdd9807e6b62019b81dbde86"
+      "canonicalUtf8": "{\"fingerprintVersion\":1,\"instructions\":null,\"tools\":{\"profile\":\"nanocodex-stock-0.5.0\",\"codeMode\":true,\"mcp\":false,\"subagents\":false}}",
+      "canonicalUtf8Hex": "7b2266696e6765727072696e7456657273696f6e223a312c22696e737472756374696f6e73223a6e756c6c2c22746f6f6c73223a7b2270726f66696c65223a226e616e6f636f6465782d73746f636b2d302e352e30222c22636f64654d6f6465223a747275652c226d6370223a66616c73652c227375626167656e7473223a66616c73657d7d",
+      "fingerprint": "sha256:1faa485a45bd4bf1977f3cfb92b66656e3be9e3348dcee9490c8b0f7eb47fbd4"
     },
     {
       "name": "empty-replacement",
       "instructions": "",
-      "canonicalUtf8": "{\"fingerprintVersion\":1,\"instructions\":\"\",\"tools\":{\"profile\":\"nanocodex-stock-0.3.0\",\"codeMode\":true,\"mcp\":false,\"subagents\":false}}",
-      "canonicalUtf8Hex": "7b2266696e6765727072696e7456657273696f6e223a312c22696e737472756374696f6e73223a22222c22746f6f6c73223a7b2270726f66696c65223a226e616e6f636f6465782d73746f636b2d302e332e30222c22636f64654d6f6465223a747275652c226d6370223a66616c73652c227375626167656e7473223a66616c73657d7d",
-      "fingerprint": "sha256:7c8136ba53f5e9ff6eb6cfac415e2e5deecf99fe88d2bb7eb2ed0864d6f40e1f"
+      "canonicalUtf8": "{\"fingerprintVersion\":1,\"instructions\":\"\",\"tools\":{\"profile\":\"nanocodex-stock-0.5.0\",\"codeMode\":true,\"mcp\":false,\"subagents\":false}}",
+      "canonicalUtf8Hex": "7b2266696e6765727072696e7456657273696f6e223a312c22696e737472756374696f6e73223a22222c22746f6f6c73223a7b2270726f66696c65223a226e616e6f636f6465782d73746f636b2d302e352e30222c22636f64654d6f6465223a747275652c226d6370223a66616c73652c227375626167656e7473223a66616c73657d7d",
+      "fingerprint": "sha256:8bde2b567ecaad434df73131d09ba0e47213da6ff7e87d07116aa17721779631"
     },
     {
       "name": "ascii-replacement",
       "instructions": "Use stock tools.",
-      "canonicalUtf8": "{\"fingerprintVersion\":1,\"instructions\":\"Use stock tools.\",\"tools\":{\"profile\":\"nanocodex-stock-0.3.0\",\"codeMode\":true,\"mcp\":false,\"subagents\":false}}",
-      "canonicalUtf8Hex": "7b2266696e6765727072696e7456657273696f6e223a312c22696e737472756374696f6e73223a225573652073746f636b20746f6f6c732e222c22746f6f6c73223a7b2270726f66696c65223a226e616e6f636f6465782d73746f636b2d302e332e30222c22636f64654d6f6465223a747275652c226d6370223a66616c73652c227375626167656e7473223a66616c73657d7d",
-      "fingerprint": "sha256:3f643d4bfa98675432b65bca085a05255279fb9618d2d63c83f59bf3bb1eef91"
+      "canonicalUtf8": "{\"fingerprintVersion\":1,\"instructions\":\"Use stock tools.\",\"tools\":{\"profile\":\"nanocodex-stock-0.5.0\",\"codeMode\":true,\"mcp\":false,\"subagents\":false}}",
+      "canonicalUtf8Hex": "7b2266696e6765727072696e7456657273696f6e223a312c22696e737472756374696f6e73223a225573652073746f636b20746f6f6c732e222c22746f6f6c73223a7b2270726f66696c65223a226e616e6f636f6465782d73746f636b2d302e352e30222c22636f64654d6f6465223a747275652c226d6370223a66616c73652c227375626167656e7473223a66616c73657d7d",
+      "fingerprint": "sha256:228064d2dcbc1e8e6d112b2abc340d338abc39b187e594d61b1bd2675523ef63"
     },
     {
       "name": "json-escapes",
       "instructions": "Quotes: \"x\" \\ tab\tline\n",
-      "canonicalUtf8": "{\"fingerprintVersion\":1,\"instructions\":\"Quotes: \\\"x\\\" \\\\ tab\\tline\\n\",\"tools\":{\"profile\":\"nanocodex-stock-0.3.0\",\"codeMode\":true,\"mcp\":false,\"subagents\":false}}",
-      "canonicalUtf8Hex": "7b2266696e6765727072696e7456657273696f6e223a312c22696e737472756374696f6e73223a2251756f7465733a205c22785c22205c5c207461625c746c696e655c6e222c22746f6f6c73223a7b2270726f66696c65223a226e616e6f636f6465782d73746f636b2d302e332e30222c22636f64654d6f6465223a747275652c226d6370223a66616c73652c227375626167656e7473223a66616c73657d7d",
-      "fingerprint": "sha256:e6097eccbf2fb943f5789faabeb987776a6b1678a03387608628f927a4f8e220"
+      "canonicalUtf8": "{\"fingerprintVersion\":1,\"instructions\":\"Quotes: \\\"x\\\" \\\\ tab\\tline\\n\",\"tools\":{\"profile\":\"nanocodex-stock-0.5.0\",\"codeMode\":true,\"mcp\":false,\"subagents\":false}}",
+      "canonicalUtf8Hex": "7b2266696e6765727072696e7456657273696f6e223a312c22696e737472756374696f6e73223a2251756f7465733a205c22785c22205c5c207461625c746c696e655c6e222c22746f6f6c73223a7b2270726f66696c65223a226e616e6f636f6465782d73746f636b2d302e352e30222c22636f64654d6f6465223a747275652c226d6370223a66616c73652c227375626167656e7473223a66616c73657d7d",
+      "fingerprint": "sha256:db8052413f31b65ec308be0f6e9d13627eb9cd93e38df73aa00f8ec19c826917"
     },
     {
       "name": "unicode-scalars",
       "instructions": "naïve 🛠️ café",
-      "canonicalUtf8": "{\"fingerprintVersion\":1,\"instructions\":\"naïve 🛠️ café\",\"tools\":{\"profile\":\"nanocodex-stock-0.3.0\",\"codeMode\":true,\"mcp\":false,\"subagents\":false}}",
-      "canonicalUtf8Hex": "7b2266696e6765727072696e7456657273696f6e223a312c22696e737472756374696f6e73223a226e61c3af766520f09f9ba0efb88f20636166c3a9222c22746f6f6c73223a7b2270726f66696c65223a226e616e6f636f6465782d73746f636b2d302e332e30222c22636f64654d6f6465223a747275652c226d6370223a66616c73652c227375626167656e7473223a66616c73657d7d",
-      "fingerprint": "sha256:deb83785232b0f14d061c8beaba2247267a0a0a6ca24a3dd121572532bbe8c2c"
+      "canonicalUtf8": "{\"fingerprintVersion\":1,\"instructions\":\"naïve 🛠️ café\",\"tools\":{\"profile\":\"nanocodex-stock-0.5.0\",\"codeMode\":true,\"mcp\":false,\"subagents\":false}}",
+      "canonicalUtf8Hex": "7b2266696e6765727072696e7456657273696f6e223a312c22696e737472756374696f6e73223a226e61c3af766520f09f9ba0efb88f20636166c3a9222c22746f6f6c73223a7b2270726f66696c65223a226e616e6f636f6465782d73746f636b2d302e352e30222c22636f64654d6f6465223a747275652c226d6370223a66616c73652c227375626167656e7473223a66616c73657d7d",
+      "fingerprint": "sha256:e7223e511afdc846308824e98c2bf5ec96824a68fd5a59daa8f01c3b2e116af9"
     },
     {
       "name": "unicode-line-separators",
       "instructions": "line\u2028separator\u2029paragraph",
-      "canonicalUtf8": "{\"fingerprintVersion\":1,\"instructions\":\"line\u2028separator\u2029paragraph\",\"tools\":{\"profile\":\"nanocodex-stock-0.3.0\",\"codeMode\":true,\"mcp\":false,\"subagents\":false}}",
-      "canonicalUtf8Hex": "7b2266696e6765727072696e7456657273696f6e223a312c22696e737472756374696f6e73223a226c696e65e280a8736570617261746f72e280a9706172616772617068222c22746f6f6c73223a7b2270726f66696c65223a226e616e6f636f6465782d73746f636b2d302e332e30222c22636f64654d6f6465223a747275652c226d6370223a66616c73652c227375626167656e7473223a66616c73657d7d",
-      "fingerprint": "sha256:62a9cafe4f3bad4265656039a67583b6a77bf286434c224d71ebaafca1e6a2c4"
+      "canonicalUtf8": "{\"fingerprintVersion\":1,\"instructions\":\"line\u2028separator\u2029paragraph\",\"tools\":{\"profile\":\"nanocodex-stock-0.5.0\",\"codeMode\":true,\"mcp\":false,\"subagents\":false}}",
+      "canonicalUtf8Hex": "7b2266696e6765727072696e7456657273696f6e223a312c22696e737472756374696f6e73223a226c696e65e280a8736570617261746f72e280a9706172616772617068222c22746f6f6c73223a7b2270726f66696c65223a226e616e6f636f6465782d73746f636b2d302e352e30222c22636f64654d6f6465223a747275652c226d6370223a66616c73652c227375626167656e7473223a66616c73657d7d",
+      "fingerprint": "sha256:873cfec31df06d55b8eab2925a213d55d31e117b453d69dd0490e9a3ff0f9975"
     },
     {
       "name": "unicode-nfc",
       "instructions": "é",
-      "canonicalUtf8": "{\"fingerprintVersion\":1,\"instructions\":\"é\",\"tools\":{\"profile\":\"nanocodex-stock-0.3.0\",\"codeMode\":true,\"mcp\":false,\"subagents\":false}}",
-      "canonicalUtf8Hex": "7b2266696e6765727072696e7456657273696f6e223a312c22696e737472756374696f6e73223a22c3a9222c22746f6f6c73223a7b2270726f66696c65223a226e616e6f636f6465782d73746f636b2d302e332e30222c22636f64654d6f6465223a747275652c226d6370223a66616c73652c227375626167656e7473223a66616c73657d7d",
-      "fingerprint": "sha256:385e276e33210bdf84aa271578450769442af3aa66080f7b19476539d7229d93"
+      "canonicalUtf8": "{\"fingerprintVersion\":1,\"instructions\":\"é\",\"tools\":{\"profile\":\"nanocodex-stock-0.5.0\",\"codeMode\":true,\"mcp\":false,\"subagents\":false}}",
+      "canonicalUtf8Hex": "7b2266696e6765727072696e7456657273696f6e223a312c22696e737472756374696f6e73223a22c3a9222c22746f6f6c73223a7b2270726f66696c65223a226e616e6f636f6465782d73746f636b2d302e352e30222c22636f64654d6f6465223a747275652c226d6370223a66616c73652c227375626167656e7473223a66616c73657d7d",
+      "fingerprint": "sha256:0ac431e31d7d58635779b84c38e9c3e462555c0483cd1bc3d4930fe746e68b13"
     },
     {
       "name": "unicode-nfd",
       "instructions": "é",
-      "canonicalUtf8": "{\"fingerprintVersion\":1,\"instructions\":\"é\",\"tools\":{\"profile\":\"nanocodex-stock-0.3.0\",\"codeMode\":true,\"mcp\":false,\"subagents\":false}}",
-      "canonicalUtf8Hex": "7b2266696e6765727072696e7456657273696f6e223a312c22696e737472756374696f6e73223a2265cc81222c22746f6f6c73223a7b2270726f66696c65223a226e616e6f636f6465782d73746f636b2d302e332e30222c22636f64654d6f6465223a747275652c226d6370223a66616c73652c227375626167656e7473223a66616c73657d7d",
-      "fingerprint": "sha256:b0cd651c909d70b3a7005ce2ac4c89290c77d27adc73f704e5d2494974044a60"
+      "canonicalUtf8": "{\"fingerprintVersion\":1,\"instructions\":\"é\",\"tools\":{\"profile\":\"nanocodex-stock-0.5.0\",\"codeMode\":true,\"mcp\":false,\"subagents\":false}}",
+      "canonicalUtf8Hex": "7b2266696e6765727072696e7456657273696f6e223a312c22696e737472756374696f6e73223a2265cc81222c22746f6f6c73223a7b2270726f66696c65223a226e616e6f636f6465782d73746f636b2d302e352e30222c22636f64654d6f6465223a747275652c226d6370223a66616c73652c227375626167656e7473223a66616c73657d7d",
+      "fingerprint": "sha256:a9c64f41e3d9022a2300c8fab4c38c8e4e7082bc7311a1343d8dd8fc7cce60fe"
+    },
+    {
+      "name": "control-escapes",
+      "instructions": "\b\f\r",
+      "canonicalUtf8": "{\"fingerprintVersion\":1,\"instructions\":\"\\b\\f\\r\",\"tools\":{\"profile\":\"nanocodex-stock-0.5.0\",\"codeMode\":true,\"mcp\":false,\"subagents\":false}}",
+      "canonicalUtf8Hex": "7b2266696e6765727072696e7456657273696f6e223a312c22696e737472756374696f6e73223a225c625c665c72222c22746f6f6c73223a7b2270726f66696c65223a226e616e6f636f6465782d73746f636b2d302e352e30222c22636f64654d6f6465223a747275652c226d6370223a66616c73652c227375626167656e7473223a66616c73657d7d",
+      "fingerprint": "sha256:dba8cbacd8b7bd9666e7efef2f136626bd5cd8dd77845fe1ca86086113156e14"
+    },
+    {
+      "name": "other-c0",
+      "instructions": "\u0001",
+      "canonicalUtf8": "{\"fingerprintVersion\":1,\"instructions\":\"\\u0001\",\"tools\":{\"profile\":\"nanocodex-stock-0.5.0\",\"codeMode\":true,\"mcp\":false,\"subagents\":false}}",
+      "canonicalUtf8Hex": "7b2266696e6765727072696e7456657273696f6e223a312c22696e737472756374696f6e73223a225c7530303031222c22746f6f6c73223a7b2270726f66696c65223a226e616e6f636f6465782d73746f636b2d302e352e30222c22636f64654d6f6465223a747275652c226d6370223a66616c73652c227375626167656e7473223a66616c73657d7d",
+      "fingerprint": "sha256:1defe79406f56820fc5a6c4abf3618e7df8ab6aaaf0a6f69a18dc00440278f97"
+    },
+    {
+      "name": "unescaped-slash",
+      "instructions": "a/b",
+      "canonicalUtf8": "{\"fingerprintVersion\":1,\"instructions\":\"a/b\",\"tools\":{\"profile\":\"nanocodex-stock-0.5.0\",\"codeMode\":true,\"mcp\":false,\"subagents\":false}}",
+      "canonicalUtf8Hex": "7b2266696e6765727072696e7456657273696f6e223a312c22696e737472756374696f6e73223a22612f62222c22746f6f6c73223a7b2270726f66696c65223a226e616e6f636f6465782d73746f636b2d302e352e30222c22636f64654d6f6465223a747275652c226d6370223a66616c73652c227375626167656e7473223a66616c73657d7d",
+      "fingerprint": "sha256:5f5f45748ec5715c2c764a5903ea60c87d58081d4d4ccd68808c3622b0deb4f5"
     }
   ]
 }

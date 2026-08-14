@@ -16,7 +16,6 @@ const MAX_RUNTIME_DELAY_MS = 2 ** 31 - 1;
 const MAX_CRASH_STDERR_BYTES = 4 * 1024;
 const MAX_TRACKED_DESCENDANTS = 4_096;
 const STDIN_WRITE_FAILURE = Symbol("NanocodexStdinWriteFailure");
-const TRUSTED_BUBBLEWRAP_PATHS = Object.freeze(["/usr/bin/bwrap", "/bin/bwrap"]);
 
 /** @typedef {"aborted" | "timeout" | "idle_timeout"} NanocodexCancellationReason */
 
@@ -55,6 +54,7 @@ const TRUSTED_BUBBLEWRAP_PATHS = Object.freeze(["/usr/bin/bwrap", "/bin/bwrap"])
  *   onStderr?: (text: string) => void;
  *   onProcess?: (event: { phase: "started" | "exited"; pid: number | undefined }) => void;
  *   spawnFn?: typeof spawn;
+ *   killFn?: typeof process.kill;
  * }} RunNanocodexProcessOptions
  */
 
@@ -86,10 +86,11 @@ const TRUSTED_BUBBLEWRAP_PATHS = Object.freeze(["/usr/bin/bwrap", "/bin/bwrap"])
  *
  * Abort and timer cancellation call `onCancel` once so the caller can construct
  * a request/session-correlated `turn.cancel`. Cleanup then escalates through a
- * bounded graceful wait, SIGTERM, and SIGKILL. Linux launches fail closed unless
- * Bubblewrap is available: the bridge runs below a private PID-namespace init,
- * so a detached or reparented descendant cannot escape cleanup. Process-group
- * and guarded `/proc` tracking remain supplemental diagnostics and escalation.
+ * bounded graceful wait, SIGTERM, and SIGKILL. The bridge is spawned directly,
+ * the same class as other Smithers CLI agents. Linux `detached` process-group
+ * signaling and guarded `/proc` tracking are supplemental best-effort cleanup,
+ * not a launch gate and not PID-namespace-authoritative. Isolation, if any,
+ * is an outer Smithers `<Sandbox>`, not this argv.
  *
  * The promise settles once. Failures expose a stable `code` property and only
  * bounded, redacted stderr; command arguments are never copied into errors.
@@ -133,11 +134,12 @@ export async function runNanocodexProcess(options) {
     });
   }
 
-  const spawnSpec = createNanocodexContainedSpawnSpec(options.command, options.args ?? [], effectiveEnv, options.cwd);
+  const spawnSpec = createNanocodexSpawnSpec(options.command, options.args ?? [], effectiveEnv, options.cwd);
 
   return new Promise((resolve, reject) => {
     const stderrCapture = createBoundedCapture(maxStderrBytes);
     const spawnFn = options.spawnFn ?? spawn;
+    const killFn = options.killFn ?? process.kill.bind(process);
     /** @type {import("node:child_process").ChildProcessWithoutNullStreams} */
     let child;
 
@@ -276,7 +278,7 @@ export async function runNanocodexProcess(options) {
       for (const identity of liveDescendants()) {
         if (identity.pid === process.pid || !sameLiveLinuxIdentity(identity)) continue;
         try {
-          process.kill(identity.pid, signal);
+          killFn(identity.pid, signal);
         } catch {
           // The descendant exited after its identity check.
         }
@@ -289,7 +291,7 @@ export async function runNanocodexProcess(options) {
       if (process.platform === "linux") {
         if (rootIdentity && sameLinuxIdentity(rootIdentity)) {
           try {
-            process.kill(-rootIdentity.pid, signal);
+            killFn(-rootIdentity.pid, signal);
             return;
           } catch {
             // Fall through to the direct child handle.
@@ -321,23 +323,24 @@ export async function runNanocodexProcess(options) {
         signalTree("SIGKILL");
         if (childClosed || settled) return;
         const survivingProcesses = (rootIdentity && sameLinuxIdentity(rootIdentity) ? 1 : 0) + liveDescendants().length;
-        settleReject(
-          retainTerminal(
-            processError(
-              "bridge_cleanup_failed",
-              survivingProcesses > 0
-                ? "Nanocodex bridge processes survived forced cleanup."
-                : "Nanocodex bridge cleanup could not be verified because process closure was not observed.",
-              {
+        if (survivingProcesses > 0) {
+          settleReject(
+            retainTerminal(
+              processError("bridge_cleanup_failed", "Nanocodex bridge processes survived forced cleanup.", {
                 survivingProcesses,
                 stderr: redact(stderrCapture.text()),
                 stderrTruncated: stderrCapture.truncated(),
-              },
+              }),
+              terminalMarked,
+              terminalRecord,
             ),
-            terminalMarked,
-            terminalRecord,
-          ),
-        );
+          );
+          return;
+        }
+        // The OS process is gone. Node may still be waiting on inherited stdio
+        // from an unobserved reparented grandchild. Supplemental census is not
+        // PID-namespace-authoritative, so treat the handle as closed.
+        onChildClose(closeCode, closeSignal);
       }, killWaitMs);
       forceSettleTimer.unref?.();
     };
@@ -870,10 +873,10 @@ export async function runNanocodexProcess(options) {
 }
 
 /**
- * Run provider-free capability discovery below the same supervised Bubblewrap
- * PID boundary used for a turn. Success is reported only after the wrapper has
- * closed and every observed descendant has been reaped or forcibly stopped.
- * Child output and errors are never copied into a thrown error.
+ * Run provider-free capability discovery by spawning the bridge directly.
+ * Success is reported only after the child has closed and every observed
+ * descendant has been reaped or forcibly stopped. Child output and errors are
+ * never copied into a thrown error.
  *
  * @param {{
  *   command: string;
@@ -923,12 +926,7 @@ export async function runNanocodexCapabilities(options) {
       stderrTruncated: false,
     });
   }
-  const spawnSpec = createNanocodexContainedSpawnSpec(
-    options.command,
-    ["capabilities", "--json"],
-    effectiveEnv,
-    options.cwd,
-  );
+  const spawnSpec = createNanocodexSpawnSpec(options.command, ["capabilities", "--json"], effectiveEnv, options.cwd);
 
   return new Promise((resolvePromise, rejectPromise) => {
     const output = createBoundedBufferCapture(maxOutputBytes);
@@ -991,14 +989,14 @@ export async function runNanocodexCapabilities(options) {
           try {
             child.kill(signal);
           } catch {
-            // The wrapper exited during escalation.
+            // The child exited during escalation.
           }
         }
       } else if (!childClosed && !rootIdentity) {
         try {
           child.kill(signal);
         } catch {
-          // The wrapper exited before its Linux identity could be read.
+          // The child exited before its Linux identity could be read.
         }
       }
       refreshDescendants();
@@ -1056,12 +1054,19 @@ export async function runNanocodexCapabilities(options) {
         forceTimer = setTimeout(() => {
           signalTree("SIGKILL");
           if (childClosed || settled) return;
-          settleReject(
-            processError("bridge_cleanup_failed", "Nanocodex capability process closure could not be verified.", {
-              stderr: "",
-              stderrTruncated: stderr.truncated(),
-            }),
-          );
+          const survivingProcesses =
+            (rootIdentity && sameLinuxIdentity(rootIdentity) ? 1 : 0) + liveDescendants().length;
+          if (survivingProcesses > 0) {
+            settleReject(
+              processError("bridge_cleanup_failed", "Nanocodex capability processes survived forced cleanup.", {
+                survivingProcesses,
+                stderr: "",
+                stderrTruncated: stderr.truncated(),
+              }),
+            );
+            return;
+          }
+          onCapabilityClose(null, null);
         }, DEFAULT_KILL_WAIT_MS);
         forceTimer.unref?.();
       }, DEFAULT_TERM_GRACE_MS);
@@ -1134,7 +1139,12 @@ export async function runNanocodexCapabilities(options) {
     child.once("error", (error) => {
       spawnErrorCode = typeof error.code === "string" ? error.code : "SPAWN_FAILED";
     });
-    child.once("close", (code, signal) => {
+    /**
+     * @param {number | null} code
+     * @param {NodeJS.Signals | null} signal
+     */
+    const onCapabilityClose = (code, signal) => {
+      if (childClosed) return;
       childClosed = true;
       clearTimeout(timeoutTimer);
       clearTimeout(killTimer);
@@ -1172,7 +1182,8 @@ export async function runNanocodexCapabilities(options) {
         }
         settleResolve(output.value());
       })();
-    });
+    };
+    child.once("close", onCapabilityClose);
 
     if (process.platform === "linux" && child.pid != null) {
       rootIdentity = readLinuxIdentity(child.pid);
@@ -1192,68 +1203,24 @@ export async function runNanocodexCapabilities(options) {
 }
 
 /**
- * Resolve an authoritative process-containment wrapper. Protocol data and
- * credentials remain on stdin/environment; this argv contains executable
- * paths and fixed containment switches only.
+ * Resolve the bridge executable and return a direct spawn spec. Protocol data
+ * and credentials remain on stdin/environment; argv contains only the binary
+ * and non-secret switches.
  *
  * @param {string} command
- * @param {string[]} args
+ * @param {string[]} [args]
  * @param {Record<string, string | undefined>} [environment]
  * @param {string} [cwd]
- * @param {(candidate: string) => boolean} [trustedBubblewrapProbe] Internal
- * deterministic test seam. Production callers must omit it.
  */
-export function createNanocodexContainedSpawnSpec(
-  command,
-  args,
-  environment = process.env,
-  cwd = process.cwd(),
-  trustedBubblewrapProbe = isExecutableRegularFile,
-) {
-  if (process.platform !== "linux") {
-    throw processError(
-      "bridge_containment_unavailable",
-      "Nanocodex bridge process containment is currently supported only on Linux.",
-      { stderr: "", stderrTruncated: false },
-    );
-  }
-  const bubblewrap = findBubblewrap(trustedBubblewrapProbe);
-  if (!bubblewrap) {
-    throw processError(
-      "bridge_containment_unavailable",
-      "Nanocodex bridge requires Bubblewrap for Linux process containment.",
-      { stderr: "", stderrTruncated: false },
-    );
-  }
+export function createNanocodexSpawnSpec(command, args = [], environment = process.env, cwd = process.cwd()) {
   return {
-    command: bubblewrap,
-    args: [
-      "--unshare-pid",
-      "--die-with-parent",
-      "--new-session",
-      "--bind",
-      "/",
-      "/",
-      "--proc",
-      "/proc",
-      "--dev-bind",
-      "/dev",
-      "/dev",
-      "--",
-      resolveNanocodexExecutable(command, cwd, environment),
-      ...args,
-    ],
+    command: resolveNanocodexExecutable(command, cwd, environment),
+    args: [...args],
   };
 }
 
-/** Fail closed when the host cannot provide the protocol-v1 process boundary. */
-export function assertNanocodexProcessContainment(environment = process.env, cwd = process.cwd()) {
-  createNanocodexContainedSpawnSpec("/bin/true", [], environment, cwd);
-}
-
 /**
- * Resolve the bridge before entering Bubblewrap. A payload path is never left
- * to the wrapper's environment-dependent PATH search.
+ * Resolve the bridge from an absolute path, cwd-relative path, or explicit PATH.
  *
  * @param {string} command
  * @param {string} cwd
@@ -1283,25 +1250,6 @@ export function resolveNanocodexExecutable(command, cwd, environment) {
     stderr: "",
     stderrTruncated: false,
   });
-}
-
-/** @param {(candidate: string) => boolean} trustedBubblewrapProbe */
-function findBubblewrap(trustedBubblewrapProbe) {
-  for (const candidate of TRUSTED_BUBBLEWRAP_PATHS) {
-    try {
-      if (!trustedBubblewrapProbe(candidate)) continue;
-      return realpathSync(candidate);
-    } catch {
-      // Continue through trusted fixed system candidates only.
-    }
-  }
-  return undefined;
-}
-
-/** @param {string} candidate */
-function isExecutableRegularFile(candidate) {
-  accessSync(candidate, fsConstants.X_OK);
-  return statSync(candidate).isFile();
 }
 
 /** @param {RunNanocodexProcessOptions} options */
@@ -1342,6 +1290,12 @@ function assertOptions(options) {
   }
   if (options.onProcess != null && typeof options.onProcess !== "function") {
     throw new TypeError("Nanocodex process onProcess must be a function.");
+  }
+  if (options.spawnFn != null && typeof options.spawnFn !== "function") {
+    throw new TypeError("Nanocodex process spawnFn must be a function.");
+  }
+  if (options.killFn != null && typeof options.killFn !== "function") {
+    throw new TypeError("Nanocodex process killFn must be a function.");
   }
   if (
     options.signal != null &&

@@ -9065,6 +9065,7 @@ type NanocodexAgentOptions = {
   cwd?: string;                    // absolute workspace fallback
   auth?: NanocodexAuth;            // defaults to OPENAI_API_KEY environment mode
   instructions?: string;           // replaces stock instructions completely
+  model?: "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" | "sol" | "terra" | "luna"; // default gpt-5.6-sol
   thinking?: NanocodexThinking;
   reasoningMode?: NanocodexReasoningMode;
   fastMode?: boolean;
@@ -18781,7 +18782,7 @@ agents[16]{class,cli,modelDefault,hijack,notes}:
   OpenCodeAgent,opencode,CLI default,not yet,OpenCode CLI (opencode run --format json)
   OpenClawAgent,openclaw,CLI default,session id,OpenClaw CLI (openclaw agent --json)
   PoolAgent,pool,CLI default,not yet,Poolside Pool CLI (ACP + NDJSON stream)
-  NanocodexAgent,smithers-nanocodex,gpt-5.6-sol,checkpoint resume,Nanocodex bridge (Linux x64)
+  NanocodexAgent,smithers-nanocodex,gpt-5.6-sol (default; terra/luna),checkpoint resume,Nanocodex bridge (Linux x64 / macOS arm64)
 ```
 
 CLI binaries must be on `PATH`: `codex`, `cursor-agent`, `claude`, `agy`, `gemini`, `pi`, `omp`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`, `pool`, `smithers-nanocodex`.
@@ -19696,108 +19697,66 @@ export const claude = useCli
 
 `NanocodexAgent` connects Smithers to the external
 [`smithers-nanocodex`](https://github.com/N0xMare/smithers-nanocodex)
-bridge. The adapter does not bundle or download the executable at runtime. You
-build, qualify, and install the pinned-source artifact separately, then select it with
-`binary` or `PATH`.
+bridge. The adapter does not bundle or download the executable at runtime.
+Install the published v0.0.2 binary for your host, verify it against the
+release `.sha256` sidecar, then select it with `binary` or `PATH`.
 
-The v0.0.1 integration is deliberately fixed: one fresh `serve` worker and one
+The v0.0.2 integration is deliberately fixed: one fresh `serve` worker and one
 stock Nanocodex turn per `generate()` call. There is no daemon, worker pool, or
 bridge-session reuse. `generate()` also performs a short, provider-free
-capability check before starting that worker.
+capability check before starting that worker. The worker is spawned directly,
+the same class as other Smithers CLI agents. Isolation, if required, is an
+outer Smithers `<Sandbox>`. The adapter must not wrap this binary in
+Bubblewrap or `sandbox-exec`.
+
+v0.0.1 / Nanocodex 0.3.0 checkpoints do not resume. The tool profile is
+`nanocodex-stock-0.5.0`.
 
 ## Requirements
 
-- Linux x64 with the `x86_64-unknown-linux-gnu` ABI
-- glibc 2.35 or newer; Ubuntu 22.04 is the oldest supported baseline
-- [Bubblewrap](https://github.com/containers/bubblewrap) at `/usr/bin/bwrap` or
-  `/bin/bwrap`, with usable private PID namespaces; other locations and `PATH`
-  lookup are not trusted, and the adapter fails closed if neither path works
+- One of the shipped hosts:
+  - Linux x64 (`x86_64-unknown-linux-gnu`), glibc 2.35 or newer; Ubuntu 22.04
+    is the oldest supported baseline
+  - macOS arm64 (`aarch64-apple-darwin`)
 - Smithers on Node.js 22 or Bun 1.3 or newer
+- The matching `smithers-nanocodex` v0.0.2 binary on `PATH` or selected with
+  `binary`
 
-macOS, Windows, Linux arm64, musl, and older glibc versions fail before the
-bridge starts. Install Bubblewrap with your distribution package manager. On
-Ubuntu:
+Windows, Linux arm64, Intel macOS, musl, and older glibc versions fail before
+the bridge starts. Bubblewrap is not required and must not wrap the worker.
 
-```bash
-sudo apt-get update
-sudo apt-get install -y bubblewrap
-```
+## Install the published v0.0.2 binary
 
-## Build the pinned release from source
+The adapter does not download the executable. Install the published
+[`v0.0.2`](https://github.com/N0xMare/smithers-nanocodex/releases/tag/v0.0.2)
+archive for your host and verify it against the release's `.sha256` sidecar
+before putting the binary on `PATH`. Smithers does not duplicate those sidecars
+as an in-repo pin digest.
 
-Smithers assigns source-build provenance only to an artifact matching the
-checked-in pin produced from the exact source commit below. Smithers does not
-record, execute, or qualify the published `v0.0.1` binary.
-
-The qualified consumer pin is:
-
-| Field                 | Value                                      |
-| --------------------- | ------------------------------------------ |
-| Release               | `v0.0.1`                                   |
-| Source repo           | `N0xMare/smithers-nanocodex`               |
-| Source commit         | `56d8b4fd54bf14e9f2874e5a010b8e301f8f695b` |
-| Source tree           | `b8a092569e579c21e2ae288a470a6881022b61f2` |
-| `Cargo.lock` blob     | `808504efe6b6ea6c43705205ca3182be0dee1afe` |
-| Rust toolchain        | `1.97.0`                                   |
-| Target                | `x86_64-unknown-linux-gnu`                 |
-| Source-build bytes    | `6286499`                                  |
-| Source-build SHA-256  | `3348b8a7818b4c759748e2cf0ecc9e0e4857f33ef6c3a92417655bfc0c73fdff` |
-| Maximum archive bytes | `8388608`                                  |
-
-Build and install that artifact:
+| Host         | rustc target               | Archive                                                     |
+| ------------ | -------------------------- | ----------------------------------------------------------- |
+| Linux x86_64 | `x86_64-unknown-linux-gnu` | `smithers-nanocodex-v0.0.2-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS arm64  | `aarch64-apple-darwin`     | `smithers-nanocodex-v0.0.2-aarch64-apple-darwin.tar.gz`     |
 
 ```bash
+# Linux x86_64. On macOS arm64 use target=aarch64-apple-darwin and `shasum -a 256 -c`.
+tag=v0.0.2
 target=x86_64-unknown-linux-gnu
-package="smithers-nanocodex-v0.0.1-${target}"
-archive="${package}.tar.gz"
-artifact_dir="$(mktemp -d)"
-smithers_checkout=/absolute/path/to/smithers
+package="smithers-nanocodex-${tag#v}-${target}"
+base="https://github.com/N0xMare/smithers-nanocodex/releases/download/${tag}"
 
-git clone https://github.com/N0xMare/smithers-nanocodex
-cd smithers-nanocodex
-git checkout 56d8b4fd54bf14e9f2874e5a010b8e301f8f695b
-test "$(git rev-parse HEAD)" = 56d8b4fd54bf14e9f2874e5a010b8e301f8f695b
-test "$(git rev-parse 'HEAD^{tree}')" = b8a092569e579c21e2ae288a470a6881022b61f2
-test "$(git hash-object Cargo.lock)" = 808504efe6b6ea6c43705205ca3182be0dee1afe
-
-rustup toolchain install 1.97.0 --profile minimal
-RUSTUP_TOOLCHAIN=1.97.0 \
-RUSTFLAGS="--remap-path-prefix=$PWD=/usr/src/smithers-nanocodex" \
-  cargo build --locked --release --target "$target"
-
-# Package deterministically so the qualification command can inspect it.
-install -d -m 0755 \
-  "$artifact_dir/$package" \
-  "$artifact_dir/$package/docs" \
-  "$artifact_dir/$package/third-party"
-install -m 0755 "target/${target}/release/smithers-nanocodex" "$artifact_dir/$package/"
-install -m 0644 README.md LICENSE "$artifact_dir/$package/"
-cp -R docs/. "$artifact_dir/$package/docs/"
-find "$artifact_dir/$package/docs" -type d -exec chmod 0755 {} +
-find "$artifact_dir/$package/docs" -type f -exec chmod 0644 {} +
-install -m 0644 third-party/README.md third-party/THIRD-PARTY-LICENSES.html \
-  "$artifact_dir/$package/third-party/"
-source_date_epoch="$(git log -1 --format=%ct)"
-tar --sort=name --mtime="@${source_date_epoch}" \
-  --owner=0 --group=0 --numeric-owner \
-  --pax-option=delete=atime,delete=ctime \
-  -C "$artifact_dir" -cf - "$package" | gzip -n -9 > "$artifact_dir/$archive"
-
-# From a Smithers checkout with dependencies installed, inspect this archive.
-node "$smithers_checkout/scripts/qualify-nanocodex-release.mjs" \
-  --archive "$artifact_dir/$archive"
-
-# Install only if the report says artifactProvenance is
-# "pinned-source-build-sha256".
-sudo install -m 0755 "$artifact_dir/$package/smithers-nanocodex" \
-  /usr/local/bin/smithers-nanocodex
+curl -fsSL -O "${base}/${package}.tar.gz"
+curl -fsSL -O "${base}/${package}.tar.gz.sha256"
+sha256sum -c "${package}.tar.gz.sha256"
+tar -xzf "${package}.tar.gz"
+sudo install -m 0755 "${package}/smithers-nanocodex" /usr/local/bin/smithers-nanocodex
 ```
 
-Smithers validates every tar header and rejects path traversal, links, devices,
-extended headers, duplicate paths, and anything outside the exact package root
-before using the executable. A locally built archive that differs from the checked-in
-pin can still receive the provider-free behavioral report, but its
-`artifactProvenance` is `unverified-input` and its source fields are `null`.
+The historical `packages/agents/tests/fixtures/nanocodex/source-build-v0.0.1.json`
+record is the immutable v0.0.1 source-build pin. It is not the current adapter
+contract. The prepared v0.0.2 consumer contract lives at
+`packages/agents/tests/fixtures/nanocodex/release-v0.0.2.json` and does not
+embed published sidecar digests.
 
 ## Configure the adapter
 
@@ -19808,6 +19767,7 @@ import { NanocodexAgent } from "smthrs";
 
 const agent = new NanocodexAgent({
   cwd: "/absolute/path/to/workspace",
+  model: "gpt-5.6-sol",
   thinking: "high",
   reasoningMode: "standard",
 });
@@ -19870,9 +19830,8 @@ This serialization is process-local. Do not run another Smithers process,
 Nanocodex bridge, or other credential-refreshing process against the same auth
 file concurrently.
 
-`preflight()` checks the host, executable, namespace profile, and declared
-target/version/capability surface without loading credentials or contacting a
-provider.
+`preflight()` checks the host, executable, and declared target/version/capability
+surface without loading credentials or contacting a provider.
 The actual managed-ChatGPT adapter suite is
 `packages/agents/tests/nanocodex-live.test.js`. It is opt-in/manual through
 `SMITHERS_RUN_NANOCODEX_LIVE=1`, not part of normal package-test execution, and
@@ -19881,20 +19840,20 @@ must run only in a trusted environment. The engine cold-restart suite at
 gate. Never enable either suite in a fork pull request or any job that exposes
 repository secrets.
 
-## Fixed v0.0.1 surface
+## Fixed v0.0.2 surface
 
-| Capability                               | v0.0.1 behavior                                            |
-| ---------------------------------------- | ---------------------------------------------------------- |
-| Model                                    | Stock Nanocodex 0.3.0, fixed `gpt-5.6-sol` adapter model   |
-| Native tools and Code Mode               | Enabled                                                    |
-| Transport                                | WebSocket preferred, with stock sticky HTTPS fallback      |
-| Checkpoints                              | `nanocodex.session-snapshot/1`, resume only                |
-| Structured output                        | Prompt-based Smithers extraction, not native schema output |
-| JavaScript tools and MCP                 | Unsupported                                                |
-| Subagents and steering                   | Unsupported                                                |
-| Custom provider endpoints                | Unsupported                                                |
-| Code Mode disablement                    | Unsupported                                                |
-| Workspace relocation and checkpoint fork | Unsupported                                                |
+| Capability                               | v0.0.2 behavior                                                                                                                                                                                                  |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Model                                    | Allowlisted `gpt-5.6-sol` (default), `gpt-5.6-terra`, `gpt-5.6-luna`; aliases `sol` / `terra` / `luna`. Fixed per native thread; resume rejects a mismatched constructor model (absent checkpoint model is Sol). |
+| Native tools and Code Mode               | Enabled                                                                                                                                                                                                          |
+| Transport                                | WebSocket preferred, with stock sticky HTTPS fallback                                                                                                                                                            |
+| Checkpoints                              | `nanocodex.session-snapshot/1`, resume only                                                                                                                                                                      |
+| Structured output                        | Prompt-based Smithers extraction, not native schema output                                                                                                                                                       |
+| JavaScript tools and MCP                 | Unsupported                                                                                                                                                                                                      |
+| Subagents and steering                   | Unsupported                                                                                                                                                                                                      |
+| Custom provider endpoints                | Unsupported                                                                                                                                                                                                      |
+| Code Mode disablement                    | Unsupported                                                                                                                                                                                                      |
+| Workspace relocation and checkpoint fork | Unsupported                                                                                                                                                                                                      |
 
 `instructions` replaces the stock instructions completely. Per-call system
 messages, JavaScript tools, provider options, and `resumeSession` are rejected.
@@ -19913,64 +19872,45 @@ tool results, source material, paths, or credentials that the agent read.
 Smithers validates and bounds the envelope but does not sanitize the opaque
 snapshot.
 
-## What Bubblewrap contains
+## Process cleanup is not isolation
 
-The adapter requires this PID namespace profile:
+The adapter spawns `smithers-nanocodex` directly. Linux `detached` process-group
+signaling and guarded `/proc` tracking are supplemental best-effort cleanup, not
+a launch gate and not PID-namespace-authoritative. They are **not** filesystem,
+network, device, or credential isolation. Use an outer Smithers `<Sandbox>`
+when your deployment needs those boundaries.
 
-```bash
-bwrap \
-  --unshare-pid \
-  --die-with-parent \
-  --new-session \
-  --bind / / \
-  --proc /proc \
-  --dev-bind /dev /dev \
-  -- /bin/true
-```
-
-This profile makes descendant membership and cleanup authoritative, including
-detached native-tool processes. It is PID containment only. It is **not**
-filesystem, network, device, or credential isolation: `/` is bound read-write,
-host networking remains available, `/dev` follows host permissions, and
-readable auth files and environment credentials remain reachable. Use a
-stronger external mount, environment, network, or credential-broker policy when
-your deployment requires those boundaries.
-
-## Qualify the release
-
-`packages/agents/tests/fixtures/nanocodex/source-build-v0.0.1.json` records the
-pinned source build and provider-free adapter preflight. It makes no checksum
-claim about the separately published release artifact.
+## Qualify a local archive
 
 From a Smithers checkout on a supported host, this command inspects a local
-archive and runs the public adapter preflight:
+v0.0.2 archive and runs the public adapter preflight:
 
 ```bash
 node scripts/qualify-nanocodex-release.mjs \
-  --archive /absolute/path/to/smithers-nanocodex-v0.0.1-x86_64-unknown-linux-gnu.tar.gz
+  --archive /absolute/path/to/smithers-nanocodex-v0.0.2-x86_64-unknown-linux-gnu.tar.gz
 ```
 
 `--archive` is required. The command reads no remote source, rejects the input
 unless it is a non-empty regular file no larger than 8 MiB, computes its
-SHA-256, and safely inspects its layout. Only the pinned source-build digest and
-size receive `pinned-source-build-sha256` provenance; every other input is
-explicitly reported as `unverified-input`, with no source commit or tree claim.
+SHA-256, and safely inspects its layout. Current v0.0.2 archives are reported
+as `unverified-input` because Smithers does not embed the published sidecar
+digests. The historical v0.0.1 source-build digest remains loadable as an
+immutable record and is not the current runtime contract.
 
 A direct local invocation does not itself initiate a network request, but the
-probed executable retains the PID-only adapter profile's host networking. Add
-an external network boundary when running an untrusted local input.
+probed executable has ordinary host networking. Add an external network
+boundary when running an untrusted local input.
 
 In a temporary scratch workspace, the verifier materializes the archive
-executable and bounded probe launchers. It runs exact-version and
-full-capability probes, then invokes public `NanocodexAgent.preflight()` against
-the same path with `inheritEnv: false` and an empty environment. Neither probe
-performs a model turn or needs a provider credential. Scratch state is removed
-on success or failure.
+executable. It runs exact-version and full-capability probes through the same
+direct-spawn supervisor used by the adapter, then invokes public
+`NanocodexAgent.preflight()` against the same path with `inheritEnv: false`
+and an empty environment. Neither probe performs a model turn or needs a
+provider credential. Scratch state is removed on success or failure.
 
 **See also:** `NanocodexAgent` reference ·
 `NanocodexAgentOptions` ·
-[`smithers-nanocodex` v0.0.1 tag](https://github.com/N0xMare/smithers-nanocodex/releases/tag/v0.0.1)
-(source reference; the release's prebuilt binary is not qualified by Smithers)
+`smithers-nanocodex` v0.0.2 tag
 
 ---
 
