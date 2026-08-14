@@ -3,8 +3,8 @@
 // smithers-display-name: Federation Dynamic Read Hardening
 // smithers-description: Repair every Luna-discovered dynamic cross-lane filesystem read.
 // smithers-tags: maintenance, federation, architecture
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 

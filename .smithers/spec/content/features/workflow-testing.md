@@ -39,7 +39,7 @@ Integration and e2e harnesses require executable database and process adapters a
 ## Test cases
 
 - `packages/testing/tests/simulate.test.ts`
-- `packages/testing/tests/fakeAgent.test.ts`
+- `packages/testing/tests/unit/fakeAgent.test.ts`
 - `packages/testing/tests/runtimeConformance.test.ts`
 - `packages/testing/tests/replay-identity-fresh-process.test.ts`
 - `e2e/testing-framework/real-db-integration.test.ts`

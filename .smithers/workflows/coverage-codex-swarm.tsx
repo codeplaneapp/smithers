@@ -2,9 +2,9 @@
 // smithers-display-name: Coverage Codex Swarm
 // smithers-description: Run parallel Codex /goal workers in isolated worktrees to raise package test coverage to a target percentage.
 // smithers-tags: coding, tests, coverage, codex, parallel
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { join } from "node:path";
-import { createSmithers, Parallel, Sequence, Task, Worktree } from "smithers-orchestrator";
+import { createSmithers, Parallel, Sequence, Task, Worktree } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 

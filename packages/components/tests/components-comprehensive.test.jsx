@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import {
@@ -14,7 +14,7 @@ import {
   Approval,
   approvalDecisionSchema,
 } from "../src/components/index.js";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
+import { SmithersRenderer } from "@smthrs/react-reconciler/dom/renderer";
 /**
  * @param {React.ReactElement} el
  */

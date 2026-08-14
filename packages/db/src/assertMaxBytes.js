@@ -1,4 +1,4 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 /**
  * @param {string} field
  * @param {string | ArrayBuffer | ArrayBufferView} value

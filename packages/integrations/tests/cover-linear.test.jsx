@@ -7,12 +7,11 @@ import React from "react";
 import { z } from "zod";
 import { Effect } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { createSmithers, renderFrame } from "smithers-orchestrator";
-import { SmithersCtx } from "@smithers-orchestrator/react-reconciler/context";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler";
+import { createSmithers, renderFrame } from "smthrs";
+import { SmithersCtx } from "@smthrs/react-reconciler/context";
+import { SmithersRenderer } from "@smthrs/react-reconciler";
 import {
   LinearClient,
   LinearClientLive,
@@ -27,6 +26,7 @@ import {
 } from "../src/linear/LinearWebhookSource.js";
 import { computeHmacSha256Hex } from "../src/core/verifySignature.js";
 import { CreateIssue, OnIssueUpdate } from "../src/linear/components.js";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 
 const API_KEY = "lin_cover_key";
 
@@ -51,13 +51,13 @@ function startScriptServer() {
       if (next.raw !== undefined) {
         return new Response(next.raw, {
           status: next.status ?? 200,
-          headers: { "content-type": "application/json", ...(next.headers ?? {}) },
+          headers: { "content-type": "application/json", ...next.headers },
         });
       }
       const payload = next.errors !== undefined ? { errors: next.errors } : { data: next.data };
       return new Response(JSON.stringify(payload), {
         status: next.status ?? 200,
-        headers: { "content-type": "application/json", ...(next.headers ?? {}) },
+        headers: { "content-type": "application/json", ...next.headers },
       });
     },
   });
@@ -283,8 +283,17 @@ describe("LinearWebhookSource edge branches", () => {
 
 const NullContext = React.createContext(/** @type {any} */ (null));
 
+// Allocated once, at module scope. `makeTempDirPath` re-arms its `bun:test`
+// drain hook whenever the registry is empty, so a per-test allocation
+// registers a hook from inside every test — the mid-test registration that
+// intermittently stalls a test for the full 5s timeout. See the longer note
+// in github-components.test.jsx.
+const apiRoot = makeTempDirPath("smithers-lin-cov-");
+let apiCount = 0;
+
 function makeApi(schemas) {
-  const dir = mkdtempSync(join(tmpdir(), "smithers-lin-cov-"));
+  const dir = join(apiRoot, `api-${(apiCount += 1)}`);
+  mkdirSync(dir, { recursive: true });
   return createSmithers(schemas, { dbPath: join(dir, "db.sqlite") });
 }
 

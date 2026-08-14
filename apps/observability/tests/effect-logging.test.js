@@ -6,7 +6,7 @@ import {
   logError,
   logWarningAwait,
   setSmithersLogRunner,
-} from "@smithers-orchestrator/observability/logging";
+} from "@smthrs/observability/logging";
 describe("effect/logging", () => {
   // These functions fire-and-forget via runFork, so we just verify they don't throw.
   test("logDebug does not throw", () => {

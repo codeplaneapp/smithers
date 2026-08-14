@@ -19,7 +19,7 @@ import { crepeThemeCss } from "./crepeTheme.generated";
  *
  * Because the Crepe editor is a heavy `@milkdown/*` dependency it lives in the
  * `adapters/` layer and is imported through the explicit
- * `@smithers-orchestrator/ui/adapters/markdown-editor` subpath (never the base
+ * `@smthrs/ui/adapters/markdown-editor` subpath (never the base
  * `index` barrel). Its ProseMirror runtime never paints under `renderToString`,
  * happy-dom, or bun's test DOM, so in those environments the component degrades
  * to a plain, fully controlled `<textarea>` that honours the exact same

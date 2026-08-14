@@ -1,4 +1,4 @@
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "smithers-orchestrator/ui";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "smthrs/ui";
 import type { PublicIssue, PublicStorySection } from "../types";
 import { BriefList } from "./BriefList";
 import { CoverageFooter } from "./CoverageFooter";

@@ -1,7 +1,7 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
-import { Poller, runWorkflow } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { Poller, runWorkflow } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { createTestSmithers, sleep } from "./helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";
@@ -76,7 +76,8 @@ describe("Poller", () => {
         </Workflow>
       );
     });
-    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+    const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+    const result = await resumeUntilSettled(workflow, first);
     expect(result.status).toBe("finished");
     expect(calls).toBe(3);
     const checkRows = db

@@ -39,8 +39,8 @@ const CHROMIUM = resolveChromium();
 const browserTest = CHROMIUM ? test : test.skip;
 
 const APPROVAL_WORKFLOW = `
-/** @jsxImportSource smithers-orchestrator */
-import { Approval, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Approval, createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, smithers, outputs } = createSmithers({

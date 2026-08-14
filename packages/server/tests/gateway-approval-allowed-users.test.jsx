@@ -1,12 +1,12 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { WebSocket } from "ws";
-import { createSmithers, approvalDecisionSchema } from "smithers-orchestrator";
+import { createSmithers, approvalDecisionSchema } from "smthrs";
 import { Gateway } from "../src/gateway.js";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { sleep } from "../../smithers/tests/helpers.js";
 /**
  * @param {Server} server

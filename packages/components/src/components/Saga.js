@@ -4,7 +4,7 @@
 // @smithers-type-exports-end
 
 import React from "react";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { forceContinueOnFail } from "./control-flow-utils.js";
 /** @typedef {import("./SagaStepProps.ts").SagaStepProps} SagaStepProps */
 

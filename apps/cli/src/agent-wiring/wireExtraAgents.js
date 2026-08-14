@@ -35,7 +35,7 @@ function detectRunner() {
  * @param {"mcp" | "skills"} opts.kind Which install ran.
  * @param {string} [opts.name] MCP server name (default `"smithers"`).
  * @param {string} [opts.command] MCP launch executable (default: the detected runner — `npx`/`pnpx`/`bunx` — matching what incur registers for other agents).
- * @param {string[]} [opts.args] MCP launch args (default `["smithers-orchestrator", "--mcp"]`).
+ * @param {string[]} [opts.args] MCP launch args (default `["smthrs", "--mcp"]`).
  * @param {boolean} [opts.global] Install globally (default `true`).
  * @param {string} [opts.cwd] Working directory for project-scoped installs.
  * @param {string[]} [opts.agents] Optional `--agent` filter; when set, only these ids are wired.
@@ -46,7 +46,7 @@ export function wireExtraAgents({
   kind,
   name = "smithers",
   command = detectRunner(),
-  args = ["smithers-orchestrator", "--mcp"],
+  args = ["smthrs", "--mcp"],
   global = true,
   cwd = process.cwd(),
   agents,

@@ -4,7 +4,7 @@
 // `plue workspace create` boots a real Microsandbox VM (via plue's control
 // plane), we SSH in, bootstrap bun + the claude/codex CLIs, ship a
 // self-contained mini-project (the child workflow's source + agents.ts +
-// input.json), run it with `bunx --bun smithers-orchestrator up`, and map the
+// input.json), run it with `bunx --bun smthrs up`, and map the
 // remote run's result back into the inline SandboxProviderResult shape.
 //
 // No side effects at import time: nothing here shells out or touches the
@@ -12,7 +12,7 @@
 // import-only tooling work on machines without a `plue` binary on PATH.
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import type { SandboxProvider, SandboxProviderRequest, SandboxProviderResult } from "smithers-orchestrator/sandbox";
+import type { SandboxProvider, SandboxProviderRequest, SandboxProviderResult } from "smthrs/sandbox";
 
 export type PlueSandboxProviderOptions = {
   /** Path to the plue CLI binary. Defaults to env PLUE_BIN or "plue". */
@@ -23,7 +23,7 @@ export type PlueSandboxProviderOptions = {
   workspaceName?: string;
   /** Keep the workspace alive after the run instead of deleting it. */
   keepWorkspace?: boolean;
-  /** smithers-orchestrator version installed on the remote VM. */
+  /** smthrs version installed on the remote VM. */
   orchestratorVersion?: string;
   /** Install bun/claude/codex CLIs on the remote VM if missing. */
   bootstrapAgents?: boolean;
@@ -165,11 +165,11 @@ export function buildRemoteProjectFiles(args: {
     private: true,
     type: "module",
     dependencies: {
-      "smithers-orchestrator": orchestratorVersion,
+      smthrs: orchestratorVersion,
       zod: "^4",
     },
   };
-  const agentsTs = `import { ClaudeCodeAgent, CodexAgent } from "smithers-orchestrator";
+  const agentsTs = `import { ClaudeCodeAgent, CodexAgent } from "smthrs";
 
 export const claude = new ClaudeCodeAgent({});
 export const codex = new CodexAgent({ skipGitRepoCheck: true });
@@ -323,7 +323,7 @@ function buildUnpackScript(remoteDir: string, archiveB64: string): string {
 // Exported so a unit test can assert it tracks the repo's root package.json
 // version — the release bump/publish flow edits package.json, not this literal,
 // so without the gate a bump would leave the remote VM on a stale orchestrator.
-export const DEFAULT_ORCHESTRATOR_VERSION = "0.32.0";
+export const DEFAULT_ORCHESTRATOR_VERSION = "0.34.0";
 const DEFAULT_POLL_INTERVAL_MS = 5_000;
 const DEFAULT_BOOT_TIMEOUT_MS = 6 * 60_000;
 const REMOTE_DIR = "/home/developer/smithers-plue-run";
@@ -537,7 +537,7 @@ export function createPlueSandboxProvider(options: PlueSandboxProviderOptions): 
           // immediately and the inspect races an unfinished run (→ null runId).
           const { stdout, stderr } = await runSsh(
             target,
-            `${REMOTE_AUTH_PREFIX}cd ${REMOTE_DIR} && set -a && . ${envPath} && set +a && bunx --bun smithers-orchestrator@${orchestratorVersion} up ${input.scriptName} --input "$(cat input.json)"`,
+            `${REMOTE_AUTH_PREFIX}cd ${REMOTE_DIR} && set -a && . ${envPath} && set +a && bunx --bun smthrs@${orchestratorVersion} up ${input.scriptName} --input "$(cat input.json)"`,
             { timeout: request.toolTimeoutMs || 25 * 60_000 },
           );
           upStdout = `${stdout}\n${stderr}`;
@@ -564,7 +564,7 @@ export function createPlueSandboxProvider(options: PlueSandboxProviderOptions): 
 
         const { stdout: inspectStdout } = await runSsh(
           target,
-          `${REMOTE_AUTH_PREFIX}cd ${REMOTE_DIR} && bunx --bun smithers-orchestrator@${orchestratorVersion} inspect ${remoteRunId ?? ""} --format json`,
+          `${REMOTE_AUTH_PREFIX}cd ${REMOTE_DIR} && bunx --bun smthrs@${orchestratorVersion} inspect ${remoteRunId ?? ""} --format json`,
           { timeout: 60_000 },
         ).catch((error) => ({ stdout: "", stderr: (error as Error).message }));
 

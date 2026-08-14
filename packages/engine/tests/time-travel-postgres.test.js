@@ -17,16 +17,11 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import React from "react";
 import { Context, Effect, Schema } from "effect";
-import { Workflow } from "@smithers-orchestrator/components/components/index";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import {
-  captureSnapshot,
-  listSnapshots,
-  loadSnapshot,
-  parseSnapshot,
-} from "@smithers-orchestrator/time-travel/snapshot";
-import { replayFromCheckpoint } from "@smithers-orchestrator/time-travel/replay";
-import { forkRunEffect, listBranchesEffect } from "@smithers-orchestrator/time-travel/fork";
+import { Workflow } from "@smthrs/components/components/index";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { captureSnapshot, listSnapshots, loadSnapshot, parseSnapshot } from "@smthrs/time-travel/snapshot";
+import { replayFromCheckpoint } from "@smthrs/time-travel/replay";
+import { forkRunEffect, listBranchesEffect } from "@smthrs/time-travel/fork";
 import { runWorkflow } from "../src/engine.js";
 import { Smithers, __builderInternals as I } from "../src/effect/builder.js";
 

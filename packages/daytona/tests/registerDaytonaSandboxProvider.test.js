@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolveSandboxProvider } from "@smithers-orchestrator/sandbox";
+import { resolveSandboxProvider } from "@smthrs/sandbox";
 import { DAYTONA_SANDBOX_PROVIDER_ID } from "../src/DAYTONA_SANDBOX_PROVIDER_ID.js";
 import { createMockDaytonaSandboxEnvironment } from "../src/createMockDaytonaSandboxEnvironment.js";
 import { registerDaytonaSandboxProvider } from "../src/registerDaytonaSandboxProvider.js";

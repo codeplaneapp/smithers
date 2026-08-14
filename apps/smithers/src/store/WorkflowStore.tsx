@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactElement } from "react";
-import { useGatewayWorkflows } from "@smithers-orchestrator/gateway-react";
+import { useGatewayWorkflows } from "@smthrs/gateway-react";
 import { openSurface } from "../app/navigation";
 import { APPS } from "../apps/appCatalog";
 import { openApp } from "../apps/openApp";

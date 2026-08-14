@@ -3,10 +3,10 @@
 // smithers-display-name: Implement Testing Framework E2E
 // smithers-description: Research, plan, implement, verify, and iterate on the testing framework until Sol and Fable approve the same tested diff.
 // smithers-tags: coding, testing, e2e, durability, review, consensus
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { execFileSync, spawn as spawnChild } from "node:child_process";
 import { createHash } from "node:crypto";
-import { ClaudeCodeAgent, CodexAgent, type AgentLike, createSmithers, UI } from "smithers-orchestrator";
+import { ClaudeCodeAgent, CodexAgent, type AgentLike, createSmithers, UI } from "smthrs";
 import { z } from "zod/v4";
 import ConsensusFableReviewPrompt from "../prompts/implement-testing-framework-e2e-consensus-fable-review.mdx";
 import ConsensusImprovementPrompt from "../prompts/implement-testing-framework-e2e-consensus-improvement.mdx";

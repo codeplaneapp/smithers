@@ -1,7 +1,4 @@
-import {
-  defineTool as defineSharedTool,
-  getDefinedToolMetadata as getSharedToolMetadata,
-} from "@smithers-orchestrator/tool-context";
+import { defineTool as defineSharedTool, getDefinedToolMetadata as getSharedToolMetadata } from "@smthrs/tool-context";
 
 export function getDefinedToolMetadata(value) {
   return getSharedToolMetadata(value);

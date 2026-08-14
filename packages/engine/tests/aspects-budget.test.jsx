@@ -1,8 +1,8 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { Approval, Aspects, Sequence, Task, Workflow, runWorkflow } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { Approval, Aspects, Sequence, Task, Workflow, runWorkflow } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { approveNode } from "../src/approvals.js";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { z } from "zod";

@@ -1,4 +1,4 @@
-import { SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
+import { SmithersGatewayClient } from "@smthrs/gateway-client";
 
 /**
  * The app's single gateway client.

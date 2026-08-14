@@ -47,7 +47,7 @@ If a workflow writes verdict files like `artifacts/.../verify.json` and reads th
 Tasks retry, and a retried tool call can fire twice: declare `sideEffect: true` on a custom tool and pass `ctx.idempotencyKey` through to the downstream system so a retry is a no-op, not a second charge. The key stays stable across retries and resumes for the same task iteration.
 
 ```ts
-import { defineTool } from "smithers-orchestrator";
+import { defineTool } from "smthrs";
 import { z } from "zod";
 
 const placeOrder = defineTool({

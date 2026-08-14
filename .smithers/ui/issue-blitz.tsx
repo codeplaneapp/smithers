@@ -1,12 +1,7 @@
 /** @jsxImportSource react */
 import { useMemo, useState } from "react";
-import {
-  createGatewayReactRoot,
-  useGatewayActions,
-  useGatewayRun,
-  useGatewayRunEvents,
-} from "smithers-orchestrator/gateway-react";
-import { NodeOutputView, RunEventLog, RunTree, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
+import { createGatewayReactRoot, useGatewayActions, useGatewayRun, useGatewayRunEvents } from "smthrs/gateway-react";
+import { NodeOutputView, RunEventLog, RunTree, WorkflowUiShell } from "smthrs/gateway-ui";
 import {
   Badge,
   Button,
@@ -32,7 +27,7 @@ import {
   isTerminalRunStatus,
   normalizeStatus,
   statusClass,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 import { buildIssueBlitzNodeState, type IssueBlitzNodeStatus as NodeStatus } from "../lib/buildIssueBlitzNodeState";
 
 const ITEMS: Array<{ key: string; kind: "hard" | "quick"; issues: number[]; title: string }> = [

@@ -5,11 +5,11 @@
  *
  * Shape: source docs/user input → extractor → missing-field loop → form/API tool.
  */
-import { Sequence, Loop } from "smithers-orchestrator";
+import { Sequence, Loop } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, write, bash, grep } from "smithers-orchestrator/tools";
+import { read, write, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import ExtractPrompt from "./prompts/form-filler-assistant/extract.mdx";
 import AskMissingPrompt from "./prompts/form-filler-assistant/ask-missing.mdx";

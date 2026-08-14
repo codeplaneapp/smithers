@@ -1,4 +1,4 @@
-import type { SandboxProviderRequest } from "@smithers-orchestrator/sandbox";
+import type { SandboxProviderRequest } from "@smthrs/sandbox";
 
 export type MicrosandboxExecOptionsBuilderLike = {
   args(args: string[]): MicrosandboxExecOptionsBuilderLike;

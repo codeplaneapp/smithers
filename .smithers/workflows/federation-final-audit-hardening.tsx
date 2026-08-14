@@ -3,8 +3,8 @@
 // smithers-display-name: Federation Final Audit Hardening
 // smithers-description: Repair the exact residual boundaries found by the final independent Luna audit.
 // smithers-tags: maintenance, federation, architecture
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 

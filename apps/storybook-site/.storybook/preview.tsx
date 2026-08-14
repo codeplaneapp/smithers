@@ -1,5 +1,5 @@
 import type { Decorator, Preview } from "@storybook/react-vite";
-import { SmithersUiStyles, tokens } from "@smithers-orchestrator/ui";
+import { SmithersUiStyles, tokens } from "@smthrs/ui";
 
 const withSmithersTheme: Decorator = (Story, context) => {
   const theme = String(context.globals.theme ?? "light");

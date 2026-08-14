@@ -3,7 +3,7 @@ import * as React from 'react';
 import { z } from 'zod';
 import '../TelegramClientTypes.js';
 import 'effect';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 
 /**
  * Send a Telegram message as a durable compute Task: chunks at 4096 chars on

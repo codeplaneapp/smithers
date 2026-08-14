@@ -6,11 +6,11 @@
  * phased rollouts, tutorial progression.
  */
 // @ts-nocheck
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, write, edit, bash, grep } from "smithers-orchestrator/tools";
+import { read, write, edit, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import ImplementPrompt from "./prompts/milestone/implement.mdx";
 import ValidatePrompt from "./prompts/milestone/validate.mdx";

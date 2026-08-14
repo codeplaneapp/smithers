@@ -1,5 +1,5 @@
 /**
- * @smithers-orchestrator/ui
+ * @smthrs/ui
  *
  * Shared component library for Smithers UIs: shadcn component anatomy (slots,
  * CVA variant APIs, asChild, data-slot attributes) and Radix behavior, styled
@@ -15,8 +15,8 @@
  *
  * @example
  * ```tsx
- * import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";
- * import { Button, Card, CardHeader, CardTitle, SmithersUiStyles, StatusPill } from "smithers-orchestrator/ui";
+ * import { createGatewayReactRoot } from "smthrs/gateway-react";
+ * import { Button, Card, CardHeader, CardTitle, SmithersUiStyles, StatusPill } from "smthrs/ui";
  *
  * function App() {
  *   return (
@@ -39,6 +39,8 @@
 export { cn } from "./cn";
 export { tokens, type SmithersUiTokens } from "./tokens";
 export { resolveTheme, subscribeTheme, type ResolvedTheme } from "./internal/resolveTheme";
+export { resolvePalette, subscribePalette, type ResolvedPalette } from "./internal/resolvePalette";
+export { useResolvedPalette } from "./internal/useResolvedPalette";
 export {
   normalizeStatus,
   statusClass,
@@ -348,6 +350,7 @@ export {
   AgentTaskTrigger,
   AgentTaskContent,
   AgentTaskGroup,
+  type AgentTaskContentProps,
   type AgentTaskProps,
 } from "./agentic/AgentTask";
 export {

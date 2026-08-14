@@ -1,4 +1,4 @@
-# @smithers-orchestrator/vercel — src
+# @smthrs/vercel — src
 
 A Smithers `SandboxProvider` backed by the [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox)
 SDK. It runs a workflow's sandbox request on Vercel Sandbox compute: ships
@@ -7,7 +7,7 @@ command, and reads the result JSON from stdout or
 `.smithers/sandbox-result.json`.
 
 Built on top of `createCommandSandboxProvider` from
-`@smithers-orchestrator/sandbox`, so request shipping, egress, result parsing,
+`@smthrs/sandbox`, so request shipping, egress, result parsing,
 secret scrubbing, and cleanup are handled uniformly; this package only supplies
 the Vercel `createSession` seam.
 
@@ -34,7 +34,7 @@ Missing auth throws `INVALID_INPUT` before the SDK is touched.
 ## Usage
 
 ```jsx
-import { registerVercelSandboxProvider } from "@smithers-orchestrator/vercel";
+import { registerVercelSandboxProvider } from "@smthrs/vercel";
 
 const unregister = registerVercelSandboxProvider({
 	runtime: "node24",

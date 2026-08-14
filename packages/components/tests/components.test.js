@@ -14,6 +14,7 @@ import {
   DecisionTable,
   DriftDetector,
   EscalationChain,
+  ForkFanOut,
   GatherAndSynthesize,
   HumanTask,
   Kanban,
@@ -42,8 +43,8 @@ import {
   Workflow,
   Worktree,
 } from "../src/components/index.js";
-import { Sidecar as FacadeSidecar } from "smithers-orchestrator";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler";
+import { Sidecar as FacadeSidecar } from "smthrs";
+import { SmithersRenderer } from "@smthrs/react-reconciler";
 /**
  * @param {HostNode | null} root
  * @returns {WorkflowGraph}
@@ -87,6 +88,7 @@ describe("components", () => {
       DecisionTable,
       DriftDetector,
       EscalationChain,
+      ForkFanOut,
       GatherAndSynthesize,
       HumanTask,
       Kanban,
@@ -191,7 +193,7 @@ describe("components", () => {
     expect(tags).not.toContain("smithers:parallel");
     expect(tags).toContain("smithers:timer");
   });
-  it("passes task props through to @smithers-orchestrator/graph extraction", async () => {
+  it("passes task props through to @smthrs/graph extraction", async () => {
     const outputSchema = z.object({ value: z.number() });
     const primary = { generate: async () => ({ value: 1 }) };
     const fallback = { generate: async () => ({ value: 2 }) };

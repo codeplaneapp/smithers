@@ -1,10 +1,10 @@
-import { defineTool } from "@smithers-orchestrator/tool-context";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { logWarning } from "@smithers-orchestrator/observability/logging";
+import { defineTool } from "@smthrs/tool-context";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { logWarning } from "@smthrs/observability/logging";
 import { z } from "zod";
 
-/** @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
-/** @typedef {import("@smithers-orchestrator/driver/MemoryRuntimeService").MemoryRuntimeTagGroup} MemoryRuntimeTagGroup */
+/** @typedef {import("@smthrs/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("@smthrs/driver/MemoryRuntimeService").MemoryRuntimeTagGroup} MemoryRuntimeTagGroup */
 
 const MEMORY_CONTEXT_OPEN = "<smithers_memory_context>";
 const MEMORY_CONTEXT_CLOSE = "</smithers_memory_context>";
@@ -285,7 +285,7 @@ function capMemoryToolResult(results, maxTokens) {
 /**
  * Fetch one frozen memory snapshot for an attempt series. Reads are advisory:
  * every error and timeout degrades to no block and a warning.
- * @param {import("@smithers-orchestrator/driver/MemoryRuntimeService").MemoryRuntimeService | undefined} service
+ * @param {import("@smthrs/driver/MemoryRuntimeService").MemoryRuntimeService | undefined} service
  * @param {TaskDescriptor["memoryConfig"]} config
  * @param {string} prompt
  * @param {{ runId: string; nodeId: string; iteration: number; taskSignal?: AbortSignal }} context
@@ -356,7 +356,7 @@ export async function buildMemoryPromptBlock(service, config, prompt, context) {
 }
 
 /**
- * @param {import("@smithers-orchestrator/driver/MemoryRuntimeService").MemoryRuntimeService} service
+ * @param {import("@smthrs/driver/MemoryRuntimeService").MemoryRuntimeService} service
  * @param {TaskDescriptor["memoryConfig"]} config
  * @param {{ runId: string; nodeId: string; iteration: number; taskSignal: AbortSignal }} context
  */
@@ -460,7 +460,7 @@ function taskMemoryDigest(payload, desc) {
 }
 
 /**
- * @param {import("@smithers-orchestrator/driver/MemoryRuntimeService").MemoryRuntimeService | undefined} service
+ * @param {import("@smthrs/driver/MemoryRuntimeService").MemoryRuntimeService | undefined} service
  * @param {TaskDescriptor} desc
  * @param {unknown} payload
  * @param {{ runId: string }} context

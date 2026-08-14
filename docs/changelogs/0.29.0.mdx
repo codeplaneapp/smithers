@@ -17,9 +17,9 @@ commits, 4 refactors, 22 test commits, and 47 docs commits.
 ## Upgrading
 
 ```bash
-bunx smithers-orchestrator update        # upgrade the CLI
-bunx smithers-orchestrator upgrade       # agent-assisted: reads the changelogs and applies what your project needs
-bunx smithers-orchestrator packs update  # refresh installed workflow packs
+bunx smthrs update        # upgrade the CLI
+bunx smthrs upgrade       # agent-assisted: reads the changelogs and applies what your project needs
+bunx smthrs packs update  # refresh installed workflow packs
 ```
 
 Behavior changes are collected in the [upgrade notes](#upgrade-notes) at the
@@ -98,7 +98,7 @@ See the [Memory component docs](/components/memory) and the
 
 ## XState as durable derived state
 
-`smithers-orchestrator/xstate` adds an optional XState v5 integration for
+`smthrs/xstate` adds an optional XState v5 integration for
 workflows whose control flow has outgrown a set of hand-written conditionals.
 It does not persist an actor or introduce a second scheduler. Instead,
 `useSmithersMachine` folds a machine over the output, approval, timeout, and
@@ -142,10 +142,10 @@ contract, re-entry rules, time-travel semantics, and performance bounds.
 
 If you have built a custom workflow UI, you have probably rebuilt a
 terminal, a diff view, or a markdown renderer more than once. 0.29.0 ships a
-shared component library across `smithers-orchestrator/ui` and
-`smithers-orchestrator/gateway-ui` so you do not have to.
+shared component library across `smthrs/ui` and
+`smthrs/gateway-ui` so you do not have to.
 
-From `smithers-orchestrator/ui` directly:
+From `smthrs/ui` directly:
 
 - A dependency-free **Markdown** renderer that renders through React
   children, never `innerHTML`, so it is XSS-safe by construction. Links with
@@ -158,24 +158,24 @@ From `smithers-orchestrator/ui` directly:
 The three adapters carry heavy dependencies, so they ship as their own
 subpaths rather than from the `ui` barrel. Import each from its own path:
 
-- **Terminal** over xterm.js, from `smithers-orchestrator/ui/adapters/terminal`.
+- **Terminal** over xterm.js, from `smthrs/ui/adapters/terminal`.
 - **MarkdownEditor** over Milkdown Crepe, from
-  `smithers-orchestrator/ui/adapters/markdown-editor`.
+  `smthrs/ui/adapters/markdown-editor`.
 - **PierreDiffView** over `@pierre/diffs`, from
-  `smithers-orchestrator/ui/adapters/pierre-diff-view`.
+  `smthrs/ui/adapters/pierre-diff-view`.
 
-From `smithers-orchestrator/gateway-ui`: a ReactFlow and dagre powered
+From `smthrs/gateway-ui`: a ReactFlow and dagre powered
 **WorkflowGraph** DAG canvas, and a run-aware **NodeOutputCard**.
 
 ```tsx
 // dependency-free, safe from the barrel
-import { Markdown, DiffHunks, FileTree, CollapsiblePanel, StageStrip } from "smithers-orchestrator/ui";
+import { Markdown, DiffHunks, FileTree, CollapsiblePanel, StageStrip } from "smthrs/ui";
 // run-aware gateway components
-import { WorkflowGraph, NodeOutputCard } from "smithers-orchestrator/gateway-ui";
+import { WorkflowGraph, NodeOutputCard } from "smthrs/gateway-ui";
 // heavy adapters: one subpath each, never the barrel
-import { Terminal } from "smithers-orchestrator/ui/adapters/terminal";
-import { MarkdownEditor } from "smithers-orchestrator/ui/adapters/markdown-editor";
-import { PierreDiffView } from "smithers-orchestrator/ui/adapters/pierre-diff-view";
+import { Terminal } from "smthrs/ui/adapters/terminal";
+import { MarkdownEditor } from "smthrs/ui/adapters/markdown-editor";
+import { PierreDiffView } from "smthrs/ui/adapters/pierre-diff-view";
 ```
 
 See the [UI component library reference](/reference/ui) for the full
@@ -201,8 +201,8 @@ back the same way. No daemon or hosted sandbox service is required.
 </Frame>
 
 ```tsx
-import { Sandbox } from "smithers-orchestrator";
-import { createMicrosandboxSandboxProvider } from "smithers-orchestrator/microsandbox";
+import { Sandbox } from "smthrs";
+import { createMicrosandboxSandboxProvider } from "smthrs/microsandbox";
 
 const provider = createMicrosandboxSandboxProvider({
   image: "oven/bun:1",
@@ -336,7 +336,7 @@ per-run 64). Alongside those:
   and total-size-capped cleanup, instead of accumulating indefinitely in the
   workflow source directory. One workspace had 711 immortal log files
   totaling 1.4 GB before this fix.
-- `bunx smithers-orchestrator ui` no longer silently opens a different workflow's UI when a
+- `bunx smthrs ui` no longer silently opens a different workflow's UI when a
   long-lived gateway's registry predates a newly authored workflow: the
   gateway now rescans on a registry miss, and the CLI fails loud with an
   actionable error instead of guessing.
@@ -346,7 +346,7 @@ per-run 64). Alongside those:
 - The db package now probes output tables via `sqlite_master` on
   sqlite-dialect external backends, fixing a table-detection bug.
 - A new [Workflow testing framework guide](/guides/testing-workflows)
-  documents the expanded `@smithers-orchestrator/testing` suites:
+  documents the expanded `@smthrs/testing` suites:
   cutpoint-conformance, replay-identity, and artifact-parity.
 - A new example workflow, "Daily CEO Intel" (branded in its own docs as "The
   Smithers Signal"), demonstrates a durable daily-intelligence-brief
@@ -394,4 +394,4 @@ The complete commit-level history for this release is in
 [CHANGELOG.md](https://github.com/smithersai/smithers/blob/main/CHANGELOG.md)
 on GitHub.
 
-Found a bug? Run `bunx smithers-orchestrator bug` to file it.
+Found a bug? Run `bunx smthrs bug` to file it.

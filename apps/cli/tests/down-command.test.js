@@ -4,11 +4,26 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { createTempRepo, pinSqliteBackend, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
 
 const CLI_ENTRY = resolve(import.meta.dir, "../src/index.js");
+
+// Sibling test files set SMITHERS_CLI_DISABLE_AUTO_MAIN=1 on the shared
+// process.env and never restore it; bun runs all files in one process, so a
+// spawned `logs` CLI would no-op. Strip it for our spawned children.
+function logsChildEnv(extra = {}) {
+  const env = {
+    ...process.env,
+    SMITHERS_NO_SKILL_REFRESH: "1",
+    SMITHERS_NO_UPDATE_CHECK: "1",
+    ...extra,
+  };
+  delete env.SMITHERS_CLI_DISABLE_AUTO_MAIN;
+  return env;
+}
+
 const CLI_COMMAND_TIMEOUT_MS = 120_000;
 const STALE_LOG_EXIT_TIMEOUT_MS = 5_000;
 const FRESH_HEARTBEAT_LEEWAY_MS = 120_000;
@@ -447,11 +462,10 @@ describe("smithers logs --follow waiting-state CTA", () => {
           cwd: repo.dir,
           stdout: "pipe",
           stderr: "pipe",
-          env: {
-            ...process.env,
-            SMITHERS_NO_SKILL_REFRESH: "1",
-            SMITHERS_NO_UPDATE_CHECK: "1",
-          },
+          // logs now follows only on a TTY; force the follow default in this
+          // non-TTY harness so the stale-during-follow branch under test is
+          // actually exercised.
+          env: logsChildEnv({ SMITHERS_LOGS_ASSUME_TTY: "1" }),
         });
         const stdoutPromise = new Response(proc.stdout).text();
         const stderrPromise = new Response(proc.stderr).text();
@@ -512,11 +526,7 @@ describe("smithers logs --follow waiting-state CTA", () => {
           cwd: repo.dir,
           stdout: "pipe",
           stderr: "pipe",
-          env: {
-            ...process.env,
-            SMITHERS_NO_SKILL_REFRESH: "1",
-            SMITHERS_NO_UPDATE_CHECK: "1",
-          },
+          env: logsChildEnv(),
         });
 
         // Read stdout incrementally. Only once the marker line appears (the

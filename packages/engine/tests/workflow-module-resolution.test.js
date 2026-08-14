@@ -60,20 +60,20 @@ test("preloaded React remains require-compatible after workflow aliases install"
 test("workflow imports use the engine React and Smithers modules over pack-local copies", async () => {
   installWorkflowModuleResolution();
   const packNodeModules = join(fixtureRoot, "pack", "node_modules");
-  mkdirSync(join(packNodeModules, "@smithers-orchestrator"), { recursive: true });
+  mkdirSync(join(packNodeModules, "@smthrs"), { recursive: true });
   copyPackage("react", join(packNodeModules, "react"));
   symlinkSync(dirname(require.resolve("zod/package.json")), join(packNodeModules, "zod"));
-  copyPackage("@smithers-orchestrator/components", join(packNodeModules, "@smithers-orchestrator", "components"));
-  copyPackage("smithers-orchestrator", join(packNodeModules, "smithers-orchestrator"));
+  copyPackage("@smthrs/components", join(packNodeModules, "@smthrs", "components"));
+  copyPackage("smthrs", join(packNodeModules, "smthrs"));
 
   const workflowPath = join(fixtureRoot, "pack", "workflow.jsx");
   writeFileSync(
     workflowPath,
     [
-      "/** @jsxImportSource smithers-orchestrator */",
+      "/** @jsxImportSource smthrs */",
       'import React from "react";',
-      'import { Task } from "@smithers-orchestrator/components";',
-      'import { createSmithers, Workflow } from "smithers-orchestrator";',
+      'import { Task } from "@smthrs/components";',
+      'import { createSmithers, Workflow } from "smthrs";',
       'import { z } from "zod";',
       "const { smithers, outputs } = createSmithers({ result: z.object({ ok: z.boolean() }) });",
       'export default smithers(() => <Workflow name="pack-local-react"><Task id="done" output={outputs.result}>{{ ok: true }}</Task></Workflow>);',
@@ -87,11 +87,10 @@ test("workflow imports use the engine React and Smithers modules over pack-local
     pathToFileURL(join(dirname(require.resolve("react/package.json")), "index.js")).href
   );
   const engineComponents = await import(
-    pathToFileURL(join(dirname(require.resolve("@smithers-orchestrator/components/package.json")), "src", "index.js"))
-      .href
+    pathToFileURL(join(dirname(require.resolve("@smthrs/components/package.json")), "src", "index.js")).href
   );
   const engineSmithers = await import(
-    pathToFileURL(join(dirname(require.resolve("smithers-orchestrator/package.json")), "src", "index.js")).href
+    pathToFileURL(join(dirname(require.resolve("smthrs/package.json")), "src", "index.js")).href
   );
 
   expect(packWorkflow.React).toBe(engineReact.default);

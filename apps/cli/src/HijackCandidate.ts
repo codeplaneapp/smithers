@@ -1,3 +1,11 @@
+export type HijackCandidateConfig = {
+  model?: string;
+  yolo?: boolean;
+  permissionMode?: string;
+  dangerouslySkipPermissions?: boolean;
+  configDir?: string;
+};
+
 export type HijackCandidate = {
   runId: string;
   nodeId: string;
@@ -9,4 +17,5 @@ export type HijackCandidate = {
   messages?: unknown[];
   accountLabel?: string;
   cwd: string;
+  config?: HijackCandidateConfig;
 };

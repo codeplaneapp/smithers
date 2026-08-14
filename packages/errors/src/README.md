@@ -1,4 +1,4 @@
-# @smithers-orchestrator/errors — src
+# @smthrs/errors — src
 
 The shared error vocabulary for smithers: `SmithersError` (a coded `Error` with
 `summary`/`docsUrl`/`details`), Effect `Data.TaggedError` classes for engine

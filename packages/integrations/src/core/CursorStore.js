@@ -4,7 +4,7 @@
 
 import { Effect } from "effect";
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 
 /**
  * CursorStore backed by the db adapter's `_smithers_integration_cursors`

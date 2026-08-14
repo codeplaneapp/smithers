@@ -28,7 +28,7 @@ flowchart LR
 ## Four layers
 
 ```ts
-import { createMemoryStore } from "smithers-orchestrator/memory";
+import { createMemoryStore } from "smthrs/memory";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 
@@ -133,7 +133,7 @@ Legacy `namespace`, object-form `recall`, `remember`, and `threadId` fields rema
 The `memory={{ recall, remember }}` legacy block is inert compatibility metadata. Get, set, or delete an exact fact from a compute `<Task>` by building a store with `createMemoryStore(db)` and calling it directly: the compute callback receives `deps` only, so there is no injected store.
 
 ```tsx
-import { createMemoryStore } from "smithers-orchestrator/memory";
+import { createMemoryStore } from "smthrs/memory";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 
@@ -210,7 +210,7 @@ for the full recall → triage → bank → distill → ratify loop.
 Maintenance jobs you run periodically:
 
 ```ts
-import { TtlGarbageCollector, TokenLimiter, Summarizer } from "smithers-orchestrator/memory";
+import { TtlGarbageCollector, TokenLimiter, Summarizer } from "smthrs/memory";
 
 const gc         = TtlGarbageCollector();   // expire facts past their TTL
 const limiter    = TokenLimiter(4000);      // keep history under token budget
@@ -233,7 +233,7 @@ flowchart LR
 ## Inspect from the CLI
 
 ```bash
-bunx smithers-orchestrator memory list workflow:code-review -w workflow.tsx
+bunx smthrs memory list workflow:code-review -w workflow.tsx
 ```
 
 The CLI currently exposes fact listing. Use the store API for writes, deletes, threads, messages, and TTL cleanup.

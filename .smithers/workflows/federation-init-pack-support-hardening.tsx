@@ -3,8 +3,8 @@
 // smithers-display-name: Federation Init Pack Support Hardening
 // smithers-description: Complete exact split-time inventory for archived init-pack support and correct preload evidence.
 // smithers-tags: maintenance, federation, architecture
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 

@@ -1435,7 +1435,8 @@ export const GATEWAY_RPC_DEFINITIONS = [
     version: SMITHERS_API_VERSION,
     method: "getNodeDiff",
     title: "Get Node Diff",
-    description: "Fetch a node-level diff bundle for one iteration.",
+    description:
+      "Fetch a node-level diff bundle for one iteration. In-progress attempts return a live working-copy diff (`live: true`).",
     maturity: "stable",
     transport: "http+websocket",
     requiredScope: "run:read",
@@ -1460,7 +1461,7 @@ export const GATEWAY_RPC_DEFINITIONS = [
     method: "getRunDiff",
     title: "Get Run Diff",
     description:
-      "Fetch the final base-to-terminal DiffBundle for a run. An oversized result is returned as an explicit marker.",
+      "Fetch the base-to-terminal DiffBundle for a run. Non-terminal runs return a live working-copy diff (`live: true`). An oversized result is returned as an explicit marker.",
     maturity: "stable",
     transport: "http+websocket",
     requiredScope: "run:read",
@@ -1485,9 +1486,13 @@ export const GATEWAY_RPC_DEFINITIONS = [
               },
               "Changed files.",
             ),
+            live: {
+              type: "boolean",
+              description: "True when computed from the live working copy of a non-terminal run.",
+            },
           },
           ["seq", "baseRef", "patches"],
-          "Final run DiffBundle.",
+          "Run DiffBundle (final, or live for a non-terminal run).",
         ),
         objectSchema(
           {

@@ -1,4 +1,4 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { buildCurrentScopes } from "./buildCurrentScopes.js";
 import { filterRowsByNodeId } from "./filterRowsByNodeId.js";
 import { normalizeInputRow } from "./normalizeInputRow.js";
@@ -10,7 +10,7 @@ const OUTPUT_PROVENANCE_SEQ = "__smithersProvenanceSeq";
 /** @typedef {import("./SafeParser.ts").SafeParser} SafeParser */
 /** @typedef {import("./SmithersCtxOptions.ts").SmithersCtxOptions} SmithersCtxOptions */
 /** @typedef {import("./RunAuthContext.ts").RunAuthContext} RunAuthContext */
-/** @typedef {import("@smithers-orchestrator/graph/ProofBinding").ProofBinding} ProofBinding */
+/** @typedef {import("@smthrs/graph/ProofBinding").ProofBinding} ProofBinding */
 /** @typedef {import("./SmithersRuntimeConfig.ts").SmithersRuntimeConfig} SmithersRuntimeConfig */
 /** @typedef {unknown} TableRef */
 /** @typedef {Record<string, unknown>} OutputRow User-visible output row — harness metadata fields (runId, nodeId, iteration) are stripped. */
@@ -29,10 +29,10 @@ const OUTPUT_PROVENANCE_SEQ = "__smithersProvenanceSeq";
 
 /**
  * Strip harness metadata columns (runId/nodeId/iteration) from an output row
- * before handing it to user code. Mirrors `@smithers-orchestrator/db/output`'s
+ * before handing it to user code. Mirrors `@smthrs/db/output`'s
  * `stripAutoColumns` exactly (array values pass through unchanged; only plain
  * objects get the three keys omitted) — duplicated locally, rather than
- * imported, because `@smithers-orchestrator/db` pulls in sqlite/postgres
+ * imported, because `@smthrs/db` pulls in sqlite/postgres
  * modules this portable driver core must stay free of.
  * @param {unknown} row
  * @returns {unknown}
@@ -134,9 +134,19 @@ export class SmithersCtx {
     this._taskStates = opts.taskStates;
     this._taskIterations = opts.taskIterations;
     /**
-     * @param {string} table
+     * Callable form of `ctx.outputs`. Accepts either the string table name or
+     * the output target ref (`outputs.probe`) that every other accessor on
+     * this class already takes. Before, the raw argument indexed the snapshot
+     * directly, so a ref stringified to `"[object Object]"`, missed, and
+     * silently returned `[]` — indistinguishable from "no rows yet" (#1486).
+     * An argument that cannot be resolved to a table name now throws instead
+     * of answering with a plausible-looking empty array.
+     * @param {TableRef} table
      */
-    const outputsFn = (table) => opts.outputs[table] ?? [];
+    const outputsFn = (table) => {
+      const tableName = typeof table === "string" ? table : this.requireTableName(table);
+      return opts.outputs[tableName] ?? [];
+    };
     for (const [name, rows] of Object.entries(opts.outputs)) {
       outputsFn[name] = rows;
     }
@@ -475,6 +485,24 @@ export class SmithersCtx {
     const zodKey = this._zodToKeyName?.get(table);
     if (zodKey) return zodKey;
     return resolveDrizzleName(table) ?? String(table);
+  }
+  /**
+   * Like {@link resolveTableName}, but throws instead of degrading to
+   * `String(table)` when the argument maps to no declared output table. Used
+   * by the callable `ctx.outputs(...)` form, where a silent `[]` is
+   * indistinguishable from "the upstream has not produced rows yet".
+   * @param {TableRef} table
+   * @returns {string}
+   */
+  requireTableName(table) {
+    const zodKey = this._zodToKeyName?.get(table);
+    if (zodKey) return zodKey;
+    const drizzleName = resolveDrizzleName(table);
+    if (drizzleName) return drizzleName;
+    throw new SmithersError(
+      "OUTPUT_TABLE_UNRESOLVABLE",
+      `ctx.outputs(...) received an argument that does not resolve to a declared output table. Pass an output ref (outputs.myTable) or its string name.`,
+    );
   }
   /**
    * Record that a task with `deps` deferred this render because its

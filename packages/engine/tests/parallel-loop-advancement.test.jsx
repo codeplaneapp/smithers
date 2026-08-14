@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * Regression test for https://github.com/smithersai/smithers/issues/267
  *
@@ -8,7 +8,7 @@
  * so independent parallel loops starved behind unrelated pipelines.
  */
 import { describe, expect, test } from "bun:test";
-import { Loop, Parallel, Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { Loop, Parallel, Task, Workflow, runWorkflow } from "smthrs";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";

@@ -1,4 +1,4 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { AWS_SANDBOX_PROVIDER_ID } from "./AWS_SANDBOX_PROVIDER_ID.js";
 import { readCloudWatchLogs } from "./readCloudWatchLogs.js";
 import { resolveAwsSdkClient } from "./resolveAwsSdkClient.js";

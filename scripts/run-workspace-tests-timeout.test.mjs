@@ -5,6 +5,9 @@ import { spawn } from "node:child_process";
 import { describe, expect, test } from "bun:test";
 
 const runner = resolve(import.meta.dirname, "run-workspace-tests.mjs");
+const FIXTURE_TIMEOUT_MINUTES = "0.1";
+const FIXTURE_START_TIMEOUT_MS = 10_000;
+const RUNNER_EXIT_TIMEOUT_MS = 30_000;
 
 function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -80,81 +83,87 @@ async function waitForProcessExit(pid, timeoutMs) {
 }
 
 describe.skipIf(process.platform === "win32")("run-workspace-tests timeout", () => {
-  test("escalates to SIGKILL when a package test traps SIGTERM", async () => {
-    const root = mkdtempSync(join(tmpdir(), "smithers-workspace-tests-timeout-"));
-    const binDir = join(root, "bin");
-    const packageDir = join(root, "packages", "hung");
-    const pidFile = join(root, "hung.pid");
-    const termFile = join(root, "hung.sigterm");
-    let child;
-    let hungPid;
-    let runnerExited = false;
-    let hungExited = false;
+  test(
+    "escalates to SIGKILL when a package test traps SIGTERM",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "smithers-workspace-tests-timeout-"));
+      const binDir = join(root, "bin");
+      const packageDir = join(root, "packages", "hung");
+      const pidFile = join(root, "hung.pid");
+      const termFile = join(root, "hung.sigterm");
+      let child;
+      let hungPid;
+      let runnerExited = false;
+      let hungExited = false;
 
-    try {
-      mkdirSync(binDir, { recursive: true });
-      mkdirSync(packageDir, { recursive: true });
-      writeFileSync(join(root, "package.json"), JSON.stringify({ private: true, workspaces: ["packages/*"] }));
-      writeFileSync(
-        join(packageDir, "package.json"),
-        JSON.stringify({ name: "@fixture/hung", scripts: { test: "unused" } }),
-      );
-      const fakePnpm = join(binDir, "pnpm");
-      writeFileSync(
-        fakePnpm,
-        `#!/usr/bin/env node
+      try {
+        mkdirSync(binDir, { recursive: true });
+        mkdirSync(packageDir, { recursive: true });
+        writeFileSync(join(root, "package.json"), JSON.stringify({ private: true, workspaces: ["packages/*"] }));
+        writeFileSync(
+          join(packageDir, "package.json"),
+          JSON.stringify({ name: "@fixture/hung", scripts: { test: "unused" } }),
+        );
+        const fakePnpm = join(binDir, "pnpm");
+        writeFileSync(
+          fakePnpm,
+          `#!/usr/bin/env node
 const { writeFileSync } = require("node:fs");
 process.on("SIGTERM", () => writeFileSync(process.env.WORKSPACE_TEST_TERM_FILE, "received"));
 writeFileSync(process.env.WORKSPACE_TEST_PID_FILE, String(process.pid));
 setInterval(() => {}, 1_000);
 `,
-      );
-      chmodSync(fakePnpm, 0o755);
+        );
+        chmodSync(fakePnpm, 0o755);
 
-      child = spawn(process.execPath, [runner, "--timeout-minutes", "0.02"], {
-        cwd: root,
-        env: {
-          ...process.env,
-          PATH: `${binDir}${delimiter}${process.env.PATH}`,
-          WORKSPACE_TEST_PID_FILE: pidFile,
-          WORKSPACE_TEST_TERM_FILE: termFile,
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: true,
-      });
-      const resultPromise = waitForExit(child, 12_000);
-      const readyOrExit = await Promise.race([
-        waitForFile(pidFile, 2_000).then(() => ({ ready: true })),
-        resultPromise.then((result) => ({ result })),
-      ]);
-      if ("result" in readyOrExit) {
-        runnerExited = true;
-        throw new Error(`Workspace test runner exited before starting its test command: ${readyOrExit.result.stderr}`);
-      }
-      hungPid = Number(readFileSync(pidFile, "utf8"));
-
-      const result = await resultPromise;
-      runnerExited = true;
-      expect(result.code).toBe(1);
-      expect(result.signal).toBeNull();
-      expect(result.stderr).toContain("exceeded 0.02 minutes");
-      expect(result.stderr).toContain("did not exit after SIGTERM; sending SIGKILL");
-      expect(result.stdout).toContain("timed out");
-      expect(result.stdout).toContain("packages/hung");
-      expect(existsSync(termFile)).toBe(true);
-      await waitForProcessExit(hungPid, 2_000);
-      hungExited = true;
-    } finally {
-      if (!runnerExited) {
-        forceKill(child?.pid);
-      }
-      if (!hungExited) {
-        if (hungPid === undefined && existsSync(pidFile)) {
-          hungPid = Number(readFileSync(pidFile, "utf8"));
+        child = spawn(process.execPath, [runner, "--timeout-minutes", FIXTURE_TIMEOUT_MINUTES], {
+          cwd: root,
+          env: {
+            ...process.env,
+            PATH: `${binDir}${delimiter}${process.env.PATH}`,
+            WORKSPACE_TEST_PID_FILE: pidFile,
+            WORKSPACE_TEST_TERM_FILE: termFile,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+          detached: true,
+        });
+        const resultPromise = waitForExit(child, RUNNER_EXIT_TIMEOUT_MS);
+        const readyOrExit = await Promise.race([
+          waitForFile(pidFile, FIXTURE_START_TIMEOUT_MS).then(() => ({ ready: true })),
+          resultPromise.then((result) => ({ result })),
+        ]);
+        if ("result" in readyOrExit) {
+          runnerExited = true;
+          throw new Error(
+            `Workspace test runner exited before starting its test command: ${readyOrExit.result.stderr}`,
+          );
         }
-        forceKill(hungPid);
+        hungPid = Number(readFileSync(pidFile, "utf8"));
+
+        const result = await resultPromise;
+        runnerExited = true;
+        expect(result.code).toBe(1);
+        expect(result.signal).toBeNull();
+        expect(result.stderr).toContain(`exceeded ${FIXTURE_TIMEOUT_MINUTES} minutes`);
+        expect(result.stderr).toContain("did not exit after SIGTERM; sending SIGKILL");
+        expect(result.stdout).toContain("timed out");
+        expect(result.stdout).toContain("packages/hung");
+        expect(existsSync(termFile)).toBe(true);
+        await waitForProcessExit(hungPid, 2_000);
+        hungExited = true;
+      } finally {
+        if (!runnerExited) {
+          forceKill(child?.pid);
+        }
+        if (!hungExited) {
+          if (hungPid === undefined && existsSync(pidFile)) {
+            hungPid = Number(readFileSync(pidFile, "utf8"));
+          }
+          forceKill(hungPid);
+        }
+        rmSync(root, { recursive: true, force: true });
       }
-      rmSync(root, { recursive: true, force: true });
-    }
-  }, 15_000);
+    },
+    RUNNER_EXIT_TIMEOUT_MS + 5_000,
+  );
 });

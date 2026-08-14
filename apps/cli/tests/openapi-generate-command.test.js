@@ -36,7 +36,7 @@ describe("smithers openapi generate", () => {
 
     const generated = readFileSync(repo.path("src/pet-tools.js"), "utf8");
     expect(generated).toContain('new URL("../openapi.json", import.meta.url)');
-    expect(generated).toContain('from "smithers-orchestrator/openapi"');
+    expect(generated).toContain('from "smthrs/openapi"');
     expect(generated).toContain("export const tools = createOpenApiToolsSync");
     expect(generated).toContain("export default tools;");
 

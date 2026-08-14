@@ -1,6 +1,6 @@
 // smithers-display-name: E2E Approval
-/** @jsxImportSource smithers-orchestrator */
-import { Approval, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Approval, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 
 // A static, no-agent workflow that suspends at a human approval gate. Launching

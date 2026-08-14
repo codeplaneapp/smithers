@@ -78,7 +78,7 @@ export function normalizeVerify(raw: unknown): VerifySpec {
 }
 
 /** Normalize a short CLI/component answer so `smithers ps`,
- * `bunx smithers-orchestrator ps`, "`ps`" all compare equal, and a JSX component
+ * `bunx smthrs ps`, "`ps`" all compare equal, and a JSX component
  * answer `<Parallel>` / `</Task>` compares equal to its bare name `Parallel`. */
 export function normalizeCliAnswer(s: string): string {
   return s
@@ -259,7 +259,7 @@ function analyzeWorkflowTest(testSource: string, workflowName: string) {
   for (const statement of source.statements) {
     if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
     const module = statement.moduleSpecifier.text;
-    if (module === "smithers-orchestrator/testing") {
+    if (module === "smthrs/testing") {
       const bindings = statement.importClause?.namedBindings;
       if (bindings && ts.isNamedImports(bindings)) {
         for (const element of bindings.elements) {
@@ -561,7 +561,7 @@ function workflowFilesVerify(artifact: string, v: VerifySpec): EvalVerdict {
   checks.push({
     name: "testing-library-import",
     passed: testAnalysis.testingImport,
-    detail: 'renderWorkflow from "smithers-orchestrator/testing"',
+    detail: 'renderWorkflow from "smthrs/testing"',
   });
 
   checks.push({

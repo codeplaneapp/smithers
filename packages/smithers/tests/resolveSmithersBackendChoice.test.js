@@ -1,22 +1,18 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { openSmithersBackend } from "../src/openSmithersBackend.js";
 import { openSmithersStore } from "../src/openSmithersStore.js";
 import { createSmithersPostgres } from "../src/create.js";
 import { resolveSmithersBackendChoice } from "../src/resolveSmithersBackendChoice.js";
+import { cleanupTempDirs, makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 
 setDefaultTimeout(120_000);
 
-/** @type {string[]} */
-const tempDirs = [];
-
 function makeWorkspace(name) {
-  const dir = join(tmpdir(), `${name}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const dir = makeTempDirPath(`${name}-`);
   mkdirSync(join(dir, ".smithers"), { recursive: true });
-  tempDirs.push(dir);
   return dir;
 }
 
@@ -76,9 +72,7 @@ async function closeApi(api) {
 
 afterEach(() => {
   delete process.env.SMITHERS_BACKEND;
-  for (const dir of tempDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  cleanupTempDirs();
 });
 
 describe("resolveSmithersBackendChoice", () => {

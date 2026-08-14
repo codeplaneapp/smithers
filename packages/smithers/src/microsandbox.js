@@ -1,1 +1,1 @@
-export * from "@smithers-orchestrator/microsandbox";
+export * from "@smthrs/microsandbox";

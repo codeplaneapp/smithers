@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // The Electric write endpoint (§5.5): writes flow through the gateway RPC path,
 // never through shapes. These tests prove the endpoint runs the real RPC,
 // enforces scope, returns a null txid rather than a fabricated one (the prior
@@ -9,7 +9,7 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import {
   Gateway,
   GATEWAY_RPC_MAX_ARRAY_LENGTH,

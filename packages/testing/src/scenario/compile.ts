@@ -1,4 +1,4 @@
-import type { ScenarioAst, ScenarioFault } from "./ast.ts";
+import type { ScenarioAst } from "./ast.ts";
 import { requiredCapabilities, type Capability } from "../harness/capabilities.ts";
 export type CompileDiagnostic = Readonly<{ readonly code: string; readonly message: string; readonly node: string }>;
 export type CompileResult = Readonly<

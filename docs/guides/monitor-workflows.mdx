@@ -24,9 +24,9 @@ Write the monitor at `.smithers/monitor/<workflowId>.tsx`, named after the workf
 ```
 
 ```bash
-bunx smithers-orchestrator up .smithers/workflows/nightly.tsx   # auto-launches .smithers/monitor/nightly.tsx
-bunx smithers-orchestrator up nightly.tsx --monitor ops/watch.tsx  # pick a monitor explicitly
-bunx smithers-orchestrator up nightly.tsx --no-monitor             # opt out
+bunx smthrs up .smithers/workflows/nightly.tsx   # auto-launches .smithers/monitor/nightly.tsx
+bunx smthrs up nightly.tsx --monitor ops/watch.tsx  # pick a monitor explicitly
+bunx smthrs up nightly.tsx --no-monitor             # opt out
 ```
 
 The flag lives on every launch path that starts a run: `up`, `workflow run`, and the overridable `oneshot` workflow.
@@ -36,7 +36,7 @@ The flag lives on every launch path that starts a run: `up`, `workflow run`, and
 A monitor is an ordinary workflow. Nothing about it is special except where the file lives and how it is launched:
 
 - It starts **with** the watched run, as a sibling run executing in parallel.
-- Its `parent_run_id` is the watched run, so `bunx smithers-orchestrator ps` and `bunx smithers-orchestrator inspect RUN_ID` show the pairing, the Gateway can render it, and `bunx smithers-orchestrator cancel RUN_ID` cascades to the monitor.
+- Its `parent_run_id` is the watched run, so `bunx smthrs ps` and `bunx smthrs inspect RUN_ID` show the pairing, the Gateway can render it, and `bunx smthrs cancel RUN_ID` cascades to the monitor.
 - It is torn down when the watched run finishes, so a monitor never outlives what it watches.
 - Its run id is `<watchedRunId>-monitor`, and it carries a `smithersMonitorFor` annotation naming the watched run.
 - A monitor never gets a monitor of its own. Three independent guards enforce that: the file's location under `monitor/`, the `--no-monitor` flag it is launched with, and the `SMITHERS_MONITOR_SUPPRESS` environment variable set on its process.
@@ -52,8 +52,8 @@ Smithers passes the monitor its subject as run input:
 Compose the shipped [`<Monitor>`](/components/monitor) component rather than hand-rolling a poll loop. A monitor file is a few lines:
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { Monitor, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Monitor, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 
@@ -121,7 +121,7 @@ The shipped defaults are deliberately timid, because a monitor that guesses wron
 
 Only `stalled` and `wedged-node` heal without a human, and only because both repairs are **idempotent and reversible**: resuming re-enters the same durable frame, and retrying a node adds an attempt without discarding prior state. Running either twice is harmless.
 
-Everything else escalates through a durable human request, which shows up in `bunx smithers-orchestrator human list` and in the Gateway. Cancelling, rewinding, reverting, time-travelling, resolving an approval on a human's behalf, and editing the repository are never done autonomously.
+Everything else escalates through a durable human request, which shows up in `bunx smthrs human list` and in the Gateway. Cancelling, rewinding, reverting, time-travelling, resolving an approval on a human's behalf, and editing the repository are never done autonomously.
 
 Widen that authority explicitly when you mean to:
 
@@ -145,7 +145,7 @@ Replace any handler outright, or silence one with `null`:
 
 ## Reading run state
 
-A monitor reads the watched run through the **Gateway client** (`smithers-orchestrator/gateway-client`) or the public CLI (`status`, `inspect`, `events`, `node`, `why`, `ps`). It must never open the store directly: `.smithers/*.db`, `.smithers/pg`, and `smithers.db` are private engine state, and reading them races the very run being watched.
+A monitor reads the watched run through the **Gateway client** (`smthrs/gateway-client`) or the public CLI (`status`, `inspect`, `events`, `node`, `why`, `ps`). It must never open the store directly: `.smithers/*.db`, `.smithers/pg`, and `smithers.db` are private engine state, and reading them races the very run being watched.
 
 The prompt shipped with `<Monitor>` binds the agent to that rule, along with what healthy and unhealthy look like, what evidence to gather before acting, and when to escalate instead of guessing. Extend it with repo-specific doctrine rather than replacing it:
 
@@ -157,7 +157,7 @@ Pass `prompt` only when you need to replace the doctrine entirely.
 
 ## Testing a monitor
 
-A monitor is a workflow, so it tests like one, with `coverWorkflow` or `renderWorkflow` from `smithers-orchestrator/testing`. Mock the classifier's verdict and assert which handler ran:
+A monitor is a workflow, so it tests like one, with `coverWorkflow` or `renderWorkflow` from `smthrs/testing`. Mock the classifier's verdict and assert which handler ran:
 
 ```ts
 const result = await coverWorkflow(monitorModule, {

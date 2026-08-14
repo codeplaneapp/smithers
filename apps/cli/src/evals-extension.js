@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { parseEvalDataset } from "@smithers-orchestrator/scorers/evalCases";
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { parseEvalDataset } from "@smthrs/scorers/evalCases";
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./DiscoveredWorkflow.ts").DiscoveredWorkflow} DiscoveredWorkflow */
 
 /**
@@ -9,7 +9,7 @@ import { parseEvalDataset } from "@smithers-orchestrator/scorers/evalCases";
  * multi's already-shipped eval-suite client. Pure wiring on top of
  * `GatewayExtensions` (see `packages/server/src/GatewayExtensions.js`) — the
  * only novel behavior lives here (persistence via `SmithersDb`, dataset
- * validation via `@smithers-orchestrator/scorers/evalCases`, and case-row
+ * validation via `@smthrs/scorers/evalCases`, and case-row
  * composition for `listCases`).
  *
  * Wire contract (must match multi's `src/evals/{EvalsBridge.tsx,
@@ -27,7 +27,7 @@ import { parseEvalDataset } from "@smithers-orchestrator/scorers/evalCases";
  *   resolveWorkflowKey: (key: string) => DiscoveredWorkflow | undefined;
  *   workspace: string;
  * }} deps
- * @returns {import("@smithers-orchestrator/server/GatewayExtensions").GatewayExtensionDefinition}
+ * @returns {import("@smthrs/server/GatewayExtensions").GatewayExtensionDefinition}
  */
 export function createEvalsExtension({ adapter, resolveWorkflowKey, workspace }) {
   return {

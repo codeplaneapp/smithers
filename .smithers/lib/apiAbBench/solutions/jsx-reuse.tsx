@@ -1,6 +1,6 @@
 // Reference solution (jsx arm, task `reuse`).
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, Task, Sequence, Branch, smithers, outputs } = createSmithers({

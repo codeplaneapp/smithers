@@ -1,4 +1,4 @@
-import { latencyScorer, llmJudge, schemaAdherenceScorer } from "smithers-orchestrator/scorers";
+import { latencyScorer, llmJudge, schemaAdherenceScorer } from "smthrs/scorers";
 
 import { agentsForRepo } from "./agents";
 

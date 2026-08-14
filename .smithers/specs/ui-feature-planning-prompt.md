@@ -49,7 +49,7 @@ Your job: produce a **step-by-step implementation plan**: architecture decisions
 
 | Package | Role |
 |---|---|
-| `smithers` | Public facade (`smithers-orchestrator` on npm). `createSmithers`, JSX runtime, `mdx-plugin`. |
+| `smithers` | Public facade (`smthrs` on npm). `createSmithers`, JSX runtime, `mdx-plugin`. |
 | `components` | 50+ React components: `Workflow`, `Task`, `Sequence`, `Parallel`, `Branch`, `Loop`, `Ralph`, `Approval`, `Sandbox`, `Signal`, `Timer`, `HumanTask`, `Saga`, `Kanban`, `Debate`, `ReviewLoop`, etc. |
 | `react-reconciler` | Custom React reconciler that renders JSX into Smithers host trees (NOT DOM). Also contains a DOM adapter used only for devtools. |
 | `driver` | Workflow driver, `SmithersCtx`, task runner, decision actor. Pure logic (no HTTP). |
@@ -72,8 +72,8 @@ Your job: produce a **step-by-step implementation plan**: architecture decisions
 
 ### Path aliases (`tsconfig.json`)
 
-- `smithers-orchestrator` → `packages/smithers/src/index.js`
-- `@smithers-orchestrator/*` → `packages/*/src/index.js` (or sub-paths)
+- `smthrs` → `packages/smithers/src/index.js`
+- `@smthrs/*` → `packages/*/src/index.js` (or sub-paths)
 - All 21 sibling packages aliased. User code always imports via these aliases, never relative paths across packages.
 
 ### Organization rules (from user's standing preferences — memory notes)
@@ -260,9 +260,9 @@ type SmithersWorkflow<Schema> = {
 
 ```js
 #!/usr/bin/env bun
-import { ... } from "@smithers-orchestrator/engine";
-import { mdxPlugin } from "smithers-orchestrator/mdx-plugin";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ... } from "@smthrs/engine";
+import { mdxPlugin } from "smthrs/mdx-plugin";
+import { SmithersDb } from "@smthrs/db/adapter";
 
 async function loadWorkflowAsync(path) {
   const abs = resolve(process.cwd(), path);
@@ -341,7 +341,7 @@ Key Effect packages already present: `effect` v3.21.1, `@effect/sql`, `@effect/s
     "moduleResolution": "bundler",
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "jsxImportSource": "smithers-orchestrator",   // <-- !!
+    "jsxImportSource": "smthrs",   // <-- !!
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "strict": true
@@ -349,7 +349,7 @@ Key Effect packages already present: `effect` v3.21.1, `@effect/sql`, `@effect/s
 }
 ```
 
-**The JSX gotcha you must solve**: smithers sets `jsxImportSource: "smithers-orchestrator"` globally, which points JSX at `packages/smithers/src/jsx-runtime.js`. That runtime is written for the Smithers reconciler (workflow graph), not DOM. The UI app needs **standard React JSX** (DOM). Options the planner must weigh:
+**The JSX gotcha you must solve**: smithers sets `jsxImportSource: "smthrs"` globally, which points JSX at `packages/smithers/src/jsx-runtime.js`. That runtime is written for the Smithers reconciler (workflow graph), not DOM. The UI app needs **standard React JSX** (DOM). Options the planner must weigh:
 
 1. Per-directory / per-file `@jsxImportSource react` override for UI files.
 2. A separate `tsconfig.ui.json` for the UI directory.
@@ -367,11 +367,11 @@ Key Effect packages already present: `effect` v3.21.1, `@effect/sql`, `@effect/s
 `examples/code-review-loop.jsx`:
 
 ```jsx
-import { Sequence, Ralph } from "smithers-orchestrator";
+import { Sequence, Ralph } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent, Output } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import ReviewPrompt from "./prompts/code-review-loop/review.mdx";
 import FixPrompt from "./prompts/code-review-loop/fix.mdx";
@@ -528,7 +528,7 @@ A non-exhaustive list of decisions the planner must make explicit. Present each 
 
 11. **Errors & boundaries**
     - UI render failures must not crash the workflow engine.
-    - Pipe UI-surface errors through `@smithers-orchestrator/errors` tagged-error patterns.
+    - Pipe UI-surface errors through `@smthrs/errors` tagged-error patterns.
 
 12. **Testing story**
     - Bun test for server SSR rendering.

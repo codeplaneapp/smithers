@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import React from "react";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
-import { Gateway, type SmithersWorkflow } from "@smithers-orchestrator/server/gateway";
+import { createSmithers } from "smthrs";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { SmithersGatewayClient } from "@smthrs/gateway-client";
+import { Gateway, type SmithersWorkflow } from "@smthrs/server/gateway";
 import { loadBudget } from "../budgets/loadBudget.ts";
 
 const WORKFLOW_KEY = "case09-workflow";

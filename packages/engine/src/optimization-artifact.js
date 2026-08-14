@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 const OPTIMIZATION_ARTIFACT_ENV = "SMITHERS_OPTIMIZATION_ARTIFACT";
 
@@ -57,7 +57,7 @@ function promptPatchesFromArtifact(artifact) {
 }
 
 /**
- * @param {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor[]} tasks
+ * @param {import("@smthrs/graph/TaskDescriptor").TaskDescriptor[]} tasks
  * @param {unknown} [artifact]
  */
 export function applyOptimizationArtifactToTasks(tasks, artifact = loadOptimizationArtifact()) {
@@ -77,7 +77,7 @@ export function applyOptimizationArtifactToTasks(tasks, artifact = loadOptimizat
       ...task,
       prompt: patch.prompt,
       meta: {
-        ...(task.meta ?? {}),
+        ...task.meta,
         optimizationArtifactId: typeof artifact.id === "string" ? artifact.id : undefined,
         optimizationStrategy: typeof artifact.strategy === "string" ? artifact.strategy : undefined,
       },

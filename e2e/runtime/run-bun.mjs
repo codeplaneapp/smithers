@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertRuntimeConformance } from "@smithers-orchestrator/testing/runtimeConformance";
+import { assertRuntimeConformance } from "@smthrs/testing/runtimeConformance";
 import { runSharedRuntimeFixture } from "./fixture.js";
 
 const dir = await mkdtemp(join(tmpdir(), "smithers-runtime-bun-"));

@@ -1,6 +1,6 @@
 // Reference solution (jsx arm, task `pipeline`). Proves the harness can score a correct candidate.
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({

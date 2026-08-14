@@ -25,7 +25,7 @@ import { SOTA_REGISTRY_VERSION } from "./sota-models.generated.js";
  */
 
 /** The published npm package. The `smithers` binary is only an alias of it. */
-export const SMITHERS_PACKAGE = "smithers-orchestrator";
+export const SMITHERS_PACKAGE = "smthrs";
 
 /** Throttle window for the passive npm check. */
 export const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;

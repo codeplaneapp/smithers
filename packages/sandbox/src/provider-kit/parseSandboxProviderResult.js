@@ -1,4 +1,4 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { SANDBOX_PROVIDER_RESULT_ENV } from "./SANDBOX_PROVIDER_RESULT_ENV.js";
 
 /**

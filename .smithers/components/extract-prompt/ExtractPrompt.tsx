@@ -1,7 +1,7 @@
 // smithers-source: seeded
-/** @jsxImportSource smithers-orchestrator */
-import { Sequence, Task, type AgentLike, type OutputTarget } from "smithers-orchestrator";
-import type { ScorersMap } from "@smithers-orchestrator/scorers";
+/** @jsxImportSource smthrs */
+import { Sequence, Task, type AgentLike, type OutputTarget } from "smthrs";
+import type { ScorersMap } from "@smthrs/scorers";
 import { LoopUntilScored } from "../LoopUntilScored";
 import ExtractPromptInstructions from "../../prompts/extract-prompt.mdx";
 import type { CachedPrompt, Stakes } from "./PromptCache";

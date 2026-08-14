@@ -27,14 +27,14 @@ test("packaged CLI llms-full bundle is byte-identical to the skill-bundled copy"
 });
 
 // Freshness contract: the canonical skill must stay on the current control-plane
-// model and must never regress to the retired `smithers-orchestrator` JSX/Ralph
+// model and must never regress to the retired `smthrs` JSX/Ralph
 // skill that pushed agents into read-only plan mode.
 test("canonical skill carries the current frontmatter, not the retired orchestrator skill", () => {
   const skill = readRepoFile("skills/smithers/SKILL.md");
   const frontmatter = skill.slice(0, skill.indexOf("\n---", 4) + 4);
 
   expect(frontmatter).toContain("name: smithers\n");
-  expect(frontmatter).not.toContain("name: smithers-orchestrator");
+  expect(frontmatter).not.toContain("name: smthrs");
   // The retired skill recommended plan mode in frontmatter; plan mode is
   // read-only, which is what made agents narrate instead of write the file.
   expect(skill).not.toContain("recommend-plan-mode");
@@ -63,7 +63,7 @@ test("skill makes workflow tests an indivisible registered authoring rule", () =
   const skill = readRepoFile("skills/smithers/SKILL.md");
 
   expect(skill).toContain("A workflow and its tests are one indivisible change");
-  expect(skill).toContain("renderWorkflow` from `smithers-orchestrator/testing");
+  expect(skill).toContain("renderWorkflow` from `smthrs/testing");
   expect(skill).toContain(".smithers/tests/hello.test.tsx");
   expect(skill).toContain("./tests/hello.test.tsx");
   expect(skill).toContain("expected node ids");

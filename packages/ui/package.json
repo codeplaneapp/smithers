@@ -1,6 +1,6 @@
 {
-  "name": "@smithers-orchestrator/ui",
-  "version": "0.32.0",
+  "name": "@smthrs/ui",
+  "version": "0.34.0",
   "description": "Shared shadcn-anatomy component library for Smithers UIs. Radix primitives + CVA variant APIs styled with the ui-styleguide theme tokens, shipped as CSS-in-TS strings so components bundle through the gateway's Bun.build and follow light/dark (prefers-color-scheme and data-theme) with zero configuration.",
   "type": "module",
   "sideEffects": false,
@@ -64,7 +64,7 @@
     "@milkdown/kit": "7.21.2",
     "@milkdown/plugin-listener": "7.21.2",
     "@pierre/diffs": "^1.2.12",
-    "@smithers-orchestrator/ui-styleguide": "workspace:*",
+    "@smthrs/ui-styleguide": "workspace:*",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "class-variance-authority": "^0.7.1",

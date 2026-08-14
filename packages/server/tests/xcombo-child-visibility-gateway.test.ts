@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 // Elements are built with the smithers jsx runtime directly so this file can
 // stay .ts (no .tsx needed) while running the REAL engine + REAL gateway.
-import { jsx, jsxs } from "smithers-orchestrator/jsx-runtime";
-import { Subflow } from "smithers-orchestrator";
+import { jsx, jsxs } from "smthrs/jsx-runtime";
+import { Subflow } from "smthrs";
 import { z } from "zod";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { Gateway } from "../src/gateway.js";

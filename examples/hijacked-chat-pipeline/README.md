@@ -8,7 +8,7 @@ hijacked Codex session presented through a custom browser chat UI:
 3. **Deliver** reads both artifacts, implements the change, and verifies it.
 
 The message bubbles and glass composer come from
-`smithers-orchestrator/ui`. The example only owns the Gateway candidate polling,
+`smthrs/ui`. The example only owns the Gateway candidate polling,
 PTY WebSocket transport, and a small ANSI/VT screen model used to turn native
 CLI redraws into readable assistant output.
 
@@ -17,7 +17,7 @@ CLI redraws into readable assistant output.
 Start the workflow in detached mode with a concrete goal:
 
 ```bash
-bunx smithers-orchestrator up examples/hijacked-chat-pipeline/workflow.tsx \
+bunx smthrs up examples/hijacked-chat-pipeline/workflow.tsx \
   --detach \
   --input '{"goal":"Add a focused improvement to this repository"}'
 ```
@@ -25,7 +25,7 @@ bunx smithers-orchestrator up examples/hijacked-chat-pipeline/workflow.tsx \
 Copy the printed run id, then open its workflow-owned UI:
 
 ```bash
-bunx smithers-orchestrator ui <run-id>
+bunx smthrs ui <run-id>
 ```
 
 `smithers ui` starts or reuses the workspace Gateway. The CLI-started Gateway

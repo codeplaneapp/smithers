@@ -23,7 +23,7 @@ function writePack(root, version = "1.0.0", marker = "original") {
       "*/",
       'import helper from "../lib/helper";',
       'import instructions from "../prompts/instructions.md";',
-      'import { UI, Workflow, createSmithers } from "smithers-orchestrator";',
+      'import { UI, Workflow, createSmithers } from "smthrs";',
       "const { smithers } = createSmithers({});",
       `export default smithers(() => <Workflow name="demo-${marker}-\${helper}-\${instructions}"><UI entry="../ui/demo.tsx" /></Workflow>);`,
       "",
@@ -53,7 +53,7 @@ function writeDirectoryWorkflowPack(root) {
       "name: nested",
       "*/",
       'import helper from "../../lib/shared";',
-      'import { UI, Workflow, createSmithers } from "smithers-orchestrator";',
+      'import { UI, Workflow, createSmithers } from "smthrs";',
       "const { smithers } = createSmithers({});",
       'export default smithers(() => <Workflow name={helper}><UI entry="../../ui/nested.tsx" /></Workflow>);',
       "",
@@ -74,7 +74,7 @@ function writeCliPack(root, marker = "pack") {
     join(root, "workflows", "demo.tsx"),
     [
       'import marker from "../lib/marker";',
-      'import { createSmithers } from "smithers-orchestrator";',
+      'import { createSmithers } from "smthrs";',
       'import { z } from "zod/v4";',
       "const { Workflow, Task, smithers, outputs } = createSmithers({",
       "    input: z.object({}),",
@@ -186,7 +186,7 @@ describe("pack eject", () => {
         '// <UI entry="../ui/not-real.tsx" />',
         'const entry = "../ui/demo.tsx";',
         'const text = "<UI entry=\\\"../ui/not-real.tsx\\\" />";',
-        'import { UI as WorkflowUI } from "smithers-orchestrator";',
+        'import { UI as WorkflowUI } from "smthrs";',
         "export default <WorkflowUI\n  entry={entry}\n/>;",
       ].join("\n"),
     );
@@ -303,7 +303,7 @@ describe("pack eject", () => {
     writeFileSync(
       join(source, "workflows", "demo.tsx"),
       [
-        'import { UI, Workflow, createSmithers } from "smithers-orchestrator";',
+        'import { UI, Workflow, createSmithers } from "smthrs";',
         "const { smithers } = createSmithers({});",
         'export default smithers(() => <Workflow name="demo"><UI entry="../ui/explicit.tsx" /></Workflow>);',
       ].join("\n"),

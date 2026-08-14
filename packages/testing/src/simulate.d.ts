@@ -1,7 +1,7 @@
 /// <reference path="../types/bun-test-shim.d.ts" />
-import { WorkflowDefinition } from '@smithers-orchestrator/driver/WorkflowDefinition';
-import { TaskDescriptor, WorkflowGraph } from '@smithers-orchestrator/graph';
-import { WaitReason, WorkflowSessionService, EngineDecision, RunResult } from '@smithers-orchestrator/scheduler';
+import { WorkflowDefinition } from '@smthrs/driver/WorkflowDefinition';
+import { TaskDescriptor, WorkflowGraph } from '@smthrs/graph';
+import { WaitReason, WorkflowSessionService, EngineDecision, RunResult } from '@smthrs/scheduler';
 
 type SimulateMockFunction = (args: {
     nodeId: string;

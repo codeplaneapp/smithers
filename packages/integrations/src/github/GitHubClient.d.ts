@@ -1,7 +1,7 @@
 import { GitHubConfig as GitHubConfig$1 } from './GitHubConfig.js';
 import { GitHubClientService as GitHubClientService$1, GitHubRequestMethod as GitHubRequestMethod$1, GitHubRequestOptions as GitHubRequestOptions$1 } from './GitHubClientService.js';
 import { Context, Layer } from 'effect';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 
 /**
  * Parse RFC 5988 `Link` header for the `rel="next"` URL.

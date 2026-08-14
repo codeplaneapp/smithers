@@ -24,7 +24,7 @@ def _smithers_base() -> list[str]:
     if shutil.which("smithers"):
         return ["smithers"]
     if shutil.which("bunx"):
-        return ["bunx", "smithers-orchestrator"]
+        return ["bunx", "smthrs"]
     return ["smithers"]
 
 

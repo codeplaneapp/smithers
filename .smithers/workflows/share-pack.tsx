@@ -4,8 +4,8 @@
 // smithers-description: Validate, prepare, publish, and list a Smithers workflow pack in awesome-smithers.
 // smithers-tags: packs, sharing, github
 // smithers-system: true
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, UI } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, UI } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 
@@ -39,9 +39,7 @@ const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({
   output: outputSchema,
 });
 const cliModule = (name: string) =>
-  process.env.SMITHERS_CLI_SRC_DIR
-    ? `${process.env.SMITHERS_CLI_SRC_DIR}/${name}.js`
-    : `@smithers-orchestrator/cli/${name}`;
+  process.env.SMITHERS_CLI_SRC_DIR ? `${process.env.SMITHERS_CLI_SRC_DIR}/${name}.js` : `@smthrs/cli/${name}`;
 
 async function validateManifest(repo: string | undefined, registry: string | undefined) {
   const { loadManifest } = await import(cliModule("manifest"));

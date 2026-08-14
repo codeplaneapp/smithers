@@ -1,7 +1,7 @@
 import React from "react";
 import { z } from "zod";
-import { createBrowserRuntime, createBrowserSmithers, defineBrowserWorkflow, Task, Workflow } from "smithers-orchestrator/browser";
-import { assertAsyncCapabilityError, assertCapabilityError, runConformanceWorkflow } from "@smithers-orchestrator/testing/browser";
+import { createBrowserRuntime, createBrowserSmithers, defineBrowserWorkflow, Task, Workflow } from "smthrs/browser";
+import { assertAsyncCapabilityError, assertCapabilityError, runConformanceWorkflow } from "@smthrs/testing/browser";
 
 // A real Zod schema (recognized by `extractGraph`'s `outputSchema` wiring,
 // unlike a duck-typed object) so enforcement is genuinely engine-owned:
@@ -38,7 +38,7 @@ function isEngineSchemaRejection(error) {
 function countFinishedSaves(runtime) {
   let count = 0;
   const originalSaveRun = runtime.storage.saveRun.bind(runtime.storage);
-  runtime.storage.saveRun = async (/** @type {string} */ runId, /** @type {import("@smithers-orchestrator/driver/RuntimeAdapter").StoredRunState} */ run) => {
+  runtime.storage.saveRun = async (/** @type {string} */ runId, /** @type {import("@smthrs/driver/RuntimeAdapter").StoredRunState} */ run) => {
     if (run.status === "finished") count += 1;
     return originalSaveRun(runId, run);
   };

@@ -5,7 +5,7 @@ description: Run a Smithers <Sandbox> child workflow in a local Microsandbox mic
 
 # Microsandbox Provider
 
-`@smithers-orchestrator/microsandbox` is a first-class Smithers
+`@smthrs/microsandbox` is a first-class Smithers
 `SandboxProvider` backed by the open source
 [Microsandbox](https://github.com/superradcompany/microsandbox) SDK. Each run
 boots a local microVM with its own Linux kernel, exchanges the Smithers
@@ -19,7 +19,7 @@ import {
   createMicrosandboxSandboxProvider,
   registerMicrosandboxSandboxProvider,
   MICROSANDBOX_PROVIDER_ID,
-} from "smithers-orchestrator/microsandbox";
+} from "smthrs/microsandbox";
 ```
 
 Microsandbox labels the runtime beta: pin and test the SDK version you
@@ -49,8 +49,8 @@ image on first use; later sandboxes reuse the local image cache.
 Pass the provider object directly to `<Sandbox>`:
 
 ```tsx
-import { createSmithers, Sandbox } from "smithers-orchestrator";
-import { createMicrosandboxSandboxProvider } from "smithers-orchestrator/microsandbox";
+import { createSmithers, Sandbox } from "smthrs";
+import { createMicrosandboxSandboxProvider } from "smthrs/microsandbox";
 
 const provider = createMicrosandboxSandboxProvider({
   image: "oven/bun:1",
@@ -79,7 +79,7 @@ export default parent.smithers((ctx) => (
 Or register it once and select it by id:
 
 ```ts
-import { registerMicrosandboxSandboxProvider } from "smithers-orchestrator/microsandbox";
+import { registerMicrosandboxSandboxProvider } from "smthrs/microsandbox";
 
 const unregister = registerMicrosandboxSandboxProvider({
   image: "oven/bun:1",

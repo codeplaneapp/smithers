@@ -5,11 +5,11 @@
  *
  * Shape: benchmark runner → metric diff → threshold gate → analysis agent.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { bash } from "smithers-orchestrator/tools";
+import { bash } from "smthrs/tools";
 import { z } from "zod";
 import RunPrompt from "./prompts/benchmark-sheriff/run.mdx";
 import AnalyzePrompt from "./prompts/benchmark-sheriff/analyze.mdx";

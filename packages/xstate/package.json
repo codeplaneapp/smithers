@@ -1,6 +1,6 @@
 {
-  "name": "@smithers-orchestrator/xstate",
-  "version": "0.32.0",
+  "name": "@smthrs/xstate",
+  "version": "0.34.0",
   "description": "XState v5 machines as durable derived control state for Smithers workflows: pure folds over output and signal rows",
   "type": "module",
   "sideEffects": false,
@@ -29,8 +29,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@smithers-orchestrator/errors": "workspace:*",
-    "@smithers-orchestrator/react-reconciler": "workspace:*",
+    "@smthrs/errors": "workspace:*",
+    "@smthrs/react-reconciler": "workspace:*",
     "react": "^19.2.7"
   },
   "peerDependencies": {
@@ -42,14 +42,14 @@
     }
   },
   "devDependencies": {
-    "@smithers-orchestrator/db": "workspace:*",
-    "@smithers-orchestrator/driver": "workspace:*",
-    "@smithers-orchestrator/engine": "workspace:*",
-    "@smithers-orchestrator/time-travel": "workspace:*",
+    "@smthrs/db": "workspace:*",
+    "@smthrs/driver": "workspace:*",
+    "@smthrs/engine": "workspace:*",
+    "@smthrs/time-travel": "workspace:*",
     "@types/bun": "latest",
     "drizzle-orm": "^0.45.2",
-    "effect": "4.0.0-beta.102",
-    "smithers-orchestrator": "workspace:*",
+    "effect": "4.0.0-beta.105",
+    "smthrs": "workspace:*",
     "typescript": "~6.0.3",
     "xstate": "5.32.5",
     "zod": "^4.4.3"

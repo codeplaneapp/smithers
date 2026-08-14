@@ -2,14 +2,14 @@
 // non-binary quality so trends improve even before a red case flips green.
 //
 // Re-exports the built-ins too, so suites import everything from one place.
-import type { AgentLike } from "smithers-orchestrator";
+import type { AgentLike } from "smthrs";
 import {
   createScorer,
   faithfulnessScorer,
   llmJudge,
   relevancyScorer,
   schemaAdherenceScorer,
-} from "smithers-orchestrator/scorers";
+} from "smthrs/scorers";
 import type { CandidateReport } from "./report-schema.js";
 
 export { faithfulnessScorer, relevancyScorer, schemaAdherenceScorer };
@@ -75,7 +75,7 @@ export const uiQualityScorer = (judge: AgentLike) => {
     description: "Quality of a Smithers custom workflow UI bundle (gateway-react).",
     judge,
     instructions:
-      "You rate a Smithers custom workflow UI bundle (React + smithers-orchestrator/gateway-react). " +
+      "You rate a Smithers custom workflow UI bundle (React + smthrs/gateway-react). " +
       "Score 0-1 on: correct use of createGatewayReactRoot + the gateway hooks " +
       "(useGatewayRun/RunEvents/NodeOutput/Approvals/Actions/Runs); handling of loading, empty, and error states; " +
       "scoping to the ?runId in location.search; clean component structure and naming; sensible layout/UX and basic accessibility; " +

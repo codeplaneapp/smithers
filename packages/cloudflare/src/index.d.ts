@@ -1,4 +1,4 @@
-import { SandboxProviderRequest, SandboxProvider, SandboxProviderResult } from '@smithers-orchestrator/sandbox';
+import { SandboxProviderRequest, SandboxProvider, SandboxProviderResult } from '@smthrs/sandbox';
 
 declare const CLOUDFLARE_SANDBOX_PROVIDER_ID: "cloudflare-sandbox";
 

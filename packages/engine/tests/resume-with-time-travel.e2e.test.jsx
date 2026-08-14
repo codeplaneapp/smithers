@@ -1,15 +1,10 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { Task, Workflow, runWorkflow } from "smithers-orchestrator";
-import {
-  captureSnapshot,
-  loadSnapshot,
-  listSnapshots,
-  parseSnapshot,
-} from "@smithers-orchestrator/time-travel/snapshot";
-import { replayFromCheckpoint } from "@smithers-orchestrator/time-travel/replay";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { Task, Workflow, runWorkflow } from "smthrs";
+import { captureSnapshot, loadSnapshot, listSnapshots, parseSnapshot } from "@smthrs/time-travel/snapshot";
+import { replayFromCheckpoint } from "@smthrs/time-travel/replay";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import { Effect } from "effect";
@@ -132,7 +127,13 @@ describe("resume with time travel", () => {
       const analyzeAttempts = await adapter.listAttempts(replay.runId, "analyze", 0);
       const implementAttempts = await adapter.listAttempts(replay.runId, "implement", 0);
       const testAttempts = await adapter.listAttempts(replay.runId, "test", 0);
-      expect(analyzeAttempts).toHaveLength(0);
+      expect(analyzeAttempts).toHaveLength(1);
+      expect(analyzeAttempts[0]).toMatchObject({
+        nodeId: "analyze",
+        iteration: 0,
+        attempt: 1,
+        state: "finished",
+      });
       expect(implementAttempts).toHaveLength(1);
       expect(testAttempts).toHaveLength(1);
       const analyzeRows = await db.select().from(tables.outputA).where(eq(tables.outputA.runId, replay.runId));

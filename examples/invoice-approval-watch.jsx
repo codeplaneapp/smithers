@@ -7,11 +7,11 @@
  * Use cases: AP automation, fraud detection, duplicate invoice flagging,
  * threshold-based approval routing, vendor compliance checks.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import ExtractPrompt from "./prompts/invoice-approval-watch/extract.mdx";
 import ValidatePrompt from "./prompts/invoice-approval-watch/validate.mdx";

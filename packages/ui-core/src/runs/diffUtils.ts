@@ -16,8 +16,8 @@
  */
 
 export type NodeDiffView =
-  | { kind: "patch"; unified: string; summary: string }
-  | { kind: "stat"; summary: string; files: string }
+  | { kind: "patch"; unified: string; summary: string; live?: boolean }
+  | { kind: "stat"; summary: string; files: string; live?: boolean }
   | { kind: "error"; message: string }
   | { kind: "empty"; message: string };
 
@@ -57,6 +57,10 @@ export function toNodeDiffView(payload: unknown, error?: Error | null): NodeDiff
     return { kind: "empty", message: "No diff available for this node." };
   }
   const rec = payload as Record<string, unknown>;
+  // A bundle computed from a live working copy (in-progress attempt) is
+  // flagged by the gateway; surface it so watchers can tell a refreshing
+  // preview apart from the final snapshot.
+  const live = rec["live"] === true;
 
   // Full DiffBundle: render the concatenated unified patches.
   if (Array.isArray(rec["patches"])) {
@@ -79,7 +83,12 @@ export function toNodeDiffView(payload: unknown, error?: Error | null): NodeDiff
       })
       .join("\n");
     const noun = withText.length === 1 ? "file" : "files";
-    return { kind: "patch", unified, summary: `${withText.length} ${noun} changed` };
+    return {
+      kind: "patch",
+      unified,
+      summary: `${withText.length} ${noun} changed${live ? " (live)" : ""}`,
+      ...(live ? { live: true } : {}),
+    };
   }
 
   // Stat-only payload: render the summary + per-file counts.
@@ -99,8 +108,9 @@ export function toNodeDiffView(payload: unknown, error?: Error | null): NodeDiff
     const noun = filesChanged === 1 ? "file" : "files";
     return {
       kind: "stat",
-      summary: `${filesChanged} ${noun} changed  +${added} -${removed}  (diff too large to inline)`,
+      summary: `${filesChanged} ${noun} changed  +${added} -${removed}  (diff too large to inline)${live ? " (live)" : ""}`,
       files: filesText || "  (no per-file stats)",
+      ...(live ? { live: true } : {}),
     };
   }
 

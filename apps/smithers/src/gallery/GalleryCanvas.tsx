@@ -180,7 +180,7 @@ import {
   type ModelOption,
   type PromptInputMessage,
   SmithersUiStyles,
-} from "@smithers-orchestrator/ui";
+} from "@smthrs/ui";
 
 type GalleryMessage = { id: string; role: "user" | "assistant"; text: string };
 
@@ -700,7 +700,7 @@ export function GalleryCanvas() {
           <ArtifactContent>patch body</ArtifactContent>
         </Artifact>
         <Snippet code="pnpm -C packages/ui test" language="bash" />
-        <PackageInfo name="@smithers-orchestrator/ui" version="0.29.0" />
+        <PackageInfo name="@smthrs/ui" version="0.29.0" />
         <SchemaDisplay schema={{ type: "object", properties: { laneId: { type: "string" } } }} />
         <Commit
           commit={{

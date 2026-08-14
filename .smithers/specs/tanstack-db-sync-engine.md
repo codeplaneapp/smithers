@@ -10,8 +10,8 @@ Goal, one sentence: building a custom UI on Smithers becomes "call
 served over REST+SSE and multiplayer Postgres served over Electric shapes,
 behind the exact same collections.
 
-Breaking changes to `@smithers-orchestrator/gateway-client` and
-`@smithers-orchestrator/gateway-react` are allowed and expected. `../multi`
+Breaking changes to `@smthrs/gateway-client` and
+`@smthrs/gateway-react` are allowed and expected. `../multi`
 pins published 0.24.x, is not deployed, and is NOT touched by this work; it
 migrates later by upgrading.
 
@@ -36,7 +36,7 @@ migrates later by upgrading.
   sqlite | pglite | postgres; reads go through `SmithersDb` (dialect seam), so a
   read path written once works on all three. NO write path returns a Postgres
   txid today.
-- `@smithers-orchestrator/electric-proxy` exists on main and is maintained:
+- `@smthrs/electric-proxy` exists on main and is maintained:
   `createSmithersElectricProxy`, `smithersElectricShapeCatalog` (+ output-table
   shapes), `serveSmithersElectricProxy`, metrics/observer. Scope/auth/rate-limit
   are already its job.

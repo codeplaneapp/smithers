@@ -4,8 +4,8 @@
 // smithers-description: Cron health monitor for ticket-fleet runs — a cheap agent inspects the latest run and reports whether it is progressing.
 // smithers-tags: monitor, cron, tickets, system
 // smithers-system: true
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";

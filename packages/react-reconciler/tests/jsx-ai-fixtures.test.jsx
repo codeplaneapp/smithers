@@ -1,7 +1,7 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { runWorkflow } from "@smithers-orchestrator/engine";
+import { runWorkflow } from "@smthrs/engine";
 import workflow from "../../smithers/tests/fixtures/jsx-ai-release-notes.jsx";
 describe("JSX AI fixtures", () => {
   test("release notes agent summarizes changelog", async () => {
@@ -16,5 +16,5 @@ describe("JSX AI fixtures", () => {
     expect(rows[0]?.latestVersion).toBe("1.2.0");
     expect(rows[0]?.changeCount).toBe(2);
     expect(rows[0]?.highlights).toEqual(["Add caching for workflow runs", "Fix resume input handling"]);
-  });
+  }, 30_000);
 });

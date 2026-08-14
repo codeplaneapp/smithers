@@ -5,7 +5,7 @@ description: Produce, review, and fix in a loop until the reviewer approves.
 
 ```ts
 // Props
-import { ReviewLoop } from "smithers-orchestrator";
+import { ReviewLoop } from "smthrs";
 
 type ReviewLoopProps = {
   id?: string; // default "review-loop"; task ids derived as {id}-produce, {id}-review
@@ -20,11 +20,11 @@ type ReviewLoopProps = {
 };
 ```
 
-Complete runnable example (renders with `bunx smithers-orchestrator graph`):
+Complete runnable example (renders with `bunx smthrs graph`):
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, ReviewLoop, ClaudeCodeAgent } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, ReviewLoop, ClaudeCodeAgent } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, smithers, outputs } = createSmithers({
@@ -224,7 +224,7 @@ export const Task = createTaskComponent({ applyCliToolAllowlist });
 
 ```js useOptionalSmithersContext.js
 import React from "react";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
 
 /**
  * Read the workflow context when React is rendering the component, but allow
@@ -247,7 +247,7 @@ export function useOptionalSmithersContext() {
 
 ```ts ReviewLoopProps.ts
 import type React from "react";
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type ReviewLoopProps = {

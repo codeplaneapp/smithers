@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Effect } from "effect";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { createHindsightMemoryStore } from "../src/HindsightMemoryStore.js";
 import { createMemoryStore } from "../src/store/createMemoryStore.js";
 import { memoryStoreConcurrencyContract } from "./memoryStoreConcurrencyContract.js";

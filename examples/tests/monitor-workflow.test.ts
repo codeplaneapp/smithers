@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { renderMdx } from "smithers-orchestrator";
+import { renderMdx } from "smthrs";
 import MonitorPrompt from "../../packages/components/src/components/MonitorPrompt.mdx";
 import { coverExample } from "./_setup.ts";
 
@@ -12,7 +12,7 @@ test("the shipped MonitorPrompt.mdx renders the monitoring doctrine", () => {
   expect(text).toContain("# Monitor one Smithers run");
   expect(text).toContain("run-42");
   // Read path: gateway-client / CLI only, never the store.
-  expect(text).toContain("smithers-orchestrator/gateway-client");
+  expect(text).toContain("smthrs/gateway-client");
   expect(text).toContain("NEVER open the store directly");
   // Healthy vs unhealthy, evidence, authority, escalation.
   expect(text).toContain("HEALTHY looks like");

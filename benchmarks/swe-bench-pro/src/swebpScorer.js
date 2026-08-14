@@ -15,7 +15,7 @@ import { scorePatch } from "./scorePatch.js";
  * fields the workflow receives), so it can locate the instance metadata and the
  * working tree the agents edited.
  *
- * @type {import("@smithers-orchestrator/scorers").Scorer}
+ * @type {import("@smthrs/scorers").Scorer}
  */
 export const swebpScorer = {
   id: "swe-bench-pro-resolved",

@@ -54,6 +54,7 @@ const NON_STANDALONE_WORKFLOW_SNIPPETS = [
   "docs/components/tui.mdx#1",
   "docs/examples/run-on-plue.mdx#5",
   "docs/examples/worktree-feature-workflow.mdx#2",
+  "docs/guide/post-failure.mdx#4",
   "docs/guides/alerting.mdx#2",
   // Imports the pack-local `../agents` module, so it cannot render standalone.
   "docs/guides/monitor-workflows.mdx#4",
@@ -156,11 +157,8 @@ function createDocsSnippetProject() {
   onTestFinished(() => {
     rmSync(dir, { recursive: true, force: true });
   });
-  symlinkDir(resolve(REPO_ROOT, "packages/smithers"), join(dir, "node_modules/smithers-orchestrator"));
-  symlinkDir(
-    resolve(REPO_ROOT, "node_modules/@smithers-orchestrator"),
-    join(dir, "node_modules/@smithers-orchestrator"),
-  );
+  symlinkDir(resolve(REPO_ROOT, "packages/smithers"), join(dir, "node_modules/smthrs"));
+  symlinkDir(resolve(REPO_ROOT, "node_modules/@smthrs"), join(dir, "node_modules/@smthrs"));
   symlinkDir(resolve(REPO_ROOT, "node_modules/react"), join(dir, "node_modules/react"));
   symlinkDir(resolve(REPO_ROOT, "node_modules/react-dom"), join(dir, "node_modules/react-dom"));
   symlinkDir(resolve(REPO_ROOT, "node_modules/zod"), join(dir, "node_modules/zod"));

@@ -13,8 +13,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
-import { SmithersError } from "@smithers-orchestrator/errors";
-import { accountsRoot } from "@smithers-orchestrator/accounts";
+import { SmithersError } from "@smthrs/errors";
+import { accountsRoot } from "@smthrs/accounts";
 
 /** @typedef {import("./DiscoveredWorkflow.ts").DiscoveredWorkflow} DiscoveredWorkflow */
 
@@ -754,8 +754,8 @@ export function createWorkflowFile(name, from = process.cwd(), options = {}) {
       "# required-bins: [git]",
       "# required-env: [GITHUB_TOKEN]",
       "*/",
-      "/** @jsxImportSource smithers-orchestrator */",
-      'import { createSmithers, Workflow } from "smithers-orchestrator";',
+      "/** @jsxImportSource smthrs */",
+      'import { createSmithers, Workflow } from "smthrs";',
       "",
       "const { smithers } = createSmithers({});",
       "",

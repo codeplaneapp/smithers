@@ -24,12 +24,12 @@ credentials); a product, CLI, doc, or behavior problem is always a `fail`.
 
 The exact version is: {props.version}
 
-Pin it on EVERY invocation: run commands as `bunx smithers-orchestrator@VERSION SUBCOMMAND`, substituting VERSION with the version above.
+Pin it on EVERY invocation: run commands as `bunx smthrs@VERSION SUBCOMMAND`, substituting VERSION with the version above.
 
 ## Setup — a fresh folder, like a new user
 
 1. Clear the bunx cache: `bun pm cache rm`, then remove any
-   `bunx-*smithers-orchestrator*` dir from `$TMPDIR`.
+   `bunx-*smthrs*` dir from `$TMPDIR`.
 2. `SMOKE_DIR=$(mktemp -d)/smoke-human && mkdir -p "$SMOKE_DIR" && cd "$SMOKE_DIR"`.
 
 ## The documented first-run flow — verify each step
@@ -74,7 +74,7 @@ with evidence (exact command + key output) for each:
   installation.mdx / tour.mdx do. Note whether the failure mode is understandable
   to a new user (`human.agent-prereq`).
 - **Wrong-package trap.** On npm, bare `smithers` is an UNRELATED package; the
-  docs always use `smithers-orchestrator`. Do not actually install bare
+  docs always use `smthrs`. Do not actually install bare
   `smithers`; just confirm the docs you follow never tell you to.
 
 ## Embedded docs — the steps you must follow verbatim

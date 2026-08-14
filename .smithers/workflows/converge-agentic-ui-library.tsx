@@ -1,5 +1,5 @@
 // smithers-display-name: Converge Agentic UI Library
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import {
   ClaudeCodeAgent,
   MergeQueue,
@@ -10,7 +10,7 @@ import {
   UI,
   Worktree,
   createSmithers,
-} from "smithers-orchestrator";
+} from "smthrs";
 import { join } from "node:path";
 import { z } from "zod/v4";
 import { providers } from "../agents";

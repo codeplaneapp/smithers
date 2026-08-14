@@ -1,12 +1,12 @@
 import { Effect } from "effect";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
+import { nowMs } from "@smthrs/scheduler/nowMs";
 import { completeToolJournalCall } from "./completeToolJournalCall.js";
 
 /**
  * Build the ambient defineTool context used by in-process compute callbacks.
  *
  * @param {{
- *   adapter: import("@smithers-orchestrator/db/adapter").SmithersDb;
+ *   adapter: import("@smthrs/db/adapter").SmithersDb;
  *   eventBus: import("./events.js").EventBus;
  *   runId: string;
  *   nodeId: string;

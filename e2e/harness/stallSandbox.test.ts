@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { SandboxHandle } from "@smithers-orchestrator/sandbox/SandboxHandle";
+import type { SandboxHandle } from "@smthrs/sandbox/SandboxHandle";
 import { stallSandbox } from "./stallSandbox.ts";
 
 function makeHandle(): { handle: SandboxHandle; cleanup: () => void } {

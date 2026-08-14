@@ -5,7 +5,7 @@ export type JsxRuntimeKey = string | number | undefined;
 
 /**
  * Smithers JSX runtime factories — the target of
- * `jsxImportSource: "smithers-orchestrator"` and what `<Workflow/>`, `<Task/>`,
+ * `jsxImportSource: "smthrs"` and what `<Workflow/>`, `<Task/>`,
  * etc. compile to. They are deliberately typed wide (`type`/`props` as
  * `unknown`): components validate their own props, and keeping these signatures
  * loose avoids expanding Smithers' deep workflow types during type-checking,

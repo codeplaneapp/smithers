@@ -1,4 +1,4 @@
-# @smithers-orchestrator/gateway-react
+# @smthrs/gateway-react
 
 React bindings for the Smithers Gateway. This package is the React layer used by
 `smithers ui` workflow UIs: it provides the provider, root bootstrap helper, and
@@ -17,7 +17,7 @@ import {
   useGatewayNodeEvents,
   useGatewayRun,
   useGatewayRunEvents,
-} from "smithers-orchestrator/gateway-react";
+} from "smthrs/gateway-react";
 
 function runIdFromUrl(): string | undefined {
   if (typeof location === "undefined") return undefined;
@@ -85,10 +85,10 @@ import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import {
   SmithersGatewayProvider,
-} from "@smithers-orchestrator/gateway-react";
+} from "@smthrs/gateway-react";
 import {
   SmithersGatewayClient,
-} from "@smithers-orchestrator/gateway-client";
+} from "@smthrs/gateway-client";
 
 const client = new SmithersGatewayClient({ baseUrl: "http://localhost:7331" });
 

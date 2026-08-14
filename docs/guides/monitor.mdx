@@ -12,20 +12,20 @@ that runs only while the monitor stays attached.
 ## 10-second quickstart
 
 ```bash
-bunx smithers-orchestrator monitor              # open the monitor over all runs
-bunx smithers-orchestrator monitor RUN_ID       # open it focused on one run
-bunx smithers-orchestrator monitor --no-open    # print the URL instead of opening a browser
-bunx smithers-orchestrator monitor --gateway http://127.0.0.1:7331   # use an explicit Gateway
+bunx smthrs monitor              # open the monitor over all runs
+bunx smthrs monitor RUN_ID       # open it focused on one run
+bunx smthrs monitor --no-open    # print the URL instead of opening a browser
+bunx smthrs monitor --gateway http://127.0.0.1:7331   # use an explicit Gateway
 ```
 
-The command resolves the workspace's singleton gateway like `bunx smithers-orchestrator ui` does: explicit `--gateway` probe, then runtime-state discovery, then the legacy port probe on `--port` (default 7331). It **autostarts** `bunx smithers-orchestrator gateway` when none is running (disable with `--no-autostart`; `--no-daemon` or `SMITHERS_NO_DAEMON=1` disables daemonized autostart), opens `/workflows/oneshot?runId=` for a built-in oneshot or `/monitor?runId=` otherwise, and prints a `{ opened, url, gateway, runId, view }` envelope.
+The command resolves the workspace's singleton gateway like `bunx smthrs ui` does: explicit `--gateway` probe, then runtime-state discovery, then the legacy port probe on `--port` (default 7331). It **autostarts** `bunx smthrs gateway` when none is running (disable with `--no-autostart`; `--no-daemon` or `SMITHERS_NO_DAEMON=1` disables daemonized autostart), opens `/workflows/oneshot?runId=` for a built-in oneshot or `/monitor?runId=` otherwise, and prints a `{ opened, url, gateway, runId, view }` envelope.
 
 When the resolved gateway requires a bearer token, the printed/opened URL
 routes through the gateway's [browser session handoff](/integrations/gateway#browser-session-handoff)
 (`/v1/auth/session`), which swaps the token for an HttpOnly cookie and lands
 on the clean URL; no more 401s from browser navigations. When nothing is
 reachable, the error names the runtime state file checked, the port probed,
-and the exact `bunx smithers-orchestrator gateway --host <host> --port <port>`
+and the exact `bunx smthrs gateway --host <host> --port <port>`
 command to start one.
 
 ## Remote access (Tailscale / SSH / LAN)
@@ -61,8 +61,8 @@ The overview is organized around triage: what needs you first, what is running n
 
 | Surface | What it is for |
 | --- | --- |
-| `bunx smithers-orchestrator monitor [RUN_ID]` | Watch all runs, or open the dedicated monitor when `RUN_ID` is a built-in oneshot. |
-| [`bunx smithers-orchestrator ui`](/guides/custom-workflow-ui) | Open **one workflow's own custom UI** (`.smithers/ui/<workflow>.tsx`), built for its domain. |
-| `bunx smithers-orchestrator ps` / `logs` / `inspect` | The terminal watch loop: scriptable, agent-drivable, works over SSH. See the [CLI catalog](/cli/overview). |
+| `bunx smthrs monitor [RUN_ID]` | Watch all runs, or open the dedicated monitor when `RUN_ID` is a built-in oneshot. |
+| [`bunx smthrs ui`](/guides/custom-workflow-ui) | Open **one workflow's own custom UI** (`.smithers/ui/<workflow>.tsx`), built for its domain. |
+| `bunx smthrs ps` / `logs` / `inspect` | The terminal watch loop: scriptable, agent-drivable, works over SSH. See the [CLI catalog](/cli/overview). |
 
 The monitor replaced the retired `monitor` *workflow*, which launched a durable agent run just to look at another run; this command observes directly through the gateway instead.

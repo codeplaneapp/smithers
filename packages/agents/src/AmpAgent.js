@@ -35,8 +35,32 @@ export function createAmpCapabilityRegistry() {
       supportsUiRequests: false,
       methods: [],
     },
+    fileChanges: {
+      supportsFileChanges: true,
+      supportsUnifiedDiff: false,
+    },
     builtIns: ["default"],
   };
+}
+
+/**
+ * Amp speaks Claude-compatible stream-json, but its file-mutating tools are
+ * `create_file` (`{path, content}`) and `edit_file` (`{path, ...}`), not
+ * Claude Code's `Write`/`Edit` names. Paths-only: amp's tool input does not
+ * carry verified prior content, so no diff is reconstructed.
+ *
+ * @param {unknown} toolName
+ * @param {unknown} input
+ * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+ */
+function parseAmpFileChanges(toolName, input) {
+  if (!isRecord(input)) return undefined;
+  const name = asString(toolName);
+  const path = asString(input.path) ?? asString(input.file_path);
+  if (!path) return undefined;
+  if (name === "create_file") return [{ path, kind: "created", source: "reported" }];
+  if (name === "edit_file") return [{ path, kind: "modified", source: "reported" }];
+  return undefined;
 }
 
 /**
@@ -66,6 +90,10 @@ export class AmpAgent extends BaseCliAgent {
     let finalAnswer = "";
     let didEmitCompleted = false;
     const nextSyntheticId = createSyntheticIdGenerator();
+    // Tool names keyed by use id so the tool_result completion keeps the
+    // started event's action kind (a create_file/edit_file started as
+    // `file_change` must not complete as a generic `tool`).
+    const toolNameByUseId = new Map();
     /**
      * @param {string} line
      * @returns {AgentCliEvent[]}
@@ -110,6 +138,8 @@ export class AmpAgent extends BaseCliAgent {
           if (block.type === "tool_use") {
             const name = asString(block.name) ?? "tool";
             const id = asString(block.id) ?? nextSyntheticId("amp-tool");
+            toolNameByUseId.set(id, name);
+            const fileChanges = parseAmpFileChanges(name, block.input);
             events.push({
               type: "action",
               engine: this.cliEngine,
@@ -122,6 +152,7 @@ export class AmpAgent extends BaseCliAgent {
                 detail: {
                   input: block.input,
                   parentToolUseId: payload.parent_tool_use_id,
+                  ...(fileChanges ? { fileChanges } : {}),
                 },
               },
               message: `Running ${name}`,
@@ -138,6 +169,8 @@ export class AmpAgent extends BaseCliAgent {
         for (const block of content) {
           if (!isRecord(block) || block.type !== "tool_result") continue;
           const id = asString(block.tool_use_id) ?? nextSyntheticId("amp-tool");
+          const name = toolNameByUseId.get(id);
+          toolNameByUseId.delete(id);
           events.push({
             type: "action",
             engine: this.cliEngine,
@@ -145,8 +178,8 @@ export class AmpAgent extends BaseCliAgent {
             entryType: "thought",
             action: {
               id,
-              kind: "tool",
-              title: "tool result",
+              kind: name ? toolKindFromName(name) : "tool",
+              title: name ?? "tool result",
               detail: {
                 parentToolUseId: payload.parent_tool_use_id,
               },
@@ -196,7 +229,18 @@ export class AmpAgent extends BaseCliAgent {
     };
   }
   /**
-   * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
+   * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
+   * into {@link AgentFileChange} records. `action` is `{ title, detail: { input } }`.
+   *
+   * @param {unknown} action
+   * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+   */
+  parseFileChanges(action) {
+    const fileAction = /** @type {{ title?: unknown; detail?: { input?: unknown } } | undefined} */ (action);
+    return parseAmpFileChanges(asString(fileAction?.title) ?? "", fileAction?.detail?.input);
+  }
+  /**
+   * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any }} params
    */
   async buildCommand(params) {
     // Resume an existing thread when a session id is provided. Amp continues a

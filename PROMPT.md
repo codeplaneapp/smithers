@@ -65,7 +65,7 @@ Deliberately exclude from the MVP:
 - Nested iframes or broad CSP domains.
 - A hosted Smithers control plane.
 
-The UI should be recognizably Smithers Monitor, but smaller than the full browser Monitor. Reuse `smithers-orchestrator/ui`, pure helpers from `monitorModel.ts`, and suitable `monitorShell.tsx` components. Extract shared pure view/style pieces when doing so reduces duplication; do not make the Apps widget depend on gateway-react hooks.
+The UI should be recognizably Smithers Monitor, but smaller than the full browser Monitor. Reuse `smthrs/ui`, pure helpers from `monitorModel.ts`, and suitable `monitorShell.tsx` components. Extract shared pure view/style pieces when doing so reduces duplication; do not make the Apps widget depend on gateway-react hooks.
 
 ## Architecture
 
@@ -96,7 +96,7 @@ Requirements:
 - Correctly create/close transports and reject malformed or stale session IDs.
 - Clean shutdown on SIGINT/SIGTERM with no orphan listener.
 - Refuse a non-loopback bind unless an explicit auth token is configured; do not invent permissive CORS defaults.
-- Keep `bunx smithers-orchestrator --mcp` stdio behavior byte-for-byte compatible.
+- Keep `bunx smthrs --mcp` stdio behavior byte-for-byte compatible.
 
 Use `@modelcontextprotocol/sdk`'s current transport. Add `@modelcontextprotocol/ext-apps` only if the current official server/UI helpers materially reduce protocol mistakes. Any dependency change must update `apps/cli/package.json`, `pnpm-lock.yaml`, and `bun.lock` together.
 

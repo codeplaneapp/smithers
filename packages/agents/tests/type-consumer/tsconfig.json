@@ -10,5 +10,5 @@
     "noEmit": true,
     "types": ["bun"]
   },
-  "files": ["transcription-options.ts", "omp-output-format.ts"]
+  "files": ["transcription-options.ts", "omp-output-format.ts", "agent-checkpoint.ts", "nanocodex-agent.ts"]
 }

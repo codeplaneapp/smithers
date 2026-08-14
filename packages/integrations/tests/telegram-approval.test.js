@@ -6,8 +6,8 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import React from "react";
 import { Effect } from "effect";
-import { createSmithers, runWorkflow, signalRun } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { createSmithers, runWorkflow, signalRun } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
 import {
   TelegramApproval,
   approvalInlineKeyboard,
@@ -23,16 +23,25 @@ import {
 import { makeTelegramClient } from "../src/telegram/TelegramClient.js";
 import { TELEGRAM_CALLBACK_QUERY_EVENT } from "../src/telegram/TelegramSource.js";
 import { startTelegramFixture } from "./telegram-fixture.js";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 
 const fixture = startTelegramFixture();
 afterAll(() => fixture.stop());
 const telegramConfig = { botToken: fixture.token, apiBaseUrl: fixture.apiBaseUrl };
 
+// Allocated once, at module scope. `makeTempDirPath` re-arms its `bun:test`
+// drain hook whenever the registry is empty, so a per-test allocation
+// registers a hook from inside every test — the mid-test registration that
+// intermittently stalls a test for the full 5s timeout. See the longer note
+// in github-components.test.jsx.
+const apiRoot = makeTempDirPath("smithers-tg-approval-");
+let apiCount = 0;
+
 function makeApi() {
-  const dir = mkdtempSync(join(tmpdir(), "smithers-tg-approval-"));
+  const dir = join(apiRoot, `api-${(apiCount += 1)}`);
+  mkdirSync(dir, { recursive: true });
   return createSmithers(
     {
       ...telegramApprovalSchemas,

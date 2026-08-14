@@ -1,10 +1,10 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterEach, describe, expect, test } from "bun:test";
 import { dirname } from "node:path";
 import { z } from "zod";
 import { Effect } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
-import { runWorkflow } from "smithers-orchestrator";
+import { runWorkflow } from "smthrs";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { startLinearFixture } from "./linear-fixture.js";
 import { configureLinear } from "../src/linear/config.js";

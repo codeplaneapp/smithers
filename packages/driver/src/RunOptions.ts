@@ -3,7 +3,7 @@ import type { RunStartedBy } from "./RunStartedBy.ts";
 import type { OutputSnapshot } from "./OutputSnapshot.ts";
 import type { SmithersErrorReport } from "./SmithersErrorReport.ts";
 import type { SignalRowInput } from "./SignalRows.ts";
-import type { SmithersEvent } from "@smithers-orchestrator/observability/SmithersEvent";
+import type { SmithersEvent } from "@smthrs/observability/SmithersEvent";
 import type { Layer } from "effect";
 
 export type EffectPlatformRuntime = "bun" | "node" | "worker";
@@ -62,6 +62,8 @@ export type RunOptions = {
   logDir?: string | null;
   allowNetwork?: boolean;
   maxOutputBytes?: number;
+  /** Per-checkpoint UTF-8 JSON byte limit; defaults to and cannot exceed the 16 MiB system ceiling. */
+  maxAgentCheckpointBytes?: number;
   toolTimeoutMs?: number;
   hot?: boolean | HotReloadOptions;
   annotations?: Record<string, string | number | boolean>;

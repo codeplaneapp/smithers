@@ -1,4 +1,4 @@
-import { GatewayComparisonScoreRow as GatewayComparisonScoreRow$1, GatewayScoreDetail as GatewayScoreDetail$1 } from '@smithers-orchestrator/protocol/gateway-rpc';
+import { GatewayComparisonScoreRow as GatewayComparisonScoreRow$1, GatewayScoreDetail as GatewayScoreDetail$1 } from '@smthrs/protocol/gateway-rpc';
 
 /**
  * @template {Record<string, unknown>} Row

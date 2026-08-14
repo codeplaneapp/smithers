@@ -1,7 +1,7 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { join } from "node:path";
-import { renderPrompt, renderWorkflow, simulate } from "smithers-orchestrator/testing";
+import { renderPrompt, renderWorkflow, simulate } from "smthrs/testing";
 import "../preload.ts";
 
 const workflows = join(import.meta.dir, "..", "workflows");

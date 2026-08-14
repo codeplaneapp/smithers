@@ -131,12 +131,12 @@ function fallbackRunSummary(run) {
  *   runId: unknown;
  *   nodeId: unknown;
  *   iteration: unknown;
- *   resolveRun: (runId: string) => Promise<{ workflow: unknown; adapter: import("@smithers-orchestrator/db/adapter").SmithersDb } | null>;
- *   summarize?: ((params: { runId: string; nodeId: string | null; iteration: number | null; adapter: import("@smithers-orchestrator/db/adapter").SmithersDb }) => Promise<{ summary: string; agentId?: string | null; source?: "agent" | "facts" } | null>) | null;
+ *   resolveRun: (runId: string) => Promise<{ workflow: unknown; adapter: import("@smthrs/db/adapter").SmithersDb } | null>;
+ *   summarize?: ((params: { runId: string; nodeId: string | null; iteration: number | null; adapter: import("@smthrs/db/adapter").SmithersDb }) => Promise<{ summary: string; agentId?: string | null; source?: "agent" | "facts" } | null>) | null;
  *   cache?: Map<string, { payload: Record<string, unknown> }>;
  *   now?: () => number;
  * }} params
- * @returns {Promise<import("@smithers-orchestrator/gateway/rpc").WhatHappenedResponse>}
+ * @returns {Promise<import("@smthrs/gateway/rpc").WhatHappenedResponse>}
  */
 export async function whatHappenedRoute(params) {
   const now = params.now ?? Date.now;
@@ -197,7 +197,7 @@ export async function whatHappenedRoute(params) {
   if (cacheable) {
     const hit = params.cache.get(cacheKey);
     if (hit) {
-      return /** @type {import("@smithers-orchestrator/gateway/rpc").WhatHappenedResponse} */ ({
+      return /** @type {import("@smthrs/gateway/rpc").WhatHappenedResponse} */ ({
         ...hit.payload,
         cached: true,
       });
@@ -243,5 +243,5 @@ export async function whatHappenedRoute(params) {
       if (oldest !== undefined) params.cache.delete(oldest);
     }
   }
-  return /** @type {import("@smithers-orchestrator/gateway/rpc").WhatHappenedResponse} */ (payload);
+  return /** @type {import("@smthrs/gateway/rpc").WhatHappenedResponse} */ (payload);
 }

@@ -1,7 +1,7 @@
 // smithers-display-name: Codex issue worktrees → local merge queue
 // smithers-source: local-only issue remediation; all verification runs locally
-/** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, Panel, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { ClaudeCodeAgent, Panel, createSmithers } from "smthrs";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";

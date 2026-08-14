@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 import type { CSSProperties } from "react";
-import { useGatewayConnectionStatus } from "@smithers-orchestrator/gateway-react";
+import { useGatewayConnectionStatus } from "@smthrs/gateway-react";
 import { theme } from "./theme";
 
 export type ConnectionBadgeProps = {

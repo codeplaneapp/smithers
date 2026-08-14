@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import React from "react";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { withTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
-import { executeSandbox } from "@smithers-orchestrator/sandbox";
-import { getNodeDiffRoute } from "@smithers-orchestrator/server";
+import { createSmithers } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { withTaskRuntime } from "@smthrs/driver/task-runtime";
+import { executeSandbox } from "@smthrs/sandbox";
+import { getNodeDiffRoute } from "@smthrs/server";
 
 const RUN_ID = "run-case26";
 const NODE_ID = "edit-readme";

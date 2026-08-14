@@ -1,12 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import {
-  Commit,
-  EnvironmentVariables,
-  parseStackTrace,
-  SecretField,
-  StackTrace,
-  TestResults,
-} from "@smithers-orchestrator/ui";
+import { Commit, EnvironmentVariables, parseStackTrace, SecretField, StackTrace, TestResults } from "@smthrs/ui";
 
 const meta: Meta = {
   title: "Agentic/Coding Artifacts",

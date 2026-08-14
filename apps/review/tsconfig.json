@@ -5,7 +5,7 @@
     "module": "ESNext",
     "moduleDetection": "force",
     "jsx": "react-jsx",
-    "jsxImportSource": "smithers-orchestrator",
+    "jsxImportSource": "smthrs",
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "allowJs": true,
@@ -15,11 +15,11 @@
     "skipLibCheck": true,
     "types": ["bun-types"],
     "paths": {
-      "smithers-orchestrator": ["../../packages/smithers/src/index.js"],
-      "smithers-orchestrator/jsx-runtime": ["../../packages/smithers/src/jsx-runtime.js"],
-      "smithers-orchestrator/jsx-dev-runtime": ["../../packages/smithers/src/jsx-runtime.js"],
-      "@smithers-orchestrator/engine": ["../../packages/engine/src/index.js"],
-      "@smithers-orchestrator/db/snapshot": ["../../packages/db/src/snapshot.js"]
+      "smthrs": ["../../packages/smithers/src/index.js"],
+      "smthrs/jsx-runtime": ["../../packages/smithers/src/jsx-runtime.js"],
+      "smthrs/jsx-dev-runtime": ["../../packages/smithers/src/jsx-runtime.js"],
+      "@smthrs/engine": ["../../packages/engine/src/index.js"],
+      "@smthrs/db/snapshot": ["../../packages/db/src/snapshot.js"]
     }
   },
   "include": ["src/**/*", "tests/**/*", "action/src/**/*", "alchemy.run.ts"]

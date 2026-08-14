@@ -15,7 +15,7 @@ import {
   OpenAIAgent,
   createHttpTool,
   tools,
-} from "smithers-orchestrator";
+} from "smthrs";
 import { stepCountIs } from "ai";
 ```
 
@@ -38,8 +38,8 @@ const codex = new OpenAIAgent({
 ```
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { AnthropicAgent, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { AnthropicAgent, createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, Task, smithers, outputs } = createSmithers({
@@ -190,7 +190,7 @@ The tool input accepts `method`, `url`, `headers`, `query`, `body`, optional `au
 [Hermes](https://github.com/NousResearch/hermes-agent) (Nous Research) exposes an OpenAI-compatible HTTP API; `HermesAgent` is a convenience `OpenAIAgent` subclass that points at your Hermes server and disables native structured output by default (a local Hermes server may not honor JSON-schema response formats).
 
 ```ts
-import { HermesAgent } from "smithers-orchestrator";
+import { HermesAgent } from "smthrs";
 
 const hermes = new HermesAgent({
   baseURL: "http://127.0.0.1:5123/v1", // or set HERMES_BASE_URL
@@ -205,10 +205,10 @@ const hermes = new HermesAgent({
 
 ## Eliza
 
-`ElizaAgent` wraps an in-process elizaOS `AgentRuntime` so an Eliza character and its plugins (Slack, Discord, Telegram, model providers) run as a first-class Smithers agent. Unlike the other agents here, it ships in a separate opt-in package owning the `@elizaos/core` dependency: install and import it from `@smithers-orchestrator/agent-eliza`:
+`ElizaAgent` wraps an in-process elizaOS `AgentRuntime` so an Eliza character and its plugins (Slack, Discord, Telegram, model providers) run as a first-class Smithers agent. Unlike the other agents here, it ships in a separate opt-in package owning the `@elizaos/core` dependency: install and import it from `@smthrs/agent-eliza`:
 
 ```ts
-import { ElizaAgent } from "@smithers-orchestrator/agent-eliza";
+import { ElizaAgent } from "@smthrs/agent-eliza";
 
 const eliza = new ElizaAgent({
   character: { name: "SupportBot", bio: "Answers product questions." },
@@ -222,12 +222,12 @@ The harness lazily initializes the runtime on the first `generate` (or `prefligh
 
 ## Hijack Support
 
-SDK agents do not reopen a provider-native CLI; Smithers persists the agent conversation and reopens it through a Smithers-managed REPL via `bunx smithers-orchestrator hijack RUN_ID`.
+SDK agents do not reopen a provider-native CLI; Smithers persists the agent conversation and reopens it through a Smithers-managed REPL via `bunx smthrs hijack RUN_ID`.
 
 Live-run behavior:
 
 - Smithers captures response history after each step via `onStepEnd`.
-- `bunx smithers-orchestrator hijack` waits until history is durable, aborts the current agent task (handing it off to the REPL), and opens the REPL.
+- `bunx smthrs hijack` waits until history is durable, aborts the current agent task (handing it off to the REPL), and opens the REPL.
 - On clean REPL exit, Smithers writes updated message history back and resumes the workflow automatically.
 
 Limits:
@@ -254,7 +254,7 @@ Use `createTranscriptionTool` when an SDK agent needs to transcribe audio in its
 For Whisper, remote audio downloads are capped at 25 MiB by default; set `maxResponseBodyBytes` for a different cap (the deprecated `maxResponseBytes` is a fallback when it's omitted). The generic `createHttpTool` has its own independent 1 MiB default.
 
 ```ts
-import { AnthropicAgent, createTranscriptionTool } from "@smithers-orchestrator/agents";
+import { AnthropicAgent, createTranscriptionTool } from "@smthrs/agents";
 
 const transcribeAudio = createTranscriptionTool({
   provider: "deepgram", // or "whisper"

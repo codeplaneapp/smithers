@@ -1,8 +1,8 @@
 import * as ai from 'ai';
 import { Tool as Tool$1, ToolSet, ToolLoopAgentSettings, LanguageModel, ToolLoopAgent } from 'ai';
-import { B as BaseCliAgentOptions, a as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, b as PiExtensionUiResponse$1, A as AgentGenerateOptions$3, c as BaseCliAgent, C as CliOutputInterpreter$e, d as CodexConfigOverrides, e as AgentCliEvent$1, f as CliOutputInterpreter$f, g as AgentCliActionKind } from './index-CN9hS6LR.js';
+import { A as AgentGenerateOptions$4, a as AgentCheckpoint$1, b as AgentFileChange$1, c as AgentCheckpointCapability$1, d as AgentCheckpointFormat$1, B as BaseCliAgentOptions, e as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, f as PiExtensionUiResponse$1, g as BaseCliAgent, C as CliOutputInterpreter$e, h as CodexConfigOverrides, i as AgentCliEvent$1, j as CliOutputInterpreter$f, k as AgentCheckpointResult$1, l as AgentCheckpointMode$1, m as AgentCliActionKind, n as AgentCheckpointContinuationOptions$1, o as AgentCheckpointJsonArray$1, p as AgentCheckpointJsonObject$1, q as AgentCheckpointJsonPrimitive$1, r as AgentCheckpointJsonValue$1, s as AgentCheckpointPublisher$1, t as AgentFileChangeKind$1 } from './index-GhnOiRTn.js';
 import * as zod from 'zod';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 import 'effect';
 import 'node:child_process';
 
@@ -250,6 +250,12 @@ type AgentCapabilityRegistry$c = {
         supportsUiRequests: boolean;
         methods: string[];
     };
+    fileChanges: {
+        /** Can this engine identify file-mutating tool calls at all? */
+        supportsFileChanges: boolean;
+        /** Can it produce (report or reconstruct) full diff content? */
+        supportsUnifiedDiff: boolean;
+    };
     builtIns: string[];
 };
 
@@ -309,6 +315,171 @@ type SmithersAgentContract$3 = {
     docsGuidance: string;
 };
 
+type NanocodexApiKeyAuth = {
+    mode: "api-key-env";
+    environmentVariable: string;
+};
+type NanocodexChatGptAuth = {
+    mode: "chatgpt";
+    /** Absolute Unicode scalar managed-auth path without NUL, at most 4,096 UTF-16 code units. */
+    authFile?: string;
+};
+type NanocodexAuth$1 = NanocodexApiKeyAuth | NanocodexChatGptAuth;
+type NanocodexThinking$1 = "none" | "low" | "medium" | "high" | "xhigh" | "max";
+type NanocodexReasoningMode$1 = "standard" | "pro";
+/**
+ * Per-call options accepted by {@link NanocodexAgent.generate}. Protocol v1
+ * supports same-session checkpoint resume only and does not accept provider
+ * session identifiers.
+ */
+type NanocodexGenerateOptions$1 = AgentGenerateOptions$4 & {
+    /** Nanocodex always uses its stock native tool set. */
+    tools?: never;
+    /** Provider options are configured on the agent, not per call. */
+    options?: never;
+    resumeCheckpoint?: AgentCheckpoint$1;
+    checkpointMode?: "resume";
+    resumeSession?: never;
+};
+/**
+ * Configuration for one stock, headless Nanocodex worker per generate call.
+ * Native Code Mode remains enabled; JavaScript tools, MCP, subagents, custom
+ * endpoints, and workspace relocation are intentionally not configurable.
+ * Protocol v1 supports Linux x86_64 (glibc >= 2.35) and macOS arm64. The
+ * adapter spawns the worker directly; Bubblewrap / sandbox-exec are not
+ * required and must not wrap this binary. Isolation is optional outer
+ * Smithers `<Sandbox>`.
+ */
+type NanocodexAgentOptions$2 = {
+    id?: string;
+    /** Absolute path or executable name resolved from the effective PATH. */
+    binary?: string;
+    cwd?: string;
+    auth?: NanocodexAuth$1;
+    /** Complete instruction replacement, at most 4 MiB encoded as UTF-8. */
+    instructions?: string;
+    /**
+     * Stock Nanocodex 0.5.0 model. Default `gpt-5.6-sol`. Wire ids and the
+     * `sol` / `terra` / `luna` aliases are accepted. The model is fixed for a
+     * native thread; resume rejects a constructor model that does not match the
+     * checkpoint (absent checkpoint model is Sol).
+     */
+    model?: "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" | "sol" | "terra" | "luna";
+    thinking?: NanocodexThinking$1;
+    reasoningMode?: NanocodexReasoningMode$1;
+    fastMode?: boolean;
+    env?: Record<string, string>;
+    inheritEnv?: boolean;
+    /** Total timeout in milliseconds. Must not exceed 2^31 - 1. */
+    timeoutMs?: number;
+    /** Idle timeout in milliseconds. Must not exceed 2^31 - 1. */
+    idleTimeoutMs?: number;
+    /** Grace period for protocol cancellation. Must not exceed 2^31 - 1. */
+    cancellationGraceMs?: number;
+    maxCheckpointBytes?: number;
+};
+
+/**
+ * Represents an entity capable of generating responses or actions based on prompts.
+ * This is typically an AI agent interface.
+ */
+type AgentLike$2 = {
+    /** Optional unique identifier for the agent */
+    id?: string;
+    /** Available tools the agent can use */
+    tools?: Record<string, unknown>;
+    /** Optional structured capability registry for cache and diagnostics */
+    capabilities?: AgentCapabilityRegistry$a;
+    /** True when the agent consumes outputSchema through a native structured-output API. */
+    supportsNativeStructuredOutput?: boolean;
+    /** Optional harness-specific file-change normalizer. */
+    parseFileChanges?: (rawEvent: unknown) => AgentFileChange$1[] | undefined;
+    /** Version- and mode-aware checkpoint formats this agent can consume. */
+    checkpointCapabilities?: readonly AgentCheckpointCapability$1[];
+    /** Checkpoint formats this agent may return or publish during generation. */
+    checkpointFormats?: readonly AgentCheckpointFormat$1[];
+    /**
+     * Performs deterministic startup checks before the first generation call in a
+     * workflow run. A rejected promise fails the task without retrying.
+     */
+    preflight?: (args?: AgentGenerateOptions$4) => Promise<void>;
+    /**
+     * Generates a response or action based on the provided arguments.
+     *
+     * @param args - The arguments for generation
+     * @param args.options - Optional provider-specific configuration
+     * @param args.abortSignal - Signal to abort the generation request
+     * @param args.prompt - The input text prompt to generate from
+     * @param args.timeout - Optional timeout configuration in milliseconds
+     * @param args.onStdout - Callback for streaming standard output text
+     * @param args.onStderr - Callback for streaming standard error text
+     * @param args.outputSchema - Optional Zod schema defining the expected structured output format
+     * @returns A promise resolving to the generated output. Results may include
+     * an optional `checkpoint: AgentCheckpoint` for a later resume or fork.
+     */
+    generate: (args?: AgentGenerateOptions$4) => Promise<unknown>;
+};
+
+/**
+ * Providers `fallbackAgents` knows how to turn into a CLI agent instance.
+ * Subscription providers use the account's `configDir`; API providers use the
+ * account's `apiKey`.
+ */
+type FallbackAgentProvider$1 = "claude-code" | "codex" | "kimi" | "antigravity" | "anthropic-api" | "openai-api";
+type FallbackAgentsOptions$2 = {
+    /**
+     * Which registered account providers to include in the chain. Defaults to
+     * `["claude-code", "codex"]` (every Claude and Codex subscription). Pass
+     * `"all"` to include every provider fallbackAgents can construct.
+     */
+    providers?: FallbackAgentProvider$1[] | "all";
+    /**
+     * The "normal" agent(s) appended after the registered accounts, and returned
+     * alone when no matching accounts exist (fresh machine, CI, corrupt
+     * registry). Defaults to a stock agent for the first requested provider
+     * family (Claude Code unless `providers` starts with a Codex-family
+     * provider). Pass `[]` to disable the tail entirely.
+     */
+    fallback?: AgentLike$2 | AgentLike$2[];
+    /**
+     * Per-provider model override, e.g. `{ codex: "gpt-5.6-sol" }`. Wins over
+     * the account's registered `model`. Absent both, the CLI's own default
+     * model is used.
+     */
+    models?: Partial<Record<FallbackAgentProvider$1, string>>;
+    /**
+     * Per-provider constructor options applied to every pooled rung of that
+     * provider, e.g. `{ codex: { sandbox: "read-only" } }`. Use it to keep a
+     * task's intended authority (read-only sandbox, restricted tools, provider
+     * config) when a single hardcoded agent becomes a pool. Account identity
+     * (`configDir`, `apiKey`, `id`) is always applied last and cannot be
+     * overridden, so a rung can never be repointed at another subscription.
+     */
+    agentOptions?: Partial<Record<FallbackAgentProvider$1, Record<string, unknown>>>;
+    /**
+     * Randomly order the registered accounts (default `true`). Each
+     * `fallbackAgents()` call draws a fresh order, so load spreads across
+     * subscriptions while the engine's quota failover walks the chain in order.
+     * Set `false` to keep registration order.
+     */
+    shuffle?: boolean;
+    /**
+     * RNG used by the shuffle (default `Math.random`). Inject a seeded function
+     * for deterministic ordering in tests or replay-stable workflows.
+     */
+    random?: () => number;
+    /**
+     * Convenience alternative to `random`: derive a deterministic shuffle from
+     * this value. Pass the run id (`seed: ctx.runId`) so the chain is stable
+     * across every render and retry of one run (keeping the engine's
+     * per-rung quota skipping precise) while still varying run to run.
+     * Ignored when `random` is provided.
+     */
+    seed?: string | number;
+    /** Environment used to locate the registry (honors `SMITHERS_HOME`). */
+    env?: NodeJS.ProcessEnv;
+};
+
 type VibeAgentOptions$2 = BaseCliAgentOptions & {
     agent?: string;
     maxTurns?: number;
@@ -348,7 +519,14 @@ type OpenCodeAgentOptions$2 = BaseCliAgentOptions$1 & {
     continueSession?: boolean;
     /** Resume a specific session by ID */
     sessionId?: string;
-    /** Provider-specific model variant/reasoning effort level */
+    /**
+     * Provider-specific model variant/reasoning-effort level (OpenCode `--variant`).
+     *
+     * OpenCode has no fixed effort ladder: the shared {@link BaseCliAgentOptions.effort}
+     * option maps onto this provider-defined string when `variant` is unset (an
+     * explicit `variant` always wins). Providers that expose no variant knob
+     * treat `effort` as unsupported.
+     */
     variant?: string;
 };
 
@@ -523,40 +701,6 @@ type OpenAIAgentOptions$2<CALL_OPTIONS = never, TOOLS extends ToolSet = {}> = Op
 
 type AnthropicAgentOptions$2<CALL_OPTIONS = never, TOOLS extends ToolSet = {}> = SdkAgentOptions<CALL_OPTIONS, TOOLS, LanguageModel>;
 
-/**
- * Represents an entity capable of generating responses or actions based on prompts.
- * This is typically an AI agent interface.
- */
-type AgentLike$1 = {
-    /** Optional unique identifier for the agent */
-    id?: string;
-    /** Available tools the agent can use */
-    tools?: Record<string, unknown>;
-    /** Optional structured capability registry for cache and diagnostics */
-    capabilities?: AgentCapabilityRegistry$a;
-    /** True when the agent consumes outputSchema through a native structured-output API. */
-    supportsNativeStructuredOutput?: boolean;
-    /**
-     * Performs deterministic startup checks before the first generation call in a
-     * workflow run. A rejected promise fails the task without retrying.
-     */
-    preflight?: (args?: AgentGenerateOptions$3) => Promise<void>;
-    /**
-     * Generates a response or action based on the provided arguments.
-     *
-     * @param args - The arguments for generation
-     * @param args.options - Optional provider-specific configuration
-     * @param args.abortSignal - Signal to abort the generation request
-     * @param args.prompt - The input text prompt to generate from
-     * @param args.timeout - Optional timeout configuration in milliseconds
-     * @param args.onStdout - Callback for streaming standard output text
-     * @param args.onStderr - Callback for streaming standard error text
-     * @param args.outputSchema - Optional Zod schema defining the expected structured output format
-     * @returns A promise resolving to the generated output
-     */
-    generate: (args?: AgentGenerateOptions$3) => Promise<unknown>;
-};
-
 /** @typedef {import("./BaseCliAgent/AgentGenerateOptions.ts").AgentGenerateOptions} AgentGenerateOptions */
 /**
  * @template [CALL_OPTIONS=never], [TOOLS=import("ai").ToolSet]
@@ -579,9 +723,9 @@ declare class AnthropicAgent<CALL_OPTIONS = never, TOOLS = ai.ToolSet> extends T
      * @param {AgentGenerateOptions} [args]
      * @returns {Promise<GenerateTextResult<TOOLS, never>>}
      */
-    generate(args?: AgentGenerateOptions$2): Promise<GenerateTextResult$2<TOOLS, never>>;
+    generate(args?: AgentGenerateOptions$3): Promise<GenerateTextResult$2<TOOLS, never>>;
 }
-type AgentGenerateOptions$2 = AgentGenerateOptions$3;
+type AgentGenerateOptions$3 = AgentGenerateOptions$4;
 type AnthropicAgentOptions$1<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = AnthropicAgentOptions$2<CALL_OPTIONS, TOOLS>;
 type GenerateTextResult$2 = ai.GenerateTextResult<any, any, any>;
 
@@ -607,9 +751,9 @@ declare class OpenAIAgent<CALL_OPTIONS = never, TOOLS = ai.ToolSet> extends Tool
      * @param {AgentGenerateOptions} [args]
      * @returns {Promise<GenerateTextResult<TOOLS, never>>}
      */
-    generate(args?: AgentGenerateOptions$1): Promise<GenerateTextResult$1<TOOLS, never>>;
+    generate(args?: AgentGenerateOptions$2): Promise<GenerateTextResult$1<TOOLS, never>>;
 }
-type AgentGenerateOptions$1 = AgentGenerateOptions$3;
+type AgentGenerateOptions$2 = AgentGenerateOptions$4;
 type GenerateTextResult$1 = ai.GenerateTextResult<any, any, any>;
 type OpenAIAgentOptions$1<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = OpenAIAgentOptions$2<CALL_OPTIONS, TOOLS>;
 
@@ -687,7 +831,15 @@ declare class AmpAgent extends BaseCliAgent {
      */
     createOutputInterpreter(): CliOutputInterpreter$d;
     /**
-     * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
+     * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
+     * into {@link AgentFileChange} records. `action` is `{ title, detail: { input } }`.
+     *
+     * @param {unknown} action
+     * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+     */
+    parseFileChanges(action: unknown): AgentFileChange$1[] | undefined;
+    /**
+     * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any }} params
      */
     buildCommand(params: {
         prompt: string;
@@ -827,12 +979,15 @@ type ClaudeCodeAgentOptions$1 = BaseCliAgentOptions & {
     appendSystemPrompt?: string;
     /**
      * Path to an isolated Claude Code config directory. Sets `CLAUDE_CONFIG_DIR`
-     * on the spawned process so this invocation uses the credentials stored at
-     * `<configDir>/.credentials.json` (instead of the user's default `~/.claude/`).
+     * on the spawned process so this invocation uses that directory's
+     * credentials (instead of the user's default `~/.claude/`): the CLI stores
+     * them at `<configDir>/.credentials.json`, or on macOS in a per-config-dir
+     * Keychain item suffixed with the first 8 hex chars of sha256(configDir).
      *
      * Use this to run multiple Claude Code subscriptions side-by-side. Set up
      * the directory by running `CLAUDE_CONFIG_DIR=<path> claude` once and
-     * completing `/login` interactively.
+     * completing `/login` interactively, or via
+     * `smithers agents add --provider claude-code --label <name> --tmux`.
      */
     configDir?: string;
     /**
@@ -890,6 +1045,14 @@ declare class ClaudeCodeAgent extends BaseCliAgent {
      */
     createOutputInterpreter(): CliOutputInterpreter$b;
     /**
+     * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
+     * into {@link AgentFileChange} records. `action` is `{ title, detail: { input } }`.
+     *
+     * @param {unknown} action
+     * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+     */
+    parseFileChanges(action: unknown): AgentFileChange$1[] | undefined;
+    /**
      * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
      */
     buildCommand(params: {
@@ -898,6 +1061,7 @@ declare class ClaudeCodeAgent extends BaseCliAgent {
         cwd: string;
         options: any;
     }): Promise<{
+        cleanup?: (() => Promise<void>) | undefined;
         command: string;
         args: string[];
         outputFormat: "text" | "json" | "stream-json";
@@ -921,6 +1085,7 @@ type CodexAgentOptions$1 = BaseCliAgentOptions & {
     localProvider?: string;
     sandbox?: "read-only" | "workspace-write" | "danger-full-access";
     profile?: string;
+    /** Emits `--sandbox workspace-write` (codex-cli removed the old `--full-auto` alias). */
     fullAuto?: boolean;
     dangerouslyBypassApprovalsAndSandbox?: boolean;
     cd?: string;
@@ -972,6 +1137,15 @@ declare class CodexAgent extends BaseCliAgent {
      */
     createOutputInterpreter(): CliOutputInterpreter$a;
     /**
+     * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
+     * into {@link AgentFileChange} records. `action.detail.changes` is codex's
+     * native `{path, kind}[]` — no diff content in the protocol.
+     *
+     * @param {unknown} action
+     * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+     */
+    parseFileChanges(action: unknown): AgentFileChange$1[] | undefined;
+    /**
      * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
      */
     buildCommand(params: {
@@ -1011,6 +1185,16 @@ declare class CursorAgent extends BaseCliAgent {
      * @returns {CliOutputInterpreter}
      */
     createOutputInterpreter(): CliOutputInterpreter$9;
+    /**
+     * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
+     * into {@link AgentFileChange} records. `action` is
+     * `{ title, detail: { arguments } }` where `arguments` is the tool call's
+     * protobuf `args` object.
+     *
+     * @param {unknown} action
+     * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+     */
+    parseFileChanges(action: unknown): AgentFileChange$1[] | undefined;
     /**
      * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any }} params
      */
@@ -1205,6 +1389,15 @@ declare class KimiAgent extends BaseCliAgent {
      */
     createOutputInterpreter(): CliOutputInterpreter$6;
     /**
+     * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
+     * into {@link AgentFileChange} records. `action.detail.arguments` is the raw
+     * JSON-string function-call arguments (OpenAI-style tool calls).
+     *
+     * @param {unknown} action
+     * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+     */
+    parseFileChanges(action: unknown): AgentFileChange$1[] | undefined;
+    /**
      * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
      */
     buildCommand(params: {
@@ -1322,6 +1515,14 @@ declare class OpenCodeAgent extends BaseCliAgent {
      */
     createOutputInterpreter(): CliOutputInterpreter$4;
     /**
+     * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
+     * into {@link AgentFileChange} records. `action` is `{ title, detail: { input } }`.
+     *
+     * @param {unknown} action
+     * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+     */
+    parseFileChanges(action: unknown): AgentFileChange$1[] | undefined;
+    /**
      * Build the CLI command spec for `opencode run`.
      *
      * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any }} params
@@ -1380,6 +1581,100 @@ declare class VibeAgent extends BaseCliAgent {
 type AgentCapabilityRegistry$5 = AgentCapabilityRegistry$c;
 type CliOutputInterpreter$3 = CliOutputInterpreter$e;
 type VibeAgentOptions$1 = VibeAgentOptions$2;
+
+/**
+ * Build a failover chain over every registered account (`smithers agents add`)
+ * so a `<Task agent={fallbackAgents()}>` spreads load across all of the
+ * user's Claude/Codex subscriptions: the accounts are randomly ordered per
+ * call and the engine's quota failover walks the chain when a rung is
+ * rate-limited. The "normal" agent (`options.fallback`, defaulting to a stock
+ * agent for the first requested family) is appended as the last rung, and is
+ * returned alone when the global registry is missing, empty, or unreadable —
+ * a workflow using this helper degrades to single-agent behavior on machines
+ * with no registered accounts.
+ *
+ * @param {FallbackAgentsOptions} [options]
+ * @returns {AgentLike[]}
+ */
+declare function fallbackAgents(options?: FallbackAgentsOptions$1): AgentLike$1[];
+type AgentLike$1 = AgentLike$2;
+type FallbackAgentsOptions$1 = FallbackAgentsOptions$2;
+
+/**
+ * Focused Smithers adapter for one stock Nanocodex agent in one headless
+ * bridge process per generate call.
+ */
+declare class NanocodexAgent {
+    /** @param {NanocodexAgentOptions} [opts] */
+    constructor(opts?: NanocodexAgentOptions$1);
+    /** @type {string} */
+    id: string;
+    model: string;
+    supportsNativeStructuredOutput: boolean;
+    checkpointFormats: readonly AgentCheckpointFormat$1[];
+    checkpointCapabilities: readonly AgentCheckpointCapability$1[];
+    /** @type {NanocodexAgentOptions} */
+    opts: NanocodexAgentOptions$1;
+    /**
+     * Side-effect-free binary/protocol compatibility check. No agent, workspace
+     * tool runtime, authentication request, or provider connection is created.
+     *
+     * @param {AgentGenerateOptions} [args]
+     */
+    preflight(args?: AgentGenerateOptions$1): Promise<void>;
+    /**
+     * Generic `AgentLike` compatibility signature. The impossible receiver keeps
+     * broad continuation options from becoming callable on a concrete instance.
+     *
+     * @overload
+     * @this {never}
+     * @param {AgentGenerateOptions} [args]
+     * @returns {Promise<unknown>}
+     */
+    generate(this: never, args?: AgentGenerateOptions$4 | undefined): Promise<unknown>;
+    /**
+     * @overload
+     * @this {NanocodexAgent}
+     * @param {NanocodexGenerateOptions} [args]
+     * @returns {Promise<import("ai").GenerateTextResult<Record<string, never>, Record<string, unknown>, import("ai").Output.Output<string, string, never>> & import("./AgentCheckpoint.ts").AgentCheckpointResult>}
+     */
+    generate(this: NanocodexAgent, args?: NanocodexGenerateOptions$1 | undefined): Promise<ai.GenerateTextResult<Record<string, never>, Record<string, unknown>, ai.Output.Output<string, string, never>> & AgentCheckpointResult$1>;
+    /**
+     * Publish recovery carried by a process-cleanup failure without making the
+     * bridge snapshot part of the durable error surface.
+     *
+     * @private
+     * @param {unknown} error
+     * @param {{ args: AgentGenerateOptions; maxCheckpointBytes: number; policyFingerprint: string; workspace: string }} context
+     */
+    private recoverProcessCheckpoint;
+    /**
+     * @private
+     * @param {NanocodexServerRecord} terminal
+     * @param {{ args: AgentGenerateOptions; maxCheckpointBytes: number; policyFingerprint: string; workspace: string }} context
+     */
+    private finishTerminal;
+    /**
+     * @private
+     * @param {import("../internal/nanocodex/protocol-types.ts").NanocodexCompletedData} completed
+     * @param {{ args: AgentGenerateOptions; maxCheckpointBytes: number; policyFingerprint: string; workspace: string }} context
+     */
+    private completedResult;
+    /**
+     * @private
+     * @param {import("../internal/nanocodex/protocol-types.ts").NanocodexRecoveryData} completed
+     * @param {{ args: AgentGenerateOptions; maxCheckpointBytes: number; policyFingerprint: string; workspace: string }} context
+     */
+    private publishCheckpoint;
+    /** @private */
+    private binary;
+    /** @private */
+    private auth;
+    /** @private @param {AgentGenerateOptions | undefined} args */
+    private environment;
+}
+type NanocodexAgentOptions$1 = NanocodexAgentOptions$2;
+type AgentGenerateOptions$1 = AgentGenerateOptions$4;
 
 /**
  * @param {CreateSmithersAgentContractOptions} options
@@ -1474,6 +1769,55 @@ type ElevenLabsTextToSpeechToolset = {
     toolNames: ["elevenlabs_text_to_speech"];
 };
 declare function createElevenLabsTextToSpeechTool(options: ElevenLabsTextToSpeechToolOptions): ElevenLabsTextToSpeechToolset;
+
+/**
+ * Hash the semantic checkpoint production and consumption declarations.
+ * Declaration order, repeated entries, and repeated values are ignored.
+ *
+ * @param {{ checkpointFormats?: readonly import("./AgentCheckpoint.ts").AgentCheckpointFormat[]; checkpointCapabilities?: readonly import("./AgentCheckpoint.ts").AgentCheckpointCapability[] } | null | undefined} agent
+ * @returns {string}
+ */
+declare function hashAgentCheckpointCapabilities(agent: {
+    checkpointFormats?: readonly AgentCheckpointFormat$1[];
+    checkpointCapabilities?: readonly AgentCheckpointCapability$1[];
+} | null | undefined): string;
+/**
+ * Test whether an agent declares support for a checkpoint version and use.
+ * @param {{ checkpointCapabilities?: readonly import("./AgentCheckpoint.ts").AgentCheckpointCapability[] } | null | undefined} agent
+ * @param {{ codec: string; version: number }} checkpoint
+ * @param {import("./AgentCheckpoint.ts").AgentCheckpointMode} mode
+ */
+declare function agentSupportsCheckpoint(agent: {
+    checkpointCapabilities?: readonly AgentCheckpointCapability$1[];
+} | null | undefined, checkpoint: {
+    codec: string;
+    version: number;
+}, mode: AgentCheckpointMode$1): boolean;
+/**
+ * Test whether an agent declares that it can produce a checkpoint format.
+ * Production is intentionally independent from resume and fork consumption.
+ * @param {{ checkpointFormats?: readonly import("./AgentCheckpoint.ts").AgentCheckpointFormat[] } | null | undefined} agent
+ * @param {{ codec: string; version: number }} checkpoint
+ */
+declare function agentProducesCheckpoint(agent: {
+    checkpointFormats?: readonly AgentCheckpointFormat$1[];
+} | null | undefined, checkpoint: {
+    codec: string;
+    version: number;
+}): boolean;
+/**
+ * Validate, serialize, and clone an agent checkpoint.
+ *
+ * The JSON walk is intentionally stricter than JSON.stringify: values that
+ * JSON.stringify would silently omit or coerce are rejected.
+ *
+ * @param {import("./AgentCheckpoint.ts").AgentCheckpoint} checkpoint
+ * @param {number} [maxBytes]
+ * @returns {import("./AgentCheckpoint.ts").AgentCheckpoint}
+ */
+declare function cloneAgentCheckpoint(checkpoint: AgentCheckpoint$1, maxBytes?: number): AgentCheckpoint$1;
+/** Maximum encoded checkpoint size accepted by default (16 MiB). */
+declare const DEFAULT_AGENT_CHECKPOINT_MAX_BYTES: number;
 
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
@@ -1905,8 +2249,19 @@ declare function createSerperSearchProvider(options: {
 type GroundedWebSearchProvider = GroundedWebSearchProvider$5;
 
 type AgentCapabilityRegistry = AgentCapabilityRegistry$c;
-type AgentGenerateOptions = AgentGenerateOptions$3;
-type AgentLike = AgentLike$1;
+type AgentGenerateOptions = AgentGenerateOptions$4;
+type AgentLike = AgentLike$2;
+type AgentCheckpoint = AgentCheckpoint$1;
+type AgentCheckpointCapability = AgentCheckpointCapability$1;
+type AgentCheckpointFormat = AgentCheckpointFormat$1;
+type AgentCheckpointJsonArray = AgentCheckpointJsonArray$1;
+type AgentCheckpointJsonObject = AgentCheckpointJsonObject$1;
+type AgentCheckpointJsonPrimitive = AgentCheckpointJsonPrimitive$1;
+type AgentCheckpointJsonValue = AgentCheckpointJsonValue$1;
+type AgentCheckpointMode = AgentCheckpointMode$1;
+type AgentCheckpointPublisher = AgentCheckpointPublisher$1;
+type AgentCheckpointResult = AgentCheckpointResult$1;
+type AgentCheckpointContinuationOptions = AgentCheckpointContinuationOptions$1;
 type AgentToolDescriptor = AgentToolDescriptor$1;
 type AnthropicAgentOptions<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = AnthropicAgentOptions$2<CALL_OPTIONS, TOOLS>;
 type OpenAIAgentOptions<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = OpenAIAgentOptions$2<CALL_OPTIONS, TOOLS>;
@@ -1920,11 +2275,20 @@ type PiExtensionUiResponse = PiExtensionUiResponse$1;
 type OpenCodeAgentOptions = OpenCodeAgentOptions$2;
 type PoolAgentOptions = PoolAgentOptions$2;
 type VibeAgentOptions = VibeAgentOptions$2;
+type FallbackAgentsOptions = FallbackAgentsOptions$2;
+type FallbackAgentProvider = FallbackAgentProvider$1;
+type NanocodexAgentOptions = NanocodexAgentOptions$2;
+type NanocodexGenerateOptions = NanocodexGenerateOptions$1;
+type NanocodexAuth = NanocodexAuth$1;
+type NanocodexThinking = NanocodexThinking$1;
+type NanocodexReasoningMode = NanocodexReasoningMode$1;
 type SmithersAgentContract = SmithersAgentContract$3;
 type SmithersAgentContractTool = SmithersAgentContractTool$1;
 type SmithersAgentToolCategory = SmithersAgentToolCategory$1;
 type SmithersListedTool = SmithersListedTool$2;
 type SmithersToolSurface = SmithersToolSurface$2;
+type AgentFileChangeKind = AgentFileChangeKind$1;
+type AgentFileChange = AgentFileChange$1;
 type CliAgentCapabilityAdapterId = CliAgentCapabilityAdapterId$1;
 type CliAgentCapabilityDoctorEntry = CliAgentCapabilityDoctorEntry$1;
 type CliAgentCapabilityDoctorReport = CliAgentCapabilityDoctorReport$3;
@@ -1951,4 +2315,4 @@ type TranscriptionProvider = TranscriptionProvider$1;
 type TranscriptionToolInput = TranscriptionToolInput$1;
 type TranscriptionToolResult = TranscriptionToolResult$1;
 
-export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, type AudioHostResolver, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateHttpToolOptions, type CreateTranscriptionToolOptions, CursorAgent, type CursorAgentOptions, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, HermesCliAgent, type HermesCliAgentOptions, type HttpToolAuth, type HttpToolInput, type HttpToolOutput, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, OmpAgent, OpenAIAgent, type OpenAIAgentOptions, OpenClawAgent, type OpenClawAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type PinnedAudioTransport, type PinnedAudioTransportRequest, PoolAgent, type PoolAgentOptions, type ResolvedAudioAddress, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, type TranscriptionProvider, type TranscriptionToolInput, type TranscriptionToolResult, VibeAgent, type VibeAgentOptions, createBraveSearchProvider, createElevenLabsTextToSpeechTool, createExaSearchProvider, createGroundedWebSearchToolset, createHermesCliCapabilityRegistry, createHttpTool, createImageGenerationTool, createOmpCapabilityRegistry, createOpenClawCapabilityRegistry, createPoolCapabilityRegistry, createSerperSearchProvider, createSmithersAgentContract, createTavilySearchProvider, createTranscriptionTool, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
+export { type AgentCapabilityRegistry, type AgentCheckpoint, type AgentCheckpointCapability, type AgentCheckpointContinuationOptions, type AgentCheckpointFormat, type AgentCheckpointJsonArray, type AgentCheckpointJsonObject, type AgentCheckpointJsonPrimitive, type AgentCheckpointJsonValue, type AgentCheckpointMode, type AgentCheckpointPublisher, type AgentCheckpointResult, type AgentFileChange, type AgentFileChangeKind, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, type AudioHostResolver, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateHttpToolOptions, type CreateTranscriptionToolOptions, CursorAgent, type CursorAgentOptions, DEFAULT_AGENT_CHECKPOINT_MAX_BYTES, type FallbackAgentProvider, type FallbackAgentsOptions, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, HermesCliAgent, type HermesCliAgentOptions, type HttpToolAuth, type HttpToolInput, type HttpToolOutput, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, NanocodexAgent, type NanocodexAgentOptions, type NanocodexAuth, type NanocodexGenerateOptions, type NanocodexReasoningMode, type NanocodexThinking, OmpAgent, OpenAIAgent, type OpenAIAgentOptions, OpenClawAgent, type OpenClawAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type PinnedAudioTransport, type PinnedAudioTransportRequest, PoolAgent, type PoolAgentOptions, type ResolvedAudioAddress, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, type TranscriptionProvider, type TranscriptionToolInput, type TranscriptionToolResult, VibeAgent, type VibeAgentOptions, agentProducesCheckpoint, agentSupportsCheckpoint, cloneAgentCheckpoint, createBraveSearchProvider, createElevenLabsTextToSpeechTool, createExaSearchProvider, createGroundedWebSearchToolset, createHermesCliCapabilityRegistry, createHttpTool, createImageGenerationTool, createOmpCapabilityRegistry, createOpenClawCapabilityRegistry, createPoolCapabilityRegistry, createSerperSearchProvider, createSmithersAgentContract, createTavilySearchProvider, createTranscriptionTool, fallbackAgents, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashAgentCheckpointCapabilities, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };

@@ -1,5 +1,5 @@
-/** @jsxImportSource smithers-orchestrator */
-import { Sequence } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Sequence } from "smthrs";
 import { Task, outputs } from "./ferricSmithers";
 import { planner } from "./ferricAgents";
 import type { FerricConfig } from "./ferricConfig";

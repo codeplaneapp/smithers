@@ -6,7 +6,7 @@ description: Generate or refine a code-backed feature inventory.
 `feature-enum` is archived (not installed by `init`): copy it from `examples/init-pack/` with its dependency closure, or ask `create-workflow` to build an equivalent. It scans the repository and produces grouped, SCREAMING_SNAKE_CASE feature names, and can refine an existing inventory from prior feature groups and a commit hash.
 
 ```bash
-bunx smithers-orchestrator workflow run feature-enum --input '{"refineIterations":3}'
+bunx smthrs workflow run feature-enum --input '{"refineIterations":3}'
 ```
 
 <Frame caption="The feature-enum UI shows the scan and refine timeline that produces a code-backed, grouped feature inventory.">

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Cross-platform `oxfmt` runner.
 //
-// The format scope is every `packages/*/{src,tests}` directory plus `apps`,
+// The format scope is every `packages/*/{src,internal,tests}` directory plus `apps`,
 // `scripts` and `.smithers` — i.e. the first-party JS/TS we author. Vendored
 // and generated trees (`reference/`, `.opentui_temp/`, `dist/`, build output)
 // are already listed in `.gitignore`, which oxfmt honours by default.
@@ -38,7 +38,7 @@ const targets = [];
 
 const packagesDir = join(root, "packages");
 for (const name of readdirSync(packagesDir).sort()) {
-  for (const sub of ["src", "tests"]) {
+  for (const sub of ["src", "internal", "tests"]) {
     if (existsSync(join(packagesDir, name, sub))) {
       // Forward-slash relative paths: oxfmt accepts them on every OS and they
       // match how .gitignore patterns are anchored.
@@ -63,6 +63,11 @@ targets.push("!**/*.d.{ts,mts,cts}", "!**/*.generated.*");
 // packages/testing ships tsup-bundled .js in src/ (the publish drift gate
 // rebuilds and byte-compares them), so formatting them guarantees drift.
 targets.push("!packages/testing/src/**/*.js");
+// examples/stereos-sandbox-provider/site is deploy output that
+// `node examples/stereos-sandbox-provider/build.mjs` re-emits with its own
+// layout (JSON.stringify payloads, verbatim page copies, a minified bundle), so
+// formatting it guarantees drift on the next build.
+targets.push("!examples/stereos-sandbox-provider/site/**/*.js");
 
 // Extra flags from the npm script (e.g. `--check` or `--write`).
 const passthrough = process.argv.slice(2);

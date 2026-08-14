@@ -6,14 +6,14 @@ import { afterAll, describe, expect, test } from "bun:test";
 import React from "react";
 import { z } from "zod";
 import { Effect, Schema } from "effect";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { createSmithers, renderFrame } from "smithers-orchestrator";
-import { SmithersCtx } from "@smithers-orchestrator/react-reconciler/context";
+import { createSmithers, renderFrame } from "smthrs";
+import { SmithersCtx } from "@smthrs/react-reconciler/context";
 import { makeGitHubClient, githubClientLayer, GitHubClient } from "../src/github/GitHubClient.js";
 import { OnWebhook, OnIssueOpened, OnIssueComment, OnPush } from "../src/github/components/OnWebhook.js";
 import { Comment } from "../src/github/components/outbound.js";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 
 function startFixture() {
   const server = Bun.serve({
@@ -32,7 +32,13 @@ function startFixture() {
             status: 403,
             headers: {
               "x-ratelimit-remaining": "0",
-              "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 1),
+              // Far enough out to stay in the future after the second is
+              // truncated. `+ 1` leaves a deadline that is only a full second
+              // away when the clock sits exactly on a boundary — at x.999s the
+              // client sees ~1ms, and any scheduling hiccup makes its
+              // `resetMs > 0` check read the window as already elapsed and
+              // return null. Still under the client's 60s cap.
+              "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 30),
             },
           },
         );
@@ -77,7 +83,12 @@ describe("GitHubClient rate-limit + parsing edge branches", () => {
     expect(error.details?.status).toBe(403);
     expect(error.details?.rateLimited).toBe(true);
     expect(error.details?.retryable).toBe(true);
-    expect(typeof error.details?.retryAfterMs).toBe("number");
+    // Derived from the 30s fixture deadline, minus however much of the current
+    // second had elapsed when the header was built and however long the
+    // round-trip took. The lower bound leaves far more slack than the test's
+    // own 10s timeout would ever allow.
+    expect(error.details?.retryAfterMs).toBeGreaterThan(20_000);
+    expect(error.details?.retryAfterMs).toBeLessThanOrEqual(30_000);
   }, 10_000);
 
   test("a past x-ratelimit-reset falls through to a null retryAfterMs", async () => {
@@ -144,8 +155,16 @@ describe("GitHubClient rate-limit + parsing edge branches", () => {
 
 const NullContext = React.createContext(/** @type {any} */ (null));
 
+// Allocated once, at module scope — see the sibling note in
+// github-components.test.jsx: a per-test `makeTempDirPath` re-arms a
+// `bun:test` hook from inside every test, which intermittently stalls a test
+// for the full 5s timeout on CI.
+const apiRoot = makeTempDirPath("smithers-gh-cov-");
+let apiCount = 0;
+
 function makeApi(schemas) {
-  const dir = mkdtempSync(join(tmpdir(), "smithers-gh-cov-"));
+  const dir = join(apiRoot, `api-${(apiCount += 1)}`);
+  mkdirSync(dir, { recursive: true });
   return createSmithers(schemas, { dbPath: join(dir, "db.sqlite") });
 }
 

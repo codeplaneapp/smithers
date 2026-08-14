@@ -1,4 +1,4 @@
-# @smithers-orchestrator/telegram-summary — src
+# @smthrs/telegram-summary — src
 
 Source of the Cloudflare Worker behind telegram-summary.smithers.sh.
 

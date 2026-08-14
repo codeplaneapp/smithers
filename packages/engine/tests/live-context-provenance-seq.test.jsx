@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * Regression pin for the live completion path: the row a finished task feeds
  * into the scheduler's render context must keep its durable completion seq
@@ -13,8 +13,8 @@
  */
 import React from "react";
 import { describe, expect, test } from "bun:test";
-import { Task, Workflow, runWorkflow } from "smithers-orchestrator";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
+import { Task, Workflow, runWorkflow } from "smthrs";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";

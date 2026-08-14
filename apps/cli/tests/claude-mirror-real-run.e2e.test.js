@@ -7,8 +7,8 @@ import { createTempRepo, pinSqliteBackend, runSmithers } from "../../../packages
 // the way the mirror script's agents do.
 
 const FANOUT_WORKFLOW = `
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Parallel, Task, Workflow, Sequence } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, Parallel, Task, Workflow, Sequence } from "smthrs";
 import { z } from "zod";
 
 const { smithers, outputs } = createSmithers({

@@ -8,7 +8,7 @@
  * your browser, and stays alive until you Ctrl-C. The worker is a real agent
  * working directly in this repo (shared-repo model), so it will read/edit files.
  */
-import { Gateway, mdxPlugin } from "smithers-orchestrator";
+import { Gateway, mdxPlugin } from "smthrs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";

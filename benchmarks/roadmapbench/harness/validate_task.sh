@@ -11,7 +11,7 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TASK_DIR="$(cd "${1:?task_dir}" && pwd)"
-IMAGE="$(awk -F'"' '/docker_image/{print $2; exit}' "$TASK_DIR/task.toml")"
+IMAGE="${RMB_IMAGE_OVERRIDE:-$(awk -F'"' '/docker_image/{print $2; exit}' "$TASK_DIR/task.toml")}"
 WORK="${RMB_WORK:-$TASK_DIR/.validate}"
 rm -rf "$WORK"; mkdir -p "$WORK"
 
@@ -61,4 +61,53 @@ python3 -c "import sys; sys.exit(0 if float('$NOOP') < 1.0 else 1)" \
   && echo "  [PASS] no-op < 1.0 ($NOOP)" || { echo "  [FAIL] no-op should be < 1.0 (got $NOOP)"; ok=0; }
 python3 -c "import sys; sys.exit(0 if abs(float('$ORACLE')-1.0) < 1e-9 else 1)" \
   && echo "  [PASS] oracle == 1.0 ($ORACLE)" || { echo "  [FAIL] oracle should be 1.0 (got $ORACLE)"; ok=0; }
-[[ $ok == 1 ]] && echo "  SCORER IS FAIR AND SOUND for this task." || { echo "  SCORER VALIDATION FAILED."; exit 1; }
+if [[ $ok != 1 ]]; then
+  echo "  SCORER VALIDATION FAILED."
+  exit 1
+fi
+echo "  SCORER IS FAIR AND SOUND for this task."
+
+# Bind the passing verdict to the exact task, hidden tests, harness, image,
+# and scoring network policy. Confirmatory runs consume the immutable image ID
+# from this receipt rather than trusting the task's mutable Docker tag.
+IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$IMAGE")"
+IMAGE_DIGEST="$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE")"
+python3 - "$TASK_DIR" "$HERE" "$IMAGE" "$IMAGE_ID" "$IMAGE_DIGEST" "$NOOP" "$ORACLE" "$WORK/validation-receipt.json" <<'PY'
+import datetime, hashlib, json, os, pathlib, sys
+
+task_dir, harness_dir, image_ref, image_id, image_digest, noop, oracle, output = sys.argv[1:]
+
+def file_hash(path):
+    return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
+
+def tree_hash(path):
+    root = pathlib.Path(path)
+    digest = hashlib.sha256()
+    for item in sorted(p for p in root.rglob("*") if p.is_file()):
+        digest.update(item.relative_to(root).as_posix().encode())
+        digest.update(b"\0")
+        digest.update(item.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+receipt = {
+    "schemaVersion": 1,
+    "taskId": pathlib.Path(task_dir).name,
+    "datasetRevision": os.environ.get("RMB_DATASET_REVISION", "59184e779909300a5a0150b06b945d39da81a099"),
+    "imageRef": image_ref,
+    "imageId": image_id,
+    "imagePinnedRef": image_digest,
+    "validationMethod": "direct-v1",
+    "scorerNetwork": os.environ.get("RMB_SCORER_NETWORK", "none"),
+    "noopReward": float(noop),
+    "oracleReward": float(oracle),
+    "taskTomlSha256": file_hash(pathlib.Path(task_dir) / "task.toml"),
+    "instructionSha256": file_hash(pathlib.Path(task_dir) / "instruction.md"),
+    "testsTreeSha256": tree_hash(pathlib.Path(task_dir) / "tests"),
+    "solutionTreeSha256": tree_hash(pathlib.Path(task_dir) / "solution"),
+    "scoreHarnessSha256": file_hash(pathlib.Path(harness_dir) / "score.sh"),
+    "validatorSha256": file_hash(pathlib.Path(harness_dir) / "validate_task.sh"),
+    "validatedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+}
+pathlib.Path(output).write_text(json.dumps(receipt, indent=2) + "\n")
+PY

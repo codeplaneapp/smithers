@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
-import { accountsRoot } from "@smithers-orchestrator/accounts";
+import { accountsRoot } from "@smthrs/accounts";
 
 /**
  * When a workflow starts in the background (a detached `up`/`run`, or an MCP
@@ -61,7 +61,7 @@ export function hasCustomUi(workflowId, cwd, exists = existsSync, read = readFil
 export function buildMonitoringOptions({ runId, workflowId, hasUi }) {
   const uiStep = hasUi
     ? `run \`smithers ui ${runId}\` (a custom UI already exists for "${workflowId}")`
-    : `author \`.smithers/ui/${workflowId}.tsx\` by composing the smithers-orchestrator/gateway-ui widgets and smithers-orchestrator/ui primitives over the gateway-react hooks, add \`<UI entry="../ui/${workflowId}.tsx" />\` to the workflow, then run \`smithers ui ${runId}\``;
+    : `author \`.smithers/ui/${workflowId}.tsx\` by composing the smthrs/gateway-ui widgets and smthrs/ui primitives over the gateway-react hooks, add \`<UI entry="../ui/${workflowId}.tsx" />\` to the workflow, then run \`smithers ui ${runId}\``;
   return [
     {
       id: "monitor-ui",

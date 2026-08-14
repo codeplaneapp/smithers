@@ -6,22 +6,27 @@ icon: "clock-rotate-left"
 
 Every successful task attempt records the workspace's [JJ](https://jj-vcs.github.io/jj/)
 commit ID into `_smithers_attempts.jj_pointer`. The time-travel API replays a run
-to one of those points, restoring the filesystem from the captured pointer and
+to one of those points, moving VCS-tracked content to the captured pointer and
 discarding graph snapshots recorded after the attempt began, rolling the run's
 timeline back to it.
+
+jj auto-tracks new non-ignored files when it captures a pointer. Gitignored files,
+including `node_modules`, build outputs, and `.env`, are never captured and restore
+leaves them as-is. Restore removes a non-ignored untracked file created after the
+target checkpoint.
 
 The public, facade-exported surface is two functions: `revertToAttempt`, the
 low-level VCS restore, and `timeTravel`, the higher-level reset that can also
 reset the target node and its dependents so the engine re-runs them.
 
 ```ts
-import { timeTravel, revertToAttempt } from "smithers-orchestrator";
+import { timeTravel, revertToAttempt } from "smthrs";
 import type {
   TimeTravelOptions,
   TimeTravelResult,
   RevertOptions,
   RevertResult,
-} from "smithers-orchestrator";
+} from "smthrs";
 ```
 
 Both take the run's `SmithersDb` adapter as their first argument. A missing
@@ -243,8 +248,8 @@ instead of importing non-exported functions from the package.
 
 ```bash
 # Browse the timeline, then rewind to a checkpoint and resume.
-bunx smithers-orchestrator timeline RUN_ID
-bunx smithers-orchestrator rewind RUN_ID FRAME_NO
+bunx smthrs timeline RUN_ID
+bunx smthrs rewind RUN_ID FRAME_NO
 ```
 
 **Source** [`time-travel/src`](https://github.com/smithersai/smithers/blob/main/packages/time-travel/src) · **Tests** [`time-travel/tests`](https://github.com/smithersai/smithers/blob/main/packages/time-travel/tests) · **See also** [CLI overview](/cli/overview), [Revert](/runtime/revert), [`rewind-run` RPC](/rpc/rewind-run)

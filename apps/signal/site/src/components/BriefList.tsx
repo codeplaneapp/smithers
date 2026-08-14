@@ -1,4 +1,4 @@
-import { Card, CardContent, CardHeader, CardTitle } from "smithers-orchestrator/ui";
+import { Card, CardContent, CardHeader, CardTitle } from "smthrs/ui";
 import type { PublicIssue } from "../types";
 
 /** "The Brief" — the 3-item, 60-second read above the fold. */

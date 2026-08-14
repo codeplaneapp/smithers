@@ -1,10 +1,10 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { createSmithers } from "smithers-orchestrator";
-import { renderWorkflow } from "smithers-orchestrator/testing";
+import { createSmithers } from "smthrs";
+import { renderWorkflow } from "smthrs/testing";
 import { z } from "zod/v4";
 import { models } from "./agents.js";
 import { repoRoot } from "./lib/paths.js";

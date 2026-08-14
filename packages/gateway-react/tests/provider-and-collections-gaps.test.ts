@@ -15,7 +15,7 @@ try {
 import { describe, expect, test } from "bun:test";
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { createSmithersDataClient } from "@smithers-orchestrator/gateway-client";
+import { createSmithersDataClient } from "@smthrs/gateway-client";
 import { SmithersCollectionsContext, SmithersCollectionsProvider, useSmithersCollections } from "../src/index.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

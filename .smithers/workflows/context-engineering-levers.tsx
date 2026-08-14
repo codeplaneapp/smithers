@@ -1,5 +1,5 @@
 // smithers-display-name: Context Engineering + Execution Levers
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * Ships the three execution levers from
  * `.smithers/specs/context-engineering-and-execution-levers.md`:
@@ -30,7 +30,7 @@ import {
   Worktree,
   createSmithers,
   type AgentLike,
-} from "smithers-orchestrator";
+} from "smthrs";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { z } from "zod/v4";

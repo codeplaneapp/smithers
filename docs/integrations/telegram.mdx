@@ -5,10 +5,10 @@ description: Bot API calls, webhook ingestion, durable in-chat approvals, and Mi
 
 Smithers ships two Telegram surfaces:
 
-- `@smithers-orchestrator/telegram`: bots in serverless functions, workflow
+- `@smthrs/telegram`: bots in serverless functions, workflow
   tasks, or tests, with no long-lived polling process (this page's first
   half).
-- `@smithers-orchestrator/integrations/telegram`: workflows that durably wait
+- `@smthrs/integrations/telegram`: workflows that durably wait
   on Telegram, listening for messages and approving gated steps from the chat
   via inline buttons or a Mini App ([Approve from the chat](#approve-from-the-chat)).
 
@@ -20,7 +20,7 @@ Sandbox tasks can call the Bot API without a local polling loop.
 ## Install
 
 ```sh
-pnpm add @smithers-orchestrator/telegram
+pnpm add @smthrs/telegram
 ```
 
 ## Send messages
@@ -30,7 +30,7 @@ import {
   createTelegramClient,
   escapeTelegramMarkdownV2,
   sendTelegramTextChunks,
-} from "@smithers-orchestrator/telegram";
+} from "@smthrs/telegram";
 
 const telegram = createTelegramClient({
   botToken: process.env.TELEGRAM_BOT_TOKEN!,
@@ -54,7 +54,7 @@ import {
   normalizeTelegramUpdate,
   isTelegramChatAllowed,
   verifyTelegramWebhookSecret,
-} from "@smithers-orchestrator/telegram";
+} from "@smthrs/telegram";
 
 export async function POST(request: Request) {
   if (!verifyTelegramWebhookSecret(request, process.env.TELEGRAM_WEBHOOK_SECRET)) {
@@ -81,7 +81,7 @@ those, and malformed values block all chats until fixed.
 ## Test with a fake
 
 ```ts
-import { FakeTelegramClient } from "@smithers-orchestrator/telegram";
+import { FakeTelegramClient } from "@smthrs/telegram";
 
 const telegram = new FakeTelegramClient();
 await telegram.sendMessage({ chatId: 123, text: "hello" });
@@ -103,12 +103,12 @@ Register the two internal node schemas with `telegramApprovalSchemas`, then
 use the component:
 
 ```tsx
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import {
   TelegramApproval,
   telegramApprovalSchemas,
   telegramApprovalDecisionSchema,
-} from "@smithers-orchestrator/integrations/telegram";
+} from "@smthrs/integrations/telegram";
 
 const { smithers, Workflow, outputs } = createSmithers({
   ...telegramApprovalSchemas,
@@ -135,8 +135,8 @@ The run only receives the press if a Telegram source is polling next to your
 workflow:
 
 ```ts
-import { makeIntegrationRuntime, makeDbCursorStore } from "@smithers-orchestrator/integrations";
-import { makeTelegramSource } from "@smithers-orchestrator/integrations/telegram";
+import { makeIntegrationRuntime, makeDbCursorStore } from "@smthrs/integrations";
+import { makeTelegramSource } from "@smthrs/integrations/telegram";
 
 const source = makeTelegramSource({
   botToken: process.env.TELEGRAM_BOT_TOKEN,
@@ -170,7 +170,7 @@ A Mini App exposes a signed `initData` string your backend must verify before
 trusting the user; never trust `initDataUnsafe`.
 
 ```ts
-import { verifyTelegramWebAppInitData } from "@smithers-orchestrator/integrations/telegram";
+import { verifyTelegramWebAppInitData } from "@smthrs/integrations/telegram";
 
 // Resolves to the parsed fields, or throws on a bad signature, a stale
 // auth_date, or the wrong token.

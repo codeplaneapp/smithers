@@ -2,9 +2,9 @@
 // smithers-display-name: Build TUI Monitor
 // smithers-description: Build the OpenTUI + React single-run monitor TUI (replaces `up --interactive`) — write the spec, gate it, scaffold packages/tui, implement all five modes, wire the live gateway data layer + hijack, verify the gate green, and document.
 // smithers-tags: tui, opentui, cli, monitor, scaffolding
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { $ } from "bun";
-import { createSmithers, Sequence, Branch, Loop, Approval, Task } from "smithers-orchestrator";
+import { createSmithers, Sequence, Branch, Loop, Approval, Task } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 
@@ -58,12 +58,12 @@ Stack: Bun runtime; OpenTUI core (@opentui/core) + React 19 renderer
 (@opentui/react). The TUI package uses the OpenTUI React JSX runtime
 (jsxImportSource "@opentui/react") — needed so the OpenTUI intrinsic
 elements (box/text/select/scrollbox/code/diff…) type-check — NOT plain
-"react" and NOT smithers-orchestrator's jsx-runtime (that runtime is only
+"react" and NOT smthrs's jsx-runtime (that runtime is only
 for workflow files). Render with
 createCliRenderer({ exitOnCtrlC:false }) -> createRoot(renderer).render(...).
 
 Data layer (NO mocks): wrap <SmithersGatewayProvider> (from
-smithers-orchestrator/gateway-react) around the app and consume the SAME hooks
+smthrs/gateway-react) around the app and consume the SAME hooks
 the web UI uses — useGatewayRun, useGatewayRunEvents, useGatewayNodeOutput,
 useGatewayApprovals, useGatewayActions. The gateway client is headless-friendly:
 inject the Bun global WebSocket and an in-memory sync backend; do NOT import
@@ -360,18 +360,18 @@ The package is already scaffolded and passing typecheck — do NOT rewrite worki
 files. Confirm these foundation pieces exist and match the spec; add only what is
 missing:
 
-- package.json: name "@smithers-orchestrator/tui" (publishable, NOT private —
+- package.json: name "@smthrs/tui" (publishable, NOT private —
   it ships the runnable "smithers-mon" bin), bin "smithers-mon" -> "./src/index.tsx"
   (run directly under Bun). Runtime deps: "@opentui/core", "@opentui/react",
-  "@smithers-orchestrator/gateway-client" (workspace:*),
-  "@smithers-orchestrator/gateway-react" (workspace:*), and "react" + "react-dom"
+  "@smthrs/gateway-client" (workspace:*),
+  "@smthrs/gateway-react" (workspace:*), and "react" + "react-dom"
   (real dependencies — the bin loads react-dom/client via gateway-react, so a
   standalone install must resolve them; do NOT make them peers or add "zod" /
-  "smithers-orchestrator"). Match this repo's workspace + build conventions (look
+  "smthrs"). Match this repo's workspace + build conventions (look
   at a sibling package's package.json/tsconfig). Wire its "test"/"typecheck"
   scripts like siblings.
 - tsconfig.json: STANDARD react JSX (jsx "react-jsx", jsxImportSource
-  "@opentui/react"). NOT smithers-orchestrator. This is an OpenTUI React app,
+  "@opentui/react"). NOT smthrs. This is an OpenTUI React app,
   not a workflow.
 - src/index.tsx entry (#!/usr/bin/env bun): assert TTY, parse a runId arg,
   createCliRenderer({ exitOnCtrlC:false }), createRoot(renderer), and mount the
@@ -444,7 +444,7 @@ attached, hand off to the monitor for that runId. \`smithers up --interactive\` 
 workflow must still pick a workflow interactively, then monitor the run it
 starts. Preserve detached/non-interactive behavior unchanged. Keep the existing
 append-only streaming code path available as a fallback for when the
-@smithers-orchestrator/tui package isn't installed (e.g. a slim install);
+@smthrs/tui package isn't installed (e.g. a slim install);
 interactive mode itself requires a TTY.
 
 Update --help text accordingly. Keep typecheck green. Do NOT push.

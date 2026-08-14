@@ -1,28 +1,29 @@
 import { Cause, Duration, Effect, Exit, Metric, Result, Schedule } from "effect";
-import { buildOutputRow, stripAutoColumns, validateOutput } from "@smithers-orchestrator/db/output";
-import { TaskHeartbeatTimeout } from "@smithers-orchestrator/errors/TaskHeartbeatTimeout";
-import { TaskTimeout } from "@smithers-orchestrator/errors/TaskTimeout";
+import { buildOutputRow, stripAutoColumns, validateOutput } from "@smthrs/db/output";
+import { TaskHeartbeatTimeout } from "@smthrs/errors/TaskHeartbeatTimeout";
+import { TaskTimeout } from "@smthrs/errors/TaskTimeout";
 import { makeAbortError, wireAbortSignal } from "./bridge-utils.js";
-import { withTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
+import { withTaskRuntime } from "@smthrs/driver/task-runtime";
 import { getSubflowChildRunId } from "../task-compute-fns.js";
-import { logDebug, logError, logInfo, logWarning } from "@smithers-orchestrator/observability/logging";
-import { attemptDuration, nodeDuration } from "@smithers-orchestrator/observability/metrics";
-import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
-import { fromTaggedError } from "@smithers-orchestrator/errors/fromTaggedError";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
-import { getJjPointer } from "@smithers-orchestrator/vcs/jj";
+import { logDebug, logError, logInfo, logWarning } from "@smthrs/observability/logging";
+import { attemptDuration, nodeDuration } from "@smthrs/observability/metrics";
+import { errorToJson } from "@smthrs/errors/errorToJson";
+import { fromTaggedError } from "@smthrs/errors/fromTaggedError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { nowMs } from "@smthrs/scheduler/nowMs";
+import { getJjPointer } from "@smthrs/vcs/jj";
 import { buildOutputValidationDiagnostics } from "../output-validation-diagnostics.js";
 import { getPlatformLayer } from "../platform-layer.js";
 import { sleep } from "../sleep.js";
 import { createHash } from "node:crypto";
-import { runWithToolContext } from "@smithers-orchestrator/tool-context";
+import { runWithToolContext } from "@smthrs/tool-context";
 import { createToolJournalContext } from "../createToolJournalContext.js";
+import { stampDurableRetryState } from "./retry-state.js";
 /**
  * @typedef {{ rootDir: string; }} ComputeTaskBridgeToolConfig
  */
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} _SmithersDb */
-/** @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} _SmithersDb */
+/** @typedef {import("@smthrs/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<Record<string, unknown>>} _BunSQLiteDatabase */
 
 // Floor between heartbeat DB writes so a hot heartbeat() loop cannot hammer
@@ -994,11 +995,12 @@ export const executeComputeTaskBridge = async (
     if (isHeartbeatPayloadValidationError(effectiveError)) {
       attemptMeta.failureRetryable = false;
     }
-    // Propagate non-retryable signal from any thrown SmithersError so the
-    // attempt is not retried (e.g. AGENT_CONFIG_INVALID from KimiAgent's
-    // expired-credentials check, or auth-failure patterns classified by
-    // BaseCliAgent.classifyNonRetryableAgentError).
-    if (effectiveError?.details?.failureRetryable === false || effectiveError?.code === "AGENT_CONFIG_INVALID") {
+    // An authored retryability decision is authoritative. In its absence,
+    // deterministic configuration errors keep their fail-fast default.
+    const explicitRetryability = effectiveError?.details?.failureRetryable;
+    if (explicitRetryability === false || explicitRetryability === true) {
+      attemptMeta.failureRetryable = explicitRetryability;
+    } else if (effectiveError?.code === "AGENT_CONFIG_INVALID") {
       attemptMeta.failureRetryable = false;
     }
     const suspensionStatus =
@@ -1138,6 +1140,14 @@ export const executeComputeTaskBridge = async (
       "engine:task",
     );
     const failedAtMs = nowMs();
+    const failureErrorJson = errorToJson(effectiveError);
+    stampDurableRetryState({
+      attemptMeta,
+      attempts,
+      descriptor: desc,
+      error: failureErrorJson,
+      failedAtMs,
+    });
     const failureClaimed = await adapter.withTransaction(
       "task-fail",
       Effect.gen(function* () {
@@ -1149,7 +1159,7 @@ export const executeComputeTaskBridge = async (
           executionOwnerId,
           "failed",
           failedAtMs,
-          JSON.stringify(errorToJson(effectiveError)),
+          JSON.stringify(failureErrorJson),
         );
         if (!claimed) return false;
         yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {

@@ -1,7 +1,7 @@
 import {
   smithersElectricShapeCatalog,
   type SmithersElectricShapeDefinition,
-} from "@smithers-orchestrator/electric-proxy/smithersElectricShapeCatalog";
+} from "@smthrs/electric-proxy/smithersElectricShapeCatalog";
 import type { CollectionConfig } from "@tanstack/db";
 import type { WorkspaceMode } from "./WorkspaceMode.ts";
 

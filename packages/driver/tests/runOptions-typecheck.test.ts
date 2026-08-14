@@ -23,7 +23,7 @@ describe("RunOptions public type", () => {
     writeFileSync(
       join(dir, "run-options.ts"),
       `
-        import type { OutputRowsReader, RunOptions, RunStartedBy, SmithersErrorReport } from "@smithers-orchestrator/driver";
+        import type { OutputRowsReader, RunOptions, RunStartedBy, SmithersErrorReport } from "@smthrs/driver";
 
         type Outputs = { rows: { value: number } };
         declare const rowsReader: OutputRowsReader<Outputs>;
@@ -77,7 +77,7 @@ describe("RunOptions public type", () => {
           module: "ESNext",
           moduleResolution: "bundler",
           paths: {
-            "@smithers-orchestrator/driver": [resolve(REPO_ROOT, "packages/driver/src/index.d.ts")],
+            "@smthrs/driver": [resolve(REPO_ROOT, "packages/driver/src/index.d.ts")],
           },
           allowImportingTsExtensions: true,
           skipLibCheck: true,

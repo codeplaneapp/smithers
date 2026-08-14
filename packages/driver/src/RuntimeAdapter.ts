@@ -59,7 +59,7 @@ export type RuntimeSubprocess = {
   spawn(command: string, args?: readonly string[], opts?: Record<string, unknown>): Promise<RuntimeSubprocessResult>;
 };
 
-/** Worktree path-resolution capability, mirroring `@smithers-orchestrator/graph`'s `resolveWorktreePath` contract. */
+/** Worktree path-resolution capability, mirroring `@smthrs/graph`'s `resolveWorktreePath` contract. */
 export type RuntimeWorktree = {
   resolve(path: string, opts?: { baseRootDir?: string; workflowPath?: string | null }): string;
 };

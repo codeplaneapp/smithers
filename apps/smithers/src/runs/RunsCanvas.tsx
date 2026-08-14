@@ -1,5 +1,5 @@
 import "./runsList.css";
-import { EmptyState, Skeleton } from "@smithers-orchestrator/ui";
+import { EmptyState, Skeleton } from "@smthrs/ui";
 import { openSurface } from "../app/navigation";
 import { useUiStore } from "../app/uiStore";
 import { StatusPill } from "../cards/StatusPill";

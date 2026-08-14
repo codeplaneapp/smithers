@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { createMemoryStore } from "../src/store/createMemoryStore.js";
 import { createLocalMemoryRuntime } from "../src/LocalMemoryRuntime.js";
 import { createTaskMemoryTools } from "../../engine/src/memory-runtime.js";

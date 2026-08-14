@@ -1,12 +1,12 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { Database } from "bun:sqlite";
 import { z } from "zod";
 import { Effect } from "effect";
-import { Parallel, Subflow, Workflow } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { Parallel, Subflow, Workflow } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
 // Relative import so these runs exercise THIS checkout's engine (the barrel
 // would resolve to the installed package instead).
 import { runWorkflow } from "../src/engine.js";
@@ -16,7 +16,7 @@ const END_TO_END_TIMEOUT_MS = 60_000;
 
 // Approved root for runtime-generated workflow files. It must live inside the
 // package so the generated modules can resolve bare imports (zod, react,
-// smithers-orchestrator) through the normal node_modules chain.
+// smthrs) through the normal node_modules chain.
 const genRoot = mkdtempSync(join(import.meta.dir, ".tmp-dynamic-wf-"));
 const outsideRoot = mkdtempSync(join(import.meta.dir, ".tmp-dynamic-wf-outside-"));
 afterAll(() => {
@@ -43,10 +43,10 @@ function buildSmithers() {
  * @returns {string} absolute path of the generated file
  */
 function writeChildWorkflow(relPath, childDbPath, bodyJsx) {
-  const source = `/** @jsxImportSource smithers-orchestrator */
+  const source = `/** @jsxImportSource smthrs */
 import { z } from "zod";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
-import { createSmithers, Task, Workflow } from "smithers-orchestrator";
+import { createSmithers, Task, Workflow } from "smthrs";
 
 const { smithers, outputs } = createSmithers(
     {

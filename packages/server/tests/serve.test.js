@@ -1,15 +1,15 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test, afterEach, beforeEach } from "bun:test";
 import { resolve } from "node:path";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { sleep } from "../../smithers/tests/helpers.js";
 import { createServeApp } from "../src/serve.js";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { Effect } from "effect";
-import { runWorkflow } from "@smithers-orchestrator/engine";
-import { renderPrometheusMetrics } from "@smithers-orchestrator/observability";
+import { runWorkflow } from "@smthrs/engine";
+import { renderPrometheusMetrics } from "@smthrs/observability";
 // ---------------------------------------------------------------------------
 // Prometheus helpers
 // ---------------------------------------------------------------------------
@@ -144,8 +144,8 @@ const fakeAgent = {
     const approvalProp = options.needsApproval ? " needsApproval" : "";
     writeFileSync(
       workflowPath,
-      `/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+      `/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 ${slowAgent}
 

@@ -4,6 +4,8 @@
  * suite; here we pin the prompt contract the hijacked agent receives.
  */
 import { describe, expect, test } from "bun:test";
+import { INLINE_CHAT_ENGINES } from "../src/buildInlineChatWorkflow.js";
+import { buildHijackLaunchSpec } from "../src/hijack.js";
 import { buildInitTutorialPrompt, tutorialEngineFor } from "../src/init/runInitTutorial.js";
 
 function det(id, displayName, over = {}) {
@@ -29,6 +31,7 @@ describe("tutorialEngineFor", () => {
     expect(tutorialEngineFor("claude")).toBe("claude-code");
     expect(tutorialEngineFor("codex")).toBe("codex");
     expect(tutorialEngineFor("pi")).toBe("pi");
+    expect(tutorialEngineFor("omp")).toBe("omp");
     expect(tutorialEngineFor("kimi")).toBe("kimi");
     expect(tutorialEngineFor("amp")).toBe("amp");
     expect(tutorialEngineFor("antigravity")).toBe("antigravity");
@@ -38,6 +41,22 @@ describe("tutorialEngineFor", () => {
     expect(tutorialEngineFor("opencode")).toBeUndefined();
     expect(tutorialEngineFor("openrouter")).toBeUndefined();
     expect(tutorialEngineFor("hermes")).toBeUndefined();
+  });
+
+  test("OMP is available to inline chat and resumes with its native CLI flags", () => {
+    expect(INLINE_CHAT_ENGINES).toContain("omp");
+    expect(
+      buildHijackLaunchSpec({
+        engine: "omp",
+        mode: "native-cli",
+        resume: "omp-session-1",
+        cwd: "/repo",
+        config: { model: "openai/gpt-5.6-luna", yolo: true },
+      }),
+    ).toMatchObject({
+      command: "omp",
+      args: ["--resume", "omp-session-1", "--cwd", "/repo", "--model", "openai/gpt-5.6-luna", "--auto-approve"],
+    });
   });
 });
 

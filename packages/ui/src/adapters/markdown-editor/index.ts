@@ -1,5 +1,5 @@
 /**
- * `@smithers-orchestrator/ui/adapters/markdown-editor`
+ * `@smthrs/ui/adapters/markdown-editor`
  *
  * The shared Milkdown Crepe WYSIWYG markdown editor. It ships as a heavy
  * `@milkdown/*` adapter behind this explicit subpath (never the base `ui`

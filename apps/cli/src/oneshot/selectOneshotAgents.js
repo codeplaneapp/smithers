@@ -1,5 +1,5 @@
 import { resolveOneshotChain } from "./resolveOneshotChain.js";
-import { listAccounts } from "@smithers-orchestrator/accounts";
+import { listAccounts } from "@smthrs/accounts";
 import { registeredAgentId } from "../registered-agent-id.js";
 
 const ACCOUNT_PROVIDERS = {
@@ -13,7 +13,7 @@ async function createAgent(spec, cwd, account) {
   const { engine, model } = spec;
   const identity = account ? { id: registeredAgentId(account.label) } : {};
   if (engine === "codex") {
-    const { CodexAgent } = await import("@smithers-orchestrator/agents/CodexAgent");
+    const { CodexAgent } = await import("@smthrs/agents/CodexAgent");
     return new CodexAgent({
       cwd,
       model,
@@ -25,7 +25,7 @@ async function createAgent(spec, cwd, account) {
     });
   }
   if (engine === "kimi") {
-    const { KimiAgent } = await import("@smithers-orchestrator/agents/KimiAgent");
+    const { KimiAgent } = await import("@smthrs/agents/KimiAgent");
     return new KimiAgent({
       cwd,
       model,
@@ -34,16 +34,16 @@ async function createAgent(spec, cwd, account) {
     });
   }
   if (engine === "pi") {
-    const { PiAgent } = await import("@smithers-orchestrator/agents/PiAgent");
+    const { PiAgent } = await import("@smthrs/agents/PiAgent");
     return new PiAgent({ cwd, ...(spec.provider ? { provider: spec.provider } : {}), model });
   }
   if (engine === "opencode") {
-    const { OpenCodeAgent } = await import("@smithers-orchestrator/agents/OpenCodeAgent");
+    const { OpenCodeAgent } = await import("@smthrs/agents/OpenCodeAgent");
     // Provider-qualified ids (anthropic/claude-opus-5, kimi-for-coding/k3) pass
     // through; a bare Anthropic id gets the anthropic/ prefix.
     return new OpenCodeAgent({ cwd, model: model.includes("/") ? model : `anthropic/${model}` });
   }
-  const { ClaudeCodeAgent } = await import("@smithers-orchestrator/agents/ClaudeCodeAgent");
+  const { ClaudeCodeAgent } = await import("@smthrs/agents/ClaudeCodeAgent");
   return new ClaudeCodeAgent({
     cwd,
     model,

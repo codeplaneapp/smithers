@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { createSmithersElectricProxy, type SmithersElectricAuthContext } from "@smithers-orchestrator/electric-proxy";
-import { serializeCronRow, serializeScoreRow } from "@smithers-orchestrator/gateway/api";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { createSmithersElectricProxy, type SmithersElectricAuthContext } from "@smthrs/electric-proxy";
+import { serializeCronRow, serializeScoreRow } from "@smthrs/gateway/api";
 import { QueryClient } from "@tanstack/react-query";
-import { createSmithersPostgres } from "smithers-orchestrator";
+import { createSmithersPostgres } from "smthrs";
 
 import type { SmithersCollections } from "../../src/data/SmithersCollections.ts";
 import type { SmithersDataClient } from "../../src/data/SmithersDataClient.ts";

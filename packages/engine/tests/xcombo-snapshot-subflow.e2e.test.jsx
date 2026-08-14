@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // Cross-feature audit: durability snapshots (Tier 1/2 workspace checkpoints)
 // combined with child workflows (<Subflow mode="childRun">).
 //
@@ -16,8 +16,8 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { z } from "zod";
 import { Effect } from "effect";
-import { Parallel, Subflow, Task, Workflow } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { Parallel, Subflow, Task, Workflow } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { runWorkflow } from "../src/engine.js";
 import { defaultGapSpoolPath } from "../src/durabilityGapSpool.js";
 import { runSnapshotsOnce } from "../../../apps/cli/src/snapshots.js";

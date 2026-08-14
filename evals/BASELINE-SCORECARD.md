@@ -58,13 +58,13 @@
 | × | kind :: doc pointer | sample |
 | --- | --- | --- |
 | 1 | ambiguous-docs :: llms-full.txt lines ~2650-2680 in the Approvals section | The section 'Approvals & human-in-the-loop' uses the phrase "<HumanTask> is for richer int |
-| 1 | ambiguous-docs :: bunx smithers-orchestrator docs-full — sections 'Quick Start | Two different patterns for Workflow import exist in the docs: (1) import Workflow directly |
+| 1 | ambiguous-docs :: bunx smthrs docs-full — sections 'Quick Start | Two different patterns for Workflow import exist in the docs: (1) import Workflow directly |
 | 1 | had-to-guess :: docs-full — Integrations / CLI Agents section | The task requires ClaudeCodeAgent but the docs primarily show AnthropicAgent for structure |
 | 1 | ambiguous-docs :: docs-full — Tour, step 1 | It is unclear whether the ctx parameter is needed for a simple inline-prompt workflow. Som |
 | 1 | api-confusing :: ? | The confidence field in the output schema is typed as 'number' with min 0 and max 1 in the |
 | 1 | ambiguous-docs :: llms-full.txt Memory section | Memory store access within a Smithers workflow context is not explicitly documented; had t |
 | 1 | missing-docs :: llms-full.txt Memory section and Components | No explicit example showing how to imperatively call store.setFact() from within a running |
-| 1 | missing-docs :: smithers-orchestrator/memory | No documented examples showing how to retrieve facts from agent namespace using Smithers m |
+| 1 | missing-docs :: smthrs/memory | No documented examples showing how to retrieve facts from agent namespace using Smithers m |
 | 1 | had-to-guess :: ? | Agent ID for the namespace was not specified, used 'default' as a reasonable assumption. |
 | 1 | ambiguous-docs :: Memory section in llms-full.txt | Task description says 'delete from workflow namespace' but does not specify which workflow |
 | 1 | had-to-guess :: Memory section initialization example | Database path (.smithers/smithers.db) assumed from standard Smithers project structure; do |

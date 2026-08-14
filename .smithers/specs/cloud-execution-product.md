@@ -146,7 +146,7 @@ minikube image load smithers-example:latest
 kubectl apply -f k8s/
 
 # Watch it run
-kubectl logs -f deployment/smithers-orchestrator
+kubectl logs -f deployment/smthrs
 
 # Access the Gateway
 minikube service smithers-gateway --url
@@ -223,7 +223,7 @@ Environment variables in `k8s/secrets.yaml`:
 Your workflow code is identical to local Smithers:
 
 ```tsx
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { smithers, Workflow, Task, outputs } = createSmithers({

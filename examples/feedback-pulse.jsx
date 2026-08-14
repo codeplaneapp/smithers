@@ -5,11 +5,11 @@
  *
  * Shape: feedback intake → sentiment/theme extractor → notifier/ticketer.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import IntakePrompt from "./prompts/feedback-pulse/intake.mdx";
 import ExtractPrompt from "./prompts/feedback-pulse/extract.mdx";

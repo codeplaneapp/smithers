@@ -3,8 +3,8 @@
 // smithers-display-name: Federation Static Import Audit
 // smithers-description: Read-only Luna audit of cross-lane static and dynamic source edges.
 // smithers-tags: validation, federation, architecture
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 

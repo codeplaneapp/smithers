@@ -14,7 +14,7 @@ import { resolveLinearConfig } from "./config.js";
 
 /** Context tag for the Linear GraphQL client service. */
 export const LinearClient = /** @type {Context.Service<LinearClientService, LinearClientService>} */ (
-  Context.Service("@smithers-orchestrator/integrations/linear/LinearClient")
+  Context.Service("@smthrs/integrations/linear/LinearClient")
 );
 
 /**
@@ -143,7 +143,7 @@ export function makeLinearClient(config) {
   /**
    * @param {string} gql
    * @param {Record<string, unknown>} [variables]
-   * @returns {Effect.Effect<any, import("@smithers-orchestrator/errors/SmithersError").SmithersError>}
+   * @returns {Effect.Effect<any, import("@smthrs/errors/SmithersError").SmithersError>}
    */
   const query = (gql, variables) =>
     Effect.gen(function* () {
@@ -245,7 +245,7 @@ export function makeLinearClient(config) {
 
   /**
    * @param {{ teamId?: string; teamKey?: string }} ref
-   * @returns {Effect.Effect<LinearTeamRef, import("@smithers-orchestrator/errors/SmithersError").SmithersError>}
+   * @returns {Effect.Effect<LinearTeamRef, import("@smthrs/errors/SmithersError").SmithersError>}
    */
   const resolveTeam = (ref) =>
     Effect.gen(function* () {
@@ -277,7 +277,7 @@ export function makeLinearClient(config) {
 
   /**
    * @param {string} teamId
-   * @returns {Effect.Effect<{ id: string; name: string }[], import("@smithers-orchestrator/errors/SmithersError").SmithersError>}
+   * @returns {Effect.Effect<{ id: string; name: string }[], import("@smthrs/errors/SmithersError").SmithersError>}
    */
   const listStates = (teamId) =>
     Effect.gen(function* () {
@@ -346,7 +346,7 @@ export function makeLinearClient(config) {
 
   /**
    * @param {string} idOrIdentifier
-   * @returns {Effect.Effect<LinearIssueResult, import("@smithers-orchestrator/errors/SmithersError").SmithersError>}
+   * @returns {Effect.Effect<LinearIssueResult, import("@smthrs/errors/SmithersError").SmithersError>}
    */
   const getIssue = (idOrIdentifier) =>
     Effect.gen(function* () {

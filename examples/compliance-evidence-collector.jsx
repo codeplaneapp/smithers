@@ -7,11 +7,11 @@
  * Use cases: SOC 2 evidence collection, ISO 27001 audits, PCI-DSS reviews,
  * regulatory compliance gathering.
  */
-import { Sequence, Parallel } from "smithers-orchestrator";
+import { Sequence, Parallel } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, write, bash, grep } from "smithers-orchestrator/tools";
+import { read, write, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import OrchestratorPrompt from "./prompts/compliance-evidence-collector/orchestrator.mdx";
 import FetchPrompt from "./prompts/compliance-evidence-collector/fetch.mdx";

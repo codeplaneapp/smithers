@@ -12,15 +12,9 @@ import {
   useGatewayRun,
   useGatewayRuns,
   useGatewayRunTree,
-} from "smithers-orchestrator/gateway-react";
-import {
-  RunEventLog,
-  StatusPill,
-  WorkflowUiShell,
-  WorkflowUiStyles,
-  formatStatus,
-} from "smithers-orchestrator/gateway-ui";
-import { EmptyState } from "smithers-orchestrator/ui";
+} from "smthrs/gateway-react";
+import { RunEventLog, StatusPill, WorkflowUiShell, WorkflowUiStyles, formatStatus } from "smthrs/gateway-ui";
+import { EmptyState } from "smthrs/ui";
 
 const WORKFLOW_KEY = "land-shared-ui";
 

@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Effect } from "effect";
 import { z } from "zod";
-import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
+import { canonicalizeXml } from "@smthrs/graph/utils/xml";
 import { SmithersDb } from "../src/adapter.js";
 import { ensureSmithersTables } from "../src/ensure.js";
 import { zodToTable } from "../src/zodToTable.js";
@@ -293,6 +293,104 @@ describe("adapter: approvals history", () => {
     const history = await adapter.listApprovalHistoryForNode("wf", "gate");
     expect(history.length).toBe(1);
     expect(history[0].runId).toBe("r1");
+  });
+
+  test("listResumableDecidedApprovals includes denied(failed) gates and excludes consumed(finished) ones", async () => {
+    const { adapter } = createDb();
+    await adapter.insertRun(runRow("r1", "running"));
+    // Approved gate re-armed to run: node "pending".
+    await adapter.insertNode(nodeRow("r1", "approved-gate", "pending"));
+    await adapter.insertOrUpdateApproval({
+      runId: "r1",
+      nodeId: "approved-gate",
+      iteration: 0,
+      status: "approved",
+      requestedAtMs: now,
+      decidedAtMs: now + 1,
+      decidedBy: "will",
+    });
+    // Denied gate (default onDeny:'fail'): node "failed" — the state a real
+    // denyNode produces, which the pending-only listDecidedApprovals drops.
+    await adapter.insertNode(nodeRow("r1", "denied-gate", "failed"));
+    await adapter.insertOrUpdateApproval({
+      runId: "r1",
+      nodeId: "denied-gate",
+      iteration: 0,
+      status: "denied",
+      requestedAtMs: now,
+      decidedAtMs: now + 2,
+      decidedBy: "will",
+    });
+    // Already-consumed approved gate: node "finished" — must NOT re-resume.
+    await adapter.insertNode(nodeRow("r1", "consumed-gate", "finished"));
+    await adapter.insertOrUpdateApproval({
+      runId: "r1",
+      nodeId: "consumed-gate",
+      iteration: 0,
+      status: "approved",
+      requestedAtMs: now,
+      decidedAtMs: now + 3,
+      decidedBy: "will",
+    });
+
+    const pendingOnly = await adapter.listDecidedApprovals("r1");
+    expect(pendingOnly.map((a) => a.nodeId).sort()).toEqual(["approved-gate"]);
+    const resumable = await adapter.listResumableDecidedApprovals("r1");
+    expect(resumable.map((a) => a.nodeId).sort()).toEqual(["approved-gate", "denied-gate"]);
+    const all = await adapter.listAllDecidedApprovals("r1");
+    expect(all.map((a) => a.nodeId).sort()).toEqual(["approved-gate", "consumed-gate", "denied-gate"]);
+    expect(Array.isArray(await adapter.listResumableDecidedApprovalsEffect("r1"))).toBe(true);
+  });
+
+  test("listResumableApprovalRuns filters before limit, deduplicates runs, and supports both parked statuses", async () => {
+    const { adapter } = createDb();
+    const insertDecision = async (runId, nodeId, nodeState, approvalStatus = "approved") => {
+      await adapter.insertNode(nodeRow(runId, nodeId, nodeState));
+      await adapter.insertOrUpdateApproval({
+        runId,
+        nodeId,
+        iteration: 0,
+        status: approvalStatus,
+        requestedAtMs: now - 20,
+        decidedAtMs: approvalStatus === "requested" ? null : now - 10,
+        decidedBy: approvalStatus === "requested" ? null : "operator",
+      });
+    };
+
+    await adapter.insertRun(
+      runRow("ineligible-crowder", "waiting-event", { heartbeatAtMs: null, createdAtMs: now + 1000 }),
+    );
+    await insertDecision("ineligible-crowder", "done", "finished");
+
+    await adapter.insertRun(
+      runRow("eligible-event", "waiting-event", { heartbeatAtMs: now - 5000, createdAtMs: now - 900 }),
+    );
+    await insertDecision("eligible-event", "approved", "pending", "approved");
+    await insertDecision("eligible-event", "denied", "failed", "denied");
+
+    await adapter.insertRun(runRow("fresh-event", "waiting-event", { heartbeatAtMs: now - 5, createdAtMs: now - 800 }));
+    await insertDecision("fresh-event", "approved", "pending");
+
+    await adapter.insertRun(
+      runRow("requested-only", "waiting-event", { heartbeatAtMs: now - 6000, createdAtMs: now - 700 }),
+    );
+    await insertDecision("requested-only", "gate", "pending", "requested");
+
+    await adapter.insertRun(
+      runRow("eligible-approval", "waiting-approval", { heartbeatAtMs: now - 7000, createdAtMs: now - 600 }),
+    );
+    await insertDecision("eligible-approval", "gate", "pending");
+
+    const staleBeforeMs = now - 100;
+    const eventPage = await adapter.listResumableApprovalRuns("waiting-event", staleBeforeMs, 1);
+    // The newer ineligible run sorts first among parked runs, so this proves
+    // eligibility is applied inside SQL before the caller-visible LIMIT.
+    expect(eventPage.map((run) => run.runId)).toEqual(["eligible-event"]);
+    expect(new Set(eventPage.map((run) => run.runId)).size).toBe(eventPage.length);
+
+    const approvalPage = await adapter.listResumableApprovalRunsEffect("waiting-approval", staleBeforeMs);
+    expect(approvalPage.map((run) => run.runId)).toEqual(["eligible-approval"]);
+    expect(() => adapter.listResumableApprovalRuns("running", staleBeforeMs)).toThrow(/resumable approval run status/i);
   });
 });
 

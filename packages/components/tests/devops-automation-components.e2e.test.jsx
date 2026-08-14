@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -18,8 +18,8 @@ import {
   approveNode,
   denyNode,
   runWorkflow,
-} from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+} from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { createTestSmithers } from "./helpers.js";
 
 setDefaultTimeout(30_000);

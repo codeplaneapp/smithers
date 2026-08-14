@@ -21,7 +21,7 @@ export function runStartersCommand(c, fail) {
   if (c.args.id && !findStarterRecipe(c.args.id)) {
     return fail({
       code: "STARTER_NOT_FOUND",
-      message: `Starter not found: ${c.args.id}. Run "bunx smithers-orchestrator starters" to list available starters.`,
+      message: `Starter not found: ${c.args.id}. Run "bunx smthrs starters" to list available starters.`,
       details: {
         availableStarters: buildStarterGallery().starters.map((starter) => starter.id),
       },

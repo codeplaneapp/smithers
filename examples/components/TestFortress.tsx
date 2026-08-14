@@ -1,6 +1,6 @@
 // smithers-source: user
-/** @jsxImportSource smithers-orchestrator */
-import { Loop, Parallel, Sequence, Task, type AgentLike } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Loop, Parallel, Sequence, Task, type AgentLike } from "smthrs";
 import { z } from "zod/v4";
 
 // Absorb transient provider rate-limits (429s from bursting fable agents look

@@ -4,7 +4,7 @@ A [Codex plugin](https://developers.openai.com/codex/plugins) that makes Codex
 fluent in **Smithers**, the durable control plane for long-running coding agents.
 Installing it gives a Codex session:
 
-- the **`smithers` MCP server** (`smithers-orchestrator --mcp`) — `list_workflows`,
+- the **`smithers` MCP server** (`smthrs --mcp`) — `list_workflows`,
   `run_workflow`, `watch_run`, `resolve_approval`, and the rest of the semantic
   tool surface;
 - the **`smithers` skill** — teaches Codex to drive Smithers as an orchestrator
@@ -21,8 +21,8 @@ Installing it gives a Codex session:
 
 The skill enforces a hard rule: whenever Codex creates or runs a workflow, it
 authors a standalone React UI at `.smithers/ui/<key>.tsx` (composed from the
-`smithers-orchestrator/gateway-ui` run widgets and `smithers-orchestrator/ui`
-primitives over the `smithers-orchestrator/gateway-react` hooks) and launches it with
+`smthrs/gateway-ui` run widgets and `smthrs/ui`
+primitives over the `smthrs/gateway-react` hooks) and launches it with
 `smithers ui <runId>`, so the human watches the run live in their browser instead
 of reading text summaries. See [`skills/smithers/SKILL.md`](./skills/smithers/SKILL.md)
 for the exact authoring contract and a working example.
@@ -86,8 +86,8 @@ routing section in the skill for setup commands.
 ## Requirements
 
 - `codex` ≥ 0.142 (the version that ships `codex plugin` / the marketplace).
-- `bunx` on PATH (the MCP server launches via `bunx smithers-orchestrator --mcp`,
-  and the skill launches the live UI via `bunx smithers-orchestrator ui <runId>`,
+- `bunx` on PATH (the MCP server launches via `bunx smthrs --mcp`,
+  and the skill launches the live UI via `bunx smthrs ui <runId>`,
   so no separate global `smithers` install is required — if `smithers` *is* on
   PATH the skill uses it directly). Inside a **Smithers source checkout** both
   paths end up on that working tree instead of the published build: the

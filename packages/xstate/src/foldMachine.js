@@ -1,5 +1,5 @@
 import { initialTransition, transition } from "xstate";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { stableHash } from "./stableHash.js";
 
 /** @typedef {import("./FoldEvent.ts").FoldEvent} FoldEvent */

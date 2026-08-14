@@ -91,7 +91,10 @@ process.stdout.write("done\\n");
     const argsFile = join(argsFileDir, "args.json");
     const fake = await makeFakeClaude(`
 const fs = require("node:fs");
-fs.writeFileSync(process.env.CLAUDE_ARGS_FILE, JSON.stringify({ args: process.argv.slice(2), sock: process.env.SMITHERS_SNAPSHOT_SOCK || null }), "utf8");
+const args = process.argv.slice(2);
+const settingsIndex = args.indexOf("--settings");
+const settings = settingsIndex >= 0 ? JSON.parse(fs.readFileSync(args[settingsIndex + 1], "utf8")) : null;
+fs.writeFileSync(process.env.CLAUDE_ARGS_FILE, JSON.stringify({ args, settings, sock: process.env.SMITHERS_SNAPSHOT_SOCK || null }), "utf8");
 process.stdout.write("done\\n");
 `);
     try {
@@ -109,7 +112,7 @@ process.stdout.write("done\\n");
       const captured = JSON.parse(await readFile(argsFile, "utf8"));
       const si = captured.args.indexOf("--settings");
       expect(si).toBeGreaterThanOrEqual(0);
-      const settings = JSON.parse(captured.args[si + 1]);
+      const settings = captured.settings;
       expect(settings.hooks.PostToolUse[0].hooks[0].command).toBe("smithers snapshot-hook");
       expect(settings.hooks.PostToolUse[0].matcher).toContain("Edit");
       expect(captured.sock).toBe("/tmp/sm-snap-test.sock");
@@ -117,6 +120,7 @@ process.stdout.write("done\\n");
       await agent.generate({ messages: [{ role: "user", content: "Ping?" }] });
       const captured2 = JSON.parse(await readFile(argsFile, "utf8"));
       expect(captured2.args).not.toContain("--settings");
+      expect(captured2.settings).toBeNull();
       expect(captured2.sock).toBeNull();
     } finally {
       await rm(fake.dir, { recursive: true, force: true });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import type { GatewayRunNode } from "@smthrs/gateway-client";
 import {
   runningNodes,
   pinnedHijackRows,

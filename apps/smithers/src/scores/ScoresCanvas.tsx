@@ -1,5 +1,5 @@
 import "./scores.css";
-import { EmptyState, Skeleton } from "@smithers-orchestrator/ui";
+import { EmptyState, Skeleton } from "@smthrs/ui";
 import {
   cacheHitPercent,
   costPerRun,

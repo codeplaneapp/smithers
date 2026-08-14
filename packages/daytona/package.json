@@ -1,6 +1,6 @@
 {
-  "name": "@smithers-orchestrator/daytona",
-  "version": "0.32.0",
+  "name": "@smthrs/daytona",
+  "version": "0.34.0",
   "description": "Daytona sandbox provider for Smithers: run sandboxed workflows on Daytona sandboxes",
   "type": "module",
   "sideEffects": false,
@@ -25,8 +25,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@smithers-orchestrator/errors": "workspace:*",
-    "@smithers-orchestrator/sandbox": "workspace:*"
+    "@smthrs/errors": "workspace:*",
+    "@smthrs/sandbox": "workspace:*"
   },
   "peerDependencies": {
     "@daytonaio/sdk": "^0.194.0"

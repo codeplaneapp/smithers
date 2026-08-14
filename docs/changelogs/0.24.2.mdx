@@ -9,7 +9,7 @@ Smithers 0.24.2 makes onboarding a single command, fixes a Codex regression that
 
 ## One-command onboarding
 
-`bunx smithers-orchestrator init` now does the whole setup in one step.
+`bunx smthrs init` now does the whole setup in one step.
 
 - `init` auto-installs the curated `smithers` skill into the coding agents it detects on your machine, so there is no more manual `mkdir` or `curl`.
 - It seeds an editable `hello` workflow (`.smithers/workflows/hello.tsx` with its prompt in `.smithers/prompts/hello.mdx`) as the smallest end-to-end example to run and tweak.
@@ -27,7 +27,7 @@ Smithers 0.24.2 makes onboarding a single command, fixes a Codex regression that
 
 ## CLI
 
-- `bunx smithers-orchestrator mcp add` now prints a copy-paste manual fallback command when the underlying agent's `mcp add` fails, so registration is recoverable without leaving the terminal.
+- `bunx smthrs mcp add` now prints a copy-paste manual fallback command when the underlying agent's `mcp add` fails, so registration is recoverable without leaving the terminal.
 
 ## Quality
 
@@ -36,7 +36,7 @@ Smithers 0.24.2 makes onboarding a single command, fixes a Codex regression that
 ## Upgrade
 
 ```sh
-bunx smithers-orchestrator@0.24.2
+bunx smthrs@0.24.2
 ```
 
 No configuration changes are required.

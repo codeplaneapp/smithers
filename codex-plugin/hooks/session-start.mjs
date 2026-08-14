@@ -108,7 +108,7 @@ try {
   );
   if (cli.source === "workspace") {
     lines.push(
-      `SOURCE-CHECKOUT RULE: this project IS the Smithers source tree (${cli.root}). Every smithers command you run must execute the working tree, so invoke it as \`${cliCommand}\` (or plain \`smithers\`, which delegates to the same entry) — never \`bunx smithers-orchestrator\`, which runs the published npm build instead of the code under edit. Surfaces built at pack time need a build first: \`smithers ui --app\` needs \`node apps/cli/scripts/build-ui.mjs\`, and type-level checks need \`pnpm check:dts\`.`,
+      `SOURCE-CHECKOUT RULE: this project IS the Smithers source tree (${cli.root}). Every smithers command you run must execute the working tree, so invoke it as \`${cliCommand}\` (or plain \`smithers\`, which delegates to the same entry) — never \`bunx smthrs\`, which runs the published npm build instead of the code under edit. Surfaces built at pack time need a build first: \`smithers ui --app\` needs \`node apps/cli/scripts/build-ui.mjs\`, and type-level checks need \`pnpm check:dts\`.`,
     );
   }
 
@@ -126,7 +126,7 @@ try {
   }
 
   lines.push(
-    "MANDATORY UI RULE: every workflow you create or run MUST have a custom live UI at .smithers/ui/<key>.tsx composed from the shipped component libraries: `smithers-orchestrator/gateway-ui` (SimpleWorkflowDashboard, WorkflowUiShell, RunTree, RunEventLog, ApprovalPanel, ...) and `smithers-orchestrator/ui` (Button, Card, Tabs, StatusPill, EmptyState, ...) over the `smithers-orchestrator/gateway-react` hooks. Import only from `react` + those three subpaths; never hand-roll markup or CSS a shipped component covers. You MUST launch the UI (`smithers ui <runId>`) so the human can watch the run. Any workflow listed above as having no UI needs one. See the `smithers` skill for the exact authoring contract.",
+    "MANDATORY UI RULE: every workflow you create or run MUST have a custom live UI at .smithers/ui/<key>.tsx composed from the shipped component libraries: `smthrs/gateway-ui` (SimpleWorkflowDashboard, WorkflowUiShell, RunTree, RunEventLog, ApprovalPanel, ...) and `smthrs/ui` (Button, Card, Tabs, StatusPill, EmptyState, ...) over the `smthrs/gateway-react` hooks. Import only from `react` + those three subpaths; never hand-roll markup or CSS a shipped component covers. You MUST launch the UI (`smithers ui <runId>`) so the human can watch the run. Any workflow listed above as having no UI needs one. See the `smithers` skill for the exact authoring contract.",
   );
 
   emit(lines.join("\n"));

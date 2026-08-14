@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { WorkflowNode, WorkflowNodeContent } from "@smithers-orchestrator/ui";
+import { WorkflowNode, WorkflowNodeContent } from "@smthrs/ui";
 import type { SmithersFlowNode } from "./WorkflowGraph";
 
 /**
@@ -35,7 +35,7 @@ export function SmithersNodeHandles({ isConnectable = true }: { isConnectable?: 
 
 /**
  * The default `smithersTask` renderer: the renderer-neutral canvas anatomy
- * from @smithers-orchestrator/ui (WorkflowNode card, kind badge, shared
+ * from @smthrs/ui (WorkflowNode card, kind badge, shared
  * StatusPill status vocabulary, content line) composed inside
  * {@link SmithersNodeHandles} so edges stay attached. This is the visual
  * language WorkflowGraph paints by default — there is no competing graph

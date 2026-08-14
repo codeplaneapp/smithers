@@ -1,9 +1,9 @@
 // smithers-display-name: Release Content
 // smithers-description: Generate claim-checked changelogs, launch threads, and release blog posts with dry-run previews, approval markers, and optional publishing.
 // smithers-tags: marketing, release, changelog, publish
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { Database } from "bun:sqlite";
-import { createSmithers, approvalDecisionSchema } from "smithers-orchestrator";
+import { createSmithers, approvalDecisionSchema } from "smthrs";
 import { z } from "zod/v4";
 import { agents, providers } from "../agents";
 

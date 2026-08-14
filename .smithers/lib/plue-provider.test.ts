@@ -64,7 +64,7 @@ describe("buildRemoteProjectFiles", () => {
     });
     expect(files["script.tsx"]).toBe("export default 1;");
     expect(files["input.json"]).toContain('"foo": "bar"');
-    expect(JSON.parse(files["package.json"]).dependencies["smithers-orchestrator"]).toBe("0.26.1");
+    expect(JSON.parse(files["package.json"]).dependencies["smthrs"]).toBe("0.26.1");
     expect(files["agents.ts"]).toContain("ClaudeCodeAgent");
     expect(files["agents.ts"]).toContain("CodexAgent");
   });

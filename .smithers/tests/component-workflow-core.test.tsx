@@ -1,20 +1,13 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { chmodSync, copyFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import React from "react";
-import { createSmithers, Task } from "smithers-orchestrator";
-import {
-  fakeAgent,
-  renderPrompt,
-  renderWorkflow,
-  runTask,
-  simulate,
-  type RenderedWorkflow,
-} from "smithers-orchestrator/testing";
-import type { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
-import type { TaskDescriptor } from "@smithers-orchestrator/graph";
+import { createSmithers, Task } from "smthrs";
+import { fakeAgent, renderPrompt, renderWorkflow, runTask, simulate, type RenderedWorkflow } from "smthrs/testing";
+import type { SmithersCtx } from "@smthrs/driver/SmithersCtx";
+import type { TaskDescriptor } from "@smthrs/graph";
 import { z } from "zod/v4";
 import { CommandProbe, commandProbeOutputSchema } from "../components/CommandProbe";
 import {

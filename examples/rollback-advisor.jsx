@@ -5,11 +5,11 @@
  *
  * Pattern: Deploy event → evidence gatherer → advisor agent → approval gate → action.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { bash, read, grep } from "smithers-orchestrator/tools";
+import { bash, read, grep } from "smthrs/tools";
 import { z } from "zod";
 import GatherEvidencePrompt from "./prompts/rollback-advisor/gather-evidence.mdx";
 import AdvisePrompt from "./prompts/rollback-advisor/advise.mdx";

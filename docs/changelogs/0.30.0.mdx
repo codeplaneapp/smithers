@@ -16,9 +16,9 @@ single-task asks. 233 commits, no breaking changes.
 ## Upgrading
 
 ```bash
-bunx smithers-orchestrator update        # upgrade the CLI
-bunx smithers-orchestrator upgrade       # agent-assisted: reads the changelogs and applies what your project needs
-bunx smithers-orchestrator packs update  # refresh installed workflow packs
+bunx smthrs update        # upgrade the CLI
+bunx smthrs upgrade       # agent-assisted: reads the changelogs and applies what your project needs
+bunx smthrs packs update  # refresh installed workflow packs
 ```
 
 Behavior changes are collected in the [upgrade notes](#upgrade-notes) at the
@@ -28,7 +28,7 @@ bottom.
 
 Every Smithers workflow can mount its own web UI, and in practice your agent
 builds that UI for you. What it can build just took a big step up:
-`smithers-orchestrator/ui` now ships a full component library for agent runs:
+`smthrs/ui` now ships a full component library for agent runs:
 chat, reasoning, tool calls, plans, approvals, checkpoints, attachments,
 sources, a workflow canvas, and more.
 
@@ -37,7 +37,7 @@ sources, a workflow canvas, and more.
 </Frame>
 
 ```tsx
-import { Message, Reasoning, ReasoningSummary, ToolCall, MessageResponse, Sources } from "smithers-orchestrator/ui";
+import { Message, Reasoning, ReasoningSummary, ToolCall, MessageResponse, Sources } from "smthrs/ui";
 
 <Message role="assistant">
   <Reasoning duration={12}>
@@ -79,7 +79,7 @@ Full catalog: [UI component library reference](/reference/ui), starting at
 
 ## Live widgets for custom run UIs
 
-`smithers-orchestrator/gateway-ui` adds the widgets a run dashboard needs,
+`smthrs/gateway-ui` adds the widgets a run dashboard needs,
 each wired to the live gateway for you:
 
 - **`NodeChatStream`**: one agent's live chat, streaming as it works.
@@ -90,7 +90,7 @@ each wired to the live gateway for you:
 - **`MonitorButton`**: one-click deep link from your UI into the Monitor.
 
 ```tsx
-import { NodeChatStream, FleetTable, MonitorButton } from "smithers-orchestrator/gateway-ui";
+import { NodeChatStream, FleetTable, MonitorButton } from "smthrs/gateway-ui";
 
 <NodeStageStrip runId={runId} stages={stages} />
 <NodeChatStream runId={runId} nodeId="implement" subtitle="opencode · kimi-k3" />
@@ -135,7 +135,7 @@ Two more pieces for custom UIs, both shown above in spirit:
 </Frame>
 
 ```tsx
-import { ChartContainer, chartConfig } from "smithers-orchestrator/ui/adapters/chart";
+import { ChartContainer, chartConfig } from "smthrs/ui/adapters/chart";
 
 <ChartContainer id="throughput" config={chartConfig([{ key: "landed", label: "Tasks landed" }])}>
   <AreaChart data={data}>…</AreaChart>
@@ -157,7 +157,7 @@ Not every ask needs a workflow. `oneshot` routes one clear task through an
 implement (and optional review) pipeline with its own live dashboard:
 
 ```bash
-bunx smithers-orchestrator oneshot "add a loading spinner to the login button"
+bunx smthrs oneshot "add a loading spinner to the login button"
 ```
 
 A **live status narrator** (a cheap agent watching the run) posts one-line
@@ -195,7 +195,7 @@ drive the OMP harness with the full RPC lifecycle handled, and
 followed up with contract and preflight fixes. First external engine
 contribution, and a great one.
 
-Running into something? `bunx smithers-orchestrator bug` files a report
+Running into something? `bunx smthrs bug` files a report
 straight from your terminal.
 
 ## Other improvements
@@ -238,4 +238,4 @@ The complete commit-level history for this release is in
 [CHANGELOG.md](https://github.com/smithersai/smithers/blob/main/CHANGELOG.md)
 on GitHub.
 
-Found a bug? Run `bunx smithers-orchestrator bug` to file it.
+Found a bug? Run `bunx smthrs bug` to file it.

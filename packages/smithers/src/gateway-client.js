@@ -1,1 +1,1 @@
-export * from "@smithers-orchestrator/gateway-client";
+export * from "@smthrs/gateway-client";

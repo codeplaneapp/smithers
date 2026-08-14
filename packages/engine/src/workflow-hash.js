@@ -1,12 +1,19 @@
 import { existsSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, extname, resolve } from "node:path";
 import { createHash } from "node:crypto";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 const STATIC_IMPORT_RE = /\b(?:import|export)\s+(?:[^"'`]*?\s+from\s*)?["']([^"']+)["']/g;
 const DYNAMIC_IMPORT_RE = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
 const WORKFLOW_IMPORT_EXTENSIONS = ["", ".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
+// Extensions whose files are loadable JS/TS modules. Imported assets that are
+// NOT modules (.mdx prompts, .md notes, ...) are still hashed into the module
+// graph, but their CONTENTS are prose — scanning them for import-shaped text
+// finds examples in code fences (e.g. `../workflows/<workflowName>.tsx` in a
+// scaffold prompt) and fails the whole graph hash, which then blocks resume
+// with RESUME_METADATA_MISMATCH "workflow module graph unavailable".
+const SCANNABLE_MODULE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]);
 
 /**
  * @param {string} input
@@ -110,6 +117,13 @@ async function collectWorkflowModuleHashEntries(workflowPath, visited = new Set(
   visited.add(resolvedPath);
   const source = await readFile(resolvedPath, "utf8");
   const entries = [`${resolvedPath}:${sha256Hex(source)}`];
+  // Only scan loadable modules for further imports. Non-module assets (most
+  // importantly .mdx prompts, which every seeded workflow imports) are hash
+  // leaves: their prose is not an import graph.
+  const extension = extname(resolvedPath).toLowerCase();
+  if (extension !== "" && !SCANNABLE_MODULE_EXTENSIONS.has(extension)) {
+    return entries;
+  }
   for (const specifier of extractWorkflowImportSpecifiers(source, resolvedPath)) {
     const importedPath = resolveWorkflowImport(resolvedPath, specifier);
     if (!importedPath) {

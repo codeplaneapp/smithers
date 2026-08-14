@@ -1,6 +1,7 @@
+/** @jsxImportSource @opentui/react */
 import { useState, useMemo } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { useRunInspectorVm } from "@smithers-orchestrator/ui-core";
+import { useRunInspectorVm } from "@smthrs/ui-core";
 import { TUI_EVENT_CAP } from "../data.ts";
 import type { GatewayEventFrame } from "../data.ts";
 import {

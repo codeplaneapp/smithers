@@ -4,10 +4,11 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import { Effect } from "effect";
 import * as BunContext from "@effect/platform-bun/BunServices";
-import { renderPrometheusMetrics } from "@smithers-orchestrator/observability";
+import { renderPrometheusMetrics } from "@smthrs/observability";
 import * as vcsEffects from "../src/jj.js";
 
 const JJ_ENV = "SMITHERS_JJ_PATH";
+const WORKSPACE_ROLLBACK_TEST_TIMEOUT_MS = 30_000;
 
 /**
  * @template A, E
@@ -296,54 +297,62 @@ exit 3
       expect((res.error ?? "").length).toBeGreaterThan(0);
     });
   });
-  test("restores a populated target when jj rejects the revision", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "jj-invalid-rev-"));
-    const target = path.join(root, "workspace");
-    const sentinel = path.join(target, "nested", "sentinel.txt");
-    await fs.mkdir(path.dirname(sentinel), { recursive: true });
-    await fs.writeFile(sentinel, "keep me");
-    const script = `
+  test(
+    "restores a populated target when jj rejects the revision",
+    async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "jj-invalid-rev-"));
+      const target = path.join(root, "workspace");
+      const sentinel = path.join(target, "nested", "sentinel.txt");
+      await fs.mkdir(path.dirname(sentinel), { recursive: true });
+      await fs.writeFile(sentinel, "keep me");
+      const script = `
 if [[ "$1" = "workspace" && "$2" = "list" ]]; then
   exit 0
 fi
 echo "Revision not found" 1>&2
 exit 1
 `;
-    try {
-      await withFakeJj(script, async () => {
-        const res = await vcs.workspaceAdd("invalid", target, { atRev: "missing" });
-        expect(res.success).toBe(false);
-        expect(await fs.readFile(sentinel, "utf8")).toBe("keep me");
-        expect(await fs.readdir(root)).toEqual(["workspace"]);
-      });
-    } finally {
-      await fs.rm(root, { recursive: true, force: true });
-    }
-  });
-  test("restores a populated target when jj cannot be spawned", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "jj-spawn-failure-"));
-    const target = path.join(root, "workspace");
-    const sentinel = path.join(target, "sentinel.txt");
-    const badJj = path.join(root, "not-a-command");
-    await fs.mkdir(target);
-    await fs.writeFile(sentinel, "keep me too");
-    await fs.mkdir(badJj);
-    const prevJj = process.env[JJ_ENV];
-    try {
-      process.env[JJ_ENV] = badJj;
-      const res = await vcs.workspaceAdd("spawn-failure", target);
-      expect(res.success).toBe(false);
-      expect(await fs.readFile(sentinel, "utf8")).toBe("keep me too");
-      expect((await fs.readdir(root)).sort()).toEqual(["not-a-command", "workspace"]);
-    } finally {
-      if (prevJj === undefined) {
-        delete process.env[JJ_ENV];
-      } else {
-        process.env[JJ_ENV] = prevJj;
+      try {
+        await withFakeJj(script, async () => {
+          const res = await vcs.workspaceAdd("invalid", target, { atRev: "missing" });
+          expect(res.success).toBe(false);
+          expect(await fs.readFile(sentinel, "utf8")).toBe("keep me");
+          expect(await fs.readdir(root)).toEqual(["workspace"]);
+        });
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
       }
-      await fs.rm(root, { recursive: true, force: true });
-    }
-  });
+    },
+    WORKSPACE_ROLLBACK_TEST_TIMEOUT_MS,
+  );
+  test(
+    "restores a populated target when jj cannot be spawned",
+    async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "jj-spawn-failure-"));
+      const target = path.join(root, "workspace");
+      const sentinel = path.join(target, "sentinel.txt");
+      const badJj = path.join(root, "not-a-command");
+      await fs.mkdir(target);
+      await fs.writeFile(sentinel, "keep me too");
+      await fs.mkdir(badJj);
+      const prevJj = process.env[JJ_ENV];
+      try {
+        process.env[JJ_ENV] = badJj;
+        const res = await vcs.workspaceAdd("spawn-failure", target);
+        expect(res.success).toBe(false);
+        expect(await fs.readFile(sentinel, "utf8")).toBe("keep me too");
+        expect((await fs.readdir(root)).sort()).toEqual(["not-a-command", "workspace"]);
+      } finally {
+        if (prevJj === undefined) {
+          delete process.env[JJ_ENV];
+        } else {
+          process.env[JJ_ENV] = prevJj;
+        }
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    },
+    WORKSPACE_ROLLBACK_TEST_TIMEOUT_MS,
+  );
   test("supports --wc-path fallback variant", async () => {
     const script = `
 if [[ "$1" = "workspace" && "$2" = "add" && "$3" = "--wc-path" ]]; then

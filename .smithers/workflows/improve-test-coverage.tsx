@@ -1,8 +1,8 @@
 // smithers-source: user
 // smithers-display-name: Improve Test Coverage
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
-import { createSmithers, Sequence, Task } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
+import { createSmithers, Sequence, Task } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { renderWorkflow } from "smithers-orchestrator/testing";
+import { renderWorkflow } from "smthrs/testing";
 import workflow, {
   scoreCandidate,
   resetBenchmarkScratch,

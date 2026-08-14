@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // Lifecycle controls (cancel / pause / resume) CROSSED with child workflows
 // (<Subflow> child runs). Single-feature behaviour is covered elsewhere
 // (pause-lifecycle.test.jsx, child-workflow-prefer-resume.test.jsx,
@@ -12,8 +12,8 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { Effect } from "effect";
-import { Parallel, Sequence, Subflow, Task, Workflow } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { Parallel, Sequence, Subflow, Task, Workflow } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
 // Relative import so these runs exercise THIS checkout's engine.
 import { runWorkflow } from "../src/engine.js";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers.js";

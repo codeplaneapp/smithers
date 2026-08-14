@@ -1,6 +1,6 @@
 {
-  "name": "@smithers-orchestrator/vcs",
-  "version": "0.32.0",
+  "name": "@smthrs/vcs",
+  "version": "0.34.0",
   "description": "VCS discovery and jj workspace operations for Smithers",
   "type": "module",
   "sideEffects": false,
@@ -25,19 +25,20 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@smithers-orchestrator/observability": "workspace:*",
-    "effect": "4.0.0-beta.102"
+    "@effect/platform-node-shared": "4.0.0-beta.105",
+    "@smthrs/observability": "workspace:*",
+    "effect": "4.0.0-beta.105"
   },
   "devDependencies": {
-    "@effect/platform-bun": "4.0.0-beta.102",
+    "@effect/platform-bun": "4.0.0-beta.105",
     "@types/bun": "latest",
     "typescript": "~6.0.3"
   },
   "optionalDependencies": {
-    "@smithers-orchestrator/jj-darwin-arm64": "workspace:*",
-    "@smithers-orchestrator/jj-darwin-x64": "workspace:*",
-    "@smithers-orchestrator/jj-linux-arm64": "workspace:*",
-    "@smithers-orchestrator/jj-linux-x64": "workspace:*",
-    "@smithers-orchestrator/jj-win32-x64": "workspace:*"
+    "@smthrs/jj-darwin-arm64": "workspace:*",
+    "@smthrs/jj-darwin-x64": "workspace:*",
+    "@smthrs/jj-linux-arm64": "workspace:*",
+    "@smthrs/jj-linux-x64": "workspace:*",
+    "@smthrs/jj-win32-x64": "workspace:*"
   }
 }

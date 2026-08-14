@@ -14,7 +14,7 @@ Use the MCP server when an AI agent should drive Smithers autonomously. Use the 
 ### Start the server
 
 ```bash
-bunx smithers-orchestrator --mcp
+bunx smthrs --mcp
 ```
 
 This starts the semantic surface: a stable, structured tool set for AI agent consumption, documented on this page.
@@ -23,13 +23,13 @@ Two additional surfaces are available via `--surface`:
 
 ```bash
 # Semantic tools only (default)
-bunx smithers-orchestrator --mcp --surface semantic
+bunx smthrs --mcp --surface semantic
 
 # Raw CLI-mirroring tools only
-bunx smithers-orchestrator --mcp --surface raw
+bunx smthrs --mcp --surface raw
 
 # Both surfaces registered on the same server
-bunx smithers-orchestrator --mcp --surface both
+bunx smthrs --mcp --surface both
 ```
 
 Use `--surface raw` only for direct CLI parity; prefer the semantic surface for new integrations, where every tool returns a `{ ok, data, error }` envelope with Zod-validated input and output schemas.
@@ -38,10 +38,10 @@ Scope the semantic surface when a client should not receive every Smithers contr
 
 ```bash
 # Expose only selected semantic tools
-bunx smithers-orchestrator --mcp --allowed-tools list_workflows,get_run
+bunx smthrs --mcp --allowed-tools list_workflows,get_run
 
 # Expose only tools annotated as read-only
-bunx smithers-orchestrator --mcp --read-only
+bunx smthrs --mcp --read-only
 ```
 
 `--allowed-tools` takes a comma-separated list of semantic tool names; an empty allowlist exposes no semantic tools. `--read-only` removes semantic tools with write or control side effects, such as starting runs, resolving approvals, or reverting attempts. Under `--surface both`, both flags apply to the semantic toolset only; raw CLI-mirroring tools are always registered by the raw surface.
@@ -55,20 +55,20 @@ For clients that read JSON config directly:
   "mcpServers": {
     "smithers": {
       "command": "bunx",
-      "args": ["smithers-orchestrator", "--mcp"]
+      "args": ["smthrs", "--mcp"]
     }
   }
 }
 ```
 
-Project-scoped install (e.g. a monorepo where Smithers is a dev dependency; ensure `smithers-orchestrator` is in the local `package.json`):
+Project-scoped install (e.g. a monorepo where Smithers is a dev dependency; ensure `smthrs` is in the local `package.json`):
 
 ```json
 {
   "mcpServers": {
     "smithers": {
       "command": "bunx",
-      "args": ["smithers-orchestrator", "--mcp"]
+      "args": ["smthrs", "--mcp"]
     }
   }
 }
@@ -76,7 +76,7 @@ Project-scoped install (e.g. a monorepo where Smithers is a dev dependency; ensu
 
 ### If `mcp add` fails
 
-`bunx smithers-orchestrator mcp add` hands the launch command to a registration helper expecting a single argument. If a runner or shell word-splits it, the helper sees a bare `--mcp` token and aborts:
+`bunx smthrs mcp add` hands the launch command to a registration helper expecting a single argument. If a runner or shell word-splits it, the helper sees a bare `--mcp` token and aborts:
 
 ```
 Registering MCP server...
@@ -87,8 +87,8 @@ message: "error: unknown option '--mcp'"
 Register with your agent's own CLI instead: the `--` separator marks everything after it as the launch command, so `--mcp` never gets parsed as one of the agent's own flags:
 
 ```bash
-codex mcp add smithers -- bunx smithers-orchestrator --mcp
-claude mcp add smithers -- bunx smithers-orchestrator --mcp
+codex mcp add smithers -- bunx smthrs --mcp
+claude mcp add smithers -- bunx smthrs --mcp
 ```
 
 Any MCP-aware CLI follows the same `<agent> mcp add <name> -- <command>` shape, or write the JSON/TOML config by hand from the snippets above. The Smithers CLI prints these fallback commands automatically whenever `mcp add` fails.
@@ -426,7 +426,7 @@ Block the current run, ask a human to make a decision, and wait for their answer
 
 When run inside a Smithers task, the run/node context is taken from the `SMITHERS_RUN_ID` / `SMITHERS_NODE_ID` / `SMITHERS_ITERATION` environment variables Smithers injects into the agent; pass `runId`/`nodeId`/`iteration` explicitly to override, or rely on single-active-run autodetection.
 
-The orchestrating agent resolves the request on the human's behalf: relay the question in conversation, collect their decision, then run `bunx smithers-orchestrator human answer <requestId> --value '<json>'` (or `bunx smithers-orchestrator human cancel <requestId>`) yourself, never instructing the human to run these. `bunx smithers-orchestrator human inbox` lists everything waiting.
+The orchestrating agent resolves the request on the human's behalf: relay the question in conversation, collect their decision, then run `bunx smthrs human answer <requestId> --value '<json>'` (or `bunx smthrs human cancel <requestId>`) yourself, never instructing the human to run these. `bunx smthrs human inbox` lists everything waiting.
 
 **Input:**
 

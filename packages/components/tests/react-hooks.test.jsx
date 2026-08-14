@@ -1,7 +1,7 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Workflow, Task, Ralph, Panel, runWorkflow } from "smithers-orchestrator";
+import { Workflow, Task, Ralph, Panel, runWorkflow } from "smthrs";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { createTestSmithers } from "./helpers.js";
 import { outputSchemas } from "./schema.js";

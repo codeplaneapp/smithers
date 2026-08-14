@@ -4,7 +4,7 @@ import {
   createSmithersDataClient,
   type SmithersGatewayClientOptions,
   type WorkspaceMode,
-} from "@smithers-orchestrator/gateway-client";
+} from "@smthrs/gateway-client";
 import { SmithersGatewayContext } from "./SmithersGatewayContext.ts";
 import { SmithersCollectionsProvider } from "./SmithersCollectionsProvider.ts";
 

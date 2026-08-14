@@ -17,15 +17,15 @@ One `taskId` per capability, fanned across a few candidate models:
   `ui-status-header`, `ui-loop-node-output-row` — the core gateway-react hooks.
 - `ui-dashboard-full` — the polished multi-pane dashboard (sota tier).
 - `ui-monitor-button` (sonnet, haiku) — must compose the shipped
-  `MonitorButton` from `smithers-orchestrator/gateway-ui` and deep-link the run
+  `MonitorButton` from `smthrs/gateway-ui` and deep-link the run
   into the Monitor rather than hand-rolling the link. `must` tokens:
-  `smithers-orchestrator/gateway-ui` + `MonitorButton` (plus the usual
+  `smthrs/gateway-ui` + `MonitorButton` (plus the usual
   `createGatewayReactRoot` mount). This is the fluency signal that agents reach
   for the shipped monitor affordance instead of reinventing a `/monitor` anchor.
 
 ## Running
 
-`bunx smithers-orchestrator eval evals/suites/ui-authoring` (or `smithers up`
+`bunx smthrs eval evals/suites/ui-authoring` (or `smithers up`
 the suite's `eval.tsx`). Candidate models resolve through `evals/agents.ts`; on a
 stock checkout the claude-backed ones (`haiku`, `sonnet`) run out of the box,
 while `gemini`/`kimi` need their respective CLIs/accounts (see

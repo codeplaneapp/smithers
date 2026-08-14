@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
-import { useSmithersCollections } from "@smithers-orchestrator/gateway-react";
+import { useSmithersCollections } from "@smthrs/gateway-react";
 import { connectionStateValue, gatewayConnectionState } from "../observability/uiMetrics";
 import type { GatewayStatus } from "../gateway/gatewayTypes";
 

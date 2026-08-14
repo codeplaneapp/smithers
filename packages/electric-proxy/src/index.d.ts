@@ -1,5 +1,5 @@
 import { Server } from 'node:http';
-import { GatewayScope } from '@smithers-orchestrator/gateway/auth/scopes';
+import { GatewayScope } from '@smthrs/gateway/auth/scopes';
 
 type SmithersElectricProxyMetricSnapshot$1 = {
     shapeOpens: number;

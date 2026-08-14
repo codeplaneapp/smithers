@@ -8,7 +8,7 @@ description: Long-horizon workflow with planning, approval, milestone validation
 `mission` handles work too long or broad for one agent loop, running milestones one at a time with parallel feature workers, integration, and validation (see How It Runs).
 
 ```bash
-bunx smithers-orchestrator workflow run mission --prompt "Migrate the dashboard to the new gateway APIs"
+bunx smthrs workflow run mission --prompt "Migrate the dashboard to the new gateway APIs"
 ```
 
 <Frame caption="The mission UI shows the approved milestone plan, the parallel per-milestone workers, and the integration and validation steps.">
@@ -30,7 +30,7 @@ bunx smithers-orchestrator workflow run mission --prompt "Migrate the dashboard 
 Example with worktree isolation:
 
 ```bash
-bunx smithers-orchestrator workflow run mission \
+bunx smthrs workflow run mission \
   --input '{"prompt":"Build import/export support","useWorktrees":true,"maxConcurrency":4}'
 ```
 
@@ -49,7 +49,7 @@ bunx smithers-orchestrator workflow run mission \
 When `requirePlanApproval` is `true`, the run pauses after planning and emits `mission:approve-plan`. Review the proposed milestones, then resume:
 
 ```bash
-bunx smithers-orchestrator approve RUN_ID --node mission:approve-plan
+bunx smthrs approve RUN_ID --node mission:approve-plan
 ```
 
 Canceling the run at the approval gate aborts the mission.

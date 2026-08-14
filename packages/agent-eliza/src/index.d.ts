@@ -1,5 +1,5 @@
 import * as ai from 'ai';
-import * as _smithers_orchestrator_agents from '@smithers-orchestrator/agents';
+import * as _smithers_orchestrator_agents from '@smthrs/agents';
 
 /**
  * Minimal structural types for elizaOS so this file compiles even when
@@ -87,7 +87,7 @@ type ElizaAgentOptions$2 = {
  * `@elizaos/core` is a hard dependency this opt-in package owns and installs.
  * It is resolved via a dynamic import (so this module carries no load-time
  * dependency and the structural types keep the build self-contained), but
- * consumers of `@smithers-orchestrator/agent-eliza` get it transitively.
+ * consumers of `@smthrs/agent-eliza` get it transitively.
  */
 declare class ElizaAgent {
     /**

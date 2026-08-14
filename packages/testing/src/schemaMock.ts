@@ -1,5 +1,5 @@
 import { toJSONSchema, type ZodType } from "zod";
-import { zodSchemaToJsonExample } from "@smithers-orchestrator/components/zod-to-example";
+import { zodSchemaToJsonExample } from "@smthrs/components/zod-to-example";
 import type { SafeSchema } from "./fakeAgent.ts";
 
 type JsonSchema = {

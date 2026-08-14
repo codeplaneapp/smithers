@@ -1,10 +1,10 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import {
   createCommandSandboxProvider,
   SANDBOX_EGRESS_CA_BUNDLE_RELATIVE_PATH,
   SANDBOX_PROVIDER_REQUEST_ENV,
   SANDBOX_PROVIDER_RESULT_ENV,
-} from "@smithers-orchestrator/sandbox";
+} from "@smthrs/sandbox";
 import { AWS_SANDBOX_PROVIDER_ID } from "./AWS_SANDBOX_PROVIDER_ID.js";
 import { createAwsCodeBuildSandboxRunner } from "./createAwsCodeBuildSandboxRunner.js";
 import { createAwsEcsSandboxRunner } from "./createAwsEcsSandboxRunner.js";
@@ -50,7 +50,7 @@ function secretValuesFrom(env) {
  * injected `SMITHERS_SANDBOX_S3_*` env vars.
  *
  * @param {import("./AwsSandboxProviderOptions.ts").AwsSandboxProviderOptions} [options]
- * @returns {import("@smithers-orchestrator/sandbox").SandboxProvider}
+ * @returns {import("@smthrs/sandbox").SandboxProvider}
  */
 export function createAwsSandboxProvider(options = {}) {
   const id = options.id ?? AWS_SANDBOX_PROVIDER_ID;
@@ -103,7 +103,7 @@ export function createAwsSandboxProvider(options = {}) {
   // `client` is a singular-spelling alias for the `{ s3, ecs, codebuild, logs }`
   // clients bag, not a single SDK client; `clients` wins when both are present.
   const clients = options.clients ?? options.client ?? {};
-  const clientOptions = { region, ...(options.clientOptions ?? {}) };
+  const clientOptions = { region, ...options.clientOptions };
   const secrets = secretValuesFrom(options.env);
   const workdir = options.workdir ?? DEFAULT_WORKDIR;
 
@@ -114,8 +114,8 @@ export function createAwsSandboxProvider(options = {}) {
     env: options.env,
     cleanup,
     /**
-     * @param {import("@smithers-orchestrator/sandbox").SandboxProviderRequest} request
-     * @returns {Promise<import("@smithers-orchestrator/sandbox").SandboxSession>}
+     * @param {import("@smthrs/sandbox").SandboxProviderRequest} request
+     * @returns {Promise<import("@smthrs/sandbox").SandboxSession>}
      */
     async createSession(request) {
       const prefix = `smithers/sandbox/${request.runId}/${request.sandboxId}`;
@@ -180,8 +180,8 @@ export function createAwsSandboxProvider(options = {}) {
         readFile: transport.readFile,
         /**
          * @param {string} command
-         * @param {import("@smithers-orchestrator/sandbox").SandboxExecOptions} execOpts
-         * @returns {Promise<import("@smithers-orchestrator/sandbox").SandboxExecResult>}
+         * @param {import("@smthrs/sandbox").SandboxExecOptions} execOpts
+         * @returns {Promise<import("@smthrs/sandbox").SandboxExecResult>}
          */
         async exec(command, execOpts) {
           const requestPath = execOpts.env[SANDBOX_PROVIDER_REQUEST_ENV];

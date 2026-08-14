@@ -3,13 +3,10 @@ import { openInlineWorkflowStore } from "../openInlineWorkflowStore.js";
 
 /**
  * @param {{ cwd: string; goal: string; agents: any[]; reviewAgents: any[]; review: boolean }} options
- * @returns {Promise<import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any>>}
+ * @returns {Promise<import("@smthrs/components/SmithersWorkflow").SmithersWorkflow<any>>}
  */
 export async function buildOneshotWorkflow(options) {
-  const [{ Workflow, Task, Sequence }, { z }] = await Promise.all([
-    import("@smithers-orchestrator/components"),
-    import("zod"),
-  ]);
+  const [{ Workflow, Task, Sequence }, { z }] = await Promise.all([import("@smthrs/components"), import("zod")]);
   const oneshotResult = z.object({
     summary: z.string().min(20),
     filesChanged: z.array(z.string()),

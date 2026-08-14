@@ -21,10 +21,10 @@ setDefaultTimeout(240_000);
  * task that throws with retries={0}, so no agent CLI is needed for the
  * failing run itself.
  */
-function failingWorkflowSource(name = "fail-demo") {
+function failingWorkflowSource(name = "fail-demo", smithersOpts = "") {
   return [
-    "/** @jsxImportSource smithers-orchestrator */",
-    'import { createSmithers, Workflow, Task } from "smithers-orchestrator";',
+    "/** @jsxImportSource smthrs */",
+    'import { createSmithers, Workflow, Task } from "smthrs";',
     'import { z } from "zod";',
     "",
     "const { smithers, outputs } = createSmithers({",
@@ -37,7 +37,7 @@ function failingWorkflowSource(name = "fail-demo") {
     '      {() => { throw new Error("deliberate failure for the autopsy trigger test"); }}',
     "    </Task>",
     "  </Workflow>",
-    "));",
+    `)${smithersOpts});`,
     "",
   ].join("\n");
 }
@@ -54,6 +54,25 @@ test("failed run without an installed post-failure workflow prints the manual CT
   expect(run.json.status).toBe("failed");
   expect(run.stderr).toContain(`smithers workflow run post-failure --input '{"targetRunId":"fail-cta"}'`);
   expect(run.stderr).not.toContain("autopsy launched");
+});
+
+test("a workflow-level postFailureAutopsy:false opt suppresses the trigger", () => {
+  const repo = createTempRepo();
+  // Same deliberate task error, but the workflow opts out per-file. The
+  // trigger must be skipped entirely: no launch line, and (unlike a plain
+  // task error on a repo without the workflow installed) not even the
+  // "not-installed" manual CTA.
+  repo.write("fail.tsx", failingWorkflowSource("fail-opt-out", ", { postFailureAutopsy: false }"));
+  const run = runSmithers(["up", "fail.tsx", "--run-id", "fail-wf-optout"], {
+    cwd: repo.dir,
+    format: "json",
+    timeoutMs: 120_000,
+  });
+  expect(run.exitCode).toBe(1);
+  expect(run.json.status).toBe("failed");
+  // Neither the "autopsy launched" line nor the "not-installed" manual CTA
+  // appears — both carry the substring "post-failure".
+  expect(run.stderr).not.toContain("post-failure");
 });
 
 test("--no-post-failure suppresses the trigger entirely", () => {
@@ -158,4 +177,12 @@ test("failed run auto-launches the installed post-failure workflow detached", as
     console.error(`autopsy run ${autopsyRunId} never registered; detached log tail:\n${tail}`);
   }
   expect(seen).toBe(true);
+
+  // Reap the detached autopsy so it does not outlive the test as an orphan.
+  // It runs the real post-failure workflow (with fake agents here); left
+  // alone it lingers in the background burning cycles — exactly the leaked
+  // `post-failure-*` process class this batch set out to stop. Cancelling it
+  // and sweeping the workspace drives its engine to a terminal state.
+  runSmithers(["cancel", autopsyRunId], { cwd: repo.dir, format: "json", timeoutMs: 30_000, env });
+  runSmithers(["down", "--force"], { cwd: repo.dir, format: "json", timeoutMs: 30_000, env });
 });

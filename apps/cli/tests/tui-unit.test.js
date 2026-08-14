@@ -1300,7 +1300,7 @@ describe("tui helpers", () => {
   test("monitor-failure guidance says the run is STILL RUNNING and never suggests smithers-mon", () => {
     // Both descriptors fire AFTER the run launched; the launcher leaves the
     // durable run alive, so the message must say so and point at surfaces
-    // that always work. `smithers-mon` is the bin of @smithers-orchestrator/tui
+    // that always work. `smithers-mon` is the bin of @smthrs/tui
     // — in the unresolvable case, the very package that failed to resolve.
     for (const failure of [
       monitorStartFailure(new Error("spawn bun ENOENT"), "run-1", "/logs/run-1.log"),
@@ -1318,7 +1318,7 @@ describe("tui helpers", () => {
     expect(monitorStartFailure(new Error("spawn bun ENOENT"), "run-1", "/l.log").code).toBe("TUI_MONITOR_FAILED");
     expect(monitorStartFailure(new Error("spawn bun ENOENT"), "run-1", "/l.log").message).toContain("spawn bun ENOENT");
     expect(monitorUnavailableFailure("run-1", "/l.log").code).toBe("TUI_MONITOR_UNAVAILABLE");
-    expect(monitorUnavailableFailure("run-1", "/l.log").message).toContain("@smithers-orchestrator/tui");
+    expect(monitorUnavailableFailure("run-1", "/l.log").message).toContain("@smthrs/tui");
   });
 
   test("armLaunchCancellation tears the unannounced run down when clack exits the process", () => {

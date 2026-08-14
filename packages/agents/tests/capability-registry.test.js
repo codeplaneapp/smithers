@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import React from "react";
 import { z } from "zod";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { Workflow, Task, runWorkflow } from "smithers-orchestrator";
+import { Workflow, Task, runWorkflow } from "smthrs";
 import { AntigravityAgent } from "../src/AntigravityAgent.js";
 import { ClaudeCodeAgent } from "../src/ClaudeCodeAgent.js";
 import { CodexAgent } from "../src/CodexAgent.js";

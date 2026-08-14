@@ -1,8 +1,8 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import "../preload.ts";
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { join } from "node:path";
-import { renderPrompt, renderWorkflow } from "smithers-orchestrator/testing";
+import { renderPrompt, renderWorkflow } from "smthrs/testing";
 
 setDefaultTimeout(45_000);
 
@@ -64,7 +64,7 @@ const ticketValue = {
   priority: 95,
   summary: "Port the Multi terminal render layer into packages/ui.",
   sourcePaths: ["/Users/williamcory/multi/src/terminal/TerminalCanvas.tsx"],
-  acceptanceCriteria: ["importable from smithers-orchestrator/ui"],
+  acceptanceCriteria: ["importable from smthrs/ui"],
   testPlan: ["focused bun tests"],
   filesLikely: ["packages/ui/src/terminal.tsx"],
 };

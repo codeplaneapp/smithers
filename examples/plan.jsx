@@ -4,11 +4,11 @@
  * Pattern: Analyze requirements → decompose into tasks → prioritize → output plan.
  * Use cases: feature planning, sprint planning, migration planning, refactor strategy.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, grep, bash } from "smithers-orchestrator/tools";
+import { read, grep, bash } from "smthrs/tools";
 import { z } from "zod";
 import PlanPrompt from "./prompts/plan/plan.mdx";
 const taskSchema = z.object({

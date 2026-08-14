@@ -1,9 +1,6 @@
 /** @jsxImportSource react */
 import { useEffect, useRef } from "react";
-import {
-  MarkdownEditor as ShippedMarkdownEditor,
-  type MarkdownEditorHandle,
-} from "smithers-orchestrator/ui/adapters/markdown-editor";
+import { MarkdownEditor as ShippedMarkdownEditor, type MarkdownEditorHandle } from "smthrs/ui/adapters/markdown-editor";
 
 export function MarkdownEditor({
   value,

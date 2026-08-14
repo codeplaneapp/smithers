@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/ddd-site",
+  "name": "@smthrs/ddd-site",
   "version": "0.0.1",
   "private": true,
   "description": "Cloudflare Worker deployment for the Docs-Driven Development marketing site",

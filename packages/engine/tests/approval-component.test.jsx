@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import {
@@ -11,9 +11,9 @@ import {
   approvalSelectionSchema,
   renderFrame,
   runWorkflow,
-} from "smithers-orchestrator";
+} from "smthrs";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { denyNode } from "../src/approvals.js";
 import { Effect } from "effect";
 const APPROVAL_TEST_TIMEOUT_MS = 15_000;

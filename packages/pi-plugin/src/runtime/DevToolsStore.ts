@@ -1,6 +1,6 @@
-import { applyDelta } from "@smithers-orchestrator/devtools";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import type { DevToolsDelta, DevToolsNode, DevToolsSnapshot } from "@smithers-orchestrator/protocol";
+import { applyDelta } from "@smthrs/devtools";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import type { DevToolsDelta, DevToolsNode, DevToolsSnapshot } from "@smthrs/protocol";
 import { DevToolsClient } from "./DevToolsClient.js";
 import { normalizeState } from "./normalizeState.js";
 

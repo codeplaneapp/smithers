@@ -1,6 +1,6 @@
 // smithers-display-name: E2E Monitor Failure
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 
 const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({

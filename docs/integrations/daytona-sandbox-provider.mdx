@@ -5,7 +5,7 @@ description: Run a Smithers <Sandbox> child workflow inside a Daytona sandbox wi
 
 # Daytona Sandbox Provider
 
-`@smithers-orchestrator/daytona` is a first-class Smithers `SandboxProvider`
+`@smthrs/daytona` is a first-class Smithers `SandboxProvider`
 backed by the [Daytona](https://www.daytona.io/) SDK. It runs a `<Sandbox>`
 child workflow's request inside a Daytona sandbox: uploads the request JSON,
 runs the entry command, reads the result JSON back. The shared provider-kit
@@ -19,7 +19,7 @@ import {
   createDaytonaSandboxProvider,
   registerDaytonaSandboxProvider,
   DAYTONA_SANDBOX_PROVIDER_ID,
-} from "smithers-orchestrator/daytona";
+} from "smthrs/daytona";
 ```
 
 ## Credentials
@@ -47,8 +47,8 @@ options, or through `clientOptions`.
 Pass the provider straight to `<Sandbox>`:
 
 ```tsx
-import { createSmithers, Sandbox } from "smithers-orchestrator";
-import { createDaytonaSandboxProvider } from "smithers-orchestrator/daytona";
+import { createSmithers, Sandbox } from "smthrs";
+import { createDaytonaSandboxProvider } from "smthrs/daytona";
 
 const provider = createDaytonaSandboxProvider({
   image: "ubuntu:22.04",
@@ -72,7 +72,7 @@ export default parent.smithers((ctx) => (
 Or register it once and reference it by id:
 
 ```ts
-import { registerDaytonaSandboxProvider } from "smithers-orchestrator/daytona";
+import { registerDaytonaSandboxProvider } from "smthrs/daytona";
 
 const unregister = registerDaytonaSandboxProvider({ image: "ubuntu:22.04" });
 

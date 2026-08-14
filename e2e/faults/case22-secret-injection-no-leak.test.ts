@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { redactValue } from "@smithers-orchestrator/observability/_traceRedaction";
+import { redactValue } from "@smthrs/observability/_traceRedaction";
 
 describe("case 22: Secret injection; no secrets in logs (redaction)", () => {
   test("trace redaction strips injected secrets from raw log strings", () => {

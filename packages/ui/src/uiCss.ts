@@ -1,5 +1,5 @@
 /**
- * The complete stylesheet for @smithers-orchestrator/ui, as a plain string.
+ * The complete stylesheet for @smthrs/ui, as a plain string.
  *
  * CSS travels as a JS string (never an `import "./x.css"`) because the gateway
  * UI bundler keeps only the JS output of `Bun.build` and silently drops CSS

@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 /**
- * Monitor shell controls, built on the shared smithers-orchestrator/ui
+ * Monitor shell controls, built on the shared smthrs/ui
  * primitives (Button, Input, Select, RowButton). These are the pure view
  * pieces of the monitor's topbar filters, runs rail, pagination, and run
  * lifecycle actions. The small lifecycle controller owns only the cancel
@@ -8,16 +8,7 @@
  * booting a gateway; RPC wiring stays in ./monitor.tsx.
  */
 import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
-import {
-  Button,
-  Input,
-  RowButton,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "smithers-orchestrator/ui";
+import { Button, Input, RowButton, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "smthrs/ui";
 import { cancelConfirmationTransition, type Tone } from "./monitorModel.ts";
 
 export function ToneDot({ tone, pulse }: { tone: Tone; pulse?: boolean }) {

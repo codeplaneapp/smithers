@@ -213,7 +213,7 @@ function main() {
   log("version", `next-channel snapshot ${version} for commit ${sha}`);
 
   // The canonical package's current `next` pointer decides the race below.
-  const currentNext = npmNextDistTag("smithers-orchestrator");
+  const currentNext = npmNextDistTag("smthrs");
   const advanceNext = shouldAdvanceNext(currentNext, commitEpoch);
   if (!advanceNext) {
     log(

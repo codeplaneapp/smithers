@@ -1,4 +1,4 @@
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
 import type { TaskProps } from "./TaskProps.ts";
 import type { OutputTarget } from "./OutputTarget.ts";
 

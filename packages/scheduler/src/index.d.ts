@@ -1,8 +1,8 @@
 import * as effect from 'effect';
 import { Context, Layer, Effect, Schedule } from 'effect';
-import * as _smithers_orchestrator_graph from '@smithers-orchestrator/graph';
-import { TaskDescriptor as TaskDescriptor$3, WorkflowGraph } from '@smithers-orchestrator/graph';
-import { TaskDescriptor as TaskDescriptor$4 } from '@smithers-orchestrator/graph/TaskDescriptor';
+import * as _smthrs_graph from '@smthrs/graph';
+import { TaskDescriptor as TaskDescriptor$3, WorkflowGraph } from '@smthrs/graph';
+import { TaskDescriptor as TaskDescriptor$4 } from '@smthrs/graph/TaskDescriptor';
 
 type TaskState$2 = "pending" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "waiting-bound" | "bound-stale" | "in-progress" | "finished" | "failed" | "cancelled" | "skipped";
 
@@ -157,6 +157,17 @@ type RunResult$1 = {
      * across loop/Ralph iterations.
      */
     readonly failedChildKeys?: readonly string[];
+    /**
+     * Loops (`<Loop>`/`<ReviewLoop>`) that exited via `onMaxReached: "return-last"`
+     * with their `until` predicate still false. Present (and non-empty) only on a
+     * `finished` result: the run completed, but these loops never converged, so a
+     * green `done` verdict would be a lie (#1464 AWF-1).
+     */
+    readonly exhaustedLoops?: readonly {
+        readonly id: string;
+        readonly iteration: number;
+        readonly maxIterations: number | null;
+    }[];
 };
 
 type WaitReason$1 = {
@@ -319,8 +330,8 @@ type SmithersAlertPolicy$1 = {
 };
 /**
  * Where a workflow's `RunResult.output` rows are read from. Mirrors the
- * component-level `OutputTarget` union (see `@smithers-orchestrator/components`
- * `OutputTarget`), restated locally because `@smithers-orchestrator/scheduler`
+ * component-level `OutputTarget` union (see `@smthrs/components`
+ * `OutputTarget`), restated locally because `@smthrs/scheduler`
  * is a pure decision engine that must not depend on zod or components:
  *
  * - a Zod schema object registered via `createSmithers(...).outputs.<key>` (recommended),
@@ -358,6 +369,12 @@ type ReadonlyTaskStateMap$2 = ReadonlyMap<string, TaskState$2>;
 type RalphState$1 = {
     readonly iteration: number;
     readonly done: boolean;
+    /**
+     * True when the loop reached `maxIterations` under `onMaxReached: "return-last"`
+     * with its `until` predicate still false. A `done` loop with `exhausted` set did
+     * not converge — the run must not read as a clean success (#1464 AWF-1).
+     */
+    readonly exhausted?: boolean;
 };
 
 type RalphStateMap$4 = Map<string, RalphState$1>;
@@ -397,7 +414,7 @@ declare function cloneTaskStateMap(states: ReadonlyTaskStateMap$1): TaskStateMap
 type ReadonlyTaskStateMap$1 = ReadonlyTaskStateMap$2;
 type TaskStateMap$3 = TaskStateMap$4;
 
-/** @typedef {import("@smithers-orchestrator/graph").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("@smthrs/graph").TaskDescriptor} TaskDescriptor */
 /** @typedef {import("./TaskState.ts").TaskState} TaskState */
 /**
  * @param {TaskState} state
@@ -405,12 +422,12 @@ type TaskStateMap$3 = TaskStateMap$4;
  * @returns {boolean}
  */
 declare function isTerminalState(state: TaskState$1, descriptor?: Pick<TaskDescriptor$2, "continueOnFail">): boolean;
-type TaskDescriptor$2 = _smithers_orchestrator_graph.TaskDescriptor;
+type TaskDescriptor$2 = _smthrs_graph.TaskDescriptor;
 type TaskState$1 = TaskState$2;
 
 declare class Scheduler extends Context.ServiceClass.Shape<"Scheduler", SchedulerService> {
 }
-type TaskDescriptor$1 = _smithers_orchestrator_graph.TaskDescriptor;
+type TaskDescriptor$1 = _smthrs_graph.TaskDescriptor;
 type TaskStateMap$2 = TaskStateMap$4;
 type PlanNode$3 = PlanNode$4;
 type RalphStateMap$3 = RalphStateMap$4;
@@ -435,7 +452,7 @@ declare function buildPlanTree(xml: XmlNode | null, ralphState?: RalphStateMap$2
 type PlanNode$2 = PlanNode$4;
 type RalphMeta$1 = RalphMeta$2;
 type RalphStateMap$2 = RalphStateMap$4;
-type XmlNode = _smithers_orchestrator_graph.XmlNode;
+type XmlNode = _smthrs_graph.XmlNode;
 
 /**
  * @param {PlanNode | null} plan
@@ -454,7 +471,7 @@ type PlanNode$1 = PlanNode$4;
 type RalphStateMap$1 = RalphStateMap$4;
 type RetryWaitMap$1 = RetryWaitMap$3;
 type ScheduleResult$1 = ScheduleResult$3;
-type TaskDescriptor = _smithers_orchestrator_graph.TaskDescriptor;
+type TaskDescriptor = _smthrs_graph.TaskDescriptor;
 type TaskStateMap$1 = TaskStateMap$4;
 
 declare class WorkflowSession extends Context.ServiceClass.Shape<"WorkflowSession", WorkflowSessionService$2> {
@@ -515,17 +532,17 @@ declare function nowMs(): number;
  * Convert a RetryPolicy to an Effect Schedule for use with Effect.retry.
  *
  * @param {RetryPolicy} policy
- * @returns {Schedule.Schedule<unknown>}
+ * @returns {Schedule.Schedule<unknown, unknown>}
  */
-declare function retryPolicyToSchedule(policy: RetryPolicy$2): Schedule.Schedule<unknown>;
+declare function retryPolicyToSchedule(policy: RetryPolicy$2): Schedule.Schedule<unknown, unknown>;
 type RetryPolicy$2 = RetryPolicy$3;
 
 /**
- * @param {import("effect").Schedule.Schedule<unknown>} schedule
+ * @param {import("effect").Schedule.Schedule<unknown, unknown>} schedule
  * @param {number} attempt
  * @returns {number}
  */
-declare function retryScheduleDelayMs(schedule: effect.Schedule.Schedule<unknown>, attempt: number): number;
+declare function retryScheduleDelayMs(schedule: effect.Schedule.Schedule<unknown, unknown>, attempt: number): number;
 
 /** @typedef {import("./RetryPolicy.ts").RetryPolicy} RetryPolicy */
 /**

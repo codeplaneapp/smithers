@@ -1,24 +1,21 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import net from "node:net";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveSmithersBackendChoice } from "../src/resolveSmithersBackendChoice.js";
 import { openSmithersBackend } from "../src/openSmithersBackend.js";
 import { openSmithersStore } from "../src/openSmithersStore.js";
 import { createSmithersPostgres } from "../src/create.js";
+import { cleanupTempDirs, makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 
 setDefaultTimeout(120_000);
 
-/** @type {string[]} */
-const tempDirs = [];
 /** @type {Array<() => Promise<void>>} */
 const cleanups = [];
 
 function makeWorkspace(name) {
-  const dir = join(tmpdir(), `${name}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const dir = makeTempDirPath(`${name}-`);
   mkdirSync(join(dir, ".smithers"), { recursive: true });
-  tempDirs.push(dir);
   return dir;
 }
 
@@ -71,9 +68,7 @@ afterEach(async () => {
   for (const fn of cleanups.splice(0).reverse()) {
     await fn().catch(() => {});
   }
-  for (const dir of tempDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  cleanupTempDirs();
 });
 
 describe("resolveSmithersBackendChoice — postgres + marker edge cases", () => {
@@ -271,6 +266,48 @@ describe("openSmithersStore — read/write and postgres paths", () => {
     await expect(openSmithersStore({ cwd, mode: "read", env: {}, wait: { timeoutMs: 0 } })).rejects.toMatchObject({
       code: "CLI_DB_NOT_FOUND",
     });
+  });
+
+  test("sqlite read surfaces an exhausted write lock instead of accepting an unverified store", async () => {
+    const cwd = makeWorkspace("open-store-sqlite-locked");
+    // Provision a real store with the runs table and a row, then release it.
+    const write = await openSmithersStore({ cwd, mode: "write", env: {} });
+    const dbPath = write.dbPath;
+    await write.adapter.insertRun({
+      runId: "locked-run",
+      workflowName: "lock-fixture",
+      status: "finished",
+      createdAtMs: Date.now(),
+      startedAtMs: Date.now(),
+      finishedAtMs: Date.now(),
+    });
+    await write.cleanup?.();
+
+    // Hold an EXCLUSIVE write lock on a separate connection so every other
+    // connection's read races straight into a lock — exactly the transient
+    // contention the campaign hit under parallel runs. Pre-fix, the run-table
+    // probe swallowed that lock into a false "no run history" or assumed the
+    // file was a Smithers store. Neither answer is safe while the schema is
+    // unreadable, so exhausted contention must remain observable.
+    const { Database } = await import("bun:sqlite");
+    const locker = new Database(dbPath);
+    locker.run("PRAGMA busy_timeout = 0");
+    // Force rollback-journal mode so the exclusive lock blocks other readers
+    // deterministically (independent of the driver's default journal mode).
+    locker.run("PRAGMA journal_mode = DELETE");
+    locker.run("BEGIN EXCLUSIVE");
+    try {
+      await expect(openSmithersStore({ cwd, mode: "read", env: {}, wait: { timeoutMs: 0 } })).rejects.toMatchObject({
+        code: "SQLITE_BUSY",
+      });
+    } finally {
+      try {
+        locker.run("ROLLBACK");
+      } catch {
+        // best-effort unlock
+      }
+      locker.close();
+    }
   });
 
   test("a non-not-found error propagates immediately without retrying", async () => {

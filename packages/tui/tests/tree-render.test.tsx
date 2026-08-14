@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/react */
 import { it, expect } from "bun:test";
 import { describeHeadlessRender, renderForTest } from "./renderHelpers.tsx";
-import type { GatewayRunNode, GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
+import type { GatewayRunNode, GatewayEventFrame } from "@smthrs/gateway-client";
 import { NodeInspectorView, TreePanel, type ApprovalUiState } from "../src/modes/TreeMode.tsx";
 import type { NodeDiffView } from "../src/modes/diffUtils.ts";
 import { ALL_TABS, type FlatNode, type TabId } from "../src/modes/treeUtils.ts";
@@ -79,6 +79,23 @@ describeHeadlessRender("NodeInspectorView – terminal rendering (CI-safe, no ga
     renderer.destroy();
   });
 
+  // The empty logs tab is the FIRST thing an operator sees after pressing [2]
+  // on a node that has produced no events yet (a parked root, a pending task),
+  // so its placeholder is the tab's only observable render. The PTY monitor
+  // e2e (apps/cli/tests/tui-monitor-zmux.e2e.test.js) asserts this exact
+  // string, but only runs on a dev box with zmux — cover it here so CI catches
+  // a drifting placeholder. It must stay parenthesized like every other
+  // inspector placeholder ("(no output)", "(no log events)").
+  it("renders the parenthesized placeholder when the logs tab has no events", async () => {
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <NodeInspectorView {...baseProps({ activeTab: "logs", nodeLogs: [] })} />,
+      { width: 120, height: 24 },
+    );
+    await waitForVisualIdle();
+    expect(captureCharFrame()).toContain("(no log events for this node)");
+    renderer.destroy();
+  });
+
   it("renders a unified diff (summary + patch text) on the diff tab", async () => {
     const diff: NodeDiffView = {
       kind: "patch",
@@ -94,6 +111,26 @@ describeHeadlessRender("NodeInspectorView – terminal rendering (CI-safe, no ga
     expect(f).toContain("1 file changed");
     expect(f).toContain("src/a.ts");
     expect(f).toContain("+new");
+    renderer.destroy();
+  });
+
+  it("renders a live working-copy diff with its live marker while the node runs", async () => {
+    const diff: NodeDiffView = {
+      kind: "patch",
+      summary: "2 files changed (live)",
+      unified: "# modify src/a.ts\n@@ -1 +1 @@\n-old\n+new",
+      live: true,
+    };
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <NodeInspectorView {...baseProps({ activeTab: "diff", diff })} />,
+      { width: 120, height: 24 },
+    );
+    await waitForVisualIdle();
+    const f = captureCharFrame();
+    expect(f).toContain("2 files changed (live)");
+    expect(f).toContain("+new");
+    // A live diff is data, not the old terminal-state gate error.
+    expect(f).not.toContain("Diff unavailable");
     renderer.destroy();
   });
 

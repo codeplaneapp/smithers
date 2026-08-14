@@ -6,11 +6,11 @@
  * Pattern: docs scanner -> repair agent -> verifier -> PR.
  * Use cases: broken code snippets, outdated imports, stale CLI examples, dead links.
  */
-import { Sequence, Parallel } from "smithers-orchestrator";
+import { Sequence, Parallel } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { bash, read, write, grep } from "smithers-orchestrator/tools";
+import { bash, read, write, grep } from "smthrs/tools";
 import { z } from "zod";
 import ScanDocsPrompt from "./prompts/docs-fixup-bot/scan-docs.mdx";
 import RepairPrompt from "./prompts/docs-fixup-bot/repair.mdx";

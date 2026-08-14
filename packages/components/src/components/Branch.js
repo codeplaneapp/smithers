@@ -1,5 +1,5 @@
 import React from "react";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 /** @typedef {import("./BranchProps.ts").BranchProps} BranchProps */
 
 /**

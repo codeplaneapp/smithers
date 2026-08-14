@@ -1,8 +1,8 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 /** @typedef {import("./PlanNode.ts").PlanNode} PlanNode */
 /** @typedef {import("./RalphMeta.ts").RalphMeta} RalphMeta */
 /** @typedef {import("./RalphStateMap.ts").RalphStateMap} RalphStateMap */
-/** @typedef {import("@smithers-orchestrator/graph").XmlNode} XmlNode */
+/** @typedef {import("@smthrs/graph").XmlNode} XmlNode */
 
 /**
  * @param {string} prefix
@@ -41,6 +41,19 @@ function parseBool(value) {
 function parseNum(value, fallback) {
   const parsed = value ? Number(value) : NaN;
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/**
+ * Parse Loop.maxIterations, where positive Infinity explicitly means
+ * unbounded. Other non-finite values remain invalid and use the fallback.
+ *
+ * @param {unknown} value
+ * @param {number} fallback
+ * @returns {number}
+ */
+function parseMaxIterations(value, fallback) {
+  const parsed = value ? Number(value) : NaN;
+  return parsed === Number.POSITIVE_INFINITY || Number.isFinite(parsed) ? parsed : fallback;
 }
 /**
  * @param {readonly { readonly ralphId: string; readonly iteration: number }[]} loopStack
@@ -245,7 +258,7 @@ export function buildPlanTree(xml, ralphState) {
       const meta = {
         id,
         until: parseBool(node.props.until),
-        maxIterations: parseNum(node.props.maxIterations, 5),
+        maxIterations: parseMaxIterations(node.props.maxIterations, 5),
         onMaxReached: node.props.onMaxReached ?? "return-last",
         continueAsNewEvery,
       };

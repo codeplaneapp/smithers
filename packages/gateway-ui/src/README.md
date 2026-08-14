@@ -1,6 +1,6 @@
-# @smithers-orchestrator/gateway-ui — src
+# @smthrs/gateway-ui — src
 
-Self-styled React components over `@smithers-orchestrator/gateway-react` hooks,
+Self-styled React components over `@smthrs/gateway-react` hooks,
 meant to be dropped into custom workflow UIs (`.smithers/ui/<workflow>.tsx`).
 Components use inline styles only — no `.css` imports — so they bundle cleanly
 through the gateway's `Bun.build`, and all accept `className` + `style` overrides.
@@ -18,7 +18,7 @@ Component map:
   the status→color map. Tokens are `var()` expressions, so derive tints with
   `color-mix(...)`, never a hex+alpha suffix.
 - `styleguide.tsx` / `styleguide-css.ts` — re-export the shared
-  `@smithers-orchestrator/ui-styleguide` CSS and the `WorkflowUiShell` scaffold.
+  `@smthrs/ui-styleguide` CSS and the `WorkflowUiShell` scaffold.
 - Pure components: `StatusPill`, `NodeRow`, `MonitorButton` (a link to the
   Gateway's `/monitor`, deep-linked to the current `runId`).
 - Hook-driven: `RunList`, `RunTree`, `RunEventLog` (structured event rows with a

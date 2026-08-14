@@ -1,6 +1,6 @@
 // smithers-display-name: Trellis
-/** @jsxImportSource smithers-orchestrator */
-import { Trellis, UI, createSmithers, delegationV2Schemas } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Trellis, UI, createSmithers, delegationV2Schemas } from "smthrs";
 import { z } from "zod/v4";
 import { fableAuthor, implementer, synthesizer, validator } from "../components/roles";
 

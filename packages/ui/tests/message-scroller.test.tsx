@@ -335,6 +335,6 @@ describe("MessageScroller", () => {
       scrollTop: 100,
     });
     const jump = container!.querySelector<HTMLElement>('[data-slot="message-scroller-jump"]')!;
-    expect(getComputedStyle(jump).color).toBe("#f4f4f5");
+    expect(getComputedStyle(jump).color).toBe("#d6deeb");
   });
 });

@@ -23,7 +23,7 @@ const STRIP_KEYS = [
  * Make every object node strict the way OpenAI / Codex structured output
  * requires: `type: "object"`, `additionalProperties: false`, and every
  * declared property listed in `required` (truly-optional fields must be
- * modeled as nullable). Mirrors `sanitizeForOpenAI` in @smithers-orchestrator/
+ * modeled as nullable). Mirrors `sanitizeForOpenAI` in @smthrs/
  * agents, kept local so apps/review takes no extra workspace dependency.
  */
 function sanitizeForOpenAI(node: unknown): void {

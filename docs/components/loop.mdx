@@ -6,7 +6,7 @@ description: Re-run children until `until` is true or `maxIterations` is hit.
 `<Loop until={done} maxIterations={5}>…</Loop>` re-runs its children each frame until `until` evaluates true or `maxIterations` is reached.
 
 ```ts
-import { Loop } from "smithers-orchestrator";
+import { Loop } from "smthrs";
 
 type LoopProps = {
   key?: string;
@@ -70,7 +70,7 @@ export default smithers((ctx) => {
 ## Notes
 
 - Give every `<Loop>` an explicit `id`. An auto id derives from tree position, so a conditionally mounted/unmounted sibling shifts the path, re-keying the loop and resetting its iteration state from 0; an explicit `id` is immune.
-- `onMaxReached` has two values: `"return-last"` (default) ends the loop cleanly at `maxIterations`, keeping the last output; `"fail"` throws `RALPH_MAX_REACHED` and fails the run. Use `"fail"` when hitting the cap means the work never converged (tests never went green), the default when the best-so-far result is acceptable.
+- `onMaxReached` has two values: `"return-last"` (default) ends the loop at `maxIterations`, keeping the last output; `"fail"` throws `RALPH_MAX_REACHED` and fails the run. Use `"fail"` when hitting the cap means the work never converged (tests never went green), the default when the best-so-far result is acceptable. A `return-last` exit with `until` still false is recorded as **exhausted**: the run's verdict reads `degraded` (not `done`) in `status`, `why` names the loop and its unmet condition, and the `RunFinished` event carries `exhaustedLoops`.
 - `ctx.latest(table, nodeId)` reads the highest-iteration output; `until` must use `ctx.outputMaybe()`, since output is absent on iter 0.
 - Direct nesting of `<Loop>` in `<Loop>` throws; wrap the inner loop in `<Sequence>`.
 - Custom Drizzle tables for loop tasks require `iteration` in the primary key.

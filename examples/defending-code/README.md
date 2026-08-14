@@ -74,7 +74,7 @@ Prerequisites:
   in (run `claude` once, then `/login`).
 
 No install step is needed: the example runs in-place and resolves
-`smithers-orchestrator` from the monorepo's workspace.
+`smthrs` from the monorepo's workspace.
 
 ```sh
 cd examples/defending-code
@@ -167,12 +167,12 @@ restore the isolation:
 
 - Wrap the executing stages in a Smithers `<Worktree>` or `<Sandbox>` so each
   agent works on an isolated copy.
-- Smithers' own `bash` tool (`smithers-orchestrator/tools`) is network-isolated
+- Smithers' own `bash` tool (`smthrs/tools`) is network-isolated
   on macOS: it wraps commands in `sandbox-exec` with network denied, the local
   analog of the reference harness's egress restriction. On Linux it currently
   falls back to a static command denylist, which is weaker than kernel-level
   egress denial, so add an OS-level sandbox (gVisor, containers) there. Drive the
-  find/patch stages with an `AnthropicAgent` (`@smithers-orchestrator/agents`)
+  find/patch stages with an `AnthropicAgent` (`@smthrs/agents`)
   plus that tool to keep agent-run code off the network.
 - Scope `ClaudeCodeAgent` tools with `allowedTools` / `disallowedTools` instead
   of `yolo`.

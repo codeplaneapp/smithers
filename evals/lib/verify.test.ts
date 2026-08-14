@@ -141,8 +141,8 @@ describe("must/mustNot JSX-tag tokens tolerate the createSmithers factory namesp
 });
 
 describe("workflow-files verifier", () => {
-  const workflow = `/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+  const workflow = `/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 const result = z.object({ message: z.string() });
 const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({ result });
@@ -155,7 +155,7 @@ export default smithers(() => (
   </Workflow>
 ));`;
   const testSource = `import { expect, test } from "bun:test";
-import { renderWorkflow } from "smithers-orchestrator/testing";
+import { renderWorkflow } from "smthrs/testing";
 import workflow from "../workflows/hello.tsx";
 test("graph", async () => {
   const frame = await renderWorkflow(workflow);
@@ -183,7 +183,7 @@ test("graph", async () => {
 
   test("fails when the testing-library import or registration is missing", async () => {
     const withoutLibrary = testSource.replace(
-      'import { renderWorkflow } from "smithers-orchestrator/testing";',
+      'import { renderWorkflow } from "smthrs/testing";',
       "const renderWorkflow = async () => ({ tasks: [] });",
     );
     const verdict = await computeVerdict(
@@ -202,7 +202,7 @@ test("graph", async () => {
 
   test("rejects a hollow truthiness smoke test", async () => {
     const hollow = `import { expect, test } from "bun:test";
-import { renderWorkflow } from "smithers-orchestrator/testing";
+import { renderWorkflow } from "smthrs/testing";
 import workflow from "../workflows/hello.tsx";
 // Fake source text must not satisfy the machine check:
 // expect(frame.tasks.map(({ nodeId }) => nodeId)).toEqual(["draft", "publish"]);
@@ -428,15 +428,15 @@ describe("build verifier resolves and structurally uses UI requirements", () => 
   test("rejects marker strings, comments, unresolved imports, unused imports, and forbidden JSX", async () => {
     const cases = [
       [`const marker = "RunTree"; export default () => <div />;`, ["RunTree"], []],
-      [`import { RunTree } from "smithers-orchestrator/not-real"; export default () => <RunTree />;`, ["RunTree"], []],
-      [`import { RunTree } from "smithers-orchestrator/gateway-ui"; export default () => <div />;`, ["RunTree"], []],
+      [`import { RunTree } from "smthrs/not-real"; export default () => <RunTree />;`, ["RunTree"], []],
+      [`import { RunTree } from "smthrs/gateway-ui"; export default () => <div />;`, ["RunTree"], []],
       [
-        `import { RunTree } from "smithers-orchestrator/gateway-ui"; export default () => <textarea />;`,
+        `import { RunTree } from "smthrs/gateway-ui"; export default () => <textarea />;`,
         ["RunTree"],
         ["<textarea"],
       ],
       [
-        `import { InventedExport } from "smithers-orchestrator/gateway-ui"; export default () => <InventedExport />;`,
+        `import { InventedExport } from "smthrs/gateway-ui"; export default () => <InventedExport />;`,
         ["InventedExport"],
         [],
       ],
@@ -452,14 +452,14 @@ describe("build verifier resolves and structurally uses UI requirements", () => 
 
   test("accepts real named, aliased, namespace imports, calls, JSX, modules, and member access", async () => {
     const artifact = `
-      import { createGatewayReactRoot as mount, useGatewayRun as useRun } from "smithers-orchestrator/gateway-react";
-      import * as UI from "smithers-orchestrator/gateway-ui";
+      import { createGatewayReactRoot as mount, useGatewayRun as useRun } from "smthrs/gateway-react";
+      import * as UI from "smthrs/gateway-ui";
       export default function App() { useRun("run"); return <UI.RunTree runId="run" className={styles.row} />; }
       const styles = { row: "row" }; mount(<App />);
     `;
     const verdict = await computeVerdict(
       buildSpec({
-        must: ["smithers-orchestrator/gateway-react", "createGatewayReactRoot", "useGatewayRun", "RunTree", ".row"],
+        must: ["smthrs/gateway-react", "createGatewayReactRoot", "useGatewayRun", "RunTree", ".row"],
       }),
       reportUi(artifact),
     );
@@ -467,7 +467,7 @@ describe("build verifier resolves and structurally uses UI requirements", () => 
   }, 60_000);
 
   test("requires module-path requirements to be imports and validates real exports", async () => {
-    const artifact = `import { MarkdownEditor } from "@smithers-orchestrator/ui/adapters/markdown-editor"; export default () => <MarkdownEditor value="" />;`;
+    const artifact = `import { MarkdownEditor } from "@smthrs/ui/adapters/markdown-editor"; export default () => <MarkdownEditor value="" />;`;
     expect((await computeVerdict(buildSpec({ must: ["adapters/markdown-editor"] }), reportUi(artifact))).passed).toBe(
       true,
     );
@@ -475,9 +475,9 @@ describe("build verifier resolves and structurally uses UI requirements", () => 
   }, 60_000);
 
   test("rejects type-only imports and nonexistent namespace exports", async () => {
-    const typeOnly = `import type { RunTree } from "smithers-orchestrator/gateway-ui"; export default () => <RunTree />;`;
+    const typeOnly = `import type { RunTree } from "smthrs/gateway-ui"; export default () => <RunTree />;`;
     const unresolvedTypeOnly = `import type { RunTree } from "definitely-not-a-real-module"; export default () => <div />;`;
-    const nonexistentNamespace = `import * as UI from "smithers-orchestrator/gateway-ui"; export default () => <UI.NotARealComponent />;`;
+    const nonexistentNamespace = `import * as UI from "smthrs/gateway-ui"; export default () => <UI.NotARealComponent />;`;
     expect((await computeVerdict(buildSpec({ must: ["RunTree"] }), reportUi(typeOnly))).passed).toBe(false);
     expect((await computeVerdict(buildSpec({ must: ["RunTree"] }), reportUi(unresolvedTypeOnly))).passed).toBe(false);
     expect(
@@ -487,7 +487,7 @@ describe("build verifier resolves and structurally uses UI requirements", () => 
 
   test("structurally recognizes the real location.search requirement", async () => {
     const artifact = `
-      import { createGatewayReactRoot as mount, useGatewayRun } from "smithers-orchestrator/gateway-react";
+      import { createGatewayReactRoot as mount, useGatewayRun } from "smthrs/gateway-react";
       const styles = { row: "row" };
       function App() { const runId = new URLSearchParams(location.search).get("runId") ?? undefined; useGatewayRun(runId); const row = styles.row; return null; }
       mount(<App />);

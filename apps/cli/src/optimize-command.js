@@ -2,12 +2,12 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import crypto from "node:crypto";
 import { Effect } from "effect";
 import { z } from "incur";
-import { OPTIMIZATION_ARTIFACT_ENV, renderFrame, resolveSchema, runWorkflow } from "@smithers-orchestrator/engine";
-import { loadOutputs } from "@smithers-orchestrator/db/snapshot";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { SmithersCtx } from "@smithers-orchestrator/driver";
-import { SmithersError } from "@smithers-orchestrator/errors";
+import { OPTIMIZATION_ARTIFACT_ENV, renderFrame, resolveSchema, runWorkflow } from "@smthrs/engine";
+import { loadOutputs } from "@smthrs/db/snapshot";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { SmithersCtx } from "@smthrs/driver";
+import { SmithersError } from "@smthrs/errors";
 import {
   assertEvalRunIdsAvailable,
   buildEvalPlan,
@@ -96,7 +96,7 @@ async function runWithLimit(items, limit, worker) {
 
 /**
  * @param {{
- *   workflow: import("@smithers-orchestrator/components").SmithersWorkflow<any>;
+ *   workflow: import("@smthrs/components").SmithersWorkflow<any>;
  *   workflowPath: string;
  *   plan: ReturnType<typeof buildEvalPlan>;
  *   options: Record<string, any>;
@@ -193,7 +193,7 @@ async function executeEvalPlan(input) {
 
 /**
  * @param {{
- *   workflow: import("@smithers-orchestrator/components").SmithersWorkflow<any>;
+ *   workflow: import("@smthrs/components").SmithersWorkflow<any>;
  *   workflowPath: string;
  *   cases: Array<Record<string, any>>;
  * }} input
@@ -242,10 +242,10 @@ async function discoverOptimizablePromptTasksForCases(input) {
  * @param {{
  *   defaultEvalRunLabel: () => string;
  *   formatRequestedJsonOutput: () => boolean;
- *   loadWorkflow: (path: string) => Promise<import("@smithers-orchestrator/components").SmithersWorkflow<any>>;
+ *   loadWorkflow: (path: string) => Promise<import("@smthrs/components").SmithersWorkflow<any>>;
  *   resolveWorkflowPathForEval: (workflowInput: string) => string;
  *   setupAbortSignal: () => AbortController;
- *   setupSqliteCleanup: (workflow: import("@smithers-orchestrator/components").SmithersWorkflow<any>) => void;
+ *   setupSqliteCleanup: (workflow: import("@smthrs/components").SmithersWorkflow<any>) => void;
  *   setCommandExitOverride: (exitCode: number) => void;
  * }} deps
  */

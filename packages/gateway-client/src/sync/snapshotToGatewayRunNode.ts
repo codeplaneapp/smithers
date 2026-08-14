@@ -30,10 +30,11 @@ export type DevToolsSnapshotNode = {
       label?: string;
       engine?: string;
       model?: string;
-      chain?: Array<{ label?: string; engine?: string; model?: string }>;
+      effort?: string;
+      chain?: Array<{ label?: string; engine?: string; model?: string; effort?: string }>;
     };
     /** Agent the latest attempt actually executed on (attempt metadata). */
-    agentRan?: { agentId?: string; engine?: string; model?: string };
+    agentRan?: { agentId?: string; engine?: string; model?: string; effort?: string };
     label?: string;
     iteration?: number;
     /** Current lifecycle state from the run's node rows (latest iteration wins). */
@@ -254,7 +255,7 @@ function rollupStatus(own: string, children: GatewayRunNode[]): string {
 }
 
 function agentRef(
-  value: { label?: string; engine?: string; model?: string } | undefined,
+  value: { label?: string; engine?: string; model?: string; effort?: string } | undefined,
 ): GatewayRunNodeAgentRef | undefined {
   if (!value) {
     return undefined;
@@ -262,13 +263,15 @@ function agentRef(
   const name = typeof value.label === "string" && value.label ? value.label : undefined;
   const engine = typeof value.engine === "string" && value.engine ? value.engine : undefined;
   const model = typeof value.model === "string" && value.model ? value.model : undefined;
-  if (!name && !engine && !model) {
+  const effort = typeof value.effort === "string" && value.effort ? value.effort : undefined;
+  if (!name && !engine && !model && !effort) {
     return undefined;
   }
   return {
     ...(name ? { name } : {}),
     ...(engine ? { engine } : {}),
     ...(model ? { model } : {}),
+    ...(effort ? { effort } : {}),
   };
 }
 
@@ -288,12 +291,14 @@ function nodeAgent(node: DevToolsSnapshotNode): GatewayRunNode["agent"] {
   const ranEngine = typeof ranRaw?.engine === "string" && ranRaw.engine ? ranRaw.engine : undefined;
   const ranModel = typeof ranRaw?.model === "string" && ranRaw.model ? ranRaw.model : undefined;
   const ranAgentId = typeof ranRaw?.agentId === "string" && ranRaw.agentId ? ranRaw.agentId : undefined;
+  const ranEffort = typeof ranRaw?.effort === "string" && ranRaw.effort ? ranRaw.effort : undefined;
   const ranOn =
-    ranEngine || ranModel || ranAgentId
+    ranEngine || ranModel || ranAgentId || ranEffort
       ? {
           ...(ranEngine ? { engine: ranEngine } : {}),
           ...(ranModel ? { model: ranModel } : {}),
           ...(ranAgentId ? { agentId: ranAgentId } : {}),
+          ...(ranEffort ? { effort: ranEffort } : {}),
         }
       : undefined;
   if (!declared && chain.length === 0 && !ranOn) {
@@ -301,7 +306,7 @@ function nodeAgent(node: DevToolsSnapshotNode): GatewayRunNode["agent"] {
       task?.agent ?? (typeof (node.props ?? {}).agent === "string" ? String((node.props ?? {}).agent) : undefined);
     return typeof legacy === "string" && legacy ? legacy : undefined;
   }
-  const agent: GatewayRunNodeAgent = { ...(declared ?? {}) };
+  const agent: GatewayRunNodeAgent = { ...declared };
   if (!agent.name) {
     agent.name = agent.engine ?? agent.model ?? ranEngine ?? ranAgentId;
   }

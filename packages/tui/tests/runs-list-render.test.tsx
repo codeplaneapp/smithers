@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/react */
 import { afterEach, expect, it } from "bun:test";
 import { act } from "react";
-import { resetRunsForIdentityChange, setRunsListRows } from "@smithers-orchestrator/ui-core";
+import { resetRunsForIdentityChange, setRunsListRows } from "@smthrs/ui-core";
 import { RunsListView } from "../src/modes/RunsListMode.tsx";
 import { describeHeadlessRender, renderForTest } from "./renderHelpers.tsx";
 

@@ -7,11 +7,11 @@
  * Use cases: IT help desk, internal service requests, policy FAQ routing,
  * incident management, request fulfillment.
  */
-import { Sequence, Parallel } from "smithers-orchestrator";
+import { Sequence, Parallel } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import IntakePrompt from "./prompts/service-desk-dispatcher/intake.mdx";
 import ClassifyPrompt from "./prompts/service-desk-dispatcher/classify.mdx";

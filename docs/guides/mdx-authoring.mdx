@@ -35,7 +35,7 @@ Write a haiku about {props.name}.
 Run it again:
 
 ```bash
-bunx smithers-orchestrator workflow run WORKFLOW_ID --input '{...}'
+bunx smthrs workflow run WORKFLOW_ID --input '{...}'
 ```
 
 The agent now writes haiku. The `.tsx` file didn't change.
@@ -59,14 +59,14 @@ Any input field the workflow declares is available as `props.<field>`.
 Use the built-in `create-workflow` workflow:
 
 ```bash
-bunx smithers-orchestrator workflow run create-workflow
+bunx smthrs workflow run create-workflow
 ```
 
 Or scaffold by hand:
 
 1. Create `.smithers/prompts/my-task.mdx` and write the instruction.
 2. Copy `examples/init-pack/hello.tsx`, rename the workflow name and prompt import.
-3. Run `bunx smithers-orchestrator workflow run my-task`.
+3. Run `bunx smthrs workflow run my-task`.
 
 ## When to graduate to TypeScript
 

@@ -1,1 +1,1 @@
-export * from "@smithers-orchestrator/ui/adapters/pierre-diff-view";
+export * from "@smthrs/ui/adapters/pierre-diff-view";

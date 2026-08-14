@@ -1,14 +1,14 @@
 /**
- * Tests for `@smithers-orchestrator/agent-eliza/conventions`
+ * Tests for `@smthrs/agent-eliza/conventions`
  *
  * Uses bun:test — no mock frameworks. Uses real implementations throughout.
  * Frontmatter uses `---`-fenced YAML blocks (elizaOS convention).
  */
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 
 import {
   parseWorkflowFrontmatter,
@@ -21,7 +21,7 @@ import { formatWorkflowsForPrompt } from "../src/conventions/formatter.js";
 import { registerWorkflows, toSkill, pluginToElizaPlugin } from "../src/conventions/register.js";
 import { loadWorkflowsFromDir, loadWorkflows } from "../src/conventions/loader.js";
 import type { WorkflowDefinition } from "../src/conventions/types.js";
-import type { SmithersWorkflow } from "smithers-orchestrator";
+import type { SmithersWorkflow } from "smthrs";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -439,7 +439,7 @@ describe("loadWorkflowsFromDir", () => {
   });
 
   test("loads a workflow file with companion .md frontmatter", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-conventions-test-"));
+    const dir = makeTempDirPath("smithers-conventions-test-");
     // Valid JS file (no --- block — that would break JS syntax)
     writeFileSync(
       join(dir, "temp-workflow.js"),
@@ -463,7 +463,7 @@ describe("loadWorkflowsFromDir", () => {
   });
 
   test("falls back to executable frontmatter when a companion .md contains only prose", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-conventions-test-"));
+    const dir = makeTempDirPath("smithers-conventions-test-");
     const execText = `/* ---
 name: cleanup-internal
 description: Remove stale workflow state
@@ -502,7 +502,7 @@ export default { build: () => null, opts: {} };`;
   });
 
   test("ignores non-array and non-string frontmatter tags and aliases", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-conventions-test-"));
+    const dir = makeTempDirPath("smithers-conventions-test-");
     writeFileSync(
       join(dir, "malformed-metadata.js"),
       `export default { workflow: {}, name: "malformed-metadata", description: "d" };`,
@@ -522,7 +522,7 @@ export default { build: () => null, opts: {} };`;
   });
 
   test("yields error diagnostic for a malformed file instead of throwing", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-conventions-test-"));
+    const dir = makeTempDirPath("smithers-conventions-test-");
     writeFileSync(join(dir, "bad.js"), "this is not valid js !!@#$%", "utf8");
 
     const result = await loadWorkflowsFromDir({ dir, source: "test" });
@@ -532,7 +532,7 @@ export default { build: () => null, opts: {} };`;
   });
 
   test("loads two workflow files, one with companion .md frontmatter and one without", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-conventions-test-"));
+    const dir = makeTempDirPath("smithers-conventions-test-");
     writeFileSync(
       join(dir, "alpha.js"),
       `export default { workflow: {}, name: "alpha", description: "Alpha wf" };`,
@@ -553,7 +553,7 @@ export default { build: () => null, opts: {} };`;
   });
 
   test("derives name from filename when no frontmatter name field", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-conventions-test-"));
+    const dir = makeTempDirPath("smithers-conventions-test-");
     writeFileSync(join(dir, "my-cool-flow.js"), "export default { workflow: {}, description: 'Cool flow' };", "utf8");
 
     const result = await loadWorkflowsFromDir({ dir, source: "test" });
@@ -561,7 +561,7 @@ export default { build: () => null, opts: {} };`;
   });
 
   test("skips non-JS/TS files", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-conventions-test-"));
+    const dir = makeTempDirPath("smithers-conventions-test-");
     writeFileSync(join(dir, "readme.md"), "# hello", "utf8");
     writeFileSync(join(dir, "valid.js"), "export default { workflow: {}, name: 'v', description: 'd' };", "utf8");
 
@@ -570,7 +570,7 @@ export default { build: () => null, opts: {} };`;
   });
 
   test("surfaces the frontmatter version field from a companion .md", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-conventions-test-"));
+    const dir = makeTempDirPath("smithers-conventions-test-");
     writeFileSync(
       join(dir, "versioned.js"),
       `export default { workflow: {}, name: "versioned", description: "v" };`,
@@ -583,7 +583,7 @@ export default { build: () => null, opts: {} };`;
   });
 
   test("surfaces the frontmatter version from a block-comment header", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-conventions-test-"));
+    const dir = makeTempDirPath("smithers-conventions-test-");
     writeFileSync(
       join(dir, "bc-versioned.js"),
       `/* ---\nname: bc-versioned\nversion: 2.0.0\n--- */\nexport default { workflow: {}, name: "bc-versioned", description: "d" };`,
@@ -595,7 +595,7 @@ export default { build: () => null, opts: {} };`;
   });
 
   test("source is the executable file's own text, not the companion .md", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-conventions-test-"));
+    const dir = makeTempDirPath("smithers-conventions-test-");
     const execText = `export default { workflow: {}, name: "srccheck", description: "d" };`;
     writeFileSync(join(dir, "srccheck.js"), execText, "utf8");
     writeFileSync(join(dir, "srccheck.md"), `---\nname: srccheck\ndescription: d\n---\n`, "utf8");
@@ -613,14 +613,14 @@ export default { build: () => null, opts: {} };`;
 
 describe("loadWorkflows", () => {
   test("emits collision diagnostic when two source dirs share a workflow name", async () => {
-    const bundled = mkdtempSync(join(tmpdir(), "smithers-bundled-"));
+    const bundled = makeTempDirPath("smithers-bundled-");
     writeFileSync(
       join(bundled, "shared.js"),
       `export default { workflow: {}, name: "shared", description: "Bundled version" };`,
       "utf8",
     );
 
-    const managed = mkdtempSync(join(tmpdir(), "smithers-managed-"));
+    const managed = makeTempDirPath("smithers-managed-");
     writeFileSync(
       join(managed, "shared.js"),
       `export default { workflow: {}, name: "shared", description: "Managed version" };`,
@@ -644,14 +644,14 @@ describe("loadWorkflows", () => {
   });
 
   test("higher-precedence (managed) source overrides lower-precedence (bundled)", async () => {
-    const bundled = mkdtempSync(join(tmpdir(), "smithers-bundled-"));
+    const bundled = makeTempDirPath("smithers-bundled-");
     writeFileSync(
       join(bundled, "my-wf.js"),
       `export default { workflow: {}, name: "my-wf", description: "Bundled" };`,
       "utf8",
     );
 
-    const managed = mkdtempSync(join(tmpdir(), "smithers-managed-"));
+    const managed = makeTempDirPath("smithers-managed-");
     writeFileSync(
       join(managed, "my-wf.js"),
       `export default { workflow: {}, name: "my-wf", description: "Managed" };`,
@@ -668,7 +668,7 @@ describe("loadWorkflows", () => {
   });
 
   test("loads workflows from explicit workflowPaths", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-explicit-"));
+    const dir = makeTempDirPath("smithers-explicit-");
     const filePath = join(dir, "explicit.js");
     writeFileSync(filePath, `export default { workflow: {}, name: "explicit", description: "Explicit path" };`, "utf8");
 

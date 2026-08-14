@@ -1,6 +1,6 @@
 {
-  "name": "@smithers-orchestrator/observability",
-  "version": "0.32.0",
+  "name": "@smthrs/observability",
+  "version": "0.34.0",
   "description": "Concrete Smithers metrics, logging, tracing, and observability integrations",
   "type": "module",
   "sideEffects": false,
@@ -36,9 +36,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@effect/opentelemetry": "4.0.0-beta.102",
-    "@effect/platform-bun": "4.0.0-beta.102",
-    "effect": "4.0.0-beta.102"
+    "@effect/opentelemetry": "4.0.0-beta.105",
+    "@effect/platform-bun": "4.0.0-beta.105",
+    "@effect/platform-node-shared": "4.0.0-beta.105",
+    "effect": "4.0.0-beta.105"
   },
   "devDependencies": {
     "@types/bun": "latest",

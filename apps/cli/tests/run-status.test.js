@@ -630,6 +630,28 @@ describe("status surfaces liveness, not just the row status", () => {
     }
   });
 
+  test("a cancel-requested run whose engine died reports cancel-pending, not terminal or orphaned (#1496)", async () => {
+    const { sqlite, adapter } = createMemoryDb();
+    try {
+      await seedRun(adapter, "cancel-stuck", {
+        status: "running",
+        heartbeatAtMs: NOW - 14 * MIN,
+        runtimeOwnerId: "pid:999999:owner",
+      });
+      await seedNode(adapter, "cancel-stuck", "implement", "in-progress", NOW - 14 * MIN);
+      await adapter.requestRunCancel("cancel-stuck", NOW - 13 * MIN);
+
+      const summary = await buildRunStatusSummary(adapter, "cancel-stuck", { nowMs: NOW });
+
+      expect(summary.verdict).toBe("cancel-pending");
+      expect(summary.liveness).toMatchObject({ state: "cancel-pending" });
+      expect(summary.reason).toContain("do not resume");
+      expect(runStatusCtaCommands(summary).map((entry) => entry.command)).not.toContain("supervise -r cancel-stuck");
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("a stale-but-live engine is `stalled`, never `orphaned`", async () => {
     const { sqlite, adapter } = createMemoryDb();
     try {
@@ -662,6 +684,125 @@ describe("status surfaces liveness, not just the row status", () => {
 
       expect(summary.verdict).toBe("running-healthy");
       expect(renderRunStatusHuman(summary)).not.toContain("Health");
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
+describe("loop exhaustion verdict (#1464 AWF-1)", () => {
+  test("a finished run whose RunFinished event carries exhaustedLoops reports degraded, never done", async () => {
+    const { sqlite, adapter } = createMemoryDb();
+    try {
+      await seedRun(adapter, "loop", {
+        status: "finished",
+        finishedAtMs: NOW - 5 * MIN,
+        heartbeatAtMs: null,
+        runtimeOwnerId: null,
+      });
+      await adapter.insertEventWithNextSeq({
+        runId: "loop",
+        timestampMs: NOW - 5 * MIN,
+        type: "RunFinished",
+        payloadJson: JSON.stringify({
+          exhaustedLoops: [{ id: "review-loop", iteration: 3, maxIterations: 4 }],
+        }),
+      });
+
+      const summary = await buildRunStatusSummary(adapter, "loop", { nowMs: NOW });
+
+      expect(summary.verdict).toBe("degraded");
+      expect(summary.reason).toContain("review-loop");
+      expect(summary.reason).toContain("maxIterations 4");
+      expect(renderRunStatusHuman(summary)).toContain("degraded");
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("a finished run with a clean RunFinished event stays done", async () => {
+    const { sqlite, adapter } = createMemoryDb();
+    try {
+      await seedRun(adapter, "clean", {
+        status: "finished",
+        finishedAtMs: NOW - 5 * MIN,
+        heartbeatAtMs: null,
+        runtimeOwnerId: null,
+      });
+      await adapter.insertEventWithNextSeq({
+        runId: "clean",
+        timestampMs: NOW - 5 * MIN,
+        type: "RunFinished",
+        payloadJson: JSON.stringify({}),
+      });
+
+      const summary = await buildRunStatusSummary(adapter, "clean", { nowMs: NOW });
+
+      expect(summary.verdict).toBe("done");
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("summarizeRunStatus maps exhaustedLoops onto the degraded verdict", () => {
+    const summary = summarizeRunStatus({
+      run: { runId: "pure", status: "finished", startedAtMs: NOW - 10 * MIN, finishedAtMs: NOW - 5 * MIN },
+      nodes: [],
+      attempts: [],
+      nowMs: NOW,
+      exhaustedLoops: [{ id: "gate-loop", iteration: 1, maxIterations: null }],
+    });
+    expect(summary.verdict).toBe("degraded");
+    expect(summary.reason).toContain("gate-loop");
+  });
+});
+
+describe("stale heartbeat on a dead engine (#1464 AWF-2)", () => {
+  test("a continued run whose segment never finished is classified by its heartbeat", async () => {
+    const { sqlite, adapter } = createMemoryDb();
+    try {
+      // `continued` with no finishedAtMs is logically still running; a killed
+      // engine on such a run must not read as healthy.
+      await seedRun(adapter, "cont", {
+        status: "continued",
+        finishedAtMs: null,
+        heartbeatAtMs: NOW - 14 * MIN,
+        runtimeOwnerId: "pid:999999:owner",
+      });
+      await seedNode(adapter, "cont", "implement", "in-progress", NOW - 14 * MIN);
+      await seedNode(adapter, "cont", "plan", "finished", NOW - 20 * MIN);
+
+      const summary = await buildRunStatusSummary(adapter, "cont", { nowMs: NOW });
+
+      expect(summary.verdict).toBe("orphaned");
+      expect(summary.liveness).toMatchObject({ state: "orphaned" });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("when the full liveness probe throws, the row-only heartbeat fallback still downgrades the verdict", async () => {
+    const { sqlite, adapter } = createMemoryDb();
+    try {
+      await seedRun(adapter, "fallback", {
+        status: "running",
+        heartbeatAtMs: NOW - 14 * MIN,
+        runtimeOwnerId: "pid:999999:owner",
+      });
+      await seedNode(adapter, "fallback", "implement", "in-progress", NOW - 14 * MIN);
+      await seedNode(adapter, "fallback", "plan", "finished", NOW - 20 * MIN);
+      // Force the sandbox read inside computeRunStateFromRow to fail: before the
+      // fallback existed this left `liveness` null and the run reported
+      // "running-healthy" for minutes after its engine died.
+      const failing = Object.create(adapter);
+      failing.listSandboxes = async () => {
+        throw new Error("sandbox read exploded");
+      };
+
+      const summary = await buildRunStatusSummary(failing, "fallback", { nowMs: NOW });
+
+      expect(summary.verdict).toBe("orphaned");
+      expect(summary.liveness).toMatchObject({ state: "orphaned" });
     } finally {
       sqlite.close();
     }

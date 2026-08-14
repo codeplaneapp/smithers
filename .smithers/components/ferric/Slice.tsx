@@ -1,5 +1,5 @@
-/** @jsxImportSource smithers-orchestrator */
-import { Loop, MergeQueue, Parallel, Sequence, Worktree } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Loop, MergeQueue, Parallel, Sequence, Worktree } from "smthrs";
 import { Task, outputs } from "./ferricSmithers";
 import { codexReviewerSeatsFor, implementerSeatsFor, opusSeatsFor } from "./ferricAgents";
 import { LANE_ROOT, type FerricConfig, type SliceDef } from "./ferricConfig";

@@ -9,8 +9,8 @@
 // @smithers-type-exports-end
 
 import { Context, Effect, Layer, Schedule } from "effect";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { logWarning } from "@smithers-orchestrator/observability/logging";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { logWarning } from "@smthrs/observability/logging";
 import { chunkTelegramText } from "./chunk.js";
 import { cleanText, convertMarkdownToTelegram } from "./markdown.js";
 
@@ -109,7 +109,7 @@ function isParseEntityError(error) {
  * @type {Context.Service<TelegramClientService, TelegramClientService>}
  */
 export const TelegramClient = /** @type {Context.Service<TelegramClientService, TelegramClientService>} */ (
-  Context.Service("@smithers-orchestrator/integrations/TelegramClient")
+  Context.Service("@smthrs/integrations/TelegramClient")
 );
 
 /**

@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/storybook-site",
+  "name": "@smthrs/storybook-site",
   "version": "0.0.1",
   "private": true,
   "description": "Storybook catalog for the shared Smithers UI component library, deployed at storybook.smithers.sh",
@@ -14,7 +14,7 @@
     "destroy": "wrangler delete storybook-site"
   },
   "dependencies": {
-    "@smithers-orchestrator/ui": "workspace:*",
+    "@smthrs/ui": "workspace:*",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },

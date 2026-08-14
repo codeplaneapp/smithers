@@ -16,18 +16,18 @@ schema-driven outputs now demand raw JSON without code fences.
 - **Bin delegation now resolves the workspace-local install through
   `package.json`.** When you run `smithers` inside a directory whose
   `.smithers/node_modules/` ships its own copy of
-  `smithers-orchestrator`, the global bin re-execs into that local
+  `smthrs`, the global bin re-execs into that local
   copy so the workflow runtime (engine, react-reconciler,
   components, React) all loads from a single module tree. Previously
   the global bin handed the local pnpm/npm `.bin/smithers` *shell
   shim* to `process.execPath` (bun), which tried to parse the
   `#!/bin/sh` shim as JavaScript and crashed with
   `Expected ")" but found "$(echo "`. Resolution now reads
-  `node_modules/smithers-orchestrator/package.json` and re-execs the
+  `node_modules/smthrs/package.json` and re-execs the
   actual JS entry, bypassing the shim. Workflow-path commands
   (`up`, `graph`, `fork`, `replay`, `revert`, `timetravel`) also
   walk upward from the workflow file to find the nearest local
-  install, so `bunx smithers-orchestrator up examples/foo/workflow.tsx` picks up the
+  install, so `bunx smthrs up examples/foo/workflow.tsx` picks up the
   workflow's own `node_modules` even when invoked from elsewhere.
 
   Unit tests for the resolution paths live in

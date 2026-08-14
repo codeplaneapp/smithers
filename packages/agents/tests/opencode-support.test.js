@@ -7,6 +7,11 @@ import { makeFakeNodeCli, prependPath } from "./fake-cli.js";
 
 const originalPath = process.env.PATH ?? "";
 
+// The agent inherits process.env by design; an ambient OPENCODE_PERMISSION
+// (e.g. when the test run itself is launched from an opencode session) must
+// not leak into these assertions.
+delete process.env.OPENCODE_PERMISSION;
+
 /**
  * @param {string} stdoutScript
  */
@@ -18,6 +23,7 @@ async function makeFakeOpenCode(stdoutScript) {
 afterEach(() => {
   process.env.PATH = originalPath;
   delete process.env.OPENCODE_ARGS_FILE;
+  delete process.env.OPENCODE_PERMISSION;
 });
 
 // ---------------------------------------------------------------------------

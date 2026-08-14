@@ -5,7 +5,7 @@ description: Parallel gather from multiple sources, then synthesize into a unifi
 
 ```ts
 // Props
-import { GatherAndSynthesize } from "smithers-orchestrator";
+import { GatherAndSynthesize } from "smthrs";
 
 type SourceDef = {
   agent: AgentLike;
@@ -233,7 +233,7 @@ export const Task = createTaskComponent({ applyCliToolAllowlist });
 
 ```ts GatherAndSynthesizeProps.ts
 import type React from "react";
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
 import type { OutputTarget } from "./OutputTarget.ts";
 import type { SourceDef } from "./SourceDef.ts";
 
@@ -260,7 +260,7 @@ export type GatherAndSynthesizeProps = {
 
 ```ts SourceDef.ts
 import type React from "react";
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type SourceDef = {

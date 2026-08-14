@@ -11,7 +11,7 @@ import {
   useGatewayActions,
   useGatewayApprovals,
   useGatewayRuns,
-} from "smithers-orchestrator/gateway-react";
+} from "smthrs/gateway-react";
 import { crepeThemeCss } from "./crepeTheme.generated";
 import { xyflowThemeCss } from "./xyflowTheme.generated";
 import { themeCss } from "./cw-theme";

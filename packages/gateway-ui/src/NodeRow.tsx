@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
-import { runNodeKey } from "@smithers-orchestrator/gateway-client";
-import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import { runNodeKey } from "@smthrs/gateway-client";
+import type { GatewayRunNode } from "@smthrs/gateway-client";
 import type { CSSProperties } from "react";
 import { StatusPill } from "./StatusPill";
 
@@ -44,7 +44,7 @@ export function NodeRow({ node, depth, activeNodeId, onSelectNode }: NodeRowProp
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {node.cardLabel ?? node.name}
           </span>
-          <span style={{ fontSize: 11, color: "var(--text-muted, #52525b)" }}>{executionMeta}</span>
+          <span style={{ fontSize: 11, color: "var(--text-muted, #676676)" }}>{executionMeta}</span>
         </span>
         <StatusPill status={node.status} />
       </button>

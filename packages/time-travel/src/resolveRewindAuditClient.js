@@ -1,4 +1,4 @@
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 
 /**
  * Resolve the portable storage layer used by the rewind audit helpers.

@@ -1,13 +1,13 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import "../preload.ts";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
-import { renderPrompt, renderWorkflow, runTask } from "smithers-orchestrator/testing";
-import { delegationV2Schemas } from "smithers-orchestrator";
-import { resolveJjBinary } from "@smithers-orchestrator/vcs/resolveJjBinary";
+import { renderPrompt, renderWorkflow, runTask } from "smthrs/testing";
+import { delegationV2Schemas } from "smthrs";
+import { resolveJjBinary } from "@smthrs/vcs/resolveJjBinary";
 import { invocationOutcomeNodeId } from "../../packages/components/src/components/delegation-v2/delegationV2Ids.js";
 
 type Task = {

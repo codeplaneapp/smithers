@@ -2,14 +2,14 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { SmithersCtx } from "@smithers-orchestrator/driver";
-import { loadInput, loadOutputs } from "@smithers-orchestrator/db/snapshot";
-import { renderFrame, resolveSchema } from "@smithers-orchestrator/engine";
+import { SmithersCtx } from "@smthrs/driver";
+import { loadInput, loadOutputs } from "@smthrs/db/snapshot";
+import { renderFrame, resolveSchema } from "@smthrs/engine";
 import { mdxPlugin } from "./mdx-plugin.js";
-import { SmithersError } from "@smithers-orchestrator/errors";
+import { SmithersError } from "@smthrs/errors";
 import { Effect } from "effect";
 /** @typedef {import("./HijackCandidate.ts").HijackCandidate} HijackCandidate */
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 
 /**
  * @template T
@@ -39,7 +39,7 @@ function parseAttemptMeta(metaJson) {
 }
 /**
  * @param {string} workflowPath
- * @returns {Promise<import("@smithers-orchestrator/components").SmithersWorkflow<any>>}
+ * @returns {Promise<import("@smthrs/components").SmithersWorkflow<any>>}
  */
 async function loadWorkflow(workflowPath) {
   const abs = resolve(process.cwd(), workflowPath);
@@ -60,7 +60,11 @@ async function resolveConversationAgent(adapter, candidate) {
   if (!workflowPath) {
     throw new SmithersError(
       "HIJACK_WORKFLOW_PATH",
-      `Run ${candidate.runId} does not have a workflowPath; cannot reconstruct agent`,
+      `Run ${candidate.runId} does not have a workflowPath; cannot reconstruct agent for takeover. ` +
+        `Takeover needs a real workflow file on disk (typical of \`smithers up <workflow>\`). ` +
+        `In-process fixture/campaign runs and some embedded engines never set workflowPath — ` +
+        `use mid-run steer (\`s\` while a node is still working) for dual-control on those, ` +
+        `or run a real workflow for full takeover. See https://smithers.sh/reference/errors`,
     );
   }
   const workflow = await loadWorkflow(workflowPath);

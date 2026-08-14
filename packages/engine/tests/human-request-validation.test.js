@@ -2,12 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { z } from "zod";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { resolveDeferredTaskStateBridge } from "../src/effect/deferred-state-bridge.js";
 import { buildHumanRequestId, isHumanRequestPastTimeout, validateHumanRequestValue } from "../src/human-requests.js";
-import { zodToCreateTableSQL } from "@smithers-orchestrator/db/zodToCreateTableSQL";
-import { zodToTable } from "@smithers-orchestrator/db/zodToTable";
+import { zodToCreateTableSQL } from "@smthrs/db/zodToCreateTableSQL";
+import { zodToTable } from "@smthrs/db/zodToTable";
 /**
  * @param {z.ZodObject<any>} schema
  */

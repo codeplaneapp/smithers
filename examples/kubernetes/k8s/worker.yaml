@@ -24,7 +24,7 @@ spec:
             - name: SMITHERS_ROLE
               value: worker
             - name: SMITHERS_ORCHESTRATOR_URL
-              value: http://smithers-orchestrator.smithers-system.svc.cluster.local:3001
+              value: http://smthrs.smithers-system.svc.cluster.local:3001
           envFrom:
             - secretRef:
                 name: smithers-api-keys

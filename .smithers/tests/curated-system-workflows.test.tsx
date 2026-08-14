@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import "../preload.ts";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -6,9 +6,9 @@ import { describe, expect, test } from "bun:test";
 import { delimiter, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
-import { fakeAgent, renderPrompt, renderWorkflow, runTask } from "smithers-orchestrator/testing";
-import type { RenderedWorkflow } from "smithers-orchestrator/testing";
-import type { TaskDescriptor } from "smithers-orchestrator/graph";
+import { fakeAgent, renderPrompt, renderWorkflow, runTask } from "smthrs/testing";
+import type { RenderedWorkflow } from "smthrs/testing";
+import type { TaskDescriptor } from "smthrs/graph";
 import { attempt, investigate, smithersBug } from "./curated-system-workflows.contracts";
 
 type Row = Record<string, unknown> & { nodeId: string };
@@ -270,9 +270,9 @@ describe.serial("curated system workflow causal contracts", () => {
             .split("\n")
             .map((line) => JSON.parse(line)),
         ).toEqual([
-          ["smithers-orchestrator", "inspect", "target-9", "--format", "json"],
-          ["smithers-orchestrator", "events", "target-9"],
-          ["smithers-orchestrator", "--version"],
+          ["smthrs", "inspect", "target-9", "--format", "json"],
+          ["smthrs", "events", "target-9"],
+          ["smthrs", "--version"],
         ]);
         const postFailureWorkflow = await load("post-failure.tsx");
         expect(() => postFailureWorkflow.inputSchema.parse({ targetRunId: "   " })).toThrow();
@@ -339,7 +339,7 @@ describe.serial("curated system workflow causal contracts", () => {
           .split("\n")
           .map((line) => JSON.parse(line));
         expect(argv[3]).toEqual([
-          "smithers-orchestrator",
+          "smthrs",
           "bug",
           "--run",
           "target-9",
@@ -383,7 +383,7 @@ describe.serial("curated system workflow causal contracts", () => {
         await mkdir(moduleDir, { recursive: true });
         await writeFile(
           join(moduleDir, "update-check.js"),
-          `import { readFileSync, appendFileSync } from "node:fs"; const s=${JSON.stringify(state)}, c=${JSON.stringify(calls)}; const read=()=>JSON.parse(readFileSync(s,"utf8")); const log=(name,args)=>appendFileSync(c,JSON.stringify({name,args})+"\\n"); export const SMITHERS_PACKAGE="smithers-orchestrator"; export function readCurrentPackageVersion(){log("current",{});return "1.0.0"} export async function fetchLatestVersion(args){log("latest",args);return read().latest} export function detectInstallMethod(){log("detect",{});return {kind:"global",manager:"bun"}} export function buildUpdatePlan(install,pkg){log("plan",{install,pkg});return {command:"bun add -g smithers-orchestrator@latest",runnable:read().runnable,explanation:"global bun"}} export function isUpdateAvailable(latest,current){log("available",{latest,current});return latest !== current} export async function fetchChangelogsSince(args){log("changelog",args);return {versions:read().latest===currentVersion?[ ]:[read().latest],truncated:false,entries:read().latest===currentVersion?[]:[{version:read().latest,url:"file:///change",ok:true,content:"change"}]}} const currentVersion="1.0.0";`,
+          `import { readFileSync, appendFileSync } from "node:fs"; const s=${JSON.stringify(state)}, c=${JSON.stringify(calls)}; const read=()=>JSON.parse(readFileSync(s,"utf8")); const log=(name,args)=>appendFileSync(c,JSON.stringify({name,args})+"\\n"); export const SMITHERS_PACKAGE="smthrs"; export function readCurrentPackageVersion(){log("current",{});return "1.0.0"} export async function fetchLatestVersion(args){log("latest",args);return read().latest} export function detectInstallMethod(){log("detect",{});return {kind:"global",manager:"bun"}} export function buildUpdatePlan(install,pkg){log("plan",{install,pkg});return {command:"bun add -g smthrs@latest",runnable:read().runnable,explanation:"global bun"}} export function isUpdateAvailable(latest,current){log("available",{latest,current});return latest !== current} export async function fetchChangelogsSince(args){log("changelog",args);return {versions:read().latest===currentVersion?[ ]:[read().latest],truncated:false,entries:read().latest===currentVersion?[]:[{version:read().latest,url:"file:///change",ok:true,content:"change"}]}} const currentVersion="1.0.0";`,
         );
         process.env.SMITHERS_CLI_SRC_DIR = pathToFileURL(moduleDir).href;
         const noUpdateGather = await runTask(
@@ -395,7 +395,7 @@ describe.serial("curated system workflow causal contracts", () => {
           updateAvailable: false,
           installKind: "global",
           installManager: "bun",
-          command: "bun add -g smithers-orchestrator@latest",
+          command: "bun add -g smthrs@latest",
           runnable: true,
           explanation: "global bun",
           dryRun: false,
@@ -436,7 +436,7 @@ describe.serial("curated system workflow causal contracts", () => {
           current: "1.0.0",
           latest: "1.0.0",
           updateAvailable: false,
-          command: "bun add -g smithers-orchestrator@latest",
+          command: "bun add -g smthrs@latest",
           changelogVersions: [],
           summary: "already current",
           commands: [],
@@ -452,7 +452,7 @@ describe.serial("curated system workflow causal contracts", () => {
           updateAvailable: true,
           installKind: "global",
           installManager: "bun",
-          command: "bun add -g smithers-orchestrator@latest",
+          command: "bun add -g smthrs@latest",
           runnable: true,
           explanation: "global bun",
           dryRun: true,
@@ -469,13 +469,13 @@ describe.serial("curated system workflow causal contracts", () => {
           pathToFileURL(moduleDir).href,
         );
         const dryAgent = fakeAgent(task(dry, "cheap-upgrade").outputSchema!, {
-          output: { ...attempt, summary: "would upgrade", commands: ["bun add -g smithers-orchestrator@latest"] },
+          output: { ...attempt, summary: "would upgrade", commands: ["bun add -g smthrs@latest"] },
         });
         expect(task(dry, "cheap-upgrade").timeoutMs).toBe(1_200_000);
         expect(dry.tasks.some((candidate) => candidate.nodeId === "smart-upgrade")).toBe(false);
         expect(
           await runTask({ ...task(dry, "cheap-upgrade"), agent: dryAgent as unknown as TaskDescriptor["agent"] }),
-        ).toEqual({ ...attempt, summary: "would upgrade", commands: ["bun add -g smithers-orchestrator@latest"] });
+        ).toEqual({ ...attempt, summary: "would upgrade", commands: ["bun add -g smthrs@latest"] });
         const dryDone = await render(
           "upgrade.tsx",
           { dryRun: "true" },
@@ -484,7 +484,7 @@ describe.serial("curated system workflow causal contracts", () => {
             row("cheap-upgrade", {
               ...attempt,
               summary: "would upgrade",
-              commands: ["bun add -g smithers-orchestrator@latest"],
+              commands: ["bun add -g smthrs@latest"],
             }),
           ],
           pathToFileURL(moduleDir).href,
@@ -495,10 +495,10 @@ describe.serial("curated system workflow causal contracts", () => {
           current: "1.0.0",
           latest: "2.0.0",
           updateAvailable: true,
-          command: "bun add -g smithers-orchestrator@latest",
+          command: "bun add -g smthrs@latest",
           changelogVersions: ["2.0.0"],
           summary: "would upgrade",
-          commands: ["bun add -g smithers-orchestrator@latest"],
+          commands: ["bun add -g smthrs@latest"],
           details: attempt.details,
         });
         const help = await render("upgrade.tsx", { dryRun: false }, [
@@ -525,10 +525,10 @@ describe.serial("curated system workflow causal contracts", () => {
           current: "1.0.0",
           latest: "2.0.0",
           updateAvailable: true,
-          command: "bun add -g smithers-orchestrator@latest",
+          command: "bun add -g smthrs@latest",
           changelogVersions: ["2.0.0"],
           summary: "verified",
-          commands: ["bun add -g smithers-orchestrator@latest"],
+          commands: ["bun add -g smthrs@latest"],
           details: "version verified",
         });
         const blocked = await render("upgrade.tsx", { dryRun: false }, [
@@ -542,10 +542,10 @@ describe.serial("curated system workflow causal contracts", () => {
           current: "1.0.0",
           latest: "2.0.0",
           updateAvailable: true,
-          command: "bun add -g smithers-orchestrator@latest",
+          command: "bun add -g smthrs@latest",
           changelogVersions: ["2.0.0"],
           summary: "blocked",
-          commands: ["bun add -g smithers-orchestrator@latest"],
+          commands: ["bun add -g smthrs@latest"],
           details: "version verified",
         });
         const options = (await readFile(calls, "utf8"))
@@ -558,7 +558,7 @@ describe.serial("curated system workflow causal contracts", () => {
         ]);
         expect(options.find((entry) => entry.name === "plan")).toEqual({
           name: "plan",
-          args: { install: { kind: "global", manager: "bun" }, pkg: "smithers-orchestrator" },
+          args: { install: { kind: "global", manager: "bun" }, pkg: "smthrs" },
         });
         expect(options.filter((entry) => entry.name === "changelog").map((entry) => entry.args)).toEqual([
           { currentVersion: "1.0.0", latestVersion: "1.0.0", timeoutMs: 8000, maxEntries: 20, maxCharsPerEntry: 12000 },

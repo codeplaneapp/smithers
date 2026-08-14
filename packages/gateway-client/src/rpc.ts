@@ -88,4 +88,4 @@ export type {
   UpdateTicketRequest,
   WhatHappenedRequest,
   WhatHappenedResponse,
-} from "@smithers-orchestrator/protocol/gateway-rpc";
+} from "@smthrs/protocol/gateway-rpc";

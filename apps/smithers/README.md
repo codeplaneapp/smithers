@@ -31,5 +31,5 @@ the serve port, `--gateway <url>` to point at a specific gateway.
 - `src/app/` — the nav-sidebar shell, router, and URL→state mapping.
 - `src/<surface>/` — one folder per surface (runs, approvals, memory, …).
 
-Reusable, hook-driven widgets live in `@smithers-orchestrator/gateway-ui` — use
+Reusable, hook-driven widgets live in `@smthrs/gateway-ui` — use
 those when building a custom workflow UI under `.smithers/ui/<workflow>.tsx`.

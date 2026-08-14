@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import type { GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
+import type { GatewayEventFrame } from "@smthrs/gateway-client";
 import { normalizeFrame, unwrapEvent, nodeLogEvents } from "../src/modes/eventFrame.ts";
 import { extractEventText, extractAttemptKeys, filterEventsByAttempt } from "../src/modes/logUtils.ts";
 import { classifyFrame, extractNodeSnapshots } from "../src/modes/timelineUtils.ts";

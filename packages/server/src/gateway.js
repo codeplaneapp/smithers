@@ -14,19 +14,14 @@ import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { CronExpressionParser } from "cron-parser";
 import { Effect, Metric } from "effect";
 import { WebSocketServer } from "ws";
-import { DB_RUN_ID_MAX_LENGTH, SmithersDb } from "@smithers-orchestrator/db/adapter";
-import {
-  captureTxid,
-  createTxidCapture,
-  isRealPostgresAdapter,
-  runWithTxidCapture,
-} from "@smithers-orchestrator/db/captureTxid";
-import { getSmithersSchemaSignature } from "@smithers-orchestrator/db/getSmithersSchemaSignature";
-import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { loadInput } from "@smithers-orchestrator/db/snapshot";
-import { sha256Hex } from "@smithers-orchestrator/db/sha256Hex";
-import { watchDocsDirectory } from "@smithers-orchestrator/db/docWatcher";
+import { DB_RUN_ID_MAX_LENGTH, SmithersDb } from "@smthrs/db/adapter";
+import { captureTxid, createTxidCapture, isRealPostgresAdapter, runWithTxidCapture } from "@smthrs/db/captureTxid";
+import { getSmithersSchemaSignature } from "@smthrs/db/getSmithersSchemaSignature";
+import { computeRunStateFromRow } from "@smthrs/db/runState";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { loadInput } from "@smthrs/db/snapshot";
+import { sha256Hex } from "@smthrs/db/sha256Hex";
+import { watchDocsDirectory } from "@smthrs/db/docWatcher";
 import {
   devtoolsActiveSubscribers,
   devtoolsBackpressureDisconnectTotal,
@@ -54,20 +49,20 @@ import {
   gatewayWebhooksReceivedTotal,
   gatewayWebhooksRejectedTotal,
   gatewayWebhooksVerifiedTotal,
-} from "@smithers-orchestrator/observability/metrics";
+} from "@smthrs/observability/metrics";
 import { runFork, runPromise } from "./smithersRuntime.js";
-import { prometheusContentType, renderPrometheusMetrics } from "@smithers-orchestrator/observability";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
-import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
-import { isSmithersError } from "@smithers-orchestrator/errors/isSmithersError";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { prometheusContentType, renderPrometheusMetrics } from "@smthrs/observability";
+import { nowMs } from "@smthrs/scheduler/nowMs";
+import { errorToJson } from "@smthrs/errors/errorToJson";
+import { isSmithersError } from "@smthrs/errors/isSmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import {
   assertJsonPayloadWithinBounds,
   assertOptionalStringMaxLength,
   assertPositiveFiniteInteger,
-} from "@smithers-orchestrator/db/input-bounds";
-import { loadLatestSnapshot } from "@smithers-orchestrator/time-travel/snapshot";
-import { diffRawSnapshots } from "@smithers-orchestrator/time-travel/diff";
+} from "@smthrs/db/input-bounds";
+import { loadLatestSnapshot } from "@smthrs/time-travel/snapshot";
+import { diffRawSnapshots } from "@smthrs/time-travel/diff";
 import { getNodeOutputRoute } from "./gatewayRoutes/getNodeOutput.js";
 import { NodeOutputRouteError } from "./gatewayRoutes/NodeOutputRouteError.js";
 import { getNodeDiffRoute } from "./gatewayRoutes/getNodeDiff.js";
@@ -82,16 +77,16 @@ import {
 } from "./gatewayRoutes/getDevToolsSnapshot.js";
 import { streamDevToolsRoute } from "./gatewayRoutes/streamDevTools.js";
 import { jumpToFrameRoute, JumpToFrameError } from "./gatewayRoutes/jumpToFrame.js";
-import { retryTask as retryTaskReset } from "@smithers-orchestrator/time-travel/retry-task";
-import { writeRewindAuditRow } from "@smithers-orchestrator/time-travel/writeRewindAuditRow";
-import { recoverInProgressRewindAudits } from "@smithers-orchestrator/time-travel/recoverInProgressRewindAudits";
+import { retryTask as retryTaskReset } from "@smthrs/time-travel/retry-task";
+import { writeRewindAuditRow } from "@smthrs/time-travel/writeRewindAuditRow";
+import { recoverInProgressRewindAudits } from "@smthrs/time-travel/recoverInProgressRewindAudits";
 import {
   GATEWAY_EVENT_WINDOW_DEFAULT,
   GATEWAY_RPC_ERRORS,
   SMITHERS_API_VERSION,
   getRequiredScopeForGatewayMethod,
-} from "@smithers-orchestrator/gateway/rpc";
-import { hasGatewayScope, isGatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
+} from "@smthrs/gateway/rpc";
+import { hasGatewayScope, isGatewayScope } from "@smthrs/gateway/auth/scopes";
 import { approvalDecision } from "./approvalDecision.js";
 import {
   apiCollectionNames,
@@ -108,9 +103,9 @@ import {
   serializeScoreRow,
   serializeTicketRow,
   serializeWorkflowRow,
-} from "@smithers-orchestrator/gateway/api";
-import { listAccounts } from "@smithers-orchestrator/accounts/listAccounts";
-import { getUsageForAccounts } from "@smithers-orchestrator/usage";
+} from "@smthrs/gateway/api";
+import { listAccounts } from "@smthrs/accounts/listAccounts";
+import { getUsageForAccounts } from "@smthrs/usage";
 import {
   EXTENSION_BACKPRESSURE_DISCONNECT_CODE,
   EXTENSION_METHOD_NOT_FOUND_CODE,
@@ -120,15 +115,15 @@ import {
   GatewayExtensions,
   isExtensionMethod,
 } from "./GatewayExtensions.js";
-import { workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
+import { loadWorkflowUiThemeCss } from "./gatewayUi/workflowUiThemeCss.js";
 import { hijackCandidatesFromAttempts } from "./hijackCandidates.js";
 import { createGatewayUiApp } from "./gatewayUi/createGatewayUiApp.js";
 import { renderDefaultConsoleClient } from "./gatewayUi/defaultConsole.js";
 import { authorizeGatewayUiRequest } from "./gatewayUi/auth.js";
 import { bundleGatewayUiEntry } from "./gatewayUi/bundle.js";
 import { DEFAULT_OPERATOR_UI_ENTRY } from "./gatewayUi/defaultOperatorUi.js";
-import { clampRunStartedByPrompt, normalizeRunStartedBy, SmithersCtx } from "@smithers-orchestrator/driver";
-import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smithers-orchestrator/components";
+import { clampRunStartedByPrompt, normalizeRunStartedBy, SmithersCtx } from "@smthrs/driver";
+import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smthrs/components";
 import { createBrowserSessionRegistry } from "./browser.js";
 import { validateBrowserRequest } from "./gatewayRoutes/browser.js";
 import { renderBrowserViewer } from "./gatewayUi/browserViewer.js";
@@ -145,9 +140,9 @@ import { renderBrowserViewer } from "./gatewayUi/browserViewer.js";
 /** @typedef {import("./RequestFrame.js").RequestFrame} RequestFrame */
 /** @typedef {import("./ResponseFrame.js").ResponseFrame} ResponseFrame */
 /** @typedef {import("node:http").ServerResponse} ServerResponse */
-/** @typedef {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<unknown>} SmithersWorkflow */
-/** @typedef {import("@smithers-orchestrator/observability/SmithersEvent").SmithersEvent} SmithersEvent */
-/** @typedef {import("@smithers-orchestrator/usage").UsageReport} UsageReport */
+/** @typedef {import("@smthrs/components/SmithersWorkflow").SmithersWorkflow<unknown>} SmithersWorkflow */
+/** @typedef {import("@smthrs/observability/SmithersEvent").SmithersEvent} SmithersEvent */
+/** @typedef {import("@smthrs/usage").UsageReport} UsageReport */
 /** @typedef {Record<string, string | number | null | undefined>} GatewayMetricLabels */
 /** @typedef {"ws" | "http"} GatewayTransport */
 /**
@@ -360,23 +355,28 @@ export const GATEWAY_RPC_INPUT_MAX_BYTES = GATEWAY_RPC_MAX_PAYLOAD_BYTES;
 export const GATEWAY_RPC_INPUT_MAX_DEPTH = GATEWAY_RPC_MAX_DEPTH;
 const GATEWAY_METHOD_NAME_PATTERN = /^[a-z][a-zA-Z0-9]*(?:\.[a-z][a-zA-Z0-9]*)*$/;
 const GATEWAY_UI_ASSET_PREFIX = "__smithers_ui";
+// A <UI>/<TUI> discovery render is synchronous JS and cannot be preempted,
+// so the background drain yields to the event loop BETWEEN workflows and
+// warns once any single render exceeds this budget (#incident: a pathological
+// pack pegged the gateway at ~99% CPU and /health went unreachable).
+const WORKFLOW_VIEW_DISCOVERY_SLOW_MS = 1_000;
 
 let engineRuntimePromise = null;
 let engineApprovalsPromise = null;
 let engineSignalsPromise = null;
 
 function loadEngineRuntime() {
-  engineRuntimePromise ??= import("@smithers-orchestrator/engine");
+  engineRuntimePromise ??= import("@smthrs/engine");
   return engineRuntimePromise;
 }
 
 function loadEngineApprovals() {
-  engineApprovalsPromise ??= import("@smithers-orchestrator/engine/approvals");
+  engineApprovalsPromise ??= import("@smthrs/engine/approvals");
   return engineApprovalsPromise;
 }
 
 function loadEngineSignals() {
-  engineSignalsPromise ??= import("@smithers-orchestrator/engine/signals");
+  engineSignalsPromise ??= import("@smthrs/engine/signals");
   return engineSignalsPromise;
 }
 
@@ -397,14 +397,10 @@ function safeJsonScript(value) {
 }
 
 /**
- * Pre-paint theme override for gateway-served UI pages. An embedding host (an
- * iframe or a deep link) forces a theme with `?theme=dark` / `?theme=light`;
- * the script stamps it as `data-theme` on `<html>` before first paint, which
- * the injected style-guide tokens (and `color-scheme`) honor. Without the
- * param the page follows the OS via `prefers-color-scheme`.
+ * Pre-paint mode and palette overrides for gateway-served UI pages.
  */
 const GATEWAY_UI_THEME_BOOTSTRAP_SCRIPT =
-  '(function(){var t=new URLSearchParams(location.search).get("theme");if(t==="dark"||t==="light"){document.documentElement.dataset.theme=t;}})();';
+  '(function(){var t=new URLSearchParams(location.search).get("theme"),p=new URLSearchParams(location.search).get("palette"),ps=["night-owl","fucory","one","github","catppuccin","solarized","gruvbox","rose-pine"];if(t==="dark"||t==="light"){document.documentElement.dataset.theme=t;}if(ps.includes(p)){document.documentElement.dataset.palette=p;}})();';
 
 /**
  * @param {string | undefined} rawPath
@@ -564,7 +560,7 @@ function resolveRunOwnerId(run) {
  * gateway-ui provenance surfaces consume.
  *
  * @param {{ configJson?: string | null }} row
- * @returns {import("@smithers-orchestrator/driver/RunStartedBy").RunStartedBy | undefined}
+ * @returns {import("@smthrs/driver/RunStartedBy").RunStartedBy | undefined}
  */
 function runStartedByFromRow(row) {
   const config = parseJson(typeof row?.configJson === "string" ? row.configJson : null);
@@ -1018,7 +1014,7 @@ function visitWorkflowViewElements(node, visit) {
  * @param {Record<string, unknown>} props
  * @param {string} workflowKey
  * @param {string | undefined} entryFile
- * @returns {import("@smithers-orchestrator/driver/WorkflowView").WorkflowViewDefinition | null}
+ * @returns {import("@smthrs/driver/WorkflowView").WorkflowViewDefinition | null}
  */
 function normalizeWorkflowViewDeclaration(kind, props, workflowKey, entryFile) {
   const title = asString(props.title);
@@ -1061,7 +1057,7 @@ function normalizeWorkflowViewDeclaration(kind, props, workflowKey, entryFile) {
 }
 
 /**
- * @param {import("@smithers-orchestrator/driver/WorkflowView").WorkflowViewDefinition} view
+ * @param {import("@smthrs/driver/WorkflowView").WorkflowViewDefinition} view
  * @param {string} workflowKey
  * @param {string} fallbackPath
  * @returns {ResolvedGatewayUiConfig}
@@ -1091,7 +1087,7 @@ function workflowViewToGatewayUiConfig(view, workflowKey, fallbackPath) {
 }
 
 /**
- * @param {import("@smithers-orchestrator/driver/WorkflowView").WorkflowViewDefinition} view
+ * @param {import("@smthrs/driver/WorkflowView").WorkflowViewDefinition} view
  * @returns {ResolvedWorkflowTuiConfig}
  */
 function workflowViewToTuiConfig(view) {
@@ -1109,7 +1105,7 @@ function workflowViewToTuiConfig(view) {
  * @param {string} workflowKey
  * @param {SmithersWorkflow} workflow
  * @param {string | undefined} entryFile
- * @returns {{ ui?: import("@smithers-orchestrator/driver/WorkflowView").WorkflowViewDefinition; tui?: import("@smithers-orchestrator/driver/WorkflowView").WorkflowViewDefinition }}
+ * @returns {{ ui?: import("@smthrs/driver/WorkflowView").WorkflowViewDefinition; tui?: import("@smthrs/driver/WorkflowView").WorkflowViewDefinition }}
  */
 function discoverWorkflowViews(workflowKey, workflow, entryFile) {
   const views = {};
@@ -1123,9 +1119,7 @@ function discoverWorkflowViews(workflowKey, workflow, entryFile) {
       auth: null,
       outputs: {},
       zodToKeyName: workflow.zodToKeyName,
-      runtimeConfig: {
-        ...(entryFile ? { workflowPath: entryFile, baseRootDir: dirname(entryFile) } : {}),
-      },
+      runtimeConfig: entryFile ? { workflowPath: entryFile, baseRootDir: dirname(entryFile) } : {},
     });
     root = workflow.build(ctx);
   } catch (error) {
@@ -1424,7 +1418,7 @@ function responseError(id, code, message, details = {}) {
 /**
  * @param {string} id
  * @param {string} method
- * @param {{ requiredScopeForMethod?: (method: string) => import("@smithers-orchestrator/gateway/auth/scopes").GatewayScope | undefined }} [registry]
+ * @param {{ requiredScopeForMethod?: (method: string) => import("@smthrs/gateway/auth/scopes").GatewayScope | undefined }} [registry]
  * @returns {ResponseFrame}
  */
 function responseForbidden(id, method, registry) {
@@ -1670,8 +1664,8 @@ function eventBrowserSessionId(event, payload) {
 }
 /**
  * @param {string} method
- * @param {{ requiredScopeForMethod?: (method: string) => import("@smithers-orchestrator/gateway/auth/scopes").GatewayScope | undefined }} [registry]
- * @returns {import("@smithers-orchestrator/gateway/auth/scopes").GatewayScope}
+ * @param {{ requiredScopeForMethod?: (method: string) => import("@smthrs/gateway/auth/scopes").GatewayScope | undefined }} [registry]
+ * @returns {import("@smthrs/gateway/auth/scopes").GatewayScope}
  */
 function requiredScopeForMethod(method, registry) {
   if (
@@ -1703,7 +1697,7 @@ function requiredScopeForMethod(method, registry) {
 /**
  * @param {string[]} scopes
  * @param {string} method
- * @param {{ requiredScopeForMethod?: (method: string) => import("@smithers-orchestrator/gateway/auth/scopes").GatewayScope | undefined }} [registry]
+ * @param {{ requiredScopeForMethod?: (method: string) => import("@smthrs/gateway/auth/scopes").GatewayScope | undefined }} [registry]
  * @returns {boolean}
  */
 function hasScope(scopes, method, registry) {
@@ -1904,6 +1898,25 @@ function parseQuotaResetAtMs(errorJson) {
     return Number.isFinite(resetAtMs) ? resetAtMs : null;
   } catch {
     return null;
+  }
+}
+/**
+ * True when the run was parked by a hijack hand-off: the engine aborts the
+ * live task for `smithers hijack` and finalizes the run as `cancelled` with
+ * `errorJson.code === "RUN_HIJACKED"`. That is not a real terminal state —
+ * resuming ends the hijack and hands the task back to the workflow — so
+ * terminal-status gates (resumeRun, auto-resume) must let it through.
+ * @param {{ status?: unknown; errorJson?: unknown } | null | undefined} run
+ * @returns {boolean}
+ */
+function isHijackParkedRun(run) {
+  if (!run || run.status !== "cancelled" || typeof run.errorJson !== "string" || !run.errorJson) {
+    return false;
+  }
+  try {
+    return asObject(JSON.parse(run.errorJson))?.code === "RUN_HIJACKED";
+  } catch {
+    return false;
   }
 }
 /**
@@ -2568,6 +2581,26 @@ export class Gateway {
   workflowRegistryReady = null;
   /** @type {Map<string, Promise<void>>} */
   workflowRegistryRefreshes = new Map();
+  /**
+   * Background <UI>/<TUI> discovery. register() never renders a workflow
+   * synchronously: renders are queued and drained one per macrotask so a slow
+   * or throwing workflow can neither block startup nor starve /health.
+   * @type {Array<{ key: string, workflow: SmithersWorkflow, entryFile: string | undefined, resolve: () => void }>}
+   */
+  viewDiscoveryQueue = [];
+  /** @type {Map<string, { workflow: SmithersWorkflow, promise: Promise<void> }>} */
+  viewDiscoveryPending = new Map();
+  /**
+   * Keys whose discovery render already ran (success OR failure), mapped to
+   * the workflow identity that was rendered. A render runs at most once per
+   * registration identity — a throwing render is skipped after one warn and
+   * never retried in a hot loop.
+   * @type {Map<string, SmithersWorkflow>}
+   */
+  viewDiscoveryCompleted = new Map();
+  viewDiscoveryScheduled = false;
+  /** Instance copy so tests can shrink the slow-render warn budget. */
+  viewDiscoverySlowMs = WORKFLOW_VIEW_DISCOVERY_SLOW_MS;
   /** @type {{ reports: UsageReport[], cachedAtMs: number } | null} */
   usageReportsCache = null;
   /** @type {Promise<UsageReport[]> | null} */
@@ -2751,8 +2784,11 @@ export class Gateway {
       typeof options.oneshotMonitor.restart === "function"
         ? options.oneshotMonitor
         : null;
-    /** @type {Set<{ dispose: () => void }>} */
+    /** @type {Set<{ runId?: string; dispose: () => void }>} */
     this.ptySessions = new Set();
+    // Set by close() so PTY teardown during shutdown does not spawn fresh
+    // resume engines inside a dying process.
+    this.gatewayClosing = false;
     this.ui = resolveGatewayUiConfig(options.ui, "/");
     this.operatorUi = resolveDefaultOperatorUiConfig(options.operatorUi);
     this.uiApp = createGatewayUiApp({
@@ -2799,14 +2835,16 @@ export class Gateway {
   }
   /** Wait for a host-owned registry load before returning aggregate data. */
   async awaitWorkflowRegistryReady() {
-    if (!this.workflowRegistryReady) {
-      return;
+    if (this.workflowRegistryReady) {
+      const { workflowsLoaded, workflowsTotal } = this.workflowRegistryProgress();
+      if (workflowsLoaded < workflowsTotal) {
+        await this.workflowRegistryReady();
+      }
     }
-    const { workflowsLoaded, workflowsTotal } = this.workflowRegistryProgress();
-    if (workflowsLoaded >= workflowsTotal) {
-      return;
-    }
-    await this.workflowRegistryReady();
+    // Workflow modules being registered is not the same as their <UI>/<TUI>
+    // views being discovered: drain the background render queue (one render
+    // per macrotask) so aggregate listings report accurate hasUi flags.
+    await this.awaitAllWorkflowViewDiscovery();
   }
   /**
    * Give the host one chance to register an unknown workflow. Concurrent
@@ -2976,11 +3014,12 @@ export class Gateway {
   /**
    * @param {{ config: GatewayUiMount }} match
    */
-  renderUiIndex(match) {
+  async renderUiIndex(match) {
     const mount = match.config;
     const title = mount.config.title ?? (mount.workflowKey ? `${mount.workflowKey} | Smithers` : "Smithers");
     const boot = this.uiBootConfig(mount);
     const assetSrc = joinUiPath(mount.config.path, `${GATEWAY_UI_ASSET_PREFIX}/client.js`);
+    const workflowUiThemeCss = await loadWorkflowUiThemeCss();
     // The style-guide token block ships in the host page itself so the
     // document is themed (light AND dark, `color-scheme` included) before —
     // and independently of — the client bundle: no white flash for dark
@@ -3012,7 +3051,7 @@ export class Gateway {
     }
     if (match.config.config.builtin === "operator") {
       return {
-        body: renderDefaultConsoleClient(),
+        body: await renderDefaultConsoleClient(),
         contentType: "text/javascript; charset=utf-8",
       };
     }
@@ -3117,7 +3156,20 @@ export class Gateway {
     if (requestedWorkflowKey && !this.workflows.has(requestedWorkflowKey)) {
       await this.refreshWorkflowRegistryOnMiss(requestedWorkflowKey);
     }
-    const uiMatch = this.resolveUiMatch(url.pathname);
+    if (requestedWorkflowKey && this.workflows.has(requestedWorkflowKey)) {
+      // A UI request wants this workflow's discovered <UI>/<TUI> view now —
+      // render it on demand instead of waiting for the whole pack to drain.
+      await this.awaitWorkflowViewDiscovery(requestedWorkflowKey);
+    }
+    let uiMatch = this.resolveUiMatch(url.pathname);
+    if (!uiMatch && (this.viewDiscoveryQueue.length > 0 || this.viewDiscoveryPending.size > 0)) {
+      // A `<UI path="/custom">` mounts outside `/workflows/<key>`, so the key
+      // cannot be read from the path: an unmatched request drains the pending
+      // discovery renders once before it 404s. Every render runs at most once,
+      // so this cannot become a hot loop.
+      await this.awaitAllWorkflowViewDiscovery();
+      uiMatch = this.resolveUiMatch(url.pathname);
+    }
     if (!uiMatch) {
       const declaredMount = requestedWorkflowKey ? this.workflowUiMountRedirect(requestedWorkflowKey, url) : null;
       if (declaredMount) {
@@ -3155,12 +3207,13 @@ export class Gateway {
    * @param {IncomingMessage} req
    * @param {ServerResponse} res
    */
-  handleRootRequest(req, res) {
+  async handleRootRequest(req, res) {
     const mounts = this.getUiMounts();
     const operatorMount = mounts.find((mount) => mount.kind === "operator");
     if (operatorMount) {
       return sendRedirect(res, operatorMount.config.path);
     }
+    const workflowUiThemeCss = await loadWorkflowUiThemeCss();
     const uiMounts = mounts.filter((mount) => mount.config.path !== "/");
     const links = [
       { href: "/health", label: "Health" },
@@ -4662,7 +4715,7 @@ a { color: var(--brand); }</style>
     // returned ascending). JS-side history paging could not stay
     // interactive on long runs, and its bounded recency window missed OLD
     // nodes' events entirely — transcripts for early nodes never loaded.
-    if (!/^[a-zA-Z0-9:_.\-]{1,160}$/.test(nodeId)) {
+    if (!/^[a-zA-Z0-9:_.-]{1,160}$/.test(nodeId)) {
       throw new SmithersError("INVALID_INPUT", "nodeId contains unsupported characters");
     }
     const matches = await resolved.adapter.listNodeEvents(runId, nodeId, {
@@ -5130,23 +5183,23 @@ a { color: var(--brand); }</style>
    */
   register(key, workflow, options) {
     ensureSmithersTables(workflow.db);
-    const embeddedViews = discoverWorkflowViews(key, workflow, options?.entryFile);
-    const ui =
-      resolveGatewayUiConfig(options?.ui, `/workflows/${encodeURIComponent(key)}`) ??
-      (embeddedViews.ui
-        ? workflowViewToGatewayUiConfig(embeddedViews.ui, key, `/workflows/${encodeURIComponent(key)}`)
-        : null);
-    const tui = embeddedViews.tui ? workflowViewToTuiConfig(embeddedViews.tui) : null;
+    // <UI>/<TUI> discovery renders the workflow tree, which is arbitrary
+    // workspace code: with a large pack it pegged the event loop for minutes
+    // before /health answered. Register immediately with the explicit UI
+    // config and render lazily in the background (or on first request for
+    // this workflow's UI) instead.
+    const ui = resolveGatewayUiConfig(options?.ui, `/workflows/${encodeURIComponent(key)}`);
     this.workflows.set(key, {
       key,
       workflow,
       schedule: options?.schedule,
       webhook: options?.webhook,
       ui,
-      tui,
+      tui: null,
       system: Boolean(options?.system),
       entryFile: options?.entryFile,
     });
+    this.enqueueWorkflowViewDiscovery(key, workflow, options?.entryFile);
     void this.queueApiInvalidation(["workflows"]);
     // Startup recovery: any audit row left in `in_progress` from a prior
     // crash is flipped to `partial` and the associated run is flagged as
@@ -5165,6 +5218,155 @@ a { color: var(--brand); }</style>
       );
     });
     return this;
+  }
+  /**
+   * Queue a background <UI>/<TUI> discovery render for a registered workflow.
+   * At most one render ever runs per registration identity: a workflow whose
+   * render throws is skipped after one warn and never retried.
+   * @param {string} key
+   * @param {SmithersWorkflow} workflow
+   * @param {string | undefined} entryFile
+   */
+  enqueueWorkflowViewDiscovery(key, workflow, entryFile) {
+    if (this.viewDiscoveryCompleted.get(key) === workflow) {
+      return;
+    }
+    const pending = this.viewDiscoveryPending.get(key);
+    if (pending && pending.workflow === workflow) {
+      return;
+    }
+    if (pending) {
+      // Re-registered under a different workflow identity before its render
+      // ran: drop the superseded queue item.
+      const index = this.viewDiscoveryQueue.findIndex((item) => item.key === key);
+      if (index >= 0) {
+        const [superseded] = this.viewDiscoveryQueue.splice(index, 1);
+        superseded.resolve();
+      }
+      this.viewDiscoveryPending.delete(key);
+    }
+    /** @type {() => void} */
+    let resolvePromise = () => {};
+    const promise = new Promise((resolve) => {
+      resolvePromise = resolve;
+    });
+    this.viewDiscoveryPending.set(key, { workflow, promise });
+    this.viewDiscoveryQueue.push({ key, workflow, entryFile, resolve: resolvePromise });
+    this.scheduleWorkflowViewDiscoveryDrain();
+  }
+  scheduleWorkflowViewDiscoveryDrain() {
+    if (this.viewDiscoveryScheduled) {
+      return;
+    }
+    this.viewDiscoveryScheduled = true;
+    // One render per macrotask: the event loop (and /health) always gets a
+    // slice between workflows, no matter how large the pack.
+    setImmediate(() => {
+      this.viewDiscoveryScheduled = false;
+      this.drainWorkflowViewDiscovery();
+    });
+  }
+  drainWorkflowViewDiscovery() {
+    const item = this.viewDiscoveryQueue.shift();
+    if (!item) {
+      return;
+    }
+    this.runWorkflowViewDiscovery(item);
+    if (this.viewDiscoveryQueue.length > 0) {
+      this.scheduleWorkflowViewDiscoveryDrain();
+    }
+  }
+  /**
+   * @param {{ key: string; workflow: SmithersWorkflow; entryFile: string | undefined; resolve: () => void }} item
+   */
+  runWorkflowViewDiscovery(item) {
+    const { key, workflow, entryFile } = item;
+    try {
+      if (this.viewDiscoveryCompleted.get(key) === workflow) {
+        return;
+      }
+      this.viewDiscoveryCompleted.set(key, workflow);
+      const startedAtMs = nowMs();
+      let embeddedViews;
+      try {
+        embeddedViews = discoverWorkflowViews(key, workflow, entryFile);
+      } catch (error) {
+        // A throwing render (including an invalid <UI> declaration surfaced by
+        // the visitor) skips this workflow with one warn — never a hot loop.
+        emitGatewayLog(
+          "warning",
+          "workflow UI discovery failed",
+          {
+            workflow: key,
+            ...gatewayErrorAnnotations(error),
+          },
+          "gateway:workflow-ui-discovery",
+        );
+        return;
+      }
+      const elapsedMs = nowMs() - startedAtMs;
+      if (elapsedMs > this.viewDiscoverySlowMs) {
+        emitGatewayLog(
+          "warning",
+          "workflow UI discovery render exceeded time budget",
+          { workflow: key, elapsedMs, budgetMs: this.viewDiscoverySlowMs },
+          "gateway:workflow-ui-discovery",
+        );
+      }
+      const entry = this.workflows.get(key);
+      if (!entry || entry.workflow !== workflow) {
+        return;
+      }
+      let changed = false;
+      if (!entry.ui && embeddedViews.ui) {
+        entry.ui = workflowViewToGatewayUiConfig(embeddedViews.ui, key, `/workflows/${encodeURIComponent(key)}`);
+        changed = true;
+      }
+      if (!entry.tui && embeddedViews.tui) {
+        entry.tui = workflowViewToTuiConfig(embeddedViews.tui);
+        changed = true;
+      }
+      if (changed) {
+        void this.queueApiInvalidation(["workflows"]);
+      }
+    } finally {
+      const pending = this.viewDiscoveryPending.get(key);
+      if (pending && pending.workflow === workflow) {
+        this.viewDiscoveryPending.delete(key);
+      }
+      item.resolve();
+    }
+  }
+  /**
+   * Wait for a workflow's discovery render, pulling it out of the background
+   * queue and rendering it now when a request needs its view immediately.
+   * @param {string} key
+   */
+  async awaitWorkflowViewDiscovery(key) {
+    const index = this.viewDiscoveryQueue.findIndex((item) => item.key === key);
+    if (index >= 0) {
+      const [item] = this.viewDiscoveryQueue.splice(index, 1);
+      this.runWorkflowViewDiscovery(item);
+      return;
+    }
+    await this.viewDiscoveryPending.get(key)?.promise;
+  }
+  /** Wait for every queued discovery render, drained one per macrotask. */
+  async awaitAllWorkflowViewDiscovery() {
+    while (this.viewDiscoveryPending.size > 0 || this.viewDiscoveryQueue.length > 0) {
+      const pending = [...this.viewDiscoveryPending.values()].map((entry) => entry.promise);
+      if (pending.length === 0) {
+        break;
+      }
+      await Promise.all(pending);
+    }
+  }
+  /** Settle every queued discovery without rendering (gateway shutdown). */
+  cancelWorkflowViewDiscovery() {
+    for (const item of this.viewDiscoveryQueue.splice(0)) {
+      item.resolve();
+    }
+    this.viewDiscoveryPending.clear();
   }
   /**
    * Gate a `/v1/pty/hijack` websocket upgrade: authenticate the request (same
@@ -5281,6 +5483,7 @@ a { color: var(--brand); }</style>
       return;
     }
     const session = {
+      runId: params.runId,
       dispose: () => {
         try {
           proc.kill();
@@ -5310,6 +5513,14 @@ a { color: var(--brand); }</style>
           ws.close(1000, "process exited");
         } catch {}
       }
+      // A hijack CLI that exits non-zero never reached its own
+      // return-of-control branch (clean exit 0 relaunches the run itself) —
+      // e.g. the operator closed the monitor tab and teardown killed the
+      // process mid-session. The run is left parked as cancelled/RUN_HIJACKED;
+      // hand it back to the workflow so the run survives monitor disconnects.
+      if (code !== 0) {
+        void this.resumeRunAfterHijackHalt(params.runId);
+      }
     });
     ws.on("message", (data, isBinary) => {
       if (isBinary) {
@@ -5338,6 +5549,47 @@ a { color: var(--brand); }</style>
     };
     ws.on("close", teardown);
     ws.on("error", teardown);
+  }
+  /**
+   * Best-effort recovery after a PTY hijack process died without cleanly
+   * returning control (tab closed, socket dropped, launcher crashed). Only
+   * acts when the run is still parked by the hijack; a run the operator
+   * already resumed/cancelled is left alone.
+   * @param {string} runId
+   */
+  async resumeRunAfterHijackHalt(runId) {
+    if (this.gatewayClosing) {
+      return;
+    }
+    try {
+      const resolved = await this.resolveRun(runId);
+      if (!resolved) {
+        return;
+      }
+      const run = await resolved.adapter.getRun(runId);
+      if (!isHijackParkedRun(run)) {
+        return;
+      }
+      emitGatewayLog(
+        "info",
+        "Gateway resuming hijack-parked run after PTY session halted",
+        { runId },
+        "gateway:pty-hijack",
+      );
+      await this.resumeRunIfNeeded(runId, resolved.workflowKey, resolved.adapter, {
+        triggeredBy: "gateway-pty-hijack",
+        scopes: [],
+        role: "operator",
+        tokenId: null,
+      });
+    } catch (error) {
+      emitGatewayLog(
+        "warn",
+        "Gateway failed to resume hijack-parked run",
+        { runId, error: error instanceof Error ? error.message : String(error) },
+        "gateway:pty-hijack",
+      );
+    }
   }
   /**
    * @param {{ port?: number; host?: string; path?: string }} [options]
@@ -5561,7 +5813,10 @@ a { color: var(--brand); }</style>
     return server;
   }
   async close() {
+    this.gatewayClosing = true;
     this.stopIdleMonitor();
+    // A closing gateway never renders queued workflow views.
+    this.cancelWorkflowViewDiscovery();
     for (const session of this.ptySessions) {
       session.dispose();
     }
@@ -6194,7 +6449,7 @@ a { color: var(--brand); }</style>
    * @param {Record<string, unknown>} input
    * @param {RunStartAuthContext} auth
    * @param {string} [runId]
-   * @param {{ resume?: boolean; maxConcurrency?: number; allowNetwork?: boolean; maxOutputBytes?: number; toolTimeoutMs?: number; startedBy?: import("@smithers-orchestrator/driver/RunStartedBy").RunStartedBy }} [options]
+   * @param {{ resume?: boolean; maxConcurrency?: number; allowNetwork?: boolean; maxOutputBytes?: number; toolTimeoutMs?: number; startedBy?: import("@smthrs/driver/RunStartedBy").RunStartedBy }} [options]
    */
   async startRun(workflowKey, input, auth, runId = crypto.randomUUID(), options) {
     const entry = this.workflows.get(workflowKey);
@@ -6403,7 +6658,11 @@ a { color: var(--brand); }</style>
         if (!run) {
           return;
         }
-        if (run.status === "finished" || run.status === "failed" || run.status === "cancelled") {
+        if (
+          run.status === "finished" ||
+          run.status === "failed" ||
+          (run.status === "cancelled" && !isHijackParkedRun(run))
+        ) {
           return;
         }
         await this.startRun(workflowKey, {}, auth, runId, { resume: true });
@@ -7804,7 +8063,7 @@ a { color: var(--brand); }</style>
    * `smithers agents` CLI manages (resolved via `accountsRoot(process.env)`,
    * honoring `SMITHERS_HOME`/`HOME`) — NOT a per-workspace DB table. So, like
    * `listPromptsFromDisk` but at the user root, this reads the file directly
-   * through the `@smithers-orchestrator/accounts` package's `listAccounts()` and
+   * through the `@smthrs/accounts` package's `listAccounts()` and
    * maps each entry onto the wire `GatewayAccount` shape.
    *
    * SECRET REDACTION: an account may carry a raw `apiKey` (a plaintext
@@ -8120,7 +8379,7 @@ a { color: var(--brand); }</style>
    * distinct adapter (so a doc in any shared DB surfaces), but a write has to
    * pick one; picking the first registered keeps create→list→update→delete
    * consistent. Returns `null` only when no workflow is registered yet.
-   * @returns {import("@smithers-orchestrator/db/adapter").SmithersDb | null}
+   * @returns {import("@smthrs/db/adapter").SmithersDb | null}
    */
   primaryDocsAdapter() {
     const first = this.workflows.values().next().value;
@@ -8638,6 +8897,35 @@ a { color: var(--brand); }</style>
             event: event.event,
           },
         };
+      case "ToolCallStarted":
+        return {
+          event: "tool.call.started",
+          payload: {
+            runId: event.runId,
+            nodeId: event.nodeId,
+            iteration: event.iteration,
+            attempt: event.attempt,
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            seq: event.seq,
+            input: event.input,
+          },
+        };
+      case "ToolCallFinished":
+        return {
+          event: "tool.call.finished",
+          payload: {
+            runId: event.runId,
+            nodeId: event.nodeId,
+            iteration: event.iteration,
+            attempt: event.attempt,
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            seq: event.seq,
+            status: event.status,
+            output: event.output,
+          },
+        };
       case "AgentSessionEvent":
         return {
           event: "agent.session",
@@ -8916,8 +9204,22 @@ a { color: var(--brand); }</style>
         if (!run) {
           return responseError(frame.id, "NOT_FOUND", `Run not found: ${runId}`);
         }
-        if (run.status === "finished" || run.status === "failed" || run.status === "cancelled") {
+        if (
+          run.status === "finished" ||
+          run.status === "failed" ||
+          (run.status === "cancelled" && !isHijackParkedRun(run))
+        ) {
           return responseOk(frame.id, { runId, status: "already_terminal" });
+        }
+        if (isHijackParkedRun(run)) {
+          // Resuming a hijack-parked run ends the hijack: kill any live PTY
+          // hijack session for the run, then hand the task back to the
+          // workflow to continue autonomously.
+          for (const session of this.ptySessions) {
+            if (session.runId === runId) {
+              session.dispose();
+            }
+          }
         }
         await this.resumeRunIfNeeded(runId, resolved.workflowKey, resolved.adapter, {
           triggeredBy: connection.userId ?? "gateway",

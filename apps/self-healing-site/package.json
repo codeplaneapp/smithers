@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/self-healing-site",
+  "name": "@smthrs/self-healing-site",
   "version": "0.0.1",
   "private": true,
   "description": "Cloudflare Worker deployment for the self-healing agent runs marketing site",

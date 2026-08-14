@@ -120,7 +120,7 @@ function seedWorkspace(artifactSource: string): { dir: string; env: NodeJS.Proce
   const dir = mkdtempSync(join(tmpdir(), "ui-functional-"));
   writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: "ui-eval-fixture-ws", private: true, type: "module" }, null, 2)}\n`);
   const nm = join(dir, "node_modules");
-  link(join(REPO_ROOT, "packages/smithers"), join(nm, "smithers-orchestrator"));
+  link(join(REPO_ROOT, "packages/smithers"), join(nm, "smthrs"));
   for (const d of ["zod", "react", "react-dom", "typescript", "@types", "@mdx-js"]) {
     link(join(ROOT_NM, d), join(nm, d));
   }
@@ -131,7 +131,7 @@ function seedWorkspace(artifactSource: string): { dir: string; env: NodeJS.Proce
   writeFileSync(
     join(dir, ".smithers/gateway.ts"),
     [
-      'import { Gateway, mdxPlugin } from "smithers-orchestrator";',
+      'import { Gateway, mdxPlugin } from "smthrs";',
       'import { dirname, resolve } from "node:path";',
       'import { fileURLToPath } from "node:url";',
       "mdxPlugin();",

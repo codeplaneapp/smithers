@@ -6,7 +6,7 @@ import {
   TracingService,
   TracingServiceLive,
   withCorrelationContext,
-} from "@smithers-orchestrator/observability";
+} from "@smthrs/observability";
 import { annotateSmithersTrace, makeSmithersSpanAttributes, withSmithersSpan } from "../src/_coreTracing.js";
 
 function plainAnnotations(annotations) {

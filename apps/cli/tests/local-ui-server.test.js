@@ -79,24 +79,24 @@ describe("bundleIsFresh", () => {
     await mkdir(join(appDir, "src"), { recursive: true });
     await mkdir(distDir);
     await mkdir(join(dependencyDir, "src"), { recursive: true });
-    await mkdir(join(appDir, "node_modules", "@smithers-orchestrator"), { recursive: true });
+    await mkdir(join(appDir, "node_modules", "@smthrs"), { recursive: true });
     await writeFile(join(appDir, "src", "main.tsx"), "");
     await writeFile(
       join(appDir, "package.json"),
       JSON.stringify({
-        dependencies: { "@smithers-orchestrator/gateway-ui": "workspace:*" },
+        dependencies: { "@smthrs/gateway-ui": "workspace:*" },
       }),
     );
     await writeFile(
       join(dependencyDir, "package.json"),
       JSON.stringify({
-        name: "@smithers-orchestrator/gateway-ui",
+        name: "@smthrs/gateway-ui",
         exports: { ".": "./src/index.ts" },
       }),
     );
     const dependencySource = join(dependencyDir, "src", "index.ts");
     await writeFile(dependencySource, "");
-    await symlink(dependencyDir, join(appDir, "node_modules", "@smithers-orchestrator", "gateway-ui"));
+    await symlink(dependencyDir, join(appDir, "node_modules", "@smthrs", "gateway-ui"));
     const bundle = join(distDir, "index.html");
     await writeFile(bundle, "");
 
@@ -123,20 +123,17 @@ describe("bundleIsFresh", () => {
     await mkdir(join(appDir, "src"), { recursive: true });
     await mkdir(distDir);
     await mkdir(join(dependencyDir, "src"), { recursive: true });
-    await mkdir(join(appDir, "node_modules", "@smithers-orchestrator"), { recursive: true });
+    await mkdir(join(appDir, "node_modules", "@smthrs"), { recursive: true });
     await writeFile(join(appDir, "src", "main.tsx"), "");
-    await writeFile(
-      join(appDir, "package.json"),
-      JSON.stringify({ dependencies: { "@smithers-orchestrator/ui": "workspace:*" } }),
-    );
+    await writeFile(join(appDir, "package.json"), JSON.stringify({ dependencies: { "@smthrs/ui": "workspace:*" } }));
     await writeFile(
       join(dependencyDir, "package.json"),
       // Only an `import` condition: `require.resolve` cannot reach this entry.
-      JSON.stringify({ name: "@smithers-orchestrator/ui", exports: { ".": { import: "./src/index.ts" } } }),
+      JSON.stringify({ name: "@smthrs/ui", exports: { ".": { import: "./src/index.ts" } } }),
     );
     const dependencySource = join(dependencyDir, "src", "index.ts");
     await writeFile(dependencySource, "");
-    await symlink(dependencyDir, join(appDir, "node_modules", "@smithers-orchestrator", "ui"));
+    await symlink(dependencyDir, join(appDir, "node_modules", "@smthrs", "ui"));
     const bundle = join(distDir, "index.html");
     await writeFile(bundle, "");
 
@@ -165,17 +162,17 @@ describe("bundleIsFresh", () => {
     await mkdir(distDir);
     await mkdir(join(directDir, "src"), { recursive: true });
     await mkdir(join(transitiveDir, "src"), { recursive: true });
-    await mkdir(join(appDir, "node_modules", "@smithers-orchestrator"), { recursive: true });
+    await mkdir(join(appDir, "node_modules", "@smthrs"), { recursive: true });
     await mkdir(join(directDir, "node_modules"), { recursive: true });
     await writeFile(join(appDir, "src", "main.tsx"), "");
     await writeFile(
       join(appDir, "package.json"),
-      JSON.stringify({ dependencies: { "@smithers-orchestrator/gateway-ui": "workspace:*" } }),
+      JSON.stringify({ dependencies: { "@smthrs/gateway-ui": "workspace:*" } }),
     );
     await writeFile(
       join(directDir, "package.json"),
       JSON.stringify({
-        name: "@smithers-orchestrator/gateway-ui",
+        name: "@smthrs/gateway-ui",
         exports: { ".": "./src/index.ts" },
         dependencies: { "workspace-theme": "workspace:*" },
       }),
@@ -188,7 +185,7 @@ describe("bundleIsFresh", () => {
     );
     const transitiveSource = join(transitiveDir, "src", "index.ts");
     await writeFile(transitiveSource, "");
-    await symlink(directDir, join(appDir, "node_modules", "@smithers-orchestrator", "gateway-ui"));
+    await symlink(directDir, join(appDir, "node_modules", "@smthrs", "gateway-ui"));
     await symlink(transitiveDir, join(directDir, "node_modules", "workspace-theme"));
     const bundle = join(distDir, "index.html");
     await writeFile(bundle, "");
@@ -226,7 +223,7 @@ describe("bundleIsFresh", () => {
     await writeFile(join(appDir, "src", "main.tsx"), "");
     await writeFile(
       join(appDir, "package.json"),
-      JSON.stringify({ dependencies: { "@smithers-orchestrator/absent": "workspace:*" } }),
+      JSON.stringify({ dependencies: { "@smthrs/absent": "workspace:*" } }),
     );
     const bundle = join(distDir, "index.html");
     await writeFile(bundle, "");

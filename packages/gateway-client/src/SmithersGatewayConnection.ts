@@ -1,4 +1,4 @@
-import type { GatewayRpcMethod } from "@smithers-orchestrator/protocol/gateway-rpc";
+import type { GatewayRpcMethod } from "@smthrs/protocol/gateway-rpc";
 import { isObject, isGatewayResponseFrame } from "./objectGuards.ts";
 import { GatewayRpcError } from "./GatewayRpcError.ts";
 import type { GatewayEventFrame } from "./GatewayEventFrame.ts";

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { renderWorkflow } from "smithers-orchestrator/testing";
+import { renderWorkflow } from "smthrs/testing";
 import workflow, { INHERITED_MEMORY, INVESTIGATION_MEMORY, RESPONSE_MEMORY } from "../workflows/memory-recall-demo";
 
 const workflowPath = `${import.meta.dir}/../workflows/memory-recall-demo.tsx`;

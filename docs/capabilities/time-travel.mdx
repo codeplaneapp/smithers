@@ -43,26 +43,26 @@ Five operations act on those ledgers. They differ on two axes - *destructive vs.
 | `timetravel` | Yes - cancels later attempts | Resets target node **and dependents** to `pending`, deletes their output rows, truncates frames/snapshots past the attempt, flips the run back to `running` | Yes - `revertToJjPointer` on the attempt's recorded commit | "Redo from this task" on the same run |
 | `revert` | No DB reset at all | Nothing | Yes - worktree back to the attempt's `jj_pointer` | Inspect or salvage filesystem state without touching the run |
 
-Separately, `bunx smithers-orchestrator restore RUN_ID --node NODE_ID [--seq N]` restores a worktree to a *durability* checkpoint - the finer-grained per-tool-call ledger - rather than a per-attempt pointer. Attempt pointers tell you where each task ended; durability checkpoints tell you every step of how it got there.
+Separately, `bunx smthrs restore RUN_ID --node NODE_ID [--seq N]` restores a worktree to a *durability* checkpoint - the finer-grained per-tool-call ledger - rather than a per-attempt pointer. Attempt pointers tell you where each task ended; durability checkpoints tell you every step of how it got there.
 
 ### Forks are real child runs
 
-`forkRunEffect` copies the parent's snapshot at the chosen frame into a **new run** (fresh UUID, frame 0) and records the edge in `_smithers_branches`, all in one transaction. The child carries the parent's outputs as already-satisfied state; only the nodes you `--reset-node` (plus, via `expandResetSet`, what depends on them) re-execute. Input overrides overlay the snapshot's input, so a fork can ask "what if the input had been different." Replay is fork + auto-resume - and if you pass an *edited workflow file*, replay re-blesses the child's workflow hash so the resume guard accepts the very edit you're carrying forward (`replayFromCheckpointEffect.js`). `bunx smithers-orchestrator timeline RUN_ID --tree` renders the whole family: parent frames, fork points, and every child branch, derived purely from snapshot + branch rows.
+`forkRunEffect` copies the parent's snapshot at the chosen frame into a **new run** (fresh UUID, frame 0) and records the edge in `_smithers_branches`, all in one transaction. The child carries the parent's outputs as already-satisfied state; only the nodes you `--reset-node` (plus, via `expandResetSet`, what depends on them) re-execute. Input overrides overlay the snapshot's input, so a fork can ask "what if the input had been different." Replay is fork + auto-resume - and if you pass an *edited workflow file*, replay re-blesses the child's workflow hash so the resume guard accepts the very edit you're carrying forward (`replayFromCheckpointEffect.js`). `bunx smthrs timeline RUN_ID --tree` renders the whole family: parent frames, fork points, and every child branch, derived purely from snapshot + branch rows.
 
 ```bash
 # What happened, and where can I go back to?
-bunx smithers-orchestrator timeline RUN_ID --tree
-bunx smithers-orchestrator snapshots RUN_ID                      # per-tool-call worktree checkpoints
+bunx smthrs timeline RUN_ID --tree
+bunx smthrs snapshots RUN_ID                      # per-tool-call worktree checkpoints
 
 # Branch two experiments off frame 5; parent untouched
-bunx smithers-orchestrator fork workflow.tsx -r RUN_ID -f 5 -n analyze -i '{"model":"opus"}' -l exp-a
-bunx smithers-orchestrator replay workflow.tsx -r RUN_ID -f 5 --restore-vcs        # fork + resume
+bunx smthrs fork workflow.tsx -r RUN_ID -f 5 -n analyze -i '{"model":"opus"}' -l exp-a
+bunx smthrs replay workflow.tsx -r RUN_ID -f 5 --restore-vcs        # fork + resume
 
 # Redo the same run from a bad task (filesystem + DB together), then resume
-bunx smithers-orchestrator timetravel workflow.tsx -r RUN_ID -n plan --resume
+bunx smthrs timetravel workflow.tsx -r RUN_ID -n plan --resume
 
 # Filesystem only - put the worktree back, decide later
-bunx smithers-orchestrator revert workflow.tsx -r RUN_ID -n implement --attempt 1
+bunx smthrs revert workflow.tsx -r RUN_ID -n implement --attempt 1
 ```
 
 ### The side-effect boundary
@@ -70,7 +70,7 @@ bunx smithers-orchestrator revert workflow.tsx -r RUN_ID -n implement --attempt 
 Rolling back a database does not un-send an email. Every destructive operation (`rewind`, `timetravel`, `revert`) runs `guardEffectBoundary` before touching anything: it finds external effects recorded after the target point, executes registered `revert` compensation handlers for them, and **blocks** (`TIME_TRAVEL_SIDE_EFFECT_BLOCKED`) on any `succeeded`/`unknown` effect it cannot compensate - unless you pass `--force`, which records `SideEffectBoundaryCrossed` and marks the run needs-attention. Compensation is something you opt tools into:
 
 ```tsx
-import { defineTool } from "smithers-orchestrator/tools";
+import { defineTool } from "smthrs/tools";
 import { z } from "zod";
 
 const createTicket = defineTool({

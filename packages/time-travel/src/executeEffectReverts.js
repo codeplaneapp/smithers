@@ -1,9 +1,9 @@
 import { Effect } from "effect";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { nowMs } from "@smthrs/scheduler/nowMs";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("@smithers-orchestrator/observability/SmithersEvent").SmithersEvent} SmithersEvent */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/observability/SmithersEvent").SmithersEvent} SmithersEvent */
 /** @typedef {import("./CrossedEffect.ts").CrossedEffect} CrossedEffect */
 /** @typedef {import("./EffectBoundaryReport.ts").EffectBoundaryReport} EffectBoundaryReport */
 /** @typedef {import("./EffectHandlerRegistry.ts").EffectHandlerRegistry} EffectHandlerRegistry */

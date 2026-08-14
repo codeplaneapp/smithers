@@ -1,9 +1,9 @@
-# @smithers-orchestrator/protocol — src
+# @smthrs/protocol — src
 
 Zero-dependency Smithers wire contracts. The public
-`@smithers-orchestrator/protocol/gateway-rpc` subpath is the canonical owner of
+`@smthrs/protocol/gateway-rpc` subpath is the canonical owner of
 the stable v1 Gateway method, request, response, error, event-frame, and
-response-frame types. `@smithers-orchestrator/gateway` consumes those wire
+response-frame types. `@smthrs/gateway` consumes those wire
 shapes and adds runtime schemas, catalog metadata, auth, and compatibility
 exports.
 
@@ -31,5 +31,5 @@ Gotchas:
   `index.d.ts`); `tests/protocol-contracts.test.js` fails on any drift,
   including a reorder.
 - Keep runtime JSON schemas, required scopes, legacy method aliases, and
-  OpenAPI metadata in `@smithers-orchestrator/gateway`. Its `./rpc` entry
+  OpenAPI metadata in `@smthrs/gateway`. Its `./rpc` entry
   re-exports these protocol-owned wire types for compatibility.

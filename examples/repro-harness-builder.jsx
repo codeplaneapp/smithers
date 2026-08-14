@@ -6,11 +6,11 @@
  * Shape: issue reader → environment planner → Docker/code tool executor → repro validator.
  * Use cases: bug triage, pre-fix environment setup, CI reproduction pipelines.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep, write } from "smithers-orchestrator/tools";
+import { read, bash, grep, write } from "smthrs/tools";
 import { z } from "zod";
 import AnalyzePrompt from "./prompts/repro-harness-builder/analyze.mdx";
 import PlanPrompt from "./prompts/repro-harness-builder/plan.mdx";

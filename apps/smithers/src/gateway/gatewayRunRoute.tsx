@@ -1,6 +1,6 @@
 import { createRoute } from "@tanstack/react-router";
-import { useGatewayRun, useGatewayRunEvents, useGatewayRpc } from "@smithers-orchestrator/gateway-react";
-import { EmptyState, Skeleton } from "@smithers-orchestrator/ui";
+import { useGatewayRun, useGatewayRunEvents, useGatewayRpc } from "@smthrs/gateway-react";
+import { EmptyState, Skeleton } from "@smthrs/ui";
 import { rootRoute } from "../app/rootRoute";
 import { TimelineCanvas } from "../timeline/TimelineCanvas";
 import { TicketsCanvas } from "../tickets/TicketsCanvas";

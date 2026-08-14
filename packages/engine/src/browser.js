@@ -1,25 +1,22 @@
 // @smithers-type-exports-begin
-/** @typedef {import("@smithers-orchestrator/driver/RuntimeAdapter").RuntimeAdapter} RuntimeAdapter */
-/** @typedef {import("@smithers-orchestrator/driver/browser-runtime").BrowserRuntimeOptions} BrowserRuntimeOptions */
+/** @typedef {import("@smthrs/driver/RuntimeAdapter").RuntimeAdapter} RuntimeAdapter */
+/** @typedef {import("@smthrs/driver/browser-runtime").BrowserRuntimeOptions} BrowserRuntimeOptions */
 // @smithers-type-exports-end
 
 import React from "react";
 import { Effect } from "effect";
-import { WorkflowDriver } from "@smithers-orchestrator/driver/WorkflowDriver";
-import { createBrowserRuntime as createBrowserRuntimeImpl } from "@smithers-orchestrator/driver/browser-runtime";
-import { makeWorkflowSession } from "@smithers-orchestrator/scheduler";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
-import { extractGraph } from "@smithers-orchestrator/graph/extract";
+import { WorkflowDriver } from "@smthrs/driver/WorkflowDriver";
+import { createBrowserRuntime as createBrowserRuntimeImpl } from "@smthrs/driver/browser-runtime";
+import { makeWorkflowSession } from "@smthrs/scheduler";
+import { SmithersRenderer } from "@smthrs/react-reconciler";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
+import { extractGraph } from "@smthrs/graph/extract";
 
-export {
-  RuntimeCapabilityError,
-  RUNTIME_CAPABILITY_UNAVAILABLE,
-} from "@smithers-orchestrator/driver/RuntimeCapabilityError";
-export { Task } from "@smithers-orchestrator/components/components/Task.browser";
-export { Workflow } from "@smithers-orchestrator/components/components/Workflow";
-export { Sequence } from "@smithers-orchestrator/components/components/Sequence";
-export { Worktree } from "@smithers-orchestrator/components/components/Worktree";
+export { RuntimeCapabilityError, RUNTIME_CAPABILITY_UNAVAILABLE } from "@smthrs/driver/RuntimeCapabilityError";
+export { Task } from "@smthrs/components/components/Task.browser";
+export { Workflow } from "@smthrs/components/components/Workflow";
+export { Sequence } from "@smthrs/components/components/Sequence";
+export { Worktree } from "@smthrs/components/components/Worktree";
 
 /**
  * Build a browser workflow definition from a `(ctx) => ReactNode` builder —
@@ -27,7 +24,7 @@ export { Worktree } from "@smithers-orchestrator/components/components/Worktree"
  * engine, minus the Node-only options (`db`, CLI-agent defaults, ...) that
  * make no sense in a browser.
  * @template Schema
- * @param {(ctx: import("@smithers-orchestrator/driver/SmithersCtx").SmithersCtx<Schema>) => React.ReactNode} build
+ * @param {(ctx: import("@smthrs/driver/SmithersCtx").SmithersCtx<Schema>) => React.ReactNode} build
  * @param {{ zodToKeyName?: Map<unknown, string> }} [opts]
  * @returns {{ build: (ctx: unknown) => React.ReactNode; zodToKeyName?: Map<unknown, string> }}
  */
@@ -37,7 +34,7 @@ export function defineBrowserWorkflow(build, opts = {}) {
 
 /**
  * Build a production browser `RuntimeAdapter` — see `createBrowserRuntime` in
- * `@smithers-orchestrator/driver/browser-runtime` for the full contract.
+ * `@smthrs/driver/browser-runtime` for the full contract.
  * @param {BrowserRuntimeOptions} [options]
  * @returns {RuntimeAdapter}
  */
@@ -59,8 +56,8 @@ export function createBrowserRuntime(options) {
  * }} options
  * @returns {{
  *   runtime: RuntimeAdapter;
- *   run: (runOptions?: { runId?: string; input?: unknown; signal?: AbortSignal }) => Promise<import("@smithers-orchestrator/driver/RunResult").RunResult>;
- *   getRun: (runId: string) => Promise<import("@smithers-orchestrator/driver/RuntimeAdapter").StoredRunState | undefined>;
+ *   run: (runOptions?: { runId?: string; input?: unknown; signal?: AbortSignal }) => Promise<import("@smthrs/driver/RunResult").RunResult>;
+ *   getRun: (runId: string) => Promise<import("@smthrs/driver/RuntimeAdapter").StoredRunState | undefined>;
  *   getOutputs: (runId: string) => Promise<Record<string, unknown[]> | undefined>;
  * }}
  */
@@ -106,7 +103,7 @@ export function createBrowserSmithers(options) {
  * @template Schema
  * @param {{ build: (ctx: unknown) => React.ReactNode; zodToKeyName?: Map<unknown, string> }} workflow
  * @param {{ runId?: string; input?: unknown; signal?: AbortSignal; runtime?: RuntimeAdapter }} [options]
- * @returns {Promise<import("@smithers-orchestrator/driver/RunResult").RunResult>}
+ * @returns {Promise<import("@smthrs/driver/RunResult").RunResult>}
  */
 export async function runBrowserWorkflow(workflow, options = {}) {
   const { runtime, ...runOptions } = options;

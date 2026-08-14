@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 import { resolveSandboxPath, assertPathWithinRoot } from "../src/sandboxPath.js";
 describe("resolveSandboxPath", () => {
-  const root = mkdtempSync(join(tmpdir(), "sandbox-"));
+  const root = makeTempDirPath("sandbox-");
   test("resolves relative path within root", () => {
     const result = resolveSandboxPath(root, "foo/bar.txt");
     expect(result).toBe(join(root, "foo/bar.txt"));
@@ -32,28 +32,28 @@ describe("resolveSandboxPath", () => {
 });
 describe("assertPathWithinRoot", () => {
   test("accepts path within root", async () => {
-    const root = mkdtempSync(join(tmpdir(), "sandbox-"));
+    const root = makeTempDirPath("sandbox-");
     const file = join(root, "test.txt");
     writeFileSync(file, "test");
     await expect(assertPathWithinRoot(root, file)).resolves.toBeUndefined();
   });
   test("rejects symlink escaping root", async () => {
-    const root = mkdtempSync(join(tmpdir(), "sandbox-"));
-    const target = mkdtempSync(join(tmpdir(), "escape-"));
+    const root = makeTempDirPath("sandbox-");
+    const target = makeTempDirPath("escape-");
     writeFileSync(join(target, "secret"), "data");
     const link = join(root, "escape");
     symlinkSync(target, link);
     await expect(assertPathWithinRoot(root, join(link, "secret"))).rejects.toThrow("Path escapes sandbox root");
   });
   test("accepts non-existent path within root (walks parents)", async () => {
-    const root = mkdtempSync(join(tmpdir(), "sandbox-"));
+    const root = makeTempDirPath("sandbox-");
     const nonexistent = join(root, "a", "b", "c.txt");
     await expect(assertPathWithinRoot(root, nonexistent)).resolves.toBeUndefined();
   });
   test("rejects when the root directory itself cannot be realpath'd", async () => {
     // The rootDir does not exist, so realpath(root) fails and the effect
     // surfaces the wrapped "realpath root" error before walking the target.
-    const missingRoot = join(mkdtempSync(join(tmpdir(), "sandbox-")), "does", "not", "exist");
+    const missingRoot = join(makeTempDirPath("sandbox-"), "does", "not", "exist");
     await expect(assertPathWithinRoot(missingRoot, join(missingRoot, "child"))).rejects.toThrow(
       /realpath root|ENOENT/i,
     );
@@ -62,7 +62,7 @@ describe("assertPathWithinRoot", () => {
     if (process.platform === "win32") {
       return;
     }
-    const root = mkdtempSync(join(tmpdir(), "sandbox-"));
+    const root = makeTempDirPath("sandbox-");
     const locked = join(root, "locked");
     mkdirSync(locked);
     chmodSync(locked, 0o000);

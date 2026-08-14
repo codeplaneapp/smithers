@@ -2,7 +2,7 @@
 // Plugin launcher for the Smithers CLI.
 //
 // Config files (`.mcp.json`, `monitors/monitors.json`) can only name a static
-// command, so they name this script instead of `bunx smithers-orchestrator`.
+// command, so they name this script instead of `bunx smthrs`.
 // It forwards every argument, inherits stdio byte-for-byte (the MCP server
 // speaks JSON-RPC over stdin/stdout, so nothing may be written here), and
 // propagates the child's exit code or signal.

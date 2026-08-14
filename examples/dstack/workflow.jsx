@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * Smithers workflow that consumes a Kimi K2 endpoint hosted on GCP via dstack.
  *
@@ -10,7 +10,7 @@
  *   KIMI_BASE_URL  — e.g. https://kimi-k2.<gateway>.example.com/v1
  *   KIMI_API_KEY   — dstack user token
  */
-import { Sequence, Task, Workflow } from "smithers-orchestrator";
+import { Sequence, Task, Workflow } from "smthrs";
 import { ToolLoopAgent as Agent } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { z } from "zod";

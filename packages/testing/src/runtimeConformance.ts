@@ -1,7 +1,4 @@
-import {
-  RuntimeCapabilityError,
-  RUNTIME_CAPABILITY_UNAVAILABLE,
-} from "@smithers-orchestrator/driver/RuntimeCapabilityError";
+import { RuntimeCapabilityError, RUNTIME_CAPABILITY_UNAVAILABLE } from "@smthrs/driver/RuntimeCapabilityError";
 
 export type RuntimeConformanceResult = {
   result: { runId: string; status: string; output?: unknown };

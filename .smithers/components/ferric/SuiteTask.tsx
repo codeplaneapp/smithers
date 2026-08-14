@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { Task, outputs } from "./ferricSmithers";
 import { assertNotInfra, sh } from "./ferricShell";
 

@@ -25,7 +25,7 @@ Local workflows directory: {props.workflowsDir}
 The docs are progressively disclosed as `llms-*.txt` fragments. Load only what
 this workflow needs, not the whole bundle.
 
-- `bunx smithers-orchestrator docs` prints the concise `llms.txt` index.
+- `bunx smthrs docs` prints the concise `llms.txt` index.
 - Then pull the fragments that match this workflow's shape:
   `llms-core.txt` (runtime, JSX surface, CLI, components, recipes) is almost
   always relevant; add `llms-memory.txt`, `llms-openapi.txt`,
@@ -34,11 +34,11 @@ this workflow needs, not the whole bundle.
 - Because every new workflow ships a custom UI, also skim the UI material: the
   component catalogs (`smithers.sh/reference/gateway-ui` for the run widgets,
   `smithers.sh/reference/ui` for the primitives), the
-  `smithers-orchestrator/gateway-react` hook docs, and 1-2 existing UIs in
+  `smthrs/gateway-react` hook docs, and 1-2 existing UIs in
   `.smithers/ui/` (e.g. `.smithers/ui/vcs.tsx`,
   `.smithers/ui/create-workflow.tsx`) so the design step knows which shipped
   components to compose instead of hand-rolling markup.
-- `bunx smithers-orchestrator ask "<focused question>"` for anything specific
+- `bunx smthrs ask "<focused question>"` for anything specific
   (e.g. "how do I add a human approval gate?", "how does Ralph decide to stop?").
 
 Record each fragment you pulled and why in `docsFragments`.
@@ -70,7 +70,7 @@ their agent dirs.
 - Decide which skills this workflow's tasks need given its domain (e.g. a deploy
   workflow needs infra/k8s skills; a docs workflow needs a docs skill; almost
   any authoring/orchestration workflow benefits from the `smithers` skill itself).
-- Install the missing ones with `bunx smithers-orchestrator skills add <name>`
+- Install the missing ones with `bunx smthrs skills add <name>`
   (this syncs them into the agent skill dirs). Mark those `installed`.
 - If a needed skill genuinely does not exist yet, mark it `recommended` and say
   what it should cover; the design step can note it as a follow-up.

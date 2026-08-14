@@ -1,9 +1,9 @@
 import { HttpRunner } from "effect/unstable/cluster";
 import { mkdir, cp, rm } from "node:fs/promises";
 import { Effect, Layer } from "effect";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { spawnCaptureEffect } from "@smithers-orchestrator/driver/child-process";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { spawnCaptureEffect } from "@smthrs/driver/child-process";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
 import { SandboxEntityExecutor } from "./sandbox-entity.js";
 import { dockerArgs, makeBaseSandboxHandle, sandboxRunnerEnv, spawnSandboxCommand } from "./process-runner.js";
 /** @type {Layer.Layer<SandboxEntityExecutor, never, never>} */

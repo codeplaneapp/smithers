@@ -15,7 +15,7 @@ import {
 } from "../src/modes/treeUtils.ts";
 import { routeApprovalKey } from "../src/modes/approvalUtils.ts";
 import { deriveOutputText, TUI_OUTPUT_PREVIEW_CHARS, TUI_OUTPUT_TRUNCATION_MARKER } from "../src/modes/TreeMode.tsx";
-import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import type { GatewayRunNode } from "@smthrs/gateway-client";
 
 function node(id: string, overrides: Partial<GatewayRunNode> = {}): GatewayRunNode {
   return { id, name: id, kind: "task", status: "done", ...overrides };

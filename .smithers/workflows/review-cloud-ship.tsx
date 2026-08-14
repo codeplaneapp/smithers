@@ -6,13 +6,13 @@
 // the zero-secret composite GitHub Action, verification gates, an approval
 // gate, deploy to review.jjhub.tech, dogfood registration, and a live
 // dogfood PR driven through the new action.
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
-import { Approval, Loop, Sequence, approvalDecisionSchema, createSmithers } from "smithers-orchestrator";
+import { Approval, Loop, Sequence, approvalDecisionSchema, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 
@@ -132,7 +132,7 @@ ${sharedRules}
 Scope:
 1. apps/review/action/action.yml — composite action. Inputs: service-url (default https://review.jjhub.tech). Steps: setup bun (oven-sh/setup-bun@v2.2.0, bun 1.3.13) and pnpm/node like .github/workflows/pr-review.yml does, pnpm install --frozen-lockfile at the action's repo root (github.action_path/../../..), install @openai/codex when CODEX_AUTH_JSON is present and otherwise install @anthropic-ai/claude-code for the unavailable-Codex fallback, then bun run the gate/session/review driver scripts below. The user's repo is already checked out at the workflow's workspace; the smithers checkout lives at the action path.
 2. apps/review/action/src/ — the action logic as bun-executable TypeScript, one export per file, unit-testable: gateEvent.ts (decide run/skip from the GitHub event payload: pull_request non-draft same-repo; issue_comment must be on a PR, body starting "@smithers review", author_association OWNER/MEMBER/COLLABORATOR; emits the PR number and head ref), createSession.ts (fetch the Actions OIDC token using ACTIONS_ID_TOKEN_REQUEST_URL/TOKEN env with audience smithers-review, POST {oidcToken} to <service-url>/api/sessions, handle 402 as neutral quota skip and 403 as not-registered notice), and runReview.ts (resolve and fetch the PR head into the workspace checkout for issue_comment, then exec bun <smithersRoot>/apps/review/src/cli/main.ts <workspace> --pr <n> --publish). Resolve inference before the exec: CODEX_AUTH_JSON wins, is materialized into an isolated CODEX_HOME then scrubbed, and selects SMITHERS_REVIEW_ENGINE=codex; otherwise CLAUDE_CODE_OAUTH_TOKEN selects the Claude subscription fallback; without either subscription credential, select Claude and set ANTHROPIC_BASE_URL=<session.anthropicBaseUrl> plus ANTHROPIC_API_KEY=<session.token> for the metered proxy. Every path sets SMITHERS_REVIEW_PUBLISH_URL=<session.publishUrl>, SMITHERS_REVIEW_PUBLISH_TOKEN=<session.token>, and passes through GH_TOKEN. Mode rule: pull_request on a comment-mode repo exits neutral with a notice naming "@smithers review".
-3. apps/review/src/workflow/createReviewAgents.ts — make Codex the default whenever the CLI is installed and authenticated, with an explicit SMITHERS_REVIEW_ENGINE override for diagnostics. In the Codex path, use gpt-5.6-sol at xhigh effort for review and verdict verification, and gpt-5.6-luna at explicit medium effort for narration and quiz generation. If Codex is unavailable, fall back to Claude (Fable primary, Opus failover). When both ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY are set, construct that Claude fallback in API-key mode so zero-secret CI runs under the proxy deterministically; otherwise use Claude subscription auth. Never run Claude in parallel with a healthy Codex path merely to provide fallback behavior. Check the agent options in node_modules/smithers-orchestrator rather than guessing.
+3. apps/review/src/workflow/createReviewAgents.ts — make Codex the default whenever the CLI is installed and authenticated, with an explicit SMITHERS_REVIEW_ENGINE override for diagnostics. In the Codex path, use gpt-5.6-sol at xhigh effort for review and verdict verification, and gpt-5.6-luna at explicit medium effort for narration and quiz generation. If Codex is unavailable, fall back to Claude (Fable primary, Opus failover). When both ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY are set, construct that Claude fallback in API-key mode so zero-secret CI runs under the proxy deterministically; otherwise use Claude subscription auth. Never run Claude in parallel with a healthy Codex path merely to provide fallback behavior. Check the agent options in node_modules/smthrs rather than guessing.
 4. bun tests for gateEvent, the session client (402/403/200 paths against a Bun.serve fixture service), engine resolution, and the exact Codex role split (Sol review/verify, Luna narrate/quiz). No tests that hit GitHub.
 5. Keep apps/review/README.md truthful: if any implemented behavior differs from the README's workflow template or trigger phrasing, fix the docs in the same change.
 `;

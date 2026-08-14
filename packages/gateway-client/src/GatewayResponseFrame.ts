@@ -1,1 +1,1 @@
-export type { GatewayResponseFrame } from "@smithers-orchestrator/protocol/gateway-rpc";
+export type { GatewayResponseFrame } from "@smthrs/protocol/gateway-rpc";

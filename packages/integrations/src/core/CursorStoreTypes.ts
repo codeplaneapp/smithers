@@ -1,5 +1,5 @@
 import type { Effect } from "effect";
-import type { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import type { SmithersError } from "@smthrs/errors/SmithersError";
 
 /**
  * Durable persistence seam for polling-source cursors. The db-backed

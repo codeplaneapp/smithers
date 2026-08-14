@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { useGatewayRuns } from "@smithers-orchestrator/gateway-react";
-import type { GatewayRunSummaryRow } from "@smithers-orchestrator/gateway-client";
+import { useGatewayRuns } from "@smthrs/gateway-react";
+import type { GatewayRunSummaryRow } from "@smthrs/gateway-client";
 import type { RunSummary } from "./runsList.ts";
 import { isQueuedRawStatus, runListStatusFromRaw } from "./runsList.ts";
 import { captureRunsIdentityEpoch, setRunsListRows, setRunsListUnavailable } from "./runsListStore.ts";

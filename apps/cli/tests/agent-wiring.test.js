@@ -29,7 +29,7 @@ afterEach(() => {
   }
 });
 
-const MCP = { name: "smithers", command: "bunx", args: ["smithers-orchestrator", "--mcp"] };
+const MCP = { name: "smithers", command: "bunx", args: ["smthrs", "--mcp"] };
 
 describe("parseAgentWiringArgv", () => {
   test("recognizes `mcp add` and `skills add`", () => {
@@ -62,16 +62,16 @@ describe("parseAgentWiringArgv", () => {
 describe("mcpAddFallbackMessage", () => {
   test("shows the `--` separated manual command for the common agents", () => {
     const msg = mcpAddFallbackMessage();
-    expect(msg).toContain("codex mcp add smithers -- bunx smithers-orchestrator --mcp");
-    expect(msg).toContain("claude mcp add smithers -- bunx smithers-orchestrator --mcp");
+    expect(msg).toContain("codex mcp add smithers -- bunx smthrs --mcp");
+    expect(msg).toContain("claude mcp add smithers -- bunx smthrs --mcp");
     // The hand-written config must split command from args correctly.
-    expect(msg).toContain('"command": "bunx", "args": ["smithers-orchestrator", "--mcp"]');
+    expect(msg).toContain('"command": "bunx", "args": ["smthrs", "--mcp"]');
     expect(msg).toContain("smithers.sh/integrations/mcp-server");
   });
 
   test("targets the agents the user asked for", () => {
     const msg = mcpAddFallbackMessage({ agents: ["cursor"] });
-    expect(msg).toContain("cursor mcp add smithers -- bunx smithers-orchestrator --mcp");
+    expect(msg).toContain("cursor mcp add smithers -- bunx smthrs --mcp");
     expect(msg).not.toContain("codex mcp add");
   });
 
@@ -95,7 +95,7 @@ describe("registerHermesMcp", () => {
     const result = registerHermesMcp({ ...MCP, homeDir: home });
     expect(result.registered).toBe(true);
     const config = parse(readFileSync(result.path, "utf8"));
-    expect(config.mcp_servers.smithers).toEqual({ command: "bunx", args: ["smithers-orchestrator", "--mcp"] });
+    expect(config.mcp_servers.smithers).toEqual({ command: "bunx", args: ["smthrs", "--mcp"] });
   });
 
   test("preserves existing config and other servers", () => {
@@ -179,7 +179,7 @@ describe("registerOpenClawMcp", () => {
     const config = JSON.parse(readFileSync(result.path, "utf8"));
     expect(config.channels).toEqual({ slack: true });
     expect(config.mcp.servers.other).toEqual({ command: "x" });
-    expect(config.mcp.servers.smithers).toEqual({ command: "bunx", args: ["smithers-orchestrator", "--mcp"] });
+    expect(config.mcp.servers.smithers).toEqual({ command: "bunx", args: ["smthrs", "--mcp"] });
   });
 
   test("does not clobber an unparseable config", () => {

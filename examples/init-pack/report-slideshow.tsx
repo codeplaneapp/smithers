@@ -6,10 +6,10 @@
 // smithers-display-name: Report Slideshow
 // smithers-description: Generate a concise HTML slideshow report from a Smithers run state and artifacts.
 // smithers-tags: ops, reporting
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
 import { $ } from "bun";
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import RenderPrompt from "../prompts/report-slideshow-render.mdx";
@@ -123,7 +123,7 @@ export default smithers((ctx) => {
         {/* 1 — Deterministically capture the run state, nodes, and a summary. */}
         <Task id="gather" output={outputs.gather}>
           {async () => {
-            const res = await $`bunx smithers-orchestrator inspect ${runId} --format json --full-output`
+            const res = await $`bunx smthrs inspect ${runId} --format json --full-output`
               .nothrow()
               .quiet();
             const stdout = res.stdout?.toString() ?? "";

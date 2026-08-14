@@ -1,4 +1,4 @@
-import type { AccountProvider } from "@smithers-orchestrator/accounts";
+import type { AccountProvider } from "@smthrs/accounts";
 import type { UsageSource } from "./UsageSource";
 import type { UsageWindow } from "./UsageWindow";
 

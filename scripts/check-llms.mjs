@@ -34,12 +34,32 @@ function run(command, args) {
 }
 
 /**
+ * A git release tag freezes the historical bundle even when npm publication
+ * is intentionally delayed.
+ *
  * @param {string} version
  * @returns {"published" | "unpublished" | "unavailable"}
  */
 function checkNpmPublication(version) {
+  const tagRef = `refs/tags/v${version}`;
+  const localTag = spawnSync("git", ["rev-parse", "--verify", "--quiet", tagRef], {
+    cwd: root,
+    stdio: "ignore",
+  });
+  if (localTag.status === 0) return "published";
+
+  // actions/checkout fetches a shallow, tagless clone by default. Check the
+  // canonical remote before falling back to npm so tagged snapshots stay
+  // immutable in CI too.
+  const remoteTag = spawnSync("git", ["ls-remote", "--exit-code", "--tags", "origin", tagRef], {
+    cwd: root,
+    stdio: "ignore",
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+  });
+  if (remoteTag.status === 0) return "published";
+
   // npm is npm.cmd on Windows; .cmd files only spawn through a shell.
-  const result = spawnSync("npm", ["view", `smithers-orchestrator@${version}`, "version"], {
+  const result = spawnSync("npm", ["view", `smthrs@${version}`, "version"], {
     cwd: root,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],

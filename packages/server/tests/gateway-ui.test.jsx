@@ -1,10 +1,10 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterEach, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { Gateway } from "../src/gateway.js";
 import { sleep } from "../../smithers/tests/helpers.js";
 
@@ -484,6 +484,7 @@ describe("Gateway UI", () => {
     expect(html).toContain("@media (prefers-color-scheme: dark)");
     expect(html).toContain(":root[data-theme='dark']");
     expect(html).toContain('new URLSearchParams(location.search).get("theme")');
+    expect(html).toContain('new URLSearchParams(location.search).get("palette")');
     expect(html).toContain("document.documentElement.dataset.theme=t");
 
     const listedResponse = await postRpc(port, "listWorkflows", { filter: { hasUi: true } });

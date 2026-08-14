@@ -1,1 +1,1 @@
-export * from "@smithers-orchestrator/aws";
+export * from "@smthrs/aws";

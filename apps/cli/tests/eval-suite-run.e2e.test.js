@@ -9,9 +9,9 @@ import { resolve } from "node:path";
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { evalCaseRunId } from "@smithers-orchestrator/scorers/evalCases";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { evalCaseRunId } from "@smthrs/scorers/evalCases";
 import { createEvalsExtension } from "../src/evals-extension.js";
 import { createTempRepo, pinSqliteBackend, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
 
@@ -27,8 +27,8 @@ const EVAL_SUITE_RUN_SOURCE = readFileSync(resolve(REPO_ROOT, ".smithers/workflo
 // elsewhere in this suite does neither, so it deliberately is NOT reused
 // here; this fixture designates its output so case grading sees real data.
 const TARGET_WORKFLOW_SOURCE = [
-  "/** @jsxImportSource smithers-orchestrator */",
-  'import { createSmithers, Workflow, Task } from "smithers-orchestrator";',
+  "/** @jsxImportSource smthrs */",
+  'import { createSmithers, Workflow, Task } from "smthrs";',
   'import { z } from "zod";',
   "",
   "const { smithers, outputs } = createSmithers({",

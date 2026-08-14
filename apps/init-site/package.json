@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/init-site",
+  "name": "@smthrs/init-site",
   "version": "0.0.1",
   "private": true,
   "description": "Cloudflare Worker deployment for the the interactive Smithers init wizard and workflow builder marketing site",

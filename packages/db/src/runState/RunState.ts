@@ -9,6 +9,7 @@ export type RunState =
   | "stale"
   | "orphaned"
   | "failed"
+  | "cancel-pending"
   | "cancelled"
   | "succeeded"
   | "unknown";

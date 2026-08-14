@@ -1,4 +1,4 @@
-import type { SmithersCtx } from "@smithers-orchestrator/driver";
+import type { SmithersCtx } from "@smthrs/driver";
 
 declare const ctx: SmithersCtx<unknown>;
 const row = ctx.signalRows("REVISE")[0];

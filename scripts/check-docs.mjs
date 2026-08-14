@@ -2,7 +2,7 @@
 /**
  * Docs lint gate. Fails CI when the docs drift from house style:
  *   - bare `smithers` / `bunx smithers` CLI invocations (must be
- *     `bunx smithers-orchestrator`)
+ *     `bunx smthrs`)
  *   - hyphenated angle-bracket CLI placeholders (`<run-id>`, must be RUN_ID)
  *   - em-dashes (—)
  *
@@ -384,9 +384,9 @@ function checkFacadeDeclarations() {
     "type GatewayOperatorUiConfig",
     "type GatewayRegisterOptions",
     "type GatewayWebhookConfig",
-    "export { SmithersDb, loadOutputs, loadOutputsEffect } from '@smithers-orchestrator/db';",
-    "export { revertToAttempt } from '@smithers-orchestrator/time-travel/revert';",
-    "export { timeTravel } from '@smithers-orchestrator/time-travel/timetravel';",
+    "export { SmithersDb, loadOutputs, loadOutputsEffect } from '@smthrs/db';",
+    "export { revertToAttempt } from '@smthrs/time-travel/revert';",
+    "export { timeTravel } from '@smthrs/time-travel/timetravel';",
     "VibeAgent",
     "type VibeAgentOptions",
   ]);
@@ -426,7 +426,7 @@ function collectExportedNames(source) {
 
 function collectDocumentedSmithersImports() {
   const imports = new Map();
-  const importPattern = /import\s*\{([^{}]*?)\}\s*from\s*["']smithers-orchestrator["']/g;
+  const importPattern = /import\s*\{([^{}]*?)\}\s*from\s*["']smthrs["']/g;
   for (const file of currentDocFiles()) {
     const source = stripGeneratedSource(readFileSync(file, "utf8"));
     for (const match of source.matchAll(importPattern)) {
@@ -460,8 +460,7 @@ const EXTERNAL_DOC_PACKAGES = new Set();
 
 function collectDocumentedPackageImports() {
   const imports = new Map();
-  const importPattern =
-    /import\s+(?:type\s+)?\{([^{}]*?)\}\s*from\s*["']((?:smithers-orchestrator\/|@smithers-orchestrator\/)[^"']+)["']/g;
+  const importPattern = /import\s+(?:type\s+)?\{([^{}]*?)\}\s*from\s*["']((?:smthrs\/|@smthrs\/)[^"']+)["']/g;
   for (const file of currentDocFiles()) {
     const source = stripGeneratedSource(readFileSync(file, "utf8"));
     for (const match of source.matchAll(importPattern)) {
@@ -612,7 +611,7 @@ function checkDocumentedSmithersImportsMatchFacade() {
   }
   if (missingRuntime.length || missingDeclarations.length) {
     failed = true;
-    console.error("\n✗ documented smithers-orchestrator imports must match facade exports:");
+    console.error("\n✗ documented smthrs imports must match facade exports:");
     if (missingRuntime.length) {
       console.error(
         `    missing runtime exports: ${missingRuntime.map(([name, files]) => `${name} (${files.join(", ")})`).join("; ")}`,
@@ -624,7 +623,7 @@ function checkDocumentedSmithersImportsMatchFacade() {
       );
     }
   } else {
-    console.log("✓ documented smithers-orchestrator imports match facade exports");
+    console.log("✓ documented smthrs imports match facade exports");
   }
 }
 
@@ -660,10 +659,7 @@ function checkTimerDocsMatchWakeRuntime() {
   const required = [
     [TIMER_COMPONENT_DOC, "The host wakes the run on its own when the fire time arrives."],
     [TIMER_COMPONENT_DOC, "A Gateway sweeps due timers on its scheduler tick"],
-    [
-      TIMER_COMPONENT_DOC,
-      "`bunx smithers-orchestrator supervise --run RUN_ID` also scans the explicitly scoped `waiting-timer` run",
-    ],
+    [TIMER_COMPONENT_DOC, "`bunx smthrs supervise --run RUN_ID` also scans the explicitly scoped `waiting-timer` run"],
     [TIMER_COMPONENT_DOC, "Wake resolution is bounded by the Gateway tick or supervisor interval"],
     [SERVER_GATEWAY_SOURCE, "async processDueTimers()"],
     [SERVER_GATEWAY_SOURCE, 'for (const status of ["waiting-timer", "waiting-approval", "waiting-event"])'],
@@ -854,8 +850,8 @@ function checkRunStateDocsMatchCurrentEmission() {
     [SMITHERS_TSCONFIG, readFileSync(SMITHERS_TSCONFIG, "utf8")],
   ]);
   const required = [
-    [join(root, "docs/runtime/run-state.mdx"), 'import { computeRunState } from "@smithers-orchestrator/db/runState";'],
-    [join(root, "docs/runtime/run-state.mdx"), 'import { deriveRunState } from "@smithers-orchestrator/db/runState";'],
+    [join(root, "docs/runtime/run-state.mdx"), 'import { computeRunState } from "@smthrs/db/runState";'],
+    [join(root, "docs/runtime/run-state.mdx"), 'import { deriveRunState } from "@smthrs/db/runState";'],
     [
       join(root, "docs/runtime/run-state.mdx"),
       "RunStateChanged` is a typed/reserved event variant, but the current runtime",
@@ -1746,6 +1742,7 @@ function checkAgentAndCacheDocsMatchSourceTypes() {
     [AGENT_LIKE_SOURCE, "tools?: Record<string, unknown>;"],
     [AGENT_LIKE_SOURCE, "capabilities?: AgentCapabilityRegistry;"],
     [AGENT_LIKE_SOURCE, "generate: (args?: AgentGenerateOptions) => Promise<unknown>;"],
+    [AGENT_GENERATE_OPTIONS_SOURCE, "maxAgentCheckpointBytes?: number;"],
     [AGENT_GENERATE_OPTIONS_SOURCE, "taskContext?: {"],
     [AGENT_GENERATE_OPTIONS_SOURCE, "[key: string]: unknown;"],
     [
@@ -1765,6 +1762,7 @@ function checkAgentAndCacheDocsMatchSourceTypes() {
     ],
     [TYPES_REFERENCE, "runtimeTools: Record<string, AgentToolDescriptor>;"],
     [TYPES_REFERENCE, "type AgentGenerateOptions = {"],
+    [TYPES_REFERENCE, "maxAgentCheckpointBytes?: number;"],
     [TYPES_REFERENCE, "taskContext?: {"],
     [TYPES_REFERENCE, "tools?: Record<string, unknown>;"],
     [TYPES_REFERENCE, "capabilities?: AgentCapabilityRegistry;"],
@@ -1854,10 +1852,10 @@ function checkControlPlaneDocsMatchStoreApi() {
     : [];
   const missingMethods = methods.filter((name) => !docs.includes(`\`${name}()\``));
   const required = [
-    [SMITHERS_CONTROL_PLANE_SOURCE, 'export * from "@smithers-orchestrator/control-plane";'],
+    [SMITHERS_CONTROL_PLANE_SOURCE, 'export * from "@smthrs/control-plane";'],
     [CONTROL_PLANE_DECLARATIONS, "declare function ensureControlPlaneTables(sqlite: ControlPlaneSqlite): void;"],
-    [CONTROL_PLANE_GUIDE, 'import { ControlPlaneStore } from "smithers-orchestrator/control-plane";'],
-    [CONTROL_PLANE_GUIDE, 'import { ControlPlaneStore } from "@smithers-orchestrator/control-plane";'],
+    [CONTROL_PLANE_GUIDE, 'import { ControlPlaneStore } from "smthrs/control-plane";'],
+    [CONTROL_PLANE_GUIDE, 'import { ControlPlaneStore } from "@smthrs/control-plane";'],
     [CONTROL_PLANE_GUIDE, "Constructing `new ControlPlaneStore(sqlite)` calls `ensureControlPlaneTables(sqlite)`."],
     [
       CONTROL_PLANE_GUIDE,
@@ -2102,18 +2100,15 @@ function checkServeDocsMatchServerTypes() {
   const required = [
     [join(root, "packages/server/src/ServeOptions.ts"), "workflow: SmithersWorkflow<unknown>;"],
     [join(root, "packages/server/src/ServeOptions.ts"), "adapter: SmithersDb;"],
-    [join(root, "packages/smithers/src/index.js"), 'export { SmithersDb } from "@smithers-orchestrator/db";'],
+    [join(root, "packages/smithers/src/index.js"), 'export { SmithersDb } from "@smthrs/db";'],
     [
       join(root, "packages/smithers/src/index.d.ts"),
-      "export { SmithersDb, loadOutputs, loadOutputsEffect } from '@smithers-orchestrator/db';",
+      "export { SmithersDb, loadOutputs, loadOutputsEffect } from '@smthrs/db';",
     ],
-    [
-      join(root, "docs/reference/types.mdx"),
-      'type SmithersDb = import("@smithers-orchestrator/db/adapter").SmithersDb;',
-    ],
+    [join(root, "docs/reference/types.mdx"), 'type SmithersDb = import("@smthrs/db/adapter").SmithersDb;'],
     [join(root, "docs/reference/types.mdx"), "workflow: SmithersWorkflow<unknown>;"],
     [join(root, "docs/reference/types.mdx"), "adapter: SmithersDb;"],
-    [join(root, "docs/integrations/serve.mdx"), 'import { SmithersDb, createServeApp } from "smithers-orchestrator";'],
+    [join(root, "docs/integrations/serve.mdx"), 'import { SmithersDb, createServeApp } from "smthrs";'],
     [join(root, "docs/integrations/serve.mdx"), "const adapter = new SmithersDb(workflow.db);"],
     [join(root, "docs/integrations/serve.mdx"), "workflow: SmithersWorkflow<unknown>;"],
     [join(root, "docs/integrations/serve.mdx"), "adapter: SmithersDb;"],
@@ -2183,11 +2178,11 @@ function checkHttpServerDocsMatchRuntimeSurface() {
     [SERVER_INTEGRATION, "`INVALID_JSON`"],
     [SERVER_INTEGRATION, "`PAYLOAD_TOO_LARGE`"],
     [SERVER_INTEGRATION, "`RUN_ID_REQUIRED`"],
-    [SERVER_INTEGRATION, 'import { bashTool } from "smithers-orchestrator/tools";'],
+    [SERVER_INTEGRATION, 'import { bashTool } from "smthrs/tools";'],
     [SERVER_INTEGRATION, 'await bashTool("echo", [ctx.input.msg])'],
   ];
   const forbidden = [
-    [SERVER_INTEGRATION, 'createSmithers, bash } from "smithers-orchestrator"'],
+    [SERVER_INTEGRATION, 'createSmithers, bash } from "smthrs"'],
     [SERVER_INTEGRATION, "await bash(`echo ${ctx.input.msg}`)"],
   ];
   const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
@@ -2435,9 +2430,7 @@ function checkPackageConfigurationDocsMatchRootConfig() {
   const publicPackageJson = JSON.parse(readFileSync(SMITHERS_PACKAGE_JSON, "utf8"));
   const workspacePackages = readWorkspacePackages();
   const workspacePackageNames = workspacePackages.map((pkg) => pkg.name);
-  const documentedWorkspacePackageNames = [
-    ...docs.matchAll(/^\| `(@smithers-orchestrator\/[^`]+|smithers-orchestrator)` \|/gm),
-  ]
+  const documentedWorkspacePackageNames = [...docs.matchAll(/^\| `(@smthrs\/[^`]+|smthrs|smthrs)` \|/gm)]
     .map((match) => match[1])
     .sort();
   const missingWorkspacePackageRows = workspacePackageNames.filter(
@@ -2457,8 +2450,8 @@ function checkPackageConfigurationDocsMatchRootConfig() {
   );
   const missingRootWorkspaceDeps = workspacePackages
     .filter((pkg) => !pkg.private)
-    .filter((pkg) => pkg.name === "smithers-orchestrator" || pkg.name.startsWith("@smithers-orchestrator/"))
-    .filter((pkg) => !/^@smithers-orchestrator\/jj-/.test(pkg.name))
+    .filter((pkg) => pkg.name === "smthrs" || pkg.name.startsWith("@smthrs/"))
+    .filter((pkg) => !/^@smthrs\/jj-/.test(pkg.name))
     .filter((pkg) => !rootWorkspaceDeps.has(pkg.name))
     .map((pkg) => pkg.name);
   const runtimePreload = readTomlScalar(bunfig, "preload");
@@ -2471,19 +2464,19 @@ function checkPackageConfigurationDocsMatchRootConfig() {
     return `| \`${importPath}\` | \`${entry}\` |`;
   });
   const facadeSubpathRows = [
-    ["smithers-orchestrator/gateway", "./src/gateway.js"],
-    ["smithers-orchestrator/gateway-client", "./src/gateway-client.js"],
-    ["smithers-orchestrator/gateway-react", "./src/gateway-react.js"],
-    ["smithers-orchestrator/sandbox", "./src/sandbox.js"],
-    ["smithers-orchestrator/jsx-runtime", "./src/jsx-runtime.js"],
-    ["smithers-orchestrator/server", "./src/server.js"],
-    ["smithers-orchestrator/observability", "./src/observability.js"],
-    ["smithers-orchestrator/mdx-plugin", "./src/mdx-plugin.js"],
-    ["smithers-orchestrator/dom/renderer", "./src/dom/renderer.js"],
-    ["smithers-orchestrator/serve", "./src/serve.js"],
-    ["smithers-orchestrator/scorers", "./src/scorers.js"],
-    ["smithers-orchestrator/memory", "./src/memory.js"],
-    ["smithers-orchestrator/openapi", "./src/openapi.js"],
+    ["smthrs/gateway", "./src/gateway.js"],
+    ["smthrs/gateway-client", "./src/gateway-client.js"],
+    ["smthrs/gateway-react", "./src/gateway-react.js"],
+    ["smthrs/sandbox", "./src/sandbox.js"],
+    ["smthrs/jsx-runtime", "./src/jsx-runtime.js"],
+    ["smthrs/server", "./src/server.js"],
+    ["smthrs/observability", "./src/observability.js"],
+    ["smthrs/mdx-plugin", "./src/mdx-plugin.js"],
+    ["smthrs/dom/renderer", "./src/dom/renderer.js"],
+    ["smthrs/serve", "./src/serve.js"],
+    ["smthrs/scorers", "./src/scorers.js"],
+    ["smthrs/memory", "./src/memory.js"],
+    ["smthrs/openapi", "./src/openapi.js"],
   ];
   const missingFacadeWrapperFiles = facadeSubpathRows
     .map(([importPath, entry]) => ({
@@ -2498,8 +2491,8 @@ function checkPackageConfigurationDocsMatchRootConfig() {
     testPreload ? `preload = ${testPreload}` : null,
     testRoot ? `| \`root\` | \`${testRoot.replace(/^"|"$/g, "")}\` |` : null,
     testPreload ? `| \`preload\` | \`${testPreload}\` |` : null,
-    "Entry files in this table are relative to the published `smithers-orchestrator` package; in the repository they live under `packages/smithers/`.",
-    "Most applications should import from `smithers-orchestrator`. The workspace packages below are listed for advanced integrations, custom clients, framework development, and monorepo orientation. This table is a repository map, not the core feature inventory. Private apps and examples are implementation consumers and are not published Smithers features. See [Feature inventory](/reference/feature-inventory) for the core product boundary.",
+    "Entry files in this table are relative to the published `smthrs` package; in the repository they live under `packages/smithers/`.",
+    "Most applications should import from `smthrs`. The workspace packages below are listed for advanced integrations, custom clients, framework development, and monorepo orientation. This table is a repository map, not the core feature inventory. Private apps and examples are implementation consumers and are not published Smithers features. See [Feature inventory](/reference/feature-inventory) for the core product boundary.",
     ...exportRows,
     ...facadeSubpathRows.map(([importPath, entry]) => `| \`${importPath}\` | \`${entry}\` |`),
     ...Object.entries(packageJson.scripts ?? {}).map(([script, command]) => `| \`${script}\` | \`${command}\` |`),
@@ -2508,15 +2501,15 @@ function checkPackageConfigurationDocsMatchRootConfig() {
     "preload.ts",
     'root = "./tests"',
     "| `test` | `node scripts/check-single-effect-version.mjs && node scripts/check-dependency-boundaries.mjs && pnpm -r test` |",
-    "| `smithers-orchestrator` | `./packages/smithers/src/index.js` |",
-    "| `smithers-orchestrator/gateway` | `./packages/server/src/gateway.js` |",
-    "| `smithers-orchestrator/sandbox` | `./packages/sandbox/src/index.js` |",
-    "| `smithers-orchestrator/server` | `./packages/server/src/index.js` |",
-    "| `smithers-orchestrator/observability` | `./apps/observability/src/index.js` |",
-    "| `smithers-orchestrator/dom/renderer` | `./packages/react-reconciler/src/dom/renderer.js` |",
-    "| `smithers-orchestrator/scorers` | `./packages/scorers/src/index.js` |",
-    "| `smithers-orchestrator/memory` | `./packages/memory/src/index.js` |",
-    "| `smithers-orchestrator/openapi` | `./packages/openapi/src/index.js` |",
+    "| `smthrs` | `./packages/smithers/src/index.js` |",
+    "| `smthrs/gateway` | `./packages/server/src/gateway.js` |",
+    "| `smthrs/sandbox` | `./packages/sandbox/src/index.js` |",
+    "| `smthrs/server` | `./packages/server/src/index.js` |",
+    "| `smthrs/observability` | `./apps/observability/src/index.js` |",
+    "| `smthrs/dom/renderer` | `./packages/react-reconciler/src/dom/renderer.js` |",
+    "| `smthrs/scorers` | `./packages/scorers/src/index.js` |",
+    "| `smthrs/memory` | `./packages/memory/src/index.js` |",
+    "| `smthrs/openapi` | `./packages/openapi/src/index.js` |",
     "The scoped workspace packages below are published for advanced integrations",
     "Some app workspaces are private and are not published packages.",
   ];
@@ -2563,14 +2556,11 @@ function checkPiPluginDocsMatchPackageRuntime() {
     [ROOT_PACKAGE_JSON, readFileSync(ROOT_PACKAGE_JSON, "utf8")],
   ]);
   const required = [
-    [
-      PI_INTEGRATION,
-      "Drive Smithers server APIs from a PI extension or Bun process via `@smithers-orchestrator/pi-plugin`:",
-    ],
-    [PI_INTEGRATION, 'import { runWorkflow, approve, streamEvents } from "@smithers-orchestrator/pi-plugin";'],
-    [PI_INTEGRATION, "`@smithers-orchestrator/pi-plugin` currently publishes TypeScript source entrypoints"],
+    [PI_INTEGRATION, "Drive Smithers server APIs from a PI extension or Bun process via `@smthrs/pi-plugin`:"],
+    [PI_INTEGRATION, 'import { runWorkflow, approve, streamEvents } from "@smthrs/pi-plugin";'],
+    [PI_INTEGRATION, "`@smthrs/pi-plugin` currently publishes TypeScript source entrypoints"],
     [PI_PLUGIN_PACKAGE_JSON, '"import": "./src/index.ts"'],
-    [ROOT_PACKAGE_JSON, '"@smithers-orchestrator/pi-plugin": "workspace:*"'],
+    [ROOT_PACKAGE_JSON, '"@smthrs/pi-plugin": "workspace:*"'],
   ];
   const forbidden = [[PI_INTEGRATION, "any Node process"]];
   const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
@@ -2627,7 +2617,7 @@ function checkVcsHelperDocsMatchCurrentExports() {
   const missingRuntimeExports = expectedRuntimeExports.filter((name) => !runtimeExports.includes(name));
   const extraRuntimeExports = runtimeExports.filter((name) => !expectedRuntimeExports.includes(name));
   const required = [
-    [VCS_HELPERS_REFERENCE, "The root `smithers-orchestrator` facade exports the main JJ helpers:"],
+    [VCS_HELPERS_REFERENCE, "The root `smthrs` facade exports the main JJ helpers:"],
     [
       VCS_HELPERS_REFERENCE,
       "The lower-level VCS package also exports repository discovery, binary resolution, tooling preflight, and snapshot capture helpers:",
@@ -2642,7 +2632,7 @@ function checkVcsHelperDocsMatchCurrentExports() {
     [VCS_HELPERS_REFERENCE, "function workspaceList(cwd?: string): VcsEffect<WorkspaceInfo[]>;"],
     [VCS_HELPERS_REFERENCE, "): VcsEffect<WorkspaceResult>;"],
     [VCS_HELPERS_REFERENCE, "## `captureWorkspaceSnapshot(cwd?)`"],
-    [VCS_HELPERS_REFERENCE, "This helper is exported by `@smithers-orchestrator/vcs`, not by the root facade."],
+    [VCS_HELPERS_REFERENCE, "This helper is exported by `@smthrs/vcs`, not by the root facade."],
     [VCS_HELPERS_REFERENCE, "function captureWorkspaceSnapshot(cwd?: string): VcsEffect<WorkspaceSnapshot | null>;"],
     [VCS_HELPERS_REFERENCE, "function findVcsRoot(startDir: string): VcsRoot | null;"],
     [VCS_HELPERS_REFERENCE, "function resolveGitBinary(): ResolvedBinary;"],
@@ -2667,7 +2657,7 @@ function checkVcsHelperDocsMatchCurrentExports() {
     ],
     [
       SMITHERS_FACADE_DECLARATIONS,
-      "export { getJjPointer, isJjRepo, revertToJjPointer, runJj, workspaceAdd, workspaceClose, workspaceList } from '@smithers-orchestrator/vcs/jj';",
+      "export { getJjPointer, isJjRepo, revertToJjPointer, runJj, workspaceAdd, workspaceClose, workspaceList } from '@smthrs/vcs/jj';",
     ],
   ];
   const forbidden = [
@@ -2748,7 +2738,7 @@ function checkTimeTravelDocsMatchCurrentExports() {
   const runtimeExports = runtimeImport.status === 0 ? runtimeImport.stdout.trim().split(/\n/).filter(Boolean) : [];
   const missingRuntimeExports = expectedTimeTravelExports.filter((name) => !runtimeExports.includes(name));
   const required = [
-    [RUNTIME_REVERT_REFERENCE, 'import { revertToAttempt, timeTravel } from "smithers-orchestrator";'],
+    [RUNTIME_REVERT_REFERENCE, 'import { revertToAttempt, timeTravel } from "smthrs";'],
     [RUNTIME_REVERT_REFERENCE, "const result = await revertToAttempt(adapter, {"],
     [
       RUNTIME_REVERT_REFERENCE,
@@ -2760,10 +2750,10 @@ function checkTimeTravelDocsMatchCurrentExports() {
       "function timeTravel(adapter: SmithersDb, opts: TimeTravelOptions): Promise<TimeTravelResult>;",
     ],
     [RECIPES_DOC, "Smithers records the current JJ commit ID in `_smithers_attempts.jj_pointer` per attempt."],
-    [SMITHERS_FACADE_SOURCE, 'export { revertToAttempt } from "@smithers-orchestrator/time-travel/revert";'],
-    [SMITHERS_FACADE_SOURCE, 'export { timeTravel } from "@smithers-orchestrator/time-travel/timetravel";'],
-    [SMITHERS_FACADE_DECLARATIONS, "export { revertToAttempt } from '@smithers-orchestrator/time-travel/revert';"],
-    [SMITHERS_FACADE_DECLARATIONS, "export { timeTravel } from '@smithers-orchestrator/time-travel/timetravel';"],
+    [SMITHERS_FACADE_SOURCE, 'export { revertToAttempt } from "@smthrs/time-travel/revert";'],
+    [SMITHERS_FACADE_SOURCE, 'export { timeTravel } from "@smthrs/time-travel/timetravel";'],
+    [SMITHERS_FACADE_DECLARATIONS, "export { revertToAttempt } from '@smthrs/time-travel/revert';"],
+    [SMITHERS_FACADE_DECLARATIONS, "export { timeTravel } from '@smthrs/time-travel/timetravel';"],
     [TIME_TRAVEL_PACKAGE_JSON, '"build": "rm -f src/index.d.ts && tsup --dts-only"'],
     [TIME_TRAVEL_INDEX_SOURCE, 'export { revertToAttempt } from "./revert.js";'],
     [TIME_TRAVEL_INDEX_SOURCE, 'export { timeTravel } from "./timetravel.js";'],
@@ -2855,7 +2845,7 @@ function checkWatchAndSteerDocsMatchCurrentUiSurface() {
   const files = new Map([[WATCH_AND_STEER_GUIDE, readFileSync(WATCH_AND_STEER_GUIDE, "utf8")]]);
   const required = [
     [WATCH_AND_STEER_GUIDE, "## Visual workflow views"],
-    [WATCH_AND_STEER_GUIDE, "`bunx smithers-orchestrator ui`"],
+    [WATCH_AND_STEER_GUIDE, "`bunx smthrs ui`"],
     [WATCH_AND_STEER_GUIDE, "Smithers workflow UI surface"],
     [WATCH_AND_STEER_GUIDE, "not a GUI you click through"],
     [WATCH_AND_STEER_GUIDE, "no GUI required"],
@@ -3375,7 +3365,7 @@ function checkOpenApiDocsMatchCurrentPackage() {
   ];
   const forbidden = [
     [OPENAPI_CONCEPTS, "Each tool call emits an `OpenApiToolCalled` event"],
-    [OPENAPI_CONCEPTS, "Visible via `bunx smithers-orchestrator events RUN_ID --type openapi`"],
+    [OPENAPI_CONCEPTS, "Visible via `bunx smthrs events RUN_ID --type openapi`"],
     [
       OPENAPI_CONCEPTS,
       "`loadSpecEffect(input)` / `loadSpecSync(input)` | Load and parse a spec from object, path, URL, or raw text.",
@@ -3424,7 +3414,7 @@ function checkMcpIntegrationDocsMatchAgentOptions() {
     [KIMI_AGENT_OPTIONS_SOURCE, "mcpConfig?: string[];"],
     [AMP_AGENT_OPTIONS_SOURCE, "mcpConfig?: string;"],
     [join(root, "docs/agents/codex.mdx"), "[mcp_servers.smithers]"],
-    [join(root, "docs/agents/codex.mdx"), "codex mcp add smithers -- bunx smithers-orchestrator --mcp"],
+    [join(root, "docs/agents/codex.mdx"), "codex mcp add smithers -- bunx smthrs --mcp"],
   ];
   const forbidden = [
     [MCP_INTEGRATION_EXAMPLE_README, "Claude Code,\nCodex, Kimi) consume MCP differently"],
@@ -3501,8 +3491,8 @@ function checkMcpToolsetDocsMatchPackageSurface() {
     [MCP_CREATE_TOOLSET_DECLARATION, "export declare function createMcpToolset("],
     [MCP_CREATE_TOOLSET_DECLARATION, "options?: McpToolsetOptions"],
     [MCP_CREATE_TOOLSET_DECLARATION, "): Promise<McpToolset>;"],
-    [MCP_TOOLSET_INTEGRATION, 'from "@smithers-orchestrator/agents/mcp/createMcpToolset";'],
-    [MCP_TOOLSET_INTEGRATION, "it is not re-exported from the top-level `smithers-orchestrator` facade"],
+    [MCP_TOOLSET_INTEGRATION, 'from "@smthrs/agents/mcp/createMcpToolset";'],
+    [MCP_TOOLSET_INTEGRATION, "it is not re-exported from the top-level `smthrs` facade"],
     [MCP_TOOLSET_INTEGRATION, "Call `close()` in a `finally` block"],
     [MCP_TOOLSET_INTEGRATION, "type McpServerConfig = {"],
     [MCP_TOOLSET_INTEGRATION, "command: string;"],
@@ -3539,7 +3529,7 @@ function checkMcpToolsetDocsMatchPackageSurface() {
     [GENERATE_LLMS_SCRIPT, '"integrations/mcp-toolset.mdx"'],
   ];
   const forbidden = [
-    [MCP_TOOLSET_INTEGRATION, 'import { createMcpToolset } from "smithers-orchestrator";'],
+    [MCP_TOOLSET_INTEGRATION, 'import { createMcpToolset } from "smthrs";'],
     [MCP_TOOLSET_INTEGRATION, "does not need `close()`"],
     [MCP_TOOLSET_INTEGRATION, "CLI agents consume MCP through `createMcpToolset`"],
   ];
@@ -3723,7 +3713,7 @@ function checkCliAgentDocsMatchCurrentModelDefaults() {
   ]);
   const required = [
     [BASE_CLI_AGENT_SOURCE, "this.model = opts.model;"],
-    [CLI_AGENTS_INTEGRATION, "agents[15]{class,cli,modelDefault,hijack,notes}:"],
+    [CLI_AGENTS_INTEGRATION, "agents[16]{class,cli,modelDefault,hijack,notes}:"],
     [CLI_AGENTS_INTEGRATION, "ClaudeCodeAgent,claude,CLI default,native session id"],
     [CLI_AGENTS_INTEGRATION, "CodexAgent,codex,CLI default,native thread id"],
     [CLI_AGENTS_INTEGRATION, "PiAgent,pi,CLI default,native session id"],
@@ -3735,7 +3725,7 @@ function checkCliAgentDocsMatchCurrentModelDefaults() {
     [CLI_AGENTS_INTEGRATION, "VibeAgent,vibe,CLI default,headless session id"],
     [CLI_AGENTS_INTEGRATION, "OpenCodeAgent,opencode,CLI default,not yet"],
     [CLI_AGENTS_INTEGRATION, "OpenClawAgent,openclaw,CLI default,session id"],
-    [CLI_AGENTS_INTEGRATION, "OmpAgent,omp,CLI default,not yet"],
+    [CLI_AGENTS_INTEGRATION, "OmpAgent,omp,CLI default,native session id"],
     [CLI_AGENTS_INTEGRATION, "CursorAgent,cursor-agent,CLI default,not yet"],
     [CLI_AGENT_DETECTION_SOURCE, 'id: "vibe"'],
     [CLI_AGENT_DETECTION_SOURCE, 'id: "openclaw"'],
@@ -3788,17 +3778,20 @@ function checkCliAgentHijackDocsMatchLauncher() {
     [NATIVE_HIJACK_ENGINE_SOURCE, '| "antigravity"'],
     [CLI_HIJACK_SOURCE, 'candidate.engine === "antigravity"'],
     [CLI_HIJACK_SOURCE, 'command: "agy"'],
-    [CLI_HIJACK_SOURCE, 'args: ["--resume", candidate.resume]'],
+    [CLI_HIJACK_SOURCE, 'args = ["--resume", candidate.resume]'],
     [CLI_AGENTS_INTEGRATION, "| `ClaudeCodeAgent` | `claude --resume` |"],
     [CLI_AGENTS_INTEGRATION, "| `CodexAgent` | `codex resume` |"],
     [CLI_AGENTS_INTEGRATION, "| `AntigravityAgent` | `agy --conversation` |"],
     [CLI_AGENTS_INTEGRATION, "| `PiAgent` | `pi --session` |"],
+    [CLI_AGENTS_INTEGRATION, "| `OmpAgent` | `omp --resume` |"],
     [CLI_AGENTS_INTEGRATION, "| `KimiAgent` | `kimi --session` |"],
     [CLI_AGENTS_INTEGRATION, "| `ForgeAgent` | `forge --conversation-id` |"],
     [CLI_AGENTS_INTEGRATION, "| `AmpAgent` | `amp threads continue` |"],
+    [CLI_HIJACK_SOURCE, 'candidate.engine === "omp"'],
+    [CLI_HIJACK_SOURCE, 'command: "omp"'],
     [
       CLI_AGENTS_INTEGRATION,
-      "native `bunx smithers-orchestrator hijack` support for Cursor, Vibe, OpenCode, OpenClaw, and OMP is not shipped yet",
+      "native `bunx smthrs hijack` support for Cursor, Vibe, OpenCode, and OpenClaw is not shipped yet",
     ],
   ];
   const forbidden = [

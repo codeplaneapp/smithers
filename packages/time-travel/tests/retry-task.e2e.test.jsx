@@ -1,6 +1,6 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { retryTask } from "../src/retry-task.js";
 import { runWorkflow as runEngineWorkflow } from "../../engine/src/engine.js";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
@@ -55,6 +55,119 @@ function makeAgent(nodeId, callCounts, behavior) {
   };
 }
 describe("retry-task e2e", () => {
+  test("a reset checkpoint cannot resurrect after the reused attempt fails fresh", async () => {
+    const { smithers, Workflow, Task, outputs, db, cleanup } = createTestSmithers(outputSchemas);
+    const adapter = new SmithersDb(db);
+    try {
+      const calls = [];
+      let resetComplete = false;
+      const checkpoint = (cursor) => ({ codec: "test.reset", version: 1, payload: { cursor } });
+      const agent = {
+        id: "reset-checkpoint-agent",
+        tools: {},
+        checkpointCapabilities: [{ codec: "test.reset", versions: [1], modes: ["resume"] }],
+        checkpointFormats: [{ codec: "test.reset", versions: [1] }],
+        async generate(args) {
+          calls.push(args);
+          if (!resetComplete) {
+            return {
+              output: { wrong: true },
+              checkpoint: checkpoint(`poisoned-${calls.length}`),
+            };
+          }
+          expect(args.resumeCheckpoint).toBeUndefined();
+          if (calls.length === 3) throw new Error("fresh reused attempt failed before checkpointing");
+          return { output: { value: 42 } };
+        },
+      };
+      const workflow = smithers(() => (
+        <Workflow name="retry-reset-checkpoint-resurrection">
+          <Task
+            id="target"
+            output={outputs.outputA}
+            agent={agent}
+            retries={1}
+            maxSchemaRetries={0}
+            retryPolicy={{ backoff: "fixed", initialDelayMs: 0 }}
+          >
+            work
+          </Task>
+        </Workflow>
+      ));
+      const runId = "retry-reset-checkpoint-resurrection-run";
+      const failed = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId }));
+      expect(failed.status).toBe("failed");
+      expect(await adapter.listAgentCheckpointRefs(runId, { nodeId: "target" })).toHaveLength(2);
+
+      const resumeClaim = {
+        claimOwnerId: "supervisor:retry-task:checkpoint-reset",
+        claimHeartbeatAtMs: Date.now(),
+      };
+      expect((await retryTask(adapter, /** @type {any} */ ({ runId, nodeId: "target", resumeClaim }))).success).toBe(
+        true,
+      );
+      resetComplete = true;
+      const resumedAfterFreshFailure = await Effect.runPromise(
+        runWorkflow(workflow, { input: {}, runId, resume: true, resumeClaim }),
+      );
+      expect(resumedAfterFreshFailure.status).toBe("failed");
+      const resumed = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId, resume: true }));
+      expect(resumed.status).toBe("finished");
+      expect(calls).toHaveLength(4);
+      expect(await adapter.listAgentCheckpointRefs(runId, { nodeId: "target", attempt: 1 })).toEqual([]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("retrying a successful task clears its checkpoint before the reused attempt", async () => {
+    const { smithers, Workflow, Task, outputs, db, cleanup } = createTestSmithers(outputSchemas);
+    const adapter = new SmithersDb(db);
+    try {
+      const calls = [];
+      const agent = {
+        id: "successful-reset-checkpoint-agent",
+        cliEngine: "test-success-reset",
+        tools: {},
+        checkpointCapabilities: [{ codec: "test.success-reset", versions: [1], modes: ["resume"] }],
+        checkpointFormats: [{ codec: "test.success-reset", versions: [1] }],
+        async generate(args) {
+          calls.push(args);
+          expect(args.resumeCheckpoint).toBeUndefined();
+          expect(args.resumeSession).toBeUndefined();
+          if (calls.length === 1) {
+            args.onEvent?.({ type: "started", engine: "test-success-reset", resume: "old-session" });
+          }
+          return {
+            output: { value: calls.length },
+            ...(calls.length === 1
+              ? { checkpoint: { codec: "test.success-reset", version: 1, payload: { cursor: "old" } } }
+              : {}),
+          };
+        },
+      };
+      const workflow = smithers(() => (
+        <Workflow name="retry-successful-checkpoint-reset">
+          <Task id="target" output={outputs.outputA} agent={agent}>
+            work
+          </Task>
+        </Workflow>
+      ));
+      const runId = "retry-successful-checkpoint-reset-run";
+      expect((await Effect.runPromise(runWorkflow(workflow, { input: {}, runId }))).status).toBe("finished");
+      expect(await adapter.listAgentCheckpointRefs(runId, { nodeId: "target", attempt: 1 })).toHaveLength(2);
+
+      expect((await retryTask(adapter, { runId, nodeId: "target" })).success).toBe(true);
+      expect((await Effect.runPromise(runWorkflow(workflow, { input: {}, runId, resume: true }))).status).toBe(
+        "finished",
+      );
+      expect(calls).toHaveLength(2);
+      expect(await adapter.listAgentCheckpointRefs(runId, { nodeId: "target", attempt: 1 })).toEqual([]);
+    } finally {
+      cleanup();
+    }
+  });
+
   test("retry-task restarts at attempt 1 and failover rung 0", async () => {
     const { smithers, Workflow, Task, outputs, db, cleanup } = createTestSmithers(outputSchemas);
     const adapter = new SmithersDb(db);
@@ -361,8 +474,8 @@ describe("retry-task e2e", () => {
   test("CLI retry-task accepts an edited workflow only with --accept-workflow-change", () => {
     const repo = createTempRepo();
     pinSqliteBackend(repo.dir);
-    const source = (value) => `/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+    const source = (value) => `/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { smithers, Workflow, Task, outputs } = createSmithers({
@@ -461,8 +574,8 @@ export default smithers(() => (
     pinSqliteBackend(repo.dir);
     repo.write(
       "workflow.tsx",
-      `/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+      `/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { smithers, Workflow, Task, outputs } = createSmithers({
@@ -538,8 +651,8 @@ export default smithers(() => (
     pinSqliteBackend(repo.dir);
     repo.write(
       "workflow.tsx",
-      `/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+      `/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { smithers, Workflow, Task, outputs } = createSmithers({

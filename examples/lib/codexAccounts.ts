@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import {
   type AgentLike,
   CodexAgent,
-} from "smithers-orchestrator";
+} from "smthrs";
 
 type CodexOptions = NonNullable<ConstructorParameters<typeof CodexAgent>[0]>;
 

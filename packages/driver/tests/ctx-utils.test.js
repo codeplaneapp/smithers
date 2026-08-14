@@ -8,7 +8,7 @@ import { filterRowsByNodeId } from "../src/filterRowsByNodeId.js";
 import { ignoreSyncError } from "../src/ignoreSyncError.js";
 import { normalizeInputRow } from "../src/normalizeInputRow.js";
 import { SmithersCtx } from "../src/SmithersCtx.js";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { WorkflowDriver } from "../src/WorkflowDriver.js";
 import { getTaskRuntime, requireTaskRuntime, withTaskRuntime } from "../src/task-runtime.js";
 import { withAbort } from "../src/withAbort.js";

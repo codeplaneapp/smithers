@@ -1,17 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { withTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { withTaskRuntime } from "@smthrs/driver/task-runtime";
 import { __executeSandboxInternals, executeSandbox, registerSandboxProvider } from "../src/execute.js";
-import { setSmithersLogRunner } from "@smithers-orchestrator/observability/logging";
+import { setSmithersLogRunner } from "@smthrs/observability/logging";
 import { Effect, Layer } from "effect";
 import { mkdir, cp, rm } from "node:fs/promises";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { SandboxEntityExecutor } from "../src/effect/sandbox-entity.js";
 import { makeSandboxTransportLayer } from "../src/transport.js";
 import { makeBaseSandboxHandle } from "../src/effect/process-runner.js";
@@ -78,7 +78,7 @@ function delayedShipTransportLayer(delayMs) {
  * @param {string} prefix
  */
 function tempDir(prefix) {
-  return mkdtempSync(join(tmpdir(), prefix));
+  return makeTempDirPath(prefix);
 }
 
 function createDb() {
@@ -111,6 +111,11 @@ function createRuntime(db, options = {}) {
  * @param {Partial<import("../src/ExecuteSandboxOptions.ts").ExecuteSandboxOptions>} overrides
  */
 async function runInRuntime(runtime, overrides = {}) {
+  // Allocated before entering the task runtime: `withTaskRuntime` runs its
+  // callback inside an AsyncLocalStorage context, and bun's hook registration
+  // (which makeTempDir uses to arm its cleanup) hangs the enclosing test when
+  // called from inside one.
+  const rootDir = overrides.rootDir ?? tempDir("smithers-sandbox-execute-");
   return withTaskRuntime(runtime, () =>
     executeSandbox({
       sandboxId: "sandbox-1",
@@ -123,12 +128,12 @@ async function runInRuntime(runtime, overrides = {}) {
         output: { ok: true },
       }),
       input: { prompt: "ship it" },
-      rootDir: tempDir("smithers-sandbox-execute-"),
       allowNetwork: false,
       maxOutputBytes: 1024,
       toolTimeoutMs: 250,
       reviewDiffs: false,
       ...overrides,
+      rootDir,
     }),
   );
 }

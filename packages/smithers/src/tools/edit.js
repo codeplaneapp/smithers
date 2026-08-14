@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { applyPatch } from "diff";
 import { z } from "zod";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { defineTool } from "./defineTool.js";
 import { assertReadableFileWithinLimit, getToolRuntimeOptions, resolveToolPath, sha256Hex } from "./utils.js";
 

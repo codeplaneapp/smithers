@@ -2,7 +2,7 @@ import { TelegramClientService } from '../TelegramClientTypes.js';
 import { TelegramDepsSpec, TelegramOutboundBaseProps } from './outboundProps.js';
 import { Effect } from 'effect';
 import React__default from 'react';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 import 'zod';
 
 /**

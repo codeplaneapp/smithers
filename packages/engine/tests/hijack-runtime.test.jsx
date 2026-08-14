@@ -1,7 +1,7 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { expect, test } from "bun:test";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { Task, Workflow, runWorkflow } from "smthrs";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import { Effect } from "effect";
@@ -21,6 +21,8 @@ test("a hijacked CLI session can be resumed by Smithers on the next attempt", as
   const agent = {
     id: "fake-hijack-agent",
     cliEngine: "claude-code",
+    model: "claude-opus-4-1",
+    opts: { yolo: true, configDir: "/tmp/fake-claude-config", permissionMode: "bypassPermissions" },
     tools: {},
     /**
      * @param {any} args
@@ -99,6 +101,15 @@ test("a hijacked CLI session can be resumed by Smithers on the next attempt", as
   expect(firstMeta.hijackHandoff).toMatchObject({
     engine: "claude-code",
     resume: "session-1",
+  });
+  // The hand-off persists the workflow agent's launch configuration so a
+  // hijacked session can be relaunched with the same model/permission flags.
+  expect(firstMeta.hijackHandoff.config).toEqual({
+    model: "claude-opus-4-1",
+    yolo: true,
+    permissionMode: "bypassPermissions",
+    dangerouslySkipPermissions: false,
+    configDir: "/tmp/fake-claude-config",
   });
   const resumed = await Effect.runPromise(
     runWorkflow(workflow, {

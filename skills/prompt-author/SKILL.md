@@ -74,8 +74,8 @@ frame without losing finished tasks, then attach a `schemaAdherence` scorer (or 
 small `smithers eval` suite) to confirm the new prompt holds the format:
 
 ```bash
-bunx smithers-orchestrator up workflow.tsx --hot true --input '{"prompt":"…"}'
-bunx smithers-orchestrator scores <run-id>     # did schema adherence improve?
+bunx smthrs up workflow.tsx --hot true --input '{"prompt":"…"}'
+bunx smthrs scores <run-id>     # did schema adherence improve?
 ```
 
 See `skills/smithers/SKILL.md` for the runtime/CLI surface and `docs/llms-core.txt`

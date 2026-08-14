@@ -1,7 +1,7 @@
 // smithers-source: user
 // smithers-display-name: Grill All Three
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Loop, Sequence } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, Loop, Sequence } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import { grillOutputSchema } from "../components/GrillMe";

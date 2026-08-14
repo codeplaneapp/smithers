@@ -256,7 +256,7 @@ exists), modeled on `examples/hijacked-chat-pipeline/ui.tsx` plus monitor patter
 - Live chat log: `NodeChatStream` (packages/gateway-ui/src/NodeChatStream.tsx) for
   the implement node (and review node when present), over `useGatewayRunEvents`.
 - Pierre diff: `PierreDiffView` from
-  `smithers-orchestrator/ui/adapters/pierre-diff-view` fed by
+  `smthrs/ui/adapters/pierre-diff-view` fed by
   `useGatewayRunDiff({ runId })` (getRunDiff RPC; handle the oversized marker
   variant with an EmptyState + `smithers diff <runId>` hint).
 - Controls row: cancel + resume via `useGatewayActions`; pause via

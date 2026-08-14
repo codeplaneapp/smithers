@@ -1,7 +1,7 @@
 import { EventBatch as EventBatch$1, EventSource as EventSource$1, EventSourceItem as EventSourceItem$1, MakePollingSourceOptions as MakePollingSourceOptions$1, MakeWebhookSourceOptions as MakeWebhookSourceOptions$1, PollResult as PollResult$1, WebhookRequest as WebhookRequest$1, WebhookSource as WebhookSource$1 } from './EventSourceTypes.js';
 import { Effect } from 'effect';
 import './CursorStoreTypes.js';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 import './ExternalEventTypes.js';
 
 /**

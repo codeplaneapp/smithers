@@ -13,7 +13,7 @@ Build **`plugin-smithers`**, an ElizaOS v1.x plugin that lets an Eliza agent **d
 - **Direction:** this is the *mirror image* of what we already ship. `agent-eliza` makes Eliza a **model backend for Smithers**. `plugin-smithers` makes **Smithers a capability inside Eliza**. Together they close the loop.
 - **Precedent:** we already did exactly this shape for another agent framework — **`packages/pi-plugin`** integrates Smithers into the PI coding agent over (a) an **MCP stdio** tool surface and (b) the **HTTP/SSE gateway** for live run control. `plugin-smithers` is the same idea expressed in Eliza's primitives.
 - **Shape (the canonical Eliza external-integration pattern):** **one Service** owns the connection + in-flight registry; **Actions** expose operations; a **Provider** injects live run state into the prompt; an **Evaluator** records outcomes; optional **routes** expose an inspector UI / webhook.
-- **Transport:** connect to a running Smithers **Gateway** with the typed **`SmithersGatewayClient`** (`@smithers-orchestrator/gateway-client`). Falls back to the plain `/v1` REST+SSE surface for a zero-Smithers-dependency build.
+- **Transport:** connect to a running Smithers **Gateway** with the typed **`SmithersGatewayClient`** (`@smthrs/gateway-client`). Falls back to the plain `/v1` REST+SSE surface for a zero-Smithers-dependency build.
 - **Home:** add it to this monorepo as **`packages/eliza-plugin`** (mirrors `pi-plugin`), so we maintain it at the source — but publish it under a non-`@elizaos/*` name so Eliza users can `elizaos plugins add` it.
 
 ---
@@ -34,7 +34,7 @@ Build **`plugin-smithers`**, an ElizaOS v1.x plugin that lets an Eliza agent **d
         └───────────────────────────┘                       └───────────────────────────────────────────┘
 ```
 
-- **`agent-eliza` (already shipped, `@smithers-orchestrator/agent-eliza`)** — `ElizaAgent` implements Smithers' `AgentLike` (`generate()`), dynamically imports `@elizaos/core`, builds an `AgentRuntime`, and calls `runtime.useModel("TEXT_LARGE", …)`. Smithers orchestrates; Eliza is one model backend.
+- **`agent-eliza` (already shipped, `@smthrs/agent-eliza`)** — `ElizaAgent` implements Smithers' `AgentLike` (`generate()`), dynamically imports `@elizaos/core`, builds an `AgentRuntime`, and calls `runtime.useModel("TEXT_LARGE", …)`. Smithers orchestrates; Eliza is one model backend.
 - **`plugin-smithers` (this proposal)** — an `@elizaos/core` `Plugin`. Eliza orchestrates the conversation; Smithers becomes a tool the agent reaches for when work is long-running, multi-step, crash-safe, or needs approvals.
 
 These are complementary, not redundant. With both installed you get a **round trip**: a Smithers workflow can use an Eliza agent as a step *and* an Eliza agent can launch Smithers workflows.
@@ -107,11 +107,11 @@ Three ways the plugin can reach Smithers. **Recommendation: Layer B (remote gate
 | Coupling | Heavy: engine + JSX build + DB in Eliza | **Thin: one client dep** | Medium: MCP client + subprocess mgmt |
 | Live events | `onProgress` callback | **`streamRunEvents()` async iterator** | tool polling (`watch_run`/`get_run`) |
 | Best when | Eliza *owns* the workflows & wants tight embedding | **Eliza is a client of a shared, long-lived Smithers** | You want to auto-mirror the whole semantic tool surface |
-| Smithers dep | `smithers-orchestrator` (engine) | `@smithers-orchestrator/gateway-client` | `@modelcontextprotocol/sdk` + a `smithers` binary on PATH |
+| Smithers dep | `smthrs` (engine) | `@smthrs/gateway-client` | `@modelcontextprotocol/sdk` + a `smithers` binary on PATH |
 
 **Why B:** it matches Smithers' reason for existing — a *durable* control plane. The Eliza agent should be a disposable client of it. It's also the lightest dependency and gives first-class live streaming. We keep **C (MCP)** in our back pocket as an *optional* way to expose the full 21-tool surface as a single escape-hatch action (see §10), and **A** documented for users who want a single process.
 
-> **Zero-Smithers-dependency variant.** If we publish `plugin-smithers` fully standalone and don't want a versioned dep on `@smithers-orchestrator/gateway-client`, the Service can hand-roll the same calls over the stable **`/v1` REST + SSE** surface (exactly what `pi-plugin/src/api/*` does): `POST /v1/runs`, `GET /v1/runs/:id`, `GET /v1/runs/:id/events` (SSE), `POST /v1/runs/:id/nodes/:nodeId/approve|deny`, `POST /v1/runs/:id/signals/:name`. Same design, ~80 lines of `fetch`. Lead with the typed client; offer this as a fallback.
+> **Zero-Smithers-dependency variant.** If we publish `plugin-smithers` fully standalone and don't want a versioned dep on `@smthrs/gateway-client`, the Service can hand-roll the same calls over the stable **`/v1` REST + SSE** surface (exactly what `pi-plugin/src/api/*` does): `POST /v1/runs`, `GET /v1/runs/:id`, `GET /v1/runs/:id/events` (SSE), `POST /v1/runs/:id/nodes/:nodeId/approve|deny`, `POST /v1/runs/:id/signals/:name`. Same design, ~80 lines of `fetch`. Lead with the typed client; offer this as a fallback.
 
 ---
 
@@ -123,7 +123,7 @@ The long-lived singleton. It is the *only* thing that talks to Smithers; everyth
 
 ```ts
 import { Service, type IAgentRuntime, EventType, type Memory, type HandlerCallback, logger } from '@elizaos/core';
-import { SmithersGatewayClient } from '@smithers-orchestrator/gateway-client';
+import { SmithersGatewayClient } from '@smthrs/gateway-client';
 
 declare module '@elizaos/core' {
   interface ServiceTypeRegistry { SMITHERS: 'smithers'; }
@@ -302,7 +302,7 @@ Round out the set with the obvious siblings (same shape):
 | `CANCEL_SMITHERS_RUN` | `cancel()` | "cancel / kill the run" |
 | `ANSWER_SMITHERS_HUMAN` | `answerHuman()` | run raised an `ask_human` question and the user answered |
 
-> **Prompt guidance bonus.** We can reuse `renderSmithersAgentPromptGuidance(contract, …)` from `@smithers-orchestrator/agents/agent-contract` (the same helper `pi-plugin` uses) inside the provider (§5.3) to teach the model *when* to use each action — consistent guidance across PI and Eliza.
+> **Prompt guidance bonus.** We can reuse `renderSmithersAgentPromptGuidance(contract, …)` from `@smthrs/agents/agent-contract` (the same helper `pi-plugin` uses) inside the provider (§5.3) to teach the model *when* to use each action — consistent guidance across PI and Eliza.
 
 ### 5.3 `SMITHERS_RUNS` provider — live state into the prompt
 
@@ -506,15 +506,15 @@ A user enables it in their character:
 
 **Recommendation: add `packages/eliza-plugin` to this monorepo** (mirrors `pi-plugin`), publish it to npm under a **non-`@elizaos/*`** name so Eliza users can install it.
 
-- **Internal package name:** `@smithers-orchestrator/eliza-plugin` (consistent with `pi-plugin` = `@smithers-orchestrator/pi-plugin`).
-- **Published/registry name:** the `@elizaos/*` scope is **reserved and rejected** by the registry validator, and `elizaos publish` wants a `plugin-*` prefix. So publish as **`@smithers-orchestrator/plugin-smithers`** (own scope is allowed) or unscoped **`elizaos-plugin-smithers`**. Discovery is keyword-based, so include `"keywords": ["elizaos", "plugin", "smithers", "orchestration"]`.
+- **Internal package name:** `@smthrs/eliza-plugin` (consistent with `pi-plugin` = `@smthrs/pi-plugin`).
+- **Published/registry name:** the `@elizaos/*` scope is **reserved and rejected** by the registry validator, and `elizaos publish` wants a `plugin-*` prefix. So publish as **`@smthrs/plugin-smithers`** (own scope is allowed) or unscoped **`elizaos-plugin-smithers`**. Discovery is keyword-based, so include `"keywords": ["elizaos", "plugin", "smithers", "orchestration"]`.
 - **`@elizaos/core` placement:** `dependencies` (the current scaffold convention) — it's externalized by the bundler either way, never bundled into `dist/`.
 
 `package.json` (note `agentConfig.pluginParameters` — how `elizaos plugins add` prompts the user for settings):
 
 ```json
 {
-  "name": "@smithers-orchestrator/eliza-plugin",
+  "name": "@smthrs/eliza-plugin",
   "description": "Drive Smithers workflows from an ElizaOS agent",
   "version": "0.26.1",
   "type": "module",
@@ -526,7 +526,7 @@ A user enables it in their character:
   "files": ["dist", "README.md"],
   "dependencies": {
     "@elizaos/core": "^1.7.2",
-    "@smithers-orchestrator/gateway-client": "workspace:*"
+    "@smthrs/gateway-client": "workspace:*"
   },
   "devDependencies": { "tsup": "^8", "typescript": "~5.9.3", "vitest": "^4" },
   "scripts": {
@@ -544,7 +544,7 @@ A user enables it in their character:
 }
 ```
 
-> **Caveat — `@smithers-orchestrator/gateway-client` as a `workspace:*` dep** works in-repo, but a *published* standalone plugin needs the gateway-client published to npm (it is, alongside `smithers-orchestrator`) — or switch the Service to the **`/v1` REST fallback** (§4) to drop the Smithers dependency entirely. Decide based on whether we publish from this monorepo or vendor the client.
+> **Caveat — `@smthrs/gateway-client` as a `workspace:*` dep** works in-repo, but a *published* standalone plugin needs the gateway-client published to npm (it is, alongside `smthrs`) — or switch the Service to the **`/v1` REST fallback** (§4) to drop the Smithers dependency entirely. Decide based on whether we publish from this monorepo or vendor the client.
 
 **Build/test:** `tsup` ESM + `.d.ts`, `@elizaos/core` externalized; component tests under `vitest` plus an Eliza `TestSuite` registered on `plugin.tests` and run with `elizaos test --type e2e`.
 
@@ -554,10 +554,10 @@ A user enables it in their character:
 
 The plugin shouldn't reinvent things `pi-plugin` already proved out:
 
-- **`@smithers-orchestrator/agents/agent-contract`** — `createSmithersAgentContract()` + `renderSmithersAgentPromptGuidance()` generate consistent "here's how to use Smithers' tools" guidance. Fold the rendered guidance into the `SMITHERS_RUNS` provider's `text` so the model gets the same playbook PI users get.
+- **`@smthrs/agents/agent-contract`** — `createSmithersAgentContract()` + `renderSmithersAgentPromptGuidance()` generate consistent "here's how to use Smithers' tools" guidance. Fold the rendered guidance into the `SMITHERS_RUNS` provider's `text` so the model gets the same playbook PI users get.
 - **`docs/llms.txt` / `docs/llms-full.txt`** — ship/the agent can surface the concise bundle as on-demand context (pi-plugin's `/smithers-docs`).
-- **`@smithers-orchestrator/gateway-client`** — the typed client; don't hand-roll WS framing.
-- **`SmithersError`** (`@smithers-orchestrator/errors`) — consistent error shapes if we go in-monorepo.
+- **`@smthrs/gateway-client`** — the typed client; don't hand-roll WS framing.
+- **`SmithersError`** (`@smthrs/errors`) — consistent error shapes if we go in-monorepo.
 
 ---
 
@@ -605,7 +605,7 @@ The repo bans mocks; tests must hit a real backend. Plan:
 | **2 — Write path** | `RUN_SMITHERS_WORKFLOW` + background `streamRunEvents` → proactive `MESSAGE_RECEIVED`. | The core value: launch + auto-report. |
 | **3 — Human-in-the-loop** | `APPROVE_/DENY_/ANSWER_HUMAN` actions + approval surfacing in the reducer. | Makes gates/`ask_human` conversational. |
 | **4 — Polish** | `SMITHERS_RUN_OUTCOME` evaluator, `/smithers/*` routes, optional static inspector, `agent-contract` prompt guidance, docs + README. | |
-| **5 — Publish** | Decide name (`@smithers-orchestrator/plugin-smithers` vs `elizaos-plugin-smithers`), publish, optional registry PR. | Keep maintained at source (this monorepo). |
+| **5 — Publish** | Decide name (`@smthrs/plugin-smithers` vs `elizaos-plugin-smithers`), publish, optional registry PR. | Keep maintained at source (this monorepo). |
 
 ---
 
@@ -613,7 +613,7 @@ The repo bans mocks; tests must hit a real backend. Plan:
 
 1. **Transport** — go with typed `SmithersGatewayClient` (recommended), or the zero-dep `/v1` REST fallback for a fully standalone publishable plugin?
 2. **Home** — `packages/eliza-plugin` in this monorepo (recommended; maintained at source), or a separate repo?
-3. **Published name** — `@smithers-orchestrator/plugin-smithers` (own scope) or unscoped `elizaos-plugin-smithers` for maximum `elizaos plugins add` ergonomics?
+3. **Published name** — `@smthrs/plugin-smithers` (own scope) or unscoped `elizaos-plugin-smithers` for maximum `elizaos plugins add` ergonomics?
 4. **Scope of v1** — read+write+approvals (Phases 1–3), or start read-only (Phase 1) to de-risk?
 5. **Proactive messaging** — is emitting synthetic `MESSAGE_RECEIVED` to make the agent "speak up" desirable, or should run updates be pull-only (agent reports only when asked)? (Affects whether we background-stream.)
 

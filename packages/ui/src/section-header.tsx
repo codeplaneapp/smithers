@@ -9,7 +9,10 @@ export function Eyebrow({ className, ...props }: ComponentProps<"span">) {
   return <span data-slot="eyebrow" className={cn("sui-eyebrow", className)} {...props} />;
 }
 
-export type SectionHeaderProps = ComponentProps<"div"> & {
+// `title` is omitted from the div props: the intrinsic HTML `title?: string`
+// would intersect with the slot below and collapse it to `string & ReactNode`,
+// making element titles unassignable (same reason CollapsiblePanel omits it).
+export type SectionHeaderProps = Omit<ComponentProps<"div">, "title"> & {
   title: ReactNode;
   /** Uppercase overline above the title. */
   eyebrow?: ReactNode;

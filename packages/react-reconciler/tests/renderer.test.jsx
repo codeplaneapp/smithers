@@ -1,7 +1,7 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { SmithersRenderer } from "../src/dom/renderer.js";
-import { Task, Workflow } from "@smithers-orchestrator/components/components/index";
+import { Task, Workflow } from "@smthrs/components/components/index";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 describe("renderer updates", () => {
   test("commitUpdate applies new props", async () => {

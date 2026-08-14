@@ -5,12 +5,12 @@ description: One page that maps every kind of Smithers UI documentation, from th
 
 Agents build every Smithers UI surface by composing the shared component
 library, never by hand-rolling markup and CSS. The library has two layers:
-`@smithers-orchestrator/ui` ports [shadcn/ui](https://ui.shadcn.com) component
+`@smthrs/ui` ports [shadcn/ui](https://ui.shadcn.com) component
 anatomy (`data-slot` attributes, CVA variants, `asChild` via Radix Slot) and
 adds agent-native components built specifically for Smithers (reasoning, tool
 calls, plans, queues, approvals, checkpoints, context usage), while
-`@smithers-orchestrator/gateway-ui` supplies run-aware widgets composed over
-the `smithers-orchestrator/gateway-react` hooks. A custom workflow UI at
+`@smthrs/gateway-ui` supplies run-aware widgets composed over
+the `smthrs/gateway-react` hooks. A custom workflow UI at
 `.smithers/ui/<workflow>.tsx` imports from those subpaths and nothing else.
 
 ## Doc types at a glance
@@ -31,12 +31,12 @@ the `smithers-orchestrator/gateway-react` hooks. A custom workflow UI at
 ## How the layers stack
 
 1. `react` renders.
-2. `smithers-orchestrator/ui` provides the components: shadcn anatomy, the
+2. `smthrs/ui` provides the components: shadcn anatomy, the
    agent-native families, and tokens that make light and dark correct by
-   construction. Heavy renderers live behind `smithers-orchestrator/ui/adapters/*`.
-3. `smithers-orchestrator/gateway-ui` provides run-aware widgets that already
+   construction. Heavy renderers live behind `smthrs/ui/adapters/*`.
+3. `smthrs/gateway-ui` provides run-aware widgets that already
    know how to render runs, events, approvals, and node output.
-4. `smithers-orchestrator/gateway-react` provides the live hooks those widgets
+4. `smthrs/gateway-react` provides the live hooks those widgets
    (and your custom panels) read runs through.
 5. Your workflow UI composes the three subpaths and calls
    `createGatewayReactRoot(<App />)`. The Gateway bundles and serves it at

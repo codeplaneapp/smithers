@@ -7,7 +7,7 @@ try {
 }
 
 import { afterEach, describe, expect, test } from "bun:test";
-import React, { act, createElement } from "react";
+import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { SmithersGatewayContext } from "../src/SmithersGatewayContext.ts";
 import { useGatewayRunTokenUsage } from "../src/useGatewayRunTokenUsage.ts";

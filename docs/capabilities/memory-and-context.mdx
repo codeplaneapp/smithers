@@ -29,7 +29,7 @@ The honest tradeoff underneath all of it: RAG-style selective recall risks surfa
 
 ### The memory store: facts, threads, notes
 
-Cross-run state lives in a `MemoryStore` (package `@smithers-orchestrator/memory`, exported as `smithers-orchestrator/memory`) over the workspace database - local SQLite (`.smithers/smithers.db`) by default. Four namespace kinds scope lifetime:
+Cross-run state lives in a `MemoryStore` (package `@smthrs/memory`, exported as `smthrs/memory`) over the workspace database - local SQLite (`.smithers/smithers.db`) by default. Four namespace kinds scope lifetime:
 
 ```ts
 type MemoryNamespace = { kind: "workflow" | "agent" | "user" | "global"; id: string };
@@ -91,14 +91,14 @@ On prompt caching: Smithers does not manage provider-level `cache_control` itsel
 
 ```bash
 # Inspect and edit facts from the shared workspace store
-bunx smithers-orchestrator memory list                          # every fact, grouped by namespace
-bunx smithers-orchestrator memory list workflow:code-review     # one namespace
-bunx smithers-orchestrator memory get workflow:code-review answer
-bunx smithers-orchestrator memory set workflow:code-review answer '"use bun test"'
-bunx smithers-orchestrator memory rm  workflow:code-review stale-key
+bunx smthrs memory list                          # every fact, grouped by namespace
+bunx smthrs memory list workflow:code-review     # one namespace
+bunx smthrs memory get workflow:code-review answer
+bunx smthrs memory set workflow:code-review answer '"use bun test"'
+bunx smthrs memory rm  workflow:code-review stale-key
 
 # Watch the context budget in a live run
-bunx smithers-orchestrator node RUN_ID NODE_ID   # per-node token usage
+bunx smthrs node RUN_ID NODE_ID   # per-node token usage
 ```
 
 Per-call context size is metered (`smithers.tokens.context_window_per_call`, bucketed at 50k/100k/200k/500k/1M) so drift toward the large buckets is visible before quality drops.

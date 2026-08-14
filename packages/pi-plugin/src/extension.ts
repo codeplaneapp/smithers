@@ -7,8 +7,8 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import type { ExtensionAPI as PiExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type, type TSchema } from "@sinclair/typebox";
-import { createSmithersAgentContract, type SmithersAgentContract } from "@smithers-orchestrator/agents/agent-contract";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { createSmithersAgentContract, type SmithersAgentContract } from "@smthrs/agents/agent-contract";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { buildSmithersPiSystemPrompt } from "./buildSmithersPiSystemPrompt.js";
 import { DevToolsClient } from "./runtime/DevToolsClient.js";
 import { DevToolsStore } from "./runtime/DevToolsStore.js";
@@ -109,10 +109,10 @@ function loadSmithersDocs() {
   const candidates = [
     resolve(thisDir, "../../../docs/llms-full.txt"),
     resolve(process.cwd(), "docs/llms-full.txt"),
-    resolve(process.cwd(), "node_modules/smithers-orchestrator/docs/llms-full.txt"),
+    resolve(process.cwd(), "node_modules/smthrs/docs/llms-full.txt"),
     resolve(thisDir, "../../../docs/llms.txt"),
     resolve(process.cwd(), "docs/llms.txt"),
-    resolve(process.cwd(), "node_modules/smithers-orchestrator/docs/llms.txt"),
+    resolve(process.cwd(), "node_modules/smthrs/docs/llms.txt"),
   ];
   for (const candidate of candidates) {
     try {
@@ -128,7 +128,7 @@ function loadSmithersDocs() {
 
 function resolveCliPath() {
   try {
-    return requireFromHere.resolve("@smithers-orchestrator/cli");
+    return requireFromHere.resolve("@smthrs/cli");
   } catch {
     return resolve(dirname(fileURLToPath(import.meta.url)), "../../../apps/cli/src/index.js");
   }

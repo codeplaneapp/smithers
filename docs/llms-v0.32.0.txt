@@ -50,6 +50,6 @@ Examples:
 
 ## Pointers
 
-- npm: smithers-orchestrator
+- npm: smthrs
 - github: github.com/smithersai/smithers
 - changelogs: docs/changelogs/ on the site (not duplicated in llms files)

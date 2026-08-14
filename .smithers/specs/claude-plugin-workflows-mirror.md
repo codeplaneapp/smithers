@@ -207,7 +207,7 @@ args (object or JSON string; normalize):
   { workflow, input?, cwd? }                      // launch mode
   { mirrorAllNodes?, maxLiveWatchers?, agentBudget? }
 
-CLI = args.cwd ? `cd <quoted cwd> && bunx smithers-orchestrator` : `bunx smithers-orchestrator`
+CLI = args.cwd ? `cd <quoted cwd> && bunx smthrs` : `bunx smthrs`
 
 // Launch mode: one schema-forced agent runs exactly
 //   ${CLI} workflow run <workflow> --detach [--input <json>] --format json
@@ -294,17 +294,17 @@ Shipped in `claude-plugin/`:
    `${CLAUDE_PLUGIN_ROOT}` is resolved by the hook runtime, so the path is
    always the currently-installed version; `scriptPath` is read once at launch,
    so mid-session updates cannot break an in-flight mirror. The active-run
-   count comes from a best-effort `bunx smithers-orchestrator ps --format json`
+   count comes from a best-effort `bunx smthrs ps --format json`
    with a 2s timeout, silent on failure, so the hook never blocks a session.
    Fallback if the context line was compacted away: the skill documents the
    glob `~/.claude/plugins/**/smithers*/workflows/smithers-run.mjs`.
 3. **Monitor** (`monitors/monitors.json`, `experimental.monitors`):
-   `bunx smithers-orchestrator claude monitor`. Approval requests, failures,
+   `bunx smthrs claude monitor`. Approval requests, failures,
    and completions reach the main loop as notifications even when no mirror is
    running, and Claude relays approvals to the human (`AskUserQuestion` →
    `resolve_approval`). Monitors are experimental and interactive-only; the
    design treats them as an enhancer, never a dependency.
-4. **`.mcp.json`** unchanged (`bunx smithers-orchestrator --mcp`).
+4. **`.mcp.json`** unchanged (`bunx smthrs --mcp`).
 5. **Skill rewrite** (`skills/smithers/SKILL.md`), the load-bearing rules:
 
    - Keep: durable/multi-step/background work runs in smithers, never
@@ -392,12 +392,12 @@ runs on seeded real stores and the real CLI binary.
 
 | Failure | Behavior |
 | --- | --- |
-| smithers CLI not installed | `bunx smithers-orchestrator` bootstraps from npm (first call slow); skill preflights with `--version` before launching a mirror |
+| smithers CLI not installed | `bunx smthrs` bootstraps from npm (first call slow); skill preflights with `--version` before launching a mirror |
 | `.smithers` not initialized | skill runs the durable `init` workflow first; `claude tick` on a missing store exits 4 with an actionable message the sync agent surfaces via its row |
 | Store backend gaps (pglite CLI reads) | tick rides `findAndOpenDb`, so it inherits the pluggable-DB fixes; sqlite (default) works today; document the dependency |
 | DB locked by the detached engine | same retry/interval story as `inspect --watch` today (sqlite WAL + retryable-write handling); tick is read-only |
 | MCP server absent (headless) | irrelevant to the mirror: everything is CLI-over-Bash; MCP is only used by the skill for control actions, with CLI equivalents documented |
-| Plugin newer/older than CLI | `contract` mismatch: script logs "update the smithers plugin / smithers-orchestrator" and returns gracefully; contract v1 is frozen |
+| Plugin newer/older than CLI | `contract` mismatch: script logs "update the smithers plugin / smthrs" and returns gracefully; contract v1 is frozen |
 | Monitor unsupported (old Claude Code, non-interactive) | monitors are additive; mirror and skill work without them |
 | SessionStart context compacted away | skill's documented glob fallback locates the script |
 

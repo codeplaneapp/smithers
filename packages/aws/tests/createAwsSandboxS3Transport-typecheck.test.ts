@@ -22,7 +22,7 @@ describe("createAwsSandboxS3Transport public type", () => {
     writeFileSync(
       join(dir, "aws-s3-transport.ts"),
       `
-				import { createAwsSandboxS3Transport } from "@smithers-orchestrator/aws";
+				import { createAwsSandboxS3Transport } from "@smthrs/aws";
 
 				createAwsSandboxS3Transport({
 					s3: {
@@ -46,7 +46,7 @@ describe("createAwsSandboxS3Transport public type", () => {
           module: "ESNext",
           moduleResolution: "bundler",
           paths: {
-            "@smithers-orchestrator/aws": [resolve(REPO_ROOT, "packages/aws/src/index.d.ts")],
+            "@smthrs/aws": [resolve(REPO_ROOT, "packages/aws/src/index.d.ts")],
           },
           skipLibCheck: true,
           lib: ["ESNext", "DOM", "DOM.Iterable"],

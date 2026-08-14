@@ -2,11 +2,11 @@
 // smithers-display-name: Docs Concise
 // smithers-description: Reword every docs page and skill more concisely without losing ideas: batched rewrite, mechanical checks, idea-preservation audit, llms regen, doc gates.
 // smithers-tags: docs, editing, quality
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { createSmithers, Parallel, Sequence, UI } from "smithers-orchestrator";
+import { createSmithers, Parallel, Sequence, UI } from "smthrs";
 import { z } from "zod/v4";
 import { providers } from "../agents";
 

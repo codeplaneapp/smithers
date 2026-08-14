@@ -1,6 +1,6 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
-/** @typedef {import("@smithers-orchestrator/db/adapter/AttemptRow").AttemptRow} AttemptRow */
+/** @typedef {import("@smthrs/db/adapter/AttemptRow").AttemptRow} AttemptRow */
 
 /**
  * Strip the loop-scope suffix (`@@ralph=0,...`) from a node id to recover the
@@ -40,6 +40,46 @@ function conversationFromMeta(metaJson) {
 }
 
 /**
+ * Parse the compact agent-checkpoint reference persisted in attempt metadata.
+ * The checkpoint payload itself deliberately lives outside meta_json so large
+ * provider snapshots do not inflate attempt rows.
+ *
+ * @param {string | null | undefined} metaJson
+ * @returns {{ contentHash: string; sequence: number; codec: string; version: number } | null}
+ */
+function checkpointRefFromMeta(metaJson) {
+  if (typeof metaJson !== "string" || metaJson.length === 0) return null;
+  let meta;
+  try {
+    meta = JSON.parse(metaJson);
+  } catch {
+    return null;
+  }
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
+  const ref = /** @type {{ agentCheckpoint?: unknown }} */ (meta).agentCheckpoint;
+  if (!ref || typeof ref !== "object" || Array.isArray(ref)) return null;
+  const candidate = /** @type {Record<string, unknown>} */ (ref);
+  if (
+    typeof candidate.contentHash !== "string" ||
+    candidate.contentHash.length === 0 ||
+    !Number.isSafeInteger(candidate.sequence) ||
+    candidate.sequence < 0 ||
+    typeof candidate.codec !== "string" ||
+    candidate.codec.length === 0 ||
+    !Number.isSafeInteger(candidate.version) ||
+    candidate.version < 1
+  ) {
+    return null;
+  }
+  return {
+    contentHash: candidate.contentHash,
+    sequence: /** @type {number} */ (candidate.sequence),
+    codec: candidate.codec,
+    version: /** @type {number} */ (candidate.version),
+  };
+}
+
+/**
  * Sort key for picking the most recently completed attempt. Prefer
  * finishedAtMs, fall back to startedAtMs, then attempt number.
  * @param {AttemptRow} attempt
@@ -65,6 +105,27 @@ function completionOrder(attempt) {
  * @returns {unknown[]} A fresh copy of the source conversation messages.
  */
 export function resolveForkSessionMessages(attempts, forkSource, nodeId) {
+  const state = resolveForkAgentState(attempts, forkSource, nodeId);
+  if (state.messages) return state.messages;
+  throw new SmithersError(
+    "TASK_FORK_SESSION_UNAVAILABLE",
+    `Task "${nodeId}" forks "${forkSource}", which completed without a usable conversation snapshot.`,
+    { nodeId, forkSource },
+  );
+}
+
+/**
+ * Resolve all durable agent continuation state available for a task fork. A
+ * native checkpoint and a replayable conversation are collected independently
+ * from the newest finished source attempts. The engine can then prefer a
+ * compatible native checkpoint and fall back to messages for older agents.
+ *
+ * @param {readonly AttemptRow[]} attempts
+ * @param {string} forkSource
+ * @param {string} nodeId
+ * @returns {{ checkpointRef: { contentHash: string; sequence: number; codec: string; version: number } | null; messages: unknown[] | null; sourceAttempt: AttemptRow }}
+ */
+export function resolveForkAgentState(attempts, forkSource, nodeId) {
   const finished = attempts.filter(
     (attempt) => logicalNodeId(attempt.nodeId) === forkSource && attempt.state === "finished",
   );
@@ -77,10 +138,13 @@ export function resolveForkSessionMessages(attempts, forkSource, nodeId) {
   }
   const ordered = [...finished].sort((a, b) => completionOrder(b) - completionOrder(a));
   for (const attempt of ordered) {
+    const checkpointRef = checkpointRefFromMeta(attempt.metaJson);
     const conversation = conversationFromMeta(attempt.metaJson);
-    if (conversation) {
-      return /** @type {unknown[]} */ (JSON.parse(JSON.stringify(conversation)));
-    }
+    const messages = conversation ? /** @type {unknown[]} */ (JSON.parse(JSON.stringify(conversation))) : null;
+    // A conversation may only substitute for a checkpoint from this exact
+    // completed attempt. Mixing a newer native snapshot with an older retry or
+    // loop iteration silently forks stale state.
+    if (checkpointRef || messages) return { checkpointRef, messages, sourceAttempt: attempt };
   }
   throw new SmithersError(
     "TASK_FORK_SESSION_UNAVAILABLE",

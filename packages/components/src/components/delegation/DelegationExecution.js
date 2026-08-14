@@ -3,8 +3,8 @@
 // @smithers-type-exports-end
 
 import React from "react";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { Sequence } from "../Sequence.js";
 import { Parallel } from "../Parallel.js";
 import { Loop } from "../Ralph.js";

@@ -7,8 +7,8 @@ import {
   Workflow,
   type BrowserWorkflow,
   type RuntimeAdapter,
-} from "smithers-orchestrator/browser";
-import { assertCapabilityError } from "@smithers-orchestrator/testing/browser";
+} from "smthrs/browser";
+import { assertCapabilityError } from "@smthrs/testing/browser";
 
 const runtime: RuntimeAdapter = createBrowserRuntime();
 const workflow: BrowserWorkflow = defineBrowserWorkflow((ctx) =>

@@ -6,8 +6,8 @@ description: Run a child workflow through an injectable sandbox provider and col
 `<Sandbox>` is a task boundary for work that runs outside the parent task process. It's provider-first: pass an injectable provider object or a registered provider id; `runtime` covers only the built-in legacy local transports.
 
 ```ts
-import { Sandbox } from "smithers-orchestrator";
-import type { SandboxProvider } from "smithers-orchestrator/sandbox";
+import { Sandbox } from "smthrs";
+import type { SandboxProvider } from "smthrs/sandbox";
 
 type SandboxProps = {
   id: string;
@@ -64,7 +64,7 @@ type SandboxProps = {
 
 The sandbox provider contract types (`SandboxProvider`, `SandboxProviderRequest`,
 `SandboxProviderResult`, `ExecuteSandboxOptions`) are public exports from
-`"smithers-orchestrator/sandbox"`. Import them with `import type` when writing adapters.
+`"smthrs/sandbox"`. Import them with `import type` when writing adapters.
 
 ## Egress controls
 
@@ -163,9 +163,9 @@ and a child workflow in one file. Real providers usually create a VM or
 container but return the same structured `SandboxProviderResult`.
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Sandbox } from "smithers-orchestrator";
-import type { SandboxProvider } from "smithers-orchestrator/sandbox";
+/** @jsxImportSource smthrs */
+import { createSmithers, Sandbox } from "smthrs";
+import type { SandboxProvider } from "smthrs/sandbox";
 import { z } from "zod";
 
 const child = createSmithers({
@@ -262,7 +262,7 @@ type SandboxProvider = {
 Register reusable providers when a workflow should reference them by id:
 
 ```ts
-import { registerSandboxProvider } from "smithers-orchestrator/sandbox";
+import { registerSandboxProvider } from "smthrs/sandbox";
 
 const unregister = registerSandboxProvider(provider);
 
@@ -327,7 +327,7 @@ For most workflows, use sibling sandboxes under a `Parallel` or `MergeQueue` ins
 
 ## Built-in local transports
 
-When `provider` is omitted, Smithers uses the legacy local transport path: `runtime` is `"bubblewrap"` (the default), `"docker"`, or `"codeplane"`. `"cloudflare"` is provider-backed, via `createCloudflareSandboxProvider()` from `smithers-orchestrator/cloudflare`. Unknown runtimes fail closed; Docker is no longer silently replaced by bubblewrap when unavailable.
+When `provider` is omitted, Smithers uses the legacy local transport path: `runtime` is `"bubblewrap"` (the default), `"docker"`, or `"codeplane"`. `"cloudflare"` is provider-backed, via `createCloudflareSandboxProvider()` from `smthrs/cloudflare`. Unknown runtimes fail closed; Docker is no longer silently replaced by bubblewrap when unavailable.
 
 ## First-class providers
 

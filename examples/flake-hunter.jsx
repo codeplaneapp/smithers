@@ -6,11 +6,11 @@
  * Pattern: command runner ↔ retry controller → evidence packer → analyst agent.
  * Use cases: CI flake detection, intermittent failure classification, test stability audits.
  */
-import { Sequence, Loop } from "smithers-orchestrator";
+import { Sequence, Loop } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import RunPrompt from "./prompts/flake-hunter/run.mdx";
 import PackPrompt from "./prompts/flake-hunter/pack.mdx";

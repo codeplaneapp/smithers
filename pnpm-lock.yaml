@@ -6,7 +6,8 @@ settings:
 
 overrides:
   '@opentelemetry/propagator-jaeger': 2.9.0
-  effect: 4.0.0-beta.102
+  effect: 4.0.0-beta.105
+  '@smthrs/cli': link:apps/cli
 
 importers:
 
@@ -21,6 +22,9 @@ importers:
       dagre:
         specifier: ^0.8.5
         version: 0.8.5
+      electrobun:
+        specifier: ^1.18.1
+        version: 1.18.1
     devDependencies:
       '@happy-dom/global-registrator':
         specifier: ^20.10.6
@@ -28,145 +32,148 @@ importers:
       '@mdx-js/esbuild':
         specifier: ^3.1.1
         version: 3.1.1(esbuild@0.28.1)
-      '@smithers-orchestrator/accounts':
+      '@smthrs/accounts':
         specifier: workspace:*
         version: link:packages/accounts
-      '@smithers-orchestrator/agent-eliza':
+      '@smthrs/agent-eliza':
         specifier: workspace:*
         version: link:packages/agent-eliza
-      '@smithers-orchestrator/agents':
+      '@smthrs/agents':
         specifier: workspace:*
         version: link:packages/agents
-      '@smithers-orchestrator/aws':
+      '@smthrs/aws':
         specifier: workspace:*
         version: link:packages/aws
-      '@smithers-orchestrator/cli':
-        specifier: workspace:*
+      '@smthrs/cli':
+        specifier: link:apps/cli
         version: link:apps/cli
-      '@smithers-orchestrator/cloudflare':
+      '@smthrs/cloudflare':
         specifier: workspace:*
         version: link:packages/cloudflare
-      '@smithers-orchestrator/components':
+      '@smthrs/components':
         specifier: workspace:*
         version: link:packages/components
-      '@smithers-orchestrator/control-plane':
+      '@smthrs/control-plane':
         specifier: workspace:*
         version: link:packages/control-plane
-      '@smithers-orchestrator/daytona':
+      '@smthrs/daytona':
         specifier: workspace:*
         version: link:packages/daytona
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:packages/db
-      '@smithers-orchestrator/devtools':
+      '@smthrs/devtools':
         specifier: workspace:*
         version: link:packages/devtools
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:packages/driver
-      '@smithers-orchestrator/electric-proxy':
+      '@smthrs/electric-proxy':
         specifier: workspace:*
         version: link:packages/electric-proxy
-      '@smithers-orchestrator/engine':
+      '@smthrs/engine':
         specifier: workspace:*
         version: link:packages/engine
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:packages/errors
-      '@smithers-orchestrator/gateway':
+      '@smthrs/gateway':
         specifier: workspace:*
         version: link:packages/gateway
-      '@smithers-orchestrator/gateway-client':
+      '@smthrs/gateway-client':
         specifier: workspace:*
         version: link:packages/gateway-client
-      '@smithers-orchestrator/gateway-react':
+      '@smthrs/gateway-react':
         specifier: workspace:*
         version: link:packages/gateway-react
-      '@smithers-orchestrator/gateway-ui':
+      '@smthrs/gateway-ui':
         specifier: workspace:*
         version: link:packages/gateway-ui
-      '@smithers-orchestrator/gcp':
+      '@smthrs/gcp':
         specifier: workspace:*
         version: link:packages/gcp
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:packages/graph
-      '@smithers-orchestrator/integrations':
+      '@smthrs/herdr':
+        specifier: workspace:*
+        version: link:packages/herdr
+      '@smthrs/integrations':
         specifier: workspace:*
         version: link:packages/integrations
-      '@smithers-orchestrator/memory':
+      '@smthrs/memory':
         specifier: workspace:*
         version: link:packages/memory
-      '@smithers-orchestrator/microsandbox':
+      '@smthrs/microsandbox':
         specifier: workspace:*
         version: link:packages/microsandbox
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:apps/observability
-      '@smithers-orchestrator/openapi':
+      '@smthrs/openapi':
         specifier: workspace:*
         version: link:packages/openapi
-      '@smithers-orchestrator/pi-plugin':
+      '@smthrs/pi-plugin':
         specifier: workspace:*
         version: link:packages/pi-plugin
-      '@smithers-orchestrator/protocol':
+      '@smthrs/protocol':
         specifier: workspace:*
         version: link:packages/protocol
-      '@smithers-orchestrator/react-reconciler':
+      '@smthrs/react-reconciler':
         specifier: workspace:*
         version: link:packages/react-reconciler
-      '@smithers-orchestrator/review':
+      '@smthrs/review':
         specifier: workspace:*
         version: link:apps/review
-      '@smithers-orchestrator/sandbox':
+      '@smthrs/sandbox':
         specifier: workspace:*
         version: link:packages/sandbox
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:packages/scheduler
-      '@smithers-orchestrator/scorers':
+      '@smthrs/scorers':
         specifier: workspace:*
         version: link:packages/scorers
-      '@smithers-orchestrator/server':
+      '@smthrs/server':
         specifier: workspace:*
         version: link:packages/server
-      '@smithers-orchestrator/telegram':
+      '@smthrs/telegram':
         specifier: workspace:*
         version: link:packages/telegram
-      '@smithers-orchestrator/testing':
+      '@smthrs/testing':
         specifier: workspace:*
         version: link:packages/testing
-      '@smithers-orchestrator/time-travel':
+      '@smthrs/time-travel':
         specifier: workspace:*
         version: link:packages/time-travel
-      '@smithers-orchestrator/tool-context':
+      '@smthrs/tool-context':
         specifier: workspace:*
         version: link:packages/tool-context
-      '@smithers-orchestrator/tui':
+      '@smthrs/tui':
         specifier: workspace:*
         version: link:packages/tui
-      '@smithers-orchestrator/tui-ui':
+      '@smthrs/tui-ui':
         specifier: workspace:*
         version: link:packages/tui-ui
-      '@smithers-orchestrator/ui':
+      '@smthrs/ui':
         specifier: workspace:*
         version: link:packages/ui
-      '@smithers-orchestrator/ui-core':
+      '@smthrs/ui-core':
         specifier: workspace:*
         version: link:packages/ui-core
-      '@smithers-orchestrator/ui-styleguide':
+      '@smthrs/ui-styleguide':
         specifier: workspace:*
         version: link:packages/ui-styleguide
-      '@smithers-orchestrator/usage':
+      '@smthrs/usage':
         specifier: workspace:*
         version: link:packages/usage
-      '@smithers-orchestrator/vcs':
+      '@smthrs/vcs':
         specifier: workspace:*
         version: link:packages/vcs
-      '@smithers-orchestrator/vercel':
+      '@smthrs/vercel':
         specifier: workspace:*
         version: link:packages/vercel
-      '@smithers-orchestrator/xstate':
+      '@smthrs/xstate':
         specifier: workspace:*
         version: link:packages/xstate
       '@tanstack/react-query':
@@ -206,8 +213,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
       esbuild:
         specifier: ^0.28.1
         version: 0.28.1
@@ -223,7 +230,7 @@ importers:
       react-dom:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
-      smithers-orchestrator:
+      smthrs:
         specifier: workspace:*
         version: link:packages/smithers
       tsup:
@@ -247,28 +254,28 @@ importers:
       '@milkdown/crepe':
         specifier: 7.21.2
         version: 7.21.2(prosemirror-model@1.25.9)(prosemirror-state@1.4.4)(prosemirror-view@1.41.9)(typescript@6.0.3)
-      '@smithers-orchestrator/accounts':
+      '@smthrs/accounts':
         specifier: workspace:*
         version: link:../packages/accounts
-      '@smithers-orchestrator/cli':
-        specifier: workspace:*
+      '@smthrs/cli':
+        specifier: link:../apps/cli
         version: link:../apps/cli
-      '@smithers-orchestrator/components':
+      '@smthrs/components':
         specifier: workspace:*
         version: link:../packages/components
-      '@smithers-orchestrator/gateway-client':
+      '@smthrs/gateway-client':
         specifier: workspace:*
         version: link:../packages/gateway-client
-      '@smithers-orchestrator/review':
+      '@smthrs/review':
         specifier: workspace:*
         version: link:../apps/review
-      '@smithers-orchestrator/scorers':
+      '@smthrs/scorers':
         specifier: workspace:*
         version: link:../packages/scorers
-      '@smithers-orchestrator/usage':
+      '@smthrs/usage':
         specifier: workspace:*
         version: link:../packages/usage
-      '@smithers-orchestrator/vcs':
+      '@smthrs/vcs':
         specifier: workspace:*
         version: link:../packages/vcs
       '@xyflow/react':
@@ -278,8 +285,8 @@ importers:
         specifier: ^0.8.5
         version: 0.8.5
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
       mermaid:
         specifier: ^11.16.0
         version: 11.16.0
@@ -289,7 +296,7 @@ importers:
       react-dom:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
-      smithers-orchestrator:
+      smthrs:
         specifier: workspace:*
         version: link:../packages/smithers
       twitter-api-v2:
@@ -308,16 +315,16 @@ importers:
       '@happy-dom/global-registrator':
         specifier: ^20.10.6
         version: 20.10.6
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../packages/driver
-      '@smithers-orchestrator/gateway-react':
+      '@smthrs/gateway-react':
         specifier: workspace:*
         version: link:../packages/gateway-react
-      '@smithers-orchestrator/gateway-ui':
+      '@smthrs/gateway-ui':
         specifier: workspace:*
         version: link:../packages/gateway-ui
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../packages/graph
       '@statelyai/inspect':
@@ -391,6 +398,9 @@ importers:
       '@mdx-js/esbuild':
         specifier: ^3.1.1
         version: 3.1.1(esbuild@0.28.1)
+      '@mdx-js/mdx':
+        specifier: ^3.1.1
+        version: 3.1.1
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.4.3)
@@ -403,67 +413,70 @@ importers:
       '@pierre/diffs':
         specifier: ^1.2.11
         version: 1.2.12(@shikijs/themes@3.23.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@smithers-orchestrator/accounts':
+      '@smthrs/accounts':
         specifier: workspace:*
         version: link:../../packages/accounts
-      '@smithers-orchestrator/agents':
+      '@smthrs/agents':
         specifier: workspace:*
         version: link:../../packages/agents
-      '@smithers-orchestrator/components':
+      '@smthrs/components':
         specifier: workspace:*
         version: link:../../packages/components
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@smithers-orchestrator/devtools':
+      '@smthrs/devtools':
         specifier: workspace:*
         version: link:../../packages/devtools
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../../packages/driver
-      '@smithers-orchestrator/engine':
+      '@smthrs/engine':
         specifier: workspace:*
         version: link:../../packages/engine
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../../packages/errors
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../../packages/graph
-      '@smithers-orchestrator/memory':
+      '@smthrs/herdr':
+        specifier: workspace:*
+        version: link:../../packages/herdr
+      '@smthrs/memory':
         specifier: workspace:*
         version: link:../../packages/memory
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../observability
-      '@smithers-orchestrator/openapi':
+      '@smthrs/openapi':
         specifier: workspace:*
         version: link:../../packages/openapi
-      '@smithers-orchestrator/protocol':
+      '@smthrs/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
-      '@smithers-orchestrator/review':
+      '@smthrs/review':
         specifier: workspace:*
         version: link:../review
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../../packages/scheduler
-      '@smithers-orchestrator/scorers':
+      '@smthrs/scorers':
         specifier: workspace:*
         version: link:../../packages/scorers
-      '@smithers-orchestrator/server':
+      '@smthrs/server':
         specifier: workspace:*
         version: link:../../packages/server
-      '@smithers-orchestrator/time-travel':
+      '@smthrs/time-travel':
         specifier: workspace:*
         version: link:../../packages/time-travel
-      '@smithers-orchestrator/tui':
+      '@smthrs/tui':
         specifier: workspace:*
         version: link:../../packages/tui
-      '@smithers-orchestrator/usage':
+      '@smthrs/usage':
         specifier: workspace:*
         version: link:../../packages/usage
-      '@smithers-orchestrator/vcs':
+      '@smthrs/vcs':
         specifier: workspace:*
         version: link:../../packages/vcs
       '@toon-format/toon':
@@ -482,8 +495,11 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
+      esbuild:
+        specifier: ^0.28.1
+        version: 0.28.1
       incur:
         specifier: ^0.4.10
         version: 0.4.10
@@ -493,7 +509,7 @@ importers:
       react:
         specifier: ^19.2.7
         version: 19.2.7
-      smithers-orchestrator:
+      smthrs:
         specifier: workspace:*
         version: link:../../packages/smithers
       yaml:
@@ -603,14 +619,17 @@ importers:
   apps/observability:
     dependencies:
       '@effect/opentelemetry':
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102(@opentelemetry/api-logs@0.217.0)(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.7.1(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.7.1(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-web@2.6.1(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.41.1)(effect@4.0.0-beta.102)
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105(@opentelemetry/api-logs@0.217.0)(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.7.1(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.7.1(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-web@2.6.1(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.41.1)(effect@4.0.0-beta.105)
       '@effect/platform-bun':
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102(effect@4.0.0-beta.102)
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105(effect@4.0.0-beta.105)
+      '@effect/platform-node-shared':
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105(effect@4.0.0-beta.105)
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
     devDependencies:
       '@types/bun':
         specifier: latest
@@ -655,30 +674,36 @@ importers:
         specifier: ^4.106.0
         version: 4.106.0(@cloudflare/workers-types@4.20260701.1)
 
+  apps/quota-dashboard:
+    dependencies:
+      electrobun:
+        specifier: 1.18.1
+        version: 1.18.1
+
   apps/review:
     dependencies:
       '@pierre/diffs':
         specifier: ^1.2.12
         version: 1.2.12(@shikijs/themes@3.23.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@smithers-orchestrator/agents':
+      '@smthrs/agents':
         specifier: workspace:*
         version: link:../../packages/agents
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@smithers-orchestrator/engine':
+      '@smthrs/engine':
         specifier: workspace:*
         version: link:../../packages/engine
-      '@smithers-orchestrator/ui-styleguide':
+      '@smthrs/ui-styleguide':
         specifier: workspace:*
         version: link:../../packages/ui-styleguide
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
       mermaid:
         specifier: ^11.16.0
         version: 11.16.0
-      smithers-orchestrator:
+      smthrs:
         specifier: workspace:*
         version: link:../../packages/smithers
       zod:
@@ -736,7 +761,7 @@ importers:
       react-dom:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
-      smithers-orchestrator:
+      smthrs:
         specifier: workspace:*
         version: link:../../packages/smithers
       zod:
@@ -782,16 +807,16 @@ importers:
       '@pierre/trees':
         specifier: 1.0.0-beta.5
         version: 1.0.0-beta.5(@pierre/theme@1.1.0)(@shikijs/themes@3.23.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(shiki@3.23.0)
-      '@smithers-orchestrator/gateway-client':
+      '@smthrs/gateway-client':
         specifier: workspace:*
         version: link:../../packages/gateway-client
-      '@smithers-orchestrator/gateway-react':
+      '@smthrs/gateway-react':
         specifier: workspace:*
         version: link:../../packages/gateway-react
-      '@smithers-orchestrator/gateway-ui':
+      '@smthrs/gateway-ui':
         specifier: workspace:*
         version: link:../../packages/gateway-ui
-      '@smithers-orchestrator/ui':
+      '@smthrs/ui':
         specifier: workspace:*
         version: link:../../packages/ui
       '@tanstack/ai':
@@ -855,7 +880,7 @@ importers:
       bun-types:
         specifier: ^1.3.14
         version: 1.3.14
-      smithers-orchestrator:
+      smthrs:
         specifier: workspace:*
         version: link:../../packages/smithers
       typescript:
@@ -868,9 +893,27 @@ importers:
         specifier: 4.4.3
         version: 4.4.3
 
+  apps/status-site:
+    devDependencies:
+      '@types/node':
+        specifier: 26.1.0
+        version: 26.1.0
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@aws-sdk/client-s3@3.1080.0)(@cloudflare/vite-plugin@1.39.2(vite@8.1.2(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))(workerd@1.20260630.1)(wrangler@4.106.0(@cloudflare/workers-types@4.20260701.1)))(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)(vite@8.1.2(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))(workerd@1.20260630.1)
+      bun-types:
+        specifier: ^1.3.14
+        version: 1.3.14
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+      wrangler:
+        specifier: ^4.106.0
+        version: 4.106.0(@cloudflare/workers-types@4.20260701.1)
+
   apps/storybook-site:
     dependencies:
-      '@smithers-orchestrator/ui':
+      '@smthrs/ui':
         specifier: workspace:*
         version: link:../../packages/ui
       react:
@@ -928,7 +971,7 @@ importers:
 
   apps/telegram-summary:
     dependencies:
-      '@smithers-orchestrator/gateway-ui':
+      '@smthrs/gateway-ui':
         specifier: workspace:*
         version: link:../../packages/gateway-ui
     devDependencies:
@@ -967,40 +1010,40 @@ importers:
 
   e2e:
     dependencies:
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../packages/db
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../packages/driver
-      '@smithers-orchestrator/engine':
+      '@smthrs/engine':
         specifier: workspace:*
         version: link:../packages/engine
-      '@smithers-orchestrator/gateway':
+      '@smthrs/gateway':
         specifier: workspace:*
         version: link:../packages/gateway
-      '@smithers-orchestrator/gateway-client':
+      '@smthrs/gateway-client':
         specifier: workspace:*
         version: link:../packages/gateway-client
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../apps/observability
-      '@smithers-orchestrator/sandbox':
+      '@smthrs/sandbox':
         specifier: workspace:*
         version: link:../packages/sandbox
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../packages/scheduler
-      '@smithers-orchestrator/server':
+      '@smthrs/server':
         specifier: workspace:*
         version: link:../packages/server
-      '@smithers-orchestrator/testing':
+      '@smthrs/testing':
         specifier: workspace:*
         version: link:../packages/testing
-      '@smithers-orchestrator/time-travel':
+      '@smthrs/time-travel':
         specifier: workspace:*
         version: link:../packages/time-travel
-      '@smithers-orchestrator/vcs':
+      '@smthrs/vcs':
         specifier: workspace:*
         version: link:../packages/vcs
       better-sqlite3:
@@ -1010,8 +1053,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
       esbuild:
         specifier: ^0.28.1
         version: 0.28.1
@@ -1021,7 +1064,7 @@ importers:
       react:
         specifier: ^19.2.7
         version: 19.2.7
-      smithers-orchestrator:
+      smthrs:
         specifier: workspace:*
         version: link:../packages/smithers
       ws:
@@ -1035,9 +1078,9 @@ importers:
         specifier: 4.20260701.1
         version: 4.20260701.1
       '@effect/platform-bun':
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102(effect@4.0.0-beta.102)
-      '@smithers-orchestrator/errors':
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105(effect@4.0.0-beta.105)
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../packages/errors
       '@types/better-sqlite3':
@@ -1061,7 +1104,7 @@ importers:
 
   packages/accounts:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
     devDependencies:
@@ -1077,13 +1120,13 @@ importers:
       '@elizaos/core':
         specifier: ~1.7.2
         version: 1.7.2(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.0))(openai@6.45.0(@aws-sdk/credential-provider-node@3.972.63)(@smithy/signature-v4@5.6.1)(ws@8.21.0)(zod@4.4.3))(ws@8.21.0)
-      '@smithers-orchestrator/agents':
+      '@smthrs/agents':
         specifier: workspace:*
         version: link:../agents
       ai:
         specifier: ^7.0.10
         version: 7.0.10(zod@4.4.3)
-      smithers-orchestrator:
+      smthrs:
         specifier: workspace:*
         version: link:../smithers
       yaml:
@@ -1111,21 +1154,24 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.4.3)
-      '@smithers-orchestrator/driver':
+      '@smthrs/accounts':
+        specifier: workspace:*
+        version: link:../accounts
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../driver
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
       ai:
         specifier: ^7.0.10
         version: 7.0.10(zod@4.4.3)
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -1142,10 +1188,10 @@ importers:
 
   packages/aws:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/sandbox':
+      '@smthrs/sandbox':
         specifier: workspace:*
         version: link:../sandbox
     devDependencies:
@@ -1170,14 +1216,14 @@ importers:
 
   packages/cloudflare:
     dependencies:
-      '@smithers-orchestrator/sandbox':
+      '@smthrs/sandbox':
         specifier: workspace:*
         version: link:../sandbox
     devDependencies:
       '@cloudflare/sandbox':
         specifier: ^0.12.3
         version: 0.12.3(@xterm/xterm@6.0.0)
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
       '@types/bun':
@@ -1189,31 +1235,31 @@ importers:
 
   packages/components:
     dependencies:
-      '@smithers-orchestrator/agents':
+      '@smthrs/agents':
         specifier: workspace:*
         version: link:../agents
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../driver
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
-      '@smithers-orchestrator/memory':
+      '@smthrs/memory':
         specifier: workspace:*
         version: link:../memory
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/react-reconciler':
+      '@smthrs/react-reconciler':
         specifier: workspace:*
         version: link:../react-reconciler
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
       bippy:
@@ -1239,15 +1285,15 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
 
   packages/control-plane:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
     devDependencies:
@@ -1260,10 +1306,10 @@ importers:
 
   packages/daytona:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/sandbox':
+      '@smthrs/sandbox':
         specifier: workspace:*
         version: link:../sandbox
     devDependencies:
@@ -1279,16 +1325,16 @@ importers:
 
   packages/db:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
       drizzle-orm:
@@ -1298,8 +1344,8 @@ importers:
         specifier: ^0.8.3
         version: 0.8.3(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0))(zod@4.4.3)
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -1331,24 +1377,24 @@ importers:
 
   packages/driver:
     dependencies:
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -1362,7 +1408,7 @@ importers:
 
   packages/electric-proxy:
     dependencies:
-      '@smithers-orchestrator/gateway':
+      '@smthrs/gateway':
         specifier: workspace:*
         version: link:../gateway
     devDependencies:
@@ -1376,51 +1422,54 @@ importers:
   packages/engine:
     dependencies:
       '@effect/platform-bun':
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102(effect@4.0.0-beta.102)
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105(effect@4.0.0-beta.105)
+      '@effect/platform-node-shared':
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105(effect@4.0.0-beta.105)
       '@effect/sql-sqlite-bun':
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102(effect@4.0.0-beta.102)
-      '@smithers-orchestrator/agents':
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105(effect@4.0.0-beta.105)
+      '@smthrs/agents':
         specifier: workspace:*
         version: link:../agents
-      '@smithers-orchestrator/components':
+      '@smthrs/components':
         specifier: workspace:*
         version: link:../components
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../driver
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/react-reconciler':
+      '@smthrs/react-reconciler':
         specifier: workspace:*
         version: link:../react-reconciler
-      '@smithers-orchestrator/sandbox':
+      '@smthrs/sandbox':
         specifier: workspace:*
         version: link:../sandbox
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
-      '@smithers-orchestrator/scorers':
+      '@smthrs/scorers':
         specifier: workspace:*
         version: link:../scorers
-      '@smithers-orchestrator/time-travel':
+      '@smthrs/time-travel':
         specifier: workspace:*
         version: link:../time-travel
-      '@smithers-orchestrator/tool-context':
+      '@smthrs/tool-context':
         specifier: workspace:*
         version: link:../tool-context
-      '@smithers-orchestrator/vcs':
+      '@smthrs/vcs':
         specifier: workspace:*
         version: link:../vcs
       diff:
@@ -1430,8 +1479,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
       react:
         specifier: ^19.2.7
         version: 19.2.7
@@ -1443,8 +1492,8 @@ importers:
         version: 4.4.3
     devDependencies:
       '@effect/platform-node':
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102(effect@4.0.0-beta.102)(ioredis@5.11.1)
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105(effect@4.0.0-beta.105)(ioredis@5.11.1)
       '@types/bun':
         specifier: latest
         version: 1.3.14
@@ -1465,8 +1514,8 @@ importers:
   packages/errors:
     dependencies:
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
     devDependencies:
       '@types/bun':
         specifier: latest
@@ -1477,7 +1526,7 @@ importers:
 
   packages/gateway:
     dependencies:
-      '@smithers-orchestrator/protocol':
+      '@smthrs/protocol':
         specifier: workspace:*
         version: link:../protocol
     devDependencies:
@@ -1490,16 +1539,16 @@ importers:
 
   packages/gateway-client:
     dependencies:
-      '@smithers-orchestrator/electric-proxy':
+      '@smthrs/electric-proxy':
         specifier: workspace:^
         version: link:../electric-proxy
-      '@smithers-orchestrator/gateway':
+      '@smthrs/gateway':
         specifier: workspace:*
         version: link:../gateway
-      '@smithers-orchestrator/protocol':
+      '@smthrs/protocol':
         specifier: workspace:*
         version: link:../protocol
-      '@smithers-orchestrator/usage':
+      '@smthrs/usage':
         specifier: workspace:*
         version: link:../usage
       '@tanstack/db':
@@ -1515,13 +1564,13 @@ importers:
         specifier: 5.101.2
         version: 5.101.2(react@19.2.7)
     devDependencies:
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
       '@types/bun':
         specifier: latest
         version: 1.3.14
-      smithers-orchestrator:
+      smthrs:
         specifier: workspace:*
         version: link:../smithers
       typescript:
@@ -1530,7 +1579,7 @@ importers:
 
   packages/gateway-react:
     dependencies:
-      '@smithers-orchestrator/gateway-client':
+      '@smthrs/gateway-client':
         specifier: workspace:*
         version: link:../gateway-client
       '@tanstack/react-db':
@@ -1540,16 +1589,16 @@ importers:
         specifier: 5.101.2
         version: 5.101.2(react@19.2.7)
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
     devDependencies:
       '@happy-dom/global-registrator':
         specifier: ^20.10.6
         version: 20.10.6
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/server':
+      '@smthrs/server':
         specifier: workspace:*
         version: link:../server
       '@types/bun':
@@ -1573,16 +1622,16 @@ importers:
 
   packages/gateway-ui:
     dependencies:
-      '@smithers-orchestrator/gateway-client':
+      '@smthrs/gateway-client':
         specifier: workspace:*
         version: link:../gateway-client
-      '@smithers-orchestrator/gateway-react':
+      '@smthrs/gateway-react':
         specifier: workspace:*
         version: link:../gateway-react
-      '@smithers-orchestrator/ui':
+      '@smthrs/ui':
         specifier: workspace:*
         version: link:../ui
-      '@smithers-orchestrator/ui-styleguide':
+      '@smthrs/ui-styleguide':
         specifier: workspace:*
         version: link:../ui-styleguide
       '@xyflow/react':
@@ -1619,10 +1668,10 @@ importers:
 
   packages/gcp:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/sandbox':
+      '@smthrs/sandbox':
         specifier: workspace:*
         version: link:../sandbox
     devDependencies:
@@ -1641,7 +1690,7 @@ importers:
 
   packages/graph:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
       drizzle-orm:
@@ -1658,32 +1707,41 @@ importers:
         specifier: ~6.0.3
         version: 6.0.3
 
+  packages/herdr:
+    devDependencies:
+      '@types/bun':
+        specifier: latest
+        version: 1.3.14
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
   packages/integrations:
     dependencies:
-      '@smithers-orchestrator/components':
+      '@smthrs/components':
         specifier: workspace:*
         version: link:../components
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/engine':
+      '@smthrs/engine':
         specifier: workspace:*
         version: link:../engine
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/react-reconciler':
+      '@smthrs/react-reconciler':
         specifier: workspace:*
         version: link:../react-reconciler
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
       react:
         specifier: ^19.2.7
         version: 19.2.7
@@ -1713,19 +1771,19 @@ importers:
 
   packages/memory:
     dependencies:
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
       '@vectorize-io/hindsight-client':
@@ -1735,8 +1793,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -1750,10 +1808,10 @@ importers:
 
   packages/microsandbox:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/sandbox':
+      '@smthrs/sandbox':
         specifier: workspace:*
         version: link:../sandbox
     devDependencies:
@@ -1787,21 +1845,21 @@ importers:
 
   packages/openapi:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
       ai:
         specifier: ^7.0.10
         version: 7.0.10(zod@4.4.3)
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
@@ -1824,19 +1882,19 @@ importers:
       '@sinclair/typebox':
         specifier: ^0.34.49
         version: 0.34.49
-      '@smithers-orchestrator/agents':
+      '@smthrs/agents':
         specifier: workspace:*
         version: link:../agents
-      '@smithers-orchestrator/cli':
-        specifier: workspace:*
+      '@smthrs/cli':
+        specifier: link:../../apps/cli
         version: link:../../apps/cli
-      '@smithers-orchestrator/devtools':
+      '@smthrs/devtools':
         specifier: workspace:*
         version: link:../devtools
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/protocol':
+      '@smthrs/protocol':
         specifier: workspace:*
         version: link:../protocol
       ws:
@@ -1870,16 +1928,16 @@ importers:
 
   packages/react-reconciler:
     dependencies:
-      '@smithers-orchestrator/devtools':
+      '@smthrs/devtools':
         specifier: workspace:*
         version: link:../devtools
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../driver
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
       bippy:
@@ -1896,8 +1954,8 @@ importers:
         specifier: latest
         version: 1.3.14
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
@@ -1907,24 +1965,24 @@ importers:
 
   packages/sandbox:
     dependencies:
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../driver
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
     devDependencies:
       '@types/bun':
         specifier: latest
@@ -1935,15 +1993,15 @@ importers:
 
   packages/scheduler:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
     devDependencies:
       '@types/bun':
         specifier: latest
@@ -1954,30 +2012,30 @@ importers:
 
   packages/scorers:
     dependencies:
-      '@smithers-orchestrator/agents':
+      '@smthrs/agents':
         specifier: workspace:*
         version: link:../agents
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
@@ -1991,52 +2049,52 @@ importers:
 
   packages/server:
     dependencies:
-      '@smithers-orchestrator/accounts':
+      '@smthrs/accounts':
         specifier: workspace:*
         version: link:../accounts
-      '@smithers-orchestrator/components':
+      '@smthrs/components':
         specifier: workspace:*
         version: link:../components
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/devtools':
+      '@smthrs/devtools':
         specifier: workspace:*
         version: link:../devtools
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../driver
-      '@smithers-orchestrator/engine':
+      '@smthrs/engine':
         specifier: workspace:*
         version: link:../engine
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/gateway':
+      '@smthrs/gateway':
         specifier: workspace:*
         version: link:../gateway
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
-      '@smithers-orchestrator/integrations':
+      '@smthrs/integrations':
         specifier: workspace:*
         version: link:../integrations
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/protocol':
+      '@smthrs/protocol':
         specifier: workspace:*
         version: link:../protocol
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
-      '@smithers-orchestrator/time-travel':
+      '@smthrs/time-travel':
         specifier: workspace:*
         version: link:../time-travel
-      '@smithers-orchestrator/ui-styleguide':
+      '@smthrs/ui-styleguide':
         specifier: workspace:*
         version: link:../ui-styleguide
-      '@smithers-orchestrator/usage':
+      '@smthrs/usage':
         specifier: workspace:*
         version: link:../usage
       cron-parser:
@@ -2046,8 +2104,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
       hono:
         specifier: ^4.12.27
         version: 4.12.27
@@ -2082,103 +2140,103 @@ importers:
       '@mdx-js/esbuild':
         specifier: ^3.1.1
         version: 3.1.1(esbuild@0.28.1)
-      '@smithers-orchestrator/agents':
+      '@smthrs/agents':
         specifier: workspace:*
         version: link:../agents
-      '@smithers-orchestrator/aws':
+      '@smthrs/aws':
         specifier: workspace:*
         version: link:../aws
-      '@smithers-orchestrator/cli':
-        specifier: workspace:*
+      '@smthrs/cli':
+        specifier: link:../../apps/cli
         version: link:../../apps/cli
-      '@smithers-orchestrator/cloudflare':
+      '@smthrs/cloudflare':
         specifier: workspace:*
         version: link:../cloudflare
-      '@smithers-orchestrator/components':
+      '@smthrs/components':
         specifier: workspace:*
         version: link:../components
-      '@smithers-orchestrator/control-plane':
+      '@smthrs/control-plane':
         specifier: workspace:*
         version: link:../control-plane
-      '@smithers-orchestrator/daytona':
+      '@smthrs/daytona':
         specifier: workspace:*
         version: link:../daytona
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../driver
-      '@smithers-orchestrator/engine':
+      '@smthrs/engine':
         specifier: workspace:*
         version: link:../engine
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/gateway-client':
+      '@smthrs/gateway-client':
         specifier: workspace:*
         version: link:../gateway-client
-      '@smithers-orchestrator/gateway-react':
+      '@smthrs/gateway-react':
         specifier: workspace:*
         version: link:../gateway-react
-      '@smithers-orchestrator/gateway-ui':
+      '@smthrs/gateway-ui':
         specifier: workspace:*
         version: link:../gateway-ui
-      '@smithers-orchestrator/gcp':
+      '@smthrs/gcp':
         specifier: workspace:*
         version: link:../gcp
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
-      '@smithers-orchestrator/memory':
+      '@smthrs/memory':
         specifier: workspace:*
         version: link:../memory
-      '@smithers-orchestrator/microsandbox':
+      '@smthrs/microsandbox':
         specifier: workspace:*
         version: link:../microsandbox
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/openapi':
+      '@smthrs/openapi':
         specifier: workspace:*
         version: link:../openapi
-      '@smithers-orchestrator/react-reconciler':
+      '@smthrs/react-reconciler':
         specifier: workspace:*
         version: link:../react-reconciler
-      '@smithers-orchestrator/sandbox':
+      '@smthrs/sandbox':
         specifier: workspace:*
         version: link:../sandbox
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
-      '@smithers-orchestrator/scorers':
+      '@smthrs/scorers':
         specifier: workspace:*
         version: link:../scorers
-      '@smithers-orchestrator/server':
+      '@smthrs/server':
         specifier: workspace:*
         version: link:../server
-      '@smithers-orchestrator/telegram':
+      '@smthrs/telegram':
         specifier: workspace:*
         version: link:../telegram
-      '@smithers-orchestrator/testing':
+      '@smthrs/testing':
         specifier: workspace:*
         version: link:../testing
-      '@smithers-orchestrator/time-travel':
+      '@smthrs/time-travel':
         specifier: workspace:*
         version: link:../time-travel
-      '@smithers-orchestrator/tool-context':
+      '@smthrs/tool-context':
         specifier: workspace:*
         version: link:../tool-context
-      '@smithers-orchestrator/ui':
+      '@smthrs/ui':
         specifier: workspace:*
         version: link:../ui
-      '@smithers-orchestrator/vcs':
+      '@smthrs/vcs':
         specifier: workspace:*
         version: link:../vcs
-      '@smithers-orchestrator/vercel':
+      '@smthrs/vercel':
         specifier: workspace:*
         version: link:../vercel
-      '@smithers-orchestrator/xstate':
+      '@smthrs/xstate':
         specifier: workspace:*
         version: link:../xstate
       ai:
@@ -2191,8 +2249,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
       incur:
         specifier: ^0.4.10
         version: 0.4.10
@@ -2231,30 +2289,33 @@ importers:
 
   packages/testing:
     dependencies:
-      '@smithers-orchestrator/components':
+      '@smthrs/components':
         specifier: workspace:*
         version: link:../components
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../driver
-      '@smithers-orchestrator/engine':
+      '@smthrs/engine':
         specifier: workspace:*
         version: link:../engine
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
-      '@smithers-orchestrator/react-reconciler':
+      '@smthrs/herdr':
+        specifier: workspace:*
+        version: link:../herdr
+      '@smthrs/react-reconciler':
         specifier: workspace:*
         version: link:../react-reconciler
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -2265,7 +2326,7 @@ importers:
       koffi:
         specifier: ^2.16.2
         version: 2.16.2
-      smithers-orchestrator:
+      smthrs:
         specifier: workspace:*
         version: link:../smithers
       typescript:
@@ -2275,38 +2336,41 @@ importers:
   packages/time-travel:
     dependencies:
       '@effect/platform-bun':
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102(effect@4.0.0-beta.102)
-      '@smithers-orchestrator/db':
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105(effect@4.0.0-beta.105)
+      '@effect/platform-node-shared':
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105(effect@4.0.0-beta.105)
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../driver
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/graph':
+      '@smthrs/graph':
         specifier: workspace:*
         version: link:../graph
-      '@smithers-orchestrator/observability':
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
-      '@smithers-orchestrator/react-reconciler':
+      '@smthrs/react-reconciler':
         specifier: workspace:*
         version: link:../react-reconciler
-      '@smithers-orchestrator/scheduler':
+      '@smthrs/scheduler':
         specifier: workspace:*
         version: link:../scheduler
-      '@smithers-orchestrator/vcs':
+      '@smthrs/vcs':
         specifier: workspace:*
         version: link:../vcs
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
       picocolors:
         specifier: ^1.1.1
         version: 1.1.1
@@ -2345,16 +2409,16 @@ importers:
       '@opentui/react':
         specifier: ^0.4.2
         version: 0.4.2(react-devtools-core@7.0.1)(react@19.2.7)(typescript@6.0.3)(web-tree-sitter@0.25.10)(ws@8.21.0)
-      '@smithers-orchestrator/gateway-client':
+      '@smthrs/gateway-client':
         specifier: workspace:*
         version: link:../gateway-client
-      '@smithers-orchestrator/gateway-react':
+      '@smthrs/gateway-react':
         specifier: workspace:*
         version: link:../gateway-react
-      '@smithers-orchestrator/tui-ui':
+      '@smthrs/tui-ui':
         specifier: workspace:*
         version: link:../tui-ui
-      '@smithers-orchestrator/ui-core':
+      '@smthrs/ui-core':
         specifier: workspace:*
         version: link:../ui-core
       react:
@@ -2413,7 +2477,7 @@ importers:
       '@pierre/diffs':
         specifier: ^1.2.12
         version: 1.2.12(@shikijs/themes@3.23.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@smithers-orchestrator/ui-styleguide':
+      '@smthrs/ui-styleguide':
         specifier: workspace:*
         version: link:../ui-styleguide
       '@xterm/addon-fit':
@@ -2465,10 +2529,10 @@ importers:
 
   packages/ui-core:
     dependencies:
-      '@smithers-orchestrator/gateway-client':
+      '@smthrs/gateway-client':
         specifier: workspace:*
         version: link:../gateway-client
-      '@smithers-orchestrator/gateway-react':
+      '@smthrs/gateway-react':
         specifier: workspace:*
         version: link:../gateway-react
       zustand:
@@ -2492,7 +2556,7 @@ importers:
 
   packages/usage:
     dependencies:
-      '@smithers-orchestrator/accounts':
+      '@smthrs/accounts':
         specifier: workspace:*
         version: link:../accounts
     devDependencies:
@@ -2505,16 +2569,19 @@ importers:
 
   packages/vcs:
     dependencies:
-      '@smithers-orchestrator/observability':
+      '@effect/platform-node-shared':
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105(effect@4.0.0-beta.105)
+      '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
     devDependencies:
       '@effect/platform-bun':
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102(effect@4.0.0-beta.102)
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105(effect@4.0.0-beta.105)
       '@types/bun':
         specifier: latest
         version: 1.3.14
@@ -2522,28 +2589,28 @@ importers:
         specifier: ~6.0.3
         version: 6.0.3
     optionalDependencies:
-      '@smithers-orchestrator/jj-darwin-arm64':
+      '@smthrs/jj-darwin-arm64':
         specifier: workspace:*
         version: link:../jj-darwin-arm64
-      '@smithers-orchestrator/jj-darwin-x64':
+      '@smthrs/jj-darwin-x64':
         specifier: workspace:*
         version: link:../jj-darwin-x64
-      '@smithers-orchestrator/jj-linux-arm64':
+      '@smthrs/jj-linux-arm64':
         specifier: workspace:*
         version: link:../jj-linux-arm64
-      '@smithers-orchestrator/jj-linux-x64':
+      '@smthrs/jj-linux-x64':
         specifier: workspace:*
         version: link:../jj-linux-x64
-      '@smithers-orchestrator/jj-win32-x64':
+      '@smthrs/jj-win32-x64':
         specifier: workspace:*
         version: link:../jj-win32-x64
 
   packages/vercel:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/sandbox':
+      '@smthrs/sandbox':
         specifier: workspace:*
         version: link:../sandbox
     devDependencies:
@@ -2559,26 +2626,26 @@ importers:
 
   packages/xstate:
     dependencies:
-      '@smithers-orchestrator/errors':
+      '@smthrs/errors':
         specifier: workspace:*
         version: link:../errors
-      '@smithers-orchestrator/react-reconciler':
+      '@smthrs/react-reconciler':
         specifier: workspace:*
         version: link:../react-reconciler
       react:
         specifier: ^19.2.7
         version: 19.2.7
     devDependencies:
-      '@smithers-orchestrator/db':
+      '@smthrs/db':
         specifier: workspace:*
         version: link:../db
-      '@smithers-orchestrator/driver':
+      '@smthrs/driver':
         specifier: workspace:*
         version: link:../driver
-      '@smithers-orchestrator/engine':
+      '@smthrs/engine':
         specifier: workspace:*
         version: link:../engine
-      '@smithers-orchestrator/time-travel':
+      '@smthrs/time-travel':
         specifier: workspace:*
         version: link:../time-travel
       '@types/bun':
@@ -2588,9 +2655,9 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
-      smithers-orchestrator:
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
+      smthrs:
         specifier: workspace:*
         version: link:../smithers
       typescript:
@@ -2893,6 +2960,9 @@ packages:
     resolution: {integrity: sha512-4zBIxpPzowiZpusoFkyGVwakdRJUyuH5PxQ/PrqghfdFWWasvnCdPfQXHrenDai+gyLARulZjZowCOj6fjT4pA==}
     engines: {node: '>=6.9.0'}
 
+  '@babylonjs/core@7.54.3':
+    resolution: {integrity: sha512-P5ncXVd8GEUJLhwloP9V0oVwQYIrvZztguVeLlvd5Rx+9aQnenKjpV8auJ6SRsUlAmNZU4pFTKzwF6o2EUfhAw==}
+
   '@braintree/sanitize-url@7.1.2':
     resolution: {integrity: sha512-jigsZK+sMF/cuiB7sERuo9V7N9jx+dhmHHnQyDSVdpZwVutaBu7WvNYqMDLSgFgfB30n452TP3vjDAvFC973mA==}
 
@@ -3194,20 +3264,20 @@ packages:
     resolution: {integrity: sha512-0dEVyRLM/lG4gp1R/Ik5bfPl/1wX00xFwd5KcNH602tzBa09oF7pbTKETEhR1GjZ75K6OJnYFu8II2dyMhONMw==}
     engines: {node: '>=16'}
 
-  '@effect/opentelemetry@4.0.0-beta.102':
-    resolution: {integrity: sha512-U15cxJ1uf3+HMnZB0BUQe3U4TuyIPYxSHJ+wEzkF4ZjteN224hsgeTgsyXSFjSIpWDVWfujdGPqmtkDpcMzf6w==}
+  '@effect/opentelemetry@4.0.0-beta.105':
+    resolution: {integrity: sha512-1OzmjmhzwSzixTZS3d2to/EIcAlpfnCrkYuqp2pTlropmPGJ2cB/E2VUDz30mXQJ4Uh+05ntw7upvtp3voZYlQ==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
-      '@opentelemetry/api': ^1.9
+      '@opentelemetry/api': '>=1.9.0 <2.0.0'
       '@opentelemetry/api-logs': '>=0.203.0 <0.300.0'
-      '@opentelemetry/resources': ^2.0.0
+      '@opentelemetry/resources': '>=2.0.0 <3.0.0'
       '@opentelemetry/sdk-logs': '>=0.203.0 <0.300.0'
-      '@opentelemetry/sdk-metrics': ^2.0.0
-      '@opentelemetry/sdk-trace-base': ^2.0.0
-      '@opentelemetry/sdk-trace-node': ^2.0.0
-      '@opentelemetry/sdk-trace-web': ^2.0.0
-      '@opentelemetry/semantic-conventions': ^1.33.0
-      effect: 4.0.0-beta.102
+      '@opentelemetry/sdk-metrics': '>=2.0.0 <3.0.0'
+      '@opentelemetry/sdk-trace-base': '>=2.0.0 <3.0.0'
+      '@opentelemetry/sdk-trace-node': '>=2.0.0 <3.0.0'
+      '@opentelemetry/sdk-trace-web': '>=2.0.0 <3.0.0'
+      '@opentelemetry/semantic-conventions': '>=1.33.0 <2.0.0'
+      effect: 4.0.0-beta.105
     peerDependenciesMeta:
       '@opentelemetry/api':
         optional: true
@@ -3226,28 +3296,28 @@ packages:
       '@opentelemetry/sdk-trace-web':
         optional: true
 
-  '@effect/platform-bun@4.0.0-beta.102':
-    resolution: {integrity: sha512-hTIb0jjTfXhNgnDq2OX5wrigc0OSvTT0VWWb1PLpMM395RJPu8rCIbTlGhy0NS7kZOd8FfgNi9e0sDhgyu+5Ag==}
+  '@effect/platform-bun@4.0.0-beta.105':
+    resolution: {integrity: sha512-5eCuMLxfkLbVK5If5zFybyKduQvhYofy0oPsbTH8UiIrYqyx5QqK9G9PZ1SfBsbqHfykwLEpMCdzQczFGERw2w==}
     peerDependencies:
-      effect: 4.0.0-beta.102
+      effect: 4.0.0-beta.105
 
-  '@effect/platform-node-shared@4.0.0-beta.102':
-    resolution: {integrity: sha512-gVd793I72MrkX4dXo7eYtRKfNj0RW4eMRfVEKEJI16h2+mBDCzQ+gqMrog2hSTHQnaIbvbYShNQ4TVGuRCYZeQ==}
+  '@effect/platform-node-shared@4.0.0-beta.105':
+    resolution: {integrity: sha512-UfeC8cFm4sP+XW14OO66CcOGJ8PcD102hH0kLwj8xUVL6nYIDGE/SJvlfVmFx+9OWF6rnjfXjMV6vyl6mCdhCQ==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
-      effect: 4.0.0-beta.102
+      effect: 4.0.0-beta.105
 
-  '@effect/platform-node@4.0.0-beta.102':
-    resolution: {integrity: sha512-wYVAU9jAePT+gouMr/EVz1CaW6yDLjPAgXYeEFLz7wugT5iZhFRag6mqajV/wwN3bzWP2fzZHokLuPmqD/rqeA==}
+  '@effect/platform-node@4.0.0-beta.105':
+    resolution: {integrity: sha512-gOHtgE9PqCT8aiiM0W7ZSbu4M2/jPGfJOKWuyBCxofNV5Np36fFY55FSa1MtyG+vjOjlD5btNY2i6i/SPtRqTA==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
-      effect: 4.0.0-beta.102
-      ioredis: ^5.7.0
+      effect: 4.0.0-beta.105
+      ioredis: '>=5.7.0 <6.0.0'
 
-  '@effect/sql-sqlite-bun@4.0.0-beta.102':
-    resolution: {integrity: sha512-pBO6FBJ+a21j2qHmzJDK1DeJsxm7HpUQBgucw6prHQXLMUBkhOsfZofhw1FKEdGRDEhO0sGTjffa2KP7iOuDIg==}
+  '@effect/sql-sqlite-bun@4.0.0-beta.105':
+    resolution: {integrity: sha512-wKdkRWA6dYQmJL5YeSDxbvTRC6PUui+kfdpHpK36h96CwzXuWBx99MtZ97MzwfhjOVLgXBQDJE4OT7y9BD9FDA==}
     peerDependencies:
-      effect: 4.0.0-beta.102
+      effect: 4.0.0-beta.105
 
   '@electric-sql/client@1.5.22':
     resolution: {integrity: sha512-bOlxcMHc39OUnvXNKa/rxtBTPwpxk/SerasFFi8Psw3825/uGvsT7br8YTWzMaETxWu6kvaPc5CXdYTyx5eJgw==}
@@ -4114,6 +4184,10 @@ packages:
 
   '@lezer/yaml@1.0.4':
     resolution: {integrity: sha512-2lrrHqxalACEbxIbsjhqGpSW8kWpUKuY6RHgnSAFZa6qK62wvnPxA8hGOwOoDbwHcOFs5M4o27mjGu+P7TvBmw==}
+
+  '@malept/cross-spawn-promise@1.1.1':
+    resolution: {integrity: sha512-RTBGWL5FWQcg9orDOCcp4LvItNzUPcyEU9bwaeJX0rJ1IQxzucC48Y0/sQLp/g6t99IQgAlGIaesJS+gTn7tVQ==}
+    engines: {node: '>= 10'}
 
   '@mapbox/node-pre-gyp@2.0.3':
     resolution: {integrity: sha512-uwPAhccfFJlsfCxMYTwOdVfOz3xqyj8xYL3zJj8f0pb30tLohnnFPhLuqp4/qoEz8sNxe4SESZedcBojRefIzg==}
@@ -6396,31 +6470,26 @@ packages:
   '@superradcompany/microsandbox-darwin-arm64@0.6.6':
     resolution: {integrity: sha512-rw7cg0G9mj1c9/14K/K6PMg78H11rGRA5tDzRbx67kAeoKWpAJnFsIYLvOCHcD+6aM0Xdxote90FVVlt1Kknjw==}
     engines: {node: '>= 22'}
-    cpu: [arm64]
     os: [darwin]
 
   '@superradcompany/microsandbox-linux-arm64-gnu@0.6.6':
     resolution: {integrity: sha512-y4CdSPkSOtCwBNbG8Yhkahxg9yh/jpp4cBMOItCOj0JshU7luE2r4+6ceIrPNAkb8sF0fX7tNTXMDK4fJA8iFA==}
     engines: {node: '>= 22'}
-    cpu: [arm64]
     os: [linux]
 
   '@superradcompany/microsandbox-linux-x64-gnu@0.6.6':
     resolution: {integrity: sha512-9yo6/G454L8ebzZP1qMxjIXRD3zJqQ68w2p9Ust7B7MOj5hr+VyuVZ0kYjSJAc4GSI0fno2xQe5z2tp5ynk78A==}
     engines: {node: '>= 22'}
-    cpu: [x64]
     os: [linux]
 
   '@superradcompany/microsandbox-win32-arm64-msvc@0.6.6':
     resolution: {integrity: sha512-q22t1DVlB8FR90adjBxTf0i//f3yzm7QYsKbsar29zoUAHC/24h6R4LE6YfIDWtPKB8jvTSpCeMehFoyXyLN1Q==}
     engines: {node: '>= 22'}
-    cpu: [arm64]
     os: [win32]
 
   '@superradcompany/microsandbox-win32-x64-msvc@0.6.6':
     resolution: {integrity: sha512-m2ir3DNw+Sc7i2DEg1kgY9bFmFHCFt2KamnXzJMUL9qtkE2n11GqIUhQJtKXwcWyM7nH0AxooMmnbx7UDMG8Ww==}
     engines: {node: '>= 22'}
-    cpu: [x64]
     os: [win32]
 
   '@tanstack/ai-event-client@0.6.8':
@@ -6543,6 +6612,9 @@ packages:
   '@tootallnate/once@2.0.1':
     resolution: {integrity: sha512-HqmEUIGRJ5fSXchkVgR5F7qn48bDBzv0kWj/Kfu5e6uci4UlEeng4331LnBkWffb++Ei3FOVLxo8JJWMFBDMeQ==}
     engines: {node: '>= 10'}
+
+  '@tootallnate/quickjs-emscripten@0.23.0':
+    resolution: {integrity: sha512-C5Mc6rdnsaJDjO3UpGW/CQTHtCKaYlScZTly4JIu97Jxo/odCiH0ITnDXSJPTOrEKk/ycSZ0AOgTmkDtkOsvIA==}
 
   '@ts-morph/common@0.11.1':
     resolution: {integrity: sha512-7hWZS0NRpEsNV8vWJzg7FEz6V8MaLNeJOmwmghqUXTpzk16V1LLZhdo+4QvE/+zv4cVci0OviuJFnqhEfoV3+g==}
@@ -6729,6 +6801,9 @@ packages:
 
   '@types/node@16.18.11':
     resolution: {integrity: sha512-3oJbGBUWuS6ahSnEq1eN2XrCyf4YsWI8OyCvo7c64zQJNplk3mO84t53o8lfTk+2ji59g5ycfc6qQ3fdHliHuA==}
+
+  '@types/node@17.0.45':
+    resolution: {integrity: sha512-w+tIMs3rq2afQdsPJlODhoUEKzFP1ayaoyl1CcnwtIlsVe7K7bA1NGm4s3PraqTLlXnbIN84zuBlxBWo1u9BLw==}
 
   '@types/node@26.1.0':
     resolution: {integrity: sha512-O0A1G3xPGy4w7AgQdAQYUlQ+BKk2Oovw8eRpofyp5KdBZULnbe+WqaOVNrm705SHphCiG4XHsACrSmPu1f+Kgw==}
@@ -7070,6 +7145,10 @@ packages:
     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
     engines: {node: '>=12'}
 
+  ast-types@0.13.4:
+    resolution: {integrity: sha512-x1FCFnFifvYDDzTaLII71vG5uvDwgtmDTEVWAxrgeiR8VjMONcCXJx7E+USjDtHlwFmt9MysbqgF9b9Vjr6w+w==}
+    engines: {node: '>=4'}
+
   ast-types@0.16.1:
     resolution: {integrity: sha512-6t10qk83GOG8p0vKmaCr8eiilZwO171AvbROMtvvNiwrTly62t+7XkA8RdIIVbpMhCASAsxgAzdRSwh6nw/5Dg==}
     engines: {node: '>=4'}
@@ -7138,6 +7217,10 @@ packages:
     resolution: {integrity: sha512-HYXq73DDpCtNzOmrFsm9eSwCvWCql0RzqjpDzXN9EadiLJ4DNat0nsZ/Bzmy+Ud12mb4/zKDY0cQ805ZzN+i0A==}
     engines: {node: '>=6.0.0'}
     hasBin: true
+
+  basic-ftp@5.3.1:
+    resolution: {integrity: sha512-bopVNp6ugyA150DDuZfPFdt1KZ5a94ZDiwX4hMgZDzF+GttD80lEy8kj98kbyhLXnPvhtIo93mdnLIjpCAeeOw==}
+    engines: {node: '>=10.0.0'}
 
   before-after-hook@3.0.2:
     resolution: {integrity: sha512-Nik3Sc0ncrMK4UUdXQmAnRtzmNQTAAXmXIopizwZ1W1t8QmfJj+zL4OA2I7XPTPW5z5TDqv4hRo/JzouDJnX3A==}
@@ -7464,6 +7547,10 @@ packages:
     resolution: {integrity: sha512-QBm4o1PwZiuY7KFbVvW7FLC8bozy7YWzv+Fz6KRS7sQghzcbDZCGxr/Bc5b6TQreAoSwuWVP491dIcK0THCX6A==}
     engines: {node: '>=18'}
 
+  cross-spawn-windows-exe@1.2.0:
+    resolution: {integrity: sha512-mkLtJJcYbDCxEG7Js6eUnUNndWjyUZwJ3H7bErmmtOYU/Zb99DyUkpamuIZE0b3bhmJyZ7D90uS6f+CGxRRjOw==}
+    engines: {node: '>= 10'}
+
   cross-spawn@7.0.6:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
     engines: {node: '>= 8'}
@@ -7641,6 +7728,10 @@ packages:
     resolution: {integrity: sha512-0R9ikRb668HB7QDxT1vkpuUBtqc53YyAwMwGeUFKRojY/NWKvdZ+9UYtRfGmhqNbRkTSVpMbmyhXipFFv2cb/A==}
     engines: {node: '>= 12'}
 
+  data-uri-to-buffer@6.0.2:
+    resolution: {integrity: sha512-7hvf7/GW8e86rW0ptuwS3OcBGDjIi6SZva7hCyWC0yYry2cOPmLIjXAUHI6DK2HsnwJd9ifmt57i8eV2n4YNpw==}
+    engines: {node: '>= 14'}
+
   dayjs@1.11.21:
     resolution: {integrity: sha512-98IT+HOahAisibz/yjKbzuOBwYcjJ7BCLPzARyHiyEBmRz4fatF+KPJszEHXsGYjUG234aH/cOjW1wwTbKUZlA==}
 
@@ -7689,6 +7780,10 @@ packages:
 
   defu@6.1.7:
     resolution: {integrity: sha512-7z22QmUWiQ/2d0KkdYmANbRUVABpZ9SNYyH5vx6PZ+nE5bcC0l7uFvEfHlyld/HcGBFTL536ClDt3DEcSlEJAQ==}
+
+  degenerator@5.0.1:
+    resolution: {integrity: sha512-TllpMR/t0M5sqCXfj85i4XaAzxmS5tVA16dqvdkMwGmzI+dXLXnw3J+3Vdv7VKw+ThlTMboK6i9rnZ6Nntj5CQ==}
+    engines: {node: '>= 14'}
 
   delaunator@5.1.0:
     resolution: {integrity: sha512-AGrQ4QSgssa1NGmWmLPqN5NY2KajF5MqxetNEO+o0n3ZwZZeTmt7bBnvzHWrmkZFxGgr4HdyFgelzgi06otLuQ==}
@@ -7873,8 +7968,12 @@ packages:
   ee-first@1.1.1:
     resolution: {integrity: sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==}
 
-  effect@4.0.0-beta.102:
-    resolution: {integrity: sha512-z8Y+Q76Hh/kjLFZrXu8tGn6e+tDsg45R+UHhxd190pXxD53OGwf/G/zDxXTkse4HJ5mobNZfitLfUCp4fMvu6w==}
+  effect@4.0.0-beta.105:
+    resolution: {integrity: sha512-7U5OzWVNlpnZFvXiZfOeu8V+dCQUa3Om569HnYG2Dx8C8V6uoKS920kFJkIDEYVhlSGhzkRqaGKmYY9bPkBMMQ==}
+
+  electrobun@1.18.1:
+    resolution: {integrity: sha512-tgZ+WKGskn/1/Y5i1mpVCCkgRa1O31Tz7MIArBTK44GfPzT43uOq9c/HvxdQGrLeZV8ZvjK1lQrwqSXCgh6tvA==}
+    hasBin: true
 
   electron-to-chromium@1.5.395:
     resolution: {integrity: sha512-7zt9Aw+SrmxLWLN0zhaTWZQiCdryLVrYTq5R7iZakLvi2UQPYMMsROYV/2qVCzMeCiSXHwKOU+sZ4zOVVlrtKA==}
@@ -8095,10 +8194,19 @@ packages:
     resolution: {integrity: sha512-/veY75JbMK4j1yjvuUxuVsiS/hr/4iHs9FTT6cgTexxdE0Ly/glccBAkloH/DofkjRbZU3bnoj38mOmhkZ0lHw==}
     engines: {node: '>=12'}
 
+  escodegen@2.1.0:
+    resolution: {integrity: sha512-2NlIDTwUWJN0mRPQOdtQBzbUHvdGY2P1VXSyU83Q3xKxM7WHX2Ql8dKq782Q9TgQUNOLEzEYu9bzLNj1q88I5w==}
+    engines: {node: '>=6.0'}
+    hasBin: true
+
   esprima@4.0.1:
     resolution: {integrity: sha512-eGuFFw7Upda+g4p+QHvnW0RyTX/SVeJBDM/gCtMARO0cLuT2HcEKnTPvhjV6aGeqrCB/sbNop0Kszm0jsaWU4A==}
     engines: {node: '>=4'}
     hasBin: true
+
+  estraverse@5.3.0:
+    resolution: {integrity: sha512-MMdARuVEQziNTeJD8DgMqmhwR11BRQ/cBP+pLtYdSTnf3MIO8fFeiINEbX36ZdNlfU/7A9f3gUw49B3oQsvwBA==}
+    engines: {node: '>=4.0'}
 
   estree-util-attach-comments@3.0.0:
     resolution: {integrity: sha512-cKUwm/HUcTDsYh/9FgnuFqpfquUbwIqwKM26BVCGDPVgvaCl/nDCCjUfiLlx6lsEZ3Z4RFxNbOQ60pkaEwFxGw==}
@@ -8273,9 +8381,6 @@ packages:
     resolution: {integrity: sha512-S8KoZgRZN+a5rNwqTxlZZePjT/4cnm0ROV70LedRHZ0p8u9fRID0hJUZQpkKLzro8LfmC8sx23bY6tVNxv8pQA==}
     engines: {node: '>= 18.0.0'}
 
-  find-my-way-ts@0.1.6:
-    resolution: {integrity: sha512-a85L9ZoXtNAey3Y6Z+eBWW658kO/MwR7zIafkIUPUMf3isZG0NCs2pjW2wtjxAKuJPxMAsHUIP4ZPGv0o5gyTA==}
-
   find-process@2.1.1:
     resolution: {integrity: sha512-SrQDx3QhlmHM90iqn9rdjCQcw/T+WlpOkHFsjoRgB+zTpDfltNA1VSNYeYELwhUTJy12UFxqjWhmhOrJc+o4sA==}
     hasBin: true
@@ -8390,6 +8495,10 @@ packages:
   get-stream@9.0.1:
     resolution: {integrity: sha512-kVCxPF3vQM/N0B1PmoqVUqgHP+EeVjmZSQn+1oCRPxd2P21P2F19lIgbR3HBosbB1PUhOAoctJnfEn2GbN2eZA==}
     engines: {node: '>=18'}
+
+  get-uri@6.0.5:
+    resolution: {integrity: sha512-b1O07XYq8eRuVzBNgJLstU6FYc1tS6wnMtF1I1D9lE8LxZSOGZ7LhxN54yPP6mGw5f2CkXY2BQUL9Fx41qvcIg==}
+    engines: {node: '>= 14'}
 
   github-from-package@0.0.0:
     resolution: {integrity: sha512-SyHy3T1v2NUXn29OsWdxmK6RwHD+vkj3v8en8AOBZ1wBQ/hCAQ5bAQTD02kW4W9tUp/3Qh6J8r9EvntiyCmOOw==}
@@ -8598,10 +8707,6 @@ packages:
   ini@1.3.8:
     resolution: {integrity: sha512-JV/yugV2uzW5iMRSiZAyDtQd+nxtUnjeLt0acNdw98kKLrvuRVyB80tsREOE7yvGVgalhZ6RNXCmEHkUKBKxew==}
 
-  ini@7.0.0:
-    resolution: {integrity: sha512-ifK0CgjALofS5bkrcTy4RaQ9Vx2Knf/eLeIO+NaswQEpH1UblrtTSCIvN71qQDMq0PeQ/SSPojvEJp9vvvfr+w==}
-    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
-
   inline-style-parser@0.2.7:
     resolution: {integrity: sha512-Nb2ctOyNR8DqQoR0OwRG95uNWIC0C1lCgf5Naz5H6Ji72KZ8OcFZLz2P5sNgwlyoJ8Yif11oMuYs5pBQa86csA==}
 
@@ -8618,6 +8723,10 @@ packages:
 
   ip-address@10.1.0:
     resolution: {integrity: sha512-XXADHxXmvT9+CRxhXg56LJovE+bmWnEWB78LB83VZTprKTmaC5QfruXocxzTZ2Kl0DNwKuBdlIhjL8LeY8Sf8Q==}
+    engines: {node: '>= 12'}
+
+  ip-address@10.4.0:
+    resolution: {integrity: sha512-oSK96Grm3aP6OrS263xVxbNDGVL7rzBtYdpGqlDG8iQdoenDoTs/nkki+DflYbAEE8Xl6o5YxhxlrKvI3nqKXQ==}
     engines: {node: '>= 12'}
 
   ipaddr.js@1.9.1:
@@ -8640,6 +8749,11 @@ packages:
 
   is-decimal@2.0.1:
     resolution: {integrity: sha512-AAB9hiomQs5DXWcRB1rqsxGUstbRroFOPPVAomNk/3XHR5JyEZChOyTWe2oayKnsSsr/kcGqF+z6yuH6HHpN0A==}
+
+  is-docker@2.2.1:
+    resolution: {integrity: sha512-F+i2BKsFrH66iaUFc0woD8sLy8getkwTwtOBjvs56Cx4CgJDeKQeqfz8wAYiSb8JOprWhHH5p77PbmYCvvUuXQ==}
+    engines: {node: '>=8'}
+    hasBin: true
 
   is-docker@3.0.0:
     resolution: {integrity: sha512-eljcgEDlEns/7AXFosB5K/2nCM4P7FQPkGc/DWLy5rmFEWvZayGrik1d9/QIY5nJ4f9YsVvBkA6kJpHn9rISdQ==}
@@ -8699,6 +8813,10 @@ packages:
   is-what@4.1.16:
     resolution: {integrity: sha512-ZhMwEosbFJkA0YhFnNDgTM4ZxDRsS6HqTo7qsZM08fehyRYIYa0yHu5R6mgo1n/8MgaPBXiPimPD77baVFYg+A==}
     engines: {node: '>=12.13'}
+
+  is-wsl@2.2.0:
+    resolution: {integrity: sha512-fKzAra0rGJUUBwGBgNkHZuToZcn+TtXHpeCgmkMJMMYx1sQDYaCSyjJBSCa2nH1DGm7s3n1oBnohoVTBaN7Lww==}
+    engines: {node: '>=8'}
 
   is-wsl@3.1.1:
     resolution: {integrity: sha512-e6rvdUCiQCAuumZslxRJWR/Doq4VpPR82kqclvcS0efgt430SlGIk05vdCN58+VrzgtIcfNODjozVielycD4Sw==}
@@ -8957,6 +9075,10 @@ packages:
 
   lru-cache@5.1.1:
     resolution: {integrity: sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w==}
+
+  lru-cache@7.18.3:
+    resolution: {integrity: sha512-jumlc0BIUrS3qJGgIkWZsyfAM7NCWiBcCDhnd+3NNM5KbBmLTgHVfWBcg6W+rLUsIpzpERPsvwUP7CckAQSOoA==}
+    engines: {node: '>=12'}
 
   lru_map@0.4.1:
     resolution: {integrity: sha512-I+lBvqMMFfqaV8CJCISjI3wbjmwVu/VyOoU7+qtu9d7ioW5klMgsTTiUOUp+DJvfTTzKXoPbyC6YfgkNcyPSOg==}
@@ -9299,9 +9421,6 @@ packages:
   msgpackr@2.0.5:
     resolution: {integrity: sha512-cef05H/dSYpLpqp3sj/qyZh5vhUYCalnaLO7j1yOmpsR0y/XwLVtK7r5gn+U/F7CTEfMowcGhlUQJDLcLf7jcA==}
 
-  multipasta@0.2.8:
-    resolution: {integrity: sha512-ZPWuMKyv0cSO29f7hozp+k6+crZbQijV8ipMvxNxRf2SwtYGTX1ZX89Kd20VV4H9Znonx+EQn+iy1wGQsJ+b+Q==}
-
   mustache@4.2.0:
     resolution: {integrity: sha512-71ippSywq5Yb7/tVYyGbkBggbU8H3u5Rz56fH60jGFgr8uHwxs+aSKeqmluIVzM0m0kB7xQjKS6qPfd0b2ZoqQ==}
     hasBin: true
@@ -9328,6 +9447,10 @@ packages:
 
   neo-async@2.6.2:
     resolution: {integrity: sha512-Yd3UES5mWCSqR+qNT93S3UoYUkqAZ9lLg8a7g9rimsWmYGK8cVToA4/sF3RrshdyV3sAGMXVUmpMYOw+dLpOuw==}
+
+  netmask@2.1.1:
+    resolution: {integrity: sha512-eonl3sLUha+S1GzTPxychyhnUzKyeQkZ7jLjKrBagJgPla13F+uQ71HgpFefyHgqrjEbCPkDArxYsjY8/+gLKA==}
+    engines: {node: '>= 0.4.0'}
 
   neverthrow@8.2.0:
     resolution: {integrity: sha512-kOCT/1MCPAxY5iUV3wytNFUMUolzuwd/VF/1KCx7kf6CutrOsTie+84zTGTpgQycjvfLdBBdvBvFLqFD2c0wkQ==}
@@ -9512,6 +9635,14 @@ packages:
     resolution: {integrity: sha512-rhIwUycgwwKcP9yTOOFK/AKsAopjjCakVqLHePO3CC6Mir1Z99xT+R63jZxAT5lFZLa2inS5h+ZS2GvR99/FBg==}
     engines: {node: '>=8'}
 
+  pac-proxy-agent@7.2.0:
+    resolution: {integrity: sha512-TEB8ESquiLMc0lV8vcd5Ql/JAKAoyzHFXaStwjkzpOpC5Yv+pIzLfHvjTSdf3vpa2bMiUQrg9i6276yn8666aA==}
+    engines: {node: '>= 14'}
+
+  pac-resolver@7.0.1:
+    resolution: {integrity: sha512-5NPgf87AT2STgwa2ntRMr45jTKrYBGkVU36yT0ig/n/GMAa3oPqhZfIQ2kMEimReg0+t9kZViDVZ83qfVUlckg==}
+    engines: {node: '>= 14'}
+
   package-json-from-dist@1.0.1:
     resolution: {integrity: sha512-UEZIS3/by4OC8vL3P2dTXRETpebLI2NiI5vIrjaD/5UtrkFX/tNbwjTSRAGC/+7CAo2pIcBaRgWmcBBHcsaCIw==}
 
@@ -9672,6 +9803,15 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
+  png-to-ico@2.1.8:
+    resolution: {integrity: sha512-Nf+IIn/cZ/DIZVdGveJp86NG5uNib1ZXMiDd/8x32HCTeKSvgpyg6D/6tUBn1QO/zybzoMK0/mc3QRgAyXdv9w==}
+    engines: {node: '>=8'}
+    hasBin: true
+
+  pngjs@6.0.0:
+    resolution: {integrity: sha512-TRzzuFRRmEoSW/p1KVAmiOgPco2Irlah+bGFCeNfJXxxYGwSw7YwAOAcd7X28K/m5bjBWKsC29KyoMfHbypayg==}
+    engines: {node: '>=12.13.0'}
+
   points-on-curve@0.2.0:
     resolution: {integrity: sha512-0mYKnYYe9ZcqMCWhUjItv/oHjvgEsfKvnUTg8sAtnHr3GVy7rGkXCb6d5cSyqrWqL4k81b9CPg3urd+T7aop3A==}
 
@@ -9756,9 +9896,6 @@ packages:
   proper-lockfile@4.1.2:
     resolution: {integrity: sha512-TjNPblN4BwAWMXU8s9AEz4JmQxnD1NNL7bNOY/AKUzyamc379FWASUhc/K1pL2noVb+XmZKLL68cjzLsiOAMaA==}
 
-  property-information@7.1.0:
-    resolution: {integrity: sha512-TwEZ+X+yCJmYfL7TPUOcvBZ4QfoT5YenQiJuX//0th53DE6w0xxLEtfK3iyryQFddXuvkIk51EEgrJQ0WJkOmQ==}
-
   property-information@7.2.0:
     resolution: {integrity: sha512-IAtzIB6sUiWaJYrX9smp3V46pBGbBeLFRGdh25kg1334VcBlD8HzhPeNIWQH9zhGmo2itIe25EHt9dQP7G5hmg==}
 
@@ -9837,6 +9974,13 @@ packages:
     resolution: {integrity: sha512-llQsMLSUDUPT44jdrU/O37qlnifitDP+ZwrmmZcoSKyLKvtZxpyV0n2/bD/N4tBAAZ/gJEdZU7KMraoK1+XYAg==}
     engines: {node: '>= 0.10'}
 
+  proxy-agent@6.5.0:
+    resolution: {integrity: sha512-TmatMXdr2KlRiA2CyDu8GqR8EjahTG3aY3nXjdzFyoZbmB8hrBsTyMezhULIXKnC0jpfjlmiZ3+EaCzoInSu/A==}
+    engines: {node: '>= 14'}
+
+  proxy-from-env@1.1.0:
+    resolution: {integrity: sha512-D+zkORCbA9f1tdWRK0RaCR3GPv50cMxcrz4X8k5LTSUD1Dkw47mKJEZQNunItRTkWwgtaUSo1RVFRIG9ZXiFYg==}
+
   proxy-from-env@2.1.0:
     resolution: {integrity: sha512-cJ+oHTW1VAEa8cJslgmUZrc+sjRKgAKl3Zyse6+PV38hZe/V6Z14TbCuXcan9F9ghlz4QrFr2c92TNF82UkYHA==}
     engines: {node: '>=10'}
@@ -9891,6 +10035,11 @@ packages:
   rc@1.2.8:
     resolution: {integrity: sha512-y3bGgqKj3QBdxLbLkomlohkvsA8gdAiUQlSBJnBhfn+BPxg4bc62d8TcBW15wavDfgexCgccckhcZvywyQYPOw==}
     hasBin: true
+
+  rcedit@4.0.1:
+    resolution: {integrity: sha512-bZdaQi34krFWhrDn+O53ccBDw0MkAT2Vhu75SqhtvhQu4OPyFM4RoVheyYiVQYdjhUi6EJMVWQ0tR6bCIYVkUg==}
+    engines: {node: '>= 14.0.0'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
 
   react-devtools-core@7.0.1:
     resolution: {integrity: sha512-C3yNvRHaizlpiASzy7b9vbnBGLrhvdhl1CbdU6EnZgxPNbai60szdLtl+VL76UNOt5bOoVTOz5rNWZxgGt+Gsw==}
@@ -10263,6 +10412,18 @@ packages:
   sisteransi@1.0.5:
     resolution: {integrity: sha512-bLGGlR1QxBcynn2d5YmDX4MGjlZvy2MRBDRNHLJ8VI6l6+9FUiyTFNJ0IveOSP0bcXgVDPRcfGqA0pjaqUpfVg==}
 
+  smart-buffer@4.2.0:
+    resolution: {integrity: sha512-94hK0Hh8rPqQl2xXc3HsaBoOXKV20MToPkcXvwbISWLEs+64sBq5kFgn2kJDHb1Pry9yrP0dxrCI9RRci7RXKg==}
+    engines: {node: '>= 6.0.0', npm: '>= 3.0.0'}
+
+  socks-proxy-agent@8.0.5:
+    resolution: {integrity: sha512-HehCEsotFqbPW9sJ8WVYB6UbmIMv7kUUORIF2Nncq4VQvBfNBLibW9YZR5dlYCSUhwcD628pRllm7n+E+YTzJw==}
+    engines: {node: '>= 14'}
+
+  socks@2.8.9:
+    resolution: {integrity: sha512-LJhUYUvItdQ0LkJTmPeaEObWXAqFyfmP85x0tch/ez9cahmhlBBLbIqDFnvBnUJGagb0JbIQrkBs1wJ+yRYpEw==}
+    engines: {node: '>= 10.0.0', npm: '>= 3.0.0'}
+
   sorted-btree@1.8.1:
     resolution: {integrity: sha512-395+XIP+wqNn3USkFSrNz7G3Ss/MXlZEqesxvzCRFwL14h6e8LukDHdLBePn5pwbm5OQ9vGu8mDyz2lLDIqamQ==}
 
@@ -10447,6 +10608,9 @@ packages:
   thenify@3.3.1:
     resolution: {integrity: sha512-RVZSIV5IG10Hk3enotrhvz0T9em6cyHBLkH/YAZuKqd8hRkKhSfCGIcP2KUY0EPxndzANBmNllzWPwak+bheSw==}
 
+  three@0.165.0:
+    resolution: {integrity: sha512-cc96IlVYGydeceu0e5xq70H8/yoVT/tXBxV/W8A/U6uOq7DXc4/s1Mkmnu6SqoYGhSRWWYFOhVwvq6V0VtbplA==}
+
   time-span@4.0.0:
     resolution: {integrity: sha512-MyqZCTGLDZ77u4k+jqg4UlrzPTPZ49NDlaekU6uuFaJLzPIN1woaRXCbGeqOfxwc3Y37ZROGAJ614Rdv7Olt+g==}
     engines: {node: '>=10'}
@@ -10495,10 +10659,6 @@ packages:
 
   tokenx@1.3.0:
     resolution: {integrity: sha512-NLdXTEZkKiO0gZuLtMoZKjCXTREXeZZt8nnnNeyoXtNZAfG/GKGSbQtLU5STspc0rMSwcA+UJfWZkbNU01iKmQ==}
-
-  toml@4.3.0:
-    resolution: {integrity: sha512-lVb8X9BsPVuH0M4BKeS91tXAmJvCjQ5UIyAbQFaxkKGyUFK2RPkhwaFSQH8vbpl1d23eu/IBH+dwVMHWaq9A5A==}
-    engines: {node: '>=20'}
 
   tr46@0.0.3:
     resolution: {integrity: sha512-N3WMsuqV66lT30CrXNbEjx4GEwlow3v6rr4mCcv6prnfwhS01rkgyFdjPNBYd9br7LpXV1+Emh01fHnq2Gdgrw==}
@@ -11604,6 +11764,8 @@ snapshots:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
 
+  '@babylonjs/core@7.54.3': {}
+
   '@braintree/sanitize-url@7.1.2': {}
 
   '@cfworker/json-schema@4.1.1': {}
@@ -12096,10 +12258,10 @@ snapshots:
     dependencies:
       '@edge-runtime/primitives': 4.1.0
 
-  '@effect/opentelemetry@4.0.0-beta.102(@opentelemetry/api-logs@0.217.0)(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.7.1(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.7.1(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-web@2.6.1(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.41.1)(effect@4.0.0-beta.102)':
+  '@effect/opentelemetry@4.0.0-beta.105(@opentelemetry/api-logs@0.217.0)(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.7.1(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.7.1(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-web@2.6.1(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.41.1)(effect@4.0.0-beta.105)':
     dependencies:
       '@opentelemetry/semantic-conventions': 1.41.1
-      effect: 4.0.0-beta.102
+      effect: 4.0.0-beta.105
     optionalDependencies:
       '@opentelemetry/api': 1.9.0
       '@opentelemetry/api-logs': 0.217.0
@@ -12110,27 +12272,27 @@ snapshots:
       '@opentelemetry/sdk-trace-node': 2.7.1(@opentelemetry/api@1.9.0)
       '@opentelemetry/sdk-trace-web': 2.6.1(@opentelemetry/api@1.9.0)
 
-  '@effect/platform-bun@4.0.0-beta.102(effect@4.0.0-beta.102)':
+  '@effect/platform-bun@4.0.0-beta.105(effect@4.0.0-beta.105)':
     dependencies:
-      '@effect/platform-node-shared': 4.0.0-beta.102(effect@4.0.0-beta.102)
-      effect: 4.0.0-beta.102
+      '@effect/platform-node-shared': 4.0.0-beta.105(effect@4.0.0-beta.105)
+      effect: 4.0.0-beta.105
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@effect/platform-node-shared@4.0.0-beta.102(effect@4.0.0-beta.102)':
+  '@effect/platform-node-shared@4.0.0-beta.105(effect@4.0.0-beta.105)':
     dependencies:
       '@types/ws': 8.18.1
-      effect: 4.0.0-beta.102
+      effect: 4.0.0-beta.105
       ws: 8.21.0
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@effect/platform-node@4.0.0-beta.102(effect@4.0.0-beta.102)(ioredis@5.11.1)':
+  '@effect/platform-node@4.0.0-beta.105(effect@4.0.0-beta.105)(ioredis@5.11.1)':
     dependencies:
-      '@effect/platform-node-shared': 4.0.0-beta.102(effect@4.0.0-beta.102)
-      effect: 4.0.0-beta.102
+      '@effect/platform-node-shared': 4.0.0-beta.105(effect@4.0.0-beta.105)
+      effect: 4.0.0-beta.105
       ioredis: 5.11.1
       mime: 4.1.0
       undici: 8.9.0
@@ -12138,9 +12300,9 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@effect/sql-sqlite-bun@4.0.0-beta.102(effect@4.0.0-beta.102)':
+  '@effect/sql-sqlite-bun@4.0.0-beta.105(effect@4.0.0-beta.105)':
     dependencies:
-      effect: 4.0.0-beta.102
+      effect: 4.0.0-beta.105
 
   '@electric-sql/client@1.5.22':
     dependencies:
@@ -12846,6 +13008,10 @@ snapshots:
       '@lezer/common': 1.5.2
       '@lezer/highlight': 1.2.3
       '@lezer/lr': 1.4.10
+
+  '@malept/cross-spawn-promise@1.1.1':
+    dependencies:
+      cross-spawn: 7.0.6
 
   '@mapbox/node-pre-gyp@2.0.3':
     dependencies:
@@ -15384,6 +15550,8 @@ snapshots:
 
   '@tootallnate/once@2.0.1': {}
 
+  '@tootallnate/quickjs-emscripten@0.23.0': {}
+
   '@ts-morph/common@0.11.1':
     dependencies:
       fast-glob: 3.3.3
@@ -15600,6 +15768,8 @@ snapshots:
   '@types/ms@2.1.0': {}
 
   '@types/node@16.18.11': {}
+
+  '@types/node@17.0.45': {}
 
   '@types/node@26.1.0':
     dependencies:
@@ -16021,6 +16191,10 @@ snapshots:
 
   assertion-error@2.0.1: {}
 
+  ast-types@0.13.4:
+    dependencies:
+      tslib: 2.8.1
+
   ast-types@0.16.1:
     dependencies:
       tslib: 2.8.1
@@ -16068,6 +16242,8 @@ snapshots:
   base64-js@1.5.1: {}
 
   baseline-browser-mapping@2.11.1: {}
+
+  basic-ftp@5.3.1: {}
 
   before-after-hook@3.0.2: {}
 
@@ -16411,6 +16587,12 @@ snapshots:
     dependencies:
       luxon: 3.7.2
 
+  cross-spawn-windows-exe@1.2.0:
+    dependencies:
+      '@malept/cross-spawn-promise': 1.1.1
+      is-wsl: 2.2.0
+      which: 2.0.2
+
   cross-spawn@7.0.6:
     dependencies:
       path-key: 3.1.1
@@ -16627,6 +16809,8 @@ snapshots:
 
   data-uri-to-buffer@4.0.1: {}
 
+  data-uri-to-buffer@6.0.2: {}
+
   dayjs@1.11.21: {}
 
   debug@4.4.3:
@@ -16663,6 +16847,12 @@ snapshots:
   define-lazy-prop@3.0.0: {}
 
   defu@6.1.7: {}
+
+  degenerator@5.0.1:
+    dependencies:
+      ast-types: 0.13.4
+      escodegen: 2.1.0
+      esprima: 4.0.1
 
   delaunator@5.1.0:
     dependencies:
@@ -16763,18 +16953,24 @@ snapshots:
 
   ee-first@1.1.1: {}
 
-  effect@4.0.0-beta.102:
+  effect@4.0.0-beta.105:
     dependencies:
       '@standard-schema/spec': 1.1.0
       fast-check: 4.9.0
-      find-my-way-ts: 0.1.6
-      ini: 7.0.0
       kubernetes-types: 1.30.0
       msgpackr: 2.0.5
-      multipasta: 0.2.8
-      toml: 4.3.0
       uuid: 14.0.1
-      yaml: 2.9.0
+
+  electrobun@1.18.1:
+    dependencies:
+      '@babylonjs/core': 7.54.3
+      '@types/bun': 1.3.14
+      png-to-ico: 2.1.8
+      proxy-agent: 6.5.0
+      rcedit: 4.0.1
+      three: 0.165.0
+    transitivePeerDependencies:
+      - supports-color
 
   electron-to-chromium@1.5.395: {}
 
@@ -17019,7 +17215,17 @@ snapshots:
 
   escape-string-regexp@5.0.0: {}
 
+  escodegen@2.1.0:
+    dependencies:
+      esprima: 4.0.1
+      estraverse: 5.3.0
+      esutils: 2.0.3
+    optionalDependencies:
+      source-map: 0.6.1
+
   esprima@4.0.1: {}
+
+  estraverse@5.3.0: {}
 
   estree-util-attach-comments@3.0.0:
     dependencies:
@@ -17236,8 +17442,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  find-my-way-ts@0.1.6: {}
-
   find-process@2.1.1:
     dependencies:
       chalk: 4.1.2
@@ -17368,6 +17572,14 @@ snapshots:
     dependencies:
       '@sec-ant/readable-stream': 0.4.1
       is-stream: 4.0.1
+
+  get-uri@6.0.5:
+    dependencies:
+      basic-ftp: 5.3.1
+      data-uri-to-buffer: 6.0.2
+      debug: 4.4.3
+    transitivePeerDependencies:
+      - supports-color
 
   github-from-package@0.0.0: {}
 
@@ -17538,7 +17750,7 @@ snapshots:
       mdast-util-mdx-expression: 2.0.1
       mdast-util-mdx-jsx: 3.2.0
       mdast-util-mdxjs-esm: 2.0.1
-      property-information: 7.1.0
+      property-information: 7.2.0
       space-separated-tokens: 2.0.2
       style-to-js: 1.1.21
       unist-util-position: 5.0.0
@@ -17572,7 +17784,7 @@ snapshots:
       mdast-util-mdx-expression: 2.0.1
       mdast-util-mdx-jsx: 3.2.0
       mdast-util-mdxjs-esm: 2.0.1
-      property-information: 7.1.0
+      property-information: 7.2.0
       space-separated-tokens: 2.0.2
       style-to-js: 1.1.21
       unist-util-position: 5.0.0
@@ -17687,8 +17899,6 @@ snapshots:
 
   ini@1.3.8: {}
 
-  ini@7.0.0: {}
-
   inline-style-parser@0.2.7: {}
 
   internmap@1.0.1: {}
@@ -17709,6 +17919,8 @@ snapshots:
 
   ip-address@10.1.0: {}
 
+  ip-address@10.4.0: {}
+
   ipaddr.js@1.9.1: {}
 
   is-alphabetical@2.0.1: {}
@@ -17725,6 +17937,8 @@ snapshots:
       hasown: 2.0.4
 
   is-decimal@2.0.1: {}
+
+  is-docker@2.2.1: {}
 
   is-docker@3.0.0: {}
 
@@ -17761,6 +17975,10 @@ snapshots:
   is-unsafe@1.0.1: {}
 
   is-what@4.1.16: {}
+
+  is-wsl@2.2.0:
+    dependencies:
+      is-docker: 2.2.1
 
   is-wsl@3.1.1:
     dependencies:
@@ -17960,6 +18178,8 @@ snapshots:
   lru-cache@5.1.1:
     dependencies:
       yallist: 3.1.1
+
+  lru-cache@7.18.3: {}
 
   lru_map@0.4.1: {}
 
@@ -18608,8 +18828,6 @@ snapshots:
     optionalDependencies:
       msgpackr-extract: 3.0.4
 
-  multipasta@0.2.8: {}
-
   mustache@4.2.0: {}
 
   mz@2.7.0:
@@ -18627,6 +18845,8 @@ snapshots:
   negotiator@1.0.0: {}
 
   neo-async@2.6.2: {}
+
+  netmask@2.1.1: {}
 
   neverthrow@8.2.0:
     optionalDependencies:
@@ -18832,6 +19052,24 @@ snapshots:
     dependencies:
       p-finally: 1.0.0
 
+  pac-proxy-agent@7.2.0:
+    dependencies:
+      '@tootallnate/quickjs-emscripten': 0.23.0
+      agent-base: 7.1.4
+      debug: 4.4.3
+      get-uri: 6.0.5
+      http-proxy-agent: 7.0.2
+      https-proxy-agent: 7.0.6
+      pac-resolver: 7.0.1
+      socks-proxy-agent: 8.0.5
+    transitivePeerDependencies:
+      - supports-color
+
+  pac-resolver@7.0.1:
+    dependencies:
+      degenerator: 5.0.1
+      netmask: 2.1.1
+
   package-json-from-dist@1.0.1: {}
 
   package-manager-detector@1.6.0: {}
@@ -18976,6 +19214,14 @@ snapshots:
     optionalDependencies:
       fsevents: 2.3.2
 
+  png-to-ico@2.1.8:
+    dependencies:
+      '@types/node': 17.0.45
+      minimist: 1.2.8
+      pngjs: 6.0.0
+
+  pngjs@6.0.0: {}
+
   points-on-curve@0.2.0: {}
 
   points-on-path@0.2.1:
@@ -19058,8 +19304,6 @@ snapshots:
       graceful-fs: 4.2.11
       retry: 0.12.0
       signal-exit: 3.0.7
-
-  property-information@7.1.0: {}
 
   property-information@7.2.0: {}
 
@@ -19193,6 +19437,21 @@ snapshots:
       forwarded: 0.2.0
       ipaddr.js: 1.9.1
 
+  proxy-agent@6.5.0:
+    dependencies:
+      agent-base: 7.1.4
+      debug: 4.4.3
+      http-proxy-agent: 7.0.2
+      https-proxy-agent: 7.0.6
+      lru-cache: 7.18.3
+      pac-proxy-agent: 7.2.0
+      proxy-from-env: 1.1.0
+      socks-proxy-agent: 8.0.5
+    transitivePeerDependencies:
+      - supports-color
+
+  proxy-from-env@1.1.0: {}
+
   proxy-from-env@2.1.0: {}
 
   public-encrypt@4.0.3:
@@ -19306,6 +19565,10 @@ snapshots:
       ini: 1.3.8
       minimist: 1.2.8
       strip-json-comments: 2.0.1
+
+  rcedit@4.0.1:
+    dependencies:
+      cross-spawn-windows-exe: 1.2.0
 
   react-devtools-core@7.0.1:
     dependencies:
@@ -19855,6 +20118,21 @@ snapshots:
 
   sisteransi@1.0.5: {}
 
+  smart-buffer@4.2.0: {}
+
+  socks-proxy-agent@8.0.5:
+    dependencies:
+      agent-base: 7.1.4
+      debug: 4.4.3
+      socks: 2.8.9
+    transitivePeerDependencies:
+      - supports-color
+
+  socks@2.8.9:
+    dependencies:
+      ip-address: 10.4.0
+      smart-buffer: 4.2.0
+
   sorted-btree@1.8.1: {}
 
   source-map-js@1.2.1: {}
@@ -20080,6 +20358,8 @@ snapshots:
     dependencies:
       any-promise: 1.3.0
 
+  three@0.165.0: {}
+
   time-span@4.0.0:
     dependencies:
       convert-hrtime: 3.0.0
@@ -20119,8 +20399,6 @@ snapshots:
   toidentifier@1.0.1: {}
 
   tokenx@1.3.0: {}
-
-  toml@4.3.0: {}
 
   tr46@0.0.3: {}
 

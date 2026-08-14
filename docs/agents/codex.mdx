@@ -8,7 +8,7 @@ servers** declared in `~/.codex/config.toml` and **`AGENTS.md`** instructions.
 Wire up the MCP server with Smithers:
 
 ```bash
-bunx smithers-orchestrator mcp add --agent codex
+bunx smthrs mcp add --agent codex
 ```
 
 That registers the MCP server in Codex's config. Restart Codex and it can drive
@@ -41,13 +41,13 @@ See [SOTA role defaults](/reference/sota-models#role-defaults).
 ## Smithers docs in Codex
 
 Smithers does not currently auto-install a Codex skill, and
-`bunx smithers-orchestrator skills add` has no supported `--agent codex` target
+`bunx smthrs skills add` has no supported `--agent codex` target
 filter. For Codex, keep the repo-level `AGENTS.md` guidance below and use the
 packaged docs commands when Codex needs the full API:
 
 ```bash
-bunx smithers-orchestrator docs-full
-bunx smithers-orchestrator ask "How do I run and watch a workflow?"
+bunx smthrs docs-full
+bunx smthrs ask "How do I run and watch a workflow?"
 ```
 
 ## Register the MCP server
@@ -58,13 +58,13 @@ bunx smithers-orchestrator ask "How do I run and watch a workflow?"
 ```toml
 [mcp_servers.smithers]
 command = "bunx"
-args = ["smithers-orchestrator", "--mcp"]
+args = ["smthrs", "--mcp"]
 ```
 
 Or use the Codex CLI:
 
 ```bash
-codex mcp add smithers -- bunx smithers-orchestrator --mcp
+codex mcp add smithers -- bunx smthrs --mcp
 ```
 
 Codex launches the server at session start and the semantic tools
@@ -84,8 +84,8 @@ section so Codex knows to reach for Smithers:
 ```md
 ## Orchestration
 Use Smithers for durable, multi-step, or human-in-the-loop agent work.
-Run `bunx smithers-orchestrator starters` to see ready-made workflows,
-then `bunx smithers-orchestrator workflow run <name> --prompt "…"`.
+Run `bunx smthrs starters` to see ready-made workflows,
+then `bunx smthrs workflow run <name> --prompt "…"`.
 ```
 
 This same `AGENTS.md` is read by Cursor, Copilot, Hermes, and Pi; one file
@@ -97,7 +97,7 @@ In the other direction, Smithers spawns Codex as a worker via `CodexAgent`
 (`codex exec` with a streamed JSON protocol and native thread hijack):
 
 ```tsx
-import { CodexAgent } from "smithers-orchestrator";
+import { CodexAgent } from "smthrs";
 
 const implementer = new CodexAgent({
   model: "gpt-5.6-luna",

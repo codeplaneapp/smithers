@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { createNodeRuntime } from "../src/node-runtime.js";
 
@@ -43,7 +43,7 @@ describe("createNodeRuntime signals capability", () => {
       expect(typeof runtime.signals?.load).toBe("function");
       const rows = await runtime.signals.load(runId);
       expect(rows).toHaveLength(2);
-      expect(rows.map((r) => r.seq)).toEqual([...rows.map((r) => r.seq)].sort((a, b) => a - b));
+      expect(rows.map((r) => r.seq)).toEqual(rows.map((r) => r.seq).sort((a, b) => a - b));
       expect(rows[0].signalName).toBe("REVISE");
       expect(typeof rows[0].payloadJson).toBe("string");
       expect(JSON.parse(rows[0].payloadJson)).toEqual({ feedback: "first" });

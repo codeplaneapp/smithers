@@ -1,6 +1,6 @@
 // Reference solution (effect arm, task `fanout`).
 import { Schema } from "effect";
-import { Smithers } from "smithers-orchestrator";
+import { Smithers } from "smthrs";
 
 const G = Smithers.workflow({ name: "ab-fanout", input: Schema.Struct({ items: Schema.Array(Schema.Number) }) });
 

@@ -4,11 +4,11 @@
  * Pattern: Agent scans → structured categorization → stored to schema table.
  * Use cases: file audits, dependency scans, API endpoint discovery, dead code detection.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import ScanPrompt from "./prompts/discovery/scan.mdx";
 const findingSchema = z.object({

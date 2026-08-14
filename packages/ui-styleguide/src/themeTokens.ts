@@ -1,89 +1,16 @@
-export const lightTokens = [
-  "color-scheme:light",
-  "font-family:var(--font-sans)",
-  // Font stacks. Sans carries the UI; mono is reserved for code, ids, and
-  // tabular data. Never set body copy in mono.
-  "--font-sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
-  "--font-mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace",
-  // Neutrals (zinc ramp). bg is one step below surface so cards read as
-  // raised without heavy shadows.
-  "--bg:#fafafa",
-  "--text:#18181b",
-  "--text-muted:#52525b",
-  "--text-faint:#6d6d75",
-  "--text-placeholder:#8a8a93",
-  // Elevation ramp: bg < surface (cards) < surface-2 (inset/hover) <
-  // surface-3 (overlays, popovers).
-  "--surface:#ffffff",
-  "--surface-2:#f4f4f5",
-  "--surface-3:#ffffff",
-  "--surface-glass:rgba(255,255,255,0.72)",
-  "--surface-glass-strong:rgba(255,255,255,0.85)",
-  "--border:rgba(24,24,27,0.08)",
-  "--border-strong:rgba(24,24,27,0.14)",
-  "--border-solid:#e4e4e7",
-  "--hover:#f4f4f5",
-  "--hover-subtle:rgba(24,24,27,0.04)",
-  "--inverse-bg:#18181b",
-  "--inverse-text:#fafafa",
-  "--code-bg:#18181b",
-  "--code-text:#f4f4f5",
-  "--inline-code-bg:rgba(24,24,27,0.06)",
-  // Semantic colors. brand = action/active, info = neutral-highlight,
-  // success = done, warning = needs-attention/waiting, danger = failed.
-  // Light values are darkened so 11px badge text stays >= 4.5:1 on the
-  // matching *-soft tint, not just on white.
-  "--brand:#6d56d8",
-  "--success:#087461",
-  "--danger:#c5343f",
-  "--warning:#916000",
-  "--info:#2a63c9",
-  "--shadow-rgb:24 24 27",
-  // Elevation shadows, weakest to strongest (card, raised, overlay).
-  "--shadow-1:0 1px 2px rgb(var(--shadow-rgb) / 0.05)",
-  "--shadow-2:0 1px 2px rgb(var(--shadow-rgb) / 0.04), 0 8px 24px rgb(var(--shadow-rgb) / 0.07)",
-  "--shadow-3:0 4px 12px rgb(var(--shadow-rgb) / 0.10), 0 16px 48px rgb(var(--shadow-rgb) / 0.14)",
-].join("; ");
+import { serializeThemeVariant } from "./serializeThemeVariant";
+import { DEFAULT_THEME_KEY, themeRegistry } from "./themeRegistry";
 
-export const darkTokens = [
-  "color-scheme:dark",
-  "--bg:#09090b",
-  "--text:#f4f4f5",
-  "--text-muted:#a1a1aa",
-  "--text-faint:#8c8c95",
-  "--text-placeholder:#75757e",
-  "--surface:#141417",
-  "--surface-2:#1b1b20",
-  "--surface-3:#232329",
-  "--surface-glass:rgba(20,20,23,0.72)",
-  "--surface-glass-strong:rgba(20,20,23,0.85)",
-  "--border:rgba(255,255,255,0.09)",
-  "--border-strong:rgba(255,255,255,0.16)",
-  "--border-solid:#2a2a30",
-  "--hover:#1f1f24",
-  "--hover-subtle:rgba(255,255,255,0.05)",
-  "--inverse-bg:#f4f4f5",
-  "--inverse-text:#18181b",
-  "--code-bg:#0c0c0e",
-  "--code-text:#e4e4e7",
-  "--inline-code-bg:rgba(255,255,255,0.08)",
-  "--brand:#8b78e6",
-  "--success:#2ec9a8",
-  "--danger:#f2555a",
-  "--warning:#e0a23a",
-  "--info:#6aa5f8",
-  "--shadow-rgb:0 0 0",
-  "--shadow-1:0 1px 2px rgb(var(--shadow-rgb) / 0.35)",
-  "--shadow-2:0 1px 2px rgb(var(--shadow-rgb) / 0.30), 0 8px 24px rgb(var(--shadow-rgb) / 0.40)",
-  "--shadow-3:0 4px 12px rgb(var(--shadow-rgb) / 0.45), 0 16px 48px rgb(var(--shadow-rgb) / 0.50)",
-].join("; ");
+export const lightTokens = serializeThemeVariant(themeRegistry[DEFAULT_THEME_KEY].light);
+
+export const darkTokens = serializeThemeVariant(themeRegistry[DEFAULT_THEME_KEY].dark);
 
 // Theme-invariant tokens: aliases, soft tints (self-adapting color-mix over
 // the semantic colors, correct in both themes), geometry, and type scale.
 export const sharedTokens = [
   // Legacy aliases (do not remove; workflow UIs rely on them). Trap: this
   // page-vocabulary `--accent` is the BRAND violet, while the shadcn bridge's
-  // `tokens.accent` (@smithers-orchestrator/ui) is the hover fill -- never
+  // `tokens.accent` (@smthrs/ui) is the hover fill -- never
   // treat the two as interchangeable.
   "--panel:var(--surface)",
   "--card:var(--surface)",
@@ -123,7 +50,7 @@ export const sharedTokens = [
   "--ring:color-mix(in srgb, var(--brand) 22%, transparent)",
   "--ring-border:color-mix(in srgb, var(--brand) 50%, transparent)",
   // Geometry: spacing, type scale, radii, and shared control heights.
-  // Spacing policy (enforced by @smithers-orchestrator/ui css-contract tests):
+  // Spacing policy (enforced by @smthrs/ui css-contract tests):
   // the --sp scale (4px steps) paces layout-level spacing; component-internal
   // padding/gap sits on a 2px fine grid (even px values only, no 5/7/9px).
   // Weight roles: 650 is the only emphasis weight for titles/labels; 700 is

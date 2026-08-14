@@ -4,10 +4,10 @@
 /** @typedef {import("./RuntimeAdapter.ts").RuntimeStorage} RuntimeStorage */
 // @smithers-type-exports-end
 
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { createUnsupportedCapability } from "./unsupportedCapability.js";
 import { withAbort } from "./withAbort.js";
-/** @typedef {import("@smithers-orchestrator/graph/types").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("@smthrs/graph/types").TaskDescriptor} TaskDescriptor */
 /** @typedef {import("./TaskExecutorContext.ts").TaskExecutorContext} TaskExecutorContext */
 
 /**

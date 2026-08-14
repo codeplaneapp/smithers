@@ -1,11 +1,11 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterEach, describe, expect, test } from "bun:test";
-import { Workflow, Task, Parallel } from "smithers-orchestrator";
+import { Workflow, Task, Parallel } from "smthrs";
 // The unit under test is THIS package's engine: the declared-width derivation
 // lives in ../src/engine.js + ../src/slotGovernor.js, so import it relatively
 // instead of through the package barrel.
 import { runWorkflow } from "../src/index.js";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";

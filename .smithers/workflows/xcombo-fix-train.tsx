@@ -1,7 +1,7 @@
 // smithers-source: authored
 // smithers-display-name: Xcombo Fix Train
-/** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, UI, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { ClaudeCodeAgent, UI, createSmithers } from "smthrs";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";

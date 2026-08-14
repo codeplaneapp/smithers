@@ -52,7 +52,7 @@ function emit(file: string, exportName: string, css: string, note: string) {
   emitTo(uiDir, file, exportName, css, note);
 }
 
-// The shared @smithers-orchestrator/ui markdown-editor adapter ships the same
+// The shared @smthrs/ui markdown-editor adapter ships the same
 // Crepe theme through its own <style> injector, so keep its pre-bundled copy in
 // lockstep with the .smithers/ui one below.
 const uiAdapterDir = resolve(root, "packages/ui/src/adapters/markdown-editor");
@@ -110,36 +110,36 @@ function crepeHouseTokens(palette: CrepeHousePalette): string {
 }
 
 const crepeLightHouseTokens = crepeHouseTokens({
-  background: "#fafafa",
-  text: "#18181b",
-  textMuted: "#52525b",
-  textFaint: "#6d6d75",
-  surface: "#ffffff",
-  surface2: "#f4f4f5",
-  hover: "#f4f4f5",
-  inverseBg: "#18181b",
-  inverseText: "#fafafa",
-  inlineCodeBg: "rgba(24,24,27,0.06)",
-  brand: "#6d56d8",
-  success: "#087461",
-  danger: "#c5343f",
-  shadow1: "0 1px 2px rgb(24 24 27 / 0.05)",
-  shadow2: "0 1px 2px rgb(24 24 27 / 0.04),0 8px 24px rgb(24 24 27 / 0.07)",
+  background: "#FBFBFB",
+  text: "#403f53",
+  textMuted: "#676676",
+  textFaint: "#6b6a7a",
+  surface: "#fefefe",
+  surface2: "#f4f3f5",
+  hover: "#f4f3f5",
+  inverseBg: "#403f53",
+  inverseText: "#FBFBFB",
+  inlineCodeBg: "rgba(64,63,83,0.06)",
+  brand: "#9449bc",
+  success: "#21766f",
+  danger: "#ba3f3c",
+  shadow1: "0 1px 2px rgb(64 63 83 / 0.05)",
+  shadow2: "0 1px 2px rgb(64 63 83 / 0.04),0 8px 24px rgb(64 63 83 / 0.07)",
 });
 const crepeDarkHouseTokens = crepeHouseTokens({
-  background: "#09090b",
-  text: "#f4f4f5",
-  textMuted: "#a1a1aa",
-  textFaint: "#8c8c95",
-  surface: "#141417",
-  surface2: "#1b1b20",
-  hover: "#1f1f24",
-  inverseBg: "#f4f4f5",
-  inverseText: "#18181b",
-  inlineCodeBg: "rgba(255,255,255,0.08)",
-  brand: "#8b78e6",
-  success: "#2ec9a8",
-  danger: "#f2555a",
+  background: "#011627",
+  text: "#d6deeb",
+  textMuted: "#94a0ae",
+  textFaint: "#909caa",
+  surface: "#0d2132",
+  surface2: "#15293a",
+  hover: "#15293a",
+  inverseBg: "#d6deeb",
+  inverseText: "#011627",
+  inlineCodeBg: "rgba(214,222,235,0.08)",
+  brand: "#c792ea",
+  success: "#addb67",
+  danger: "#f16f6c",
   shadow1: "0 1px 2px rgb(0 0 0 / 0.35)",
   shadow2: "0 1px 2px rgb(0 0 0 / 0.30),0 8px 24px rgb(0 0 0 / 0.40)",
 });
@@ -151,7 +151,7 @@ const crepeCss = [
   `.milkdown{${crepeLightHouseTokens}}`,
   `@media (prefers-color-scheme: dark){:root:not([data-theme='light']) .milkdown{${crepeDarkHouseTokens}}}`,
   `:root[data-theme='dark'] .milkdown{${crepeDarkHouseTokens}}`,
-  `.milkdown :focus-visible{outline:2px solid var(--ring-border,color-mix(in srgb,var(--brand,#6d56d8) 50%,transparent))!important;outline-offset:2px}`,
+  `.milkdown :focus-visible{outline:2px solid var(--ring-border,color-mix(in srgb,var(--brand,#9449bc) 50%,transparent))!important;outline-offset:2px}`,
   `@media (prefers-reduced-motion: reduce){.milkdown *,.milkdown *::before,.milkdown *::after{animation-delay:0ms!important;animation-duration:0.001ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-delay:0ms!important;transition-duration:0.001ms!important}}`,
 ].join("\n");
 emit(
@@ -165,7 +165,7 @@ emitTo(
   "crepeTheme.generated.ts",
   "crepeThemeCss",
   crepeCss,
-  "Milkdown Crepe CSS (common + house light/dark token bridge), pre-bundled for the @smithers-orchestrator/ui markdown-editor adapter <style> injection.",
+  "Milkdown Crepe CSS (common + house light/dark token bridge), pre-bundled for the @smthrs/ui markdown-editor adapter <style> injection.",
 );
 emitTo(
   exampleUiDir,

@@ -1,0 +1,90 @@
+---
+title: Node runtime
+description: What Smithers supports when you run it under plain Node instead of Bun.
+---
+
+Smithers runs under Bun and under plain Node. Bun is the recommended runtime and
+the one every example assumes. Node is fully supported for the library, the CLI,
+and the gateway, with the backend and bundling limits listed below.
+
+Importing the library needs Node 22 or newer. The CLI needs Node 22.15 or newer,
+because it installs module hooks with `module.registerHooks`, which landed in
+that release.
+
+## Supported backends under Node
+
+| Backend | Bun | Node | Notes |
+| --- | --- | --- | --- |
+| `pglite` | yes | yes | Embedded Postgres. No server to start. The recommended Node default. |
+| `postgres` | yes | yes | Set `DATABASE_URL`. |
+| `sqlite` | yes | no | Uses `bun:sqlite`, a Bun built-in with no Node equivalent. |
+
+Select a backend with `--backend`, the `SMITHERS_BACKEND` environment variable,
+or `backend` in `smithers.config.ts`:
+
+```bash
+SMITHERS_BACKEND=pglite node node_modules/smthrs/src/bin/smithers.js up workflow.tsx
+```
+
+Asking for `sqlite` under Node fails immediately with the `DB_REQUIRES_BUN_SQLITE`
+error, which names both fixes: switch to `pglite` or `postgres`, or run the same
+command under Bun. Nothing silently downgrades.
+
+`createSmithers()` is the synchronous sqlite factory, so it also requires Bun.
+Author workflows with the async factory to stay portable:
+
+```tsx
+const { Workflow, smithers, outputs } = await openSmithersBackend(schemas);
+```
+
+## Running the CLI under Node
+
+The published bin carries a `#!/usr/bin/env bun` shebang, which only decides what
+runs the file when you execute it directly. Invoke it with Node and Node runs it:
+
+```bash
+node node_modules/smthrs/src/bin/smithers.js up workflow.tsx --input '{"name":"node"}'
+node node_modules/smthrs/src/bin/smithers.js gateway
+```
+
+`npx smithers` and `node_modules/.bin/smithers` still require Bun on `PATH`. The
+package manager installs the bin as a link to the script, so the operating
+system honours its `#!/usr/bin/env bun` shebang and reports
+`env: bun: No such file or directory` when Bun is missing. Call the script with
+Node, as above, on a machine that has no Bun.
+
+Every child process the CLI spawns (the detached run engine, the supervisor, the
+monitor, the TUI) is launched with the runtime that is executing right now, so a
+Node parent produces Node children and no `bun` binary has to be on `PATH`.
+
+Workflow files are TypeScript and JSX. Bun transpiles them on import; Node does
+not, and its built-in type stripping refuses `.tsx` entirely and refuses any
+`.ts` under a `node_modules` directory. The CLI therefore installs an
+esbuild-backed module loader before it loads anything, covering `.ts`, `.tsx`,
+`.jsx`, and `.mdx`. JSX compiles with the automatic runtime, using the
+`@jsxImportSource` pragma in the file when it has one and the nearest
+`tsconfig.json` otherwise, which is the same choice Bun makes.
+
+Importing the library needs no loader at all:
+
+```bash
+node -e "import('smthrs').then(() => console.log('ok'))"
+```
+
+## Known limits under Node
+
+- The sqlite backend is unavailable, as described above.
+- Gateway custom-UI bundling requires Bun. `bunx smthrs ui` and `bunx smthrs monitor`
+  build workflow-owned `<UI>` entries with Bun's bundler, and report a missing
+  Bun install rather than serving a stale bundle. Everything else the gateway
+  serves, including the RPC and websocket control plane and the run list, works
+  under Node.
+- Cross-run memory uses the main database under Node. Under Bun a Postgres or
+  PGlite run keeps memory in a local sqlite sidecar; under Node there is no
+  sqlite, so memory is stored in the run database instead. Memory facts and
+  message history behave the same either way. Memory notes and note search ride
+  the synchronous sqlite driver and its FTS5 index, so on a Postgres-dialect
+  database they are unavailable and `saveNote`, `searchNotes`, and `deleteThread`
+  fail with `DB_WRITE_FAILED` or `DB_QUERY_FAILED`. That limit already applies to
+  a Bun run that opens the memory store on Postgres directly. Run under Bun on
+  the sqlite backend when a workflow needs notes.

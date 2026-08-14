@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { useGatewayMutation, useGatewayTickets } from "@smithers-orchestrator/gateway-react";
-import { gatewayKeys, type GatewayTicketRow } from "@smithers-orchestrator/gateway-client";
+import { useGatewayMutation, useGatewayTickets } from "@smthrs/gateway-react";
+import { gatewayKeys, type GatewayTicketRow } from "@smthrs/gateway-client";
 import { useLocalModeRefetch } from "../sync/useLocalModeRefetch";
 import { ticketStatusFromWire, ticketUpdatedLabel, type Ticket } from "./tickets";
 import { bindTicketActions, useTicketsStore } from "./ticketsStore";

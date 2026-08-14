@@ -1,5 +1,5 @@
 import { rename } from "node:fs/promises";
-import type { SandboxHandle } from "@smithers-orchestrator/sandbox/SandboxHandle";
+import type { SandboxHandle } from "@smthrs/sandbox/SandboxHandle";
 
 const STALL_SUFFIX = ".stalled";
 

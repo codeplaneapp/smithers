@@ -155,7 +155,7 @@ The four locked decisions:
    against any backend the engine writes (SQLite, PGlite, Postgres) because it
    reads through `SmithersDb`, not the wire.
 
-2. **Native smithers sync; plue keeps its projection.** smithers-orchestrator ships
+2. **Native smithers sync; plue keeps its projection.** smthrs ships
    its own Postgres + Electric + SQLite-client sync of the `_smithers_*` schema,
    usable self-hosted with zero plue. plue continues mapping runs into its
    repo-scoped product tables and syncing those. `apps/smithers` consumes a

@@ -6,7 +6,7 @@
 // @smithers-type-exports-end
 
 import { DEFAULT_TIER_ORDER } from "./delegationSchemasRuntime.js";
-/** @typedef {import("@smithers-orchestrator/agents/AgentLike").AgentLike} AgentLike */
+/** @typedef {import("@smthrs/agents/AgentLike").AgentLike} AgentLike */
 
 /**
  * Pure render-time fold helpers for the delegation composites. Every composite
@@ -19,7 +19,7 @@ import { DEFAULT_TIER_ORDER } from "./delegationSchemasRuntime.js";
  * Read every row of an output table from the workflow context. Targets may be
  * zod schemas from `createSmithers(...).outputs` (resolved via the registered
  * key) or plain table-name strings.
- * @param {import("@smithers-orchestrator/driver").SmithersCtx<any> | null} ctx
+ * @param {import("@smthrs/driver").SmithersCtx<any> | null} ctx
  * @param {unknown} target
  * @returns {Record<string, any>[]}
  */
@@ -645,7 +645,7 @@ export function agentForTier(agents, tier, tierOrder = DEFAULT_TIER_ORDER) {
 
 /**
  * Synthesize the delegation event log the run scorers in
- * `smithers-orchestrator/scorers` fold (`DelegationEvent[]` — the simulation
+ * `smthrs/scorers` fold (`DelegationEvent[]` — the simulation
  * contract's vocabulary) from the dc* rows the run actually wrote. Output
  * rows carry no cross-table timestamps, so events are emitted in phase order
  * with one documented approximation: probe/user-edit replans are treated as

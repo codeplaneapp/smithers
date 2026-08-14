@@ -1,15 +1,15 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { WorkflowDefinition } from "@smithers-orchestrator/driver/WorkflowDefinition";
-import type { TaskDescriptor, WorkflowGraph, XmlNode } from "@smithers-orchestrator/graph";
+import type { WorkflowDefinition } from "@smthrs/driver/WorkflowDefinition";
+import type { TaskDescriptor, WorkflowGraph, XmlNode } from "@smthrs/graph";
 import type {
   ApprovalResolution,
   EngineDecision,
   RunResult,
   WaitReason,
   WorkflowSessionService,
-} from "@smithers-orchestrator/scheduler";
+} from "@smthrs/scheduler";
 import { Effect } from "effect";
 import { auto } from "./fakeAgent.ts";
 import { schemaMock } from "./schemaMock.ts";

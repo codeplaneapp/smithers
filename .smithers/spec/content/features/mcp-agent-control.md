@@ -61,7 +61,7 @@ Codex, Claude Code, Hermes, PI, and other supported clients can install Smithers
 
 ## Debugging
 
-- Run bunx smithers-orchestrator --mcp --surface semantic and inspect registered tools from the MCP client.
+- Run bunx smthrs --mcp --surface semantic and inspect registered tools from the MCP client.
 - If mcp add fails due command word-splitting, `docs/integrations/mcp-server.mdx` documents the agent-specific fallback command with -- separators.
 
 ## Architecture

@@ -1,10 +1,11 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { Task, Workflow, runWorkflow } from "smthrs";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import { Effect } from "effect";
+import { enqueueSteer } from "../src/steers.js";
 const HIJACK_E2E_TIMEOUT_MS = 15_000;
 describe("hijack e2e", () => {
   test(
@@ -13,6 +14,7 @@ describe("hijack e2e", () => {
       const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);
       const adapter = new SmithersDb(db);
       const resumeSessions = [];
+      const receivedPrompts = [];
       const followupExecutions = [];
       let resolveStarted;
       const started = new Promise((resolve) => {
@@ -29,6 +31,7 @@ describe("hijack e2e", () => {
         async generate(args) {
           callCount += 1;
           resumeSessions.push(args.resumeSession);
+          receivedPrompts.push(args.prompt);
           if (callCount === 1) {
             args.onEvent?.({
               type: "started",
@@ -73,6 +76,8 @@ describe("hijack e2e", () => {
         );
         await started;
         await adapter.requestRunHijack(runId, Date.now(), "claude-code");
+        const STEER = "apply this queued steer after the hijack resumes";
+        await Effect.runPromise(enqueueSteer(adapter, runId, "plan", STEER));
         await sleep(300);
         const hijacked = await runPromise;
         expect(hijacked.status).toBe("cancelled");
@@ -89,6 +94,8 @@ describe("hijack e2e", () => {
           mode: "native-cli",
           resume: "session-e2e-1",
         });
+        expect((await Effect.runPromise(adapter.listSteers(runId)))[0]?.status).toBe("queued");
+        expect(await Effect.runPromise(adapter.listEventsByType(runId, "SteerExpired"))).toHaveLength(0);
         const followupAttemptsBeforeResume = await adapter.listAttempts(runId, "finish", 0);
         expect(followupAttemptsBeforeResume).toHaveLength(0);
         const resumed = await Effect.runPromise(
@@ -100,6 +107,8 @@ describe("hijack e2e", () => {
         );
         expect(resumed.status).toBe("finished");
         expect(resumeSessions).toEqual([undefined, "session-e2e-1"]);
+        expect(receivedPrompts[1]).toContain(STEER);
+        expect((await Effect.runPromise(adapter.listSteers(runId)))[0]?.status).toBe("consumed");
         expect(followupExecutions).toHaveLength(1);
         expect((await adapter.getRun(runId))?.status).toBe("finished");
         const resumedAttempts = await adapter.listAttempts(runId, "plan", 0);
@@ -185,6 +194,8 @@ describe("hijack e2e", () => {
         );
         await started;
         await adapter.requestRunHijack(runId, Date.now(), "openai-sdk");
+        const STEER = "return value 9 after applying the resumed steer";
+        await Effect.runPromise(enqueueSteer(adapter, runId, "plan", STEER));
         await sleep(300);
         releaseStepFinish();
         const hijacked = await runPromise;
@@ -207,6 +218,7 @@ describe("hijack e2e", () => {
           expect.objectContaining({ role: "user" }),
           { role: "assistant", content: "I have inspected the repo." },
         ]);
+        expect((await Effect.runPromise(adapter.listSteers(runId)))[0]?.status).toBe("queued");
         const resumed = await Effect.runPromise(
           runWorkflow(workflow, {
             input: {},
@@ -216,10 +228,13 @@ describe("hijack e2e", () => {
         );
         expect(resumed.status).toBe("finished");
         expect(messageHistory).toHaveLength(2);
-        expect(messageHistory[1]).toEqual([
+        expect(messageHistory[1].slice(0, 2)).toEqual([
           expect.objectContaining({ role: "user" }),
           { role: "assistant", content: "I have inspected the repo." },
         ]);
+        expect(messageHistory[1].at(-2)).toEqual({ role: "user", content: STEER });
+        expect(messageHistory[1].at(-1)?.content).toContain("The first character of your response");
+        expect((await Effect.runPromise(adapter.listSteers(runId)))[0]?.status).toBe("consumed");
         const resumedAttempts = await adapter.listAttempts(runId, "plan", 0);
         expect(resumedAttempts).toHaveLength(2);
         const secondAttempt = resumedAttempts[0];

@@ -5,7 +5,7 @@ description: Sequential steps with risk classification; safe auto-runs, risky/cr
 
 ```ts
 // Props
-import { Runbook } from "smithers-orchestrator";
+import { Runbook } from "smthrs";
 
 type RunbookProps = {
   id?: string; // used as step-id prefix; defaults to "runbook" when omitted
@@ -63,7 +63,7 @@ The `<Runbook>` implementation and the files it imports, straight from the packa
 // @smithers-type-exports-end
 
 import React from "react";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
 import { Sequence } from "./Sequence.js";
 import { Task } from "./Task.js";
 import { Approval } from "./Approval.js";
@@ -173,9 +173,8 @@ export function Runbook(props) {
 // @smithers-type-exports-end
 
 import React from "react";
-import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-export { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+export { SmithersCtx } from "@smthrs/driver/SmithersCtx";
 /** @type {React.Context<SmithersCtx<any> | null>} */
 export const SmithersContext = React.createContext(null);
 SmithersContext.displayName = "SmithersContext";
@@ -262,10 +261,10 @@ export const Task = createTaskComponent({ applyCliToolAllowlist });
 
 import React from "react";
 import { z } from "zod";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
-import { getTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
+import { getTaskRuntime } from "@smthrs/driver/task-runtime";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 /** @typedef {import("./ApprovalAutoApprove.ts").ApprovalAutoApprove} ApprovalAutoApprove */
 /** @typedef {import("./ApprovalMode.ts").ApprovalMode} ApprovalMode */
 /** @typedef {import("./ApprovalOption.ts").ApprovalOption} ApprovalOption */
@@ -392,18 +391,14 @@ function validateApprovalRestriction(value, field, id) {
 }
 /**
  * @param {ApprovalAutoApprove[keyof ApprovalAutoApprove]} callback
- * @param {import("@smithers-orchestrator/driver").SmithersCtx<unknown> | null} ctx
+ * @param {import("@smthrs/driver").SmithersCtx<unknown> | null} ctx
  * @returns {boolean | undefined}
  */
 function evaluateBooleanCallback(callback, ctx) {
   if (typeof callback !== "function") {
     return undefined;
   }
-  return Boolean(
-    /** @type {(ctx: import("@smithers-orchestrator/driver").SmithersCtx<unknown> | null) => boolean} */ (callback)(
-      ctx,
-    ),
-  );
+  return Boolean(/** @type {(ctx: import("@smthrs/driver").SmithersCtx<unknown> | null) => boolean} */ (callback)(ctx));
 }
 /**
  * @template Row
@@ -502,7 +497,7 @@ export function Approval(props) {
 ```
 
 ```ts RunbookProps.ts
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
 import type { ApprovalRequest } from "./ApprovalRequest.ts";
 import type { RunbookStep } from "./RunbookStep.ts";
 import type { OutputTarget } from "./OutputTarget.ts";
@@ -524,7 +519,7 @@ export type RunbookProps = {
 ```
 
 ```ts RunbookStep.ts
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type RunbookStep = {

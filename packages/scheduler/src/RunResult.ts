@@ -29,4 +29,15 @@ export type RunResult = {
    * across loop/Ralph iterations.
    */
   readonly failedChildKeys?: readonly string[];
+  /**
+   * Loops (`<Loop>`/`<ReviewLoop>`) that exited via `onMaxReached: "return-last"`
+   * with their `until` predicate still false. Present (and non-empty) only on a
+   * `finished` result: the run completed, but these loops never converged, so a
+   * green `done` verdict would be a lie (#1464 AWF-1).
+   */
+  readonly exhaustedLoops?: readonly {
+    readonly id: string;
+    readonly iteration: number;
+    readonly maxIterations: number | null;
+  }[];
 };

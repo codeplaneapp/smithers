@@ -34,7 +34,7 @@ The tradeoff BAML is pointing at is real and studied: [Tam et al., *Let Me Speak
 Output contracts are declared once, at workflow creation, as Zod schemas. `createSmithers` registers each schema as a durable output relation and returns typed references:
 
 ```tsx
-import { ClaudeCodeAgent, createSmithers, Sequence, Task } from "smithers-orchestrator";
+import { ClaudeCodeAgent, createSmithers, Sequence, Task } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, smithers, outputs } = createSmithers({
@@ -101,8 +101,8 @@ Because every completed task is a Zod-validated row in a known table, the engine
 The same discipline runs in the other direction. `createOpenApiTools` compiles an OpenAPI 3.x spec into AI SDK tools - one per operation, Zod schemas converted from the spec's JSON schemas - so the agent's *calls into your systems* are typed too. Curate the surface with `include`/`exclude`/`operations`, and generate a reusable module from the CLI:
 
 ```bash
-bunx smithers-orchestrator openapi list ./api/openapi.yaml       # audit what an agent could call
-bunx smithers-orchestrator openapi generate ./api/openapi.yaml ./src/openapi-tools.js
+bunx smthrs openapi list ./api/openapi.yaml       # audit what an agent could call
+bunx smthrs openapi generate ./api/openapi.yaml ./src/openapi-tools.js
 ```
 
 See [OpenAPI Tools](/concepts/openapi-tools) for auth, redirect-origin protection, response-size caps, and current limitations (JSON bodies only, no cookie params, OpenAPI 3.x only).
@@ -119,11 +119,11 @@ See [OpenAPI Tools](/concepts/openapi-tools) for auth, redirect-origin protectio
 ## Operating it
 
 ```bash
-bunx smithers-orchestrator output RUN_ID NODE_ID --pretty      # print a node's validated output row (--iteration N inside loops)
-bunx smithers-orchestrator node RUN_ID NODE_ID                 # attempts, schema retries, tool calls
-bunx smithers-orchestrator logs RUN_ID                          # engine:schema-retry entries show each correction and its Zod issues
-bunx smithers-orchestrator graph workflow.tsx                    # inspect the typed dependency graph without executing
-bunx smithers-orchestrator eval workflow.tsx suite.jsonl         # run the contract against an eval suite
+bunx smthrs output RUN_ID NODE_ID --pretty      # print a node's validated output row (--iteration N inside loops)
+bunx smthrs node RUN_ID NODE_ID                 # attempts, schema retries, tool calls
+bunx smthrs logs RUN_ID                          # engine:schema-retry entries show each correction and its Zod issues
+bunx smthrs graph workflow.tsx                    # inspect the typed dependency graph without executing
+bunx smthrs eval workflow.tsx suite.jsonl         # run the contract against an eval suite
 ```
 
 MCP equivalents for agents driving Smithers: `get_node_detail`, `get_run`, `list_artifacts`.

@@ -1,4 +1,4 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
 import { dirname, isAbsolute, resolve } from "node:path";
@@ -15,7 +15,7 @@ const monorepoRoot = resolve(thisDir, "../../../..");
 const reactSpecifierRe = /^react(?:-dom)?(?:\/.*)?$/;
 const tanstackSpecifierRe = /^@tanstack\//;
 const smithersUiSpecifierRe =
-  /^(?:smithers-orchestrator\/gateway-(?:react|client)|@smithers-orchestrator\/(?:gateway-react|gateway-client|gateway)(?:\/.*)?)$/;
+  /^(?:smthrs\/gateway-(?:react|client)|@smthrs\/(?:gateway-react|gateway-client|gateway)(?:\/.*)?)$/;
 const INLINE_UI_NAMESPACE = "smithers-inline-ui";
 
 /**
@@ -242,7 +242,7 @@ async function buildGatewayUiBundleInSubprocess(config, inProcessError) {
   }
   // cwd is thisDir, not process.cwd(): a bunfig.toml at the caller's cwd may
   // preload modules that poison the fresh registry the same way (the
-  // .smithers pack preloads smithers-orchestrator). The worker chdirs back
+  // .smithers pack preloads smthrs). The worker chdirs back
   // to the real cwd before building.
   const proc = Bun.spawn([process.execPath, resolve(thisDir, "bundleWorker.js")], {
     cwd: thisDir,

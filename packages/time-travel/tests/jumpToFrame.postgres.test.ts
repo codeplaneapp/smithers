@@ -17,15 +17,21 @@
  * skips there unless a real PG URL is supplied.
  */
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
+import { createHash } from "node:crypto";
 import React from "react";
 import { Context, Effect, Schema } from "effect";
-import { Workflow } from "@smithers-orchestrator/components/components/index";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { runWorkflow, Smithers, __builderInternals as I } from "@smithers-orchestrator/engine";
+import { Workflow } from "@smthrs/components/components/index";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { runWorkflow, Smithers, __builderInternals as I } from "@smthrs/engine";
 import { jumpToFrame } from "../src/jumpToFrame.js";
 import { listRewindAuditRows } from "../src/listRewindAuditRows.js";
 import { recoverInProgressRewindAudits } from "../src/recoverInProgressRewindAudits.js";
 import { writeRewindAuditRow } from "../src/writeRewindAuditRow.js";
+import { captureSnapshot } from "../src/snapshot/index.js";
+import {
+  deleteAgentCheckpointAttemptsByKeys,
+  persistAgentCheckpointRows,
+} from "../src/snapshot/agentCheckpointPersistence.js";
 
 setDefaultTimeout(180_000);
 
@@ -58,6 +64,120 @@ function uniqueRunId(prefix: string) {
 }
 
 describe.skipIf(process.platform === "win32" && !PG_URL)("jumpToFrame rewind (postgres)", () => {
+  test("bulk checkpoint restoration uses the PostgreSQL batch and content-lock path", async () => {
+    const { adapter, close } = await bootPg([]);
+    const runId = uniqueRunId("pg-checkpoint-bulk");
+    const checkpointJson = JSON.stringify({ codec: "test.pg", version: 1, payload: { cursor: 1 } });
+    const contentHash = createHash("sha256").update(checkpointJson).digest("hex");
+    const attempt = {
+      runId,
+      nodeId: "agent",
+      iteration: 0,
+      attempt: 1,
+      state: "finished",
+      startedAtMs: 1,
+      finishedAtMs: 2,
+      heartbeatAtMs: null,
+      heartbeatDataJson: null,
+      errorJson: null,
+      jjPointer: null,
+      cached: false,
+      metaJson: null,
+      responseText: null,
+      jjCwd: null,
+    };
+    const checkpoint = {
+      runId,
+      nodeId: "agent",
+      iteration: 0,
+      attempt: 1,
+      sequence: 0,
+      contentHash,
+      codec: "test.pg",
+      version: 1,
+      agentId: null,
+      purpose: "resume",
+      createdAtMs: 2,
+      checkpointJson,
+      sizeBytes: Buffer.byteLength(checkpointJson),
+      contentCreatedAtMs: 2,
+    };
+    try {
+      await adapter.insertRun({ runId, workflowName: "pg-checkpoint-bulk", status: "finished", createdAtMs: 1 });
+      await adapter.withTransaction(
+        "postgres checkpoint batch restore",
+        Effect.tryPromise(() =>
+          persistAgentCheckpointRows(adapter, {
+            runId,
+            attempts: [attempt],
+            checkpoints: [checkpoint],
+            replaceCheckpointRefs: true,
+          }),
+        ),
+      );
+      expect(await adapter.listAgentCheckpointRefs(runId)).toMatchObject([{ contentHash, sequence: 0 }]);
+      expect(await adapter.getAgentCheckpoint(contentHash)).toMatchObject({ checkpointJson });
+      if (PG_URL) {
+        const before = await adapter.internalStorage.queryOne(
+          `SELECT ctid::text AS ctid, xmin::text AS xmin
+             FROM _smithers_agent_checkpoint_contents
+            WHERE content_hash = ?`,
+          [contentHash],
+        );
+        await adapter.withTransaction(
+          "postgres checkpoint repeat materialization",
+          Effect.tryPromise(() =>
+            persistAgentCheckpointRows(adapter, {
+              runId,
+              attempts: [attempt],
+              checkpoints: [checkpoint],
+              replaceCheckpointRefs: true,
+            }),
+          ),
+        );
+        const after = await adapter.internalStorage.queryOne(
+          `SELECT ctid::text AS ctid, xmin::text AS xmin
+             FROM _smithers_agent_checkpoint_contents
+            WHERE content_hash = ?`,
+          [contentHash],
+        );
+        expect(after).toEqual(before);
+      }
+      const snapshot = await captureSnapshot(adapter, runId, 0, {
+        nodes: [
+          {
+            nodeId: "agent",
+            iteration: 0,
+            state: "finished",
+            lastAttempt: 1,
+            outputTable: "",
+            label: null,
+          },
+        ],
+        outputs: {},
+        ralph: [],
+        input: {},
+      });
+      const snapshotOutputs = JSON.parse(snapshot.outputsJson);
+      expect(snapshotOutputs.__smithersAgentCheckpointProvenance.version).toBe(2);
+      expect(
+        snapshotOutputs.__smithersAgentCheckpointProvenance.attempts.map((tuple: unknown[]) => tuple.slice(0, 3)),
+      ).toEqual([["agent", 0, 1]]);
+      expect(
+        snapshotOutputs.__smithersAgentCheckpointProvenance.checkpoints.map((tuple: unknown[]) => tuple.slice(0, 5)),
+      ).toEqual([["agent", 0, 1, 0, contentHash]]);
+
+      await adapter.withTransaction(
+        "postgres checkpoint batch delete",
+        Effect.tryPromise(() => deleteAgentCheckpointAttemptsByKeys(adapter, runId, [["agent", 0, 1]])),
+      );
+      expect(await adapter.listAttemptsForRun(runId)).toEqual([]);
+      expect(await adapter.listAgentCheckpointRefs(runId)).toEqual([]);
+    } finally {
+      await close();
+    }
+  });
+
   test("claims stale audits with portable RETURNING and a live-lease predicate", async () => {
     const { adapter, close } = await bootPg([]);
     const now = 500_000;

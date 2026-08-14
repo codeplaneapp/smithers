@@ -1,9 +1,9 @@
 import { IntegrationRuntime as IntegrationRuntime$1, MakeIntegrationRuntimeOptions as MakeIntegrationRuntimeOptions$1 } from './IntegrationRuntimeTypes.js';
-import '@smithers-orchestrator/db/adapter';
+import '@smthrs/db/adapter';
 import './EventSourceTypes.js';
 import './CursorStoreTypes.js';
 import 'effect';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 import './ExternalEventTypes.js';
 
 /**

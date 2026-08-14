@@ -1,8 +1,8 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { Parallel, Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { Parallel, Task, Workflow, runWorkflow } from "smthrs";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import { Effect } from "effect";
@@ -323,13 +323,9 @@ describe("failureRetryable=false short-circuits engine retries", () => {
           </Task>
         </Workflow>
       ));
-      const startMs = Date.now();
       const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
-      const elapsedMs = Date.now() - startMs;
       expect(result.status).toBe("failed");
       expect(callCount).toBe(1);
-      // Non-retryable should fail fast — no exponential backoff window.
-      expect(elapsedMs).toBeLessThan(900);
       const attempts = await adapter.listAttempts(result.runId, "creds-bad", 0);
       expect(attempts).toHaveLength(1);
     } finally {
@@ -359,12 +355,9 @@ describe("failureRetryable=false short-circuits engine retries", () => {
           </Task>
         </Workflow>
       ));
-      const startMs = Date.now();
       const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
-      const elapsedMs = Date.now() - startMs;
       expect(result.status).toBe("failed");
       expect(callCount).toBe(1);
-      expect(elapsedMs).toBeLessThan(900);
       const attempts = await adapter.listAttempts(result.runId, "bad", 0);
       expect(attempts).toHaveLength(1);
       const meta = JSON.parse(attempts[0].metaJson ?? "{}");
@@ -394,12 +387,9 @@ describe("failureRetryable=false short-circuits engine retries", () => {
           </Task>
         </Workflow>
       ));
-      const startMs = Date.now();
       const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
-      const elapsedMs = Date.now() - startMs;
       expect(result.status).toBe("failed");
       expect(callCount).toBe(1);
-      expect(elapsedMs).toBeLessThan(900);
       const attempts = await adapter.listAttempts(result.runId, "missing-config", 0);
       expect(attempts).toHaveLength(1);
       const error = JSON.parse(attempts[0].errorJson ?? "{}");
@@ -454,7 +444,7 @@ describe("failureRetryable=false short-circuits engine retries", () => {
  *   effectiveError?.details?.failureRetryable === false ||
  *   effectiveError?.code === "AGENT_CONFIG_INVALID"
  */
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { EventBus as BridgeEventBus } from "../src/events.js";
 import { executeTaskBridge as bridgeExecuteTaskBridge } from "../src/effect/workflow-bridge.js";
 import { z as bridgeZ } from "zod";

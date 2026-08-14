@@ -88,7 +88,7 @@ Trellis validates and compiles fuel-bounded model-authored sequence and parallel
 
 ## Architecture
 
-- `packages/smithers/src/index.js` re-exports createSmithers plus all component primitives from @smithers-orchestrator/components.
+- `packages/smithers/src/index.js` re-exports createSmithers plus all component primitives from @smthrs/components.
 - `packages/components/src/index.js` exports prompt rendering, zod examples, and component host elements; `packages/engine/src/index.js` and `packages/driver/src/index.js` run the rendered graph.
 - `docs/how-it-works.mdx` documents the render -> extract -> schedule -> execute -> persist -> re-render loop.
 

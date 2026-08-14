@@ -342,7 +342,7 @@ const DIFF = [
   "--- /dev/null",
   "+++ b/apps/studio/package.json",
   "@@ -0,0 +1,2 @@",
-  '+{ "name": "@smithers-orchestrator/studio",',
+  '+{ "name": "@smthrs/studio",',
   '+  "private": true }',
   "diff --git a/apps/studio/src/main.ts b/apps/studio/src/main.ts",
   "--- a/apps/studio/src/main.ts",

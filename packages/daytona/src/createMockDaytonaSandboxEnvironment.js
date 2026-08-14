@@ -18,7 +18,7 @@ const RESULT_FILE_SUFFIX = ".smithers/sandbox-result.json";
  *   request: Record<string, unknown>;
  *   files: Map<string, string>;
  *   env: Record<string, string>;
- * }) => import("@smithers-orchestrator/sandbox").SandboxProviderResult | Promise<import("@smithers-orchestrator/sandbox").SandboxProviderResult>} handler
+ * }) => import("@smthrs/sandbox").SandboxProviderResult | Promise<import("@smthrs/sandbox").SandboxProviderResult>} handler
  * @param {{
  *   failCreate?: boolean;
  *   failExec?: boolean;

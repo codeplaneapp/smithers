@@ -7,7 +7,7 @@ import {
   logWarningAwait,
   logErrorAwait,
   setSmithersLogRunner,
-} from "@smithers-orchestrator/observability/logging";
+} from "@smthrs/observability/logging";
 
 describe("resolveMinLevel", () => {
   test("maps every SMITHERS_LOG_LEVEL alias to a numeric threshold", () => {

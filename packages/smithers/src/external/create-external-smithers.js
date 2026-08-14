@@ -8,22 +8,21 @@
 // @smithers-type-exports-end
 
 import React from "react";
-import { Database } from "bun:sqlite";
-import { drizzle } from "drizzle-orm/bun-sqlite";
+import { loadBunSqliteDatabase, loadBunSqliteDrizzle } from "@smthrs/db/bunSqliteRuntime";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
-import { zodToTable } from "@smithers-orchestrator/db/zodToTable";
-import { syncZodTableSchema } from "@smithers-orchestrator/db/zodToCreateTableSQL";
-import { camelToSnake } from "@smithers-orchestrator/db/utils/camelToSnake";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { zodToTable } from "@smthrs/db/zodToTable";
+import { syncZodTableSchema } from "@smthrs/db/zodToCreateTableSQL";
+import { camelToSnake } from "@smthrs/db/utils/camelToSnake";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { prepareOutputSchemas } from "../prepareOutputSchemas.js";
-/** @typedef {import("@smithers-orchestrator/agents/AgentLike").AgentLike} AgentLike */
-/** @typedef {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any>} SmithersWorkflow */
+/** @typedef {import("@smthrs/agents/AgentLike").AgentLike} AgentLike */
+/** @typedef {import("@smthrs/components/SmithersWorkflow").SmithersWorkflow<any>} SmithersWorkflow */
 /**
  * Serialize a SmithersCtx into a plain JSON-safe object for external processes.
- * @param {import("@smithers-orchestrator/driver/SmithersCtx").SmithersCtx<any>} ctx
+ * @param {import("@smthrs/driver/SmithersCtx").SmithersCtx<any>} ctx
  * @returns {SerializedCtx}
  */
 export function serializeCtx(ctx) {
@@ -75,13 +74,15 @@ export function hostNodeToReact(node, agents) {
  *
  * @template {Record<string, import("zod").ZodObject<any>>} S
  * @param {ExternalSmithersConfig<S>} config
- * @returns {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<S> & { tables: Record<string, any>; cleanup: () => void }}
+ * @returns {import("@smthrs/components/SmithersWorkflow").SmithersWorkflow<S> & { tables: Record<string, any>; cleanup: () => void }}
  */
 export function createExternalSmithers(config) {
   const { schemas, agents, buildFn } = config;
+  const { zodToKeyName, ambiguousZodSchemas } = prepareOutputSchemas(schemas);
   const dbPath = config.dbPath
     ? resolve(config.dbPath)
     : join(mkdtempSync(join(tmpdir(), "smithers-ext-")), "smithers.db");
+  const Database = loadBunSqliteDatabase();
   const sqlite = new Database(dbPath);
   sqlite.run("PRAGMA journal_mode = WAL");
   // 30s timeout: concurrent worktrees each spawn agent processes that all write
@@ -120,13 +121,12 @@ export function createExternalSmithers(config) {
   for (const [key, table] of Object.entries(tables)) {
     drizzleSchema[key] = table;
   }
-  const db = drizzle(sqlite, { schema: drizzleSchema });
+  const db = loadBunSqliteDrizzle()(sqlite, { schema: drizzleSchema });
   const schemaRegistry = new Map();
   for (const [name, zodSchema] of Object.entries(schemas)) {
     if (name === "input") continue;
     schemaRegistry.set(name, { table: tables[name], zodSchema });
   }
-  const { zodToKeyName, ambiguousZodSchemas } = prepareOutputSchemas(schemas);
   return {
     db,
     build: (ctx) => {

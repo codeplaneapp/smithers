@@ -8,7 +8,7 @@ current project's `.smithers/` (every `.smithers` is a publishable pack) through
 publication one durable step at a time.
 
 ```bash
-bunx smithers-orchestrator workflow run share-pack --input '{"dryRun":true}'
+bunx smthrs workflow run share-pack --input '{"dryRun":true}'
 ```
 
 ## Input
@@ -28,11 +28,11 @@ bunx smithers-orchestrator workflow run share-pack --input '{"dryRun":true}'
 3. **publish-pack**: creates and pushes the GitHub repository with the `gh`
    CLI.
 4. **share-registry**: calls the same machinery as
-   `bunx smithers-orchestrator share` to add the pack to awesome-smithers
+   `bunx smthrs share` to add the pack to awesome-smithers
    and open the PR.
 
 Each stage gates on the previous, so a failed push retries without
 re-validating; `dryRun` shows the registry entry and diff without touching
-GitHub. The run has a live UI (`bunx smithers-orchestrator ui RUN_ID`).
+GitHub. The run has a live UI (`bunx smthrs ui RUN_ID`).
 
 Requires an authenticated `gh` CLI, and errors clearly if it's missing.

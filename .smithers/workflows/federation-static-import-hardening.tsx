@@ -3,8 +3,8 @@
 // smithers-display-name: Federation Static Import Hardening
 // smithers-description: Eliminate every unclassified static cross-lane import in the federation plan.
 // smithers-tags: maintenance, federation, architecture
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 

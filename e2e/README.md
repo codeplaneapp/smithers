@@ -1,4 +1,4 @@
-# @smithers-orchestrator/e2e
+# @smthrs/e2e
 
 End-to-end fault-injection matrix for the smithers orchestrator. Implements
 the test surface required by [ticket 0022](../.smithers/tickets/smithers/0022-fault-injection-e2e-matrix.md):

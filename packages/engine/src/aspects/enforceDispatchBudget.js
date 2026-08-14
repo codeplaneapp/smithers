@@ -1,9 +1,9 @@
 import { Effect } from "effect";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { evaluateAspectBudget } from "./evaluateAspectBudget.js";
 
 /**
- * @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor
+ * @typedef {import("@smthrs/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor
  * @typedef {import("./createBudgetTracker.js").BudgetSnapshot} BudgetSnapshot
  */
 

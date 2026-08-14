@@ -6,7 +6,7 @@ import type {
   OutputTarget,
   SignalProps as ComponentSignalProps,
   TaskProps as ComponentTaskProps,
-} from "@smithers-orchestrator/components";
+} from "@smthrs/components";
 import type { z } from "zod";
 
 export * from "./index.js";

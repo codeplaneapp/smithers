@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import crypto from "node:crypto";
-import { SmithersError } from "@smithers-orchestrator/errors";
+import { SmithersError } from "@smthrs/errors";
 
 const ARTIFACT_SCHEMA_VERSION = 1;
 export const OPTIMIZER_PROVIDER_IDS = [

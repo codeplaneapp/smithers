@@ -14,7 +14,7 @@ Rough layers:
 - **Composite patterns** built from the primitives — Kanban, Panel,
   CheckSuite, Debate, ReviewLoop, Optimizer, ContentPipeline, ApprovalGate,
   EscalationChain, DecisionTable, DriftDetector, ScanFixVerify, Poller,
-  Supervisor, Runbook, Sidecar, and the `delegation/` subtree.
+  Supervisor, Runbook, Sidecar, ForkFanOut, and the `delegation/` subtree.
 
 Gotchas:
 

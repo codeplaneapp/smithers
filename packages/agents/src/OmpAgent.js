@@ -33,6 +33,7 @@ export function createOmpCapabilityRegistry(opts = {}) {
       smithersSkillIds: normalizeCapabilityStringList(opts.skills),
     },
     humanInteraction: { supportsUiRequests: false, methods: [] },
+    fileChanges: { supportsFileChanges: false, supportsUnifiedDiff: false },
     builtIns: opts.noTools ? [] : normalizeCapabilityStringList(opts.tools?.length ? opts.tools : ["default"]),
   };
 }
@@ -58,7 +59,7 @@ export class OmpAgent extends BaseCliAgent {
     const envName = resolveOmpProviderEnv(this.opts.provider, this.opts.model ?? this.model);
     if (!envName) throw new Error("OMP apiKey requires a documented provider or model environment mapping");
     // Keep this overlay authoritative over inherited and account-provided env.
-    return { ...(this.env ?? {}), [envName]: this.opts.apiKey };
+    return { ...this.env, [envName]: this.opts.apiKey };
   }
   buildArgs({ prompt, cwd, options, mode }) {
     const args = [];

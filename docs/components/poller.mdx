@@ -5,7 +5,7 @@ description: Poll an external condition with configurable backoff until satisfie
 
 ```ts
 // Props
-import { Poller } from "smithers-orchestrator";
+import { Poller } from "smthrs";
 
 type PollerProps = {
   id?: string; // default "poll"
@@ -56,8 +56,8 @@ The `<Poller>` implementation and the files it imports, straight from the packag
 <CodeGroup>
 ```js Poller.js
 import React from "react";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
 import { Task } from "./Task.js";
 import { Loop } from "./Ralph.js";
 import { Sequence } from "./Sequence.js";
@@ -221,9 +221,8 @@ export class SmithersError extends Error {
 // @smithers-type-exports-end
 
 import React from "react";
-import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-export { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+export { SmithersCtx } from "@smthrs/driver/SmithersCtx";
 /** @type {React.Context<SmithersCtx<any> | null>} */
 export const SmithersContext = React.createContext(null);
 SmithersContext.displayName = "SmithersContext";
@@ -330,7 +329,7 @@ export function Sequence(props) {
 
 ```js Timer.js
 import React from "react";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 /** @typedef {import("./TimerProps.ts").TimerProps} TimerProps */
 
 /**
@@ -373,7 +372,7 @@ export function Timer(props) {
 
 ```ts PollerProps.ts
 import type React from "react";
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type PollerProps = {

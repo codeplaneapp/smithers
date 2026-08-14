@@ -1,4 +1,4 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { assertPositiveFiniteNumber } from "./assertPositiveFiniteNumber.js";
 /**
  * @param {string} field

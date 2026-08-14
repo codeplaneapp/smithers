@@ -7,8 +7,8 @@
  */
 // @smithers-type-exports-end
 
-import { Context, Duration, Effect, Layer, Schedule, Schema, SchemaParser } from "effect";
-import { logWarning } from "@smithers-orchestrator/observability/logging";
+import { Context, Duration, Effect, Layer, Schedule, SchemaParser } from "effect";
+import { logWarning } from "@smthrs/observability/logging";
 import { IntegrationError } from "../core/IntegrationError.js";
 import { resolveGitHubConfig } from "./config.js";
 

@@ -3,9 +3,9 @@
 // Copy this implementation and its referenced .smithers prompts/components/UI/lib files into a project to use it.
 // smithers-source: seeded
 // smithers-display-name: Implement
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
-import { createSmithers, Sequence, Task } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
+import { createSmithers, Sequence, Task } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import { implementer, panelists, polishReviewer } from "../components/roles";

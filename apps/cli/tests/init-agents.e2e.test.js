@@ -204,7 +204,7 @@ test("re-init preserves a customized legacy scaffold while repairing generated W
   expect(first.exitCode).toBe(0);
 
   const customizedLegacyScaffold = [
-    'import { CodexAgent as BaseCodexAgent } from "smithers-orchestrator";',
+    'import { CodexAgent as BaseCodexAgent } from "smthrs";',
     "export const CodexAgent = new BaseCodexAgent({",
     '  model: "gpt-5.4",',
     "  cwd: process.cwd(),",
@@ -431,7 +431,7 @@ test("smithers init comments out OpenCode CLI when it is present but not authent
   expect(result.exitCode).toBe(0);
   const agentsSource = repo.read(".smithers/agents.ts");
   expect(agentsSource).toContain("//   opencode: new SmithersOpenCodeAgent(");
-  expect(agentsSource).toContain('// import { OpenCodeAgent as SmithersOpenCodeAgent } from "smithers-orchestrator";');
+  expect(agentsSource).toContain('// import { OpenCodeAgent as SmithersOpenCodeAgent } from "smthrs";');
   expect(agentsSource).toContain('// export { OpenCodeAgent } from "./agents/opencode";');
   expect(uncommented(agentsSource)).not.toContain("providers.opencode");
 });

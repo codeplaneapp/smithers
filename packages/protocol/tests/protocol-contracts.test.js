@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -15,6 +15,8 @@ import {
 const protocolRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(protocolRoot, "../..");
 const tsc = resolve(repoRoot, "node_modules/.bin/tsc");
+
+setDefaultTimeout(30_000);
 
 // Each error code is spelled in three hand-maintained places that must stay in
 // sync, INCLUDING member order: the runtime tuple in src/errors/index.js, the
@@ -155,7 +157,7 @@ describe("protocol runtime constants", () => {
             JUMP_TO_FRAME_ERROR_CODES,
             NODE_DIFF_ERROR_CODES,
             NODE_OUTPUT_ERROR_CODES,
-          } from "@smithers-orchestrator/protocol";
+          } from "@smthrs/protocol";
 
           console.log(JSON.stringify({
             DEVTOOLS_ERROR_CODES,

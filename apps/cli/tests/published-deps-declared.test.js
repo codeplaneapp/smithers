@@ -1,8 +1,8 @@
 // Regression guardrail: every external import in a published package must be
 // declared in that package's own package.json (dependencies or peerDependencies).
 //
-// This catches the class of bug where `bunx smithers-orchestrator init` fails
-// with `Cannot find module '<X>' from '.../node_modules/smithers-orchestrator/src/<foo>.js'`
+// This catches the class of bug where `bunx smthrs init` fails
+// with `Cannot find module '<X>' from '.../node_modules/smthrs/src/<foo>.js'`
 // because <X> is imported but not declared. The monorepo masks this during
 // development because phantom deps hoist from the root node_modules, but the
 // bunx install layout is strict.
@@ -46,7 +46,7 @@ function collectPackages(dir, out) {
       out.push({
         name: manifest.name,
         dir,
-        skipSubdirs: manifest.name === "smithers-orchestrator" ? ["src/pi-plugin", "src/ide"] : [],
+        skipSubdirs: manifest.name === "smthrs" ? ["src/pi-plugin", "src/ide"] : [],
       });
     }
   }

@@ -11,7 +11,7 @@ different deployment:
   lifecycle, SSE event streams, and approvals; one server, many workflows by
   path. Use it for a plain HTTP API with no client SDK.
 - **`createServeApp`**: Hono app bound to one already-loaded workflow and run;
-  what `bunx smithers-orchestrator up --serve` mounts. Compose it into a
+  what `bunx smthrs up --serve` mounts. Compose it into a
   larger Hono app or call `app.fetch` in tests.
 - **`Gateway`**: headless control plane. Authenticate once, stream events over
   WebSocket with resume-on-reconnect, decide approvals, inject signals, run
@@ -19,7 +19,7 @@ different deployment:
   [Gateway client](/reference/gateway-client) and custom UIs talk to.
 
 ```ts
-import { startServer, createServeApp, Gateway } from "smithers-orchestrator";
+import { startServer, createServeApp, Gateway } from "smthrs";
 ```
 
 <Note>
@@ -85,13 +85,13 @@ const server = startServer({
 });
 ```
 
-**Source** [`index.js`](https://github.com/smithersai/smithers/blob/main/packages/server/src/index.js) · [`ServerOptions.ts`](https://github.com/smithersai/smithers/blob/main/packages/server/src/ServerOptions.ts) · **Tests** [`server.test.js`](https://github.com/smithersai/smithers/blob/main/packages/server/tests/server.test.js) · **See also** [Server Mode](/integrations/server), [Control-plane deployment](/deployment/control-plane)
+**Source** [`index.js`](https://github.com/smithersai/smithers/blob/main/packages/server/src/index.js) · [`ServerOptions.js`](https://github.com/smithersai/smithers/blob/main/packages/server/src/ServerOptions.js) · **Tests** [`server.test.js`](https://github.com/smithersai/smithers/blob/main/packages/server/tests/server.test.js) · **See also** [Server Mode](/integrations/server), [Control-plane deployment](/deployment/control-plane)
 
 ## createServeApp
 
 Builds a Hono app for a single, already-loaded workflow and run: mount it with
 `Bun.serve`, route it into another Hono app, or drive `app.fetch` directly in
-tests. Backs `bunx smithers-orchestrator up --serve`.
+tests. Backs `bunx smthrs up --serve`.
 
 ```ts
 function createServeApp(opts: ServeOptions): import("hono").Hono;
@@ -128,7 +128,7 @@ function createServeApp(opts: ServeOptions): import("hono").Hono;
 </ResponseField>
 
 ```ts
-import { SmithersDb, createServeApp } from "smithers-orchestrator";
+import { SmithersDb, createServeApp } from "smthrs";
 
 const abort = new AbortController();
 const app = createServeApp({
@@ -169,7 +169,7 @@ port `7331`; pass `path` for a Unix socket. `close` aborts active runs, drains
 inflight work, and tears down connections and the scheduler.
 
 ```ts
-import { Gateway } from "smithers-orchestrator";
+import { Gateway } from "smthrs";
 
 const gateway = new Gateway({
   heartbeatMs: 15_000,

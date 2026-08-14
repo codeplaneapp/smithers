@@ -1,12 +1,12 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { Effect } from "effect";
 import { z } from "zod";
-import { Approval, Sequence, SmithersDb, Task, Workflow, runWorkflow, usePatched } from "smithers-orchestrator";
-import { Subflow } from "@smithers-orchestrator/components/components/index";
+import { Approval, Sequence, SmithersDb, Task, Workflow, runWorkflow, usePatched } from "smthrs";
+import { Subflow } from "@smthrs/components/components/index";
 import { approveNode } from "../src/approvals.js";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers.js";
 const contractSchemas = {

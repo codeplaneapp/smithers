@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * SWE-EVO benchmark workflow.
  *
@@ -17,8 +17,8 @@
  * suite in the instance's Docker image (see harness/score_instance.py).
  */
 
-import { createSmithers } from "smithers-orchestrator";
-import { ClaudeCodeAgent, CodexAgent } from "@smithers-orchestrator/agents";
+import { createSmithers } from "smthrs";
+import { ClaudeCodeAgent, CodexAgent } from "@smthrs/agents";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod/v4";

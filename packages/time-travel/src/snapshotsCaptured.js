@@ -1,1 +1,1 @@
-export { snapshotsCaptured } from "@smithers-orchestrator/observability/metrics";
+export { snapshotsCaptured } from "@smthrs/observability/metrics";

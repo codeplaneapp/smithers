@@ -6,14 +6,14 @@
 // smithers-display-name: Make Workflow Tutorial
 // smithers-description: First-time tutorial — scans your repo + coding-agent chat history, recommends a ranked list of Smithers workflows to build for your situation, lets you pick one, builds it with a custom UI via create-workflow, then launches + monitors + self-improves it. Ends with a "dive deeper" feature preview so you know what else to ask your agent.
 // smithers-tags: tutorial, onboarding, create-workflow, first-time
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
 import { $ } from "bun";
 import { existsSync } from "node:fs";
 import { open, readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { HumanTask, createSmithers } from "smithers-orchestrator";
+import { HumanTask, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import DiveDeeperPrompt from "../prompts/make-workflow-tutorial-dive-deeper.mdx";
@@ -67,11 +67,11 @@ async function trySharedRedactValue(value: string): Promise<string | null> {
   try {
     // Reuse the observability package's canonical redactor when the seeded pack
     // is running inside the monorepo. Keep a fallback for user repos where only
-    // the public smithers-orchestrator facade may be installed.
+    // the public smthrs facade may be installed.
     const dynamicImport = new Function("specifier", "return import(specifier)") as (
       specifier: string,
     ) => Promise<{ redactValue?: (value: unknown) => { value: unknown } }>;
-    const mod = await dynamicImport("@smithers-orchestrator/observability/_traceRedaction");
+    const mod = await dynamicImport("@smthrs/observability/_traceRedaction");
     const redacted = mod.redactValue?.(value)?.value;
     return typeof redacted === "string" ? redacted : null;
   } catch {
@@ -152,7 +152,7 @@ async function readRepoContext() {
   parts.push("\n=== RECENT GIT COMMITS ===", (log.stdout?.toString() ?? "").trim());
 
   // Smithers concise doc index — tells the recommender what workflows exist
-  const docs = await $`bunx smithers-orchestrator docs`.nothrow().quiet();
+  const docs = await $`bunx smthrs docs`.nothrow().quiet();
   const smithersDocs = (docs.stdout?.toString() ?? "").slice(0, 25_000);
 
   return {
@@ -261,7 +261,7 @@ async function launchBuild(
   buildRunId: string,
 ) {
   const uiNote =
-    ` Also build a custom .smithers/ui/${pick.workflowName}.tsx for it using smithers-orchestrator/gateway-react so users can watch it live in the browser.`;
+    ` Also build a custom .smithers/ui/${pick.workflowName}.tsx for it using smthrs/gateway-react so users can watch it live in the browser.`;
   const prompt =
     `Build a Smithers workflow named "${pick.workflowName}". ` +
     `Goal: ${pick.workflowGoal}.` +
@@ -269,14 +269,14 @@ async function launchBuild(
     uiNote;
   const input = JSON.stringify({ prompt, review: false });
 
-  let res = await $`bunx smithers-orchestrator up ${BUILD_WF} --run-id ${buildRunId} --input ${input} --detach`
+  let res = await $`bunx smthrs up ${BUILD_WF} --run-id ${buildRunId} --input ${input} --detach`
     .nothrow()
     .quiet();
   let tail = `${res.stdout?.toString() ?? ""}\n${res.stderr?.toString() ?? ""}`.trim();
 
   if (res.exitCode !== 0 && /ALREADY[_ ]?EXISTS/i.test(tail)) {
     res =
-      await $`bunx smithers-orchestrator up ${BUILD_WF} --run-id ${buildRunId} --resume true --force --detach`
+      await $`bunx smthrs up ${BUILD_WF} --run-id ${buildRunId} --resume true --force --detach`
         .nothrow()
         .quiet();
     tail = `${res.stdout?.toString() ?? ""}\n${res.stderr?.toString() ?? ""}`.trim();
@@ -291,7 +291,7 @@ async function launchBuild(
 
 async function pollBuild(childRunId: string) {
   const res =
-    await $`bunx smithers-orchestrator inspect ${childRunId} --format json --full-output`
+    await $`bunx smthrs inspect ${childRunId} --format json --full-output`
       .nothrow()
       .quiet();
   const raw = res.stdout?.toString() ?? "";
@@ -310,7 +310,7 @@ async function pollBuild(childRunId: string) {
   let resumed = false;
   if (stale) {
     const r =
-      await $`bunx smithers-orchestrator up ${BUILD_WF} --run-id ${childRunId} --resume true --force --detach`
+      await $`bunx smthrs up ${BUILD_WF} --run-id ${childRunId} --resume true --force --detach`
         .nothrow()
         .quiet();
     resumed = r.exitCode === 0;
@@ -341,7 +341,7 @@ async function gatherDiveDeeperDocs() {
   } catch {
     // User repos usually do not include smithers.sh human docs; fall through.
   }
-  const res = await $`bunx smithers-orchestrator docs`.nothrow().quiet();
+  const res = await $`bunx smthrs docs`.nothrow().quiet();
   return { docs: (res.stdout?.toString() ?? "").slice(0, 50_000) };
 }
 

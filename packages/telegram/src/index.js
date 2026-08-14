@@ -12,7 +12,7 @@ const DEFAULT_MAX_RETRY_AFTER_SECONDS = 30;
 // (messageFromUpdate mirrors this list).
 const DEFAULT_ALLOWED_UPDATES = ["message", "edited_message", "channel_post", "edited_channel_post"];
 // Full escape set required by the Bot API MarkdownV2 spec, including backslash itself.
-const MARKDOWN_V2_SPECIAL = /([_*\[\]()~`>#+\-=|{}.!\\])/g;
+const MARKDOWN_V2_SPECIAL = /([_*[\]()~`>#+\-=|{}.!\\])/g;
 
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);

@@ -1,11 +1,11 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { Workflow, Task, runWorkflow } from "smithers-orchestrator";
+import { Workflow, Task, runWorkflow } from "smthrs";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 const schemas = { a: z.object({ v: z.number() }) };
 
@@ -138,6 +138,24 @@ describe("TokenUsageReported model attribution", () => {
         cacheWriteTokens: 2,
         reasoningTokens: 3,
       });
+      // A failed attempt still burned tokens, so it has to reach
+      // `_smithers_run_usage` too — otherwise `smithers usage --run` undercounts
+      // exactly the runs whose cost the operator most wants explained (#1464
+      // AWF-6).
+      expect(readRunUsageRows(dbPath)).toMatchObject([
+        {
+          run_id: result.runId,
+          node_id: "t",
+          iteration: 0,
+          attempt: 1,
+          model: "failed-response-model",
+          input_tokens: 17,
+          output_tokens: 4,
+          cache_read_tokens: 8,
+          cache_write_tokens: 2,
+          reasoning_tokens: 3,
+        },
+      ]);
     } finally {
       cleanup();
     }
@@ -177,6 +195,57 @@ describe("TokenUsageReported model attribution", () => {
       });
       expect(JSON.stringify(result.error)).not.toContain("telemetry getter exploded");
       expect(readTokenUsageEvents(dbPath)).toEqual([]);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+/**
+ * @param {string} dbPath
+ * @returns {Array<Record<string, unknown>>}
+ */
+function readRunUsageRows(dbPath) {
+  const db = new Database(dbPath, { readonly: true });
+  try {
+    return db.query("SELECT * FROM _smithers_run_usage ORDER BY node_id").all();
+  } finally {
+    db.close();
+  }
+}
+
+describe("per-run token usage table (#1464 AWF-6)", () => {
+  test("a finished run's token total is queryable without replaying the event log", async () => {
+    const { smithers, outputs, dbPath, cleanup } = createTestSmithers(schemas);
+    try {
+      const workflow = smithers(() => (
+        <Workflow name="run-usage">
+          <Task id="one" output={outputs.a} agent={usageAgent("agent-1", undefined, "claude-opus-test")}>
+            compute
+          </Task>
+          <Task id="two" output={outputs.a} agent={usageAgent("agent-2", undefined, "claude-opus-test")}>
+            compute again
+          </Task>
+        </Workflow>
+      ));
+      const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+      expect(result.status).toBe("finished");
+      const rows = readRunUsageRows(dbPath);
+      expect(rows.map((row) => row.node_id)).toEqual(["one", "two"]);
+      // usageAgent reports 10 in / 5 out per task, so the run total is a SUM
+      // over the table rather than a scan of _smithers_events.payload_json.
+      const db = new Database(dbPath, { readonly: true });
+      try {
+        const total = db
+          .query(
+            "SELECT SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens FROM _smithers_run_usage",
+          )
+          .get();
+        expect(total).toMatchObject({ input_tokens: 20, output_tokens: 10 });
+      } finally {
+        db.close();
+      }
+      expect(rows.every((row) => row.model === "claude-opus-test")).toBe(true);
     } finally {
       cleanup();
     }

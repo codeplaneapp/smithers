@@ -20,21 +20,13 @@ import { and, desc, eq } from "drizzle-orm";
 import { Context, Duration, Effect, Layer, Result, Schedule, Schema, SchemaParser } from "effect";
 import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import React from "react";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { runWorkflow } from "../engine.js";
-import { ignoreSyncError } from "@smithers-orchestrator/driver/interop";
-import { requireTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
-import {
-  Branch,
-  Loop,
-  Parallel,
-  Sequence,
-  Task,
-  Worktree,
-  Workflow,
-} from "@smithers-orchestrator/components/components/index";
-import { camelToSnake } from "@smithers-orchestrator/db/utils/camelToSnake";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { ignoreSyncError } from "@smthrs/driver/interop";
+import { requireTaskRuntime } from "@smthrs/driver/task-runtime";
+import { Branch, Loop, Parallel, Sequence, Task, Worktree, Workflow } from "@smthrs/components/components/index";
+import { camelToSnake } from "@smthrs/db/utils/camelToSnake";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 /**
  * @typedef {import("effect").Schema.Schema<any, any, never>} AnySchema
  */
@@ -49,7 +41,7 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
  * @typedef {Record<string, unknown> & { input: unknown; executionId: string; stepId: string; attempt: number; signal: AbortSignal; iteration: number; heartbeat: (data?: unknown) => void; lastHeartbeat: unknown | null; }} BuilderStepContext
  */
 /** @typedef {import("./BuilderStepHandle.ts").BuilderStepHandle} BuilderStepHandle */
-/** @typedef {import("@smithers-orchestrator/scheduler/RetryPolicy").RetryPolicy} RetryPolicy */
+/** @typedef {import("@smthrs/scheduler/RetryPolicy").RetryPolicy} RetryPolicy */
 /** @typedef {import("./SmithersSqliteOptions.ts").SmithersSqliteOptions} SmithersSqliteOptions */
 /**
  * @typedef {{
@@ -60,7 +52,7 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
  *   retryPolicy?: RetryPolicy;
  *   timeout?: unknown;
  *   skipIf?: (ctx: BuilderStepContext) => boolean;
- *   cache?: import("@smithers-orchestrator/scheduler/CachePolicy").CachePolicy;
+ *   cache?: import("@smthrs/scheduler/CachePolicy").CachePolicy;
  * }} StepOptions
  */
 /**
@@ -1281,7 +1273,7 @@ function postgres(options) {
  * @param {{ dataDir?: string }} [options]
  */
 function pglite(options) {
-  return Layer.succeed(SmithersSqlite, { ...(options ?? {}), provider: "pglite" });
+  return Layer.succeed(SmithersSqlite, { ...options, provider: "pglite" });
 }
 
 /** @type {{ sqlite: typeof sqlite; postgres: typeof postgres; pglite: typeof pglite; workflow: typeof workflow; fragment: typeof fragment }} */

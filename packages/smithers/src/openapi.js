@@ -1,1 +1,1 @@
-export * from "@smithers-orchestrator/openapi";
+export * from "@smthrs/openapi";

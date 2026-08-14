@@ -1,12 +1,12 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
-import { renderPrompt, renderWorkflow, runTask, simulate } from "smithers-orchestrator/testing";
-import type { RenderedWorkflow } from "smithers-orchestrator/testing";
-import type { TaskDescriptor } from "smithers-orchestrator/graph";
+import { renderPrompt, renderWorkflow, runTask, simulate } from "smthrs/testing";
+import type { RenderedWorkflow } from "smthrs/testing";
+import type { TaskDescriptor } from "smthrs/graph";
 import {
   approval,
   skillClarify,
@@ -309,13 +309,13 @@ describe.serial("curated authoring workflows", () => {
       expect(sim.task("verify").outputs).toEqual([
         {
           passed: false,
-          command: `${process.env.SMITHERS_BUNX} smithers-orchestrator graph .smithers/workflows/report-workflow-scaffold.tsx && ${process.env.SMITHERS_BUN} test --preload ./.smithers/preload.ts --max-concurrency=1 ./.smithers/tests/report-workflow-scaffold.test.tsx`,
+          command: `${process.env.SMITHERS_BUNX} smthrs graph .smithers/workflows/report-workflow-scaffold.tsx && ${process.env.SMITHERS_BUN} test --preload ./.smithers/preload.ts --max-concurrency=1 ./.smithers/tests/report-workflow-scaffold.test.tsx`,
           errors: ["[graph] GRAPH_SENTINEL"],
           notes: "verification failed for report-workflow-scaffold; see errors.",
         },
         {
           passed: true,
-          command: `${process.env.SMITHERS_BUNX} smithers-orchestrator graph .smithers/workflows/report-workflow.tsx && ${process.env.SMITHERS_BUN} test --preload ./.smithers/preload.ts --max-concurrency=1 ./.smithers/tests/report-workflow.test.tsx && ${process.env.SMITHERS_BUN} build --no-bundle .smithers/ui/report-workflow.tsx`,
+          command: `${process.env.SMITHERS_BUNX} smthrs graph .smithers/workflows/report-workflow.tsx && ${process.env.SMITHERS_BUN} test --preload ./.smithers/preload.ts --max-concurrency=1 ./.smithers/tests/report-workflow.test.tsx && ${process.env.SMITHERS_BUN} build --no-bundle .smithers/ui/report-workflow.tsx`,
           errors: [],
           notes:
             "report-workflow loads, its graph renders, its registered test passes, and .smithers/ui/report-workflow.tsx transpiles.",
@@ -362,7 +362,7 @@ describe.serial("curated authoring workflows", () => {
         nextSteps: [
           'smithers workflow run report-workflow --prompt "<your input>"  # or: smithers up .smithers/workflows/report-workflow.tsx',
           "pnpm -C .smithers test  # run the registered workflow tests",
-          "bunx smithers-orchestrator graph .smithers/workflows/report-workflow.tsx  # print the graph; add --interactive for the TUI",
+          "bunx smthrs graph .smithers/workflows/report-workflow.tsx  # print the graph; add --interactive for the TUI",
           "smithers ui <runId>  # open the custom UI in .smithers/ui/report-workflow.tsx for a run",
           'smithers workflow run create-workflow --prompt "iterate on report-workflow: <what to change>"  # iterate',
         ],

@@ -8,8 +8,8 @@
 // slideshow, UI features, sdk-docs) built on the OLD bespoke SDK and never merged. This
 // workflow harvests that product work onto the #286 base, KEEPS the TanStack DB sync layer,
 // drops the bespoke SDK, ports any old-sync usage to the new public hooks, and greens it.
-/** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { ClaudeCodeAgent, createSmithers } from "smthrs";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -223,8 +223,8 @@ registry. Most 06-07 app code uses the public hook names, which are preserved, s
 NO STRAY WORK: after harvesting, every 06-07 source branch's product work must be present on this branch
 (verify each branch has no unique non-sync file missing here).
 
-VERIFY (must end green): \`pnpm install\`, then for each of @smithers-orchestrator/gateway-client,
-@smithers-orchestrator/gateway-react, @smithers-orchestrator/smithers:
+VERIFY (must end green): \`pnpm install\`, then for each of @smthrs/gateway-client,
+@smthrs/gateway-react, @smthrs/smithers:
 \`pnpm --filter <pkg> typecheck\` and \`pnpm --filter <pkg> test\`. Fix every error/failure.
 Repo conventions: one named export per file; no mocks in product code; if you change docs, run \`pnpm docs:llms\`.
 Do NOT commit or push (a later step commits).

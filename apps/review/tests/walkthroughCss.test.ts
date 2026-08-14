@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { reducedMotionCss } from "@smithers-orchestrator/ui-styleguide";
+import { reducedMotionCss } from "@smthrs/ui-styleguide";
 import { walkthroughCss } from "../src/walkthrough/walkthroughCss";
 
 describe("walkthrough CSS design contract", () => {

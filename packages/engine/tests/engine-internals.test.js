@@ -6,9 +6,9 @@ import { join, resolve as resolvePath } from "node:path";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { __engineInternals as I, runsDueForQuotaResume } from "../src/engine.js";
 
 const inputPayloadTable = sqliteTable("input_payload", {
@@ -82,6 +82,29 @@ async function insertRun(adapter, runId, overrides = {}) {
 }
 
 describe("engine internals: errors, heartbeat and continuation helpers", () => {
+  test("resolveBinary falls back to PATH when Bun.which cannot resolve", () => {
+    const dir = mkdtempSync(join(tmpdir(), "smithers-resolve-binary-"));
+    const command = process.platform === "win32" ? "fallback-tool.exe" : "fallback-tool";
+    const candidate = join(dir, command);
+    const originalPath = process.env.PATH;
+    const originalWhich = Bun.which;
+    writeFileSync(candidate, "");
+
+    try {
+      process.env.PATH = dir;
+      Bun.which = () => null;
+      expect(I.resolveBinary(command)).toBe(candidate);
+    } finally {
+      Bun.which = originalWhich;
+      if (originalPath === undefined) {
+        delete process.env.PATH;
+      } else {
+        process.env.PATH = originalPath;
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("cancellation resolves pending approvals and human requests", async () => {
     const { adapter, sqlite } = makeContinueDb();
     try {
@@ -711,6 +734,115 @@ describe("engine internals: durability, options and graph helpers", () => {
     ).toBe(false);
   });
 
+  test("reset resume boundaries veto stale state once without poisoning fresh retries", () => {
+    const reset = (attempt, resetAtMs, startedAtMs = resetAtMs - 100) => ({
+      attempt,
+      state: "cancelled",
+      startedAtMs,
+      finishedAtMs: resetAtMs - 50,
+      metaJson: JSON.stringify({
+        resetCancelled: true,
+        resetResumeBoundaryMs: resetAtMs,
+      }),
+    });
+    const failed = (attempt, startedAtMs, discardResumeSession = false) => ({
+      attempt,
+      state: "failed",
+      startedAtMs,
+      metaJson: JSON.stringify({ discardResumeSession }),
+    });
+
+    expect(I.shouldDiscardResumeSession([reset(3, 1_000), reset(2, 1_000), reset(1, 1_000)])).toBe(true);
+    expect(I.shouldDiscardResumeSession([reset(3, 1_000), reset(2, 1_000), failed(1, 1_100)])).toBe(false);
+    expect(I.shouldDiscardResumeSession([reset(3, 1_000), failed(1, 1_100, true)])).toBe(true);
+    expect(I.shouldDiscardResumeSession([reset(3, 1_000), failed(2, 1_100, true), failed(1, 1_200, false)])).toBe(
+      false,
+    );
+    expect(I.shouldDiscardResumeSession([failed(2, 900, false), failed(1, 800, true)])).toBe(false);
+    // A legacy reset row has no trustworthy reset timestamp. Even a newer
+    // unmarked crash-cancelled row may still predate the reset, so upgrades
+    // retain the historical fail-closed behavior instead of reusing it.
+    expect(
+      I.shouldDiscardResumeSession([
+        {
+          attempt: 2,
+          state: "cancelled",
+          startedAtMs: 100,
+          finishedAtMs: 200,
+          metaJson: JSON.stringify({ resetCancelled: true, discardResumeSession: true }),
+        },
+        { attempt: 3, state: "cancelled", startedAtMs: 300, finishedAtMs: 400, metaJson: null },
+      ]),
+    ).toBe(true);
+
+    const staleReset = {
+      attempt: 2,
+      state: "cancelled",
+      startedAtMs: 800,
+      heartbeatDataJson: JSON.stringify({ agentResume: "stale-session" }),
+      metaJson: JSON.stringify({
+        resetCancelled: true,
+        resetResumeBoundaryMs: 1_000,
+        agentEngine: "cli",
+        agentResume: "stale-session",
+      }),
+    };
+    const fresh = {
+      attempt: 1,
+      state: "failed",
+      startedAtMs: 1_100,
+      heartbeatDataJson: JSON.stringify({ agentResume: "fresh-session" }),
+      metaJson: JSON.stringify({ agentEngine: "cli", agentResume: "fresh-session" }),
+    };
+    expect(I.resumeEligibleAttempts([staleReset, fresh])).toEqual([fresh]);
+    expect(I.findHijackContinuation(I.resumeEligibleAttempts([staleReset, fresh]), "cli")).toEqual({
+      mode: "native-cli",
+      resume: "fresh-session",
+    });
+  });
+
+  test("retry hydration accepts current durable state and ignores stale or legacy deadlines", () => {
+    const attempt = (number, state, meta = {}) => ({
+      runId: "run",
+      nodeId: "task",
+      iteration: 0,
+      attempt: number,
+      state,
+      startedAtMs: number * 100,
+      errorJson: JSON.stringify({ message: "failed" }),
+      metaJson: JSON.stringify(meta),
+    });
+    const current = I.retrySessionStateFromAttempts([
+      attempt(1, "failed", { retryState: { version: 1, failureCount: 1, retryAtMs: 5_000 } }),
+    ]);
+    expect(current.retryCounts).toEqual(new Map([["task::0", 1]]));
+    expect(current.retryWait).toEqual(new Map([["task::0", 5_000]]));
+
+    const terminalLater = I.retrySessionStateFromAttempts([
+      attempt(1, "failed", { retryState: { version: 1, failureCount: 1, retryAtMs: 5_000 } }),
+      attempt(2, "cancelled"),
+    ]);
+    expect(terminalLater.retryCounts).toEqual(new Map([["task::0", 1]]));
+    expect(terminalLater.retryWait).toEqual(new Map());
+
+    const legacy = I.retrySessionStateFromAttempts([attempt(1, "failed")]);
+    expect(legacy.retryCounts).toEqual(new Map([["task::0", 1]]));
+    expect(legacy.retryWait).toEqual(new Map());
+
+    expect(() =>
+      I.retrySessionStateFromAttempts([
+        attempt(1, "failed", { retryState: { version: 1, failureCount: 0, retryAtMs: "soon" } }),
+      ]),
+    ).toThrow("durable retry state is malformed");
+
+    expect(() =>
+      I.retrySessionStateFromAttempts([
+        attempt(1, "failed", { retryState: { version: 1, failureCount: 0, retryAtMs: "soon" } }),
+        attempt(2, "cancelled"),
+      ]),
+    ).not.toThrow();
+  });
+
   test("handles carried input rows and durability metadata comparisons", () => {
     expect(
       I.ralphStateToObject(
@@ -939,6 +1071,81 @@ describe("engine internals: durability, options and graph helpers", () => {
     ).not.toThrow();
   });
 
+  test("assertResumeDurabilityMetadata: --accept-workflow-change re-blesses missing hashes (#1489)", () => {
+    const v2Config = I.buildDurabilityConfig({}, { entryWorkflowHash: "entry" });
+    // Stored workflowHash is null but the current source hashes fine: accepting
+    // the workflow change must re-bless instead of failing identically.
+    const accepted = I.assertResumeDurabilityMetadata(
+      {
+        workflowPath: "/tmp/wf.ts",
+        workflowHash: null,
+        vcsRoot: "/repo",
+      },
+      v2Config,
+      {
+        workflowHash: "graph-1",
+        entryWorkflowHash: "entry",
+        vcsRoot: "/repo",
+      },
+      "/tmp/wf.ts",
+      { acceptWorkflowChange: true },
+    );
+    expect(accepted).toEqual(["workflow module graph unavailable"]);
+    // Missing stored entry hash is likewise acceptable.
+    expect(
+      I.assertResumeDurabilityMetadata(
+        {
+          workflowPath: "/tmp/wf.ts",
+          workflowHash: "graph-1",
+          vcsRoot: "/repo",
+        },
+        I.buildDurabilityConfig({}, { entryWorkflowHash: null }),
+        {
+          workflowHash: "graph-1",
+          entryWorkflowHash: "entry",
+          vcsRoot: "/repo",
+        },
+        "/tmp/wf.ts",
+        { acceptWorkflowChange: true },
+      ),
+    ).toEqual(["workflow entry hash unavailable"]);
+    // Without the flag it still fails closed, and the hint points at the flag.
+    expect(() =>
+      I.assertResumeDurabilityMetadata(
+        {
+          workflowPath: "/tmp/wf.ts",
+          workflowHash: null,
+          vcsRoot: "/repo",
+        },
+        v2Config,
+        {
+          workflowHash: "graph-1",
+          entryWorkflowHash: "entry",
+          vcsRoot: "/repo",
+        },
+        "/tmp/wf.ts",
+      ),
+    ).toThrow("--accept-workflow-change");
+    // A non-workflow mismatch (VCS root) is never accepted by the flag.
+    expect(() =>
+      I.assertResumeDurabilityMetadata(
+        {
+          workflowPath: "/tmp/wf.ts",
+          workflowHash: null,
+          vcsRoot: "/repo",
+        },
+        v2Config,
+        {
+          workflowHash: "graph-1",
+          entryWorkflowHash: "entry",
+          vcsRoot: "/repo2",
+        },
+        "/tmp/wf.ts",
+        { acceptWorkflowChange: true },
+      ),
+    ).toThrow("VCS root changed");
+  });
+
   test("parses run config/auth and validates run options", () => {
     expect(I.resolveRootDir({ rootDir: "/tmp/root" }, null)).toBe(resolvePath("/tmp/root"));
     expect(I.resolveLogDir("/tmp/root", "run", null)).toBeUndefined();
@@ -988,6 +1195,11 @@ describe("engine internals: durability, options and graph helpers", () => {
 
     expect(() => I.validateRunOptions({ input: {}, maxOutputBytes: 0 })).toThrow("maxOutputBytes");
     expect(() => I.validateRunOptions({ input: {}, maxOutputBytes: Number.NaN })).toThrow("maxOutputBytes");
+    expect(() => I.validateRunOptions({ input: {}, maxAgentCheckpointBytes: 0 })).toThrow("maxAgentCheckpointBytes");
+    expect(() => I.validateRunOptions({ input: {}, maxAgentCheckpointBytes: 1.5 })).toThrow("maxAgentCheckpointBytes");
+    expect(() => I.validateRunOptions({ input: {}, maxAgentCheckpointBytes: 16 * 1024 * 1024 + 1 })).toThrow(
+      "system ceiling",
+    );
     expect(() => I.validateRunOptions({ input: {}, toolTimeoutMs: -1 })).toThrow("toolTimeoutMs");
     expect(() =>
       I.validateRunOptions({
@@ -1119,6 +1331,12 @@ describe("engine internals: durability, options and graph helpers", () => {
     expect(I.parseAttemptErrorCode("{")).toBeNull();
     expect(I.isRetryableTaskFailure({ metaJson: '{"failureRetryable":false}' })).toBe(false);
     expect(I.isRetryableTaskFailure({ errorJson: '{"code":"AGENT_CONFIG_INVALID"}' })).toBe(false);
+    expect(
+      I.isRetryableTaskFailure({
+        metaJson: '{"failureRetryable":true}',
+        errorJson: '{"code":"AGENT_CONFIG_INVALID"}',
+      }),
+    ).toBe(true);
     expect(I.isRetryableTaskFailure({ metaJson: '{"kind":"compute"}', errorJson: '{"code":"INVALID_OUTPUT"}' })).toBe(
       false,
     );

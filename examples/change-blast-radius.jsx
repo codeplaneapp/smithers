@@ -4,11 +4,11 @@
  *
  * Shape: diff parser -> dependency/context gatherer -> blast-radius agent.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import ParsePrompt from "./prompts/change-blast-radius/parse.mdx";
 import GatherPrompt from "./prompts/change-blast-radius/gather.mdx";

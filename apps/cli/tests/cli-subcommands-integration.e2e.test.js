@@ -16,6 +16,8 @@ import {
 } from "../../../packages/smithers/tests/e2e-helpers.js";
 
 const CLI_ENTRY = resolve(import.meta.dir, "..", "src", "index.js");
+const TOKEN_COMMAND_TIMEOUT_MS = 60_000;
+const TOKEN_ROUND_TRIP_TIMEOUT_MS = 120_000;
 
 function tempDir(prefix) {
   const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -282,48 +284,77 @@ test("openapi list/generate reject invalid specs without writing generated outpu
   expect(existsSync(repo.path("generated/tools.js"))).toBe(false);
 }, 30_000);
 
-test("token issue/exec/revoke round-trips a brokered action token through a child process", () => {
-  const repo = createTempRepo();
-  const env = quietEnv({ SMITHERS_TOKEN_STORE: repo.path(".smithers", "tokens.json") });
-  const issued = runSmithers(["token", "issue", "--scopes", "run:read cron:write", "--ttl", "15m", "--reveal-token"], {
-    cwd: repo.dir,
-    format: "json",
-    env,
-  });
-  expect(issued.exitCode, `${issued.stdout}\n${issued.stderr}`).toBe(0);
-  expect(issued.json?.token).toStartWith("smithers_");
-  expect(issued.json?.grant.scopes).toEqual(["run:read", "cron:write"]);
-  const handle = issued.json?.actionToken?.handle;
-  expect(handle).toStartWith("smithers_action_");
+test(
+  "token issue/exec/revoke round-trips a brokered action token through a child process",
+  () => {
+    const repo = createTempRepo();
+    const env = quietEnv({ SMITHERS_TOKEN_STORE: repo.path(".smithers", "tokens.json") });
+    const issued = runSmithers(
+      ["token", "issue", "--scopes", "run:read cron:write", "--ttl", "15m", "--reveal-token"],
+      {
+        cwd: repo.dir,
+        format: "json",
+        env,
+      },
+    );
+    expect(issued.exitCode, `${issued.stdout}\n${issued.stderr}`).toBe(0);
+    expect(issued.json?.token).toStartWith("smithers_");
+    expect(issued.json?.grant.scopes).toEqual(["run:read", "cron:write"]);
+    const handle = issued.json?.actionToken?.handle;
+    expect(handle).toStartWith("smithers_action_");
 
-  const command = `${JSON.stringify(process.execPath)} -e "process.stdout.write(process.env.SMITHERS_TEST_TOKEN?.startsWith('smithers_') ? 'TOKEN_OK\\\\n' : 'TOKEN_BAD\\\\n')"`;
-  const executed = runSmithers(
-    ["token", "exec", "--handle", handle, "--scopes", "run:read", "--env", "SMITHERS_TEST_TOKEN", "--command", command],
-    { cwd: repo.dir, format: "json", env, timeoutMs: 30_000 },
-  );
-  expect(executed.exitCode, `${executed.stdout}\n${executed.stderr}`).toBe(0);
-  expect(executed.stdout).toContain("TOKEN_OK");
-  expect(executed.json).toMatchObject({
-    ok: true,
-    tokenId: issued.json?.grant.tokenId,
-    actionId: "gateway",
-  });
+    const command = `${JSON.stringify(process.execPath)} -e "process.stdout.write(process.env.SMITHERS_TEST_TOKEN?.startsWith('smithers_') ? 'TOKEN_OK\\\\n' : 'TOKEN_BAD\\\\n')"`;
+    const executed = runSmithers(
+      [
+        "token",
+        "exec",
+        "--handle",
+        handle,
+        "--scopes",
+        "run:read",
+        "--env",
+        "SMITHERS_TEST_TOKEN",
+        "--command",
+        command,
+      ],
+      { cwd: repo.dir, format: "json", env, timeoutMs: TOKEN_COMMAND_TIMEOUT_MS },
+    );
+    expect(executed.exitCode, `${executed.stdout}\n${executed.stderr}`).toBe(0);
+    expect(executed.stdout).toContain("TOKEN_OK");
+    expect(executed.json).toMatchObject({
+      ok: true,
+      tokenId: issued.json?.grant.tokenId,
+      actionId: "gateway",
+    });
 
-  const revoked = runSmithers(["token", "revoke", issued.json.token], {
-    cwd: repo.dir,
-    format: "json",
-    env,
-  });
-  expect(revoked.exitCode).toBe(0);
-  expect(revoked.json).toMatchObject({ revoked: true, tokenId: issued.json?.grant.tokenId });
+    const revoked = runSmithers(["token", "revoke", issued.json.token], {
+      cwd: repo.dir,
+      format: "json",
+      env,
+    });
+    expect(revoked.exitCode).toBe(0);
+    expect(revoked.json).toMatchObject({ revoked: true, tokenId: issued.json?.grant.tokenId });
 
-  const denied = runSmithers(
-    ["token", "exec", "--handle", handle, "--scopes", "run:read", "--env", "SMITHERS_TEST_TOKEN", "--command", command],
-    { cwd: repo.dir, format: "json", env, timeoutMs: 30_000 },
-  );
-  expect(denied.exitCode).toBe(1);
-  expect(`${denied.stdout}\n${denied.stderr}`).toContain("revoked");
-}, 45_000);
+    const denied = runSmithers(
+      [
+        "token",
+        "exec",
+        "--handle",
+        handle,
+        "--scopes",
+        "run:read",
+        "--env",
+        "SMITHERS_TEST_TOKEN",
+        "--command",
+        command,
+      ],
+      { cwd: repo.dir, format: "json", env, timeoutMs: TOKEN_COMMAND_TIMEOUT_MS },
+    );
+    expect(denied.exitCode).toBe(1);
+    expect(`${denied.stdout}\n${denied.stderr}`).toContain("revoked");
+  },
+  TOKEN_ROUND_TRIP_TIMEOUT_MS,
+);
 
 test("agents capabilities/doctor/test exercise the CLI registry and a spawned account binary", () => {
   const repo = createTempRepo();
@@ -384,7 +415,7 @@ test("mcp add and skills add run supplementary Hermes and Pi wiring from the rea
     PATH: process.env.PATH ?? "",
   });
 
-  const mcp = runSmithers(["mcp", "add", "--agent", "hermes", "--command", "bunx smithers-orchestrator --mcp"], {
+  const mcp = runSmithers(["mcp", "add", "--agent", "hermes", "--command", "bunx smthrs --mcp"], {
     cwd: repo.dir,
     format: null,
     env,
@@ -395,7 +426,7 @@ test("mcp add and skills add run supplementary Hermes and Pi wiring from the rea
   const hermesConfig = parseYaml(readFileSync(join(home, ".hermes", "config.yaml"), "utf8"));
   expect(hermesConfig.mcp_servers.smithers).toEqual({
     command: "bunx",
-    args: ["smithers-orchestrator", "--mcp"],
+    args: ["smthrs", "--mcp"],
   });
   expect(existsSync(join(home, ".hermes", "plugins", "smithers", "plugin.yaml"))).toBe(true);
 

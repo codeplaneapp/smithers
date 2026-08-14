@@ -8,7 +8,7 @@ import {
   toolKindFromName,
   createSyntheticIdGenerator,
 } from "./BaseCliAgent/index.js";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { normalizeCapabilityStringList } from "./capability-registry/index.js";
 import { getCliAgentSurfaceManifestEntry } from "./cli-surface/index.js";
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
@@ -82,6 +82,10 @@ export function createAntigravityCapabilityRegistry(opts = {}) {
     humanInteraction: {
       supportsUiRequests: false,
       methods: [],
+    },
+    fileChanges: {
+      supportsFileChanges: false,
+      supportsUnifiedDiff: false,
     },
     builtIns: resolveAntigravityBuiltIns(opts),
   };

@@ -3,12 +3,12 @@
 // @smithers-type-exports-end
 
 import { Effect } from "effect";
-import { isRunHeartbeatFresh } from "@smithers-orchestrator/engine";
-import { isPidAlive, parseRuntimeOwnerPid } from "@smithers-orchestrator/engine/runtime-owner";
-import { computeRetryDelayMs } from "@smithers-orchestrator/scheduler/computeRetryDelayMs";
-import { SmithersError } from "@smithers-orchestrator/errors";
+import { isRunHeartbeatFresh } from "@smthrs/engine";
+import { isPidAlive, parseRuntimeOwnerPid } from "@smthrs/engine/runtime-owner";
+import { computeRetryDelayMs } from "@smthrs/scheduler/computeRetryDelayMs";
+import { SmithersError } from "@smthrs/errors";
 import { formatAge } from "./format.js";
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./WhyBlocker.ts").WhyBlocker} WhyBlocker */
 /** @typedef {import("./WhyDiagnosis.ts").WhyDiagnosis} WhyDiagnosis */
 
@@ -575,26 +575,47 @@ function dedupeBlockers(blockers) {
   return deduped;
 }
 /**
- * @param {{ run: DbRunRow; nodes: DbNodeRow[]; approvals: DbApprovalRow[]; attempts: DbAttemptRow[]; events: DbEventRow[]; lastFrame: DbFrameRow | undefined; nowMs: number; }} params
+ * @param {{ run: DbRunRow; nodes: DbNodeRow[]; approvals: DbApprovalRow[]; attempts: DbAttemptRow[]; events: DbEventRow[]; lastFrame: DbFrameRow | undefined; runFinishedEvents?: DbEventRow[]; nowMs: number; }} params
  * @returns {WhyDiagnosis}
  */
 function buildDiagnosis(params) {
-  const { run, nodes, approvals, attempts, events, lastFrame, nowMs } = params;
+  const { run, nodes, approvals, attempts, events, lastFrame, runFinishedEvents = [], nowMs } = params;
   const runId = run.runId;
   const status = run.status === "continued" && run.finishedAtMs == null ? "running" : String(run.status ?? "unknown");
   const forcedBoundary = latestForcedEffectBoundary(events);
   const boundaryInformation = latestWarningEffectBoundaryInformation(events);
   const information = boundaryInformation ? [boundaryInformation] : [];
   if (status === "finished" || status === "cancelled") {
-    const summary = forcedBoundary
-      ? forcedBoundary.lateCompletion
-        ? `Run is ${status}; an external effect completed after its journal row was archived and needs attention.`
-        : `Run is ${status}; a forced ${forcedBoundary.operation} side-effect crossing needs attention.`
-      : status === "finished"
-        ? "Run is finished, nothing is blocked."
-        : typeof run.finishedAtMs === "number"
-          ? `Run was cancelled at ${new Date(run.finishedAtMs).toISOString()}.`
-          : "Run was cancelled.";
+    // A loop that exited via return-last with its `until` predicate still false
+    // is exhaustion, not success — name the loop and the unmet condition
+    // instead of "nothing is blocked" (#1464 AWF-1).
+    const finishedPayload = parseEventPayload(runFinishedEvents.at(-1));
+    const exhaustedLoops = Array.isArray(finishedPayload?.exhaustedLoops)
+      ? finishedPayload.exhaustedLoops.filter((loop) => loop && typeof loop.id === "string")
+      : [];
+    const exhaustedSummary =
+      status === "finished" && exhaustedLoops.length > 0
+        ? `Run finished, but loop${exhaustedLoops.length > 1 ? "s" : ""} ${exhaustedLoops
+            .map((loop) =>
+              loop.maxIterations != null
+                ? `'${loop.id}' (reached maxIterations ${loop.maxIterations})`
+                : `'${loop.id}'`,
+            )
+            .join(
+              ", ",
+            )} exhausted without its until condition ever being satisfied — the last output was kept, not approved.`
+        : null;
+    const summary = exhaustedSummary
+      ? exhaustedSummary
+      : forcedBoundary
+        ? forcedBoundary.lateCompletion
+          ? `Run is ${status}; an external effect completed after its journal row was archived and needs attention.`
+          : `Run is ${status}; a forced ${forcedBoundary.operation} side-effect crossing needs attention.`
+        : status === "finished"
+          ? "Run is finished, nothing is blocked."
+          : typeof run.finishedAtMs === "number"
+            ? `Run was cancelled at ${new Date(run.finishedAtMs).toISOString()}.`
+            : "Run was cancelled.";
     return {
       runId,
       status,
@@ -1093,13 +1114,16 @@ export function diagnoseRunEffect(adapter, runId, nowMs = Date.now()) {
         return yield* Effect.fail(new SmithersError("RUN_NOT_FOUND", `Run not found: ${runId}`));
       }
       const afterSeq = Math.max(-1, (lastSeq ?? -1) - RECENT_EVENTS_LIMIT);
-      const [events, forcedBoundaryEvents] = yield* Effect.all([
+      const [events, forcedBoundaryEvents, runFinishedEvents] = yield* Effect.all([
         adapter.listEventHistoryEffect(runId, {
           afterSeq,
           limit: RECENT_EVENTS_LIMIT,
         }),
         typeof adapter.listEventsByTypeEffect === "function"
           ? adapter.listEventsByTypeEffect(runId, "SideEffectBoundaryCrossed")
+          : Effect.succeed([]),
+        typeof adapter.listEventsByTypeEffect === "function"
+          ? adapter.listEventsByTypeEffect(runId, "RunFinished")
           : Effect.succeed([]),
       ]);
       const eventRows = [...(events ?? [])];
@@ -1115,6 +1139,7 @@ export function diagnoseRunEffect(adapter, runId, nowMs = Date.now()) {
         attempts: attempts ?? [],
         events: eventRows,
         lastFrame: lastFrame,
+        runFinishedEvents: runFinishedEvents ?? [],
         nowMs,
       });
       const childDiagnoses = (yield* Effect.all(
@@ -1159,8 +1184,11 @@ export function diagnoseRunEffect(adapter, runId, nowMs = Date.now()) {
  */
 export function renderWhyDiagnosisHuman(diagnosis) {
   const information = diagnosis.information ?? [];
+  // A finished run prints its summary: the clean default is "nothing is
+  // blocked", but an exhausted loop (#1464 AWF-1) or a boundary warning
+  // replaces that text and must survive to the human output.
   if (diagnosis.status === "finished" && diagnosis.blockers.length === 0 && information.length === 0) {
-    return "Run is finished, nothing is blocked.";
+    return diagnosis.summary;
   }
   if (diagnosis.status === "cancelled" && diagnosis.blockers.length === 0 && information.length === 0) {
     return diagnosis.summary;

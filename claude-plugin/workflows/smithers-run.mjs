@@ -27,7 +27,7 @@ export const meta = {
 //                                        (workflow = discovered ID or a .tsx/.mdx path)
 //   { mirrorAllNodes?, maxLiveWatchers?, agentBudget?, collapseAt? }
 //   { cli? }                             command that runs the Smithers CLI
-//                                        (default `bunx smithers-orchestrator`).
+//                                        (default `bunx smthrs`).
 //                                        Inside a Smithers source checkout the
 //                                        SessionStart hook passes the working
 //                                        tree's entry so the mirror never drives
@@ -71,7 +71,7 @@ function shellQuote(value) {
 
 const CLI_COMMAND = typeof workflowArgs.cli === 'string' && workflowArgs.cli.trim()
   ? workflowArgs.cli.trim()
-  : 'bunx smithers-orchestrator'
+  : 'bunx smthrs'
 const CLI = workflowArgs.cwd
   ? `cd ${shellQuote(workflowArgs.cwd)} && ${CLI_COMMAND}`
   : CLI_COMMAND
@@ -272,7 +272,15 @@ while (ticks < MAX_TICKS) {
     },
   )
   if (!tick) {
-    log(`Mirror sync failed for run ${runId}; stopping the mirror (the Smithers run itself is unaffected).`)
+    // A null tick means the tick agent died (e.g. a transient network/API
+    // failure like ENOTFOUND), not that the run changed state. Treat it like
+    // an error tick and retry; only stop after 3 consecutive failures.
+    errorTicks += 1
+    if (errorTicks < 3) {
+      log(`Mirror tick #${ticks} for run ${runId} failed (transient API error); retrying.`)
+      continue
+    }
+    log(`Mirror sync failed ${errorTicks} times in a row for run ${runId}; stopping the mirror (the Smithers run itself is unaffected). Re-attach with args {"runId":"${runId}"}.`)
     break
   }
   if (tick.contract === -1) {
@@ -280,12 +288,12 @@ while (ticks < MAX_TICKS) {
     if (errorTicks < 3) {
       continue
     }
-    log(`Mirror sync error for run ${runId}: ${typeof tick.error === 'string' ? tick.error : 'smithers claude tick failed'}. Check the run id and that smithers-orchestrator is up to date, then re-attach with args {"runId":"${runId}"}.`)
+    log(`Mirror sync error for run ${runId}: ${typeof tick.error === 'string' ? tick.error : 'smithers claude tick failed'}. Check the run id and that smthrs is up to date, then re-attach with args {"runId":"${runId}"}.`)
     break
   }
   errorTicks = 0
   if (tick.contract !== CONTRACT) {
-    log(`smithers claude tick speaks contract ${tick.contract}, this mirror speaks ${CONTRACT}. Update the smithers plugin and smithers-orchestrator, then re-attach with args {"runId":"${runId}"}.`)
+    log(`smithers claude tick speaks contract ${tick.contract}, this mirror speaks ${CONTRACT}. Update the smithers plugin and smthrs, then re-attach with args {"runId":"${runId}"}.`)
     break
   }
   seq = typeof tick.seq === 'number' ? tick.seq : seq

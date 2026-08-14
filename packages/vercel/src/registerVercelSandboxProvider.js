@@ -1,4 +1,4 @@
-import { registerSandboxProvider } from "@smithers-orchestrator/sandbox";
+import { registerSandboxProvider } from "@smthrs/sandbox";
 import { createVercelSandboxProvider } from "./createVercelSandboxProvider.js";
 
 /**

@@ -6,16 +6,16 @@
 // smithers-display-name: Delegation Chain
 // smithers-description: Recursive multi-tier delegation — strong models refine the goal, decompose into tiered chunks, de-risk with research/POC probes, then execute with per-node backpressure (reviews over jj commit ranges, checks, developer previews), live-editable outputs, cost forecasts, and full scoring.
 // smithers-tags: delegation, planning, concierge, migration
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
-import { DelegationChain, createSmithers, delegationSchemas } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
+import { DelegationChain, createSmithers, delegationSchemas } from "smthrs";
 import {
   estimateAccuracyScorer,
   humanPollScorer,
   planSolidityScorer,
   pocJudgmentScorer,
   tierFitScorer,
-} from "smithers-orchestrator/scorers";
+} from "smthrs/scorers";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 

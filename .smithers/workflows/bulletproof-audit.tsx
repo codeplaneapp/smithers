@@ -1,10 +1,10 @@
 // smithers-source: authored
 // smithers-display-name: Bulletproof Audit
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createSmithers, Parallel, Sequence } from "smithers-orchestrator";
+import { createSmithers, Parallel, Sequence } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import { FeatureGroups } from "../specs/features";

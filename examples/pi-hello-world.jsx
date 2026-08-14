@@ -1,5 +1,5 @@
-/** @jsxImportSource smithers-orchestrator */
-import { Task, Workflow, PiAgent } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Task, Workflow, PiAgent } from "smthrs";
 import { z } from "zod";
 import { createExampleSmithers } from "./_example-kit.js";
 const HelloSchema = z.object({

@@ -1,3 +1,3 @@
-import type { GatewayApprovalSummary } from "@smithers-orchestrator/protocol/gateway-rpc";
+import type { GatewayApprovalSummary } from "@smthrs/protocol/gateway-rpc";
 
 export type GatewayApprovalRow = GatewayApprovalSummary;

@@ -1,17 +1,7 @@
 /** @jsxImportSource react */
 import { useMemo } from "react";
-import {
-  createGatewayReactRoot,
-  useGatewayRun,
-  useGatewayRunEvents,
-  useGatewayRunTree,
-} from "smithers-orchestrator/gateway-react";
-import {
-  WorkflowGraph,
-  WorkflowUiShell,
-  WorkflowUiStyles,
-  type WorkflowSpecNode,
-} from "smithers-orchestrator/gateway-ui";
+import { createGatewayReactRoot, useGatewayRun, useGatewayRunEvents, useGatewayRunTree } from "smthrs/gateway-react";
+import { WorkflowGraph, WorkflowUiShell, WorkflowUiStyles, type WorkflowSpecNode } from "smthrs/gateway-ui";
 import {
   Badge,
   Card,
@@ -23,14 +13,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "smithers-orchestrator/ui";
-import {
-  approvalDecided,
-  computeMachineState,
-  eventReceived,
-  taskOutput,
-  timedOut,
-} from "smithers-orchestrator/xstate";
+} from "smthrs/ui";
+import { approvalDecided, computeMachineState, eventReceived, taskOutput, timedOut } from "smthrs/xstate";
 import {
   RELEASE_TRAIN_OUTPUTS,
   releaseTrainMachine,

@@ -5,7 +5,7 @@ import { createServer as createNetServer } from "node:net";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { createSmithers } from "../../../packages/smithers/src/create.js";
 import { createTempRepo, runSmithers, writeTestWorkflow } from "../../../packages/smithers/tests/e2e-helpers.js";
 import { canonicalWorkspacePath, gatewayRuntimePaths, writeGatewayRuntimeState } from "../src/gateway-runtime.js";
@@ -119,8 +119,8 @@ function seedConflictedWorkspace(repo) {
   repo.write(
     ".smithers/workflows/basic.tsx",
     [
-      "/** @jsxImportSource smithers-orchestrator */",
-      'import { createSmithers } from "smithers-orchestrator";',
+      "/** @jsxImportSource smthrs */",
+      'import { createSmithers } from "smthrs";',
       "",
       "const { Workflow, Task, UI, smithers } = createSmithers({});",
       "",
@@ -136,7 +136,7 @@ function seedConflictedWorkspace(repo) {
   repo.write(
     ".smithers/ui/basic.tsx",
     [
-      'import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";',
+      'import { createGatewayReactRoot } from "smthrs/gateway-react";',
       "",
       "createGatewayReactRoot(<main>Basic UI</main>);",
       "",
@@ -177,12 +177,12 @@ function seedConflictedWorkspace(repo) {
   );
 }
 
-function writeWorkflowWithUi(repo, key, label, declareUi = true) {
+function writeWorkflowWithUi(repo, key, label, declareUi = true, root = ".smithers") {
   repo.write(
-    `.smithers/workflows/${key}.tsx`,
+    `${root}/workflows/${key}.tsx`,
     [
-      "/** @jsxImportSource smithers-orchestrator */",
-      'import { createSmithers } from "smithers-orchestrator";',
+      "/** @jsxImportSource smthrs */",
+      'import { createSmithers } from "smthrs";',
       'import { z } from "zod";',
       "",
       "const { Workflow, Task, UI, smithers, outputs } = createSmithers({",
@@ -199,10 +199,10 @@ function writeWorkflowWithUi(repo, key, label, declareUi = true) {
     ].join("\n"),
   );
   repo.write(
-    `.smithers/ui/${key}.tsx`,
+    `${root}/ui/${key}.tsx`,
     [
       "/** @jsxImportSource react */",
-      'import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";',
+      'import { createGatewayReactRoot } from "smthrs/gateway-react";',
       "",
       `createGatewayReactRoot(<main>${label}</main>);`,
       "",
@@ -506,6 +506,46 @@ describe("smithers ui", () => {
     expect(`${result.stdout}\n${result.stderr}`).not.toContain("/workflows/audit?runId=run-late-authored");
   }, 60_000);
 
+  test("ui registers an explicit-path run's workflow from its recorded entry file (#1474)", async () => {
+    const repo = createTempRepo();
+    writeWorkflowWithUi(repo, "audit", "Audit UI");
+    // Authored OUTSIDE every registry dir: only the run row knows the entry file.
+    writeWorkflowWithUi(repo, "gtm-leads", "GTM Leads UI", true, "src");
+    const { env } = makeStateDirEnv();
+    const port = await findOpenPort();
+    const gateway = await startWorkspaceGateway(repo, port, env);
+
+    const run = await runSmithersAsync(["up", "src/workflows/gtm-leads.tsx", "--run-id", "run-explicit-path"], {
+      cwd: repo.dir,
+      env,
+      format: "json",
+    });
+    if (run.exitCode !== 0) {
+      throw new Error(
+        `Explicit-path fixture run failed. stdout=${JSON.stringify(run.stdout)} stderr=${JSON.stringify(run.stderr)}`,
+      );
+    }
+
+    const result = await runSmithersAsync(
+      ["ui", "run-explicit-path", "--port", String(port), "--no-autostart", "--no-open"],
+      {
+        cwd: repo.dir,
+        env,
+        format: "json",
+      },
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.json).toMatchObject({
+      opened: false,
+      url: `${gateway.base}/workflows/gtm-leads?runId=run-explicit-path`,
+      runId: "run-explicit-path",
+      workflow: "gtm-leads",
+    });
+    const ui = await fetch(`${gateway.base}/workflows/gtm-leads`);
+    expect(ui.status).toBe(200);
+    expect(await ui.text()).toContain('"workflowKey":"gtm-leads"');
+  }, 60_000);
+
   test("emits a JSON error envelope when no Gateway is reachable and autostart is disabled", async () => {
     const repo = createTempRepo();
     const port = await findOpenPort();
@@ -612,8 +652,8 @@ describe("smithers ui", () => {
     repo.write(
       ".smithers/workflows/basic.tsx",
       [
-        "/** @jsxImportSource smithers-orchestrator */",
-        'import { createSmithers, Workflow, Task, UI } from "smithers-orchestrator";',
+        "/** @jsxImportSource smthrs */",
+        'import { createSmithers, Workflow, Task, UI } from "smthrs";',
         'import { z } from "zod";',
         "",
         "const { smithers, outputs } = createSmithers({",

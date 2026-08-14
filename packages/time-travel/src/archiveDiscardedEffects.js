@@ -1,4 +1,4 @@
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./EffectBoundaryAttempt.ts").EffectBoundaryAttempt} EffectBoundaryAttempt */
 
 const JOURNAL_COLUMNS = [

@@ -67,7 +67,7 @@ OTLP HTTP exporters accept explicit headers or OTEL\_EXPORTER\_OTLP\_HEADERS for
 
 - `apps/observability/src/index.js` exports observability layers, metrics, logging, tracing, Prometheus helpers, agent trace helpers, and correlation utilities.
 - `apps/observability/docker-compose.otel.yml`, prometheus, tempo, loki, and collector configs ship the local stack assets.
-- `packages/smithers/src/index.js` re-exports observability through `smithers-orchestrator/observability`.
+- `packages/smithers/src/index.js` re-exports observability through `smthrs/observability`.
 
 ## Fixes and diffs
 

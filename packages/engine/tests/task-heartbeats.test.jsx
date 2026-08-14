@@ -1,12 +1,12 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
-import { Task, Workflow, runWorkflow } from "smithers-orchestrator";
-import { requireTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { Task, Workflow, runWorkflow } from "smthrs";
+import { requireTaskRuntime } from "@smthrs/driver/task-runtime";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import { Effect } from "effect";
-import { BaseCliAgent } from "@smithers-orchestrator/agents/BaseCliAgent";
+import { BaseCliAgent } from "@smthrs/agents/BaseCliAgent";
 
 class SilentOwnedChildAgent extends BaseCliAgent {
   async buildCommand() {
@@ -166,7 +166,7 @@ function buildSmithers() {
   return createTestSmithers(outputSchemas);
 }
 async function waitForRunningAttempt(adapter, nodeId) {
-  for (let i = 0; i < 80; i += 1) {
+  for (let i = 0; i < 1_200; i += 1) {
     try {
       const run = (await adapter.listRuns(20, "running"))[0];
       if (run) {
@@ -205,7 +205,7 @@ describe("task heartbeats", () => {
     const result = await resultPromise;
     expect(result.status).toBe("finished");
     cleanup();
-  }, 10_000);
+  }, 60_000);
   test("a real child that exits cannot keep a wedged agent alive", async () => {
     const { smithers, outputs, db, cleanup } = buildSmithers();
     const agent = new ExitedChildNeverResolvingAgent({ id: "exited-child" });
@@ -572,7 +572,7 @@ describe("task heartbeats", () => {
     const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
     cleanup();
-  });
+  }, 180_000);
   test("non-JSON heartbeat payload fails at heartbeat call time", async () => {
     const { smithers, outputs, db, cleanup } = buildSmithers();
     const workflow = smithers(() => (

@@ -12,9 +12,9 @@ Demonstrates literal output with no AI agent; for a version that uses an LLM age
 ## Source
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // workflows/hello.tsx
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, Task, smithers, outputs } = createSmithers({
@@ -40,7 +40,7 @@ export default smithers((ctx) => (
 ## Running
 
 ```bash
-bunx smithers-orchestrator up workflows/hello.tsx --input '{"name": "World"}'
+bunx smthrs up workflows/hello.tsx --input '{"name": "World"}'
 ```
 
 ```

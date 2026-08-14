@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
-import { addAccount } from "@smithers-orchestrator/accounts";
+import { addAccount } from "@smthrs/accounts";
 import { extractGeneratedDetectionProviderIds, generateAgentsTs } from "../src/agent-detection.js";
 import { createExecutableDir, writeFakeClaudeBinary } from "../../../packages/smithers/tests/e2e-helpers.js";
 
@@ -414,10 +414,10 @@ describe("generateAgentsTs (account-driven)", () => {
     const env = newSmithersHome();
     const generated = generateAgentsTs({ ...env, PATH: "/no-agent-binaries", OPENROUTER_API_KEY: "" });
     const active = uncommented(generated);
-    expect(generated).toContain('import { OpenAIAgent as SmithersOpenAIAgent } from "smithers-orchestrator";');
+    expect(generated).toContain('import { OpenAIAgent as SmithersOpenAIAgent } from "smthrs";');
     expect(generated).toContain("openrouter: createOpenRouterAgent()");
     expect(generated).toContain("//   claude: new SmithersClaudeCodeAgent(");
-    expect(generated).toContain('// import { CodexAgent as SmithersCodexAgent } from "smithers-orchestrator";');
+    expect(generated).toContain('// import { CodexAgent as SmithersCodexAgent } from "smthrs";');
     expect(generated).toContain('// export { CodexAgent } from "./agents/codex";');
     expect(generated).not.toMatch(/^\/\/ $/m);
     expect(active).toContain("smart: [\n    providers.openrouter,");

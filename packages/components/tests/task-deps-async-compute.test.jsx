@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * Regression tests for #1415.
  *
@@ -12,8 +12,8 @@
  * callback runs exactly once, at execution time, and is awaited.
  */
 import { describe, expect, test } from "bun:test";
-import { SmithersCtx } from "@smithers-orchestrator/react-reconciler/context";
-import { renderFrame, runWorkflow } from "smithers-orchestrator";
+import { SmithersCtx } from "@smthrs/react-reconciler/context";
+import { renderFrame, runWorkflow } from "smthrs";
 import { createTestSmithers } from "./helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";

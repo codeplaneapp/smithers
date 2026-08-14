@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { simulate } from "smithers-orchestrator/testing";
+import { simulate } from "smthrs/testing";
 import { gradeUi, verifyGatewayUi } from "../workflows/create-ui.tsx";
 
 const target = "create-ui-gate-fixture";
@@ -9,8 +9,8 @@ const uiPath = `.smithers/ui/${target}.tsx`;
 let server: ReturnType<typeof Bun.serve> | undefined;
 
 const compliantSource = `/** @jsxImportSource react */
-import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";
-import { WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
+import { createGatewayReactRoot } from "smthrs/gateway-react";
+import { WorkflowUiShell } from "smthrs/gateway-ui";
 function App() { return <WorkflowUiShell title="Fixture" />; }
 createGatewayReactRoot(<App />);
 `;

@@ -1,0 +1,12 @@
+{
+  "codec": "nanocodex.session-snapshot",
+  "version": 1,
+  "payload": {
+    "bridgeProtocolVersion": 1,
+    "nanocodexVersion": "0.3.0",
+    "snapshotVersion": 1,
+    "canonicalWorkspace": "/workspace",
+    "policyFingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "nanocodexSnapshot": {}
+  }
+}

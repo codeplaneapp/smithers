@@ -1,6 +1,6 @@
 {
-  "name": "@smithers-orchestrator/vercel",
-  "version": "0.32.0",
+  "name": "@smthrs/vercel",
+  "version": "0.34.0",
   "description": "Vercel Sandbox provider for Smithers: run durable workflow sandboxes on Vercel Sandbox compute",
   "type": "module",
   "sideEffects": false,
@@ -25,8 +25,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@smithers-orchestrator/errors": "workspace:*",
-    "@smithers-orchestrator/sandbox": "workspace:*"
+    "@smthrs/errors": "workspace:*",
+    "@smthrs/sandbox": "workspace:*"
   },
   "peerDependencies": {
     "@vercel/sandbox": "^2.0.0"

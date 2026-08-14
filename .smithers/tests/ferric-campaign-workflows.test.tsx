@@ -1,8 +1,8 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import "../preload.ts";
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { renderWorkflow } from "smithers-orchestrator/testing";
+import { renderWorkflow } from "smthrs/testing";
 import { publishMarkerPath } from "../components/ferric/PublishPipeline";
 import { parseQueueRows } from "../components/ferric/QueueParse";
 import { ferricSchemas } from "../components/ferric/ferricSchemas";

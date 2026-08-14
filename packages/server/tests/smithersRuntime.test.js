@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Context, Effect, Fiber } from "effect";
-import { smithersTraceSpanStorage } from "@smithers-orchestrator/observability/_smithersTraceSpanStorage";
+import { smithersTraceSpanStorage } from "@smthrs/observability/_smithersTraceSpanStorage";
 import { runFork, runPromise, runSync } from "../src/smithersRuntime.js";
 
 describe("smithersRuntime", () => {

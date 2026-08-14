@@ -73,7 +73,7 @@ export function normalizeProseLine(line: string): string {
   let out = line;
   for (const [re, tok] of HYPHENATED) out = out.replace(re, tok);
   return out.replace(/`([^`]+)`/g, (whole, inner) => {
-    if (!/smithers-orchestrator\s/.test(inner) || isPathOrUrlContext(inner)) return whole;
+    if (!/smthrs\s/.test(inner) || isPathOrUrlContext(inner)) return whole;
     const fixed = normalizeCommand(inner);
     return fixed === inner ? whole : `\`${fixed}\``;
   });

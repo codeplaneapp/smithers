@@ -6,11 +6,11 @@
  * Pattern: telemetry collectors → comparator → judge agent → deploy control plane.
  * Use cases: canary deployments, progressive delivery, deployment safety gates.
  */
-import { Sequence, Parallel } from "smithers-orchestrator";
+import { Sequence, Parallel } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import CollectStablePrompt from "./prompts/canary-judge/collect-stable.mdx";
 import CollectCanaryPrompt from "./prompts/canary-judge/collect-canary.mdx";

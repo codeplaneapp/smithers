@@ -4,11 +4,11 @@
  * Pattern: Shepherd a PR through its full lifecycle to merge.
  * Use cases: automated PR merging, PR finalization, CI-gated merge.
  */
-import { Sequence, Loop } from "smithers-orchestrator";
+import { Sequence, Loop } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { bash, read, grep } from "smithers-orchestrator/tools";
+import { bash, read, grep } from "smthrs/tools";
 import { z } from "zod";
 import RebasePrompt from "./prompts/pr-lifecycle/rebase.mdx";
 import ReviewPrompt from "./prompts/pr-lifecycle/review.mdx";

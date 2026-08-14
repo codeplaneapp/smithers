@@ -2,7 +2,7 @@
 
 GitHub: https://github.com/smithersai/smithers/issues/622
 
-**Severity:** Low · **Feature:** `@smithers-orchestrator/ui` · **File:** `packages/ui/src/status.ts:16` and `:66`
+**Severity:** Low · **Feature:** `@smthrs/ui` · **File:** `packages/ui/src/status.ts:16` and `:66`
 
 ## Problem
 The centralized status vocabulary (new single source of truth, re-exported by `gateway-ui`) omits several **canonical run states**, so they render as neutral/benign tints:
@@ -16,7 +16,7 @@ Canonical vocab for reference:
 - `RunState` (derived): `… paused, recovering, stale, orphaned, failed, cancelled, succeeded, unknown`
 
 ## Why low
-Latent today: `isTerminalRunStatus` from this package has no active in-repo call site (only re-exports); `statusClass` only hits the raw-status path via `StatusPill`; and it is not a regression (matches the prior per-copy vocab that was consolidated). But these are **public** `@smithers-orchestrator/ui` helpers, so the gap will bite external consumers and any future call site that feeds derived state.
+Latent today: `isTerminalRunStatus` from this package has no active in-repo call site (only re-exports); `statusClass` only hits the raw-status path via `StatusPill`; and it is not a regression (matches the prior per-copy vocab that was consolidated). But these are **public** `@smthrs/ui` helpers, so the gap will bite external consumers and any future call site that feeds derived state.
 
 ## Suggested fix
 Enumerate the full `RunStatus` + derived `RunState` vocabulary in `statusClass`, `formatStatus`, and `TERMINAL_STATUSES` (map `stale`/`orphaned`→bad, `recovering`→warn, `continued`/`succeeded`→ok+terminal, `cancelled`→bad/terminal). Add tests covering every canonical state.

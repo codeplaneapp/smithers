@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // The generic fluency-eval engine. Every suite is a thin wrapper:
 //
 //   import { createFluencyEval } from "../../lib/eval-kit";
@@ -7,7 +7,7 @@
 // One candidate <Task> (weak model under test) → one verify step (deterministic
 // compute child, or a judge <Task> on a sota model). The candidate self-reports
 // oneShot + friction; the verifier sets the hard `passed` the case asserts on.
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { EVAL_DB_PATH } from "./paths.js";
 import { resolveCandidate, resolveJudge } from "./model-matrix.js";
@@ -107,7 +107,7 @@ const DEFAULT_TASK = "Describe the Smithers task to one-shot.";
 const DOCS_PREAMBLE =
   "You are an AI agent using Smithers (a durable control plane for coding agents) for a real task. " +
   "The Smithers docs and skill ARE available to you — consult them, do not rely on memory:\n" +
-  "  • `bunx smithers-orchestrator docs` / `docs-full` print the LLM docs bundle\n" +
+  "  • `bunx smthrs docs` / `docs-full` print the LLM docs bundle\n" +
   "  • skills/smithers/SKILL.md and skills/smithers/llms-full.txt\n" +
   "  • docs/llms-core.txt and the docs/llms-*.txt topic fragments\n" +
   "Ground your answer in those docs. If something you need is missing, unclear, or wrong in the docs, " +
@@ -128,8 +128,8 @@ function artifactContract(kind: VerifyKind): string {
     return [
       "Deliverable: put a COMPLETE, self-contained Smithers workflow file in `artifact` (artifactKind: workflow-tsx).",
       "Requirements that make it verifiable:",
-      "  • It MUST start with the pragma: /** @jsxImportSource smithers-orchestrator */",
-      "  • Import everything from 'smithers-orchestrator' (and 'zod' for schemas).",
+      "  • It MUST start with the pragma: /** @jsxImportSource smthrs */",
+      "  • Import everything from 'smthrs' (and 'zod' for schemas).",
       "  • Construct any agent INLINE (e.g. new ClaudeCodeAgent({ model: 'claude-sonnet-5' })).",
       "  • Do NOT import project-relative paths like '../agents' or '../prompts/*.mdx' — it must stand alone.",
       "  • It must render with `smithers graph` (a valid <Workflow> tree with typed <Task> outputs).",
@@ -143,12 +143,12 @@ function artifactContract(kind: VerifyKind): string {
       "Deliverable: put a COMPLETE, self-contained custom workflow UI bundle in `artifact` (artifactKind: ui-tsx). One file.",
       "Requirements:",
       "  • Start with the pragma: /** @jsxImportSource react */",
-      "  • Mount with createGatewayReactRoot(<App />) from 'smithers-orchestrator/gateway-react' and read the run to scope to from `?runId` in location.search. Handle loading / empty / error states.",
+      "  • Mount with createGatewayReactRoot(<App />) from 'smthrs/gateway-react' and read the run to scope to from `?runId` in location.search. Handle loading / empty / error states.",
       "  • Compose from the shipped component libraries BEFORE hand-rolling markup — a hand-rolled version of a shipped component is a wrong answer:",
-      "      - 'smithers-orchestrator/gateway-ui' run-shaped widgets (self-connecting): SimpleWorkflowDashboard, WorkflowUiShell, RunList, RunTree, RunEventLog, NodeChatStream, NodeOutputView, ApprovalPanel, LaunchButton, MonitorButton, WorkflowPicker, ConnectionBadge, StatusPill",
-      "      - Include a MonitorButton (from 'smithers-orchestrator/gateway-ui') in the UI so operators can open the Smithers Monitor deep-linked to the current run.",
-      "      - 'smithers-orchestrator/ui' primitives: Button, Card, Input, Tabs, Dialog, Table, KpiStat, EmptyState, ChatTranscript, ChatComposer, DiffHunks, StageStrip, FileTree, Markdown (plus MarkdownEditor via 'smithers-orchestrator/ui/adapters/markdown-editor', Terminal via 'smithers-orchestrator/ui/adapters/terminal')",
-      "      - 'smithers-orchestrator/gateway-react' hooks for bespoke panes the widgets don't cover: useGatewayRun, useGatewayRunEvents, useGatewayNodeOutput, useGatewayApprovals, useGatewayActions, useGatewayRuns",
+      "      - 'smthrs/gateway-ui' run-shaped widgets (self-connecting): SimpleWorkflowDashboard, WorkflowUiShell, RunList, RunTree, RunEventLog, NodeChatStream, NodeOutputView, ApprovalPanel, LaunchButton, MonitorButton, WorkflowPicker, ConnectionBadge, StatusPill",
+      "      - Include a MonitorButton (from 'smthrs/gateway-ui') in the UI so operators can open the Smithers Monitor deep-linked to the current run.",
+      "      - 'smthrs/ui' primitives: Button, Card, Input, Tabs, Dialog, Table, KpiStat, EmptyState, ChatTranscript, ChatComposer, DiffHunks, StageStrip, FileTree, Markdown (plus MarkdownEditor via 'smthrs/ui/adapters/markdown-editor', Terminal via 'smthrs/ui/adapters/terminal')",
+      "      - 'smthrs/gateway-react' hooks for bespoke panes the widgets don't cover: useGatewayRun, useGatewayRunEvents, useGatewayNodeOutput, useGatewayApprovals, useGatewayActions, useGatewayRuns",
       "  • It must be valid TSX that transpiles. Do not invent hooks, components, or props that don't exist.",
     ].join("\n");
   }
@@ -158,14 +158,14 @@ function artifactContract(kind: VerifyKind): string {
       "This UI will be booted in a REAL browser against a REAL run and graded on OBSERVED behavior, not just source. It must actually work.",
       "Requirements:",
       "  • Start with the pragma: /** @jsxImportSource react */",
-      "  • Import from 'smithers-orchestrator/gateway-react': createGatewayReactRoot, useGatewayRun, useGatewayRunEvents, useGatewayNodeOutput, useGatewayApprovals, useGatewayActions.",
+      "  • Import from 'smthrs/gateway-react': createGatewayReactRoot, useGatewayRun, useGatewayRunEvents, useGatewayNodeOutput, useGatewayApprovals, useGatewayActions.",
       "  • Read the run to scope to from `?runId` in location.search.",
       "  • Show the run's live STATUS (from useGatewayRun().data.status).",
       "  • Stream and render the LIVE EVENTS from useGatewayRunEvents(runId, { afterSeq: 0 }). Each frame is { event: string, payload: { nodeId, error, ... } } — surface EVERY task node (plan, build, flaky, report), not just one.",
       "  • Render the 'report' node's OUTPUT via useGatewayNodeOutput({ runId, nodeId: 'report', iteration: 0 }).",
       "  • SURFACE THE FAILED NODE: the 'flaky' task fails — show its failed state and error message (NodeFailed frames carry payload.error).",
       "  • Show PENDING APPROVALS from useGatewayApprovals({ filter: { runId } }) with a working Approve button that calls useGatewayActions().submitApproval({ runId, nodeId, approved: true }).",
-      "  • Include the monitor-open affordance: a MonitorButton from 'smithers-orchestrator/gateway-ui' that deep-links this run into the Smithers Monitor.",
+      "  • Include the monitor-open affordance: a MonitorButton from 'smthrs/gateway-ui' that deep-links this run into the Smithers Monitor.",
       "  • Mount with createGatewayReactRoot(<App />). Handle loading / empty / error states. Do not invent hooks or props that don't exist.",
     ].join("\n");
   }
@@ -225,8 +225,8 @@ function qualityPrompt(
   functional?: { renderedText?: string; features?: Record<string, boolean>; passed?: boolean },
 ): string {
   const lines = [
-    "You rate a Smithers custom workflow UI bundle (React + smithers-orchestrator/gateway-react).",
-    "Score 0-1 on: correct use of createGatewayReactRoot + the gateway hooks (useGatewayRun/RunEvents/NodeOutput/Approvals/Actions/Runs); handling of loading/empty/error states; scoping to the ?runId in location.search; clean component structure; sensible layout/UX and basic accessibility; whether it includes the monitor-open affordance (a MonitorButton from smithers-orchestrator/gateway-ui deep-linking the run into the Smithers Monitor); and absence of obvious bugs or invented APIs.",
+    "You rate a Smithers custom workflow UI bundle (React + smthrs/gateway-react).",
+    "Score 0-1 on: correct use of createGatewayReactRoot + the gateway hooks (useGatewayRun/RunEvents/NodeOutput/Approvals/Actions/Runs); handling of loading/empty/error states; scoping to the ?runId in location.search; clean component structure; sensible layout/UX and basic accessibility; whether it includes the monitor-open affordance (a MonitorButton from smthrs/gateway-ui deep-linking the run into the Smithers Monitor); and absence of obvious bugs or invented APIs.",
   ];
   if (functional) {
     lines.push(

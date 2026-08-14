@@ -30,8 +30,8 @@ function createExampleProject() {
     },
   });
   const modulesDir = join(dir, "node_modules");
-  symlinkDir(resolve(REPO_ROOT, "packages/smithers"), join(modulesDir, "smithers-orchestrator"));
-  symlinkDir(resolve(REPO_ROOT, "node_modules/@smithers-orchestrator"), join(modulesDir, "@smithers-orchestrator"));
+  symlinkDir(resolve(REPO_ROOT, "packages/smithers"), join(modulesDir, "smthrs"));
+  symlinkDir(resolve(REPO_ROOT, "node_modules/@smthrs"), join(modulesDir, "@smthrs"));
   symlinkDir(resolve(REPO_ROOT, "node_modules/react"), join(modulesDir, "react"));
   symlinkDir(resolve(REPO_ROOT, "node_modules/react-dom"), join(modulesDir, "react-dom"));
   symlinkDir(resolve(REPO_ROOT, "node_modules/zod"), join(modulesDir, "zod"));

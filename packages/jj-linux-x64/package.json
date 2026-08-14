@@ -1,7 +1,7 @@
 {
-  "name": "@smithers-orchestrator/jj-linux-x64",
-  "version": "0.32.0",
-  "description": "Vendored jj (Jujutsu) binary for linux-x64, used by @smithers-orchestrator/vcs. Installed automatically as an optional dependency; not meant to be depended on directly.",
+  "name": "@smthrs/jj-linux-x64",
+  "version": "0.34.0",
+  "description": "Vendored jj (Jujutsu) binary for linux-x64, used by @smthrs/vcs. Installed automatically as an optional dependency; not meant to be depended on directly.",
   "license": "Apache-2.0",
   "os": [
     "linux"

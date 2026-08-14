@@ -1,9 +1,9 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { createSmithers, HumanTask, Parallel, Signal, Timer } from "smithers-orchestrator";
+import { createSmithers, HumanTask, Parallel, Signal, Timer } from "smthrs";
 import { coverWorkflow, expectFullCoverage, fakeAgent, WorkflowCoverageError } from "../src/index.ts";
-import { coverWorkflow as shippedCoverWorkflow } from "@smithers-orchestrator/testing";
+import { coverWorkflow as shippedCoverWorkflow } from "@smthrs/testing";
 
 const valueSchema = z.object({ value: z.string() });
 

@@ -10,7 +10,7 @@ The Effect-based persistence layer behind the memory package:
   `@vectorize-io/hindsight-client`, with exact records delegated to a
   transactional `MemoryStore`.
 - `MemoryStore.ts` is the full contract; `MemoryStore.js` is its type-export
-  shim; `index.js` is the subpath barrel (`@smithers-orchestrator/memory/store`).
+  shim; `index.js` is the subpath barrel (`@smthrs/memory/store`).
 
 Every operation exists twice: an Effect variant (`*Effect`, typed errors as
 `SmithersError` with `DB_QUERY_FAILED`/`DB_WRITE_FAILED` codes, a

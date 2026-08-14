@@ -2,7 +2,7 @@ import { claudeMirrorContract } from "./claudeMirrorContract.js";
 import { isTerminalClaudeMirrorRunStatus } from "./isTerminalClaudeMirrorRunStatus.js";
 import { readClaudeMirrorSubscriptions } from "./readClaudeMirrorSubscriptions.js";
 import { removeClaudeMirrorSubscription } from "./removeClaudeMirrorSubscription.js";
-import { isPidAlive, parseRuntimeOwnerPid } from "@smithers-orchestrator/engine/runtime-owner";
+import { isPidAlive, parseRuntimeOwnerPid } from "@smthrs/engine/runtime-owner";
 
 const RUN_SCAN_LIMIT = 50;
 const EVENT_PAGE_SIZE = 200;

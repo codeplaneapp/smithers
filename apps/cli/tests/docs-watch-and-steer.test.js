@@ -12,7 +12,7 @@ function readRepoFile(path) {
 test("watch-and-steer guide only documents in-scope UI surfaces", () => {
   const guide = readRepoFile("docs/guide/watch-and-steer.mdx");
 
-  expect(guide).toContain("bunx smithers-orchestrator ui");
+  expect(guide).toContain("bunx smthrs ui");
   expect(guide).toContain("Smithers workflow UI surface");
   expect(guide).toContain("no GUI required");
   expect(guide).toContain("not a GUI");

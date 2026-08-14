@@ -1,6 +1,6 @@
 {
-  "name": "@smithers-orchestrator/graph",
-  "version": "0.32.0",
+  "name": "@smthrs/graph",
+  "version": "0.34.0",
   "description": "Framework-neutral Smithers workflow graph model and extraction helpers",
   "type": "module",
   "sideEffects": false,
@@ -40,7 +40,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@smithers-orchestrator/errors": "workspace:*",
+    "@smthrs/errors": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "zod": "^4.4.3"
   },

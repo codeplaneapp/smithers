@@ -2,6 +2,17 @@
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./BaseCliAgent/AgentGenerateOptions.ts").AgentGenerateOptions} AgentGenerateOptions */
 /** @typedef {import("./AgentLike.ts").AgentLike} AgentLike */
+/** @typedef {import("./AgentCheckpoint.ts").AgentCheckpoint} AgentCheckpoint */
+/** @typedef {import("./AgentCheckpoint.ts").AgentCheckpointCapability} AgentCheckpointCapability */
+/** @typedef {import("./AgentCheckpoint.ts").AgentCheckpointFormat} AgentCheckpointFormat */
+/** @typedef {import("./AgentCheckpoint.ts").AgentCheckpointJsonArray} AgentCheckpointJsonArray */
+/** @typedef {import("./AgentCheckpoint.ts").AgentCheckpointJsonObject} AgentCheckpointJsonObject */
+/** @typedef {import("./AgentCheckpoint.ts").AgentCheckpointJsonPrimitive} AgentCheckpointJsonPrimitive */
+/** @typedef {import("./AgentCheckpoint.ts").AgentCheckpointJsonValue} AgentCheckpointJsonValue */
+/** @typedef {import("./AgentCheckpoint.ts").AgentCheckpointMode} AgentCheckpointMode */
+/** @typedef {import("./AgentCheckpoint.ts").AgentCheckpointPublisher} AgentCheckpointPublisher */
+/** @typedef {import("./AgentCheckpoint.ts").AgentCheckpointResult} AgentCheckpointResult */
+/** @typedef {import("./BaseCliAgent/AgentGenerateOptions.ts").AgentCheckpointContinuationOptions} AgentCheckpointContinuationOptions */
 /** @typedef {import("./capability-registry/AgentToolDescriptor.ts").AgentToolDescriptor} AgentToolDescriptor */
 /**
  * @template [CALL_OPTIONS=never]
@@ -27,11 +38,20 @@
 /** @typedef {import("./OpenCodeAgentOptions.ts").OpenCodeAgentOptions} OpenCodeAgentOptions */
 /** @typedef {import("./PoolAgentOptions.ts").PoolAgentOptions} PoolAgentOptions */
 /** @typedef {import("./VibeAgentOptions.ts").VibeAgentOptions} VibeAgentOptions */
+/** @typedef {import("./FallbackAgentsOptions.ts").FallbackAgentsOptions} FallbackAgentsOptions */
+/** @typedef {import("./FallbackAgentsOptions.ts").FallbackAgentProvider} FallbackAgentProvider */
+/** @typedef {import("./NanocodexAgentOptions.ts").NanocodexAgentOptions} NanocodexAgentOptions */
+/** @typedef {import("./NanocodexAgentOptions.ts").NanocodexGenerateOptions} NanocodexGenerateOptions */
+/** @typedef {import("./NanocodexAgentOptions.ts").NanocodexAuth} NanocodexAuth */
+/** @typedef {import("./NanocodexAgentOptions.ts").NanocodexThinking} NanocodexThinking */
+/** @typedef {import("./NanocodexAgentOptions.ts").NanocodexReasoningMode} NanocodexReasoningMode */
 /** @typedef {import("./agent-contract/SmithersAgentContract.ts").SmithersAgentContract} SmithersAgentContract */
 /** @typedef {import("./agent-contract/SmithersAgentContractTool.ts").SmithersAgentContractTool} SmithersAgentContractTool */
 /** @typedef {import("./agent-contract/SmithersAgentToolCategory.ts").SmithersAgentToolCategory} SmithersAgentToolCategory */
 /** @typedef {import("./agent-contract/SmithersListedTool.ts").SmithersListedTool} SmithersListedTool */
 /** @typedef {import("./agent-contract/SmithersToolSurface.ts").SmithersToolSurface} SmithersToolSurface */
+/** @typedef {import("./agent-contract/AgentFileChange.ts").AgentFileChangeKind} AgentFileChangeKind */
+/** @typedef {import("./agent-contract/AgentFileChange.ts").AgentFileChange} AgentFileChange */
 /** @typedef {import("./cli-capabilities/CliAgentCapabilityAdapterId.ts").CliAgentCapabilityAdapterId} CliAgentCapabilityAdapterId */
 /** @typedef {import("./cli-capabilities/CliAgentCapabilityDoctorReport.ts").CliAgentCapabilityDoctorEntry} CliAgentCapabilityDoctorEntry */
 /** @typedef {import("./cli-capabilities/CliAgentCapabilityDoctorReport.ts").CliAgentCapabilityDoctorReport} CliAgentCapabilityDoctorReport */
@@ -60,6 +80,13 @@
 // @smithers-type-exports-end
 
 export { BaseCliAgent } from "./BaseCliAgent/index.js";
+export {
+  DEFAULT_AGENT_CHECKPOINT_MAX_BYTES,
+  agentProducesCheckpoint,
+  agentSupportsCheckpoint,
+  cloneAgentCheckpoint,
+  hashAgentCheckpointCapabilities,
+} from "./agent-checkpoint.js";
 export { hashCapabilityRegistry } from "./capability-registry/index.js";
 export { AnthropicAgent } from "./AnthropicAgent.js";
 export { OpenAIAgent } from "./OpenAIAgent.js";
@@ -79,6 +106,8 @@ export { KimiAgent } from "./KimiAgent.js";
 export { ForgeAgent } from "./ForgeAgent.js";
 export { OpenCodeAgent } from "./OpenCodeAgent.js";
 export { VibeAgent } from "./VibeAgent.js";
+export { fallbackAgents } from "./fallbackAgents.js";
+export { NanocodexAgent } from "./NanocodexAgent.js";
 export {
   getCliAgentCapabilityReport,
   getCliAgentCapabilityDoctorReport,

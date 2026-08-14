@@ -1,5 +1,8 @@
-import { DEFAULT_OPERATOR_UI_CLIENT_JS } from "./defaultOperatorUi.js";
+import { loadDefaultOperatorUiClientJs } from "./defaultOperatorUi.js";
 
+/**
+ * @returns {Promise<string>}
+ */
 export function renderDefaultConsoleClient() {
-  return DEFAULT_OPERATOR_UI_CLIENT_JS;
+  return loadDefaultOperatorUiClientJs();
 }

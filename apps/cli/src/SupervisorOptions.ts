@@ -1,4 +1,4 @@
-import type { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import type { SmithersDb } from "@smthrs/db/adapter";
 import type { ResumeTarget } from "./ResumeTarget.ts";
 
 export type SupervisorSpawnClaim = {

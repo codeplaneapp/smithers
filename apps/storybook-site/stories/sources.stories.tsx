@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { InlineCitation, Sources, Suggestion } from "@smithers-orchestrator/ui";
+import { InlineCitation, Sources, Suggestion } from "@smthrs/ui";
 
 const meta: Meta = {
   title: "Agentic/Sources & Citations",

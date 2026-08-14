@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildBuiltinRelaunch } from "./resume-target.js";
 import { resolveDetachedRunLogFile } from "./resolveDetachedRunLogFile.js";
+import { smithersRuntimeSpawn } from "./node-loader/smithersRuntimeSpawn.js";
 
 /** @typedef {import("./SupervisorOptions.ts").SupervisorSpawnClaim} SupervisorSpawnClaim */
 /** @typedef {import("./ResumeTarget.ts").ResumeTarget} ResumeTarget */
@@ -53,9 +54,10 @@ export function buildResumeArgs(target, runId) {
  * @param {string | ResumeTarget} targetOrWorkflowPath
  * @param {string} runId
  * @param {SupervisorSpawnClaim} [claim]
+ * @param {{ executable?: string }} [options]
  * @returns {number | null}
  */
-export function resumeRunDetached(targetOrWorkflowPath, runId, claim) {
+export function resumeRunDetached(targetOrWorkflowPath, runId, claim, options = {}) {
   const target = normalizeResumeTarget(targetOrWorkflowPath);
   const cliPath = fileURLToPath(new URL("./index.js", import.meta.url));
   const args = [cliPath, ...buildResumeArgs(target, runId)];
@@ -87,7 +89,8 @@ export function resumeRunDetached(targetOrWorkflowPath, runId, claim) {
     logFd = null;
   }
   try {
-    const child = spawn("bun", args, {
+    const runtime = options.executable ? { command: options.executable, args } : smithersRuntimeSpawn(args);
+    const child = spawn(runtime.command, runtime.args, {
       cwd,
       stdio: logFd === null ? "ignore" : ["ignore", logFd, logFd],
       env: process.env,

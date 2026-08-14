@@ -26,7 +26,7 @@
   <text font-size="24" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#6B7280"><tspan x="736" y="614">insertions</tspan></text>
 
   <rect x="96" y="686" width="720" height="72" rx="10" fill="#141826" stroke="#232838" stroke-width="2"/>
-  <text x="126" y="731" font-size="27" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#4C8DFF">bunx smithers-orchestrator@latest init</text>
+  <text x="126" y="731" font-size="27" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#4C8DFF">bunx smthrs@latest init</text>
 
   <rect x="96" y="812" width="16" height="16" rx="4" fill="#4C8DFF"/>
   <text x="124" y="826" font-size="26" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#6B7280">smithers.sh</text>

@@ -1,7 +1,7 @@
 /** @jsxImportSource react */
 // n8n-style workflow graph: ReactFlow renders the canvas, dagre computes a
 // left-to-right layout, and each node paints the shared canvas anatomy from
-// @smithers-orchestrator/ui (WorkflowNode card + StatusPill status vocabulary)
+// @smthrs/ui (WorkflowNode card + StatusPill status vocabulary)
 // via SmithersCanvasNode. Ported from the Smithers create-workflow UI's
 // `cw-graph` into a generic, props-driven gateway-ui component — feed it a
 // WorkflowSpecNode[] and it draws the DAG. The graph composes the shared
@@ -30,7 +30,7 @@ import {
   type NodeTypes,
 } from "@xyflow/react";
 import dagre from "dagre";
-import { EmptyState, WorkflowCanvas } from "@smithers-orchestrator/ui";
+import { EmptyState, WorkflowCanvas } from "@smthrs/ui";
 import {
   ensureGatewayUiStyles,
   resolveTheme,
@@ -46,7 +46,7 @@ export { SmithersCanvasNode, SmithersNodeHandles };
 
 /**
  * @deprecated The default `smithersTask` renderer now composes the shared
- * @smithers-orchestrator/ui canvas anatomy; this alias of
+ * @smthrs/ui canvas anatomy; this alias of
  * {@link SmithersCanvasNode} keeps the old import path working. The legacy
  * inline-styled card (kind kicker + hardcoded status dot) is gone — statuses
  * flow through the shared status vocabulary instead.
@@ -58,7 +58,7 @@ export type NodeKind = "agent" | "compute" | "approval" | "merge" | "loop" | "br
 /**
  * @deprecated The common status subset, kept for compatibility. Node statuses
  * accept any string and resolve through the shared
- * @smithers-orchestrator/ui status vocabulary (`statusClass`/`formatStatus`).
+ * @smthrs/ui status vocabulary (`statusClass`/`formatStatus`).
  */
 export type FlowNodeStatus = "running" | "done" | "failed" | "pending";
 
@@ -274,7 +274,7 @@ function WorkflowGraphImpl({
  * An n8n-style workflow DAG canvas. Feed it a {@link WorkflowSpecNode} array and
  * it lays the graph out with dagre ({@link workflowToFlow}) and renders each node
  * as a {@link SmithersCanvasNode} card — the shared
- * @smithers-orchestrator/ui canvas anatomy, inside the shared `WorkflowCanvas`
+ * @smthrs/ui canvas anatomy, inside the shared `WorkflowCanvas`
  * region, with statuses piped through the shared status vocabulary. Read-only
  * by default (nodes are not draggable, connectable, or deletable, but remain
  * keyboard-focusable with visible focus and accessible names) and generic —

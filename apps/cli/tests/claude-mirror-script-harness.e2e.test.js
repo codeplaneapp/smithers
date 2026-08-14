@@ -18,8 +18,8 @@ const SCRIPT_PATH = resolve(import.meta.dir, "../../../claude-plugin/workflows/s
 const CLI_ENTRY = resolve(import.meta.dir, "../src/index.js");
 
 const FANOUT_WORKFLOW = `
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Parallel, Task, Workflow, Sequence } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, Parallel, Task, Workflow, Sequence } from "smthrs";
 import { z } from "zod";
 
 const { smithers, outputs } = createSmithers({
@@ -64,9 +64,9 @@ function loadScriptBody() {
 
 /** @param {string} command @param {string} cwd */
 function execMirrorCommand(command, cwd) {
-  // The script targets `bunx smithers-orchestrator`; tests run the same CLI
+  // The script targets `bunx smthrs`; tests run the same CLI
   // from the workspace so they exercise the code under review, not npm.
-  const localized = command.replaceAll("bunx smithers-orchestrator", `bun ${CLI_ENTRY}`);
+  const localized = command.replaceAll("bunx smthrs", `bun ${CLI_ENTRY}`);
   const result = spawnSync("bash", ["-c", localized], {
     cwd,
     encoding: "utf8",
@@ -137,8 +137,13 @@ function harnessAgent(state) {
   };
 }
 
-/** @param {{ dir: string }} repo @param {any} args */
-async function runMirrorScript(repo, args) {
+/**
+ * @param {{ dir: string }} repo
+ * @param {any} args
+ * @param {(base: Function) => Function} [decorateAgent] wrap the harness agent,
+ *   e.g. to simulate an agent() call dying on a terminal API error (null).
+ */
+async function runMirrorScript(repo, args, decorateAgent) {
   const state = { cwd: repo.dir, calls: [], phases: [], logs: [] };
   const AsyncFunction = (async () => {}).constructor;
   const body = new AsyncFunction(
@@ -164,8 +169,9 @@ async function runMirrorScript(repo, args) {
     }
     return results;
   };
+  const baseAgent = harnessAgent(state);
   const result = await body(
-    harnessAgent(state),
+    decorateAgent ? decorateAgent(baseAgent) : baseAgent,
     parallel,
     pipeline,
     (title) => state.phases.push(title),
@@ -226,6 +232,51 @@ describe("smithers-run.mjs mirror script (harness, real run)", () => {
     expect(labels).toContain("audit-beta");
     const auditCall = state.calls.find((call) => call.label === "audit-alpha");
     expect(auditCall.phase).toBe("Audit");
+    expect(state.logs.some((line) => line.includes("Mirror complete"))).toBe(true);
+  }, 90_000);
+
+  test("a transient null tick (agent died on an API error) retries instead of stopping the mirror", async () => {
+    const repo = createTempRepo();
+    pinSqliteBackend(repo.dir);
+    repo.write("workflow.tsx", FANOUT_WORKFLOW);
+
+    const runId = "mirror-harness-nulltick";
+    const up = runSmithers(["up", "workflow.tsx", "--detach", "--run-id", runId], {
+      cwd: repo.dir,
+      format: "json",
+      timeoutMs: 120_000,
+    });
+    expect(up.exitCode, `${up.stdout}\n${up.stderr}`).toBe(0);
+    for (let index = 0; index < 100; index += 1) {
+      const probe = runSmithers(["claude", "tick", runId], { cwd: repo.dir, format: "json" });
+      if (probe.exitCode === 0 && probe.json && TERMINAL.has(probe.json.status)) {
+        break;
+      }
+      Bun.sleepSync(150);
+    }
+
+    // The first tick agent dies the way the Workflow runtime reports a
+    // terminal API error: agent() resolves to null. The mirror must retry
+    // (the run did not change state), not stop.
+    let nulledTicks = 0;
+    const { result, state } = await runMirrorScript(
+      repo,
+      { runId, cwd: repo.dir, mirrorAllNodes: true },
+      (base) =>
+        async (prompt, opts = {}) => {
+          if (nulledTicks === 0 && /^tick #\d+/.test(String(opts.label))) {
+            nulledTicks += 1;
+            return null;
+          }
+          return base(prompt, opts);
+        },
+    );
+
+    expect(nulledTicks).toBe(1);
+    expect(result.runId).toBe(runId);
+    expect(result.status).toBe("finished");
+    expect(result.mirrored).toBeGreaterThanOrEqual(3);
+    expect(state.logs.some((line) => line.includes("failed (transient API error); retrying"))).toBe(true);
     expect(state.logs.some((line) => line.includes("Mirror complete"))).toBe(true);
   }, 90_000);
 

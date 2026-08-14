@@ -4,7 +4,7 @@ import { WebhookRequest } from '../core/EventSourceTypes.js';
 import './LinearConfig.js';
 import '../core/CursorStoreTypes.js';
 import 'effect';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 
 /**
  * Verify a Linear webhook request: `Linear-Signature` is the HMAC-SHA256

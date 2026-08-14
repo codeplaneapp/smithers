@@ -1,4 +1,4 @@
-import type { SandboxProvider, SandboxProviderRequest, SandboxProviderResult } from "@smithers-orchestrator/sandbox";
+import type { SandboxProvider, SandboxProviderRequest, SandboxProviderResult } from "@smthrs/sandbox";
 
 export const GCP_SANDBOX_PROVIDER_ID: "gcp-sandbox";
 

@@ -24,7 +24,7 @@ const FIXTURES = [
 ];
 
 function cli(args: string[]): { code: number; out: string } {
-  const res = spawnSync("bunx", ["smithers-orchestrator", ...args], { encoding: "utf8" });
+  const res = spawnSync("bunx", ["smthrs", ...args], { encoding: "utf8" });
   return { code: res.status ?? 1, out: `${res.stdout ?? ""}${res.stderr ?? ""}` };
 }
 

@@ -1,4 +1,4 @@
-import type { HostNode } from "@smithers-orchestrator/graph/types";
+import type { HostNode } from "@smthrs/graph/types";
 
 export type HostContainer = {
   root: HostNode | null;

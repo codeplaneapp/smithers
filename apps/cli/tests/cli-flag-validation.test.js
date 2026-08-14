@@ -161,6 +161,17 @@ describe("documented negated boolean flags parse", () => {
     expect(all).not.toContain("Unknown flag");
   }, 30_000);
 
+  test("retry-task -d/--detach parses (not rejected as Unknown flag)", () => {
+    const repo = createTempRepo();
+    writeFlagWorkflow(repo);
+    const result = runSmithers(["retry-task", "workflow.tsx", "--run-id", "missing-run", "--node-id", "x", "-d"], {
+      cwd: repo.dir,
+      format: null,
+    });
+    const all = `${result.stdout}\n${result.stderr}`;
+    expect(all).not.toContain("Unknown flag");
+  }, 30_000);
+
   test("retry-task --accept-workflow-change parses (not rejected as Unknown flag)", () => {
     const repo = createTempRepo();
     writeFlagWorkflow(repo);

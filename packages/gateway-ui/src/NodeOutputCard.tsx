@@ -1,7 +1,7 @@
 /** @jsxImportSource react */
 import { useInsertionEffect, type CSSProperties, type ReactNode } from "react";
-import { useGatewayNodeOutput } from "@smithers-orchestrator/gateway-react";
-import { AgentOutput, parseAgentOutput } from "@smithers-orchestrator/ui";
+import { useGatewayNodeOutput } from "@smthrs/gateway-react";
+import { AgentOutput, parseAgentOutput } from "@smthrs/ui";
 import { formatOutput, unwrapNodeOutput, type NodeOutputStatus } from "./NodeOutputView";
 import { ensureGatewayUiStyles, theme } from "./theme";
 

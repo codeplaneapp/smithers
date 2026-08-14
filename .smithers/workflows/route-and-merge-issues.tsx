@@ -37,8 +37,8 @@
 //     --max-concurrency 24 --run-id issue-merge --input '{"maxConcurrency":24}'
 // Validate on a couple of issues first:
 //   ... --input '{"numbers":[611,612],"defaultStrategy":"fable-sandwich"}'
-/** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { ClaudeCodeAgent, createSmithers } from "smthrs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
@@ -529,9 +529,9 @@ function selfWorkflowPrompt(item: WorkItem, feedback: string) {
     "",
     "Do this in order:",
     `1. DESIGN: read the issue + comments, research the code, and design a small workflow graph that fixes THIS issue (typical shape: plan task → implement task → verify/review loop). Reuse .smithers/components/ where they fit.`,
-    `2. AUTHOR: write \`.smithers/workflows/issue-${item.issueNumber}-${slugify(item.title)}.tsx\` in THIS worktree. Follow the local conventions (see the sibling workflow files): /** @jsxImportSource smithers-orchestrator */, createSmithers with zod output schemas, coalesce every ctx.input field with \`??\`, never name a field runId/nodeId/iteration/id.`,
-    "3. VERIFY THE GRAPH: `bunx smithers-orchestrator graph <your-file>` from the worktree root MUST exit 0. Fix and retry until it does.",
-    "4. RUN IT: `bunx smithers-orchestrator up <your-file> --input '<json>'` in the FOREGROUND from the worktree root, and drive it to completion. If it parks on an error, diagnose via `bunx smithers-orchestrator inspect <run-id>` and fix your workflow or the underlying code, then resume (`--run-id <id> --resume true`).",
+    `2. AUTHOR: write \`.smithers/workflows/issue-${item.issueNumber}-${slugify(item.title)}.tsx\` in THIS worktree. Follow the local conventions (see the sibling workflow files): /** @jsxImportSource smthrs */, createSmithers with zod output schemas, coalesce every ctx.input field with \`??\`, never name a field runId/nodeId/iteration/id.`,
+    "3. VERIFY THE GRAPH: `bunx smthrs graph <your-file>` from the worktree root MUST exit 0. Fix and retry until it does.",
+    "4. RUN IT: `bunx smthrs up <your-file> --input '<json>'` in the FOREGROUND from the worktree root, and drive it to completion. If it parks on an error, diagnose via `bunx smthrs inspect <run-id>` and fix your workflow or the underlying code, then resume (`--run-id <id> --resume true`).",
     "5. HAND-VERIFY: after the nested run finishes, verify the fix YOURSELF — run the new/focused tests directly, read the diff. Do not trust the nested run's self-report.",
     "6. Decide whether your bespoke workflow file is genuinely reusable: if yes, keep it in the working tree so it ships; if it is one-shot scaffolding, delete it so the change stays minimal.",
     "",

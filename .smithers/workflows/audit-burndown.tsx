@@ -1,7 +1,7 @@
 // smithers-source: authored
 // smithers-display-name: Audit Burndown
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Sequence, Parallel, Loop, Worktree } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, Sequence, Parallel, Loop, Worktree } from "smthrs";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve, relative } from "node:path";
 import { z } from "zod/v4";

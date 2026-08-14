@@ -7,7 +7,7 @@ import { makePollingSource, makeWebhookSource } from "../src/core/EventSource.js
 import { makeDbCursorStore } from "../src/core/CursorStore.js";
 import { IntegrationError } from "../src/core/IntegrationError.js";
 import { verifySignature } from "../src/core/verifySignature.js";
-import { signalRun } from "@smithers-orchestrator/engine/signals";
+import { signalRun } from "@smthrs/engine/signals";
 
 const EVENT_NAME = "integration:test:ping";
 

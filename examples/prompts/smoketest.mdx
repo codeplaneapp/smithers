@@ -1,7 +1,7 @@
 # Smoke Test — Features across the last releases
 
 You are running the **feature** slice of a release smoke test for the
-`smithers-orchestrator` npm package. Your job: prove that every user-facing
+`smthrs` npm package. Your job: prove that every user-facing
 change shipped across the last few releases actually holds against the published
 package, and that the baseline install path is not broken.
 
@@ -28,14 +28,14 @@ and never a pass-with-a-caveat. It is a `fail`.
 
 The exact version is: {props.version}
 
-Pin it on EVERY invocation — run commands as `bunx smithers-orchestrator@VERSION SUBCOMMAND`, substituting VERSION with the version above (do not use `@latest`, do not re-derive it).
+Pin it on EVERY invocation — run commands as `bunx smthrs@VERSION SUBCOMMAND`, substituting VERSION with the version above (do not use `@latest`, do not re-derive it).
 
 ## Setup — always work in a brand-new folder
 
 1. Clear caches so you test the registry, not a stale copy: `bun pm cache rm`,
-   then remove any `bunx-*smithers-orchestrator*` dir from `$TMPDIR` (macOS:
-   `rm -rf $(echo $TMPDIR)bunx-*smithers-orchestrator*`; Linux:
-   `rm -rf $TMPDIR/bunx-*smithers-orchestrator*`).
+   then remove any `bunx-*smthrs*` dir from `$TMPDIR` (macOS:
+   `rm -rf $(echo $TMPDIR)bunx-*smthrs*`; Linux:
+   `rm -rf $TMPDIR/bunx-*smthrs*`).
 2. `SMOKE_DIR=$(mktemp -d)/smoke-features && mkdir -p "$SMOKE_DIR" && cd "$SMOKE_DIR"`.
    Never reuse a folder. Never work in the monorepo.
 
@@ -45,7 +45,7 @@ Pin it on EVERY invocation — run commands as `bunx smithers-orchestrator@VERSI
   `.smithers/workflows/hello.tsx`, `.smithers/prompts/hello.mdx` exist, and that
   `.smithers/.gitignore` ignores `pg/` and `migrated.json` (added in 0.25.1).
 - `.smithers/node_modules/.bin/smithers` resolves to
-  `smithers-orchestrator/src/bin/smithers.js` (use `readlink`).
+  `smthrs/src/bin/smithers.js` (use `readlink`).
 - `workflow list` prints the seeded workflows (hello, implement, review, plan,
   ralph, debug, audit, ...) without crashing.
 - After `init`, runs must be visible through the normal `ps`/`inspect` CLI and

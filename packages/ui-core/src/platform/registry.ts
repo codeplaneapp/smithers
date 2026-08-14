@@ -16,9 +16,7 @@ export function setPlatform(platform: Platform): void {
 
 export function getPlatform(): Platform {
   if (!currentPlatform) {
-    throw new Error(
-      "Platform not set. Call setPlatform(...) once at shell boot before using @smithers-orchestrator/ui-core.",
-    );
+    throw new Error("Platform not set. Call setPlatform(...) once at shell boot before using @smthrs/ui-core.");
   }
   return currentPlatform;
 }

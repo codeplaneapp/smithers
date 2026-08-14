@@ -1,10 +1,10 @@
-# @smithers-orchestrator/memory — src
+# @smthrs/memory — src
 
 Persistent memory for Smithers runs: working-memory facts, conversation
 threads, and messages, stored in the shared smithers SQLite DB (tables come
-from `@smithers-orchestrator/db/internal-schema` via `schema.js`).
+from `@smthrs/db/internal-schema` via `schema.js`).
 
-Every file here is importable as `@smithers-orchestrator/memory/<name>`
+Every file here is importable as `@smthrs/memory/<name>`
 through the package.json `./*` export, so treat **all** files as public npm
 surface — do not rename, move, or delete them.
 

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { useGatewayMemoryFacts } from "@smithers-orchestrator/gateway-react";
-import type { GatewayMemoryFactRow } from "@smithers-orchestrator/gateway-client";
+import { useGatewayMemoryFacts } from "@smthrs/gateway-react";
+import type { GatewayMemoryFactRow } from "@smthrs/gateway-client";
 import { useLocalModeRefetch } from "../sync/useLocalModeRefetch";
 import { validatedFilter, type MemoryFact } from "./memoryFacts";
 import { useMemoryStore } from "./memoryStore";
@@ -13,7 +13,7 @@ import { useMemoryStore } from "./memoryStore";
  * `GatewayMemoryFactRow` onto a `MemoryFact`, and pushes the result into the
  * store on every change. Memory is READ-ONLY on the wire (only a
  * `listMemoryFacts` RPC, no write), so there is no mutation seam: facts are
- * written by runs/workflows (the `@smithers-orchestrator/memory` MemoryStore) and
+ * written by runs/workflows (the `@smthrs/memory` MemoryStore) and
  * surface here verbatim.
  *
  * We fetch EVERY namespace (no `namespace` arg) so the surface's client-side

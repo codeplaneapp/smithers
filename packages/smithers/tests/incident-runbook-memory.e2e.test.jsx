@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // Fake-agent variant of examples/incident-runbook-memory.jsx, run END-TO-END under
 // the real engine. Mirrors the example's workflow exactly (same task ids, schemas,
 // Branch threshold, approval gate, and the same store calls its agent tools make);
@@ -12,7 +12,7 @@
 //             live and the lessons retire atomically
 //   run 5     recall serves ONE runbook rule and zero lessons (the compressed
 //             corpus) — the payoff step, measured
-import { describe, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 import { z } from "zod";
 import {
   Sequence,
@@ -24,7 +24,7 @@ import {
   createMemoryStore,
   ensureSmithersTables,
 } from "../src/index.js";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { Effect } from "effect";
 import { dirname } from "node:path";
 import { createTestSmithers } from "./helpers.js";

@@ -19,12 +19,12 @@ credentials); a product, CLI, doc, or behavior problem is always a `fail`.
 
 The exact version is: {props.version}
 
-Pin it on EVERY `bunx` invocation: run `bunx smithers-orchestrator@VERSION SUBCOMMAND`, substituting VERSION with the version above.
+Pin it on EVERY `bunx` invocation: run `bunx smthrs@VERSION SUBCOMMAND`, substituting VERSION with the version above.
 
 ## Setup — a fresh folder
 
 1. Clear the bunx cache (`bun pm cache rm`, then remove any
-   `bunx-*smithers-orchestrator*` dir from `$TMPDIR`).
+   `bunx-*smthrs*` dir from `$TMPDIR`).
 2. `SMOKE_DIR=$(mktemp -d)/smoke-ui && mkdir -p "$SMOKE_DIR" && cd "$SMOKE_DIR"`.
 3. Run `init` (pinned to the version above) and confirm `.smithers/gateway.ts`
    and `.smithers/ui/` exist (the gateway + UI sources).

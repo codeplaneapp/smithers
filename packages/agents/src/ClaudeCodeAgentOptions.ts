@@ -9,12 +9,15 @@ export type ClaudeCodeAgentOptions = BaseCliAgentOptions & {
   appendSystemPrompt?: string;
   /**
    * Path to an isolated Claude Code config directory. Sets `CLAUDE_CONFIG_DIR`
-   * on the spawned process so this invocation uses the credentials stored at
-   * `<configDir>/.credentials.json` (instead of the user's default `~/.claude/`).
+   * on the spawned process so this invocation uses that directory's
+   * credentials (instead of the user's default `~/.claude/`): the CLI stores
+   * them at `<configDir>/.credentials.json`, or on macOS in a per-config-dir
+   * Keychain item suffixed with the first 8 hex chars of sha256(configDir).
    *
    * Use this to run multiple Claude Code subscriptions side-by-side. Set up
    * the directory by running `CLAUDE_CONFIG_DIR=<path> claude` once and
-   * completing `/login` interactively.
+   * completing `/login` interactively, or via
+   * `smithers agents add --provider claude-code --label <name> --tmux`.
    */
   configDir?: string;
   /**
@@ -46,6 +49,10 @@ export type ClaudeCodeAgentOptions = BaseCliAgentOptions & {
   noChrome?: boolean;
   noSessionPersistence?: boolean;
   outputFormat?: "text" | "json" | "stream-json";
+  // `effort` is inherited from BaseCliAgentOptions (the shared first-class
+  // reasoning-effort surface). Claude Code translates it in buildCommand by
+  // merging `{ effortLevel }` into a single `--settings` flag — user-supplied
+  // `--settings` (extraArgs or opts.settings) keys win on conflict.
   permissionMode?: "acceptEdits" | "bypassPermissions" | "default" | "delegate" | "dontAsk" | "plan";
   pluginDir?: string[];
   replayUserMessages?: boolean;

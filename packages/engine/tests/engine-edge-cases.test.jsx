@@ -1,11 +1,11 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { SmithersDb, runWorkflow } from "smithers-orchestrator";
+import { SmithersDb, runWorkflow } from "smthrs";
 import { approveNode } from "../src/approvals.js";
 import { createTestDb, createTestSmithers } from "../../smithers/tests/helpers.js";
 import { ddl, schema } from "../../smithers/tests/schema.js";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { Effect } from "effect";
 describe("engine edge cases", () => {
   test("resume rejects runs that were never started", async () => {

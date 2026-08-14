@@ -3,7 +3,7 @@
 // session over real RPC (submitSignal utterances → worker dispatch → end).
 // Spawned by ultragrill.e2e.test with cwd set to a throwaway dir and a fake
 // `claude` on PATH so the worker resolves deterministically.
-import { Gateway, SmithersDb, mdxPlugin } from "smithers-orchestrator";
+import { Gateway, SmithersDb, mdxPlugin } from "smthrs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 

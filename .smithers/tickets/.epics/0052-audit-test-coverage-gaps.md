@@ -51,8 +51,8 @@ Each item below is still open in current `main`. Text is the original audit find
 - [x] **P2** Reconnect-afterSeq / ws-drop / webhook behaviors are fabricated in e2e/faults but exist as real (non-e2e) tests elsewhere — duplicate-but-fake instead of promoting the real ones — `e2e/faults/case09-reconnect-afterseq.test.ts; case15-ws-drop-reconnect.test.ts; case17-webhook-bad-signature.test.ts; e2e/budgets/latency.json`
   - _done (2026-07-08):_ e2e/faults/case09-reconnect-afterseq.test.ts; e2e/faults/case15-ws-drop-reconnect.test.ts; e2e/faults/case17-webhook-bad-signature.test.ts
   - _remaining:_ case09 and case15 reconnect/ws-drop behaviors are still fabricated in e2e/faults rather than promoting the real non-e2e tests
-- [x] **P2** e2e package.json omits the smithers-orchestrator dependency that case25 imports, so the real-gateway e2e relies on hoisting — `e2e/package.json; e2e/faults/case25-approval-scope-denial.test.ts:7`
-  - _remaining:_ e2e/package.json still omits the smithers-orchestrator dependency; case25 relies on workspace hoisting
+- [x] **P2** e2e package.json omits the smthrs dependency that case25 imports, so the real-gateway e2e relies on hoisting — `e2e/package.json; e2e/faults/case25-approval-scope-denial.test.ts:7`
+  - _remaining:_ e2e/package.json still omits the smthrs dependency; case25 relies on workspace hoisting
 - [x] **P2** OpenAPI 'e2e' test mocks globalThis.fetch, so it is not a strict no-mock e2e — `packages/openapi/tests/e2e.test.js:9-18,30-42`
   - _done (2026-07-08):_ packages/openapi/tests/e2e.test.js
   - _remaining:_ OpenAPI 'e2e' still mocks globalThis.fetch — not a strict no-mock e2e
@@ -61,7 +61,7 @@ Each item below is still open in current `main`. Text is the original audit find
   - _remaining:_ Neither smoke test exercises the examples/ tree; both only scan docs
 - [x] **P2** examples/ tree (108 workflows) is in NO CI gate — typecheck:examples script exists but is never invoked — `.github/workflows/ci.yml:34`
   - _done (2026-06-20):_ `.github/workflows/ci.yml` now runs `pnpm typecheck:examples`, plus a `bun test` of the examples component tests. (The examples tsconfig still points at `src/*.js` rather than the published package — that narrower gap remains the separate open item below.)
-- [x] **P2** examples/tsconfig.json points smithers-orchestrator at src/*.js source, not the published package — typecheck:examples does not validate against shipped types — `examples/tsconfig.json`
+- [x] **P2** examples/tsconfig.json points smthrs at src/*.js source, not the published package — typecheck:examples does not validate against shipped types — `examples/tsconfig.json`
   - _done (2026-07-08):_ apps/cli/tests/examples-tsconfig-published-types.test.js
   - _remaining:_ examples tsconfig still points at src/*.js source, not the published package; does not validate against shipped types
 - [x] **P2** AntigravityAgent stream-json interpreter is untested and effectively dead in practice — ``

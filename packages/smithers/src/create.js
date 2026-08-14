@@ -5,14 +5,10 @@
  */
 // @smithers-type-exports-end
 
-import { Database } from "bun:sqlite";
-import { drizzle } from "drizzle-orm/bun-sqlite";
+import { loadBunSqliteDatabase, loadBunSqliteDrizzle } from "@smthrs/db/bunSqliteRuntime";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
 import React from "react";
-import {
-  createSmithersContext,
-  SmithersContext as GlobalSmithersContext,
-} from "@smithers-orchestrator/react-reconciler/context";
+import { createSmithersContext, SmithersContext as GlobalSmithersContext } from "@smthrs/react-reconciler/context";
 import {
   Approval as BaseApproval,
   Workflow as BaseWorkflow,
@@ -31,41 +27,41 @@ import {
   Timer as BaseTimer,
   UI as BaseUI,
   TUI as BaseTUI,
-} from "@smithers-orchestrator/components";
-import { zodToTable } from "@smithers-orchestrator/db/zodToTable";
+} from "@smthrs/components";
+import { zodToTable } from "@smthrs/db/zodToTable";
 import {
   zodToCreateTableSQL,
   zodSchemaColumns,
   syncZodTableSchema,
   syncZodTableSchemaPostgres,
-} from "@smithers-orchestrator/db/zodToCreateTableSQL";
-import { camelToSnake } from "@smithers-orchestrator/db/utils/camelToSnake";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { POSTGRES, SQLITE, quoteIdentifier } from "@smithers-orchestrator/db/dialect";
-import { createHindsightMemoryStore, createLocalMemoryRuntime, createMemoryStore } from "@smithers-orchestrator/memory";
+} from "@smthrs/db/zodToCreateTableSQL";
+import { camelToSnake } from "@smthrs/db/utils/camelToSnake";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { POSTGRES, SQLITE, quoteIdentifier } from "@smthrs/db/dialect";
+import { createHindsightMemoryStore, createLocalMemoryRuntime, createMemoryStore } from "@smthrs/memory";
 import { resolve, join } from "node:path";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { assertZodV4 } from "@smithers-orchestrator/errors/assertZodV4";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { assertZodV4 } from "@smthrs/errors/assertZodV4";
 import { findSmithersAnchorDir } from "./findSmithersAnchorDir.js";
-import { prepareOutputSchemas } from "./prepareOutputSchemas.js";
+import { assertNoReservedPublicOutputNames, prepareOutputSchemas } from "./prepareOutputSchemas.js";
 import { acquireSharedPostgresPool } from "./sharedPostgresPool.js";
-/** @typedef {import("@smithers-orchestrator/components").ApprovalProps<any, any>} ApprovalProps */
-/** @typedef {import("@smithers-orchestrator/components").SandboxProps} SandboxProps */
-/** @typedef {import("@smithers-orchestrator/components").SignalProps<any>} SignalProps */
-/** @typedef {import("@smithers-orchestrator/scheduler/SmithersWorkflowOptions").SmithersAlertPolicy} SmithersAlertPolicy */
-/** @typedef {import("@smithers-orchestrator/scheduler/SmithersWorkflowOptions").SmithersAlertPolicyDefaults} SmithersAlertPolicyDefaults */
-/** @typedef {import("@smithers-orchestrator/scheduler/SmithersWorkflowOptions").SmithersAlertPolicyRule} SmithersAlertPolicyRule */
+/** @typedef {import("@smthrs/components").ApprovalProps<any, any>} ApprovalProps */
+/** @typedef {import("@smthrs/components").SandboxProps} SandboxProps */
+/** @typedef {import("@smthrs/components").SignalProps<any>} SignalProps */
+/** @typedef {import("@smthrs/scheduler/SmithersWorkflowOptions").SmithersAlertPolicy} SmithersAlertPolicy */
+/** @typedef {import("@smthrs/scheduler/SmithersWorkflowOptions").SmithersAlertPolicyDefaults} SmithersAlertPolicyDefaults */
+/** @typedef {import("@smthrs/scheduler/SmithersWorkflowOptions").SmithersAlertPolicyRule} SmithersAlertPolicyRule */
 /**
  * @template Schema
- * @typedef {import("@smithers-orchestrator/driver/SmithersCtx").SmithersCtx<Schema>} SmithersCtx
+ * @typedef {import("@smthrs/driver/SmithersCtx").SmithersCtx<Schema>} SmithersCtx
  */
 /**
  * @template Schema
- * @typedef {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<Schema>} SmithersWorkflow
+ * @typedef {import("@smthrs/components/SmithersWorkflow").SmithersWorkflow<Schema>} SmithersWorkflow
  */
-/** @typedef {import("@smithers-orchestrator/scheduler/SmithersWorkflowOptions").SmithersWorkflowOptions} SmithersWorkflowOptions */
-/** @typedef {import("@smithers-orchestrator/components").WorkflowProps} WorkflowProps */
+/** @typedef {import("@smthrs/scheduler/SmithersWorkflowOptions").SmithersWorkflowOptions} SmithersWorkflowOptions */
+/** @typedef {import("@smthrs/components").WorkflowProps} WorkflowProps */
 /** @typedef {import("./CreateSmithersOptions.ts").CreateSmithersOptions} CreateSmithersOptions */
 
 const hotCache = new Map();
@@ -232,7 +228,7 @@ function prepareSmithersTables(schemas) {
  *   outputs: Record<string, unknown>;
  *   zodToKeyName: Map<unknown, string>;
  *   ambiguousZodSchemas: Set<unknown>;
- *   memoryService?: import("@smithers-orchestrator/driver/MemoryRuntimeService").MemoryRuntimeService;
+ *   memoryService?: import("@smthrs/driver/MemoryRuntimeService").MemoryRuntimeService;
  *   opts?: CreateSmithersOptions;
  *   inputSchema?: unknown;
  * }} config
@@ -376,6 +372,7 @@ function buildSmithersApi(config) {
  * ```
  */
 export function createSmithers(schemas, opts) {
+  assertNoReservedPublicOutputNames(schemas);
   // Honor an explicitly requested backend instead of silently opening
   // bun:sqlite. `createSmithers` is the synchronous SQLite path; PGlite and
   // Postgres provision over the wire asynchronously, so a workflow that wants
@@ -440,6 +437,7 @@ export function createSmithers(schemas, opts) {
   const { tables, drizzleSchema, schemaRegistry, outputs, zodToKeyName, ambiguousZodSchemas } =
     prepareSmithersTables(schemas);
   // 2. Create SQLite db
+  const Database = loadBunSqliteDatabase();
   const sqlite = new Database(dbPath);
   sqlite.run(`PRAGMA journal_mode = ${opts?.journalMode ?? "WAL"}`);
   // 30s timeout: concurrent worktrees each spawn agent processes that all write
@@ -489,7 +487,7 @@ export function createSmithers(schemas, opts) {
     syncZodTableSchema(sqlite, tableName, zodSchema);
   }
   // 4. Create Drizzle instance with all tables in the schema
-  const db = drizzle(sqlite, { schema: drizzleSchema });
+  const db = loadBunSqliteDrizzle()(sqlite, { schema: drizzleSchema });
   ensureSmithersTables(db);
   const memoryService = createMemoryService(db);
   // 5. Build the public API around the prepared db + table metadata.
@@ -514,7 +512,7 @@ export function createSmithers(schemas, opts) {
   return api;
 }
 /**
- * @param {ReturnType<import("@smithers-orchestrator/db/sql-message-storage").getSqlMessageStorage>} storage
+ * @param {ReturnType<import("@smthrs/db/sql-message-storage").getSqlMessageStorage>} storage
  * @param {string} tableName
  * @param {import("zod").ZodObject<any>} schema
  * @param {{ isInput?: boolean }} [opts]
@@ -556,7 +554,7 @@ async function syncZodTableSchemaStorage(storage, tableName, schema, opts) {
 /**
  * Cloudflare-native SQLite backend for Workers/Durable Objects. Pass a descriptor
  * produced by `createCloudflareDurableObjectSqliteDescriptor()` or
- * `createCloudflareD1SqliteDescriptor()` from `smithers-orchestrator/cloudflare`.
+ * `createCloudflareD1SqliteDescriptor()` from `smthrs/cloudflare`.
  *
  * @template {Record<string, import("zod").ZodObject<any>>} Schemas
  * @param {Schemas} schemas
@@ -564,6 +562,7 @@ async function syncZodTableSchemaStorage(storage, tableName, schema, opts) {
  * @returns {Promise<import("./CreateSmithersApi.ts").CreateSmithersApi<Schemas> & { close?: () => Promise<void> }>}
  */
 export async function createSmithersCloudflare(schemas, opts) {
+  assertNoReservedPublicOutputNames(schemas);
   if (!opts?.db) {
     throw new SmithersError(
       "INVALID_INPUT",

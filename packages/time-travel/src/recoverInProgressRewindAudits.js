@@ -1,6 +1,6 @@
 import { REWIND_LEASE_TTL_MS } from "./acquireRewindLock.js";
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 
 // A healthy rewind renews every third of its lease TTL. Waiting for five full
 // lease windows gives an active process ample renewal and clock-skew margin

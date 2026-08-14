@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * defending-code: a Smithers port of Anthropic's
  * `defending-code-reference-harness`.
@@ -27,8 +27,8 @@
  * Run from this directory:  smithers up workflow.jsx -c 3
  * See README.md for setup, auth, and safety notes.
  */
-import { Sequence, Parallel } from "smithers-orchestrator";
-import { ClaudeCodeAgent } from "@smithers-orchestrator/agents";
+import { Sequence, Parallel } from "smthrs";
+import { ClaudeCodeAgent } from "@smthrs/agents";
 import { z } from "zod";
 import { createExampleSmithers } from "../_example-kit.js";
 

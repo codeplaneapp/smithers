@@ -83,6 +83,45 @@ describe("installAgentIntegration", () => {
     }
   });
 
+  test("omp gets the curated skill in ~/.omp/agent/skills", () => {
+    const home = tempHome([".omp"]);
+    try {
+      const result = installAgentIntegration({
+        agentId: "omp",
+        env: {},
+        homeDir: home,
+        detections: [],
+        runCommand: () => {
+          throw new Error("no CLI should run for a skill-tier agent");
+        },
+      });
+      expect(result.kind).toBe("skill");
+      expect(result.ok).toBe(true);
+      expect(existsSync(join(home, ".omp", "agent", "skills", "smithers", "SKILL.md"))).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("omp skill install honors PI_CODING_AGENT_DIR", () => {
+    const home = tempHome(["custom-omp-agent"]);
+    const agentDir = join(home, "custom-omp-agent");
+    try {
+      const result = installAgentIntegration({
+        agentId: "omp",
+        env: { PI_CODING_AGENT_DIR: agentDir },
+        homeDir: home,
+        detections: [],
+      });
+      expect(result.kind).toBe("skill");
+      expect(result.ok).toBe(true);
+      expect(existsSync(join(agentDir, "skills", "smithers", "SKILL.md"))).toBe(true);
+      expect(existsSync(join(home, ".omp", "agent", "skills", "smithers", "SKILL.md"))).toBe(false);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   test("a skill-tier agent that is not present reports the miss without failing", () => {
     const home = tempHome();
     try {

@@ -18,8 +18,8 @@
 //     agent tasks exhaust retries; render logic never shells out (data-only conditions).
 //   • If origin/main diverges with conflicts, pushes fail fast and the run keeps fixing;
 //     the final summary reports the divergence for the human instead of pausing.
-/** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, UI, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { ClaudeCodeAgent, UI, createSmithers } from "smthrs";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";

@@ -20,8 +20,8 @@ function expectNoRunRow(repo, runId) {
 
 function validSlowWorkflow() {
   return [
-    "/** @jsxImportSource smithers-orchestrator */",
-    'import { createSmithers, Workflow, Task } from "smithers-orchestrator";',
+    "/** @jsxImportSource smthrs */",
+    'import { createSmithers, Workflow, Task } from "smthrs";',
     'import { z } from "zod";',
     "const { smithers, outputs } = createSmithers({ result: z.object({ ok: z.boolean() }) });",
     "export default smithers(() => (",
@@ -45,7 +45,7 @@ describe("detached launch admission", () => {
       repo.write(
         "broken.tsx",
         [
-          "/** @jsxImportSource smithers-orchestrator */",
+          "/** @jsxImportSource smthrs */",
           "const prompt = `an unescaped `backtick` breaks parsing`;",
           "export default prompt;",
           "",
@@ -75,9 +75,9 @@ describe("detached launch admission", () => {
       repo.write(
         ".smithers/workflows/mdx-broken.tsx",
         [
-          "/** @jsxImportSource smithers-orchestrator */",
+          "/** @jsxImportSource smthrs */",
           'import BrokenPrompt from "../prompts/broken.mdx";',
-          'import { createSmithers, Workflow, Task } from "smithers-orchestrator";',
+          'import { createSmithers, Workflow, Task } from "smthrs";',
           'import { z } from "zod";',
           "const { smithers, outputs } = createSmithers({ result: z.object({ ok: z.boolean() }) });",
           "export default smithers(() => (",
@@ -172,9 +172,9 @@ describe("detached launch admission", () => {
       repo.write(
         "dies-in-child.tsx",
         [
-          "/** @jsxImportSource smithers-orchestrator */",
+          "/** @jsxImportSource smthrs */",
           'import { existsSync, writeFileSync } from "node:fs";',
-          'import { createSmithers, Workflow, Task } from "smithers-orchestrator";',
+          'import { createSmithers, Workflow, Task } from "smthrs";',
           'import { z } from "zod";',
           'const marker = ".detached-preflight-complete";',
           'if (existsSync(marker)) throw new Error("deliberate child pre-admission crash");',

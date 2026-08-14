@@ -1,13 +1,10 @@
 // Browser-safe runtime-conformance helper. Deliberately does NOT import the
-// main `@smithers-orchestrator/testing` barrel (`index.ts`) — that barrel
+// main `@smthrs/testing` barrel (`index.ts`) — that barrel
 // pulls in Node-heavy helpers (fakeAgent's CLI process mocking, simulate.ts,
 // etc.) that would defeat the point of a bundle importable by a browser
-// fixture. This module only ever imports `@smithers-orchestrator/driver`
+// fixture. This module only ever imports `@smthrs/driver`
 // subpaths, which are themselves runtime-portable.
-import {
-  RuntimeCapabilityError,
-  RUNTIME_CAPABILITY_UNAVAILABLE,
-} from "@smithers-orchestrator/driver/RuntimeCapabilityError";
+import { RuntimeCapabilityError, RUNTIME_CAPABILITY_UNAVAILABLE } from "@smthrs/driver/RuntimeCapabilityError";
 
 export type BrowserConformanceSmithers = {
   run(options?: { runId?: string; input?: unknown; signal?: AbortSignal }): Promise<{

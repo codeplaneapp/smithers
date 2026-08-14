@@ -6,7 +6,7 @@
 // @smithers-type-exports-end
 
 import { z } from "zod";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { renderOutboundTask } from "./outboundInternals.js";
 
 /** Output shape produced by `<SendMessage>` (sendMessageSmart's result). */

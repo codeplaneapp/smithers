@@ -1,16 +1,10 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { assign, createMachine } from "xstate";
-import { SmithersDb, Task, WaitForEvent, Workflow, runWorkflow, signalRun } from "smithers-orchestrator";
-import {
-  jumpToFrame,
-  listSnapshots,
-  loadSnapshot,
-  parseSnapshot,
-  replayFromCheckpoint,
-} from "@smithers-orchestrator/time-travel";
+import { SmithersDb, Task, WaitForEvent, Workflow, runWorkflow, signalRun } from "smthrs";
+import { jumpToFrame, listSnapshots, loadSnapshot, parseSnapshot, replayFromCheckpoint } from "@smthrs/time-travel";
 import { Effect } from "effect";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { taskOutput, eventReceived, timedOut, useSmithersMachine, __machineCacheInternals } from "../src/index.js";

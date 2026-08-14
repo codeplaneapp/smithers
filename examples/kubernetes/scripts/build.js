@@ -6,7 +6,7 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const exampleDir = resolve(scriptDir, "..");
 const repoRoot = resolve(exampleDir, "../..");
 const dockerfile = resolve(exampleDir, "Dockerfile");
-const orchestratorTag = `smithers-orchestrator:${tag}`;
+const orchestratorTag = `smthrs:${tag}`;
 const workerTag = `smithers-worker:${tag}`;
 console.log(`Building ${orchestratorTag}...`);
 await $ `docker build -f ${dockerfile} --target orchestrator -t ${orchestratorTag} ${repoRoot}`;

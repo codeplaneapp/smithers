@@ -1,7 +1,4 @@
-import {
-  renderSmithersAgentPromptGuidance,
-  type SmithersAgentContract,
-} from "@smithers-orchestrator/agents/agent-contract";
+import { renderSmithersAgentPromptGuidance, type SmithersAgentContract } from "@smthrs/agents/agent-contract";
 import type { SmithersPiRunContext } from "./SmithersPiRunContext.js";
 import { normalizeState } from "./runtime/normalizeState.js";
 

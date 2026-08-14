@@ -7,7 +7,7 @@ import type { EventSource, MakeWebhookSourceOptions, WebhookRequest } from "./Ev
  * route incoming HTTP deliveries to them.
  */
 export type MakeIntegrationRuntimeOptions = {
-  adapter: import("@smithers-orchestrator/db/adapter").SmithersDb;
+  adapter: import("@smthrs/db/adapter").SmithersDb;
   sources?: EventSource[];
   webhookSources?: MakeWebhookSourceOptions[];
 };

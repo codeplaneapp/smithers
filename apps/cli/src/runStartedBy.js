@@ -1,4 +1,4 @@
-import { normalizeRunStartedBy } from "@smithers-orchestrator/driver";
+import { normalizeRunStartedBy } from "@smthrs/driver";
 
 /** @param {unknown} value */
 function nonEmptyString(value) {
@@ -34,7 +34,7 @@ function isMissingIdentity(value) {
  *
  * @param {{ harness?: unknown; sessionId?: unknown; prompt?: unknown }} explicit
  * @param {Record<string, unknown>} [env]
- * @returns {import("@smithers-orchestrator/driver/RunStartedBy").RunStartedBy | undefined}
+ * @returns {import("@smthrs/driver/RunStartedBy").RunStartedBy | undefined}
  */
 export function resolveCliStartedBy(explicit = {}, env = process.env) {
   const detected = detectHarness(env);

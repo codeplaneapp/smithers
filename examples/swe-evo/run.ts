@@ -17,9 +17,9 @@
  */
 
 import { Effect } from "effect";
-import { runWorkflow } from "@smithers-orchestrator/engine";
-import { loadOutputs } from "@smithers-orchestrator/db/snapshot";
-import { Gateway } from "@smithers-orchestrator/server/gateway";
+import { runWorkflow } from "@smthrs/engine";
+import { loadOutputs } from "@smthrs/db/snapshot";
+import { Gateway } from "@smthrs/server/gateway";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

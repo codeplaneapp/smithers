@@ -13,15 +13,15 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
 import { loadWorkflows, loadWorkflowsFromDir } from "../src/conventions/loader.js";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 
 describe("loadWorkflowsFromDir — dangling symlink", () => {
   test("skips a dangling symlink with a diagnostic instead of aborting the whole directory", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-loader-cov-"));
+    const dir = makeTempDirPath("smithers-loader-cov-");
     // A valid workflow file that must still be discovered.
     writeFileSync(join(dir, "good.js"), "export default { name: 'good', steps: [] };", "utf8");
     // A symlink pointing at a non-existent target -> statSync throws ENOENT.
@@ -42,7 +42,7 @@ describe("loadWorkflowsFromDir — dangling symlink", () => {
 
 describe("loadWorkflowsFromDir — non-object export", () => {
   test("emits 'no recognizable export' error when the module default is not an object", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-loader-cov-"));
+    const dir = makeTempDirPath("smithers-loader-cov-");
     // Valid, importable module whose default export is a primitive number.
     // buildDefinition() rejects this (typeof !== "object") -> null -> error diagnostic.
     writeFileSync(join(dir, "primitive.js"), "export default 42;", "utf8");
@@ -57,7 +57,7 @@ describe("loadWorkflowsFromDir — non-object export", () => {
 
 describe("workflow paths with URL-significant characters", () => {
   test("loads files containing '#' through directory and explicit-path APIs", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-loader-url-path-"));
+    const dir = makeTempDirPath("smithers-loader-url-path-");
     const filePath = join(dir, "workflow#query.js");
     writeFileSync(filePath, `export default { workflow: {}, name: "url-safe", description: "URL-safe" };`, "utf8");
 
@@ -77,7 +77,7 @@ describe("workflow paths with URL-significant characters", () => {
 
 describe("loadWorkflows — explicit workflowPaths edge cases", () => {
   test("emits an import error and read-failure fallback for a non-existent workflowPath", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-loader-cov-"));
+    const dir = makeTempDirPath("smithers-loader-cov-");
     const missing = join(dir, "does-not-exist.js");
 
     const result = await loadWorkflows({
@@ -94,7 +94,7 @@ describe("loadWorkflows — explicit workflowPaths edge cases", () => {
   });
 
   test("emits 'no recognizable export' for an explicit workflowPath whose default is a primitive", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-loader-cov-"));
+    const dir = makeTempDirPath("smithers-loader-cov-");
     const filePath = join(dir, "primitive-explicit.js");
     writeFileSync(filePath, "export default 7;", "utf8");
 
@@ -114,10 +114,10 @@ describe("loadWorkflows — explicit workflowPaths edge cases", () => {
 
 describe("loadWorkflows — includeDefaults managed + project dirs", () => {
   test("loads the managed dir and the <cwd>/.smithers/workflows project dir when includeDefaults is true", async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "smithers-loader-cov-cwd-"));
+    const cwd = makeTempDirPath("smithers-loader-cov-cwd-");
 
     // Managed dir (existsSync true) — covers the includeDefaults managed branch.
-    const managed = mkdtempSync(join(tmpdir(), "smithers-loader-cov-managed-"));
+    const managed = makeTempDirPath("smithers-loader-cov-managed-");
     writeFileSync(
       join(managed, "managed-wf.js"),
       `export default { workflow: {}, name: "managed-wf", description: "Managed" };`,

@@ -1,4 +1,4 @@
-import type { GatewayRpcMethod } from "@smithers-orchestrator/protocol/gateway-rpc";
+import type { GatewayRpcMethod } from "@smthrs/protocol/gateway-rpc";
 import { isObject, isGatewayResponseFrame } from "./objectGuards.ts";
 import { GatewayRpcError } from "./GatewayRpcError.ts";
 import type { GatewayEventFrame } from "./GatewayEventFrame.ts";
@@ -60,7 +60,7 @@ const DEFAULT_GATEWAY_BASE_URL = "http://127.0.0.1:7331";
 // supply one. Kept in lock-step with this package's version by scripts/bump.mjs
 // (a release bump rewrites the literal); tests/SmithersGatewayClient.test.ts
 // pins it to package.json so it can't silently drift again.
-const DEFAULT_CLIENT_VERSION = "0.32.0";
+const DEFAULT_CLIENT_VERSION = "0.34.0";
 
 // How long a connection must stay alive before streamRunEventsResilient treats
 // it as healthy and resets backoff — see the flap-protection paragraph on that

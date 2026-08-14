@@ -13,7 +13,7 @@ import {
   verifyTelegramWebhookSecret,
 } from "../src/index.js";
 
-describe("@smithers-orchestrator/telegram", () => {
+describe("@smthrs/telegram", () => {
   test("verifies Telegram webhook secrets from the official header", () => {
     const request = new Request("https://example.test/webhook", {
       headers: { "x-telegram-bot-api-secret-token": "secret" },

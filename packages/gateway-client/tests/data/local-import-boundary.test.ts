@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { apiCollectionNames } from "@smithers-orchestrator/gateway/api";
+import { apiCollectionNames } from "@smthrs/gateway/api";
 import { QueryClient } from "@tanstack/react-query";
 import { createSmithersCollections } from "../../src/data/createSmithersCollections.ts";
 import { smithersApiInvalidationPrefixes } from "../../src/data/smithersApiInvalidationPrefixes.ts";

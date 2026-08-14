@@ -6,11 +6,11 @@
  * Use cases: support ticket routing, message dispatching, file processing
  * pipelines, multi-domain intake systems.
  */
-import { Sequence, Parallel } from "smithers-orchestrator";
+import { Sequence, Parallel } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import IntakePrompt from "./prompts/classifier-switchboard/intake.mdx";
 import ClassifyPrompt from "./prompts/classifier-switchboard/classify.mdx";

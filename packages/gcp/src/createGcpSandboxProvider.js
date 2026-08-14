@@ -1,10 +1,10 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import {
   createCommandSandboxProvider,
   SANDBOX_EGRESS_CA_BUNDLE_RELATIVE_PATH,
   SANDBOX_PROVIDER_REQUEST_ENV,
   SANDBOX_PROVIDER_RESULT_ENV,
-} from "@smithers-orchestrator/sandbox";
+} from "@smthrs/sandbox";
 import { GCP_SANDBOX_PROVIDER_ID } from "./GCP_SANDBOX_PROVIDER_ID.js";
 import { createGcpCloudRunJobsSandboxRunner } from "./createGcpCloudRunJobsSandboxRunner.js";
 import { createGcpSandboxGcsTransport } from "./createGcpSandboxGcsTransport.js";
@@ -96,7 +96,7 @@ async function resolveStorageClient(provider, options) {
   if (typeof Storage !== "function") {
     throw new SmithersError("SANDBOX_EXECUTION_FAILED", "@google-cloud/storage does not export Storage.", { provider });
   }
-  return new Storage({ projectId: options.projectId, ...(options.clientOptions?.storage ?? {}) });
+  return new Storage({ projectId: options.projectId, ...options.clientOptions?.storage });
 }
 
 /**
@@ -126,7 +126,7 @@ async function resolveRunClient(provider, options) {
       provider,
     });
   }
-  return new JobsClient({ projectId: options.projectId, ...(options.clientOptions?.run ?? {}) });
+  return new JobsClient({ projectId: options.projectId, ...options.clientOptions?.run });
 }
 
 /**
@@ -135,7 +135,7 @@ async function resolveRunClient(provider, options) {
  * filesystem). Auth is Application Default Credentials.
  *
  * @param {import("./GcpSandboxProviderOptions.ts").GcpSandboxProviderOptions} [options]
- * @returns {import("@smithers-orchestrator/sandbox").SandboxProvider}
+ * @returns {import("@smthrs/sandbox").SandboxProvider}
  */
 export function createGcpSandboxProvider(options = {}) {
   const id = (options.id ?? GCP_SANDBOX_PROVIDER_ID).trim() || GCP_SANDBOX_PROVIDER_ID;

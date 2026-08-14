@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
-import { discoverWorkflows } from "@smithers-orchestrator/cli/workflows";
-import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smithers-orchestrator/components";
-import { renderWorkflow } from "smithers-orchestrator/testing";
+import { discoverWorkflows } from "@smthrs/cli/workflows";
+import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smthrs/components";
+import { renderWorkflow } from "smthrs/testing";
 import "./whole-foods-meal-planner.test";
 
 const packRoot = join(import.meta.dir, "..");
@@ -16,6 +16,7 @@ const slash = (value: string) => value.split(sep).join("/");
 const sorted = (values: Iterable<string>) => [...values].sort((a, b) => a.localeCompare(b));
 
 const workflowOwners = {
+  "./tests/fallback-agents-poc.test.tsx": ["fallback-agents-poc.tsx"],
   "./tests/stacked-ship-workflow.test.tsx": ["stacked-ship.tsx"],
   "./tests/daily-ceo-intel-pipeline.test.ts": ["daily-ceo-intel.tsx"],
   "./tests/issue-blitz.test.ts": ["issue-blitz.tsx", "issue-train.tsx"],
@@ -159,6 +160,8 @@ const workflowOwners = {
     "xcombo-fix-train.tsx",
   ],
   "./tests/workflow-component-inventory.test.ts": [
+    "bug-triage-train.tsx",
+    "docs-home-design-system.tsx",
     "federation-approval-polish-hardening.tsx",
     "federation-architecture-fix.tsx",
     "federation-artifact-edge-sync.tsx",
@@ -174,9 +177,16 @@ const workflowOwners = {
     "federation-static-import-audit.tsx",
     "federation-static-import-hardening.tsx",
     "federation-workflow-hardening-2.tsx",
+    "file-change-contract.tsx",
+    "n8n-gap-research.tsx",
+    "n8n-mvp-mission-v2.tsx",
+    "n8n-mvp-mission.tsx",
     "pr-polish-panel.tsx",
+    "rename-dependents.tsx",
+    "rename-package.tsx",
     "smithers-repo-federation.tsx",
     "sol-issue-train-pinned.tsx",
+    "upgrade-dependents.tsx",
     "whole-foods-meal-planner.tsx",
   ],
   "./tests/review-since-publish.test.tsx": ["review-since-publish.tsx"],
@@ -409,6 +419,79 @@ describe("federation workflow smoke coverage", () => {
     });
     const train = await renderWorkflow(module.default, { workflowPath, input: {}, outputs: {} });
     expect(train.tasks.map((task) => task.nodeId)).toContain("setup");
+  }, 30_000);
+
+  test("docs-home-design-system loops implement then review until the reviewer says LGTM", async () => {
+    const workflowPath = join(workflowRoot, "docs-home-design-system.tsx");
+    const module = await import(workflowPath);
+    const first = await renderWorkflow(module.default, { workflowPath, input: {}, outputs: {} });
+    const nodeIds = first.tasks.map((task) => task.nodeId);
+
+    expect(nodeIds).toContain("dhds:implement");
+    expect(nodeIds).toContain("dhds:review");
+    expect(nodeIds.indexOf("dhds:implement")).toBeLessThan(nodeIds.indexOf("dhds:review"));
+
+    const xml = first.toXml();
+    expect(xml).toContain('"smithers:ralph"');
+    expect(xml).toContain("design system");
+  }, 30_000);
+
+  test("dependent rename and upgrade workflows render their lead lanes", async () => {
+    const renamePackage = await renderWorkflowFile("rename-package.tsx");
+    expect(renamePackage.tasks.map((task) => task.nodeId)).toContain("sweep-packages");
+
+    const renamePath = join(workflowRoot, "rename-dependents.tsx");
+    const renameModule = await import(renamePath);
+    expect(renameModule.default.inputSchema.safeParse({}).success).toBe(false);
+    const renameDependents = await renderWorkflow(renameModule.default, {
+      workflowPath: renamePath,
+      input: { repos: ["smithersai/example-dependent"] },
+      outputs: {},
+    });
+    expect(renameDependents.tasks.map((task) => task.nodeId)).toContain("rename-smithersai-example-dependent");
+
+    const upgradeDependents = await renderWorkflowFile("upgrade-dependents.tsx");
+    expect(upgradeDependents.tasks.map((task) => task.nodeId)).toContain("discover");
+  }, 30_000);
+
+  test("file-change-contract leads with the spec task before fixtures, polish, and land", async () => {
+    const frame = await renderWorkflowFile("file-change-contract.tsx");
+    const nodeIds = frame.tasks.map((task) => task.nodeId);
+    expect(nodeIds).toContain("fcc:spec");
+    expect(nodeIds[0]).toBe("fcc:spec");
+    expect(frame.tasks[0]?.outputSchema).toBeDefined();
+  }, 30_000);
+
+  test("n8n research fans out one task per facet before synthesizing", async () => {
+    const frame = await renderWorkflowFile("n8n-gap-research.tsx");
+    const nodeIds = frame.tasks.map((task) => task.nodeId);
+    const facets = nodeIds.filter((id) => id.startsWith("gap:") && id !== "gap:synthesize");
+    expect(facets.length).toBeGreaterThan(1);
+    expect(nodeIds).toContain("gap:synthesize");
+    expect(nodeIds.indexOf("gap:synthesize")).toBeGreaterThan(nodeIds.indexOf(facets[0]!));
+  }, 30_000);
+
+  test("n8n-mvp-mission opens each round with an independent plan panel it then judges", async () => {
+    const frame = await renderWorkflowFile("n8n-mvp-mission.tsx");
+    const nodeIds = frame.tasks.map((task) => task.nodeId);
+    expect(nodeIds).toContain("mission:plan-fable");
+    expect(nodeIds).toContain("mission:plan-sol");
+    expect(nodeIds.indexOf("mission:plan-fable")).toBeLessThan(nodeIds.indexOf("mission:plan"));
+    // Never-stop mission: no lanes exist until the judge emits a plan, so the
+    // first frame stops at the synthesized plan rather than mounting lanes.
+    expect(nodeIds.some((id) => id.startsWith("mission:impl:"))).toBe(false);
+  }, 30_000);
+
+  test("n8n-mvp-mission-v2 gates every round behind the environment preflight", async () => {
+    const frame = await renderWorkflowFile("n8n-mvp-mission-v2.tsx");
+    const nodeIds = frame.tasks.map((task) => task.nodeId);
+    // v2's headline change over v1: a round never fans out onto a sick machine,
+    // so the preflight runs ahead of the two independent planners and the judge.
+    expect(nodeIds[0]).toBe("mission:preflight");
+    expect(nodeIds.indexOf("mission:plan-fable")).toBeGreaterThan(nodeIds.indexOf("mission:preflight"));
+    expect(nodeIds.indexOf("mission:plan-sol")).toBeGreaterThan(nodeIds.indexOf("mission:preflight"));
+    expect(nodeIds.indexOf("mission:plan-sol")).toBeLessThan(nodeIds.indexOf("mission:plan"));
+    expect(nodeIds.some((id) => id.startsWith("mission:impl:"))).toBe(false);
   }, 30_000);
 
   test("pr-polish-panel opens with independent reviews before the isolated polish step", async () => {

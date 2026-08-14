@@ -3,6 +3,7 @@ import {
   extractBackendFlag,
   findFirstPositionalIndex,
   parseMcpSurfaceArgv,
+  rewriteBareHerdrFlagArgv,
   rewriteBareResumeFlagArgv,
 } from "../src/argv-utils.js";
 
@@ -111,6 +112,55 @@ describe("argv-utils", () => {
 
     test("does not rewrite unrelated flags", () => {
       expect(rewriteBareResumeFlagArgv(["run", "--run-id", "abc"])).toEqual(["run", "--run-id", "abc"]);
+    });
+  });
+
+  describe("rewriteBareHerdrFlagArgv", () => {
+    test("rewrites a bare --herdr before another flag so it does not swallow it", () => {
+      // The bug: the union-typed --herdr treats the next token as its value, so
+      // `--herdr --run-id X` would consume `--run-id` as the session.
+      expect(rewriteBareHerdrFlagArgv(["up", "wf.tsx", "--herdr", "--run-id", "abc"])).toEqual([
+        "up",
+        "wf.tsx",
+        "--herdr=true",
+        "--run-id",
+        "abc",
+      ]);
+      // Bare --herdr followed by a short flag (e.g. -d detach).
+      expect(rewriteBareHerdrFlagArgv(["up", "wf.tsx", "--herdr", "-d"])).toEqual([
+        "up",
+        "wf.tsx",
+        "--herdr=true",
+        "-d",
+      ]);
+      // Bare --herdr at end of argv.
+      expect(rewriteBareHerdrFlagArgv(["up", "wf.tsx", "--herdr"])).toEqual(["up", "wf.tsx", "--herdr=true"]);
+    });
+
+    test("preserves an explicit session value", () => {
+      // Separate-form session name (does not start with '-') is left intact so
+      // incur parses it as the value.
+      expect(rewriteBareHerdrFlagArgv(["up", "wf.tsx", "--herdr", "mysession"])).toEqual([
+        "up",
+        "wf.tsx",
+        "--herdr",
+        "mysession",
+      ]);
+      // Equals-form is never touched.
+      expect(rewriteBareHerdrFlagArgv(["up", "wf.tsx", "--herdr=mysession"])).toEqual([
+        "up",
+        "wf.tsx",
+        "--herdr=mysession",
+      ]);
+    });
+
+    test("does not rewrite unrelated argv", () => {
+      expect(rewriteBareHerdrFlagArgv(["up", "wf.tsx", "--run-id", "abc"])).toEqual([
+        "up",
+        "wf.tsx",
+        "--run-id",
+        "abc",
+      ]);
     });
   });
 

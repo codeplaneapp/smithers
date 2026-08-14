@@ -1,8 +1,8 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import React from "react";
-import { SmithersContext, SmithersCtx } from "@smithers-orchestrator/react-reconciler/context";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
+import { SmithersContext, SmithersCtx } from "@smthrs/react-reconciler/context";
+import { SmithersRenderer } from "@smthrs/react-reconciler/dom/renderer";
 import { EscalationChain } from "../src/components/index.js";
 
 const agent = { id: "agent", generate: async () => ({ text: "ok" }) };

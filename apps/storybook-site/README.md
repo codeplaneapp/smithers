@@ -1,6 +1,6 @@
 # storybook-site
 
-Storybook catalog for `@smithers-orchestrator/ui`, deployed at
+Storybook catalog for `@smthrs/ui`, deployed at
 https://storybook.smithers.sh as a Cloudflare Worker serving the static
 Storybook build (same worker pattern as the other `apps/*-site` workers).
 
@@ -11,11 +11,11 @@ pnpm run deploy       # build + wrangler deploy to storybook.smithers.sh
 ```
 
 Stories live in `stories/*.stories.tsx` and import only from
-`@smithers-orchestrator/ui`. The preview decorator renders
+`@smthrs/ui`. The preview decorator renders
 `<SmithersUiStyles withTheme />` and stamps `data-theme` on the iframe root,
 so every story can be flipped between light and dark from the toolbar.
 
 The catalog is curated per family (primitives, chat, agentic, approvals,
 artifacts, diff); it does not aim to enumerate every export. Gateway-bound
-widgets (`smithers-orchestrator/gateway-ui`) are out of scope here because
+widgets (`smthrs/gateway-ui`) are out of scope here because
 they fetch live run data; see the styleguide served by the Gateway for those.

@@ -21,7 +21,7 @@ own `.mdx` file, one per prompt named in the design. Write the custom UI to
 
 1. **Start from the closest example** named in the provisioning manifest. Copy
    its structure, then adapt. Don't invent API; if unsure, re-read the example or
-   `bunx smithers-orchestrator docs`.
+   `bunx smthrs docs`.
 2. **Workflow file header**: begin with the seed comments and the JSX pragma,
    exactly like the other workflows in `{props.workflowsDir}`:
    ```
@@ -30,10 +30,10 @@ own `.mdx` file, one per prompt named in the design. Write the custom UI to
    // smithers-display-name: <Title Case Name>
    // smithers-description: <one sentence: what the workflow does>
    // smithers-tags: <comma-separated tags, e.g. ops, reporting>
-   /** @jsxImportSource smithers-orchestrator */
+   /** @jsxImportSource smthrs */
    ```
-3. **Imports**: `import { createSmithers } from "smithers-orchestrator"` (or
-   `import { createSmithers, UI } from "smithers-orchestrator"` when writing a
+3. **Imports**: `import { createSmithers } from "smthrs"` (or
+   `import { createSmithers, UI } from "smthrs"` when writing a
    custom UI), `import { z } from "zod/v4"`, `import { agents } from "../agents"`,
    any components from `../components`, and each prompt from
    `../prompts/<name>.mdx`.
@@ -76,13 +76,13 @@ plan (skip only if the design's `ui` is null because the user declined one):
 2. Start with `/** @jsxImportSource react */`, import React hooks from `react`,
    and import `createGatewayReactRoot`, `useGatewayRuns`, `useGatewayRunEvents`,
    `useGatewayNodeOutput`, and `useGatewayActions` (as needed) from
-   `smithers-orchestrator/gateway-react`.
+   `smthrs/gateway-react`.
 3. **Compose from the shipped component libraries instead of hand-rolling
-   markup or CSS**: `smithers-orchestrator/gateway-ui` for the run widgets
+   markup or CSS**: `smthrs/gateway-ui` for the run widgets
    (`WorkflowUiShell` as the page scaffold, or `SimpleWorkflowDashboard` when
    launch-and-watch is all the workflow needs, plus `RunList`, `RunTree`,
    `RunEventLog`, `NodeOutputView`, `ApprovalPanel`, `LaunchButton`,
-   `ConnectionBadge`, `StatusPill`) and `smithers-orchestrator/ui` for the
+   `ConnectionBadge`, `StatusPill`) and `smthrs/ui` for the
    primitives (`Button`, `Card`, `Input`, `Tabs`, `Table`, `Badge`,
    `StatusPill`, `EmptyState`, `SectionHeader`, `RowButton`, `KpiStat`; render
    `<SmithersUiStyles />` once at the root). Write bespoke JSX only for panels
@@ -116,8 +116,8 @@ monitor for a monitor.
 Compose the shipped `Monitor` component rather than hand-rolling a poll loop:
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { Monitor, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Monitor, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 
@@ -150,7 +150,7 @@ export default smithers((ctx) => (
 Rules: `nodeId`/`runId`/`iteration` are reserved output columns, so the
 implicated node field must be `targetNodeId`. The monitor receives
 `watchRunId`, `watchWorkflowId`, and `watchWorkflowPath` as input. It reads run
-state through `smithers-orchestrator/gateway-client` or the public CLI, never
+state through `smthrs/gateway-client` or the public CLI, never
 the store. Leave `autoHeal` at its default (`stalled`, `wedged-node`) unless the
 design says otherwise: those two repairs are idempotent and reversible, and
 everything else escalates to a human.
@@ -163,7 +163,7 @@ the test in the same pass, never as a follow-up.
 
 1. Write `{props.testsDir}/<workflowName>.test.tsx`. Import the **real**
    workflow module and drive it through `renderWorkflow` from
-   `smithers-orchestrator/testing`. A hand-built plan/graph object validates a
+   `smthrs/testing`. A hand-built plan/graph object validates a
    stand-in that merely resembles the workflow and passes while the real file is
    broken.
 2. **Register it**: append `./tests/<workflowName>.test.tsx` to the
@@ -183,7 +183,7 @@ the test in the same pass, never as a follow-up.
 ```tsx
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { renderWorkflow } from "smithers-orchestrator/testing";
+import { renderWorkflow } from "smthrs/testing";
 import workflow from "../workflows/<workflowName>.tsx";
 
 const workflowPath = join(import.meta.dir, "..", "workflows", "<workflowName>.tsx");
@@ -206,12 +206,12 @@ as a name filter and would silently match no files):
 
 ## Acceptance criteria
 
-- `bunx smithers-orchestrator graph {props.workflowsDir}/<workflowName>.tsx`
+- `bunx smthrs graph {props.workflowsDir}/<workflowName>.tsx`
   exits 0 (run it yourself before finishing).
 - `{props.testsDir}/<workflowName>.test.tsx` exists, is registered in
   `{props.packageJson}`, and passes.
 - If you wrote a monitor,
-  `bunx smithers-orchestrator graph {props.monitorDir}/<workflowName>.tsx`
+  `bunx smthrs graph {props.monitorDir}/<workflowName>.tsx`
   exits 0 too.
 - The UI file (when required) transpiles with `bun build --no-bundle`.
 - The workflow declares the UI with `<UI entry="../ui/<workflowName>.tsx" />`;

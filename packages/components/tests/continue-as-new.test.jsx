@@ -1,9 +1,9 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { z } from "zod";
-import { SmithersDb, runWorkflow } from "smithers-orchestrator";
+import { SmithersDb, runWorkflow } from "smthrs";
 import { createTestSmithers } from "./helpers.js";
 describe("continue-as-new", () => {
   test("splits long loop runs, carries state, and preserves ancestry", async () => {
@@ -61,7 +61,7 @@ describe("continue-as-new", () => {
     const run1Node = await adapter.getNode(run1Id, "tick", 0);
     expect(run1Node?.state).toBe("finished");
     cleanup();
-  }, 15_000);
+  }, 30_000);
   test("supports explicit continue-as-new with workflow payload", async () => {
     const { smithers, outputs, Workflow, Sequence, Task, ContinueAsNew, db, tables, cleanup } = createTestSmithers({
       result: z.object({

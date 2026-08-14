@@ -108,6 +108,12 @@ type RunFinishedEvent = RunEventBase & {
     type: "RunFinished";
     failedChildren?: number;
     failedChildKeys?: readonly string[];
+    /** Loops that exited via return-last with `until` still false (#1464 AWF-1). */
+    exhaustedLoops?: readonly {
+        id: string;
+        iteration: number;
+        maxIterations: number | null;
+    }[];
 };
 type RunFailedEvent = RunEventBase & {
     type: "RunFailed";
@@ -355,11 +361,6 @@ type DevToolsNode$3 = DevToolsNode$7;
 declare function collectTasks(node: DevToolsNode$2, out?: DevToolsNode$2[]): DevToolsNode$2[];
 type DevToolsNode$2 = DevToolsNode$7;
 
-/** @typedef {import("./DevToolsEngineEvent.ts").DevToolsEngineEvent} DevToolsEngineEvent */
-/** @typedef {import("./DevToolsEventBus.ts").DevToolsEventBus} DevToolsEventBus */
-/** @typedef {import("./DevToolsRunStoreOptions.ts").DevToolsRunStoreOptions} DevToolsRunStoreOptions */
-/** @typedef {import("./RunExecutionState.ts").RunExecutionState} RunExecutionState */
-/** @typedef {import("./TaskExecutionState.ts").TaskExecutionState} TaskExecutionState */
 declare class DevToolsRunStore {
     /**
      * @param {DevToolsRunStoreOptions} [options]
@@ -374,6 +375,14 @@ declare class DevToolsRunStore {
         bus: DevToolsEventBus$2;
         handler: (event: DevToolsEngineEvent$1) => void;
     }>;
+    /** @type {number} */
+    _maxRunsRetained: number;
+    /** @type {number} */
+    _maxEventsPerRun: number;
+    /** @type {number} */
+    _maxTasksPerRun: number;
+    /** @type {number} */
+    _maxToolCallsPerTask: number;
     /**
      * Attach to a Smithers EventBus-like source.
      * @param {DevToolsEventBus} bus

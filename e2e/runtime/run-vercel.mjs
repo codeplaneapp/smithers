@@ -1,6 +1,6 @@
 import { fork } from "node:child_process";
 import { createRequire } from "node:module";
-import { assertRuntimeConformance } from "@smithers-orchestrator/testing/runtimeConformance";
+import { assertRuntimeConformance } from "@smthrs/testing/runtimeConformance";
 import { terminateChild } from "./terminateChild.mjs";
 
 // Drive @vercel/node's own local Node.js function bridge directly

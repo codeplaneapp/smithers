@@ -72,7 +72,7 @@ import {
 import type {
   GatewayRpcMethod as ProtocolGatewayRpcMethod,
   LaunchRunRequest as ProtocolLaunchRunRequest,
-} from "@smithers-orchestrator/protocol/gateway-rpc";
+} from "@smthrs/protocol/gateway-rpc";
 import { GATEWAY_SCOPE_VALUES, hasGatewayScope, type GatewayScope } from "../src/auth/scopes.js";
 
 /**

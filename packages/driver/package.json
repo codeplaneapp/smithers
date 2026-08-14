@@ -1,6 +1,6 @@
 {
-  "name": "@smithers-orchestrator/driver",
-  "version": "0.32.0",
+  "name": "@smthrs/driver",
+  "version": "0.34.0",
   "description": "Workflow execution driver — runs tasks, acts on EngineDecisions, reports results",
   "type": "module",
   "sideEffects": false,
@@ -92,12 +92,12 @@
     "build": "rm -f src/index.d.ts && tsup --dts-only"
   },
   "dependencies": {
-    "@smithers-orchestrator/db": "workspace:*",
-    "@smithers-orchestrator/errors": "workspace:*",
-    "@smithers-orchestrator/graph": "workspace:*",
-    "@smithers-orchestrator/observability": "workspace:*",
-    "@smithers-orchestrator/scheduler": "workspace:*",
-    "effect": "4.0.0-beta.102",
+    "@smthrs/db": "workspace:*",
+    "@smthrs/errors": "workspace:*",
+    "@smthrs/graph": "workspace:*",
+    "@smthrs/observability": "workspace:*",
+    "@smthrs/scheduler": "workspace:*",
+    "effect": "4.0.0-beta.105",
     "zod": "^4.4.3"
   },
   "devDependencies": {

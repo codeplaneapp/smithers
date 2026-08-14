@@ -67,7 +67,7 @@ it too.
 ## Also in 0.25.0
 
 Durability is now backend-pluggable: it runs on Postgres and PGlite alongside
-SQLite, and `bunx smithers-orchestrator migrate` moves a legacy store forward (a
+SQLite, and `bunx smthrs migrate` moves a legacy store forward (a
 missing migration fails loud rather than reading stale data). The Gateway grew
 the sync layer the upcoming UI is built on: typed read RPCs plus TanStack DB
 collections and React hooks. Around 160 fixes landed across the CLI, gateway,
@@ -80,5 +80,5 @@ direction, not a release yet.
 ## Upgrade
 
 ```sh
-bunx smithers-orchestrator@0.25.0
+bunx smthrs@0.25.0
 ```

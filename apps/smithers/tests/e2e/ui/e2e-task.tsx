@@ -1,9 +1,9 @@
 /** @jsxImportSource react */
 import { useState } from "react";
-import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";
-import { ConnectionBadge, RunEventLog, RunList } from "smithers-orchestrator/gateway-ui";
+import { createGatewayReactRoot } from "smthrs/gateway-react";
+import { ConnectionBadge, RunEventLog, RunList } from "smthrs/gateway-ui";
 
-// A real workflow UI built from the shared @smithers-orchestrator/gateway-ui
+// A real workflow UI built from the shared @smthrs/gateway-ui
 // components, mounted by the seed gateway for the e2e suite. Exercises the
 // package's components end-to-end in a real browser against a real gateway.
 function App() {

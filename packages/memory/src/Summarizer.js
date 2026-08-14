@@ -1,8 +1,8 @@
 import { Effect } from "effect";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
 /** @typedef {import("./MemoryProcessor.ts").MemoryProcessor} MemoryProcessor */
 /** @typedef {import("./store/MemoryStore.ts").MemoryStore} MemoryStore */
-/** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
+/** @typedef {import("@smthrs/errors/SmithersError").SmithersError} SmithersError */
 
 // Newest N messages stay verbatim; everything older is folded into the summary.
 const RECENT_MESSAGE_COUNT = 2;

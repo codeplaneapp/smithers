@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/claw-eval-gateway",
+  "name": "@smthrs/claw-eval-gateway",
   "version": "0.0.0",
   "private": true,
   "type": "module",

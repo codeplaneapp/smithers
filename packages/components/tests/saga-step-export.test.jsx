@@ -1,6 +1,6 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
-import { Saga, SagaStep } from "smithers-orchestrator";
+import { Saga, SagaStep } from "smthrs";
 
 // Regression: `import { SagaStep }` previously threw "Export named 'SagaStep'
 // not found" because it was only attached as Saga.Step, never re-exported.

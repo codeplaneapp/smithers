@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { reducedMotionCss } from "@smithers-orchestrator/ui-styleguide";
+import { reducedMotionCss } from "@smthrs/ui-styleguide";
 import { agenticReasoningCss, sharedCss, smithersUiCss } from "../src/uiCss";
 
 describe("agentic reasoning CSS", () => {
@@ -22,7 +22,7 @@ describe("agentic reasoning CSS", () => {
 
   test("routes active chain steps through the shared running color", () => {
     expect(agenticReasoningCss).toContain(
-      ".sui-cot-step[data-status-class='run'] .sui-cot-step-dot { background:var(--brand, #6d56d8); }",
+      ".sui-cot-step[data-status-class='run'] .sui-cot-step-dot { background:var(--brand, #9449bc); }",
     );
     expect(agenticReasoningCss).not.toContain(
       ".sui-cot-step[data-status='running'] .sui-cot-step-dot { background:var(--info",

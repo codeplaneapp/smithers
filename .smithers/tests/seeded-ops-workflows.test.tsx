@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import "../preload.ts";
 import { describe, expect, mock, setDefaultTimeout, test } from "bun:test";
 import {
@@ -15,9 +15,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
-import { renderPrompt, renderWorkflow, runTask, simulate } from "smithers-orchestrator/testing";
-import type { RenderedWorkflow } from "smithers-orchestrator/testing";
-import type { TaskDescriptor } from "smithers-orchestrator/graph";
+import { renderPrompt, renderWorkflow, runTask, simulate } from "smthrs/testing";
+import type { RenderedWorkflow } from "smthrs/testing";
+import type { TaskDescriptor } from "smthrs/graph";
 import { parseFirstJsonObject } from "../lib/parse-first-json-value";
 
 // Bun resolves child-process commands against the process-start PATH. Keep
@@ -235,7 +235,7 @@ describe.serial("seeded ops/filesystem workflows", () => {
           .split("\n")
           .map((line) => JSON.parse(line)),
       ).toEqual([
-        { command: "npm", args: ["view", "smithers-orchestrator", "version"] },
+        { command: "npm", args: ["view", "smthrs", "version"] },
         { command: "pnpm", args: ["version", "patch"] },
       ]);
     });
@@ -431,7 +431,7 @@ describe.serial("seeded ops/filesystem workflows", () => {
       .join(", ");
     expect(await runTask(task(all, "report"))).toEqual({
       passed: true,
-      summary: `Smoke test of smithers-orchestrator@${expectedVersion} across 4/4 areas (changelogs: ${releaseList}). All baseline, onboarding, feature, and UI checks passed. onboarding-human ok onboarding-agent ok features ok workflow-ui ok`,
+      summary: `Smoke test of smthrs@${expectedVersion} across 4/4 areas (changelogs: ${releaseList}). All baseline, onboarding, feature, and UI checks passed. onboarding-human ok onboarding-agent ok features ok workflow-ui ok`,
       findings: [
         { area: "onboarding-human", status: "pass", evidence: "real" },
         { area: "onboarding-agent", status: "pass", evidence: "real" },
@@ -455,7 +455,7 @@ describe.serial("seeded ops/filesystem workflows", () => {
     );
     expect(await runTask(task(fail, "report"))).toEqual({
       passed: false,
-      summary: `Smoke test of smithers-orchestrator@${expectedVersion} across 4/4 areas (changelogs: ${releaseList}). 1 failing check(s). onboarding-human ok onboarding-agent ok features ok ui`,
+      summary: `Smoke test of smthrs@${expectedVersion} across 4/4 areas (changelogs: ${releaseList}). 1 failing check(s). onboarding-human ok onboarding-agent ok features ok ui`,
       findings: [
         { area: "onboarding-human", status: "pass", evidence: "real" },
         { area: "onboarding-agent", status: "pass", evidence: "real" },
@@ -467,7 +467,7 @@ describe.serial("seeded ops/filesystem workflows", () => {
     const missing = await render("smoketest.tsx", smokeInput, combine(...good.slice(0, 3)));
     expect(await runTask(task(missing, "report"))).toEqual({
       passed: false,
-      summary: `Smoke test of smithers-orchestrator@${expectedVersion} across 3/4 areas (changelogs: ${releaseList}). 0 failing check(s); only 3/4 areas reported. onboarding-human ok onboarding-agent ok features ok`,
+      summary: `Smoke test of smthrs@${expectedVersion} across 3/4 areas (changelogs: ${releaseList}). 0 failing check(s); only 3/4 areas reported. onboarding-human ok onboarding-agent ok features ok`,
       findings: [
         { area: "onboarding-human", status: "pass", evidence: "real" },
         { area: "onboarding-agent", status: "pass", evidence: "real" },

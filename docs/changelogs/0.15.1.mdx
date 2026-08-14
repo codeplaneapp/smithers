@@ -57,7 +57,7 @@ improvement, and a schema-retry bug fix.
   with proper JSX text interpolation.
 
 - **Seeded `audit` and `feature-enum` workflows now use grouped feature arrays.**
-  The workflow-pack schemas emitted by `bunx smithers-orchestrator init` now use
+  The workflow-pack schemas emitted by `bunx smthrs init` now use
   `Record<string, string[]>` for grouped feature inputs, matching the shared
   `ForEachFeature` and `FeatureEnum` components and fixing seeded TS2322
   assignment errors.
@@ -68,13 +68,13 @@ improvement, and a schema-retry bug fix.
   `.smithers/prompts/*.mdx` files. All workflow tasks now import and render
   prompt templates instead of embedding raw strings, matching the pattern
   already used by `research-plan-implement`, `plan`, `research`, and
-  `ValidationLoop`. The `bunx smithers-orchestrator init` codegen has been updated to emit the
+  `ValidationLoop`. The `bunx smthrs init` codegen has been updated to emit the
   new `.mdx` files and reference them in the generated workflows and
   components.
 
 - **Replace deprecated `.passthrough()` with `z.looseObject()`.** All Zod
   schemas that used `.passthrough()` now use `z.looseObject()` (Zod v4) or
-  `.catchall(z.unknown())` (v3 compat layer). The `bunx smithers-orchestrator init` scaffold
+  `.catchall(z.unknown())` (v3 compat layer). The `bunx smthrs init` scaffold
   templates in `workflow-pack.ts` were updated to match. `.passthrough()` was
   deprecated in Zod v4 in favour of explicit top-level constructors.
 
@@ -84,7 +84,7 @@ improvement, and a schema-retry bug fix.
 
 - Improved crosslinking and added external reference links across 36
   documentation pages.
-- Fixed CLI command examples to use `bunx smithers-orchestrator`.
+- Fixed CLI command examples to use `bunx smthrs`.
 - Fixed bare `smithers` reference in the gateway page.
 - Regenerated `docs/llms-full.txt` with internal cross-links to match the
   current docs manifest.

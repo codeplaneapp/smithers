@@ -1,7 +1,8 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { Parallel, Sequence, SmithersDb, Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { Sequence, SmithersDb, Task, Workflow, runWorkflow } from "smthrs";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { approveNode } from "../src/approvals.js";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { Effect } from "effect";
@@ -72,6 +73,40 @@ describe("Task retryPolicy through the real engine", () => {
         // with a 1000ms base; an explicit zero-delay policy must not fall
         // back to it. The generous bound only catches that regression.
         expect(attemptTimes[1] - attemptTimes[0]).toBeLessThan(1000);
+      } finally {
+        cleanup();
+      }
+    },
+    END_TO_END_TIMEOUT_MS,
+  );
+  test(
+    "retryAfterMs prevents a retry earlier than the provider minimum",
+    async () => {
+      const { smithers, outputs, cleanup } = buildSmithers();
+      try {
+        /** @type {number[]} */
+        const attemptTimes = [];
+        const workflow = smithers(() => (
+          <Workflow name="retry-after-minimum">
+            <Task id="provider-flaky" output={outputs.num} retries={1} retryPolicy={{ initialDelayMs: 50 }}>
+              {() => {
+                attemptTimes.push(Date.now());
+                if (attemptTimes.length === 1) {
+                  throw new SmithersError("PROVIDER_TRANSIENT", "provider cooldown", {
+                    failureRetryable: true,
+                    retryAfterMs: 300,
+                  });
+                }
+                return { value: attemptTimes.length };
+              }}
+            </Task>
+          </Workflow>
+        ));
+
+        const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+        expect(result.status).toBe("finished");
+        expect(attemptTimes).toHaveLength(2);
+        expect(attemptTimes[1] - attemptTimes[0]).toBeGreaterThanOrEqual(250);
       } finally {
         cleanup();
       }

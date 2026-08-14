@@ -1,6 +1,6 @@
 // Reference solution (jsx arm, task `fanout`).
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, Task, Parallel, Loop, smithers, outputs } = createSmithers({

@@ -6,11 +6,11 @@
  * Pattern: scheduler → scanner commands → maintenance agent → PR creator.
  * Use cases: scheduled repo hygiene, automated cleanup PRs, maintenance backlog reduction.
  */
-import { Sequence, Parallel } from "smithers-orchestrator";
+import { Sequence, Parallel } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep, write } from "smithers-orchestrator/tools";
+import { read, bash, grep, write } from "smthrs/tools";
 import { z } from "zod";
 import ScanPrompt from "./prompts/repo-janitor/scan.mdx";
 import FixWarningsPrompt from "./prompts/repo-janitor/fix-warnings.mdx";

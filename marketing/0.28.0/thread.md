@@ -14,7 +14,7 @@ tweet 2 uses a real screen recording gif).
 >
 > A Monitor you operate fleets from, installable workflow packs, provenance-bound approvals, durable memory, and Node.js + browser support.
 >
-> bunx smithers-orchestrator@latest init
+> bunx smthrs@latest init
 
 Claim IDs: release-scale, monitor, packs, provenance, memory-notes, runtimes
 Characters: 265

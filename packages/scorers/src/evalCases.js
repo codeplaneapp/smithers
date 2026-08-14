@@ -13,8 +13,8 @@ import { isEvalInfraFailure } from "./isEvalInfraFailure.js";
  * the scorer that turns a graded case into a real `_smithers_scorers` row.
  * Pure (no I/O), so it is usable both from the `evals` gateway extension
  * (`apps/cli/src/evals-extension.js`) and from a seeded workflow via the
- * public `smithers-orchestrator/evals` subpath (a seeded `.smithers/workflows/
- * *.tsx` file can only import `smithers-orchestrator` — `@smithers-orchestrator/*`
+ * public `smthrs/evals` subpath (a seeded `.smithers/workflows/
+ * *.tsx` file can only import `smthrs` — `@smthrs/*`
  * is not resolvable from a user's project under pnpm's strict install).
  *
  * `parseEvalDataset` preserves multi's `src/evals/evalReport.ts` base parsing

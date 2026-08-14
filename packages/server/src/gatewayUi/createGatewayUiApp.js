@@ -12,7 +12,7 @@ import { Hono } from "hono";
 /**
  * @param {{
  *   resolveMatch: (pathname: string) => GatewayUiMatch | null;
- *   renderIndex: (match: GatewayUiMatch) => string;
+ *   renderIndex: (match: GatewayUiMatch) => string | Promise<string>;
  *   renderAsset: (match: GatewayUiMatch) => Promise<{ body: string; contentType: string } | null>;
  * }} options
  */
@@ -38,7 +38,7 @@ export function createGatewayUiApp(options) {
         "X-Content-Type-Options": "nosniff",
       });
     }
-    return c.html(options.renderIndex(match), 200, {
+    return c.html(await options.renderIndex(match), 200, {
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
     });

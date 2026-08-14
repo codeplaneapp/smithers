@@ -1,12 +1,75 @@
 import { spawn } from "node:child_process";
-import { accountToProviderEnv, getAccount } from "@smithers-orchestrator/accounts";
-import { SmithersError } from "@smithers-orchestrator/errors";
+import { accountToProviderEnv, getAccount } from "@smthrs/accounts";
+import { closeSync, existsSync, openSync, readSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { isAbsolute, join } from "node:path";
+import { SmithersError } from "@smthrs/errors";
 import { registeredAgentLabel } from "./registered-agent-id.js";
 /** @typedef {import("./HijackCandidate.ts").HijackCandidate} HijackCandidate */
 /** @typedef {import("./HijackLaunchSpec.ts").HijackLaunchSpec} HijackLaunchSpec */
 /** @typedef {import("./NativeHijackEngine.ts").NativeHijackEngine} NativeHijackEngine */
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 
+const CLAUDE_TRANSCRIPT_PREFIX_BYTES = 64_000;
+
+/**
+ * Locate the project directory Claude Code used for a session id.
+ * Claude keys sessions under `~/.claude/projects/<slug>/<sessionId>.jsonl`
+ * and each transcript line carries `cwd`.
+ *
+ * @param {string} sessionId
+ * @param {{ home?: string, configDir?: string }} [opts]
+ * @returns {string | null}
+ */
+export function resolveClaudeSessionCwd(sessionId, opts = {}) {
+  if (typeof sessionId !== "string" || sessionId === "") return null;
+  const home = opts.home ?? homedir();
+  const projectsRoot = join(opts.configDir ?? join(home, ".claude"), "projects");
+  if (!existsSync(projectsRoot)) return null;
+  let projectDirs;
+  try {
+    projectDirs = readdirSync(projectsRoot, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+  } catch {
+    return null;
+  }
+  for (const dir of projectDirs) {
+    const file = join(projectsRoot, dir, `${sessionId}.jsonl`);
+    let fd;
+    try {
+      // Read only a bounded prefix — Claude records cwd on early lines, and a
+      // long-running session transcript may otherwise be hundreds of MiB.
+      // Opening directly also avoids a separate exists/read race.
+      fd = openSync(file, "r");
+      const buf = Buffer.allocUnsafe(CLAUDE_TRANSCRIPT_PREFIX_BYTES);
+      const bytesRead = readSync(fd, buf, 0, buf.length, 0);
+      const head = buf.toString("utf8", 0, bytesRead);
+      for (const line of head.split("\n")) {
+        if (!line.includes('"cwd"')) continue;
+        try {
+          const row = JSON.parse(line);
+          if (typeof row?.cwd === "string" && row.cwd !== "") {
+            return row.cwd;
+          }
+        } catch {
+          /* next line */
+        }
+      }
+    } catch {
+      /* next project */
+    } finally {
+      if (fd !== undefined) {
+        try {
+          closeSync(fd);
+        } catch {
+          /* next project */
+        }
+      }
+    }
+  }
+  return null;
+}
 /**
  * @param {string | null} [metaJson]
  * @returns {Record<string, unknown>}
@@ -29,6 +92,7 @@ function asNativeHijackEngine(value) {
     value === "antigravity" ||
     value === "codex" ||
     value === "pi" ||
+    value === "omp" ||
     value === "kimi" ||
     value === "forge" ||
     value === "amp"
@@ -43,6 +107,27 @@ function asConversationMessages(value) {
   return Array.isArray(value) ? value : undefined;
 }
 /**
+ * Launch flags the workflow agent ran with (model, permission mode, config
+ * dir), recorded by the engine on the hijack hand-off. `--resume` restores
+ * conversation state only — per-process argv must be re-emitted explicitly.
+ * @param {unknown} value
+ * @param {Record<string, unknown>} meta
+ * @returns {import("./HijackCandidate.ts").HijackCandidateConfig | undefined}
+ */
+function extractHijackConfig(value, meta) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  /** @type {import("./HijackCandidate.ts").HijackCandidateConfig} */
+  const config = {};
+  const model =
+    typeof source.model === "string" ? source.model : typeof meta.agentModel === "string" ? meta.agentModel : undefined;
+  if (model) config.model = model;
+  if (source.yolo === true) config.yolo = true;
+  if (typeof source.permissionMode === "string") config.permissionMode = source.permissionMode;
+  if (source.dangerouslySkipPermissions === true) config.dangerouslySkipPermissions = true;
+  if (typeof source.configDir === "string") config.configDir = source.configDir;
+  return Object.keys(config).length > 0 ? config : undefined;
+}
+/**
  * @param {Record<string, unknown>} meta
  * @returns {| { engine: string; mode: "native-cli"; resume: string } | { engine: string; mode: "conversation"; messages: unknown[] } | null}
  */
@@ -54,22 +139,24 @@ function extractContinuationFromMeta(meta) {
     const resume = typeof handoff.resume === "string" ? handoff.resume : undefined;
     const messages = asConversationMessages(handoff.messages);
     const accountLabel = registeredAgentLabel(handoff.agentId) ?? registeredAgentLabel(meta.agentId);
+    const config = extractHijackConfig(handoff.config, meta);
     if (engine && mode === "native-cli" && resume) {
-      return { engine, mode: "native-cli", resume, accountLabel };
+      return { engine, mode: "native-cli", resume, accountLabel, config };
     }
     if (engine && mode === "conversation" && messages?.length) {
-      return { engine, mode: "conversation", messages, accountLabel };
+      return { engine, mode: "conversation", messages, accountLabel, config };
     }
   }
   const engine = typeof meta.agentEngine === "string" ? meta.agentEngine : undefined;
   const resume = typeof meta.agentResume === "string" ? meta.agentResume : undefined;
   const accountLabel = registeredAgentLabel(meta.agentId);
+  const config = extractHijackConfig(undefined, meta);
   if (engine && resume) {
-    return { engine, mode: "native-cli", resume, accountLabel };
+    return { engine, mode: "native-cli", resume, accountLabel, config };
   }
   const messages = asConversationMessages(meta.agentConversation);
   if (engine && messages?.length) {
-    return { engine, mode: "conversation", messages, accountLabel };
+    return { engine, mode: "conversation", messages, accountLabel, config };
   }
   return null;
 }
@@ -93,6 +180,19 @@ export async function resolveHijackCandidate(adapter, runId, target) {
     const extracted = extractContinuationFromMeta(meta);
     if (!extracted) continue;
     if (target && target !== extracted.engine && target !== attempt.nodeId) continue;
+    // Prefer the cwd the agent actually used for its session:
+    // 1) meta.agentCwd (persisted by engine for new attempts)
+    // 2) Claude session transcript lookup (covers 0.27 / pre-agentCwd runs)
+    // 3) jjCwd (worktree isolation)
+    // 4) process.cwd() last resort
+    const persistedCwd =
+      (typeof meta.agentCwd === "string" && meta.agentCwd) || (typeof meta.cwd === "string" && meta.cwd) || null;
+    const metaCwd = persistedCwd && isAbsolute(persistedCwd) ? persistedCwd : null;
+    const resumeId = extracted.mode === "native-cli" ? extracted.resume : undefined;
+    const sessionCwd =
+      !metaCwd && extracted.engine === "claude-code" && typeof resumeId === "string"
+        ? resolveClaudeSessionCwd(resumeId, { configDir: extracted.config?.configDir })
+        : null;
     return {
       runId,
       nodeId: attempt.nodeId,
@@ -100,10 +200,11 @@ export async function resolveHijackCandidate(adapter, runId, target) {
       attempt: attempt.attempt,
       engine: extracted.engine,
       mode: extracted.mode,
-      resume: extracted.mode === "native-cli" ? extracted.resume : undefined,
+      resume: resumeId,
       messages: extracted.mode === "conversation" ? extracted.messages : undefined,
       accountLabel: extracted.accountLabel,
-      cwd: attempt.jjCwd ?? process.cwd(),
+      cwd: metaCwd || sessionCwd || attempt.jjCwd || process.cwd(),
+      ...(extracted.config ? { config: extracted.config } : {}),
     };
   }
   // Auto-hijack emits this durable event before aborting the live task. Under
@@ -133,6 +234,7 @@ export async function resolveHijackCandidate(adapter, runId, target) {
         attempt.nodeId === nodeId && (attempt.iteration ?? 0) === iteration && attempt.attempt === attemptNumber,
     );
     const matchingMeta = parseAttemptMeta(matchingAttempt?.metaJson);
+    const eventConfig = extractHijackConfig(payload.config, matchingMeta);
     return {
       runId,
       nodeId,
@@ -142,7 +244,8 @@ export async function resolveHijackCandidate(adapter, runId, target) {
       mode: "native-cli",
       resume,
       accountLabel: registeredAgentLabel(payload.agentId) ?? registeredAgentLabel(matchingMeta.agentId),
-      cwd: typeof payload.cwd === "string" ? payload.cwd : process.cwd(),
+      cwd: typeof payload.cwd === "string" && isAbsolute(payload.cwd) ? payload.cwd : process.cwd(),
+      ...(eventConfig ? { config: eventConfig } : {}),
     };
   }
   return null;
@@ -226,59 +329,112 @@ export function buildHijackLaunchSpec(candidate, baseEnv = process.env) {
     );
   }
   const env = buildHijackEnvironment(candidate, baseEnv);
+  const config = candidate.config ?? {};
+  const yolo = config.yolo === true || config.dangerouslySkipPermissions === true;
+  if (config.configDir) {
+    // Mirrors the agent env layer (e.g. ClaudeCodeAgent sets CLAUDE_CONFIG_DIR
+    // from opts.configDir); a registered account already rehydrated above wins
+    // only when the agent itself pinned no config dir.
+    if (candidate.engine === "claude-code") env.CLAUDE_CONFIG_DIR = config.configDir;
+    if (candidate.engine === "codex") env.CODEX_HOME = config.configDir;
+    if (candidate.engine === "kimi") env.KIMI_SHARE_DIR = config.configDir;
+  }
   if (candidate.engine === "claude-code") {
+    // Strip print/SDK entrypoint markers so interactive resume is not forced
+    // into --print (which then demands a deferred tool marker or a prompt).
     if (env.CLAUDE_CODE_ENTRYPOINT) env.CLAUDE_CODE_ENTRYPOINT = "";
     if (env.CLAUDECODE) env.CLAUDECODE = "";
+    const args = ["--resume", candidate.resume];
+    if (config.yolo === true) {
+      args.push("--allow-dangerously-skip-permissions");
+      args.push("--dangerously-skip-permissions");
+      if (!config.permissionMode) {
+        args.push("--permission-mode", "bypassPermissions");
+      }
+    }
+    if (config.dangerouslySkipPermissions === true) args.push("--dangerously-skip-permissions");
+    if (config.permissionMode) args.push("--permission-mode", config.permissionMode);
+    if (config.model) args.push("--model", config.model);
+    delete env.CLAUDE_CODE_ENTRYPOINT;
+    delete env.CLAUDECODE;
+    // Explicit interactive resume. Do NOT pass a trailing prompt: that would
+    // auto-send a user turn. A real TTY is required (caller must not pipe stdin).
     return {
       command: "claude",
-      args: ["--resume", candidate.resume],
+      args,
       cwd: candidate.cwd,
       env,
     };
   }
   if (candidate.engine === "antigravity") {
+    const args = ["--conversation", candidate.resume];
+    if (config.model) args.push("--model", config.model);
+    if (yolo) args.push("--dangerously-skip-permissions");
     return {
       command: "agy",
-      args: ["--conversation", candidate.resume],
+      args,
       cwd: candidate.cwd,
       env,
     };
   }
   if (candidate.engine === "pi") {
+    const args = ["--session", candidate.resume];
+    if (config.model) args.push("--model", config.model);
     return {
       command: "pi",
-      args: ["--session", candidate.resume],
+      args,
+      cwd: candidate.cwd,
+      env,
+    };
+  }
+  if (candidate.engine === "omp") {
+    const args = ["--resume", candidate.resume, "--cwd", candidate.cwd];
+    if (config.model) args.push("--model", config.model);
+    if (yolo) args.push("--auto-approve");
+    return {
+      command: "omp",
+      args,
       cwd: candidate.cwd,
       env,
     };
   }
   if (candidate.engine === "kimi") {
+    const args = ["--session", candidate.resume, "--work-dir", candidate.cwd];
+    if (config.model) args.push("--model", config.model);
     return {
       command: "kimi",
-      args: ["--session", candidate.resume, "--work-dir", candidate.cwd],
+      args,
       cwd: candidate.cwd,
       env,
     };
   }
   if (candidate.engine === "forge") {
+    const args = ["--conversation-id", candidate.resume, "-C", candidate.cwd];
+    if (config.model) args.push("--model", config.model);
     return {
       command: "forge",
-      args: ["--conversation-id", candidate.resume, "-C", candidate.cwd],
+      args,
       cwd: candidate.cwd,
       env,
     };
   }
   if (candidate.engine === "amp") {
+    const args = ["threads", "continue", candidate.resume];
+    if (config.model) args.push("--model", config.model);
+    if (yolo) args.push("--dangerously-allow-all");
     return {
       command: "amp",
-      args: ["threads", "continue", candidate.resume],
+      args,
       cwd: candidate.cwd,
       env,
     };
   }
+  const args = ["resume", candidate.resume, "-C", candidate.cwd];
+  if (config.model) args.push("--model", config.model);
+  if (yolo) args.push("--dangerously-bypass-approvals-and-sandbox");
   return {
     command: "codex",
-    args: ["resume", candidate.resume, "-C", candidate.cwd],
+    args,
     cwd: candidate.cwd,
     env,
   };

@@ -6,15 +6,10 @@ import {
   useGatewayNodeOutput,
   useGatewayActions,
   useGatewayRpc,
-} from "@smithers-orchestrator/gateway-react";
-import type { GatewayAsyncState } from "@smithers-orchestrator/gateway-react";
-import type { UseGatewayRunTreeResult } from "@smithers-orchestrator/gateway-react";
-import type {
-  GatewayRpcPayload,
-  GatewayRunNode,
-  GatewayApprovalRow,
-  GatewayEventFrame,
-} from "@smithers-orchestrator/gateway-client";
+} from "@smthrs/gateway-react";
+import type { GatewayAsyncState } from "@smthrs/gateway-react";
+import type { UseGatewayRunTreeResult } from "@smthrs/gateway-react";
+import type { GatewayRpcPayload, GatewayRunNode, GatewayApprovalRow, GatewayEventFrame } from "@smthrs/gateway-client";
 
 export type RunData = GatewayAsyncState<GatewayRpcPayload<"getRun">>;
 

@@ -1,7 +1,7 @@
 // smithers-source: user
 // smithers-display-name: Memory Recall Demo
-/** @jsxImportSource smithers-orchestrator */
-import { Memory, Task, UI, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Memory, Task, UI, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 

@@ -2,8 +2,8 @@
 // smithers-display-name: Review Panel (Codex + Opus)
 // smithers-description: A benchmark review stage as a PANEL: independent reviewers (Codex + Opus) judge the same implementation in parallel, and their verdicts aggregate to one decision. Reviewers never implement. Drop-in replacement for a single-reviewer harness stage.
 // smithers-tags: benchmark, review, panel, fleet
-/** @jsxImportSource smithers-orchestrator */
-import { Parallel, Sequence, Task, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Parallel, Sequence, Task, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { buildReviewPanel } from "./buildReviewPanel";
 

@@ -10,7 +10,7 @@ import {
   ConfirmationRequest,
   ConfirmationTitle,
   ContextUsage,
-} from "@smithers-orchestrator/ui";
+} from "@smthrs/ui";
 
 const meta: Meta = {
   title: "Agentic/Approvals & Checkpoints",

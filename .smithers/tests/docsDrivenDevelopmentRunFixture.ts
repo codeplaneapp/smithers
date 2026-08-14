@@ -3,7 +3,7 @@ import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlin
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Gateway, mdxPlugin } from "smithers-orchestrator";
+import { Gateway, mdxPlugin } from "smthrs";
 
 mdxPlugin();
 
@@ -136,7 +136,7 @@ function writeFixtureAgents(root: string) {
 }
 
 function fixtureAgentsModuleSource() {
-  return `import { type AgentLike } from "smithers-orchestrator";
+  return `import { type AgentLike } from "smthrs";
 
 type FixtureEngine = "claude" | "codex";
 

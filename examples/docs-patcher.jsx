@@ -6,11 +6,11 @@
  * Pattern: contract/diff detector -> docs patch agent -> verifier -> PR creator.
  * Use cases: API migration docs, CLI flag renames, SDK changelog snippets, README sync.
  */
-import { Sequence, Parallel } from "smithers-orchestrator";
+import { Sequence, Parallel } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { bash, read, write, grep } from "smithers-orchestrator/tools";
+import { bash, read, write, grep } from "smthrs/tools";
 import { z } from "zod";
 import DetectDriftPrompt from "./prompts/docs-patcher/detect-drift.mdx";
 import PatchDocsPrompt from "./prompts/docs-patcher/patch-docs.mdx";

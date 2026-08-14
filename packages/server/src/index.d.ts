@@ -1,16 +1,16 @@
 import * as node_http from 'node:http';
 import { IncomingMessage as IncomingMessage$1, ServerResponse as ServerResponse$2 } from 'node:http';
-import * as _smithers_orchestrator_usage from '@smithers-orchestrator/usage';
-import * as _smithers_orchestrator_observability_SmithersEvent from '@smithers-orchestrator/observability/SmithersEvent';
-import * as _smithers_orchestrator_components_SmithersWorkflow from '@smithers-orchestrator/components/SmithersWorkflow';
-import { SmithersWorkflow as SmithersWorkflow$1 } from '@smithers-orchestrator/components/SmithersWorkflow';
-import * as _smithers_orchestrator_db_adapter from '@smithers-orchestrator/db/adapter';
-import { SmithersDb as SmithersDb$4 } from '@smithers-orchestrator/db/adapter';
-import * as _smithers_orchestrator_driver_RunStartedBy from '@smithers-orchestrator/driver/RunStartedBy';
+import * as _smthrs_usage from '@smthrs/usage';
+import * as _smthrs_observability_SmithersEvent from '@smthrs/observability/SmithersEvent';
+import * as _smthrs_components_SmithersWorkflow from '@smthrs/components/SmithersWorkflow';
+import { SmithersWorkflow as SmithersWorkflow$1 } from '@smthrs/components/SmithersWorkflow';
+import * as _smthrs_db_adapter from '@smthrs/db/adapter';
+import { SmithersDb as SmithersDb$4 } from '@smthrs/db/adapter';
+import * as _smthrs_driver_RunStartedBy from '@smthrs/driver/RunStartedBy';
 import * as ws from 'ws';
 import { WebSocketServer } from 'ws';
 import * as node_stream from 'node:stream';
-import * as _smithers_orchestrator_db_runState from '@smithers-orchestrator/db/runState';
+import * as _smthrs_db_runState from '@smthrs/db/runState';
 import * as effect_Record from 'effect/Record';
 import * as effect_LogLevel from 'effect/LogLevel';
 import * as hono from 'hono';
@@ -18,15 +18,15 @@ import { Hono } from 'hono';
 import * as hono_types from 'hono/types';
 import { Effect } from 'effect';
 import * as effect_Fiber from 'effect/Fiber';
-import * as _smithers_orchestrator_protocol_errors from '@smithers-orchestrator/protocol/errors';
-import * as _smithers_orchestrator_devtools_snapshotSerializer from '@smithers-orchestrator/devtools/snapshotSerializer';
-import * as _smithers_orchestrator_protocol_devtools from '@smithers-orchestrator/protocol/devtools';
-import * as _smithers_orchestrator_engine_effect_DiffBundle from '@smithers-orchestrator/engine/effect/DiffBundle';
-import { DiffBundle } from '@smithers-orchestrator/engine/effect/DiffBundle';
-import { computeDiffBundleBetweenRefs } from '@smithers-orchestrator/engine/effect/diff-bundle';
-import { selectOutputRow } from '@smithers-orchestrator/db/output';
-import * as _smithers_orchestrator_time_travel_jumpToFrame from '@smithers-orchestrator/time-travel/jumpToFrame';
-export { JumpToFrameError } from '@smithers-orchestrator/time-travel/jumpToFrame';
+import * as _smthrs_protocol_errors from '@smthrs/protocol/errors';
+import * as _smthrs_devtools_snapshotSerializer from '@smthrs/devtools/snapshotSerializer';
+import * as _smthrs_protocol_devtools from '@smthrs/protocol/devtools';
+import * as _smthrs_engine_effect_DiffBundle from '@smthrs/engine/effect/DiffBundle';
+import { DiffBundle } from '@smthrs/engine/effect/DiffBundle';
+import { computeDiffBundleBetweenRefs, computeDiffBundle } from '@smthrs/engine/effect/diff-bundle';
+import { selectOutputRow } from '@smthrs/db/output';
+import * as _smthrs_time_travel_jumpToFrame from '@smthrs/time-travel/jumpToFrame';
+export { JumpToFrameError } from '@smthrs/time-travel/jumpToFrame';
 
 declare namespace approvalDecision {
     export { parseApprovalRequest };
@@ -423,7 +423,7 @@ type GatewayOptions$1 = {
     identity?: {
         /** Storage backend the workspace store resolved to (sqlite | pglite | postgres). */
         backend?: string;
-        /** smithers-orchestrator package version serving this gateway. */
+        /** smthrs package version serving this gateway. */
         version?: string;
     };
     /**
@@ -977,6 +977,34 @@ declare class Gateway {
     workflowRegistryReady: null;
     /** @type {Map<string, Promise<void>>} */
     workflowRegistryRefreshes: Map<string, Promise<void>>;
+    /**
+     * Background <UI>/<TUI> discovery. register() never renders a workflow
+     * synchronously: renders are queued and drained one per macrotask so a slow
+     * or throwing workflow can neither block startup nor starve /health.
+     * @type {Array<{ key: string, workflow: SmithersWorkflow, entryFile: string | undefined, resolve: () => void }>}
+     */
+    viewDiscoveryQueue: Array<{
+        key: string;
+        workflow: SmithersWorkflow;
+        entryFile: string | undefined;
+        resolve: () => void;
+    }>;
+    /** @type {Map<string, { workflow: SmithersWorkflow, promise: Promise<void> }>} */
+    viewDiscoveryPending: Map<string, {
+        workflow: SmithersWorkflow;
+        promise: Promise<void>;
+    }>;
+    /**
+     * Keys whose discovery render already ran (success OR failure), mapped to
+     * the workflow identity that was rendered. A render runs at most once per
+     * registration identity — a throwing render is skipped after one warn and
+     * never retried in a hot loop.
+     * @type {Map<string, SmithersWorkflow>}
+     */
+    viewDiscoveryCompleted: Map<string, SmithersWorkflow>;
+    viewDiscoveryScheduled: boolean;
+    /** Instance copy so tests can shrink the slow-render warn budget. */
+    viewDiscoverySlowMs: number;
     /** @type {{ reports: UsageReport[], cachedAtMs: number } | null} */
     usageReportsCache: {
         reports: UsageReport[];
@@ -1111,10 +1139,12 @@ declare class Gateway {
             adapter: SmithersDb$4;
         }): Promise<Record<string, unknown>>;
     } | null;
-    /** @type {Set<{ dispose: () => void }>} */
+    /** @type {Set<{ runId?: string; dispose: () => void }>} */
     ptySessions: Set<{
+        runId?: string;
         dispose: () => void;
     }>;
+    gatewayClosing: boolean;
     identity: {
         backend?: string;
         version?: string;
@@ -1450,7 +1480,7 @@ declare class Gateway {
     buildRunSnapshot(runId: string): Promise<{
         failedChildren?: number;
         failedChildKeys?: string[];
-        runState?: _smithers_orchestrator_db_runState.RunStateView | undefined;
+        runState?: _smthrs_db_runState.RunStateView | undefined;
         workflowKey: string;
         summary: {};
         runId: string;
@@ -1637,6 +1667,36 @@ declare class Gateway {
      */
     register(key: string, workflow: SmithersWorkflow, options?: GatewayRegisterOptions): this;
     /**
+     * Queue a background <UI>/<TUI> discovery render for a registered workflow.
+     * At most one render ever runs per registration identity: a workflow whose
+     * render throws is skipped after one warn and never retried.
+     * @param {string} key
+     * @param {SmithersWorkflow} workflow
+     * @param {string | undefined} entryFile
+     */
+    enqueueWorkflowViewDiscovery(key: string, workflow: SmithersWorkflow, entryFile: string | undefined): void;
+    scheduleWorkflowViewDiscoveryDrain(): void;
+    drainWorkflowViewDiscovery(): void;
+    /**
+     * @param {{ key: string; workflow: SmithersWorkflow; entryFile: string | undefined; resolve: () => void }} item
+     */
+    runWorkflowViewDiscovery(item: {
+        key: string;
+        workflow: SmithersWorkflow;
+        entryFile: string | undefined;
+        resolve: () => void;
+    }): void;
+    /**
+     * Wait for a workflow's discovery render, pulling it out of the background
+     * queue and rendering it now when a request needs its view immediately.
+     * @param {string} key
+     */
+    awaitWorkflowViewDiscovery(key: string): Promise<void>;
+    /** Wait for every queued discovery render, drained one per macrotask. */
+    awaitAllWorkflowViewDiscovery(): Promise<void>;
+    /** Settle every queued discovery without rendering (gateway shutdown). */
+    cancelWorkflowViewDiscovery(): void;
+    /**
      * Gate a `/v1/pty/hijack` websocket upgrade: authenticate the request (same
      * token/Host/Origin semantics as the HTTP API, token also accepted as a
      * `?token=` query param since browsers cannot set websocket headers), check
@@ -1667,6 +1727,14 @@ declare class Gateway {
         cols: number;
         rows: number;
     }): void;
+    /**
+     * Best-effort recovery after a PTY hijack process died without cleanly
+     * returning control (tab closed, socket dropped, launcher crashed). Only
+     * acts when the run is still parked by the hijack; a run the operator
+     * already resumed/cancelled is left alone.
+     * @param {string} runId
+     */
+    resumeRunAfterHijackHalt(runId: string): Promise<void>;
     /**
      * @param {{ port?: number; host?: string; path?: string }} [options]
      */
@@ -1725,7 +1793,7 @@ declare class Gateway {
      * @param {Record<string, unknown>} input
      * @param {RunStartAuthContext} auth
      * @param {string} [runId]
-     * @param {{ resume?: boolean; maxConcurrency?: number; allowNetwork?: boolean; maxOutputBytes?: number; toolTimeoutMs?: number; startedBy?: import("@smithers-orchestrator/driver/RunStartedBy").RunStartedBy }} [options]
+     * @param {{ resume?: boolean; maxConcurrency?: number; allowNetwork?: boolean; maxOutputBytes?: number; toolTimeoutMs?: number; startedBy?: import("@smthrs/driver/RunStartedBy").RunStartedBy }} [options]
      */
     startRun(workflowKey: string, input: Record<string, unknown>, auth: RunStartAuthContext, runId?: string, options?: {
         resume?: boolean;
@@ -1733,7 +1801,7 @@ declare class Gateway {
         allowNetwork?: boolean;
         maxOutputBytes?: number;
         toolTimeoutMs?: number;
-        startedBy?: _smithers_orchestrator_driver_RunStartedBy.RunStartedBy;
+        startedBy?: _smthrs_driver_RunStartedBy.RunStartedBy;
     }): Promise<{
         runId: string;
         workflow: string;
@@ -2001,7 +2069,7 @@ declare class Gateway {
      * `smithers agents` CLI manages (resolved via `accountsRoot(process.env)`,
      * honoring `SMITHERS_HOME`/`HOME`) — NOT a per-workspace DB table. So, like
      * `listPromptsFromDisk` but at the user root, this reads the file directly
-     * through the `@smithers-orchestrator/accounts` package's `listAccounts()` and
+     * through the `@smthrs/accounts` package's `listAccounts()` and
      * maps each entry onto the wire `GatewayAccount` shape.
      *
      * SECRET REDACTION: an account may carry a raw `apiKey` (a plaintext
@@ -2143,9 +2211,9 @@ declare class Gateway {
      * distinct adapter (so a doc in any shared DB surfaces), but a write has to
      * pick one; picking the first registered keeps create→list→update→delete
      * consistent. Returns `null` only when no workflow is registered yet.
-     * @returns {import("@smithers-orchestrator/db/adapter").SmithersDb | null}
+     * @returns {import("@smthrs/db/adapter").SmithersDb | null}
      */
-    primaryDocsAdapter(): _smithers_orchestrator_db_adapter.SmithersDb | null;
+    primaryDocsAdapter(): _smthrs_db_adapter.SmithersDb | null;
     /**
      * Live work docs for the `listTickets` RPC. `_smithers_docs` is global, so
      * read across every DISTINCT adapter (mirrors `listMemoryFactsAcrossWorkflows`)
@@ -2379,9 +2447,9 @@ type IncomingMessage = node_http.IncomingMessage;
 type RequestFrame = RequestFrame$1;
 type ResponseFrame = ResponseFrame$1;
 type ServerResponse$1 = node_http.ServerResponse;
-type SmithersWorkflow = _smithers_orchestrator_components_SmithersWorkflow.SmithersWorkflow<unknown>;
-type SmithersEvent$1 = _smithers_orchestrator_observability_SmithersEvent.SmithersEvent;
-type UsageReport = _smithers_orchestrator_usage.UsageReport;
+type SmithersWorkflow = _smthrs_components_SmithersWorkflow.SmithersWorkflow<unknown>;
+type SmithersEvent$1 = _smthrs_observability_SmithersEvent.SmithersEvent;
+type UsageReport = _smthrs_usage.UsageReport;
 type GatewayMetricLabels = Record<string, string | number | null | undefined>;
 type GatewayTransport = "ws" | "http";
 type GatewayRequestContext = {
@@ -2511,7 +2579,7 @@ declare const NODE_OUTPUT_MAX_BYTES: number;
 
 declare const NODE_OUTPUT_WARN_BYTES: 1048576;
 
-/** @typedef {import("@smithers-orchestrator/protocol/errors").NodeOutputErrorCode} NodeOutputErrorCode */
+/** @typedef {import("@smthrs/protocol/errors").NodeOutputErrorCode} NodeOutputErrorCode */
 declare class NodeOutputRouteError extends Error {
     /**
      * @param {NodeOutputErrorCode} code
@@ -2521,7 +2589,7 @@ declare class NodeOutputRouteError extends Error {
     /** @type {NodeOutputErrorCode} */
     code: NodeOutputErrorCode;
 }
-type NodeOutputErrorCode = _smithers_orchestrator_protocol_errors.NodeOutputErrorCode;
+type NodeOutputErrorCode = _smthrs_protocol_errors.NodeOutputErrorCode;
 
 /**
  * @returns {DevToolsNode}
@@ -2627,11 +2695,11 @@ declare function getDevToolsSnapshotRoute(input: {
     frameNo?: number;
     onWarning?: (warning: SnapshotSerializerWarning$1) => void;
 }): Promise<DevToolsSnapshot>;
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("@smithers-orchestrator/protocol/devtools").DevToolsNode} DevToolsNode */
-/** @typedef {import("@smithers-orchestrator/protocol/devtools").DevToolsSnapshot} DevToolsSnapshot */
-/** @typedef {import("@smithers-orchestrator/protocol/devtools").DevToolsNodeType} DevToolsNodeType */
-/** @typedef {import("@smithers-orchestrator/devtools/snapshotSerializer").SnapshotSerializerWarning} SnapshotSerializerWarning */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/protocol/devtools").DevToolsNode} DevToolsNode */
+/** @typedef {import("@smthrs/protocol/devtools").DevToolsSnapshot} DevToolsSnapshot */
+/** @typedef {import("@smthrs/protocol/devtools").DevToolsNodeType} DevToolsNodeType */
+/** @typedef {import("@smthrs/devtools/snapshotSerializer").SnapshotSerializerWarning} SnapshotSerializerWarning */
 declare const DEVTOOLS_RUN_ID_PATTERN: RegExp;
 declare const DEVTOOLS_MAX_FRAME_NO: 2147483647;
 declare const DEVTOOLS_TREE_MAX_DEPTH: 256;
@@ -2653,13 +2721,13 @@ declare const DEVTOOLS_EMPTY_ROOT_ID: 0;
  * subscribed client, so unbounded prompts are not allowed through.
  */
 declare const DEVTOOLS_TASK_PROMPT_MAX_CHARS: 4000;
-type DevToolsAgentRef = _smithers_orchestrator_protocol_devtools.DevToolsAgentRef;
-type DevToolsAgentSummary = _smithers_orchestrator_protocol_devtools.DevToolsAgentSummary;
-type SmithersDb$3 = _smithers_orchestrator_db_adapter.SmithersDb;
-type DevToolsNode = _smithers_orchestrator_protocol_devtools.DevToolsNode;
-type DevToolsSnapshot = _smithers_orchestrator_protocol_devtools.DevToolsSnapshot;
-type DevToolsNodeType = _smithers_orchestrator_protocol_devtools.DevToolsNodeType;
-type SnapshotSerializerWarning$1 = _smithers_orchestrator_devtools_snapshotSerializer.SnapshotSerializerWarning;
+type DevToolsAgentRef = _smthrs_protocol_devtools.DevToolsAgentRef;
+type DevToolsAgentSummary = _smthrs_protocol_devtools.DevToolsAgentSummary;
+type SmithersDb$3 = _smthrs_db_adapter.SmithersDb;
+type DevToolsNode = _smthrs_protocol_devtools.DevToolsNode;
+type DevToolsSnapshot = _smthrs_protocol_devtools.DevToolsSnapshot;
+type DevToolsNodeType = _smthrs_protocol_devtools.DevToolsNodeType;
+type SnapshotSerializerWarning$1 = _smthrs_devtools_snapshotSerializer.SnapshotSerializerWarning;
 
 type DiffSummary$1 = {
     filesChanged: number;
@@ -2676,6 +2744,8 @@ type GetNodeDiffStatPayload = {
     seq: number;
     baseRef: string;
     summary: DiffSummary$1;
+    /** True when computed from the live working copy of an in-progress attempt. */
+    live?: boolean;
 };
 type GetNodeDiffRoutePayload = DiffBundle | GetNodeDiffStatPayload;
 type GetNodeDiffRouteResult$1 = {
@@ -2704,8 +2774,8 @@ declare function resolveCommitPointer(pointer: string, cwd: string): Promise<str
  *   iteration: unknown;
  *   resolveRun: (runId: string) => Promise<{ adapter: SmithersDb } | null>;
  *   emitEffect?: (effect: Effect.Effect<void>) => Promise<unknown>;
- *   computeDiffBundleImpl?: (baseRef: string, cwd: string, seq?: number) => Promise<import("@smithers-orchestrator/engine/effect/DiffBundle").DiffBundle>;
- *   computeDiffBundleBetweenRefsImpl?: (baseRef: string, targetRef: string, cwd: string, seq?: number) => Promise<import("@smithers-orchestrator/engine/effect/DiffBundle").DiffBundle>;
+ *   computeDiffBundleImpl?: (baseRef: string, cwd: string, seq?: number) => Promise<import("@smthrs/engine/effect/DiffBundle").DiffBundle>;
+ *   computeDiffBundleBetweenRefsImpl?: (baseRef: string, targetRef: string, cwd: string, seq?: number) => Promise<import("@smthrs/engine/effect/DiffBundle").DiffBundle>;
  *   resolveCommitPointerImpl?: (pointer: string, cwd: string) => Promise<string | null>;
  *   nowMs?: () => number;
  *   stat?: boolean;
@@ -2720,19 +2790,19 @@ declare function getNodeDiffRoute({ runId: rawRunId, nodeId: rawNodeId, iteratio
         adapter: SmithersDb$2;
     } | null>;
     emitEffect?: (effect: Effect.Effect<void>) => Promise<unknown>;
-    computeDiffBundleImpl?: (baseRef: string, cwd: string, seq?: number) => Promise<_smithers_orchestrator_engine_effect_DiffBundle.DiffBundle>;
-    computeDiffBundleBetweenRefsImpl?: (baseRef: string, targetRef: string, cwd: string, seq?: number) => Promise<_smithers_orchestrator_engine_effect_DiffBundle.DiffBundle>;
+    computeDiffBundleImpl?: (baseRef: string, cwd: string, seq?: number) => Promise<_smthrs_engine_effect_DiffBundle.DiffBundle>;
+    computeDiffBundleBetweenRefsImpl?: (baseRef: string, targetRef: string, cwd: string, seq?: number) => Promise<_smthrs_engine_effect_DiffBundle.DiffBundle>;
     resolveCommitPointerImpl?: (pointer: string, cwd: string) => Promise<string | null>;
     nowMs?: () => number;
     stat?: boolean;
 }): Promise<GetNodeDiffRouteResult>;
-type SmithersDb$2 = _smithers_orchestrator_db_adapter.SmithersDb;
-type AttemptRow = _smithers_orchestrator_db_adapter.AttemptRow;
+type SmithersDb$2 = _smthrs_db_adapter.SmithersDb;
+type AttemptRow = _smthrs_db_adapter.AttemptRow;
 type GetNodeDiffRouteResult = GetNodeDiffRouteResult$1;
 type DiffSummary = DiffSummary$1;
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("@smithers-orchestrator/db/adapter").AttemptRow} AttemptRow */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").AttemptRow} AttemptRow */
 /** @typedef {import("./GetNodeDiffRouteResult.js").GetNodeDiffRouteResult} GetNodeDiffRouteResult */
 /** @typedef {import("./DiffSummary.js").DiffSummary} DiffSummary */
 declare const NODE_ID_PATTERN: RegExp;
@@ -2757,10 +2827,11 @@ declare function summarizeBundle(bundle: {
  * revisions. Each checkout lane is reduced to its terminal tree; cached node
  * bundles are used only when the terminal checkout has been reaped.
  */
-declare function getRunDiffRoute({ runId: rawRunId, resolveRun, computeDiffBundleBetweenRefsImpl, resolveCommitPointerImpl, }: {
+declare function getRunDiffRoute({ runId: rawRunId, resolveRun, computeDiffBundleBetweenRefsImpl, computeDiffBundleImpl, resolveCommitPointerImpl, }: {
     runId: any;
     resolveRun: any;
     computeDiffBundleBetweenRefsImpl?: typeof computeDiffBundleBetweenRefs | undefined;
+    computeDiffBundleImpl?: typeof computeDiffBundle | undefined;
     resolveCommitPointerImpl?: typeof resolveCommitPointer | undefined;
 }): Promise<{
     ok: boolean;
@@ -2807,7 +2878,7 @@ type NodeOutputResponse$1 = {
  *   runId: unknown;
  *   nodeId: unknown;
  *   iteration: unknown;
- *   resolveRun: (runId: string) => Promise<{ workflow: import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<unknown>; adapter: import("@smithers-orchestrator/db/adapter").SmithersDb } | null>;
+ *   resolveRun: (runId: string) => Promise<{ workflow: import("@smthrs/components/SmithersWorkflow").SmithersWorkflow<unknown>; adapter: import("@smthrs/db/adapter").SmithersDb } | null>;
  *   selectOutputRowImpl?: typeof selectOutputRow;
  *   emitEffect?: (effect: Effect.Effect<void>) => Promise<unknown>;
  * }} params
@@ -2818,17 +2889,17 @@ declare function getNodeOutputRoute(params: {
     nodeId: unknown;
     iteration: unknown;
     resolveRun: (runId: string) => Promise<{
-        workflow: _smithers_orchestrator_components_SmithersWorkflow.SmithersWorkflow<unknown>;
-        adapter: _smithers_orchestrator_db_adapter.SmithersDb;
+        workflow: _smthrs_components_SmithersWorkflow.SmithersWorkflow<unknown>;
+        adapter: _smthrs_db_adapter.SmithersDb;
     } | null>;
     selectOutputRowImpl?: typeof selectOutputRow;
     emitEffect?: (effect: Effect.Effect<void>) => Promise<unknown>;
 }): Promise<NodeOutputResponse>;
 type NodeOutputResponse = NodeOutputResponse$1;
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("@smithers-orchestrator/observability/SmithersEvent").SmithersEvent} SmithersEvent */
-/** @typedef {import("@smithers-orchestrator/time-travel/jumpToFrame").JumpResult} JumpResult */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/observability/SmithersEvent").SmithersEvent} SmithersEvent */
+/** @typedef {import("@smthrs/time-travel/jumpToFrame").JumpResult} JumpResult */
 /**
  * Gateway wrapper around time-travel jump orchestration.
  *
@@ -2873,9 +2944,9 @@ declare function jumpToFrameRoute(input: {
     onLog?: (level: "info" | "warn" | "error", message: string, fields?: Record<string, unknown>) => Promise<void> | void;
 }): Promise<JumpResult>;
 
-type SmithersDb$1 = _smithers_orchestrator_db_adapter.SmithersDb;
-type SmithersEvent = _smithers_orchestrator_observability_SmithersEvent.SmithersEvent;
-type JumpResult = _smithers_orchestrator_time_travel_jumpToFrame.JumpResult;
+type SmithersDb$1 = _smthrs_db_adapter.SmithersDb;
+type SmithersEvent = _smthrs_observability_SmithersEvent.SmithersEvent;
+type JumpResult = _smthrs_time_travel_jumpToFrame.JumpResult;
 
 /**
  * @param {{
@@ -2917,16 +2988,16 @@ declare function streamDevToolsRoute(input: {
         errorCode?: string;
     }) => void;
 }): AsyncIterable<DevToolsEvent>;
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("@smithers-orchestrator/protocol/devtools").DevToolsEvent} DevToolsEvent */
-/** @typedef {import("@smithers-orchestrator/protocol/devtools").DevToolsSnapshot} DevToolsSnapshot */
-/** @typedef {import("@smithers-orchestrator/devtools/snapshotSerializer").SnapshotSerializerWarning} SnapshotSerializerWarning */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/protocol/devtools").DevToolsEvent} DevToolsEvent */
+/** @typedef {import("@smthrs/protocol/devtools").DevToolsSnapshot} DevToolsSnapshot */
+/** @typedef {import("@smthrs/devtools/snapshotSerializer").SnapshotSerializerWarning} SnapshotSerializerWarning */
 declare const DEVTOOLS_REBASELINE_INTERVAL: 50;
 declare const DEVTOOLS_BACKPRESSURE_LIMIT: 1000;
 declare const DEVTOOLS_POLL_INTERVAL_MS: 25;
-type SmithersDb = _smithers_orchestrator_db_adapter.SmithersDb;
-type DevToolsEvent = _smithers_orchestrator_protocol_devtools.DevToolsEvent;
-type SnapshotSerializerWarning = _smithers_orchestrator_devtools_snapshotSerializer.SnapshotSerializerWarning;
+type SmithersDb = _smthrs_db_adapter.SmithersDb;
+type DevToolsEvent = _smthrs_protocol_devtools.DevToolsEvent;
+type SnapshotSerializerWarning = _smthrs_devtools_snapshotSerializer.SnapshotSerializerWarning;
 
 /**
  * @param {ServerOptions} [opts]

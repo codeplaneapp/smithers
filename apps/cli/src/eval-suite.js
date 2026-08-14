@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import crypto from "node:crypto";
-import { SmithersError } from "@smithers-orchestrator/errors";
+import { SmithersError } from "@smthrs/errors";
 import {
   EVAL_CASE_STATUSES,
   evaluateEvalCaseAsync,
@@ -11,8 +11,8 @@ import {
   jsonEquals,
   normalizeEvalJudge,
   slugifyEvalToken,
-} from "@smithers-orchestrator/scorers/evalCases";
-import { isEvalInfraFailure } from "@smithers-orchestrator/scorers/isEvalInfraFailure";
+} from "@smthrs/scorers/evalCases";
+import { isEvalInfraFailure } from "@smthrs/scorers/isEvalInfraFailure";
 import { listNarratorCandidates } from "./narrator-agents.js";
 
 export { EVAL_CASE_STATUSES };
@@ -474,7 +474,7 @@ export function createEvalJudgeRunner(options = {}) {
     if (candidates.length === 0) {
       throw new Error(unavailableMessage);
     }
-    const { llmJudge } = await import("@smithers-orchestrator/scorers/llmJudge");
+    const { llmJudge } = await import("@smthrs/scorers/llmJudge");
     const failures = [];
     for (const candidate of candidates) {
       try {

@@ -1,13 +1,13 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Effect } from "effect";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { CodexAgent } from "@smithers-orchestrator/agents";
-import { Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { CodexAgent } from "@smthrs/agents";
+import { Task, Workflow, runWorkflow } from "smthrs";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 
@@ -113,6 +113,18 @@ describe("CLI-backed agent fallback through the real process path", () => {
       expect(attempts).toHaveLength(1);
       const meta = JSON.parse(attempts[0]?.metaJson ?? "{}");
       expect(meta.agentId).toBe("codex-real-process-fallback");
+      const checkpointRefs = await adapter.listAgentCheckpointRefs(result.runId, { nodeId: "impl" });
+      expect(checkpointRefs.map((ref) => ref.sequence)).toEqual([0, 1]);
+      expect(new Set(checkpointRefs.map((ref) => ref.contentHash)).size).toBe(1);
+      for (const ref of checkpointRefs) {
+        expect(ref).toMatchObject({ codec: "smithers.cli-session", version: 1, purpose: "session" });
+      }
+      const checkpointContent = await adapter.getAgentCheckpoint(checkpointRefs[0].contentHash);
+      expect(JSON.parse(checkpointContent.checkpointJson)).toEqual({
+        codec: "smithers.cli-session",
+        version: 1,
+        payload: { engine: "codex", resume: "thread-real-process" },
+      });
 
       const captured = JSON.parse(await readFile(captureFile, "utf8"));
       expect(captured.args.slice(0, 1)).toEqual(["exec"]);

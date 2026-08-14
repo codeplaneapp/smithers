@@ -7,7 +7,7 @@ import {
   serializeRunRow,
   serializeScoreRow,
   serializeTicketRow,
-} from "@smithers-orchestrator/gateway/api";
+} from "@smthrs/gateway/api";
 import type { GatewayApprovalRow } from "../sync/GatewayApprovalRow.ts";
 import type { GatewayCronRow } from "../sync/GatewayCronRow.ts";
 import type { GatewayMemoryFactRow } from "../sync/GatewayMemoryFactRow.ts";

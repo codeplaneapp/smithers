@@ -1,4 +1,4 @@
-# @smithers-orchestrator/daytona — src
+# @smthrs/daytona — src
 
 Smithers `SandboxProvider` backed by the [Daytona](https://www.daytona.io/) SDK.
 It runs a Smithers sandbox request inside a Daytona sandbox: uploads
@@ -37,7 +37,7 @@ falling back to env vars:
 ## Usage
 
 ```js
-import { registerDaytonaSandboxProvider } from "@smithers-orchestrator/daytona";
+import { registerDaytonaSandboxProvider } from "@smthrs/daytona";
 
 const unregister = registerDaytonaSandboxProvider({
 	image: "ubuntu:22.04",

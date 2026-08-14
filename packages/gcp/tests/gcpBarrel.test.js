@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolveSandboxProvider } from "@smithers-orchestrator/sandbox";
+import { resolveSandboxProvider } from "@smthrs/sandbox";
 import * as barrel from "../src/index.js";
 import { registerGcpSandboxProvider } from "../src/registerGcpSandboxProvider.js";
 import { createMockGcpSandboxEnvironment } from "../src/createMockGcpSandboxEnvironment.js";

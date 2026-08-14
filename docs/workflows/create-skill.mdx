@@ -10,12 +10,12 @@ equip an agent to do, and the workflow clarifies it, designs the structure,
 scaffolds files, and documents the result.
 
 ```bash
-bunx smithers-orchestrator workflow run create-skill \
+bunx smthrs workflow run create-skill \
   --prompt "A skill that teaches an agent to triage flaky tests"
 ```
 
 By default it pauses for design approval before any files are written. Clear
-the gate with `bunx smithers-orchestrator approve RUN_ID --node approve-design`, or run
+the gate with `bunx smthrs approve RUN_ID --node approve-design`, or run
 autonomously with `--input '{"review":false}'`.
 
 ## Stages

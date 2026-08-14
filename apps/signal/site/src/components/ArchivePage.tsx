@@ -1,4 +1,4 @@
-import { Card, CardContent, CardHeader, CardTitle, EmptyState } from "smithers-orchestrator/ui";
+import { Card, CardContent, CardHeader, CardTitle, EmptyState } from "smthrs/ui";
 
 export function ArchivePage(props: { dates: string[]; onOpen: (date: string) => void }) {
   if (props.dates.length === 0) {

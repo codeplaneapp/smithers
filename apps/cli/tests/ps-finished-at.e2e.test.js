@@ -12,8 +12,8 @@ setDefaultTimeout(120_000);
  */
 function finishingWorkflowSource() {
   return [
-    "/** @jsxImportSource smithers-orchestrator */",
-    'import { createSmithers, Workflow, Task } from "smithers-orchestrator";',
+    "/** @jsxImportSource smthrs */",
+    'import { createSmithers, Workflow, Task } from "smthrs";',
     'import { z } from "zod";',
     "",
     "const { smithers, outputs } = createSmithers({",

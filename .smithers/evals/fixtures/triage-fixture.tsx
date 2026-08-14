@@ -3,8 +3,8 @@
 // terminal state the run lands in (failed with a specific error, or suspended
 // on an approval gate). Failure texts carry the evidence triage-run must read;
 // mode names are neutral so the run input does not leak the expected action.
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 
 const inputSchema = z.object({

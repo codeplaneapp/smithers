@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { renderWorkflow } from "smithers-orchestrator/testing";
+import { renderWorkflow } from "smthrs/testing";
 
 import { buildIssueBlitzNodeState } from "../lib/buildIssueBlitzNodeState";
 
@@ -93,9 +93,9 @@ describe("issue-blitz safety contract", () => {
     const imports = [...uiSource.matchAll(/from "([^"]+)"/g)].map((match) => match[1]);
     expect(imports).toEqual([
       "react",
-      "smithers-orchestrator/gateway-react",
-      "smithers-orchestrator/gateway-ui",
-      "smithers-orchestrator/ui",
+      "smthrs/gateway-react",
+      "smthrs/gateway-ui",
+      "smthrs/ui",
       "../lib/buildIssueBlitzNodeState",
     ]);
     expect(uiSource).toContain('testId="issue-blitz-ui"');

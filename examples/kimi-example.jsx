@@ -1,6 +1,6 @@
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
-import { KimiAgent } from "smithers-orchestrator";
+import { KimiAgent } from "smthrs";
 import { z } from "zod";
 import AnalysisPrompt from "./prompts/kimi-example/analysis.mdx";
 import ReportPrompt from "./prompts/kimi-example/report.mdx";

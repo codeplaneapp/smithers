@@ -1,8 +1,9 @@
 import { confirm, intro, isCancel, note, outro, password, select, spinner, text } from "@clack/prompts";
-import { defaultConfigDir } from "@smithers-orchestrator/accounts";
+import { defaultConfigDir } from "@smthrs/accounts";
 import { runAgentAdd, pingAccount } from "./runAgentAdd.js";
+import { runAgentAddWithTmuxLogin, tmuxAvailable } from "./tmuxLogin.js";
 
-/** @typedef {import("@smithers-orchestrator/accounts").AccountProvider} AccountProvider */
+/** @typedef {import("@smthrs/accounts").AccountProvider} AccountProvider */
 
 const PROVIDER_CHOICES = [
   { value: "codex", label: "Codex (subscription, recommended)", hint: "ChatGPT Plus/Pro via `codex` CLI" },
@@ -100,6 +101,40 @@ export async function agentAddWizard(opts = {}) {
         });
         if (isCancel(customDir)) bail();
         configDir = customDir.replace(/^~(?=\/|$)/, env.HOME ?? "");
+      }
+      // Preferred path: run the login inside a detached tmux session and
+      // auto-register once the credential artifact appears.
+      if (tmuxAvailable(env)) {
+        const useTmux = await confirm({
+          message: "Launch the login in a tmux session now? (opens your browser once you attach)",
+          initialValue: true,
+        });
+        if (isCancel(useTmux)) bail();
+        if (useTmux) {
+          const result = await runAgentAddWithTmuxLogin({
+            provider: /** @type {AccountProvider} */ (provider),
+            label,
+            configDir,
+            env,
+            cwd,
+            onStatus: (message) => note(message, "tmux login"),
+          });
+          if (!result.ok) {
+            note(result.detail ?? result.reason, "Not registered");
+          } else {
+            added.push(result.account.label);
+            note(`Registered ${result.account.label} (${result.account.provider}).`);
+            if (result.regen?.rewritten) note(`Updated ${result.regen.path}`, ".smithers/agents.ts");
+            const ping = pingAccount(result.account);
+            if (ping.ran) {
+              note(`${ping.cmd}\n→ ${ping.exitCode === 0 ? "OK" : `non-zero exit (${ping.exitCode ?? "?"})`}`, "Ping");
+            }
+          }
+          if (!opts.loop) break;
+          const again = await confirm({ message: "Add another account?", initialValue: false });
+          if (isCancel(again) || !again) break;
+          continue;
+        }
       }
       const bin = SUBSCRIPTION_LOGIN_BIN[provider];
       const envVar = SUBSCRIPTION_DIR_ENV_VAR[provider];

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { computeMachineState, eventReceived, taskOutput } from "smithers-orchestrator/xstate";
-import { renderWorkflow } from "smithers-orchestrator/testing";
+import { computeMachineState, eventReceived, taskOutput } from "smthrs/xstate";
+import { renderWorkflow } from "smthrs/testing";
 import workflow from "../workflows/xstate-release-train";
 import { RELEASE_TRAIN_OUTPUTS, releaseTrainMachine } from "../components/releaseTrainMachine";
 

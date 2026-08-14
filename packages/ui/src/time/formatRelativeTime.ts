@@ -9,7 +9,7 @@ const DAY_MS = 86_400_000;
  */
 export function formatRelativeTime(ts: number, now: number = Date.now()): string {
   const delta = now - ts;
-  if (delta < MINUTE_MS) return "just now";
+  if (delta < MINUTE_MS) return `${Math.floor(Math.max(0, delta) / 1000)}s ago`;
   if (delta < HOUR_MS) return `${Math.floor(delta / MINUTE_MS)}m ago`;
   if (delta < DAY_MS) {
     const hours = Math.floor(delta / HOUR_MS);

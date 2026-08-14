@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -119,9 +119,9 @@ describe("Gateway timer sweep", () => {
   let gateway;
   let dbPaths = [];
   beforeAll(async () => {
-    createSmithers = (await import("smithers-orchestrator/create")).createSmithers;
+    createSmithers = (await import("smthrs/create")).createSmithers;
     Gateway = (await import("../src/gateway.js")).Gateway;
-    SmithersDb = (await import("@smithers-orchestrator/db/adapter")).SmithersDb;
+    SmithersDb = (await import("@smthrs/db/adapter")).SmithersDb;
   });
   beforeEach(() => {
     gateway = undefined;

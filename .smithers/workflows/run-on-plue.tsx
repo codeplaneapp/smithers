@@ -1,12 +1,12 @@
 // smithers-source: authored
 // smithers-display-name: Run On Plue
 // smithers-description: Run any Smithers workflow script on a real Microsandbox VM provisioned through the Plue CLI.
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { readFileSync } from "node:fs";
 import { basename, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createSmithers } from "smithers-orchestrator";
-import { Sandbox } from "@smithers-orchestrator/components";
+import { createSmithers } from "smthrs";
+import { Sandbox } from "@smthrs/components";
 import { z } from "zod/v4";
 import { createPlueSandboxProvider } from "../lib/plue-provider.ts";
 

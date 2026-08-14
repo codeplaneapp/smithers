@@ -1,8 +1,8 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import "../preload.ts";
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { renderWorkflow, simulate, type RenderedWorkflow } from "smithers-orchestrator/testing";
+import { renderWorkflow, simulate, type RenderedWorkflow } from "smthrs/testing";
 
 const workflows = join(import.meta.dir, "..", "workflows");
 const pathFor = (file: string) => join(workflows, file);

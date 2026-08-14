@@ -1,4 +1,4 @@
-import { CursorAgent as SmithersCursorAgent } from "smithers-orchestrator";
+import { CursorAgent as SmithersCursorAgent } from "smthrs";
 
 // Built-in Cursor CLI agent (cliEngine: "cursor").
 // Tweak `model`, `cwd`, or uncomment extra options below to match your setup.

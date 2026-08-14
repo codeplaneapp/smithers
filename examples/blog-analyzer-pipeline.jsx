@@ -4,11 +4,11 @@
  * Pattern: Content Ingester → Analyzer → Report Sink.
  * Use cases: blog categorization, content audits, editorial insights, topic clustering.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import IngestPrompt from "./prompts/blog-analyzer-pipeline/ingest.mdx";
 import AnalyzePrompt from "./prompts/blog-analyzer-pipeline/analyze.mdx";

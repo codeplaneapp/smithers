@@ -1,1 +1,1 @@
-export { snapshotDuration } from "@smithers-orchestrator/observability/metrics";
+export { snapshotDuration } from "@smthrs/observability/metrics";

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { defineTool } from "./defineTool.js";
 import { captureProcess, getToolRuntimeOptions, resolveToolPath } from "./utils.js";
 

@@ -18,7 +18,7 @@ errors, fix the files, and make all checks pass. You have file + shell tools.
 
 ## Verify command that failed
 
-`bunx smithers-orchestrator graph {props.workflowFile}`, the focused test at
+`bunx smthrs graph {props.workflowFile}`, the focused test at
 `{props.testFile}` after confirming it is registered in `{props.packageJson}`,
 plus, if the UI file exists, `bun build --no-bundle {props.uiFile}`. Errors
 below are prefixed `[graph]`, `[test-registration]`, `[test]`, or `[ui]` so you
@@ -51,20 +51,20 @@ know which check failed.
      prompt; wrap them in backticks or fenced code blocks.
    - **UI transpile errors**: wrong JSX pragma (must be
      `/** @jsxImportSource react */`), bad import from
-     `smithers-orchestrator/gateway-react`, `smithers-orchestrator/gateway-ui`,
-     or `smithers-orchestrator/ui`, or plain TypeScript mistakes.
+     `smthrs/gateway-react`, `smthrs/gateway-ui`,
+     or `smthrs/ui`, or plain TypeScript mistakes.
      Compare against `{props.uiDir}/vcs.tsx`.
    - **UI not advertised**: the browser file exists but the workflow lacks
      `<UI entry="../ui/<workflow>.tsx" />`, so `smithers ui` cannot find it.
    - **Test missing/unregistered**: write `{props.testFile}` using
-     `renderWorkflow` from `smithers-orchestrator/testing`, assert node order,
+     `renderWorkflow` from `smthrs/testing`, assert node order,
      explicit dependencies, schemas, and branch/loop behavior, then preserve and
      append its `./tests/<workflow>.test.tsx` path in `{props.packageJson}`.
 3. Make the smallest change that fixes the error without abandoning the design.
-   If the docs would help, run `bunx smithers-orchestrator docs` or
-   `bunx smithers-orchestrator ask "<question>"`.
+   If the docs would help, run `bunx smthrs docs` or
+   `bunx smthrs ask "<question>"`.
 4. Re-run the failing command(s) yourself and confirm exit 0 before you finish:
-   `bunx smithers-orchestrator graph {props.workflowFile}`, the focused test at
+   `bunx smthrs graph {props.workflowFile}`, the focused test at
    `{props.testFile}`, and, if the UI file exists,
    `bun build --no-bundle {props.uiFile} > /dev/null`.
 

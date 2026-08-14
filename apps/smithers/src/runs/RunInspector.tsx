@@ -1,4 +1,4 @@
-import { EmptyState } from "@smithers-orchestrator/ui";
+import { EmptyState } from "@smthrs/ui";
 import { WorkflowGraph } from "../askme/WorkflowGraph";
 import { useCardUiStore } from "../cards/cardUiStore";
 import { StatusPill } from "../cards/StatusPill";

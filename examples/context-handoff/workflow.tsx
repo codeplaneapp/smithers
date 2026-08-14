@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * Durable "/clear": a context handoff.
  *
@@ -26,18 +26,18 @@
  *
  * Run the graph without executing it:
  *
- *   bunx smithers-orchestrator graph examples/context-handoff/workflow.tsx --input '{}'
+ *   bunx smthrs graph examples/context-handoff/workflow.tsx --input '{}'
  *
  * The DAG includes the catch branch, so the render proves the whole handoff
  * wiring compiles.
  */
 
-import { createSmithers, ClaudeCodeAgent } from "smithers-orchestrator";
-// In-repo, "smithers-orchestrator" resolves to a limited examples entry that
+import { createSmithers, ClaudeCodeAgent } from "smthrs";
+// In-repo, "smthrs" resolves to a limited examples entry that
 // does not re-export <Aspects>/<TryCatchFinally>; import them from the
 // components package directly. End-user code can import both from
-// "smithers-orchestrator".
-import { Aspects, TryCatchFinally } from "@smithers-orchestrator/components";
+// "smthrs".
+import { Aspects, TryCatchFinally } from "@smthrs/components";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod/v4";

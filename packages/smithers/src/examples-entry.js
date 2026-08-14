@@ -1,23 +1,23 @@
 // @smithers-type-exports-begin
-/** @typedef {import("@smithers-orchestrator/agents/AgentLike").AgentLike} AgentLike */
-/** @typedef {import("@smithers-orchestrator/components").ApprovalDecision} ApprovalDecision */
-/** @typedef {import("@smithers-orchestrator/components").ApprovalProps} ApprovalProps */
-/** @typedef {import("@smithers-orchestrator/components").ApprovalRequest} ApprovalRequest */
+/** @typedef {import("@smthrs/agents/AgentLike").AgentLike} AgentLike */
+/** @typedef {import("@smthrs/components").ApprovalDecision} ApprovalDecision */
+/** @typedef {import("@smthrs/components").ApprovalProps} ApprovalProps */
+/** @typedef {import("@smthrs/components").ApprovalRequest} ApprovalRequest */
 /**
  * @template Schema
  * @typedef {import("./CreateSmithersApi.ts").CreateSmithersApi<Schema>} CreateSmithersApi
  */
-/** @typedef {import("@smithers-orchestrator/components").DepsSpec} DepsSpec */
-/** @typedef {import("@smithers-orchestrator/components").InferDeps} InferDeps */
-/** @typedef {import("@smithers-orchestrator/components").OutputTarget} OutputTarget */
-/** @typedef {import("@smithers-orchestrator/driver/SmithersCtx").SmithersCtx} SmithersCtx */
-/** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
+/** @typedef {import("@smthrs/components").DepsSpec} DepsSpec */
+/** @typedef {import("@smthrs/components").InferDeps} InferDeps */
+/** @typedef {import("@smthrs/components").OutputTarget} OutputTarget */
+/** @typedef {import("@smthrs/driver/SmithersCtx").SmithersCtx} SmithersCtx */
+/** @typedef {import("@smthrs/errors/SmithersError").SmithersError} SmithersError */
 /**
  * @template Schema
- * @typedef {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<Schema>} SmithersWorkflow
+ * @typedef {import("@smthrs/components/SmithersWorkflow").SmithersWorkflow<Schema>} SmithersWorkflow
  */
-/** @typedef {import("@smithers-orchestrator/components").TaskProps} TaskProps */
-/** @typedef {import("@smithers-orchestrator/components").WaitForEventProps} WaitForEventProps */
+/** @typedef {import("@smthrs/components").TaskProps} TaskProps */
+/** @typedef {import("@smthrs/components").WaitForEventProps} WaitForEventProps */
 // @smithers-type-exports-end
 
 export {
@@ -33,10 +33,11 @@ export {
   Ralph,
   Worktree,
   Sandbox,
-} from "@smithers-orchestrator/components";
-export { Timer } from "@smithers-orchestrator/components";
-export { ClaudeCodeAgent } from "@smithers-orchestrator/agents/ClaudeCodeAgent";
-export { KimiAgent } from "@smithers-orchestrator/agents/KimiAgent";
-export { PiAgent } from "@smithers-orchestrator/agents/PiAgent";
+} from "@smthrs/components";
+export { Timer } from "@smthrs/components";
+export { ClaudeCodeAgent } from "@smthrs/agents/ClaudeCodeAgent";
+export { KimiAgent } from "@smthrs/agents/KimiAgent";
+export { PiAgent } from "@smthrs/agents/PiAgent";
+export { NanocodexAgent } from "@smthrs/agents";
 export { createSmithers } from "./create.js";
-export { runWorkflow, renderFrame } from "@smithers-orchestrator/engine";
+export { runWorkflow, renderFrame } from "@smthrs/engine";

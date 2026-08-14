@@ -1,11 +1,11 @@
 import { Effect } from "effect";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { loadRunOutputRowsEffect } from "@smithers-orchestrator/db/snapshot";
-import { requireTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
-import { buildSubflowChildRunId } from "@smithers-orchestrator/graph/subflow-run-lineage";
-import { retryTask } from "@smithers-orchestrator/time-travel/retry-task";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { loadRunOutputRowsEffect } from "@smthrs/db/snapshot";
+import { requireTaskRuntime } from "@smthrs/driver/task-runtime";
+import { buildSubflowChildRunId } from "@smthrs/graph/subflow-run-lineage";
+import { retryTask } from "@smthrs/time-travel/retry-task";
 import { makeAbortError } from "./effect/bridge-utils.js";
 import { isPidAlive, parseRuntimeOwnerPid } from "./runtime-owner.js";
 import { getWorkflowMakeBridgeRuntime } from "./effect/workflow-make-bridge.js";
@@ -13,8 +13,8 @@ import { isWorkflowFileRef, loadWorkflowFileRef } from "./workflow-file.js";
 import { buildValidatedChildRunId } from "./child-run-id.js";
 /** @typedef {import("./ChildWorkflowDefinition.ts").ChildWorkflowDefinition} ChildWorkflowDefinition */
 /** @typedef {import("./ChildWorkflowExecuteOptions.ts").ChildWorkflowExecuteOptions} ChildWorkflowExecuteOptions */
-/** @typedef {import("@smithers-orchestrator/driver/RunResult").RunResult} RunResult */
-/** @typedef {import("@smithers-orchestrator/db/adapter/RunRow").RunRow} RunRow */
+/** @typedef {import("@smthrs/driver/RunResult").RunResult} RunResult */
+/** @typedef {import("@smthrs/db/adapter/RunRow").RunRow} RunRow */
 
 // Mirrors the engine's RUN_HEARTBEAT_STALE_MS: a "running" child whose
 // heartbeat is older than this (and whose runtime owner pid is gone) is
@@ -29,7 +29,7 @@ const TERMINAL_CHILD_RUN_STATUSES = new Set(["finished", "failed", "cancelled"])
 
 /**
  * @param {unknown} value
- * @returns {value is import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any>}
+ * @returns {value is import("@smthrs/components/SmithersWorkflow").SmithersWorkflow<any>}
  */
 function isWorkflowLike(value) {
   return Boolean(value && typeof value === "object" && "build" in value && typeof value.build === "function");
@@ -202,7 +202,7 @@ async function waitForChildRunToSettle(adapter, childRunId, signal, pollInterval
  * state straight from its database. Prefer-resume never re-executes a child
  * that already settled, so its recorded outputs and terminal status survive
  * parent crash/restart cycles unchanged.
- * @param {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any>} childWorkflow
+ * @param {import("@smthrs/components/SmithersWorkflow").SmithersWorkflow<any>} childWorkflow
  * @param {string} childRunId
  * @param {RunResult["status"]} status
  * @returns {Promise<RunResult & { output: unknown }>}
@@ -237,8 +237,8 @@ async function loadPreservedChildResult(childWorkflow, childRunId, status) {
 }
 /**
  * @param {ChildWorkflowDefinition} definition
- * @param {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any>} [parentWorkflow]
- * @returns {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any>}
+ * @param {import("@smthrs/components/SmithersWorkflow").SmithersWorkflow<any>} [parentWorkflow]
+ * @returns {import("@smthrs/components/SmithersWorkflow").SmithersWorkflow<any>}
  */
 function resolveChildWorkflow(definition, parentWorkflow) {
   const resolved = typeof definition === "function" ? definition() : definition;
@@ -278,7 +278,7 @@ function resolveChildWorkflow(definition, parentWorkflow) {
  * duplicate: a finished child returns its preserved output, a child still
  * live in another process is attached to (polled until it settles), and any
  * other existing child is resumed in place under a durable claim.
- * @param {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any> | undefined} parentWorkflow
+ * @param {import("@smthrs/components/SmithersWorkflow").SmithersWorkflow<any> | undefined} parentWorkflow
  * @param {ChildWorkflowExecuteOptions} options
  * @returns {Promise<RunResult & { output: unknown }>}
  */
@@ -318,7 +318,7 @@ export async function executeChildWorkflow(parentWorkflow, options) {
   const pauseSignal = options.pauseSignal ?? runtime.pauseSignal;
   const parentContext = await loadParentRunContext(parentWorkflow?.db ?? runtime.db, parentRunId);
   const childConfig = {
-    ...(parentContext.config ?? {}),
+    ...parentContext.config,
     // Explicit child ids cannot be recognized from the generated `:child:`
     // grammar. Persist workspace lineage so destructive operations still
     // share the parent's rewind lease.
@@ -360,6 +360,7 @@ export async function executeChildWorkflow(parentWorkflow, options) {
       workflowPath,
       allowNetwork: options.allowNetwork,
       maxOutputBytes: options.maxOutputBytes,
+      maxAgentCheckpointBytes: options.maxAgentCheckpointBytes,
       toolTimeoutMs: options.toolTimeoutMs,
       signal,
       pauseSignal,
@@ -383,6 +384,7 @@ export async function executeChildWorkflow(parentWorkflow, options) {
       workflowPath,
       allowNetwork: options.allowNetwork,
       maxOutputBytes: options.maxOutputBytes,
+      maxAgentCheckpointBytes: options.maxAgentCheckpointBytes,
       toolTimeoutMs: options.toolTimeoutMs,
       signal,
       pauseSignal,

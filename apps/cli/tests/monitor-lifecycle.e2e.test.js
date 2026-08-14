@@ -16,8 +16,8 @@ const TIMEOUT_MS = 180_000;
  */
 function computeWorkflow(name, delayMs) {
   return [
-    "/** @jsxImportSource smithers-orchestrator */",
-    'import { createSmithers, Workflow, Task } from "smithers-orchestrator";',
+    "/** @jsxImportSource smthrs */",
+    'import { createSmithers, Workflow, Task } from "smthrs";',
     'import { z } from "zod";',
     "",
     "const { smithers, outputs } = createSmithers({",
@@ -40,8 +40,8 @@ function computeWorkflow(name, delayMs) {
 
 function approvalWorkflow(name) {
   return [
-    "/** @jsxImportSource smithers-orchestrator */",
-    'import { Approval, createSmithers } from "smithers-orchestrator";',
+    "/** @jsxImportSource smthrs */",
+    'import { Approval, createSmithers } from "smthrs";',
     'import { z } from "zod";',
     "",
     "const { Workflow, smithers, outputs } = createSmithers({",

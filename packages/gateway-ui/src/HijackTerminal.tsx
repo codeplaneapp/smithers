@@ -1,7 +1,7 @@
 /** @jsxImportSource react */
 import { useCallback, useRef, type CSSProperties } from "react";
-import { useSmithersGateway } from "@smithers-orchestrator/gateway-react";
-import { Terminal, type TerminalInstance, type TerminalStream } from "@smithers-orchestrator/ui/adapters/terminal";
+import { useSmithersGateway } from "@smthrs/gateway-react";
+import { Terminal, type TerminalInstance, type TerminalStream } from "@smthrs/ui/adapters/terminal";
 import { ptyHijackUrl, type HijackStatus } from "./hijack";
 
 const WEBSOCKET_OPEN = 1;

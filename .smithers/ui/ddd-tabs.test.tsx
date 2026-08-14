@@ -14,9 +14,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { act, useState, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { createSmithers, Gateway } from "smithers-orchestrator";
-import { SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
-import { SmithersGatewayProvider } from "smithers-orchestrator/gateway-react";
+import { createSmithers, Gateway } from "smthrs";
+import { SmithersGatewayClient } from "@smthrs/gateway-client";
+import { SmithersGatewayProvider } from "smthrs/gateway-react";
 import { z } from "zod/v4";
 import type { Feature, TicketRow } from "./ddd-shared";
 

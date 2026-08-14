@@ -5,11 +5,11 @@
  * Use cases: multi-stage pipelines, progressive refinement, build pipelines,
  * content pipelines (outline → draft → edit → publish).
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, write, edit, bash, grep } from "smithers-orchestrator/tools";
+import { read, write, edit, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import OutlinePrompt from "./prompts/waterfall/outline.mdx";
 import DraftPrompt from "./prompts/waterfall/draft.mdx";

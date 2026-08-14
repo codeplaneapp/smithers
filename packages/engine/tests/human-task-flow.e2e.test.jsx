@@ -1,11 +1,11 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { dirname } from "node:path";
-import { HumanTask, Workflow, Task, Sequence, runWorkflow } from "smithers-orchestrator";
+import { HumanTask, Workflow, Task, Sequence, runWorkflow } from "smthrs";
 import { approveNode } from "../src/approvals.js";
 import { buildHumanRequestId } from "../src/human-requests.js";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";

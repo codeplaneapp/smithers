@@ -1,4 +1,4 @@
-# @smithers-orchestrator/ui-styleguide — src
+# @smthrs/ui-styleguide — src
 
 Shipped-as-source `.ts` module: the package's exports map points straight at
 `src/index.ts` (no build step, no dependencies).

@@ -6,7 +6,7 @@
  *
  * REAL product path (no-mocks):
  *   - Build a real in-memory DB via `ensureSmithersTables` and drive it through
- *     the real `@smithers-orchestrator/db/adapter` `SmithersDb`. The run, node,
+ *     the real `@smthrs/db/adapter` `SmithersDb`. The run, node,
  *     timer attempt and timer-fired event are seeded and read back through the
  *     shipping adapter methods (`insertRun`, `insertNode`, `getNode`,
  *     `insertAttempt`, `getAttempt`, `updateAttempt`, `updateRun`,
@@ -28,8 +28,8 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, onTestFinished, test } from "bun:test";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { corruptHeartbeat } from "../harness/corruptHeartbeat.ts";
 import { takeoverRun } from "../harness/takeoverRun.ts";
 

@@ -13,7 +13,7 @@
  * only invokes Sol when repair is actually required.
  */
 // crontab: */5 * * * * PATH=/usr/local/bin:/usr/bin:/bin SMITHERS_BIN=/absolute/path/to/smithers /absolute/path/to/bun /path/to/repo/.smithers/scripts/codex-issue-merge-watchdog.ts --root /path/to/repo --run-id RUN_ID
-import { ClaudeCodeAgent, type AgentLike } from "smithers-orchestrator";
+import { ClaudeCodeAgent, type AgentLike } from "smthrs";
 import {
   existsSync,
   closeSync,

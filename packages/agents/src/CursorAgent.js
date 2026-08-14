@@ -51,9 +51,37 @@ export function createCursorCapabilityRegistry(opts = {}) {
       supportsUiRequests: false,
       methods: [],
     },
+    fileChanges: {
+      supportsFileChanges: true,
+      supportsUnifiedDiff: false,
+    },
     builtIns: resolveCursorBuiltIns(opts),
   };
 }
+
+/**
+ * Paths-only normalization of cursor-agent's file-mutating tool calls. The
+ * protobuf `agent.v1.ToolCall` oneof cases are `writeToolCall` /
+ * `editToolCall` / `deleteToolCall` (readCursorToolCall strips the
+ * `ToolCall` suffix), each carrying the target path in `args.path`; the
+ * payload has no verified before/after content, so no diff is reconstructed.
+ *
+ * @param {unknown} toolName - the oneof case with the `ToolCall` suffix stripped
+ * @param {unknown} args - the tool call's `args`
+ * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+ */
+function parseCursorFileChanges(toolName, args) {
+  if (!isRecord(args)) return undefined;
+  const name = asString(toolName)?.toLowerCase() ?? "";
+  const path = asString(args.path) ?? asString(args.file_path);
+  if (!path) return undefined;
+  if (name === "write" || name === "edit") return [{ path, kind: "modified", source: "reported" }];
+  if (name === "delete") return [{ path, kind: "deleted", source: "reported" }];
+  return undefined;
+}
+
+/** `delete` is a file change even though it matches no default keyword. */
+const CURSOR_TOOL_KIND_RULES = [[["delete"], "file_change"]];
 
 /**
  * `cursor-agent` serializes its protobuf `agent.v1.ToolCall` oneof as
@@ -238,6 +266,7 @@ export class CursorAgent extends BaseCliAgent {
         // `call_id` is stable across started/completed, so both events land on the
         // same action row. Falling back to a synthetic id would split them in two.
         const id = asString(payload.call_id) ?? nextSyntheticId("cursor-tool");
+        const fileChanges = completed ? undefined : parseCursorFileChanges(name, args);
         return [
           ...startIfNeeded(),
           {
@@ -247,10 +276,12 @@ export class CursorAgent extends BaseCliAgent {
             entryType: "thought",
             action: {
               id,
-              kind: toolKindFromName(name),
+              kind: toolKindFromName(name, CURSOR_TOOL_KIND_RULES),
               title: name,
               // Args belong on start/update; the completed event carries the result.
-              ...(completed || args === undefined ? {} : { detail: { arguments: args } }),
+              ...(completed || args === undefined
+                ? {}
+                : { detail: { arguments: args, ...(fileChanges ? { fileChanges } : {}) } }),
             },
             message: completed ? undefined : `Running ${name}`,
             ok: completed ? !failed : undefined,
@@ -323,6 +354,20 @@ export class CursorAgent extends BaseCliAgent {
         ];
       },
     };
+  }
+
+  /**
+   * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
+   * into {@link AgentFileChange} records. `action` is
+   * `{ title, detail: { arguments } }` where `arguments` is the tool call's
+   * protobuf `args` object.
+   *
+   * @param {unknown} action
+   * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+   */
+  parseFileChanges(action) {
+    const fileAction = /** @type {{ title?: unknown; detail?: { arguments?: unknown } } | undefined} */ (action);
+    return parseCursorFileChanges(asString(fileAction?.title) ?? "", fileAction?.detail?.arguments);
   }
 
   /**

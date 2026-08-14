@@ -5,7 +5,7 @@ description: Typed waterfall of refinement stages, each depending on the previou
 
 ```ts
 // Props
-import { ContentPipeline } from "smithers-orchestrator";
+import { ContentPipeline } from "smthrs";
 
 type ContentPipelineProps = {
   id?: string;
@@ -162,7 +162,7 @@ export type ContentPipelineProps = {
 ```
 
 ```ts ContentPipelineStage.ts
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type ContentPipelineStage = {

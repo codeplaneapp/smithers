@@ -2,8 +2,8 @@
 // smithers-source: one-off — fix issues #236 #254 #255 #258 #262 #265, each in its own
 // worktree: Codex Sol investigates/reviews, Codex Luna implements, a human approval gate
 // reviews the PRs, then Codex Terra merges and closes each issue. Claude is failover-only.
-/** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { ClaudeCodeAgent, createSmithers } from "smthrs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
@@ -189,7 +189,7 @@ const HINTS: Record<number, string> = {
     "Preferred fix: ship the compose assets at the path the CLI expects AND ensure they are included in the published package (check package.json files/exports of the package that should carry them). Also make the failure message state prerequisites clearly, and reconcile docs that mention `observability up` with the real `smithers observability [--detach] [--down]` shape.",
   ].join("\n"),
   265: [
-    "Aspects budgets (costBudget/tokenBudget/latencySlo with onExceeded) are type-only: components/src/components/Task.js attaches __aspects but @smithers-orchestrator/graph/src/extract.js drops it, and engine/scheduler never consume budgets. ASPECT_BUDGET_EXCEEDED is unreachable.",
+    "Aspects budgets (costBudget/tokenBudget/latencySlo with onExceeded) are type-only: components/src/components/Task.js attaches __aspects but @smthrs/graph/src/extract.js drops it, and engine/scheduler never consume budgets. ASPECT_BUDGET_EXCEEDED is unreachable.",
     "Preferred fix: real enforcement — thread __aspects through graph extraction into TaskDescriptors, accumulate per-run token/cost usage in the engine (from token-usage reporting), and apply onExceeded semantics (fail | warn | skip-remaining) at task-dispatch time, surfacing ASPECT_BUDGET_EXCEEDED. Add focused engine tests.",
     "If full enforcement is genuinely too large for one PR, the issue accepts an honest fallback: enforce what is feasible (e.g. cost/token budgets at dispatch) and/or mark unenforced props as not-yet-enforced in the component docs and llms bundles. Do NOT ship a fake/no-op gate that looks enforced.",
   ].join("\n"),

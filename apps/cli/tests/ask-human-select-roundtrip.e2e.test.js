@@ -3,9 +3,9 @@ import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { buildHumanRequestId } from "@smithers-orchestrator/engine/human-requests";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { buildHumanRequestId } from "@smthrs/engine/human-requests";
 import { createTempRepo, pinSqliteBackend, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
 
 const CLI_ENTRY = resolve(import.meta.dir, "../src/index.js");

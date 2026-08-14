@@ -1,4 +1,4 @@
-import type { GatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
+import type { GatewayScope } from "@smthrs/gateway/auth/scopes";
 import type { SmithersElectricProxyMetrics } from "./SmithersElectricProxyMetrics.ts";
 import type { SmithersElectricProxyObserver } from "./SmithersElectricProxyObserver.ts";
 import type { SmithersElectricShapeDefinition } from "./SmithersElectricShapeDefinition.ts";

@@ -1,4 +1,4 @@
-# @smithers-orchestrator/driver — src
+# @smthrs/driver — src
 
 The workflow execution driver: the loop that turns a rendered workflow into
 scheduled work and acts on the engine's decisions.

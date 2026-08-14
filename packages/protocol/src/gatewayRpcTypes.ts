@@ -410,6 +410,8 @@ export type GatewayDiffBundle = {
   seq: number;
   baseRef: string;
   patches: GatewayDiffPatch[];
+  /** True when computed from the live working copy of a non-terminal run. */
+  live?: boolean;
 };
 
 export type GetRunDiffRequest = {

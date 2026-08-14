@@ -5,6 +5,8 @@ import {
   smithersRuns,
   smithersNodes,
   smithersAttempts,
+  smithersAgentCheckpointContents,
+  smithersAgentCheckpoints,
   smithersFrames,
   smithersApprovals,
   smithersCache,
@@ -18,6 +20,8 @@ import {
   smithersScorers,
 } from "../src/internal-schema.js";
 import {
+  smithersAgentCheckpointContents as modularAgentCheckpointContents,
+  smithersAgentCheckpoints as modularAgentCheckpoints,
   smithersFrames as modularFrames,
   smithersNodeDiffs as modularNodeDiffs,
   smithersTimeTravelAudit as modularTimeTravelAudit,
@@ -36,6 +40,18 @@ function hasRunCascadeForeignKey(table) {
 }
 
 describe("internal schema table definitions", () => {
+  test("exports agent checkpoint content and reference tables from both schema barrels", () => {
+    expect(getTableName(smithersAgentCheckpointContents)).toBe("_smithers_agent_checkpoint_contents");
+    expect(getTableName(smithersAgentCheckpoints)).toBe("_smithers_agent_checkpoints");
+    expect(modularAgentCheckpointContents).toBe(smithersAgentCheckpointContents);
+    expect(modularAgentCheckpoints).toBe(smithersAgentCheckpoints);
+  });
+  test("agent checkpoint hashes are required while agent ids remain optional", () => {
+    const contentColumns = getTableConfig(smithersAgentCheckpointContents).columns;
+    const refColumns = getTableConfig(smithersAgentCheckpoints).columns;
+    expect(contentColumns.find((column) => column.name === "content_hash")?.notNull).toBe(true);
+    expect(refColumns.find((column) => column.name === "agent_id")?.notNull).toBe(false);
+  });
   test("smithersRuns table name is _smithers_runs", () => {
     expect(getTableName(smithersRuns)).toBe("_smithers_runs");
   });

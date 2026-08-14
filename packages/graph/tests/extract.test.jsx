@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, spyOn, test } from "bun:test";
 import { resolve } from "node:path";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
@@ -769,6 +769,34 @@ describe("extractGraph", () => {
       expect(result.tasks[0].ralphId).toBe("inner@@outer=2");
       expect(result.tasks[0].iteration).toBe(4);
       expect(result.mountedTaskIds).toEqual(["work@@outer=2::4"]);
+    });
+
+    test("scopes dependsOn/needs authored with logical ids to loop-scoped node ids (issue #1487)", () => {
+      // <Panel> inside a nested loop authors moderator dependsOn/needs with the
+      // logical panelist ids, but the panelists are mounted with the ancestor
+      // loop scope appended — an exact-id dependency lookup then deadlocks.
+      const root = hostEl("smithers:ralph", { id: "outer" }, [
+        hostEl("smithers:workflow", {}, [
+          hostEl("smithers:task", { id: "unscoped", output: "t" }),
+          hostEl("smithers:ralph", { id: "inner" }, [
+            hostEl("smithers:task", { id: "panelist-a", output: "t" }),
+            hostEl("smithers:task", { id: "panelist-b", output: "t" }),
+            hostEl("smithers:task", {
+              id: "moderator",
+              output: "t",
+              dependsOn: ["panelist-a", "panelist-b", "unscoped", "missing"],
+              needs: { "panelist-a": "panelist-a", other: "unscoped" },
+            }),
+          ]),
+        ]),
+      ]);
+      const result = extractGraph(root, { ralphIterations: { outer: 2 } });
+      const moderator = result.tasks.find((task) => task.nodeId.startsWith("moderator"));
+      expect(moderator.nodeId).toBe("moderator@@outer=2");
+      // Sibling deps resolve to the scoped mounted ids; deps that already
+      // resolve exactly (unscoped ancestors) or never resolve are untouched.
+      expect(moderator.dependsOn).toEqual(["panelist-a@@outer=2", "panelist-b@@outer=2", "unscoped", "missing"]);
+      expect(moderator.needs).toEqual({ "panelist-a": "panelist-a@@outer=2", other: "unscoped" });
     });
 
     test("throws on duplicate ralph id", () => {

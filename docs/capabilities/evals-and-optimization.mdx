@@ -8,7 +8,7 @@ An agent workflow that "seems fine" is an unmeasured workflow. The failure mode 
 
 The honest complication for coding agents specifically: there is often **no ground-truth label**. "Refactor this module" has thousands of acceptable outputs. What you *can* measure is cheaper and still decisive - did the run finish, did the output match its schema, does it contain the fields downstream tasks depend on, did it stay within a latency budget, and does an LLM judge with explicit instructions rate it above a threshold. None of these prove the output is optimal. Together, run after run, they catch regressions the moment they happen, which is what one-off manual review never does.
 
-Smithers ships this as three layers on the same substrate: **scorers** attached to tasks (graded on every real run, persisted next to the run), **eval suites** (JSONL cases replayed through the real workflow by `bunx smithers-orchestrator eval`, producing a checked-in report), and **GEPA prompt optimization** (`bunx smithers-orchestrator optimize`, which rewrites task prompts and only keeps the rewrite if the suite score actually improves).
+Smithers ships this as three layers on the same substrate: **scorers** attached to tasks (graded on every real run, persisted next to the run), **eval suites** (JSONL cases replayed through the real workflow by `bunx smthrs eval`, producing a checked-in report), and **GEPA prompt optimization** (`bunx smthrs optimize`, which rewrites task prompts and only keeps the rewrite if the suite score actually improves).
 
 ## How the industry does it
 
@@ -38,7 +38,7 @@ import {
   schemaAdherenceScorer,
   latencyScorer,
   toxicityScorer,
-} from "smithers-orchestrator";
+} from "smthrs";
 
 const mentionsRisk = createScorer({
   id: "mentions-risk",
@@ -69,7 +69,7 @@ The `sampling` binding (`all` | `ratio` | `none`) is how you afford judge-based 
 Read scores back per run:
 
 ```bash
-bunx smithers-orchestrator scores RUN_ID
+bunx smthrs scores RUN_ID
 ```
 
 or aggregate across runs with `aggregateScores(adapter, { scorerId })` - count, mean, min/max, p50, stddev - straight from the persisted table. This is the same shape as Braintrust's online scoring of production logs, minus the hosted dashboard: your scores live in your own database.
@@ -87,7 +87,7 @@ Cases are JSONL (or JSON), one per line, each naming an input and what must be t
 Deterministic checks: `status`, `output` (exact JSON), `outputContains` (recursive subset match), `errorContains`. The optional `judge` runs an LLM-as-judge pass; a case with both passes only when every deterministic assertion passes *and* the judge score meets its threshold - the executable-first, judge-second ordering.
 
 ```bash
-bunx smithers-orchestrator eval workflow.tsx --cases evals/smoke.jsonl --suite smoke --force
+bunx smthrs eval workflow.tsx --cases evals/smoke.jsonl --suite smoke --force
 ```
 
 Each case executes the real workflow as a persisted run and the report lands at `.smithers/evals/smoke.json` (per-case assertions, run IDs, outputs, summary) - check it into CI with `--format json`. Exit codes are the contract: `0` all pass, `1` genuine failures, `4` invalid case files, and `5` when the only reds are **inconclusive** - harness faults (network refused, missing binary, rate limit) that killed the case before the workflow's behavior was observed. That distinction matters: a CI loop that treats exit `5` like `1` will "fix" product code the suite never actually tested. Network is off by default for eval runs (loopback stays open); pass `--allow-network` when a case genuinely needs the outside world.
@@ -96,10 +96,10 @@ Full walkthrough with all flags: [Evals quickstart](/guides/evals-quickstart).
 
 ## Optimization: GEPA over your suite
 
-Once a suite scores a workflow, the score becomes a target. `bunx smithers-orchestrator optimize` implements GEPA-style reflective prompt evolution ([Agrawal et al., 2025](https://arxiv.org/abs/2507.19457)): an optimizer model reads the baseline eval failures, proposes rewritten prompts for the workflow's agent tasks, and Smithers verifies the rewrite by running the suite again.
+Once a suite scores a workflow, the score becomes a target. `bunx smthrs optimize` implements GEPA-style reflective prompt evolution ([Agrawal et al., 2025](https://arxiv.org/abs/2507.19457)): an optimizer model reads the baseline eval failures, proposes rewritten prompts for the workflow's agent tasks, and Smithers verifies the rewrite by running the suite again.
 
 ```bash
-OPENAI_API_KEY=... bunx smithers-orchestrator optimize workflow.tsx \
+OPENAI_API_KEY=... bunx smthrs optimize workflow.tsx \
   --cases evals/smoke.jsonl \
   --suite smoke-gepa \
   --artifact .smithers/optimizations/smoke-gepa.json
@@ -112,7 +112,7 @@ This is a deliberately narrower bet than DSPy: no program restructuring, no few-
 ## Guarantees and limits
 
 - Scorers **never block or fail** a task - they run after completion, and scorer failures are logged, not thrown. Corollary: a scorer cannot gate a run; use a review/approval node for gating.
-- Every scorer result and eval run is **persisted locally** - no hosted service, queryable via `bunx smithers-orchestrator scores`, `aggregateScores`, or SQL against `_smithers_scorers`.
+- Every scorer result and eval run is **persisted locally** - no hosted service, queryable via `bunx smthrs scores`, `aggregateScores`, or SQL against `_smithers_scorers`.
 - Judge assertions inherit LLM-judge weaknesses: self-preference and verbosity bias ([Zheng et al.](https://arxiv.org/abs/2306.05685)) are not solved, only mitigated by cross-provider judging and low-variance rubric instructions. An unparseable judge reply scores 0, and a missing judge agent fails the assertion with setup guidance rather than crashing the suite.
 - Eval cases run the **real workflow with real agents** - suites cost real tokens and real minutes. Use `--max-cases` to shard and `--concurrency` conservatively.
 - `optimize` guards against regressions on **your suite**, not in general: a small suite can be overfit by a prompt patch exactly the way a small test set overfits any optimizer. Grow the suite before trusting the artifact.
@@ -121,11 +121,11 @@ This is a deliberately narrower bet than DSPy: no program restructuring, no few-
 ## Operating it
 
 ```bash
-bunx smithers-orchestrator eval workflow.tsx --cases evals/smoke.jsonl --suite smoke --dry-run   # plan
-bunx smithers-orchestrator eval workflow.tsx --cases evals/smoke.jsonl --suite smoke --force     # run + report
-bunx smithers-orchestrator scores RUN_ID                                                         # scorer results for one run
-bunx smithers-orchestrator optimize workflow.tsx --cases evals/smoke.jsonl --suite s --artifact a.json
-bunx smithers-orchestrator eval workflow.tsx --cases evals/smoke.jsonl --optimization a.json     # verify a patch
+bunx smthrs eval workflow.tsx --cases evals/smoke.jsonl --suite smoke --dry-run   # plan
+bunx smthrs eval workflow.tsx --cases evals/smoke.jsonl --suite smoke --force     # run + report
+bunx smthrs scores RUN_ID                                                         # scorer results for one run
+bunx smthrs optimize workflow.tsx --cases evals/smoke.jsonl --suite s --artifact a.json
+bunx smthrs eval workflow.tsx --cases evals/smoke.jsonl --optimization a.json     # verify a patch
 ```
 
 ## See also

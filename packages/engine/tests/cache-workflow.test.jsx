@@ -1,6 +1,6 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
-import { Workflow, Task, runWorkflow } from "smithers-orchestrator";
+import { Workflow, Task, runWorkflow } from "smthrs";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";
@@ -81,6 +81,48 @@ describe("workflow caching", () => {
       ));
     await Effect.runPromise(runWorkflow(makeWorkflow("prompt A"), { input: {}, runId: "r1" }));
     await Effect.runPromise(runWorkflow(makeWorkflow("prompt B"), { input: {}, runId: "r2" }));
+    expect(calls).toBe(2);
+    cleanup();
+  });
+  test("checkpoint capability changes invalidate the cache", async () => {
+    const { smithers, outputs, cleanup } = createTestSmithers({
+      out: z.object({ v: z.number() }),
+    });
+    let calls = 0;
+    const makeWorkflow = (checkpointCapabilities) =>
+      smithers(() => (
+        <Workflow name="checkpoint-capability-cache" cache>
+          <Task
+            id="t"
+            output={outputs.out}
+            agent={{
+              id: "checkpoint-capability-cache-agent",
+              tools: {},
+              checkpointCapabilities,
+              async generate() {
+                calls += 1;
+                return { output: { v: calls } };
+              },
+            }}
+          >
+            Same prompt
+          </Task>
+        </Workflow>
+      ));
+
+    await Effect.runPromise(
+      runWorkflow(makeWorkflow([{ codec: "cache.checkpoint", versions: [1], modes: ["resume"] }]), {
+        input: {},
+        runId: "checkpoint-capability-r1",
+      }),
+    );
+    await Effect.runPromise(
+      runWorkflow(makeWorkflow([{ codec: "cache.checkpoint", versions: [1], modes: ["resume", "fork"] }]), {
+        input: {},
+        runId: "checkpoint-capability-r2",
+      }),
+    );
+
     expect(calls).toBe(2);
     cleanup();
   });

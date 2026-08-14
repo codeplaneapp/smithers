@@ -1,10 +1,10 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { z } from "zod";
-import { Loop, Parallel, Sequence, SmithersDb, Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { Loop, Parallel, Sequence, SmithersDb, Task, Workflow, runWorkflow } from "smthrs";
 import { diagnoseRunEffect } from "../../../apps/cli/src/why-diagnosis.js";
 import { SmithersCtx } from "../../driver/src/SmithersCtx.js";
 import { canonicalJson, digestProofRow } from "../../driver/src/provenance.js";

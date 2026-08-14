@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { createServer, type Server } from "node:http";
 import { WebSocketServer } from "ws";
 import { DevToolsClient } from "../src/runtime/DevToolsClient.js";
-import type { DevToolsNode, DevToolsSnapshot } from "@smithers-orchestrator/protocol";
+import type { DevToolsNode, DevToolsSnapshot } from "@smthrs/protocol";
 
 function node(id: number, nodeId: string, state = "running"): DevToolsNode {
   return {

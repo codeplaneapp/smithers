@@ -68,45 +68,45 @@ tasks.
 ```
 
 ```bash
-bunx smithers-orchestrator signal abc123 user-feedback --data '{"rating": 5}'
+bunx smthrs signal abc123 user-feedback --data '{"rating": 5}'
 ```
 
 ---
 
 ## CLI
 
-### `bunx smithers-orchestrator why`: Understand why a run is stuck
+### `bunx smthrs why`: Understand why a run is stuck
 
 A diagnostic engine that calculates exactly what's blocking a run and tells you
 how to fix it.
 
 ```
-$ bunx smithers-orchestrator why abc123
+$ bunx smthrs why abc123
 Run abc123 is waiting-approval
   Blocked node:  review-gate
   Reason:        Approval requested, no decision yet
-  Unblock:       bunx smithers-orchestrator approve abc123
+  Unblock:       bunx smthrs approve abc123
 ```
 
 Detects waiting signals, pending approvals, stale heartbeats, retry backoffs,
 upstream dependency failures, and more.
 
-### `bunx smithers-orchestrator events`: Browse workflow event history
+### `bunx smthrs events`: Browse workflow event history
 
 Filter by node, category, or time. Events stream incrementally so you never run
 out of memory on large runs.
 
 ```bash
-bunx smithers-orchestrator events abc123 --type approval --since 5m
+bunx smthrs events abc123 --type approval --since 5m
 ```
 
-### `bunx smithers-orchestrator node`: Deep-dive into a single node
+### `bunx smthrs node`: Deep-dive into a single node
 
 Aggregates task attempts, tool calls, schema validation errors, Zod-validated
 outputs, and token usage with pricing.
 
 ```bash
-bunx smithers-orchestrator node review-step -r abc123 --tools --attempts
+bunx smthrs node review-step -r abc123 --tools --attempts
 ```
 
 ### `--watch` flag
@@ -114,7 +114,7 @@ bunx smithers-orchestrator node review-step -r abc123 --tools --attempts
 Live-updating views for `ps`, `inspect`, and `events`.
 
 ```bash
-bunx smithers-orchestrator ps --watch --interval 2
+bunx smthrs ps --watch --interval 2
 ```
 
 ---
@@ -136,7 +136,7 @@ bunx smithers-orchestrator ps --watch --interval 2
   and resumes them automatically. Atomic DB claim lock prevents concurrent
   supervisor races.
   ```bash
-  bunx smithers-orchestrator supervise
+  bunx smthrs supervise
   ```
 
 ---
@@ -149,14 +149,14 @@ bunx smithers-orchestrator ps --watch --interval 2
 
 ---
 
-## `bunx smithers-orchestrator init` Improvements
+## `bunx smthrs init` Improvements
 
 - Tier-based agent groupings (`cheapFast`, `smart`, `smartTool`) with automatic
   provider detection and fallback
 - Typed `inputSchema` objects on all seeded workflows
 - `ValidationLoop` with feedback injection and convergence detection
 - New `ticket-kanban` workflow for parallel ticket implementation in worktrees
-- `bunx smithers-orchestrator workflow create` scaffold uses the tier-based system
+- `bunx smthrs workflow create` scaffold uses the tier-based system
 - All seeded files use `zod/v4`
 
 ---

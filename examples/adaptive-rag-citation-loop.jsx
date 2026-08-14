@@ -11,11 +11,11 @@
  * so each retry shows exactly which evidence was used and why the judge accepted
  * or rejected the groundedness of the answer.
  */
-import { Sequence, Parallel, Loop } from "smithers-orchestrator";
+import { Sequence, Parallel, Loop } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import RoutePrompt from "./prompts/adaptive-rag-citation-loop/route.mdx";
 import PlanRetrievalPrompt from "./prompts/adaptive-rag-citation-loop/plan-retrieval.mdx";

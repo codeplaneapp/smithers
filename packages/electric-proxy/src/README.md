@@ -1,4 +1,4 @@
-# @smithers-orchestrator/electric-proxy — src
+# @smthrs/electric-proxy — src
 
 The auth/scope/rate-limit/observability proxy that fronts an ElectricSQL shape
 API (`/v1/shape`) for Smithers cloud and self-hosted deployments. Everything

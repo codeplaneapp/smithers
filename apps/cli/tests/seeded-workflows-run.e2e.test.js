@@ -223,7 +223,7 @@ function writeBunxShim(binDir) {
       'import { spawnSync } from "node:child_process";',
       `const cliEntry = ${JSON.stringify(CLI_ENTRY)};`,
       "const args = process.argv.slice(2);",
-      'if (args[0] !== "smithers-orchestrator") {',
+      'if (args[0] !== "smthrs") {',
       '  process.stderr.write(`unsupported bunx command in test fixture: ${args.join(" ")}\\n`);',
       "  process.exit(127);",
       "}",
@@ -263,8 +263,8 @@ function writeFakeAgentBinaries(binDir) {
     '    "// smithers-source: generated",',
     '    "// smithers-metadata-version: 1",',
     '    "// smithers-display-name: Mock Workflow",',
-    '    "/** @jsxImportSource smithers-orchestrator */",',
-    '    "import { createSmithers } from \\"smithers-orchestrator\\";",',
+    '    "/** @jsxImportSource smthrs */",',
+    '    "import { createSmithers } from \\"smthrs\\";",',
     '    "import { z } from \\"zod/v4\\";",',
     '    "const { Workflow, Task, smithers, outputs } = createSmithers({ output: z.object({ summary: z.string() }) });",',
     '    "export default smithers(() => (",',
@@ -282,7 +282,7 @@ function writeFakeAgentBinaries(binDir) {
     '  fs.writeFileSync(path.join(testsDir, "mock-workflow.test.tsx"), [',
     '    "import { expect, test } from \\"bun:test\\";",',
     '    "import { join } from \\"node:path\\";",',
-    '    "import { renderWorkflow } from \\"smithers-orchestrator/testing\\";",',
+    '    "import { renderWorkflow } from \\"smthrs/testing\\";",',
     '    "import workflow from \\"../workflows/mock-workflow.tsx\\";",',
     '    "test(\\"renders the real mock workflow graph\\", async () => {",',
     '    "  const graph = await renderWorkflow(workflow, { workflowPath: join(import.meta.dir, \\"..\\", \\"workflows\\", \\"mock-workflow.tsx\\"), input: {}, outputs: {} });",',
@@ -405,6 +405,10 @@ function initWorkflowPack() {
     OPENAI_API_KEY: "",
     GEMINI_API_KEY: "",
     GOOGLE_API_KEY: "",
+    // Several seeded-workflow cases deliberately fail. Keep those failures
+    // from spawning detached autopsies that can outlive this fixture's fake
+    // agent binaries and fall through to real credentials on the host.
+    SMITHERS_POST_FAILURE: "0",
     SMITHERS_FAKE_AGENT_RESPONSE: AGENT_RESPONSE,
     SMITHERS_SHARE_REGISTRY_README: repo.path("registry-readme.md"),
   };
@@ -539,8 +543,8 @@ const EXPECTED_WORKFLOW = [
   "// smithers-source: generated",
   "// smithers-metadata-version: 1",
   "// smithers-display-name: Mock Workflow",
-  "/** @jsxImportSource smithers-orchestrator */",
-  'import { createSmithers } from "smithers-orchestrator";',
+  "/** @jsxImportSource smthrs */",
+  'import { createSmithers } from "smthrs";',
   'import { z } from "zod/v4";',
   "const { Workflow, Task, smithers, outputs } = createSmithers({ output: z.object({ summary: z.string() }) });",
   "export default smithers(() => (",
@@ -692,6 +696,7 @@ for (const mode of ["missing", "malformed", "mismatched", "wrong-path"]) {
       });
       expect(terminal.exitCode).toBe(0);
       expect(jsonOutput(terminal)).toMatchObject({ status: "built", skill_path: null });
+      expect(result.stderr).not.toContain("Post-failure autopsy launched");
       expect(repo.read(".smithers/test-document-attempts")).toBe("3");
       expect(repo.read(".smithers/test-scaffold-count")).toBe("1");
       expect(repo.read(".smithers/workflows/mock-workflow.tsx")).toBe(EXPECTED_WORKFLOW);

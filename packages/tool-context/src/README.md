@@ -1,4 +1,4 @@
-# @smithers-orchestrator/tool-context — src
+# @smthrs/tool-context — src
 
 AsyncLocalStorage-backed ambient `ToolContext`
 (runId/nodeId/iteration/attempt/rootDir/idempotencyKey/seq/durabilitySnapshot)

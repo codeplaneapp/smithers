@@ -12,6 +12,10 @@ export const smithersRuns = sqliteTable("_smithers_runs", {
   heartbeatAtMs: integer("heartbeat_at_ms"),
   runtimeOwnerId: text("runtime_owner_id"),
   cancelRequestedAtMs: integer("cancel_requested_at_ms"),
+  cancelRequestId: text("cancel_request_id"),
+  cancelRequestSource: text("cancel_request_source"),
+  cancelRequestClientIdentity: text("cancel_request_client_identity"),
+  cancelRequestClientPid: integer("cancel_request_client_pid"),
   pauseRequestedAtMs: integer("pause_requested_at_ms"),
   hijackRequestedAtMs: integer("hijack_requested_at_ms"),
   hijackTarget: text("hijack_target"),
@@ -55,6 +59,7 @@ export const smithersAttempts = sqliteTable(
     metaJson: text("meta_json"),
     responseText: text("response_text"),
     jjCwd: text("jj_cwd"),
+    effort: text("effort"),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.runId, t.nodeId, t.iteration, t.attempt] }),
@@ -287,12 +292,14 @@ export const smithersRalph = sqliteTable(
     ralphId: text("ralph_id").notNull(),
     iteration: integer("iteration").notNull().default(0),
     done: integer("done", { mode: "boolean" }).notNull().default(false),
+    exhausted: integer("exhausted", { mode: "boolean" }).notNull().default(false),
     updatedAtMs: integer("updated_at_ms").notNull(),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.runId, t.ralphId] }),
   }),
 );
+export { smithersSteers } from "./internal-schema/smithersSteers.js";
 export { smithersScorers } from "./internal-schema/smithersScorers.js";
 export { smithersMemoryFacts } from "./internal-schema/smithersMemoryFacts.js";
 export { smithersMemoryThreads } from "./internal-schema/smithersMemoryThreads.js";
@@ -330,6 +337,8 @@ export const smithersSchemaMigrations = sqliteTable("_smithers_schema_migrations
 });
 export { smithersWorkspaceStates } from "./internal-schema/smithersWorkspaceStates.js";
 export { smithersWorkspaceCheckpoints } from "./internal-schema/smithersWorkspaceCheckpoints.js";
+export { smithersAgentCheckpointContents } from "./internal-schema/smithersAgentCheckpointContents.js";
+export { smithersAgentCheckpoints } from "./internal-schema/smithersAgentCheckpoints.js";
 export { smithersDocs } from "./internal-schema/smithersDocs.js";
 export { smithersIntegrationDeliveries } from "./internal-schema/smithersIntegrationDeliveries.js";
 export { smithersIntegrationCursors } from "./internal-schema/smithersIntegrationCursors.js";

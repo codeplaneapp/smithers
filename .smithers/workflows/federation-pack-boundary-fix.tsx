@@ -3,8 +3,8 @@
 // smithers-display-name: Federation Pack Boundary Fix
 // smithers-description: Repair pack/retained-test ownership and standalone dependency gaps in federation artifacts.
 // smithers-tags: maintenance, federation, architecture
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 
@@ -76,7 +76,7 @@ defects. Resolve every one with evidence from source-clone:
    their owned code. Model concrete rewrites and standalone validation.
 
 4. .smithers/tests/flagship-ui-render.test.tsx imports
-   @smithers-orchestrator/gateway-react and gateway-ui. Add both already-published
+   @smthrs/gateway-react and gateway-ui. Add both already-published
    ^0.31.0 packages to smithers-packs generatedRootManifest devDependencies and
    correct its false notes.
 
@@ -92,7 +92,7 @@ defects. Resolve every one with evidence from source-clone:
    repo/aggregate-local paths appropriate to the owning lane.
 
 7. examples/init-pack/make-workflow-tutorial.tsx dynamically imports
-   @smithers-orchestrator/observability/_traceRedaction with a fallback. Declare
+   @smthrs/observability/_traceRedaction with a fallback. Declare
    observability ^0.32.0 as an optional dependency and add the corresponding real
    initial edge smithers-observability -> smithers-packs if initial publication
    installs it; alternatively make the degradation explicit and verifiable.
@@ -106,10 +106,10 @@ defects. Resolve every one with evidence from source-clone:
    its CLI prerequisite remains the already-published ^0.31.0 line.
 
 9. Add a drift guard for the retained read-only apps/review copy until
-   @smithers-orchestrator/review@0.32.0 publishes and the copy is removed.
+   @smthrs/review@0.32.0 publishes and the copy is removed.
 
 10. Make the createSmithers move/export into
-    @smithers-orchestrator/engine an explicit prerequisite/action for review
+    @smthrs/engine an explicit prerequisite/action for review
     facade decoupling; engine does not export it today.
 
 11. Verify whether gateway-react's db/server imports are type-only and correct

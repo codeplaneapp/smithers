@@ -3,11 +3,11 @@ title: Workflow optimization
 description: Optimize Smithers workflow prompts against eval suites with GEPA-style prompt artifacts.
 ---
 
-Run `bunx smithers-orchestrator optimize` to generate improved prompts for agent tasks via GEPA, verify the improvement against your eval suite, and save the result as a reusable artifact.
+Run `bunx smthrs optimize` to generate improved prompts for agent tasks via GEPA, verify the improvement against your eval suite, and save the result as a reusable artifact.
 
 ```bash
 OPENAI_API_KEY=... \
-bunx smithers-orchestrator optimize workflow.tsx \
+bunx smthrs optimize workflow.tsx \
   --cases evals/smoke.jsonl \
   --suite smoke-gepa \
   --artifact .smithers/optimizations/smoke-gepa.json
@@ -17,7 +17,7 @@ The implicit optimizer is OpenAI-compatible `gpt-5.6-luna` with reasoning
 effort `medium`; pass `--provider` to use another backend (see
 [Providers](#providers)).
 
-`bunx smithers-orchestrator optimize` runs the eval suite twice:
+`bunx smthrs optimize` runs the eval suite twice:
 
 1. baseline run with the workflow's current prompts
 2. optimized run with GEPA-generated prompt patches applied
@@ -29,7 +29,7 @@ The command writes the artifact only when the optimized score improves by at lea
 Apply the optimized prompts to future evals with `--optimization`:
 
 ```bash
-bunx smithers-orchestrator eval workflow.tsx \
+bunx smthrs eval workflow.tsx \
   --cases evals/smoke.jsonl \
   --suite smoke-optimized \
   --optimization .smithers/optimizations/smoke-gepa.json
@@ -42,7 +42,7 @@ The artifact patches only agent-backed `<Task>` prompts by `nodeId`; workflow st
 This run shows a GEPA patch fixing a baseline failure: the baseline prompt omitted the required optimization token and failed the eval, then Cerebras GEPA's patch added the token and the optimized eval passed.
 
 ```bash
-CEREBRAS_API_KEY=... bunx smithers-orchestrator optimize workflow.tsx \
+CEREBRAS_API_KEY=... bunx smthrs optimize workflow.tsx \
   --cases evals/opt.jsonl \
   --suite cerebras-proof \
   --provider cerebras \
@@ -76,7 +76,7 @@ Observed result:
 
 ## Providers
 
-`bunx smithers-orchestrator optimize` accepts the same provider vocabulary Smithers uses for agents and accounts:
+`bunx smthrs optimize` accepts the same provider vocabulary Smithers uses for agents and accounts:
 
 | Provider | Optimizer API | Required env | Default model |
 | --- | --- | --- | --- |

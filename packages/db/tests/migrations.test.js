@@ -157,8 +157,91 @@ describe("DB migration edges", () => {
           "0014_current_indexes",
           "0017_add_scorer_context_columns",
           "0018_add_docs",
+          "0037_agent_checkpoints",
         ]),
       );
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("0037 repairs missing agent checkpoint tables and index idempotently", () => {
+    const { sqlite, db } = setupMemoryDb();
+    try {
+      sqlite.run("DROP TABLE _smithers_agent_checkpoints");
+      sqlite.run("DROP TABLE _smithers_agent_checkpoint_contents");
+      sqlite.run("DELETE FROM _smithers_schema_migrations WHERE id = '0037_agent_checkpoints'");
+      ensureSmithersTables(db);
+      expect(
+        sqlite
+          .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_agent_checkpoint_contents'")
+          .get(),
+      ).toBeDefined();
+      expect(
+        sqlite
+          .query('PRAGMA table_info("_smithers_agent_checkpoint_contents")')
+          .all()
+          .find((column) => column.name === "content_hash")?.notnull,
+      ).toBe(1);
+      expect(
+        sqlite
+          .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_agent_checkpoints'")
+          .get(),
+      ).toBeDefined();
+      expect(
+        sqlite
+          .query(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = '_smithers_agent_checkpoints_content_hash_idx'",
+          )
+          .get(),
+      ).toBeDefined();
+      expect(
+        sqlite
+          .query(
+            "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = '_smithers_agent_checkpoints_attempt_delete'",
+          )
+          .get(),
+      ).toBeDefined();
+      sqlite.run("DROP TRIGGER _smithers_agent_checkpoints_attempt_delete");
+      expect(() => ensureSmithersTables(db)).not.toThrow();
+      expect(
+        sqlite
+          .query(
+            "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = '_smithers_agent_checkpoints_attempt_delete'",
+          )
+          .get(),
+      ).toBeDefined();
+      expect(migrationRows(sqlite).filter((row) => row.id === "0037_agent_checkpoints")).toHaveLength(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("0037 converges stores that recorded the preview 0035 checkpoint id", () => {
+    const { sqlite, db } = setupMemoryDb();
+    try {
+      sqlite.run(
+        "UPDATE _smithers_schema_migrations SET id = '0035_agent_checkpoints' WHERE id = '0037_agent_checkpoints'",
+      );
+
+      expect(() => ensureSmithersTables(db)).not.toThrow();
+
+      const ids = migrationRows(sqlite).map((row) => row.id);
+      expect(ids).toContain("0035_agent_checkpoints");
+      expect(ids).toContain("0037_agent_checkpoints");
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("0037 fails closed when a recorded checkpoint table has an incompatible shape", () => {
+    const { sqlite, db } = setupMemoryDb();
+    try {
+      sqlite.run("DROP TRIGGER _smithers_agent_checkpoints_attempt_delete");
+      sqlite.run("DROP TRIGGER _smithers_agent_checkpoint_refs_delete");
+      sqlite.run("DROP TABLE _smithers_agent_checkpoints");
+      sqlite.run("CREATE TABLE _smithers_agent_checkpoints (run_id TEXT PRIMARY KEY)");
+      expect(() => ensureSmithersTables(db)).toThrow(/0037 agent checkpoint schema mismatch/);
     } finally {
       sqlite.close();
     }
@@ -515,6 +598,65 @@ describe("DB migration edges", () => {
     sqlite.close();
   });
 
+  test("0039 adds the first-class effort column; a legacy meta_json-only row reads clean", () => {
+    const sqlite = new Database(":memory:");
+    // Pre-0039 attempts table: NO effort column. A legacy row smuggled effort
+    // inside meta_json (the old back-compat path).
+    sqlite.exec(`
+      CREATE TABLE _smithers_attempts (
+        run_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        iteration INTEGER NOT NULL DEFAULT 0,
+        attempt INTEGER NOT NULL,
+        state TEXT NOT NULL,
+        started_at_ms INTEGER NOT NULL,
+        meta_json TEXT,
+        PRIMARY KEY (run_id, node_id, iteration, attempt)
+      );
+      INSERT INTO _smithers_attempts (run_id, node_id, iteration, attempt, state, started_at_ms, meta_json)
+        VALUES ('legacy', 'setup', 0, 1, 'finished', 1000,
+          '{"agentEngine":"claude-code","agentModel":"claude-sonnet-4","effort":"high"}');
+    `);
+    const db = drizzle(sqlite);
+    ensureSmithersTables(db);
+
+    // The migration promoted effort to a first-class column...
+    const cols = sqlite
+      .query('PRAGMA table_info("_smithers_attempts")')
+      .all()
+      .map((c) => c.name);
+    expect(cols).toContain("effort");
+    expect(migrationRows(sqlite).map((row) => row.id)).toContain("0039_attempt_effort_column");
+
+    // ...and the legacy row still reads clean: the new column is NULL (never
+    // backfilled from the blob) while the old meta_json value survives intact.
+    const row = sqlite.query("SELECT effort, meta_json FROM _smithers_attempts WHERE node_id = ?").get("setup");
+    expect(row.effort).toBeNull();
+    expect(JSON.parse(row.meta_json).effort).toBe("high");
+    sqlite.close();
+  });
+
+  test("effort persists to the first-class column through the adapter round-trip", async () => {
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    ensureSmithersTables(db);
+    const adapter = new SmithersDb(db);
+    await adapter.insertAttempt({
+      runId: "run-1",
+      nodeId: "worker",
+      iteration: 0,
+      attempt: 1,
+      state: "finished",
+      startedAtMs: 1000,
+      metaJson: JSON.stringify({ agentModel: "claude-sonnet-5", effort: "xhigh" }),
+      effort: "xhigh",
+    });
+    const attempts = await adapter.listAttemptsForRun("run-1");
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0].effort).toBe("xhigh");
+    sqlite.close();
+  });
+
   test("0014 current-indexes upgrades a store whose ledger predates _smithers_docs", () => {
     // Regression: the `_smithers_docs` index lives in the current-index list that
     // migration 0014 runs, but the table is only created by 0018. A store whose
@@ -588,6 +730,179 @@ describe("DB migration edges", () => {
       .get();
     expect(docsIndex).toBeTruthy();
     sqlite.close();
+  });
+
+  test("effort and steer migrations follow the current 0038 ledger head", () => {
+    const sqlite = new Database(":memory:");
+    sqlite.exec(`
+      CREATE TABLE _smithers_schema_migrations (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        applied_at_ms INTEGER NOT NULL,
+        checksum TEXT,
+        destructive INTEGER NOT NULL DEFAULT 0,
+        details_json TEXT
+      );
+      CREATE TABLE _smithers_runs (
+        run_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL
+      );
+    `);
+    // 0025_snapshot_contents is deliberately NOT pre-applied: it creates the
+    // snapshot tables the post-migration trigger repair depends on, so a ledger
+    // claiming 0025 without those tables is not a state a real store reaches.
+    for (const id of [
+      "0001_current_tables",
+      "0002_attempt_legacy_columns",
+      "0003_run_legacy_columns",
+      "0004_approval_payload_columns",
+      "0005_alert_model_extensions",
+      "0006_frame_encoding_column",
+      "0007_event_timestamp_column",
+      "0011_add_node_diffs",
+      "0012_add_time_travel_audit",
+      "0013_run_owned_foreign_keys",
+      "0014_current_indexes",
+      "0015_add_workspace_states",
+      "0016_add_workspace_checkpoints",
+      "0017_add_scorer_context_columns",
+      "0018_add_docs",
+      "0019_add_integration_tables",
+      "0020_run_pause_column",
+      "0021_memory_fact_provenance_columns",
+      "0022_memory_message_iteration_column",
+      "0023_add_memory_notes",
+      "0026_drop_snapshot_prototype_triggers",
+      "0027_add_rewind_leases",
+      "0028_sandbox_heartbeat_column",
+      "0029_integration_delivery_claims",
+      "0030_output_provenance",
+      "0031_side_effect_journal",
+      "0032_tool_call_tokens",
+    ]) {
+      sqlite.run("INSERT INTO _smithers_schema_migrations (id, name, applied_at_ms) VALUES (?, ?, ?)", [id, id, 1]);
+    }
+    const db = drizzle(sqlite);
+
+    expect(() => ensureSmithersTables(db)).not.toThrow();
+
+    const table = sqlite.query("SELECT name FROM sqlite_master WHERE type='table' AND name = '_smithers_steers'").get();
+    expect(table).toBeTruthy();
+    const index = sqlite
+      .query("SELECT name FROM sqlite_master WHERE type='index' AND name = '_smithers_steers_queued_idx'")
+      .get();
+    expect(index).toBeTruthy();
+    const ledger = migrationRows(sqlite).map((row) => row.id);
+    expect(ledger).toEqual(
+      expect.arrayContaining([
+        "0035_ralph_exhausted",
+        "0036_agent_processes",
+        "0037_agent_checkpoints",
+        "0038_run_token_usage",
+        "0039_attempt_effort_column",
+        "0040_add_steers",
+      ]),
+    );
+    sqlite.close();
+  });
+
+  test("all preview effort/steer ledger aliases coexist and converge to the 0039/0040 ids", () => {
+    const { sqlite, db } = setupMemoryDb();
+    try {
+      sqlite.run("DELETE FROM _smithers_schema_migrations WHERE id IN (?, ?)", [
+        "0039_attempt_effort_column",
+        "0040_add_steers",
+      ]);
+      for (const id of [
+        "0035_attempt_effort_column",
+        "0036_add_steers",
+        "0036_attempt_effort_column",
+        "0037_add_steers",
+      ]) {
+        sqlite.run("INSERT INTO _smithers_schema_migrations (id, name, applied_at_ms) VALUES (?, ?, ?)", [id, id, 1]);
+      }
+      sqlite.run("DROP INDEX _smithers_steers_queued_idx");
+
+      expect(() => ensureSmithersTables(db)).not.toThrow();
+
+      const ids = migrationRows(sqlite).map((row) => row.id);
+      expect(ids).toEqual(
+        expect.arrayContaining([
+          "0035_attempt_effort_column",
+          "0036_add_steers",
+          "0036_attempt_effort_column",
+          "0037_add_steers",
+          "0039_attempt_effort_column",
+          "0040_add_steers",
+        ]),
+      );
+      expect(ids).toContain("0037_agent_checkpoints");
+      expect(
+        sqlite
+          .query("SELECT name FROM sqlite_master WHERE type = 'index' AND name = '_smithers_steers_queued_idx'")
+          .get(),
+      ).toBeDefined();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("0040 repairs a missing or malformed owned queued index even with a recorded ledger row", () => {
+    const { sqlite, db } = setupMemoryDb();
+    try {
+      sqlite.run("DROP INDEX _smithers_steers_queued_idx");
+      expect(() => ensureSmithersTables(db)).not.toThrow();
+      expect(
+        sqlite
+          .query('PRAGMA index_info("_smithers_steers_queued_idx")')
+          .all()
+          .map((row) => row.name),
+      ).toEqual(["run_id", "node_id", "status", "created_at_ms"]);
+
+      sqlite.run("DROP INDEX _smithers_steers_queued_idx");
+      sqlite.run("CREATE UNIQUE INDEX _smithers_steers_queued_idx ON _smithers_steers (status, run_id)");
+      expect(() => ensureSmithersTables(db)).not.toThrow();
+      const index = sqlite
+        .query('PRAGMA index_list("_smithers_steers")')
+        .all()
+        .find((row) => row.name === "_smithers_steers_queued_idx");
+      expect(index.unique).toBe(0);
+      expect(index.partial).toBe(0);
+      expect(
+        sqlite
+          .query('PRAGMA index_info("_smithers_steers_queued_idx")')
+          .all()
+          .map((row) => row.name),
+      ).toEqual(["run_id", "node_id", "status", "created_at_ms"]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("0037 fails closed on incompatible table and wrong-owner index collisions", () => {
+    const malformed = setupMemoryDb();
+    try {
+      malformed.sqlite.run("DROP TABLE _smithers_steers");
+      malformed.sqlite.run("CREATE TABLE _smithers_steers (steer_id TEXT PRIMARY KEY)");
+      expect(() => ensureSmithersTables(malformed.db)).toThrow(/0040 steer schema mismatch/);
+    } finally {
+      malformed.sqlite.close();
+    }
+
+    const wrongOwner = setupMemoryDb();
+    try {
+      wrongOwner.sqlite.run("DROP INDEX _smithers_steers_queued_idx");
+      wrongOwner.sqlite.run(`CREATE TABLE unrelated_steers (
+        run_id TEXT, node_id TEXT, status TEXT, created_at_ms INTEGER
+      )`);
+      wrongOwner.sqlite.run(
+        "CREATE INDEX _smithers_steers_queued_idx ON unrelated_steers (run_id, node_id, status, created_at_ms)",
+      );
+      expect(() => ensureSmithersTables(wrongOwner.db)).toThrow(/queued index name is owned by another table/);
+    } finally {
+      wrongOwner.sqlite.close();
+    }
   });
 
   test("malformed JSON in valueJson / xmlJson / configJson is caught at deserialize layer with a useful error", () => {

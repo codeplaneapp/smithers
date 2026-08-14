@@ -3,7 +3,7 @@
 React adapter for Smithers DevTools. `SmithersDevTools.js` instruments fiber
 commits via bippy, maps `smithers:*` host fibers to `DevToolsNode` trees
 (`HOST_TAG_MAP`), and delegates state/snapshot tracking to
-`SmithersDevToolsCore` from `@smithers-orchestrator/devtools`.
+`SmithersDevToolsCore` from `@smthrs/devtools`.
 
 - `index.js` — the `./devtools` export surface: re-exports `SmithersDevTools`
   plus a tool-managed `@smithers-type-exports` block (preserve byte-for-byte).

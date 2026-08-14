@@ -13,7 +13,7 @@
   "dependencies": {
     "@ai-sdk/openai": "^1.0.0",
     "ai": "^4.0.0",
-    "smithers-orchestrator": "file:../../packages/smithers",
+    "smthrs": "file:../../packages/smithers",
     "zod": "^3.23.0"
   }
 }

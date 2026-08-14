@@ -18,8 +18,8 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { listAccounts } from "@smithers-orchestrator/accounts";
-import { ClaudeCodeAgent, CodexAgent, KimiAgent, type AgentLike } from "smithers-orchestrator";
+import { listAccounts } from "@smthrs/accounts";
+import { ClaudeCodeAgent, CodexAgent, KimiAgent, type AgentLike } from "smthrs";
 import { validateRegistry } from "./generate-sota.ts";
 
 const ROOT = resolve(import.meta.dir, "..");

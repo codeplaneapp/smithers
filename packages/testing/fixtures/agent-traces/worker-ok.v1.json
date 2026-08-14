@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "id": "worker-ok",
+  "engineHint": "any",
+  "turns": [
+    {
+      "stream": [{ "t": "text", "text": "worker shard ok\n" }],
+      "result": {
+        "kind": "ok",
+        "output": { "summary": "shard done", "ok": true }
+      }
+    }
+  ]
+}

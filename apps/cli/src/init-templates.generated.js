@@ -18,7 +18,7 @@ export const GENERATED_INIT_TEMPLATES = [
   {
     "sourcePath": "tsconfig.json",
     "path": ".smithers/tsconfig.json",
-    "contents": "{\n  \"compilerOptions\": {\n    \"lib\": [\n      \"ESNext\",\n      \"DOM\",\n      \"DOM.Iterable\"\n    ],\n    \"target\": \"ESNext\",\n    \"module\": \"ESNext\",\n    \"moduleDetection\": \"force\",\n    \"jsx\": \"react-jsx\",\n    \"jsxImportSource\": \"smithers-orchestrator\",\n    \"moduleResolution\": \"bundler\",\n    \"allowImportingTsExtensions\": true,\n    \"verbatimModuleSyntax\": true,\n    \"noEmit\": true,\n    \"strict\": true,\n    \"skipLibCheck\": true,\n    \"paths\": {\n      \"~/*\": [\n        \"./*\"\n      ]\n    }\n  },\n  \"include\": [\n    \"./**/*\"\n  ],\n  \"exclude\": [\n    \"./executions/**/*\"\n  ]\n}\n"
+    "contents": "{\n  \"compilerOptions\": {\n    \"lib\": [\n      \"ESNext\",\n      \"DOM\",\n      \"DOM.Iterable\"\n    ],\n    \"target\": \"ESNext\",\n    \"module\": \"ESNext\",\n    \"moduleDetection\": \"force\",\n    \"jsx\": \"react-jsx\",\n    \"jsxImportSource\": \"smthrs\",\n    \"moduleResolution\": \"bundler\",\n    \"allowImportingTsExtensions\": true,\n    \"verbatimModuleSyntax\": true,\n    \"noEmit\": true,\n    \"strict\": true,\n    \"skipLibCheck\": true,\n    \"paths\": {\n      \"~/*\": [\n        \"./*\"\n      ]\n    }\n  },\n  \"include\": [\n    \"./**/*\"\n  ],\n  \"exclude\": [\n    \"./executions/**/*\"\n  ]\n}\n"
   },
   {
     "sourcePath": "types/assets.d.ts.tmpl",
@@ -33,48 +33,48 @@ export const GENERATED_INIT_TEMPLATES = [
   {
     "sourcePath": "preload.ts.tmpl",
     "path": ".smithers/preload.ts",
-    "contents": "import { mdxPlugin } from \"smithers-orchestrator\";\nmdxPlugin();\n"
+    "contents": "import { mdxPlugin } from \"smthrs\";\nmdxPlugin();\n"
   },
   {
     "sourcePath": "gateway.ts.tmpl",
     "path": ".smithers/gateway.ts",
-    "contents": "import { Gateway, mdxPlugin } from \"smithers-orchestrator\";\nimport { dirname, resolve } from \"node:path\";\nimport { fileURLToPath } from \"node:url\";\n\nmdxPlugin();\n\nconst here = dirname(fileURLToPath(import.meta.url));\nconst projectRoot = resolve(here, \"..\");\nprocess.chdir(projectRoot);\n\nconst parsedPort = Number(process.env.PORT ?? \"7331\");\nconst port = Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 7331;\nconst host = process.env.HOST ?? \"127.0.0.1\";\n\nconst gateway = new Gateway({ heartbeatMs: 15_000 });\n\n// Mount each workflow independently. Browser UIs are declared by each workflow\n// with <UI entry=\"../ui/<key>.tsx\" /> and discovered by Gateway.register().\n// A workflow that fails to import (e.g. a broken prompt/MDX) disables only itself — the rest of\n// the gateway and the other workflow UIs still come up.\nasync function mountWorkflow(key: string, title: string) {\n  try {\n    const workflowEntry = resolve(here, \"workflows\", key + \".tsx\");\n    const mod = await import(\"./workflows/\" + key + \".tsx\");\n    gateway.register(key, mod.default, { entryFile: workflowEntry });\n    const mounted = (gateway as any).workflows?.get?.(key)?.ui;\n    if (mounted) {\n      console.log(\"  \" + title + \" UI -> http://\" + host + \":\" + port + \"/workflows/\" + key);\n    } else {\n      console.log(\"  \" + title + \" (no UI)\");\n    }\n  } catch (err) {\n    const message = err instanceof Error ? err.message : String(err);\n    console.warn(\"[gateway] skipped \" + key + \": \" + message);\n  }\n}\n\nconsole.log(\"Workflow UIs:\");\n/* {{MOUNTS}} */\n\nawait gateway.listen({ host, port });\nconsole.log(\"Smithers Gateway listening on http://\" + host + \":\" + port);\n"
+    "contents": "import { Gateway, mdxPlugin } from \"smthrs\";\nimport { dirname, resolve } from \"node:path\";\nimport { fileURLToPath } from \"node:url\";\n\nmdxPlugin();\n\nconst here = dirname(fileURLToPath(import.meta.url));\nconst projectRoot = resolve(here, \"..\");\nprocess.chdir(projectRoot);\n\nconst parsedPort = Number(process.env.PORT ?? \"7331\");\nconst port = Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 7331;\nconst host = process.env.HOST ?? \"127.0.0.1\";\n\nconst gateway = new Gateway({ heartbeatMs: 15_000 });\n\n// Mount each workflow independently. Browser UIs are declared by each workflow\n// with <UI entry=\"../ui/<key>.tsx\" /> and discovered by Gateway.register().\n// A workflow that fails to import (e.g. a broken prompt/MDX) disables only itself — the rest of\n// the gateway and the other workflow UIs still come up.\nasync function mountWorkflow(key: string, title: string) {\n  try {\n    const workflowEntry = resolve(here, \"workflows\", key + \".tsx\");\n    const mod = await import(\"./workflows/\" + key + \".tsx\");\n    gateway.register(key, mod.default, { entryFile: workflowEntry });\n    const mounted = (gateway as any).workflows?.get?.(key)?.ui;\n    if (mounted) {\n      console.log(\"  \" + title + \" UI -> http://\" + host + \":\" + port + \"/workflows/\" + key);\n    } else {\n      console.log(\"  \" + title + \" (no UI)\");\n    }\n  } catch (err) {\n    const message = err instanceof Error ? err.message : String(err);\n    console.warn(\"[gateway] skipped \" + key + \": \" + message);\n  }\n}\n\nconsole.log(\"Workflow UIs:\");\n/* {{MOUNTS}} */\n\nawait gateway.listen({ host, port });\nconsole.log(\"Smithers Gateway listening on http://\" + host + \":\" + port);\n"
   },
   {
     "sourcePath": "agents/claude-code.ts.tmpl",
     "path": ".smithers/agents/claude-code.ts",
     "preserveExisting": true,
-    "contents": "import { ClaudeCodeAgent as SmithersClaudeCodeAgent } from \"smithers-orchestrator\";\n\n// Built-in Claude Code CLI agent (cliEngine: \"claude-code\").\n// Tweak `model` or uncomment extra options below to match your setup.\nexport const ClaudeCodeAgent = new SmithersClaudeCodeAgent({\n  model: \"claude-fable-5\",\n  // systemPrompt: \"Add shared instructions for every Claude run.\",\n  // timeoutMs: 10 * 60 * 1000,\n  // dangerouslySkipPermissions: true,\n});\n"
+    "contents": "import { ClaudeCodeAgent as SmithersClaudeCodeAgent } from \"smthrs\";\n\n// Built-in Claude Code CLI agent (cliEngine: \"claude-code\").\n// Tweak `model` or uncomment extra options below to match your setup.\nexport const ClaudeCodeAgent = new SmithersClaudeCodeAgent({\n  model: \"claude-fable-5\",\n  // systemPrompt: \"Add shared instructions for every Claude run.\",\n  // timeoutMs: 10 * 60 * 1000,\n  // dangerouslySkipPermissions: true,\n});\n"
   },
   {
     "sourcePath": "agents/codex.ts.tmpl",
     "path": ".smithers/agents/codex.ts",
     "preserveExisting": true,
-    "contents": "import { CodexAgent as SmithersCodexAgent } from \"smithers-orchestrator\";\n\n// Built-in Codex CLI agent (cliEngine: \"codex\").\n// Tweak `model` or uncomment extra options below to match your setup.\nexport const CodexAgent = new SmithersCodexAgent({\n  model: \"gpt-5.6-luna\",\n  config: { model_reasoning_effort: \"medium\" },\n  skipGitRepoCheck: true,\n  // systemPrompt: \"Add shared instructions for every Codex run.\",\n  // sandbox: \"workspace-write\",\n  // fullAuto: true,\n});\n"
+    "contents": "import { CodexAgent as SmithersCodexAgent } from \"smthrs\";\n\n// Built-in Codex CLI agent (cliEngine: \"codex\").\n// Tweak `model` or uncomment extra options below to match your setup.\nexport const CodexAgent = new SmithersCodexAgent({\n  model: \"gpt-5.6-luna\",\n  config: { model_reasoning_effort: \"medium\" },\n  skipGitRepoCheck: true,\n  // systemPrompt: \"Add shared instructions for every Codex run.\",\n  // sandbox: \"workspace-write\",\n  // fullAuto: true,\n});\n"
   },
   {
     "sourcePath": "agents/cursor.ts.tmpl",
     "path": ".smithers/agents/cursor.ts",
     "preserveExisting": true,
-    "contents": "import { CursorAgent as SmithersCursorAgent } from \"smithers-orchestrator\";\n\n// Built-in Cursor CLI agent (cliEngine: \"cursor\").\n// Tweak `model`, `cwd`, or uncomment extra options below to match your setup.\nexport const CursorAgent = new SmithersCursorAgent({\n  cwd: process.cwd(),\n  // systemPrompt: \"Add shared instructions for every Cursor run.\",\n  // mode: \"plan\",\n  // force: true,\n});\n"
+    "contents": "import { CursorAgent as SmithersCursorAgent } from \"smthrs\";\n\n// Built-in Cursor CLI agent (cliEngine: \"cursor\").\n// Tweak `model`, `cwd`, or uncomment extra options below to match your setup.\nexport const CursorAgent = new SmithersCursorAgent({\n  cwd: process.cwd(),\n  // systemPrompt: \"Add shared instructions for every Cursor run.\",\n  // mode: \"plan\",\n  // force: true,\n});\n"
   },
   {
     "sourcePath": "agents/opencode.ts.tmpl",
     "path": ".smithers/agents/opencode.ts",
     "preserveExisting": true,
-    "contents": "import { OpenCodeAgent as SmithersOpenCodeAgent } from \"smithers-orchestrator\";\n\n// Built-in OpenCode CLI agent (cliEngine: \"opencode\").\n// Tweak `model` or uncomment extra options below to match your setup.\nexport const OpenCodeAgent = new SmithersOpenCodeAgent({\n  model: \"anthropic/claude-fable-5\",\n  // agentName: \"build\",\n  // systemPrompt: \"Add shared instructions for every OpenCode run.\",\n  // yolo: true,\n});\n"
+    "contents": "import { OpenCodeAgent as SmithersOpenCodeAgent } from \"smthrs\";\n\n// Built-in OpenCode CLI agent (cliEngine: \"opencode\").\n// Tweak `model` or uncomment extra options below to match your setup.\nexport const OpenCodeAgent = new SmithersOpenCodeAgent({\n  model: \"anthropic/claude-fable-5\",\n  // agentName: \"build\",\n  // systemPrompt: \"Add shared instructions for every OpenCode run.\",\n  // yolo: true,\n});\n"
   },
   {
     "sourcePath": "agents/antigravity.ts.tmpl",
     "path": ".smithers/agents/antigravity.ts",
     "preserveExisting": true,
-    "contents": "import { AntigravityAgent as SmithersAntigravityAgent } from \"smithers-orchestrator\";\n\n// Built-in Antigravity CLI agent (cliEngine: \"antigravity\").\n// Tweak `model` or uncomment extra options below to match your setup.\nexport const AntigravityAgent = new SmithersAntigravityAgent({\n  // model: \"Gemini 3.1 Pro (high)\",\n  // systemPrompt: \"Add shared instructions for every Antigravity run.\",\n  // dangerouslySkipPermissions: true,\n  // allowedTools: [\"read_file\", \"write_file\"],\n});\n"
+    "contents": "import { AntigravityAgent as SmithersAntigravityAgent } from \"smthrs\";\n\n// Built-in Antigravity CLI agent (cliEngine: \"antigravity\").\n// Tweak `model` or uncomment extra options below to match your setup.\nexport const AntigravityAgent = new SmithersAntigravityAgent({\n  // model: \"Gemini 3.1 Pro (high)\",\n  // systemPrompt: \"Add shared instructions for every Antigravity run.\",\n  // dangerouslySkipPermissions: true,\n  // allowedTools: [\"read_file\", \"write_file\"],\n});\n"
   },
   {
     "sourcePath": "agents/custom.ts.tmpl",
     "path": ".smithers/agents/custom.ts",
     "preserveExisting": true,
-    "contents": "import { type AgentLike } from \"smithers-orchestrator\";\n\n// Custom AgentLike adapter scaffold.\n// Implement generate(args) to run your provider/tool and return the assistant text.\nexport const CustomAgent: AgentLike = {\n  async generate(args = {}) {\n    const prompt = typeof args === \"object\" && args && \"prompt\" in args\n      ? String((args as { prompt?: unknown }).prompt ?? \"\")\n      : String(args ?? \"\");\n    throw new Error(\n      \"CustomAgent is scaffolded but not implemented. Replace generate(args) with your adapter; it must return the assistant text for: \" + prompt,\n    );\n  },\n};\n"
+    "contents": "import { type AgentLike } from \"smthrs\";\n\n// Custom AgentLike adapter scaffold.\n// Implement generate(args) to run your provider/tool and return the assistant text.\nexport const CustomAgent: AgentLike = {\n  async generate(args = {}) {\n    const prompt = typeof args === \"object\" && args && \"prompt\" in args\n      ? String((args as { prompt?: unknown }).prompt ?? \"\")\n      : String(args ?? \"\");\n    throw new Error(\n      \"CustomAgent is scaffolded but not implemented. Replace generate(args) with your adapter; it must return the assistant text for: \" + prompt,\n    );\n  },\n};\n"
   },
   {
     "sourcePath": "agents/index.ts.tmpl",

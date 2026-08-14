@@ -25,7 +25,7 @@ unsound ordering and signal/timeout semantics.
 
 ```tsx
 import { setup } from "xstate";
-import { useSmithersMachine, taskOutput, approvalDecided, eventReceived, timedOut } from "smithers-orchestrator/xstate";
+import { useSmithersMachine, taskOutput, approvalDecided, eventReceived, timedOut } from "smthrs/xstate";
 
 function Release() {
   const ctx = useCtx();
@@ -112,8 +112,8 @@ verified engine contract:
 
 ### Package
 
-- `packages/xstate` → `@smithers-orchestrator/xstate`, re-exported as the
-  `smithers-orchestrator/xstate` subpath. `xstate` is a peerDependency
+- `packages/xstate` → `@smthrs/xstate`, re-exported as the
+  `smthrs/xstate` subpath. `xstate` is a peerDependency
   `^5.19.0` plus devDependency for tests.
 - Phase 0 core prerequisites (below) touch `db`/`driver`/`engine` read paths;
   the package itself stays a read-only consumer of the (extended) public

@@ -1,9 +1,9 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { listRewindAuditRows } from "@smithers-orchestrator/time-travel/rewindAudit";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { listRewindAuditRows } from "@smthrs/time-travel/rewindAudit";
 
 type AnyRow = Record<string, unknown>;
 

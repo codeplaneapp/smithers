@@ -6,7 +6,7 @@
 import { existsSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { SmithersError } from "@smithers-orchestrator/errors";
+import { SmithersError } from "@smthrs/errors";
 import { resolvePackDirs } from "./workflows.js";
 import { workflowIdFromPath } from "./monitoring-suggestion.js";
 

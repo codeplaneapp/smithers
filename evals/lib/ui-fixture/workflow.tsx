@@ -1,6 +1,6 @@
 // smithers-source: eval-fixture
 // smithers-display-name: UI Eval Fixture
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // The deterministic fixture a ui-functional eval runs the candidate UI against.
 // Every task here is a COMPUTE task (no agent) so the run is reproducible on a
 // CI box with no agent CLIs. In one run it exercises every surface a good
@@ -13,7 +13,7 @@
 //                              approve/deny; approving resumes it to `finished`
 // The literal output strings below are the assertion contract: a UI that truly
 // read + rendered node output will show them in the DOM.
-import { Approval, createSmithers } from "smithers-orchestrator";
+import { Approval, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 
 const planSchema = z.object({ steps: z.array(z.string()), note: z.string() });

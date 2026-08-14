@@ -4,7 +4,7 @@ description: Executable node; runs an agent, compute callback, or emits a static
 ---
 
 ```ts
-import { Task } from "smithers-orchestrator";
+import { Task } from "smthrs";
 
 type TaskProps = {
   id: string;
@@ -83,11 +83,11 @@ matching table. Set `outputSchema={...}` only for a custom Drizzle table or
 string key it can't infer a schema from.
 
 <Warning>
-**Don't name an output field `iteration`, `runId`, or `nodeId`.** Smithers persists every output alongside those internal columns, so declaring one collides and the workflow fails to load (`bunx smithers-orchestrator graph` errors before running). Loop counters hit this most: use `round`, `pass`, or `attempt` instead.
+**Don't name an output field `iteration`, `runId`, or `nodeId`.** Smithers persists every output alongside those internal columns, so declaring one collides and the workflow fails to load (`bunx smthrs graph` errors before running). Loop counters hit this most: use `round`, `pass`, or `attempt` instead.
 </Warning>
 
 ```tsx
-import { CodexAgent } from "smithers-orchestrator";
+import { CodexAgent } from "smthrs";
 
 const analysisAgent = new CodexAgent({
   model: "gpt-5.6-terra",
@@ -234,18 +234,18 @@ A task inside a `<Loop>` can depend on a task outside it: the upstream resolves 
 
 ## Fork
 
-Every agent task produces a reusable session snapshot; use `fork` to start a new task from any previous task's context.
+Checkpoint-aware and conversation-recording agent tasks produce reusable state; use `fork` to start a new task from a compatible previous task context.
 
 `<Task id={B} fork={A}>` means:
 
 - `B` depends on `A` and cannot run until `A` has completed.
-- `B` starts from a **copy** of `A`'s final agent session context, then submits its own prompt into that copy.
-- `B` produces its own output and its own session snapshot.
+- `B` starts from a **copy** of `A`'s final agent checkpoint when the target declares an exact codec/version/`"fork"` match in `checkpointCapabilities`. Otherwise Smithers falls back only when that same source attempt recorded forkable conversation messages.
+- `B` produces its own output and independent continuation state when its agent supports it.
 
 `fork` never mutates or continues the source task; multiple tasks may fork the same source safely, and a forked task may itself be forked.
 
 ```tsx
-import { CodexAgent } from "smithers-orchestrator";
+import { CodexAgent } from "smthrs";
 
 const planner = new CodexAgent({ model: "gpt-5.6-sol" });
 const implementer = new CodexAgent({ model: "gpt-5.6-terra", config: { model_reasoning_effort: "medium" } });
@@ -272,7 +272,7 @@ const VERIFY = "verify" as const;
 **Parallel branches**: fork the same source from sibling tasks; each gets its own copy, unaffected by the others:
 
 ```tsx
-import { CodexAgent } from "smithers-orchestrator";
+import { CodexAgent } from "smthrs";
 
 const researcher = new CodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" } });
 const implementer = new CodexAgent({ model: "gpt-5.6-terra", config: { model_reasoning_effort: "medium" } });
@@ -297,12 +297,13 @@ const implementer = new CodexAgent({ model: "gpt-5.6-terra", config: { model_rea
 
 - **`TASK_FORK_SOURCE_NOT_FOUND`**: `fork` points to a task id absent from the graph (including one that exists only in an unselected `<Branch>`).
 - **`TASK_FORK_CYCLE`**: `fork` creates a cycle, directly or indirectly.
-- **`TASK_FORK_SESSION_UNAVAILABLE`**: the forking task isn't an agent task, or its source completed with no usable session snapshot (e.g. a compute/static source, or one skipped/cancelled).
+- **`TASK_FORK_SESSION_UNAVAILABLE`**: the forking task isn't an agent task, or its source completed with neither a checkpoint nor forkable conversation messages (e.g. a compute/static source, or one skipped/cancelled).
+- **`TASK_FORK_CHECKPOINT_INCOMPATIBLE`**: the source has only a native checkpoint and the target agent does not support its codec, version, or isolated-fork mode.
 - **`TASK_FORK_SOURCE_NOT_COMPLETE`**: the source exists but hasn't completed; the forked task waits rather than running.
 
 ## Notes
 
 - `memory` overrides the nearest [`<Memory>`](/components/memory) provider for this task. Recall and primer failures log a warning and run the original prompt.
-- Forking never reuses a native session id; it always copies into a new one (see [Fork](#fork), [error cases](#error-cases)).
+- Native checkpoints are supplied as the discriminated pair `{ resumeCheckpoint, checkpointMode: "fork" }`, never with `resumeSession`; adapters must create an isolated branch and never mutate the source. CLI session ids are never reused for forks. An incompatible native checkpoint falls back only to conversation messages recorded by the same source attempt; checkpoint-only sources fail with `TASK_FORK_CHECKPOINT_INCOMPATIBLE`.
 - When `outputSchema` is set, JSON is extracted from agent text. Missing or invalid JSON triggers up to `maxSchemaRetries` correction calls before the attempt fails; corrections resume the agent's own CLI session (`claude --resume`, `codex exec resume`) when a session id was captured, so the fix runs with full task context instead of a fresh session. Correction calls don't consume `retries`.
 - Auth errors short-circuit retries; non-idempotent tool reuse warns on the next attempt.

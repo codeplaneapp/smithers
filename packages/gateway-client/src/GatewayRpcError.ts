@@ -1,4 +1,4 @@
-import type { GatewayRpcErrorDetails } from "@smithers-orchestrator/protocol/gateway-rpc";
+import type { GatewayRpcErrorDetails } from "@smthrs/protocol/gateway-rpc";
 
 export class GatewayRpcError extends Error {
   readonly code: string;

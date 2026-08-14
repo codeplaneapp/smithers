@@ -1,6 +1,6 @@
 {
-  "name": "@smithers-orchestrator/memory",
-  "version": "0.32.0",
+  "name": "@smthrs/memory",
+  "version": "0.34.0",
   "description": "Persistent and semantic memory services for Smithers",
   "type": "module",
   "sideEffects": false,
@@ -40,14 +40,14 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@smithers-orchestrator/db": "workspace:*",
-    "@smithers-orchestrator/errors": "workspace:*",
-    "@smithers-orchestrator/graph": "workspace:*",
-    "@smithers-orchestrator/observability": "workspace:*",
-    "@smithers-orchestrator/scheduler": "workspace:*",
+    "@smthrs/db": "workspace:*",
+    "@smthrs/errors": "workspace:*",
+    "@smthrs/graph": "workspace:*",
+    "@smthrs/observability": "workspace:*",
+    "@smthrs/scheduler": "workspace:*",
     "@vectorize-io/hindsight-client": "0.8.4",
     "drizzle-orm": "^0.45.2",
-    "effect": "4.0.0-beta.102",
+    "effect": "4.0.0-beta.105",
     "zod": "^4.4.3"
   },
   "devDependencies": {

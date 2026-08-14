@@ -1,4 +1,4 @@
-# @smithers-orchestrator/scorers — src
+# @smthrs/scorers — src
 
 Scorer contract, built-in scorers, execution, and aggregation for Smithers runs.
 

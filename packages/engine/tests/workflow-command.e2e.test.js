@@ -200,8 +200,8 @@ test("workflow path can pause on WaitForEvent, accept a signal, and resume", () 
   repo.write(
     "workflow.tsx",
     [
-      "/** @jsxImportSource smithers-orchestrator */",
-      'import { createSmithers, WaitForEvent, Workflow } from "smithers-orchestrator";',
+      "/** @jsxImportSource smthrs */",
+      'import { createSmithers, WaitForEvent, Workflow } from "smthrs";',
       'import { z } from "zod";',
       "",
       "const { smithers, outputs } = createSmithers({",

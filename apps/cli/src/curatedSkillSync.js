@@ -94,7 +94,7 @@ export function curatedSkillStatus(opts = {}) {
   // there, so reporting it as stale would be a defect the user cannot fix.
   const deselected = new Set(loadSkillDeselections(homeDir));
 
-  for (const target of skillTargets(homeDir)) {
+  for (const target of skillTargets(homeDir, env)) {
     if (deselected.has(target.id)) continue;
     const dest = join(target.skillsDir, CURATED_SKILL_NAME);
     const skillMd = join(dest, "SKILL.md");
@@ -166,7 +166,7 @@ export function formatSkillsAddSummary({ status, commandSkillCount = null, opted
   }
   if (!status.source) {
     lines.push(
-      `⚠ Synced ${commandPart}. The curated \`${status.skill}\` skill could not be synced: bundled source not found (reinstall smithers-orchestrator).`,
+      `⚠ Synced ${commandPart}. The curated \`${status.skill}\` skill could not be synced: bundled source not found (reinstall smthrs).`,
     );
     return lines.join("\n");
   }
@@ -202,7 +202,7 @@ export function formatCuratedSkillList(status) {
     ? `Curated skill (${status.skill}, bundled v${status.version}):`
     : `Curated skill (${status.skill}):`;
   if (!status.source) {
-    return `${heading}\n  ✗ bundled source not found — reinstall smithers-orchestrator`;
+    return `${heading}\n  ✗ bundled source not found — reinstall smthrs`;
   }
   if (status.installs.length === 0) {
     return `${heading}\n  (no detected agent with a Smithers-owned skills directory)`;

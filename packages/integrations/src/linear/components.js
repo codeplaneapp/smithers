@@ -7,10 +7,10 @@
 
 import React from "react";
 import { Effect } from "effect";
-import { Task, WaitForEvent } from "@smithers-orchestrator/components";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
-import { stripAutoColumns } from "@smithers-orchestrator/db/react-output";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { Task, WaitForEvent } from "@smthrs/components";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
+import { stripAutoColumns } from "@smthrs/db/react-output";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { integrationEventName } from "../core/signalNames.js";
 import { makeLinearClient } from "./LinearClient.js";
 import { LINEAR_SOURCE_ID } from "./LinearWebhookSource.js";
@@ -144,7 +144,7 @@ function fromDeps(value, deps) {
 
 /**
  * @param {string} displayName
- * @param {(props: any, resolvedDeps: Record<string, unknown>) => (client: import("./LinearClientTypes.ts").LinearClientService) => Effect.Effect<Record<string, unknown>, import("@smithers-orchestrator/errors/SmithersError").SmithersError>} buildCall
+ * @param {(props: any, resolvedDeps: Record<string, unknown>) => (client: import("./LinearClientTypes.ts").LinearClientService) => Effect.Effect<Record<string, unknown>, import("@smthrs/errors/SmithersError").SmithersError>} buildCall
  */
 function makeLinearOutbound(displayName, buildCall) {
   /** @param {any} props */

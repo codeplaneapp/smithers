@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useGatewayConnectionStatus, useGatewayRuns } from "@smithers-orchestrator/gateway-react";
+import { useGatewayConnectionStatus, useGatewayRuns } from "@smthrs/gateway-react";
 import { useLocalModeRefetch } from "../sync/useLocalModeRefetch";
 import { normalizeRunStatus, runStatusCategory, type RunSummary } from "./runsList";
 import { useRunsListStore } from "./runsListStore";

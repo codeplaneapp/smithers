@@ -3,7 +3,7 @@ title: "Testing workflows"
 description: "Simulate workflows, script agents, and assert task behavior with Bun tests."
 ---
 
-`@smithers-orchestrator/testing` is the consumer-facing test surface for Smithers workflows; import it from the published facade:
+`@smthrs/testing` is the consumer-facing test surface for Smithers workflows; import it from the published facade:
 
 ```ts
 import {
@@ -20,7 +20,7 @@ import {
   toHaveExecuted,
   toHaveExecutedInOrder,
   toHaveFinished,
-} from "smithers-orchestrator/testing";
+} from "smthrs/testing";
 ```
 
 <Note>
@@ -34,7 +34,7 @@ Examples below use the `createSmithers` workflow API and `bun:test`; the testing
 ```ts
 import { expect, test } from "bun:test";
 import WorkflowModule from "../simple-workflow.jsx";
-import { coverWorkflow } from "smithers-orchestrator/testing";
+import { coverWorkflow } from "smthrs/testing";
 
 test("covers the workflow", async () => {
   const result = await coverWorkflow(WorkflowModule, { input: { topic: "Smithers" } });
@@ -45,7 +45,7 @@ test("covers the workflow", async () => {
 By default, `coverWorkflow` calls `expectFullCoverage(result)` before returning. The assertion requires every pass to finish, every rendered task to execute, every `expectedNodes` entry to render, and every structured output to pass its schema. Set `assert: false` to inspect a failing result, or call `expectFullCoverage` later.
 
 <Warning>
-`coverWorkflow` checks workflow STRUCTURE, not behavior: agents, sandboxes, subflows, compute, and side effects are stubbed, so a red here is a graph or schema defect, never proof about your product. Keep the two loops separate. Behavior against real services belongs to `bunx smithers-orchestrator eval` with real runs, and when an eval case dies on a harness or environment fault (connection refused, TLS, network denied) it grades INCONCLUSIVE and the command exits `5`: repair the harness, do not iterate on the workflow. Do not respond to environment faults by building an ever-more-hermetic simulation of production inside your test harness; that trades observed behavior for reproducibility of a world that is not yours.
+`coverWorkflow` checks workflow STRUCTURE, not behavior: agents, sandboxes, subflows, compute, and side effects are stubbed, so a red here is a graph or schema defect, never proof about your product. Keep the two loops separate. Behavior against real services belongs to `bunx smthrs eval` with real runs, and when an eval case dies on a harness or environment fault (connection refused, TLS, network denied) it grades INCONCLUSIVE and the command exits `5`: repair the harness, do not iterate on the workflow. Do not respond to environment faults by building an ever-more-hermetic simulation of production inside your test harness; that trades observed behavior for reproducibility of a world that is not yours.
 </Warning>
 
 The result includes:
@@ -89,11 +89,11 @@ Use `coverWorkflow` for broad path and schema conformance. Use `simulate` direct
 The returned `Sim` is lazy: `await sim.run()` executes it and populates the fields below.
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
-import { auto, fakeAgent, simulate } from "smithers-orchestrator/testing";
+import { createSmithers } from "smthrs";
+import { auto, fakeAgent, simulate } from "smthrs/testing";
 
 const schemas = {
   input: z.object({ name: z.string() }),
@@ -178,7 +178,7 @@ The main `Sim` fields are:
 `renderWorkflow` renders a frame or task descriptors without executing them: it resolves task output schemas, attaches the same subflow and sandbox compute functions as the engine, and returns a `RenderedWorkflow` with rendered `tasks`, `ctx`, `runId`, `frameNo`, and `toXml()`.
 
 ```ts
-import { renderPrompt, renderWorkflow, runTask } from "smithers-orchestrator/testing";
+import { renderPrompt, renderWorkflow, runTask } from "smthrs/testing";
 
 const frame = await renderWorkflow(buildWorkflow(), {
   input: { name: "Ada" },
@@ -203,7 +203,7 @@ The testing package augments `bun:test`'s matcher types; register the set once p
 
 ```ts
 import { expect, test } from "bun:test";
-import { simMatchers, simulate } from "smithers-orchestrator/testing";
+import { simMatchers, simulate } from "smthrs/testing";
 
 expect.extend(simMatchers);
 

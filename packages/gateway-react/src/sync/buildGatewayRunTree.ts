@@ -1,4 +1,4 @@
-import { runNodeKey, type GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import { runNodeKey, type GatewayRunNode } from "@smthrs/gateway-client";
 
 /** Row key of the synthetic root emitted when the flat rows form a forest. */
 export const SYNTHETIC_RUN_ROOT_KEY = "__run-root__";

@@ -10,7 +10,7 @@ import {
   launchDiagnostics,
 } from "../src/diagnostics/index.js";
 import { BaseCliAgent } from "../src/BaseCliAgent/index.js";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { runDiagnosticCommand } from "../src/diagnostics/runDiagnosticCommand.js";
 
 /**
@@ -576,6 +576,27 @@ describe("codex strategy checks", () => {
       auth_mode: "chatgpt",
       OPENAI_API_KEY: null,
       tokens: { access_token: "fake-access-token", account_id: "acct_123" },
+    });
+    try {
+      const strategy = getDiagnosticStrategy("codex");
+      const report = await runDiagnostics(strategy, {
+        env: { CODEX_HOME: codexHome },
+        cwd: "/tmp",
+      });
+      const apiKeyCheck = report.checks.find((c) => c.id === "api_key_valid");
+      expect(apiKeyCheck.status).toBe("pass");
+      expect(apiKeyCheck.message).toContain("subscription");
+    } finally {
+      dispose();
+    }
+  });
+  test("api_key_valid prefers ChatGPT subscription tokens over a stale stored API key — #1447", async () => {
+    // `codex login` (chatgpt) can leave OPENAI_API_KEY behind in auth.json; the
+    // codex binary honors auth_mode, so preflight must not probe the stale key.
+    const { codexHome, dispose } = makeCodexHome({
+      auth_mode: "chatgpt",
+      OPENAI_API_KEY: "sk-test-stale-key-should-not-be-probed",
+      tokens: { access_token: "fake-access-token", refresh_token: "fake-refresh", account_id: "acct_123" },
     });
     try {
       const strategy = getDiagnosticStrategy("codex");

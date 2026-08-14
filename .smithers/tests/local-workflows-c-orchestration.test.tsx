@@ -1,11 +1,11 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import "../preload.ts";
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { renderPrompt, renderWorkflow, runTask } from "smithers-orchestrator/testing";
+import { renderPrompt, renderWorkflow, runTask } from "smthrs/testing";
 
 setDefaultTimeout(45_000);
 
@@ -82,19 +82,41 @@ describe("local orchestration workflows C", () => {
     const instructionPath = join(root, "instruction.md");
     try {
       await writeFile(instructionPath, "Implement the benchmark fixture.\n");
-      const bench = await render("orchbench.tsx", {
-        taskId: "smoke-task",
-        image: "smithers/orchbench:test",
-        container: "orchbench-smoke",
-        repoDir: root,
-        instructionPath,
-        testsDir: root,
-        workDir: root,
-        pattern: "solo-sol",
-        smoke: true,
-      });
-      expect(optional(bench, "solo")).toBeDefined();
-      expect(bench.toXml()).toContain('"name":"orchbench"');
+      const patterns = [
+        "solo-sol",
+        "sol-sol-sol",
+        "sol-terra-sol",
+        "plan-impl-review",
+        "plan-impl-review-blind",
+        "sol-work-sol-review",
+        "sol-work-fable-review",
+        "solo-fable",
+        "fable-fable-fable",
+        "fable-plan-impl-review",
+        "fable-plan-impl-review-blind",
+      ];
+      for (const pattern of patterns) {
+        const bench = await render("orchbench.tsx", {
+          taskId: "smoke-task",
+          image: "smithers/orchbench:test",
+          container: "orchbench-smoke",
+          repoDir: root,
+          instructionPath,
+          testsDir: root,
+          workDir: root,
+          pattern,
+          smoke: true,
+        });
+        expect(
+          optional(bench, pattern.startsWith("solo-") ? "solo" : pattern.startsWith("sol-work-") ? "work" : "plan"),
+        ).toBeDefined();
+        expect(bench.tasks.every((descriptor) => descriptor.retries === 0)).toBe(true);
+        if (pattern === "plan-impl-review-blind") {
+          expect(task(bench, "review").dependsOn ?? []).not.toContain("implement");
+        }
+        expect(bench.toXml()).toContain('"name":"orchbench"');
+        expect(bench.toXml()).not.toContain("roadmapbench-reward");
+      }
     } finally {
       await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
     }

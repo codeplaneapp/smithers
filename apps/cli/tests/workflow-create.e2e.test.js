@@ -21,7 +21,7 @@ test("smithers workflow create scaffolds a renderable workflow that discovery ca
   expect(repo.exists(".smithers/workflows/agent-made.tsx")).toBe(true);
 
   const source = repo.read(".smithers/workflows/agent-made.tsx");
-  expect(source).toContain("@jsxImportSource smithers-orchestrator");
+  expect(source).toContain("@jsxImportSource smthrs");
   expect(source).toContain('<Workflow name="agent-made"');
   expect(created.json).toMatchObject({ id: "agent-made" });
 

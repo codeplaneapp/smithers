@@ -17,8 +17,8 @@ import {
   Workflow,
   createSmithers,
   runWorkflow,
-} from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+} from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { loadBudget } from "../budgets/loadBudget.ts";
 
 const SOAK_ENABLED = process.env.SMITHERS_E2E_SOAK === "1";

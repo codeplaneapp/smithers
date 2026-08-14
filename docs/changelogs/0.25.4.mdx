@@ -9,11 +9,11 @@ Smithers 0.25.4 is a focused patch driven by a post-publish smoke test of 0.25.3
 
 ## CLI and backends
 
-After a reverse migration (`bunx smithers-orchestrator migrate --to sqlite`), a default `bunx smithers-orchestrator ps` or `inspect` no longer refuses with `SMITHERS_BACKEND_CONFLICT`. The reverse migration writes a `migrated.json` receipt naming sqlite as the authoritative store, but resolution previously honored only pglite and postgres receipts, so the kept source store still on disk looked like an unresolved second store. Resolution now honors a sqlite-target receipt and tolerates exactly the recorded migration source. Any OTHER populated store still refuses, so no run history is ever hidden.
+After a reverse migration (`bunx smthrs migrate --to sqlite`), a default `bunx smthrs ps` or `inspect` no longer refuses with `SMITHERS_BACKEND_CONFLICT`. The reverse migration writes a `migrated.json` receipt naming sqlite as the authoritative store, but resolution previously honored only pglite and postgres receipts, so the kept source store still on disk looked like an unresolved second store. Resolution now honors a sqlite-target receipt and tolerates exactly the recorded migration source. Any OTHER populated store still refuses, so no run history is ever hidden.
 
 ## Docs
 
-The Get Started first-run step now leads with the plain `bunx smithers-orchestrator workflow run hello`, which works in every context: terminals, CI, devcontainers, cloud IDEs, and agent-driven runs. `--interactive` is documented as the optional live-status-card nicety for a real terminal, instead of being the primary command that exits with `INTERACTIVE_REQUIRES_TTY` outside a TTY.
+The Get Started first-run step now leads with the plain `bunx smthrs workflow run hello`, which works in every context: terminals, CI, devcontainers, cloud IDEs, and agent-driven runs. `--interactive` is documented as the optional live-status-card nicety for a real terminal, instead of being the primary command that exits with `INTERACTIVE_REQUIRES_TTY` outside a TTY.
 
 ## Quality
 

@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { getNodeDiffRoute } from "../src/gatewayRoutes/getNodeDiff.js";
+import { NODE_DIFF_MAX_BYTES } from "@smthrs/db/cache/nodeDiffCache";
 function createTestDb() {
   const sqlite = new Database(":memory:");
   const db = drizzle(sqlite);
@@ -168,6 +169,117 @@ describe("getNodeDiffRoute", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.code).toBe("AttemptNotFinished");
+    }
+    sqlite.close();
+  });
+  test("in-progress attempt returns a live working-copy diff and never touches the cache", async () => {
+    const { sqlite, adapter } = createTestDb();
+    const runId = "run-diff-live";
+    const nodeId = "task:live";
+    await adapter.insertRun(runRow(runId, { vcsRevision: "base-ref-live" }));
+    await adapter.insertNode(nodeRow(runId, nodeId, 0, { state: "in-progress" }));
+    await adapter.insertAttempt(
+      attemptRow(runId, nodeId, 0, {
+        state: "in-progress",
+        finishedAtMs: null,
+        jjPointer: null,
+      }),
+    );
+    let computeCalls = 0;
+    const result = await getNodeDiffRoute({
+      runId,
+      nodeId,
+      iteration: 0,
+      resolveRun: async () => ({ adapter }),
+      computeDiffBundleImpl: async (baseRef, cwd, seq) => {
+        computeCalls += 1;
+        return {
+          seq: seq ?? 1,
+          baseRef,
+          patches: [{ path: "live.txt", operation: "modify", diff: `cwd:${cwd}` }],
+        };
+      },
+      resolveCommitPointerImpl: async (pointer) => pointer,
+      emitEffect: async () => undefined,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.payload.live).toBe(true);
+      expect(result.payload.baseRef).toBe("base-ref-live");
+      expect(result.payload.patches).toHaveLength(1);
+    }
+    expect(computeCalls).toBe(1);
+    // Live content is mutable: it must NOT be persisted as an immutable
+    // base-to-pointer cache row.
+    const cached = await adapter.getNodeDiffCache(runId, nodeId, 0, "base-ref-live");
+    expect(cached).toBeUndefined();
+    sqlite.close();
+  });
+  test("in-progress attempt in stat mode returns a live summary", async () => {
+    const { sqlite, adapter } = createTestDb();
+    const runId = "run-diff-live-stat";
+    const nodeId = "task:live-stat";
+    await adapter.insertRun(runRow(runId, { vcsRevision: "base-ref-stat" }));
+    await adapter.insertNode(nodeRow(runId, nodeId, 0, { state: "in-progress" }));
+    await adapter.insertAttempt(
+      attemptRow(runId, nodeId, 0, {
+        state: "in-progress",
+        finishedAtMs: null,
+        jjPointer: null,
+      }),
+    );
+    const result = await getNodeDiffRoute({
+      runId,
+      nodeId,
+      iteration: 0,
+      stat: true,
+      resolveRun: async () => ({ adapter }),
+      computeDiffBundleImpl: async (baseRef) => ({
+        seq: 1,
+        baseRef,
+        patches: [{ path: "live.txt", operation: "modify", diff: "@@ -1 +1 @@\n-old\n+new" }],
+      }),
+      resolveCommitPointerImpl: async (pointer) => pointer,
+      emitEffect: async () => undefined,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.payload.live).toBe(true);
+      expect(result.payload.summary.filesChanged).toBe(1);
+      expect(result.payload.summary.added).toBe(1);
+      expect(result.payload.summary.removed).toBe(1);
+    }
+    sqlite.close();
+  });
+  test("in-progress live diff enforces the same size cap as the terminal diff", async () => {
+    const { sqlite, adapter } = createTestDb();
+    const runId = "run-diff-live-large";
+    const nodeId = "task:live-large";
+    await adapter.insertRun(runRow(runId, { vcsRevision: "base-ref-large" }));
+    await adapter.insertNode(nodeRow(runId, nodeId, 0, { state: "in-progress" }));
+    await adapter.insertAttempt(
+      attemptRow(runId, nodeId, 0, {
+        state: "in-progress",
+        finishedAtMs: null,
+        jjPointer: null,
+      }),
+    );
+    const result = await getNodeDiffRoute({
+      runId,
+      nodeId,
+      iteration: 0,
+      resolveRun: async () => ({ adapter }),
+      computeDiffBundleImpl: async (baseRef) => ({
+        seq: 1,
+        baseRef,
+        patches: [{ path: "huge.txt", operation: "modify", diff: "x".repeat(NODE_DIFF_MAX_BYTES) }],
+      }),
+      resolveCommitPointerImpl: async (pointer) => pointer,
+      emitEffect: async () => undefined,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("DiffTooLarge");
     }
     sqlite.close();
   });

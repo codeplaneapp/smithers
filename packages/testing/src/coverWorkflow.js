@@ -11,7 +11,7 @@ import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } fr
 
 // src/schemaMock.ts
 import { toJSONSchema } from "zod";
-import { zodSchemaToJsonExample } from "@smithers-orchestrator/components/zod-to-example";
+import { zodSchemaToJsonExample } from "@smthrs/components/zod-to-example";
 function stringForFormat(format) {
   switch (format) {
     case "email":
@@ -516,7 +516,7 @@ function writeFileAt(posix, root, path, name, contents) {
     if (ownsCurrent) closeSync(current);
   }
 }
-async function writeFiles(rootDir, files) {
+async function writeFakeAgentFiles(rootDir, files) {
   if (!files || Object.keys(files).length === 0) return;
   if (!rootDir) {
     throw new TypeError("Fake agent files require a rootDir");
@@ -570,7 +570,7 @@ function buildFakeAgent(schema, script, options = {}) {
       calls.push(call);
       const raw = typeof script === "function" ? await script(args) : script;
       const response = normalizeResult(schema, raw);
-      await writeFiles(call.rootDir, response.files);
+      await writeFakeAgentFiles(call.rootDir, response.files);
       const generated = {};
       if ("output" in response) generated.output = response.output;
       if (response.text !== void 0) generated.text = response.text;
@@ -603,9 +603,9 @@ var fakeAgent = Object.assign(buildFakeAgent, {
 });
 
 // src/simulate.ts
-import { WorkflowDriver } from "@smithers-orchestrator/driver";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler";
-import { makeWorkflowSession } from "@smithers-orchestrator/scheduler";
+import { WorkflowDriver } from "@smthrs/driver";
+import { SmithersRenderer } from "@smthrs/react-reconciler";
+import { makeWorkflowSession } from "@smthrs/scheduler";
 import { Effect } from "effect";
 function createRunId() {
   return `sim_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
@@ -770,8 +770,8 @@ function __simulateWithControls(workflow, options = {}, controls) {
       const graph = await smithersRenderer.render(element, extractOptions);
       const rootDir = extractOptions?.baseRootDir ?? options.rootDir;
       const workflowPath = extractOptions?.workflowPath ?? options.workflowPath ?? null;
-      const engineHelpers = await import("@smithers-orchestrator/engine/engine");
-      const computeHelpers = await import("@smithers-orchestrator/engine/task-compute-fns");
+      const engineHelpers = await import("@smthrs/engine/engine");
+      const computeHelpers = await import("@smthrs/engine/task-compute-fns");
       engineHelpers.resolveTaskOutputs(graph.tasks, workflow);
       computeHelpers.attachSubflowComputeFns(graph.tasks, workflow, {
         rootDir,

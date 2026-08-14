@@ -1,10 +1,8 @@
 import { reducedMotionCss } from "./standaloneThemeCss";
-import { darkTokens, lightTokens, sharedTokens } from "./themeTokens";
+import { paletteThemeCss } from "./paletteThemeCss";
 
 export const workflowUiThemeCss = [
-  `:root { ${lightTokens}; ${sharedTokens}; }`,
-  `@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) { ${darkTokens}; } }`,
-  `:root[data-theme='dark'] { ${darkTokens}; }`,
+  ...paletteThemeCss("'"),
   "* { box-sizing:border-box; }",
   "body { min-width:320px; min-height:100vh; margin:0; background:var(--bg); color:var(--text); font-size:var(--fs-3); line-height:var(--lh-body); font-synthesis:none; text-rendering:optimizeLegibility; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }",
   "::selection { background:color-mix(in srgb, var(--brand) 24%, transparent); }",
@@ -47,7 +45,7 @@ export const workflowUiThemeCss = [
   ".badge.info { color:var(--info); border-color:var(--info-border); background:var(--info-soft); }",
   ".badge.bad,.badge.failed { color:var(--danger); border-color:var(--danger-border); background:var(--danger-soft); }",
   // Neutral outcomes and not-started states are muted, matching the shared
-  // status vocabulary in @smithers-orchestrator/ui (a user cancel is not a
+  // status vocabulary in @smthrs/ui (a user cancel is not a
   // failure; pending/queued work has not started).
   ".badge.cancelled,.badge.canceled,.badge.skipped,.badge.pending,.badge.queued { color:var(--muted); border-color:var(--border); background:var(--hover-subtle); }",
   ".card,.panel,.kpi,.stat,.slot { min-width:0; border:1px solid var(--border); border-radius:var(--r-2); background:var(--surface); box-shadow:var(--shadow-2); }",
@@ -97,3 +95,11 @@ export const workflowUiLayoutCss = [
 
 export const workflowUiStyles = [workflowUiThemeCss, workflowUiLayoutCss].join("\n");
 export { reducedMotionCss, standaloneThemeCss } from "./standaloneThemeCss";
+export { DEFAULT_THEME_KEY, themeRegistry } from "./themeRegistry";
+export { serializeThemeVariant } from "./serializeThemeVariant";
+export { contrastRatio } from "./contrastRatio";
+export { mixColors } from "./mixColors";
+export type { SmithersTheme } from "./SmithersTheme";
+export type { TerminalPalette } from "./TerminalPalette";
+export type { ThemeSyntaxId } from "./ThemeSyntaxId";
+export type { ThemeVariantTokens } from "./ThemeVariantTokens";

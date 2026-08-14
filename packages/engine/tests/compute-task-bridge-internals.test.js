@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { z } from "zod";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { requireTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { TaskHeartbeatTimeout } from "@smithers-orchestrator/errors/TaskHeartbeatTimeout";
-import { defineTool } from "@smithers-orchestrator/tool-context";
-import { archiveDiscardedEffects } from "@smithers-orchestrator/time-travel/archiveDiscardedEffects";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { requireTaskRuntime } from "@smthrs/driver/task-runtime";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { TaskHeartbeatTimeout } from "@smthrs/errors/TaskHeartbeatTimeout";
+import { defineTool } from "@smthrs/tool-context";
+import { archiveDiscardedEffects } from "@smthrs/time-travel/archiveDiscardedEffects";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import {
@@ -231,6 +231,29 @@ describe("compute task bridge execution branches", () => {
       expect(attempts[0]?.state).toBe("failed");
       expect(JSON.parse(attempts[0]?.metaJson ?? "{}").failureRetryable).toBe(false);
       expect(JSON.parse(attempts[0]?.errorJson ?? "{}").code).toBe("INVALID_OUTPUT");
+    } finally {
+      result.cleanup();
+    }
+  });
+
+  test("persists explicit retryable override for AGENT_CONFIG_INVALID", async () => {
+    const result = await runBridge({
+      descOverrides: {
+        nodeId: "retryable-config",
+        runId: "retryable-config-run",
+        retries: 1,
+        computeFn: () => {
+          throw new SmithersError("AGENT_CONFIG_INVALID", "temporary compute configuration lag", {
+            failureRetryable: true,
+          });
+        },
+      },
+    });
+    try {
+      const attempts = await Effect.runPromise(result.adapter.listAttempts(result.runId, "retryable-config", 0));
+      expect(attempts[0]?.state).toBe("failed");
+      expect(JSON.parse(attempts[0]?.metaJson ?? "{}").failureRetryable).toBe(true);
+      expect(result.eventBus.events.map((event) => event.type)).toContain("NodeRetrying");
     } finally {
       result.cleanup();
     }

@@ -20,7 +20,7 @@ import { tokens as t } from "../tokens";
  * smithers theme tokens and a CVD-validated categorical palette, over Recharts.
  *
  * It lives in the `adapters/` layer because it pulls the heavy `recharts`
- * widget; reach it through the `smithers-orchestrator/ui/adapters/chart`
+ * widget; reach it through the `smthrs/ui/adapters/chart`
  * subpath (never the base barrel, which the UI-architecture guard keeps free
  * of heavy dependencies).
  *
@@ -35,7 +35,7 @@ import { tokens as t } from "../tokens";
  * The categorical series palette, in fixed slot order. Both columns are one
  * palette — the dark column is the same eight hues re-stepped for the dark
  * surface. Validated (adjacent-pair CVD ΔE ≥ 8, normal-vision ΔE ≥ 15,
- * lightness band, chroma floor) against the smithers light `#ffffff` and dark
+ * lightness band, chroma floor) against the smithers light `#fefefe` and dark
  * `#141417` surfaces. Never reorder, cycle, or append generated hues; past
  * eight series fold the tail into "Other" or facet.
  */

@@ -4,7 +4,7 @@ description: Conditional fork; mounts `then` when `if` is true, otherwise `else`
 ---
 
 ```ts
-import { Branch } from "smithers-orchestrator";
+import { Branch } from "smthrs";
 
 type BranchProps = {
   if: boolean;
@@ -16,8 +16,8 @@ type BranchProps = {
 ```
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, Task, Branch, smithers, outputs } = createSmithers({

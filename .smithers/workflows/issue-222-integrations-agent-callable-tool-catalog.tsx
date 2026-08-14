@@ -1,7 +1,7 @@
 // smithers-source: bespoke
 // smithers-display-name: Issue 222 — OAuth authorization-URL builder
-/** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, createSmithers, Sequence, Task, UI, type AgentLike } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { ClaudeCodeAgent, createSmithers, Sequence, Task, UI, type AgentLike } from "smthrs";
 import { z } from "zod/v4";
 import {
   ValidationLoop,

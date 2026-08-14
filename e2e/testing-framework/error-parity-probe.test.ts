@@ -4,10 +4,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Result } from "effect";
-import { spawnCaptureEffect } from "@smithers-orchestrator/driver/child-process";
-import { isRetryableSqliteWriteError, withSqliteWriteRetry, withSqliteWriteRetryEffect } from "@smithers-orchestrator/db/write-retry";
-import * as engineModule from "@smithers-orchestrator/engine/engine";
-import { errorToJson, toSmithersError } from "@smithers-orchestrator/errors";
+import { spawnCaptureEffect } from "@smthrs/driver/child-process";
+import { isRetryableSqliteWriteError, withSqliteWriteRetry, withSqliteWriteRetryEffect } from "@smthrs/db/write-retry";
+import * as engineModule from "@smthrs/engine/engine";
+import { errorToJson, toSmithersError } from "@smthrs/errors";
 // The probes exercise the PUBLISHED testing artifact (the committed
 // src/index.js the package exports map ships) via an explicit .js specifier —
 // not the tsconfig alias to the TypeScript source.

@@ -60,7 +60,7 @@ test("workflow list merges the global ~/.smithers pack, local taking precedence"
 
 test("a global workflow runs against the current repo (db lands in cwd)", () => {
   // Put the global pack under a linked temp repo so the global workflow file can
-  // resolve `smithers-orchestrator`/`zod` via the parent node_modules.
+  // resolve `smthrs`/`zod` via the parent node_modules.
   const globalHome = createTempRepo();
   const smithersHome = join(globalHome.dir, ".smithers");
   writeTestWorkflow(globalHome, ".smithers/workflows/ping.tsx");

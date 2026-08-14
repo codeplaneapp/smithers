@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { reducedMotionCss, workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
+import { reducedMotionCss, workflowUiThemeCss } from "@smthrs/ui-styleguide";
 import { agentOutputCss, smithersUiCss } from "../src/uiCss";
 import { tokens } from "../src/tokens";
 
@@ -72,7 +72,7 @@ describe("css contract", () => {
     for (const m of rootBlock.matchAll(/(--[\w-]+):([^;]+);/g)) {
       lightValues.set(m[1]!, m[2]!.trim());
     }
-    expect(lightValues.get("--bg")).toBe("#fafafa");
+    expect(lightValues.get("--bg")).toBe("#FBFBFB");
 
     const sources = [
       smithersUiCss,
@@ -100,17 +100,17 @@ describe("css contract", () => {
     // Routed through --ring/--ring-border so a host that themes the ring
     // re-themes these components; the fallbacks stay the house recipe.
     expect(smithersUiCss).toContain(
-      "border-color:var(--ring-border, color-mix(in srgb, var(--brand, #6d56d8) 50%, transparent))",
+      "border-color:var(--ring-border, color-mix(in srgb, var(--brand, #9449bc) 50%, transparent))",
     );
     expect(smithersUiCss).toContain(
-      "0 0 0 3px var(--ring, color-mix(in srgb, var(--brand, #6d56d8) 22%, transparent))",
+      "0 0 0 3px var(--ring, color-mix(in srgb, var(--brand, #9449bc) 22%, transparent))",
     );
   });
 
   test("the default button variant is the house tinted primary, not a solid fill", () => {
     const defaultRule = smithersUiCss.match(/\.sui-button-default \{[^}]+\}/)?.[0] ?? "";
-    expect(defaultRule).toContain("color-mix(in srgb, var(--brand, #6d56d8) 10%,");
-    expect(defaultRule).toContain("color:var(--brand, #6d56d8)");
+    expect(defaultRule).toContain("color-mix(in srgb, var(--brand, #9449bc) 10%,");
+    expect(defaultRule).toContain("color:var(--brand, #9449bc)");
   });
 
   test("badge variants consume the shared semantic soft and border tokens", () => {

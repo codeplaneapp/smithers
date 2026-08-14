@@ -36,6 +36,10 @@ export function createPoolCapabilityRegistry(_opts = {}) {
       supportsUiRequests: false,
       methods: [],
     },
+    fileChanges: {
+      supportsFileChanges: false,
+      supportsUnifiedDiff: false,
+    },
     builtIns: normalizeCapabilityStringList(["default"]),
   };
 }

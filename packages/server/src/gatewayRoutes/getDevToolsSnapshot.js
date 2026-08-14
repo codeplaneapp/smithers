@@ -1,12 +1,12 @@
-import { snapshotSerialize } from "@smithers-orchestrator/devtools";
-import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
+import { snapshotSerialize } from "@smthrs/devtools";
+import { computeRunStateFromRow } from "@smthrs/db/runState";
 import { RUN_ID_PATTERN } from "./RUN_ID_PATTERN.js";
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("@smithers-orchestrator/protocol/devtools").DevToolsNode} DevToolsNode */
-/** @typedef {import("@smithers-orchestrator/protocol/devtools").DevToolsSnapshot} DevToolsSnapshot */
-/** @typedef {import("@smithers-orchestrator/protocol/devtools").DevToolsNodeType} DevToolsNodeType */
-/** @typedef {import("@smithers-orchestrator/devtools/snapshotSerializer").SnapshotSerializerWarning} SnapshotSerializerWarning */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/protocol/devtools").DevToolsNode} DevToolsNode */
+/** @typedef {import("@smthrs/protocol/devtools").DevToolsSnapshot} DevToolsSnapshot */
+/** @typedef {import("@smthrs/protocol/devtools").DevToolsNodeType} DevToolsNodeType */
+/** @typedef {import("@smthrs/devtools/snapshotSerializer").SnapshotSerializerWarning} SnapshotSerializerWarning */
 
 export const DEVTOOLS_RUN_ID_PATTERN = RUN_ID_PATTERN;
 export const DEVTOOLS_MAX_FRAME_NO = 2_147_483_647;
@@ -59,8 +59,8 @@ function boolProp(value) {
   return value === true || value === "true" || value === "1";
 }
 
-/** @typedef {import("@smithers-orchestrator/protocol/devtools").DevToolsAgentRef} DevToolsAgentRef */
-/** @typedef {import("@smithers-orchestrator/protocol/devtools").DevToolsAgentSummary} DevToolsAgentSummary */
+/** @typedef {import("@smthrs/protocol/devtools").DevToolsAgentRef} DevToolsAgentRef */
+/** @typedef {import("@smthrs/protocol/devtools").DevToolsAgentSummary} DevToolsAgentSummary */
 
 /**
  * Re-whitelist an agent ref persisted in the frame task index. The engine only
@@ -77,13 +77,15 @@ function sanitizeAgentRef(value) {
   const label = typeof value.label === "string" && value.label ? value.label : undefined;
   const engine = typeof value.engine === "string" && value.engine ? value.engine : undefined;
   const model = typeof value.model === "string" && value.model ? value.model : undefined;
-  if (!label && !engine && !model) {
+  const effort = typeof value.effort === "string" && value.effort ? value.effort : undefined;
+  if (!label && !engine && !model && !effort) {
     return undefined;
   }
   return {
     ...(label ? { label } : {}),
     ...(engine ? { engine } : {}),
     ...(model ? { model } : {}),
+    ...(effort ? { effort } : {}),
   };
 }
 
@@ -350,7 +352,9 @@ export function parseXmlToDevToolsRoot(xml, onWarning, taskIndex = new Map()) {
       type: /** @type {DevToolsNodeType} */ (nodeType),
       name: displayName || "unknown",
       props: serializedProps,
-      task: nodeType === "task" ? extractTaskInfo(serializedProps, taskIndex) : undefined,
+      task: ["task", "timer", "wait-for-event", "subflow"].includes(nodeType)
+        ? extractTaskInfo(serializedProps, taskIndex)
+        : undefined,
       children: [],
       depth,
     };
@@ -539,7 +543,7 @@ export const DEVTOOLS_TASK_PROMPT_MAX_CHARS = 4_000;
  * @returns {void}
  */
 export function attachAgentAttemptsToDevToolsRoot(root, attemptRows, frameCreatedAtMs) {
-  /** @type {Map<string, { iteration: number; attempt: number; metaJson: unknown }>} */
+  /** @type {Map<string, { iteration: number; attempt: number; metaJson: unknown; effort: unknown }>} */
   const latest = new Map();
   for (const row of Array.isArray(attemptRows) ? attemptRows : []) {
     if (!asObject(row) || typeof row.nodeId !== "string") {
@@ -560,18 +564,18 @@ export function attachAgentAttemptsToDevToolsRoot(root, attemptRows, frameCreate
     const key = `${row.nodeId}\u0000${iteration}`;
     const existing = latest.get(key);
     if (!existing || attempt > existing.attempt) {
-      latest.set(key, { iteration, attempt, metaJson: row.metaJson });
+      latest.set(key, { iteration, attempt, metaJson: row.metaJson, effort: row.effort });
     }
   }
   if (latest.size === 0) {
     return;
   }
-  /** @type {Map<string, { agentId?: string; engine?: string; model?: string; prompt?: string } | undefined>} */
+  /** @type {Map<string, { agentId?: string; engine?: string; model?: string; effort?: string; prompt?: string } | undefined>} */
   const parsedByNode = new Map();
   /**
    * @param {string} nodeId
    * @param {number | undefined} iteration
-   * @returns {{ agentId?: string; engine?: string; model?: string; prompt?: string } | undefined}
+   * @returns {{ agentId?: string; engine?: string; model?: string; effort?: string; prompt?: string } | undefined}
    */
   const attemptMetaFor = (nodeId, iteration) => {
     const key = `${nodeId}\u0000${iteration ?? 0}`;
@@ -579,32 +583,46 @@ export function attachAgentAttemptsToDevToolsRoot(root, attemptRows, frameCreate
       return parsedByNode.get(key);
     }
     const row = latest.get(key);
-    /** @type {{ agentId?: string; engine?: string; model?: string; prompt?: string } | undefined} */
+    /** @type {{ agentId?: string; engine?: string; model?: string; effort?: string; prompt?: string } | undefined} */
     let meta;
-    if (row && typeof row.metaJson === "string" && row.metaJson.length > 0) {
-      try {
-        const parsed = JSON.parse(row.metaJson);
-        if (asObject(parsed)) {
-          const engine = typeof parsed.agentEngine === "string" && parsed.agentEngine ? parsed.agentEngine : undefined;
-          const model = typeof parsed.agentModel === "string" && parsed.agentModel ? parsed.agentModel : undefined;
-          const agentId = typeof parsed.agentId === "string" && parsed.agentId ? parsed.agentId : undefined;
-          const prompt =
-            typeof parsed.prompt === "string" && parsed.prompt
-              ? parsed.prompt.length > DEVTOOLS_TASK_PROMPT_MAX_CHARS
-                ? `${parsed.prompt.slice(0, DEVTOOLS_TASK_PROMPT_MAX_CHARS)}…`
-                : parsed.prompt
-              : undefined;
-          if (engine || model || agentId || prompt) {
-            meta = {
-              ...(agentId ? { agentId } : {}),
-              ...(engine ? { engine } : {}),
-              ...(model ? { model } : {}),
-              ...(prompt ? { prompt } : {}),
-            };
+    if (row) {
+      /** @type {Record<string, unknown>} */
+      let parsed = {};
+      if (typeof row.metaJson === "string" && row.metaJson.length > 0) {
+        try {
+          const decoded = JSON.parse(row.metaJson);
+          if (asObject(decoded)) {
+            parsed = decoded;
           }
+        } catch {
+          parsed = {};
         }
-      } catch {
-        meta = undefined;
+      }
+      const engine = typeof parsed.agentEngine === "string" && parsed.agentEngine ? parsed.agentEngine : undefined;
+      const model = typeof parsed.agentModel === "string" && parsed.agentModel ? parsed.agentModel : undefined;
+      const agentId = typeof parsed.agentId === "string" && parsed.agentId ? parsed.agentId : undefined;
+      const prompt =
+        typeof parsed.prompt === "string" && parsed.prompt
+          ? parsed.prompt.length > DEVTOOLS_TASK_PROMPT_MAX_CHARS
+            ? `${parsed.prompt.slice(0, DEVTOOLS_TASK_PROMPT_MAX_CHARS)}…`
+            : parsed.prompt
+          : undefined;
+      // First-class column wins; fall back to the meta_json effort keys so
+      // rows recorded before the column still surface the suffix.
+      const effort =
+        (typeof row.effort === "string" && row.effort ? row.effort : undefined) ??
+        (typeof parsed.effort === "string" && parsed.effort ? parsed.effort : undefined) ??
+        (typeof parsed.reasoningEffort === "string" && parsed.reasoningEffort ? parsed.reasoningEffort : undefined) ??
+        (typeof parsed.variant === "string" && parsed.variant ? parsed.variant : undefined) ??
+        (typeof parsed.effortLevel === "string" && parsed.effortLevel ? parsed.effortLevel : undefined);
+      if (engine || model || agentId || effort || prompt) {
+        meta = {
+          ...(agentId ? { agentId } : {}),
+          ...(engine ? { engine } : {}),
+          ...(model ? { model } : {}),
+          ...(effort ? { effort } : {}),
+          ...(prompt ? { prompt } : {}),
+        };
       }
     }
     parsedByNode.set(key, meta);
@@ -621,7 +639,7 @@ export function attachAgentAttemptsToDevToolsRoot(root, attemptRows, frameCreate
       const meta = attemptMetaFor(node.task.nodeId, node.task.iteration);
       if (meta) {
         const { prompt, ...ran } = meta;
-        if (ran.agentId || ran.engine || ran.model) {
+        if (ran.agentId || ran.engine || ran.model || ran.effort) {
           node.task.agentRan = ran;
         }
         if (prompt) {

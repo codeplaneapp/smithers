@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Readable } from "node:stream";
-import { createSnapshotServer, nextSnapshotSocketPath } from "@smithers-orchestrator/engine/snapshotServer";
+import { createSnapshotServer, nextSnapshotSocketPath } from "@smthrs/engine/snapshotServer";
 import { runSnapshotHookOnce } from "../src/snapshot-hook.js";
 
 const stdinOf = (str) => Readable.from([str]);

@@ -10,10 +10,10 @@
 // @smithers-type-exports-end
 
 import React from "react";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
-import { stripAutoColumns } from "@smithers-orchestrator/db/react-output";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { WaitForEvent } from "@smithers-orchestrator/components";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
+import { stripAutoColumns } from "@smthrs/db/react-output";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { WaitForEvent } from "@smthrs/components";
 import { integrationEventName } from "../../core/signalNames.js";
 import {
   GitHubWebhookPayloadSchema,

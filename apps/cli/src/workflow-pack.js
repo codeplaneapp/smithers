@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { accountsRoot } from "@smithers-orchestrator/accounts";
+import { accountsRoot } from "@smthrs/accounts";
 import { generateAgentsTs } from "./agent-detection.js";
 import {
   installCuratedSkill,
@@ -112,7 +112,7 @@ function isLocalSourceCheckout() {
 }
 /**
  * Pins shipped with this release for devDep-only specs that won't be in the
- * user's `node_modules` after `bunx smithers-orchestrator@latest init`. Bump
+ * user's `node_modules` after `bunx smthrs@latest init`. Bump
  * these when updating the monorepo's root devDependencies.
  */
 const BUNDLED_VERSION_PINS = {
@@ -179,10 +179,10 @@ function renderPackageJson(versions) {
         dependencies: {
           react: versions.reactVersion,
           "react-dom": versions.reactDomVersion,
-          "smithers-orchestrator": smithersSpec,
+          smthrs: smithersSpec,
           // The seeded `init` system workflow imports the CLI's pack
           // scaffolding functions to make re-init a durable run.
-          "@smithers-orchestrator/cli": smithersSpec,
+          "@smthrs/cli": smithersSpec,
           zod: versions.zodVersion,
           "@milkdown/crepe": versions.milkdownCrepeVersion,
           mermaid: versions.mermaidVersion,
@@ -268,6 +268,10 @@ const UI_WORKFLOWS = [
   { key: "create-workflow", title: "Create Workflow" },
   { key: "create-skill", title: "Create Skill" },
   { key: "docs-driven-development", title: "Docs Driven Development" },
+  // System workflow that ships its own gateway-react UI (SEEDED_UI_IDS) and
+  // declares <UI entry="../ui/share-pack.tsx" /> in its source. It must be
+  // mounted so the shipped UI is reachable; the manifest, e2e descriptor, and
+  // ui-drift guard all treat it as a first-class UI workflow.
   { key: "share-pack", title: "Share Pack" },
   { key: "smithers-repo-federation", title: "Smithers Repo Federation" },
   { key: "whole-foods-meal-planner", title: "Whole Foods Meal Planner" },
@@ -549,10 +553,11 @@ export function initWorkflowPack(options = {}) {
     // (marker says opted-out, so it is never refreshed). Filtering by the
     // marker keeps disk and marker consistent; an empty marker = install all.
     let targets = options.selectedSkillTargets;
+    const skillEnv = options.skillOptions?.env ?? env;
     if (targets === undefined) {
       const optedOut = new Set(loadSkillDeselections(homeDir));
       if (optedOut.size > 0) {
-        targets = skillTargets(homeDir)
+        targets = skillTargets(homeDir, skillEnv)
           .map((t) => t.id)
           .filter((id) => !optedOut.has(id));
       }
@@ -568,7 +573,7 @@ export function initWorkflowPack(options = {}) {
     // passed an explicit selection (undefined = non-interactive, which honors
     // the existing marker above rather than rewriting it).
     if (options.selectedSkillTargets !== undefined) {
-      const allIds = skillTargets(homeDir).map((t) => t.id);
+      const allIds = skillTargets(homeDir, skillEnv).map((t) => t.id);
       const deselectedIds = allIds.filter((id) => !options.selectedSkillTargets.includes(id));
       try {
         saveSkillDeselections(homeDir, deselectedIds);
@@ -641,7 +646,7 @@ function linkLocalSourceRuntime(rootDir) {
   if (!isLocalSourceCheckout()) return;
   const nodeModules = resolve(rootDir, "node_modules");
   if (!existsSync(nodeModules)) return;
-  const runtimeLink = resolve(nodeModules, "smithers-orchestrator");
+  const runtimeLink = resolve(nodeModules, "smthrs");
   rmSync(runtimeLink, { recursive: true, force: true });
   symlinkSync(SOURCE_SMITHERS_PACKAGE, runtimeLink, "dir");
 }

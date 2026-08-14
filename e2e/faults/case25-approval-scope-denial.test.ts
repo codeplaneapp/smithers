@@ -4,15 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import React from "react";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { hasGatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
-import { Gateway, type SmithersWorkflow } from "@smithers-orchestrator/server/gateway";
+import { createSmithers } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { hasGatewayScope } from "@smthrs/gateway/auth/scopes";
+import { Gateway, type SmithersWorkflow } from "@smthrs/server/gateway";
 
 // case25 — approval scope denial against the REAL gateway.
 //
-// This drives @smithers-orchestrator/server's Gateway over its real HTTP
+// This drives @smthrs/server's Gateway over its real HTTP
 // `/v1/rpc/<method>` surface with token-based auth. A viewer-scoped token
 // (run:read only) that calls `submitApproval` must hit the gateway's real
 // scope gate and receive a 403 FORBIDDEN whose `requiredScope` is

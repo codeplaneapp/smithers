@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
+/** @jsxImportSource @opentui/react */
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
-import { SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
-import { SmithersGatewayProvider } from "@smithers-orchestrator/gateway-react";
+import { SmithersGatewayClient } from "@smthrs/gateway-client";
+import { SmithersGatewayProvider } from "@smthrs/gateway-react";
 import { spawn } from "node:child_process";
 import { connect } from "node:net";
 import { resolveGatewayConfig, isValidGatewayPort, GatewayConfigError } from "./gatewayConfig.ts";

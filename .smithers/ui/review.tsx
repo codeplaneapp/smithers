@@ -7,8 +7,8 @@ import {
   useGatewayRun,
   useGatewayRunEvents,
   useGatewayRuns,
-} from "smithers-orchestrator/gateway-react";
-import { NodeOutputView, RunEventLog, RunTree, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
+} from "smthrs/gateway-react";
+import { NodeOutputView, RunEventLog, RunTree, WorkflowUiShell } from "smthrs/gateway-ui";
 import {
   Badge,
   Button,
@@ -19,6 +19,7 @@ import {
   CardTitle,
   EmptyState,
   Input,
+  Markdown,
   SectionHeader,
   SmithersUiStyles,
   StatusPill,
@@ -28,7 +29,7 @@ import {
   TabsTrigger,
   isTerminalRunStatus,
   normalizeStatus,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 
 const WORKFLOW_KEY = "review";
 const MAX_REVIEWERS = 6;
@@ -71,9 +72,12 @@ export function isRunTerminal(status: string | undefined | null): boolean {
 // from panelist consensus). `approved === null` means "no verdict yet": while the
 // run is still active that is genuinely PENDING, but once the run is terminal a
 // missing verdict means the (continueOnFail) moderator failed/produced nothing.
+// A rejection is only FINAL once the run is terminal: while the run is still
+// active the moderator output can precede follow-up work, and showing a red
+// "Blocked" badge next to a RUNNING status pill reads as a contradiction.
 export function verdictStateFor(approved: boolean | null, runTerminal: boolean): VerdictState {
   if (approved === true) return "approved";
-  if (approved === false) return "blocked";
+  if (approved === false) return runTerminal ? "blocked" : "pending";
   return runTerminal ? "missing" : "pending";
 }
 
@@ -157,7 +161,15 @@ export function ReviewerLane({ review, open, onToggle }: { review: ReviewRow; op
         <StatusPill status={review.approved ? "finished" : "failed"} label={review.approved ? "approved" : "denied"} />
       </CardHeader>
       <CardContent id={feedbackId}>
-        {open ? review.feedback || "No feedback provided." : review.feedback.slice(0, 180) || "No feedback provided."}
+        {open ? (
+          review.feedback ? (
+            <Markdown content={review.feedback} />
+          ) : (
+            "No feedback provided."
+          )
+        ) : (
+          review.feedback.slice(0, 180) || "No feedback provided."
+        )}
         {SEVERITIES.map((severity) => {
           const count = review.issues.filter((issue) => issue.severity === severity).length;
           return count ? (
@@ -329,12 +341,16 @@ export function ReviewApp() {
               <CardDescription>
                 {approvedCount} of {reviews.length} panelists approved
                 {verdictState === "pending"
-                  ? " · awaiting moderator synthesis"
+                  ? synthesis
+                    ? " · moderator synthesized; awaiting run completion"
+                    : " · awaiting moderator synthesis"
                   : verdictState === "missing"
                     ? " · moderator produced no verdict"
                     : " · moderator synthesized"}
               </CardDescription>
-              {synthesis?.feedback ? <p data-testid="review-synthesis-feedback">{synthesis.feedback}</p> : null}
+              {synthesis?.feedback ? (
+                <Markdown data-testid="review-synthesis-feedback" content={synthesis.feedback} />
+              ) : null}
               {SEVERITIES.map((s) => (
                 <Badge
                   key={s}
@@ -388,7 +404,7 @@ export function ReviewApp() {
                   <CardDescription>
                     {it.file ? `${it.file} · ` : ""}flagged by {it.reviewer}
                   </CardDescription>
-                  {it.description}
+                  <Markdown content={it.description} />
                 </CardContent>
               </Card>
             ))}

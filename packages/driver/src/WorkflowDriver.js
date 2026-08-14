@@ -1,4 +1,4 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { SmithersCtx } from "./SmithersCtx.js";
 import { defaultTaskExecutor } from "./defaultTaskExecutor.js";
 import { withAbort } from "./withAbort.js";
@@ -13,13 +13,13 @@ import { withAbort } from "./withAbort.js";
 /** @typedef {import("./ContinueAsNewHandler.ts").ContinueAsNewHandler} ContinueAsNewHandler */
 
 /** @typedef {import("./RunOptions.ts").RunOptions} RunOptions */
-/** @typedef {import("@smithers-orchestrator/scheduler").RunResult} RunResult */
-/** @typedef {import("@smithers-orchestrator/scheduler").EngineDecision} EngineDecision */
-/** @typedef {import("@smithers-orchestrator/scheduler").RenderContext} RenderContext */
-/** @typedef {import("@smithers-orchestrator/scheduler").WaitReason} WaitReason */
-/** @typedef {import("@smithers-orchestrator/graph/types").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("@smthrs/scheduler").RunResult} RunResult */
+/** @typedef {import("@smthrs/scheduler").EngineDecision} EngineDecision */
+/** @typedef {import("@smthrs/scheduler").RenderContext} RenderContext */
+/** @typedef {import("@smthrs/scheduler").WaitReason} WaitReason */
+/** @typedef {import("@smthrs/graph/types").TaskDescriptor} TaskDescriptor */
 
-const SCHEDULER_SPECIFIER = "@smithers-orchestrator/scheduler";
+const SCHEDULER_SPECIFIER = "@smthrs/scheduler";
 /**
  * @param {import("./RuntimeAdapter.ts").RuntimeAdapter} [adapter]
  * @returns {string}
@@ -314,7 +314,7 @@ export class WorkflowDriver {
   activeRunId = "";
   /** @type {RunOptions | undefined} */
   activeOptions;
-  /** @type {import("@smithers-orchestrator/graph").WorkflowGraph | undefined} */
+  /** @type {import("@smthrs/graph").WorkflowGraph | undefined} */
   lastGraph;
   /** @type {{ nodeId: string; waitingOn: string[] }[]} Tasks that deferred on unresolved deps in the latest render. */
   lastDeferredDeps = [];
@@ -541,9 +541,7 @@ export class WorkflowDriver {
   async initializeSession(runId, options) {
     const createSession = this.createSession ?? (await loadCreateSession());
     if (!createSession) {
-      throw new Error(
-        "WorkflowDriver requires a WorkflowSession or createSession from @smithers-orchestrator/scheduler.",
-      );
+      throw new Error("WorkflowDriver requires a WorkflowSession or createSession from @smthrs/scheduler.");
     }
     const created = createSession({
       db: this.db,
@@ -835,7 +833,7 @@ export class WorkflowDriver {
    */
   async drainInflight() {
     while (this.inflightTasks.size > 0) {
-      await Promise.allSettled([...this.inflightTasks.values()]);
+      await Promise.allSettled(this.inflightTasks.values());
     }
     this.settledTasks.length = 0;
   }

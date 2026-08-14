@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 /**
- * Monitor shell controls on the shared smithers-orchestrator/ui primitives
+ * Monitor shell controls on the shared smthrs/ui primitives
  * (issue #1033): focus, disabled, active, and keyboard states of the topbar
  * filters, rail rows, pagination, chips, and run lifecycle actions.
  *
@@ -27,12 +27,13 @@ const { act, useState } = await import("react");
 const { createRoot } = await import("react-dom/client");
 type ReactElement = import("react").ReactElement;
 type Root = import("react-dom/client").Root;
-const { SMITHERS_UI_STYLE_ATTR, smithersUiCss } = await import("smithers-orchestrator/ui");
-const { workflowUiThemeCss } = await import("smithers-orchestrator/gateway-ui");
+const { SMITHERS_UI_STYLE_ATTR, smithersUiCss } = await import("smthrs/ui");
+const { workflowUiThemeCss } = await import("smthrs/gateway-ui");
 const { Chip, MonitorToolbar, RunLifecycleActions, RunLifecycleControls, RunRailRow, RunsPagination } =
   await import("../src/monitor-ui/monitorShell.tsx");
 const {
   createMonitorKeydownHandler,
+  EventLog,
   ExecutionTree,
   monitorCss,
   RunProgressCell,
@@ -501,6 +502,96 @@ describe("migrated monitor surfaces", () => {
   });
 });
 
+describe("event log accessibility", () => {
+  const eventsState = (
+    overrides: Partial<Parameters<typeof EventLog>[0]["eventsState"]> = {},
+  ): Parameters<typeof EventLog>[0]["eventsState"] => ({
+    events: [
+      {
+        type: "event",
+        event: "NodeStarted",
+        payload: { nodeId: "task-1" },
+        seq: 1,
+        stateVersion: 1,
+        timestampMs: Date.now() - 2_000,
+      },
+      {
+        type: "event",
+        event: "AgentEvent",
+        payload: { text: "working" },
+        seq: 2,
+        stateVersion: 2,
+        timestampMs: Date.now() - 1_000,
+      },
+    ],
+    lastHeartbeat: undefined,
+    error: undefined,
+    streaming: true,
+    loading: false,
+    ...overrides,
+  });
+
+  test("exposes a focusable live list, row semantics, and selected filter state", async () => {
+    await render(<EventLog runId="run-events" eventsState={eventsState()} />);
+
+    const list = byTestId("monitor-events");
+    expect(list.tagName).toBe("OL");
+    expect(list.tabIndex).toBe(0);
+    expect(list.getAttribute("aria-label")).toBe("Activity event stream");
+    expect(list.getAttribute("aria-live")).toBe("polite");
+    expect(list.getAttribute("aria-relevant")).toBe("additions text");
+    expect(list.getAttribute("aria-busy")).toBe("false");
+    await act(async () => list.focus());
+    expect(document.activeElement).toBe(list);
+
+    const rows = [...list.querySelectorAll(".mon-event")];
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.tagName === "LI")).toBe(true);
+
+    const activity = byTestId("monitor-events-filter-activity");
+    const notable = byTestId("monitor-events-filter-notable");
+    expect(activity.getAttribute("aria-pressed")).toBe("true");
+    expect(notable.getAttribute("aria-pressed")).toBe("false");
+    expect(activity.getAttribute("aria-controls")).toBe(list.id);
+
+    await act(async () => notable.focus());
+    expect(document.activeElement).toBe(notable);
+    await click(notable);
+    expect(notable.getAttribute("aria-pressed")).toBe("true");
+    expect(activity.getAttribute("aria-pressed")).toBe("false");
+    expect(list.getAttribute("aria-label")).toBe("Notable event stream");
+    expect(list.querySelectorAll(".mon-event")).toHaveLength(1);
+  });
+
+  test("announces paused following and provides a keyboard-focusable resume control", async () => {
+    await render(<EventLog runId="run-follow" eventsState={eventsState()} />);
+
+    const list = byTestId("monitor-events");
+    Object.defineProperty(list, "scrollHeight", { configurable: true, value: 1_000 });
+    Object.defineProperty(list, "clientHeight", { configurable: true, value: 100 });
+    list.scrollTop = 100;
+    await act(async () => list.dispatchEvent(new Event("scroll", { bubbles: true })));
+
+    const follow = byTestId("monitor-events-follow");
+    const status = byTestId("monitor-events-follow-status");
+    expect(follow.getAttribute("aria-pressed")).toBe("false");
+    expect(follow.getAttribute("aria-label")).toBe("Resume following new events");
+    expect(follow.textContent).toContain("Resume follow");
+    expect(status.textContent).toContain("paused");
+    expect(list.getAttribute("aria-live")).toBe("off");
+
+    await act(async () => follow.focus());
+    expect(document.activeElement).toBe(follow);
+    await click(follow);
+    expect(follow.getAttribute("aria-pressed")).toBe("true");
+    expect(follow.getAttribute("aria-label")).toBe("Following new events");
+    expect(follow.textContent).toContain("Following");
+    expect(status.textContent).toContain("Following new events");
+    expect(list.getAttribute("aria-live")).toBe("polite");
+    expect(list.scrollTop).toBe(1_000);
+  });
+});
+
 describe("execution tree unavailable states", () => {
   const historicalRoot = {
     key: "workflow#0",
@@ -661,6 +752,7 @@ describe("monitor theme contract", () => {
     for (const selector of [
       ".mon-tree-chevron:focus-visible",
       ".mon-tree-main:focus-visible",
+      ".mon-events:focus-visible",
       ".mon-timeline-row:focus-visible",
       ".mon-approval-main:focus-visible",
       ".mon-diff-summary:focus-visible",

@@ -32,12 +32,7 @@ describe("review UI composition", () => {
 
   test("keeps the pack UI at the supported composition boundary", () => {
     const imports = [...source.matchAll(/from "([^"]+)"/g)].map((match) => match[1]);
-    expect(imports).toEqual([
-      "react",
-      "smithers-orchestrator/gateway-react",
-      "smithers-orchestrator/gateway-ui",
-      "smithers-orchestrator/ui",
-    ]);
+    expect(imports).toEqual(["react", "smthrs/gateway-react", "smthrs/gateway-ui", "smthrs/ui"]);
     expect(source).toContain('testId="review-ui"');
   });
 });

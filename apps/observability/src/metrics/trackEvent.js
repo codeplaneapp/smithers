@@ -66,7 +66,7 @@ import { agentActionsTotal } from "./agentActionsTotal.js";
 import { agentErrorsTotal } from "./agentErrorsTotal.js";
 import { agentRetriesTotal } from "./agentRetriesTotal.js";
 import { agentTokensTotal } from "./agentTokensTotal.js";
-/** @typedef {import("@smithers-orchestrator/observability/SmithersEvent").SmithersEvent} SmithersEvent */
+/** @typedef {import("@smthrs/observability/SmithersEvent").SmithersEvent} SmithersEvent */
 /** @typedef {Extract<SmithersEvent, { type: "AgentEvent" }>["event"]} AgentEventPayload */
 /** @typedef {{ inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number; totalTokens?: number }} AgentUsageTotals */
 

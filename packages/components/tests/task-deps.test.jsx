@@ -1,10 +1,10 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
-import { SmithersCtx } from "@smithers-orchestrator/react-reconciler/context";
-import { renderFrame, runWorkflow } from "smithers-orchestrator";
+import { SmithersCtx } from "@smthrs/react-reconciler/context";
+import { renderFrame, runWorkflow } from "smthrs";
 import { createTestSmithers } from "./helpers.js";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Effect } from "effect";
 /**

@@ -19,8 +19,8 @@ import {
   toolKindFromName,
 } from "./BaseCliAgent/index.js";
 import { normalizeCapabilityStringList } from "./capability-registry/index.js";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { enrichReportWithErrorAnalysis, launchDiagnostics } from "./diagnostics/index.js";
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
@@ -75,6 +75,10 @@ export function createPiCapabilityRegistry(opts = {}) {
     humanInteraction: {
       supportsUiRequests: true,
       methods: ["extension_ui_request"],
+    },
+    fileChanges: {
+      supportsFileChanges: false,
+      supportsUnifiedDiff: false,
     },
     builtIns: resolvePiBuiltIns(opts),
   };

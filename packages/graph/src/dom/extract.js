@@ -6,7 +6,7 @@
 import { resolveStableId } from "../utils/tree-ids.js";
 import { getTableName } from "drizzle-orm";
 import { DEFAULT_MERGE_QUEUE_CONCURRENCY, MERGE_QUEUE_PRIORITY, WORKTREE_EMPTY_PATH_ERROR } from "../constants.js";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { resolveWorktreePath } from "../worktree-path.js";
 import { coerceFiniteNumber } from "../utils/numeric-props.js";
 import { normalizeTaskSideEffect } from "../normalizeTaskSideEffect.js";
@@ -19,7 +19,7 @@ import { createSubflowResultError } from "../subflow-result-error.js";
 /** @typedef {import("../XmlNode.ts").XmlNode} XmlNode */
 
 // TODO(migration): Delegate extractFromHost to
-// @smithers-orchestrator/graph.extractGraph once core extraction reaches full
+// @smthrs/graph.extractGraph once core extraction reaches full
 // legacy parity. Current blockers:
 // - <Subflow> and <Sandbox> descriptors here attach runtime computeFn handlers
 //   that call executeChildWorkflow/executeSandbox; core extractGraph currently
@@ -480,7 +480,7 @@ export function extractFromHost(root, opts) {
           prompt: undefined,
           staticPayload: undefined,
           computeFn: async () => {
-            const { executeChildWorkflow } = await loadRuntimeModule("@smithers-orchestrator/engine/child-workflow");
+            const { executeChildWorkflow } = await loadRuntimeModule("@smthrs/engine/child-workflow");
             const result = await executeChildWorkflow(undefined, {
               workflow: raw.__smithersSubflowWorkflow,
               input: raw.__smithersSubflowInput,
@@ -583,9 +583,9 @@ export function extractFromHost(root, opts) {
         staticPayload: undefined,
         computeFn: async () => {
           const [{ executeSandbox }, { executeChildWorkflow }, { applyDiffBundle }] = await Promise.all([
-            loadRuntimeModule("@smithers-orchestrator/sandbox/execute"),
-            loadRuntimeModule("@smithers-orchestrator/engine/child-workflow"),
-            loadRuntimeModule("@smithers-orchestrator/engine/effect/diff-bundle"),
+            loadRuntimeModule("@smthrs/sandbox/execute"),
+            loadRuntimeModule("@smthrs/engine/child-workflow"),
+            loadRuntimeModule("@smthrs/engine/effect/diff-bundle"),
           ]);
           if (!workflowDef) {
             throw new SmithersError("INVALID_INPUT", `Sandbox ${nodeId} is missing workflow definition.`, { nodeId });
@@ -996,6 +996,7 @@ export function extractFromHost(root, opts) {
         outputSchema,
         dependsOn,
         needs,
+        forkSource: typeof raw.fork === "string" && raw.fork ? raw.fork : undefined,
         needsApproval,
         waitAsync,
         approvalMode,
@@ -1070,5 +1071,38 @@ export function extractFromHost(root, opts) {
     }
   }
   walk(root, { path: [], iteration: 0, parentIsRalph: false, parallelStack: [], worktreeStack: [], loopStack: [] });
+  scopeDependencyIds(tasks);
   return { xml: toXmlNode(root), tasks, mountedTaskIds };
+}
+
+/**
+ * Scope `dependsOn`/`needs` references authored with logical task ids to the
+ * mounted node ids of tasks nested inside ancestor loops. A task inside a
+ * nested loop is mounted as `<logical id>@@<ancestor scope>`, but dependency
+ * edges are authored with logical ids (e.g. by <Panel>), so an exact-id lookup
+ * would report the upstream task as missing and deadlock the run. When an
+ * exact id is not mounted, resolve it against the dependent task's own loop
+ * scope, preferring the nearest (most deeply scoped) match.
+ * @param {TaskDescriptor[]} tasks
+ */
+function scopeDependencyIds(tasks) {
+  const mounted = new Set(tasks.map((task) => task.nodeId));
+  for (const task of tasks) {
+    const atIdx = task.nodeId.indexOf("@@");
+    if (atIdx === -1) continue;
+    const scopeEntries = task.nodeId.slice(atIdx + 2).split(",");
+    /** @param {string} depId */
+    const resolve = (depId) => {
+      if (mounted.has(depId)) return depId;
+      for (let depth = scopeEntries.length; depth >= 1; depth--) {
+        const candidate = `${depId}@@${scopeEntries.slice(0, depth).join(",")}`;
+        if (mounted.has(candidate)) return candidate;
+      }
+      return depId;
+    };
+    if (task.dependsOn) task.dependsOn = task.dependsOn.map(resolve);
+    if (task.needs) {
+      task.needs = Object.fromEntries(Object.entries(task.needs).map(([key, value]) => [key, resolve(value)]));
+    }
+  }
 }

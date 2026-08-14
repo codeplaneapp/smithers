@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * A/B equivalence for the incremental frame-snapshot cache: the same fixture
  * workflow runs once with SMITHERS_INCREMENTAL_FRAME_SNAPSHOTS=0 (the full
@@ -7,7 +7,7 @@
  * Snapshots feed resume/time-travel, so any divergence is a corrupted resume
  * waiting to happen. Comparison is canonical (sorted keys, order-insensitive
  * row arrays) — row order inside a snapshot is storage order and may legally
- * differ; timestamps/hashes are excluded the same way.
+ * differ; volatile attempt/checkpoint timestamps are normalized.
  *
  * A second test proves the cache actually engages: a task mutates the input
  * row out-of-band mid-run, which later frames only notice when they re-load
@@ -22,12 +22,12 @@
  * poison resume/time-travel for up to FRAME_KEYFRAME_INTERVAL frames.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { Loop, Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { Loop, Task, Workflow, runWorkflow } from "smthrs";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";
-import { loadSnapshot } from "@smithers-orchestrator/time-travel";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { loadSnapshot } from "@smthrs/time-travel";
+import { SmithersDb } from "@smthrs/db/adapter";
 
 const ENV_KEY = "SMITHERS_INCREMENTAL_FRAME_SNAPSHOTS";
 const savedEnv = process.env[ENV_KEY];
@@ -73,6 +73,33 @@ function readSnapshots(db, runId) {
     .all(runId);
 }
 /**
+ * The two fixtures run sequentially, so exact checkpoint provenance carries
+ * different wall-clock timestamps even when both snapshot paths captured the
+ * same rows. Preserve every other provenance field in the comparison.
+ * @param {unknown} value
+ * @returns {unknown}
+ */
+function normalizeAgentCheckpointProvenance(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const provenance = /** @type {Record<string, unknown>} */ (value);
+  const normalizeTupleIndexes = (tuples, indexes) =>
+    Array.isArray(tuples)
+      ? tuples.map((tuple) => {
+          if (!Array.isArray(tuple)) return tuple;
+          const normalized = [...tuple];
+          for (const index of indexes) {
+            if (typeof normalized[index] === "number") normalized[index] = 0;
+          }
+          return normalized;
+        })
+      : tuples;
+  return {
+    ...provenance,
+    attempts: normalizeTupleIndexes(provenance.attempts, [4, 5, 6]),
+    checkpoints: normalizeTupleIndexes(provenance.checkpoints, [9, 12]),
+  };
+}
+/**
  * Order-insensitive canonical form: object keys sorted, arrays sorted by the
  * canonical JSON of their elements. Applied identically to both runs, so any
  * content difference still fails while legal storage-order differences don't.
@@ -91,7 +118,15 @@ function canonicalize(value) {
     return Object.fromEntries(
       Object.keys(value)
         .sort()
-        .map((key) => [key, canonicalize(/** @type {Record<string, unknown>} */ (value)[key])]),
+        .map((key) => {
+          const child = /** @type {Record<string, unknown>} */ (value)[key];
+          return [
+            key,
+            canonicalize(
+              key === "__smithersAgentCheckpointProvenance" ? normalizeAgentCheckpointProvenance(child) : child,
+            ),
+          ];
+        }),
     );
   }
   return value;

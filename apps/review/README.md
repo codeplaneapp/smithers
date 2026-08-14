@@ -137,33 +137,33 @@ CLI, a `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or an
 `ANTHROPIC_API_KEY`:
 
 ```sh
-bunx smithers-orchestrator review --help
+bunx smthrs review --help
 ```
 
 ```sh
 # review the working tree of a repo, write .smithers-review/walkthrough.html
-bunx smithers-orchestrator review /path/to/repo
+bunx smthrs review /path/to/repo
 
 # review a branch against main, open the walkthrough when done
-bunx smithers-orchestrator review /path/to/repo --from main --to HEAD --open
+bunx smthrs review /path/to/repo --from main --to HEAD --open
 
 # review one commit
-bunx smithers-orchestrator review /path/to/repo --commit abc1234
+bunx smthrs review /path/to/repo --commit abc1234
 
 # review GitHub PR #123 and post the review onto it (via gh)
-bunx smithers-orchestrator review /path/to/repo --pr 123
+bunx smthrs review /path/to/repo --pr 123
 
 # publish the walkthrough to the share service and print an unlisted URL
-bunx smithers-orchestrator review /path/to/repo --pr 123 --publish
+bunx smthrs review /path/to/repo --pr 123 --publish
 
 # no agents: deterministic story, no review findings (works offline)
-bunx smithers-orchestrator review /path/to/repo --no-review --no-narrate
+bunx smthrs review /path/to/repo --no-review --no-narrate
 ```
 
 The standalone package bin, `smithers-review`, accepts the same options and
 remains useful for package-level testing in this monorepo.
 
-The repo path defaults to the current directory. Run `bunx smithers-orchestrator review --help` for all
+The repo path defaults to the current directory. Run `bunx smthrs review --help` for all
 options. `--publish` needs a publish service URL in
 `SMITHERS_REVIEW_PUBLISH_URL` and an API key (`srk_…`, operator-issued) in
 `SMITHERS_REVIEW_PUBLISH_TOKEN`; both can also be set in

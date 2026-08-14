@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import { delimiter, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { mdxPlugin } from "smithers-orchestrator";
+import { mdxPlugin } from "smthrs";
 import {
   canonicalGithubRemote,
   commitPatchId,
@@ -41,7 +41,7 @@ import {
 } from "../lib/risklessGithubIssueSweep";
 
 mdxPlugin();
-const { renderWorkflow, runTask } = await import("smithers-orchestrator/testing");
+const { renderWorkflow, runTask } = await import("smthrs/testing");
 const {
   default: workflow,
   candidateEvidenceProof: candidateProofId,
@@ -2054,7 +2054,7 @@ describe("riskless GitHub issue sweep production graph", () => {
         expect(git("commit", "-qm", "base").status).toBe(0);
         expect(git("worktree", "add", "--detach", peer, "HEAD").status).toBe(0);
         rmSync(peer, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-        const orchestratorUrl = import.meta.resolve("smithers-orchestrator");
+        const orchestratorUrl = import.meta.resolve("smthrs");
         const workflowUrl = `${pathToFileURL(join(import.meta.dir, "..", "workflows", "riskless-github-issue-sweep.tsx")).href}?missing-worktree-test=${Date.now()}`;
         const script = `import { mdxPlugin } from ${JSON.stringify(orchestratorUrl)}; mdxPlugin(); const { activeCollisionPaths } = await import(${JSON.stringify(workflowUrl)}); console.log(JSON.stringify(activeCollisionPaths(["x.txt"], ${JSON.stringify(fixture)})));`;
         const child = spawnSync(process.execPath, ["-e", script], {

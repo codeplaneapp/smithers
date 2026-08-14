@@ -21,7 +21,7 @@ id, and, for Mini Apps, a backend that verifies `initData` before trusting it.
 
 ## What we ship
 
-Two tiers, both landing in `@smithers-orchestrator/integrations/telegram`.
+Two tiers, both landing in `@smthrs/integrations/telegram`.
 
 ### Tier 1 — inline-keyboard approvals (the headline, no hosting)
 

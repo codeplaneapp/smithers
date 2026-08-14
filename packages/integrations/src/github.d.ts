@@ -8,7 +8,7 @@ import 'zod';
 import './github/GitHubConfig.js';
 import './github/GitHubClientService.js';
 import 'effect';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 import './core/ExternalEventTypes.js';
 import './github/GitHubWebhookSourceOptions.js';
 import './core/EventSourceTypes.js';

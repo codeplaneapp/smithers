@@ -1,13 +1,13 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import "../preload.ts";
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { renderWorkflow, runTask, simulate } from "smithers-orchestrator/testing";
-import type { RenderedWorkflow } from "smithers-orchestrator/testing";
-import type { TaskDescriptor } from "smithers-orchestrator/graph";
+import { renderWorkflow, runTask, simulate } from "smthrs/testing";
+import type { RenderedWorkflow } from "smthrs/testing";
+import type { TaskDescriptor } from "smthrs/graph";
 import { caseRows, dddAuditBroken, dddAuditClean, dddFeature, evalSuite } from "./curated-ddd-eval-workflows.contracts";
 
 type Row = Record<string, unknown> & { nodeId: string; iteration?: number };

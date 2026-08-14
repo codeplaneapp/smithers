@@ -9,7 +9,7 @@ per-namespace. The store keeps three kinds of state, detailed below:
 namespaced **facts**, ordered **message threads**, and append-only **notes**.
 
 All memory values and non-generic types are re-exported from the canonical
-`smithers-orchestrator` facade; the `smithers-orchestrator/memory` subpath
+`smthrs` facade; the `smthrs/memory` subpath
 exports the same surface.
 
 ```ts
@@ -24,7 +24,7 @@ import {
   TtlGarbageCollector,
   namespaceToString,
   parseNamespace,
-} from "smithers-orchestrator";
+} from "smthrs";
 import type {
   MemoryNamespace,
   MemoryNamespaceKind,
@@ -40,7 +40,7 @@ import type {
   TaskMemoryConfig,
   SemanticRecallConfig,
   MessageHistoryConfig,
-} from "smithers-orchestrator";
+} from "smthrs";
 ```
 
 `createMemoryStore(db)` preserves the local SQLite implementation; pass it as
@@ -72,7 +72,7 @@ engine-facing methods.
 
 <Note>
 Note types (`MemoryNote`, `SaveNoteInput`, `NoteReadFilter`, `MemoryProvenance`)
-are exported from `smithers-orchestrator/memory`. `WorkingMemoryConfig<T>` is
+are exported from `smthrs/memory`. `WorkingMemoryConfig<T>` is
 generic over a Zod schema (documented below). `Task`, imported directly or
 from `createSmithers`, exposes the same `memory` prop; see
 [Memory](/concepts/memory) for the declarative `<Task memory={...}>` metadata.
@@ -263,7 +263,7 @@ function createMemoryStore(db: BunSQLiteDatabase<any>): MemoryStore;
 </ParamField>
 
 ```ts
-import { createMemoryStore } from "smithers-orchestrator";
+import { createMemoryStore } from "smthrs";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 
@@ -411,7 +411,7 @@ function createMemoryLayer(
 
 ```ts
 import { Effect } from "effect";
-import { createMemoryLayer, MemoryService } from "smithers-orchestrator";
+import { createMemoryLayer, MemoryService } from "smthrs";
 
 const program = Effect.gen(function* () {
   const memory = yield* MemoryService;
@@ -462,7 +462,7 @@ type MemoryProcessor = {
 </ResponseField>
 
 ```ts
-import { TtlGarbageCollector, Summarizer } from "smithers-orchestrator";
+import { TtlGarbageCollector, Summarizer } from "smthrs";
 
 await TtlGarbageCollector().process(store);
 await Summarizer(myAgent).process(store);
@@ -580,7 +580,7 @@ Namespaces are stored as strings. These two helpers round-trip a
 </ResponseField>
 
 ```ts
-import { namespaceToString, parseNamespace } from "smithers-orchestrator";
+import { namespaceToString, parseNamespace } from "smthrs";
 
 namespaceToString({ kind: "user", id: "u1" }); // "user:u1"
 parseNamespace("workflow:code-review"); // { kind: "workflow", id: "code-review" }
@@ -589,7 +589,7 @@ parseNamespace("workflow:code-review"); // { kind: "workflow", id: "code-review"
 Cross-run facts are also viewable from the CLI:
 
 ```bash
-bunx smithers-orchestrator memory
+bunx smthrs memory
 ```
 
 **Source** [`store/MemoryStore.ts`](https://github.com/smithersai/smithers/blob/main/packages/memory/src/store/MemoryStore.ts) · [`MemoryServiceApi.ts`](https://github.com/smithersai/smithers/blob/main/packages/memory/src/MemoryServiceApi.ts) · [`MemoryNote.ts`](https://github.com/smithersai/smithers/blob/main/packages/memory/src/MemoryNote.ts) · [`createMemoryLayer.js`](https://github.com/smithersai/smithers/blob/main/packages/memory/src/createMemoryLayer.js) · [`processors.js`](https://github.com/smithersai/smithers/blob/main/packages/memory/src/processors.js) · **Tests** [`store.test.js`](https://github.com/smithersai/smithers/blob/main/packages/memory/tests/store.test.js) · [`notes.test.js`](https://github.com/smithersai/smithers/blob/main/packages/memory/tests/notes.test.js) · [`service.test.js`](https://github.com/smithersai/smithers/blob/main/packages/memory/tests/service.test.js) · [`processors.test.js`](https://github.com/smithersai/smithers/blob/main/packages/memory/tests/processors.test.js) · **See also** [Memory](/concepts/memory), [Types reference](/reference/types)

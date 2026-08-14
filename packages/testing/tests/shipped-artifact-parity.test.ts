@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
-import { build } from "tsup";
 import * as source from "../src/index.ts";
 
 /**
- * Package-export/runtime parity gate. The published `@smithers-orchestrator/
+ * Package-export/runtime parity gate. The published `@smthrs/
  * testing` entrypoint is the COMMITTED src/index.js artifact (via the
  * package.json exports map), while most in-repo suites resolve the tsconfig
  * alias straight to src/index.ts. A stale committed bundle can therefore stay
@@ -18,7 +18,7 @@ import * as source from "../src/index.ts";
  * serialization's native fields, real-adapter advertised cut points, and
  * cut-point receipt/ambiguity emission.
  */
-const shippedPath = Bun.resolveSync("@smithers-orchestrator/testing", import.meta.dir);
+const shippedPath = Bun.resolveSync("@smthrs/testing", import.meta.dir);
 const shipped = (await import(shippedPath)) as typeof source;
 
 describe("published artifact parity", () => {
@@ -30,18 +30,28 @@ describe("published artifact parity", () => {
     expect(shipped as unknown).not.toBe(source as unknown);
   });
 
-  test("the committed coverWorkflow JavaScript exactly matches a fresh source build", async () => {
+  test("the committed coverWorkflow JavaScript exactly matches a fresh source build", () => {
     const outDir = mkdtempSync(join(tmpdir(), "smithers-testing-artifact-"));
     try {
-      await build({
-        entry: { coverWorkflow: join(import.meta.dir, "../src/coverWorkflow.ts") },
-        format: ["esm"],
-        outDir,
-        clean: false,
-        dts: false,
-        splitting: false,
-        silent: true,
-      });
+      const result = spawnSync(
+        "pnpm",
+        [
+          "exec",
+          "tsup",
+          "src/coverWorkflow.ts",
+          "--no-config",
+          "--format",
+          "esm",
+          "--out-dir",
+          outDir,
+          "--no-splitting",
+          "--silent",
+          "--external",
+          "package.json",
+        ],
+        { cwd: join(import.meta.dir, ".."), encoding: "utf8" },
+      );
+      expect(result.status, result.stderr || result.stdout).toBe(0);
       expect(readFileSync(join(outDir, "coverWorkflow.js"), "utf8")).toBe(
         readFileSync(join(import.meta.dir, "../src/coverWorkflow.js"), "utf8"),
       );
@@ -49,6 +59,41 @@ describe("published artifact parity", () => {
       rmSync(outDir, { recursive: true, force: true });
     }
   });
+
+  test("Node can import the shipped runScenario package subpath", () => {
+    const result = spawnSync(
+      "node",
+      [
+        "--input-type=module",
+        "--eval",
+        [
+          'const shipped = await import("@smthrs/testing/runScenario");',
+          'if (typeof shipped.runScenario !== "function") throw new Error("runScenario export missing");',
+          'if (typeof shipped.runKernelScenario !== "function") throw new Error("runKernelScenario export missing");',
+        ].join("\n"),
+      ],
+      { cwd: join(import.meta.dir, ".."), encoding: "utf8" },
+    );
+
+    expect(result.status, result.stderr || result.stdout).toBe(0);
+  });
+
+  test(
+    "the published tarball includes campaign tooling and its trace fixtures",
+    () => {
+      const result = spawnSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
+        cwd: join(import.meta.dir, ".."),
+        encoding: "utf8",
+      });
+      expect(result.status, result.stderr || result.stdout).toBe(0);
+      const paths = new Set(JSON.parse(result.stdout)[0].files.map((file: { path: string }) => file.path));
+      expect(paths).toContain("scripts/core-campaign.mjs");
+      expect(paths).toContain("scripts/cleanup-herdr-session.mjs");
+      expect(paths).toContain("fixtures/agent-traces/README.md");
+      expect(paths).toContain("fixtures/agent-traces/hello-ok.v1.json");
+    },
+    { timeout: 15_000 },
+  );
 
   test("shipped serializeBoundaryError carries family-specific native fields identically to source", () => {
     const cause = Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY", errno: 5, byteOffset: -1 });

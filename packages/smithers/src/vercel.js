@@ -1,1 +1,1 @@
-export * from "@smithers-orchestrator/vercel";
+export * from "@smthrs/vercel";

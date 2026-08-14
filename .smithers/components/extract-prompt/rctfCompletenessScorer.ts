@@ -1,5 +1,5 @@
-import { llmJudge } from "@smithers-orchestrator/scorers";
-import type { Scorer } from "@smithers-orchestrator/scorers";
+import { llmJudge } from "@smthrs/scorers";
+import type { Scorer } from "@smthrs/scorers";
 
 export type RctfCompletenessScorerOptions = {
   /** The judge agent. Must implement `generate({ prompt }) → string | { text }`. */

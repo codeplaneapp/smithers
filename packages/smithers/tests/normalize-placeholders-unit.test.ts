@@ -57,17 +57,17 @@ describe("normalize-placeholders units", () => {
     expect(normalizeCommand("smithers logs <id>")).toBe("smithers logs RUN_ID");
   });
 
-  test("prose normalizes hyphenated tokens everywhere but command tokens only in smithers-orchestrator spans", () => {
+  test("prose normalizes hyphenated tokens everywhere but command tokens only in smthrs spans", () => {
     expect(normalizeProseLine("Pass the <run-id> to the command.")).toBe("Pass the RUN_ID to the command.");
-    expect(normalizeProseLine("Run `bunx smithers-orchestrator inspect <runId>` to check.")).toBe(
-      "Run `bunx smithers-orchestrator inspect RUN_ID` to check.",
+    expect(normalizeProseLine("Run `bunx smthrs inspect <runId>` to check.")).toBe(
+      "Run `bunx smthrs inspect RUN_ID` to check.",
     );
     // Non-smithers spans and prose mentions of <runId> stay untouched.
     expect(normalizeProseLine("Use `other-tool <runId>` instead.")).toBe("Use `other-tool <runId>` instead.");
     expect(normalizeProseLine("The <runId> appears in prose.")).toBe("The <runId> appears in prose.");
     // Path/URL template spans keep their placeholders even for smithers commands.
-    expect(normalizeProseLine("See `bunx smithers-orchestrator logs .smithers/executions/<runId>/`.")).toBe(
-      "See `bunx smithers-orchestrator logs .smithers/executions/<runId>/`.",
+    expect(normalizeProseLine("See `bunx smthrs logs .smithers/executions/<runId>/`.")).toBe(
+      "See `bunx smthrs logs .smithers/executions/<runId>/`.",
     );
   });
 
@@ -84,7 +84,7 @@ describe("normalize-placeholders units", () => {
       "```",
       "smithers inspect <id>",
       "```",
-      "After: `bunx smithers-orchestrator node <nodeId>` and <runId> in prose.",
+      "After: `bunx smthrs node <nodeId>` and <runId> in prose.",
     ].join("\n");
     const expected = [
       "Use RUN_ID in prose.",
@@ -100,7 +100,7 @@ describe("normalize-placeholders units", () => {
       // A bare fence counts as shell.
       "smithers inspect RUN_ID",
       "```",
-      "After: `bunx smithers-orchestrator node NODE_ID` and <runId> in prose.",
+      "After: `bunx smthrs node NODE_ID` and <runId> in prose.",
     ].join("\n");
     expect(rewrite(input)).toBe(expected);
   });

@@ -49,7 +49,7 @@ Smithers is in the **checkpoint family**, not the replay family. It does not re-
 | `_smithers_approvals`, `_smithers_signals`, `_smithers_human_requests` | Durable suspension state: what the run is waiting for and who answered | On suspension and resolution |
 | `_smithers_workspace_checkpoints` / `_smithers_workspace_states` | Filesystem checkpoints: jj commit id per `(run, node, iteration, attempt, seq)`, with tier and source | During agent execution (next section) |
 
-The event log exists for `bunx smithers-orchestrator logs`, scoring, and debugging. Resume never replays it - resume reads current state. That is the core design difference from Temporal: no replay means no determinism requirement on workflow code, at the cost of coarser recovery granularity (task attempts, not individual awaits).
+The event log exists for `bunx smthrs logs`, scoring, and debugging. Resume never replays it - resume reads current state. That is the core design difference from Temporal: no replay means no determinism requirement on workflow code, at the cost of coarser recovery granularity (task attempts, not individual awaits).
 
 ## Two layers: engine state and worktree checkpoints
 
@@ -57,20 +57,20 @@ Database rows recover the *orchestration*. But a coding agent's real product is 
 
 **Layer 1 - engine state (always on).** The tables above. A completed task's outputs, the frame history, suspension state. This layer alone gives you crash-resume of the workflow.
 
-**Layer 2 - workspace durability snapshots (jj worktrees).** While an agent works in a worktree, `startDurability.js` runs a filesystem watcher that commits the tree via jj on settle (**Tier 2**, `source: "watch"`), and agents that expose tool hooks get strict per-tool-call snapshots (**Tier 1**): the Claude Code plugin's PostToolUse hook runs `smithers snapshot-hook`, which hits a local snapshot socket and captures the tree immediately after each mutation, labeled with the `tool_use_id`. In-process SDK agents get the same via an ambient tool-context wrapper (`source: "wrap"`). The snapshot service serializes captures per worktree, dedups by jj commit id, and assigns a monotonic `seq` per attempt. A capture that fails does not fail the agent - it is recorded as a **gap** in an NDJSON spool outside the worktree (`$TMPDIR/smithers-durability/<runId>.gaps.ndjson`), so you can always tell the difference between "nothing changed" and "we couldn't look."
+**Layer 2 - workspace durability snapshots (jj worktrees).** While an agent works in a worktree, `startDurability.js` runs a filesystem watcher that snapshots VCS-tracked content through jj on settle (**Tier 2**, `source: "watch"`), and agents that expose tool hooks get strict per-tool-call snapshots (**Tier 1**): the Claude Code plugin's PostToolUse hook runs `smithers snapshot-hook`, which hits a local snapshot socket and captures tracked content immediately after each mutation, labeled with the `tool_use_id`. jj auto-tracks new non-ignored files during capture. It never captures gitignored files such as `node_modules`, build outputs, or `.env`. In-process SDK agents get the same via an ambient tool-context wrapper (`source: "wrap"`). The snapshot service serializes captures per worktree, dedups by jj commit id, and assigns a monotonic `seq` per attempt. A capture that fails does not fail the agent - it is recorded as a **gap** in an NDJSON spool outside the worktree (`$TMPDIR/smithers-durability/<runId>.gaps.ndjson`), so you can always tell the difference between "nothing changed" and "we couldn't look."
 
-The two layers join at the attempt row: `_smithers_attempts.jj_pointer` records where the tree ended up, and `_smithers_workspace_checkpoints` records every intermediate step of how it got there. `bunx smithers-orchestrator snapshots RUN_ID` lists them; `bunx smithers-orchestrator restore RUN_ID --node NODE_ID [--seq N]` puts a worktree back to any of them via `jj restore --from <commit>`.
+The two layers join at the attempt row: `_smithers_attempts.jj_pointer` records where the tree ended up, and `_smithers_workspace_checkpoints` records every intermediate step of how it got there. `bunx smthrs snapshots RUN_ID` lists them; `bunx smthrs restore RUN_ID --node NODE_ID [--seq N]` moves tracked content back to any checkpoint via `jj restore --from <commit>`. Restore leaves gitignored files as-is. It removes a non-ignored untracked file created after the target checkpoint.
 
 ```bash
-bunx smithers-orchestrator snapshots r1                     # every checkpoint: node, attempt, seq, tier, age
-bunx smithers-orchestrator restore r1 --node implement      # worktree back to the node's latest checkpoint
-bunx smithers-orchestrator restore r1 --node implement --seq 3   # or a specific mid-attempt state
+bunx smthrs snapshots r1                     # every checkpoint: node, attempt, seq, tier, age
+bunx smthrs restore r1 --node implement      # worktree back to the node's latest checkpoint
+bunx smthrs restore r1 --node implement --seq 3   # or a specific mid-attempt state
 ```
 
 ## The resume contract
 
 ```bash
-bunx smithers-orchestrator up workflow.tsx --run-id r1 --resume true
+bunx smthrs up workflow.tsx --run-id r1 --resume true
 ```
 
 Resume is legal from any of: `running` (stale), `waiting-approval`, `waiting-event`, `waiting-timer`, `waiting-quota`, `paused`, `cancelled`, `finished`, `failed`. The contract, precisely:
@@ -86,7 +86,7 @@ At run start Smithers stores a hash of the workflow **entry file** and of the **
 
 Your options when it fires, in order of preference:
 
-- **Carry the edit forward on a fork:** `bunx smithers-orchestrator fork workflow.tsx --run-id r1 --frame N` branches a new run from a persisted frame under the new code.
+- **Carry the edit forward on a fork:** `bunx smthrs fork workflow.tsx --run-id r1 --frame N` branches a new run from a persisted frame under the new code.
 - **Resume this run anyway:** `--accept-workflow-change` waives *workflow-hash* mismatches only (never path/VCS-root drift). You are asserting the edit is compatible with the persisted state; Smithers cannot check that for you - it has no replay to check it with.
 - **Revert the file** and resume normally.
 
@@ -95,7 +95,11 @@ Unattended resumes (the supervisor, the gateway's timer sweep) that hit a mismat
 ## Failure taxonomy
 
 <Accordion title="Process crash / kill -9">
-The run row still says `running` but its heartbeat stops. `bunx smithers-orchestrator supervise <run-id...>` (or `--all`) polls for runs whose heartbeat is older than the stale threshold (default 30s), claims the run by stamping `runtime_owner_id` with `supervisor:<id>` so two supervisors can't double-resume, and resumes it in a detached child. Completed work is skipped per the contract; the interrupted attempt re-runs.
+The run row still says `running` but its heartbeat stops. `bunx smthrs supervise <run-id...>` (or `--all`) polls for runs whose heartbeat is older than the stale threshold (default 30s), claims the run by stamping `runtime_owner_id` with `supervisor:<id>` so two supervisors can't double-resume, and resumes it in a detached child. Completed work is skipped per the contract; the interrupted attempt re-runs.
+
+You don't need `supervise` to *notice* a dead engine: `status`, `ps`, and `inspect` compare `heartbeat_at_ms` against the same 30s threshold and downgrade a stale run to `stalled`/`orphaned` with the last-heartbeat age, even when the full liveness probe fails (a row-only fallback classifies from the run row alone).
+
+Agent subprocesses can't orphan either. Every agent an engine spawns is registered in `_smithers_agent_processes` with its engine pid, spawned as its own process-group leader so the whole tree (subagents, MCP servers, tool children) is killable by pgid. Any CLI invocation sweeps that registry and group-kills entries whose engine is verifiably gone; `cancel`/`down` do the same for the runs they fence. Opt out of the boot sweep with `SMITHERS_NO_ORPHAN_REAPER=1`.
 </Accordion>
 
 <Accordion title="Machine reboot">
@@ -107,11 +111,11 @@ Per-task, `agent={[claude, codex]}` fails over between harnesses. When every opt
 </Accordion>
 
 <Accordion title="Human approval that arrives 14 hours later">
-`<Approval>` moves the run to `waiting-approval` and the process exits. The pending request is a durable row answerable from CLI (`bunx smithers-orchestrator approve` / `deny`), web, or MCP at any hour; resolution triggers resume at exactly the gated node. Nothing replays, because nothing needs to - the state the run suspended with is the state it wakes with.
+`<Approval>` moves the run to `waiting-approval` and the process exits. The pending request is a durable row answerable from CLI (`bunx smthrs approve` / `deny`), web, or MCP at any hour; resolution triggers resume at exactly the gated node. Nothing replays, because nothing needs to - the state the run suspended with is the state it wakes with.
 </Accordion>
 
 <Accordion title="Pause and cancellation">
-`smithers pause <runId>` sets `pause_requested_at_ms`; the driver stops scheduling new tasks, lets in-flight attempts drain, and parks the run as `paused` - resumable later, cleanly, with zero abandoned attempts. `bunx smithers-orchestrator cancel` propagates abort to running agents and marks the run `cancelled`; even that is resumable, because cancellation deletes no state.
+`smithers pause <runId>` sets `pause_requested_at_ms`; the driver stops scheduling new tasks, lets in-flight attempts drain, and parks the run as `paused` - resumable later, cleanly, with zero abandoned attempts. `bunx smthrs cancel` propagates abort to running agents and marks the run `cancelled`; even that is resumable, because cancellation deletes no state.
 </Accordion>
 
 ## Guarantees and limits
@@ -129,16 +133,16 @@ Per-task, `agent={[claude, codex]}` fails over between harnesses. When every opt
 ## Operating it
 
 ```bash
-bunx smithers-orchestrator ps                          # active, paused, and recently finished runs
-bunx smithers-orchestrator up wf.tsx --run-id r1 -d    # start detached
-smithers status r1 && bunx smithers-orchestrator why r1
+bunx smthrs ps                          # active, paused, and recently finished runs
+bunx smthrs up wf.tsx --run-id r1 -d    # start detached
+smithers status r1 && bunx smthrs why r1
 smithers pause r1                    # drain in-flight, park resumably
-bunx smithers-orchestrator up wf.tsx --run-id r1 --resume true
-bunx smithers-orchestrator supervise --all             # auto-resume anything with a stale heartbeat
-bunx smithers-orchestrator snapshots r1                # filesystem checkpoints per node/attempt
-bunx smithers-orchestrator restore r1 --node implement --seq 3
-bunx smithers-orchestrator timeline r1                 # every persisted frame
-bunx smithers-orchestrator fork wf.tsx --run-id r1 --frame 4   # branch a timeline (incl. under edited code)
+bunx smthrs up wf.tsx --run-id r1 --resume true
+bunx smthrs supervise --all             # auto-resume anything with a stale heartbeat
+bunx smthrs snapshots r1                # filesystem checkpoints per node/attempt
+bunx smthrs restore r1 --node implement --seq 3
+bunx smthrs timeline r1                 # every persisted frame
+bunx smthrs fork wf.tsx --run-id r1 --frame 4   # branch a timeline (incl. under edited code)
 ```
 
 Every command has an MCP twin (`get_run`, `list_snapshots`, `restore_checkpoint`, `replay_run`, …), so the agent operating a run gets the same durability surface you do.

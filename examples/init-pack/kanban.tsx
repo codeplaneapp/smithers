@@ -2,9 +2,9 @@
 // Run bounded parallel tickets and summarize their delivery state. It remains an example because the curated init pack installs only authoring and documentation workflows. Run `smithers graph examples/init-pack/kanban.tsx` after copying it into a project.
 // Copy this implementation and its referenced .smithers prompts/components/UI/lib files into a project to use it.
 // smithers-display-name: Kanban
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
-import { createSmithers, Sequence, Parallel, Worktree } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
+import { createSmithers, Sequence, Parallel, Worktree } from "smthrs";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve, relative } from "node:path";
 import { z } from "zod/v4";

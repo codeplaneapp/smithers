@@ -1,7 +1,7 @@
-/** @typedef {import("@smithers-orchestrator/graph/types").ExtractGraph} ExtractGraph */
+/** @typedef {import("@smthrs/graph/types").ExtractGraph} ExtractGraph */
 /** @typedef {{ extractGraph?: ExtractGraph }} CoreModule */
 /** @typedef {{ resolveWorktreePath?: (path: string, opts?: { baseRootDir?: string; workflowPath?: string | null }) => string }} WorktreePathModule */
-const GRAPH_SPECIFIER = "@smithers-orchestrator/graph";
+const GRAPH_SPECIFIER = "@smthrs/graph";
 // In-repo dev fallback: resolves packages/graph/src when the workspace package specifier is not installed.
 const LOCAL_GRAPH_SPECIFIER = "../../graph/src/index.js";
 /**
@@ -28,8 +28,7 @@ export async function resolveExtractGraph(importModule = importCoreModule) {
     return localExtractGraph;
   }
   throw new Error(
-    "Unable to load extractGraph from @smithers-orchestrator/graph. " +
-      "Install @smithers-orchestrator/graph and ensure it exports extractGraph.",
+    "Unable to load extractGraph from @smthrs/graph. " + "Install @smthrs/graph and ensure it exports extractGraph.",
   );
 }
 /**

@@ -2,35 +2,32 @@
 // separate files so CI can run each in its own bun process: every PGlite
 // instance holds >1GB of WASM memory bun cannot reliably reclaim, and the
 // whole suite in one process dies with a Bus error near the ~2GB ceiling.
-import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { SmithersDb } from "../../db/src/adapter.js";
 import { ensureSmithersTables } from "../../db/src/ensure.js";
-import { forkRun, getBranchInfo, listBranches } from "@smithers-orchestrator/time-travel/fork";
-import { loadSnapshot } from "@smithers-orchestrator/time-travel/snapshot";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import pg from "pg";
 import { createSmithers } from "../src/create.js";
 import { migrateSmithersStore } from "../src/migrateSmithersStore.js";
-import { openSmithersBackend } from "../src/openSmithersBackend.js";
-import { createSmithersPostgres } from "../src/create.js";
-import { openSmithersStore } from "../src/openSmithersStore.js";
 import { resolveSmithersBackendChoice } from "../src/resolveSmithersBackendChoice.js";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { cleanupTempDirs, makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
+import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 
 setDefaultTimeout(120_000);
 
-/** @type {string[]} */
-export const tempDirs = [];
 export const PG_URL = process.env.SMITHERS_TEST_PG_URL;
 
+// Each workspace holds a full PGlite store (~40MB) — the heaviest scratch dirs
+// the repo produces, and the ones that turned the $TMPDIR leak into a
+// disk-full outage. They go through the shared registry so the afterEach below
+// drains them by tracked path, including the ones a failing test never reached
+// its own cleanup for. Nothing reclaims them if bun dies outright (this suite's
+// documented Bus error): `bun test` never runs process-exit handlers, so the
+// registry's exit sweep is not a backstop here — the per-test drain is.
 export function makeWorkspace(name) {
-  const dir = join(tmpdir(), `${name}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const dir = makeTempDirPath(`${name}-`);
   mkdirSync(join(dir, ".smithers"), { recursive: true });
-  tempDirs.push(dir);
   return dir;
 }
 
@@ -46,15 +43,13 @@ export async function closeApi(api) {
 registerCleanup();
 function registerCleanup() {
   try {
-    afterEach(cleanupTempDirs);
+    afterEach(cleanupWorkspaces);
   } catch {
     // Imported outside `bun test` (e.g. a repro script): callers clean up themselves.
   }
 }
-function cleanupTempDirs() {
-  for (const dir of tempDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
-  }
+function cleanupWorkspaces() {
+  cleanupTempDirs();
   // Every test boots at least one PGlite (WASM) instance; without a forced
   // collection between tests the mapped WASM memories accumulate until bun
   // dies with a Bus error near the 2GB mark (reproducible from ~3 tests in).

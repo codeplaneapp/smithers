@@ -1,6 +1,6 @@
 import { SendDocumentOptions as SendDocumentOptions$1, SendMessageSmartOptions as SendMessageSmartOptions$1, SendMessageSmartResult as SendMessageSmartResult$1, TelegramClientService as TelegramClientService$1, TelegramClientConfig as TelegramClientConfig$1, TelegramDocumentInput as TelegramDocumentInput$1, TelegramInlineKeyboard as TelegramInlineKeyboard$1 } from './TelegramClientTypes.js';
 import { Context, Layer } from 'effect';
-import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
+import { SmithersError } from '@smthrs/errors/SmithersError';
 
 /**
  * Strip the bot token from any string (URLs, error messages, causes) so it

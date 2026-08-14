@@ -33,8 +33,8 @@ export type SmithersAlertPolicy = {
 
 /**
  * Where a workflow's `RunResult.output` rows are read from. Mirrors the
- * component-level `OutputTarget` union (see `@smithers-orchestrator/components`
- * `OutputTarget`), restated locally because `@smithers-orchestrator/scheduler`
+ * component-level `OutputTarget` union (see `@smthrs/components`
+ * `OutputTarget`), restated locally because `@smthrs/scheduler`
  * is a pure decision engine that must not depend on zod or components:
  *
  * - a Zod schema object registered via `createSmithers(...).outputs.<key>` (recommended),
@@ -49,6 +49,15 @@ export type SmithersWorkflowOutputTarget =
 export type SmithersWorkflowOptions = {
   alertPolicy?: SmithersAlertPolicy;
   cache?: boolean;
+  /**
+   * Per-workflow opt-out for the default-on post-failure autopsy. When `false`,
+   * a failure of this workflow never auto-launches the `post-failure` autopsy —
+   * use it for workflows that fail deliberately (e.g. fault-injection e2e
+   * suites) so they don't burn agent tokens autopsying an expected failure.
+   * Defaults to on. The CLI's `--no-post-failure` flag and `SMITHERS_POST_FAILURE=0`
+   * env var remain independent, broader opt-outs.
+   */
+  postFailureAutopsy?: boolean;
   /**
    * Explicit workflow-level output schema/table used to populate
    * `RunResult.output` (and therefore a parent `Subflow`'s child result). Pass

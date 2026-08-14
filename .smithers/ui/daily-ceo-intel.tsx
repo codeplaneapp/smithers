@@ -6,8 +6,8 @@ import {
   useGatewayNodeOutput,
   useGatewayRunTree,
   useGatewayRuns,
-} from "smithers-orchestrator/gateway-react";
-import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
+} from "smthrs/gateway-react";
+import { WorkflowUiStyles } from "smthrs/gateway-ui";
 import {
   Badge,
   Button,
@@ -30,7 +30,7 @@ import {
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 
 const WORKFLOW_KEY = "daily-ceo-intel";
 

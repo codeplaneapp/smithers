@@ -11,7 +11,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 import type { PublicIssue } from "../types";
 
 /** Transparency footer: every source checked today, ok or not, plus totals. */

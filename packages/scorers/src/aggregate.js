@@ -1,7 +1,7 @@
 // @smithers-type-exports-begin
 /** @typedef {import("./AggregateOptions.js").AggregateOptions} AggregateOptions */
 /** @typedef {import("./types.js").AggregateScore} AggregateScore */
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./DelegationRunScoreOptions.js").DelegationRunResults} DelegationRunResults */
 /** @typedef {import("./DelegationRunScoreOptions.js").DelegationRunScoreOptions} DelegationRunScoreOptions */
 /** @typedef {import("./types.js").ScoreResult} ScoreResult */

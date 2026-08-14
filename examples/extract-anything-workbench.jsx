@@ -4,11 +4,11 @@
  *
  * Shape: arbitrary input → candidate extractors (parallel) → validator/preview.
  */
-import { Sequence, Parallel } from "smithers-orchestrator";
+import { Sequence, Parallel } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import ExtractPrompt from "./prompts/extract-anything-workbench/extract.mdx";
 import ValidatePrompt from "./prompts/extract-anything-workbench/validate.mdx";

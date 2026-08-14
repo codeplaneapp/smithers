@@ -1,4 +1,4 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 /** @typedef {import("./getDiagnosticStrategy.js").AgentDiagnosticStrategy} AgentDiagnosticStrategy */
 /** @typedef {import("./DiagnosticCheck.ts").DiagnosticCheck} DiagnosticCheck */
 /** @typedef {import("./getDiagnosticStrategy.js").DiagnosticCheckDef} DiagnosticCheckDef */

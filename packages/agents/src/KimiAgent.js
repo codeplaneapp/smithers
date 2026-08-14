@@ -10,9 +10,60 @@ import {
   asString,
   toolKindFromName,
   createSyntheticIdGenerator,
+  reconstructUnifiedDiff,
 } from "./BaseCliAgent/index.js";
 import { normalizeCapabilityStringList } from "./capability-registry/index.js";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+
+/**
+ * Normalize kimi's real builtin file-mutating tools. Verified against the
+ * installed `kimi_cli` 1.48.0 vendor source
+ * (`kimi_cli/tools/file/write.py`, `kimi_cli/tools/file/replace.py`) since no
+ * committed transcript fixture captured a kimi tool call (see
+ * `tests/fixtures/cli-transcripts/README.md`). Despite kimi using the same
+ * OpenAI-style `function.arguments` JSON-string tool-call envelope as the
+ * `ToolCall` pydantic model documents, its builtin tool names and argument
+ * keys are NOT Claude Code's (`Edit`/`MultiEdit`/`Write`/`file_path`/
+ * `old_string`): kimi's tools are `WriteFile` (`{path, content, mode:
+ * "overwrite" | "append"}`) and `StrReplaceFile` (`{path, edit: {old, new,
+ * replace_all?} | Edit[]}`).
+ *
+ * @param {string} toolName
+ * @param {unknown} input
+ * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+ */
+function parseKimiFileChanges(toolName, input) {
+  if (!isRecord(input)) return undefined;
+  if (toolName === "WriteFile") {
+    const path = asString(input.path);
+    const content = asString(input.content);
+    if (!path || content === undefined) return undefined;
+    // Neither append nor overwrite includes prior file contents.
+    return [{ path, kind: "modified", source: "reported" }];
+  }
+  if (toolName === "StrReplaceFile") {
+    const path = asString(input.path);
+    if (!path) return undefined;
+    const rawEdit = input.edit;
+    if (!isRecord(rawEdit) && !Array.isArray(rawEdit)) return undefined;
+    const edits = Array.isArray(rawEdit) ? rawEdit : [rawEdit];
+    const changes = [];
+    for (const edit of edits) {
+      if (!isRecord(edit)) continue;
+      const oldString = asString(edit.old);
+      const newString = asString(edit.new);
+      if (oldString === undefined || newString === undefined) continue;
+      const unifiedDiff = reconstructUnifiedDiff(path, oldString, newString);
+      changes.push({
+        path,
+        kind: "modified",
+        ...(unifiedDiff ? { unifiedDiff, source: "reconstructed" } : { source: "reported" }),
+      });
+    }
+    return changes.length > 0 ? changes : undefined;
+  }
+  return undefined;
+}
 
 /**
  * The kimi CLI's OAuth refresh endpoint, mirroring the Python implementation
@@ -92,8 +143,8 @@ async function refreshKimiTokenIfNeeded(credsDir, fileName) {
       "Content-Type": "application/x-www-form-urlencoded",
       "X-Msh-Platform": "kimi_cli",
       "X-Msh-Version": "1.37.0",
-      "X-Msh-Device-Name": "smithers-orchestrator",
-      "X-Msh-Device-Model": "smithers-orchestrator",
+      "X-Msh-Device-Name": "smthrs",
+      "X-Msh-Device-Model": "smthrs",
       "X-Msh-Os-Version": process.platform,
     };
     try {
@@ -230,6 +281,10 @@ export function createKimiCapabilityRegistry(opts = {}) {
       supportsUiRequests: false,
       methods: [],
     },
+    fileChanges: {
+      supportsFileChanges: true,
+      supportsUnifiedDiff: true,
+    },
     builtIns: ["default"],
   };
 }
@@ -254,6 +309,11 @@ export class KimiAgent extends BaseCliAgent {
     let didEmitCompleted = false;
     let finalAnswer = "";
     const nextSyntheticId = createSyntheticIdGenerator();
+    // Tool-call names keyed by call id so the `role: "tool"` completion can
+    // keep the same action kind as the `started` event (a WriteFile started
+    // as `file_change` must not complete as a generic `tool` — nodeChat
+    // finalizes the pending change by action id + kind).
+    const toolNameById = new Map();
     /**
      * @param {string} line
      * @returns {AgentCliEvent[]}
@@ -290,6 +350,15 @@ export class KimiAgent extends BaseCliAgent {
           const fn = isRecord(toolCall.function) ? toolCall.function : undefined;
           const name = asString(fn?.name) ?? "tool";
           const id = asString(toolCall.id) ?? nextSyntheticId("kimi-tool");
+          toolNameById.set(id, name);
+          const rawArguments = asString(fn?.arguments);
+          let parsedArguments;
+          try {
+            parsedArguments = rawArguments ? JSON.parse(rawArguments) : undefined;
+          } catch {
+            parsedArguments = undefined;
+          }
+          const fileChanges = parseKimiFileChanges(name, parsedArguments);
           events.push({
             type: "action",
             engine: this.cliEngine,
@@ -300,7 +369,8 @@ export class KimiAgent extends BaseCliAgent {
               kind: toolKindFromName(name),
               title: name,
               detail: {
-                arguments: asString(fn?.arguments),
+                arguments: rawArguments,
+                ...(fileChanges ? { fileChanges } : {}),
               },
             },
             message: `Running ${name}`,
@@ -310,6 +380,8 @@ export class KimiAgent extends BaseCliAgent {
       }
       if (role === "tool") {
         const id = asString(payload.tool_call_id) ?? nextSyntheticId("kimi-tool");
+        const name = toolNameById.get(id);
+        toolNameById.delete(id);
         events.push({
           type: "action",
           engine: this.cliEngine,
@@ -317,8 +389,8 @@ export class KimiAgent extends BaseCliAgent {
           entryType: "thought",
           action: {
             id,
-            kind: "tool",
-            title: "tool result",
+            kind: name ? toolKindFromName(name) : "tool",
+            title: name ?? "tool result",
             detail: {},
           },
           message: asString(payload.content),
@@ -348,6 +420,24 @@ export class KimiAgent extends BaseCliAgent {
         ];
       },
     };
+  }
+  /**
+   * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
+   * into {@link AgentFileChange} records. `action.detail.arguments` is the raw
+   * JSON-string function-call arguments (OpenAI-style tool calls).
+   *
+   * @param {unknown} action
+   * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+   */
+  parseFileChanges(action) {
+    const fileAction = /** @type {{ title?: string; detail?: { arguments?: string } } | undefined} */ (action);
+    let parsedArguments;
+    try {
+      parsedArguments = fileAction?.detail?.arguments ? JSON.parse(fileAction.detail.arguments) : undefined;
+    } catch {
+      return undefined;
+    }
+    return parseKimiFileChanges(fileAction?.title ?? "", parsedArguments);
   }
   /**
    * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params

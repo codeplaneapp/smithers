@@ -1,8 +1,8 @@
 // smithers-source: authored
 // smithers-display-name: Workflow Authoring Benchmark
 // smithers-description: A builder agent authors a miniature issue-sweep workflow; scored deterministically (no LLM judges) against the rules in docs/workflows/authoring-rules.mdx.
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, ClaudeCodeAgent as BaseClaudeCodeAgent } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, ClaudeCodeAgent as BaseClaudeCodeAgent } from "smthrs";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
@@ -66,9 +66,9 @@ function builderPrompt(): string {
     `5. Do NOT nest a <Loop> as the literal immediate child of another <Loop> anywhere (that throws NESTED_LOOP) -- the per-issue correction loop must be reached through the <Parallel> lane, not wrapped in a second outer loop.`,
     `6. No agent calls are required -- every Task may use a plain compute function (a JS function returning a static/deterministic object) so this workflow runs instantly with no network access. Do not import or reference any agent.`,
     ``,
-    `Also author a test file at \`.smithers/workflows/.authoring-benchmark/${CANDIDATE_ID}.test.tsx\` that imports \`renderWorkflow\` from \`smithers-orchestrator/testing\`, imports the workflow module you just wrote, and calls \`renderWorkflow\` on it (a real render of the real workflow, not a hand-built graph object) asserting the graph renders without throwing. Register this new test file in \`.smithers/package.json\`'s \`test\` script (append its path to that space-separated list) so it actually runs under \`pnpm test\`.`,
+    `Also author a test file at \`.smithers/workflows/.authoring-benchmark/${CANDIDATE_ID}.test.tsx\` that imports \`renderWorkflow\` from \`smthrs/testing\`, imports the workflow module you just wrote, and calls \`renderWorkflow\` on it (a real render of the real workflow, not a hand-built graph object) asserting the graph renders without throwing. Register this new test file in \`.smithers/package.json\`'s \`test\` script (append its path to that space-separated list) so it actually runs under \`pnpm test\`.`,
     ``,
-    `When finished, verify your own work: run \`bun run .smithers/../apps/cli/src/index.js graph .smithers/workflows/.authoring-benchmark/${CANDIDATE_ID}.tsx\` (or the shorter \`bunx smithers-orchestrator graph\` if available) and confirm it renders with no error before you finish.`,
+    `When finished, verify your own work: run \`bun run .smithers/../apps/cli/src/index.js graph .smithers/workflows/.authoring-benchmark/${CANDIDATE_ID}.tsx\` (or the shorter \`bunx smthrs graph\` if available) and confirm it renders with no error before you finish.`,
     ``,
     `Return workflowPath (the workflow file's path), testPath (the test file's path), and a one-sentence summary.`,
   ].join("\n");

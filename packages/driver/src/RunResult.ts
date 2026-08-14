@@ -19,4 +19,15 @@ export type RunResult = {
    * {@link failedChildren}.
    */
   readonly failedChildKeys?: readonly string[];
+  /**
+   * Loops that exited via `onMaxReached: "return-last"` with their `until`
+   * predicate still false. Present (and non-empty) only on a `finished` result:
+   * the run completed, but these loops never converged (#1464 AWF-1). See
+   * `docs/runtime/run-state.mdx`.
+   */
+  readonly exhaustedLoops?: readonly {
+    readonly id: string;
+    readonly iteration: number;
+    readonly maxIterations: number | null;
+  }[];
 };

@@ -4,11 +4,11 @@
  * Pattern: Plan tasks → Execute in parallel → Review each → Mark done or loop back.
  * Use cases: issue processing, PR queues, ticket triage, batch operations.
  */
-import { Sequence, Parallel, Loop } from "smithers-orchestrator";
+import { Sequence, Parallel, Loop } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, write, edit, bash, grep } from "smithers-orchestrator/tools";
+import { read, write, edit, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import TriagePrompt from "./prompts/kanban/triage.mdx";
 import WorkPrompt from "./prompts/kanban/work.mdx";

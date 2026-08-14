@@ -11,7 +11,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { Effect } from "effect";
-import { Smithers } from "smithers-orchestrator";
+import { Smithers } from "smthrs";
 
 export const RESULT_SENTINEL = "__API_AB_RESULT__";
 

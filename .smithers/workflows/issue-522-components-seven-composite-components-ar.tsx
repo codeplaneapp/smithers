@@ -1,8 +1,8 @@
 // smithers-source: bespoke
 // smithers-display-name: Issue 522 — composite components deps wiring
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
-import { createSmithers, Sequence, Task } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
+import { createSmithers, Sequence, Task } from "smthrs";
 import { z } from "zod/v4";
 import { implementer, panelists, synthesizer, validator } from "../components/roles";
 import {

@@ -1,6 +1,6 @@
 {
-  "name": "@smithers-orchestrator/microsandbox",
-  "version": "0.32.0",
+  "name": "@smthrs/microsandbox",
+  "version": "0.34.0",
   "description": "Microsandbox provider for Smithers: run sandboxed workflows in local microVMs",
   "type": "module",
   "sideEffects": false,
@@ -26,8 +26,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@smithers-orchestrator/errors": "workspace:*",
-    "@smithers-orchestrator/sandbox": "workspace:*"
+    "@smthrs/errors": "workspace:*",
+    "@smthrs/sandbox": "workspace:*"
   },
   "peerDependencies": {
     "microsandbox": "0.6.6"

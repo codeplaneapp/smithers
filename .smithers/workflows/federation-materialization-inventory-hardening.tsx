@@ -3,8 +3,8 @@
 // smithers-display-name: Federation Materialization Inventory Hardening
 // smithers-description: Inventory every planned split-time materialization with exact update and drift policy.
 // smithers-tags: maintenance, federation, architecture
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 

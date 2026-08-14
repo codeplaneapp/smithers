@@ -1,4 +1,4 @@
-# @smithers-orchestrator/devtools — src
+# @smthrs/devtools — src
 
 Dependency-free inspection utilities for Smithers runs, in three clusters:
 

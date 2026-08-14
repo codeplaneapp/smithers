@@ -1,12 +1,13 @@
 import { Effect } from "effect";
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { openDurableSqliteDatabase } from "@smithers-orchestrator/db/openDurableSqliteDatabase";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { createHindsightMemoryStore, createLocalMemoryRuntime, createMemoryStore } from "@smithers-orchestrator/memory";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { openDurableSqliteDatabase } from "@smthrs/db/openDurableSqliteDatabase";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { createHindsightMemoryStore, createLocalMemoryRuntime, createMemoryStore } from "@smthrs/memory";
 import { createSmithers, createSmithersPostgres } from "./create.js";
 import { findSmithersAnchorDir } from "./findSmithersAnchorDir.js";
+import { assertNoReservedPublicOutputNames } from "./prepareOutputSchemas.js";
 import { resolveSmithersBackendChoice } from "./resolveSmithersBackendChoice.js";
 
 /**
@@ -33,7 +34,13 @@ function attachMemoryBackend(api, env, localMemoryDbPath) {
   const hindsightUrl = env.HINDSIGHT_URL?.trim();
   let contractStore;
   let closeLocalMemory;
-  if (api.db?.dialect !== "postgres") {
+  // The sqlite sidecar exists because the memory store was authored against a
+  // synchronous sqlite client, so a Postgres-dialect main database cannot serve
+  // it directly. `bun:sqlite` has no Node equivalent, so on Node the sidecar is
+  // not available at all: route memory to the main database instead of failing
+  // the whole backend. Bun keeps the sidecar.
+  const canOpenSqliteSidecar = typeof Bun !== "undefined";
+  if (api.db?.dialect !== "postgres" || !canOpenSqliteSidecar) {
     ensureSmithersTables(api.db);
     contractStore = createMemoryStore(api.db);
   } else {
@@ -89,11 +96,12 @@ function attachMemoryBackend(api, env, localMemoryDbPath) {
  * @param {import("./OpenSmithersBackendOptions.ts").OpenSmithersBackendOptions} [opts]
  * @returns {Promise<import("./CreateSmithersApi.ts").CreateSmithersApi<Schemas> & {
  *   close?: () => Promise<void>;
- *   memoryStore: import("@smithers-orchestrator/memory").MemoryStore;
- *   memoryService: import("@smithers-orchestrator/driver/MemoryRuntimeService").MemoryRuntimeService;
+ *   memoryStore: import("@smthrs/memory").MemoryStore;
+ *   memoryService: import("@smthrs/driver/MemoryRuntimeService").MemoryRuntimeService;
  * }>}
  */
 export async function openSmithersBackend(schemas = /** @type {Schemas} */ ({}), opts = {}) {
+  assertNoReservedPublicOutputNames(schemas);
   const startedAt = Date.now();
   const cwd = resolve(opts.cwd ?? process.cwd());
   const env = opts.env ?? process.env;

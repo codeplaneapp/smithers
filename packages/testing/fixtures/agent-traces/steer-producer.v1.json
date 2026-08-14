@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "id": "steer-producer",
+  "engineHint": "any",
+  "turns": [
+    {
+      "result": {
+        "kind": "ok",
+        "output": { "summary": "planned work", "ok": true }
+      }
+    }
+  ]
+}

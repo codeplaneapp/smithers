@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
-import { isPidAlive, parseRuntimeOwnerPid } from "@smithers-orchestrator/engine/runtime-owner";
+import { isPidAlive, parseRuntimeOwnerPid } from "@smthrs/engine/runtime-owner";
 import { terminateRunOwner } from "../cancel-cascade.js";
 import { BUILTIN_RESUME_CONFIG_KEY, buildBuiltinRelaunch } from "../resume-target.js";
 import { buildHijackEnvironment, resolveHijackCandidate, waitForHijackCandidate } from "../hijack.js";
 import { startOneshotStatusUpdater } from "./startOneshotStatusUpdater.js";
+import { smithersRuntimeReentry } from "../node-loader/smithersRuntimeSpawn.js";
 
 const ATTACH_LEASE_MS = 35_000;
 const RESTART_RELEASE_TIMEOUT_MS = 15_000;
@@ -249,7 +250,8 @@ export function createOneshotMonitorControl(options) {
 
   const launchBuiltin = async (config, runId, resume) => {
     const launch = buildBuiltinRelaunch(config, { runId, resume });
-    const child = spawnImpl(process.execPath, [options.cliEntry, ...launch.args], {
+    const runtime = smithersRuntimeReentry([options.cliEntry, ...launch.args]);
+    const child = spawnImpl(runtime.command, runtime.args, {
       cwd: launch.cwd,
       detached: true,
       stdio: "ignore",

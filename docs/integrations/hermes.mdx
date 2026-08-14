@@ -32,17 +32,17 @@ Smithers installs a **native Hermes plugin**, far richer than a bare MCP entry
 - **Gateway push-back**: a detached run launched from a chat session reports its
   result back into that same session.
 - **Slack approval buttons**: an approval gate becomes Approve / Deny buttons that
-  map straight to `bunx smithers-orchestrator approve` / `bunx smithers-orchestrator deny`.
+  map straight to `bunx smthrs approve` / `bunx smthrs deny`.
 
 ### Distribution is one command
 
 The plugin ships inside the Smithers CLI, so installing it is one command:
 
 ```bash
-bunx smithers-orchestrator hermes
+bunx smthrs hermes
 
 # `hermes` is a convenience alias for the generic form:
-bunx smithers-orchestrator mcp add --agent hermes
+bunx smthrs mcp add --agent hermes
 ```
 
 The command writes the plugin into `~/.hermes/plugins/smithers/`, installs the
@@ -83,8 +83,8 @@ In both runtimes the guidance is the same: a Smithers workflow is a **superset
 of a skill**, since a skill is static instructions while a workflow is
 executable, durable, typed, inspectable, composable, and optimizable. Capture
 reusable procedures as workflows (even small one-task ones), and optimize
-them like skills with `bunx smithers-orchestrator eval`, scorers, and
-`bunx smithers-orchestrator optimize`. See the
+them like skills with `bunx smthrs eval`, scorers, and
+`bunx smthrs optimize`. See the
 [smithers skill](https://github.com/smithersai/smithers/blob/main/skills/smithers/SKILL.md).
 
 ## Links

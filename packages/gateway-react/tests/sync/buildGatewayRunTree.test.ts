@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  flattenGatewayRunNode,
-  mapSmithersElectricRow,
-  type GatewayRunNode,
-} from "@smithers-orchestrator/gateway-client";
+import { flattenGatewayRunNode, mapSmithersElectricRow, type GatewayRunNode } from "@smthrs/gateway-client";
 import { buildGatewayRunTree, SYNTHETIC_RUN_ROOT_KEY } from "../../src/sync/buildGatewayRunTree.ts";
 
 describe("buildGatewayRunTree", () => {

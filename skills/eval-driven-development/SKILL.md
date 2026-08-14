@@ -77,7 +77,7 @@ Case shape:
    ```
 
 4. Run it (in-repo use `bun apps/cli/src/index.js eval`; consumers use
-   `bunx smithers-orchestrator eval`):
+   `bunx smthrs eval`):
 
    ```bash
    bun apps/cli/src/index.js eval .smithers/workflows/<wf>.tsx \

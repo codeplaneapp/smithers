@@ -15,17 +15,17 @@ should start at the [Product API](/guide/what-is-smithers) instead.
 
 Almost everything lives behind one facade. Import components, agents, tools,
 scorers, memory, openapi, observability, the server/gateway, db, time-travel, and
-errors from `smithers-orchestrator`.
+errors from `smthrs`.
 
 ```ts
-import { createSmithers, Task } from "smithers-orchestrator";
+import { createSmithers, Task } from "smthrs";
 ```
 
 The browser/React Gateway SDK is published as subpaths instead, so it can ship
 independently of the engine and stay client-safe:
 
-- `smithers-orchestrator/gateway-client` · the framework-free RPC/WS client.
-- `smithers-orchestrator/gateway-react` · the React hooks and provider built on it.
+- `smthrs/gateway-client` · the framework-free RPC/WS client.
+- `smthrs/gateway-react` · the React hooks and provider built on it.
 
 ## How to read a page
 

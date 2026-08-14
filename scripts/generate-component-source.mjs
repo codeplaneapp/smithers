@@ -8,7 +8,7 @@
  * writes a `## Source` section containing, as one tab per file:
  *   - the component's own source (e.g. ScanFixVerify.js)
  *   - every repo file it imports: local `./*.js` siblings and resolved
- *     `@smithers-orchestrator/*` files (one level deep, `react` excluded)
+ *     `@smthrs/*` files (one level deep, `react` excluded)
  *   - the prop/type files it references via JSDoc `import("./*.ts")` typedefs
  *
  * The section is delimited by GENERATED:COMPONENT-SOURCE markers and is fully
@@ -73,7 +73,7 @@ function resolveImport(spec, fromFile) {
  * Collect the repo files a component depends on, in a deterministic order:
  * real `import ... from` specifiers first (source order), then JSDoc
  * `import("./x.ts")` type references. `react` and other bare externals are
- * skipped; only local and `@smithers-orchestrator/*` files are included.
+ * skipped; only local and `@smthrs/*` files are included.
  */
 function collectDeps(srcPath) {
   const src = readFileSync(srcPath, "utf8");
@@ -89,7 +89,7 @@ function collectDeps(srcPath) {
   for (const match of src.matchAll(/import\s+[^;]*?\bfrom\s*["']([^"']+)["']/g)) {
     const spec = match[1];
     if (spec === "react") continue;
-    if (!spec.startsWith(".") && !spec.startsWith("@smithers-orchestrator/")) continue;
+    if (!spec.startsWith(".") && !spec.startsWith("@smthrs/")) continue;
     add(resolveImport(spec, srcPath));
   }
   for (const match of src.matchAll(/import\(["'](\.\/[^"']+\.tsx?)["']\)/g)) {

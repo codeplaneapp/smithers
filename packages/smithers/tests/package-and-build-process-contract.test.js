@@ -72,7 +72,7 @@ async function importDependencyBoundaryModule(cwd) {
 function scaffoldConsumer() {
   const dir = tempRoot("smithers-package-consumer-");
   mkdirSync(join(dir, "node_modules"), { recursive: true });
-  linkDir(resolve(root, "packages/smithers"), join(dir, "node_modules/smithers-orchestrator"));
+  linkDir(resolve(root, "packages/smithers"), join(dir, "node_modules/smthrs"));
   if (existsSync(resolve(root, "node_modules/@types"))) {
     linkDir(resolve(root, "node_modules/@types"), join(dir, "node_modules/@types"));
   }
@@ -84,40 +84,40 @@ describe("PACKAGE_AND_BUILD process contracts", () => {
     const dir = scaffoldConsumer();
     const script = `
       const specs = [
-        "smithers-orchestrator",
-        "smithers-orchestrator/tools",
-        "smithers-orchestrator/testing",
-        "smithers-orchestrator/jsx-runtime",
-        "smithers-orchestrator/jsx-dev-runtime",
-        "smithers-orchestrator/gateway-client",
-        "smithers-orchestrator/gateway-react",
-        "smithers-orchestrator/scorers",
-        "smithers-orchestrator/gateway-ui",
-        "smithers-orchestrator/ui",
-        "smithers-orchestrator/sandbox",
-        "smithers-orchestrator/telegram",
-        "smithers-orchestrator/control-plane",
-        "smithers-orchestrator/cloudflare",
-        "smithers-orchestrator/daytona",
-        "smithers-orchestrator/microsandbox",
-        "smithers-orchestrator/vercel",
-        "smithers-orchestrator/aws",
-        "smithers-orchestrator/gcp",
-        "smithers-orchestrator/dom/renderer",
-        "smithers-orchestrator/gateway",
-        "smithers-orchestrator/mdx-plugin",
-        "smithers-orchestrator/memory",
-        "smithers-orchestrator/observability",
-        "smithers-orchestrator/openapi",
-        "smithers-orchestrator/serve",
-        "smithers-orchestrator/server",
+        "smthrs",
+        "smthrs/tools",
+        "smthrs/testing",
+        "smthrs/jsx-runtime",
+        "smthrs/jsx-dev-runtime",
+        "smthrs/gateway-client",
+        "smthrs/gateway-react",
+        "smthrs/scorers",
+        "smthrs/gateway-ui",
+        "smthrs/ui",
+        "smthrs/sandbox",
+        "smthrs/telegram",
+        "smthrs/control-plane",
+        "smthrs/cloudflare",
+        "smthrs/daytona",
+        "smthrs/microsandbox",
+        "smthrs/vercel",
+        "smthrs/aws",
+        "smthrs/gcp",
+        "smthrs/dom/renderer",
+        "smthrs/gateway",
+        "smthrs/mdx-plugin",
+        "smthrs/memory",
+        "smthrs/observability",
+        "smthrs/openapi",
+        "smthrs/serve",
+        "smthrs/server",
       ];
       const resolved = [];
       for (const spec of specs) {
         const mod = await import(spec);
         resolved.push([spec, Object.keys(mod).length]);
       }
-      for (const spec of ["smithers-orchestrator/pi-plugin", "smithers-orchestrator/pi-extension"]) {
+      for (const spec of ["smthrs/pi-plugin", "smthrs/pi-extension"]) {
         try {
           await import(spec);
           resolved.push([spec, "unexpected-success"]);
@@ -133,8 +133,8 @@ describe("PACKAGE_AND_BUILD process contracts", () => {
     const rows = JSON.parse(result.stdout);
     const failures = rows.filter(([, count]) => count === 0 || count === "unexpected-success");
     expect(failures).toEqual([]);
-    expect(Object.fromEntries(rows)["smithers-orchestrator/pi-plugin"]).toBe("ERR_MODULE_NOT_FOUND");
-    expect(Object.fromEntries(rows)["smithers-orchestrator/pi-extension"]).toBe("ERR_MODULE_NOT_FOUND");
+    expect(Object.fromEntries(rows)["smthrs/pi-plugin"]).toBe("ERR_MODULE_NOT_FOUND");
+    expect(Object.fromEntries(rows)["smthrs/pi-extension"]).toBe("ERR_MODULE_NOT_FOUND");
   });
 
   test("published type stubs and JSX runtime typecheck from a real TypeScript consumer", () => {
@@ -151,7 +151,7 @@ describe("PACKAGE_AND_BUILD process contracts", () => {
             strict: true,
             skipLibCheck: true,
             jsx: "react-jsx",
-            jsxImportSource: "smithers-orchestrator",
+            jsxImportSource: "smthrs",
             noEmit: true,
             types: ["node"],
           },
@@ -164,15 +164,15 @@ describe("PACKAGE_AND_BUILD process contracts", () => {
     write(
       join(dir, "app.tsx"),
       `
-        import { Workflow, Task, createSmithers, defineTool } from "smithers-orchestrator";
-        import { jsx } from "smithers-orchestrator/jsx-runtime";
-        import { runTask } from "smithers-orchestrator/testing";
-        import * as gatewayClient from "smithers-orchestrator/gateway-client";
-        import * as gatewayReact from "smithers-orchestrator/gateway-react";
-        import * as scorers from "smithers-orchestrator/scorers";
-        import * as sandbox from "smithers-orchestrator/sandbox";
-        import * as cloudflare from "smithers-orchestrator/cloudflare";
-        import type { CreateSmithersApi, SmithersWorkflow, TaskProps } from "smithers-orchestrator";
+        import { Workflow, Task, createSmithers, defineTool } from "smthrs";
+        import { jsx } from "smthrs/jsx-runtime";
+        import { runTask } from "smthrs/testing";
+        import * as gatewayClient from "smthrs/gateway-client";
+        import * as gatewayReact from "smthrs/gateway-react";
+        import * as scorers from "smthrs/scorers";
+        import * as sandbox from "smthrs/sandbox";
+        import * as cloudflare from "smthrs/cloudflare";
+        import type { CreateSmithersApi, SmithersWorkflow, TaskProps } from "smthrs";
 
         const workflow = <Workflow name="consumer"><Task id="task" output="task">hi</Task></Workflow>;
         const create: typeof createSmithers = createSmithers;

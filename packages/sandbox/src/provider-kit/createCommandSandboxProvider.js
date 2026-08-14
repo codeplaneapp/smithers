@@ -1,4 +1,4 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { normalizeSandboxEgressConfig, sandboxEgressEnv } from "../egress.js";
 import { SANDBOX_PROVIDER_REQUEST_ENV } from "./SANDBOX_PROVIDER_REQUEST_ENV.js";
 import { SANDBOX_PROVIDER_RESULT_ENV } from "./SANDBOX_PROVIDER_RESULT_ENV.js";
@@ -65,7 +65,7 @@ export function createCommandSandboxProvider(options) {
       request.heartbeat({ sandboxId: request.sandboxId, stage: `${id}-request-shipped`, remoteId: session.remoteId });
 
       const env = {
-        ...(options.env ?? {}),
+        ...options.env,
         ...egressEnv,
         [SANDBOX_PROVIDER_REQUEST_ENV]: requestPath,
         [SANDBOX_PROVIDER_RESULT_ENV]: resultPath,

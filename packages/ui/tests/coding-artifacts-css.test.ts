@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
+import { workflowUiThemeCss } from "@smthrs/ui-styleguide";
 import { artifactsCss, CODING_ARTIFACTS_CSS_ID } from "../src/artifacts/artifactsCss";
 
 /** Strip every var(--x, fallback) expression, including rgba fallbacks. */

@@ -1,8 +1,4 @@
-import {
-  applyDiffBundle,
-  computeDiffBundle,
-  computeDiffBundleBetweenRefs,
-} from "@smithers-orchestrator/engine/effect/diff-bundle";
+import { applyDiffBundle, computeDiffBundle, computeDiffBundleBetweenRefs } from "@smthrs/engine/effect/diff-bundle";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -137,6 +133,35 @@ function finalizeRunBundle(bundle, baseRef, terminalRef) {
 }
 
 /**
+ * Compute a live run diff from the working copy of every checkout the run's
+ * attempts touched. Best-effort: a lane that cannot be diffed right now
+ * (reaped worktree, mid-rebase checkout) is skipped rather than failing the
+ * whole request — the terminal base-to-terminal diff stays the authoritative
+ * final snapshot once the run ends.
+ */
+async function liveRunBundles({ attempts, baseRef, vcsType, computeDiffBundleImpl, resolveCommitPointerImpl }) {
+  const latestSeqByCwd = new Map();
+  for (const row of attempts) {
+    const cwd = typeof row?.jjCwd === "string" && row.jjCwd ? row.jjCwd : null;
+    if (!cwd) continue;
+    const seq = Number(row?.attempt ?? 0);
+    latestSeqByCwd.set(cwd, Math.max(latestSeqByCwd.get(cwd) ?? 0, Number.isFinite(seq) ? seq : 0));
+  }
+  const resolveRef = vcsType === "jj" || !vcsType ? resolveCommitPointerImpl : async (ref) => ref;
+  const bundles = [];
+  const failures = [];
+  for (const [cwd, seq] of latestSeqByCwd) {
+    try {
+      const resolvedBaseRef = (await resolveRef(baseRef, cwd)) ?? baseRef;
+      bundles.push({ ...(await computeDiffBundleImpl(resolvedBaseRef, cwd, seq)), baseRef });
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  return { bundles, laneCount: latestSeqByCwd.size, failures };
+}
+
+/**
  * Compute the final run diff directly between the run base and terminal VCS
  * revisions. Each checkout lane is reduced to its terminal tree; cached node
  * bundles are used only when the terminal checkout has been reaped.
@@ -145,6 +170,7 @@ export async function getRunDiffRoute({
   runId: rawRunId,
   resolveRun,
   computeDiffBundleBetweenRefsImpl = computeDiffBundleBetweenRefs,
+  computeDiffBundleImpl = computeDiffBundle,
   resolveCommitPointerImpl = resolveCommitPointer,
 }) {
   try {
@@ -171,13 +197,31 @@ export async function getRunDiffRoute({
         },
       };
     if (!TERMINAL_RUN_STATUSES.has(run.status)) {
-      return {
-        ok: false,
-        error: {
-          code: "VcsError",
-          message: "Run diff is unavailable until the run reaches a terminal state.",
-        },
-      };
+      // Live path: diff the run base against the CURRENT working copy of
+      // every checkout an attempt recorded, so watching UIs see edits as the
+      // agent makes them. Read-only (`git diff <base> -- .` + untracked
+      // files), same size cap as the terminal diff, and never cached — the
+      // terminal base-to-terminal diff below stays the final snapshot.
+      const attempts = await resolved.adapter.listAttemptsForRun(runId);
+      const live = await liveRunBundles({
+        attempts,
+        baseRef,
+        vcsType: run.vcsType,
+        computeDiffBundleImpl,
+        resolveCommitPointerImpl,
+      });
+      if (live.bundles.length === 0) {
+        if (live.laneCount === 0) return { ok: true, payload: { seq: 0, baseRef, patches: [], live: true } };
+        return {
+          ok: false,
+          error: {
+            code: "VcsError",
+            message: `Unable to compute a live run diff: ${live.failures[0] ?? "no checkout could be diffed."}`,
+          },
+        };
+      }
+      const bundle = live.bundles.length === 1 ? live.bundles[0] : mergeBundles(live.bundles, baseRef);
+      return finalizeRunBundle({ ...bundle, live: true }, baseRef, "live");
     }
     const attempts = await resolved.adapter.listAttemptsForRun(runId);
     const terminalAttempts = terminalAttemptsByCwd(attempts);

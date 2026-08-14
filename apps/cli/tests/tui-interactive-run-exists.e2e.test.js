@@ -18,8 +18,8 @@ setDefaultTimeout(240_000);
  * clack prompt, so no PTY is required to exercise it).
  */
 const okWorkflow = [
-  "/** @jsxImportSource smithers-orchestrator */",
-  'import { createSmithers, Workflow, Task } from "smithers-orchestrator";',
+  "/** @jsxImportSource smthrs */",
+  'import { createSmithers, Workflow, Task } from "smthrs";',
   'import { z } from "zod";',
   "",
   "const { smithers, outputs } = createSmithers({",

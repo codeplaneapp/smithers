@@ -5,7 +5,7 @@
  * REAL product path (no-mocks):
  *   - Build a real in-memory DB via `ensureSmithersTables` (the same schema the
  *     runtime bootstraps) and drive it through the real
- *     `@smithers-orchestrator/db/adapter` `SmithersDb`.
+ *     `@smthrs/db/adapter` `SmithersDb`.
  *   - Seed a 3-deep `continueAsNew` lineage with the real `adapter.insertRun`
  *     (which validates the row and writes `parent_run_id`):
  *       R1 (status='continued', parent=NULL)
@@ -29,8 +29,8 @@ import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 
 const R1 = "run-case07-r1-root";
 const R2 = "run-case07-r2-mid";

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
-import { useGatewayNodeOutput } from "@smithers-orchestrator/gateway-react";
-import { Button, EmptyState, Skeleton } from "@smithers-orchestrator/ui";
+import { useGatewayNodeOutput } from "@smthrs/gateway-react";
+import { Button, EmptyState, Skeleton } from "@smthrs/ui";
 import { StatusPill } from "../cards/StatusPill";
 import type { RunNode } from "../runs/Run";
 

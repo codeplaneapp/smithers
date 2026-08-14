@@ -1,11 +1,11 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test, afterEach, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { startServer } from "../src/index.js";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { createTestDb, sleep } from "../../smithers/tests/helpers.js";
 import { ddl, schema } from "../../smithers/tests/schema.js";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { resolve } from "node:path";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 function buildDb() {
@@ -197,8 +197,8 @@ const fakeAgent = {
     const outputValue = options.value ?? 42;
     writeFileSync(
       workflowPath,
-      `/** @jsxImportSource smithers-orchestrator */
-	import { createSmithers } from "smithers-orchestrator";
+      `/** @jsxImportSource smthrs */
+	import { createSmithers } from "smthrs";
 	import { z } from "zod";
 	${slowAgent}
 	

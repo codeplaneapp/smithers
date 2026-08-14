@@ -2,8 +2,8 @@
 
 This slice moves the apps/smithers PWA off its hand-written gateway RPC helper
 (`src/gateway/gatewayRpc.ts`) and 3-second `setInterval` polls onto the
-first-class SDK packages — `@smithers-orchestrator/gateway-client` and (where
-React hooks make sense) `@smithers-orchestrator/gateway-react`.
+first-class SDK packages — `@smthrs/gateway-client` and (where
+React hooks make sense) `@smthrs/gateway-react`.
 
 ## What changed
 
@@ -84,7 +84,7 @@ RPC-frame `Unauthorized` errors arrive as a `GatewayRpcError` and the store's
 ## Out of scope
 
 - Migrating `WorkflowRunUi` / `GatewayRunInspector` to `useGatewayRun` /
-  `useGatewayRunEvents` from `@smithers-orchestrator/gateway-react` is a
+  `useGatewayRunEvents` from `@smthrs/gateway-react` is a
   separate slice (slice B). The store/SDK boundary is enough to remove the
   polling loop and fix the `launchRun` bug today.
 - Mounting `SmithersGatewayProvider` at the app root + a hooks-only inspector

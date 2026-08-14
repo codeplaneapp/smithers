@@ -8,38 +8,45 @@ import {
   syncCuratedSkill,
 } from "./curatedSkillSync.js";
 import { syncSkillsAfterUpgrade } from "./syncSkillsAfterUpgrade.js";
-import { extractBackendFlag, findFirstPositionalIndex, rewriteBareResumeFlagArgv } from "./argv-utils.js";
+import {
+  extractBackendFlag,
+  findFirstPositionalIndex,
+  rewriteBareHerdrFlagArgv,
+  rewriteBareResumeFlagArgv,
+} from "./argv-utils.js";
 import { CHAT_CREATE_PROMPT, INLINE_CHAT_ENGINES, buildInlineChatWorkflow } from "./buildInlineChatWorkflow.js";
 import { parseJsonArgument, tryParseJsonInput } from "./json-args.js";
 import { wrapCliCommandHandlersWithInputBounds } from "./cli-command-bounds.js";
-import { resolve, dirname, basename, relative, join } from "node:path";
+import { resolve, dirname, basename, relative, join, isAbsolute } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { closeSync, readFileSync, existsSync, mkdirSync, openSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { Effect, Fiber } from "effect";
 import { Cli, SyncSkills, z } from "incur";
-import { isRunHeartbeatFresh, runWorkflow, renderFrame, resolveSchema } from "@smithers-orchestrator/engine";
-import { __engineInternals } from "@smithers-orchestrator/engine/engine";
-import { readWorkflowEntryHash, readWorkflowGraphHash } from "@smithers-orchestrator/engine/workflow-hash";
+import { isRunHeartbeatFresh, runWorkflow, renderFrame, resolveSchema } from "@smthrs/engine";
+import { __engineInternals } from "@smthrs/engine/engine";
+import { readWorkflowEntryHash, readWorkflowGraphHash } from "@smthrs/engine/workflow-hash";
 import { mdxPlugin } from "./mdx-plugin.js";
-import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
-import { signalRun } from "@smithers-orchestrator/engine/signals";
-import { loadInput, loadOutputs } from "@smithers-orchestrator/db/snapshot";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
-import { parseStateKey } from "@smithers-orchestrator/scheduler/parseStateKey";
-import { normalizeRunStartedBy, SmithersCtx } from "@smithers-orchestrator/driver";
+import { smithersRuntimeReentry, smithersRuntimeSpawn } from "./node-loader/smithersRuntimeSpawn.js";
+import { approveNode, denyNode } from "@smthrs/engine/approvals";
+import { isPidAlive, parseRuntimeOwnerPid } from "@smthrs/engine/runtime-owner";
+import { signalRun } from "@smthrs/engine/signals";
+import { loadInput, loadOutputs } from "@smthrs/db/snapshot";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { computeRunStateFromRow, deriveRunState } from "@smthrs/db/runState";
+import { parseStateKey } from "@smthrs/scheduler/parseStateKey";
+import { normalizeRunStartedBy, SmithersCtx } from "@smthrs/driver";
 import { resolveCliStartedBy } from "./runStartedBy.js";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
 import { runFork, runPromise, runSync } from "./smithersRuntime.js";
-import { trackEvent } from "@smithers-orchestrator/observability/metrics";
-import { vcsToolingStatus } from "@smithers-orchestrator/vcs/vcsToolingStatus";
-import { findVcsRoot } from "@smithers-orchestrator/vcs/find-root";
-import { listSmithersWorktrees } from "@smithers-orchestrator/engine/listSmithersWorktrees";
-import { reapWorktrees } from "@smithers-orchestrator/engine/reapWorktrees";
-import { revertToAttempt } from "@smithers-orchestrator/time-travel/revert";
-import { retryTask } from "@smithers-orchestrator/time-travel/retry-task";
-import { timeTravel } from "@smithers-orchestrator/time-travel/timetravel";
+import { trackEvent } from "@smthrs/observability/metrics";
+import { vcsToolingStatus } from "@smthrs/vcs/vcsToolingStatus";
+import { findVcsRoot } from "@smthrs/vcs/find-root";
+import { listSmithersWorktrees } from "@smthrs/engine/listSmithersWorktrees";
+import { reapWorktrees } from "@smthrs/engine/reapWorktrees";
+import { revertToAttempt } from "@smthrs/time-travel/revert";
+import { retryTask } from "@smthrs/time-travel/retry-task";
+import { timeTravel } from "@smthrs/time-travel/timetravel";
 import { spawn } from "node:child_process";
 import { CronExpressionParser } from "cron-parser";
 import {
@@ -47,9 +54,10 @@ import {
   isHumanRequestPastTimeout,
   validateHumanRequestValue,
   waitForHumanAnswer,
-} from "@smithers-orchestrator/engine/human-requests";
-import { SmithersError } from "@smithers-orchestrator/errors";
+} from "@smthrs/engine/human-requests";
+import { SmithersError } from "@smthrs/errors";
 import { findAndOpenDb, findSmithersDb } from "./find-db.js";
+import { reapOrphanedAgentsOnBoot } from "./reap-orphaned-agents.js";
 import { cliWorkspace } from "./cliWorkspace.js";
 import {
   cascadeCancelRun,
@@ -110,6 +118,55 @@ import { parseAgentWiringArgv, parseSkillsSubcommandArgv } from "./agent-wiring/
 import { EXTRA_MCP_AGENTS, EXTRA_SKILL_AGENTS, wireExtraAgents } from "./agent-wiring/wireExtraAgents.js";
 import { launchConversationHijackSession, persistConversationHijackHandoff } from "./hijack-session.js";
 import { colorizeEventText, formatAge, formatElapsedCompact, formatEventLine, formatRelativeOffset } from "./format.js";
+import {
+  attachTailKeyControls,
+  deriveTailStatus,
+  formatTailFinalStatusLine,
+  isTailActiveState,
+  lingerUntilClosed,
+  tailRunEvents,
+} from "./tail.js";
+import { runApproveWatch } from "./approve-watch.js";
+import { buildOverviewBlock, overviewDigestSignature, overviewSignature } from "./tail-overview.js";
+import { createNodeHud } from "./node-hud.js";
+import { runTopCommand } from "./smithers-top.js";
+import { SmithersGatewayClient } from "smthrs/gateway-client";
+import { resolveGatewaySource, resolveSupervisorGatewayTarget } from "./supervisor-observation.js";
+import { HERDR_PROTOCOL, createHerdrClient, createHerdrRunSurface, workspaceLabelMatches } from "@smthrs/herdr";
+import {
+  buildAgentNodeFilter,
+  buildGateCommand,
+  buildOverviewCommand,
+  buildTailCommand,
+  createUpHerdrSurface,
+  ensureSessionStubWorkspace,
+  followRunIntoHerdr,
+  herdrRunIdFromWorkspaceLabel,
+  herdrSessionOf,
+  herdrWorkspaceLabel,
+  isSystemWorkflowSource,
+  launchHerdrHijackPane,
+  makeHerdrStderrLogger,
+  normalizeHerdrCockpitOpts,
+  openHerdrNodePane,
+  probeCompatibleHerdr,
+  reconcileHerdrResumeGates,
+  resolveHerdrHijackOption,
+  resolveHerdrOption,
+} from "./herdr.js";
+import { defaultSessionNameForRun } from "@smthrs/herdr";
+import {
+  countInFlightAgentSiblings,
+  detectHerdrMirrorForRun,
+  formatTakeoverWarning,
+  listActiveRunsForSteer,
+  nodeExistsInRun,
+  resolveSteerAuthor,
+  resolveSteerTargetNode,
+} from "./steer.js";
+import { enqueueSteer } from "@smthrs/engine/steers";
+import { fuzzySelect } from "./fuzzy-select.js";
+import { confirm, isCancel, text } from "@clack/prompts";
 import { EVENT_CATEGORY_VALUES, eventTypesForCategory, normalizeEventCategory } from "./event-categories.js";
 import { aggregateNodeDetailEffect, renderNodeDetailHuman } from "./node-detail.js";
 import { diagnoseRunEffect, diagnosisCtaCommands, renderWhyDiagnosisHuman } from "./why-diagnosis.js";
@@ -131,9 +188,11 @@ import {
   needsPreflightNotice,
   preflightConfigEntry,
 } from "./oneshot-preflight.js";
-import { listAccounts, removeAccount } from "@smithers-orchestrator/accounts";
-import { getUsageForAccounts, formatUsageReports } from "@smithers-orchestrator/usage";
+import { listAccounts, removeAccount } from "@smthrs/accounts";
+import { getUsageForAccounts, formatUsageReports } from "@smthrs/usage";
 import { runAgentAdd, pingAccount } from "./agent-commands/runAgentAdd.js";
+import { runAgentAddWithTmuxLogin } from "./agent-commands/tmuxLogin.js";
+import { formatAccountIdentity, readAccountIdentity } from "./agent-commands/accountIdentity.js";
 import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
 import { getWorkflowFollowUpCtas } from "./workflow-pack.js";
 import { buildMonitoringGuidance, hasCustomUi, workflowIdFromPath } from "./monitoring-suggestion.js";
@@ -188,6 +247,7 @@ import { ask } from "./ask.js";
 import { runScheduler } from "./scheduler.js";
 import { resumeRunDetached } from "./resume-detached.js";
 import { launchPostFailureAutopsy } from "./launchPostFailureAutopsy.js";
+import { classifyTerminalCause } from "./classifyTerminalCause.js";
 import { resolveLaunchRootDir, parsePersistedRootDir } from "./resolve-root.js";
 import { DETACHED_RUN_LOG_FILE_ENV } from "./detachedRunLogEnv.js";
 import { reapDetachedRunLogs } from "./reapDetachedRunLogs.js";
@@ -203,11 +263,16 @@ import {
   formatCliAgentCapabilityDoctorReport,
   getCliAgentCapabilityDoctorReport,
   getCliAgentCapabilityReport,
-} from "@smithers-orchestrator/agents/cli-capabilities";
+} from "@smthrs/agents/cli-capabilities";
 import { findAndOpenSupervisorDb, parseDurationMs, supervisorLoopEffect, supervisorPollEffect } from "./supervisor.js";
 import { DEFAULT_LIFECYCLE_EVENT_TYPES, renderAttemptPool, tallyAttemptPool } from "./observability-helpers.js";
 import { buildDurabilityRunOptions } from "./up-engine-options.js";
-import { BUILTIN_RESUME_CONFIG_KEY, buildBuiltinResumeConfig } from "./resume-target.js";
+import {
+  BUILTIN_RESUME_CONFIG_KEY,
+  buildBuiltinRelaunch,
+  buildBuiltinResumeConfig,
+  resolveResumeTarget,
+} from "./resume-target.js";
 import { WATCH_MIN_INTERVAL_MS, runWatchLoop, watchIntervalSecondsToMs } from "./watch.js";
 import { runMcpModeIfRequested } from "./mcp/mcp-mode.js";
 import {
@@ -278,7 +343,7 @@ async function loadWorkflowAsync(path) {
 // Advertise this CLI's module directory to workflows launched by it. System
 // workflows (the seeded `init`) import CLI internals through this so they
 // always run the exact code that launched them, instead of depending on
-// `@smithers-orchestrator/cli` being resolvable from the pack's node_modules.
+// `@smthrs/cli` being resolvable from the pack's node_modules.
 process.env.SMITHERS_CLI_SRC_DIR ??= dirname(fileURLToPath(import.meta.url));
 
 /**
@@ -461,6 +526,11 @@ const FOLLOW_POLL_INTERVAL_MS = 500;
 // Hard-exit deadline once a graceful shutdown starts, so a hung shutdown never
 // requires `kill -9`.
 const FORCE_EXIT_BACKSTOP_MS = 5000;
+// Mirror the engine's RUN_HEARTBEAT_STALE_MS (engine.js): the staleness window
+// the approve/deny resume claim uses. A parked run has a null heartbeat (always
+// stale); this only bounds the rare case where the row still carries an old
+// heartbeat the owner-liveness gate already judged not-fresh.
+const CLI_RESUME_HEARTBEAT_STALE_MS = 30_000;
 /**
  * @param {string | undefined} status
  */
@@ -477,6 +547,102 @@ function formatStatusExitCode(status) {
   if (status === "cancelled") return 2;
   return 1;
 }
+/**
+ * After `approve`/`deny` records a decision, a detached run that parked at the
+ * gate has no live engine to act on it — the operator reads "approve did
+ * nothing" and the run stays parked until someone runs `up --resume`. When the
+ * caller opted in (default; `--no-resume` opts out) and the run is genuinely
+ * parked with a verifiably-absent owner, relaunch the engine detached so the
+ * decision takes effect immediately.
+ *
+ * Owner-liveness gate (mirrors supervisor.js processCandidateEffect:216-235): a
+ * live owner PID — or a fresh heartbeat on a still-"running" row — is a busy
+ * engine that will pick the decision up itself; resuming then would race a
+ * second engine against the merge queue and corrupt the run's frames. Never
+ * resume in that case. `markRunWaiting` nulls owner+heartbeat when a run parks,
+ * so a genuinely-parked gate run falls through to the resume.
+ *
+ * Durable claim fencing (mirrors supervisor.js processApprovalDecidedCandidate-
+ * Effect:412-441): the owner-liveness gate is a point-in-time read and does NOT
+ * coordinate this resume with a concurrent one — a supervisor `waiting-approval`
+ * poll or a second `approve`/`deny` racing this same decision would otherwise
+ * double-spawn `up --resume --force` and, because `--force` skips the engine
+ * boot's RUN_STILL_RUNNING guard, briefly run two engines against one run's
+ * merge queue. We therefore atomically claim the run first and thread the claim
+ * to the child so the engine boot VALIDATES the claim (engine.js RUN_RESUME_CLAIM
+ * path) instead of taking the ownership-steal `--force` branch; a lost claim
+ * means another resumer already won, so we do not spawn.
+ *
+ * @param {SmithersDb} adapter
+ * @param {any} run  the run row read AFTER the decision was recorded
+ * @param {string} runId
+ * @param {{ executable?: string }} [resumeOptions]
+ * @returns {Promise<{ resumed: true; pid: number } | { resumed: false; reason: "run-missing" | "not-parked" | "no-workflow-path" | "workflow-missing" | "owner-alive" | "claim-lost" | "spawn-failed" }>}
+ */
+async function maybeResumeDecidedDetachedRun(adapter, run, runId, resumeOptions) {
+  if (!run) return { resumed: false, reason: "run-missing" };
+  if (run.status !== "waiting-approval" && run.status !== "waiting-event")
+    return { resumed: false, reason: "not-parked" };
+  const resumeTarget = resolveResumeTarget(run, { workflowExists: existsSync });
+  if (!resumeTarget) {
+    return { resumed: false, reason: run.workflowPath ? "workflow-missing" : "no-workflow-path" };
+  }
+  const ownerPid = parseRuntimeOwnerPid(run.runtimeOwnerId);
+  const ownerAlive = ownerPid !== null && isPidAlive(ownerPid);
+  if (ownerAlive || isRunHeartbeatFresh(run)) return { resumed: false, reason: "owner-alive" };
+  // Atomically claim the parked run before spawning. The CAS matches on the
+  // parked (owner, heartbeat) tuple, so of two concurrent resumers only one
+  // wins; the loser's claim fails and it does not spawn a second engine.
+  const claimOwnerId = `cli-resume:${process.pid}:${Date.now()}`;
+  const claimHeartbeatAtMs = Date.now();
+  const restoreRuntimeOwnerId = run.runtimeOwnerId ?? null;
+  const restoreHeartbeatAtMs = run.heartbeatAtMs ?? null;
+  let claimed = false;
+  try {
+    claimed = await adapter.claimRunForResumeEffect({
+      runId,
+      expectedStatus: run.status,
+      expectedRuntimeOwnerId: restoreRuntimeOwnerId,
+      expectedHeartbeatAtMs: restoreHeartbeatAtMs,
+      staleBeforeMs: Date.now() - CLI_RESUME_HEARTBEAT_STALE_MS,
+      claimOwnerId,
+      claimHeartbeatAtMs,
+      requireStale: true,
+    });
+  } catch {
+    claimed = false;
+  }
+  if (!claimed) return { resumed: false, reason: "claim-lost" };
+  const claim = { claimOwnerId, claimHeartbeatAtMs, restoreRuntimeOwnerId, restoreHeartbeatAtMs };
+  let pid = null;
+  try {
+    pid = resumeRunDetached(resumeTarget, runId, claim, resumeOptions);
+  } catch {
+    // Spawn threw synchronously.
+    pid = null;
+  }
+  // Release the claim on ANY spawn failure — a synchronous throw OR a spawn
+  // that produced no pid. resumeRunDetached returns `child.pid ?? null`, and an
+  // async failure (ENOENT for a missing `bun`, a hit process limit) surfaces as
+  // `child.pid === undefined` WITHOUT throwing, so a null pid is a failed boot
+  // too. Reporting resumed:true with pid:null there would strand the run
+  // claimed by an engine that never started until the 30s staleness window
+  // elapses — and in the detached, no-supervisor case this feature targets,
+  // nothing would ever retry it, so the run stays parked while we report it
+  // resumed.
+  if (pid === null || pid === undefined) {
+    await Promise.resolve(
+      adapter.releaseRunResumeClaimEffect({
+        runId,
+        claimOwnerId,
+        restoreRuntimeOwnerId,
+        restoreHeartbeatAtMs,
+      }),
+    ).catch(() => {});
+    return { resumed: false, reason: "spawn-failed" };
+  }
+  return { resumed: true, pid };
+}
 const LOG_FOLLOW_ACTIVE_STATES = new Set(["running", "waiting-approval", "waiting-event", "waiting-timer"]);
 /**
  * @param {unknown} state
@@ -486,8 +652,26 @@ function isLogFollowActiveState(state) {
   return typeof state === "string" && LOG_FOLLOW_ACTIVE_STATES.has(state);
 }
 /**
+ * Resolve the DEFAULT follow behavior for `logs <run>` when neither `-f/--follow`
+ * nor `--no-follow` was passed: follow only on an interactive TTY (a piped or
+ * redirected `logs` snapshots and exits instead of hanging the pipe).
+ *
+ * `SMITHERS_LOGS_ASSUME_TTY=1` is a test seam that forces the TTY-default
+ * (would-follow) branch even when stdout is not a TTY, so a non-interactive
+ * harness can exercise BOTH the default-follow path and the `--no-follow`
+ * override of it. It never changes a real interactive session (which already
+ * has a TTY) and is subordinate to explicit `-f`/`--no-follow`.
+ * @returns {boolean}
+ */
+function logsFollowTtyDefault() {
+  if (process.env.SMITHERS_LOGS_ASSUME_TTY === "1") {
+    return true;
+  }
+  return Boolean(process.stdout.isTTY);
+}
+/**
  * @param {string} runId
- * @param {import("@smithers-orchestrator/db/runState").RunStateView | undefined} stateView
+ * @param {import("@smthrs/db/runState").RunStateView | undefined} stateView
  */
 function reportLogFollowInactiveDerivedState(runId, stateView) {
   if (stateView?.state !== "stale" && stateView?.state !== "orphaned") return;
@@ -636,6 +820,30 @@ function redactConnectionStringForCli(value) {
     return `${url.protocol}//${auth}${url.host}${url.pathname}${url.search}${url.hash}`;
   } catch {
     return "<redacted>";
+  }
+}
+let stdioGuardInstalled = false;
+/**
+ * Keep a foreground engine alive when the calling shell closes its stdio pipe
+ * (e.g. `smithers retry-task ... | head`). Without this the first progress
+ * write after the pipe closes kills the whole engine — SIGPIPE under Bun, an
+ * unhandled stream EPIPE under Node — orphaning the run while its agent
+ * children keep going. Closed-pipe writes are silently dropped; every other
+ * stream error still crashes as before.
+ */
+function guardAgainstClosedStdio() {
+  if (stdioGuardInstalled) return;
+  stdioGuardInstalled = true;
+  try {
+    process.on("SIGPIPE", () => {});
+  } catch {
+    // Signal not supported on this platform/runtime.
+  }
+  for (const stream of [process.stdout, process.stderr]) {
+    stream.on("error", (err) => {
+      if (/** @type {NodeJS.ErrnoException} */ (err)?.code === "EPIPE") return;
+      throw err;
+    });
   }
 }
 function buildProgressReporter() {
@@ -1144,9 +1352,14 @@ async function* streamRunEventsCommand(c) {
     }
     const initialRunState = await computeRunStateFromRow(adapter, run);
     const initialFollowState = initialRunState.state === "succeeded" ? "finished" : initialRunState.state;
+    // Follow only when explicitly asked (-f/--follow), or, when unset,
+    // only if stdout is a TTY. A piped/redirected `logs <run>` (non-TTY)
+    // snapshots and exits instead of hanging the pipe. --no-follow forces
+    // snapshot even on a TTY.
+    const shouldFollow = c.options.follow ?? logsFollowTtyDefault();
     const isActive = isLogFollowActiveState(initialFollowState);
-    if (!c.options.follow || !isActive) {
-      if (c.options.follow) {
+    if (!shouldFollow || !isActive) {
+      if (shouldFollow) {
         reportLogFollowInactiveDerivedState(c.args.runId, initialRunState);
       }
       return c.ok(undefined, {
@@ -1198,6 +1411,637 @@ async function* streamRunEventsCommand(c) {
         return c.ok(undefined, { cta: { commands: ctaCommands } });
       }
     }
+  } finally {
+    cleanup?.();
+  }
+}
+/**
+ * `smithers approve --watch <run>`: the interactive gate-watching loop (the run's
+ * pending approval gates + human requests, answered by keystroke, then linger on
+ * terminal). Thin wrapper around {@link runApproveWatch} in approve-watch.js —
+ * opens the run's store, validates the run exists, and drives the loop against
+ * process stdin/stdout. Errors clean with a non-zero exit.
+ *
+ * @param {any} c
+ */
+async function runApproveWatchCommand(c) {
+  const fail = makeFail(c);
+  let cleanup;
+  try {
+    const db = await findAndOpenDb();
+    cleanup = db.cleanup;
+    const adapter = db.adapter;
+    const runId = c.args.runId;
+    const run = await adapter.getRun(runId);
+    if (!run) {
+      return fail({
+        code: "RUN_NOT_FOUND",
+        message: `Run not found: ${runId}`,
+        exitCode: 4,
+      });
+    }
+    await runApproveWatch({
+      adapter,
+      runId,
+      node: c.options.node,
+      decidedBy: c.options.by,
+      stdin: process.stdin,
+      emit: (text) => process.stdout.write(text),
+      // Auto-resume a parked detached run after each committed decision,
+      // matching the non-watch approve/deny commands. --no-resume opts out.
+      resumeDetached: c.options.resume !== false ? maybeResumeDecidedDetachedRun : undefined,
+    });
+    return c.ok(undefined);
+  } catch (error) {
+    return fail({
+      code: error instanceof SmithersError ? error.code : "APPROVE_WATCH_FAILED",
+      message: error?.message ?? String(error),
+      exitCode: 1,
+    });
+  } finally {
+    cleanup?.();
+  }
+}
+/**
+ * Read-only tail of a run's output. Streams persisted + live events straight
+ * from the workspace store (no gateway server), following live runs until they
+ * reach a terminal state. With --node, prints that node's NodeOutput verbatim;
+ * otherwise a concise run-level overview; with --format jsonl, raw event JSON.
+ *
+ * @param {any} c
+ */
+async function runTailCommand(c) {
+  const fail = makeFail(c);
+  let cleanup;
+  /** @type {{ exit: () => void } | null} */
+  let activeHud = null;
+  try {
+    const db = await findAndOpenDb();
+    cleanup = db.cleanup;
+    const adapter = db.adapter;
+    const runId = c.args.runId;
+    const run = await adapter.getRun(runId);
+    if (!run) {
+      return fail({
+        code: "RUN_NOT_FOUND",
+        message: `Run not found: ${runId}`,
+        exitCode: 4,
+      });
+    }
+    // jsonl is selected by the command option (`--format=jsonl`) or the
+    // global format flag (`--format jsonl` / `--json`), mirroring how
+    // `events` detects machine output.
+    const jsonl = c.options.format === "jsonl" || c.format === "jsonl" || c.format === "json";
+    const nodeId = c.options.node;
+    // `tail` no longer aliases `logs` (≤0.29), where `-n` meant "last N lines".
+    // `-n`/`--node` now selects a node. Warn when it matches nothing so a stale
+    // `smithers tail <run> -n 50` reads as "no such node" instead of a silent
+    // empty hang. Soft: a failed node read must not block tailing.
+    if (typeof nodeId === "string" && nodeId !== "") {
+      let nodeOk = true;
+      try {
+        nodeOk = await nodeExistsInRun(adapter, runId, nodeId);
+      } catch {
+        nodeOk = true;
+      }
+      if (!nodeOk) {
+        // A node the run has not reached yet also "matches nothing" — with
+        // --follow the tail will pick it up when it starts, so don't claim
+        // "nothing to tail" absolutely. The alias note catches the common
+        // `tail <run> -n 50` misuse (a bare line-count now read as a node id).
+        const willFollow = c.options.follow !== false;
+        const suffix = willFollow ? " yet — a --follow tail will pick it up if that node starts" : "";
+        process.stderr.write(
+          `[smithers] --node ${nodeId} matches no node in ${runId}${suffix}. Note: 'tail' is no longer an alias of 'logs'; '-n' selects a node, not a line count (use 'smithers logs <run> -n N' for the last N events).\n`,
+        );
+      }
+    }
+    const follow = c.options.follow !== false;
+    const baseMs = run.startedAtMs ?? run.createdAtMs ?? Date.now();
+    // HUD: only the node-detail HUD remains; require explicit --hud (herdr
+    // passes it for node panes). `--overview` renders the append-only board.
+    const hudExplicit = c.options.hud === true;
+    const useHud = !jsonl && hudExplicit;
+
+    const cliEntry = fileURLToPath(import.meta.url);
+    const steerEligible = Boolean(process.stdin.isTTY) && !jsonl && typeof nodeId === "string" && nodeId !== "";
+    let cancelledByKey = false;
+
+    // ── Node HUD path (stream body + bottom dual-control dock) ────────
+    /** @type {ReturnType<typeof createNodeHud> | null} */
+    let nodeHud = null;
+    // Node tabs: require explicit --hud (herdr always passes it), allow non-TTY.
+    // `useHud` already folds in `!jsonl`; do NOT re-admit `hudExplicit` here or
+    // `--format jsonl --node X --hud` would enter the alt-screen and swallow the
+    // machine output that jsonl consumers expect on stdout.
+    if (useHud && typeof nodeId === "string" && nodeId !== "") {
+      nodeHud = createNodeHud({ runId, nodeId });
+      activeHud = nodeHud;
+      nodeHud.enter();
+      process.stderr.write(`[smithers] node HUD active for ${runId} / ${nodeId}\n`);
+    }
+
+    // `--overview` append-only board (non-HUD): reprinted after each drain.
+    let overviewSig = null;
+    const onStatusBlock =
+      c.options.overview && !jsonl && !nodeId
+        ? async (status) => {
+            const nodes = await adapter.listNodes(runId);
+            let queuedSteers = [];
+            try {
+              const allSteers = await adapter.listSteers(runId);
+              queuedSteers = allSteers.filter((steer) => steer.status === "queued");
+            } catch {
+              // Best-effort: the board still renders without the steer summary.
+            }
+            const nowMs = Date.now();
+            const startedAtMs = run.startedAtMs ?? run.createdAtMs ?? baseMs;
+            const digestSig = overviewDigestSignature({
+              runId,
+              status,
+              nodes,
+              queuedSteers,
+              startedAtMs,
+              nowMs,
+            });
+            const sig = `${overviewSignature(status, nodes, digestSig)}\u0002${queuedSteers.length}`;
+            if (sig === overviewSig) {
+              return;
+            }
+            overviewSig = sig;
+            let pendingApprovals = [];
+            try {
+              pendingApprovals = await adapter.listPendingApprovals(runId);
+            } catch {
+              // Best-effort enrichment: the board still renders without CTAs.
+            }
+            process.stdout.write(
+              buildOverviewBlock({
+                runId,
+                status,
+                nodes,
+                pendingApprovals,
+                queuedSteers,
+                includeDigest: true,
+                startedAtMs,
+                nowMs,
+              }),
+            );
+          }
+        : nodeHud
+          ? async (status) => {
+              nodeHud.setMeta({
+                status: status ?? "unknown",
+                note: isTailActiveState(status) ? "dual-control dock · always at bottom" : "run finished",
+              });
+              if (!isTailActiveState(status)) {
+                nodeHud.setDock("linger");
+              }
+            }
+          : undefined;
+
+    const keyControls =
+      steerEligible && follow
+        ? attachTailKeyControls({
+            runId,
+            nodeId: /** @type {string} */ (nodeId),
+            cliEntry,
+            onClose: () => {
+              cancelledByKey = true;
+            },
+            // Hijack (`h`) aborts every in-flight sibling agent run-wide; let the
+            // pane refuse loudly instead of silently killing them (see tail.js
+            // takeover). Same seam the node-detail pane wires.
+            inFlightSiblings: () => countInFlightAgentSiblings(adapter, runId, /** @type {string} */ (nodeId)),
+            emit: nodeHud ? (t) => nodeHud.pushBody(t) : undefined,
+            onDock: nodeHud
+              ? (state) => {
+                  if (state.mode === "input") {
+                    nodeHud.setDock("input", state.buffer ?? "");
+                  } else if (state.mode === "linger") {
+                    nodeHud.setDock("linger");
+                  } else {
+                    nodeHud.setDock("idle");
+                    if (state.note) nodeHud.setMeta({ note: state.note });
+                  }
+                }
+              : undefined,
+          })
+        : undefined;
+    let finalStatus;
+    try {
+      finalStatus = await tailRunEvents(adapter, run, {
+        nodeId,
+        jsonl,
+        follow,
+        baseMs,
+        emit: (text) => {
+          if (nodeHud) nodeHud.pushBody(text);
+          else process.stdout.write(text);
+        },
+        onStatusBlock,
+        isCancelled: keyControls ? () => cancelledByKey : undefined,
+      });
+    } finally {
+      // Restore the terminal (exit raw mode, drop the listener) before any
+      // linger re-arms its own, and before the process exits on cancel.
+      keyControls?.stop();
+    }
+    // Pretty output ends with a one-line terminal-state summary once the run
+    // is done; jsonl output stays raw event JSON only. A key-driven close skips
+    // the summary/linger and exits at once.
+    if (!jsonl && !isTailActiveState(finalStatus) && !cancelledByKey) {
+      if (nodeHud) {
+        nodeHud.setMeta({ status: finalStatus ?? "finished" });
+        nodeHud.setDock("linger");
+        nodeHud.pushBody(formatTailFinalStatusLine(runId, finalStatus));
+      } else {
+        process.stdout.write(`${formatTailFinalStatusLine(runId, finalStatus)}\n`);
+      }
+      // With --linger (herdr panes pass it), hold the terminal open after the
+      // run finishes so the human can read the output, until they press
+      // q/Enter or Ctrl-C.
+      if (c.options.linger) {
+        if (nodeHud) {
+          // Stay in node HUD; reuse linger key semantics via a second control set.
+          await lingerUntilClosed(
+            steerEligible
+              ? {
+                  steer: { runId, nodeId, cliEntry },
+                  suppressChromeHints: true,
+                  emit: (t) => {
+                    if (
+                      t.includes("hijack") ||
+                      t.includes("taking over") ||
+                      t.includes("run finished") ||
+                      t.includes("steer") ||
+                      t.includes("steer")
+                    ) {
+                      nodeHud.setMeta({ note: t.trim() });
+                    }
+                  },
+                }
+              : {
+                  suppressChromeHints: true,
+                  emit: (t) => nodeHud.pushBody(t),
+                },
+          );
+        } else {
+          await lingerUntilClosed(steerEligible ? { steer: { runId, nodeId, cliEntry } } : undefined);
+        }
+      }
+    }
+    if (nodeHud) {
+      nodeHud.exit();
+      activeHud = null;
+    }
+    return c.ok(undefined);
+  } catch (error) {
+    return fail({
+      code: error instanceof SmithersError ? error.code : "TAIL_FAILED",
+      message: error?.message ?? String(error),
+      exitCode: 1,
+    });
+  } finally {
+    try {
+      activeHud?.exit();
+    } catch {
+      /* ignore */
+    }
+    cleanup?.();
+  }
+}
+/**
+ * `smithers herdr status`: ping the herdr server over its socket and report the
+ * version / protocol / compatibility in one line. Non-zero exit with a clear
+ * message when no server is reachable (absent socket or binary). Pure client — no
+ * herdr binary required.
+ *
+ * @param {any} c
+ */
+async function runHerdrStatusCommand(c) {
+  const fail = makeFail(c);
+  const session = c.options.session;
+  const client = createHerdrClient({ session, logger: () => {} });
+  const pong = await client.ping().catch(() => undefined);
+  if (!pong) {
+    return fail({
+      code: "HERDR_UNAVAILABLE",
+      message: `No herdr server reachable at ${client.socketPath}. Start one with \`herdr server\`${session ? ` (session ${session})` : ""}.`,
+      exitCode: 4,
+    });
+  }
+  const compatible = pong.protocol === HERDR_PROTOCOL;
+  process.stderr.write(
+    `herdr ${pong.version} · protocol ${pong.protocol} (client expects ${HERDR_PROTOCOL}: ${compatible ? "compatible" : "MISMATCH"})\n`,
+  );
+  if (!compatible) {
+    return fail({
+      code: "HERDR_PROTOCOL_MISMATCH",
+      message: `Herdr protocol mismatch at ${client.socketPath}: client expects ${HERDR_PROTOCOL}, server reports ${pong.protocol}. No mutating Herdr command was run.`,
+      exitCode: 4,
+      details: {
+        socketPath: client.socketPath,
+        version: pong.version,
+        protocol: pong.protocol,
+        expectedProtocol: HERDR_PROTOCOL,
+        compatible: false,
+        capabilities: pong.capabilities ?? null,
+      },
+    });
+  }
+  return c.ok({
+    socketPath: client.socketPath,
+    version: pong.version,
+    protocol: pong.protocol,
+    expectedProtocol: HERDR_PROTOCOL,
+    compatible,
+    capabilities: pong.capabilities ?? null,
+  });
+}
+/**
+ * `smithers herdr attach <run-id>`: mirror an existing run into a herdr workspace
+ * and follow its status until the run is terminal or Ctrl-C. Adopts an existing
+ * workspace/panes by the deterministic label (no duplicates), replays current
+ * node states (panes only for still-active nodes), then follows live events via
+ * the DB poller. Detaching (run end or SIGINT) never closes the workspace.
+ *
+ * @param {any} c
+ */
+async function runHerdrAttachCommand(c) {
+  const fail = makeFail(c);
+  let cleanup;
+  try {
+    const db = await findAndOpenDb();
+    cleanup = db.cleanup;
+    const adapter = db.adapter;
+    const runId = c.args.runId;
+    const run = await adapter.getRun(runId);
+    if (!run) {
+      return fail({ code: "RUN_NOT_FOUND", message: `Run not found: ${runId}`, exitCode: 4 });
+    }
+    const session = c.options.session;
+    const probe = createHerdrClient({ session, logger: () => {} });
+    const compatibility = await probeCompatibleHerdr(probe);
+    if (!compatibility.available) {
+      if (compatibility.reason === "protocol_mismatch") {
+        return fail({
+          code: "HERDR_PROTOCOL_MISMATCH",
+          message: `${compatibility.error instanceof Error ? compatibility.error.message : "Herdr protocol mismatch"}. No Herdr changes were made.`,
+          exitCode: 4,
+          details: {
+            socketPath: probe.socketPath,
+            protocol: compatibility.pong?.protocol ?? null,
+            expectedProtocol: HERDR_PROTOCOL,
+          },
+        });
+      }
+      return fail({
+        code: "HERDR_UNAVAILABLE",
+        message: `No herdr server reachable at ${probe.socketPath}. Start one with \`herdr server\`${session ? ` (session ${session})` : ""}.`,
+        exitCode: 4,
+      });
+    }
+    const workflowId = run.workflowPath ? workflowIdFromPath(run.workflowPath) : (run.workflowName ?? "smithers");
+    const label = herdrWorkspaceLabel(workflowId, runId);
+    const status = deriveTailStatus(await computeRunStateFromRow(adapter, run));
+    // Already terminal: summarize and exit without creating a workspace or any
+    // panes for long-finished nodes.
+    if (!isTailActiveState(status)) {
+      process.stderr.write(`${formatTailFinalStatusLine(runId, status)}\n`);
+      process.stderr.write(`Run is no longer active; no herdr panes created.\n`);
+      return c.ok({ runId, status, attached: false });
+    }
+    const surface = createHerdrRunSurface({
+      client: probe,
+      session,
+      workspaceLabel: label,
+      cwd: process.cwd(),
+      logger: makeHerdrStderrLogger(),
+      tailCommand: buildTailCommand(fileURLToPath(import.meta.url)),
+      gateCommand: buildGateCommand(fileURLToPath(import.meta.url)),
+      overviewCommand: buildOverviewCommand(fileURLToPath(import.meta.url), {
+        dbPath: db.dbPath,
+        cwd: process.cwd(),
+      }),
+      nodeFilter: buildAgentNodeFilter(adapter, runId),
+      closeWorkspaceOnFinish: false,
+    });
+    let cancelled = false;
+    const onSigint = () => {
+      cancelled = true;
+    };
+    process.on("SIGINT", onSigint);
+    let finalStatus;
+    try {
+      finalStatus = await followRunIntoHerdr(adapter, run, surface, {
+        isCancelled: () => cancelled,
+      });
+    } finally {
+      process.removeListener("SIGINT", onSigint);
+      // Detach only — closeWorkspaceOnFinish is false, so the workspace stays.
+      await surface.close();
+    }
+    if (cancelled) {
+      process.stderr.write(`Detached from run ${runId} (workspace left open).\n`);
+      return c.ok({ runId, status: "detached", attached: true });
+    }
+    process.stderr.write(`${formatTailFinalStatusLine(runId, finalStatus)}\n`);
+    return c.ok({ runId, status: finalStatus, attached: true });
+  } catch (error) {
+    return fail({
+      code: error instanceof SmithersError ? error.code : "HERDR_ATTACH_FAILED",
+      message: error?.message ?? String(error),
+      exitCode: 1,
+    });
+  } finally {
+    cleanup?.();
+  }
+}
+/**
+ * `smithers herdr open <run-id> [node-id]`: open (or re-open) an on-demand herdr
+ * pane for a run — a specific node's lingering tail, or (no node id) the run-level
+ * overview — into the run's mirror workspace. Gives a pane to a node the adaptive
+ * mirror never paned (an unpaned swarm worker past the tab cap) or re-surfaces a
+ * finished node's output on demand. Find-or-create is outcome-tolerant (a terminal
+ * workspace renamed with an outcome marker is re-adopted, not duplicated) and a
+ * node with a live pane is adopted, not duplicated.
+ *
+ * @param {any} c
+ */
+async function runHerdrOpenCommand(c) {
+  const fail = makeFail(c);
+  let cleanup;
+  try {
+    const db = await findAndOpenDb();
+    cleanup = db.cleanup;
+    const adapter = db.adapter;
+    const runId = c.args.runId;
+    const nodeId = typeof c.args.nodeId === "string" && c.args.nodeId !== "" ? c.args.nodeId : undefined;
+    const run = await adapter.getRun(runId);
+    if (!run) {
+      return fail({ code: "RUN_NOT_FOUND", message: `Run not found: ${runId}`, exitCode: 4 });
+    }
+    const session = c.options.session;
+    const probe = createHerdrClient({ session, logger: () => {} });
+    const compatibility = await probeCompatibleHerdr(probe);
+    if (!compatibility.available) {
+      if (compatibility.reason === "protocol_mismatch") {
+        return fail({
+          code: "HERDR_PROTOCOL_MISMATCH",
+          message: `${compatibility.error instanceof Error ? compatibility.error.message : "Herdr protocol mismatch"}. No Herdr changes were made.`,
+          exitCode: 4,
+          details: {
+            socketPath: probe.socketPath,
+            protocol: compatibility.pong?.protocol ?? null,
+            expectedProtocol: HERDR_PROTOCOL,
+          },
+        });
+      }
+      return fail({
+        code: "HERDR_UNAVAILABLE",
+        message: `No herdr server reachable at ${probe.socketPath}. Start one with \`herdr server\`${session ? ` (session ${session})` : ""}.`,
+        exitCode: 4,
+      });
+    }
+    const workflowId = run.workflowPath ? workflowIdFromPath(run.workflowPath) : (run.workflowName ?? "smithers");
+    const label = herdrWorkspaceLabel(workflowId, runId);
+    const cliPath = fileURLToPath(import.meta.url);
+    const argv = nodeId
+      ? buildTailCommand(cliPath)({ runId, nodeId })
+      : buildOverviewCommand(cliPath, {
+          dbPath: db.dbPath,
+          cwd: process.cwd(),
+        })({ runId });
+    const opened = await openHerdrNodePane({
+      client: probe,
+      session,
+      label,
+      cwd: process.cwd(),
+      runId,
+      nodeId,
+      argv,
+      logger: makeHerdrStderrLogger(),
+    });
+    if (!opened) {
+      return fail({
+        code: "HERDR_OPEN_FAILED",
+        message: `Could not open a herdr pane for ${nodeId ? `node ${nodeId} of ` : ""}run ${runId}.`,
+        exitCode: 1,
+      });
+    }
+    process.stderr.write(
+      `Opened ${nodeId ? `node ${nodeId}` : "overview"} pane for run ${runId} (agent ${opened.name}).\n`,
+    );
+    return c.ok({
+      runId,
+      nodeId: nodeId ?? null,
+      name: opened.name,
+      paneId: opened.paneId,
+      workspaceId: opened.workspaceId ?? null,
+      tab: opened.tabLabel,
+    });
+  } catch (error) {
+    return fail({
+      code: error instanceof SmithersError ? error.code : "HERDR_OPEN_FAILED",
+      message: error?.message ?? String(error),
+      exitCode: 1,
+    });
+  } finally {
+    cleanup?.();
+  }
+}
+/**
+ * `smithers herdr clean [--session <s>]`: close herdr workspaces that mirror a
+ * smithers run whose run is TERMINAL in the DB. A workspace must carry the
+ * versioned Smithers ownership marker and its complete label must exactly match
+ * the identity reconstructed from the known run row. A run still active
+ * (running / waiting) is left open. Prints what it closed.
+ *
+ * @param {any} c
+ */
+async function runHerdrCleanCommand(c) {
+  const fail = makeFail(c);
+  let cleanup;
+  try {
+    const db = await findAndOpenDb();
+    cleanup = db.cleanup;
+    const adapter = db.adapter;
+    const session = c.options.session;
+    const client = createHerdrClient({ session, logger: () => {} });
+    const compatibility = await probeCompatibleHerdr(client);
+    if (!compatibility.available) {
+      if (compatibility.reason === "protocol_mismatch") {
+        return fail({
+          code: "HERDR_PROTOCOL_MISMATCH",
+          message: `${compatibility.error instanceof Error ? compatibility.error.message : "Herdr protocol mismatch"}. No Herdr changes were made.`,
+          exitCode: 4,
+          details: {
+            socketPath: client.socketPath,
+            protocol: compatibility.pong?.protocol ?? null,
+            expectedProtocol: HERDR_PROTOCOL,
+          },
+        });
+      }
+      return fail({
+        code: "HERDR_UNAVAILABLE",
+        message: `No herdr server reachable at ${client.socketPath}. Start one with \`herdr server\`${session ? ` (session ${session})` : ""}.`,
+        exitCode: 4,
+      });
+    }
+    const list = await client.tryCall("workspace.list", {});
+    const workspaces = list && Array.isArray(list.workspaces) ? list.workspaces : [];
+    /** @type {{ workspaceId: string, label: string, runId: string, status: string }[]} */
+    const closed = [];
+    let skippedActive = 0;
+    for (const ws of workspaces) {
+      if (!ws || typeof ws.label !== "string" || typeof ws.workspace_id !== "string") {
+        continue;
+      }
+      const wsRunId = herdrRunIdFromWorkspaceLabel(ws.label);
+      if (!wsRunId) {
+        // Not a smithers run workspace — never touch it.
+        continue;
+      }
+      let run;
+      try {
+        run = await adapter.getRun(wsRunId);
+      } catch {
+        run = undefined;
+      }
+      if (!run) {
+        // Ownership marker names a run id we do not know — leave it alone.
+        continue;
+      }
+      const workflowId = run.workflowPath ? workflowIdFromPath(run.workflowPath) : (run.workflowName ?? "smithers");
+      const expectedLabel = herdrWorkspaceLabel(workflowId, wsRunId);
+      if (!workspaceLabelMatches(ws.label, expectedLabel)) {
+        // A marker alone is insufficient for destructive ownership: the full
+        // workflow + run identity must be the one Smithers would have created.
+        continue;
+      }
+      const status = deriveTailStatus(await computeRunStateFromRow(adapter, run));
+      if (isTailActiveState(status)) {
+        // A live run's workspace stays open.
+        skippedActive += 1;
+        continue;
+      }
+      await client.tryCall("workspace.close", { workspace_id: ws.workspace_id });
+      closed.push({ workspaceId: ws.workspace_id, label: ws.label, runId: wsRunId, status });
+      process.stderr.write(`Closed workspace ${ws.workspace_id} — run ${wsRunId} (${status}): ${ws.label}\n`);
+    }
+    if (closed.length === 0) {
+      process.stderr.write(
+        `No terminal smithers run workspaces to close${skippedActive > 0 ? ` (${skippedActive} still active, left open)` : ""}.\n`,
+      );
+    }
+    return c.ok({ closed, count: closed.length, skippedActive });
+  } catch (error) {
+    return fail({
+      code: error instanceof SmithersError ? error.code : "HERDR_CLEAN_FAILED",
+      message: error?.message ?? String(error),
+      exitCode: 1,
+    });
   } finally {
     cleanup?.();
   }
@@ -1463,7 +2307,22 @@ async function buildPsRows(adapter, limit, status) {
     const waitingTimers = run.status === "waiting-timer" ? await listWaitingTimers(adapter, run.runId) : [];
     const nextTimer = waitingTimers[0];
     const startedBy = compactStartedByFromConfigJson(run.configJson);
-    const view = await computeRunStateFromRow(adapter, run);
+    // Fall back to a row-only classification (heartbeat_at_ms +
+    // runtime_owner_id) when the full probe throws, so one bad auxiliary read
+    // can neither sink the listing nor leave a dead engine reading "running"
+    // (#1464 AWF-2).
+    const view = await computeRunStateFromRow(adapter, run).catch(() => {
+      try {
+        // Same normalization inspect/run-status apply: a continued run whose
+        // segment never finished is logically running, so its stale heartbeat
+        // must downgrade the verdict instead of reading "succeeded" (#1464 AWF-2).
+        return deriveRunState({
+          run: run.status === "continued" && run.finishedAtMs == null ? { ...run, status: "running" } : run,
+        });
+      } catch {
+        return { state: run.status };
+      }
+    });
     // Surface pending approval gates so `ps --json` consumers (the OpenClaw /
     // Claude plugins' before-prompt context) can relay gate node ids without
     // a second `inspect` round-trip. Only query the runs that are actually
@@ -1699,6 +2558,58 @@ async function resolveApprovalCommandTarget(adapter, runId, options) {
 }
 
 /**
+ * Map durable steering-steer rows to the compact JSON shape shared by `inspect`
+ * and `why`: id, target node, status (queued/consumed/expired), message, author,
+ * queued time, and the consuming attempt/iteration once consumed. Oldest first
+ * (as `listSteers` returns them).
+ *
+ * @param {import("@smthrs/db/adapter").SteerRow[]} steers
+ * @returns {Array<Record<string, unknown>>}
+ */
+function summarizeSteerRows(steers) {
+  return (Array.isArray(steers) ? steers : []).map((n) => ({
+    steerId: n.steerId,
+    nodeId: n.nodeId,
+    status: n.status,
+    message: n.message,
+    ...(n.author ? { author: n.author } : {}),
+    queued: new Date(n.createdAtMs).toISOString(),
+    ...(n.consumedByAttempt != null ? { consumedByAttempt: n.consumedByAttempt } : {}),
+    ...(n.consumedByIteration != null ? { consumedByIteration: n.consumedByIteration } : {}),
+  }));
+}
+
+/**
+ * A human "Steers" section appended to `smithers why` when a run carries
+ * any steers: a one-line count, then each still-queued steer (target node +
+ * clipped message) so a supervisor sees what is waiting to land. Empty string
+ * when there are none, so it appends cleanly.
+ *
+ * @param {import("@smthrs/db/adapter").SteerRow[]} steers
+ * @returns {string}
+ */
+function formatWhySteerSection(steers) {
+  const rows = Array.isArray(steers) ? steers : [];
+  if (rows.length === 0) {
+    return "";
+  }
+  /** @type {Record<string, number>} */
+  const counts = { queued: 0, consumed: 0, expired: 0 };
+  for (const n of rows) {
+    counts[n.status] = (counts[n.status] ?? 0) + 1;
+  }
+  const lines = ["", `Steers: ${counts.queued} queued · ${counts.consumed} consumed · ${counts.expired} expired`];
+  for (const n of rows) {
+    if (n.status !== "queued") {
+      continue;
+    }
+    const msg = n.message.length > 80 ? `${n.message.slice(0, 77)}...` : n.message;
+    lines.push(`  ↪ queued → ${n.nodeId}: ${msg}`);
+  }
+  return `\n${lines.join("\n")}`;
+}
+
+/**
  * @param {SmithersDb} adapter
  * @param {string} runId
  * @returns {Promise<InspectSnapshot>}
@@ -1728,6 +2639,15 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
   const approvals = await adapter.listPendingApprovals(runId);
   const waitingTimers = await listWaitingTimers(adapter, runId);
   const loops = await adapter.listRalph(runId);
+  // Soft: a store last written by ≤0.29 has no _smithers_steers table, and a
+  // read-mode open runs no DDL — a missing table must not fail the whole
+  // inspect over a cosmetic section. Matches the why/overview guards.
+  let steers = [];
+  try {
+    steers = await adapter.listSteers(runId);
+  } catch {
+    steers = [];
+  }
   const ancestry = await adapter.listRunAncestry(runId, 1_000);
   const continuedFromRunIds = ancestry.slice(1).map((row) => row.runId);
   const lineagePageSize = 100;
@@ -1767,7 +2687,11 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
     loopId: l.ralphId,
     iteration: l.iteration,
     maxIterations: l.maxIterations,
+    ...(l.exhausted ? { exhausted: true } : {}),
   }));
+  const exhaustedLoops = Array.isArray(finishedPayload.exhaustedLoops)
+    ? finishedPayload.exhaustedLoops.filter((loop) => loop && typeof loop.id === "string")
+    : [];
   let config = undefined;
   if (r.configJson) {
     try {
@@ -1780,7 +2704,18 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
       error = JSON.parse(r.errorJson);
     } catch {}
   }
-  const runState = await computeRunStateFromRow(adapter, run).catch(() => undefined);
+  const runState = await computeRunStateFromRow(adapter, run).catch(() => {
+    // Row-only fallback: heartbeat_at_ms + runtime_owner_id alone classify a
+    // dead engine as stale/orphaned even when an auxiliary read fails
+    // (#1464 AWF-2).
+    try {
+      return deriveRunState({
+        run: r.status === "continued" && r.finishedAtMs == null ? { ...run, status: "running" } : run,
+      });
+    } catch {
+      return undefined;
+    }
+  });
   const result = {
     run: {
       id: r.runId,
@@ -1835,6 +2770,15 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
   }
   if (loopState.length > 0) {
     result.loops = loopState;
+  }
+  if (exhaustedLoops.length > 0) {
+    result.exhaustedLoops = exhaustedLoops;
+  }
+  if (Array.isArray(steers) && steers.length > 0) {
+    // Steers (queued/consumed/expired), oldest first — the same rows
+    // `smithers steer` writes, so an operator can see what was steered and
+    // whether it landed. `listSteers` returns them chronologically already.
+    result.steers = summarizeSteerRows(steers);
   }
   if (config) {
     result.config = config;
@@ -2009,6 +2953,12 @@ const upOptions = z.object({
     .string()
     .optional()
     .describe("Explicit launch-context attribution (durably stored; never inferred from workflow input)"),
+  herdr: z
+    .union([z.boolean(), z.string()])
+    .optional()
+    .describe(
+      "Mirror this run into a herdr terminal workspace (one pane per agent node). Optionally =SESSION to target a named herdr session. Degrades silently if no herdr server is reachable.",
+    ),
 });
 // Launch the interactive picker + live status card instead of a one-shot run.
 // Shared by `up` and `workflow run`; deliberately NOT folded into `upOptions`
@@ -2191,7 +3141,12 @@ const psOptions = z.object({
 // `--since` stays accepted as a deprecated alias so existing scripts keep
 // working. (#10)
 const logsOptions = z.object({
-  follow: z.boolean().default(true).describe("Keep tailing (default true for active runs)"),
+  follow: z
+    .boolean()
+    .optional()
+    .describe(
+      "Follow live runs to completion. Default: follow only when stdout is a TTY; piped/redirected output snapshots and exits. -f/--follow forces follow; --no-follow forces snapshot.",
+    ),
   fromSeq: z.number().int().optional().describe("Start from event sequence number (exclusive)"),
   since: z
     .number()
@@ -2202,6 +3157,38 @@ const logsOptions = z.object({
     ),
   tail: z.number().int().min(1).default(50).describe("Show last N events first"),
   followAncestry: z.boolean().default(false).describe("Include events from ancestor runs (continuation lineage)"),
+});
+const tailArgs = z.object({
+  runId: z.string().describe("Run ID to tail"),
+});
+const tailOptions = z.object({
+  node: z.string().optional().describe("Filter to a single node; prints that node's output verbatim"),
+  follow: z
+    .boolean()
+    .default(true)
+    .describe("Keep tailing until the run reaches a terminal state (default true for live runs)"),
+  format: z
+    .enum(["pretty", "jsonl"])
+    .default("pretty")
+    .describe("Output format: pretty (human) or jsonl (raw event JSON per line)"),
+  linger: z
+    .boolean()
+    .default(false)
+    .describe(
+      "After the run reaches a terminal state, stay open until you press q/Enter or Ctrl-C (used by herdr panes so they do not vanish at run end)",
+    ),
+  overview: z
+    .boolean()
+    .default(false)
+    .describe(
+      "Run-level supervision board: periodically print a per-node status block (id, state, attempt) with approve/hijack CTAs and a queue summary, above the event scroll (used by the herdr overview pane)",
+    ),
+  hud: z
+    .boolean()
+    .optional()
+    .describe(
+      "Fixed-frame TUI HUD (alt-screen) for --node: stream body + bottom dual-control dock (steer/hijack/close). Opt-in; herdr node panes pass it. Ignored without --node and with --format jsonl.",
+    ),
 });
 const eventsOptions = z.object({
   node: z.string().optional().describe("Filter events by node ID"),
@@ -2312,6 +3299,22 @@ const approveOptions = z.object({
     .describe("Loop iteration number (defaults to the pending gate's iteration)"),
   note: z.string().optional().describe("Approval/denial note"),
   by: z.string().optional().describe("Name or identifier of the approver"),
+  resume: z
+    .boolean()
+    .default(true)
+    .describe(
+      "After recording the decision, auto-resume a parked detached run (no live owner) so it continues; --no-resume only records the decision.",
+    ),
+});
+// `approve` adds an interactive `--watch` mode on top of the shared approve/deny
+// options; `deny` keeps the plain single-shot options above.
+const approveWatchOptions = approveOptions.extend({
+  watch: z
+    .boolean()
+    .default(false)
+    .describe(
+      "Interactively watch the run: answer each pending approval gate AND human request (ask/confirm/select) as it appears, then linger until the run ends (used by herdr gate panes)",
+    ),
 });
 const humanArgs = z.object({
   action: z.string().describe("Human request action: inbox, answer, or cancel"),
@@ -2360,6 +3363,29 @@ const hijackOptions = z.object({
   target: z.string().optional().describe("Agent engine (e.g. claude-code, codex) or node id whose session to hand off"),
   timeoutMs: z.number().int().min(1).default(30_000).describe("How long to wait for a live run to hand off"),
   launch: z.boolean().default(true).describe("Open the hijacked session immediately"),
+});
+const steerArgs = z.object({
+  runId: z.string().optional().describe("Run ID to steer (default: the single active run, or pick from a list)"),
+  message: z
+    .string()
+    .optional()
+    .describe("Steer message to queue for the target node's next agent step (quote multi-word messages)"),
+});
+const steerOptions = z.object({
+  node: z.string().optional().describe("Node id to steer (default: the run's current agent node)"),
+  message: z.string().optional().describe("Steer message (safe for values beginning with '-')"),
+  takeover: z
+    .boolean()
+    .default(false)
+    .describe(
+      "Hijack the live agent session instead of queuing a steer; run-wide, so it warns and asks before aborting in-flight siblings",
+    ),
+  yes: z.boolean().default(false).describe("Skip the takeover confirmation prompt (answer yes)"),
+  timeoutMs: z.number().int().min(1).default(30_000).describe("How long to wait for a live run to hand off (takeover)"),
+  session: z
+    .string()
+    .optional()
+    .describe("herdr session hosting the mirror (default: auto-detected from the pane env / default socket)"),
 });
 const graphOptions = z.object({
   runId: z.string().default("graph").describe("Run ID for context"),
@@ -2674,6 +3700,71 @@ async function findParentRunError(parentRunId) {
 }
 
 /**
+ * Derive the workflow to relaunch for `up --resume <runId>` with no workflow
+ * arg: the stored run record already knows its workflow file, so demanding the
+ * path again would contradict the --resume help text.
+ *
+ * @param {string} runId
+ * @returns {Promise<{ workflowPath: string } | { error: { code: string; message: string; exitCode: number } }>}
+ */
+async function deriveResumeWorkflowPath(runId) {
+  let opened;
+  try {
+    opened = await findAndOpenDb();
+  } catch (err) {
+    if (err instanceof SmithersError && err.code === "CLI_DB_NOT_FOUND") {
+      return {
+        error: {
+          code: "RUN_NOT_FOUND",
+          message: `Run not found: ${runId} (no smithers store exists in this workspace yet)`,
+          exitCode: 4,
+        },
+      };
+    }
+    throw err;
+  }
+  try {
+    const run = await opened.adapter.getRun(runId);
+    if (!run) {
+      return {
+        error: { code: "RUN_NOT_FOUND", message: `Run not found: ${runId}`, exitCode: 4 },
+      };
+    }
+    const target = resolveResumeTarget(
+      { runId, workflowPath: run.workflowPath, configJson: run.configJson },
+      { workflowExists: (workflowPath) => existsSync(workflowPath) },
+    );
+    if (target?.kind === "workflow-file") {
+      return { workflowPath: target.workflowPath };
+    }
+    if (target?.kind === "builtin") {
+      let relaunchArgs;
+      try {
+        relaunchArgs = buildBuiltinRelaunch(target, { runId, resume: true }).args;
+      } catch {
+        relaunchArgs = [target.command, ...target.args];
+      }
+      return {
+        error: {
+          code: "RUN_NOT_RESUMABLE_HERE",
+          message: `Run ${runId} was started by built-in \`smithers ${target.command}\` and has no workflow file; resume it with:\n  smithers ${relaunchArgs.join(" ")}`,
+          exitCode: 4,
+        },
+      };
+    }
+    return {
+      error: {
+        code: "WORKFLOW_REQUIRED",
+        message: `Run ${runId} has no workflow file on disk (recorded path: ${run.workflowPath ?? "none"}). Provide the workflow path explicitly: smithers up <workflow-file> --resume --run-id ${runId}`,
+        exitCode: 4,
+      },
+    };
+  } finally {
+    opened.cleanup?.();
+  }
+}
+
+/**
  * Load and render the initial graph before a detached child is spawned. This is
  * the same compilation/render boundary as `smithers graph`, with persisted
  * input and outputs restored for a resume.
@@ -2958,11 +4049,21 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
       });
       mkdirSync(dirname(logFile), { recursive: true });
       if (!runId) childArgs.push("--run-id", effectiveRunId);
+      // Hand the herdr mirror off to the detached child via the env (which is
+      // forwarded below): the surface must run in the child that actually
+      // drives the run, and its logger writes to the child's stdio — the
+      // detach log file. Not pushed as a flag, so the child activates it
+      // purely from SMITHERS_HERDR (see resolveHerdrOption).
+      const herdrHandoff = resolveHerdrOption(options.herdr, process.env);
+      if (herdrHandoff) {
+        process.env.SMITHERS_HERDR = herdrHandoff === true ? "1" : herdrHandoff;
+      }
       const admissionNonce = crypto.randomUUID();
       const fd = openSync(logFile, "a");
       let child;
       try {
-        child = spawn("bun", [cliPath, ...childArgs], {
+        const detachedSpawn = smithersRuntimeSpawn([cliPath, ...childArgs]);
+        child = spawn(detachedSpawn.command, detachedSpawn.args, {
           detached: true,
           stdio: ["ignore", fd, fd],
           env: {
@@ -2996,7 +4097,8 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
           supervisorArgs.push("--stale-threshold", options.superviseStaleThreshold);
         if (options.superviseMaxConcurrent !== 3)
           supervisorArgs.push("--max-concurrent", String(options.superviseMaxConcurrent));
-        const supervisor = spawn("bun", supervisorArgs, {
+        const supervisorSpawn = smithersRuntimeSpawn(supervisorArgs);
+        const supervisor = spawn(supervisorSpawn.command, supervisorSpawn.args, {
           detached: true,
           stdio: ["ignore", fd, fd],
           env: process.env,
@@ -3017,6 +4119,26 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
       const monitorCommands = monitorHasUi
         ? [{ command: `ui ${effectiveRunId}`, description: "Open the live workflow UI" }]
         : [];
+      const watchCommands = [
+        ...monitorCommands,
+        { command: `logs ${effectiveRunId}`, description: "Tail run logs" },
+        { command: `chat ${effectiveRunId} --follow`, description: "Watch agent chat" },
+        { command: `ps`, description: "List all runs" },
+        { command: `inspect ${effectiveRunId}`, description: "Inspect run state" },
+      ];
+      // When the herdr mirror is active for this detached run, surface attaching
+      // to the live terminal workspace FIRST among the watch options — it is the
+      // richest live view (a pane per agent node) of a background run.
+      const herdrAttachSession = herdrHandoff ? herdrSessionOf(herdrHandoff) : undefined;
+      if (herdrHandoff) {
+        watchCommands.unshift({
+          command: `herdr attach ${effectiveRunId}${herdrAttachSession ? ` --session ${herdrAttachSession}` : ""}`,
+          description: "Attach the herdr mirror (a live pane per agent node)",
+        });
+      }
+      const operateHeader = herdrHandoff
+        ? `${monitoring.text}\n\nMirroring into herdr — attach the live terminal workspace, or operate the run:`
+        : `${monitoring.text}\n\nOperate the run:`;
       // The monitoring guidance already covers the custom-UI suggestion,
       // so the shared next steps skip it here (omitUi) to avoid repeats.
       const backgroundCta = withAgentNextSteps(
@@ -3027,14 +4149,8 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
           hasUi: monitorHasUi,
           omitUi: true,
         },
-        [
-          ...monitorCommands,
-          { command: `logs ${effectiveRunId}`, description: "Tail run logs" },
-          { command: `chat ${effectiveRunId} --follow`, description: "Watch agent chat" },
-          { command: `ps`, description: "List all runs" },
-          { command: `inspect ${effectiveRunId}`, description: "Inspect run state" },
-        ],
-        `${monitoring.text}\n\nOperate the run:`,
+        watchCommands,
+        operateHeader,
       );
       return c.ok(
         { runId: effectiveRunId, logFile, pid: child.pid, ...(supervisorPid ? { supervisorPid } : {}), monitoring },
@@ -3088,7 +4204,7 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
       // pin through ANY mechanism (--backend, SMITHERS_BACKEND, or a `backend`
       // field in smithers.config.ts) wins. Reading the marker directly meant a
       // config-file pin was silently ignored here.
-      const { resolveSmithersBackendPreference } = await import("smithers-orchestrator/resolveSmithersBackendChoice");
+      const { resolveSmithersBackendPreference } = await import("smthrs/resolveSmithersBackendChoice");
       const { backend: selectedBackend } = await resolveSmithersBackendPreference({
         cwd: process.cwd(),
         backend: options.backend,
@@ -3102,7 +4218,7 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
         // reported as such (rather than masking it behind the mismatch).
         let probe;
         try {
-          const { openSmithersBackend } = await import("smithers-orchestrator");
+          const { openSmithersBackend } = await import("smthrs");
           // Validate the authoritative pglite store actually opens (so a
           // genuinely broken store surfaces as BACKEND_OPEN_FAILED rather
           // than being masked by the BACKEND_MISMATCH below). No schemas
@@ -3139,8 +4255,7 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
     // but nothing acted on it at startup, so a process kill mid-rewind left
     // runs silently un-recovered. (SQLite-only; non-fatal.)
     {
-      const { recoverRewindAuditsAtStartup } =
-        await import("@smithers-orchestrator/time-travel/recoverRewindAuditsAtStartup");
+      const { recoverRewindAuditsAtStartup } = await import("@smthrs/time-travel/recoverRewindAuditsAtStartup");
       await recoverRewindAuditsAtStartup(adapter, {
         onRecovered: (count) =>
           process.stderr.write(
@@ -3208,7 +4323,83 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
     const persistedRootDir = resume ? parsePersistedRootDir(existingRun?.configJson) : undefined;
     const rootDir = !options.root && persistedRootDir ? persistedRootDir : resolveLaunchRootDir(options.root);
     const logDir = options.log ? options.logDir : null;
-    const onProgress = buildProgressReporter();
+    // Optional herdr mirror plane. When active, materialize the run id up front
+    // so the deterministic workspace label (the find-or-create key) and the id
+    // runWorkflow uses are identical, then compose the surface onto the same
+    // onProgress seam the engine already drives. Fully degradable: an absent
+    // herdr warns once (createUpHerdrSurface) and the run proceeds unchanged.
+    // System workflows (post-failure, init, …) never auto-mirror from env
+    // inheritance unless the user passes an explicit --herdr on this invocation.
+    const workflowIsSystem =
+      /** @type {any} */ (workflow)?.opts?.system === true ||
+      /** @type {any} */ (workflow)?.system === true ||
+      isSystemWorkflowSource(workflowPath);
+    const herdrFlagExplicit = options.herdr !== undefined && options.herdr !== false;
+    const herdrOption =
+      workflowIsSystem && !herdrFlagExplicit ? undefined : resolveHerdrOption(options.herdr, process.env);
+    const materializedRunId = runId ?? (herdrOption ? `run-${Date.now()}` : undefined);
+    const baseProgressReporter = buildProgressReporter();
+    let herdrSurface = null;
+    // Declarative cockpit options from workflow.opts.herdr (no graph extract).
+    const cockpitOpts = normalizeHerdrCockpitOpts(/** @type {any} */ (workflow)?.opts?.herdr ?? options.herdrCockpit);
+    if (herdrOption && materializedRunId) {
+      // Session-per-run: opt-in via --herdr=SESSION, opts.surface/sessionName, or
+      // SMITHERS_HERDR_SESSION. Default remains workspace in the resolved session.
+      let session = herdrSessionOf(herdrOption);
+      const wantSessionSurface =
+        cockpitOpts.surface === "session" ||
+        typeof cockpitOpts.sessionName === "string" ||
+        (typeof process.env.SMITHERS_HERDR_SESSION === "string" && process.env.SMITHERS_HERDR_SESSION !== "");
+      if (wantSessionSurface && !session) {
+        session =
+          cockpitOpts.sessionName || process.env.SMITHERS_HERDR_SESSION || defaultSessionNameForRun(materializedRunId);
+      }
+      if (wantSessionSurface && session) {
+        // Daily-session stub so the operator is not blind (soft).
+        await ensureSessionStubWorkspace({
+          workflowId: workflowIdFromPath(workflowPath),
+          runId: materializedRunId,
+          sessionName: session,
+          cwd: process.cwd(),
+        });
+      }
+      // Prefer explicit project DB so `smithers supervisor --db` matches the engine store
+      // (avoids pane cwd discovery landing on a different smithers.db).
+      let herdrDbPath;
+      try {
+        herdrDbPath = findSmithersDb(process.cwd());
+      } catch {
+        herdrDbPath = resolve(process.cwd(), "smithers.db");
+      }
+      herdrSurface = await createUpHerdrSurface({
+        session,
+        label: herdrWorkspaceLabel(workflowIdFromPath(workflowPath), materializedRunId),
+        cwd: process.cwd(),
+        dbPath: herdrDbPath,
+        adapter,
+        runId: materializedRunId,
+        cliPath: fileURLToPath(import.meta.url),
+        cockpit: cockpitOpts,
+      });
+    }
+    // On RESUME the process that parked at an approval gate has exited, so its
+    // surface (which reported the gate `blocked`) is gone. Adopt its panes and
+    // re-flag the gate nodes BEFORE the resumed run emits live events, or the
+    // gate pane stays stuck "blocked" in the mirror even after the run finishes.
+    // Best-effort: a failure here never blocks the resume.
+    if (herdrSurface && resume && materializedRunId) {
+      try {
+        await reconcileHerdrResumeGates(adapter, materializedRunId, herdrSurface);
+      } catch {
+        // The herdr mirror is an optional presentation plane; degrade silently.
+      }
+    }
+    const onProgress = herdrSurface
+      ? (event) => {
+          baseProgressReporter(event);
+          herdrSurface.onEvent(event);
+        }
+      : baseProgressReporter;
     const abort = setupAbortSignal();
     const resumeClaim =
       options.resumeClaimOwner && options.resumeClaimHeartbeat
@@ -3286,7 +4477,8 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
         backend: options.backend,
       });
       if (existingMonitor) monitorArgs.push("--resume", "--force");
-      const child = spawn("bun", [fileURLToPath(import.meta.url), ...monitorArgs], {
+      const monitorSpawn = smithersRuntimeSpawn([fileURLToPath(import.meta.url), ...monitorArgs]);
+      const child = spawn(monitorSpawn.command, monitorSpawn.args, {
         detached: true,
         stdio: "ignore",
         env: buildMonitorLaunchEnv(),
@@ -3376,13 +4568,38 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
       if (["finished", "failed", "cancelled", "canceled", "continued"].includes(result.status)) {
         await stopMonitor();
       }
+      // Flush the mirror before returning: the terminal event was already fed
+      // synchronously via onProgress, so close() drains it (deadline-bounded,
+      // never closes the user's workspace).
+      if (herdrSurface) {
+        await herdrSurface.close();
+      }
       process.exitCode = formatStatusExitCode(result.status);
       if (result.status === "failed") {
-        launchPostFailureAutopsy({
-          failedRunId: result.runId,
-          workflowPath: resolvedWorkflowPath,
-          enabled: options.postFailure !== false,
-        });
+        // Autopsy is opt-out at three layers: the CLI `--no-post-failure`
+        // flag, `SMITHERS_POST_FAILURE=0` (both checked inside the
+        // launcher), and a per-workflow `postFailureAutopsy: false` opt
+        // (for workflows that fail deliberately). When still enabled,
+        // classify WHY the run failed and only autopsy a genuine,
+        // unexpected task error: a human-denied gate, an operator cancel,
+        // or a quota park all already have their cause recorded, so
+        // autopsying them just burns agent tokens.
+        const autopsyEnabled =
+          options.postFailure !== false && /** @type {any} */ (workflow)?.opts?.postFailureAutopsy !== false;
+        if (autopsyEnabled) {
+          const cause = result.runId ? await classifyTerminalCause(adapter, result.runId, result) : "task-error";
+          if (cause === "task-error") {
+            launchPostFailureAutopsy({
+              failedRunId: result.runId,
+              workflowPath: resolvedWorkflowPath,
+              enabled: true,
+            });
+          } else {
+            process.stderr.write(
+              `[smithers] Run failed (${cause}); its cause is already recorded, so the post-failure autopsy was skipped.\n`,
+            );
+          }
+        }
       }
       const reportEnabled = humanTty && options.report !== false && process.env.SMITHERS_NO_REPORT !== "1";
       if (reportEnabled && result.runId) {
@@ -3457,8 +4674,11 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
           exitCode: 4,
         });
       }
-      const { createServeApp } = await import("@smithers-orchestrator/server/serve");
-      const effectiveRunId = monitoredRunId ?? `run-${Date.now()}`;
+      const { createServeApp } = await import("@smthrs/server/serve");
+      // Reuse the id materialized for the herdr label when mirroring, so the
+      // workspace label matches the id runWorkflow runs under; otherwise the
+      // existing behavior (materialize on demand) is unchanged.
+      const effectiveRunId = monitoredRunId ?? materializedRunId ?? `run-${Date.now()}`;
       const serveApp = createServeApp({
         workflow: workflow,
         adapter: adapter,
@@ -3552,7 +4772,7 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
       result = await Effect.runPromise(
         runWorkflow(workflow, {
           input,
-          runId: monitoredRunId,
+          runId: monitoredRunId ?? materializedRunId,
           parentRunId: options.parentRunId,
           ...(Object.keys(runConfig).length > 0 ? { config: runConfig } : {}),
           ...buildDurabilityRunOptions({
@@ -3732,29 +4952,26 @@ async function ensureWorkspaceGateway(workspace, preferredPort, opts = {}) {
     const autostartIdleMs = process.env.SMITHERS_GATEWAY_IDLE_MS
       ? String(Math.max(0, Math.floor(Number(process.env.SMITHERS_GATEWAY_IDLE_MS) || 0)))
       : "300000";
-    child = spawn(
-      process.argv[0],
-      [
-        process.argv[1],
-        "gateway",
-        "--host",
-        host,
-        "--port",
-        String(preferredPort),
-        "--idle-timeout",
-        autostartIdleMs,
-        // The gateway refuses an unauthenticated non-loopback bind (it would
-        // be a full-control open control plane), so autostart on a remote-
-        // reachable host always mints a token; the state file hands it to
-        // this client, which passes it through the browser session handoff.
-        ...(GATEWAY_LOOPBACK_HOSTS.has(host) ? [] : ["--mint-token"]),
-      ],
-      {
-        stdio: ["ignore", stderrFd, stderrFd],
-        detached: true,
-        cwd: workspace,
-      },
-    );
+    const gatewaySpawn = smithersRuntimeReentry([
+      process.argv[1],
+      "gateway",
+      "--host",
+      host,
+      "--port",
+      String(preferredPort),
+      "--idle-timeout",
+      autostartIdleMs,
+      // The gateway refuses an unauthenticated non-loopback bind (it would
+      // be a full-control open control plane), so autostart on a remote-
+      // reachable host always mints a token; the state file hands it to
+      // this client, which passes it through the browser session handoff.
+      ...(GATEWAY_LOOPBACK_HOSTS.has(host) ? [] : ["--mint-token"]),
+    ]);
+    child = spawn(gatewaySpawn.command, gatewaySpawn.args, {
+      stdio: ["ignore", stderrFd, stderrFd],
+      detached: true,
+      cwd: workspace,
+    });
     child.unref();
   } catch (error) {
     if (stderrFd !== undefined) {
@@ -3796,11 +5013,13 @@ async function ensureWorkspaceGateway(workspace, preferredPort, opts = {}) {
  * discovery → legacy port probe (refused on workspace-identity mismatch) →
  * autostart, unless the daemon escape hatch disables it.
  *
- * @param {{ gateway?: string; port: number; host?: string; autostart?: boolean; daemon?: boolean }} options
+ * @param {{ gateway?: string; port: number; host?: string; autostart?: boolean; daemon?: boolean; cwd?: string }} options
  * @returns {Promise<{ ok: true; base: string; token: string | null; workspace: string | undefined } | { ok: false; message: string }>}
  */
 async function resolveBrowserGateway(options) {
-  const workspace = options.gateway ? undefined : resolveGatewayWorkspace();
+  // Honor --cwd for workspace discovery (S1 finding b): resolveGatewayWorkspace
+  // defaults to process.cwd(), so callers without --cwd are unaffected.
+  const workspace = options.gateway ? undefined : resolveGatewayWorkspace(options.cwd);
   const host = options.host ?? process.env.SMITHERS_GATEWAY_HOST?.trim() ?? "127.0.0.1";
   let base = options.gateway ? options.gateway.replace(/\/+$/, "") : null;
   let token = base ? resolveGatewayBearer(workspace, base) : null;
@@ -3886,6 +5105,78 @@ async function resolveBrowserGateway(options) {
     };
   }
   return { ok: true, base, token, workspace };
+}
+/**
+ * Resolve the `smithers supervisor` read source from its `--gateway`/`--direct`
+ * flags.
+ *
+ * Gateway `auto` is now the DEFAULT (the flip): with no flag the supervisor
+ * starts-or-attaches the workspace gateway by REUSING resolveBrowserGateway
+ * (the exact path `smithers monitor` uses) — no new lifecycle machinery.
+ * `--gateway <url>` attaches to that URL. `--direct` forces the local direct-db
+ * read path (returns undefined so runSmithersTop builds the SQLite source
+ * itself) — the escape hatch for diagnosing a broken gateway.
+ *
+ * Fallback posture (in resolveGatewaySource): the default `auto` failure warns
+ * to stderr and falls back to direct-db (permanent fallback) so the default
+ * path never hard-fails; an explicit unreachable `--gateway <url>` hard-errors,
+ * exactly like runMonitorCommand.
+ *
+ * @param {any} c
+ * @returns {Promise<import("./SupervisorObservationSource.ts").SupervisorObservationSource | undefined>}
+ */
+async function resolveSupervisorObservationSource(c) {
+  const pinnedDb = typeof c.options?.db === "string" && c.options.db !== "";
+  // The implicit default only takes the gateway path interactively; a pinned
+  // --db or a headless/scripted invocation stays on direct-db (see
+  // resolveSupervisorGatewayTarget). An explicit --gateway <url|auto> overrides.
+  const interactive = Boolean(process.stdout?.isTTY);
+  const target = resolveSupervisorGatewayTarget(c.options?.gateway, {
+    direct: c.options?.direct,
+    pinnedDb,
+    interactive,
+  });
+  if (!target) {
+    // --direct, a pinned --db, or a headless default => direct-db; the gateway
+    // is never touched.
+    return undefined;
+  }
+  if (pinnedDb) {
+    // We only reach here with a pinned --db when the user ALSO passed an
+    // explicit --gateway <url|auto>. The gateway path reads its own workspace
+    // db, so --db can't pin primary reads here — it only backs the local
+    // detail panes. Say so rather than silently ignoring it.
+    process.stderr.write(
+      `[smithers supervisor] --db does not pin primary reads on the gateway path (${target.gateway ?? "auto"}); it only backs the local detail panes. Use --direct to read that database directly.\n`,
+    );
+  }
+  return resolveGatewaySource(target, {
+    resolveGateway: () =>
+      resolveBrowserGateway({
+        gateway: target.gateway,
+        // Same default port monitor uses; `auto` discovers/probes/autostarts it.
+        port: 7331,
+        autostart: target.autostart,
+        // No dedicated flag; the SMITHERS_NO_DAEMON env escape hatch still applies.
+        daemon: c.options?.daemon,
+        // Honor --cwd for gateway workspace discovery (S1 finding b) so
+        // --cwd resolves consistently on both the direct and gateway paths.
+        cwd: c.options?.cwd,
+      }),
+    makeClient: (resolved) =>
+      new SmithersGatewayClient({
+        baseUrl: resolved.base,
+        ...(resolved.token ? { token: resolved.token } : {}),
+      }),
+    warn: (message) => process.stderr.write(message),
+    unreachableError: (message) =>
+      new SmithersError("GATEWAY_UNREACHABLE", message, undefined, {
+        includeDocsUrl: false,
+      }),
+    // dbPath/cwd are for the still-direct-db herdr detail panes (S2); the read
+    // seam itself is fully RPC-sourced.
+    sourceOpts: { cwd: c.options?.cwd },
+  });
 }
 /** Path the CLI-booted gateway mounts the Smithers Monitor UI on. */
 const MONITOR_UI_MOUNT_PATH = "/monitor";
@@ -4065,7 +5356,7 @@ async function runUiCommand(c) {
     const opened = c.options.open ? openInBrowser(browserUrl) : false;
     const printedUrl = printBrowserGatewayUrl({ label: "UI URL:", base, url, token, opened });
     return c.ok(
-      { opened: c.options.open, url: printedUrl, runId: runId ?? null, workflow: workflowKey },
+      { opened, url: printedUrl, runId: runId ?? null, workflow: workflowKey },
       {
         cta: buildAgentNextSteps({
           workflowId: workflowKey,
@@ -4093,6 +5384,8 @@ async function runFullUiCommand(c, base, token, fail) {
       port: c.options.appPort,
       rebuild: c.options.rebuild,
     });
+    // Real result, not the flag: openInBrowser also suppresses inside a herdr
+    // cockpit / with SMITHERS_NO_BROWSER.
     const opened = c.options.open ? openInBrowser(url) : false;
     console.log(`${opened ? "Opening" : "UI URL:"} ${url}`);
     console.log(`[smithers] Serving the full Smithers UI (gateway: ${base}). Press Ctrl-C to stop.`);
@@ -4103,7 +5396,7 @@ async function runFullUiCommand(c, base, token, fail) {
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
     await new Promise(() => {});
-    return c.ok({ opened: c.options.open, url, gateway: base });
+    return c.ok({ opened, url, gateway: base });
   } catch (err) {
     // A taken --app-port rejects with EADDRINUSE out of the listen; name the
     // port and the flag to change it instead of surfacing the raw listen error.
@@ -4321,7 +5614,7 @@ async function runGatewayCommand(options) {
     startLock.release();
     startLockReleased = true;
   };
-  /** @type {import("@smithers-orchestrator/server/gateway").Gateway | undefined} */
+  /** @type {import("@smthrs/server/gateway").Gateway | undefined} */
   let gateway;
   /** @type {Array<() => unknown | Promise<unknown>>} */
   const backendCleanups = [];
@@ -4366,13 +5659,13 @@ async function runGatewayCommand(options) {
       process.env.SMITHERS_BACKEND = options.backend;
     }
     const [{ Gateway }, { openSmithersBackend }] = await Promise.all([
-      import("@smithers-orchestrator/server/gateway"),
-      import("smithers-orchestrator"),
+      import("@smthrs/server/gateway"),
+      import("smthrs"),
     ]);
     // Same shared precedence as every other boot path (explicit → env → config
     // → marker → sqlite); hand-rolling it here used to skip the config pin, so
     // the Gateway advertised a different backend than the engine wrote to.
-    const { resolveSmithersBackendPreference } = await import("smithers-orchestrator/resolveSmithersBackendChoice");
+    const { resolveSmithersBackendPreference } = await import("smthrs/resolveSmithersBackendChoice");
     identityBackend = (await resolveSmithersBackendPreference({ cwd: workspace, backend: options.backend })).backend;
     // Idle spin-down (spec decision 14): autostarted daemons pass --idle-timeout
     // (see ensureWorkspaceGateway) so they exit once idle; an explicit
@@ -4393,11 +5686,14 @@ async function runGatewayCommand(options) {
     // finished runs reopen the recorded agent session for a post-mortem.
     const cliEntry = fileURLToPath(new URL("./index.js", import.meta.url));
     /** @type {(params: { runId: string; nodeId?: string }) => { command: string[]; cwd?: string; env?: Record<string, string | undefined> }} */
-    const hijackPty = ({ runId, nodeId }) => ({
-      command: [process.execPath, cliEntry, "hijack", runId, ...(nodeId ? ["--target", nodeId] : [])],
-      cwd: workspace,
-      env: { ...process.env, FORCE_COLOR: process.env.FORCE_COLOR ?? "1" },
-    });
+    const hijackPty = ({ runId, nodeId }) => {
+      const runtime = smithersRuntimeReentry([cliEntry, "hijack", runId, ...(nodeId ? ["--target", nodeId] : [])]);
+      return {
+        command: [runtime.command, ...runtime.args],
+        cwd: workspace,
+        env: { ...process.env, FORCE_COLOR: process.env.FORCE_COLOR ?? "1" },
+      };
+    };
     const oneshotMonitor = createOneshotMonitorControl({
       cliEntry,
       cancelRun: (adapter, runId) => cascadeCancelRun(adapter, runId),
@@ -4450,6 +5746,7 @@ async function runGatewayCommand(options) {
     ensureSmithersTables(workspaceWorkflow.db);
     setupSqliteCleanup(workspaceWorkflow);
     backendCleanups.push(() => workspaceApi.close?.());
+    const workspaceAdapter = new SmithersDb(workspaceWorkflow.db);
     /** @type {Map<string, Promise<void>>} */
     const workflowLoaders = new Map();
     let readOnlyWorkflow;
@@ -4555,14 +5852,48 @@ async function runGatewayCommand(options) {
         const discovered = discoverWorkflows(workspace).find((candidate) => candidate.id === workflowKey);
         if (discovered) {
           await loadAndRegisterWorkflow(discovered);
+          return;
+        }
+        // Explicit-path launches (`smithers up src/workflows/foo.tsx`) live
+        // outside every registry dir, so a rescan can never find them. The
+        // run row recorded the entry file at launch — register from it so
+        // `smithers ui <runId>` serves the workflow-owned <UI> declaration.
+        const entryFile = await recordedRunEntryFile(workflowKey);
+        if (entryFile) {
+          await loadAndRegisterWorkflow({ id: workflowKey, entryFile });
         }
         return;
       }
     };
+    /**
+     * Entry file recorded by the most recent run whose workflow key matches
+     * an unregistered `workflowKey`. Null when no run names a still-existing
+     * entry file for the key.
+     * @param {string} workflowKey
+     * @returns {Promise<string | null>}
+     */
+    const recordedRunEntryFile = async (workflowKey) => {
+      try {
+        const runs = await workspaceAdapter.listRuns(50, undefined, workflowKey);
+        for (const run of Array.isArray(runs) ? runs : []) {
+          const workflowPath = typeof run?.workflowPath === "string" ? run.workflowPath : null;
+          if (!workflowPath || workflowIdFromPath(workflowPath) !== workflowKey) {
+            continue;
+          }
+          if (existsSync(workflowPath)) {
+            return workflowPath;
+          }
+        }
+      } catch {
+        // A registry-refresh probe must never fail the request; the Gateway
+        // falls through to its definitive NOT_FOUND response.
+      }
+      return null;
+    };
     gateway.extend(
       "evals",
       createEvalsExtension({
-        adapter: new SmithersDb(workspaceWorkflow.db),
+        adapter: workspaceAdapter,
         resolveWorkflowKey: (key) => workflowIndex.get(key),
         workspace,
       }),
@@ -4915,7 +6246,7 @@ const workflowCli = Cli.create({
       if (!vcs.ok && c.format !== "json") {
         process.stderr.write(
           `${pc.yellow("⚠ No jj or git found.")} Smithers needs one to snapshot and isolate agent work.\n` +
-            `  Smithers bundles jj via the optional @smithers-orchestrator/jj-<platform> package; if it could not\n` +
+            `  Smithers bundles jj via the optional @smthrs/jj-<platform> package; if it could not\n` +
             `  install for your platform, install jj (https://github.com/jj-vcs/jj) or git, or set SMITHERS_JJ_PATH.\n`,
         );
       }
@@ -4996,8 +6327,8 @@ async function resolveMemoryWorkflowAsync(workflowPath) {
  * @param {{ readOnly?: boolean }} [options]
  */
 async function openMemoryStore(workflowPath, options = {}) {
-  const { createMemoryStore } = await import("@smithers-orchestrator/memory/store");
-  const { parseNamespace } = await import("@smithers-orchestrator/memory/types");
+  const { createMemoryStore } = await import("@smthrs/memory/store");
+  const { parseNamespace } = await import("@smthrs/memory/types");
   if (!workflowPath && options.readOnly && cliWorkspace.usesManifestFallback()) {
     const opened = await findAndOpenDb();
     return { store: createMemoryStore(opened.db), parseNamespace, cleanup: opened.cleanup };
@@ -5544,12 +6875,22 @@ const agentsCli = Cli.create({
       force: z.boolean().default(false).describe("Register even if no credentials are present"),
       replace: z.boolean().default(false).describe("Overwrite an existing account with the same label"),
       loop: z.boolean().default(false).describe("Wizard mode only: keep adding accounts until you say done"),
+      tmux: z
+        .boolean()
+        .default(false)
+        .describe(
+          "Subscription providers: launch the provider CLI in a detached tmux session, wait for the browser login to complete, then register",
+        ),
+      loginTimeout: z
+        .number()
+        .default(600)
+        .describe("--tmux: how many seconds to wait for the login to complete before giving up"),
     }),
     async run(c) {
       // Flag-driven mode: provider+label given → just register.
       if (c.options.provider && c.options.label) {
         try {
-          const result = runAgentAdd({
+          const addInput = {
             provider: c.options.provider,
             label: c.options.label,
             configDir: c.options.configDir,
@@ -5558,12 +6899,20 @@ const agentsCli = Cli.create({
             skipLogin: c.options.skipLogin,
             force: c.options.force,
             replace: c.options.replace,
-          });
+          };
+          const result = c.options.tmux
+            ? await runAgentAddWithTmuxLogin({
+                ...addInput,
+                timeoutMs: c.options.loginTimeout * 1000,
+                onStatus: (message) => process.stderr.write(`${message}\n`),
+              })
+            : runAgentAdd(addInput);
           if (!result.ok) {
-            const code = result.reason === "login-required" ? 2 : 1;
+            const loginPending = result.reason === "login-required" || result.reason === "login-timeout";
+            const code = loginPending ? 2 : 1;
             commandExitOverride = code;
             return c.error({
-              code: result.reason === "login-required" ? "AGENT_LOGIN_REQUIRED" : "AGENT_ADD_FAILED",
+              code: loginPending ? "AGENT_LOGIN_REQUIRED" : "AGENT_ADD_FAILED",
               message: result.detail ?? result.reason,
               exitCode: code,
             });
@@ -5594,12 +6943,22 @@ const agentsCli = Cli.create({
         process.stderr.write("No accounts registered. Add one with `smithers agents add`.\n");
         return c.ok({ accounts });
       }
-      const rows = accounts.map((a) => {
+      // Resolved once and reused for both renderings: --format json consumers
+      // need the signed-in subscription too. Without it a machine reader can
+      // see that claude-3 is at 90% but not which subscription to go
+      // re-authenticate, which is exactly what a quota dashboard is for.
+      const identified = accounts.map((a) => ({
+        ...a,
+        signedInAs: formatAccountIdentity(readAccountIdentity(a.provider, a.configDir)) || null,
+      }));
+      const rows = identified.map((a) => {
         const where = a.configDir ?? (a.apiKey ? "(api key set)" : "");
-        return `  ${a.label.padEnd(24)}  ${a.provider.padEnd(14)}  ${where}`;
+        // Naming the signed-in subscription makes two labels sharing one
+        // rate limit obvious instead of silently halving the pool.
+        return `  ${a.label.padEnd(24)}  ${a.provider.padEnd(14)}  ${(a.signedInAs ?? "").padEnd(26)}  ${where}`;
       });
       process.stderr.write(`Registered accounts (${accounts.length}):\n${rows.join("\n")}\n`);
-      return c.ok({ accounts });
+      return c.ok({ accounts: identified });
     },
   })
   .command("remove", {
@@ -5666,7 +7025,7 @@ const openapiCli = Cli.create({
     args: openapiListArgs,
     async run(c) {
       try {
-        const { listOperations } = await import("@smithers-orchestrator/openapi/tool-factory");
+        const { listOperations } = await import("@smthrs/openapi/tool-factory");
         const ops = listOperations(c.args.specPath);
         if (ops.length === 0) {
           console.log("  No operations found in spec.");
@@ -5688,7 +7047,7 @@ const openapiCli = Cli.create({
     args: openapiGenerateArgs,
     async run(c) {
       try {
-        const { createOpenApiToolsSync } = await import("@smithers-orchestrator/openapi/tool-factory");
+        const { createOpenApiToolsSync } = await import("@smthrs/openapi/tool-factory");
         const specPath = resolve(process.cwd(), c.args.specPath);
         const outputPath = resolve(process.cwd(), c.args.outputPath);
         const outputDir = dirname(outputPath);
@@ -5703,7 +7062,7 @@ const openapiCli = Cli.create({
           outputPath,
           [
             'import { fileURLToPath } from "node:url";',
-            'import { createOpenApiToolsSync } from "smithers-orchestrator/openapi";',
+            'import { createOpenApiToolsSync } from "smthrs/openapi";',
             "",
             `const specPath = fileURLToPath(new URL(${JSON.stringify(importPath)}, import.meta.url));`,
             "",
@@ -5940,6 +7299,14 @@ const worktreeCli = Cli.create({
           const verb = result.dryRun ? "Would remove" : "Removed";
           for (const entry of result.removed) {
             console.log(`${verb} ${entry.path} (${entry.runId}, ${formatBytes(entry.bytes)})`);
+            if (entry.ignoredPaths.length > 0) {
+              const count = entry.ignoredPathsTruncated
+                ? `${entry.ignoredPaths.length}+`
+                : String(entry.ignoredPaths.length);
+              const preview = entry.ignoredPaths.slice(0, 3).join(", ");
+              const more = entry.ignoredPaths.length > 3 || entry.ignoredPathsTruncated ? ", ..." : "";
+              console.log(`${result.dryRun ? "Would delete" : "Deleted"} ${count} ignored path(s): ${preview}${more}`);
+            }
           }
           for (const entry of result.skipped) {
             console.log(`Keeping ${entry.path} (${entry.runId}): ${entry.reason}`);
@@ -5964,6 +7331,52 @@ const worktreeCli = Cli.create({
       } finally {
         cleanup();
       }
+    },
+  });
+const herdrSessionOption = z.object({
+  session: z
+    .string()
+    .optional()
+    .describe("Target a named herdr session's socket (default: the default session, or HERDR_SESSION)"),
+});
+const herdrCli = Cli.create({
+  name: "herdr",
+  description: "Mirror runs into a herdr terminal workspace (optional presentation/steering plane).",
+})
+  .command("status", {
+    description: "Ping the herdr server and report its version, protocol, and client compatibility.",
+    options: herdrSessionOption,
+    async run(c) {
+      return runHerdrStatusCommand(c);
+    },
+  })
+  .command("attach", {
+    description:
+      "Mirror an existing run into a herdr workspace: adopt/create panes for active agent nodes and follow status until the run ends or Ctrl-C. Never closes the workspace.",
+    args: z.object({ runId: z.string().describe("Run ID to mirror into herdr") }),
+    options: herdrSessionOption,
+    async run(c) {
+      return runHerdrAttachCommand(c);
+    },
+  })
+  .command("open", {
+    description:
+      "Open (or re-open) an on-demand herdr pane for a run: a node's lingering output tail, or the run-level overview when no node is given. Adopts an existing pane instead of duplicating it.",
+    args: z.object({
+      runId: z.string().describe("Run ID whose workspace to open a pane in"),
+      nodeId: z.string().optional().describe("Node ID to open a tail pane for (omit for the run-level overview pane)"),
+    }),
+    options: herdrSessionOption,
+    async run(c) {
+      return runHerdrOpenCommand(c);
+    },
+  })
+  .command("clean", {
+    description:
+      "Close herdr workspaces that mirror a smithers run whose run is terminal in the DB. Never touches workspaces that do not map to a known run, and leaves active runs open.",
+    options: herdrSessionOption,
+    async run(c) {
+      return runHerdrCleanCommand(c);
     },
   });
 // ---------------------------------------------------------------------------
@@ -6292,6 +7705,443 @@ async function resolveHijackRequestEngine(adapter, runId, target) {
     return target;
   }
 }
+/**
+ * Core hand-off flow shared by `smithers hijack` and `smithers steer`. Requests
+ * a live run's hand-off (or resolves a settled run's resumable session), then
+ * hosts the interactive agent session either in a herdr pane (when
+ * `herdrHijack.enabled`, fully degradable) or in the current terminal. The
+ * herdr-pane decision is INJECTED, not read from env inside here, so the two
+ * entry points differ only in how they decide: `hijack` derives it from
+ * `SMITHERS_HERDR_HIJACK` (resolveHerdrHijackOption); `steer` derives it from
+ * herdr-mirror auto-detection (detectHerdrMirrorForRun). Behaviour on the
+ * `hijack` path is byte-identical to the pre-extraction inline body.
+ *
+ * @param {{
+ *   adapter: any,
+ *   run: any,
+ *   runId: string,
+ *   target: string | undefined,
+ *   timeoutMs: number,
+ *   launch: boolean,
+ *   herdrHijack: { enabled: boolean, session: string | undefined },
+ *   ok: (payload: any) => any,
+ *   fail: (opts: { code: string, message: string, exitCode: number }) => any,
+ * }} params
+ */
+async function runHijackFlow(params) {
+  const { adapter, run, runId, target, timeoutMs, launch, herdrHijack, ok, fail } = params;
+  let candidate = await resolveHijackCandidate(adapter, runId, target);
+  const runIsLive = run.status === "running";
+  const requestedAtMs = Date.now();
+  if (runIsLive) {
+    // `--target` accepts an agent engine OR a node id (the TUI's HijackMode
+    // and `smithers steer --node` both pass the selected node id). The
+    // engine's hand-off check (maybeCompleteHijack) only understands engine
+    // names, so resolve a node-id target to that node's recorded engine
+    // before persisting the request; the raw target still scopes candidate
+    // matching below, which understands both. (#23)
+    const requestTarget = await resolveHijackRequestEngine(adapter, runId, target);
+    const event = {
+      type: "RunHijackRequested",
+      runId,
+      timestampMs: requestedAtMs,
+      ...(target ? { target } : {}),
+    };
+    await adapter.requestRunHijack(runId, requestedAtMs, requestTarget);
+    await adapter.insertEventWithNextSeq({
+      runId,
+      timestampMs: requestedAtMs,
+      type: "RunHijackRequested",
+      payloadJson: JSON.stringify(event),
+    });
+    runSync(trackEvent(event));
+    try {
+      candidate = await waitForHijackCandidate(adapter, runId, {
+        target,
+        timeoutMs,
+      });
+    } catch (error) {
+      await adapter.clearRunHijack(runId).catch(() => undefined);
+      return fail({
+        code: "HIJACK_TIMEOUT",
+        message: error?.message ?? String(error),
+        exitCode: 4,
+      });
+    }
+  }
+  if (!candidate) {
+    return fail({
+      code: "HIJACK_UNAVAILABLE",
+      message: `No resumable agent session or conversation found for run ${runId}.`,
+      exitCode: 4,
+    });
+  }
+  // --target may name the engine OR the node id; the candidate the resolver
+  // returns matches on either, so reject only when it matches neither. (#23)
+  if (target && candidate.engine !== target && candidate.nodeId !== target) {
+    return fail({
+      code: "HIJACK_TARGET_MISMATCH",
+      message: `Run ${runId} is resumable via ${candidate.engine} on node ${candidate.nodeId}, not ${target}. Pass an agent engine (e.g. claude-code, codex) or a node id from \`smithers tree ${runId}\`.`,
+      exitCode: 4,
+    });
+  }
+  const resumeCommand = run.workflowPath ? `smithers up ${run.workflowPath} --resume --run-id ${runId}` : null;
+  if (!launch) {
+    const launchSpec = isNativeHijackCandidate(candidate) ? buildHijackLaunchSpec(candidate) : null;
+    const launchInfo = launchSpec
+      ? {
+          command: launchSpec.command,
+          args: launchSpec.args,
+          cwd: launchSpec.cwd,
+        }
+      : null;
+    return ok({
+      runId,
+      engine: candidate.engine,
+      mode: candidate.mode,
+      nodeId: candidate.nodeId,
+      attempt: candidate.attempt,
+      iteration: candidate.iteration,
+      resume: candidate.resume ?? null,
+      messageCount: candidate.messages?.length ?? 0,
+      cwd: candidate.cwd,
+      launch: launchInfo,
+      resumeCommand,
+    });
+  }
+  let exitCode = 0;
+  let resumedBySmithers = false;
+  if (isNativeHijackCandidate(candidate)) {
+    const launchSpec = buildHijackLaunchSpec(candidate);
+    // Spec D4: when the caller opted into pane hosting, host the interactive
+    // session in a herdr pane (so the operator drives it from any attached
+    // terminal, incl. over SSH) instead of this terminal. Fully degradable:
+    // if herdr is unreachable or the pane launch fails, launchHerdrHijackPane
+    // returns null and we fall through to the current-terminal flow below.
+    const herdrPane = herdrHijack.enabled
+      ? await launchHerdrHijackPane({
+          spec: launchSpec,
+          runId,
+          nodeId: candidate.nodeId,
+          label: run.workflowPath ? herdrWorkspaceLabel(workflowIdFromPath(run.workflowPath), runId) : undefined,
+          session: herdrHijack.session,
+          cwd: candidate.cwd,
+          // The pane wraps the session so that, on exit, it prints this
+          // handback line and lingers for a keypress instead of dying.
+          resumeCommand,
+        })
+      : null;
+    if (herdrPane) {
+      // The pane's process is owned by herdr, so we neither block on child
+      // exit nor auto-resume (see launchHerdrHijackPane's handback TODO).
+      // The operator drives the pane and hands control back manually.
+      const attachCommand = `herdr agent attach ${herdrPane.name}`;
+      process.stderr.write(`[smithers] hijack launched in a herdr pane\n`);
+      process.stderr.write(
+        `[smithers]   agent ${herdrPane.name} · pane ${herdrPane.paneId}${herdrPane.workspaceId ? ` · workspace ${herdrPane.workspaceId}` : ""}\n`,
+      );
+      process.stderr.write(`[smithers]   attach with: ${attachCommand}\n`);
+      if (resumeCommand) {
+        process.stderr.write(`[smithers]   when finished, return control to Smithers with:\n    ${resumeCommand}\n`);
+      }
+      return ok({
+        runId,
+        engine: candidate.engine,
+        mode: candidate.mode,
+        resumedSession: candidate.resume ?? null,
+        resumedBySmithers: false,
+        herdrPane: {
+          name: herdrPane.name,
+          paneId: herdrPane.paneId,
+          workspaceId: herdrPane.workspaceId ?? null,
+          attach: attachCommand,
+        },
+        resumeCommand,
+      });
+    }
+    // When a herdr pane was requested but failed, do NOT fall through to
+    // `claude --resume` on a non-TTY (print mode → "No deferred tool marker").
+    // Bare `smithers hijack` from scripts/tests may still launch without a TTY.
+    if (herdrHijack.enabled && !process.stdin.isTTY) {
+      return fail({
+        code: "HIJACK_LAUNCH_FAILED",
+        message: `Cannot open interactive ${candidate.engine} session without a TTY (herdr pane launch also failed). From a herdr detail tab this should open a new hijack tab — check herdr is reachable, or run: smithers hijack ${runId} --target ${candidate.nodeId}`,
+        exitCode: 4,
+      });
+    }
+    process.stderr.write(
+      `[smithers] hijacking ${candidate.engine} session ${candidate.resume} from ${candidate.nodeId}#${candidate.attempt}\n`,
+    );
+    exitCode = await launchHijackSession(launchSpec);
+  } else {
+    if (!candidate.messages?.length) {
+      return fail({
+        code: "HIJACK_CONVERSATION_MISSING",
+        message: `Run ${runId} did not persist a resumable conversation for ${candidate.engine}.`,
+        exitCode: 4,
+      });
+    }
+    const result = await launchConversationHijackSession(adapter, {
+      ...candidate,
+      mode: "conversation",
+      messages: candidate.messages,
+    });
+    await persistConversationHijackHandoff(adapter, candidate, result.messages);
+    exitCode = result.code;
+  }
+  if (exitCode === 0 && runIsLive && run.workflowPath) {
+    const pid = resumeRunDetached(run.workflowPath, runId);
+    resumedBySmithers = true;
+    process.stderr.write(`[smithers] returned control to Smithers${pid ? ` (pid ${pid})` : ""}\n`);
+  } else if (resumeCommand) {
+    process.stderr.write(`[smithers] return control to Smithers with:\n  ${resumeCommand}\n`);
+  }
+  if (exitCode !== 0) {
+    return fail({
+      code: "HIJACK_LAUNCH_FAILED",
+      message: `${candidate.engine} exited with code ${exitCode}`,
+      exitCode,
+    });
+  }
+  return ok({
+    runId,
+    engine: candidate.engine,
+    mode: candidate.mode,
+    resumedSession: candidate.resume ?? null,
+    resumedBySmithers,
+  });
+}
+/**
+ * `smithers steer [runId] [--node <id>] [message] [--takeover]`: the
+ * zero-ceremony steering command, with three modes over one resolved run (same id
+ * semantics as `tail` — an explicit id wins, else auto-pick the single active run
+ * or prompt among several):
+ *   - a message   → queue a durable steer for the target node; it lands
+ *                   on that node's next agent step and the run never stops;
+ *   - no message  → prompt for a single input line, then queue that steer;
+ *   - --takeover  → the run-wide hijack hand-off (into the run's herdr mirror as a
+ *                   pane when one exists, else this terminal), gated by an honest
+ *                   in-flight-sibling warning (a run-wide hijack aborts every other
+ *                   agent node, which re-runs on resume).
+ *
+ * @param {any} c
+ */
+async function runSteerCommand(c) {
+  const fail = makeFail(c);
+  const { adapter, cleanup } = await findAndOpenDb();
+  try {
+    // 1. Resolve the run. An explicit id wins (same semantics as `tail`);
+    //    otherwise auto-pick the single active run or prompt among several.
+    /** @type {string | undefined} */
+    let runId = c.args.runId;
+    /** @type {any} */
+    let run;
+    if (runId) {
+      run = await adapter.getRun(runId);
+      if (!run) {
+        return fail({ code: "RUN_NOT_FOUND", message: `Run not found: ${runId}`, exitCode: 4 });
+      }
+    } else {
+      const active = await listActiveRunsForSteer(adapter);
+      if (active.length === 0) {
+        return fail({
+          code: "NO_ACTIVE_RUN",
+          message: "No active runs to steer. Pass a run id: smithers steer <runId>.",
+          exitCode: 4,
+        });
+      }
+      if (active.length === 1) {
+        run = active[0];
+        runId = run.runId;
+      } else if (!process.stdin.isTTY) {
+        return fail({
+          code: "MULTIPLE_ACTIVE_RUNS",
+          message: `Multiple active runs; pass one: ${active.map((r) => r.runId).join(", ")}.`,
+          exitCode: 4,
+        });
+      } else {
+        const choice = await fuzzySelect({
+          message: "Select a run to steer",
+          options: active.map((r) => ({
+            value: r.runId,
+            label: r.runId,
+            hint: `${r.workflowName ?? "run"} · ${r.status}`,
+          })),
+        });
+        if (isCancel(choice)) {
+          return c.ok({ steered: false, reason: "cancelled" });
+        }
+        runId = String(choice);
+        run = active.find((r) => r.runId === runId);
+      }
+    }
+    // 2. Takeover mode: the run-wide hijack hand-off, gated on the sibling
+    //    warning. Everything below (steer) is the default.
+    if (c.options.takeover) {
+      return await runSteerTakeover(c, adapter, run, runId, fail);
+    }
+    // 3. Steer mode (default). With a message, queue it; without one, prompt
+    //    a single input line first (a bare `smithers steer` from a TTY).
+    let message =
+      typeof c.options.message === "string"
+        ? c.options.message.trim()
+        : typeof c.args.message === "string"
+          ? c.args.message.trim()
+          : "";
+    if (!message) {
+      if (!process.stdin.isTTY) {
+        return fail({
+          code: "STEER_MESSAGE_REQUIRED",
+          message: `Pass a steering message: smithers steer ${runId} "…", or --takeover to hand off the session.`,
+          exitCode: 4,
+        });
+      }
+      const entered = await text({
+        message: `Steer run ${runId}`,
+        placeholder: "a short instruction for the agent's next step",
+      });
+      if (isCancel(entered)) {
+        return c.ok({ steered: false, reason: "cancelled" });
+      }
+      message = String(entered ?? "").trim();
+      if (!message) {
+        return c.ok({ steered: false, reason: "empty" });
+      }
+    }
+    // An explicit --node must name a real node in the run. Otherwise the steer
+    // is queued against a node that never runs and silently expires when the run
+    // ends — the operator's steer looks accepted but never lands. The pane `s`
+    // key always names its own in-flight node, so it passes untouched.
+    if (typeof c.options.node === "string" && c.options.node !== "") {
+      const exists = await nodeExistsInRun(adapter, runId, c.options.node);
+      if (!exists) {
+        return fail({
+          code: "NODE_NOT_IN_RUN",
+          message: `No node "${c.options.node}" in run ${runId}; see \`smithers tree ${runId}\` for its node ids.`,
+          exitCode: 4,
+        });
+      }
+    }
+    // Resolve the target node: an explicit --node wins, else the run's current
+    // in-flight agent node. A run with no agent node in flight can't be steerd.
+    const nodeId = await resolveSteerTargetNode(adapter, runId, c.options.node);
+    if (!nodeId) {
+      return fail({
+        code: "NO_TARGET_NODE",
+        message: `No in-flight agent node to steer on run ${runId}; name one with --node <id> (see \`smithers tree ${runId}\`).`,
+        exitCode: 4,
+      });
+    }
+    let queued;
+    try {
+      queued = await runPromise(enqueueSteer(adapter, runId, nodeId, message, { author: resolveSteerAuthor() }));
+    } catch (error) {
+      return fail({
+        code: error instanceof SmithersError ? error.code : "STEER_FAILED",
+        message: error?.message ?? String(error),
+        exitCode: 4,
+      });
+    }
+    process.stderr.write(`↪ steer queued for run ${runId} · node ${nodeId}\n`);
+    process.stderr.write(
+      `  it lands on ${nodeId}'s next agent step; watch it with:\n    smithers tail ${runId} --node ${nodeId}\n`,
+    );
+    return c.ok({
+      steered: true,
+      mode: "steer",
+      runId,
+      nodeId,
+      steerId: queued.steerId,
+      message,
+    });
+  } finally {
+    cleanup();
+  }
+}
+/**
+ * The `--takeover` arm of `smithers steer`: the run-wide hijack hand-off, gated
+ * by an honest in-flight-sibling warning. A hijack aborts the shared run signal,
+ * so any OTHER agent node currently mid-generate is cancelled and re-runs on
+ * resume; when there are such siblings we print the exact count and require a `y`
+ * confirmation (skippable with `--yes`, and refused outright on a non-TTY without
+ * it) before touching the run. With no siblings it proceeds straight to the
+ * shared hand-off flow (herdr mirror pane when one exists, else this terminal).
+ *
+ * @param {any} c
+ * @param {any} adapter
+ * @param {any} run
+ * @param {string} runId
+ * @param {(opts: { code: string, message: string, exitCode: number }) => any} fail
+ */
+async function runSteerTakeover(c, adapter, run, runId, fail) {
+  // Resolve the node being taken over so its own in-flight attempt is not
+  // counted as a "sibling": an explicit --node wins, else the run's hijack
+  // candidate (the node with a resumable session).
+  let targetNode = c.options.node;
+  if (!targetNode) {
+    const candidate = await resolveHijackCandidate(adapter, runId).catch(() => null);
+    targetNode = candidate?.nodeId;
+  }
+  const siblings = await countInFlightAgentSiblings(adapter, runId, targetNode);
+  if (siblings.length > 0 && !c.options.yes) {
+    process.stderr.write(`${formatTakeoverWarning(siblings)}\n`);
+    if (!process.stdin.isTTY) {
+      return fail({
+        code: "TAKEOVER_NOT_CONFIRMED",
+        message: `Takeover would abort ${siblings.length} in-flight sibling${siblings.length === 1 ? "" : "s"}; re-run with --yes to proceed, or queue a steer instead (smithers steer ${runId} "…").`,
+        exitCode: 4,
+      });
+    }
+    const proceed = await confirm({ message: "Take the whole run over anyway?", initialValue: false });
+    if (isCancel(proceed) || proceed !== true) {
+      return c.ok({ steered: false, reason: "declined" });
+    }
+  }
+  // Prefer a herdr pane for takeover when:
+  //  - the run already has a herdr mirror (`up --herdr`), OR
+  //  - the operator is already inside herdr (supervisor detail tab), OR
+  //  - SMITHERS_HERDR_HIJACK is set.
+  // Falling through to `claude --resume` with a non-TTY stdin hits Claude's
+  // print-mode path ("No deferred tool marker…") and exits 1.
+  const workflowId = run.workflowPath ? workflowIdFromPath(run.workflowPath) : (run.workflowName ?? "smithers");
+  const label = herdrWorkspaceLabel(workflowId, runId);
+  const detection = await detectHerdrMirrorForRun({
+    session: c.options.session,
+    label,
+    runId,
+    logger: makeHerdrStderrLogger(),
+  });
+  const envHijack = resolveHerdrHijackOption(process.env);
+  const inHerdr = process.env.HERDR_ENV === "1";
+  const useHerdrPane = detection.mirrored || envHijack.enabled || inHerdr;
+  if (useHerdrPane) {
+    process.stderr.write(`[smithers] taking over run ${runId} in a herdr pane…\n`);
+  } else {
+    process.stderr.write(`[smithers] taking over run ${runId} in this terminal…\n`);
+  }
+  return await runHijackFlow({
+    adapter,
+    run,
+    runId,
+    target: c.options.node,
+    timeoutMs: c.options.timeoutMs,
+    launch: true,
+    herdrHijack: useHerdrPane
+      ? {
+          enabled: true,
+          session: c.options.session ?? envHijack.session,
+        }
+      : { enabled: false, session: undefined },
+    ok: (payload) =>
+      c.ok({
+        ...payload,
+        steered: true,
+        mode: "takeover",
+        mirrored: detection.mirrored || inHerdr,
+      }),
+    fail,
+  });
+}
 // ---------------------------------------------------------------------------
 let commandExitOverride;
 /**
@@ -6316,7 +8166,8 @@ const ONESHOT_UI_ENTRY = fileURLToPath(new URL("./oneshot/oneshot-ui.tsx", impor
 
 /** @param {string} runId @param {string} cwd */
 function openOneshotUi(runId, cwd) {
-  const opener = spawn("bun", [fileURLToPath(import.meta.url), "ui", runId, "--workflow", "oneshot"], {
+  const openerSpawn = smithersRuntimeSpawn([fileURLToPath(import.meta.url), "ui", runId, "--workflow", "oneshot"]);
+  const opener = spawn(openerSpawn.command, openerSpawn.args, {
     cwd,
     detached: true,
     stdio: "ignore",
@@ -6342,7 +8193,7 @@ const cli = Cli.create({
   // the alias is documented here until an upstream flag entry lands. (#11)
   description: CLI_DESCRIPTION,
   version: readPackageVersion(),
-  mcp: { command: "bunx smithers-orchestrator --mcp" },
+  mcp: { command: "bunx smthrs --mcp" },
 })
   // =========================================================================
   // smithers init [prompt]
@@ -6600,7 +8451,8 @@ const cli = Cli.create({
         const fd = openSync(logFile, "a");
         let child;
         try {
-          child = spawn("bun", childArgs, {
+          const oneshotSpawn = smithersRuntimeSpawn(childArgs);
+          child = spawn(oneshotSpawn.command, oneshotSpawn.args, {
             cwd: taskCwd,
             detached: true,
             stdio: ["ignore", fd, fd],
@@ -6968,7 +8820,20 @@ const cli = Cli.create({
     alias: { detach: "d", runId: "r", input: "i", maxConcurrency: "c" },
     async run(c) {
       const fail = makeFail(c);
-      const mode = interactiveLaunchMode(c.options, Boolean(c.args.workflow), c.format);
+      let workflowArg = c.args.workflow;
+      // `up --resume <runId>` (or --resume with --run-id) needs no workflow
+      // arg: derive it from the stored run record, as the --resume help
+      // promises.
+      if (!workflowArg && !c.options.interactive) {
+        const { resume, resumeRunId } = normalizeResumeOption(c.options.resume);
+        const resumeTargetRunId = resumeRunId ?? (resume ? c.options.runId : undefined);
+        if (resumeTargetRunId) {
+          const derived = await deriveResumeWorkflowPath(resumeTargetRunId);
+          if ("error" in derived) return fail(derived.error);
+          workflowArg = derived.workflowPath;
+        }
+      }
+      const mode = interactiveLaunchMode(c.options, Boolean(workflowArg), c.format);
       if (mode === "needs-tty") {
         return fail({
           code: "INTERACTIVE_REQUIRES_TTY",
@@ -6986,16 +8851,16 @@ const cli = Cli.create({
       }
       if (mode === "interactive") {
         let preselect;
-        if (c.args.workflow) {
-          const asPath = resolve(process.cwd(), c.args.workflow);
+        if (workflowArg) {
+          const asPath = resolve(process.cwd(), workflowArg);
           if (existsSync(asPath)) {
-            const id = basename(c.args.workflow).replace(/\.[mc]?[tj]sx?$/i, "");
+            const id = basename(workflowArg).replace(/\.[mc]?[tj]sx?$/i, "");
             preselect = { entryFile: asPath, id, displayName: id };
           } else {
             // Not a file — treat the arg as a discovered workflow ID, the
             // same way `smithers workflow run <id>` does.
             try {
-              const discovered = resolveWorkflow(c.args.workflow, process.cwd());
+              const discovered = resolveWorkflow(workflowArg, process.cwd());
               preselect = {
                 entryFile: discovered.entryFile,
                 id: discovered.id,
@@ -7013,7 +8878,7 @@ const cli = Cli.create({
       }
       const optionError = validateUpOptionConsistency(c.options);
       if (optionError) return fail(optionError);
-      return executeUpCommand(c, c.args.workflow, c.options, fail);
+      return executeUpCommand(c, workflowArg, c.options, fail);
     },
   })
   // =========================================================================
@@ -7025,7 +8890,7 @@ const cli = Cli.create({
     async run(c) {
       const fail = makeFail(c);
       try {
-        const { migrateSmithersStore } = await import("smithers-orchestrator/migrateSmithersStore");
+        const { migrateSmithersStore } = await import("smthrs/migrateSmithersStore");
         if (!c.options.to) {
           return fail({
             code: "INVALID_INPUT",
@@ -7502,12 +9367,79 @@ const cli = Cli.create({
   // smithers logs <run_id>
   // =========================================================================
   .command("logs", {
-    description: "Tail the event log of a specific run.",
+    description:
+      "Tail the event log of a specific run. Follows a live run to completion only when stdout is a TTY; piped/redirected output snapshots and exits. -f/--follow forces follow, --no-follow forces snapshot.",
     args: z.object({ runId: z.string().describe("Run ID to tail") }),
     options: logsOptions,
     alias: { follow: "f", tail: "n" },
     async *run(c) {
       return yield* streamRunEventsCommand(c);
+    },
+  })
+  // =========================================================================
+  // smithers tail <run_id>
+  // =========================================================================
+  .command("tail", {
+    description:
+      "Tail a run's output: verbatim node output with --node, or a concise run-level event overview. Follows live runs to completion; --format jsonl emits raw event JSON per line.",
+    args: tailArgs,
+    options: tailOptions,
+    alias: { follow: "f", node: "n" },
+    async run(c) {
+      return runTailCommand(c);
+    },
+  })
+  // =========================================================================
+  // smithers supervisor — workflow supervisor outline (herdr right pane)
+  // =========================================================================
+  .command("supervisor", {
+    description:
+      "Workflow supervisor: live outline of phases and agents. Sources through the workspace gateway by default (start-or-attach, silently falling back to direct smithers.db reads if none is reachable). Designed as the herdr cockpit right pane (harness left); also works in a bare TTY. j/k select, Enter opens a detail tab in herdr when available, [ ] switch runs, f follow live, q quit.",
+    options: z.object({
+      db: z.string().optional().describe("Path to smithers.db (default: discover from cwd)"),
+      cwd: z.string().optional().describe("Project directory for DB discovery (default: process.cwd())"),
+      interval: z.number().positive().default(0.5).describe("Poll interval in seconds"),
+      gateway: z
+        .string()
+        .optional()
+        .describe(
+          "Source data through a workspace gateway over RPC: a base URL to attach (hard-fails if unreachable), or `auto` to start-or-attach the workspace gateway. Default (no flag) is `auto` with a silent fallback to direct-db when no gateway is reachable.",
+        ),
+      direct: z
+        .boolean()
+        .optional()
+        .describe(
+          "Force direct smithers.db reads, bypassing the gateway (the escape hatch for diagnosing a broken gateway).",
+        ),
+    }),
+    alias: { interval: "i", gateway: "g" },
+    async run(c) {
+      return runTopCommand(c, { resolveSource: () => resolveSupervisorObservationSource(c) });
+    },
+  })
+  // Hidden/compat alias — prefer `smithers supervisor`.
+  .command("top", {
+    description: "Alias for `smithers supervisor` (workflow supervisor).",
+    options: z.object({
+      db: z.string().optional().describe("Path to smithers.db (default: discover from cwd)"),
+      cwd: z.string().optional().describe("Project directory for DB discovery (default: process.cwd())"),
+      interval: z.number().positive().default(0.5).describe("Poll interval in seconds"),
+      gateway: z
+        .string()
+        .optional()
+        .describe(
+          "Source data through a workspace gateway over RPC: a base URL to attach (hard-fails if unreachable), or `auto` to start-or-attach the workspace gateway. Default (no flag) is `auto` with a silent fallback to direct-db when no gateway is reachable.",
+        ),
+      direct: z
+        .boolean()
+        .optional()
+        .describe(
+          "Force direct smithers.db reads, bypassing the gateway (the escape hatch for diagnosing a broken gateway).",
+        ),
+    }),
+    alias: { interval: "i", gateway: "g" },
+    async run(c) {
+      return runTopCommand(c, { resolveSource: () => resolveSupervisorObservationSource(c) });
     },
   })
   // =========================================================================
@@ -8074,136 +10006,36 @@ const cli = Cli.create({
             exitCode: 4,
           });
         }
-        let candidate = await resolveHijackCandidate(adapter, c.args.runId, c.options.target);
-        const runIsLive = run.status === "running";
-        const requestedAtMs = Date.now();
-        if (runIsLive) {
-          // `--target` accepts an agent engine OR a node id (the TUI's
-          // HijackMode passes the selected node id). The engine's
-          // hand-off check (maybeCompleteHijack) only understands engine
-          // names, so resolve a node-id target to that node's recorded
-          // engine before persisting the request; the raw target still
-          // scopes candidate matching below, which understands both. (#23)
-          const requestTarget = await resolveHijackRequestEngine(adapter, c.args.runId, c.options.target);
-          const event = {
-            type: "RunHijackRequested",
-            runId: c.args.runId,
-            timestampMs: requestedAtMs,
-            ...(c.options.target ? { target: c.options.target } : {}),
-          };
-          await adapter.requestRunHijack(c.args.runId, requestedAtMs, requestTarget);
-          await adapter.insertEventWithNextSeq({
-            runId: c.args.runId,
-            timestampMs: requestedAtMs,
-            type: "RunHijackRequested",
-            payloadJson: JSON.stringify(event),
-          });
-          runSync(trackEvent(event));
-          try {
-            candidate = await waitForHijackCandidate(adapter, c.args.runId, {
-              target: c.options.target,
-              timeoutMs: c.options.timeoutMs,
-            });
-          } catch (error) {
-            await adapter.clearRunHijack(c.args.runId).catch(() => undefined);
-            return fail({
-              code: "HIJACK_TIMEOUT",
-              message: error?.message ?? String(error),
-              exitCode: 4,
-            });
-          }
-        }
-        if (!candidate) {
-          return fail({
-            code: "HIJACK_UNAVAILABLE",
-            message: `No resumable agent session or conversation found for run ${c.args.runId}.`,
-            exitCode: 4,
-          });
-        }
-        // --target may name the engine OR the node id; the candidate the
-        // resolver returns matches on either, so reject only when it
-        // matches neither. (#23)
-        if (c.options.target && candidate.engine !== c.options.target && candidate.nodeId !== c.options.target) {
-          return fail({
-            code: "HIJACK_TARGET_MISMATCH",
-            message: `Run ${c.args.runId} is resumable via ${candidate.engine} on node ${candidate.nodeId}, not ${c.options.target}. Pass an agent engine (e.g. claude-code, codex) or a node id from \`smithers tree ${c.args.runId}\`.`,
-            exitCode: 4,
-          });
-        }
-        const resumeCommand = run.workflowPath
-          ? `smithers up ${run.workflowPath} --resume --run-id ${c.args.runId}`
-          : null;
-        if (!c.options.launch) {
-          const launchSpec = isNativeHijackCandidate(candidate) ? buildHijackLaunchSpec(candidate) : null;
-          const launch = launchSpec
-            ? {
-                command: launchSpec.command,
-                args: launchSpec.args,
-                cwd: launchSpec.cwd,
-              }
-            : null;
-          return c.ok({
-            runId: c.args.runId,
-            engine: candidate.engine,
-            mode: candidate.mode,
-            nodeId: candidate.nodeId,
-            attempt: candidate.attempt,
-            iteration: candidate.iteration,
-            resume: candidate.resume ?? null,
-            messageCount: candidate.messages?.length ?? 0,
-            cwd: candidate.cwd,
-            launch,
-            resumeCommand,
-          });
-        }
-        let exitCode = 0;
-        let resumedBySmithers = false;
-        if (isNativeHijackCandidate(candidate)) {
-          const launchSpec = buildHijackLaunchSpec(candidate);
-          process.stderr.write(
-            `[smithers] hijacking ${candidate.engine} session ${candidate.resume} from ${candidate.nodeId}#${candidate.attempt}\n`,
-          );
-          exitCode = await launchHijackSession(launchSpec);
-        } else {
-          if (!candidate.messages?.length) {
-            return fail({
-              code: "HIJACK_CONVERSATION_MISSING",
-              message: `Run ${c.args.runId} did not persist a resumable conversation for ${candidate.engine}.`,
-              exitCode: 4,
-            });
-          }
-          const result = await launchConversationHijackSession(adapter, {
-            ...candidate,
-            mode: "conversation",
-            messages: candidate.messages,
-          });
-          await persistConversationHijackHandoff(adapter, candidate, result.messages);
-          exitCode = result.code;
-        }
-        if (exitCode === 0 && runIsLive && run.workflowPath) {
-          const pid = resumeRunDetached(run.workflowPath, c.args.runId);
-          resumedBySmithers = true;
-          process.stderr.write(`[smithers] returned control to Smithers${pid ? ` (pid ${pid})` : ""}\n`);
-        } else if (resumeCommand) {
-          process.stderr.write(`[smithers] return control to Smithers with:\n  ${resumeCommand}\n`);
-        }
-        if (exitCode !== 0) {
-          return fail({
-            code: "HIJACK_LAUNCH_FAILED",
-            message: `${candidate.engine} exited with code ${exitCode}`,
-            exitCode,
-          });
-        }
-        return c.ok({
+        // Pane hosting is opt-in via SMITHERS_HERDR_HIJACK; `steer` derives the
+        // same decision from mirror auto-detection instead. Both share
+        // runHijackFlow, so the hand-off body stays single-sourced.
+        return await runHijackFlow({
+          adapter,
+          run,
           runId: c.args.runId,
-          engine: candidate.engine,
-          mode: candidate.mode,
-          resumedSession: candidate.resume ?? null,
-          resumedBySmithers,
+          target: c.options.target,
+          timeoutMs: c.options.timeoutMs,
+          launch: c.options.launch,
+          herdrHijack: resolveHerdrHijackOption(process.env),
+          ok: (payload) => c.ok(payload),
+          fail,
         });
       } finally {
         cleanup();
       }
+    },
+  })
+  // =========================================================================
+  // smithers steer [run_id]
+  // =========================================================================
+  .command("steer", {
+    description:
+      "Steer a running workflow in one step. With a message, queue a durable steer that lands on the target node's next agent step (the run never stops); with no message, prompt for one; with --takeover, hand off the live agent session (a run-wide hijack, so it warns and asks before aborting in-flight siblings). Bare `smithers steer` auto-picks the single active run (or prompts).",
+    args: steerArgs,
+    options: steerOptions,
+    alias: { node: "n", takeover: "t", yes: "y" },
+    async run(c) {
+      return runSteerCommand(c);
     },
   })
   // =========================================================================
@@ -8409,13 +10241,27 @@ const cli = Cli.create({
         const { adapter, cleanup } = await findAndOpenDb();
         try {
           const diagnosis = await runPromise(diagnoseRunEffect(adapter, c.args.runId));
+          // Steers are a form of pending human input, so surface them
+          // alongside the blocker diagnosis (queued ones especially — they are
+          // waiting to land on a node's next agent step).
+          let steers = [];
+          try {
+            steers = await adapter.listSteers(c.args.runId);
+          } catch {
+            // Best-effort: the diagnosis still renders without the steer section.
+          }
+          const withSteers =
+            Array.isArray(steers) && steers.length > 0
+              ? { ...diagnosis, steers: summarizeSteerRows(steers) }
+              : diagnosis;
           if (c.options.json) {
-            return c.ok(JSON.stringify(diagnosis, null, 2));
+            return c.ok(JSON.stringify(withSteers, null, 2));
           }
           if (c.format === "json") {
-            return c.ok(diagnosis);
+            return c.ok(withSteers);
           }
-          return c.ok(renderWhyDiagnosisHuman(diagnosis), {
+          const human = renderWhyDiagnosisHuman(diagnosis) + formatWhySteerSection(steers);
+          return c.ok(human, {
             cta: withAgentNextSteps({ runId: c.args.runId }, diagnosisCtaCommands(diagnosis)),
           });
         } finally {
@@ -8914,11 +10760,15 @@ const cli = Cli.create({
   // smithers approve <run_id>
   // =========================================================================
   .command("approve", {
-    description: "Approve a paused approval gate. Auto-detects the pending node if only one exists.",
+    description:
+      "Approve a paused approval gate. Auto-detects the pending node if only one exists. With --watch, interactively answer each gate and human request as it appears.",
     args: approveArgs,
-    options: approveOptions,
-    alias: { node: "n" },
+    options: approveWatchOptions,
+    alias: { node: "n", watch: "w" },
     async run(c) {
+      if (c.options.watch) {
+        return runApproveWatchCommand(c);
+      }
       const fail = makeFail(c);
       try {
         const { adapter, cleanup } = await findAndOpenDb();
@@ -8929,18 +10779,27 @@ const cli = Cli.create({
           }
           const { runId: targetRunId, nodeId, iteration } = target;
           await Effect.runPromise(approveNode(adapter, targetRunId, nodeId, iteration, c.options.note, c.options.by));
-          const runAfterApproval = await adapter.getRun(c.args.runId);
+          const runAfterApproval = await adapter.getRun(targetRunId);
           const isDetached =
             !runAfterApproval ||
             runAfterApproval.status === "waiting-event" ||
             runAfterApproval.status === "waiting-approval";
+          // Auto-resume a parked detached run so the approval takes effect
+          // now instead of leaving it parked until someone runs
+          // `up --resume` (operators read that as "approve did nothing").
+          // `--no-resume` opts out; the owner-liveness gate keeps a live
+          // engine from being double-driven.
+          const resumeResult =
+            c.options.resume !== false
+              ? await maybeResumeDecidedDetachedRun(adapter, runAfterApproval, targetRunId)
+              : { resumed: false, reason: "opted-out" };
           const ctaCommands = [
-            { command: `logs ${c.args.runId}`, description: "Tail run logs" },
+            { command: `logs ${targetRunId}`, description: "Tail run logs" },
             { command: `ps`, description: "List all runs" },
           ];
-          if (isDetached && runAfterApproval?.workflowPath) {
+          if (isDetached && !resumeResult.resumed && runAfterApproval?.workflowPath) {
             ctaCommands.unshift({
-              command: `up ${runAfterApproval.workflowPath} --resume --run-id ${c.args.runId}`,
+              command: `up ${runAfterApproval.workflowPath} --resume --run-id ${targetRunId}`,
               description: "Resume the paused run",
             });
           }
@@ -8949,16 +10808,18 @@ const cli = Cli.create({
           // and fails WORKFLOW_REQUIRED, so mirror the runnable form the
           // ctaCommands / signal / hijack paths already use. (#24)
           const resumeNote = runAfterApproval?.workflowPath
-            ? `smithers up ${runAfterApproval.workflowPath} --resume --run-id ${c.args.runId}`
-            : `smithers up <workflow-file> --resume --run-id ${c.args.runId}`;
+            ? `smithers up ${runAfterApproval.workflowPath} --resume --run-id ${targetRunId}`
+            : `smithers up <workflow-file> --resume --run-id ${targetRunId}`;
+          const approvedNote = resumeResult.resumed
+            ? `Approval recorded; relaunched the engine detached${resumeResult.pid ? ` (pid ${resumeResult.pid})` : ""} to continue the run.`
+            : `Approval recorded. If running detached, resume the run to continue: ${resumeNote}`;
           return c.ok(
             {
-              runId: c.args.runId,
+              runId: targetRunId,
               nodeId,
               status: "approved",
-              ...(isDetached
-                ? { note: `Approval recorded. If running detached, resume the run to continue: ${resumeNote}` }
-                : {}),
+              ...(resumeResult.resumed ? { resumed: true, resumePid: resumeResult.pid ?? null } : {}),
+              ...(isDetached ? { note: approvedNote } : {}),
             },
             {
               cta: {
@@ -9058,14 +10919,46 @@ const cli = Cli.create({
           }
           const { runId: targetRunId, nodeId, iteration } = target;
           await Effect.runPromise(denyNode(adapter, targetRunId, nodeId, iteration, c.options.note, c.options.by));
+          // Deny especially needs the auto-resume: the run must resume for
+          // the engine to fail the gate (or run any on-deny task). Without
+          // it a detached run stays parked and the denial does nothing
+          // until someone runs `up --resume`. `--no-resume` opts out; the
+          // owner-liveness gate keeps a live engine from being double-driven.
+          const runAfterDenial = await adapter.getRun(targetRunId);
+          const resumeResult =
+            c.options.resume !== false
+              ? await maybeResumeDecidedDetachedRun(adapter, runAfterDenial, targetRunId)
+              : { resumed: false, reason: "opted-out" };
+          const ctaCommands = [
+            { command: `logs ${targetRunId}`, description: "Tail run logs" },
+            { command: `ps`, description: "List all runs" },
+          ];
+          if (
+            !resumeResult.resumed &&
+            runAfterDenial?.workflowPath &&
+            (runAfterDenial.status === "waiting-approval" || runAfterDenial.status === "waiting-event")
+          ) {
+            ctaCommands.unshift({
+              command: `up ${runAfterDenial.workflowPath} --resume --run-id ${targetRunId}`,
+              description: "Resume the run so the denial takes effect",
+            });
+          }
           return c.ok(
-            { runId: c.args.runId, nodeId, status: "denied" },
+            {
+              runId: c.args.runId,
+              nodeId,
+              status: "denied",
+              ...(resumeResult.resumed
+                ? {
+                    resumed: true,
+                    resumePid: resumeResult.pid ?? null,
+                    note: `Denial recorded; relaunched the engine detached${resumeResult.pid ? ` (pid ${resumeResult.pid})` : ""} so the run fails the gate.`,
+                  }
+                : {}),
+            },
             {
               cta: {
-                commands: [
-                  { command: `logs ${c.args.runId}`, description: "Tail run logs" },
-                  { command: `ps`, description: "List all runs" },
-                ],
+                commands: ctaCommands,
               },
             },
           );
@@ -9231,7 +11124,13 @@ const cli = Cli.create({
             });
           }
           await adapter.requestRunPause(c.args.runId, Date.now());
-          process.exitCode = 2;
+          // A successful park is a success: leave the exit code at 0 so
+          // scripts don't read a healthy pause as a failure. Exit 2 is
+          // reserved for "cancelled" (see the exit-code table); a graceful
+          // pause is neither a failure nor a cancel. The idempotent
+          // already-paused branch above returns 0 too — match it. Real
+          // failures still exit non-zero (RUN_NOT_FOUND/RUN_NOT_ACTIVE=4,
+          // PAUSE_FAILED=1).
           return c.ok(
             {
               runId: c.args.runId,
@@ -9535,6 +11434,10 @@ const cli = Cli.create({
       nodeId: z.string().describe("Task/node ID to retry"),
       iteration: z.number().int().default(0).describe("Loop iteration"),
       deps: z.boolean().default(true).describe("Also reset dependents. Use --no-deps to reset only this node."),
+      detach: z
+        .boolean()
+        .default(false)
+        .describe("After the reset, resume the run in the background (like `up -d`) and exit"),
       force: z.boolean().default(false).describe("Allow retry even if run is still running"),
       acceptWorkflowChange: z
         .boolean()
@@ -9543,12 +11446,14 @@ const cli = Cli.create({
           "Resume this run after its workflow source changed, re-blessing durability metadata in place; you own replay determinism",
         ),
     }),
-    alias: { runId: "r", nodeId: "n" },
+    alias: { runId: "r", nodeId: "n", detach: "d" },
     async run(c) {
       const fail = makeFail(c);
       try {
-        const { adapter, workflow, cleanup } = await loadWorkflowDb(c.args.workflow);
+        const workflowFile = resolveWorkflowArg(c.args.workflow);
+        const { adapter, workflow, cleanup } = await loadWorkflowDb(workflowFile);
         try {
+          guardAgainstClosedStdio();
           const reportProgress = buildProgressReporter();
           let engineAttached = false;
           let retryState;
@@ -9559,7 +11464,7 @@ const cli = Cli.create({
             }
             reportProgress(event);
           };
-          await preflightRetryResume(adapter, c.options.runId, c.args.workflow, {
+          await preflightRetryResume(adapter, c.options.runId, workflowFile, {
             acceptWorkflowChange: c.options.acceptWorkflowChange,
           });
           const retryResumeClaim = {
@@ -9586,6 +11491,31 @@ const cli = Cli.create({
             process.exitCode = 1;
             return c.ok(resetResult);
           }
+          if (c.options.detach) {
+            // Hand the reset run to a detached `up --resume` child carrying the
+            // claim stamped during the reset, so the engine never runs in (and
+            // dies with) the calling shell's foreground pipe.
+            try {
+              const pid = resumeRunDetached(
+                {
+                  kind: "workflow-file",
+                  workflowPath: resolve(process.cwd(), workflowFile),
+                  cwd: process.cwd(),
+                },
+                c.options.runId,
+                retryResumeClaim,
+              );
+              process.stderr.write(
+                `[smithers] Reset ${resetResult.resetNodes.join(", ")}; resuming run ${c.options.runId} detached (pid ${pid}).\n`,
+              );
+              return c.ok({ ...resetResult, detached: true, pid });
+            } catch (error) {
+              if (retryState) {
+                await rollbackFailedRetryResume(adapter, retryState, retryResumeClaim, error);
+              }
+              throw error;
+            }
+          }
           const abort = setupAbortSignal();
           let runResult;
           try {
@@ -9593,7 +11523,7 @@ const cli = Cli.create({
               runWorkflow(workflow, {
                 input: {},
                 runId: c.options.runId,
-                workflowPath: c.args.workflow,
+                workflowPath: workflowFile,
                 resume: true,
                 force: c.options.force,
                 acceptWorkflowChange: c.options.acceptWorkflowChange,
@@ -9755,7 +11685,7 @@ const cli = Cli.create({
           code: "COMPOSE_NOT_FOUND",
           message: [
             `Docker Compose file not found. Checked ${composeDirCandidates.map((dir) => resolve(dir, "docker-compose.otel.yml")).join(", ")}.`,
-            `Reinstall smithers-orchestrator or upgrade @smithers-orchestrator/observability to a version that ships the local stack assets, then run "smithers observability --detach".`,
+            `Reinstall smthrs or upgrade @smthrs/observability to a version that ships the local stack assets, then run "smithers observability --detach".`,
             `Docker with Compose support is required.`,
           ].join(" "),
           exitCode: 1,
@@ -9884,7 +11814,7 @@ const cli = Cli.create({
     async run(c) {
       const fail = makeFail(c);
       try {
-        const { replayFromCheckpoint } = await import("@smithers-orchestrator/time-travel/replay");
+        const { replayFromCheckpoint } = await import("@smthrs/time-travel/replay");
         const { adapter, cleanup } = await loadWorkflowDb(c.args.workflow);
         try {
           const parsedOverrides = tryParseJsonInput(c.options.input, "input");
@@ -9918,7 +11848,7 @@ const cli = Cli.create({
           const workflow = await loadWorkflow(c.args.workflow);
           const onProgress = buildProgressReporter();
           const abort = setupAbortSignal();
-          const engine = await import("@smithers-orchestrator/engine");
+          const engine = await import("@smthrs/engine");
           const runResult = await Effect.runPromise(
             engine.runWorkflow(workflow, {
               input: {},
@@ -10169,7 +12099,7 @@ const cli = Cli.create({
     async run(c) {
       const fail = makeFail(c);
       try {
-        const { forkRun } = await import("@smithers-orchestrator/time-travel/fork");
+        const { forkRun } = await import("@smthrs/time-travel/fork");
         const { adapter, cleanup } = await loadWorkflowDb(c.args.workflow);
         try {
           const parsedOverrides = tryParseJsonInput(c.options.input, "input");
@@ -10196,7 +12126,7 @@ const cli = Cli.create({
             const workflow = await loadWorkflow(c.args.workflow);
             const onProgress = buildProgressReporter();
             const abort = setupAbortSignal();
-            const engine = await import("@smithers-orchestrator/engine");
+            const engine = await import("@smthrs/engine");
             const runResult = await Effect.runPromise(
               engine.runWorkflow(workflow, {
                 input: {},
@@ -10275,7 +12205,7 @@ const cli = Cli.create({
       const fail = makeFail(c);
       try {
         const { buildTimeline, buildTimelineTree, formatTimelineForTui, formatTimelineAsJson } =
-          await import("@smithers-orchestrator/time-travel/timeline");
+          await import("@smthrs/time-travel/timeline");
         const { adapter, cleanup } = await findAndOpenDb();
         try {
           const tree = c.options.tree
@@ -10320,7 +12250,12 @@ const cli = Cli.create({
           "Gateway bind host when autostarting (or set SMITHERS_GATEWAY_HOST). Use 0.0.0.0 for Tailscale/LAN access; a bearer token is minted automatically for non-loopback binds.",
         ),
       workflow: z.string().optional().describe("Open this workflow's UI directly, skipping run lookup."),
-      open: z.boolean().default(true).describe("Open a browser. Use --no-open to just print the URL."),
+      open: z
+        .boolean()
+        .default(true)
+        .describe(
+          "Open a browser. Use --no-open to just print the URL. Also suppressed automatically inside a herdr workspace (HERDR_ENV=1) or by SMITHERS_NO_BROWSER=1; force it back on with SMITHERS_NO_BROWSER=0.",
+        ),
       autostart: z
         .boolean()
         .default(true)
@@ -10388,7 +12323,12 @@ const cli = Cli.create({
         .boolean()
         .default(false)
         .describe("Force a rebuild of the full UI bundle before serving (with --app)."),
-      open: z.boolean().default(true).describe("Open a browser. Use --no-open to just print the URL."),
+      open: z
+        .boolean()
+        .default(true)
+        .describe(
+          "Open a browser. Use --no-open to just print the URL. Also suppressed automatically inside a herdr workspace (HERDR_ENV=1) or by SMITHERS_NO_BROWSER=1; force it back on with SMITHERS_NO_BROWSER=0.",
+        ),
       autostart: z
         .boolean()
         .default(true)
@@ -10431,7 +12371,12 @@ const cli = Cli.create({
         .describe(
           "Gateway bind host when autostarting (or set SMITHERS_GATEWAY_HOST). Use 0.0.0.0 for Tailscale/LAN access; a bearer token is minted automatically for non-loopback binds.",
         ),
-      open: z.boolean().default(true).describe("Open a browser. Use --no-open to just print the URL."),
+      open: z
+        .boolean()
+        .default(true)
+        .describe(
+          "Open a browser. Use --no-open to just print the URL. Also suppressed automatically inside a herdr workspace (HERDR_ENV=1) or by SMITHERS_NO_BROWSER=1; force it back on with SMITHERS_NO_BROWSER=0.",
+        ),
       autostart: z
         .boolean()
         .default(true)
@@ -10637,16 +12582,47 @@ const cli = Cli.create({
     },
   })
   .command("usage", {
-    description: "Show how much rate limit / subscription quota each registered account has used.",
+    description:
+      "Show how much rate limit / subscription quota each registered account has used, or with --run the token total one run spent.",
     options: z.object({
       account: z.string().optional().describe("Only report this account label"),
       provider: z.string().optional().describe("Only report accounts for this provider"),
+      run: z.string().optional().describe("Report the persisted token total for this run ID instead of account quota"),
       fresh: z
         .boolean()
         .default(false)
         .describe("Bypass the short usage cache (still respects provider rate-limit floors)"),
     }),
     async run(c) {
+      const fail = makeFail(c);
+      if (c.options.run) {
+        // Read from `_smithers_run_usage`, not by replaying TokenUsageReported
+        // events — the whole point of the table is an authoritative total
+        // (#1464 AWF-6).
+        const runId = c.options.run;
+        try {
+          const { adapter, cleanup } = await findAndOpenDb();
+          try {
+            // A run that spent nothing and a run ID that does not exist both sum
+            // to zero. Without this check a typo'd ID reports "0 tokens" and
+            // exits 0, which reads as an answer rather than a miss.
+            if (!(await adapter.getRun(runId))) {
+              return fail({ code: "RUN_NOT_FOUND", message: `Run not found: ${runId}`, exitCode: 4 });
+            }
+            const usage = await adapter.getRunTokenUsage(runId);
+            process.stderr.write(
+              `${runId}: ${usage.totalTokens.toLocaleString()} tokens ` +
+                `(${usage.inputTokens.toLocaleString()} in / ${usage.outputTokens.toLocaleString()} out) ` +
+                `across ${usage.attempts} agent attempt(s)\n`,
+            );
+            return c.ok({ usage });
+          } finally {
+            cleanup();
+          }
+        } catch (err) {
+          return fail({ code: "USAGE_FAILED", message: err?.message ?? String(err), exitCode: 1 });
+        }
+      }
       let accounts = listAccounts();
       if (c.options.account) {
         accounts = accounts.filter((a) => a.label === c.options.account);
@@ -10668,7 +12644,8 @@ const cli = Cli.create({
   .command(memoryCli)
   .command(openapiCli)
   .command(tokenCli)
-  .command(worktreeCli);
+  .command(worktreeCli)
+  .command(herdrCli);
 const cliCommands = Cli.toCommands?.get(cli);
 if (!(cliCommands instanceof Map)) {
   throw new Error("Could not resolve Smithers CLI commands for input bounds.");
@@ -10803,7 +12780,6 @@ const COMMAND_ALIASES = {
   exec: "up",
   show: "inspect",
   log: "logs",
-  tail: "logs",
   help: "--help",
 };
 /**
@@ -11045,8 +13021,7 @@ async function runRawJsonTimelineCommandIfMatched(argv) {
   if (!jsonOutput || positionals.length !== 2 || positionals[0] !== "timeline") {
     return false;
   }
-  const { buildTimeline, buildTimelineTree, formatTimelineAsJson } =
-    await import("@smithers-orchestrator/time-travel/timeline");
+  const { buildTimeline, buildTimelineTree, formatTimelineAsJson } = await import("@smthrs/time-travel/timeline");
   const { adapter, cleanup } = await findAndOpenDb();
   try {
     const tree = treeOutput
@@ -11057,6 +13032,96 @@ async function runRawJsonTimelineCommandIfMatched(argv) {
   } finally {
     cleanup();
   }
+}
+/**
+ * Run `tail --format jsonl` outside Incur so stdout remains an event-only
+ * JSONL stream. Incur appends its generated stale-skills CTA after a command
+ * result when command skills are installed but outdated; that extra JSON
+ * object is valid JSON but is not a run event and corrupts the stream contract.
+ *
+ * This parser intentionally accepts only tail's registered flags. Unknown or
+ * malformed arguments fall through to Incur for its normal validation/error
+ * rendering.
+ *
+ * @param {string[]} argv
+ * @returns {Promise<boolean>}
+ */
+async function runRawJsonlTailCommandIfMatched(argv) {
+  const commandIndex = findFirstPositionalIndex(argv);
+  if (commandIndex < 0 || argv[commandIndex] !== "tail") return false;
+  const options = {
+    node: undefined,
+    follow: true,
+    format: "jsonl",
+    linger: false,
+    overview: false,
+    hud: undefined,
+  };
+  const positionals = [];
+  let jsonl = false;
+  for (let index = 0; index < argv.length; index++) {
+    if (index === commandIndex) continue;
+    const arg = argv[index];
+    if (arg === "--format") {
+      if (argv[index + 1] !== "jsonl") return false;
+      jsonl = true;
+      index += 1;
+      continue;
+    }
+    if (arg === "--format=jsonl" || arg === "--json") {
+      jsonl = true;
+      continue;
+    }
+    if (arg === "--node" || arg === "-n") {
+      const value = argv[index + 1];
+      if (!value || value.startsWith("-")) return false;
+      options.node = value;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--node=")) {
+      const value = arg.slice("--node=".length);
+      if (!value) return false;
+      options.node = value;
+      continue;
+    }
+    if (arg === "--follow") {
+      options.follow = true;
+      continue;
+    }
+    if (arg === "--no-follow") {
+      options.follow = false;
+      continue;
+    }
+    if (arg === "--linger" || arg === "--overview" || arg === "--hud") {
+      options[arg.slice(2)] = true;
+      continue;
+    }
+    if (arg === "--no-linger" || arg === "--no-overview" || arg === "--no-hud") {
+      options[arg.slice(5)] = false;
+      continue;
+    }
+    if (arg === "--full-output") continue;
+    if (arg.startsWith("-")) return false;
+    positionals.push(arg);
+  }
+  if (!jsonl || positionals.length !== 1) return false;
+  await runTailCommand({
+    args: { runId: positionals[0] },
+    options,
+    format: "jsonl",
+    ok(value) {
+      return value;
+    },
+    error(error) {
+      writeStdoutSync(`${JSON.stringify({ code: error.code, message: error.message })}\n`);
+      return error;
+    },
+  });
+  // Match main's normal post-Incur path: imported Smithers modules may retain
+  // background handles, so a completed one-shot CLI command exits explicitly.
+  process.exit(commandExitOverride ?? 0);
+  return true;
 }
 /**
  * @param {string[]} argv
@@ -11257,10 +13322,12 @@ async function relaunchForConflictedWorkspaceManifest() {
   // the conflicted cwd while it waits for a child.
   if (typeof process.execve === "function") {
     process.chdir(cliPackageDir);
-    process.execve(process.execPath, [process.execPath, cliEntry, ...process.argv.slice(2)], childEnv);
+    const runtime = smithersRuntimeReentry([cliEntry, ...process.argv.slice(2)]);
+    process.execve(runtime.command, [runtime.command, ...runtime.args], childEnv);
   }
   process.chdir(cliPackageDir);
-  const child = spawn(process.execPath, [cliEntry, ...process.argv.slice(2)], {
+  const runtime = smithersRuntimeReentry([cliEntry, ...process.argv.slice(2)]);
+  const child = spawn(runtime.command, runtime.args, {
     env: childEnv,
     stdio: "inherit",
   });
@@ -11309,7 +13376,7 @@ async function main() {
     process.exit(4);
   }
   if (command === "review") {
-    const { runReviewCli } = await import("@smithers-orchestrator/review/cli");
+    const { runReviewCli } = await import("@smthrs/review/cli");
     // Forward every arg except the `review` token itself — including any flags
     // that preceded it (e.g. `smithers --help review`), so the review CLI can
     // render its own help instead of eagerly starting a review.
@@ -11321,7 +13388,7 @@ async function main() {
   }
   // Self-heal the curated agent skill on a normal human-facing invocation:
   // keep ~/.claude/skills (and Pi) in sync with the bundled skill and evict
-  // any retired `smithers-orchestrator` copy. Throttled + best-effort; skipped
+  // any retired `smthrs` copy. Throttled + best-effort; skipped
   // in CI, non-TTY use, JSON mode, and for completions/version/help so it
   // never mutates agent state or adds noise/latency to scripted use. Opt out with
   // SMITHERS_NO_SKILL_REFRESH=1.
@@ -11385,6 +13452,29 @@ async function main() {
       /* best-effort: a failed update check never blocks a command */
     }
   }
+  // Reap orphaned agent subprocesses whose engine died without cleanup
+  // (SIGKILL, OOM): the engine registers every agent pid it spawns, and this
+  // sweep group-kills any registered pid whose engine is verifiably gone, so
+  // no unsupervised agent keeps burning subscription quota (#1464 AWF-3,
+  // #1332). Best-effort and silent unless something was actually reaped;
+  // skipped for CI/JSON/help so scripted use never sees noise. Opt out with
+  // SMITHERS_NO_ORPHAN_REAPER=1.
+  if (
+    command &&
+    command !== "completions" &&
+    process.env.SMITHERS_NO_ORPHAN_REAPER !== "1" &&
+    !process.env.CI &&
+    !argvRequestsJsonMode(argv) &&
+    !argv.includes("--version") &&
+    !argv.includes("--help") &&
+    !argv.includes("-h")
+  ) {
+    try {
+      await reapOrphanedAgentsOnBoot();
+    } catch {
+      /* best-effort: a failed sweep never blocks a command */
+    }
+  }
   // `--backend` is a registered option only on up/gateway/workflow.
   // The SMITHERS_MIGRATION_REQUIRED error tells users to run any command with
   // `--backend sqlite`, so lift it into SMITHERS_BACKEND for every other command
@@ -11398,6 +13488,10 @@ async function main() {
     }
   }
   argv = rewriteBareResumeFlagArgv(argv);
+  argv = rewriteBareHerdrFlagArgv(argv);
+  if (await runRawJsonlTailCommandIfMatched(argv)) {
+    return;
+  }
   if (await runMcpModeIfRequested(argv, { cli, version: readPackageVersion() })) {
     return;
   }
@@ -11470,7 +13564,7 @@ async function main() {
   }
   // `mcp add` failed inside the registration helper and we did not recover it
   // via supplementary wiring. The usual cause is a runner that word-split the
-  // `bunx smithers-orchestrator --mcp` launch command, leaving the helper to
+  // `bunx smthrs --mcp` launch command, leaving the helper to
   // choke on the bare `--mcp` flag. Point the user at the reliable manual path.
   if (wiring?.kind === "mcp" && !serveSucceeded && !targetsOnlyExtra) {
     console.error("");
@@ -11537,7 +13631,15 @@ const __retryTaskCliInternals = {
   rollbackFailedRetryResume,
 };
 
-export { __retryTaskCliInternals, cli, formatStatusExitCode, isWaitingStatus, pauseCtas };
+export {
+  __retryTaskCliInternals,
+  cli,
+  formatStatusExitCode,
+  isWaitingStatus,
+  maybeResumeDecidedDetachedRun,
+  pauseCtas,
+  resolveGatewayWorkspace,
+};
 
 if (process.env.SMITHERS_CLI_DISABLE_AUTO_MAIN !== "1") {
   process.on("unhandledRejection", (reason) => {

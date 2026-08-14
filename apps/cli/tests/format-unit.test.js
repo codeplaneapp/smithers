@@ -99,6 +99,13 @@ describe("format helpers", () => {
       ["ApprovalGranted", { nodeId: "n" }, "Approved: n"],
       ["ApprovalAutoApproved", { nodeId: "n" }, "Auto-approved: n"],
       ["ApprovalDenied", { nodeId: "n" }, "Denied: n"],
+      [
+        "SteerQueued",
+        { nodeId: "n", message: "prefer the smaller change" },
+        "↪ steer queued: prefer the smaller change",
+      ],
+      ["SteerConsumed", { nodeId: "n", attempt: 2, iteration: 0 }, "✓ steer consumed by attempt 2"],
+      ["SteerExpired", { nodeId: "n" }, "✗ steer expired — node finished first; press h to hijack"],
       ["ToolCallStarted", { nodeId: "n", toolName: "bash", attempt: 2 }, "n → bash"],
       ["ToolCallFinished", { nodeId: "n", toolName: "bash", status: "success" }, "n ← bash (success)"],
       ["ScorerStarted", { nodeId: "n", scorerName: "Quality" }, "scorer Quality started"],

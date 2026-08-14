@@ -12,8 +12,8 @@ that launch, approve, and cancel. Most hooks share the
 them all.
 
 <Note>
-Everything here lives at the subpath `smithers-orchestrator/gateway-react`,
-**not** the bare `smithers-orchestrator` facade. Import from the subpath, or
+Everything here lives at the subpath `smthrs/gateway-react`,
+**not** the bare `smthrs` facade. Import from the subpath, or
 the build fails.
 </Note>
 
@@ -22,7 +22,7 @@ import {
   SmithersGatewayProvider,
   useGatewayRun,
   useGatewayActions,
-} from "smithers-orchestrator/gateway-react";
+} from "smthrs/gateway-react";
 
 function App() {
   return (
@@ -727,7 +727,7 @@ These types are exported from the same subpath for typing your own components.
 import type {
   SmithersCollectionsContextValue,
   GatewayConnectionStatus,
-} from "smithers-orchestrator/gateway-react";
+} from "smthrs/gateway-react";
 // GatewayAsyncState<T> is generic; see its section above for the full shape.
 ```
 

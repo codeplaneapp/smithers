@@ -1,10 +1,10 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import { Effect } from "effect";
-import { runWorkflow } from "smithers-orchestrator";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
-import { SmithersContext, SmithersCtx } from "@smithers-orchestrator/react-reconciler/context";
+import { runWorkflow } from "smthrs";
+import { SmithersRenderer } from "@smthrs/react-reconciler/dom/renderer";
+import { SmithersContext, SmithersCtx } from "@smthrs/react-reconciler/context";
 import { createTestSmithers } from "./helpers.js";
 import {
   BackpressurePlanning,
@@ -43,9 +43,6 @@ import {
   tierSchema,
 } from "../src/components/delegation/delegationSchemas.ts";
 import {
-  chunkGateFailures,
-  executionComplete,
-  foldGates,
   foldPlans,
   physicalId,
   synthesizeDelegationEvents,

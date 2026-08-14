@@ -1,4 +1,4 @@
-import { workflowUiThemeCss } from "@smithers-orchestrator/ui-styleguide";
+import { loadWorkflowUiThemeCss } from "./workflowUiThemeCss.js";
 
 export const DEFAULT_OPERATOR_UI_ENTRY = "smithers:default-operator-ui";
 const WORKFLOW_UI_THEME_PLACEHOLDER = "/*__SMITHERS_WORKFLOW_UI_THEME_CSS__*/";
@@ -1493,6 +1493,23 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   setInterval(refresh, 5000);
 }
 
-export const DEFAULT_OPERATOR_UI_CLIENT_JS = `(${defaultOperatorUiClient
-  .toString()
-  .replace(WORKFLOW_UI_THEME_PLACEHOLDER, workflowUiThemeCss.replace(/\$/g, "$$$$"))})();\n`;
+/** @type {Promise<string> | null} */
+let pendingClientJs = null;
+
+/**
+ * Build the stringified operator UI client, inlining the style-guide theme CSS.
+ *
+ * The style guide loads on demand so that a Node process which never serves the
+ * operator UI never imports it. See `./workflowUiThemeCss.js`.
+ *
+ * @returns {Promise<string>}
+ */
+export function loadDefaultOperatorUiClientJs() {
+  pendingClientJs ??= loadWorkflowUiThemeCss().then(
+    (workflowUiThemeCss) =>
+      `(${defaultOperatorUiClient
+        .toString()
+        .replace(WORKFLOW_UI_THEME_PLACEHOLDER, workflowUiThemeCss.replace(/\$/g, "$$$$"))})();\n`,
+  );
+  return pendingClientJs;
+}

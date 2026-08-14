@@ -51,7 +51,7 @@ not prose.
 ## Run it
 
 ```bash
-bunx smithers-orchestrator eval .smithers/workflows/release.tsx \
+bunx smthrs eval .smithers/workflows/release.tsx \
   --cases .smithers/evals/release-quality.jsonl \
   --suite release-quality --force
 ```
@@ -71,8 +71,8 @@ completion, without blocking it. Attach to the `<Task>` whose output
 matters; read via `smithers scores`.
 
 ```tsx
-import { schemaAdherenceScorer, faithfulnessScorer, relevancyScorer } from "smithers-orchestrator/scorers";
-import { llmJudge } from "smithers-orchestrator/scorers";
+import { schemaAdherenceScorer, faithfulnessScorer, relevancyScorer } from "smthrs/scorers";
+import { llmJudge } from "smthrs/scorers";
 
 <Task id="draft" output={outputs.notes} agent={writer}
   scorers={{
@@ -102,7 +102,7 @@ also take a judge agent. Sample expensive judges via
 `sampling: { type: "ratio", rate: 0.1 }`. Inspect:
 
 ```bash
-bunx smithers-orchestrator scores <run-id>
+bunx smthrs scores <run-id>
 ```
 
 Use assertions for the hard gate (must-be-true), scorers for the trend
@@ -117,7 +117,7 @@ criteria into a JSONL fixture (`id`, `input`, `expected`, `rubric`) under
 `.smithers/evals/` and reports the exact `smithers eval` command:
 
 ```bash
-bunx smithers-orchestrator workflow run eval-author \
+bunx smthrs workflow run eval-author \
   --input '{"prompt":"Release notes must list every breaking change","workflow":".smithers/workflows/release.tsx"}'
 ```
 

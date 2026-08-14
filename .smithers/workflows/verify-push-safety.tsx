@@ -1,7 +1,7 @@
 // smithers-source: authored
 // smithers-display-name: Verify Push Safety
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Sequence } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, Sequence } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import { Review, reviewOutputSchema } from "../components/Review";

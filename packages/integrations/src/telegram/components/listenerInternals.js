@@ -4,10 +4,10 @@
 // ctx.outputMaybe, parse it with the zod schema and invoke the render prop.
 
 import React from "react";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
-import { stripAutoColumns } from "@smithers-orchestrator/db/react-output";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { WaitForEvent } from "@smithers-orchestrator/components";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
+import { stripAutoColumns } from "@smthrs/db/react-output";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { WaitForEvent } from "@smthrs/components";
 import { telegramChatCorrelationId, telegramThreadCorrelationId } from "../TelegramSource.js";
 
 /**

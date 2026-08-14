@@ -21,7 +21,7 @@ import "react";
 import "react-dom/client";
 import "react-dom/server";
 import "@xyflow/react";
-import "@smithers-orchestrator/gateway-react";
+import "@smthrs/gateway-react";
 import "../src/index.ts";
 import "./inMemoryGateway.ts";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";

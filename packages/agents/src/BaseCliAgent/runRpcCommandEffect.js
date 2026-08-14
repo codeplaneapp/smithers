@@ -2,12 +2,13 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { Effect, Metric } from "effect";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-import { logDebug, logWarning } from "@smithers-orchestrator/observability/logging";
-import { toolOutputTruncatedTotal } from "@smithers-orchestrator/observability/metrics";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
+import { logDebug, logWarning } from "@smthrs/observability/logging";
+import { toolOutputTruncatedTotal } from "@smthrs/observability/metrics";
 import { extractTextFromJsonValue } from "./extractTextFromJsonValue.js";
 import { normalizeTokenUsage } from "./normalizeTokenUsage.js";
+import { parentDeathCommand } from "./parentDeathCommand.js";
 import { truncateToBytes } from "./truncateToBytes.js";
 import { sanitizeCliArgs, sanitizeCliErrorCause } from "./sanitizeCliArgs.js";
 /** @typedef {import("./PiExtensionUiResponse.ts").PiExtensionUiResponse} PiExtensionUiResponse */
@@ -120,7 +121,8 @@ export function runRpcCommandEffect(command, args, options) {
     let stderrTruncated = false;
     let terminationStarted = false;
     logDebug("starting agent RPC command", logAnnotations, span);
-    const child = spawnFn(command, args, {
+    const invocation = parentDeathCommand(command, args, spawnFn === spawn);
+    const child = spawnFn(invocation.command, invocation.args, {
       cwd,
       env,
       detached: true,

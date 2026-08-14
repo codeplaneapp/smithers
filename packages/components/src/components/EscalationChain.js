@@ -4,7 +4,7 @@
 // @smithers-type-exports-end
 
 import React from "react";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
 import { Sequence } from "./Sequence.js";
 import { Branch } from "./Branch.js";
 import { Task } from "./Task.js";

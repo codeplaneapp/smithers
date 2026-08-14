@@ -1,3 +1,3 @@
-import type { SmithersEvent } from "@smithers-orchestrator/observability/SmithersEvent";
+import type { SmithersEvent } from "@smthrs/observability/SmithersEvent";
 
 export type SmithersEventType = SmithersEvent["type"];

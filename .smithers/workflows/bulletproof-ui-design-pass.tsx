@@ -1,13 +1,6 @@
 // smithers-display-name: Bulletproof UI Design Pass
-/** @jsxImportSource smithers-orchestrator */
-import {
-  OpenCodeAgent as SmithersOpenCodeAgent,
-  Parallel,
-  Sequence,
-  Task,
-  UI,
-  createSmithers,
-} from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { OpenCodeAgent as SmithersOpenCodeAgent, Parallel, Sequence, Task, UI, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { providers } from "../agents";
 

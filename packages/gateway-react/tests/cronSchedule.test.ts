@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { GatewayCronRow } from "@smithers-orchestrator/gateway-client";
+import type { GatewayCronRow } from "@smthrs/gateway-client";
 import { cronStatus, cronToCalendarEvents, expandCron, parseCronPattern } from "../src/cronSchedule.ts";
 
 const HOUR_MS = 3_600_000;

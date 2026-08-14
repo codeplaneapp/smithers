@@ -1,2 +1,2 @@
-import { mdxPlugin } from "smithers-orchestrator";
+import { mdxPlugin } from "smthrs";
 mdxPlugin();

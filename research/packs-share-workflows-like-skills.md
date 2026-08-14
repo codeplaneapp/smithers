@@ -32,7 +32,7 @@ smithers workflow run kanban --prompt "triage my issues"
 | Manifest | `smithers.toon` at the root of any `.smithers`-shaped dir (TOON format; `@toon-format/toon` already in the stack) |
 | Universal manifest | Yes — `smithers init` scaffolds `smithers.toon` into every `.smithers/`; **every .smithers is a publishable pack** |
 | Install location | `.smithers/packs/<name>/` (local, default) and `~/.smithers/packs/<name>/` (`-g`), mirroring workflow tiers |
-| Pack deps | Host-provided only for v1: `smithers-orchestrator`, `react`, `zod` — enforced at add-time by import scan |
+| Pack deps | Host-provided only for v1: `smthrs`, `react`, `zod` — enforced at add-time by import scan |
 | Edit model | Read-only + `smithers eject <pack>:<workflow>` copies into local `.smithers/` where shadow order makes it win |
 | v1 pack contents | workflows + UIs + prompts/lib (skills/evals in v2) |
 | Discovery | awesome-smithers is the v1 registry (new Packs section with install one-liners); no hosted registry yet |
@@ -117,8 +117,8 @@ add-time import scan.
 
 ### Dep restriction enforcement
 
-At add-time, scan all pack TS/TSX for bare imports; allowlist `smithers-orchestrator`,
-`@smithers-orchestrator/*` (ui/gateway-react/gateway-client), `react`, `zod`. Anything else →
+At add-time, scan all pack TS/TSX for bare imports; allowlist `smthrs`,
+`@smthrs/*` (ui/gateway-react/gateway-client), `react`, `zod`. Anything else →
 hard fail with a clear message naming the file and import. (Runtime would fail anyway;
 failing at add is the feature.)
 

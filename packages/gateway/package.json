@@ -1,6 +1,6 @@
 {
-  "name": "@smithers-orchestrator/gateway",
-  "version": "0.32.0",
+  "name": "@smthrs/gateway",
+  "version": "0.34.0",
   "description": "Stable Smithers Gateway RPC contracts, auth scopes, and deployment metadata",
   "type": "module",
   "sideEffects": false,
@@ -38,7 +38,7 @@
     "test": "bun test tests"
   },
   "dependencies": {
-    "@smithers-orchestrator/protocol": "workspace:*"
+    "@smthrs/protocol": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest",

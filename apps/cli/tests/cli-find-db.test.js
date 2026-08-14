@@ -36,7 +36,7 @@ describe("findSmithersDb", () => {
   test("throws CLI_DB_NOT_FOUND when no db exists", () => {
     setup();
     try {
-      expect(() => findSmithersDb(TMP)).toThrow(/No smithers\.db found/);
+      expect(() => findSmithersDb(TMP)).toThrow(/No smithers workspace found from/);
     } finally {
       teardown();
     }

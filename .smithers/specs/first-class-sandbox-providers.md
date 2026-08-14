@@ -22,7 +22,7 @@ local, in-process isolation; a remote cloud sandbox runs the command on the
 remote machine with the SDK as the only transport, which is exactly what
 `run(request) -> SandboxProviderResult` models.
 
-Each backend ships as `packages/<provider>` mirroring `@smithers-orchestrator/cloudflare`:
+Each backend ships as `packages/<provider>` mirroring `@smthrs/cloudflare`:
 
 - a factory `create<Provider>SandboxProvider(options)` returning a `SandboxProvider`
 - an exported provider-id constant (`<PROVIDER>_SANDBOX_PROVIDER_ID`)
@@ -109,19 +109,19 @@ and writes a `SandboxProviderResult` JSON to `SMITHERS_SANDBOX_RESULT_PATH`
 (`{ bundlePath }` or `{ status, output|outputs, patches?, artifacts?, diffBundle?, runId? }`),
 or prints the result JSON to stdout.
 
-### 2.1 Daytona — `@smithers-orchestrator/daytona` (id `daytona-sandbox`)
+### 2.1 Daytona — `@smthrs/daytona` (id `daytona-sandbox`)
 SDK `@daytonaio/sdk` (lazy import; also try `@daytona/sdk` rename). `new Daytona({ apiKey, apiUrl, target })`,
 env `DAYTONA_API_KEY`/`DAYTONA_API_URL`/`DAYTONA_TARGET`. `daytona.create({ image|snapshot, envVars, labels, ephemeral, autoStopInterval, resources })`;
 ship via `sandbox.fs.uploadFile`, exec via `sandbox.process.executeCommand(command, workdir, env, timeout)` ->
 `{ exitCode, result }` (streams merged), collect via `sandbox.fs.downloadFile`. Cleanup `daytona.delete`
 (skip on `keep`). Default `autoStopInterval: 15`, `ephemeral: true`.
 
-### 2.2 Cloudflare — `@smithers-orchestrator/cloudflare` (id `cloudflare-sandbox`, EXISTS)
+### 2.2 Cloudflare — `@smthrs/cloudflare` (id `cloudflare-sandbox`, EXISTS)
 Refactor `run()`/`cleanup()` onto `createCommandSandboxProvider`, preserving public options,
 result shape, the Durable Object binding requirement, `keepAlive`, and the `execution:"process"` branch.
 Add contract-suite + validation + redaction tests. D1/DO-SQLite descriptor helpers stay separate.
 
-### 2.3 Vercel — `@smithers-orchestrator/vercel` (id `vercel-sandbox`)
+### 2.3 Vercel — `@smthrs/vercel` (id `vercel-sandbox`)
 SDK `@vercel/sandbox`. `Sandbox.create({ runtime, source?, resources:{vcpus}, ports?, timeout, env })`.
 Auth OIDC (`VERCEL_OIDC_TOKEN`) preferred, access-token fallback (`VERCEL_TOKEN`/`VERCEL_TEAM_ID`/`VERCEL_PROJECT_ID`).
 Ship via `sandbox.writeFiles([{path, content:Buffer, mode?}])` under `/vercel/sandbox`; exec `sandbox.runCommand({cmd,args,cwd,env})` ->
@@ -129,7 +129,7 @@ Ship via `sandbox.writeFiles([{path, content:Buffer, mode?}])` under `/vercel/sa
 Default session timeout 5 min; `extendTimeout(ms)` up to plan cap (45 min Hobby / 5 h Pro) — warn past cap, error only beyond it.
 `sandbox.domain(port)` surfaced in result `output` when ports declared.
 
-### 2.4 AWS — `@smithers-orchestrator/aws` (id `aws-sandbox`, single factory + `mode`)
+### 2.4 AWS — `@smthrs/aws` (id `aws-sandbox`, single factory + `mode`)
 `createAwsSandboxProvider({ mode: "fargate" | "codebuild", region, bucket, ... })`, default `mode:"fargate"`.
 Bundle transport is BYO S3 (`createAwsSandboxS3Transport` over `@aws-sdk/client-s3`): request ->
 `s3://<bucket>/smithers/sandbox/<runId>/<sandboxId>/request.json`, result read back from `<prefix>/sandbox-result.json`.
@@ -142,7 +142,7 @@ Auth = standard AWS credential chain; never inject local creds into the containe
 CloudWatch logs (`@aws-sdk/client-cloudwatch-logs`) only when enabled, truncated to `maxOutputBytes`.
 Prereqs (cluster/task-def/VPC/bucket/IAM) are documented, not auto-provisioned. EC2 mode is documented future work.
 
-### 2.5 GCP — `@smithers-orchestrator/gcp` (id `gcp-sandbox`)
+### 2.5 GCP — `@smthrs/gcp` (id `gcp-sandbox`)
 `createGcpSandboxProvider({ projectId, location, bucket, jobName, ... })`, default Cloud Run Jobs
 (`createGcpCloudRunJobsSandboxRunner`, `@google-cloud/run` v2 `JobsClient`). Bundle transport via GCS
 (`createGcpSandboxGcsTransport`, `@google-cloud/storage`). Auth = ADC (`GOOGLE_APPLICATION_CREDENTIALS` / workload identity).
@@ -176,7 +176,7 @@ SANDBOX_PROVIDER_RESULT_ENV.js, index.js}`; add `export * from "./provider-kit/i
 document in `src/README.md`.
 
 ### 4.2 New provider packages (mirror `packages/cloudflare`)
-Each: `package.json` (SDK optionalDependency; deps `@smithers-orchestrator/sandbox` + `@smithers-orchestrator/errors`),
+Each: `package.json` (SDK optionalDependency; deps `@smthrs/sandbox` + `@smthrs/errors`),
 `src/index.js` barrel, `src/README.md`, `tests/`. Files per §2 with one export each:
 - `packages/daytona/src/`: `DAYTONA_SANDBOX_PROVIDER_ID.js`, `DaytonaSandboxProviderOptions.ts`,
   `createDaytonaSandboxProvider.js`, `registerDaytonaSandboxProvider.js`, `createMockDaytonaSandboxEnvironment.js`, `index.js`
@@ -189,7 +189,7 @@ Each: `package.json` (SDK optionalDependency; deps `@smithers-orchestrator/sandb
   `createMockGcpSandboxEnvironment.js`, `index.js`
 
 ### 4.3 Meta-package re-exports (`packages/smithers`)
-`src/{daytona,vercel,aws,gcp}.js` each `export * from "@smithers-orchestrator/<provider>"`; add `./daytona`, `./vercel`,
+`src/{daytona,vercel,aws,gcp}.js` each `export * from "@smthrs/<provider>"`; add `./daytona`, `./vercel`,
 `./aws`, `./gcp` subpath exports + workspace deps to `packages/smithers/package.json` (mirror the `./cloudflare` shim).
 
 ### 4.4 Docs (Mintlify `.mdx`; land BEFORE code)

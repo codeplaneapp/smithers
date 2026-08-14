@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { extractGraph } from "../src/extract.js";
 import { __setRuntimeModuleLoader, extractFromHost } from "../src/dom/extract.js";

@@ -1,4 +1,4 @@
-import { assertZodV4 } from "@smithers-orchestrator/errors/assertZodV4";
+import { assertZodV4 } from "@smthrs/errors/assertZodV4";
 import { sanitizeForOpenAI } from "./sanitizeForOpenAI.js";
 /**
  * Convert a Zod schema to an OpenAI-safe JSON Schema object.

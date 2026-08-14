@@ -1,1 +1,1 @@
-export * from "@smithers-orchestrator/xstate";
+export * from "@smthrs/xstate";

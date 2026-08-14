@@ -181,6 +181,18 @@ function classifyRunning(run, sandboxHeartbeats, now, staleThresholdMs, base, is
   const ownerPid = parseRuntimeOwnerPid(run.runtimeOwnerId);
   const hasOwner = run.runtimeOwnerId != null && run.runtimeOwnerId.length > 0;
   const orphaned = !hasOwner || (ownerPid != null && !isOwnerPidAlive(ownerPid));
+  // A durable cancel request plus a verifiably absent engine is cancellation
+  // awaiting terminal bookkeeping, not completed cancellation and not work
+  // that should be resumed. Keep the stale-heartbeat evidence, but classify
+  // it distinctly so ps/status neither claim a terminal DB state nor misdirect
+  // operators toward orphan recovery (#1496).
+  if (orphaned && run.cancelRequestedAtMs != null) {
+    return {
+      ...base,
+      state: "cancel-pending",
+      unhealthy: { kind: "engine-heartbeat-stale", lastHeartbeatAt },
+    };
+  }
   return {
     ...base,
     state: orphaned ? "orphaned" : "stale",

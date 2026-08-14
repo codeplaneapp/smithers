@@ -6,11 +6,11 @@
  * Pattern: scheduler → command runner → anomaly/notability check → report agent.
  * Use cases: CI health watches, cron job monitoring, flaky-command alerting.
  */
-import { Sequence, Loop } from "smithers-orchestrator";
+import { Sequence, Loop } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { bash, read, grep } from "smithers-orchestrator/tools";
+import { bash, read, grep } from "smthrs/tools";
 import { z } from "zod";
 import RunPrompt from "./prompts/command-watchdog/run.mdx";
 import DetectPrompt from "./prompts/command-watchdog/detect.mdx";

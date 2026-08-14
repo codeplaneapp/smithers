@@ -1,6 +1,6 @@
 {
-  "name": "@smithers-orchestrator/time-travel",
-  "version": "0.32.0",
+  "name": "@smthrs/time-travel",
+  "version": "0.34.0",
   "description": "Smithers snapshots, diffs, forks, replay, timelines, and VCS-tagged run history",
   "type": "module",
   "sideEffects": false,
@@ -50,17 +50,18 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@effect/platform-bun": "4.0.0-beta.102",
-    "@smithers-orchestrator/db": "workspace:*",
-    "@smithers-orchestrator/driver": "workspace:*",
-    "@smithers-orchestrator/errors": "workspace:*",
-    "@smithers-orchestrator/graph": "workspace:*",
-    "@smithers-orchestrator/observability": "workspace:*",
-    "@smithers-orchestrator/react-reconciler": "workspace:*",
-    "@smithers-orchestrator/scheduler": "workspace:*",
-    "@smithers-orchestrator/vcs": "workspace:*",
+    "@effect/platform-bun": "4.0.0-beta.105",
+    "@effect/platform-node-shared": "4.0.0-beta.105",
+    "@smthrs/db": "workspace:*",
+    "@smthrs/driver": "workspace:*",
+    "@smthrs/errors": "workspace:*",
+    "@smthrs/graph": "workspace:*",
+    "@smthrs/observability": "workspace:*",
+    "@smthrs/react-reconciler": "workspace:*",
+    "@smthrs/scheduler": "workspace:*",
+    "@smthrs/vcs": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "effect": "4.0.0-beta.102",
+    "effect": "4.0.0-beta.105",
     "picocolors": "^1.1.1"
   },
   "devDependencies": {

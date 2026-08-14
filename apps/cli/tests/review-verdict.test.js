@@ -16,7 +16,9 @@ test("isRunTerminal treats active/suspended as non-terminal, else terminal", () 
 test("verdictStateFor maps synthesis + terminality", () => {
   expect(verdictStateFor(true, false)).toBe("approved");
   expect(verdictStateFor(true, true)).toBe("approved");
-  expect(verdictStateFor(false, false)).toBe("blocked");
+  // A mid-run rejection is provisional — the run may still be finishing, so the
+  // UI must not show a final "Blocked" next to a RUNNING status pill (#1464).
+  expect(verdictStateFor(false, false)).toBe("pending");
   expect(verdictStateFor(false, true)).toBe("blocked");
   expect(verdictStateFor(null, false)).toBe("pending");
   expect(verdictStateFor(null, true)).toBe("missing");

@@ -11,7 +11,7 @@ configured agent classifies the failure and returns one concrete next move.
 Run it explicitly for the same autopsy outside the automatic path:
 
 ```bash
-bunx smithers-orchestrator workflow run post-failure \
+bunx smthrs workflow run post-failure \
   --input '{"targetRunId":"RUN_ID","workflowPath":".smithers/workflows/example.tsx"}'
 ```
 
@@ -23,4 +23,4 @@ Final output:
 - optional bug report metadata when the failure appears to be in Smithers itself
 
 If it suspects a Smithers bug, the workflow pauses on a human approval gate
-before filing through `bunx smithers-orchestrator bug`.
+before filing through `bunx smthrs bug`.

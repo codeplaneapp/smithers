@@ -2,7 +2,7 @@
 // in the Effect assembly pipeline. Real store, real fold; the gateway API is a
 // deterministic in-memory fixture returning the exact shapes those arms handle.
 import { describe, expect, test } from "bun:test";
-import { GatewayRpcError } from "@smithers-orchestrator/gateway-client";
+import { GatewayRpcError } from "@smthrs/gateway-client";
 import {
   createDelegationChainStore,
   type DelegationChainApi,

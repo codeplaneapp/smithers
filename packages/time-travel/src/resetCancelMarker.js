@@ -11,14 +11,16 @@
  * (`RESET_CANCELLED_META_KEY` in engine.js); this string is the shared contract.
  */
 export const RESET_CANCELLED_META_KEY = "resetCancelled";
+export const RESET_RESUME_BOUNDARY_META_KEY = "resetResumeBoundaryMs";
 
 /**
  * Merge the reset marker into an attempt's existing `meta_json`, preserving any
  * previously-stored fields (e.g. `agentEngine` / `agentModel`).
  * @param {string | null | undefined} metaJson
+ * @param {number} resetAtMs
  * @returns {string}
  */
-export function markResetCancelledMeta(metaJson) {
+export function markResetCancelledMeta(metaJson, resetAtMs) {
   let meta = {};
   if (metaJson) {
     try {
@@ -31,5 +33,11 @@ export function markResetCancelledMeta(metaJson) {
     }
   }
   meta[RESET_CANCELLED_META_KEY] = true;
+  // A reset invalidates pre-reset resume state, but only until the first fresh
+  // post-reset attempt starts. A persistent `discardResumeSession` flag on old
+  // higher-numbered attempts would poison every later retry after attempt
+  // numbering restarts at one, so record a chronological boundary instead.
+  meta[RESET_RESUME_BOUNDARY_META_KEY] = resetAtMs;
+  delete meta.discardResumeSession;
   return JSON.stringify(meta);
 }

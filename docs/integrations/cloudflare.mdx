@@ -3,7 +3,7 @@ title: Cloudflare
 description: Run Smithers on Cloudflare Workers with Durable Object SQLite or D1 storage and a Sandbox SDK provider.
 ---
 
-`@smithers-orchestrator/cloudflare` runs Smithers inside Cloudflare Workers. It
+`@smthrs/cloudflare` runs Smithers inside Cloudflare Workers. It
 provides a SQLite descriptor over Durable Object storage or D1, a factory that
 builds the Smithers API against that descriptor, and a sandbox provider backed
 by the Cloudflare Sandbox SDK.
@@ -18,7 +18,7 @@ import {
   createCloudflareDurableObjectSqliteDescriptor,
   createCloudflareD1SqliteDescriptor,
   createCloudflareSandboxProvider,
-} from "smithers-orchestrator/cloudflare";
+} from "smthrs/cloudflare";
 ```
 
 ## Create the Smithers API
@@ -91,7 +91,7 @@ const provider = createCloudflareSandboxProvider({ binding: env.Sandbox });
 
 Pass the provider where the runtime is resolved. Requesting runtime
 `"cloudflare"` without a provider throws `INVALID_INPUT` ("Sandbox runtime
-\"cloudflare\" requires a provider from smithers-orchestrator/cloudflare, e.g.
+\"cloudflare\" requires a provider from smthrs/cloudflare, e.g.
 createCloudflareSandboxProvider()."). The provider's id is
 `CLOUDFLARE_SANDBOX_PROVIDER_ID` (`"cloudflare-sandbox"`), which becomes the
 selected runtime.
@@ -150,4 +150,4 @@ What's billed on Cloudflare:
 
 - You write the Worker and Durable Object class; the package supplies only the storage descriptors and sandbox provider.
 - `createMockCloudflareSandboxEnvironment(handler)` is exported for tests: it implements the subset of the Sandbox SDK the provider uses.
-- The descriptor helpers are also exported from `@smithers-orchestrator/cloudflare`; only `createSmithersCloudflare` requires the `smithers-orchestrator/cloudflare` subpath.
+- The descriptor helpers are also exported from `@smthrs/cloudflare`; only `createSmithersCloudflare` requires the `smthrs/cloudflare` subpath.

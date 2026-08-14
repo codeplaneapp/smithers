@@ -1,14 +1,14 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { Gateway } from "../src/gateway.js";
 
 /**
  * Live end-to-end proof for the shared component library
- * (@smithers-orchestrator/ui) through the REAL gateway pipeline: a workflow UI
+ * (@smthrs/ui) through the REAL gateway pipeline: a workflow UI
  * entry that imports the package is bundled by Bun.build (react + react-dom
  * deduped to the server's copy), served as client.js, and the host page
  * carries the theme system that makes the sui-* classes correct in light AND
@@ -52,7 +52,7 @@ function writeSharedComponentsUiEntry(dir) {
       "  DialogTrigger,",
       "  SmithersUiStyles,",
       "  StatusPill,",
-      '} from "@smithers-orchestrator/ui";',
+      '} from "@smthrs/ui";',
       "",
       "function App() {",
       '  return h("main", null,',
@@ -81,9 +81,9 @@ function writeGatewaySourceGraphUiEntry(dir) {
     [
       'import { createElement as h } from "react";',
       'import { createRoot } from "react-dom/client";',
-      'import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";',
-      'import { useGatewayActions } from "@smithers-orchestrator/gateway-react/useGatewayActions";',
-      'import { GatewayRpcError } from "@smithers-orchestrator/gateway-client/rpc";',
+      'import { createGatewayReactRoot } from "smthrs/gateway-react";',
+      'import { useGatewayActions } from "@smthrs/gateway-react/useGatewayActions";',
+      'import { GatewayRpcError } from "@smthrs/gateway-client/rpc";',
       "const graph = [createGatewayReactRoot, useGatewayActions, GatewayRpcError]",
       '  .map((value) => value.name).join(":");',
       'createRoot(document.getElementById("root")).render(',
@@ -127,11 +127,12 @@ describe("Gateway UI with shared components", () => {
       expect(htmlResponse.status).toBe(200);
       const html = await htmlResponse.text();
       expect(html).toContain("color-scheme:light");
-      expect(html).toContain("--bg:#fafafa");
+      expect(html).toContain("--bg:#FBFBFB");
       expect(html).toContain("@media (prefers-color-scheme: dark)");
       expect(html).toContain(":root[data-theme='dark']");
-      expect(html).toContain("--bg:#09090b");
+      expect(html).toContain("--bg:#011627");
       expect(html).toContain('new URLSearchParams(location.search).get("theme")');
+      expect(html).toContain('new URLSearchParams(location.search).get("palette")');
       expect(html).toContain("document.documentElement.dataset.theme=t");
     }
 
@@ -145,8 +146,8 @@ describe("Gateway UI with shared components", () => {
     expect(bundle).toContain(".sui-button");
     expect(bundle).toContain(".sui-card");
     expect(bundle).toContain(".sui-dialog-content");
-    expect(bundle).toContain("color-mix(in srgb, var(--brand, #6d56d8)");
-    expect(bundle).toContain("var(--surface, #ffffff)");
+    expect(bundle).toContain("color-mix(in srgb, var(--brand, #9449bc)");
+    expect(bundle).toContain("var(--surface, #fefefe)");
     expect(bundle).toContain("data-smithers-ui");
     // Note: the component sheet itself carries no dark values (enforced by the
     // ui package's css-contract test); dark comes from the host page flipping

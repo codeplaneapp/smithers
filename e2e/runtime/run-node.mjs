@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { assertRuntimeConformance } from "@smithers-orchestrator/testing/runtimeConformance";
+import { assertRuntimeConformance } from "@smthrs/testing/runtimeConformance";
 import { runSharedRuntimeFixture } from "./fixture.js";
 
 const exec = promisify(execFile);

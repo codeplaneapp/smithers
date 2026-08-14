@@ -1,5 +1,5 @@
 // smithers-display-name: Monitor Redesign Swarm
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * Redesign the Smithers Monitor into a single operator-first surface: open it
  * and see everything — cost & subscription burn, honest ETA, workspace-level
@@ -22,7 +22,7 @@
  * inside monitor.tsx), then feature lanes run in nested worktrees branched off
  * the redesign branch, merged back one at a time.
  */
-import { Approval, MergeQueue, Parallel, Sequence, Task, Worktree, createSmithers } from "smithers-orchestrator";
+import { Approval, MergeQueue, Parallel, Sequence, Task, Worktree, createSmithers } from "smthrs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";

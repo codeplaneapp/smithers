@@ -10,7 +10,11 @@ const ignoredDirs = new Set(["dist", "node_modules"]);
 const testDirs = new Set(["test", "tests", "__tests__"]);
 const sanctionedSourceRoots = new Set(["packages/db/src", "packages/gateway/src", "packages/server/src"]);
 
-const directDbPattern = /new Database\(|new pg\.Client\(|new pg\.Pool\(|PGlite\.create\(/g;
+// `new (loadBunSqliteDatabase())(` is the same direct sqlite constructor as
+// `new Database(`, written that way so `bun:sqlite` resolves lazily and Node can
+// import the module. It stays inside this audit; only the spelling changed.
+const directDbPattern =
+  /new Database\(|new \(loadBunSqliteDatabase\(\)\)\(|new pg\.Client\(|new pg\.Pool\(|PGlite\.create\(/g;
 
 const allowedDirectDbAccess = new Map([
   ["packages/engine/src/effect/builder.js", 3],

@@ -79,13 +79,13 @@
       "resolved": [
         {
           "i": 1,
-          "finding": "**P0** Flagship package smithers-orchestrator has no `test` script — its unit tests never run in CI — `packages/smithers/package.json:1`",
+          "finding": "**P0** Flagship package smthrs has no `test` script — its unit tests never run in CI — `packages/smithers/package.json:1`",
           "evidence": "#414 added \"test\": \"bun test tests\" to packages/smithers/package.json (verified line 61) plus gate scripts/check-smithers-test-script.mjs wired into root package.json:75 test script."
         },
         {
           "i": 3,
           "finding": "**P0** case14 'gateway RPC roundtrip' and case17 'webhook bad signature' skip the real path on an obsolete/false rationale that case25 disproves — `e2e/faults/case14-gateway-rpc-roundtrip.test.ts:853-861; e2e/faults/case17-webhook-bad-signature.test.ts:446-451; contrast e2e/faults/case25-approval-scope-denial.test.ts:11,168-187`",
-          "evidence": "#415 rewrote case14 and case17 to boot the real Gateway: case14 imports Gateway from @smithers-orchestrator/server/gateway (line 11), new Gateway() + gateway.listen() (lines 113,131); case17 same (lines 10,91,100) + 'uses production handleWebhook + HMAC verification' test. No test.skip remains in either file."
+          "evidence": "#415 rewrote case14 and case17 to boot the real Gateway: case14 imports Gateway from @smthrs/server/gateway (line 11), new Gateway() + gateway.listen() (lines 113,131); case17 same (lines 10,91,100) + 'uses production handleWebhook + HMAC verification' test. No test.skip remains in either file."
         },
         {
           "i": 4,
@@ -119,7 +119,7 @@
         },
         {
           "i": 3,
-          "finding": "**P2** Circular dependency between @smithers-orchestrator/agents and @smithers-orchestrator/observability ships to npm — `packages/agents/src/BaseCliAgent/BaseCliAgent.js:5-6 and apps/observability/src/_traceEventNormalizers.js:1-2`",
+          "finding": "**P2** Circular dependency between @smthrs/agents and @smthrs/observability ships to npm — `packages/agents/src/BaseCliAgent/BaseCliAgent.js:5-6 and apps/observability/src/_traceEventNormalizers.js:1-2`",
           "reason": "Published circular dependency still ships."
         },
         {
@@ -154,7 +154,7 @@
         },
         {
           "i": 10,
-          "finding": "**P2** Published smithers-orchestrator ./* wildcard publicly exposes internal helper files — `packages/smithers/package.json (exports \"./*\" -> ./src/*.js)`",
+          "finding": "**P2** Published smthrs ./* wildcard publicly exposes internal helper files — `packages/smithers/package.json (exports \"./*\" -> ./src/*.js)`",
           "reason": "./* wildcard still present on published package."
         },
         {
@@ -259,7 +259,7 @@
         },
         {
           "i": 31,
-          "finding": "**P1** Published @smithers-orchestrator/observability lives under apps/ and forms a publish cycle with agents (depended on by 14 published packages) — ``",
+          "finding": "**P1** Published @smthrs/observability lives under apps/ and forms a publish cycle with agents (depended on by 14 published packages) — ``",
           "reason": "Published observability still under apps/ in a publish cycle with agents."
         },
         {
@@ -269,7 +269,7 @@
         },
         {
           "i": 33,
-          "finding": "**P2** apps/cli is also published from apps/ (non-private @smithers-orchestrator/cli) — apps/ contains 2 shipping packages, not the conventional zero — `apps/cli/package.json`",
+          "finding": "**P2** apps/cli is also published from apps/ (non-private @smthrs/cli) — apps/ contains 2 shipping packages, not the conventional zero — `apps/cli/package.json`",
           "reason": "apps/cli still published from apps/."
         },
         {
@@ -608,7 +608,7 @@
         },
         {
           "i": 65,
-          "finding": "**P2** Declared dependency @smithers-orchestrator/errors is unused — `packages/usage/package.json:29`",
+          "finding": "**P2** Declared dependency @smthrs/errors is unused — `packages/usage/package.json:29`",
           "reason": "Declared dependency still unused."
         },
         {
@@ -850,7 +850,7 @@
         {
           "i": 35,
           "finding": "**P2** tsconfig path map for the protocol root points at a non-existent file (src/index.js) — `tsconfig.json:162-164 (and examples/tsconfig.json equivalent)`",
-          "evidence": "/Users/williamcory/smithers2/tsconfig.json:162-164 maps @smithers-orchestrator/protocol -> ./packages/protocol/src/index.js, and that file EXISTS on disk. examples/tsconfig.json equivalent."
+          "evidence": "/Users/williamcory/smithers2/tsconfig.json:162-164 maps @smthrs/protocol -> ./packages/protocol/src/index.js, and that file EXISTS on disk. examples/tsconfig.json equivalent."
         },
         {
           "i": 36,
@@ -946,7 +946,7 @@
         },
         {
           "i": 41,
-          "finding": "**P2** Type-only subpath @smithers-orchestrator/sandbox/SandboxHandle also breaks external strict TS consumers (extends finding #1) — `packages/sandbox/src/SandboxHandle.ts; packages/sandbox/package.json:13-17; e2e/harness/stallSandbox.ts:2`",
+          "finding": "**P2** Type-only subpath @smthrs/sandbox/SandboxHandle also breaks external strict TS consumers (extends finding #1) — `packages/sandbox/src/SandboxHandle.ts; packages/sandbox/package.json:13-17; e2e/harness/stallSandbox.ts:2`",
           "reason": "Type-only subpath resolution still broken (same root cause as #40)."
         },
         {
@@ -1368,7 +1368,7 @@
         {
           "i": 78,
           "finding": "**P2** case14 gateway-rpc-roundtrip e2e is not real e2e: it reimplements the RPC handlers instead of booting the real Gateway — `e2e/faults/case14-gateway-rpc-roundtrip.test.ts:382-485`",
-          "evidence": "#415 e2e/faults/case14-gateway-rpc-roundtrip.test.ts now imports the real Gateway from @smithers-orchestrator/server/gateway (:11) and createSmithers; 1003-line reimplementation removed"
+          "evidence": "#415 e2e/faults/case14-gateway-rpc-roundtrip.test.ts now imports the real Gateway from @smthrs/server/gateway (:11) and createSmithers; 1003-line reimplementation removed"
         },
         {
           "i": 85,
@@ -1464,8 +1464,8 @@
         },
         {
           "i": 27,
-          "finding": "**P2** e2e package.json omits the smithers-orchestrator dependency that case25 imports, so the real-gateway e2e relies on hoisting — `e2e/package.json; e2e/faults/case25-approval-scope-denial.test.ts:7`",
-          "reason": "e2e/package.json still omits the smithers-orchestrator dependency; case25 relies on workspace hoisting"
+          "finding": "**P2** e2e package.json omits the smthrs dependency that case25 imports, so the real-gateway e2e relies on hoisting — `e2e/package.json; e2e/faults/case25-approval-scope-denial.test.ts:7`",
+          "reason": "e2e/package.json still omits the smthrs dependency; case25 relies on workspace hoisting"
         },
         {
           "i": 28,
@@ -1484,7 +1484,7 @@
         },
         {
           "i": 31,
-          "finding": "**P2** examples/tsconfig.json points smithers-orchestrator at src/*.js source, not the published package — typecheck:examples does not validate against shipped types — `examples/tsconfig.json`",
+          "finding": "**P2** examples/tsconfig.json points smthrs at src/*.js source, not the published package — typecheck:examples does not validate against shipped types — `examples/tsconfig.json`",
           "reason": "examples tsconfig still points at src/*.js source, not the published package; does not validate against shipped types"
         },
         {

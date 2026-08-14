@@ -26,6 +26,48 @@ const DELETE_DUPLICATE_SCORER_ROWS_SQL = `DELETE FROM _smithers_scorers
 const CREATE_SCORER_IDENTITY_INDEX_SQL = `CREATE UNIQUE INDEX IF NOT EXISTS _smithers_scorers_identity_uidx
   ON _smithers_scorers (run_id, node_id, iteration, attempt, scorer_id, source)`;
 
+const AGENT_CHECKPOINT_ATTEMPT_DELETE_TRIGGER_SQL = `CREATE TRIGGER IF NOT EXISTS _smithers_agent_checkpoints_attempt_delete
+  AFTER DELETE ON _smithers_attempts
+  BEGIN
+    DELETE FROM _smithers_agent_checkpoints
+    WHERE run_id = OLD.run_id
+      AND node_id = OLD.node_id
+      AND iteration = OLD.iteration
+      AND attempt = OLD.attempt;
+  END`;
+
+const AGENT_CHECKPOINT_REF_DELETE_TRIGGER_SQL = `CREATE TRIGGER IF NOT EXISTS _smithers_agent_checkpoint_refs_delete
+  AFTER DELETE ON _smithers_agent_checkpoints
+  BEGIN
+    DELETE FROM _smithers_agent_checkpoint_contents
+    WHERE content_hash = OLD.content_hash
+      AND NOT EXISTS (
+        SELECT 1 FROM _smithers_agent_checkpoints refs
+        WHERE refs.content_hash = OLD.content_hash
+      );
+  END`;
+
+const AGENT_CHECKPOINT_POSTGRES_REF_DELETE_TRIGGER_SQL = `CREATE OR REPLACE FUNCTION _smithers_delete_orphan_agent_checkpoint_content()
+  RETURNS TRIGGER LANGUAGE plpgsql AS $$
+  BEGIN
+    PERFORM 1
+    FROM _smithers_agent_checkpoint_contents contents
+    WHERE contents.content_hash = OLD.content_hash
+    FOR UPDATE;
+    DELETE FROM _smithers_agent_checkpoint_contents contents
+    WHERE contents.content_hash = OLD.content_hash
+      AND NOT EXISTS (
+        SELECT 1 FROM _smithers_agent_checkpoints refs
+        WHERE refs.content_hash = OLD.content_hash
+      );
+    RETURN OLD;
+  END
+  $$`;
+
+const AGENT_CHECKPOINT_POSTGRES_REF_DELETE_TRIGGER_DDL = `CREATE OR REPLACE TRIGGER _smithers_agent_checkpoint_refs_delete
+  AFTER DELETE ON _smithers_agent_checkpoints
+  FOR EACH ROW EXECUTE FUNCTION _smithers_delete_orphan_agent_checkpoint_content()`;
+
 const RUN_CANCELLATION_ATTRIBUTION_COLUMNS = [
   ["cancel_request_id", "cancel_request_id TEXT"],
   ["cancel_request_source", "cancel_request_source TEXT"],
@@ -153,6 +195,12 @@ const LEGACY_COLUMN_MIGRATIONS = [
     name: "Add iteration provenance column to memory messages",
     table: "_smithers_memory_messages",
     columns: [["iteration", "iteration INTEGER"]],
+  },
+  {
+    id: "0039_attempt_effort_column",
+    name: "Add first-class effort column to attempts",
+    table: "_smithers_attempts",
+    columns: [["effort", "effort TEXT"]],
   },
 ];
 
@@ -287,6 +335,338 @@ function backfillOutputProvenanceSqlite(sqlite) {
 
 function indexExists(sqlite, index) {
   return Boolean(sqlite.query("SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?").get(index));
+}
+
+const STEERS_TABLE = "_smithers_steers";
+const STEERS_QUEUED_INDEX = "_smithers_steers_queued_idx";
+const STEERS_TABLE_SHAPE = {
+  columns: {
+    steer_id: { type: "TEXT", notNull: false },
+    run_id: { type: "TEXT", notNull: true },
+    node_id: { type: "TEXT", notNull: true },
+    message: { type: "TEXT", notNull: true },
+    status: { type: "TEXT", notNull: true },
+    author: { type: "TEXT", notNull: false },
+    created_at_ms: { type: "INTEGER", notNull: true },
+    consumed_at_ms: { type: "INTEGER", notNull: false },
+    consumed_by_attempt: { type: "INTEGER", notNull: false },
+    consumed_by_iteration: { type: "INTEGER", notNull: false },
+    expired_at_ms: { type: "INTEGER", notNull: false },
+  },
+  primaryKey: ["steer_id"],
+  queuedIndex: ["run_id", "node_id", "status", "created_at_ms"],
+};
+
+/**
+ * A same-name table or index with a different shape is not ours to mutate.
+ * Missing owned objects are repairable; incompatible collisions fail closed so
+ * CREATE IF NOT EXISTS cannot silently record a migration that never applied.
+ * @param {import("bun:sqlite").Database} sqlite
+ */
+function steerSchemaMatchesSqlite(sqlite) {
+  if (!tableExists(sqlite, STEERS_TABLE)) return false;
+  const columns = sqlite.query(`PRAGMA table_info(${quoteIdentifier(STEERS_TABLE)})`).all();
+  const expectedColumns = Object.keys(STEERS_TABLE_SHAPE.columns);
+  const primaryKey = columns
+    .filter((row) => Number(row.pk) > 0)
+    .sort((a, b) => Number(a.pk) - Number(b.pk))
+    .map((row) => row.name);
+  const tableMatches =
+    JSON.stringify(columns.map((row) => row.name)) === JSON.stringify(expectedColumns) &&
+    JSON.stringify(primaryKey) === JSON.stringify(STEERS_TABLE_SHAPE.primaryKey) &&
+    columns.every((column) => {
+      const expected = STEERS_TABLE_SHAPE.columns[column.name];
+      return (
+        expected !== undefined &&
+        String(column.type).toUpperCase() === expected.type &&
+        Boolean(Number(column.notnull)) === expected.notNull
+      );
+    }) &&
+    String(columns.find((column) => column.name === "status")?.dflt_value ?? "")
+      .replaceAll("(", "")
+      .replaceAll(")", "") === "'queued'";
+  if (!tableMatches) {
+    throw new Error("0040 steer schema mismatch: expected the canonical _smithers_steers table shape");
+  }
+  if (!indexExists(sqlite, STEERS_QUEUED_INDEX)) return false;
+  const indexRow = sqlite
+    .query("SELECT tbl_name FROM sqlite_master WHERE type = 'index' AND name = ?")
+    .get(STEERS_QUEUED_INDEX);
+  if (indexRow?.tbl_name !== STEERS_TABLE) {
+    throw new Error("0040 steer schema mismatch: queued index name is owned by another table");
+  }
+  const indexListRow = sqlite
+    .query(`PRAGMA index_list(${quoteIdentifier(STEERS_TABLE)})`)
+    .all()
+    .find((row) => row.name === STEERS_QUEUED_INDEX);
+  const indexColumns = sqlite
+    .query(`PRAGMA index_info(${quoteIdentifier(STEERS_QUEUED_INDEX)})`)
+    .all()
+    .sort((a, b) => Number(a.seqno) - Number(b.seqno))
+    .map((row) => row.name);
+  return (
+    JSON.stringify(indexColumns) === JSON.stringify(STEERS_TABLE_SHAPE.queuedIndex) &&
+    Number(indexListRow?.unique ?? 0) === 0 &&
+    Number(indexListRow?.partial ?? 0) === 0
+  );
+}
+
+/**
+ * @param {{ query: (config: { text: string; values?: readonly unknown[] }) => Promise<{ rows?: readonly Record<string, unknown>[] }> }} pgConn
+ */
+async function steerSchemaMatchesPostgres(pgConn) {
+  if (!(await tableExistsPostgres(pgConn, STEERS_TABLE))) return false;
+  const columnsResult = await pgConn.query({
+    text: `SELECT column_name AS name, data_type, is_nullable, column_default
+           FROM information_schema.columns
+           WHERE table_schema = current_schema() AND table_name = $1
+           ORDER BY ordinal_position`,
+    values: [STEERS_TABLE],
+  });
+  const columns = columnsResult.rows ?? [];
+  const expectedColumns = Object.keys(STEERS_TABLE_SHAPE.columns);
+  if (JSON.stringify(columns.map((row) => row.name)) !== JSON.stringify(expectedColumns)) {
+    throw new Error("0040 steer schema mismatch: expected the canonical _smithers_steers columns");
+  }
+  for (const column of columns) {
+    const expected = STEERS_TABLE_SHAPE.columns[column.name];
+    const numeric = expected?.type === "INTEGER";
+    // PostgreSQL primary-key columns are reported NOT NULL even when the
+    // portable SQLite DDL does not spell NOT NULL separately.
+    const expectedNullable = column.name === "steer_id" || expected?.notNull ? "NO" : "YES";
+    if (!expected || (numeric ? column.data_type !== "bigint" : column.data_type !== "text")) {
+      throw new Error(`0040 steer schema mismatch for ${STEERS_TABLE}.${String(column.name)}`);
+    }
+    if (column.is_nullable !== expectedNullable) {
+      throw new Error(`0040 steer schema mismatch for ${STEERS_TABLE}.${String(column.name)} nullability`);
+    }
+    if (column.name === "status" && !/^'queued'(?:::text)?$/i.test(String(column.column_default ?? ""))) {
+      throw new Error(`0040 steer schema mismatch for ${STEERS_TABLE}.status default`);
+    }
+  }
+  const primaryKeyResult = await pgConn.query({
+    text: `SELECT a.attname AS name
+           FROM pg_index i
+           JOIN pg_class t ON t.oid = i.indrelid
+           JOIN pg_namespace n ON n.oid = t.relnamespace
+           JOIN unnest(i.indkey) WITH ORDINALITY keys(attnum, ord) ON true
+           JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = keys.attnum
+           WHERE n.nspname = current_schema() AND t.relname = $1 AND i.indisprimary
+           ORDER BY keys.ord`,
+    values: [STEERS_TABLE],
+  });
+  if (
+    JSON.stringify((primaryKeyResult.rows ?? []).map((row) => row.name)) !==
+    JSON.stringify(STEERS_TABLE_SHAPE.primaryKey)
+  ) {
+    throw new Error("0040 steer schema mismatch: expected steer_id primary key");
+  }
+  const namedRelationResult = await pgConn.query({
+    text: `SELECT c.relkind
+           FROM pg_class c
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname = current_schema() AND c.relname = $1`,
+    values: [STEERS_QUEUED_INDEX],
+  });
+  const namedRelation = namedRelationResult.rows?.[0];
+  if (!namedRelation) return false;
+  if (namedRelation.relkind !== "i") {
+    throw new Error("0040 steer schema mismatch: queued index name is owned by a non-index relation");
+  }
+  const indexResult = await pgConn.query({
+    text: `SELECT t.relname AS table_name, a.attname AS name, keys.ord, i.indisunique, i.indisvalid, i.indisready,
+                  (i.indpred IS NOT NULL) AS is_partial
+           FROM pg_index i
+           JOIN pg_class idx ON idx.oid = i.indexrelid
+           JOIN pg_class t ON t.oid = i.indrelid
+           JOIN pg_namespace n ON n.oid = t.relnamespace
+           JOIN unnest(i.indkey) WITH ORDINALITY keys(attnum, ord) ON true
+           LEFT JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = keys.attnum
+           WHERE n.nspname = current_schema() AND idx.relname = $1
+           ORDER BY keys.ord`,
+    values: [STEERS_QUEUED_INDEX],
+  });
+  const indexRows = indexResult.rows ?? [];
+  if (indexRows.some((row) => row.table_name !== STEERS_TABLE)) {
+    throw new Error("0040 steer schema mismatch: queued index name is owned by another table");
+  }
+  return (
+    JSON.stringify(indexRows.map((row) => row.name)) === JSON.stringify(STEERS_TABLE_SHAPE.queuedIndex) &&
+    indexRows.every(
+      (row) =>
+        row.indisunique === false && row.is_partial === false && row.indisvalid === true && row.indisready === true,
+    )
+  );
+}
+
+/**
+ * Async SQLite-compatible twin used by edge stores that do not expose the
+ * synchronous bun:sqlite catalog API.
+ * @param {{ queryAllRaw: (statement: string, params?: readonly unknown[]) => Promise<readonly Record<string, unknown>[]> }} storage
+ */
+async function steerSchemaMatchesExternalSqlite(storage) {
+  const columns = await storage.queryAllRaw(`PRAGMA table_info(${quoteIdentifier(STEERS_TABLE)})`);
+  const expectedColumns = Object.keys(STEERS_TABLE_SHAPE.columns);
+  const primaryKey = columns
+    .filter((row) => Number(row.pk) > 0)
+    .sort((a, b) => Number(a.pk) - Number(b.pk))
+    .map((row) => row.name);
+  const tableMatches =
+    JSON.stringify(columns.map((row) => row.name)) === JSON.stringify(expectedColumns) &&
+    JSON.stringify(primaryKey) === JSON.stringify(STEERS_TABLE_SHAPE.primaryKey) &&
+    columns.every((column) => {
+      const expected = STEERS_TABLE_SHAPE.columns[column.name];
+      return (
+        expected !== undefined &&
+        String(column.type).toUpperCase() === expected.type &&
+        Boolean(Number(column.notnull)) === expected.notNull
+      );
+    }) &&
+    String(columns.find((column) => column.name === "status")?.dflt_value ?? "")
+      .replaceAll("(", "")
+      .replaceAll(")", "") === "'queued'";
+  if (!tableMatches) {
+    throw new Error("0040 steer schema mismatch: expected the canonical _smithers_steers table shape");
+  }
+  const indexRows = await storage.queryAllRaw("SELECT tbl_name FROM sqlite_master WHERE type = 'index' AND name = ?", [
+    STEERS_QUEUED_INDEX,
+  ]);
+  if (indexRows.length === 0) return false;
+  if (indexRows[0]?.tbl_name !== STEERS_TABLE) {
+    throw new Error("0040 steer schema mismatch: queued index name is owned by another table");
+  }
+  const indexListRow = (await storage.queryAllRaw(`PRAGMA index_list(${quoteIdentifier(STEERS_TABLE)})`)).find(
+    (row) => row.name === STEERS_QUEUED_INDEX,
+  );
+  const indexColumns = (await storage.queryAllRaw(`PRAGMA index_info(${quoteIdentifier(STEERS_QUEUED_INDEX)})`))
+    .slice()
+    .sort((a, b) => Number(a.seqno) - Number(b.seqno))
+    .map((row) => row.name);
+  return (
+    JSON.stringify(indexColumns) === JSON.stringify(STEERS_TABLE_SHAPE.queuedIndex) &&
+    Number(indexListRow?.unique ?? 0) === 0 &&
+    Number(indexListRow?.partial ?? 0) === 0
+  );
+}
+
+const AGENT_CHECKPOINT_TABLE_SHAPES = {
+  _smithers_agent_checkpoint_contents: {
+    columns: {
+      content_hash: { type: "TEXT", nullable: false },
+      checkpoint_json: { type: "TEXT", nullable: false },
+      size_bytes: { type: "INTEGER", nullable: false },
+      created_at_ms: { type: "INTEGER", nullable: false },
+    },
+    primaryKey: ["content_hash"],
+  },
+  _smithers_agent_checkpoints: {
+    columns: {
+      run_id: { type: "TEXT", nullable: false },
+      node_id: { type: "TEXT", nullable: false },
+      iteration: { type: "INTEGER", nullable: false },
+      attempt: { type: "INTEGER", nullable: false },
+      sequence: { type: "INTEGER", nullable: false },
+      content_hash: { type: "TEXT", nullable: false },
+      codec: { type: "TEXT", nullable: false },
+      version: { type: "INTEGER", nullable: false },
+      agent_id: { type: "TEXT", nullable: true },
+      purpose: { type: "TEXT", nullable: false },
+      created_at_ms: { type: "INTEGER", nullable: false },
+    },
+    primaryKey: ["run_id", "node_id", "iteration", "attempt", "sequence"],
+  },
+};
+
+function agentCheckpointSqliteColumnsMatch(columns, shape) {
+  return (
+    JSON.stringify(columns.map((row) => row.name)) === JSON.stringify(Object.keys(shape.columns)) &&
+    columns.every((column) => {
+      const expected = shape.columns[column.name];
+      return (
+        expected !== undefined &&
+        String(column.type).toUpperCase() === expected.type &&
+        (Number(column.notnull) === 0) === expected.nullable
+      );
+    })
+  );
+}
+
+function agentCheckpointSqliteForeignKeysMatch(fks) {
+  const groups = new Map();
+  for (const row of fks) {
+    const id = Number(row.id);
+    groups.set(id, [...(groups.get(id) ?? []), row]);
+  }
+  const attemptFk = [...groups.values()].find((rows) => rows.every((row) => row.table === "_smithers_attempts"));
+  const contentFk = [...groups.values()].find((rows) =>
+    rows.every((row) => row.table === "_smithers_agent_checkpoint_contents"),
+  );
+  const attemptRows = [...(attemptFk ?? [])];
+  const attemptColumns = attemptRows.sort((a, b) => Number(a.seq) - Number(b.seq)).map((row) => [row.from, row.to]);
+  return (
+    JSON.stringify(attemptColumns) ===
+      JSON.stringify([
+        ["run_id", "run_id"],
+        ["node_id", "node_id"],
+        ["iteration", "iteration"],
+        ["attempt", "attempt"],
+      ]) &&
+    attemptRows.every((row) => String(row.on_delete).toUpperCase() === "CASCADE") &&
+    contentFk?.length === 1 &&
+    contentFk[0].from === "content_hash" &&
+    contentFk[0].to === "content_hash"
+  );
+}
+
+function assertAgentCheckpointSqliteSchema(sqlite) {
+  for (const [table, shape] of Object.entries(AGENT_CHECKPOINT_TABLE_SHAPES)) {
+    if (!tableExists(sqlite, table)) throw new Error(`0037 agent checkpoint schema is missing table ${table}`);
+    const columns = sqlite.query(`PRAGMA table_info(${quoteIdentifier(table)})`).all();
+    const primaryKey = columns
+      .filter((row) => Number(row.pk) > 0)
+      .sort((a, b) => a.pk - b.pk)
+      .map((row) => row.name);
+    if (
+      !agentCheckpointSqliteColumnsMatch(columns, shape) ||
+      JSON.stringify(primaryKey) !== JSON.stringify(shape.primaryKey)
+    ) {
+      throw new Error(
+        `0037 agent checkpoint schema mismatch for ${table}: expected canonical columns and primary key ${shape.primaryKey.join(",")}`,
+      );
+    }
+  }
+  const fks = sqlite.query('PRAGMA foreign_key_list("_smithers_agent_checkpoints")').all();
+  if (!agentCheckpointSqliteForeignKeysMatch(fks)) {
+    throw new Error("0037 agent checkpoint schema mismatch: required foreign keys are missing or invalid");
+  }
+  const index = sqlite.query('PRAGMA index_info("_smithers_agent_checkpoints_content_hash_idx")').all();
+  if (index.length !== 1 || index[0].name !== "content_hash") {
+    throw new Error("0037 agent checkpoint schema mismatch: content hash index is missing or invalid");
+  }
+  return true;
+}
+
+async function assertAgentCheckpointExternalSqliteSchema(storage) {
+  // Keep the async path explicit because edge descriptors do not expose the
+  // synchronous bun:sqlite query API used by the migration runner.
+  for (const [table, shape] of Object.entries(AGENT_CHECKPOINT_TABLE_SHAPES)) {
+    const columns = await storage.queryAllRaw(`PRAGMA table_info(${quoteIdentifier(table)})`);
+    const primaryKey = columns
+      .filter((row) => Number(row.pk) > 0)
+      .sort((a, b) => a.pk - b.pk)
+      .map((row) => row.name);
+    if (
+      !agentCheckpointSqliteColumnsMatch(columns, shape) ||
+      JSON.stringify(primaryKey) !== JSON.stringify(shape.primaryKey)
+    ) {
+      throw new Error(`0037 agent checkpoint schema mismatch for ${table}`);
+    }
+  }
+  const fks = await storage.queryAllRaw('PRAGMA foreign_key_list("_smithers_agent_checkpoints")');
+  const index = await storage.queryAllRaw('PRAGMA index_info("_smithers_agent_checkpoints_content_hash_idx")');
+  if (!agentCheckpointSqliteForeignKeysMatch(fks) || index.length !== 1 || index[0].name !== "content_hash") {
+    throw new Error("0037 agent checkpoint schema mismatch: required foreign key or index is invalid");
+  }
 }
 
 const SNAPSHOT_SQLITE_TRIGGERS = [
@@ -490,6 +870,77 @@ async function indexExistsPostgres(pgConn, index) {
     values: [index],
   });
   return Boolean(result.rows?.[0]);
+}
+
+async function assertAgentCheckpointPostgresSchema(pgConn) {
+  for (const [table, shape] of Object.entries(AGENT_CHECKPOINT_TABLE_SHAPES)) {
+    const columnsResult = await pgConn.query({
+      text: `SELECT column_name AS name, data_type, is_nullable
+             FROM information_schema.columns
+             WHERE table_schema = current_schema() AND table_name = $1
+             ORDER BY ordinal_position`,
+      values: [table],
+    });
+    const columns = columnsResult.rows ?? [];
+    if (JSON.stringify(columns.map((row) => row.name)) !== JSON.stringify(Object.keys(shape.columns))) {
+      throw new Error(`0037 agent checkpoint schema mismatch for ${table}`);
+    }
+    for (const column of columns) {
+      const numeric = ["iteration", "attempt", "sequence", "version", "size_bytes", "created_at_ms"].includes(
+        column.name,
+      );
+      const expectedNullable = column.name === "agent_id" ? "YES" : "NO";
+      if (
+        (numeric ? column.data_type !== "bigint" : column.data_type !== "text") ||
+        column.is_nullable !== expectedNullable
+      ) {
+        throw new Error(`0037 agent checkpoint schema mismatch for ${table}.${column.name}`);
+      }
+    }
+    const pkResult = await pgConn.query({
+      text: `SELECT a.attname AS name
+             FROM pg_index i
+             JOIN pg_class t ON t.oid = i.indrelid
+             JOIN pg_namespace n ON n.oid = t.relnamespace
+             JOIN unnest(i.indkey) WITH ORDINALITY keys(attnum, ord) ON true
+             JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = keys.attnum
+             WHERE n.nspname = current_schema() AND t.relname = $1 AND i.indisprimary
+             ORDER BY keys.ord`,
+      values: [table],
+    });
+    if (JSON.stringify((pkResult.rows ?? []).map((row) => row.name)) !== JSON.stringify(shape.primaryKey)) {
+      throw new Error(`0037 agent checkpoint schema mismatch for ${table} primary key`);
+    }
+  }
+  const indexResult = await pgConn.query({
+    text: `SELECT indexdef FROM pg_indexes
+           WHERE schemaname = current_schema() AND indexname = '_smithers_agent_checkpoints_content_hash_idx'`,
+  });
+  if (!/\(content_hash\)\s*$/i.test(String(indexResult.rows?.[0]?.indexdef ?? ""))) {
+    throw new Error("0037 agent checkpoint schema mismatch: content hash index is missing or invalid");
+  }
+  const fkResult = await pgConn.query({
+    text: `SELECT pg_get_constraintdef(c.oid) AS definition
+           FROM pg_constraint c
+           JOIN pg_class t ON t.oid = c.conrelid
+           JOIN pg_namespace n ON n.oid = t.relnamespace
+           WHERE n.nspname = current_schema() AND t.relname = '_smithers_agent_checkpoints' AND c.contype = 'f'`,
+  });
+  const definitions = (fkResult.rows ?? []).map((row) => String(row.definition));
+  if (
+    !definitions.some(
+      (value) => value.includes("FOREIGN KEY (content_hash)") && value.includes("_smithers_agent_checkpoint_contents"),
+    ) ||
+    !definitions.some(
+      (value) =>
+        value.includes("FOREIGN KEY (run_id, node_id, iteration, attempt)") &&
+        value.includes("_smithers_attempts") &&
+        value.includes("ON DELETE CASCADE"),
+    )
+  ) {
+    throw new Error("0037 agent checkpoint schema mismatch: required foreign keys are missing or invalid");
+  }
+  return true;
 }
 
 /**
@@ -967,6 +1418,10 @@ function buildMigrations(context) {
             skipped += 1;
             continue;
           }
+          if (target === STEERS_TABLE && statement.includes(STEERS_QUEUED_INDEX)) {
+            skipped += 1;
+            continue;
+          }
           sqlite.run(statement);
           applied += 1;
         }
@@ -978,6 +1433,10 @@ function buildMigrations(context) {
         for (const statement of [...context.createIndexStatements, ...EXTRA_INDEX_STATEMENTS]) {
           const target = indexTargetTable(statement);
           if (target && !(await tableExistsPostgres(pgConn, target))) {
+            skipped += 1;
+            continue;
+          }
+          if (target === STEERS_TABLE && statement.includes(STEERS_QUEUED_INDEX)) {
             skipped += 1;
             continue;
           }
@@ -1788,6 +2247,180 @@ function buildMigrations(context) {
         return { table: "_smithers_runs", addedColumns };
       },
     },
+    // 0034 is already the inline cancellation-attribution migration above;
+    // this file-backed checkpoint migration follows it.
+    {
+      id: "0035_ralph_exhausted",
+      name: "Add loop-exhaustion flag to ralph state",
+      checksum: "packages/db/migrations/0035_add_ralph_exhausted.sql",
+      isApplied: (sqlite) => tableColumnNames(sqlite, "_smithers_ralph").has("exhausted"),
+      isAppliedPostgres: async (pgConn) => (await tableColumnNamesPostgres(pgConn, "_smithers_ralph")).has("exhausted"),
+      up: (sqlite) => {
+        if (!tableExists(sqlite, "_smithers_ralph")) {
+          return { table: "_smithers_ralph", addedColumns: [], skipped: "missing_table" };
+        }
+        const added = addColumnIfMissing(
+          sqlite,
+          "_smithers_ralph",
+          "exhausted",
+          "exhausted INTEGER NOT NULL DEFAULT 0",
+        );
+        return { table: "_smithers_ralph", addedColumns: added ? ["exhausted"] : [] };
+      },
+      upPostgres: async (pgConn) => {
+        if (!(await tableExistsPostgres(pgConn, "_smithers_ralph"))) {
+          return { table: "_smithers_ralph", addedColumns: [], skipped: "missing_table" };
+        }
+        const added = await addColumnIfMissingPostgres(
+          pgConn,
+          "_smithers_ralph",
+          "exhausted",
+          "exhausted INTEGER NOT NULL DEFAULT 0",
+        );
+        return { table: "_smithers_ralph", addedColumns: added ? ["exhausted"] : [] };
+      },
+    },
+    {
+      id: "0036_agent_processes",
+      name: "Track live agent subprocesses so orphaned agents can be reaped",
+      checksum: "packages/db/migrations/0036_add_agent_processes.sql",
+      isApplied: (sqlite) => tableExists(sqlite, "_smithers_agent_processes"),
+      isAppliedPostgres: (pgConn) => tableExistsPostgres(pgConn, "_smithers_agent_processes"),
+      up: (sqlite) => {
+        sqlite.run(createTableStatementFor("_smithers_agent_processes", context.createTableStatements));
+        return { table: "_smithers_agent_processes", created: true };
+      },
+      upPostgres: async (pgConn) => {
+        await pgConn.query({
+          text: translateDdl(
+            POSTGRES,
+            createTableStatementFor("_smithers_agent_processes", context.createTableStatements),
+          ),
+        });
+        return { table: "_smithers_agent_processes", created: true };
+      },
+    },
+    {
+      id: "0037_agent_checkpoints",
+      name: "Add content-addressed generic agent checkpoints",
+      checksum: "packages/db/migrations/0037_agent_checkpoints.sql",
+      isApplied: (sqlite) => {
+        if (
+          !tableExists(sqlite, "_smithers_agent_checkpoint_contents") ||
+          !tableExists(sqlite, "_smithers_agent_checkpoints") ||
+          !indexExists(sqlite, "_smithers_agent_checkpoints_content_hash_idx")
+        )
+          return false;
+        return assertAgentCheckpointSqliteSchema(sqlite);
+      },
+      isAppliedPostgres: async (pgConn) => {
+        if (
+          !(await tableExistsPostgres(pgConn, "_smithers_agent_checkpoint_contents")) ||
+          !(await tableExistsPostgres(pgConn, "_smithers_agent_checkpoints")) ||
+          !(await indexExistsPostgres(pgConn, "_smithers_agent_checkpoints_content_hash_idx"))
+        )
+          return false;
+        return assertAgentCheckpointPostgresSchema(pgConn);
+      },
+      up: (sqlite) => {
+        sqlite.run(createTableStatementFor("_smithers_agent_checkpoint_contents", context.createTableStatements));
+        sqlite.run(createTableStatementFor("_smithers_agent_checkpoints", context.createTableStatements));
+        sqlite.run(`CREATE INDEX IF NOT EXISTS _smithers_agent_checkpoints_content_hash_idx
+    ON _smithers_agent_checkpoints (content_hash)`);
+        if (tableExists(sqlite, "_smithers_attempts")) sqlite.run(AGENT_CHECKPOINT_ATTEMPT_DELETE_TRIGGER_SQL);
+        sqlite.run(AGENT_CHECKPOINT_REF_DELETE_TRIGGER_SQL);
+        assertAgentCheckpointSqliteSchema(sqlite);
+        return { tables: ["_smithers_agent_checkpoint_contents", "_smithers_agent_checkpoints"] };
+      },
+      upPostgres: async (pgConn) => {
+        await pgConn.query({
+          text: translateDdl(
+            POSTGRES,
+            createTableStatementFor("_smithers_agent_checkpoint_contents", context.createTableStatements),
+          ),
+        });
+        await pgConn.query({
+          text: translateDdl(
+            POSTGRES,
+            createTableStatementFor("_smithers_agent_checkpoints", context.createTableStatements),
+          ),
+        });
+        await pgConn.query({
+          text: "CREATE INDEX IF NOT EXISTS _smithers_agent_checkpoints_content_hash_idx ON _smithers_agent_checkpoints (content_hash)",
+        });
+        await pgConn.query({ text: AGENT_CHECKPOINT_POSTGRES_REF_DELETE_TRIGGER_SQL });
+        await pgConn.query({ text: AGENT_CHECKPOINT_POSTGRES_REF_DELETE_TRIGGER_DDL });
+        await assertAgentCheckpointPostgresSchema(pgConn);
+        return { tables: ["_smithers_agent_checkpoint_contents", "_smithers_agent_checkpoints"] };
+      },
+    },
+    {
+      id: "0038_run_token_usage",
+      name: "Persist per-attempt token usage so run totals are queryable without replaying events",
+      checksum: "packages/db/migrations/0038_add_run_token_usage.sql",
+      isApplied: (sqlite) => tableExists(sqlite, "_smithers_run_usage"),
+      isAppliedPostgres: (pgConn) => tableExistsPostgres(pgConn, "_smithers_run_usage"),
+      up: (sqlite) => {
+        sqlite.run(createTableStatementFor("_smithers_run_usage", context.createTableStatements));
+        return { table: "_smithers_run_usage", created: true };
+      },
+      upPostgres: async (pgConn) => {
+        await pgConn.query({
+          text: translateDdl(POSTGRES, createTableStatementFor("_smithers_run_usage", context.createTableStatements)),
+        });
+        return { table: "_smithers_run_usage", created: true };
+      },
+    },
+    {
+      id: "0040_add_steers",
+      name: "Add durable steer inbox table",
+      repairRecorded: true,
+      checksum: checksumForStatements([
+        createTableStatementFor("_smithers_steers", context.createTableStatements),
+        `CREATE INDEX IF NOT EXISTS _smithers_steers_queued_idx
+    ON _smithers_steers (run_id, node_id, status, created_at_ms)`,
+      ]),
+      isApplied: (sqlite) => steerSchemaMatchesSqlite(sqlite),
+      isAppliedPostgres: (pgConn) => steerSchemaMatchesPostgres(pgConn),
+      up: (sqlite) => {
+        sqlite.run(createTableStatementFor("_smithers_steers", context.createTableStatements));
+        // Assert before creating the owned index so an unrelated same-name
+        // table is never mutated merely because CREATE TABLE was a no-op.
+        const hadIndex = indexExists(sqlite, STEERS_QUEUED_INDEX);
+        steerSchemaMatchesSqlite(sqlite);
+        if (hadIndex) sqlite.run(`DROP INDEX ${quoteIdentifier(STEERS_QUEUED_INDEX)}`);
+        sqlite.run(`CREATE INDEX IF NOT EXISTS _smithers_steers_queued_idx
+    ON _smithers_steers (run_id, node_id, status, created_at_ms)`);
+        if (!steerSchemaMatchesSqlite(sqlite)) {
+          throw new Error("0040 steer schema repair did not install the canonical queued index");
+        }
+        return { table: "_smithers_steers", createdIndex: !hadIndex, rebuiltIndex: hadIndex };
+      },
+      upPostgres: async (pgConn) => {
+        await pgConn.query({
+          text: translateDdl(POSTGRES, createTableStatementFor("_smithers_steers", context.createTableStatements)),
+        });
+        const hadIndex = await indexExistsPostgres(pgConn, STEERS_QUEUED_INDEX);
+        // Validate the table and any same-name index before mutating the owned
+        // index. Missing or malformed indexes on the canonical table return
+        // false and are repaired; a wrong-owner name collision throws.
+        await steerSchemaMatchesPostgres(pgConn);
+        if (hadIndex) {
+          await pgConn.query({ text: `DROP INDEX ${quoteIdentifier(STEERS_QUEUED_INDEX)}` });
+        }
+        await pgConn.query({
+          text: translateDdl(
+            POSTGRES,
+            `CREATE INDEX IF NOT EXISTS _smithers_steers_queued_idx
+            ON _smithers_steers (run_id, node_id, status, created_at_ms)`,
+          ),
+        });
+        if (!(await steerSchemaMatchesPostgres(pgConn))) {
+          throw new Error("0040 steer schema repair did not install the canonical queued index");
+        }
+        return { table: "_smithers_steers", createdIndex: !hadIndex, rebuiltIndex: hadIndex };
+      },
+    },
   ];
 }
 
@@ -1803,7 +2436,8 @@ export function runSmithersSchemaMigrations(sqlite, context) {
   sqlite.run(MIGRATION_TABLE_SQL);
   const applied = loadAppliedMigrationIds(sqlite);
   for (const migration of buildMigrations(context)) {
-    if (applied.has(migration.id) || hasMigrationRecord(sqlite, migration.id)) {
+    const alreadyAppliedInLedger = applied.has(migration.id) || hasMigrationRecord(sqlite, migration.id);
+    if (alreadyAppliedInLedger && (!migration.repairRecorded || migration.isApplied(sqlite))) {
       continue;
     }
     const details = runSqliteMigrationSpan(migration, () => {
@@ -1821,6 +2455,11 @@ export function runSmithersSchemaMigrations(sqlite, context) {
   // CREATE TRIGGER IF NOT EXISTS is metadata-only and repairs a manually
   // dropped lifecycle trigger without rerunning any recorded migration.
   for (const trigger of SNAPSHOT_SQLITE_TRIGGERS) sqlite.run(trigger);
+  if (tableExists(sqlite, "_smithers_attempts") && tableExists(sqlite, "_smithers_agent_checkpoints")) {
+    sqlite.run(AGENT_CHECKPOINT_ATTEMPT_DELETE_TRIGGER_SQL);
+    sqlite.run(AGENT_CHECKPOINT_REF_DELETE_TRIGGER_SQL);
+  }
+  assertAgentCheckpointSqliteSchema(sqlite);
 }
 
 /**
@@ -1855,6 +2494,28 @@ export async function runSmithersSchemaInitSqliteAsync(storage, context) {
   for (const [column, definition] of RUN_CANCELLATION_ATTRIBUTION_COLUMNS) {
     if (!runColumns.has(column)) {
       await storage.execute(`ALTER TABLE _smithers_runs ADD COLUMN ${definition}`);
+    }
+  }
+  // External SQLite backends do not run the versioned migration ledger, so the
+  // additive column migrations (e.g. 0039 effort on _smithers_attempts) never
+  // upgrade a pre-existing table — CREATE TABLE IF NOT EXISTS above is a no-op
+  // once the table exists. Apply them explicitly so persisting those columns
+  // does not fail against stores created before the column was introduced.
+  for (const config of LEGACY_COLUMN_MIGRATIONS) {
+    const tableRows = await storage.queryAllRaw(
+      "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ?",
+      [config.table],
+    );
+    if (tableRows.length === 0) continue;
+    const existingColumns = new Set(
+      (await storage.queryAllRaw(`PRAGMA table_info(${quoteIdentifier(config.table)})`))
+        .map((row) => row.name)
+        .filter((name) => typeof name === "string"),
+    );
+    for (const [column, definition] of config.columns) {
+      if (!existingColumns.has(column)) {
+        await storage.execute(`ALTER TABLE ${quoteIdentifier(config.table)} ADD COLUMN ${definition}`);
+      }
     }
   }
   // External SQLite backends do not run the versioned migration ledger. Apply
@@ -1911,9 +2572,25 @@ export async function runSmithersSchemaInitSqliteAsync(storage, context) {
     }
   }
   for (const statement of SNAPSHOT_SQLITE_TRIGGERS) await storage.execute(statement);
+  await storage.execute(AGENT_CHECKPOINT_ATTEMPT_DELETE_TRIGGER_SQL);
+  await storage.execute(AGENT_CHECKPOINT_REF_DELETE_TRIGGER_SQL);
+  const steerIndexMatches = await steerSchemaMatchesExternalSqlite(storage);
+  if (!steerIndexMatches) {
+    const ownedIndex = await storage.queryAllRaw(
+      "SELECT 1 AS one FROM sqlite_master WHERE type = 'index' AND name = ? AND tbl_name = ?",
+      [STEERS_QUEUED_INDEX, STEERS_TABLE],
+    );
+    if (ownedIndex.length > 0) {
+      await storage.execute(`DROP INDEX ${quoteIdentifier(STEERS_QUEUED_INDEX)}`);
+    }
+  }
   for (const statement of [...context.createIndexStatements, ...EXTRA_INDEX_STATEMENTS]) {
     await storage.execute(statement);
   }
+  if (!(await steerSchemaMatchesExternalSqlite(storage))) {
+    throw new Error("0040 steer schema repair did not install the canonical queued index");
+  }
+  await assertAgentCheckpointExternalSqliteSchema(storage);
 }
 
 /**
@@ -1976,35 +2653,49 @@ async function runPostgresMigrationSpan(migration, run) {
  * @returns {Promise<void>}
  */
 export async function runSmithersSchemaMigrationsPostgres(pgConn, context) {
-  await pgConn.query({ text: translateDdl(POSTGRES, MIGRATION_TABLE_SQL) });
-  const applied = await loadAppliedMigrationIdsPostgres(pgConn);
-  for (const migration of buildMigrations(context)) {
-    const alreadyAppliedInLedger = applied.has(migration.id);
-    if (alreadyAppliedInLedger && migration.isAppliedPostgres && (await migration.isAppliedPostgres(pgConn))) {
-      continue;
-    }
-    const details = await runPostgresMigrationSpan(migration, async () => {
-      await pgConn.query({ text: "BEGIN" });
-      try {
+  // PostgreSQL's idempotent DDL is not concurrency-safe by itself: two
+  // sessions can both observe a missing object and race in the system catalogs
+  // (for example CREATE OR REPLACE TRIGGER can raise "tuple concurrently
+  // updated"). BEGIN first so Smithers' shared pool pins one physical session,
+  // then hold a database/schema-scoped transaction lock across discovery,
+  // migrations, and lifecycle-trigger repair. Commit/rollback releases both
+  // the lock and the pool pin; independent databases/schemas remain independent.
+  const lockKey = "hashtext(current_database()), hashtext(COALESCE(current_schema(), '') || ':smithers:schema')";
+  const completed = [];
+  await pgConn.query({ text: "BEGIN" });
+  try {
+    await pgConn.query({ text: `SELECT pg_advisory_xact_lock(${lockKey})` });
+    await pgConn.query({ text: translateDdl(POSTGRES, MIGRATION_TABLE_SQL) });
+    const applied = await loadAppliedMigrationIdsPostgres(pgConn);
+    for (const migration of buildMigrations(context)) {
+      const alreadyAppliedInLedger = applied.has(migration.id);
+      if (alreadyAppliedInLedger && migration.isAppliedPostgres && (await migration.isAppliedPostgres(pgConn))) {
+        continue;
+      }
+      const details = await runPostgresMigrationSpan(migration, async () => {
         const alreadyApplied = migration.isAppliedPostgres ? await migration.isAppliedPostgres(pgConn) : false;
         const nextDetails = alreadyApplied
           ? { skipped: "schema_already_matches" }
           : await migration.upPostgres?.(pgConn);
         await recordMigrationPostgres(pgConn, migration, nextDetails);
-        await pgConn.query({ text: "COMMIT" });
         return nextDetails;
-      } catch (error) {
-        try {
-          await pgConn.query({ text: "ROLLBACK" });
-        } catch {
-          // Preserve the original migration failure.
-        }
-        throw error;
-      }
-    });
-    logDestructiveMigration(migration, details);
-    applied.add(migration.id);
+      });
+      completed.push([migration, details]);
+      applied.add(migration.id);
+    }
+    await pgConn.query({ text: AGENT_CHECKPOINT_POSTGRES_REF_DELETE_TRIGGER_SQL });
+    await pgConn.query({ text: AGENT_CHECKPOINT_POSTGRES_REF_DELETE_TRIGGER_DDL });
+    await assertAgentCheckpointPostgresSchema(pgConn);
+    await pgConn.query({ text: "COMMIT" });
+  } catch (error) {
+    try {
+      await pgConn.query({ text: "ROLLBACK" });
+    } catch {
+      // Preserve the original migration failure.
+    }
+    throw error;
   }
+  for (const [migration, details] of completed) logDestructiveMigration(migration, details);
 }
 
 /**

@@ -1,4 +1,4 @@
-import { Badge, SectionHeader, Eyebrow, StatusPill } from "smithers-orchestrator/ui";
+import { Badge, SectionHeader, Eyebrow, StatusPill } from "smthrs/ui";
 
 export function Masthead(props: {
   date?: string;

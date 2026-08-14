@@ -3,13 +3,13 @@
  * Run with: smithers up examples/chat-log-repro.jsx
  * Then check: smithers chat <run-id> --follow
  */
-import { Sequence, Parallel, ClaudeCodeAgent } from "smithers-orchestrator";
+import { Sequence, Parallel, ClaudeCodeAgent } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { z } from "zod";
 
 let CodexAgent;
 try {
-  ({ CodexAgent } = await import("smithers-orchestrator"));
+  ({ CodexAgent } = await import("smthrs"));
 } catch {
   // CodexAgent may not be available
 }

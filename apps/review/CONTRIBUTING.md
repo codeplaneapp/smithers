@@ -114,12 +114,12 @@ jobs:
 
 ## Rendering diffs anywhere else
 
-The diff renderer is exported as `@smithers-orchestrator/review/diffs` so
+The diff renderer is exported as `@smthrs/review/diffs` so
 humans and agents can embed the same diffs in any artifact (reports, custom
 workflow UIs, dashboards):
 
 ```ts
-import { renderPierreFileDiff, extractDiffAssets } from "@smithers-orchestrator/review/diffs";
+import { renderPierreFileDiff, extractDiffAssets } from "@smthrs/review/diffs";
 
 const html = await renderPierreFileDiff({ diff: gitPatchForOneFile });
 // embedding many diffs in one page? hoist the shared assets once:

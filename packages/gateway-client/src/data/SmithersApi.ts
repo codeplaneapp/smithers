@@ -37,11 +37,10 @@ import type {
   SubmitApprovalRequest,
   SubmitApprovalResponse,
   SubmitSignalRequest,
-} from "@smithers-orchestrator/protocol/gateway-rpc";
+} from "@smthrs/protocol/gateway-rpc";
 import type { GatewayCronRow } from "../sync/GatewayCronRow.ts";
 import type { GatewayComparisonScoreRow } from "../sync/GatewayComparisonScoreRow.ts";
 import type { GatewayMemoryFactRow } from "../sync/GatewayMemoryFactRow.ts";
-import type { GatewayPromptRow } from "../sync/GatewayPromptRow.ts";
 import type { GatewayRunEventRow } from "../sync/GatewayRunEventRow.ts";
 import type { GatewayRunNode } from "../sync/GatewayRunNode.ts";
 import type { GatewayRunRow } from "../sync/GatewayRunRow.ts";
@@ -50,7 +49,7 @@ import type { GatewayScoreDetail } from "../sync/GatewayScoreDetail.ts";
 import type { GatewayScoreRow } from "../sync/GatewayScoreRow.ts";
 import type { GatewayTicketRow } from "../sync/GatewayTicketRow.ts";
 import type { ApiMutationResult } from "./ApiMutationResult.ts";
-import type { UsageReport } from "@smithers-orchestrator/usage";
+import type { UsageReport } from "@smthrs/usage";
 
 export type SmithersApi = {
   listRuns(params?: ListRunsRequest): Promise<GatewayRunSummaryRow[]>;

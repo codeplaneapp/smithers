@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { Badge, ModelBadge, ProviderBadge, StatusPill } from "@smithers-orchestrator/ui";
+import { Badge, ModelBadge, ProviderBadge, StatusPill } from "@smthrs/ui";
 
 const meta: Meta = {
   title: "Primitives/Badge",

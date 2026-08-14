@@ -1,4 +1,4 @@
-import { AntigravityAgent as SmithersAntigravityAgent } from "smithers-orchestrator";
+import { AntigravityAgent as SmithersAntigravityAgent } from "smthrs";
 
 // Built-in Antigravity CLI agent (cliEngine: "antigravity").
 // Tweak `model` or uncomment extra options below to match your setup.

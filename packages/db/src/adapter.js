@@ -6,6 +6,7 @@
 /** @typedef {import("./adapter/EvalSuiteRow.ts").EvalSuiteRow} EvalSuiteRow */
 /** @typedef {import("./adapter/IntegrationDeliveryClaim.ts").IntegrationDeliveryClaim} IntegrationDeliveryClaim */
 /** @typedef {import("./adapter/NodeRow.ts").NodeRow} NodeRow */
+/** @typedef {import("./adapter/SteerRow.ts").SteerRow} SteerRow */
 /** @typedef {import("./adapter/PendingHumanRequestRow.ts").PendingHumanRequestRow} PendingHumanRequestRow */
 /** @typedef {import("./adapter/RunAncestryRow.ts").RunAncestryRow} RunAncestryRow */
 /** @typedef {import("./adapter/RunRow.ts").RunRow} RunRow */
@@ -18,8 +19,8 @@ import { getTableColumns } from "drizzle-orm/utils";
 import { createHash } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Effect, Exit, Metric } from "effect";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
+import { SmithersError as SmithersErrorClass } from "@smthrs/errors/SmithersError";
 import { getSqlMessageStorage } from "./sql-message-storage.js";
 import { sha256Hex } from "./sha256Hex.js";
 import { POSTGRES, beginTransactionSql } from "./dialect.js";
@@ -30,10 +31,26 @@ import {
   dbQueryDuration,
   dbTransactionDuration,
   dbTransactionRollbacks,
-} from "@smithers-orchestrator/observability/metrics";
+} from "@smthrs/observability/metrics";
 
 function incrementGauge(metric, delta) {
   return Metric.value(metric).pipe(Effect.flatMap((state) => Metric.update(metric, Number(state.value) + delta)));
+}
+
+function approvalTarget(row) {
+  try {
+    const request = JSON.parse(row?.requestJson ?? "null");
+    if (
+      request?.kind === "ReplayUnsafeApproval" &&
+      typeof request.nodeId === "string" &&
+      Number.isSafeInteger(request.iteration)
+    ) {
+      return { nodeId: request.nodeId, iteration: request.iteration };
+    }
+  } catch {
+    // Malformed metadata uses the approval row's direct target.
+  }
+  return { nodeId: row.nodeId, iteration: row.iteration };
 }
 import {
   assertOptionalStringMaxLength,
@@ -55,6 +72,8 @@ import { normalizeWaitForEventCorrelationId, parseWaitForEventAttemptSnapshot } 
 /** @typedef {import("./adapter/AlertRow.ts").AlertRow} AlertRow */
 /** @typedef {import("./adapter/AlertStatus.ts").AlertStatus} AlertStatus */
 /** @typedef {import("./adapter/AttemptRow.ts").AttemptRow} AttemptRow */
+/** @typedef {import("./adapter/AgentCheckpointRow.ts").AgentCheckpointContentRow} AgentCheckpointContentRow */
+/** @typedef {import("./adapter/AgentCheckpointRow.ts").AgentCheckpointRefRow} AgentCheckpointRefRow */
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} BunSQLiteDatabase */
 /** @typedef {import("drizzle-orm").Table} Table */
 /** @typedef {import("./adapter/EventHistoryQuery.ts").EventHistoryQuery} EventHistoryQuery */
@@ -65,7 +84,7 @@ import { normalizeWaitForEventCorrelationId, parseWaitForEventAttemptSnapshot } 
  * @typedef {Effect.Effect<A, E> & PromiseLike<A>} RunnableEffect
  */
 /** @typedef {import("./adapter/SignalQuery.ts").SignalQuery} SignalQuery */
-/** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
+/** @typedef {import("@smthrs/errors/SmithersError").SmithersError} SmithersError */
 /**
  * @typedef {{ runId: string; frameNo: number; createdAtMs: number; xmlJson: string; xmlHash: string; encoding: string; mountedTaskIdsJson: string | null; taskIndexJson: string | null; note: string | null; }} FrameRow
  */
@@ -87,6 +106,7 @@ import { normalizeWaitForEventCorrelationId, parseWaitForEventAttemptSnapshot } 
 
 export const DB_ALERT_ID_MAX_LENGTH = 256;
 const DB_RUN_CANCEL_ATTRIBUTION_MAX_LENGTH = 1024;
+const STEER_ACTIVE_RUN_STATUSES = new Set(["running", "waiting-approval", "waiting-event", "waiting-timer"]);
 export const DB_ALERT_POLICY_NAME_MAX_LENGTH = 256;
 export const DB_ALERT_MESSAGE_MAX_LENGTH = 4096;
 export const DB_ALERT_ALLOWED_SEVERITIES = ["info", "warning", "critical"];
@@ -95,6 +115,53 @@ export const DB_ALERT_ALLOWED_STATUSES = ["firing", "acknowledged", "resolved", 
 // multi-KB, so 512 bounds memory while keeping recent rewind/inflate reads hot.
 const FRAME_XML_CACHE_MAX = 512;
 const DOC_CONFLICT_KIND = "conflict";
+const AGENT_CHECKPOINT_GC_DEFAULT_LIMIT = 100;
+const AGENT_CHECKPOINT_GC_MAX_LIMIT = 1000;
+const AGENT_CHECKPOINT_REF_DEFAULT_LIMIT = 100;
+const AGENT_CHECKPOINT_REF_MAX_LIMIT = 1000;
+const AGENT_CHECKPOINT_CONTENT_NUMBER_FIELDS = {
+  sizeBytes: 0,
+  createdAtMs: 0,
+};
+const AGENT_CHECKPOINT_REF_NUMBER_FIELDS = {
+  iteration: 0,
+  attempt: 1,
+  sequence: 0,
+  version: 1,
+  createdAtMs: 0,
+};
+
+/**
+ * Delete one deterministic page of unreferenced checkpoint content. PostgreSQL
+ * locks candidate rows before taking the DELETE statement's fresh snapshot so
+ * publication and collection have one serialization point. SQLite write
+ * transactions already serialize this sequence.
+ * @param {ReturnType<typeof getSqlMessageStorage>} storage
+ * @param {{ limit: number, afterContentHash?: string }} options
+ */
+async function pruneOrphanedAgentCheckpointContentsPage(storage, options) {
+  const postgresLock = storage.dialect === POSTGRES ? " FOR UPDATE" : "";
+  const candidates = await storage.queryAll(
+    `SELECT content_hash FROM _smithers_agent_checkpoint_contents contents
+     WHERE content_hash > ?
+       AND NOT EXISTS (SELECT 1 FROM _smithers_agent_checkpoints refs WHERE refs.content_hash = contents.content_hash)
+     ORDER BY content_hash ASC LIMIT ?${postgresLock}`,
+    [options.afterContentHash ?? "", options.limit],
+  );
+  if (candidates.length === 0) return { deletedCount: 0, nextCursor: null };
+  const hashes = candidates.map((row) => row.contentHash);
+  const deleted = await storage.queryAll(
+    `DELETE FROM _smithers_agent_checkpoint_contents
+     WHERE content_hash IN (${hashes.map(() => "?").join(", ")})
+       AND NOT EXISTS (SELECT 1 FROM _smithers_agent_checkpoints refs WHERE refs.content_hash = _smithers_agent_checkpoint_contents.content_hash)
+     RETURNING content_hash`,
+    hashes,
+  );
+  return {
+    deletedCount: deleted.length,
+    nextCursor: candidates.length === options.limit ? hashes.at(-1) : null,
+  };
+}
 export const DB_RUN_ID_MAX_LENGTH = 256;
 export const DB_RUN_WORKFLOW_NAME_MAX_LENGTH = 256;
 export const DB_RUN_ALLOWED_STATUSES = [
@@ -112,6 +179,50 @@ export const DB_RUN_ALLOWED_STATUSES = [
 const RAW_QUERY_ALLOWED_PREFIX = /^(?:select|with|explain|values)\b/i;
 const RAW_QUERY_FORBIDDEN_KEYWORDS = /\b(?:drop|delete|insert|update|alter|create|attach|detach|pragma)\b/i;
 const ACTIVE_ALERT_STATUSES = new Set(["firing", "acknowledged", "silenced"]);
+/**
+ * PostgreSQL exposes BIGINT columns as strings with node-postgres' default
+ * parser. Keep the checkpoint API's numeric contract independent of process-
+ * global parser configuration.
+ * @param {Record<string, unknown> | undefined | null} row
+ * @param {Record<string, number>} fields
+ * @returns {Record<string, unknown> | undefined | null}
+ */
+function normalizeAgentCheckpointNumbers(row, fields) {
+  if (!row) return row;
+  for (const [field, minimum] of Object.entries(fields)) {
+    row[field] = parseAgentCheckpointSafeInteger(row[field], field, minimum);
+  }
+  return row;
+}
+/**
+ * @param {unknown} value
+ * @param {string} field
+ * @param {number} minimum
+ * @returns {number}
+ */
+function parseAgentCheckpointSafeInteger(value, field, minimum) {
+  const isDecimalString = typeof value === "string" && /^-?(?:0|[1-9]\d*)$/.test(value);
+  const number =
+    typeof value === "number" ? value : typeof value === "bigint" || isDecimalString ? Number(value) : Number.NaN;
+  if (!Number.isSafeInteger(number) || number < minimum) {
+    const constraint = minimum === 0 ? "a nonnegative safe integer" : `a safe integer >= ${minimum}`;
+    throw new Error(`Invalid persisted agent checkpoint ${field}: expected ${constraint}, received ${String(value)}`);
+  }
+  return number;
+}
+/**
+ * @param {Record<string, unknown>} row
+ * @returns {boolean}
+ */
+function isResetCancelledAttemptRow(row) {
+  if (row.state !== "cancelled" || typeof row.metaJson !== "string") return false;
+  try {
+    const meta = JSON.parse(row.metaJson);
+    return meta !== null && typeof meta === "object" && !Array.isArray(meta) && meta.resetCancelled === true;
+  } catch {
+    return false;
+  }
+}
 /**
  * @param {string} path
  * @param {number} updatedAtMs
@@ -892,10 +1003,9 @@ export class SmithersDb {
     );
   }
   /**
-   * @param {string} currentFiberThread
    * @returns {boolean}
    */
-  ownsActiveTransaction(currentFiberThread) {
+  ownsActiveTransaction() {
     const state = getSqliteTransactionState(resolveSqliteClientKey(this.db));
     this.transactionDepth = state.depth;
     this.transactionOwnerThread = state.ownerAdapter ? "*" : null;
@@ -1717,6 +1827,52 @@ export class SmithersDb {
     );
   }
   /**
+   * List stale parked runs that still have at least one decided approval whose
+   * node is actionable. The EXISTS predicate deduplicates runs and, critically,
+   * applies approval/node eligibility before ORDER BY/LIMIT so an ineligible
+   * newer run cannot crowd an eligible run out of the supervisor page.
+   * @param {"waiting-event" | "waiting-approval"} status
+   * @param {number} staleBeforeMs
+   * @param {number} [limit]
+   * @returns {RunnableEffect<RunRow[], SmithersError>}
+   */
+  listResumableApprovalRuns(status, staleBeforeMs, limit = 500) {
+    if (status !== "waiting-event" && status !== "waiting-approval") {
+      throw toSmithersError(new Error("Invalid resumable approval run status"), undefined, {
+        code: "INVALID_INPUT",
+        details: { status, allowedStatuses: ["waiting-event", "waiting-approval"] },
+      });
+    }
+    if (!Number.isFinite(staleBeforeMs)) {
+      throw toSmithersError(new Error("Invalid stale heartbeat cutoff"), undefined, {
+        code: "INVALID_INPUT",
+        details: { staleBeforeMs },
+      });
+    }
+    const normalizedLimit = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 500;
+    const self = this;
+    return runnableEffect(
+      Effect.gen(function* () {
+        const candidates = yield* self.read(`list resumable approval run candidates ${status}`, () =>
+          self.internalStorage.queryAll(
+            `SELECT r.*
+               FROM _smithers_runs r
+               WHERE r.status = ?
+                 AND (r.heartbeat_at_ms IS NULL OR r.heartbeat_at_ms < ?)
+               ORDER BY r.created_at_ms DESC, r.run_id ASC`,
+            [status, staleBeforeMs],
+          ),
+        );
+        const eligible = [];
+        for (const run of candidates) {
+          if ((yield* self.listResumableDecidedApprovals(run.runId)).length > 0) eligible.push(run);
+          if (eligible.length >= normalizedLimit) break;
+        }
+        return eligible;
+      }),
+    );
+  }
+  /**
    * @param {{ runId: string; expectedStatus?: string; expectedRuntimeOwnerId: string | null; expectedHeartbeatAtMs: number | null; staleBeforeMs: number; claimOwnerId: string; claimHeartbeatAtMs: number; requireStale?: boolean; }} params
    * @returns {RunnableEffect<boolean, SmithersError>}
    */
@@ -1925,11 +2081,22 @@ export class SmithersDb {
    * @returns {RunnableEffect<NodeRow[], SmithersError>}
    */
   listNodes(runId) {
+    // First-seen order for outline/phase grouping (without ORDER BY, SQLite
+    // returns node_id index order — alphabetical — which wrecks Sequence
+    // outlines). SQLite `rowid` is EXACT and stable across the ON CONFLICT DO
+    // UPDATE upserts (rowid is preserved on update). Postgres has no rowid;
+    // `ctid` is BEST-EFFORT — it approximates insertion order but a row's ctid
+    // changes when the node's state is updated (new tuple version) and after
+    // VACUUM FULL/CLUSTER, so the outline can drift on Postgres. Display-only
+    // (decision-path callers key by node, not order); a created-order column is a
+    // fast-follow if exact Postgres outline order is needed.
+    const orderBy = this.internalStorage.dialect === POSTGRES ? "ctid ASC" : "rowid ASC";
     return this.read(`list nodes ${runId}`, () =>
       this.internalStorage.queryAll(
         `SELECT *
          FROM _smithers_nodes
-         WHERE run_id = ?`,
+         WHERE run_id = ?
+         ORDER BY ${orderBy}`,
         [runId],
       ),
     );
@@ -2378,7 +2545,7 @@ export class SmithersDb {
             .then((count) => count > 0),
         );
         if (!runUpdated)
-          return yield* Effect.fail(new SmithersError("HEARTBEAT_FENCE_LOST", "Task heartbeat run fence lost."));
+          return yield* Effect.fail(new SmithersErrorClass("HEARTBEAT_FENCE_LOST", "Task heartbeat run fence lost."));
         const updated = yield* Effect.tryPromise(() =>
           self.internalStorage
             .updateWhere(
@@ -2393,12 +2560,14 @@ export class SmithersDb {
             .then((count) => count > 0),
         );
         if (!updated)
-          return yield* Effect.fail(new SmithersError("HEARTBEAT_FENCE_LOST", "Task heartbeat attempt fence lost."));
+          return yield* Effect.fail(
+            new SmithersErrorClass("HEARTBEAT_FENCE_LOST", "Task heartbeat attempt fence lost."),
+          );
         return true;
       }),
     ).pipe(
       Effect.catch((error) => {
-        if (error instanceof SmithersError && error.code === "HEARTBEAT_FENCE_LOST") return Effect.succeed(false);
+        if (error instanceof SmithersErrorClass && error.code === "HEARTBEAT_FENCE_LOST") return Effect.succeed(false);
         return Effect.fail(error);
       }),
     );
@@ -2453,6 +2622,496 @@ export class SmithersDb {
          LIMIT 1`,
         [runId, nodeId, iteration, attempt],
         { booleanColumns: ["cached"] },
+      ),
+    );
+  }
+  /**
+   * Atomically persist immutable checkpoint content and its attempt-scoped
+   * reference. The SHA-256 hash is an address, not proof: always compare the
+   * exact stored JSON bytes before creating the reference.
+   * Omit `sequence` to allocate the next sequence while holding the attempt
+   * lock. Explicit sequences remain supported for idempotent replay/import.
+   * @param {{ runId: string, nodeId: string, iteration: number, attempt: number, sequence?: number, checkpointJson: string, codec: string, version: number, agentId?: string | null, purpose: string, createdAtMs: number, runtimeOwnerId: string | null }} row
+   * @returns {RunnableEffect<AgentCheckpointRefRow | null, SmithersError>}
+   */
+  putAgentCheckpoint(row) {
+    if (typeof row.checkpointJson !== "string") {
+      return runnableEffect(
+        Effect.fail(
+          new SmithersErrorClass("AGENT_CHECKPOINT_INVALID", "Agent checkpoint JSON must be a string.", {
+            nodeId: row.nodeId,
+            attempt: row.attempt,
+            failureRetryable: false,
+          }),
+        ),
+      );
+    }
+    const contentHash = sha256Hex(row.checkpointJson);
+    const sizeBytes = Buffer.byteLength(row.checkpointJson, "utf8");
+    const createdAtMs = row.createdAtMs;
+    const operation = `put agent checkpoint ${row.nodeId}#${row.attempt}:${row.sequence ?? "append"}`;
+    return this.withTransactionEffect(
+      operation,
+      Effect.tryPromise({
+        try: async () => {
+          if (this.internalStorage.dialect === POSTGRES) {
+            // Run mutations (owner takeover, cancellation, terminal status) lock
+            // the run row. Take that lock first, then the attempt row, so the
+            // fence remains true through publication and all checkpoint cleanup
+            // paths use the same deadlock-safe lock order.
+            const ownedRun = await this.internalStorage.queryOne(
+              `SELECT 1 AS owned
+             FROM _smithers_runs
+             WHERE run_id = ?
+               AND status = 'running'
+               AND cancel_requested_at_ms IS NULL
+               AND ((runtime_owner_id IS NULL AND CAST(? AS TEXT) IS NULL) OR runtime_owner_id = ?)
+             LIMIT 1 FOR UPDATE`,
+              [row.runId, row.runtimeOwnerId, row.runtimeOwnerId],
+            );
+            if (!ownedRun) return null;
+            const activeAttempt = await this.internalStorage.queryOne(
+              `SELECT 1 AS active
+             FROM _smithers_attempts
+             WHERE run_id = ? AND node_id = ? AND iteration = ? AND attempt = ? AND state = 'in-progress'
+             LIMIT 1 FOR UPDATE`,
+              [row.runId, row.nodeId, row.iteration, row.attempt],
+            );
+            if (!activeAttempt) return null;
+          } else {
+            const fence = await this.internalStorage.queryOne(
+              `SELECT 1 AS owned
+             FROM _smithers_runs r
+             JOIN _smithers_attempts a
+               ON a.run_id = r.run_id
+              AND a.node_id = ?
+              AND a.iteration = ?
+              AND a.attempt = ?
+             WHERE r.run_id = ?
+               AND r.status = 'running'
+               AND r.cancel_requested_at_ms IS NULL
+               AND ((r.runtime_owner_id IS NULL AND CAST(? AS TEXT) IS NULL) OR r.runtime_owner_id = ?)
+               AND a.state = 'in-progress'
+             LIMIT 1`,
+              [row.nodeId, row.iteration, row.attempt, row.runId, row.runtimeOwnerId, row.runtimeOwnerId],
+            );
+            if (!fence) return null;
+          }
+          const sequence =
+            row.sequence ??
+            parseAgentCheckpointSafeInteger(
+              (
+                await this.internalStorage.queryOne(
+                  `SELECT COALESCE(MAX(sequence), -1) + 1 AS next_sequence
+                 FROM _smithers_agent_checkpoints
+                 WHERE run_id = ? AND node_id = ? AND iteration = ? AND attempt = ?`,
+                  [row.runId, row.nodeId, row.iteration, row.attempt],
+                )
+              )?.nextSequence ?? 0,
+              "nextSequence",
+              0,
+            );
+          const ref = {
+            runId: row.runId,
+            nodeId: row.nodeId,
+            iteration: row.iteration,
+            attempt: row.attempt,
+            sequence,
+            contentHash,
+            codec: row.codec,
+            version: row.version,
+            agentId: row.agentId ?? null,
+            purpose: row.purpose,
+            createdAtMs,
+          };
+          let content;
+          if (this.internalStorage.dialect === POSTGRES) {
+            content = await this.internalStorage.queryOne(
+              `SELECT * FROM _smithers_agent_checkpoint_contents
+             WHERE content_hash = ? LIMIT 1 FOR KEY SHARE`,
+              [contentHash],
+            );
+            if (!content) {
+              content = await this.internalStorage.queryOne(
+                `INSERT INTO _smithers_agent_checkpoint_contents
+                 (content_hash, checkpoint_json, size_bytes, created_at_ms)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT (content_hash) DO NOTHING
+               RETURNING content_hash, checkpoint_json, size_bytes, created_at_ms`,
+                [contentHash, row.checkpointJson, sizeBytes, createdAtMs],
+              );
+              if (!content) {
+                content = await this.internalStorage.queryOne(
+                  `SELECT * FROM _smithers_agent_checkpoint_contents
+                 WHERE content_hash = ? LIMIT 1 FOR KEY SHARE`,
+                  [contentHash],
+                );
+              }
+            }
+          } else {
+            await this.internalStorage.insertIgnore("_smithers_agent_checkpoint_contents", {
+              contentHash,
+              checkpointJson: row.checkpointJson,
+              sizeBytes,
+              createdAtMs,
+            });
+            content = await this.internalStorage.queryOne(
+              `SELECT * FROM _smithers_agent_checkpoint_contents WHERE content_hash = ? LIMIT 1`,
+              [contentHash],
+            );
+          }
+          if (!content || content.checkpointJson !== row.checkpointJson || Number(content.sizeBytes) !== sizeBytes) {
+            throw new SmithersErrorClass(
+              "AGENT_CHECKPOINT_CORRUPT",
+              `Agent checkpoint content hash collision or corruption: ${contentHash}`,
+              { contentHash, failureRetryable: false },
+            );
+          }
+          await this.internalStorage.insertIgnore("_smithers_agent_checkpoints", ref);
+          const stored = await this.internalStorage.queryOne(
+            `SELECT * FROM _smithers_agent_checkpoints
+           WHERE run_id = ? AND node_id = ? AND iteration = ? AND attempt = ? AND sequence = ?
+           LIMIT 1`,
+            [row.runId, row.nodeId, row.iteration, row.attempt, sequence],
+          );
+          if (
+            !stored ||
+            stored.contentHash !== contentHash ||
+            stored.codec !== ref.codec ||
+            Number(stored.version) !== ref.version ||
+            (stored.agentId ?? null) !== ref.agentId ||
+            stored.purpose !== ref.purpose ||
+            Number(stored.createdAtMs) !== ref.createdAtMs
+          ) {
+            throw new SmithersErrorClass(
+              "AGENT_CHECKPOINT_CORRUPT",
+              `Agent checkpoint reference conflict: ${row.runId}/${row.nodeId}/${row.iteration}/${row.attempt}/${sequence}`,
+              {
+                contentHash,
+                runId: row.runId,
+                nodeId: row.nodeId,
+                iteration: row.iteration,
+                attempt: row.attempt,
+                sequence,
+                failureRetryable: false,
+              },
+            );
+          }
+          return normalizeAgentCheckpointNumbers(stored, AGENT_CHECKPOINT_REF_NUMBER_FIELDS);
+        },
+        catch: (cause) =>
+          cause instanceof SmithersErrorClass
+            ? cause
+            : toSmithersError(cause, operation, {
+                code: "DB_WRITE_FAILED",
+                details: { operation },
+              }),
+      }),
+    );
+  }
+  /**
+   * @param {string} contentHash
+   * @returns {RunnableEffect<AgentCheckpointContentRow | null, SmithersError>}
+   */
+  getAgentCheckpoint(contentHash) {
+    return this.read(`get agent checkpoint ${contentHash}`, () =>
+      this.internalStorage
+        .queryOne(`SELECT * FROM _smithers_agent_checkpoint_contents WHERE content_hash = ? LIMIT 1`, [contentHash])
+        .then((row) => normalizeAgentCheckpointNumbers(row, AGENT_CHECKPOINT_CONTENT_NUMBER_FIELDS) ?? null),
+    );
+  }
+  /**
+   * @param {string} runId
+   * @param {{ nodeId?: string, iteration?: number, attempt?: number, purpose?: string, limit?: number, after?: { nodeId: string, iteration: number, attempt: number, sequence: number } }} [filters]
+   * @returns {RunnableEffect<AgentCheckpointRefRow[], SmithersError>}
+   */
+  listAgentCheckpointRefs(runId, filters = {}) {
+    const limit = filters.limit ?? AGENT_CHECKPOINT_REF_DEFAULT_LIMIT;
+    if (!Number.isSafeInteger(limit) || limit <= 0 || limit > AGENT_CHECKPOINT_REF_MAX_LIMIT) {
+      return runnableEffect(
+        Effect.fail(
+          new SmithersErrorClass(
+            "INVALID_INPUT",
+            `Agent checkpoint reference limit must be between 1 and ${AGENT_CHECKPOINT_REF_MAX_LIMIT}.`,
+          ),
+        ),
+      );
+    }
+    const clauses = ["run_id = ?"];
+    const params = [runId];
+    for (const [column, value] of [
+      ["node_id", filters.nodeId],
+      ["iteration", filters.iteration],
+      ["attempt", filters.attempt],
+      ["purpose", filters.purpose],
+    ]) {
+      if (value !== undefined) {
+        clauses.push(`${column} = ?`);
+        params.push(value);
+      }
+    }
+    const after = filters.after;
+    if (
+      after !== undefined &&
+      (typeof after.nodeId !== "string" ||
+        !Number.isSafeInteger(after.iteration) ||
+        after.iteration < 0 ||
+        !Number.isSafeInteger(after.attempt) ||
+        after.attempt <= 0 ||
+        !Number.isSafeInteger(after.sequence) ||
+        after.sequence < 0)
+    ) {
+      return runnableEffect(
+        Effect.fail(new SmithersErrorClass("INVALID_INPUT", "Agent checkpoint after cursor is invalid.")),
+      );
+    }
+    if (after) {
+      clauses.push(
+        `(node_id > ? OR
+          (node_id = ? AND iteration > ?) OR
+          (node_id = ? AND iteration = ? AND attempt > ?) OR
+          (node_id = ? AND iteration = ? AND attempt = ? AND sequence > ?))`,
+      );
+      params.push(
+        after.nodeId,
+        after.nodeId,
+        after.iteration,
+        after.nodeId,
+        after.iteration,
+        after.attempt,
+        after.nodeId,
+        after.iteration,
+        after.attempt,
+        after.sequence,
+      );
+    }
+    return this.read(`list agent checkpoint refs ${runId}`, () =>
+      this.internalStorage
+        .queryAll(
+          `SELECT * FROM _smithers_agent_checkpoints
+           WHERE ${clauses.join(" AND ")}
+           ORDER BY node_id ASC, iteration ASC, attempt ASC, sequence ASC
+           LIMIT ?`,
+          [...params, limit],
+        )
+        .then((rows) => rows.map((row) => normalizeAgentCheckpointNumbers(row, AGENT_CHECKPOINT_REF_NUMBER_FIELDS))),
+    );
+  }
+  /**
+   * Read newest checkpoint references for one node iteration without loading
+   * its complete checkpoint history.
+   * @param {string} runId
+   * @param {string} nodeId
+   * @param {number} iteration
+   * @param {{ limit?: number, beforeAttemptExclusive?: number, before?: { attempt: number, sequence: number } }} [options]
+   * @returns {RunnableEffect<AgentCheckpointRefRow[], SmithersError>}
+   */
+  listLatestAgentCheckpointRefs(runId, nodeId, iteration, options = {}) {
+    const limit = options.limit ?? 1;
+    if (!Number.isSafeInteger(limit) || limit <= 0 || limit > AGENT_CHECKPOINT_REF_MAX_LIMIT) {
+      return runnableEffect(
+        Effect.fail(
+          new SmithersErrorClass(
+            "INVALID_INPUT",
+            `Agent checkpoint reference limit must be between 1 and ${AGENT_CHECKPOINT_REF_MAX_LIMIT}.`,
+          ),
+        ),
+      );
+    }
+    const beforeAttemptExclusive = options.beforeAttemptExclusive;
+    if (
+      beforeAttemptExclusive !== undefined &&
+      (!Number.isSafeInteger(beforeAttemptExclusive) || beforeAttemptExclusive <= 0)
+    ) {
+      return runnableEffect(
+        Effect.fail(
+          new SmithersErrorClass(
+            "INVALID_INPUT",
+            "Agent checkpoint beforeAttemptExclusive must be a positive safe integer.",
+          ),
+        ),
+      );
+    }
+    const before = options.before;
+    if (
+      before !== undefined &&
+      (!Number.isSafeInteger(before.attempt) ||
+        before.attempt <= 0 ||
+        !Number.isSafeInteger(before.sequence) ||
+        before.sequence < 0)
+    ) {
+      return runnableEffect(
+        Effect.fail(
+          new SmithersErrorClass(
+            "INVALID_INPUT",
+            "Agent checkpoint before cursor must contain safe attempt and sequence integers.",
+          ),
+        ),
+      );
+    }
+    if (before !== undefined && beforeAttemptExclusive !== undefined) {
+      return runnableEffect(
+        Effect.fail(new SmithersErrorClass("INVALID_INPUT", "Use either before or beforeAttemptExclusive, not both.")),
+      );
+    }
+    const cursorSql = before
+      ? "AND (attempt < ? OR (attempt = ? AND sequence < ?))"
+      : beforeAttemptExclusive === undefined
+        ? ""
+        : "AND attempt < ?";
+    const cursorParams = before
+      ? [before.attempt, before.attempt, before.sequence]
+      : beforeAttemptExclusive === undefined
+        ? []
+        : [beforeAttemptExclusive];
+    return this.read(`list latest agent checkpoint refs ${runId}/${nodeId}`, () =>
+      this.internalStorage
+        .queryAll(
+          `SELECT * FROM _smithers_agent_checkpoints
+           WHERE run_id = ? AND node_id = ? AND iteration = ?
+           ${cursorSql}
+           ORDER BY attempt DESC, sequence DESC
+           LIMIT ?`,
+          [runId, nodeId, iteration, ...cursorParams, limit],
+        )
+        .then((rows) => rows.map((row) => normalizeAgentCheckpointNumbers(row, AGENT_CHECKPOINT_REF_NUMBER_FIELDS))),
+    );
+  }
+  /**
+   * @param {string} runId
+   * @param {string} nodeId
+   * @param {number} iteration
+   * @param {number} attempt
+   * @returns {RunnableEffect<number, SmithersError>}
+   */
+  getNextAgentCheckpointSequence(runId, nodeId, iteration, attempt) {
+    return this.read(`get next agent checkpoint sequence ${runId}/${nodeId}#${attempt}`, () =>
+      this.internalStorage
+        .queryOne(
+          `SELECT COALESCE(MAX(sequence), -1) + 1 AS next_sequence
+           FROM _smithers_agent_checkpoints
+           WHERE run_id = ? AND node_id = ? AND iteration = ? AND attempt = ?`,
+          [runId, nodeId, iteration, attempt],
+        )
+        .then((row) => parseAgentCheckpointSafeInteger(row?.nextSequence ?? 0, "nextSequence", 0)),
+    );
+  }
+  /**
+   * Delete checkpoint references before a reset-cancelled attempt number is
+   * reused. The run ownership and reset marker are checked while locked in the
+   * same transaction as ref deletion and orphan-content collection.
+   * @param {string} runId
+   * @param {string} nodeId
+   * @param {number} iteration
+   * @param {number} attempt
+   * @param {string | null} runtimeOwnerId
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+  deleteResetAgentCheckpoints(runId, nodeId, iteration, attempt, runtimeOwnerId) {
+    const self = this;
+    const label = `delete reset agent checkpoints ${nodeId}#${attempt}`;
+    const operation = Effect.tryPromise({
+      try: async () => {
+        let resetAttempt;
+        if (this.internalStorage.dialect === POSTGRES) {
+          const ownedRun = await this.internalStorage.queryOne(
+            `SELECT 1 AS owned FROM _smithers_runs
+           WHERE run_id = ?
+             AND status = 'running'
+             AND cancel_requested_at_ms IS NULL
+             AND ((runtime_owner_id IS NULL AND CAST(? AS TEXT) IS NULL) OR runtime_owner_id = ?)
+           LIMIT 1 FOR UPDATE`,
+            [runId, runtimeOwnerId, runtimeOwnerId],
+          );
+          if (!ownedRun) return false;
+          resetAttempt = await this.internalStorage.queryOne(
+            `SELECT state, meta_json FROM _smithers_attempts
+           WHERE run_id = ? AND node_id = ? AND iteration = ? AND attempt = ?
+           LIMIT 1 FOR UPDATE`,
+            [runId, nodeId, iteration, attempt],
+          );
+        } else {
+          resetAttempt = await this.internalStorage.queryOne(
+            `SELECT a.state, a.meta_json
+           FROM _smithers_runs r
+           JOIN _smithers_attempts a
+             ON a.run_id = r.run_id
+            AND a.node_id = ?
+            AND a.iteration = ?
+            AND a.attempt = ?
+           WHERE r.run_id = ?
+             AND r.status = 'running'
+             AND r.cancel_requested_at_ms IS NULL
+             AND ((r.runtime_owner_id IS NULL AND CAST(? AS TEXT) IS NULL) OR r.runtime_owner_id = ?)
+           LIMIT 1`,
+            [nodeId, iteration, attempt, runId, runtimeOwnerId, runtimeOwnerId],
+          );
+        }
+        if (!resetAttempt || !isResetCancelledAttemptRow(resetAttempt)) return false;
+        await this.internalStorage.deleteWhere(
+          "_smithers_agent_checkpoints",
+          "run_id = ? AND node_id = ? AND iteration = ? AND attempt = ?",
+          [runId, nodeId, iteration, attempt],
+        );
+        await pruneOrphanedAgentCheckpointContentsPage(this.internalStorage, {
+          limit: AGENT_CHECKPOINT_GC_MAX_LIMIT,
+        });
+        return true;
+      },
+      catch: (cause) =>
+        cause instanceof SmithersErrorClass
+          ? cause
+          : toSmithersError(cause, label, { code: "DB_WRITE_FAILED", details: { operation: label } }),
+    });
+    return runnableEffect(
+      Effect.suspend(() => (self.ownsActiveTransaction() ? operation : self.withTransactionEffect(label, operation))),
+    );
+  }
+  /**
+   * Delete one deterministic page of unreferenced content. `afterContentHash`
+   * scopes a resumable scan; the NOT EXISTS predicate is rechecked at delete.
+   * @param {{ limit?: number, afterContentHash?: string }} [options]
+   * @returns {RunnableEffect<{ deletedCount: number, nextCursor: string | null }, SmithersError>}
+   */
+  pruneOrphanedAgentCheckpointContents(options = {}) {
+    const limit = options.limit ?? AGENT_CHECKPOINT_GC_DEFAULT_LIMIT;
+    if (!Number.isSafeInteger(limit) || limit <= 0 || limit > AGENT_CHECKPOINT_GC_MAX_LIMIT) {
+      return runnableEffect(
+        Effect.fail(
+          new SmithersErrorClass(
+            "INVALID_INPUT",
+            `Agent checkpoint GC limit must be between 1 and ${AGENT_CHECKPOINT_GC_MAX_LIMIT}.`,
+          ),
+        ),
+      );
+    }
+    if (options.afterContentHash !== undefined && typeof options.afterContentHash !== "string") {
+      return runnableEffect(
+        Effect.fail(new SmithersErrorClass("INVALID_INPUT", "Agent checkpoint GC cursor must be a string.")),
+      );
+    }
+    const self = this;
+    const label = "prune orphaned agent checkpoint contents";
+    const operation = Effect.tryPromise({
+      try: () =>
+        pruneOrphanedAgentCheckpointContentsPage(self.internalStorage, {
+          limit,
+          afterContentHash: options.afterContentHash,
+        }),
+      catch: (cause) =>
+        cause instanceof SmithersErrorClass
+          ? cause
+          : toSmithersError(cause, label, { code: "DB_WRITE_FAILED", details: { operation: label } }),
+    });
+    return runnableEffect(
+      Effect.suspend(() =>
+        self.ownsActiveTransaction() ? operation : self.withTransactionEffect(label, operation),
+      ).pipe(
+        Effect.tap((result) =>
+          Effect.logDebug("db.agent_checkpoint_gc.completed").pipe(
+            Effect.annotateLogs({ deletedCount: result.deletedCount, limit, nextCursor: result.nextCursor }),
+          ),
+        ),
       ),
     );
   }
@@ -3253,6 +3912,188 @@ export class SmithersDb {
     });
   }
   /**
+   * Insert a queued steer. Idempotent on the (unique) steer id so a
+   * retried enqueue does not create a duplicate row.
+   * @param {{ steerId: string; runId: string; nodeId: string; message: string; author?: string | null; createdAtMs: number; status?: string; }} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+  enqueueSteer(row) {
+    return this.write(`enqueue steer ${row.steerId}`, () =>
+      this.internalStorage.insertIgnore("_smithers_steers", {
+        steerId: row.steerId,
+        runId: row.runId,
+        nodeId: row.nodeId,
+        message: row.message,
+        status: row.status ?? "queued",
+        author: row.author ?? null,
+        createdAtMs: row.createdAtMs,
+      }),
+    );
+  }
+  /**
+   * Atomically publish a queued steer and its durable SteerQueued event. The
+   * insert's own RETURNING verdict decides event ownership: a retry with the
+   * same steerId is a no-op, while an event failure rolls the row back so the
+   * next retry can publish both facts together.
+   * @param {{ steerId: string; runId: string; nodeId: string; message: string; author?: string | null; createdAtMs: number; status?: string; }} row
+   * @param {{ runId: string; timestampMs: number; type: "SteerQueued"; payloadJson: string; }} eventRow
+   * @param {{ requireActiveTarget?: boolean }} [options]
+   * @returns {RunnableEffect<boolean, SmithersError>}
+   */
+  enqueueSteerWithEvent(row, eventRow, options = {}) {
+    const self = this;
+    const operation = Effect.gen(function* () {
+      if (options.requireActiveTarget) {
+        // SQLite's BEGIN IMMEDIATE already excludes a concurrent terminal
+        // update. PostgreSQL needs the row lock explicitly so finalization
+        // cannot pass this fence and strand a newly queued steer afterward.
+        const lockSuffix = self.internalStorage.dialect === POSTGRES ? " FOR UPDATE" : "";
+        const run = yield* self.read(`lock steer run ${row.runId}`, () =>
+          self.internalStorage.queryOne(
+            `SELECT status
+             FROM _smithers_runs
+             WHERE run_id = ?
+             LIMIT 1${lockSuffix}`,
+            [row.runId],
+          ),
+        );
+        if (!run) {
+          return yield* Effect.fail(
+            new SmithersErrorClass("RUN_NOT_FOUND", `Run not found: ${row.runId}`, { runId: row.runId }),
+          );
+        }
+        if (!STEER_ACTIVE_RUN_STATUSES.has(run.status)) {
+          return yield* Effect.fail(
+            new SmithersErrorClass("RUN_NOT_ACTIVE", `Run is not active (status: ${run.status})`, {
+              runId: row.runId,
+              status: run.status,
+            }),
+          );
+        }
+        const node = yield* self.read(`check steer node ${row.nodeId}`, () =>
+          self.internalStorage.queryOne(
+            `SELECT 1 AS present
+             FROM _smithers_nodes
+             WHERE run_id = ? AND node_id = ?
+             LIMIT 1`,
+            [row.runId, row.nodeId],
+          ),
+        );
+        if (!node) {
+          return yield* Effect.fail(
+            new SmithersErrorClass("NODE_NOT_IN_RUN", `No node "${row.nodeId}" in run ${row.runId}`, {
+              runId: row.runId,
+              nodeId: row.nodeId,
+            }),
+          );
+        }
+      }
+      const inserted = yield* self.write(`enqueue steer ${row.steerId}`, () =>
+        self.internalStorage.insertIgnoreReturningInserted("_smithers_steers", {
+          steerId: row.steerId,
+          runId: row.runId,
+          nodeId: row.nodeId,
+          message: row.message,
+          status: row.status ?? "queued",
+          author: row.author ?? null,
+          createdAtMs: row.createdAtMs,
+        }),
+      );
+      if (!inserted) return false;
+      yield* self.insertEventWithNextSeq(eventRow);
+      return true;
+    });
+    if (sqliteTransactionContext.getStore() === this) return runnableEffect(operation);
+    return this.withTransactionEffect(`enqueue steer with event ${row.steerId}`, operation);
+  }
+  /**
+   * List the queued (not-yet-consumed, not-expired) steers targeting one node,
+   * oldest first. This is the single hot-path read at agent-generate assembly;
+   * it is served by `_smithers_steers_queued_idx (run_id, node_id, status,
+   * created_at_ms)`.
+   * @param {string} runId
+   * @param {string} nodeId
+   * @returns {RunnableEffect<SteerRow[], SmithersError>}
+   */
+  listQueuedSteers(runId, nodeId) {
+    return this.read(`list queued steers ${nodeId}`, () =>
+      this.internalStorage.queryAll(
+        `SELECT *
+         FROM _smithers_steers
+         WHERE run_id = ? AND node_id = ? AND status = 'queued'
+         ORDER BY created_at_ms ASC, steer_id ASC`,
+        [runId, nodeId],
+      ),
+    );
+  }
+  /**
+   * List every steer for a run (any status), oldest first, for CLI/inspect.
+   * @param {string} runId
+   * @param {{ nodeId?: string }} [query]
+   * @returns {RunnableEffect<SteerRow[], SmithersError>}
+   */
+  listSteers(runId, query = {}) {
+    return this.read(`list steers ${runId}`, () => {
+      const clauses = ["run_id = ?"];
+      const params = [runId];
+      if (query.nodeId) {
+        clauses.push("node_id = ?");
+        params.push(query.nodeId);
+      }
+      return this.internalStorage.queryAll(
+        `SELECT *
+         FROM _smithers_steers
+         WHERE ${clauses.join(" AND ")}
+         ORDER BY created_at_ms ASC, steer_id ASC`,
+        params,
+      );
+    });
+  }
+  /**
+   * Mark a queued steer consumed by a specific attempt/iteration. The
+   * `status = 'queued'` guard makes consumption idempotent: a re-run cannot
+   * re-consume an already-consumed (or expired) steer.
+   * @param {string} steerId
+   * @param {{ consumedAtMs: number; consumedByAttempt: number; consumedByIteration: number; }} decision
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+  markSteerConsumed(steerId, decision) {
+    return this.write(`consume steer ${steerId}`, () =>
+      this.internalStorage.updateWhere(
+        "_smithers_steers",
+        {
+          status: "consumed",
+          consumedAtMs: decision.consumedAtMs,
+          consumedByAttempt: decision.consumedByAttempt,
+          consumedByIteration: decision.consumedByIteration,
+        },
+        "steer_id = ? AND status = ?",
+        [steerId, "queued"],
+      ),
+    );
+  }
+  /**
+   * Mark a queued steer expired (its target reached a terminal state with no
+   * further generate call). Guarded on `status = 'queued'` so an already
+   * consumed steer is never overwritten.
+   * @param {string} steerId
+   * @param {number} expiredAtMs
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+  markSteerExpired(steerId, expiredAtMs) {
+    return this.write(`expire steer ${steerId}`, () =>
+      this.internalStorage.updateWhere(
+        "_smithers_steers",
+        {
+          status: "expired",
+          expiredAtMs,
+        },
+        "steer_id = ? AND status = ?",
+        [steerId, "queued"],
+      ),
+    );
+  }
+  /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
@@ -3747,7 +4588,7 @@ export class SmithersDb {
    * @param {string} runId
    * @param {string} nodeId Validated upstream (no quotes/percent — node id charset).
    * @param {{ afterSeq?: number; limit?: number }} [query]
-   * @returns {RunnableEffect<EventRow[], SmithersError>}
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
   listNodeEvents(runId, nodeId, query = {}) {
     const limit = Math.max(1, Math.min(500, Math.floor(query.limit ?? 100)));
@@ -3812,8 +4653,170 @@ export class SmithersDb {
          FROM _smithers_ralph
          WHERE run_id = ?`,
         [runId],
-        { booleanColumns: ["done"] },
+        { booleanColumns: ["done", "exhausted"] },
       ),
+    );
+  }
+  /**
+   * Register a live agent subprocess so a later CLI invocation can reap it if
+   * its engine dies without cleanup (#1464 AWF-3, #1332).
+   * @param {{ pid: number; runId: string; nodeId?: string | null; enginePid: number; startedAtMs: number }} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+  registerAgentProcess(row) {
+    return this.write(`register agent process ${row.pid}`, () =>
+      this.internalStorage.dialect === POSTGRES
+        ? this.internalStorage.execute(
+            `INSERT INTO _smithers_agent_processes (pid, run_id, node_id, engine_pid, started_at_ms)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(pid)
+             DO UPDATE SET run_id = excluded.run_id, node_id = excluded.node_id,
+                           engine_pid = excluded.engine_pid, started_at_ms = excluded.started_at_ms`,
+            [row.pid, row.runId, row.nodeId ?? null, row.enginePid, row.startedAtMs],
+          )
+        : this.internalStorage.execute(
+            `INSERT OR REPLACE INTO _smithers_agent_processes (pid, run_id, node_id, engine_pid, started_at_ms)
+             VALUES (?, ?, ?, ?, ?)`,
+            [row.pid, row.runId, row.nodeId ?? null, row.enginePid, row.startedAtMs],
+          ),
+    );
+  }
+  /**
+   * @param {number} pid
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+  unregisterAgentProcess(pid) {
+    return this.write(`unregister agent process ${pid}`, () =>
+      this.internalStorage.execute(`DELETE FROM _smithers_agent_processes WHERE pid = ?`, [pid]),
+    );
+  }
+  /**
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+  listAgentProcesses() {
+    return this.read(`list agent processes`, () =>
+      this.internalStorage.queryAll(`SELECT * FROM _smithers_agent_processes ORDER BY started_at_ms ASC`),
+    );
+  }
+  /**
+   * Persist one attempt's token usage so a run total is a single SUM instead of
+   * a replay of every `TokenUsageReported` payload in the event log (#1464
+   * AWF-6, #1436). Keyed by attempt identity and written as an upsert, so a
+   * provider that re-reports a cumulative running total for the same attempt
+   * replaces its row rather than inflating the total.
+   *
+   * @param {{
+   *   runId: string;
+   *   nodeId: string;
+   *   iteration?: number | null;
+   *   attempt?: number | null;
+   *   model?: string | null;
+   *   agent?: string | null;
+   *   inputTokens?: number | null;
+   *   outputTokens?: number | null;
+   *   cacheReadTokens?: number | null;
+   *   cacheWriteTokens?: number | null;
+   *   reasoningTokens?: number | null;
+   *   updatedAtMs: number;
+   * }} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+  recordRunTokenUsage(row) {
+    /** @param {unknown} value */
+    const count = (value) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0);
+    const values = [
+      row.runId,
+      row.nodeId,
+      row.iteration ?? 0,
+      row.attempt ?? 0,
+      row.model ?? null,
+      row.agent ?? null,
+      count(row.inputTokens),
+      count(row.outputTokens),
+      count(row.cacheReadTokens),
+      count(row.cacheWriteTokens),
+      count(row.reasoningTokens),
+      row.updatedAtMs,
+    ];
+    const columns = `(run_id, node_id, iteration, attempt, model, agent, input_tokens, output_tokens,
+              cache_read_tokens, cache_write_tokens, reasoning_tokens, updated_at_ms)`;
+    return this.write(`record run token usage ${row.runId}/${row.nodeId}`, () =>
+      this.internalStorage.dialect === POSTGRES
+        ? this.internalStorage.execute(
+            `INSERT INTO _smithers_run_usage ${columns}
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(run_id, node_id, iteration, attempt)
+             DO UPDATE SET model = excluded.model, agent = excluded.agent,
+                           input_tokens = excluded.input_tokens, output_tokens = excluded.output_tokens,
+                           cache_read_tokens = excluded.cache_read_tokens,
+                           cache_write_tokens = excluded.cache_write_tokens,
+                           reasoning_tokens = excluded.reasoning_tokens,
+                           updated_at_ms = excluded.updated_at_ms`,
+            values,
+          )
+        : this.internalStorage.execute(
+            `INSERT OR REPLACE INTO _smithers_run_usage ${columns}
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            values,
+          ),
+    );
+  }
+  /**
+   * Authoritative per-run token total, read straight from `_smithers_run_usage`.
+   * Always resolves (zeros when the run reported no usage) so callers never have
+   * to distinguish "no usage" from "run not found" (#1464 AWF-6).
+   *
+   * @param {string} runId
+   * @returns {RunnableEffect<{
+   *   runId: string;
+   *   inputTokens: number;
+   *   outputTokens: number;
+   *   cacheReadTokens: number;
+   *   cacheWriteTokens: number;
+   *   reasoningTokens: number;
+   *   totalTokens: number;
+   *   attempts: number;
+   * }, SmithersError>}
+   */
+  getRunTokenUsage(runId) {
+    return this.read(`get run token usage ${runId}`, async () => {
+      const row = await this.internalStorage.queryOne(
+        `SELECT COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+                COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
+                COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+                COUNT(*) AS attempts
+         FROM _smithers_run_usage
+         WHERE run_id = ?`,
+        [runId],
+      );
+      const num = (/** @type {unknown} */ value) => {
+        const parsed = Number(value ?? 0);
+        return Number.isFinite(parsed) ? parsed : 0;
+      };
+      const inputTokens = num(row?.input_tokens ?? row?.inputTokens);
+      const outputTokens = num(row?.output_tokens ?? row?.outputTokens);
+      return {
+        runId,
+        inputTokens,
+        outputTokens,
+        cacheReadTokens: num(row?.cache_read_tokens ?? row?.cacheReadTokens),
+        cacheWriteTokens: num(row?.cache_write_tokens ?? row?.cacheWriteTokens),
+        reasoningTokens: num(row?.reasoning_tokens ?? row?.reasoningTokens),
+        totalTokens: inputTokens + outputTokens,
+        attempts: num(row?.attempts),
+      };
+    });
+  }
+  /**
+   * Drop every registry row owned by one engine pid (graceful engine exit).
+   * @param {number} enginePid
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+  clearAgentProcessesForOwner(enginePid) {
+    return this.write(`clear agent processes for owner ${enginePid}`, () =>
+      this.internalStorage.execute(`DELETE FROM _smithers_agent_processes WHERE engine_pid = ?`, [enginePid]),
     );
   }
   /**
@@ -3935,6 +4938,36 @@ export class SmithersDb {
         [runId],
         { booleanColumns: ["autoApproved"] },
       ),
+    );
+  }
+  /**
+   * Decided approvals whose gate node is still *actionable* — the node is either
+   * `pending` (approved, re-armed to run) or `failed` (denied via the default
+   * onDeny:'fail', not yet consumed). This is the set the supervisor must resume
+   * a detached run for: an approved gate needs its task executed, and a denied
+   * gate needs the engine booted so the denial actually propagates.
+   *
+   * Unlike {@link listDecidedApprovals} (node = 'pending' only) it also catches
+   * a denied gate, whose node the engine moves to `failed` — the exact state a
+   * real `denyNode` produces, which the pending-only filter silently drops so a
+   * denied detached run would otherwise never resume. Unlike
+   * {@link listAllDecidedApprovals} it excludes finished/skipped gates (already
+   * consumed), so a run whose only decided approval was long since executed is
+   * not perpetually re-resumed every time it parks and goes stale.
+   * @param {string} runId
+   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+   */
+  listResumableDecidedApprovals(runId) {
+    const self = this;
+    return runnableEffect(
+      Effect.gen(function* () {
+        const [approvals, nodes] = yield* Effect.all([self.listAllDecidedApprovals(runId), self.listNodes(runId)]);
+        const stateByTarget = new Map(nodes.map((node) => [`${node.nodeId}\0${node.iteration}`, node.state]));
+        return approvals.filter((approval) => {
+          const target = approvalTarget(approval);
+          return ["pending", "failed"].includes(stateByTarget.get(`${target.nodeId}\0${target.iteration}`));
+        });
+      }),
     );
   }
   /**
@@ -4065,7 +5098,7 @@ export class SmithersDb {
          WHERE run_id = ? AND ralph_id = ?
          LIMIT 1`,
         [runId, ralphId],
-        { booleanColumns: ["done"] },
+        { booleanColumns: ["done", "exhausted"] },
       ),
     );
   }
@@ -4450,7 +5483,7 @@ export class SmithersDb {
   // ---------------------------------------------------------------------------
   /**
    * List cross-run memory facts, optionally scoped to a namespace. Reads the
-   * `_smithers_memory_facts` table written by `@smithers-orchestrator/memory`'s
+   * `_smithers_memory_facts` table written by `@smthrs/memory`'s
    * MemoryStore (`setFact`) — the SAME table the `smithers memory list` CLI reads
    * — so a fact set by any run/workflow surfaces here. Columns are snake→camel
    * cased by the storage layer (`value_json → valueJson`, etc.). A null/undefined
@@ -5118,6 +6151,15 @@ export class SmithersDb {
     return this.listStaleRunningRuns(staleBeforeMs, limit);
   }
   /**
+   * @param {"waiting-event" | "waiting-approval"} status
+   * @param {number} staleBeforeMs
+   * @param {number} [limit]
+   * @returns {RunnableEffect<RunRow[], SmithersError>}
+   */
+  listResumableApprovalRunsEffect(status, staleBeforeMs, limit = 500) {
+    return this.listResumableApprovalRuns(status, staleBeforeMs, limit);
+  }
+  /**
    * @param {Parameters<SmithersDb["claimRunForResume"]>[0]} params
    * @returns {RunnableEffect<boolean, SmithersError>}
    */
@@ -5232,6 +6274,13 @@ export class SmithersDb {
    */
   listDecidedApprovalsEffect(runId) {
     return this.listDecidedApprovals(runId);
+  }
+  /**
+   * @param {string} runId
+   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+   */
+  listResumableDecidedApprovalsEffect(runId) {
+    return this.listResumableDecidedApprovals(runId);
   }
   /**
    * @param {string} runId

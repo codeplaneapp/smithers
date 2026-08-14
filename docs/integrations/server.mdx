@@ -3,14 +3,14 @@ title: HTTP Server
 description: "Run Smithers as an HTTP server: REST routes for runs, approvals, tools."
 ---
 
-`startServer` boots a multi-workflow HTTP server with REST endpoints for run lifecycle, SSE event streams, and [human-in-the-loop approvals](/components/approval). For a single-workflow variant alongside `bunx smithers-orchestrator up`, see [Serve Mode](/integrations/serve).
+`startServer` boots a multi-workflow HTTP server with REST endpoints for run lifecycle, SSE event streams, and [human-in-the-loop approvals](/components/approval). For a single-workflow variant alongside `bunx smthrs up`, see [Serve Mode](/integrations/serve).
 
 <Note>API reference: [Server & Gateway](/reference/server-gateway) lists every server and gateway export, its options, and links to source and tests.</Note>
 
 ## Quick start
 
 ```ts
-import { startServer } from "smithers-orchestrator";
+import { startServer } from "smthrs";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 
 const server = startServer({
@@ -80,9 +80,9 @@ Errors use the envelope `{ "error": { "code", "message", "details" } }`. Common 
 Tools resolve relative to `rootDir`. The example below exposes a workflow using the built-in `bash` tool through the server, called via `POST /v1/runs`.
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { Task, Workflow, createSmithers } from "smithers-orchestrator";
-import { bashTool } from "smithers-orchestrator/tools";
+/** @jsxImportSource smthrs */
+import { Task, Workflow, createSmithers } from "smthrs";
+import { bashTool } from "smthrs/tools";
 import { z } from "zod";
 
 const { smithers, outputs } = createSmithers({

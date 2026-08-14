@@ -21,6 +21,11 @@ describe("public re-export barrels", () => {
     expect(declarations).toContain("resolveSmithersBackendPreference,");
   });
 
+  test("root facade exports the headless Nanocodex adapter", async () => {
+    const root = await importBarrel("../src/index.js");
+    expect(typeof root.NanocodexAgent).toBe("function");
+  });
+
   test("sandbox-provider barrels re-export their provider ids and factories", async () => {
     const aws = await importBarrel("../src/aws.js");
     expect(aws.AWS_SANDBOX_PROVIDER_ID).toBe("aws-sandbox");
@@ -157,6 +162,7 @@ describe("public re-export barrels", () => {
     expect(typeof examples.ClaudeCodeAgent).toBe("function");
     expect(typeof examples.KimiAgent).toBe("function");
     expect(typeof examples.PiAgent).toBe("function");
+    expect(typeof examples.NanocodexAgent).toBe("function");
     expect(typeof examples.runWorkflow).toBe("function");
     expect(typeof examples.renderFrame).toBe("function");
     expect(examples.approvalDecisionSchema).toBeDefined();
@@ -164,8 +170,8 @@ describe("public re-export barrels", () => {
 });
 
 describe("xstate stays a subpath-only optional integration", () => {
-  test("the root barrel never references xstate, so importing smithers-orchestrator resolves with the peer absent", async () => {
-    // The real consumer scenario: smithers-orchestrator installed, the
+  test("the root barrel never references xstate, so importing smthrs resolves with the peer absent", async () => {
+    // The real consumer scenario: smthrs installed, the
     // optional `xstate` peer NOT installed. The root barrel (runtime and
     // types) must never touch the integration or the install breaks. The
     // subpath is the only doorway, and its peer is declared optional so

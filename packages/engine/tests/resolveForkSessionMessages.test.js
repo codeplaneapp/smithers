@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolveForkSessionMessages } from "../src/resolveForkSessionMessages.js";
+import { resolveForkAgentState, resolveForkSessionMessages } from "../src/resolveForkSessionMessages.js";
 
 /**
  * @param {object} fields
@@ -27,6 +27,14 @@ function attempt(fields) {
 /** @param {unknown[]} messages */
 function metaWithConversation(messages) {
   return JSON.stringify({ kind: "agent", agentConversation: messages });
+}
+
+function metaWithCheckpoint(checkpoint, messages) {
+  return JSON.stringify({
+    kind: "agent",
+    agentCheckpoint: checkpoint,
+    ...(messages ? { agentConversation: messages } : {}),
+  });
 }
 
 describe("resolveForkSessionMessages", () => {
@@ -134,5 +142,63 @@ describe("resolveForkSessionMessages", () => {
       error = err;
     }
     expect(error?.code).toBe("TASK_FORK_SESSION_UNAVAILABLE");
+  });
+});
+
+describe("resolveForkAgentState", () => {
+  test("returns checkpoint-only source state without embedding its payload", () => {
+    const checkpointRef = {
+      contentHash: "sha256:checkpoint",
+      sequence: 2,
+      codec: "example.snapshot",
+      version: 1,
+    };
+    const source = attempt({ nodeId: "source", finishedAtMs: 100, metaJson: metaWithCheckpoint(checkpointRef) });
+    const state = resolveForkAgentState([source], "source", "fork");
+    expect(state.checkpointRef).toEqual(checkpointRef);
+    expect(state.messages).toBeNull();
+    expect(state.sourceAttempt).toBe(source);
+  });
+
+  test("does not mix a newest checkpoint with conversation from an older attempt", () => {
+    const checkpointRef = {
+      contentHash: "sha256:new",
+      sequence: 3,
+      codec: "example.snapshot",
+      version: 2,
+    };
+    const state = resolveForkAgentState(
+      [
+        attempt({ nodeId: "source", attempt: 2, finishedAtMs: 200, metaJson: metaWithCheckpoint(checkpointRef) }),
+        attempt({
+          nodeId: "source",
+          attempt: 1,
+          finishedAtMs: 100,
+          metaJson: metaWithConversation([{ role: "assistant", content: "fallback" }]),
+        }),
+      ],
+      "source",
+      "fork",
+    );
+    expect(state.checkpointRef).toEqual(checkpointRef);
+    expect(state.messages).toBeNull();
+  });
+
+  test("ignores malformed checkpoint references", () => {
+    const state = resolveForkAgentState(
+      [
+        attempt({
+          nodeId: "source",
+          finishedAtMs: 100,
+          metaJson: metaWithCheckpoint({ contentHash: "", sequence: -1, codec: "", version: 0 }, [
+            { role: "assistant", content: "usable" },
+          ]),
+        }),
+      ],
+      "source",
+      "fork",
+    );
+    expect(state.checkpointRef).toBeNull();
+    expect(state.messages).toEqual([{ role: "assistant", content: "usable" }]);
   });
 });

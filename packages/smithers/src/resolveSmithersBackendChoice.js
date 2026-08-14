@@ -1,9 +1,9 @@
-import { Database } from "bun:sqlite";
+import { loadBunSqliteDatabase } from "@smthrs/db/bunSqliteRuntime";
 import { Effect } from "effect";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { findSmithersAnchorDir } from "./findSmithersAnchorDir.js";
 
 const BACKENDS = new Set(["sqlite", "pglite", "postgres"]);
@@ -42,7 +42,7 @@ function inspectSqliteStore(dbPath) {
   }
   let sqlite;
   try {
-    sqlite = new Database(dbPath, { readonly: true });
+    sqlite = new (loadBunSqliteDatabase())(dbPath, { readonly: true });
     const hasRuns = Boolean(
       sqlite.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_runs'").get(),
     );

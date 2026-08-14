@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { Terminal as XTerminal } from "@xterm/xterm";
-import { Terminal, type TerminalWriter } from "../src/adapters/terminal";
+import { Terminal, terminalThemeFor, type TerminalWriter } from "../src/adapters/terminal";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -32,6 +32,7 @@ afterEach(async () => {
   container = undefined;
   document.querySelectorAll(`style[${STYLE_ATTR}]`).forEach((el) => el.remove());
   document.documentElement.removeAttribute("data-theme");
+  document.documentElement.removeAttribute("data-palette");
   window.matchMedia = originalMatchMedia;
   globalThis.MutationObserver = originalMutationObserver;
 });
@@ -124,10 +125,10 @@ describe("<Terminal> headless rendering", () => {
   });
 
   test("the default palette follows root data-theme toggles", async () => {
-    let notifyThemeChange: (() => void) | undefined;
+    const notifyThemeChanges: (() => void)[] = [];
     globalThis.MutationObserver = class {
       constructor(callback: MutationCallback) {
-        notifyThemeChange = () => callback([], this as unknown as MutationObserver);
+        notifyThemeChanges.push(() => callback([], this as unknown as MutationObserver));
       }
       disconnect() {}
       observe() {}
@@ -140,18 +141,24 @@ describe("<Terminal> headless rendering", () => {
     let term: XTerminal | null = null;
     await render(<Terminal lines={["theme"]} onReady={(next) => (term = next)} />);
     const ready = await waitFor(() => term);
-    const notify = await waitFor(() => notifyThemeChange);
+    await waitFor(() => notifyThemeChanges.length > 0);
     expect(container?.querySelector('[data-slot="terminal"]')?.getAttribute("data-theme-mode")).toBe("light");
-    expect(ready.options.theme?.background).toBe("#fbfcfd");
+    expect(ready.options.theme?.background).toBe("#F6F6F6");
 
     await act(async () => {
       document.documentElement.setAttribute("data-theme", "dark");
-      notify();
+      for (const notify of notifyThemeChanges) notify();
       await Promise.resolve();
     });
-    await waitFor(() => ready.options.theme?.background === "#07090d");
+    await waitFor(() => ready.options.theme?.background === "#011627");
     expect(container?.querySelector('[data-slot="terminal"]')?.getAttribute("data-theme-mode")).toBe("dark");
-    expect(ready.options.theme?.background).toBe("#07090d");
+    expect(ready.options.theme?.background).toBe("#011627");
+  });
+
+  test("uses registry terminal palettes", () => {
+    expect(terminalThemeFor("fucory", "dark").background).toBe("#07090d");
+    expect(terminalThemeFor("rose-pine", "light").red).toBeTruthy();
+    expect(terminalThemeFor("catppuccin", "light").brightRed).toBe("#de293e");
   });
 
   test("disables xterm cursor blinking when reduced motion is preferred", async () => {

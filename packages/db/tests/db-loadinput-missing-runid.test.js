@@ -3,7 +3,7 @@ import { Effect, Exit } from "effect";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { loadInputEffect } from "../src/snapshot.js";
 
 // Input table deliberately missing a `runId` column to exercise the

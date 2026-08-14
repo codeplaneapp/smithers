@@ -1,4 +1,4 @@
-import { runNodeKey, type GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import { runNodeKey, type GatewayRunNode } from "@smthrs/gateway-client";
 
 /**
  * Moved verbatim from `packages/tui/src/modes/treeUtils.ts`: the node-tree

@@ -2,7 +2,7 @@
 // smithers-display-name: Plan → Implement → Review (PR per issue)
 // smithers-description: Discover every unresolved GitHub issue, then run a Codex Sol plan/review → Luna implement → Terra validate/PR loop in isolated worktrees. Non-Codex providers are failover-only.
 // smithers-tags: coding, github, issues, pr, plan, implement, review, worktree, parallel
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 //
 // What this does
 // --------------
@@ -43,7 +43,7 @@
 //  - ctx.input is NOT schema-defaulted at runtime, so every field is defaulted in code.
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
-import { createSmithers, Parallel, Sequence, Task, Worktree } from "smithers-orchestrator";
+import { createSmithers, Parallel, Sequence, Task, Worktree } from "smthrs";
 import { z } from "zod/v4";
 import { implementer, panelists, synthesizer, validator } from "../components/roles";
 import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";

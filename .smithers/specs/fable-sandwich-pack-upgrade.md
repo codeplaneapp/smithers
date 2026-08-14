@@ -204,7 +204,7 @@ per the per-workflow audits, then sync docs + regen bundles.
 
 ```
 bun scripts/generate-workflow-pack.ts                 # after any seeded/legacy edit
-bunx smithers-orchestrator graph .smithers/workflows/<id>.tsx --input '{}'
+bunx smthrs graph .smithers/workflows/<id>.tsx --input '{}'
 bun test apps/cli/tests/agents-ts-codegen.test.js apps/cli/tests/cli-agent-detection.test.js
 bun test apps/cli/tests/seeded-workflows-graph.e2e.test.js apps/cli/tests/seeded-pack-fresh.test.js \
          apps/cli/tests/workflow-pack-component-drift.test.js

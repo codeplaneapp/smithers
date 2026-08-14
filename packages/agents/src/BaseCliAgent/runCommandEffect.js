@@ -1,11 +1,12 @@
 import { Effect } from "effect";
-import { spawnCaptureEffect } from "@smithers-orchestrator/driver/child-process";
+import { spawnCaptureEffect } from "@smthrs/driver/child-process";
+import { parentDeathCommand } from "./parentDeathCommand.js";
 import { sanitizeCliArgs } from "./sanitizeCliArgs.js";
 /**
  * @typedef {{ cwd: string; env: Record<string, string>; input?: string; timeoutMs?: number; idleTimeoutMs?: number; signal?: AbortSignal; maxOutputBytes?: number; truncateKeep?: "head" | "tail"; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onProcess?: (event: { phase: "started" | "exited"; pid: number | undefined }) => void; }} RunCommandOptions
  */
 /** @typedef {import("./RunCommandResult.ts").RunCommandResult} RunCommandResult */
-/** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
+/** @typedef {import("@smthrs/errors/SmithersError").SmithersError} SmithersError */
 
 /**
  * @param {string} command
@@ -27,7 +28,8 @@ export function runCommandEffect(command, args, options) {
     onStderr,
     onProcess,
   } = options;
-  return spawnCaptureEffect(command, args, {
+  const invocation = parentDeathCommand(command, args);
+  return spawnCaptureEffect(invocation.command, invocation.args, {
     cwd,
     env,
     input,
@@ -36,6 +38,11 @@ export function runCommandEffect(command, args, options) {
     idleTimeoutMs,
     maxOutputBytes,
     truncateKeep,
+    // Spawn agent CLIs as their own process-group leader (POSIX) so cleanup
+    // can kill the whole group — subagents, MCP servers, tool children —
+    // instead of just the wrapper pid, and so an orphan reaper can address
+    // the group by pgid after an engine death (#1464 AWF-3, #1332).
+    detached: invocation.contained,
     onStdout,
     onStderr,
     onProcess,

@@ -1,23 +1,18 @@
+/** @jsxImportSource @opentui/react */
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { SyntaxStyle } from "@opentui/core";
 import { useApprovals, useActions, TUI_EVENT_CAP } from "../data.ts";
 import type { GatewayEventFrame } from "../data.ts";
-import { runNodeKey, type GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import { runNodeKey, type GatewayRunNode } from "@smthrs/gateway-client";
 import {
   useRunInspectorVm,
   deriveOutputText,
   normalizeFrame,
   TUI_OUTPUT_PREVIEW_CHARS,
   TUI_OUTPUT_TRUNCATION_MARKER,
-} from "@smithers-orchestrator/ui-core";
-import {
-  RunTree,
-  RunEventLog,
-  sanitizeTerminalText,
-  type RunTreeRow,
-  type RunEventLogRow,
-} from "@smithers-orchestrator/tui-ui";
+} from "@smthrs/ui-core";
+import { RunTree, RunEventLog, sanitizeTerminalText, type RunTreeRow, type RunEventLogRow } from "@smthrs/tui-ui";
 import {
   eventKeyName,
   isModifiedKeyEvent,
@@ -45,7 +40,7 @@ import {
   type ApprovalKeyAction,
 } from "./approvalUtils.ts";
 import { buildHumanRequestUi, mayAwaitHumanInput, type HumanRequestUiState } from "./humanUtils.ts";
-import { toNodeDiffView, type NodeDiffView } from "./diffUtils.ts";
+import { type NodeDiffView } from "./diffUtils.ts";
 import { useOverlayOpen } from "../OverlayContext.tsx";
 
 /**
@@ -277,7 +272,11 @@ export function NodeInspectorView({
           </scrollbox>
         )}
         {activeTab === "logs" && (
-          <RunEventLog rows={toRunEventLogRows(nodeLogs)} emptyLabel="no log events for this node" />
+          // Parenthesized to match every other inspector placeholder
+          // ("(no output)", RunEventLog's own "(no log events)" default) —
+          // the tui-ui extraction dropped the parens when this moved from an
+          // inline <text> to the shared leaf.
+          <RunEventLog rows={toRunEventLogRows(nodeLogs)} emptyLabel="(no log events for this node)" />
         )}
         {activeTab === "diff" && (
           <scrollbox width="100%" height="100%" scrollY>

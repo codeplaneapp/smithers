@@ -10,7 +10,7 @@ Durable agent-workflow runtime/control plane. Product UI: `../multi`. Hosted for
 - `packages/{db,server,gateway,protocol,control-plane}` — persistence and control-plane contracts/services.
 - `packages/{agents,sandbox,vcs,time-travel,memory,scorers,openapi}` — adapters and runtime capabilities.
 - `packages/{gateway-client,gateway-react,gateway-ui,components,tui}` — gateway clients and run UIs.
-- `packages/smithers` — published `smithers-orchestrator` facade; implement in the owning package, then export here.
+- `packages/smithers` — published `smthrs` facade; implement in the owning package, then export here.
 - `apps/cli` — CLI, MCP server, gateway command, local workflow tools.
 - `.smithers` — built-in/init workflow pack and workflow UIs; `scripts/generate-workflow-pack.ts` generates shipped pack assets.
 - `apps/observability`, `apps/review` — observability and review integrations.
@@ -36,7 +36,7 @@ bun apps/cli/src/index.js <cmd>   # run smithers from this working tree
 ## Running smithers here
 
 Internal scripts run the **working tree**, never an installed copy. `bunx
-smithers-orchestrator` downloads the published npm build; inside a checkout it
+smthrs` downloads the published npm build; inside a checkout it
 usually re-execs back into source via the published bin's `node_modules`
 delegation, but a fresh worktree or slimmed checkout has no such install and
 silently runs last release's build instead of the code under edit.
@@ -49,7 +49,7 @@ silently runs last release's build instead of the code under edit.
   this tree's `apps/cli/src/index.js` from anywhere inside the checkout.
 - `pnpm check:local-smithers` (part of `pnpm test`) fails the build on a
   published-CLI invocation in an execution position. Prose mentions of `bunx
-  smithers-orchestrator` — agent prompts, docs assertions, marketing copy — are
+  smthrs` — agent prompts, docs assertions, marketing copy — are
   correct and are not flagged.
 
 Running from source needs `pnpm install` and nothing else — every package

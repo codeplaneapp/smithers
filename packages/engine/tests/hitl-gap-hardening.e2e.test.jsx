@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { dirname } from "node:path";
 import {
@@ -9,10 +9,10 @@ import {
   Workflow,
   runWorkflow,
   approvalDecisionSchema,
-} from "smithers-orchestrator";
+} from "smthrs";
 import { approveNode, denyNode } from "../src/approvals.js";
 import { buildHumanRequestId } from "../src/human-requests.js";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";

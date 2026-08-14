@@ -11,7 +11,7 @@ export { AnswerCallbackQuery, AnswerCallbackQueryProps, EditMessage, EditMessage
 export { TelegramApproval, TelegramApprovalProps, TelegramApprovalRequest, telegramApprovalSchemas } from './telegram/components/TelegramApproval.js';
 import './telegram/TelegramClientTypes.js';
 import 'effect';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 import './telegram/approvalTypes.js';
 import 'zod';
 import './telegram/initDataTypes.js';

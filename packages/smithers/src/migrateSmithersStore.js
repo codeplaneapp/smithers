@@ -1,13 +1,14 @@
-import { Database } from "bun:sqlite";
 import { Effect } from "effect";
-import { drizzle } from "drizzle-orm/bun-sqlite";
+import { loadBunSqliteDatabase, loadBunSqliteDrizzle } from "@smthrs/db/bunSqliteRuntime";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { POSTGRES, quoteIdentifier, translateDdl } from "@smithers-orchestrator/db/dialect";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { POSTGRES, quoteIdentifier, translateDdl } from "@smthrs/db/dialect";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { createSmithersPostgres } from "./create.js";
 import { findSmithersAnchorDir } from "./findSmithersAnchorDir.js";
+
+/** @typedef {import("bun:sqlite").Database} Database */
 
 const DEFAULT_BATCH_SIZE = 250;
 const MIGRATION_MARKER_NAME = "migrated.json";
@@ -680,8 +681,8 @@ function upgradeSqliteSourceStore(dbPath) {
   /** @type {Database | undefined} */
   let sqlite;
   try {
-    sqlite = new Database(dbPath);
-    ensureSmithersTables(drizzle(sqlite));
+    sqlite = new (loadBunSqliteDatabase())(dbPath);
+    ensureSmithersTables(loadBunSqliteDrizzle()(sqlite));
   } catch (error) {
     if (isCorruptSqliteError(error)) {
       const original = error instanceof Error ? error.message : String(error);
@@ -727,7 +728,7 @@ function openSourceStore(dbPath) {
   /** @type {Database | undefined} */
   let sqlite;
   try {
-    sqlite = new Database(dbPath, { readonly: true });
+    sqlite = new (loadBunSqliteDatabase())(dbPath, { readonly: true });
     sqlite.exec("BEGIN");
     const runCount = sqliteTableExists(sqlite, "_smithers_runs") ? countSqliteRows(sqlite, "_smithers_runs") : 0;
     const schemaVersion = sqliteSchemaVersion(sqlite);
@@ -990,7 +991,7 @@ function sqliteRunCountAt(dbPath) {
   assertSqliteSidecarsSane(dbPath);
   if (!existsSync(dbPath)) return 0;
   try {
-    const sqlite = new Database(dbPath, { readonly: true });
+    const sqlite = new (loadBunSqliteDatabase())(dbPath, { readonly: true });
     try {
       return sqliteTableExists(sqlite, "_smithers_runs") ? countSqliteRows(sqlite, "_smithers_runs") : 0;
     } finally {
@@ -1009,7 +1010,7 @@ function sqliteHasRunsTableAt(dbPath) {
   if (!existsSync(dbPath)) return false;
   let sqlite;
   try {
-    sqlite = new Database(dbPath, { readonly: true });
+    sqlite = new (loadBunSqliteDatabase())(dbPath, { readonly: true });
     return sqliteTableExists(sqlite, "_smithers_runs");
   } catch {
     return false;
@@ -1251,8 +1252,8 @@ async function migratePgToSqlite(opts, context) {
         /* no stale temp */
       }
     }
-    sqlite = new Database(tempDbPath);
-    ensureSmithersTables(drizzle(sqlite));
+    sqlite = new (loadBunSqliteDatabase())(tempDbPath);
+    ensureSmithersTables(loadBunSqliteDrizzle()(sqlite));
     await prepareSqliteTarget(sqlite, pgConn, tables);
     const tableResults = [];
     for (const table of tables) {

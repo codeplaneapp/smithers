@@ -127,17 +127,17 @@ describe("PackageInfo", () => {
   test("renders name, version, description, and install command snippet", async () => {
     await render(
       <PackageInfo
-        name="@smithers-orchestrator/ui"
+        name="@smthrs/ui"
         version="0.29.0"
         description="Shared component library"
-        registryUrl="https://www.npmjs.com/package/@smithers-orchestrator/ui"
-        installCommand="pnpm add @smithers-orchestrator/ui"
+        registryUrl="https://www.npmjs.com/package/@smthrs/ui"
+        installCommand="pnpm add @smthrs/ui"
       />,
     );
     const link = container!.querySelector("a.sui-pkginfo-name") as HTMLAnchorElement;
     expect(link.getAttribute("href")).toContain("npmjs.com");
     expect(container!.querySelector(".sui-pkginfo-version")!.textContent).toBe("0.29.0");
-    expect(container!.querySelector(".sui-snippet-code")!.textContent).toBe("pnpm add @smithers-orchestrator/ui");
+    expect(container!.querySelector(".sui-snippet-code")!.textContent).toBe("pnpm add @smthrs/ui");
   });
 
   test("drops unsafe registry URLs to plain text", async () => {

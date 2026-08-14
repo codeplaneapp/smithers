@@ -1,17 +1,17 @@
 ---
 title: "0.16.7"
-description: "Patch release: bunx smithers-orchestrator@latest init followed by"
+description: "Patch release: bunx smthrs@latest init followed by"
 ---
 
-Patch release: `bunx smithers-orchestrator@latest init` followed by
-`bunx smithers-orchestrator@latest workflow <name>` now actually runs a
+Patch release: `bunx smthrs@latest init` followed by
+`bunx smthrs@latest workflow <name>` now actually runs a
 workflow end-to-end on a fresh machine.
 
 ---
 
 ## Fixes
 
-- **`bunx smithers-orchestrator init` now runs `bun install` inside `.smithers/`**. Bun's
+- **`bunx smthrs init` now runs `bun install` inside `.smithers/`**. Bun's
   runtime auto-install happily fetches registry deps but silently
   skips `github:` specifiers, so the newly-declared
   `github:mattpocock/skills` dep stayed missing until the user ran
@@ -22,10 +22,10 @@ workflow end-to-end on a fresh machine.
   inherited so the install log is visible). Install failures (no
   `bun` on PATH, non-zero exit) don't fail init; they're surfaced on
   the returned result and the user can re-run `bun install` manually.
-  A new `bunx smithers-orchestrator init --no-install` flag skips the step for CI /
+  A new `bunx smthrs init --no-install` flag skips the step for CI /
   scripted reinits.
 
-- **`@smithers-orchestrator/react-reconciler` host config now provides
+- **`@smthrs/react-reconciler` host config now provides
   the methods `react-reconciler@0.33` requires**. The compiled
   reconciler reads `resolveEventTimeStamp`, `resolveEventType`,
   `trackSchedulerEvent`, `maySuspendCommitOnUpdate`,
@@ -37,7 +37,7 @@ workflow end-to-end on a fresh machine.
   supplies neutral implementations for each (no-op void, `null`, or
   `false` as appropriate for a headless host with no native events).
 
-- **The `smithers-orchestrator` bin now delegates to a local
+- **The `smthrs` bin now delegates to a local
   `.smithers/node_modules/.bin/smithers` when one exists**. `bunx`
   extracts to a throwaway tmp dir and `.smithers/` has its own
   `node_modules/`; they're separate resolution roots, so the engine

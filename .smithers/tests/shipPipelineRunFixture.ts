@@ -4,7 +4,7 @@
 // renders the real run. Spawned by ship-pipeline-run.e2e.test.tsx with cwd set to a
 // throwaway git repo (so the worktrees + ticket files land there, and bun
 // resolves modules from the real tree rather than a stale global cache).
-import { Gateway, mdxPlugin } from "smithers-orchestrator";
+import { Gateway, mdxPlugin } from "smthrs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 

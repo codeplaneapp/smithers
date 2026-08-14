@@ -1,13 +1,13 @@
 // smithers-source: user
 // smithers-metadata-version: 1
 // smithers-display-name: Smoke Test
-// smithers-description: Comprehensive release smoke test. Four parallel agents prove the published smithers-orchestrator works for a brand-new user: the human onboarding flow, the agent onboarding flow, every user-facing change across the last 4 releases, and a real workflow UI served over the gateway — then a deterministic report aggregates the verdict.
+// smithers-description: Comprehensive release smoke test. Four parallel agents prove the published smthrs works for a brand-new user: the human onboarding flow, the agent onboarding flow, every user-facing change across the last 4 releases, and a real workflow UI served over the gateway — then a deterministic report aggregates the verdict.
 // smithers-tags: release, qa, smoke
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import FeaturesPrompt from "../prompts/smoketest.mdx";
@@ -20,7 +20,7 @@ import WorkflowUiPrompt from "../prompts/smoketest-ui.mdx";
  * (`<repo>/.smithers/workflows/smoketest.tsx`) so the smoke test always targets
  * the currently-checked-out version + ITS changelogs, not whatever npm
  * `@latest` happens to be. The smoke test runs the PUBLISHED package
- * (`bunx smithers-orchestrator@<version>`) in throwaway temp dirs; the repo is
+ * (`bunx smthrs@<version>`) in throwaway temp dirs; the repo is
  * only used to pin which version + docs are the source of truth.
  */
 const workflowDir = fileURLToPath(new URL(".", import.meta.url).href);
@@ -59,7 +59,7 @@ const HUMAN_GUIDE = ["docs/guide/get-started.mdx", "docs/quickstart.mdx", "docs/
 const AGENT_SKILL = readFileSync(resolve(monorepoRoot, "skills/smithers/SKILL.md"), "utf8");
 
 const DEFAULT_PROMPT =
-  "Smoke test the latest published smithers-orchestrator release against the pinned changelogs and onboarding docs.";
+  "Smoke test the latest published smthrs release against the pinned changelogs and onboarding docs.";
 
 // One shape for every area's verdict AND the final aggregated report. `findings`
 // carry a dotted `area` label (e.g. `features.migrate`, `human.run-hello`).
@@ -94,7 +94,7 @@ const { Workflow, Task, Sequence, Parallel, smithers, outputs } = createSmithers
 
 /**
  * Comprehensive smoke test. Four independent agents each work in their OWN
- * fresh temp dir against the published `smithers-orchestrator@CURRENT_VERSION`,
+ * fresh temp dir against the published `smthrs@CURRENT_VERSION`,
  * so one area crashing can't poison another and `init` is exercised four times
  * (it is the single most important command). `continueOnFail` keeps a dead agent
  * from sinking the run; the deterministic report flags any missing area as a
@@ -143,7 +143,7 @@ export default smithers((ctx) => {
             const failed = findings.filter((f) => f.status === "fail");
             const passed = rows.length === 4 && rows.every((r) => r.passed) && failed.length === 0;
             const summary =
-              `Smoke test of smithers-orchestrator@${CURRENT_VERSION} across ${rows.length}/4 areas ` +
+              `Smoke test of smthrs@${CURRENT_VERSION} across ${rows.length}/4 areas ` +
               `(changelogs: ${VERSIONS_STR}). ` +
               (passed
                 ? "All baseline, onboarding, feature, and UI checks passed."

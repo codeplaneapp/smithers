@@ -10,7 +10,7 @@
     "module": "ESNext",
     "moduleDetection": "force",
     "jsx": "react-jsx",
-    "jsxImportSource": "smithers-orchestrator",
+    "jsxImportSource": "smthrs",
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "allowJs": true,
@@ -27,23 +27,23 @@
       "~/*": [
         "./*"
       ],
-      "smithers-orchestrator": [
+      "smthrs": [
         "../packages/smithers/src/index.js"
       ],
-      "smithers-orchestrator/jsx-runtime": [
+      "smthrs/jsx-runtime": [
         "../packages/smithers/src/jsx-runtime.js"
       ],
-      "smithers-orchestrator/jsx-dev-runtime": [
+      "smthrs/jsx-dev-runtime": [
         "../packages/smithers/src/jsx-runtime.js"
       ],
-      "smithers-orchestrator/tools": [
+      "smthrs/tools": [
         "../packages/smithers/src/tools.js"
       ],
-      "smithers-orchestrator/*": [
+      "smthrs/*": [
         "../packages/smithers/src/*.js",
         "../packages/smithers/src/*/index.js"
       ],
-      "smithers-orchestrator/scorers": [
+      "smthrs/scorers": [
         "../packages/scorers/src/index.js"
       ],
       "@smithers/agents": [

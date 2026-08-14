@@ -1,6 +1,6 @@
 // smithers-source: seeded
-/** @jsxImportSource smithers-orchestrator */
-import { Sequence, Task, estimateCostUsd, type AgentLike } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Sequence, Task, estimateCostUsd, type AgentLike } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import EstimatePrompt from "../prompts/estimate.mdx";

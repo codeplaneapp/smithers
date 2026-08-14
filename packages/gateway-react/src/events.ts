@@ -4,7 +4,7 @@
  * framework-free so workflow UIs, gateway-ui, and plain scripts can all share
  * one implementation.
  */
-import type { GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
+import type { GatewayEventFrame } from "@smthrs/gateway-client";
 import { asArray, asString, isRecord } from "./rows.ts";
 
 /** A run-event frame; collection rows may also carry `timestampMs`. */

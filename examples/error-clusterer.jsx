@@ -6,11 +6,11 @@
  * Pattern: error ingester → clusterer → explainer agent → KB/ticket update.
  * Use cases: incident dedup, error triage dashboards, runbook linking, SRE knowledge bases.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { bash, read, write, grep } from "smithers-orchestrator/tools";
+import { bash, read, write, grep } from "smthrs/tools";
 import { z } from "zod";
 import IngestPrompt from "./prompts/error-clusterer/ingest.mdx";
 import ClusterPrompt from "./prompts/error-clusterer/cluster.mdx";

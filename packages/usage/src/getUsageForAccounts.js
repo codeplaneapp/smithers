@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { getAccountUsage } from "./getAccountUsage.js";
 import { readUsageCache, writeUsageCache } from "./usageCache.js";
 
-/** @typedef {import("@smithers-orchestrator/accounts").Account} Account */
+/** @typedef {import("@smthrs/accounts").Account} Account */
 /** @typedef {import("./UsageReport.ts").UsageReport} UsageReport */
 
 /**

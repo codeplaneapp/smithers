@@ -1,4 +1,4 @@
-// @smithers-orchestrator/integrations/telegram — Telegram Bot API surface:
+// @smthrs/integrations/telegram — Telegram Bot API surface:
 // fetch-based client Layer, getUpdates long-poll EventSource, the
 // listener/outbound workflow components, in-app approvals, and Mini App
 // (Web App) initData verification.

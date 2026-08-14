@@ -63,31 +63,31 @@
       "resolved": [],
       "stillOpen": [
         {
-          "finding": "P0 Flagship package smithers-orchestrator has no `test` script \u2014 its unit tests never run in CI \u2014 packages/smithers/package.json",
+          "finding": "P0 Flagship package smthrs has no `test` script \u2014 its unit tests never run in CI \u2014 packages/smithers/package.json",
           "file": "packages/smithers/package.json:60",
           "severity": "P0",
-          "reason": "package.json `scripts` still only has `typecheck` and `build`; there is NO `test` script. There are 4 real unit test files (tests/tools-unit.test.js, create-unit.test.js, define-tool-durability.test.js, exit-listener-leak-unit.test.js = 24 tests, all passing when run directly with `bun test`). CI runs `pnpm -r test`, and `pnpm --filter smithers-orchestrator test` does nothing (no script => silently skipped, exit 0, no output). So these 24 tests never execute in CI.",
+          "reason": "package.json `scripts` still only has `typecheck` and `build`; there is NO `test` script. There are 4 real unit test files (tests/tools-unit.test.js, create-unit.test.js, define-tool-durability.test.js, exit-listener-leak-unit.test.js = 24 tests, all passing when run directly with `bun test`). CI runs `pnpm -r test`, and `pnpm --filter smthrs test` does nothing (no script => silently skipped, exit 0, no output). So these 24 tests never execute in CI.",
           "fixSketch": "Add `\"test\": \"bun test tests\"` to packages/smithers/package.json scripts so `pnpm -r test` runs the 4 existing unit-test files."
         },
         {
           "finding": "P0 22 of 30 fault cases fabricate their own SQL schema and reimplement the feature in-test \u2014 they validate a mock of the contract, not the product \u2014 e2e/faults/case12...; case14...; case03,case17,case24,case26,case27",
           "file": "e2e/faults/case12-rewind-reverts-vcs.test.ts:40-221",
           "severity": "P0",
-          "reason": "Survey of all 30 fault cases: exactly 22 still contain `CREATE TABLE` (fabricated schema) and do not drive the real product DB/engine. case12 still defines buildDb() (40-100), seedRun(), and reimplements rewind() (160-221) entirely in-test against an in-memory sqlite mock \u2014 no time-travel product code is invoked. case14 fabricates buildDb()+handleRpc() (86-485) reimplementing gateway RPC dispatch. case03 (4 CREATE TABLE, 0 product imports), case17 (3/0), case24 (5 CREATE TABLE, only imports a metadata helper), case26 (5/0), case27 (4/0) all likewise mock the contract. None of these import @smithers-orchestrator/{db,engine,server,time-travel} to exercise the real path.",
+          "reason": "Survey of all 30 fault cases: exactly 22 still contain `CREATE TABLE` (fabricated schema) and do not drive the real product DB/engine. case12 still defines buildDb() (40-100), seedRun(), and reimplements rewind() (160-221) entirely in-test against an in-memory sqlite mock \u2014 no time-travel product code is invoked. case14 fabricates buildDb()+handleRpc() (86-485) reimplementing gateway RPC dispatch. case03 (4 CREATE TABLE, 0 product imports), case17 (3/0), case24 (5 CREATE TABLE, only imports a metadata helper), case26 (5/0), case27 (4/0) all likewise mock the contract. None of these import @smthrs/{db,engine,server,time-travel} to exercise the real path.",
           "fixSketch": "Replace per-case fabricated `buildDb()` with ensureSmithersTables(SmithersDb) and drive real engine/time-travel/gateway code (pattern already proven by case25)."
         },
         {
           "finding": "P0 case14 'gateway RPC roundtrip' and case17 'webhook bad signature' skip the real path on an obsolete/false rationale that case25 disproves \u2014 e2e/faults/case14...:853-861; case17...:446-451; contrast case25...:11,168-187",
           "file": "e2e/faults/case14-gateway-rpc-roundtrip.test.ts:853-861",
           "severity": "P0",
-          "reason": "Both case14 (test.skip at 853-861) and case17 (test.skip at 446-451) still skip the real-Gateway path with the rationale 'booting the real Gateway from packages/server inside e2e fails on effect / @smithers-orchestrator/devtools resolution because workspace symlinks bypass e2e flat node_modules'. case25 disproves this: it imports `Gateway` from `@smithers-orchestrator/server/gateway` (line 11) and boots it for real \u2014 `new Gateway(...)` + `gateway.listen({port:0})` (168-187) \u2014 and I ran it: 5 pass / 1 skip / 0 fail (real FORBIDDEN scope denial + real approval grant over HTTP). So booting the real Gateway from packages/server inside the e2e package works today; the skip rationale is false.",
+          "reason": "Both case14 (test.skip at 853-861) and case17 (test.skip at 446-451) still skip the real-Gateway path with the rationale 'booting the real Gateway from packages/server inside e2e fails on effect / @smthrs/devtools resolution because workspace symlinks bypass e2e flat node_modules'. case25 disproves this: it imports `Gateway` from `@smthrs/server/gateway` (line 11) and boots it for real \u2014 `new Gateway(...)` + `gateway.listen({port:0})` (168-187) \u2014 and I ran it: 5 pass / 1 skip / 0 fail (real FORBIDDEN scope denial + real approval grant over HTTP). So booting the real Gateway from packages/server inside the e2e package works today; the skip rationale is false.",
           "fixSketch": "Delete the test.skip stubs in case14/case17 and rewrite them to import and boot the real Gateway like case25 (assert real RPC roundtrip / real handleWebhook 401)."
         },
         {
           "finding": "P0 captureWorkspaceSnapshot + withSnapshotTimeout have ZERO coverage in CI (only tested in jj-real-repo.test.js, which is skipped when jj is absent) \u2014 packages/vcs/tests/jj-real-repo.test.js:26,307-356 ; packages/vcs/src/jj.js:108-147",
           "file": "packages/vcs/src/jj.js:111-176",
           "severity": "P0",
-          "reason": "The only test touching captureWorkspaceSnapshot is jj-real-repo.test.js (describeIfJj at line 26, capture block at 307-356), and availability is detected via spawnSync('jj') on the SYSTEM PATH \u2014 not via resolveJjBinary(), so the bundled @smithers-orchestrator/jj-linux-x64 binary does not satisfy it. CI installs no system jj (verified: no jj reference in .github/workflows), so the whole suite skips. Verified by running with jj stripped from PATH: `0 pass, 12 skip`. The non-jj-gated fake-bin suite jj-workspace.test.js covers runJj/isJjRepo/workspaceAdd/List/Close/getJjPointer/revertToJjPointer but has 0 references to captureWorkspaceSnapshot or withSnapshotTimeout. The recently added jj-snapshot-parse.test.js only covers the pure parseWorkspaceSnapshot helper, NOT the two functions this finding names. Result: captureWorkspaceSnapshot and withSnapshotTimeout have zero CI coverage.",
+          "reason": "The only test touching captureWorkspaceSnapshot is jj-real-repo.test.js (describeIfJj at line 26, capture block at 307-356), and availability is detected via spawnSync('jj') on the SYSTEM PATH \u2014 not via resolveJjBinary(), so the bundled @smthrs/jj-linux-x64 binary does not satisfy it. CI installs no system jj (verified: no jj reference in .github/workflows), so the whole suite skips. Verified by running with jj stripped from PATH: `0 pass, 12 skip`. The non-jj-gated fake-bin suite jj-workspace.test.js covers runJj/isJjRepo/workspaceAdd/List/Close/getJjPointer/revertToJjPointer but has 0 references to captureWorkspaceSnapshot or withSnapshotTimeout. The recently added jj-snapshot-parse.test.js only covers the pure parseWorkspaceSnapshot helper, NOT the two functions this finding names. Result: captureWorkspaceSnapshot and withSnapshotTimeout have zero CI coverage.",
           "fixSketch": "Add a fake-bin test (SMITHERS_JJ_PATH like jj-workspace.test.js) exercising captureWorkspaceSnapshot success/failure/null paths and withSnapshotTimeout's code:124 timeout sentinel \u2014 no real jj required."
         }
       ]
@@ -112,46 +112,46 @@
           "fixSketch": "For e2e, collect from its actual test roots (or whole dir minus ignored) rather than only `src`."
         },
         {
-          "finding": "Circular dependency between @smithers-orchestrator/agents and @smithers-orchestrator/observability ships to npm",
+          "finding": "Circular dependency between @smthrs/agents and @smthrs/observability ships to npm",
           "file": "packages/agents/src/BaseCliAgent/BaseCliAgent.js:5",
           "severity": "P2",
-          "reason": "BaseCliAgent.js:5-6 imports @smithers-orchestrator/observability/logging and /metrics; apps/observability/src/_traceEventNormalizers.js:1-2 imports @smithers-orchestrator/agents/BaseCliAgent. Both package.jsons declare each other as runtime deps and both are non-private (published). Real publish cycle.",
+          "reason": "BaseCliAgent.js:5-6 imports @smthrs/observability/logging and /metrics; apps/observability/src/_traceEventNormalizers.js:1-2 imports @smthrs/agents/BaseCliAgent. Both package.jsons declare each other as runtime deps and both are non-private (published). Real publish cycle.",
           "fixSketch": "Extract the shared trace/metrics helpers into a leaf package both depend on, breaking the cycle."
         },
         {
           "finding": "observability is a foundational library but lives in apps/ (package masquerading as an app)",
           "file": "apps/observability/package.json:1",
           "severity": "P2",
-          "reason": "@smithers-orchestrator/observability is non-private (ships to npm) and is a runtime dep of agents (and ~14 published packages) yet lives under apps/. Confirmed non-private and depended upon broadly.",
+          "reason": "@smthrs/observability is non-private (ships to npm) and is a runtime dep of agents (and ~14 published packages) yet lives under apps/. Confirmed non-private and depended upon broadly.",
           "fixSketch": "Move to packages/observability and update the workspace, exports map, and dependents."
         },
         {
           "finding": ".smithers workflow pack (a shipping target) is excluded from the dependency-boundary check and imports undeclared react/effect",
           "file": "scripts/check-dependency-boundaries.mjs:20",
           "severity": "P2",
-          "reason": ".smithers is in ignoredDirs (line 20) and is neither in workspaceRoots nor directWorkspaceDirs, so the check never scans it. 19 .smithers/ui/*.tsx files import from 'react' but .smithers/package.json declares no react dependency (deps: scorers, smithers-orchestrator, zod only). Check passes for 41 packages without flagging it.",
+          "reason": ".smithers is in ignoredDirs (line 20) and is neither in workspaceRoots nor directWorkspaceDirs, so the check never scans it. 19 .smithers/ui/*.tsx files import from 'react' but .smithers/package.json declares no react dependency (deps: scorers, smthrs, zod only). Check passes for 41 packages without flagging it.",
           "fixSketch": "Add .smithers to directWorkspaceDirs (remove from ignoredDirs) and collect its ui/components roots, then declare react/effect in .smithers/package.json."
         },
         {
           "finding": "Subpath exports point their types condition at the barrel index.d.ts, which does not contain the subpath's symbols",
           "file": "packages/agents/package.json",
           "severity": "P2",
-          "reason": "exports './BaseCliAgent'/'./agent-contract'/'./diagnostics' etc. all set types -> ./src/index.d.ts while import -> a different subpath module. The barrel index.d.ts has 0 occurrences of extractTextFromJsonValue/normalizeTokenUsage (the symbols observability imports via @smithers-orchestrator/agents/BaseCliAgent), so the types served for the subpath are wrong/incomplete.",
+          "reason": "exports './BaseCliAgent'/'./agent-contract'/'./diagnostics' etc. all set types -> ./src/index.d.ts while import -> a different subpath module. The barrel index.d.ts has 0 occurrences of extractTextFromJsonValue/normalizeTokenUsage (the symbols observability imports via @smthrs/agents/BaseCliAgent), so the types served for the subpath are wrong/incomplete.",
           "fixSketch": "Generate per-subpath .d.ts (tsup multi-entry) and point each export's types at its own declaration file."
         },
         {
           "finding": "Three workspace packages (accounts, usage, tool-context) are missing from the root tsconfig paths map",
           "file": "tsconfig.json",
           "severity": "P2",
-          "reason": "grep for @smithers-orchestrator/(accounts|usage|tool-context) in tsconfig.json returns nothing; the 59 path entries include none of them, yet all three packages exist with those names.",
+          "reason": "grep for @smthrs/(accounts|usage|tool-context) in tsconfig.json returns nothing; the 59 path entries include none of them, yet all three packages exist with those names.",
           "fixSketch": "Add the three missing path mappings to compilerOptions.paths in root tsconfig.json."
         },
         {
           "finding": "smithers <-> cli package cycle exists (bin delegates dynamically; cli imports smithers statically)",
           "file": "packages/smithers/src/bin/smithers.js:138",
           "severity": "P2",
-          "reason": "packages/smithers depends on @smithers-orchestrator/cli and bin/smithers.js:138 does `await import('@smithers-orchestrator/cli')`; apps/cli depends on smithers-orchestrator and imports it statically (resolve-root.js:2, find-db.js:6 import smithers-orchestrator/findSmithersAnchorDir). Bidirectional dependency.",
-          "fixSketch": "Move findSmithersAnchorDir (and any shared leaf) into a package both depend on, so cli no longer statically imports smithers-orchestrator."
+          "reason": "packages/smithers depends on @smthrs/cli and bin/smithers.js:138 does `await import('@smthrs/cli')`; apps/cli depends on smthrs and imports it statically (resolve-root.js:2, find-db.js:6 import smthrs/findSmithersAnchorDir). Bidirectional dependency.",
+          "fixSketch": "Move findSmithersAnchorDir (and any shared leaf) into a package both depend on, so cli no longer statically imports smthrs."
         },
         {
           "finding": "Root package.json exports map is a dev-only alias that diverges structurally from the actually-published exports",
@@ -161,7 +161,7 @@
           "fixSketch": "Generate the root dev alias from the published smithers exports, or add a check that the key sets/conditions stay in sync."
         },
         {
-          "finding": "Published smithers-orchestrator ./* wildcard publicly exposes internal helper files",
+          "finding": "Published smthrs ./* wildcard publicly exposes internal helper files",
           "file": "packages/smithers/package.json",
           "severity": "P2",
           "reason": "exports './*' -> './src/*.js' exposes internal helpers like prepareOutputSchemas.js, create.js, examples-entry.js, observability.js, server.js as importable subpaths of the published package.",
@@ -200,7 +200,7 @@
           "file": ".github/workflows/ci.yml:9",
           "severity": "P2",
           "reason": "The drift check is packages/gateway `check:openapi` wired into its `build` script. ci.yml runs no `build` step (grep 'build' in ci.yml = none) and `pnpm test` doesn't trigger the gateway build. It only runs via `pnpm -r build` in faults.yml:33 and faults-nightly.yml.",
-          "fixSketch": "Add `pnpm --filter @smithers-orchestrator/gateway check:openapi` (or `pnpm -r build`) to the primary ci.yml job."
+          "fixSketch": "Add `pnpm --filter @smthrs/gateway check:openapi` (or `pnpm -r build`) to the primary ci.yml job."
         },
         {
           "finding": "jj platform packages' prepublishOnly binary-presence validation never runs on PRs",
@@ -249,7 +249,7 @@
           "file": "packages/memory/src/TaskMemoryConfig.ts:3",
           "severity": "P2",
           "reason": "Two real source definitions diverge: packages/memory/src/TaskMemoryConfig.ts has a top-level `namespace?: string | MemoryNamespace` field; packages/graph/src/types.ts:106 (re-exported by graph/src/TaskMemoryConfig.ts) omits that field entirely. components/TaskProps.ts imports the memory one. Shapes are out of sync.",
-          "fixSketch": "Have graph re-export TaskMemoryConfig from @smithers-orchestrator/memory instead of redefining it."
+          "fixSketch": "Have graph re-export TaskMemoryConfig from @smthrs/memory instead of redefining it."
         },
         {
           "finding": "Generated openapi index.d.ts is committed and can drift; ./* and ./metrics subpaths point types at the full bundle",
@@ -290,7 +290,7 @@
           "finding": "Default operator console re-implements the whole wire protocol instead of using the published SDK",
           "file": "packages/server/src/gatewayUi/defaultOperatorUi.js:509",
           "severity": "P2",
-          "reason": "defaultOperatorUi.js is 1432 lines, opens a raw WebSocket (line 509) and hand-rolls the request/response frame protocol inline, with no import of @smithers-orchestrator/gateway-client (grep for gateway-client/SmithersGatewayClient = none).",
+          "reason": "defaultOperatorUi.js is 1432 lines, opens a raw WebSocket (line 509) and hand-rolls the request/response frame protocol inline, with no import of @smthrs/gateway-client (grep for gateway-client/SmithersGatewayClient = none).",
           "fixSketch": "Rebuild the default operator UI on top of the published SmithersGatewayClient SDK."
         },
         {
@@ -308,10 +308,10 @@
           "fixSketch": "Add a CI job: `pnpm -r build` then fail if `git status --porcelain` reports any changed src/*.d.ts."
         },
         {
-          "finding": "Published @smithers-orchestrator/observability lives under apps/ and forms a publish cycle with agents (depended on by 14 published packages)",
+          "finding": "Published @smthrs/observability lives under apps/ and forms a publish cycle with agents (depended on by 14 published packages)",
           "file": "apps/observability/package.json:1",
           "severity": "P1",
-          "reason": "observability is non-private and lives in apps/; it imports @smithers-orchestrator/agents/BaseCliAgent (apps/observability/src/_traceEventNormalizers.js:1-2) while agents imports observability (BaseCliAgent.js:5-6) \u2014 a published cycle. (Same root cause as the agents<->observability and observability-in-apps findings.)",
+          "reason": "observability is non-private and lives in apps/; it imports @smthrs/agents/BaseCliAgent (apps/observability/src/_traceEventNormalizers.js:1-2) while agents imports observability (BaseCliAgent.js:5-6) \u2014 a published cycle. (Same root cause as the agents<->observability and observability-in-apps findings.)",
           "fixSketch": "Relocate observability to packages/ and break the cycle by extracting the shared trace/metric helpers into a leaf package."
         },
         {
@@ -319,13 +319,13 @@
           "file": "packages/agents/src/BaseCliAgent/parseHelpers.js:7",
           "severity": "P2",
           "reason": "isRecord/isObject/asRecord are defined in 11+ distinct packages/apps (agents, components, devtools, pi-plugin, db, gateway-client, errors, engine, cli, smithers, smithers-studio-2). No single shared predicate package; agents exports its own from parseHelpers.js while others keep local copies. 89 files still use inline `instanceof Error` message extraction.",
-          "fixSketch": "Add a shared @smithers-orchestrator/errors (or a small predicates package) exporting isRecord/asRecord and an errorMessage() helper, then replace the local copies."
+          "fixSketch": "Add a shared @smthrs/errors (or a small predicates package) exporting isRecord/asRecord and an errorMessage() helper, then replace the local copies."
         },
         {
-          "finding": "apps/cli is also published from apps/ (non-private @smithers-orchestrator/cli) \u2014 apps/ contains 2 shipping packages, not the conventional zero",
+          "finding": "apps/cli is also published from apps/ (non-private @smthrs/cli) \u2014 apps/ contains 2 shipping packages, not the conventional zero",
           "file": "apps/cli/package.json:1",
           "severity": "P2",
-          "reason": "@smithers-orchestrator/cli is non-private (ships). Scanning apps/*/package.json shows exactly 2 non-private packages: @smithers-orchestrator/cli and @smithers-orchestrator/observability. apps/ holds shipping packages.",
+          "reason": "@smthrs/cli is non-private (ships). Scanning apps/*/package.json shows exactly 2 non-private packages: @smthrs/cli and @smthrs/observability. apps/ holds shipping packages.",
           "fixSketch": "Move cli (and observability) to packages/ so apps/ holds only private apps."
         },
         {
@@ -355,7 +355,7 @@
           "finding": "Capability-registry factory exports inconsistent: 4 of 10 re-exported from index and consumed nowhere via the barrel",
           "file": "packages/agents/src/index.js:64,65,72,74",
           "severity": "P2",
-          "reason": "createAmp/Antigravity/Forge/Vibe CapabilityRegistry are re-exported from index.js but no external consumer imports them via the @smithers-orchestrator/agents barrel; only used internally via relative imports (AgentX.js, getCliAgentCapabilityReport.js). The other 6 factories are not re-exported.",
+          "reason": "createAmp/Antigravity/Forge/Vibe CapabilityRegistry are re-exported from index.js but no external consumer imports them via the @smthrs/agents barrel; only used internally via relative imports (AgentX.js, getCliAgentCapabilityReport.js). The other 6 factories are not re-exported.",
           "fixSketch": "Drop the 4 factory re-exports from index.js (or re-export all 10 consistently)."
         },
         {
@@ -390,7 +390,7 @@
           "finding": "_coreMetrics.js catalog reachable as a published deep import via './*' subpath export",
           "file": "apps/observability/package.json:18-22",
           "severity": "P2",
-          "reason": "The `./*` -> `./src/*.js` export still resolves @smithers-orchestrator/observability/_coreMetrics, exposing the stale duplicate metric catalog/in-memory service.",
+          "reason": "The `./*` -> `./src/*.js` export still resolves @smthrs/observability/_coreMetrics, exposing the stale duplicate metric catalog/in-memory service.",
           "fixSketch": "After deleting the dead _coreMetrics body, optionally tighten the exports map to only the intended subpaths."
         },
         {
@@ -488,7 +488,7 @@
           "finding": "loadCreateSession has an unreachable createSession branch and a dead relative-path fallback",
           "file": "packages/driver/src/WorkflowDriver.js:166-167,158",
           "severity": "P2",
-          "reason": "The scheduler exports makeWorkflowSession but not createSession, so the createSession branch (166-167) never fires; the first import of @smithers-orchestrator/scheduler always succeeds, so the LOCAL_SCHEDULER_SPECIFIER fallback (158) is dead.",
+          "reason": "The scheduler exports makeWorkflowSession but not createSession, so the createSession branch (166-167) never fires; the first import of @smthrs/scheduler always succeeds, so the LOCAL_SCHEDULER_SPECIFIER fallback (158) is dead.",
           "fixSketch": "Drop the createSession branch and the relative-path fallback specifier."
         },
         {
@@ -684,7 +684,7 @@
           "finding": "core-types.js is an orphaned re-export imported by nothing",
           "file": "packages/react-reconciler/src/core-types.js:1",
           "severity": "P2",
-          "reason": "core-types.js does `export * from @smithers-orchestrator/graph` but has no importer.",
+          "reason": "core-types.js does `export * from @smthrs/graph` but has no importer.",
           "fixSketch": "Delete core-types.js."
         },
         {
@@ -786,10 +786,10 @@
           "fixSketch": "Delete formatDiffAsJson (callers can use the diff object directly)."
         },
         {
-          "finding": "Declared dependency @smithers-orchestrator/errors is unused",
+          "finding": "Declared dependency @smthrs/errors is unused",
           "file": "packages/usage/package.json:29",
           "severity": "P2",
-          "reason": "No file under packages/usage/src imports @smithers-orchestrator/errors; only package.json references it.",
+          "reason": "No file under packages/usage/src imports @smthrs/errors; only package.json references it.",
           "fixSketch": "Remove the unused dependency."
         },
         {
@@ -878,7 +878,7 @@
           "finding": "P2 ./BaseCliAgent subpath export declares a types target missing its runtime exports",
           "file": "packages/agents/package.json (exports['./BaseCliAgent'].types) -> packages/agents/src/index.d.ts",
           "severity": "P2",
-          "reason": "exports['./BaseCliAgent'] resolves runtime to ./src/BaseCliAgent/index.js, which re-exports ~25 symbols (BaseCliAgent, pushFlag, pushList, isRecord, asString, asNumber, truncate, toolKindFromName, createSyntheticIdGenerator, resolveTimeouts, combineNonEmpty, extractPrompt, tryParseJson, runCommandEffect, etc.). Its types target is the package-root ./src/index.d.ts, which only declares the BaseCliAgent class \u2014 none of those helper functions are typed there, and there is no src/BaseCliAgent/index.d.ts. So `import { pushFlag } from 'smithers-orchestrator/agents/BaseCliAgent'` gets the runtime symbol with no types.",
+          "reason": "exports['./BaseCliAgent'] resolves runtime to ./src/BaseCliAgent/index.js, which re-exports ~25 symbols (BaseCliAgent, pushFlag, pushList, isRecord, asString, asNumber, truncate, toolKindFromName, createSyntheticIdGenerator, resolveTimeouts, combineNonEmpty, extractPrompt, tryParseJson, runCommandEffect, etc.). Its types target is the package-root ./src/index.d.ts, which only declares the BaseCliAgent class \u2014 none of those helper functions are typed there, and there is no src/BaseCliAgent/index.d.ts. So `import { pushFlag } from 'smthrs/agents/BaseCliAgent'` gets the runtime symbol with no types.",
           "fixSketch": "Emit/point a dedicated ./src/BaseCliAgent/index.d.ts (re-exporting the module's symbols) and set that as the subpath's `types` instead of the package-root d.ts."
         },
         {
@@ -951,7 +951,7 @@
         },
         {
           "finding": "tsconfig path map for the protocol root points at a non-existent file (src/index.js) \u2014 tsconfig.json:162-164",
-          "evidence": "packages/protocol/src/index.js now exists (201 bytes, real exports). Both tsconfig.json:163 and examples/tsconfig.json:118 point @smithers-orchestrator/protocol -> packages/protocol/src/index.js, which resolves."
+          "evidence": "packages/protocol/src/index.js now exists (201 bytes, real exports). Both tsconfig.json:163 and examples/tsconfig.json:118 point @smthrs/protocol -> packages/protocol/src/index.js, which resolves."
         },
         {
           "finding": "fiberToNode in SmithersDevTools only descends one level through non-Smithers fibers \u2014 packages/react-reconciler/src/devtools/SmithersDevTools.js:137-152",
@@ -959,7 +959,7 @@
         },
         {
           "finding": "runs.rerun uses backend-specific raw SQL with a hardcoded `payload` column \u2014 packages/server/src/gateway.js:4542-4546",
-          "evidence": "runs.rerun now resolves the workflow's input table via resolveSchema and loads the original input through the backend-agnostic loadInput() (from @smithers-orchestrator/db/snapshot, which has Postgres + drizzle paths against the actual input table), then routes to runs.create. No hardcoded `payload`-column raw SQL remains. Tested by gateway.test.jsx 'reruns with the original schema-backed input row' and the hijack+rerun test."
+          "evidence": "runs.rerun now resolves the workflow's input table via resolveSchema and loads the original input through the backend-agnostic loadInput() (from @smthrs/db/snapshot, which has Postgres + drizzle paths against the actual input table), then routes to runs.create. No hardcoded `payload`-column raw SQL remains. Tested by gateway.test.jsx 'reruns with the original schema-backed input row' and the hijack+rerun test."
         },
         {
           "finding": "Bare require() inside an ESM module breaks workspaceAdd pre-create cleanup \u2014 packages/vcs/src/jj.js:197-211",
@@ -1199,14 +1199,14 @@
           "finding": "Deep subpath imports resolve types to index.d.ts and break strict TS consumers (TS2305/TS2459)",
           "file": "packages/sandbox/package.json:12-16 (exports './*' types -> ./src/index.d.ts)",
           "severity": "P1",
-          "reason": "The './*' export maps types to ./src/index.d.ts for ALL subpaths, and only index.d.ts exists (no per-file .d.ts). External strict TS consumers importing e.g. @smithers-orchestrator/sandbox/SandboxHandle get the root barrel types, not the subpath's types. Internally masked only by the tsconfig path map (tsconfig.json:194-196).",
+          "reason": "The './*' export maps types to ./src/index.d.ts for ALL subpaths, and only index.d.ts exists (no per-file .d.ts). External strict TS consumers importing e.g. @smthrs/sandbox/SandboxHandle get the root barrel types, not the subpath's types. Internally masked only by the tsconfig path map (tsconfig.json:194-196).",
           "fixSketch": "Emit per-subpath declaration files (tsup dts per entry) and map './*' types to ./src/*.d.ts."
         },
         {
-          "finding": "Type-only subpath @smithers-orchestrator/sandbox/SandboxHandle also breaks external strict TS consumers",
+          "finding": "Type-only subpath @smthrs/sandbox/SandboxHandle also breaks external strict TS consumers",
           "file": "packages/sandbox/package.json:12-16; e2e/harness/stallSandbox.ts:2",
           "severity": "P2",
-          "reason": "Same root cause as the deep-subpath finding: stallSandbox.ts:2 does `import type { SandboxHandle } from \"@smithers-orchestrator/sandbox/SandboxHandle\"`, but the published exports './*' types resolve to index.d.ts; with no SandboxHandle.d.ts an external strict consumer cannot resolve the type.",
+          "reason": "Same root cause as the deep-subpath finding: stallSandbox.ts:2 does `import type { SandboxHandle } from \"@smthrs/sandbox/SandboxHandle\"`, but the published exports './*' types resolve to index.d.ts; with no SandboxHandle.d.ts an external strict consumer cannot resolve the type.",
           "fixSketch": "Same fix as the deep-subpath finding \u2014 per-subpath .d.ts so SandboxHandle resolves from its own subpath."
         },
         {
@@ -2003,11 +2003,11 @@
           "fixSketch": "Promote the fault cases onto the real Gateway/server rather than fabricated ws servers."
         },
         {
-          "finding": "e2e package.json omits the smithers-orchestrator dependency that case25 imports",
+          "finding": "e2e package.json omits the smthrs dependency that case25 imports",
           "file": "e2e/package.json; e2e/faults/case25-approval-scope-denial.test.ts:7",
           "severity": "P2",
-          "reason": "case25 imports `smithers-orchestrator` (line 7) but e2e/package.json dependencies list only @smithers-orchestrator/* scoped packages; the unscoped package resolves via hoisting.",
-          "fixSketch": "Add `\"smithers-orchestrator\": \"workspace:*\"` to e2e/package.json dependencies."
+          "reason": "case25 imports `smthrs` (line 7) but e2e/package.json dependencies list only @smthrs/* scoped packages; the unscoped package resolves via hoisting.",
+          "fixSketch": "Add `\"smthrs\": \"workspace:*\"` to e2e/package.json dependencies."
         },
         {
           "finding": "OpenAPI 'e2e' test mocks globalThis.fetch, so it is not a strict no-mock e2e",
@@ -2031,11 +2031,11 @@
           "fixSketch": "Add `- run: pnpm typecheck:examples` to ci.yml."
         },
         {
-          "finding": "examples/tsconfig.json points smithers-orchestrator at src/*.js source, not the published package",
+          "finding": "examples/tsconfig.json points smthrs at src/*.js source, not the published package",
           "file": "examples/tsconfig.json",
           "severity": "P2",
-          "reason": "paths map `smithers-orchestrator` -> ../packages/smithers/src/examples-entry.js and src/* globs, so typecheck:examples validates against source, not shipped declaration types.",
-          "fixSketch": "Point the smithers-orchestrator path at the built dist/types (or run typecheck against the published package) so examples validate shipped types."
+          "reason": "paths map `smthrs` -> ../packages/smithers/src/examples-entry.js and src/* globs, so typecheck:examples validates against source, not shipped declaration types.",
+          "fixSketch": "Point the smthrs path at the built dist/types (or run typecheck against the published package) so examples validate shipped types."
         },
         {
           "finding": "AntigravityAgent stream-json interpreter is untested and effectively dead in practice",

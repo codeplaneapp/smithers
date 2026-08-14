@@ -1,8 +1,8 @@
-import { Sequence, Ralph } from "smithers-orchestrator";
+import { Sequence, Ralph } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent, Output } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import ReviewPrompt from "./prompts/code-review-loop/review.mdx";
 import FixPrompt from "./prompts/code-review-loop/fix.mdx";

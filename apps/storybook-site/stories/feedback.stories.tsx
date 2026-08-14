@@ -1,13 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-  Progress,
-  Skeleton,
-  Spinner,
-  StageStrip,
-} from "@smithers-orchestrator/ui";
+import { Alert, AlertDescription, AlertTitle, Progress, Skeleton, Spinner, StageStrip } from "@smthrs/ui";
 
 const meta: Meta = {
   title: "Primitives/Feedback",

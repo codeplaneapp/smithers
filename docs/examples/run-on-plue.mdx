@@ -19,7 +19,7 @@ The provider:
 4. Installs Bun, then the Claude Code and Codex CLIs, when missing.
 5. Seeds Claude and Codex auth for the remote CLIs.
 6. Ships a small remote project containing the child workflow source, `agents.ts`, `package.json`, and `input.json`.
-7. Runs `smithers-orchestrator up` in the workspace and reads the remote run result back over SSH.
+7. Runs `smthrs up` in the workspace and reads the remote run result back over SSH.
 8. Deletes the workspace unless `keepWorkspace` is true.
 
 The parent workflow receives:
@@ -48,7 +48,7 @@ Secrets are seeded at run time through Plue's operation-scoped secret or credent
 Run the included demo child workflow:
 
 ```bash
-bunx smithers-orchestrator up .smithers/workflows/run-on-plue.tsx --input '{
+bunx smthrs up .smithers/workflows/run-on-plue.tsx --input '{
   "script": ".smithers/workflows/plue-demo-child.tsx",
   "repo": "alice/smoke-test"
 }'
@@ -57,7 +57,7 @@ bunx smithers-orchestrator up .smithers/workflows/run-on-plue.tsx --input '{
 Pass input through to the remote child:
 
 ```bash
-bunx smithers-orchestrator up .smithers/workflows/run-on-plue.tsx --input '{
+bunx smthrs up .smithers/workflows/run-on-plue.tsx --input '{
   "script": "workflows/review-child.tsx",
   "repo": "acme/app",
   "input": {
@@ -69,7 +69,7 @@ bunx smithers-orchestrator up .smithers/workflows/run-on-plue.tsx --input '{
 Use a local or custom CLI binary and keep the workspace for inspection:
 
 ```bash
-bunx smithers-orchestrator up .smithers/workflows/run-on-plue.tsx --input '{
+bunx smthrs up .smithers/workflows/run-on-plue.tsx --input '{
   "script": ".smithers/workflows/plue-demo-child.tsx",
   "repo": "alice/smoke-test",
   "plueBin": "/path/to/plue",
@@ -82,9 +82,9 @@ bunx smithers-orchestrator up .smithers/workflows/run-on-plue.tsx --input '{
 `run-on-plue` is the default wrapper, but workflows can pass the provider object to `<Sandbox>` directly:
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
-import { Sandbox } from "@smithers-orchestrator/components";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
+import { Sandbox } from "@smthrs/components";
 import { createPlueSandboxProvider } from "../lib/plue-provider";
 import { childWorkflow } from "./child";
 import { z } from "zod/v4";

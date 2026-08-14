@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { makeWorkflowSession } from "../src/makeWorkflowSession.js";
 
 function el(tag, props = {}, children = []) {

@@ -1,4 +1,4 @@
-# @smithers-orchestrator/time-travel — src
+# @smthrs/time-travel — src
 
 Snapshots, structured diffs (`diff.js`), forks, checkpoint replay (`replay.js`),
 timelines, and VCS-tagged run history — plus the destructive rewind machinery:
@@ -23,7 +23,7 @@ and `revert.js`.
   deep-import subpath — renames and moves are API breaks.
 - `SmithersDb` adapter methods return thenable RunnableEffects: both
   `await adapter.x()` and `yield* adapter.x()` work; no `Effect.runPromise`
-  wrapping is needed. VCS effects from `@smithers-orchestrator/vcs` are plain
+  wrapping is needed. VCS effects from `@smthrs/vcs` are plain
   Effects and DO need `Effect.runPromise(... Effect.provide(BunContext.layer))`.
 - `recoverRewindAuditsAtStartup.js` is deliberately not in the barrel —
   `packages/server/src/serve.js` deep-imports it.

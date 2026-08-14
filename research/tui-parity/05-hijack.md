@@ -15,7 +15,7 @@ Hijack = suspend the opentui renderer, hand the real terminal to another process
 `HijackMode.tsx` facts to preserve:
 
 - Spawn options `{ stdio: "inherit", detached: SUPPORTS_PROCESS_GROUPS }` (non-win32), so `killHijackChild` can signal the whole process group (`process.kill(-pid, "SIGTERM")`) and catch agent grandchildren; falls back to `child.kill` on Windows/failure; no-ops once exited.
-- Today's only command: `hijackCommand(runId, nodeId)` re-invokes the real smithers CLI (`SMITHERS_CLI` env, else `import.meta.resolve("@smithers-orchestrator/cli")` via `cliEntry.ts`) as `[argv0, cliPath, "hijack", runId, "--target", nodeId]`. Never a bare `smithers` on PATH; never `process.argv[1]` (would recurse into the TUI). Null CLI resolution renders "HIJACK unavailable".
+- Today's only command: `hijackCommand(runId, nodeId)` re-invokes the real smithers CLI (`SMITHERS_CLI` env, else `import.meta.resolve("@smthrs/cli")` via `cliEntry.ts`) as `[argv0, cliPath, "hijack", runId, "--target", nodeId]`. Never a bare `smithers` on PATH; never `process.argv[1]` (would recurse into the TUI). Null CLI resolution renders "HIJACK unavailable".
 - `HandingOff` keeps `onDone` in a ref so effect deps stay `[runId, nodeId, renderer]`; a fresh closure must not kill the live child.
 - Phase order renders `handing-off`/`returned` before consulting candidates, so live event churn can never unmount the active session.
 - Candidate picking: `hijackCandidates(nodes, events)` (event-derived live nodes union tree-status running/active), `pinnedHijackRows` pins picker rows by `runNodeKey` so a completing node cannot slide a different session under the cursor; departed rows relabel "ended".

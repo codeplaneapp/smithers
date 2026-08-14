@@ -1,13 +1,4 @@
-import {
-  Badge,
-  Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "smithers-orchestrator/ui";
+import { Badge, Button, Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "smthrs/ui";
 import type { PublicStory } from "../types";
 
 const SECTION_LABELS: Record<string, string> = {

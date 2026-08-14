@@ -3,7 +3,7 @@ title: Event Types
 description: Current SmithersEvent variants, event categories, and top-level fields.
 ---
 
-`SmithersEvent` is the discriminated union the runtime and observability layer understand. Runtime-emitted variants are persisted to the event log, passed to `runWorkflow({ onProgress })`, streamed by Gateway, and filtered by `bunx smithers-orchestrator events --type <category>`. Reserved variants appear here typed but not yet emitted.
+`SmithersEvent` is the discriminated union the runtime and observability layer understand. Runtime-emitted variants are persisted to the event log, passed to `runWorkflow({ onProgress })`, streamed by Gateway, and filtered by `bunx smthrs events --type <category>`. Reserved variants appear here typed but not yet emitted.
 
 Every variant has `type`, `runId`, and `timestampMs`. Node-scoped variants add `nodeId` and `iteration`. Attempt-scoped variants add `attempt`.
 
@@ -158,6 +158,9 @@ millis from the stored row) and surface `stateVersion: 0`.
 | `ApprovalGranted` | `runId`, `nodeId`, `iteration`, `timestampMs` |
 | `ApprovalAutoApproved` | `runId`, `nodeId`, `iteration`, `timestampMs` |
 | `ApprovalDenied` | `runId`, `nodeId`, `iteration`, `timestampMs` |
+| `SteerQueued` | `runId`, `nodeId`, `steerId`, `message`, `author?`, `timestampMs` |
+| `SteerConsumed` | `runId`, `nodeId`, `iteration`, `attempt`, `steerId`, `timestampMs` |
+| `SteerExpired` | `runId`, `nodeId`, `steerId`, `timestampMs` |
 | `ToolCallStarted` | `runId`, `nodeId`, `iteration`, `attempt`, `toolCallId`, `toolName`, `seq`, `timestampMs` |
 | `ToolCallFinished` | `runId`, `nodeId`, `iteration`, `attempt`, `toolCallId`, `toolName`, `seq`, `status`, `timestampMs` |
 | `NodeOutput` | `runId`, `nodeId`, `iteration`, `attempt`, `text`, `stream`, `timestampMs` |

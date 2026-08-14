@@ -1,1 +1,1 @@
-export * from "@smithers-orchestrator/ui/status";
+export * from "@smthrs/ui/status";

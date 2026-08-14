@@ -14,17 +14,17 @@ description: Short operational cheatsheet. The full catalog lives in CLI.
 **Set up**
 
 ```bash
-bunx smithers-orchestrator init                                       # scaffold .smithers/
-bunx smithers-orchestrator init --template idea-to-tickets            # return a create-workflow starter request
-bunx smithers-orchestrator starters                                   # browse template IDs
+bunx smthrs init                                       # scaffold .smithers/
+bunx smthrs init --template idea-to-tickets            # return a create-workflow starter request
+bunx smthrs starters                                   # browse template IDs
 ```
 
 **Verify the setup**
 
 ```bash
-bunx smithers-orchestrator --version          # prints the version you installed
-bunx smithers-orchestrator workflow doctor    # vcs + workflow pack health
-bunx smithers-orchestrator workflow list      # workflows discovered in this repo
+bunx smthrs --version          # prints the version you installed
+bunx smthrs workflow doctor    # vcs + workflow pack health
+bunx smthrs workflow list      # workflows discovered in this repo
 ```
 
 `workflow doctor` confirms a VCS resolved and the pack scaffolded (output trimmed):
@@ -68,15 +68,15 @@ your chosen agent's model/provider credentials). See
 **Run your first workflow**
 
 ```bash
-bunx smithers-orchestrator workflow run create-workflow --prompt "…"  # build a new workflow from a plain-English ask
-bunx smithers-orchestrator up workflow.tsx --run-id RUN_ID --resume true   # resume a paused run
+bunx smthrs workflow run create-workflow --prompt "…"  # build a new workflow from a plain-English ask
+bunx smthrs up workflow.tsx --run-id RUN_ID --resume true   # resume a paused run
 ```
 
 For an implement- or debug-style workflow, `--interactive` prompts for inputs and drops you into the full-screen TUI monitor (TTY only):
 
 ```bash
-bunx smithers-orchestrator up workflow.tsx --interactive              # supply inputs interactively, then watch the run
-bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive     # pick a discovered workflow and its inputs
+bunx smthrs up workflow.tsx --interactive              # supply inputs interactively, then watch the run
+bunx smthrs workflow run WORKFLOW_ID --interactive     # pick a discovered workflow and its inputs
 ```
 
 **What success looks like**
@@ -95,12 +95,12 @@ bunx smithers-orchestrator workflow run WORKFLOW_ID --interactive     # pick a d
 **Observe & control**
 
 ```bash
-bunx smithers-orchestrator ps                                         # list runs
-bunx smithers-orchestrator inspect RUN_ID                           # structured run state
-bunx smithers-orchestrator logs RUN_ID --tail 20 --follow           # stream events
-bunx smithers-orchestrator why RUN_ID                               # why is it paused?
-bunx smithers-orchestrator approve RUN_ID --node NODE_ID --by NAME   # approve a paused node
-bunx smithers-orchestrator cancel RUN_ID                            # cancel a run
+bunx smthrs ps                                         # list runs
+bunx smthrs inspect RUN_ID                           # structured run state
+bunx smthrs logs RUN_ID --tail 20 --follow           # stream events
+bunx smthrs why RUN_ID                               # why is it paused?
+bunx smthrs approve RUN_ID --node NODE_ID --by NAME   # approve a paused node
+bunx smthrs cancel RUN_ID                            # cancel a run
 ```
 
 See [Tour](/tour) for a full worked example, and [CLI overview](/cli/overview) for the complete flag reference.

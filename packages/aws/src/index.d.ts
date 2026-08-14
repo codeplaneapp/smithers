@@ -1,4 +1,4 @@
-import type { SandboxProvider, SandboxProviderResult } from "@smithers-orchestrator/sandbox";
+import type { SandboxProvider, SandboxProviderResult } from "@smthrs/sandbox";
 
 export const AWS_SANDBOX_PROVIDER_ID: "aws-sandbox";
 

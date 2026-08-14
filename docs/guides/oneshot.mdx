@@ -8,10 +8,10 @@ authoring. It launches in the background by default and serves a live
 dashboard with chat, diff, hijack, pause, and cancel controls.
 
 ```bash
-bunx smithers-orchestrator oneshot "add a loading spinner to the login button"
-bunx smithers-orchestrator oneshot --goal-file TICKET.md
-bunx smithers-orchestrator oneshot "fix the flaky retry test" --review on
-bunx smithers-orchestrator oneshot --status        # usable agents, model chain, preferences
+bunx smthrs oneshot "add a loading spinner to the login button"
+bunx smthrs oneshot --goal-file TICKET.md
+bunx smthrs oneshot "fix the flaky retry test" --review on
+bunx smthrs oneshot --status        # usable agents, model chain, preferences
 ```
 
 ## When to use it
@@ -92,7 +92,7 @@ context). An explicit `--model` (a slot: `sol`, `terra`, `luna`, `kimi`,
 default `auto` follows the task shape, with review on Sol at high reasoning
 effort.
 
-Run `bunx smithers-orchestrator oneshot --status "<goal>"` before first use.
+Run `bunx smthrs oneshot --status "<goal>"` before first use.
 It prints the usable agents, the goal's classified `taskType`, the resolved
 model chain, and the stored preferences as JSON; when no usable agent is
 detected, oneshot is unavailable and work should go through the direct or
@@ -125,7 +125,7 @@ Every launch CTA tells the operator to offer the monitor to the user. Open it
 directly with:
 
 ```bash
-bunx smithers-orchestrator monitor ONESHOT_RUN_ID
+bunx smthrs monitor ONESHOT_RUN_ID
 ```
 
 For a built-in oneshot, this opens the dedicated oneshot monitor. It includes
@@ -140,7 +140,7 @@ cancel controls, plus:
   the hijack request and returns control to Smithers so the run is not stranded.
   Codex, Kimi, and OpenCode are shown as unsupported
   because their current headless sessions do not provide an equally reliable
-  live message boundary. Use `bunx smithers-orchestrator hijack RUN_ID` for
+  live message boundary. Use `bunx smthrs hijack RUN_ID` for
   interactive takeover.
 - **Restart**: after confirmation, cancel the active attempt if needed and
   launch a fresh run from the durable `builtinResume` argv recorded at the
@@ -153,12 +153,12 @@ cancel controls, plus:
 
 The oneshot UI, the `chat-create` run UI, and the Monitor's node-row hijack
 view are all the same shared `OneshotSurface` component from
-`smithers-orchestrator/gateway-ui`: goal and status cards, chat, diff, events,
+`smthrs/gateway-ui`: goal and status cards, chat, diff, events,
 and an embedded PTY terminal for hijack and reopen. The Monitor hosts it in a
 dialog that can maximize to the viewport and restore.
 
 Steering and restart requests and outcomes are durable run events shown by
-`bunx smithers-orchestrator status RUN_ID`, `events RUN_ID`, and
+`bunx smthrs status RUN_ID`, `events RUN_ID`, and
 `timeline RUN_ID`. Narrator lines are durable `NodeOutput` events shown by
 `events RUN_ID --raw` and by a later monitor attachment.
 

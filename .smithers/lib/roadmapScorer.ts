@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createScorer } from "smithers-orchestrator";
+import { createScorer } from "smthrs";
 
 const HARNESS = join(dirname(fileURLToPath(import.meta.url)), "../../benchmarks/roadmapbench/harness");
 
@@ -30,24 +30,39 @@ export async function runRoadmapScore(input: RoadmapScorerInput, checkpoint?: st
   const outDir = join(input.workDir, `score${suffix}`);
   // score.sh snapshots every candidate before mounting it read-write, so both
   // intermediate and final grading leave the submitted artifact untouched.
-  const reward = await new Promise<{ reward: number; raw: string }>((resolve) => {
+  const reward = await new Promise<{ reward: number; raw: string }>((resolve, reject) => {
     execFile(
       "bash",
       [join(HARNESS, "score.sh"), input.image, input.repoDir, input.testsDir, outDir],
       { timeout: 30 * 60_000, maxBuffer: 64 * 1024 * 1024 },
-      (_err, stdout) => {
+      (err, stdout, stderr) => {
         const raw = String(stdout);
+        if (err) {
+          reject(new Error(`RoadmapBench scorer failed: ${err.message}\n${String(stderr).slice(-4000)}`));
+          return;
+        }
         const last = raw.trim().split("\n").pop() ?? "0";
         const n = Number.parseFloat(last);
-        resolve({ reward: Number.isFinite(n) ? n : 0, raw });
+        if (!Number.isFinite(n) || n < 0 || n > 1) {
+          reject(new Error(`RoadmapBench scorer returned an invalid reward: ${raw.slice(-4000)}`));
+          return;
+        }
+        resolve({ reward: n, raw });
       },
     );
   });
   let meta: Record<string, unknown> = {};
   try {
     meta = JSON.parse(readFileSync(join(outDir, "reward.json"), "utf8"));
-  } catch {
-    /* reward.json absent → reward stays 0 */
+  } catch (err) {
+    throw new Error(`RoadmapBench scorer did not produce valid reward metadata: ${String(err)}`);
+  }
+  const metadataReward = Number(meta.reward);
+  if (!Number.isFinite(metadataReward) || metadataReward < 0 || metadataReward > 1) {
+    throw new Error(`RoadmapBench scorer metadata has an invalid reward: ${String(meta.reward)}`);
+  }
+  if (Math.abs(metadataReward - reward.reward) > 1e-12) {
+    throw new Error(`RoadmapBench scorer stdout/metadata mismatch: ${reward.reward} != ${metadataReward}`);
   }
   try {
     writeFileSync(

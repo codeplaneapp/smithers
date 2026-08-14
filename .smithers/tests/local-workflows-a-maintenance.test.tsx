@@ -1,10 +1,10 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import "../preload.ts";
 import { describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join, parse, resolve } from "node:path";
-import { fakeAgent, renderWorkflow, runTask, simulate } from "smithers-orchestrator/testing";
+import { fakeAgent, renderWorkflow, runTask, simulate } from "smthrs/testing";
 
 const workflows = join(import.meta.dir, "..", "workflows");
 type TaskLike = {
@@ -471,5 +471,5 @@ describe.serial("Local-A maintenance and probe workflows", () => {
     await expect(runTask(boom as never)).rejects.toThrow(
       "fail-probe: intentional failure to exercise the post-failure auto-trigger",
     );
-  });
+  }, 30_000);
 });

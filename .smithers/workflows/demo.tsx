@@ -1,6 +1,6 @@
 // smithers-source: authored
 // smithers-display-name: Slideshow Demo
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 
 /**
  * A keyboard-driven Smithers slide deck for a 5–15 minute screenshare.
@@ -28,7 +28,7 @@
  *   ./.smithers/scripts/run-demo.sh --voice Daniel
  */
 
-import { createSmithers } from "smithers-orchestrator";
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 
 const inputSchema = z.object({
@@ -976,7 +976,7 @@ export function Optimizer({
     render: () => {
       printCode(
         `import { llmJudge, faithfulness, relevancy, schemaAdherence } from
-  "smithers-orchestrator/scorers";
+  "smthrs/scorers";
 
 <Task
   id="answer"
@@ -1008,7 +1008,7 @@ export function Optimizer({
       "On any task you can set memory dot recall to auto-inject the top K most relevant past facts into the prompt.",
     render: () => {
       printCode(
-        `import { createMemoryStore } from "smithers-orchestrator/memory";
+        `import { createMemoryStore } from "smthrs/memory";
 const ns = { kind: "workflow", id: "code-review" };
 
 <Task
@@ -1323,7 +1323,7 @@ store.setFact(ns, "code-style", { tabs: 2, semi: true }, 30 * 24 * 3600_000);`,
 // .smithers/workflows/kanban.frontend/
 //   index.html · assets/ · manifest.json   ← React app, served by smithers
 
-bunx smithers-orchestrator up workflow.tsx \\
+bunx smthrs up workflow.tsx \\
   --serve --port 7331 \\
   --auth-token "$SMITHERS_API_KEY" \\
   --metrics
@@ -1347,7 +1347,7 @@ GET  /metrics                       # Prometheus`,
       "Same substrate. Different authoring surface. You can mix both in one workflow.",
     render: () => {
       printCode(
-        `import { Smithers } from "smithers-orchestrator";
+        `import { Smithers } from "smthrs";
 import { Effect, Schema } from "effect";
 
 const G = Smithers.workflow({
@@ -1399,7 +1399,7 @@ const analyze = G.step("analyze", {
           `   ${C.cyan}ralph-loop${C.reset}          ${C.dim}keep going until done${C.reset}`,
           "",
           `   ${C.dim}101 files in examples/. Read one, copy it, edit it.${C.reset}`,
-          `   ${C.green}bunx smithers-orchestrator init${C.reset}${C.dim}    ← scaffolds seeded workflows into your repo${C.reset}`,
+          `   ${C.green}bunx smthrs init${C.reset}${C.dim}    ← scaffolds seeded workflows into your repo${C.reset}`,
           "",
         ],
         C.cyan,
@@ -1440,7 +1440,7 @@ const analyze = G.step("analyze", {
 
   {
     title: "THREE LAYERS",
-    subtitle: "smithers-orchestrator. The forge. The GUI.",
+    subtitle: "smthrs. The forge. The GUI.",
     narration:
       "Smithers is three things. " +
       "The orchestrator — what you just watched — shipped today on N P M. " +
@@ -1451,9 +1451,9 @@ const analyze = G.step("analyze", {
         "Smithers, three layers",
         [
           "",
-          `   ${C.cyan}1${C.reset} ${C.bold}smithers-orchestrator${C.reset}   ${C.dim}shipped today · OSS · npm${C.reset}`,
+          `   ${C.cyan}1${C.reset} ${C.bold}smthrs${C.reset}   ${C.dim}shipped today · OSS · npm${C.reset}`,
           `       the durable JSX workflow runtime`,
-          `       ${C.green}bunx smithers-orchestrator init${C.reset}`,
+          `       ${C.green}bunx smthrs init${C.reset}`,
           "",
           `   ${C.cyan}2${C.reset} ${C.bold}Smithers (the forge)${C.reset}      ${C.dim}AGPL · in build · ~78% of MVP${C.reset}`,
           `       jj-native code host · landing requests · agent runtime`,
@@ -1472,10 +1472,10 @@ const analyze = G.step("analyze", {
   {
     title: "READY TO TRY?",
     subtitle: "",
-    narration: "Try it. B U N X smithers-orchestrator init. Thanks for watching.",
+    narration: "Try it. B U N X smthrs init. Thanks for watching.",
     render: () => {
       write("\n\n\n");
-      write(`        ${C.bold}${C.green}bunx smithers-orchestrator init${C.reset}\n`);
+      write(`        ${C.bold}${C.green}bunx smthrs init${C.reset}\n`);
       write(`        ${C.dim}scaffolds .smithers/ in any project${C.reset}\n\n\n`);
       write(`        ${C.bold}smithers.sh${C.reset}\n`);
       write(`        ${C.dim}docs · llms-full.txt · GUI download${C.reset}\n\n\n`);

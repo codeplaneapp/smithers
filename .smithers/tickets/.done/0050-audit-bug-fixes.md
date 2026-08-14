@@ -32,7 +32,7 @@ Each item below is still open in current `main`. Text is the original audit find
   - _remaining:_ sideEffects:false still declared while reconciler.js has top-level side effects.
 - [x] **P1** Deep subpath imports resolve types to index.d.ts and break for strict TS consumers (TS2305/TS2459) — `packages/sandbox/package.json:13-17 (exports "./*" types -> ./src/index.d.ts); packages/sandbox/src/sandboxPath.js; packages/sandbox/src/effect/sandbox-entity.js`
   - _remaining:_ Deep subpath types still all route to index.d.ts; strict TS consumers (TS2305/TS2459) still break.
-- [x] **P2** Type-only subpath @smithers-orchestrator/sandbox/SandboxHandle also breaks external strict TS consumers (extends finding #1) — `packages/sandbox/src/SandboxHandle.ts; packages/sandbox/package.json:13-17; e2e/harness/stallSandbox.ts:2`
+- [x] **P2** Type-only subpath @smthrs/sandbox/SandboxHandle also breaks external strict TS consumers (extends finding #1) — `packages/sandbox/src/SandboxHandle.ts; packages/sandbox/package.json:13-17; e2e/harness/stallSandbox.ts:2`
   - _remaining:_ Type-only subpath resolution still broken (same root cause as #40).
 - [x] **P2** WorkflowSessionLive builds a single shared session — a latent correctness bug if ever consumed — ``
   - _remaining:_ Still a single shared session per layer build (Layer.sync memoizes one instance), not per-consumer. Latent — unconsumed.

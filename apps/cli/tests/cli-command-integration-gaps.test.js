@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { buildHumanRequestId } from "@smithers-orchestrator/engine/human-requests";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { buildHumanRequestId } from "@smthrs/engine/human-requests";
 import { createTempRepo, pinSqliteBackend, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
 
 const COMMAND_TIMEOUT_MS = 120_000;
@@ -41,7 +41,7 @@ async function insertRun(adapter, runId, overrides = {}) {
 }
 
 /**
- * @param {Partial<import("@smithers-orchestrator/db/adapter").HumanRequestRow>} overrides
+ * @param {Partial<import("@smthrs/db/adapter").HumanRequestRow>} overrides
  */
 function humanRequestRow(overrides) {
   const now = Date.now();
@@ -403,7 +403,8 @@ describe("CLI pause integration gaps", () => {
         timeoutMs: COMMAND_TIMEOUT_MS,
       });
 
-      expect(result.exitCode).toBe(2);
+      // A successful park exits 0 (ratified: pause exit 0, was 2/cancelled).
+      expect(result.exitCode).toBe(0);
       expect(result.json).toMatchObject({ runId: "pause-live", status: "pause-requested" });
       const run = await adapter.getRun("pause-live");
       expect(run?.status).toBe("running");

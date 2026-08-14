@@ -5,7 +5,7 @@
  *
  * REAL product path (no-mocks):
  *   - Build a real in-memory DB via `ensureSmithersTables` and drive it through
- *     the real `@smithers-orchestrator/db/adapter` `SmithersDb`.
+ *     the real `@smthrs/db/adapter` `SmithersDb`.
  *   - Cron rows go through the REAL `adapter.upsertCron` / `adapter.listCrons` /
  *     `adapter.updateCronRunTime`; run rows through the REAL `adapter.insertRun`
  *     (whose INSERT-OR-IGNORE is exactly the dedupe-by-run_id mechanism this case
@@ -23,8 +23,8 @@
 import { describe, expect, onTestFinished, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 
 const WORKFLOW_PATH = "workflows/case18.tsx";
 const WORKFLOW_NAME = "case18-workflow";

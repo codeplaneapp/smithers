@@ -2,8 +2,8 @@
 // smithers-source: one-off (ephemeral) — fix the 2026-07-14 triaged open issues in isolated
 // worktrees, integrate reviewed candidate commits serially, verify the exact integration head,
 // require human approval, then publish that exact SHA with a non-force main refspec.
-/** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, createSmithers, UI } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { ClaudeCodeAgent, createSmithers, UI } from "smthrs";
 import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -83,8 +83,8 @@ const WORK_ITEMS: WorkItem[] = [
     issues: [1333],
     title: "Gateway runs die at render: dual React instances when the workflow pack vendors its own react",
     hint: [
-      "Engine + react-reconciler resolve from one install (e.g. bunx cache) while the pack's workflows resolve react/@smithers-orchestrator/components from the pack's own node_modules → dispatcher.useContext null.",
-      "Preferred fix per the issue: engine-owned module unification — before importing a workflow module, install a Bun.plugin onResolve alias so react, react/jsx-runtime, react/jsx-dev-runtime, smithers-orchestrator and @smithers-orchestrator/components resolve to the ENGINE's instances. Additionally consider making react a peerDependency of @smithers-orchestrator/components so pack installs stop vendoring a second copy.",
+      "Engine + react-reconciler resolve from one install (e.g. bunx cache) while the pack's workflows resolve react/@smthrs/components from the pack's own node_modules → dispatcher.useContext null.",
+      "Preferred fix per the issue: engine-owned module unification — before importing a workflow module, install a Bun.plugin onResolve alias so react, react/jsx-runtime, react/jsx-dev-runtime, smthrs and @smthrs/components resolve to the ENGINE's instances. Additionally consider making react a peerDependency of @smthrs/components so pack installs stop vendoring a second copy.",
       "Add a regression test: render a workflow from a pack directory that has its own node_modules/react while the engine runs from a different root.",
     ].join("\n"),
   },

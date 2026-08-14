@@ -2,8 +2,8 @@
 import { execFileSync, spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { loadOutputs } from "@smithers-orchestrator/db/snapshot";
-import { runWorkflow } from "@smithers-orchestrator/engine";
+import { loadOutputs } from "@smthrs/db/snapshot";
+import { runWorkflow } from "@smthrs/engine";
 import { Effect } from "effect";
 import { buildPullRequestReview } from "../github/buildPullRequestReview";
 import { listPullRequestFiles } from "../github/listPullRequestFiles";

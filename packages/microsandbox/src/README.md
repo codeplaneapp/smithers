@@ -1,9 +1,9 @@
-# @smithers-orchestrator/microsandbox
+# @smthrs/microsandbox
 
 First-class Smithers `SandboxProvider` for local Microsandbox microVMs. The
 package maps the shared `SandboxSession` seam onto the `microsandbox` TypeScript
 SDK. Request/result serialization, egress env, redaction, and result parsing
-remain in `@smithers-orchestrator/sandbox`'s provider kit.
+remain in `@smthrs/sandbox`'s provider kit.
 
 ## Exports
 

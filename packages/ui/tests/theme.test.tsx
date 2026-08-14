@@ -3,6 +3,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { resolveTheme, type ResolvedTheme } from "../src/internal/resolveTheme";
 import { useResolvedTheme } from "../src/internal/useResolvedTheme";
+import { resolvePalette, type ResolvedPalette } from "../src/internal/resolvePalette";
+import { useResolvedPalette } from "../src/internal/useResolvedPalette";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -15,6 +17,37 @@ afterEach(async () => {
   container?.remove();
   container = undefined;
   document.documentElement.removeAttribute("data-theme");
+  document.documentElement.removeAttribute("data-palette");
+});
+
+describe("palette resolution", () => {
+  test("defaults invalid and absent values to Night Owl", () => {
+    expect(resolvePalette({ getAttribute: () => null })).toBe("night-owl");
+    expect(resolvePalette({ getAttribute: () => "unknown" })).toBe("night-owl");
+    expect(resolvePalette({ getAttribute: () => "toString" })).toBe("night-owl");
+    expect(resolvePalette({ getAttribute: () => "__proto__" })).toBe("night-owl");
+    expect(resolvePalette({ getAttribute: () => "gruvbox" })).toBe("gruvbox");
+  });
+
+  test("updates when data-palette changes", async () => {
+    const seen: ResolvedPalette[] = [];
+    function Probe() {
+      const palette = useResolvedPalette();
+      seen.push(palette);
+      return <output data-palette={palette}>{palette}</output>;
+    }
+    document.documentElement.setAttribute("data-palette", "one");
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => root?.render(<Probe />));
+    expect(container.querySelector("output")?.getAttribute("data-palette")).toBe("one");
+    await act(async () => {
+      document.documentElement.setAttribute("data-palette", "solarized");
+      await Promise.resolve();
+    });
+    expect(seen).toContain("solarized");
+  });
 });
 
 describe("resolveTheme", () => {

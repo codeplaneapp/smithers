@@ -2,8 +2,8 @@ import { basename, extname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Effect } from "effect";
 import { z } from "zod";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { findAndOpenDb } from "../find-db.js";
 import { aggregateNodeDetailEffect } from "../node-detail.js";
 import { diagnoseRunEffect } from "../why-diagnosis.js";
@@ -12,26 +12,26 @@ import { WATCH_MIN_INTERVAL_MS } from "../watch.js";
 import { discoverWorkflows, resolveWorkflow } from "../workflows.js";
 import { buildMonitoringGuidance, hasCustomUi, workflowIdFromPath } from "../monitoring-suggestion.js";
 import { mdxPlugin } from "../mdx-plugin.js";
-import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
-import { buildAgentAskRequestRow, waitForHumanAnswer } from "@smithers-orchestrator/engine/human-requests";
+import { approveNode, denyNode } from "@smthrs/engine/approvals";
+import { buildAgentAskRequestRow, waitForHumanAnswer } from "@smthrs/engine/human-requests";
 import { buildAskKindFields, buildAskPromptText, buildAskUniqueToken, resolveAskHumanContext } from "../ask-human.js";
-import { runWorkflow } from "@smithers-orchestrator/engine";
-import { revertToAttempt } from "@smithers-orchestrator/time-travel/revert";
-import { forkRun } from "@smithers-orchestrator/time-travel/fork";
-import { replayFromCheckpoint } from "@smithers-orchestrator/time-travel/replay";
-import { timeTravel } from "@smithers-orchestrator/time-travel/timetravel";
-import { buildTimelineEffect, buildTimelineTreeEffect } from "@smithers-orchestrator/time-travel/timeline";
-import { jumpToFrameRoute } from "@smithers-orchestrator/server/gatewayRoutes/jumpToFrame";
+import { runWorkflow } from "@smthrs/engine";
+import { revertToAttempt } from "@smthrs/time-travel/revert";
+import { forkRun } from "@smthrs/time-travel/fork";
+import { replayFromCheckpoint } from "@smthrs/time-travel/replay";
+import { timeTravel } from "@smthrs/time-travel/timetravel";
+import { buildTimelineEffect, buildTimelineTreeEffect } from "@smthrs/time-travel/timeline";
+import { jumpToFrameRoute } from "@smthrs/server/gatewayRoutes/jumpToFrame";
 import { runPromise } from "../smithersRuntime.js";
 import { pickTargetCheckpoint, runRestoreOnce } from "../restore.js";
 import { listScopedWorkspaceSnapshots } from "../snapshot-scope.js";
-import { SmithersError } from "@smithers-orchestrator/errors";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+import { SmithersError } from "@smthrs/errors";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
 import { subscribeClaudeSessionRun } from "../claude-mirror/subscribeClaudeSessionRun.js";
 import { resolveCliStartedBy } from "../runStartedBy.js";
 /** @typedef {import("./SemanticToolCallResult.ts").SemanticToolCallResult} SemanticToolCallResult */
 /** @typedef {import("./SemanticToolContext.ts").SemanticToolContext} SemanticToolContext */
-/** @typedef {import("@smithers-orchestrator/db/adapter").RunRow} RunRow */
+/** @typedef {import("@smthrs/db/adapter").RunRow} RunRow */
 /**
  * @template T
  * @typedef {(adapter: SmithersDb, dbPath: string) => Promise<T>} WithDbCallback

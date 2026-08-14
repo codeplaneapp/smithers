@@ -1,6 +1,6 @@
 import React from "react";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
 import { Task } from "./Task.js";
 import { Loop } from "./Ralph.js";
 import { Sequence } from "./Sequence.js";

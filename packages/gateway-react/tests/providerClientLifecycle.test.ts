@@ -20,7 +20,7 @@ import {
   SmithersGatewayClient,
   type SmithersDataClient,
   type SmithersGatewayClientOptions,
-} from "@smithers-orchestrator/gateway-client";
+} from "@smthrs/gateway-client";
 import { SmithersGatewayProvider, useSmithersCollections, useSmithersGateway } from "../src/index.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

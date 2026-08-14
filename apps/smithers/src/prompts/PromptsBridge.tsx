@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { useGatewayPrompts } from "@smithers-orchestrator/gateway-react";
-import type { GatewayPromptRow } from "@smithers-orchestrator/gateway-client";
+import { useGatewayPrompts } from "@smthrs/gateway-react";
+import type { GatewayPromptRow } from "@smthrs/gateway-client";
 import { useLocalModeRefetch } from "../sync/useLocalModeRefetch";
 import { useGatewayConnectionStatus } from "../sync/useGatewayConnectionStatus";
 import { OFFLINE_SEED_PROMPTS, type Prompt } from "./promptsSource";

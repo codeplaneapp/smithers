@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -18,7 +18,7 @@ import {
   Task,
   Workflow,
   runWorkflow,
-} from "smithers-orchestrator";
+} from "smthrs";
 import { createTestSmithers } from "./helpers.js";
 
 setDefaultTimeout(30_000);

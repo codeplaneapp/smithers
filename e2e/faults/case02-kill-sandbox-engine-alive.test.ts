@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { computeRunState } from "@smithers-orchestrator/db/runState/computeRunState";
-import { deriveRunState } from "@smithers-orchestrator/db/runState/deriveRunState";
-import { RUN_STATE_HEARTBEAT_STALE_MS } from "@smithers-orchestrator/db/runState/RUN_STATE_HEARTBEAT_STALE_MS";
-import type { SandboxHandle } from "@smithers-orchestrator/sandbox/SandboxHandle";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { computeRunState } from "@smthrs/db/runState/computeRunState";
+import { deriveRunState } from "@smthrs/db/runState/deriveRunState";
+import { RUN_STATE_HEARTBEAT_STALE_MS } from "@smthrs/db/runState/RUN_STATE_HEARTBEAT_STALE_MS";
+import type { SandboxHandle } from "@smthrs/sandbox/SandboxHandle";
 import { stallSandbox } from "../harness/stallSandbox.ts";
 import { corruptHeartbeat } from "../harness/corruptHeartbeat.ts";
 

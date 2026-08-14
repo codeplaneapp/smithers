@@ -9,8 +9,8 @@ export { INTEGRATION_SIGNAL_PREFIX, integrationEventName, integrationReceivedBy,
 export { computeHmacSha256Hex, verifySignature } from './core/verifySignature.js';
 import './core/CursorStoreTypes.js';
 import 'effect';
-import '@smithers-orchestrator/errors/SmithersError';
-import '@smithers-orchestrator/db/adapter';
+import '@smthrs/errors/SmithersError';
+import '@smthrs/db/adapter';
 import './core/EventSourceTypes.js';
 import './core/ExternalEventTypes.js';
 import 'effect/Effect';

@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import React from "react";
 import { Effect } from "effect";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { Task, Workflow, runWorkflow } from "smthrs";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import { jumpToFrame } from "../src/jumpToFrame.js";
@@ -63,6 +64,29 @@ describe("jumpToFrame integration", () => {
         const callsCBefore = callsC;
         const taskBInputBefore = taskBInputs[0];
 
+        const taskCAttempt = (await adapter.listAttempts(firstRun.runId, "task:c", 0))[0];
+        const checkpointJson = JSON.stringify({ codec: "test.rewind", version: 1, payload: { cursor: "late" } });
+        const checkpointRef = { contentHash: createHash("sha256").update(checkpointJson).digest("hex") };
+        await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoint_contents", {
+          contentHash: checkpointRef.contentHash,
+          checkpointJson,
+          sizeBytes: Buffer.byteLength(checkpointJson, "utf8"),
+          createdAtMs: Date.now(),
+        });
+        await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoints", {
+          runId: firstRun.runId,
+          nodeId: "task:c",
+          iteration: 0,
+          attempt: taskCAttempt.attempt,
+          sequence: 0,
+          contentHash: checkpointRef.contentHash,
+          codec: "test.rewind",
+          version: 1,
+          agentId: "test",
+          purpose: "turn",
+          createdAtMs: Date.now(),
+        });
+
         // Clear JJ pointers so the rewind path works without a real sandbox.
         // We're testing the DB/replay layer; VCS revert is exercised by unit tests.
         for (const attempt of await adapter.listAttemptsForRun(firstRun.runId)) {
@@ -89,6 +113,7 @@ describe("jumpToFrame integration", () => {
 
         expect(rewind.ok).toBe(true);
         expect(rewind.newFrameNo).toBe(earliestFrameNo);
+        expect(await adapter.getAgentCheckpoint(checkpointRef.contentHash)).toBeNull();
 
         const resumed = await Effect.runPromise(
           runWorkflow(workflow, {

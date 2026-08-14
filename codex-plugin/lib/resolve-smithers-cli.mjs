@@ -3,7 +3,7 @@
 //
 // Inside the smithers monorepo (this repo, a worktree of it, or any of its
 // subdirectories) every internal script must execute `apps/cli/src/index.js`
-// from the working tree. `bunx smithers-orchestrator` does not do that: bunx
+// from the working tree. `bunx smthrs` does not do that: bunx
 // downloads and runs the published npm tarball, and only lands back on the
 // working tree by accident, via the published bin's `node_modules` delegation
 // — which silently does not fire in a fresh worktree, a slimmed checkout, or
@@ -11,7 +11,7 @@
 // a run execute last week's published build is the failure that mode causes.
 //
 // Outside a checkout there is no source to prefer, so this falls back to
-// `bunx smithers-orchestrator` — the behavior every published plugin user gets.
+// `bunx smthrs` — the behavior every published plugin user gets.
 //
 // Dependency-free (Node built-ins only): this module is copied verbatim into
 // every plugin directory that ships standalone. `scripts/check-local-smithers.mjs`
@@ -77,7 +77,7 @@ export function resolveSmithersCli(from = process.cwd()) {
   if (root) {
     return { command: "bun", args: [join(root, SOURCE_CLI_ENTRY)], source: "workspace", root };
   }
-  return { command: "bunx", args: ["smithers-orchestrator"], source: "published", root: null };
+  return { command: "bunx", args: ["smthrs"], source: "published", root: null };
 }
 
 /**

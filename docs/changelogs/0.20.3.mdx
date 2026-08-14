@@ -11,11 +11,11 @@ example, and `<Loop>` / `<Sequence>` accept a typed `key` prop.
 
 ## CLI
 
-- **`bunx smithers-orchestrator docs`.** Fetches `https://smithers.sh/llms.txt` (the
+- **`bunx smthrs docs`.** Fetches `https://smithers.sh/llms.txt` (the
   concise docs index for LLMs) and writes it to stdout. With `--json`,
   returns `{ url, content }` instead.
 
-- **`bunx smithers-orchestrator docs-full`.** Fetches `https://smithers.sh/llms-full.txt`
+- **`bunx smthrs docs-full`.** Fetches `https://smithers.sh/llms-full.txt`
   (the full ~8k-line docs bundle for LLMs) and writes it to stdout.
   Same `--json` behavior as `docs`.
 
@@ -27,7 +27,7 @@ example, and `<Loop>` / `<Sequence>` accept a typed `key` prop.
 ## Components
 
 - **`<Loop>` and `<Sequence>` accept `key`.** `LoopProps` and
-  `SequenceProps` in `@smithers-orchestrator/components` now declare
+  `SequenceProps` in `@smthrs/components` now declare
   `key?: string` explicitly, so TypeScript users can pass a stable
   `key` when iterating without a TS error. Matches the React contract
   the renderer already honored at runtime.

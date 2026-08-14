@@ -4,8 +4,8 @@
 // smithers-description: Agent-assisted Smithers upgrade: fetch changelogs since the installed version, let a cheap agent run the upgrade, and escalate to a smart agent only when needed.
 // smithers-tags: system, upgrade, ops
 // smithers-system: true
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 
@@ -68,9 +68,7 @@ const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({
 });
 
 const cliModule = (name: string) =>
-  process.env.SMITHERS_CLI_SRC_DIR
-    ? `${process.env.SMITHERS_CLI_SRC_DIR}/${name}.js`
-    : `@smithers-orchestrator/cli/${name}`;
+  process.env.SMITHERS_CLI_SRC_DIR ? `${process.env.SMITHERS_CLI_SRC_DIR}/${name}.js` : `@smthrs/cli/${name}`;
 
 function boolInput(value: unknown): boolean {
   return value === true || value === "true" || value === "1";
@@ -156,7 +154,7 @@ Rules:
 - If updateAvailable is false, do not mutate anything. Return success=true with a concise summary.
 - If dryRun is true, do not mutate anything. Return success=true and list the command you would run.
 - If a runnable command is provided, run that exact command first.
-- After running an upgrade command, verify with \`smithers --version\` when available, or \`bunx smithers-orchestrator --version\` as a fallback.
+- After running an upgrade command, verify with \`smithers --version\` when available, or \`bunx smthrs --version\` as a fallback.
 - Do not edit repository source files, workflow files, or user configuration. This workflow upgrades the installed CLI/package/plugin only.
 - If the install plan is not runnable, a command fails, credentials/permissions are missing, the package manager asks an interactive question, or you are unsure, STOP and return needsHelp with a specific reason. Do not guess.
 - Do not try to delegate yourself. Returning needsHelp triggers the smart-agent escalation step.

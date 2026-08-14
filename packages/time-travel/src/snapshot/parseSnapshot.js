@@ -1,5 +1,5 @@
 import { parseSnapshotJson } from "./parseSnapshotJson.js";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 /** @typedef {import("../ParsedSnapshot.ts").ParsedSnapshot} ParsedSnapshot */
 /** @typedef {import("./Snapshot.ts").Snapshot} Snapshot */
 
@@ -79,11 +79,15 @@ export function parseSnapshot(snapshot) {
     }
     ralph[r.ralphId] = r;
   }
+  const outputs = parseSnapshotRecord(snapshot.outputsJson, "outputsJson", ctx);
+  delete outputs.__smithersAgentCheckpointProvenance;
+  delete outputs.__smithersAgentCheckpointHorizons;
+  delete outputs.__smithersSignalProvenanceHorizon;
   return {
     runId: snapshot.runId,
     frameNo: snapshot.frameNo,
     nodes,
-    outputs: parseSnapshotRecord(snapshot.outputsJson, "outputsJson", ctx),
+    outputs,
     ralph,
     input: parseSnapshotRecord(snapshot.inputJson, "inputJson", ctx),
     vcsPointer: snapshot.vcsPointer,

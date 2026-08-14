@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
-import { assertMaxBytes } from "@smithers-orchestrator/db/input-bounds";
-import { SmithersError } from "@smithers-orchestrator/errors";
+import { assertMaxBytes } from "@smthrs/db/input-bounds";
+import { SmithersError } from "@smthrs/errors";
 
 export const CLI_JSON_ARGUMENT_MAX_BYTES = 1024 * 1024;
 

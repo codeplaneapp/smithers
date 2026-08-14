@@ -1,9 +1,9 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import React from "react";
-import { createSmithers, mdxPlugin, Sequence, Task } from "smithers-orchestrator";
+import { createSmithers, mdxPlugin, Sequence, Task } from "smthrs";
 import { z } from "zod/v4";
-import { fakeAgent, simulate } from "smithers-orchestrator/testing";
+import { fakeAgent, simulate } from "smthrs/testing";
 
 mdxPlugin();
 const { ValidationLoop, implementOutputSchema, validateOutputSchema } =

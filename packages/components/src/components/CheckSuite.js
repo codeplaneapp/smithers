@@ -4,8 +4,8 @@
 
 import React from "react";
 import { spawn } from "node:child_process";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
-import { getTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
+import { getTaskRuntime } from "@smthrs/driver/task-runtime";
 import { Sequence } from "./Sequence.js";
 import { Parallel } from "./Parallel.js";
 import { Task } from "./Task.js";

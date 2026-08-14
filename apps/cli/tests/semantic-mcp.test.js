@@ -8,9 +8,9 @@ import { Effect } from "effect";
 import { Cli, z } from "incur";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { captureSnapshot } from "@smithers-orchestrator/time-travel/snapshot";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { captureSnapshot } from "@smthrs/time-travel/snapshot";
 import { parseMcpSurfaceArgv } from "../src/argv-utils.js";
 import { registerRawToolsOnMcpServer, runMcpModeIfRequested } from "../src/mcp/mcp-mode.js";
 import { createSemanticMcpServer, registerSemanticTools } from "../src/mcp/semantic-server.js";
@@ -550,8 +550,8 @@ describe("semantic MCP surface", () => {
     writeFileSync(
       join(cwd, ".smithers", "workflows", "quick.tsx"),
       [
-        "/** @jsxImportSource smithers-orchestrator */",
-        'import { createSmithers, Workflow, Task } from "smithers-orchestrator";',
+        "/** @jsxImportSource smthrs */",
+        'import { createSmithers, Workflow, Task } from "smthrs";',
         'import { z } from "zod";',
         "const { smithers, outputs } = createSmithers({ result: z.object({ value: z.number() }) });",
         "export default smithers(() => (",

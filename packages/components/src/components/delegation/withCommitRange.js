@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-/** @typedef {import("@smithers-orchestrator/agents/AgentLike").AgentLike} AgentLike */
+/** @typedef {import("@smthrs/agents/AgentLike").AgentLike} AgentLike */
 
 const VCS_PROBE_TIMEOUT_MS = 5_000;
 
@@ -75,7 +75,7 @@ export function withCommitRange(agent, probe = captureWorkingCopyCommit) {
       if (prop !== "generate") {
         return Reflect.get(target, prop, receiver);
       }
-      /** @param {import("@smithers-orchestrator/agents/BaseCliAgent/AgentGenerateOptions").AgentGenerateOptions} [args] */
+      /** @param {import("@smthrs/agents/BaseCliAgent/AgentGenerateOptions").AgentGenerateOptions} [args] */
       return async function generate(args) {
         const cwd = typeof args?.rootDir === "string" && args.rootDir.length > 0 ? args.rootDir : process.cwd();
         const before = await probe(cwd).catch(() => null);

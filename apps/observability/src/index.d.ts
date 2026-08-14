@@ -492,6 +492,28 @@ type SmithersEvent$2 = {
     iteration: number;
     timestampMs: number;
 } | {
+    type: "SteerQueued";
+    runId: string;
+    nodeId: string;
+    steerId: string;
+    message: string;
+    author?: string;
+    timestampMs: number;
+} | {
+    type: "SteerConsumed";
+    runId: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    steerId: string;
+    timestampMs: number;
+} | {
+    type: "SteerExpired";
+    runId: string;
+    nodeId: string;
+    steerId: string;
+    timestampMs: number;
+} | {
     type: "ToolCallStarted";
     runId: string;
     nodeId: string;
@@ -1257,7 +1279,7 @@ type CorrelationContext$1 = CorrelationContext$5;
  *
  * @deprecated Prefer the Effect-returning
  * `updateCurrentCorrelationContext` from
- * `@smithers-orchestrator/observability` (the `_coreCorrelation` version),
+ * `@smthrs/observability` (the `_coreCorrelation` version),
  * which does not mutate shared state. This shim will be removed once legacy
  * callers migrate.
  *

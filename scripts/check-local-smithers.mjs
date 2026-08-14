@@ -2,7 +2,7 @@
 // Guard: this repo's own scripts must execute the Smithers *working tree*,
 // never an installed copy.
 //
-// `bunx smithers-orchestrator` downloads and runs the published npm tarball.
+// `bunx smthrs` downloads and runs the published npm tarball.
 // Inside this checkout it usually re-execs back into the working tree via the
 // published bin's delegation, but that is a fallback, not a guarantee: it needs
 // an installed `node_modules`, so a fresh worktree or a slimmed checkout
@@ -10,7 +10,7 @@
 // scripts therefore name the source entry (`apps/cli/src/index.js`) directly,
 // or resolve it through `lib/resolve-smithers-cli.mjs`.
 //
-// User-facing prose still says `bunx smithers-orchestrator`: that is the right
+// User-facing prose still says `bunx smthrs`: that is the right
 // command for someone who has no checkout, and this repo's code is full of it
 // legitimately — agent prompts in the shipped workflow pack, docs assertions,
 // marketing SVGs, eval fixtures. So the scan only looks at positions that
@@ -103,7 +103,7 @@ export function isCommentLine(line) {
  * @param {string} line
  */
 function mentionsPublishedCli(line) {
-  return RUNNERS.some((runner) => line.includes(`${runner} smithers-orchestrator`));
+  return RUNNERS.some((runner) => line.includes(`${runner} smthrs`));
 }
 
 /**

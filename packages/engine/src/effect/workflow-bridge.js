@@ -7,7 +7,7 @@
  * `activity-bridge.js`). Further engine boundaries are modeled as Workflows over time.
  */
 import { Effect } from "effect";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
 import { makeWorkerTask } from "./entity-worker.js";
 import { executeTaskActivity, makeTaskBridgeKey, RetriableTaskFailure } from "./activity-bridge.js";
 import { parseAttemptMetaJson } from "./bridge-utils.js";
@@ -17,7 +17,7 @@ import { dispatchWorkerTask } from "./single-runner.js";
 /** @typedef {import("../HijackState.ts").HijackState} HijackState */
 /** @typedef {import("./LegacyExecuteTaskFn.ts").LegacyExecuteTaskFn} LegacyExecuteTaskFn */
 /** @typedef {import("./TaskBridgeToolConfig.ts").TaskBridgeToolConfig} TaskBridgeToolConfig */
-/** @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
+/** @typedef {import("@smthrs/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
 /** @typedef {import("./TaskActivityContext.ts").TaskActivityContext} _TaskActivityContext */
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<Record<string, unknown>>} _BunSQLiteDatabase */
 /** @typedef {import("drizzle-orm/sqlite-core").SQLiteTable} SQLiteTable */
@@ -58,12 +58,9 @@ export {
   SandboxEntityExecutor,
   makeSandboxEntityId,
   makeSandboxTransportServiceEffect,
-} from "@smithers-orchestrator/sandbox/effect/sandbox-entity";
+} from "@smthrs/sandbox/effect/sandbox-entity";
 export { CodeplaneSandboxExecutorLive, DockerSandboxExecutorLive, SandboxHttpRunner } from "./http-runner.js";
-export {
-  BubblewrapSandboxExecutorLive,
-  SandboxSocketRunner,
-} from "@smithers-orchestrator/sandbox/effect/socket-runner";
+export { BubblewrapSandboxExecutorLive, SandboxSocketRunner } from "@smthrs/sandbox/effect/socket-runner";
 export {
   isTaskResultFailure,
   makeWorkerTask,
@@ -117,6 +114,9 @@ function isRetryableBridgeTaskFailure(attempt) {
   const meta = parseAttemptMetaJson(attempt?.metaJson);
   if (meta?.failureRetryable === false) {
     return false;
+  }
+  if (meta?.failureRetryable === true) {
+    return true;
   }
   const errorCode = parseAttemptErrorCode(attempt?.errorJson);
   if (errorCode === "AGENT_CONFIG_INVALID") {
@@ -458,7 +458,7 @@ export const executeTaskBridge = (
  * @param {HijackState} [hijackState]
  * @param {LegacyExecuteTaskFn} [legacyExecuteTaskFn]
  * @param {AbortSignal} [pauseSignal]
- * @returns {Effect.Effect<void, import("@smithers-orchestrator/errors/SmithersError").SmithersError, never>}
+ * @returns {Effect.Effect<void, import("@smthrs/errors/SmithersError").SmithersError, never>}
  */
 export const executeTaskBridgeEffect = (
   adapter,

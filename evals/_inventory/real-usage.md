@@ -5,7 +5,7 @@ Mined from `~/.claude/projects/*` (Claude Code transcripts) and `~/.codex/` (his
 agent **struggled**.
 
 **Richest real consumers** (usage, not framework dev):
-- `vibecode-room` — custom "smithering" orchestration layer on top of smithers-orchestrator (122k+ mentions, 1400+ struggle hits). The single best source.
+- `vibecode-room` — custom "smithering" orchestration layer on top of smthrs (122k+ mentions, 1400+ struggle hits). The single best source.
 - `tevm-monorepo` — multi-agent bug-hunt durable workflows over multiple repos (46k mentions).
 - `fable-smithers` — authoring the `fable-build`/`smithering` meta-workflow and seeding it into the init pack.
 - Codex sessions — `ticket-kanban`, `studio-parity-swarm`, `zevm-rebuild`, `open-code-review` durable runs + literal CLI history.

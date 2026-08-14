@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { runWithToolContext } from "@smithers-orchestrator/tool-context";
+import { runWithToolContext } from "@smthrs/tool-context";
 import { defineTool } from "../src/tools/defineTool.js";
 
 describe("defineTool durability snapshot (Tier 1 in-process wrap)", () => {

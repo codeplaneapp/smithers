@@ -1,4 +1,4 @@
-import { runNodeKey, type GatewayRunNode, type GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
+import { runNodeKey, type GatewayRunNode, type GatewayEventFrame } from "@smthrs/gateway-client";
 import type { SelectOption } from "@opentui/core";
 import { unwrapEvent } from "./eventFrame.ts";
 

@@ -32,7 +32,7 @@ describe("published integration delivery claim types", () => {
     writeFileSync(
       join(tmp, "consumer.ts"),
       [
-        `import type { IntegrationDeliveryClaim, SmithersDb } from "@smithers-orchestrator/db/adapter";`,
+        `import type { IntegrationDeliveryClaim, SmithersDb } from "@smthrs/db/adapter";`,
         `declare const db: SmithersDb;`,
         `const row = { sourceId: "telegram", dedupeKey: "update:1", eventName: "integration:telegram:message", receivedAtMs: 1 };`,
         `async function lifecycle(): Promise<IntegrationDeliveryClaim> {`,

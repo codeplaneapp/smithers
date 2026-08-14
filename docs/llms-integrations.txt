@@ -1,6 +1,6 @@
 # Smithers Integrations
 
-> Smithers integrations: agent runtimes (Claude Code, Codex, Cursor, Gemini, Pi), tool surfaces, ecosystem partners.
+> Smithers integrations: agent runtimes (Claude Code, Codex, Cursor, Gemini, Nanocodex, Pi), tool surfaces, ecosystem partners.
 
 ---
 
@@ -8,7 +8,7 @@
 
 > Three patterns for connecting Smithers to external services.
 
-Smithers ships first-party event sources for GitHub, Linear, and Telegram (`@smithers-orchestrator/integrations`) that turn provider webhooks into durable workflow signals. For other services (Notion, Slack, etc.), your app owns the integration: pick tools on an SDK agent, skills/plugins/MCP on a CLI agent, or an external CLI run inside a task. If the service already exposes an MCP server and you're using an SDK agent, [MCP Toolset](/integrations/mcp-toolset) turns that server into AI SDK tools.
+Smithers ships first-party event sources for GitHub, Linear, and Telegram (`@smthrs/integrations`) that turn provider webhooks into durable workflow signals. For other services (Notion, Slack, etc.), your app owns the integration: pick tools on an SDK agent, skills/plugins/MCP on a CLI agent, or an external CLI run inside a task. If the service already exposes an MCP server and you're using an SDK agent, [MCP Toolset](/integrations/mcp-toolset) turns that server into AI SDK tools.
 
 ## Pattern 1: Pass tools to an SDK agent
 
@@ -36,7 +36,7 @@ const opsAgent = new Agent({
 Use this when your CLI agent already supports external integrations and Smithers should only orchestrate the task.
 
 ```ts
-import { PiAgent } from "smithers-orchestrator";
+import { PiAgent } from "smthrs";
 
 const pi = new PiAgent({
   provider: "openai",
@@ -95,7 +95,7 @@ CLI-backed agent classes wrap external AI command-line tools and implement the [
 ## Quick Start
 
 ```tsx
-import { CodexAgent, Task, Workflow, createSmithers } from "smithers-orchestrator";
+import { CodexAgent, Task, Workflow, createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { smithers, outputs } = createSmithers({
@@ -121,14 +121,14 @@ export default smithers((ctx) => (
 ## Available agents
 
 ```toon
-agents[15]{class,cli,modelDefault,hijack,notes}:
+agents[16]{class,cli,modelDefault,hijack,notes}:
   CodexAgent,codex,CLI default,native thread id,OpenAI Codex CLI (codex exec via stdin + JSON stream)
   ClaudeCodeAgent,claude,CLI default,native session id,Anthropic Claude Code CLI
   CursorAgent,cursor-agent,CLI default,not yet,Cursor CLI (cursor-agent --print stream-json)
   AntigravityAgent,agy,CLI default,native session id,Google Antigravity CLI
   GeminiAgent,gemini,CLI default,legacy session id,Deprecated legacy Gemini CLI wrapper
   PiAgent,pi,CLI default,native session id,Pi CLI (text/json/rpc modes + extension UI hooks)
-  OmpAgent,omp,CLI default,not yet,Oh My Pi OMP harness (text/json/rpc modes)
+  OmpAgent,omp,CLI default,native session id,Oh My Pi OMP harness (text/json/rpc modes)
   KimiAgent,kimi,CLI default,native session id,Moonshot Kimi CLI (auto-isolates KIMI_SHARE_DIR)
   ForgeAgent,forge,CLI default,conversation id,Forge CLI (300+ models)
   HermesCliAgent,hermes,CLI default,session id,Nous Research Hermes Agent CLI (hermes -z headless)
@@ -137,9 +137,10 @@ agents[15]{class,cli,modelDefault,hijack,notes}:
   OpenCodeAgent,opencode,CLI default,not yet,OpenCode CLI (opencode run --format json)
   OpenClawAgent,openclaw,CLI default,session id,OpenClaw CLI (openclaw agent --json)
   PoolAgent,pool,CLI default,not yet,Poolside Pool CLI (ACP + NDJSON stream)
+  NanocodexAgent,smithers-nanocodex,gpt-5.6-sol (default; terra/luna),checkpoint resume,Nanocodex bridge (Linux x64 / macOS arm64)
 ```
 
-CLI binaries must be on `PATH`: `codex`, `cursor-agent`, `claude`, `agy`, `gemini`, `pi`, `omp`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`, `pool`.
+CLI binaries must be on `PATH`: `codex`, `cursor-agent`, `claude`, `agy`, `gemini`, `pi`, `omp`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`, `pool`, `smithers-nanocodex`.
 
 `HermesCliAgent` drives the Hermes *agent* CLI. It is distinct from `HermesAgent`,
 which talks to the Hermes *model* over an OpenAI-compatible HTTP API. Use
@@ -153,7 +154,7 @@ continue its active session.
 
 ## Default routing: Claude builds and gates, Codex checks
 
-When `bunx smithers-orchestrator init` detects usable Codex authentication,
+When `bunx smthrs init` detects usable Codex authentication,
 its generated implementation pool starts with Claude Opus 5, the checking
 pools start with Codex workers using exact model pins, and the orchestration
 seats run on Claude:
@@ -182,7 +183,7 @@ See [SOTA role defaults](/reference/sota-models#role-defaults).
 `OmpAgent` runs the installed OMP v17.0.5 harness in headless text, JSON print, or RPC mode.
 
 ```ts
-import { OmpAgent } from "smithers-orchestrator";
+import { OmpAgent } from "smthrs";
 
 const omp = new OmpAgent({
   provider: "openai",
@@ -221,7 +222,7 @@ JSON print mode emits a session header followed by agent-session events such as 
 `CodexAgent` is the Smithers wrapper for OpenAI's `codex` CLI. It runs `codex exec` in non-interactive mode, sends the task prompt over stdin, forces `--json` so Smithers can stream structured progress, and captures the final assistant message via `--output-last-message`.
 
 ```tsx
-import { CodexAgent, Task, Workflow, createSmithers } from "smithers-orchestrator";
+import { CodexAgent, Task, Workflow, createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { smithers, outputs } = createSmithers({
@@ -252,7 +253,7 @@ For ChatGPT-account Codex auth, use an exact Codex model id such as
 
 - Subscription login: run `codex login` once. For isolated accounts, pass `configDir`; Smithers sets `CODEX_HOME` for that invocation.
 - `apiKey`: Smithers sets `OPENAI_API_KEY` on the spawned process, but Codex CLI >= 0.144 ignores that variable for auth/billing selection when subscription login is present. The option is therefore effectively inert on current CLIs; the subscription login wins.
-- Account registry: `bunx smithers-orchestrator agents add --provider codex ...` registers a subscription config directory, while `--provider openai-api` registers API-key billing for Codex-compatible providers.
+- Account registry: `bunx smthrs agents add --provider codex ...` registers a subscription config directory, while `--provider openai-api` registers API-key billing for Codex-compatible providers.
 
 ### Structured output
 
@@ -274,8 +275,12 @@ forces `--output-format stream-json` so Smithers can stream structured progress.
   it unsets an inherited `ANTHROPIC_API_KEY`.
 - Subscription login: the `claude` CLI stores credentials per config directory.
   To set up an isolated subscription, run `CLAUDE_CONFIG_DIR=<dir> claude` once
-  and complete `/login` interactively. The credentials land at
-  `<dir>/.credentials.json`.
+  and complete `/login` interactively, or let Smithers drive it:
+  `bunx smthrs agents add --provider claude-code --label <name> --tmux`
+  launches the CLI in a detached tmux session and registers the account when
+  the browser login completes. Credentials land at `<dir>/.credentials.json`, or
+  on macOS in a per-config-dir Keychain item
+  (`Claude Code-credentials-<first 8 hex of sha256(configDir)>`).
 - Pinning a subscription: pass `configDir` to use that directory's credentials.
   Smithers sets `CLAUDE_CONFIG_DIR=<configDir>` for that invocation, so you can
   run several subscriptions side by side. Omit it to use the default `~/.claude/`.
@@ -284,7 +289,7 @@ forces `--output-format stream-json` so Smithers can stream structured progress.
   `ANTHROPIC_API_KEY` to the spawned `claude` process.
 
 ```ts
-import { ClaudeCodeAgent } from "smithers-orchestrator";
+import { ClaudeCodeAgent } from "smthrs";
 
 // Subscription billing, pinned to an isolated login dir (no API key):
 const claude = new ClaudeCodeAgent({
@@ -324,7 +329,7 @@ validation. Setting `outputFormat: "json"` and `tools: ""` keeps the run a singl
 quiet completion with no tool use.
 
 ```ts
-import { ClaudeCodeAgent } from "smithers-orchestrator";
+import { ClaudeCodeAgent } from "smthrs";
 import { z } from "zod";
 
 const schema = z.object({
@@ -363,7 +368,7 @@ matching the schema. No API key is needed; it bills your ChatGPT subscription
 via `~/.codex/auth.json` (or `CODEX_HOME` when `configDir` is set).
 
 ```ts
-import { CodexAgent } from "smithers-orchestrator";
+import { CodexAgent } from "smthrs";
 import { z } from "zod";
 
 const schema = z.object({
@@ -436,7 +441,7 @@ await agent.generate({
 `ClaudeCodeAgent` extends the base with Claude Code-specific session and permission flags. Key additions: `permissionMode`, `sessionId`, `mcpConfig`, `resume`.
 
 ```ts
-import { ClaudeCodeAgent } from "smithers-orchestrator";
+import { ClaudeCodeAgent } from "smthrs";
 new ClaudeCodeAgent({
   permissionMode?: "acceptEdits" | "bypassPermissions" | "default" | "delegate" | "dontAsk" | "plan";
   allowedTools?: string[]; disallowedTools?: string[]; disableSlashCommands?: boolean;
@@ -495,7 +500,7 @@ const agent = new ClaudeCodeAgent({
 `CodexAgent` extends the base with OpenAI Codex-specific flags. Key additions: `sandbox`, `config`, `outputSchema`.
 
 ```ts
-import { CodexAgent } from "smithers-orchestrator";
+import { CodexAgent } from "smthrs";
 new CodexAgent({
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
   fullAuto?: boolean; dangerouslyBypassApprovalsAndSandbox?: boolean;
@@ -512,7 +517,7 @@ new CodexAgent({
 `CursorAgent` wraps Cursor's `cursor-agent` CLI in headless print mode. Key additions: `apiKey`, `mode`, `force`, `sandbox`, `workspace`, `pluginDir`, `resume`, `continueSession`, and `worktree`.
 
 ```ts
-import { CursorAgent } from "smithers-orchestrator";
+import { CursorAgent } from "smthrs";
 new CursorAgent({
   apiKey?: string; header?: string[];
   model?: string; mode?: "plan" | "ask"; plan?: boolean;
@@ -532,7 +537,7 @@ login state.
 `AntigravityAgent` wraps the Google `agy` CLI. Key additions: `allowedMcpServerNames`, `geminiDir`, `conversation`, `continue`, and `resume`.
 
 ```ts
-import { AntigravityAgent } from "smithers-orchestrator";
+import { AntigravityAgent } from "smthrs";
 new AntigravityAgent({
   model?: string; sandbox?: boolean;
   yolo?: boolean; dangerouslySkipPermissions?: boolean;
@@ -569,7 +574,7 @@ outside workflow launch through `agy plugin`.
 `GeminiAgent` is the deprecated legacy wrapper for the older `gemini` CLI. Prefer `AntigravityAgent` for new Google CLI integrations, but existing workflows can still use `GeminiAgent`.
 
 ```ts
-import { GeminiAgent } from "smithers-orchestrator";
+import { GeminiAgent } from "smthrs";
 new GeminiAgent({
   debug?: boolean; model?: string; sandbox?: boolean; yolo?: boolean;
   approvalMode?: "default" | "auto_edit" | "yolo" | "plan";
@@ -586,7 +591,7 @@ new GeminiAgent({
 `PiAgent` wraps the Pi CLI and adds extension UI hook support. Key additions: `provider`, `model`, `mode`, `onExtensionUiRequest`, `extension`, `thinking`.
 
 ```ts
-import { PiAgent, type PiExtensionUiRequest, type PiExtensionUiResponse } from "smithers-orchestrator";
+import { PiAgent, type PiExtensionUiRequest, type PiExtensionUiResponse } from "smthrs";
 new PiAgent({
   provider?: string; model?: string; apiKey?: string; appendSystemPrompt?: string; mode?: "text" | "json" | "rpc";
   print?: boolean; continue?: boolean; resume?: boolean; session?: string;
@@ -604,7 +609,7 @@ new PiAgent({
 `KimiAgent` wraps the Moonshot Kimi CLI with automatic session isolation. Key additions: `thinking`, `agent`, `maxRalphIterations`.
 
 ```ts
-import { KimiAgent } from "smithers-orchestrator";
+import { KimiAgent } from "smthrs";
 new KimiAgent({
   thinking?: boolean; outputFormat?: "text" | "stream-json";
   finalMessageOnly?: boolean; quiet?: boolean;
@@ -625,7 +630,7 @@ the `configDir` name just keeps the option uniform across agents.
 `ForgeAgent` wraps the Forge CLI and supports 300+ models via provider/model strings. Key additions: `conversationId`, `provider`, `workflow`.
 
 ```ts
-import { ForgeAgent } from "smithers-orchestrator";
+import { ForgeAgent } from "smthrs";
 new ForgeAgent({
   directory?: string; provider?: string; agent?: string;
   conversationId?: string; sandbox?: string; restricted?: boolean;
@@ -639,7 +644,7 @@ Key additions: `provider`, `continueSession`. A per-call `resumeSession` emits
 `-r <session>`; a configured `continueSession` emits `-c [name]`.
 
 ```ts
-import { HermesCliAgent } from "smithers-orchestrator";
+import { HermesCliAgent } from "smthrs";
 new HermesCliAgent({
   model?: string; provider?: string;
   continueSession?: string | boolean;
@@ -648,7 +653,7 @@ new HermesCliAgent({
 
 Smithers also installs a native Hermes plugin (slash commands, a live-run status
 injector, lifecycle hooks, a bundled skill, and approval buttons) when you run
-`bunx smithers-orchestrator hermes` (an alias for `bunx smithers-orchestrator mcp add --agent hermes`),
+`bunx smthrs hermes` (an alias for `bunx smthrs mcp add --agent hermes`),
 so Hermes can drive Smithers as its durable control plane. See the
 [Hermes & Eliza](/integrations/hermes) page.
 
@@ -659,7 +664,7 @@ so Hermes can drive Smithers as its durable control plane. See the
 OpenClaw conversation when the installed CLI supports sessions.
 
 ```ts
-import { OpenClawAgent } from "smithers-orchestrator";
+import { OpenClawAgent } from "smthrs";
 new OpenClawAgent({
   agent?: string;
   session?: string;
@@ -670,7 +675,7 @@ new OpenClawAgent({
 ```
 
 Smithers also installs a native OpenClaw plugin when you run
-`bunx smithers-orchestrator mcp add --agent openclaw`. The plugin adds Smithers
+`bunx smthrs mcp add --agent openclaw`. The plugin adds Smithers
 workflow tools, a bundled orchestration skill, and eval/optimization tools that
 encourage OpenClaw to turn repeated work into reusable, measured workflows. See
 [OpenClaw](/agents/openclaw).
@@ -678,7 +683,7 @@ encourage OpenClaw to turn repeated work into reusable, measured workflows. See
 `AmpAgent` wraps the Amp CLI in `--execute` headless mode. Key additions: `visibility`, `mcpConfig`, `dangerouslyAllowAll`.
 
 ```ts
-import { AmpAgent } from "smithers-orchestrator";
+import { AmpAgent } from "smthrs";
 new AmpAgent({
   visibility?: "private" | "public" | "workspace" | "group";
   mcpConfig?: string; settingsFile?: string;
@@ -690,7 +695,7 @@ new AmpAgent({
 `VibeAgent` wraps Mistral's `vibe` CLI with streaming JSON output. Key additions: `agent`, `maxTurns`, `maxPrice`, `maxTokens`, `enabledTools`, `sessionId`, `continueSession`.
 
 ```ts
-import { VibeAgent } from "smithers-orchestrator";
+import { VibeAgent } from "smthrs";
 new VibeAgent({
   agent?: string;
   maxTurns?: number; maxPrice?: number; maxTokens?: number;
@@ -702,7 +707,7 @@ new VibeAgent({
 `OpenCodeAgent` wraps the OpenCode CLI via `opencode run --format json`. Key additions: `agentName`, `continueSession`, `sessionId`. Note: native hijack support is not yet shipped.
 
 ```ts
-import { OpenCodeAgent } from "smithers-orchestrator";
+import { OpenCodeAgent } from "smthrs";
 new OpenCodeAgent({
   model: "provider/model",
   agentName: "readonly",
@@ -715,7 +720,7 @@ new OpenCodeAgent({
 named agents, explicit sandbox mode, and manual session continuation.
 
 ```ts
-import { PoolAgent } from "smithers-orchestrator";
+import { PoolAgent } from "smthrs";
 new PoolAgent({
   agentName: "default",
   sandbox: "required",
@@ -725,7 +730,7 @@ new PoolAgent({
 
 ## Hijack handoff
 
-Most built-in CLI agents support `bunx smithers-orchestrator hijack RUN_ID`, which relaunches the agent in its native CLI session for interactive takeover.
+Most built-in CLI agents support `bunx smthrs hijack RUN_ID`, which relaunches the agent in its native CLI session for interactive takeover.
 
 Smithers persists the native session or conversation id on each task event. On hijack, it waits for a safe boundary between blocking tool calls, then reopens the session via the vendor's resume flag:
 
@@ -735,11 +740,12 @@ Smithers persists the native session or conversation id on each task event. On h
 | `CodexAgent` | `codex resume` |
 | `AntigravityAgent` | `agy --conversation` |
 | `PiAgent` | `pi --session` |
+| `OmpAgent` | `omp --resume` |
 | `KimiAgent` | `kimi --session` |
 | `ForgeAgent` | `forge --conversation-id` |
 | `AmpAgent` | `amp threads continue` |
 
-On clean exit the workflow resumes in detached mode. Cursor, Vibe, OpenCode, OpenClaw, and OMP stream capture and headless session continuation are documented above, but native `bunx smithers-orchestrator hijack` support for Cursor, Vibe, OpenCode, OpenClaw, and OMP is not shipped yet. The deprecated `GeminiAgent` has no native hijack launcher; use `AntigravityAgent` (`agy --conversation`) for Google CLI takeover. See [How it works → Durability and resume](/how-it-works#durability--resume).
+On clean exit the workflow resumes in detached mode. Cursor, Vibe, OpenCode, and OpenClaw stream capture and headless session continuation are documented above, but native `bunx smthrs hijack` support for Cursor, Vibe, OpenCode, and OpenClaw is not shipped yet. The deprecated `GeminiAgent` has no native hijack launcher; use `AntigravityAgent` (`agy --conversation`) for Google CLI takeover. See [How it works → Durability and resume](/how-it-works#durability--resume).
 
 ## Notes
 
@@ -767,7 +773,7 @@ import {
   OpenAIAgent,
   createHttpTool,
   tools,
-} from "smithers-orchestrator";
+} from "smthrs";
 import { stepCountIs } from "ai";
 ```
 
@@ -790,8 +796,8 @@ const codex = new OpenAIAgent({
 ```
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { AnthropicAgent, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { AnthropicAgent, createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, Task, smithers, outputs } = createSmithers({
@@ -942,7 +948,7 @@ The tool input accepts `method`, `url`, `headers`, `query`, `body`, optional `au
 [Hermes](https://github.com/NousResearch/hermes-agent) (Nous Research) exposes an OpenAI-compatible HTTP API; `HermesAgent` is a convenience `OpenAIAgent` subclass that points at your Hermes server and disables native structured output by default (a local Hermes server may not honor JSON-schema response formats).
 
 ```ts
-import { HermesAgent } from "smithers-orchestrator";
+import { HermesAgent } from "smthrs";
 
 const hermes = new HermesAgent({
   baseURL: "http://127.0.0.1:5123/v1", // or set HERMES_BASE_URL
@@ -957,10 +963,10 @@ const hermes = new HermesAgent({
 
 ## Eliza
 
-`ElizaAgent` wraps an in-process elizaOS `AgentRuntime` so an Eliza character and its plugins (Slack, Discord, Telegram, model providers) run as a first-class Smithers agent. Unlike the other agents here, it ships in a separate opt-in package owning the `@elizaos/core` dependency: install and import it from `@smithers-orchestrator/agent-eliza`:
+`ElizaAgent` wraps an in-process elizaOS `AgentRuntime` so an Eliza character and its plugins (Slack, Discord, Telegram, model providers) run as a first-class Smithers agent. Unlike the other agents here, it ships in a separate opt-in package owning the `@elizaos/core` dependency: install and import it from `@smthrs/agent-eliza`:
 
 ```ts
-import { ElizaAgent } from "@smithers-orchestrator/agent-eliza";
+import { ElizaAgent } from "@smthrs/agent-eliza";
 
 const eliza = new ElizaAgent({
   character: { name: "SupportBot", bio: "Answers product questions." },
@@ -974,12 +980,12 @@ The harness lazily initializes the runtime on the first `generate` (or `prefligh
 
 ## Hijack Support
 
-SDK agents do not reopen a provider-native CLI; Smithers persists the agent conversation and reopens it through a Smithers-managed REPL via `bunx smithers-orchestrator hijack RUN_ID`.
+SDK agents do not reopen a provider-native CLI; Smithers persists the agent conversation and reopens it through a Smithers-managed REPL via `bunx smthrs hijack RUN_ID`.
 
 Live-run behavior:
 
 - Smithers captures response history after each step via `onStepEnd`.
-- `bunx smithers-orchestrator hijack` waits until history is durable, aborts the current agent task (handing it off to the REPL), and opens the REPL.
+- `bunx smthrs hijack` waits until history is durable, aborts the current agent task (handing it off to the REPL), and opens the REPL.
 - On clean REPL exit, Smithers writes updated message history back and resumes the workflow automatically.
 
 Limits:
@@ -1006,7 +1012,7 @@ Use `createTranscriptionTool` when an SDK agent needs to transcribe audio in its
 For Whisper, remote audio downloads are capped at 25 MiB by default; set `maxResponseBodyBytes` for a different cap (the deprecated `maxResponseBytes` is a fallback when it's omitted). The generic `createHttpTool` has its own independent 1 MiB default.
 
 ```ts
-import { AnthropicAgent, createTranscriptionTool } from "@smithers-orchestrator/agents";
+import { AnthropicAgent, createTranscriptionTool } from "@smthrs/agents";
 
 const transcribeAudio = createTranscriptionTool({
   provider: "deepgram", // or "whisper"
@@ -1046,6 +1052,229 @@ export const claude = useCli
 
 ---
 
+## Nanocodex
+
+> Run the pinned stock Nanocodex agent as a short-lived, checkpoint-aware Smithers worker.
+
+`NanocodexAgent` connects Smithers to the external
+[`smithers-nanocodex`](https://github.com/N0xMare/smithers-nanocodex)
+bridge. The adapter does not bundle or download the executable at runtime.
+Install the published v0.0.2 binary for your host, verify it against the
+release `.sha256` sidecar, then select it with `binary` or `PATH`.
+
+The v0.0.2 integration is deliberately fixed: one fresh `serve` worker and one
+stock Nanocodex turn per `generate()` call. There is no daemon, worker pool, or
+bridge-session reuse. `generate()` also performs a short, provider-free
+capability check before starting that worker. The worker is spawned directly,
+the same class as other Smithers CLI agents. Isolation, if required, is an
+outer Smithers `<Sandbox>`. The adapter must not wrap this binary in
+Bubblewrap or `sandbox-exec`.
+
+v0.0.1 / Nanocodex 0.3.0 checkpoints do not resume. The tool profile is
+`nanocodex-stock-0.5.0`.
+
+## Requirements
+
+- One of the shipped hosts:
+  - Linux x64 (`x86_64-unknown-linux-gnu`), glibc 2.35 or newer; Ubuntu 22.04
+    is the oldest supported baseline
+  - macOS arm64 (`aarch64-apple-darwin`)
+- Smithers on Node.js 22 or Bun 1.3 or newer
+- The matching `smithers-nanocodex` v0.0.2 binary on `PATH` or selected with
+  `binary`
+
+Windows, Linux arm64, Intel macOS, musl, and older glibc versions fail before
+the bridge starts. Bubblewrap is not required and must not wrap the worker.
+
+## Install the published v0.0.2 binary
+
+The adapter does not download the executable. Install the published
+[`v0.0.2`](https://github.com/N0xMare/smithers-nanocodex/releases/tag/v0.0.2)
+archive for your host and verify it against the release's `.sha256` sidecar
+before putting the binary on `PATH`. Smithers does not duplicate those sidecars
+as an in-repo pin digest.
+
+| Host         | rustc target               | Archive                                                     |
+| ------------ | -------------------------- | ----------------------------------------------------------- |
+| Linux x86_64 | `x86_64-unknown-linux-gnu` | `smithers-nanocodex-v0.0.2-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS arm64  | `aarch64-apple-darwin`     | `smithers-nanocodex-v0.0.2-aarch64-apple-darwin.tar.gz`     |
+
+```bash
+# Linux x86_64. On macOS arm64 use target=aarch64-apple-darwin and `shasum -a 256 -c`.
+tag=v0.0.2
+target=x86_64-unknown-linux-gnu
+package="smithers-nanocodex-${tag#v}-${target}"
+base="https://github.com/N0xMare/smithers-nanocodex/releases/download/${tag}"
+
+curl -fsSL -O "${base}/${package}.tar.gz"
+curl -fsSL -O "${base}/${package}.tar.gz.sha256"
+sha256sum -c "${package}.tar.gz.sha256"
+tar -xzf "${package}.tar.gz"
+sudo install -m 0755 "${package}/smithers-nanocodex" /usr/local/bin/smithers-nanocodex
+```
+
+The historical `packages/agents/tests/fixtures/nanocodex/source-build-v0.0.1.json`
+record is the immutable v0.0.1 source-build pin. It is not the current adapter
+contract. The prepared v0.0.2 consumer contract lives at
+`packages/agents/tests/fixtures/nanocodex/release-v0.0.2.json` and does not
+embed published sidecar digests.
+
+## Configure the adapter
+
+With the executable on `PATH`, no binary option is needed:
+
+```tsx
+import { NanocodexAgent } from "smthrs";
+
+const agent = new NanocodexAgent({
+  cwd: "/absolute/path/to/workspace",
+  model: "gpt-5.6-sol",
+  thinking: "high",
+  reasoningMode: "standard",
+});
+```
+
+Set `binary` to an executable name resolved through `PATH` or to a path. The
+adapter resolves and canonicalizes the executable during preflight.
+
+```tsx
+const agent = new NanocodexAgent({
+  binary: "/opt/smithers/bin/smithers-nanocodex",
+  cwd: "/srv/workspaces/project",
+  inheritEnv: false,
+  env: {
+    PATH: "/usr/local/bin:/usr/bin:/bin",
+    NANOCODEX_OPENAI_KEY: process.env.NANOCODEX_OPENAI_KEY!,
+  },
+  auth: {
+    mode: "api-key-env",
+    environmentVariable: "NANOCODEX_OPENAI_KEY",
+  },
+});
+```
+
+When `inheritEnv` is `false`, ambient process variables are not inherited. The
+`serve` worker receives variables configured in `env` plus any Smithers
+task-context identifiers supplied for the call: `SMITHERS_RUN_ID`,
+`SMITHERS_NODE_ID`, `SMITHERS_ITERATION`, and `SMITHERS_ATTEMPT`. Include `PATH`
+in `env` if `binary` is a command name; ambient `PATH` is not used in this mode.
+Prompts, credentials, and snapshots never appear in process arguments.
+
+## Authentication
+
+API-key mode is the default and reads `OPENAI_API_KEY`. You can name another
+bridge-process environment variable as shown above. The credential value stays
+out of protocol JSON, although same-UID host processes may still inspect the
+bridge environment through facilities such as Linux `/proc`.
+
+Managed ChatGPT mode uses the normal Nanocodex/Codex auth file or an explicit
+absolute path:
+
+```tsx
+const agent = new NanocodexAgent({
+  auth: {
+    mode: "chatgpt",
+    authFile: "/home/worker/.codex/auth.json",
+  },
+});
+```
+
+Within one Smithers JavaScript process, managed-ChatGPT `generate()` calls that
+resolve to the same canonical auth file are FIFO-serialized across
+`NanocodexAgent` instances. The gate covers the `serve` worker through verified
+process closure; provider-free preflight may still run concurrently, and the
+gate releases before checkpoint publication. Calls using different auth files
+and all API-key calls remain concurrent. A queued caller may abort promptly,
+but later waiters do not overtake the active call.
+
+This serialization is process-local. Do not run another Smithers process,
+Nanocodex bridge, or other credential-refreshing process against the same auth
+file concurrently.
+
+`preflight()` checks the host, executable, and declared target/version/capability
+surface without loading credentials or contacting a provider.
+The actual managed-ChatGPT adapter suite is
+`packages/agents/tests/nanocodex-live.test.js`. It is opt-in/manual through
+`SMITHERS_RUN_NANOCODEX_LIVE=1`, not part of normal package-test execution, and
+must run only in a trusted environment. The engine cold-restart suite at
+`packages/engine/tests/nanocodex-live-workflow.test.js` uses the same opt-in
+gate. Never enable either suite in a fork pull request or any job that exposes
+repository secrets.
+
+## Fixed v0.0.2 surface
+
+| Capability                               | v0.0.2 behavior                                                                                                                                                                                                  |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Model                                    | Allowlisted `gpt-5.6-sol` (default), `gpt-5.6-terra`, `gpt-5.6-luna`; aliases `sol` / `terra` / `luna`. Fixed per native thread; resume rejects a mismatched constructor model (absent checkpoint model is Sol). |
+| Native tools and Code Mode               | Enabled                                                                                                                                                                                                          |
+| Transport                                | WebSocket preferred, with stock sticky HTTPS fallback                                                                                                                                                            |
+| Checkpoints                              | `nanocodex.session-snapshot/1`, resume only                                                                                                                                                                      |
+| Structured output                        | Prompt-based Smithers extraction, not native schema output                                                                                                                                                       |
+| JavaScript tools and MCP                 | Unsupported                                                                                                                                                                                                      |
+| Subagents and steering                   | Unsupported                                                                                                                                                                                                      |
+| Custom provider endpoints                | Unsupported                                                                                                                                                                                                      |
+| Code Mode disablement                    | Unsupported                                                                                                                                                                                                      |
+| Workspace relocation and checkpoint fork | Unsupported                                                                                                                                                                                                      |
+
+`instructions` replaces the stock instructions completely. Per-call system
+messages, JavaScript tools, provider options, and `resumeSession` are rejected.
+
+## Checkpoints and workspace identity
+
+Each completed turn returns a durable Smithers checkpoint containing the exact
+opaque Nanocodex snapshot. Resume is accepted only when the checkpoint's
+`canonicalWorkspace` exactly matches the current canonical workspace, along
+with the bridge, Nanocodex, snapshot, codec, and policy versions. Moving a
+checkpoint across worktrees, machines, symlink-resolved roots, or absolute
+workspace paths is unsupported. Fork mode is unsupported.
+
+Treat checkpoints as secrets. A snapshot may contain conversation context,
+tool results, source material, paths, or credentials that the agent read.
+Smithers validates and bounds the envelope but does not sanitize the opaque
+snapshot.
+
+## Process cleanup is not isolation
+
+The adapter spawns `smithers-nanocodex` directly. Linux `detached` process-group
+signaling and guarded `/proc` tracking are supplemental best-effort cleanup, not
+a launch gate and not PID-namespace-authoritative. They are **not** filesystem,
+network, device, or credential isolation. Use an outer Smithers `<Sandbox>`
+when your deployment needs those boundaries.
+
+## Qualify a local archive
+
+From a Smithers checkout on a supported host, this command inspects a local
+v0.0.2 archive and runs the public adapter preflight:
+
+```bash
+node scripts/qualify-nanocodex-release.mjs \
+  --archive /absolute/path/to/smithers-nanocodex-v0.0.2-x86_64-unknown-linux-gnu.tar.gz
+```
+
+`--archive` is required. The command reads no remote source, rejects the input
+unless it is a non-empty regular file no larger than 8 MiB, computes its
+SHA-256, and safely inspects its layout. Current v0.0.2 archives are reported
+as `unverified-input` because Smithers does not embed the published sidecar
+digests. The historical v0.0.1 source-build digest remains loadable as an
+immutable record and is not the current runtime contract.
+
+A direct local invocation does not itself initiate a network request, but the
+probed executable has ordinary host networking. Add an external network
+boundary when running an untrusted local input.
+
+In a temporary scratch workspace, the verifier materializes the archive
+executable. It runs exact-version and full-capability probes through the same
+direct-spawn supervisor used by the adapter, then invokes public
+`NanocodexAgent.preflight()` against the same path with `inheritEnv: false`
+and an empty environment. Neither probe performs a model turn or needs a
+provider credential. Scratch state is removed on success or failure.
+
+**See also:** [`NanocodexAgent` reference](/reference/agents#nanocodexagent) ·
+[`NanocodexAgentOptions`](/reference/types) ·
+[`smithers-nanocodex` v0.0.2 tag](https://github.com/N0xMare/smithers-nanocodex/releases/tag/v0.0.2)
+
+---
+
 ## MCP Toolset
 
 > Connect a stdio MCP server to an SDK agent by projecting its tools into AI SDK tools.
@@ -1057,16 +1286,16 @@ For the opposite direction, where an MCP-aware client drives Smithers workflows,
 ## Import
 
 ```ts
-import { OpenAIAgent } from "smithers-orchestrator";
+import { OpenAIAgent } from "smthrs";
 import {
   createMcpToolset,
   type McpServerConfig,
   type McpToolset,
   type McpToolsetOptions,
-} from "@smithers-orchestrator/agents/mcp/createMcpToolset";
+} from "@smthrs/agents/mcp/createMcpToolset";
 ```
 
-`createMcpToolset` is intentionally a deep import from `@smithers-orchestrator/agents/mcp/createMcpToolset`; it is not re-exported from the top-level `smithers-orchestrator` facade.
+`createMcpToolset` is intentionally a deep import from `@smthrs/agents/mcp/createMcpToolset`; it is not re-exported from the top-level `smthrs` facade.
 
 ## Quick Start
 
@@ -1174,7 +1403,7 @@ Use `createMcpToolset` when building an SDK-agent workflow with `AnthropicAgent`
 > Sandboxed file and shell tools for AI agent tasks, with exact input schemas, security policies, and usage examples.
 
 ```ts
-import { tools, read, write, edit, grep, bash, defineTool, getDefinedToolMetadata } from "smithers-orchestrator";
+import { tools, read, write, edit, grep, bash, defineTool, getDefinedToolMetadata } from "smthrs";
 ```
 
 `tools` bundles all five tools keyed by name:
@@ -1185,7 +1414,7 @@ const { read, write, edit, grep, bash } = tools;
 
 <Note>API reference: [Tools](/reference/tools) lists every built-in tool and helper, its options, and links to source and tests.</Note>
 
-The `smithers-orchestrator/tools` subpath also exports lower-level helpers:
+The `smthrs/tools` subpath also exports lower-level helpers:
 
 | Export | Purpose |
 |---|---|
@@ -1234,7 +1463,7 @@ Each invocation receives a unique `callToken`. Completion and failure updates ma
 `defineTool()` wraps custom [AI SDK](https://ai-sdk.dev) tools with Smithers runtime context, deterministic idempotency keys, side-effect metadata, and the side-effect snapshot hook.
 
 ```ts
-import { defineTool } from "smithers-orchestrator";
+import { defineTool } from "smthrs";
 import { z } from "zod";
 
 const placeOrder = defineTool({
@@ -1335,7 +1564,7 @@ Returns file contents as UTF-8. Throws `"File too large"` if size exceeds `maxOu
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { read, grep } from "smithers-orchestrator";
+import { read, grep } from "smthrs";
 
 const codeAgent = new Agent({
   model: openai("gpt-5.6-sol"),
@@ -1368,7 +1597,7 @@ Returns `"ok"`; throws `"Content too large"` if content exceeds `maxOutputBytes`
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { write, read } from "smithers-orchestrator";
+import { write, read } from "smthrs";
 
 const writerAgent = new Agent({
   model: openai("gpt-5.6-luna"),
@@ -1483,7 +1712,7 @@ bash `/dev/tcp`), a nested shell, or a renamed binary. Unenforced isolation logs
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { bash } from "smithers-orchestrator";
+import { bash } from "smthrs";
 
 const devAgent = new Agent({
   model: openai("gpt-5.6-terra"),
@@ -1507,7 +1736,7 @@ Pass tools to an [AI SDK](https://ai-sdk.dev) agent and assign the agent to a [`
 ```tsx
 import { ToolLoopAgent as Agent } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { createSmithers, read, write, edit, grep, bash, Task } from "smithers-orchestrator";
+import { createSmithers, read, write, edit, grep, bash, Task } from "smthrs";
 import { z } from "zod";
 
 const codeAgent = new Agent({
@@ -1534,7 +1763,7 @@ The full bundle works too:
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { tools } from "smithers-orchestrator";
+import { tools } from "smthrs";
 
 const fullAgent = new Agent({
   model: openai("gpt-5.6-terra"),
@@ -1553,7 +1782,7 @@ const fullAgent = new Agent({
 
 ```ts
 import { Effect } from "effect";
-import { runWorkflow } from "smithers-orchestrator";
+import { runWorkflow } from "smthrs";
 
 const result = await Effect.runPromise(runWorkflow(workflow, {
   input: { file: "src/auth.ts" },
@@ -1935,7 +2164,7 @@ Smithers provides deterministic orchestration (workflow graph, approvals, retrie
 ### 1) PI as Workflow Agent
 
 ```tsx
-import { PiAgent } from "smithers-orchestrator";
+import { PiAgent } from "smthrs";
 
 const pi = new PiAgent({
   provider: "openai",
@@ -1951,19 +2180,19 @@ const pi = new PiAgent({
 
 `PiAgent` supports all PI CLI flags: provider/model, tools, extensions, skills, prompt templates, themes, sessions. Text mode uses `--print` by default; JSON/RPC modes set `--mode` and omit `--print`.
 
-PI sessions are first-class hijack targets: `bunx smithers-orchestrator hijack RUN_ID --target pi` reopens the PI session for local steering.
+PI sessions are first-class hijack targets: `bunx smthrs hijack RUN_ID --target pi` reopens the PI session for local steering.
 
 ### 2) PI Server Client
 
-Drive Smithers server APIs from a PI extension or Bun process via `@smithers-orchestrator/pi-plugin`:
+Drive Smithers server APIs from a PI extension or Bun process via `@smthrs/pi-plugin`:
 
 ```ts
-import { runWorkflow, approve, streamEvents } from "@smithers-orchestrator/pi-plugin";
+import { runWorkflow, approve, streamEvents } from "@smthrs/pi-plugin";
 ```
 
-`@smithers-orchestrator/pi-plugin` currently publishes TypeScript source entrypoints; run it with Bun or bundle it before using it from plain Node.
+`@smthrs/pi-plugin` currently publishes TypeScript source entrypoints; run it with Bun or bundle it before using it from plain Node.
 
-The older `smithers-orchestrator/pi-plugin` and `smithers-orchestrator/pi-extension` subpaths were removed; use the scoped package directly.
+The older `smthrs/pi-plugin` and `smthrs/pi-extension` subpaths were removed; use the scoped package directly.
 
 ### 3) Hybrid: PI Extensibility + Smithers Orchestration
 
@@ -1973,7 +2202,7 @@ The older `smithers-orchestrator/pi-plugin` and `smithers-orchestrator/pi-extens
 Patterns:
 
 1. PI skill-driven coding task inside a Smithers `<Task>`.
-2. PI extension command that starts/resumes Smithers workflows via server API or `@smithers-orchestrator/pi-plugin`.
+2. PI extension command that starts/resumes Smithers workflows via server API or `@smthrs/pi-plugin`.
 3. Smithers workflow output persisted to SQLite and consumed by later PI-assisted tasks.
 
 ## Hijacking PI Sessions
@@ -1996,7 +2225,7 @@ Session persistence:
 1. Install PI CLI and add to `PATH`.
 2. Configure PI credentials via env/config (prefer over CLI args for API keys).
 3. Instantiate `PiAgent` with explicit options in workflows.
-4. For server-driven workflows, use `@smithers-orchestrator/pi-plugin`.
+4. For server-driven workflows, use `@smthrs/pi-plugin`.
 
 ```bash
 # Verify PI is installed
@@ -2012,7 +2241,7 @@ pi --version
 
 ## Limitations
 
-Smithers has no chat interface for PI; chat UI integration is the host application's responsibility, via `@smithers-orchestrator/pi-plugin`.
+Smithers has no chat interface for PI; chat UI integration is the host application's responsibility, via `@smthrs/pi-plugin`.
 
 ---
 
@@ -2049,17 +2278,17 @@ Smithers installs a **native Hermes plugin**, far richer than a bare MCP entry
 - **Gateway push-back**: a detached run launched from a chat session reports its
   result back into that same session.
 - **Slack approval buttons**: an approval gate becomes Approve / Deny buttons that
-  map straight to `bunx smithers-orchestrator approve` / `bunx smithers-orchestrator deny`.
+  map straight to `bunx smthrs approve` / `bunx smthrs deny`.
 
 ### Distribution is one command
 
 The plugin ships inside the Smithers CLI, so installing it is one command:
 
 ```bash
-bunx smithers-orchestrator hermes
+bunx smthrs hermes
 
 # `hermes` is a convenience alias for the generic form:
-bunx smithers-orchestrator mcp add --agent hermes
+bunx smthrs mcp add --agent hermes
 ```
 
 The command writes the plugin into `~/.hermes/plugins/smithers/`, installs the
@@ -2100,8 +2329,8 @@ In both runtimes the guidance is the same: a Smithers workflow is a **superset
 of a skill**, since a skill is static instructions while a workflow is
 executable, durable, typed, inspectable, composable, and optimizable. Capture
 reusable procedures as workflows (even small one-task ones), and optimize
-them like skills with `bunx smithers-orchestrator eval`, scorers, and
-`bunx smithers-orchestrator optimize`. See the
+them like skills with `bunx smthrs eval`, scorers, and
+`bunx smthrs optimize`. See the
 [smithers skill](https://github.com/smithersai/smithers/blob/main/skills/smithers/SKILL.md).
 
 ## Links
@@ -2116,7 +2345,7 @@ them like skills with `bunx smithers-orchestrator eval`, scorers, and
 
 > Typed control state for workflows: fold an XState v5 machine over durable output and signal rows with useSmithersMachine
 
-`smithers-orchestrator/xstate` runs [XState v5](https://stately.ai/docs) state
+`smthrs/xstate` runs [XState v5](https://stately.ai/docs) state
 machines as an **optional derived-state layer** over rows Smithers already
 persists (not a backend, scheduler, or persisted actor): each frame,
 `useSmithersMachine` recomputes state as a pure fold over durable output and
@@ -2130,7 +2359,7 @@ approval ladders, multi-phase pipelines with re-entry) and you want
 
 ```tsx
 import { setup, assign } from "xstate";
-import { useSmithersMachine, taskOutput, approvalDecided, eventReceived, timedOut } from "smithers-orchestrator/xstate";
+import { useSmithersMachine, taskOutput, approvalDecided, eventReceived, timedOut } from "smthrs/xstate";
 
 const releaseMachine = setup({}).createMachine({
   context: { revision: 0 },
@@ -2194,7 +2423,7 @@ function Release() {
 }
 ```
 
-External events are ordinary signals: `bunx smithers-orchestrator signal RUN_ID REVISE --data '{...}'`.
+External events are ordinary signals: `bunx smthrs signal RUN_ID REVISE --data '{...}'`.
 There is **no `send()`, no `onDone` prop, and no actor**.
 
 ## The fold
@@ -2319,13 +2548,633 @@ visualization work unmodified on the machine definition.
 
 ---
 
+## Herdr
+
+> Mirror a Smithers run into a herdr terminal workspace with an overview tab, a tab per attention-worthy node, authoritative status, in-pane approvals, and one-key steering (press s to steer, h to hijack, or smithers steer), all optional and degradable.
+
+# Herdr
+
+[Herdr](https://herdr.dev) is a terminal workspace manager. Smithers can mirror a
+run into a herdr workspace so you can watch the whole run at a glance, drop into
+any node, answer a parked gate in place, and take an agent over by hand, without
+giving up any of Smithers' guarantees.
+
+Herdr is a **mirrored presentation and steering plane**. Smithers keeps owning
+everything that matters: it spawns the agents, isolates them, records the durable
+event log, and resumes after a crash. Herdr only renders that run and lets you
+steer it. The mirror is fed from Smithers' event stream, so the herdr sidebar
+shows **authoritative** status pushed from Smithers rather than screen-scraped
+guesses.
+
+The integration is **optional and degradable**. If no herdr server is running,
+`--herdr` warns once on stderr and the run proceeds unchanged. If herdr dies
+mid-run, every call soft-fails and the run finishes normally. No herdr code is on
+the engine's hot path.
+
+## Quickstart
+
+Install and start a herdr server (see the [herdr docs](https://herdr.dev) for
+platform details), then mirror a run:
+
+```bash
+herdr server                                            # start a herdr server (or run the herdr app)
+bunx smthrs up workflow.tsx --herdr      # run and mirror it into herdr
+```
+
+`--herdr` targets herdr's default session. Pass `--herdr=SESSION` to target a
+named session, or set `HERDR_SESSION` / `HERDR_SOCKET_PATH` (herdr's own env) to
+pick the socket.
+
+## The adaptive layout
+
+Smithers maps a run onto herdr's own hierarchy (workspace, then tabs, then panes)
+so the workspace reads like a run and each tab reads like one thing you might need
+to look at.
+
+- One **workspace** per attached run, labelled
+  `WORKFLOW_ID [smithers:v1:ENCODED_RUN_ID]`. The versioned suffix is Smithers'
+  ownership marker. The complete label is the find-or-create key, so a re-attach
+  or resume reuses the same workspace without adopting an operator-created label
+  that merely mentions the same run id.
+- The workspace's **first tab is the cockpit**. By default it is a **split**: left
+  = your harness shell (or a spawned harness), right = portable **`smithers supervisor`**
+  (`top --db <store>` - long-lived fleet board; see [The overview board](#the-overview-board)
+  and the [workflow supervisor guide](/guide/workflow-supervisor)). Operator-owned workspaces can
+  pre-split and dock top into the right pane without renaming the workspace.
+- Each mirrored node gets its **own tab**, labelled with the node id, holding
+  **one full-size pane** running that node's live output
+  (`tail RUN_ID --node NODE_ID --hud --linger`) with a **fixed bottom dual-control
+  dock** (`s` steer · `h` hijack · `q` close). Because only one tab renders at a
+  time, every node pane gets the full terminal area instead of a shrinking sliver.
+  The pane is named `smithers:RUN_ID:NODE_ID`.
+
+Why tabs rather than splitting one tab into many panes: herdr splits divide a
+single shared area, so panes halve with each new node (a fourth node is already a
+narrow column, a sixth is an unreadable two-column sliver). Tabs each get the full
+area regardless of how many exist, so a tab per node stays legible where splits do
+not.
+
+### The adaptive cap
+
+Auto-spawning a tab per node breaks down under fan-out: a swarm over dozens of
+issues would open dozens of tabs, most idle then gone. So the mirror uses an
+adaptive cap, **`tabCap` (default 6 tabs including the overview)**, which leaves
+room for five mirrored node tabs. Past the cap an ordinary node stays **unpaned**
+and issues no herdr calls at all, so a large fan-out does not flood the tab bar or
+the socket. The overview tab always reflects every node (see
+[the queue summary](#the-overview-board)), and you can pull any unpaned node up on
+demand with [`herdr open`](#on-demand-panes).
+
+### Attention promotion (always bypasses the cap)
+
+The cap only holds back *ordinary* nodes. Three kinds of node are
+attention-worthy and **always get a tab, even past the cap**:
+
+- **Parked approval gates** (`NodeWaitingApproval` / `ApprovalRequested`). A pure
+  gate node carries no agent attempt row, so the ordinary agent-only pane filter
+  would drop it; because a parked human gate is exactly what you need to see, it
+  overrides both the filter and the cap and its pane runs
+  [`approve --watch`](#answering-a-gate-in-pane) so you can decide in place.
+- **Failed nodes** (`NodeFailed` on the final attempt). A worker that fails deep
+  in a swarm is promoted out of the unpaned pool into its own tab so the one thing
+  that went wrong is visible without hunting for it.
+- **Hijack panes** (see [Hijack into a pane](#hijack-into-a-pane)).
+
+Loop iterations **reuse their node's tab** rather than opening a new one per
+iteration, so a validation loop that retries three times is one tab, not three.
+**Focus is never stolen** by any of this: a background gate or failure lights up
+the sidebar and fires a notification but never yanks your screen off what you are
+looking at. The one deliberate exception is a hijack pane, which does focus,
+because you asked to drive that agent right now.
+
+Everything in the mirror is soft-fail, replay-idempotent, cross-run-filtered, and
+seq-monotonic: a re-attach or resume adopts the tabs and panes already there
+instead of duplicating them, stale events from other runs are filtered out, and
+out-of-order pushes are dropped rather than flapping a pane's status backward.
+
+## Status mapping
+
+Smithers pushes each pane's status from the run's event stream. `blocked` always
+means "needs a human", so approvals and failures both surface as `blocked` (with a
+notification), which is what makes the herdr sidebar a useful worklist.
+
+| Smithers event | Pane status | Meaning |
+|---|---|---|
+| `NodeStarted`, `NodeRetrying` | `working` | the agent node is executing (retry shows the attempt) |
+| `ApprovalGranted`, `ApprovalAutoApproved` | `working` | a gate cleared; the node resumed |
+| `NodeWaitingApproval`, `ApprovalRequested` | `blocked` | paused on a human approval gate; the message carries the question and a notification fires |
+| `NodeFailed` | `blocked` | the node failed; the message is `failed: SUMMARY` |
+| `NodeFinished` | `idle` | the node completed (`status` token `done`) |
+| `NodeCancelled` | `idle` | the node was cancelled (`status` token `cancelled`) |
+| `RunFinished` | working panes go `idle` (`done`) | the run completed; a pane already `blocked` on a tolerated failure keeps its failure |
+| `RunFailed`, `RunCancelled` | working or blocked panes go `blocked` | the run ended abnormally |
+
+The gate question is pushed both as the pane's status message and as its queryable
+`status` metadata token, so `herdr agent list` shows what needs approving, not just
+that the pane is blocked. When such a gate clears, its pane resolves to `idle` with
+the `status` token `approved` rather than the `working`/`done` an ordinary agent
+node reports.
+
+Because `bunx smthrs up` exits when it parks at a gate (exit code
+3, awaiting a decision), you approve and resume in a new process. On resume
+Smithers re-adopts the parked gate pane and re-flags it, so the pane moves from
+`blocked` to `approved` when the resumed run clears the gate instead of staying
+stuck `blocked` in the mirror.
+
+When an agent reports a resumable session id, Smithers also forwards it to the
+pane so herdr can associate the pane with the agent's session.
+
+### Outcome labels
+
+When the run reaches a terminal state, Smithers renames its workspace with an
+outcome marker while keeping the run id, so the sidebar shows the result at a
+glance:
+
+| Marker | Terminal state |
+|---|---|
+| `✓ WORKFLOW_ID [smithers:v1:ENCODED_RUN_ID]` | finished |
+| `✗ WORKFLOW_ID [smithers:v1:ENCODED_RUN_ID]` | failed |
+| `◻ WORKFLOW_ID [smithers:v1:ENCODED_RUN_ID]` | cancelled |
+
+The rename is derived from the clean label and never stacks markers on replay, and
+find-or-create/attach re-adopt a renamed workspace (the marker prefix is tolerated
+when matching), so a resumed run reuses its marked workspace rather than opening a
+fresh one. Panes still linger after the run ends (below), so a `✓` or `✗`
+workspace is a finished run you can still read; close it yourself, or sweep every
+terminal run's workspace at once with [`herdr clean`](#cleaning-up).
+
+## The supervision kit
+
+The mirror is most useful with a few herdr settings turned on, so a parked gate or
+a failed worker rises to the top of the sidebar on its own instead of waiting to
+be found. Configure these in your herdr config (`herdr --default-config` prints
+the full template):
+
+- **Sort the agent panel by attention.** Set `agent_panel_sort = "priority"` in
+  `[ui]`. This flips the agent list from grouped-by-workspace to a flat queue
+  ordered blocked, done, working, idle, unknown. Since Smithers maps every parked
+  gate and every failure to `blocked`, and herdr rolls `blocked` up over
+  `working`/`idle`/`unknown` at the workspace level, the run that needs you is
+  first in the list.
+- **Filter to what is blocked with `prefix+g`.** The session navigator opens on
+  `prefix+g` and gives a searchable tree of every workspace, tab, and pane. Press
+  `/` to fuzzy-find by text, or `b` / `w` / `i` / `d` to filter to blocked /
+  working / idle / done panes. `prefix+g` then `b` is a one-keystroke "show me only
+  what is waiting on a human" across every mirrored run.
+- **Turn on notifications.** Smithers fires a herdr notification when a gate parks,
+  a node fails, a hijack is ready, and when a run ends. herdr only surfaces these
+  if toasts are enabled: set `[ui.toast] delivery = "herdr"` for in-UI toasts (or
+  `system` for desktop notifications). Then `prefix+o`
+  (`open_notification_target`) jumps focus straight to the pane that raised the
+  most recent toast, so an alert is one keystroke from the thing that raised it.
+
+With those on, the day-to-day loop is: leave herdr on the priority agent panel,
+let runs mirror themselves, and act only when a row goes blocked, either by
+clicking it, pressing `prefix+g b`, or following a toast with `prefix+o`.
+
+## Answering a gate in-pane
+
+A parked approval gate is promoted to its own tab whose pane runs an interactive
+watcher:
+
+```bash
+bunx smthrs approve RUN_ID --watch
+```
+
+`approve --watch` polls the run for pending approval gates **and** human requests
+(`ask` / `confirm` / `select` / `json`) and answers each one by keystroke as it
+appears (`y` / `n` for a gate, a picker or prompt for a human request), committing
+through the exact same engine machinery as the single-shot `approve` / `deny` /
+`human answer` commands. After a decision it lingers and waits for the next gate,
+so one pane walks a multi-gate run end to end. It is a standalone command; you can
+run it in any terminal, and the herdr gate tab is simply where the mirror runs it
+for you.
+
+The single-shot forms are unchanged and still the right tool from a script or a
+one-off terminal:
+
+```bash
+bunx smthrs approve RUN_ID                 # auto-detects the pending node
+bunx smthrs approve RUN_ID --node NODE_ID  # when several gates are pending
+bunx smthrs deny RUN_ID --node NODE_ID
+```
+
+## The overview board
+
+The cockpit **right** pane hosts **`smithers supervisor`** - a portable, long-lived
+workflow board (not a scrolling log). Herdr only *places* that process; the board
+itself is a standalone CLI surface. Full guide: [workflow supervisor](/guide/workflow-supervisor).
+
+```bash
+# Anywhere (including outside herdr)
+smithers supervisor --db /path/to/smithers.db
+
+# Single-run attach still available
+smithers tail RUN_ID --overview --hud --linger
+```
+
+What you see at a glance:
+
+- **Fleet** - multi-run strip when the store has more than one run (`j`/`k` to focus).
+- **Header** - run id, status, elapsed, tallies (working / blocked / failed / done).
+- **Attention** - fails, gates, queued steers (empty when calm).
+- **Board** - per-node status (attention-first); large fan-outs trim to attention + queue summary.
+- **Digest** - deterministic progress (~30s), no LLM.
+- **CTAs** - exact `approve` / steer commands when something needs a human; dual-control
+  keys live on the **node tab dock** (`s` steer · `h` hijack), not on the workflow supervisor outline.
+
+### The browser stays out of the way
+
+Inside a herdr pane (`HERDR_ENV=1`), the commands that would normally launch a
+browser - `monitor`, `ui`, `gui`, and the post-run HTML summary - **print their
+URL instead**. The cockpit is already your live view, and a per-command
+`--no-open` is useless when an *agent* runs the command on your behalf.
+
+```bash
+SMITHERS_NO_BROWSER=1   # suppress anywhere (plain tmux/iTerm split, SSH, CI)
+SMITHERS_NO_BROWSER=0   # force the browser back on, even inside herdr
+```
+
+Nothing is lost: the URL is printed and any report file is still written.
+
+### Packaging: workflow supervisor vs herdr-only
+
+| Layer | Owns | Installs with |
+|---|---|---|
+| **workflow supervisor** (`smithers supervisor`) | Board UI, poll loop, keys, `--db` | Smithers CLI |
+| **herdr integration** | Workspace/tab/pane chrome, dock, soft-pin, harness left | Optional; needs herdr server |
+| **campaign / testing** | Fixtures, watch-pack, bridge that *invokes* top in a pane | Dev/testing |
+
+If you are writing guidance for herdr, document **placement and keys around the
+host**. Do not re-document the whole board - link to [workflow supervisor](/guide/workflow-supervisor).
+
+
+### Testing without LLMs
+
+Herdr is one **visibility plane**. Agent-trace fixtures and core scenarios are shared
+across HUD, herdr, and other UIs - see
+[Token-free visibility testing](/guides/token-free-visibility-testing).
+
+## On-demand panes
+
+The cap deliberately leaves most swarm workers unpaned. When you do want to look
+at a specific one (or re-open a finished node's output), pull it up on demand:
+
+```bash
+bunx smthrs herdr open RUN_ID NODE_ID      # a node's lingering output tail
+bunx smthrs herdr open RUN_ID              # the run-level overview pane
+```
+
+`herdr open` places one full-size pane into the run's mirror workspace. It is
+find-or-create and outcome-tolerant: an outcome-marked (`✓`/`✗`/`◻`) workspace is
+re-adopted, and a node that already has a pane is adopted rather than duplicated,
+so opening the same node twice is idempotent. This is the escape valve for
+"the mirror never paned that worker, but I need to see it now" and works whether
+the run is live or already finished.
+
+### Cleaning up
+
+Finished runs leave their workspaces up on purpose so you can read them. When you
+are done, sweep them:
+
+```bash
+bunx smthrs herdr clean
+```
+
+`herdr clean` closes every herdr workspace that mirrors a Smithers run **whose run
+is terminal in the local store**. Before closing anything, it requires the
+versioned ownership marker and an exact match with the workflow and run identity
+reconstructed from the DB row. Unknown, mismatched, and active-run workspaces are
+left open. It prints each workspace it closed.
+
+## Supervision profiles
+
+Workflows differ in how much a human watches them, and the adaptive layout is
+built to match that spread. Four shapes cover the pack.
+
+### Bounded and steerable
+
+*"I want to watch this whole thing and jump in when it asks."* A short run
+(`hello`, `research`, `review`, `plan`) is one to three agent nodes. It fits under
+the cap comfortably: the overview tab plus a tab per node, and you can read the
+entire run. The interactive members of this shape (`grill-me`, a clarify phase)
+want a focused tab you type into, which is exactly a node tab; nothing steals focus
+away from it while you answer.
+
+### Pipeline
+
+*"I care about the current stage and the gate, not every token."* A sequential
+multi-stage run (`implement`, `research-plan-implement`, `create-workflow`,
+`release`) is a handful of distinct stages with zero to a few approval gates.
+Each stage gets a tab, and loop iterations (a validation loop retrying) reuse that
+stage's tab instead of piling up. The approval gate is promoted to its own tab
+running `approve --watch`, so your attention lands on the gate and the current
+stage, which is where a pipeline's decisions live, and the overview tab carries the
+banner for everything else.
+
+### Swarm and long-horizon
+
+*"I am an exception handler, not a babysitter."* A fan-out over issues, features,
+or tickets (`fix-all-issues`, `merge-train-all-issues`, `mission`, `ralph`) runs
+dozens of mostly-mechanical workers, most with no human gate at all. Here the cap
+earns its keep: the workers stay unpaned, the overview tab is the dashboard (its
+queue summary tallies working/blocked/failed/done across the whole swarm), and only
+attention-worthy nodes take a tab, a failing worker promoted out of the pool, an
+up-front plan-approval gate, a merge or final-report node. When you want a specific
+worker, `herdr open RUN_ID worker-3` pulls it up; when a worker fails, it is
+already waiting in its own tab and the sidebar has gone blocked.
+
+### Co-pilot
+
+*"The agent is asking me questions; I want to answer fast."* Interactive workflows
+put the human upstream of the agents, answering clarify or grill questions rather
+than approving output. These want a single focused, low-latency tab. Because the
+mirror never steals focus, you drive the conversation from the node's tab (reach it
+with `prefix+g` or a click), and a parked human request surfaces the same way a
+gate does: promoted, blocked, and answerable in place with `approve --watch`.
+
+## Attach to a run already in flight
+
+`bunx smthrs herdr attach` mirrors an existing run into herdr and
+follows it live until the run ends or you press Ctrl-C:
+
+```bash
+bunx smthrs herdr attach RUN_ID
+bunx smthrs herdr attach RUN_ID --session SESSION
+```
+
+Attach reconciles against existing herdr state: it finds-or-creates the run's
+workspace by the deterministic label (tolerating an outcome marker), adopts the
+overview and node tabs already there, and creates tabs only for nodes that are
+still active or attention-worthy (long-finished nodes are not replayed). Detaching
+(run end or Ctrl-C) never closes the workspace. Attaching to an already-terminal
+run prints a final status line and creates nothing.
+
+## Check the server
+
+`bunx smthrs herdr status` pings the server and reports its
+version, protocol, and whether this client is compatible. It needs no run and no
+herdr code path beyond the socket:
+
+```bash
+bunx smthrs herdr status
+bunx smthrs herdr status --session SESSION
+```
+
+It exits non-zero with a clear message when no server is reachable.
+
+## Standalone tail
+
+The panes are just `smithers tail`, which is a standalone, herdr-free command.
+Use it directly to follow a run, a single node, or the run-level board from any
+terminal:
+
+```bash
+bunx smthrs tail RUN_ID                  # run-level event overview
+bunx smthrs tail RUN_ID --overview       # run-level supervision board
+bunx smthrs tail RUN_ID --node NODE_ID   # one node's output, verbatim
+bunx smthrs tail RUN_ID --format jsonl   # raw event JSON, one per line
+bunx smthrs tail RUN_ID --linger         # stay open after the run ends
+```
+
+It reads the run's persisted and live event stream directly from the local store,
+so it works for detached runs and needs no gateway server. It follows a live run
+to completion by default and prints a one-line final status, then exits. Pass
+`--linger` to keep it open after the run reaches a terminal state until you press
+`q`, Enter, or Ctrl-C; this is what mirror panes use so they do not vanish at run
+end. See the [CLI overview](/cli/overview) for the full flag list.
+
+On an interactive **node** tail (a TTY with `--node`, live or lingering), the same
+[one-key controls](#steer-with-one-key) apply - press `s` to steer this node's
+agent, `h` to hijack it, `q` (or Ctrl-C) to close - shown as a subtle
+`s steer · h hijack · q close` hint (a lingering pane after run end drops the
+`s`, since a steer can no longer land once every node is terminal). Piped,
+`--format jsonl`, and non-TTY tails are unaffected: no raw mode, no keys.
+
+## Steer with one key
+
+Steering a live run comes in two gestures, and they differ on one thing: whether
+the run keeps running.
+
+- A **steer** is a short instruction you drop into a running node. The run **never
+  stops** - the steer is consumed on that node's next agent step and the agent
+  carries on.
+- A **takeover** hands you the agent's live session to drive by hand. The run
+  **parks** while you drive, and resumes when you hand control back.
+
+In the mirror each is **one key** on an agent's node tab. No run id, no node id, no
+env vars: the pane already knows its own run and node (it is a `smithers tail
+--node`) and which herdr session it lives in (herdr exports `HERDR_SOCKET_PATH`
+into every pane), so a single keystroke is the whole gesture.
+
+| Key | Where | What it does |
+| --- | --- | --- |
+| `s` | any agent node tab (live) | steer - open an inline `steer:` input line; type an instruction and press Enter to queue it as a steer for this node (Esc cancels) |
+| `h` | any agent node tab (live or lingering) | hijack - hand off this agent's live session as a focused hijack pane (run-wide; warns first if other agents are in flight) |
+| `y` / `n` | a parked gate tab (`approve --watch`) | approve / deny the gate in place |
+| `q` | any node tab, and a pane lingering after run end | close the pane (Ctrl-C also works) |
+
+The live node tab shows a subtle `s steer · h hijack · q close` hint; a pane
+lingering after the run ends drops the `s` (a steer can no longer land once every
+node is terminal) and shows `h hijack · q close`. The overview tab spells the
+same options as text (`in its node tab press s to steer · h to hijack`), so you
+can act from wherever your attention landed.
+
+Prefer to type it? `smithers steer` is the one-word equivalent, with zero env
+ceremony:
+
+```bash
+bunx smthrs steer                          # steer the single active run's current agent
+bunx smthrs steer RUN_ID "…"               # queue a steer for a specific run's current node
+bunx smthrs steer RUN_ID --node NODE_ID "…"  # target a specific node's agent
+bunx smthrs steer RUN_ID --takeover        # hand off the live session instead (warns before aborting siblings)
+```
+
+With no run id it auto-picks the single active run (or prompts you among several);
+a bare `smithers steer` with no message prompts for one. For a takeover it
+auto-detects the run's herdr mirror from the pane/env session and opens the
+hand-off as a hijack pane there; with no mirror reachable it hands the session off
+in your current terminal instead. Either way there is nothing to set up - this is
+the replacement for the old `cd … && SMITHERS_HERDR=… SMITHERS_HERDR_HIJACK=1 …
+hijack --target …` incantation.
+
+### The steering contract
+
+**Steer - the run never stops.** A queued steer is consumed on the target node's
+**next agent `generate()` call** - its first start, a retry attempt, or the next
+loop iteration - and injected as a user message *before* the structured-output
+schema wrap, so it never breaks a node that returns JSON. Consumption is recorded
+in the attempt's persisted conversation, so a steer is **replay-safe**: resuming
+or replaying the run reproduces the identical turn without re-reading the inbox,
+and never double-injects. A steer that is never consumed - its node already
+finished, or the run ends first - **expires** deterministically when the run
+reaches a terminal state (finished / failed; a cancelled or hijacked run keeps its
+queued steers so a resume can still consume them), emitting `SteerExpired`;
+run-level expiry (rather than per-node) is what keeps a steer aimed at a `<Loop>`
+node's *next* iteration from being thrown away early. The pane you are watching
+renders each step as a one-liner: `↪ steer queued: …`, `✓ steer consumed by
+attempt N`, `✗ steer expired - node finished first; press h to hijack`.
+
+**Hijack - run-wide today.** A hijack is the [hijack hand-off](#hijack-into-a-pane):
+Smithers parks the **whole run** (its status goes to `cancelled`) and hands you
+the target node's live session; you resume when you are done. Because the hijack
+aborts the shared run signal, any *other* agent node that was mid-generate is
+cancelled and **re-runs on resume**. So `steer --takeover` (and the `h` key) gate
+on an honest warning: when the run has in-flight agent siblings it prints the
+exact count - `⚠ Takeover is run-wide: it aborts N in-flight siblings (…); they
+re-run on resume.` - and requires a `y` confirmation (`--yes` to skip; on a
+non-TTY without `--yes` it refuses rather than silently aborting the wave).
+Answering `n` leaves the run completely untouched. A **node-scoped** takeover that
+parks only the one node and leaves its siblings running is on the roadmap; it
+needs a per-node interrupt the engine does not have yet, so today taking one worker
+over means taking the run over.
+
+herdr stays a **pure mirror** throughout: it never writes to the engine or the
+run's store. Pressing `s` or `h` in a pane just spawns the same `smithers steer`
+the CLI would, and the pane only *displays* the `SteerQueued` / `SteerConsumed` /
+`SteerExpired` events Smithers emits.
+
+## Hijack into a pane
+
+`smithers steer --takeover` (and the `h` key) is a thin, zero-ceremony front end
+over `bunx smthrs hijack RUN_ID`, the underlying hand-off. `hijack`
+by default launches the interactive agent CLI in your **current terminal**; the
+`SMITHERS_HERDR_HIJACK` env var opts it into a **herdr pane** inside the run's
+mirror workspace instead. `steer --takeover` just sets that up for you after
+auto-detecting the mirror (and after the in-flight-sibling warning above), so you
+rarely reach for the raw form - but it stays available for scripts and for driving
+the pane-vs-terminal decision explicitly. The hijack pane is cap-exempt and does
+take focus, because you asked to drive that agent right now.
+
+Pane hosting is gated on `SMITHERS_HERDR_HIJACK`, and the session it targets comes
+from `SMITHERS_HERDR` (not from herdr's own `HERDR_SESSION`). So to host the pane
+in the same named session your run mirrors into, set **both** variables:
+
+```bash
+SMITHERS_HERDR=SESSION SMITHERS_HERDR_HIJACK=1 bunx smthrs hijack RUN_ID
+```
+
+`SMITHERS_HERDR_HIJACK` accepts `1`, `true`, or an explicit session name. With `1`
+or `true` it reuses the session from `SMITHERS_HERDR`; if `SMITHERS_HERDR` is unset
+the pane carries no explicit session, so the client falls through to herdr's own
+socket resolution (`HERDR_SOCKET_PATH`, then `HERDR_SESSION`, then the default
+session). That is why setting **both** variables, above, is the reliable way to
+host the pane in the same named session your run mirrors into. The hijack pane is
+an agent named `smithers:RUN_ID:hijack:NODE_ID`, marked `blocked` ("hijacked -
+attach to drive"). The command prints the exact agent name and attach command on
+stderr; attach and hijack with herdr's own CLI:
+
+```bash
+herdr agent attach smithers:RUN_ID:hijack:NODE_ID
+```
+
+### Hijack afterlife
+
+A hijack pane does not collapse to a bare shell when your session exits. Smithers
+wraps the launch spec so that when the agent CLI exits, the pane prints a handback
+summary (the exact resume command) and lingers for a keypress instead of vanishing,
+so a hijack you stepped away from is still readable when you come back. The inner
+exit code is preserved, and argv/cwd/env are passed through exactly; only the
+herdr-pane path is wrapped, the current-terminal hijack flow is byte-identical.
+
+Handback is **manual**, and the run does not keep running while you drive the agent
+by hand: on handoff Smithers parks the run (its status goes to `cancelled`), so the
+durable run stops advancing until you return control. Because the pane's process is
+owned by herdr and its exit event carries no exit code, Smithers does not
+auto-resume (auto-resuming after an aborted or errored session could corrupt the
+run). When you are done, hand control back with the resume command the hijack
+prints:
+
+```bash
+bunx smthrs up WORKFLOW_FILE --resume --run-id RUN_ID
+```
+
+If no herdr server is reachable or the pane launch fails, hijack falls back to the
+byte-identical current-terminal flow, so opting in never removes your ability to
+hijack.
+
+## Detached runs
+
+`bunx smthrs up --detach` (`-d`) re-spawns the run in a background
+process and returns immediately. `--herdr` is honored there too: the parent hands
+the setting to the detached child through the `SMITHERS_HERDR` env var (`1` or the
+session name), which the child inherits, so the mirror runs in the process that
+actually executes the run. You do not set `SMITHERS_HERDR` yourself; `--herdr` sets
+it for the handoff. The detach message leads its watch options with
+`herdr attach RUN_ID` so you can re-open the mirror after detaching.
+
+## Degradability
+
+Herdr never affects a run. Every interaction is fire-and-forget with a per-call
+timeout (5s by default) and a consecutive-timeout circuit breaker that drops
+pushes fast once herdr stops answering. Concretely:
+
+- No herdr server reachable: `--herdr` logs one warning on stderr and the run
+  proceeds with no mirror. For a detached run, that warning lands in the detach
+  log file.
+- Herdr dies mid-run: calls soft-fail, the breaker opens, and the run reaches its
+  terminal state normally.
+- Host shutdown is bounded: closing the surface abandons a hung herdr after a
+  short deadline rather than blocking.
+
+## Version pinning
+
+This client is built and tested against **herdr 0.8.0 / wire protocol 19**.
+`bunx smthrs herdr status` reports the server's protocol and whether it
+matches, which is the quickest compatibility check.
+
+A protocol other than 19 is handled two different ways, on purpose:
+
+- **Optional mirroring** (`up --herdr`, auto-detected mirrors, the supervisor's
+  pane integration) degrades softly: one warning, then the run proceeds with no
+  mirror. Nothing about execution or durability depends on herdr.
+- **Explicit `herdr` commands** (`status`, `open`, `attach`, `clean`) fail closed
+  with `HERDR_PROTOCOL_MISMATCH` and exit 4, reporting both protocol numbers and
+  confirming that no mutating call was made. Driving panes over a wire format
+  the server may have redefined is not worth the risk of corrupting a workspace.
+
+Herdr's protocol advances faster than its user-visible version, and the changes
+are real: protocol 19 reshaped `agent.start` so it can only attach one of herdr's
+known interactive agent kinds to an existing pane, and replaced each pane's
+`custom_status` with a `tokens` metadata map. Releases speaking a protocol other
+than 19 are **not** wire-compatible with this client, so herdr features are inert
+(safely) until the client is updated to match. Check `herdr status client` against
+the number above before filing a bug about herdr features doing nothing.
+
+## Remote runs over SSH
+
+Herdr talks to Smithers over a local unix socket, so herdr runs **where your
+agents run**. To watch a run executing on a remote host, run both Smithers and
+herdr on that host and reach them over SSH (for example an SSH session into the
+host, then `bunx smthrs herdr attach RUN_ID` there). Do not try to
+forward or expose the socket itself; SSH to the host and run the client locally.
+
+## Security
+
+The herdr control socket is **unauthenticated local control**. Anything that can
+reach it can start processes and drive panes. Keep it on a trusted local machine
+(the default socket lives under `~/.config/herdr/`). Never expose it over the
+network or forward the raw socket. For a remote host, SSH in and run the client
+there rather than opening the socket up.
+
+## Mirror vs interactive moments
+
+The mirror is the **architecture**: Smithers always owns execution, isolation,
+and durability, and herdr is a read-mostly presentation and steering plane fed
+from Smithers' event stream. In-pane approvals (`approve --watch`) and hijack panes
+are the **interactive escape hatches** for the moments you need to decide or drive
+by hand. A per-task interactive mode, where herdr would own a task's process end to
+end, is explicitly out of scope for this integration.
+
+---
+
 ## Microsandbox Provider
 
 > Run a Smithers <Sandbox> child workflow in a local Microsandbox microVM with createMicrosandboxSandboxProvider.
 
 # Microsandbox Provider
 
-`@smithers-orchestrator/microsandbox` is a first-class Smithers
+`@smthrs/microsandbox` is a first-class Smithers
 `SandboxProvider` backed by the open source
 [Microsandbox](https://github.com/superradcompany/microsandbox) SDK. Each run
 boots a local microVM with its own Linux kernel, exchanges the Smithers
@@ -2339,7 +3188,7 @@ import {
   createMicrosandboxSandboxProvider,
   registerMicrosandboxSandboxProvider,
   MICROSANDBOX_PROVIDER_ID,
-} from "smithers-orchestrator/microsandbox";
+} from "smthrs/microsandbox";
 ```
 
 Microsandbox labels the runtime beta: pin and test the SDK version you
@@ -2369,8 +3218,8 @@ image on first use; later sandboxes reuse the local image cache.
 Pass the provider object directly to `<Sandbox>`:
 
 ```tsx
-import { createSmithers, Sandbox } from "smithers-orchestrator";
-import { createMicrosandboxSandboxProvider } from "smithers-orchestrator/microsandbox";
+import { createSmithers, Sandbox } from "smthrs";
+import { createMicrosandboxSandboxProvider } from "smthrs/microsandbox";
 
 const provider = createMicrosandboxSandboxProvider({
   image: "oven/bun:1",
@@ -2399,7 +3248,7 @@ export default parent.smithers((ctx) => (
 Or register it once and select it by id:
 
 ```ts
-import { registerMicrosandboxSandboxProvider } from "smithers-orchestrator/microsandbox";
+import { registerMicrosandboxSandboxProvider } from "smthrs/microsandbox";
 
 const unregister = registerMicrosandboxSandboxProvider({
   image: "oven/bun:1",
@@ -2531,7 +3380,7 @@ public exports, and requires no hypervisor, image pull, or credentials.
 
 # Daytona Sandbox Provider
 
-`@smithers-orchestrator/daytona` is a first-class Smithers `SandboxProvider`
+`@smthrs/daytona` is a first-class Smithers `SandboxProvider`
 backed by the [Daytona](https://www.daytona.io/) SDK. It runs a `<Sandbox>`
 child workflow's request inside a Daytona sandbox: uploads the request JSON,
 runs the entry command, reads the result JSON back. The shared provider-kit
@@ -2545,7 +3394,7 @@ import {
   createDaytonaSandboxProvider,
   registerDaytonaSandboxProvider,
   DAYTONA_SANDBOX_PROVIDER_ID,
-} from "smithers-orchestrator/daytona";
+} from "smthrs/daytona";
 ```
 
 ## Credentials
@@ -2573,8 +3422,8 @@ options, or through `clientOptions`.
 Pass the provider straight to `<Sandbox>`:
 
 ```tsx
-import { createSmithers, Sandbox } from "smithers-orchestrator";
-import { createDaytonaSandboxProvider } from "smithers-orchestrator/daytona";
+import { createSmithers, Sandbox } from "smthrs";
+import { createDaytonaSandboxProvider } from "smthrs/daytona";
 
 const provider = createDaytonaSandboxProvider({
   image: "ubuntu:22.04",
@@ -2598,7 +3447,7 @@ export default parent.smithers((ctx) => (
 Or register it once and reference it by id:
 
 ```ts
-import { registerDaytonaSandboxProvider } from "smithers-orchestrator/daytona";
+import { registerDaytonaSandboxProvider } from "smthrs/daytona";
 
 const unregister = registerDaytonaSandboxProvider({ image: "ubuntu:22.04" });
 
@@ -2661,7 +3510,7 @@ touching Daytona.
 
 # Vercel Sandbox Provider
 
-`@smithers-orchestrator/vercel` is a first-class Smithers `SandboxProvider`
+`@smthrs/vercel` is a first-class Smithers `SandboxProvider`
 backed by the [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox) SDK: it
 ships a `<Sandbox>` child workflow's request JSON into the sandbox workdir,
 runs the entry command, and reads the result JSON back. The shared
@@ -2676,7 +3525,7 @@ import {
   createVercelSandboxProvider,
   registerVercelSandboxProvider,
   VERCEL_SANDBOX_PROVIDER_ID,
-} from "smithers-orchestrator/vercel";
+} from "smthrs/vercel";
 ```
 
 ## Credentials
@@ -2702,8 +3551,8 @@ Each can also be passed as a factory option (`oidcToken`, `token`, `teamId`,
 ## Usage
 
 ```tsx
-import { createSmithers, Sandbox } from "smithers-orchestrator";
-import { createVercelSandboxProvider } from "smithers-orchestrator/vercel";
+import { createSmithers, Sandbox } from "smthrs";
+import { createVercelSandboxProvider } from "smthrs/vercel";
 
 const provider = createVercelSandboxProvider({
   runtime: "node24",
@@ -2728,7 +3577,7 @@ export default parent.smithers((ctx) => (
 Or register it once and reference it by id:
 
 ```ts
-import { registerVercelSandboxProvider } from "smithers-orchestrator/vercel";
+import { registerVercelSandboxProvider } from "smthrs/vercel";
 
 const unregister = registerVercelSandboxProvider({ runtime: "node24" });
 
@@ -2790,7 +3639,7 @@ unit tests run in CI without touching Vercel.
 
 # AWS Sandbox Provider
 
-`@smithers-orchestrator/aws` is a Smithers `SandboxProvider` that runs a
+`@smthrs/aws` is a Smithers `SandboxProvider` that runs a
 `<Sandbox>` child workflow's request on AWS: Fargate (ECS `RunTask`, the
 default) or CodeBuild. AWS shares no filesystem with the orchestrator, so the
 request/result bundle transports through an S3 bucket. The shared
@@ -2805,7 +3654,7 @@ import {
   createAwsSandboxProvider,
   registerAwsSandboxProvider,
   AWS_SANDBOX_PROVIDER_ID,
-} from "smithers-orchestrator/aws";
+} from "smthrs/aws";
 ```
 
 ## Credentials
@@ -2839,7 +3688,7 @@ The task or build role needs S3 read/write on the prefix.
 ## Usage
 
 ```tsx
-import { createAwsSandboxProvider } from "smithers-orchestrator/aws";
+import { createAwsSandboxProvider } from "smthrs/aws";
 
 // Fargate (default)
 const provider = createAwsSandboxProvider({
@@ -2919,7 +3768,7 @@ credentials, so unit tests run in CI without touching AWS.
 
 # GCP Sandbox Provider
 
-`@smithers-orchestrator/gcp` is a first-class Smithers `SandboxProvider` for
+`@smthrs/gcp` is a first-class Smithers `SandboxProvider` for
 Google Cloud. It executes a `<Sandbox>` child workflow's request on Cloud Run
 Jobs and ships the request/result bundle through a Cloud Storage bucket,
 since Cloud Run Jobs give the caller no shared filesystem. The shared
@@ -2933,7 +3782,7 @@ import {
   createGcpSandboxProvider,
   registerGcpSandboxProvider,
   GCP_SANDBOX_PROVIDER_ID,
-} from "smithers-orchestrator/gcp";
+} from "smthrs/gcp";
 ```
 
 ## Credentials
@@ -2984,8 +3833,8 @@ Other knobs: `prefix` (default `smithers/sandbox`), `command`, `workdir`
 ## Usage
 
 ```tsx
-import { Sandbox } from "smithers-orchestrator";
-import { createGcpSandboxProvider } from "smithers-orchestrator/gcp";
+import { Sandbox } from "smthrs";
+import { createGcpSandboxProvider } from "smthrs/gcp";
 
 const provider = createGcpSandboxProvider({
   projectId: "my-project",
@@ -3117,13 +3966,13 @@ helper (on Cloudflare the provider is wired through `createSmithersCloudflare`).
 
 | Platform | Package | Create fn · provider id | Execution · transport |
 |---|---|---|---|
-| Microsandbox | `@smithers-orchestrator/microsandbox` | `createMicrosandboxSandboxProvider` · `microsandbox` | Local hardware-isolated microVM · guest filesystem |
-| Cloudflare | `@smithers-orchestrator/cloudflare` | `createCloudflareSandboxProvider` · `cloudflare-sandbox` | `@cloudflare/sandbox` container |
-| AWS | `@smithers-orchestrator/aws` | `createAwsSandboxProvider` · `aws-sandbox` | Fargate (ECS) or CodeBuild runner · S3 bundle transport |
-| GCP | `@smithers-orchestrator/gcp` | `createGcpSandboxProvider` · `gcp-sandbox` | Cloud Run Jobs runner · GCS bundle transport |
-| Vercel | `@smithers-orchestrator/vercel` | `createVercelSandboxProvider` · `vercel-sandbox` | Vercel Sandbox compute |
-| Daytona | `@smithers-orchestrator/daytona` | `createDaytonaSandboxProvider` · `daytona-sandbox` | Daytona sandboxes |
-| Any host (Docker) | `@smithers-orchestrator/sandbox` | Docker `http-runner` | Local/remote Docker |
+| Microsandbox | `@smthrs/microsandbox` | `createMicrosandboxSandboxProvider` · `microsandbox` | Local hardware-isolated microVM · guest filesystem |
+| Cloudflare | `@smthrs/cloudflare` | `createCloudflareSandboxProvider` · `cloudflare-sandbox` | `@cloudflare/sandbox` container |
+| AWS | `@smthrs/aws` | `createAwsSandboxProvider` · `aws-sandbox` | Fargate (ECS) or CodeBuild runner · S3 bundle transport |
+| GCP | `@smthrs/gcp` | `createGcpSandboxProvider` · `gcp-sandbox` | Cloud Run Jobs runner · GCS bundle transport |
+| Vercel | `@smthrs/vercel` | `createVercelSandboxProvider` · `vercel-sandbox` | Vercel Sandbox compute |
+| Daytona | `@smthrs/daytona` | `createDaytonaSandboxProvider` · `daytona-sandbox` | Daytona sandboxes |
+| Any host (Docker) | `@smthrs/sandbox` | Docker `http-runner` | Local/remote Docker |
 
 <Note>
   There's no dedicated Kubernetes provider yet: on a cluster, run the
@@ -3187,7 +4036,7 @@ The provider:
 4. Installs Bun, then the Claude Code and Codex CLIs, when missing.
 5. Seeds Claude and Codex auth for the remote CLIs.
 6. Ships a small remote project containing the child workflow source, `agents.ts`, `package.json`, and `input.json`.
-7. Runs `smithers-orchestrator up` in the workspace and reads the remote run result back over SSH.
+7. Runs `smthrs up` in the workspace and reads the remote run result back over SSH.
 8. Deletes the workspace unless `keepWorkspace` is true.
 
 The parent workflow receives:
@@ -3216,7 +4065,7 @@ Secrets are seeded at run time through Plue's operation-scoped secret or credent
 Run the included demo child workflow:
 
 ```bash
-bunx smithers-orchestrator up .smithers/workflows/run-on-plue.tsx --input '{
+bunx smthrs up .smithers/workflows/run-on-plue.tsx --input '{
   "script": ".smithers/workflows/plue-demo-child.tsx",
   "repo": "alice/smoke-test"
 }'
@@ -3225,7 +4074,7 @@ bunx smithers-orchestrator up .smithers/workflows/run-on-plue.tsx --input '{
 Pass input through to the remote child:
 
 ```bash
-bunx smithers-orchestrator up .smithers/workflows/run-on-plue.tsx --input '{
+bunx smthrs up .smithers/workflows/run-on-plue.tsx --input '{
   "script": "workflows/review-child.tsx",
   "repo": "acme/app",
   "input": {
@@ -3237,7 +4086,7 @@ bunx smithers-orchestrator up .smithers/workflows/run-on-plue.tsx --input '{
 Use a local or custom CLI binary and keep the workspace for inspection:
 
 ```bash
-bunx smithers-orchestrator up .smithers/workflows/run-on-plue.tsx --input '{
+bunx smthrs up .smithers/workflows/run-on-plue.tsx --input '{
   "script": ".smithers/workflows/plue-demo-child.tsx",
   "repo": "alice/smoke-test",
   "plueBin": "/path/to/plue",
@@ -3250,9 +4099,9 @@ bunx smithers-orchestrator up .smithers/workflows/run-on-plue.tsx --input '{
 `run-on-plue` is the default wrapper, but workflows can pass the provider object to `<Sandbox>` directly:
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
-import { Sandbox } from "@smithers-orchestrator/components";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
+import { Sandbox } from "@smthrs/components";
 import { createPlueSandboxProvider } from "../lib/plue-provider";
 import { childWorkflow } from "./child";
 import { z } from "zod/v4";

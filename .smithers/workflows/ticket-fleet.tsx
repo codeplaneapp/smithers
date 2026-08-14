@@ -1,14 +1,7 @@
 // smithers-display-name: Ticket fleet: implement → cross-model review → merge train
 // smithers-source: two-way ticket/GitHub sync + difficulty-tiered backlog burndown; lands on main via a serialized local merge queue with per-landing pushes. Landing runs concurrently with the lanes (land-as-you-go), and triage verdicts are memoized across runs in .smithers/executions/ticket-fleet/triage-ledger.json. Pass solNumbers/fableNumbers to split implementers explicitly (Sol vs Fable, each fix reviewed by the opposite model).
-/** @jsxImportSource smithers-orchestrator */
-import {
-  ApprovalGate,
-  ClaudeCodeAgent,
-  Panel,
-  UI,
-  approvalDecisionSchema,
-  createSmithers,
-} from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { ApprovalGate, ClaudeCodeAgent, Panel, UI, approvalDecisionSchema, createSmithers } from "smthrs";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {

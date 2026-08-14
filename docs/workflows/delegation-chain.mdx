@@ -15,14 +15,14 @@ throughout, and the run ends with scorers plus a short poll (see How It Runs,
 Live control, and Scoring below).
 
 ```bash
-bunx smithers-orchestrator workflow run delegation-chain --prompt "Migrate the billing service to the new gateway APIs"
+bunx smthrs workflow run delegation-chain --prompt "Migrate the billing service to the new gateway APIs"
 ```
 
 Watch and steer it in the custom workflow UI, home to the delegation tree,
 question forms, editable outputs, and cost bar:
 
 ```bash
-bunx smithers-orchestrator ui --workflow delegation-chain
+bunx smthrs ui --workflow delegation-chain
 ```
 
 ## Inputs
@@ -44,7 +44,7 @@ Only `prompt` is required; everything else defaults to automatic operation.
 Example with a policy and a budget:
 
 ```bash
-bunx smithers-orchestrator workflow run delegation-chain \
+bunx smthrs workflow run delegation-chain \
   --input '{"prompt":"Ship CSV import","approvalPolicy":"Anything that deletes data needs my approval","budgetUsd":20}'
 ```
 

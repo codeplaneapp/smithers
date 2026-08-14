@@ -1,4 +1,4 @@
-import { SmithersWorkflow } from 'smithers-orchestrator';
+import { SmithersWorkflow } from 'smthrs';
 
 /**
  * Shared types for the elizaOS-conventions workflow authoring layer.

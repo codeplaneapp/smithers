@@ -2,7 +2,7 @@ import React__default from 'react';
 import { z } from 'zod';
 import { TelegramClientConfig, TelegramInlineKeyboard, SendMessageSmartOptions, TelegramDocumentInput } from '../TelegramClientTypes.js';
 import 'effect';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 
 /** Loose deps spec (mirrors Task's DepsSpec: dep key → zod output schema). */
 type TelegramDepsSpec = Record<string, z.ZodTypeAny>;

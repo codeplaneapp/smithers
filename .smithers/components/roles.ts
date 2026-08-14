@@ -14,7 +14,7 @@
 // the active panel instead.
 import { accessSync, constants } from "node:fs";
 import { delimiter, extname, join } from "node:path";
-import { type AgentLike, ClaudeCodeAgent } from "smithers-orchestrator";
+import { type AgentLike, ClaudeCodeAgent } from "smthrs";
 import { codexFirst } from "../lib/codexAccounts";
 
 export const SOL_MODEL = process.env.SMITHERS_SOL_MODEL?.trim() || "gpt-5.6-sol";

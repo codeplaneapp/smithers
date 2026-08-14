@@ -10,11 +10,11 @@
  * Smithers implementation: extraction is parallel, reconciliation is a durable
  * loop, and only high-severity mismatches pause for human review.
  */
-import { Sequence, Parallel, Loop } from "smithers-orchestrator";
+import { Sequence, Parallel, Loop } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, write, bash, grep } from "smithers-orchestrator/tools";
+import { read, write, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import ClassifyPrompt from "./prompts/document-exception-queue/classify.mdx";
 import ExtractPrompt from "./prompts/document-exception-queue/extract.mdx";

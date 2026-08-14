@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { gatewayBackoffDelay, type GatewayBackoffOptions } from "@smithers-orchestrator/gateway-client";
+import { gatewayBackoffDelay, type GatewayBackoffOptions } from "@smthrs/gateway-client";
 import { useSmithersGateway } from "./useSmithersGateway.ts";
 
 const DEFAULT_MAX_FRAMES = 1000;

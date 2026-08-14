@@ -1,5 +1,5 @@
-/** @jsxImportSource smithers-orchestrator */
-import { afterEach, beforeAll, afterAll, describe, expect, test } from "bun:test";
+/** @jsxImportSource smthrs */
+import { afterEach, afterAll, describe, expect, test } from "bun:test";
 import { createServer } from "node:http";
 import { WebSocket as NodeWebSocket, WebSocketServer } from "ws";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";

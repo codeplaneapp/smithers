@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { dirname } from "node:path";
 import {
@@ -10,10 +10,10 @@ import {
   approvalDecisionSchema,
   approvalRankingSchema,
   approvalSelectionSchema,
-} from "smithers-orchestrator";
+} from "smthrs";
 import { approveNode, denyNode } from "../src/approvals.js";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { renderPrometheusMetrics } from "@smithers-orchestrator/observability";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { renderPrometheusMetrics } from "@smthrs/observability";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";

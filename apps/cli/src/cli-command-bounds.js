@@ -1,4 +1,4 @@
-import { assertMaxBytes, assertMaxStringLength } from "@smithers-orchestrator/db/input-bounds";
+import { assertMaxBytes, assertMaxStringLength } from "@smthrs/db/input-bounds";
 import { CLI_JSON_ARGUMENT_MAX_BYTES } from "./json-args.js";
 
 export const CLI_ARGUMENT_MAX_LENGTH = 4096;
@@ -35,6 +35,7 @@ export function validateCliStringArgument(path, value) {
       assertMaxBytes(path, value, CLI_JSON_ARGUMENT_MAX_BYTES);
       return;
     case "prompt":
+    case "goal":
     case "note":
     case "authToken":
       assertMaxStringLength(path, value, CLI_TEXT_ARGUMENT_MAX_LENGTH);

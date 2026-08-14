@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Effect } from "effect";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { schedulerTickEffect } from "../../apps/cli/src/scheduler.js";
 
 const SOAK_ENABLED = process.env.SMITHERS_E2E_SOAK === "1";

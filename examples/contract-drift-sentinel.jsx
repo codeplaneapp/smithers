@@ -6,11 +6,11 @@
  * Pattern: schema loader → diff engine → analyst agent → PR/status output.
  * Use cases: API governance, contract-first development, consumer impact analysis.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import LoadPrompt from "./prompts/contract-drift-sentinel/load.mdx";
 import DiffPrompt from "./prompts/contract-drift-sentinel/diff.mdx";

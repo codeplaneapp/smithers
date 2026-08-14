@@ -3,7 +3,7 @@
 Run the deterministic benchmark with:
 
 ```bash
-bunx smithers-orchestrator eval evals/phase1-authoring-benchmark.tsx --cases evals/suites/phase1-authoring/cases.jsonl --suite phase1-authoring --force
+bunx smthrs eval evals/phase1-authoring-benchmark.tsx --cases evals/suites/phase1-authoring/cases.jsonl --suite phase1-authoring --force
 ```
 
 The builder is `claude-haiku-4-5-20251001`. The case has no LLM judge: it

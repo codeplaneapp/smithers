@@ -2,8 +2,12 @@
   "study": "persuasion-gap-v1",
   "samplingFrame": "UnipatAI/RoadmapBench train split (115 tasks)",
   "datasetRevision": "59184e779909300a5a0150b06b945d39da81a099",
-  "selection": "Within language, ascending SHA-256 of persuasion-gap-v1:<task_id>; pilot tasks excluded",
+  "selection": "Within language, ascending SHA-256 of persuasion-gap-v1:<task_id>; pilot tasks excluded; target six and floor three per language; deterministic cyclic overflow to 30",
   "pilotExcluded": ["fbr-2.42.0-roadmap", "opt-4.4.0-roadmap", "rat-0.21.0-roadmap", "vbt-1.2.0-roadmap"],
+  "targetTasks": 30,
+  "targetPerLanguage": 6,
+  "minimumPerLanguage": 3,
+  "overflowLanguageOrder": ["C++", "Go", "Python", "TypeScript", "Rust"],
   "tasksPerLanguage": 6,
   "candidates": {
     "C++": [

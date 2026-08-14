@@ -1,8 +1,8 @@
-import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler";
-import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
-import type { WorkflowDefinition } from "@smithers-orchestrator/driver/WorkflowDefinition";
-import type { ExtractOptions, TaskDescriptor, WorkflowGraph } from "@smithers-orchestrator/graph";
+import { SmithersCtx } from "@smthrs/driver/SmithersCtx";
+import { SmithersRenderer } from "@smthrs/react-reconciler";
+import { canonicalizeXml } from "@smthrs/graph/utils/xml";
+import type { WorkflowDefinition } from "@smthrs/driver/WorkflowDefinition";
+import type { ExtractOptions, TaskDescriptor, WorkflowGraph } from "@smthrs/graph";
 
 // The engine's post-render helpers are authored in `.js`; engine's `./*` exports
 // funnel every subpath's *types* to its `index.d.ts` bundle, which does not
@@ -96,9 +96,8 @@ export async function renderWorkflow<Schema = unknown>(
   // post-render pass still runs when `renderWorkflow` executes under Bun.
   const baseRootDir = options.baseRootDir ?? options.runtimeConfig?.baseRootDir;
   const workflowPath = options.workflowPath ?? options.runtimeConfig?.workflowPath ?? null;
-  const engineHelpers = (await import("@smithers-orchestrator/engine/engine")) as unknown as EngineOutputHelpers;
-  const computeHelpers =
-    (await import("@smithers-orchestrator/engine/task-compute-fns")) as unknown as TaskComputeFnHelpers;
+  const engineHelpers = (await import("@smthrs/engine/engine")) as unknown as EngineOutputHelpers;
+  const computeHelpers = (await import("@smthrs/engine/task-compute-fns")) as unknown as TaskComputeFnHelpers;
   engineHelpers.resolveTaskOutputs(graph.tasks, workflow);
   computeHelpers.attachSubflowComputeFns(graph.tasks, workflow, {
     rootDir: baseRootDir,

@@ -4,8 +4,8 @@
 // @smithers-type-exports-end
 
 import readline from "node:readline";
-import { jumpToFrameRoute } from "@smithers-orchestrator/server/gatewayRoutes/jumpToFrame";
-import { JumpToFrameError } from "@smithers-orchestrator/time-travel/jumpToFrame";
+import { jumpToFrameRoute } from "@smthrs/server/gatewayRoutes/jumpToFrame";
+import { JumpToFrameError } from "@smthrs/time-travel/jumpToFrame";
 import { EXIT_OK, EXIT_USER_ERROR, EXIT_DECLINED } from "./util/exitCodes.js";
 import { formatCliErrorForStderr, getCliErrorMapping } from "./util/errorMessage.js";
 import { renderEffectBoundaryReport } from "./renderEffectBoundaryReport.js";

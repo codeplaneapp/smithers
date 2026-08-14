@@ -1,6 +1,6 @@
 {
-  "name": "@smithers-orchestrator/engine",
-  "version": "0.32.0",
+  "name": "@smthrs/engine",
+  "version": "0.34.0",
   "description": "Concrete Smithers workflow execution engine",
   "type": "module",
   "sideEffects": [
@@ -32,25 +32,26 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@effect/platform-bun": "4.0.0-beta.102",
-    "@effect/sql-sqlite-bun": "4.0.0-beta.102",
-    "@smithers-orchestrator/agents": "workspace:*",
-    "@smithers-orchestrator/components": "workspace:*",
-    "@smithers-orchestrator/db": "workspace:*",
-    "@smithers-orchestrator/driver": "workspace:*",
-    "@smithers-orchestrator/errors": "workspace:*",
-    "@smithers-orchestrator/graph": "workspace:*",
-    "@smithers-orchestrator/observability": "workspace:*",
-    "@smithers-orchestrator/react-reconciler": "workspace:*",
-    "@smithers-orchestrator/sandbox": "workspace:*",
-    "@smithers-orchestrator/scheduler": "workspace:*",
-    "@smithers-orchestrator/scorers": "workspace:*",
-    "@smithers-orchestrator/time-travel": "workspace:*",
-    "@smithers-orchestrator/tool-context": "workspace:*",
-    "@smithers-orchestrator/vcs": "workspace:*",
+    "@effect/platform-bun": "4.0.0-beta.105",
+    "@effect/platform-node-shared": "4.0.0-beta.105",
+    "@effect/sql-sqlite-bun": "4.0.0-beta.105",
+    "@smthrs/agents": "workspace:*",
+    "@smthrs/components": "workspace:*",
+    "@smthrs/db": "workspace:*",
+    "@smthrs/driver": "workspace:*",
+    "@smthrs/errors": "workspace:*",
+    "@smthrs/graph": "workspace:*",
+    "@smthrs/observability": "workspace:*",
+    "@smthrs/react-reconciler": "workspace:*",
+    "@smthrs/sandbox": "workspace:*",
+    "@smthrs/scheduler": "workspace:*",
+    "@smthrs/scorers": "workspace:*",
+    "@smthrs/time-travel": "workspace:*",
+    "@smthrs/tool-context": "workspace:*",
+    "@smthrs/vcs": "workspace:*",
     "diff": "^9.0.0",
     "drizzle-orm": "^0.45.2",
-    "effect": "4.0.0-beta.102",
+    "effect": "4.0.0-beta.105",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "zod": "^4.4.3"
@@ -61,7 +62,7 @@
     "pg": "^8.22.0"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.0.0-beta.102",
+    "@effect/platform-node": "4.0.0-beta.105",
     "@types/bun": "latest",
     "typescript": "~6.0.3"
   }

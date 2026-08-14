@@ -59,8 +59,8 @@ const dedupe = [
   "react-dom",
   "@tanstack/db",
   "@tanstack/react-db",
-  "@smithers-orchestrator/gateway-client",
-  "@smithers-orchestrator/gateway-react",
+  "@smthrs/gateway-client",
+  "@smthrs/gateway-react",
 ];
 
 export default defineConfig({

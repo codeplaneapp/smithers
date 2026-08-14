@@ -17,7 +17,7 @@ Verified against `main` after the 95-PR merge-train. 169 findings resolved, 254 
 
 ## #299 — 4 still open
 
-- [ ] **P0** P0 Flagship package smithers-orchestrator has no `test` script — its unit tests never run in CI — packages/smithers/package.json — `packages/smithers/package.json:60`
+- [ ] **P0** P0 Flagship package smthrs has no `test` script — its unit tests never run in CI — packages/smithers/package.json — `packages/smithers/package.json:60`
   - fix: Add `"test": "bun test tests"` to packages/smithers/package.json scripts so `pnpm -r test` runs the 4 existing unit-test files.
 - [ ] **P0** P0 22 of 30 fault cases fabricate their own SQL schema and reimplement the feature in-test — they validate a mock of the contract, not the product — e2e/faults/ — `e2e/faults/case12-rewind-reverts-vcs.test.ts:40-221`
   - fix: Replace per-case fabricated `buildDb()` with ensureSmithersTables(SmithersDb) and drive real engine/time-travel/gateway code (pattern already proven by case25).
@@ -32,7 +32,7 @@ Verified against `main` after the 95-PR merge-train. 169 findings resolved, 254 
   - fix: Split into per-command modules (cli/commands/*.js), a parsing module, and an mcp/ wiring module; index.js becomes a thin dispatcher.
 - [ ] **P1** dependency-boundary check scans ZERO files for the e2e workspace (directWorkspaceDirs entry is effectively dead) — `scripts/check-dependency-boundaries.mjs:101`
   - fix: For e2e, collect from its actual test roots (or whole dir minus ignored) rather than only `src`.
-- [ ] **P2** Circular dependency between @smithers-orchestrator/agents and @smithers-orchestrator/observability ships to npm — `packages/agents/src/BaseCliAgent/BaseCliAgent.js:5`
+- [ ] **P2** Circular dependency between @smthrs/agents and @smthrs/observability ships to npm — `packages/agents/src/BaseCliAgent/BaseCliAgent.js:5`
   - fix: Extract the shared trace/metrics helpers into a leaf package both depend on, breaking the cycle.
 - [ ] **P2** observability is a foundational library but lives in apps/ (package masquerading as an app) — `apps/observability/package.json:1`
   - fix: Move to packages/observability and update the workspace, exports map, and dependents.
@@ -43,10 +43,10 @@ Verified against `main` after the 95-PR merge-train. 169 findings resolved, 254 
 - [ ] **P2** Three workspace packages (accounts, usage, tool-context) are missing from the root tsconfig paths map — `tsconfig.json`
   - fix: Add the three missing path mappings to compilerOptions.paths in root tsconfig.json.
 - [ ] **P2** smithers <-> cli package cycle exists (bin delegates dynamically; cli imports smithers statically) — `packages/smithers/src/bin/smithers.js:138`
-  - fix: Move findSmithersAnchorDir (and any shared leaf) into a package both depend on, so cli no longer statically imports smithers-orchestrator.
+  - fix: Move findSmithersAnchorDir (and any shared leaf) into a package both depend on, so cli no longer statically imports smthrs.
 - [ ] **P2** Root package.json exports map is a dev-only alias that diverges structurally from the actually-published exports — `package.json:18`
   - fix: Generate the root dev alias from the published smithers exports, or add a check that the key sets/conditions stay in sync.
-- [ ] **P2** Published smithers-orchestrator ./* wildcard publicly exposes internal helper files — `packages/smithers/package.json`
+- [ ] **P2** Published smthrs ./* wildcard publicly exposes internal helper files — `packages/smithers/package.json`
   - fix: Drop the './*' wildcard and enumerate only intended public subpaths.
 - [ ] **P2** No automated guard that every documented public subpath export resolves — `e2e/exports/programmatic-api.test.ts:1`
   - fix: Add an e2e test that reads each published package.json exports map and dynamically imports every subpath, asserting resolution.
@@ -57,7 +57,7 @@ Verified against `main` after the 95-PR merge-train. 169 findings resolved, 254 
 - [ ] **P1** typecheck:examples never runs in CI — 22 user-facing example workflows can ship broken — `package.json:67`
   - fix: Add a `pnpm typecheck:examples` step to ci.yml.
 - [ ] **P2** Gateway OpenAPI drift check is gated only via faults.yml's pnpm -r build, not in the primary CI job — `.github/workflows/ci.yml:9`
-  - fix: Add `pnpm --filter @smithers-orchestrator/gateway check:openapi` (or `pnpm -r build`) to the primary ci.yml job.
+  - fix: Add `pnpm --filter @smthrs/gateway check:openapi` (or `pnpm -r build`) to the primary ci.yml job.
 - [ ] **P2** jj platform packages' prepublishOnly binary-presence validation never runs on PRs — `packages/jj-darwin-arm64/package.json:1`
   - fix: Add a CI step running `pnpm fetch:jj` + a presence assertion (or invoke the prepublishOnly check) on PRs.
 - [ ] **P2** Full e2e suite runs in the test job without the build step that faults.yml deems necessary — `e2e/package.json:1`
@@ -71,7 +71,7 @@ Verified against `main` after the 95-PR merge-train. 169 findings resolved, 254 
 - [ ] **P2** getDevToolsSnapshot is used by the nodes collection but is missing from the client's typed RPC surface — `packages/gateway-client/src/GatewayRpcTypeMap.ts:31`
   - fix: Add getDevToolsSnapshot request/response entries to GatewayRpcRequestMap/GatewayRpcResponseMap.
 - [ ] **P2** TaskMemoryConfig defined three times with a diverging shape — `packages/memory/src/TaskMemoryConfig.ts:3`
-  - fix: Have graph re-export TaskMemoryConfig from @smithers-orchestrator/memory instead of redefining it.
+  - fix: Have graph re-export TaskMemoryConfig from @smthrs/memory instead of redefining it.
 - [ ] **P2** Generated openapi index.d.ts is committed and can drift; ./* and ./metrics subpaths point types at the full bundle — `packages/openapi/package.json:7`
   - fix: Emit per-entry declarations and point subpath types at them; add a CI build+drift check.
 - [ ] **P1** Quadruple-defined error contract with no drift guard between the runtime (.js) and type (.ts) copies — `packages/protocol/src/errors.ts:1`
@@ -88,11 +88,11 @@ Verified against `main` after the 95-PR merge-train. 169 findings resolved, 254 
   - fix: Set checkJs:true in the root tsconfig (or each package tsconfig) and fix the resulting JSDoc-type errors package by package.
 - [ ] **P1** 28 packages commit a generated bundled src/index.d.ts that ships as exports types and can drift; drift guard exists only at publish, not in CI — `.github/workflows/ci.yml`
   - fix: Add a CI job: `pnpm -r build` then fail if `git status --porcelain` reports any changed src/*.d.ts.
-- [ ] **P1** Published @smithers-orchestrator/observability lives under apps/ and forms a publish cycle with agents (depended on by 14 published packages) — `apps/observability/package.json:1`
+- [ ] **P1** Published @smthrs/observability lives under apps/ and forms a publish cycle with agents (depended on by 14 published packages) — `apps/observability/package.json:1`
   - fix: Relocate observability to packages/ and break the cycle by extracting the shared trace/metric helpers into a leaf package.
 - [ ] **P2** isRecord / isObject / asRecord predicate family re-implemented across 7+ packages with divergent bodies; 99 inline error-message extractions — `packages/agents/src/BaseCliAgent/parseHelpers.js:7`
-  - fix: Add a shared @smithers-orchestrator/errors (or a small predicates package) exporting isRecord/asRecord and an errorMessage() helper, then replace the local copies.
-- [ ] **P2** apps/cli is also published from apps/ (non-private @smithers-orchestrator/cli) — apps/ contains 2 shipping packages, not the conventional zero — `apps/cli/package.json:1`
+  - fix: Add a shared @smthrs/errors (or a small predicates package) exporting isRecord/asRecord and an errorMessage() helper, then replace the local copies.
+- [ ] **P2** apps/cli is also published from apps/ (non-private @smthrs/cli) — apps/ contains 2 shipping packages, not the conventional zero — `apps/cli/package.json:1`
   - fix: Move cli (and observability) to packages/ so apps/ holds only private apps.
 - [ ] **P2** Workflow-to-UI binding is implicit filename convention with no missing-UI signal — `apps/cli/src/index.js:1993`
   - fix: Emit a warning (or a `smithers workflow doctor` check) when a registered workflow has no matching ui/<id>.tsx.
@@ -223,7 +223,7 @@ Verified against `main` after the 95-PR merge-train. 169 findings resolved, 254 
   - fix: Delete resolveWorkflowAtRevision (with the orphaned vcs-version feature).
 - [ ] **P2** formatDiffAsJson is an identity-spread export with no production caller — `packages/time-travel/src/diff.js:206-208`
   - fix: Delete formatDiffAsJson (callers can use the diff object directly).
-- [ ] **P2** Declared dependency @smithers-orchestrator/errors is unused — `packages/usage/package.json:29`
+- [ ] **P2** Declared dependency @smthrs/errors is unused — `packages/usage/package.json:29`
   - fix: Remove the unused dependency.
 - [ ] **P2** WorkspaceSnapshot.ts is orphaned dead code whose docs diverge from the authoritative inline typedef — `packages/vcs/src/WorkspaceSnapshot.ts:1-16`
   - fix: Delete WorkspaceSnapshot.ts (or make jj.js import it as the single source).
@@ -331,7 +331,7 @@ Verified against `main` after the 95-PR merge-train. 169 findings resolved, 254 
   - fix: Implement ordered insertion against a multi-child container root that honors _beforeChild.
 - [ ] **P1** Deep subpath imports resolve types to index.d.ts and break strict TS consumers (TS2305/TS2459) — `packages/sandbox/package.json:12-16 (exports './*' types -> ./src/index.d.ts)`
   - fix: Emit per-subpath declaration files (tsup dts per entry) and map './*' types to ./src/*.d.ts.
-- [ ] **P2** Type-only subpath @smithers-orchestrator/sandbox/SandboxHandle also breaks external strict TS consumers — `packages/sandbox/package.json:12-16; e2e/harness/stallSandbox.ts:2`
+- [ ] **P2** Type-only subpath @smthrs/sandbox/SandboxHandle also breaks external strict TS consumers — `packages/sandbox/package.json:12-16; e2e/harness/stallSandbox.ts:2`
   - fix: Same fix as the deep-subpath finding — per-subpath .d.ts so SandboxHandle resolves from its own subpath.
 - [ ] **P2** WorkflowSessionLive builds a single shared session (latent correctness bug if consumed) — `packages/scheduler/src/WorkflowSessionLive.js:6`
   - fix: Use Layer.effect/scoped that builds a fresh makeWorkflowSession per scope, or don't expose a shared-instance layer.
@@ -410,16 +410,16 @@ Verified against `main` after the 95-PR merge-train. 169 findings resolved, 254 
   - fix: Drive these predicates through a real seeded run/Gateway instead of a hand-built in-memory schema.
 - [ ] **P2** Reconnect-afterSeq / ws-drop / webhook behaviors are fabricated in e2e/faults but exist as real tests elsewhere — `e2e/faults/case09-reconnect-afterseq.test.ts; case15-ws-drop-reconnect.test.ts; case17-webhook-bad-signature.test.ts`
   - fix: Promote the fault cases onto the real Gateway/server rather than fabricated ws servers.
-- [ ] **P2** e2e package.json omits the smithers-orchestrator dependency that case25 imports — `e2e/package.json; e2e/faults/case25-approval-scope-denial.test.ts:7`
-  - fix: Add `"smithers-orchestrator": "workspace:*"` to e2e/package.json dependencies.
+- [ ] **P2** e2e package.json omits the smthrs dependency that case25 imports — `e2e/package.json; e2e/faults/case25-approval-scope-denial.test.ts:7`
+  - fix: Add `"smthrs": "workspace:*"` to e2e/package.json dependencies.
 - [ ] **P2** OpenAPI 'e2e' test mocks globalThis.fetch, so it is not a strict no-mock e2e — `packages/openapi/tests/e2e.test.js:9-18,30-42`
   - fix: Boot a tiny real HTTP server fixture and point the generated tools at it instead of mocking fetch.
 - [ ] **P1** Neither 'examples smoke test' actually exercises the examples/ tree — `apps/cli/tests/docs-examples-smoke.test.js:155`
   - fix: Add a smoke test that compiles/loads each examples/*.tsx (or runs `tsc -p examples/tsconfig.json`) in CI.
 - [ ] **P2** examples/ tree is in NO CI gate — typecheck:examples script exists but is never invoked — `.github/workflows/ci.yml:34`
   - fix: Add `- run: pnpm typecheck:examples` to ci.yml.
-- [ ] **P2** examples/tsconfig.json points smithers-orchestrator at src/*.js source, not the published package — `examples/tsconfig.json`
-  - fix: Point the smithers-orchestrator path at the built dist/types (or run typecheck against the published package) so examples validate shipped types.
+- [ ] **P2** examples/tsconfig.json points smthrs at src/*.js source, not the published package — `examples/tsconfig.json`
+  - fix: Point the smthrs path at the built dist/types (or run typecheck against the published package) so examples validate shipped types.
 - [ ] **P2** AntigravityAgent stream-json interpreter is untested and effectively dead in practice — `packages/agents/src/AntigravityAgent.js:100-160`
   - fix: Either delete the dead stream-json interpreter or add a direct interpreter test and wire stream-json output.
 - [ ] **P2** Observability metric emission path in agents has no test assertions — `packages/agents/src/BaseCliAgent/BaseCliAgent.js:666-690`

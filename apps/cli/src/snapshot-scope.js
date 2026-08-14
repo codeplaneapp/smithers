@@ -2,7 +2,7 @@ import {
   SUBFLOW_RUN_LINEAGE_MAX_ROWS,
   parseSubflowChildRunId,
   subflowRunLineage,
-} from "@smithers-orchestrator/graph/subflow-run-lineage";
+} from "@smthrs/graph/subflow-run-lineage";
 
 /**
  * Resolve every run whose workspace checkpoints belong to a parent-facing

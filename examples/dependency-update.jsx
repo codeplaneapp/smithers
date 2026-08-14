@@ -4,11 +4,11 @@
  * Pattern: Scan → Risk assess → Apply updates → Run tests.
  * Use cases: npm update, cargo update, pip upgrade, go mod tidy.
  */
-import { Sequence, Parallel } from "smithers-orchestrator";
+import { Sequence, Parallel } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, edit, bash, grep } from "smithers-orchestrator/tools";
+import { read, edit, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import ScanPrompt from "./prompts/dependency-update/scan.mdx";
 import UpdatePrompt from "./prompts/dependency-update/update.mdx";

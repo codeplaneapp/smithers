@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // db-query — can a weak model answer questions about a Smithers run DB by writing
 // SQL? The candidate gets the schema + path, writes a query; the `query` verifier
 // runs THAT query against the seeded fixture and checks the scalar answer.

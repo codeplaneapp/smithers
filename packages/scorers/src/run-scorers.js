@@ -1,15 +1,15 @@
 import { Effect, Metric } from "effect";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
 import { scorerDuration, scorersFinished, scorersFailed, scorersStarted } from "./metrics.js";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
+import { nowMs } from "@smthrs/scheduler/nowMs";
 import crypto from "node:crypto";
 /** @typedef {{ emit: (eventName: "event", event: unknown) => unknown, emitEventWithPersist?: (event: unknown) => import("effect").Effect.Effect<void, unknown> }} EventBus */
 /** @typedef {import("./types.js").ScoreResult} ScoreResult */
 /** @typedef {import("./types.js").ScorerContext} ScorerContext */
 /** @typedef {import("./types.js").ScorerBinding} ScorerBinding */
 /** @typedef {import("./types.js").ScorersMap} ScorersMap */
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/errors/SmithersError").SmithersError} SmithersError */
 
 // ---------------------------------------------------------------------------
 // Sampling

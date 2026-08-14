@@ -1,4 +1,4 @@
-# @smithers-orchestrator/ui
+# @smthrs/ui
 
 Shared component library for Smithers UIs: shadcn component anatomy (compound
 slots, CVA variant APIs, `asChild`, `data-slot` attributes) and Radix behavior,
@@ -11,7 +11,7 @@ component also self-injects the composed sheet plus its lane CSS fragment as a
 fallback. All classes are namespaced `sui-*`.
 
 ```tsx
-import { SmithersUiStyles, Button, StatusPill } from "smithers-orchestrator/ui";
+import { SmithersUiStyles, Button, StatusPill } from "smthrs/ui";
 ```
 
 ## Families
@@ -44,11 +44,11 @@ import { SmithersUiStyles, Button, StatusPill } from "smithers-orchestrator/ui";
 - Workflow canvas: `WorkflowCanvas` node/edge/controls/panel/toolbar/minimap
   anatomy.
 
-Heavy renderers stay behind `smithers-orchestrator/ui/adapters/*` subpaths so
+Heavy renderers stay behind `smthrs/ui/adapters/*` subpaths so
 the base barrel tree-shakes clean. Gateway-bound wrappers
 (`GatewayApprovalList`, `GatewayApprovalConfirmation`,
 `GatewayCheckpointControls`, `SmithersCanvasNode`) live in
-`smithers-orchestrator/gateway-ui`.
+`smthrs/gateway-ui`.
 
 Provenance for every ported family is recorded per lane under `provenance/`
 and aggregated in `shadcn-provenance.json`; `node scripts/check-ui-architecture.mjs`

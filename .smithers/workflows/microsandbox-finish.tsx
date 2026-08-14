@@ -17,8 +17,8 @@
 //     tasks at execute time with absolute paths (compute cwd is the launch root).
 //   • Irreversible steps (integrate into dirty shared repos, prod deploy, filing the
 //     upstream issue) sit behind <Approval> gates; deny skips rather than failing.
-/** @jsxImportSource smithers-orchestrator */
-import { Approval, ClaudeCodeAgent, UI, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Approval, ClaudeCodeAgent, UI, createSmithers } from "smthrs";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";

@@ -39,7 +39,7 @@ And one rule about the operator boundary:
 
 > **The workspace Gateway is the run control plane.** A controller, Bun cron
 > job, monitor, bot, or custom client must use
-> `smithers-orchestrator/gateway-client` or Gateway RPC/REST for run discovery,
+> `smthrs/gateway-client` or Gateway RPC/REST for run discovery,
 > health, events, launch/resume/cancel, approvals, signals, scores, and node
 > output. Never open SQLite, PGlite, or Postgres from an operator script; never
 > query `_smithers_*`; never import `openSmithersStore` or CLI-internal
@@ -78,7 +78,7 @@ Use this loop for broad, ambiguous, risky, long-running, or multi-agent work:
 4. Design the Smithers run. Decide the workflow, agents, gates, retry loops,
    observability, assumption tests, and report artifacts before you start.
 5. Validate the workflow shape. Render the graph with
-   `bunx smithers-orchestrator graph <workflow>` (there is no `up --dry-run`; the
+   `bunx smthrs graph <workflow>` (there is no `up --dry-run`; the
    `graph` verb is the dry-run path, rendering the graph without executing or
    persisting anything) or dry-run evals before launching expensive or
    destructive work.
@@ -214,23 +214,23 @@ If you cannot see the run, you cannot operate it well.
 For local and development work, use the CLI surfaces yourself:
 
 ```bash
-bunx smithers-orchestrator ps
-bunx smithers-orchestrator inspect RUN_ID --watch
-bunx smithers-orchestrator events RUN_ID --watch
-bunx smithers-orchestrator node NODE_ID --runId RUN_ID
-bunx smithers-orchestrator scores RUN_ID
-bunx smithers-orchestrator why RUN_ID
+bunx smthrs ps
+bunx smthrs inspect RUN_ID --watch
+bunx smthrs events RUN_ID --watch
+bunx smthrs node NODE_ID --runId RUN_ID
+bunx smthrs scores RUN_ID
+bunx smthrs why RUN_ID
 ```
 
 For any long-lived observer or controller, start from the workspace singleton
 and use its typed API:
 
 ```bash
-bunx smithers-orchestrator gateway status --format json
+bunx smthrs gateway status --format json
 ```
 
 The status response provides the verified `url` for the current workspace. If no
-singleton is running, start `bunx smithers-orchestrator gateway` under the
+singleton is running, start `bunx smthrs gateway` under the
 controller's service manager, then create a `SmithersGatewayClient` with that
 URL. Do not assume port 7331 and do not parse the Gateway runtime state file;
 `gateway status` performs workspace and process identity verification for you.
@@ -249,14 +249,14 @@ Use serve mode when you need HTTP status, SSE events, remote approvals, or
 Prometheus metrics:
 
 ```bash
-bunx smithers-orchestrator up workflow.tsx --serve --metrics --port 7331
+bunx smthrs up workflow.tsx --serve --metrics --port 7331
 ```
 
 Use the observability stack when the work needs traces, metrics, dashboards, or
 a reviewer evidence bundle:
 
 ```bash
-bunx smithers-orchestrator observability
+bunx smthrs observability
 ```
 
 Enable OpenTelemetry export when you need trace-level proof, then include the
@@ -267,12 +267,12 @@ and any application logs.
 When the human would benefit from seeing the work, suggest the UI and operate it
 for them:
 
-- `bunx smithers-orchestrator monitor [RUN_ID]` opens the Smithers Monitor: a
+- `bunx smthrs monitor [RUN_ID]` opens the Smithers Monitor: a
   zero-setup live view over every run in the workspace (grouped runs, execution
   tree, event log, approvals inbox), optionally focused on one run. It observes
   only; it launches nothing.
-- `bunx smithers-orchestrator gui <path>` opens the workspace view.
-- `bunx smithers-orchestrator ui RUN_ID` opens a workflow custom UI when the Gateway is running
+- `bunx smthrs gui <path>` opens the workspace view.
+- `bunx smthrs ui RUN_ID` opens a workflow custom UI when the Gateway is running
   and the workflow has a registered UI.
 - Gateway and custom UI streams expose run state, frames, approvals, node output,
   and DevTools snapshots for richer visual monitoring.
@@ -285,8 +285,8 @@ plan, gates, and evidence live." Do not phrase it as homework for the human.
 Use hot mode while authoring or tuning a workflow:
 
 ```bash
-bunx smithers-orchestrator graph workflow.tsx
-bunx smithers-orchestrator up workflow.tsx --hot true --input '{"prompt":"..."}'
+bunx smthrs graph workflow.tsx
+bunx smthrs up workflow.tsx --hot true --input '{"prompt":"..."}'
 ```
 
 The graph command validates the rendered shape without executing the whole job.
@@ -376,7 +376,7 @@ Before launching:
 - Outcome, finish line, and evidence are written down.
 - Missing context has been researched or asked for.
 - Third-party assumptions have probes or are explicitly marked as risks.
-- Workflow graph (`bunx smithers-orchestrator graph <workflow>`, the dry-run
+- Workflow graph (`bunx smthrs graph <workflow>`, the dry-run
   path) or eval dry-run has been checked.
 - Backpressure checks exist and can fail.
 - Observability path is chosen.

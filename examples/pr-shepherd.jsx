@@ -3,11 +3,11 @@
  * <PRShepherd> — Watch a PR move to ready-for-review, gather diffs/tests/context,
  * leave structured review comments, and optionally re-run after changes.
  */
-import { Sequence, Parallel } from "smithers-orchestrator";
+import { Sequence, Parallel } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import GatherDiffPrompt from "./prompts/pr-shepherd/gather-diff.mdx";
 import GatherTestsPrompt from "./prompts/pr-shepherd/gather-tests.mdx";

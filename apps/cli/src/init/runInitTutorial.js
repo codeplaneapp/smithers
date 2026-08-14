@@ -19,6 +19,7 @@ const TUTORIAL_ENGINES = {
   codex: "codex",
   antigravity: "antigravity",
   pi: "pi",
+  omp: "omp",
   kimi: "kimi",
   amp: "amp",
 };
@@ -127,8 +128,8 @@ export async function runInitTutorial(opts) {
   try {
     const [{ Effect }, { runWorkflow }, { SmithersDb }] = await Promise.all([
       import("effect"),
-      import("@smithers-orchestrator/engine"),
-      import("@smithers-orchestrator/db/adapter"),
+      import("@smthrs/engine"),
+      import("@smthrs/db/adapter"),
     ]);
     const workflow = await buildInlineChatWorkflow({
       engine,

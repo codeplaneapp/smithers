@@ -1,8 +1,8 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import "../preload.ts";
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { join } from "node:path";
-import { renderWorkflow } from "smithers-orchestrator/testing";
+import { renderWorkflow } from "smthrs/testing";
 
 setDefaultTimeout(60_000);
 
@@ -16,7 +16,7 @@ const render = async (input: unknown = {}, outputs: Record<string, unknown[]> = 
 const ids = (frame: Frame) => frame.tasks.map((t) => t.nodeId);
 
 const baselineRow = {
-  packageName: "smithers-orchestrator",
+  packageName: "smthrs",
   publishedVersion: "0.31.0",
   tag: "v0.31.0",
   tagCommit: "abc123",

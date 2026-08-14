@@ -1,9 +1,9 @@
 ---
 title: "0.20.2"
-description: "Patch release: bunx smithers-orchestrator init is significantly leaner"
+description: "Patch release: bunx smthrs init is significantly leaner"
 ---
 
-Patch release: `bunx smithers-orchestrator init` is significantly leaner
+Patch release: `bunx smthrs init` is significantly leaner
 on cold installs. The deprecated TUI mode and the GitHub-tarball `skills`
 dependency are gone.
 
@@ -11,7 +11,7 @@ dependency are gone.
 
 ## CLI
 
-- **TUI mode removed.** The `bunx smithers-orchestrator tui` command pulled in `@opentui/core`,
+- **TUI mode removed.** The `bunx smthrs tui` command pulled in `@opentui/core`,
   which transitively required `jimp` (~89M), `three` (~31M), `planck` (~9M),
   and `bun-webgpu` (~9M), roughly **170 MB** of graphics-stack packages
   installed into `.smithers/node_modules/` on every `init`, even for users
@@ -27,10 +27,10 @@ dependency are gone.
   `.smithers/prompts/grill-me.mdx`, and `.smithers/components/GrillMe.tsx`
   imports the local file. The init scaffolder in
   `apps/cli/src/workflow-pack.js` writes the new prompt and the updated
-  import on `bunx smithers-orchestrator init`.
+  import on `bunx smthrs init`.
 
 ## Impact
 
 - `.smithers/node_modules/` shrinks from ~467 MB to ~300 MB on a fresh
-  `bunx smithers-orchestrator init`.
+  `bunx smthrs init`.
 - Cold `bun install` skips the GitHub tarball fetch for `skills`.

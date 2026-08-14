@@ -1,4 +1,4 @@
-import type { TaskDescriptor } from "@smithers-orchestrator/graph";
+import type { TaskDescriptor } from "@smthrs/graph";
 import type { TaskState } from "./TaskState.ts";
 
 export type TaskRecord = {

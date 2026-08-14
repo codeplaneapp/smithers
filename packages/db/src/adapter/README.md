@@ -13,7 +13,7 @@ file.
   an enum means editing the constant array, not the type.
 - `SmithersDb.js` is a re-export shim only — the adapter implementation lives in
   `../adapter.js`; the shim keeps the historical
-  `@smithers-orchestrator/db/adapter` subpath stable.
+  `@smthrs/db/adapter` subpath stable.
 - `index.js` is the barrel. Its `// @smithers-type-exports-begin/end` typedef
   block is tool-managed — never hand-edit it. It intentionally lists only the
   typedefs the tool emitted; `NodeDiffCacheRow.ts` is imported directly where

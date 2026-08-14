@@ -1,8 +1,5 @@
 // src/runtimeConformance.ts
-import {
-  RuntimeCapabilityError,
-  RUNTIME_CAPABILITY_UNAVAILABLE
-} from "@smithers-orchestrator/driver/RuntimeCapabilityError";
+import { RuntimeCapabilityError, RUNTIME_CAPABILITY_UNAVAILABLE } from "@smthrs/driver/RuntimeCapabilityError";
 function fail(message) {
   throw new Error(`runtime conformance: ${message}`);
 }

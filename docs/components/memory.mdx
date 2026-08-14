@@ -4,7 +4,7 @@ description: Recall durable context, load mental-model primers, and retain task 
 ---
 
 ```tsx
-import { Memory } from "smithers-orchestrator";
+import { Memory } from "smthrs";
 
 <Memory
   banks={[`user-${ctx.input.userId}`, `project-${ctx.input.repoId}`]}
@@ -129,9 +129,9 @@ HINDSIGHT_BANK_PREFIX=dev-
 Outside a run, manage durable facts with the `memory` command: `set` writes (remember) a fact, `get` and `list` read (recall) facts.
 
 ```bash
-bunx smithers-orchestrator memory set workflow:my-flow last-release '{"tag":"v1.4.0"}'  # remember a fact
-bunx smithers-orchestrator memory get workflow:my-flow last-release                     # recall one fact
-bunx smithers-orchestrator memory list workflow:my-flow                                 # recall every fact in a namespace
+bunx smthrs memory set workflow:my-flow last-release '{"tag":"v1.4.0"}'  # remember a fact
+bunx smthrs memory get workflow:my-flow last-release                     # recall one fact
+bunx smthrs memory list workflow:my-flow                                 # recall every fact in a namespace
 ```
 
 Inside a run, set `tools` on `<Memory>` to expose the agent-facing `remember` and `recall` tools instead.

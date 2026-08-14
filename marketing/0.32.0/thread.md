@@ -10,7 +10,7 @@ Production-hardening shape: hook with scale, headline feature (monitor workflows
 >
 > First-class monitor workflows, resumable runs after in-flight workflow edits, and durable subflow fixes across the engine.
 >
-> bunx smithers-orchestrator@latest init
+> bunx smthrs@latest init
 >
 > 1/6
 

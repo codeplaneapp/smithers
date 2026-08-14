@@ -54,8 +54,8 @@ test("the committed package declarations compile for a skipLibCheck:false consum
   writeFileSync(
     join(fixtureRoot, "consumer.ts"),
     `import { Effect, Layer } from "effect";
-import { MemoryService, createMemoryLayer } from "@smithers-orchestrator/memory";
-import type { MemoryServiceApi, MemoryNamespace } from "@smithers-orchestrator/memory";
+import { MemoryService, createMemoryLayer } from "@smthrs/memory";
+import type { MemoryServiceApi, MemoryNamespace } from "@smthrs/memory";
 
 // \`yield*\` must surface the service API, so a declaration that lost its
 // Context.ServiceClass base (\`declare class MemoryService {}\`) fails here.

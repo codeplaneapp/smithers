@@ -1,21 +1,21 @@
-import * as _smithers_orchestrator_graph_types from '@smithers-orchestrator/graph/types';
-import { TaskDescriptor as TaskDescriptor$2, WorkflowGraph } from '@smithers-orchestrator/graph/types';
-import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
-import { SmithersEvent } from '@smithers-orchestrator/observability/SmithersEvent';
+import * as _smthrs_graph_types from '@smthrs/graph/types';
+import { TaskDescriptor as TaskDescriptor$2, WorkflowGraph } from '@smthrs/graph/types';
+import { SmithersError } from '@smthrs/errors/SmithersError';
+import { SmithersEvent } from '@smthrs/observability/SmithersEvent';
 import { Layer } from 'effect';
-import * as _smithers_orchestrator_scheduler from '@smithers-orchestrator/scheduler';
-import { WaitReason as WaitReason$1, EngineDecision as EngineDecision$1 } from '@smithers-orchestrator/scheduler';
+import * as _smthrs_scheduler from '@smthrs/scheduler';
+import { WaitReason as WaitReason$1, EngineDecision as EngineDecision$1 } from '@smthrs/scheduler';
 import { z } from 'zod';
-import * as _smithers_orchestrator_graph_ProofBinding from '@smithers-orchestrator/graph/ProofBinding';
-import { SmithersWorkflowOptions } from '@smithers-orchestrator/scheduler/SmithersWorkflowOptions';
-import { SchemaRegistryEntry } from '@smithers-orchestrator/db/SchemaRegistryEntry';
-import * as _smithers_orchestrator_graph from '@smithers-orchestrator/graph';
-import { ExtractOptions, WorkflowGraph as WorkflowGraph$1 } from '@smithers-orchestrator/graph';
+import * as _smthrs_graph_ProofBinding from '@smthrs/graph/ProofBinding';
+import { SmithersWorkflowOptions } from '@smthrs/scheduler/SmithersWorkflowOptions';
+import { SchemaRegistryEntry } from '@smthrs/db/SchemaRegistryEntry';
+import * as _smthrs_graph from '@smthrs/graph';
+import { ExtractOptions, WorkflowGraph as WorkflowGraph$1 } from '@smthrs/graph';
 
 /**
  * Raw signal row as loaded by a `RuntimeAdapter.signals.load` implementation
  * (or seeded via `RunOptions.signals` for tests/replay without a live
- * adapter). Mirrors `@smithers-orchestrator/db`'s `SignalRow` shape minus
+ * adapter). Mirrors `@smthrs/db`'s `SignalRow` shape minus
  * `runId` (the ctx is already run-scoped). `payloadJson` may be a JSON string
  * (as stored durably) or an already-parsed value (test convenience).
  */
@@ -31,7 +31,7 @@ type SignalRowInput$1 = {
  * A signal row as handed to workflow/render code. `payload` is intentionally
  * `unknown` — signals are not schema-validated at receipt time (a `smithers
  * signal` call can deliver arbitrary JSON), so typed access belongs to the
- * caller (e.g. `@smithers-orchestrator/xstate`'s `eventReceived`, which
+ * caller (e.g. `@smthrs/xstate`'s `eventReceived`, which
  * validates against a supplied schema and reports a typed error naming the
  * signal on failure) rather than being asserted here.
  */
@@ -141,6 +141,8 @@ type RunOptions$2 = {
     logDir?: string | null;
     allowNetwork?: boolean;
     maxOutputBytes?: number;
+    /** Per-checkpoint UTF-8 JSON byte limit; defaults to and cannot exceed the 16 MiB system ceiling. */
+    maxAgentCheckpointBytes?: number;
     toolTimeoutMs?: number;
     hot?: boolean | HotReloadOptions$1;
     annotations?: Record<string, string | number | boolean>;
@@ -239,7 +241,7 @@ type RuntimeSubprocessResult$1 = {
 type RuntimeSubprocess$1 = {
     spawn(command: string, args?: readonly string[], opts?: Record<string, unknown>): Promise<RuntimeSubprocessResult$1>;
 };
-/** Worktree path-resolution capability, mirroring `@smithers-orchestrator/graph`'s `resolveWorktreePath` contract. */
+/** Worktree path-resolution capability, mirroring `@smthrs/graph`'s `resolveWorktreePath` contract. */
 type RuntimeWorktree$1 = {
     resolve(path: string, opts?: {
         baseRootDir?: string;
@@ -290,7 +292,7 @@ type RuntimeAdapter$1 = {
     readonly signals?: RuntimeSignals$1;
 };
 
-type TaskDescriptor$1 = _smithers_orchestrator_graph_types.TaskDescriptor;
+type TaskDescriptor$1 = _smthrs_graph_types.TaskDescriptor;
 type TaskExecutorContext = TaskExecutorContext$1;
 type BrowserRuntimeOptions$1 = {
     clock?: RuntimeClock$1;
@@ -389,6 +391,17 @@ type RunResult$2 = {
      * {@link failedChildren}.
      */
     readonly failedChildKeys?: readonly string[];
+    /**
+     * Loops that exited via `onMaxReached: "return-last"` with their `until`
+     * predicate still false. Present (and non-empty) only on a `finished` result:
+     * the run completed, but these loops never converged (#1464 AWF-1). See
+     * `docs/runtime/run-state.mdx`.
+     */
+    readonly exhaustedLoops?: readonly {
+        readonly id: string;
+        readonly iteration: number;
+        readonly maxIterations: number | null;
+    }[];
 };
 
 type ContinueAsNewHandler$1 = (transition: unknown, context: {
@@ -426,6 +439,7 @@ type FallbackTableName<Schema> = [keyof Schema & string] extends [never] ? strin
 type OutputAccessor$2<Schema, TRow = unknown> = {
     (table: FallbackTableName<Schema>): Array<TRow>;
     <K extends keyof Schema & string>(table: K): Array<InferOutputEntry$1<Schema[K]>>;
+    <K extends keyof Schema & string>(table: Schema[K]): Array<InferOutputEntry$1<Schema[K]>>;
 } & {
     [K in keyof Schema & string]: Array<InferOutputEntry$1<Schema[K]>>;
 };
@@ -693,6 +707,15 @@ declare class SmithersCtx<Schema extends unknown = unknown> {
      */
     resolveTableName(table: TableRef): string;
     /**
+     * Like {@link resolveTableName}, but throws instead of degrading to
+     * `String(table)` when the argument maps to no declared output table. Used
+     * by the callable `ctx.outputs(...)` form, where a silent `[]` is
+     * indistinguishable from "the upstream has not produced rows yet".
+     * @param {TableRef} table
+     * @returns {string}
+     */
+    requireTableName(table: TableRef): string;
+    /**
      * Record that a task with `deps` deferred this render because its
      * dependencies were not resolvable. Called by the Task component before it
      * returns null. The engine inspects these at quiescence to turn a permanent
@@ -714,7 +737,7 @@ type OutputKey$1 = OutputKey$2;
 type SafeParser = SafeParser$1;
 type SmithersCtxOptions$1 = SmithersCtxOptions$2;
 type RunAuthContext$1 = RunAuthContext$2;
-type ProofBinding$1 = _smithers_orchestrator_graph_ProofBinding.ProofBinding;
+type ProofBinding$1 = _smthrs_graph_ProofBinding.ProofBinding;
 type SmithersRuntimeConfig = SmithersRuntimeConfig$1;
 type TableRef = unknown;
 /**
@@ -882,8 +905,8 @@ declare class WorkflowDriver<Schema extends unknown = unknown> {
     activeRunId: string;
     /** @type {RunOptions | undefined} */
     activeOptions: RunOptions$1 | undefined;
-    /** @type {import("@smithers-orchestrator/graph").WorkflowGraph | undefined} */
-    lastGraph: _smithers_orchestrator_graph.WorkflowGraph | undefined;
+    /** @type {import("@smthrs/graph").WorkflowGraph | undefined} */
+    lastGraph: _smthrs_graph.WorkflowGraph | undefined;
     /** @type {{ nodeId: string; waitingOn: string[] }[]} Tasks that deferred on unresolved deps in the latest render. */
     lastDeferredDeps: {
         nodeId: string;
@@ -1035,11 +1058,11 @@ type SchedulerWaitHandler = SchedulerWaitHandler$1;
 type WaitHandler = WaitHandler$1;
 type ContinueAsNewHandler = ContinueAsNewHandler$1;
 type RunOptions$1 = RunOptions$2;
-type RunResult$1 = _smithers_orchestrator_scheduler.RunResult;
-type EngineDecision = _smithers_orchestrator_scheduler.EngineDecision;
-type RenderContext = _smithers_orchestrator_scheduler.RenderContext;
-type WaitReason = _smithers_orchestrator_scheduler.WaitReason;
-type TaskDescriptor = _smithers_orchestrator_graph_types.TaskDescriptor;
+type RunResult$1 = _smthrs_scheduler.RunResult;
+type EngineDecision = _smthrs_scheduler.EngineDecision;
+type RenderContext = _smthrs_scheduler.RenderContext;
+type WaitReason = _smthrs_scheduler.WaitReason;
+type TaskDescriptor = _smthrs_graph_types.TaskDescriptor;
 
 /**
  * Clamp a startedBy prompt to its persisted budget, surrogate-pair safe.
@@ -1069,7 +1092,7 @@ type InferOutputEntry<T> = InferOutputEntry$1<T>;
 type OutputKey = OutputKey$2;
 type OutputSnapshot = OutputSnapshot$2;
 type OutputRowsReader<Schema = unknown> = OutputRowsReader$2<Schema>;
-type ProofBinding = _smithers_orchestrator_graph_ProofBinding.ProofBinding;
+type ProofBinding = _smthrs_graph_ProofBinding.ProofBinding;
 type RunAuthContext = RunAuthContext$2;
 type RunStartedBy = RunStartedBy$1;
 type EffectPlatformRuntime = EffectPlatformRuntime$1;

@@ -1,13 +1,13 @@
 // smithers-source: authored
 // smithers-display-name: VCS
 // smithers-description: Inspect and act on a git or jj working tree. Status and log are deterministic; commit messages and rebase plans are written by an agent.
-/** @jsxImportSource smithers-orchestrator */
-import { UI } from "smithers-orchestrator";
-import { createSmithers, Task, Sequence } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { UI } from "smthrs";
+import { createSmithers, Task, Sequence } from "smthrs";
 import { execFileSync } from "node:child_process";
 import { z } from "zod/v4";
 import { agents } from "../agents";
-import { resolveJjBinary } from "@smithers-orchestrator/vcs/resolveJjBinary";
+import { resolveJjBinary } from "@smthrs/vcs/resolveJjBinary";
 
 const NL = String.fromCharCode(10);
 

@@ -57,8 +57,33 @@ export function createCodexCapabilityRegistry(opts = {}) {
       supportsUiRequests: false,
       methods: [],
     },
+    fileChanges: {
+      supportsFileChanges: true,
+      supportsUnifiedDiff: false,
+    },
     builtIns: resolveCodexBuiltIns(opts),
   };
+}
+const CODEX_CHANGE_KIND = { add: "created", update: "modified", delete: "deleted" };
+/**
+ * Normalize codex's native `item.changes: {path, kind}[]` — path+kind only,
+ * no diff content ships in the protocol.
+ *
+ * @param {unknown} rawChanges
+ * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+ */
+function parseCodexFileChanges(rawChanges) {
+  if (!Array.isArray(rawChanges)) return undefined;
+  const changes = rawChanges
+    .map((entry) => {
+      if (!isRecord(entry)) return null;
+      const path = asString(entry.path);
+      const rawKind = asString(entry.kind);
+      if (!path || !rawKind) return null;
+      return { path, kind: CODEX_CHANGE_KIND[rawKind] ?? "modified", source: "reported" };
+    })
+    .filter((entry) => Boolean(entry));
+  return changes.length > 0 ? changes : undefined;
 }
 export class CodexAgent extends BaseCliAgent {
   opts;
@@ -175,6 +200,7 @@ export class CodexAgent extends BaseCliAgent {
           })
           .filter((entry) => Boolean(entry));
         const message = files.length > 0 ? files.slice(0, 4).join(", ") : "Updated files";
+        const fileChanges = parseCodexFileChanges(rawChanges);
         return {
           type: "action",
           engine: this.cliEngine,
@@ -187,6 +213,7 @@ export class CodexAgent extends BaseCliAgent {
             detail: {
               type: itemType,
               changes: rawChanges,
+              ...(fileChanges ? { fileChanges } : {}),
             },
           },
           message,
@@ -513,13 +540,52 @@ export class CodexAgent extends BaseCliAgent {
     };
   }
   /**
+   * Normalize a `file_change` action (as emitted by {@link createOutputInterpreter})
+   * into {@link AgentFileChange} records. `action.detail.changes` is codex's
+   * native `{path, kind}[]` — no diff content in the protocol.
+   *
+   * @param {unknown} action
+   * @returns {import("./agent-contract/AgentFileChange.ts").AgentFileChange[] | undefined}
+   */
+  parseFileChanges(action) {
+    const fileAction = /** @type {{ detail?: { changes?: unknown } } | undefined} */ (action);
+    return parseCodexFileChanges(fileAction?.detail?.changes);
+  }
+  /**
    * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
    */
   async buildCommand(params) {
     const resumeSession = typeof params.options?.resumeSession === "string" ? params.options.resumeSession : undefined;
     const args = resumeSession ? ["exec", "resume"] : ["exec"];
     const yoloEnabled = this.opts.yolo ?? this.yolo;
-    const configOverrides = normalizeCodexConfig(this.opts.config);
+    // First-class effort → model_reasoning_effort (explicit config wins).
+    // Documented ceiling: Codex historically accepts only
+    // minimal | low | medium | high (xhigh on newer gpt-5-codex). This is a
+    // pass-through — `max` from the shared ladder is NOT a Codex value, so
+    // forwarding it is the caller's responsibility (Codex will reject it).
+    const effort =
+      (typeof this.opts.effort === "string" && this.opts.effort) ||
+      (typeof this.effort === "string" && this.effort) ||
+      null;
+    /** @type {CodexConfigOverrides | undefined} */
+    let configForNorm = this.opts.config;
+    if (effort) {
+      if (Array.isArray(configForNorm)) {
+        const entries = configForNorm.map(String);
+        const hasExplicitEffort = entries.some((entry) => /^\s*model_reasoning_effort\s*=/.test(entry));
+        configForNorm = hasExplicitEffort ? entries : [...entries, `model_reasoning_effort=${effort}`];
+      } else {
+        const base =
+          configForNorm && typeof configForNorm === "object"
+            ? { .../** @type {Record<string, unknown>} */ (configForNorm) }
+            : {};
+        if (base.model_reasoning_effort == null) {
+          base.model_reasoning_effort = effort;
+        }
+        configForNorm = base;
+      }
+    }
+    const configOverrides = normalizeCodexConfig(configForNorm);
     for (const entry of configOverrides) {
       args.push("-c", entry);
     }
@@ -532,10 +598,11 @@ export class CodexAgent extends BaseCliAgent {
     if (!resumeSession) pushFlag(args, "--sandbox", this.opts.sandbox);
     if (!resumeSession) pushFlag(args, "--profile", this.opts.profile);
     if (!resumeSession && this.opts.fullAuto && !this.opts.sandbox) {
-      // `--full-auto` is a deprecated alias for `--sandbox workspace-write`;
-      // codex-cli 0.144+ rejects the flag alongside an explicit --sandbox,
-      // so an explicit sandbox option wins and the alias is dropped.
-      args.push("--full-auto");
+      // codex-cli 0.147 removed `--full-auto` entirely (it errors with
+      // "unexpected argument"); it was an alias for `--sandbox
+      // workspace-write`, so emit the canonical flag. An explicit sandbox
+      // option still wins via the pushFlag above.
+      args.push("--sandbox", "workspace-write");
     } else if (yoloEnabled || this.opts.dangerouslyBypassApprovalsAndSandbox) {
       args.push("--dangerously-bypass-approvals-and-sandbox");
     }

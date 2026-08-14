@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { renderPrometheusMetrics } from "@smithers-orchestrator/observability";
+import { renderPrometheusMetrics } from "@smthrs/observability";
 import { Gateway } from "../src/gateway.js";
 
 // streamRunEvents fans live frames straight onto the WS socket. These tests

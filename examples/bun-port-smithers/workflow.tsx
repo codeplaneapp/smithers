@@ -1,6 +1,6 @@
-/** @jsxImportSource smithers-orchestrator */
-import { ApprovalGate, HumanTask, Subflow, type SmithersWorkflow } from "@smithers-orchestrator/components";
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { ApprovalGate, HumanTask, Subflow, type SmithersWorkflow } from "@smthrs/components";
+import { createSmithers } from "smthrs";
 import type { z } from "zod";
 
 import {

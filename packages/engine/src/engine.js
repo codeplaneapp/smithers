@@ -1,9 +1,8 @@
-import { makeWorkflowSession } from "@smithers-orchestrator/scheduler";
-import { ReactWorkflowDriver } from "@smithers-orchestrator/react-reconciler/driver";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
-import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
-import { normalizeRunStartedBy } from "@smithers-orchestrator/driver";
-import { resolveWorktreePath } from "@smithers-orchestrator/graph";
+import { attachDurableRetryState, makeWorkflowSession, parseDurableRetryState } from "@smthrs/scheduler";
+import { ReactWorkflowDriver } from "@smthrs/react-reconciler/driver";
+import { SmithersRenderer } from "@smthrs/react-reconciler/dom/renderer";
+import { normalizeRunStartedBy } from "@smthrs/driver";
+import { resolveWorktreePath } from "@smthrs/graph";
 import { createNodeRuntime } from "./node-runtime.js";
 import {
   coerceOutputRowForSnapshot,
@@ -11,42 +10,42 @@ import {
   loadOutputs,
   loadRunOutputRowsEffect,
   OUTPUT_PROVENANCE_SEQ,
-} from "@smithers-orchestrator/db/snapshot";
-import { FRAME_KEYFRAME_INTERVAL } from "@smithers-orchestrator/db/frame-codec";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+} from "@smthrs/db/snapshot";
+import { FRAME_KEYFRAME_INTERVAL } from "@smthrs/db/frame-codec";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
 import {
   selectOutputRow,
   validateOutput,
   describeSchemaShape,
   buildOutputRow,
   stripAutoColumns,
-} from "@smithers-orchestrator/db/output";
-import { validateInput } from "@smithers-orchestrator/db/input";
-import { schemaSignature } from "@smithers-orchestrator/db/schema-signature";
-import { withSqliteWriteRetry } from "@smithers-orchestrator/db/write-retry";
-import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
-import { classifyClaudeWorkflowNodeKind } from "@smithers-orchestrator/graph/classifyClaudeWorkflowNodeKind";
-import { escapeSmithersDir } from "@smithers-orchestrator/graph/escapeSmithersDir";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
-import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+} from "@smthrs/db/output";
+import { validateInput } from "@smthrs/db/input";
+import { schemaSignature } from "@smthrs/db/schema-signature";
+import { withSqliteWriteRetry } from "@smthrs/db/write-retry";
+import { canonicalizeXml } from "@smthrs/graph/utils/xml";
+import { classifyClaudeWorkflowNodeKind } from "@smthrs/graph/classifyClaudeWorkflowNodeKind";
+import { escapeSmithersDir } from "@smthrs/graph/escapeSmithersDir";
+import { nowMs } from "@smthrs/scheduler/nowMs";
+import { errorToJson } from "@smthrs/errors/errorToJson";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import {
   assertJsonPayloadWithinBounds,
   assertOptionalStringMaxLength,
   assertPositiveFiniteInteger,
-} from "@smithers-orchestrator/db/input-bounds";
+} from "@smthrs/db/input-bounds";
 import { buildPlanTree, buildStateKey } from "./scheduler.js";
 import { buildWorktreeIsolationNotice, WORKTREE_ISOLATION_NOTICE_MARKER } from "./buildWorktreeIsolationNotice.js";
 import { buildOutputValidationDiagnostics } from "./output-validation-diagnostics.js";
 import { isThenablePayload, makeThenablePayloadError } from "./thenable-payload.js";
-import { resolveForkSessionMessages } from "./resolveForkSessionMessages.js";
+import { resolveForkAgentState } from "./resolveForkSessionMessages.js";
 import { getDefinedToolMetadata } from "./getDefinedToolMetadata.js";
-import { captureSnapshotEffect, loadLatestSnapshot, parseSnapshot } from "@smithers-orchestrator/time-travel/snapshot";
+import { captureSnapshotEffect, loadLatestSnapshot, parseSnapshot } from "@smthrs/time-travel/snapshot";
 import { EventBus } from "./events.js";
 import { AgentTraceCollector } from "./AgentTraceCollector.js";
-import { getJjPointer, runJj, workspaceAdd } from "@smithers-orchestrator/vcs/jj";
-import { findVcsRoot } from "@smithers-orchestrator/vcs/find-root";
+import { getJjPointer, runJj, workspaceAdd } from "@smthrs/vcs/jj";
+import { findVcsRoot } from "@smthrs/vcs/find-root";
 import { createSlotGovernor } from "./slotGovernor.js";
 import { createWorktreeSyncCache } from "./worktreeSyncCache.js";
 import { writeWorktreeOwner } from "./worktreeOwnerFile.js";
@@ -54,11 +53,15 @@ import { reapWorktrees } from "./reapWorktrees.js";
 import { runGit } from "./runGit.js";
 import { startDurability } from "./startDurability.js";
 import { startDocFileSync } from "./startDocFileSync.js";
-import { failedRestoreToSurface, restoreWorkspaceToLatestCheckpoint } from "./restoreWorkspace.js";
+import {
+  failedRestoreToSurface,
+  restoreWorkspaceToLatestCheckpoint,
+  shouldRestoreWorkspaceForResume,
+} from "./restoreWorkspace.js";
 import { appendGap, defaultGapSpoolPath } from "./durabilityGapSpool.js";
-import { runWithToolContext } from "@smithers-orchestrator/tool-context";
+import { runWithToolContext } from "@smthrs/tool-context";
 import { createToolJournalContext } from "./createToolJournalContext.js";
-import { vcsToolingStatus } from "@smithers-orchestrator/vcs/vcsToolingStatus";
+import { vcsToolingStatus } from "@smthrs/vcs/vcsToolingStatus";
 import { getDefaultPlatformLayer, getPlatformLayer, withPlatformLayer } from "./platform-layer.js";
 import { sleep } from "./sleep.js";
 import { getTableName, isTable } from "drizzle-orm";
@@ -78,19 +81,26 @@ import {
   schedulerWaitDuration,
   trackEvent,
   updateAsyncExternalWaitPending,
-} from "@smithers-orchestrator/observability/metrics";
-import { runScorersAsync } from "@smithers-orchestrator/scorers/run-scorers";
+} from "@smthrs/observability/metrics";
+import { runScorersAsync } from "@smthrs/scorers/run-scorers";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-import { logDebug, logError, logInfo, logWarning } from "@smithers-orchestrator/observability/logging";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
+import { logDebug, logError, logInfo, logWarning } from "@smthrs/observability/logging";
 import { isPidAlive, parseRuntimeOwnerPid } from "./runtime-owner.js";
 import { spawn as nodeSpawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { platform } from "node:os";
-import { annotateSmithersTrace, smithersSpanNames, withSmithersSpan } from "@smithers-orchestrator/observability";
-import { withTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
-import { hashCapabilityRegistry } from "@smithers-orchestrator/agents/capability-registry";
+import { annotateSmithersTrace, smithersSpanNames, withSmithersSpan } from "@smthrs/observability";
+import { withTaskRuntime } from "@smthrs/driver/task-runtime";
+import { hashCapabilityRegistry } from "@smthrs/agents/capability-registry";
+import {
+  DEFAULT_AGENT_CHECKPOINT_MAX_BYTES,
+  agentProducesCheckpoint,
+  agentSupportsCheckpoint,
+  cloneAgentCheckpoint,
+  hashAgentCheckpointCapabilities,
+} from "@smthrs/agents/agent-checkpoint";
 import {
   bridgeApprovalResolve,
   bridgeWaitForEventResolve,
@@ -100,11 +110,11 @@ import {
   resolveDeferredTaskStateBridge,
 } from "./effect/workflow-bridge.js";
 import { acquireSingleRunnerRunLease } from "./effect/single-runner.js";
-import { parseWaitForEventAttemptSnapshot } from "@smithers-orchestrator/db/waitForEventAttempt";
 import { AlertRuntime } from "./alert-runtime.js";
 import { attachSandboxComputeFns, attachSubflowComputeFns, getSubflowChildRunId } from "./task-compute-fns.js";
-import { SUBFLOW_RUN_LINEAGE_MAX_ROWS, subflowRunLineage } from "@smithers-orchestrator/graph/subflow-run-lineage";
+import { SUBFLOW_RUN_LINEAGE_MAX_ROWS, subflowRunLineage } from "@smthrs/graph/subflow-run-lineage";
 import { buildCacheScopeIdentity, isFreshCacheRow, normalizeCacheScope } from "./cache-policy.js";
+import { RETRY_STATE_META_KEY, stampDurableRetryState } from "./effect/retry-state.js";
 import { runWorkflowWithMakeBridge } from "./effect/workflow-make-bridge.js";
 import {
   createWorkflowVersioningRuntime,
@@ -115,7 +125,7 @@ import {
   runWithCorrelationContext,
   updateCurrentCorrelationContext,
   withCorrelationContext,
-} from "@smithers-orchestrator/observability/correlation";
+} from "@smthrs/observability/correlation";
 import {
   extractWorkflowImportSpecifiers,
   getWorkflowImportScanLoader,
@@ -130,18 +140,19 @@ import { extractBalancedJson, extractLastBalancedJson } from "./json-extraction.
 import { setupBudgetTracker } from "./aspects/setupBudgetTracker.js";
 import { evaluateAspectBudget } from "./aspects/evaluateAspectBudget.js";
 import { buildMemoryPromptBlock, createTaskMemoryTools, retainTaskMemory } from "./memory-runtime.js";
-/** @typedef {import("@smithers-orchestrator/graph/GraphSnapshot").GraphSnapshot} GraphSnapshot */
+/** @typedef {import("@smthrs/graph/GraphSnapshot").GraphSnapshot} GraphSnapshot */
 /** @typedef {import("./HijackState.ts").HijackState} HijackState */
-/** @typedef {import("@smithers-orchestrator/driver/RunOptions").RunOptions} RunOptions */
-/** @typedef {import("@smithers-orchestrator/driver/SmithersErrorReport").SmithersErrorReport} SmithersErrorReport */
-/** @typedef {import("@smithers-orchestrator/driver/RunResult").RunResult} RunResult */
-/** @typedef {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow} SmithersWorkflow */
-/** @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
-/** @typedef {import("@smithers-orchestrator/scheduler").RenderContext} RenderContext */
-/** @typedef {import("@smithers-orchestrator/scheduler").TaskStateMap} TaskStateMap */
-/** @typedef {import("@smithers-orchestrator/db/adapter/ApprovalRow").ApprovalRow} ApprovalRow */
-/** @typedef {import("@smithers-orchestrator/db/adapter/RunRow").RunRow} RunRow */
-/** @typedef {import("@smithers-orchestrator/graph/XmlNode").XmlNode} XmlNode */
+/** @typedef {import("@smthrs/driver/RunOptions").RunOptions} RunOptions */
+/** @typedef {import("@smthrs/driver/SmithersErrorReport").SmithersErrorReport} SmithersErrorReport */
+/** @typedef {import("@smthrs/driver/RunResult").RunResult} RunResult */
+/** @typedef {import("@smthrs/components/SmithersWorkflow").SmithersWorkflow} SmithersWorkflow */
+/** @typedef {import("@smthrs/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("@smthrs/scheduler").RenderContext} RenderContext */
+/** @typedef {import("@smthrs/scheduler").TaskStateMap} TaskStateMap */
+/** @typedef {import("@smthrs/db/adapter/ApprovalRow").ApprovalRow} ApprovalRow */
+/** @typedef {import("@smthrs/db/adapter/AttemptRow").AttemptRow} AttemptRow */
+/** @typedef {import("@smthrs/db/adapter/RunRow").RunRow} RunRow */
+/** @typedef {import("@smthrs/graph/XmlNode").XmlNode} XmlNode */
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<Record<string, unknown>>} BunSQLiteDatabase */
 /** @typedef {import("drizzle-orm/sqlite-core").SQLiteTable} SQLiteTable */
 
@@ -186,7 +197,10 @@ function acquireWorktreeCreationSlot(root) {
 function resolveBinary(cmd) {
   const bunRuntime = typeof Bun !== "undefined" ? Bun : null;
   if (typeof bunRuntime?.which === "function") {
-    return bunRuntime.which(cmd);
+    const resolved = bunRuntime.which(cmd);
+    if (resolved) {
+      return resolved;
+    }
   }
   const pathEnv = typeof process !== "undefined" ? process.env.PATH : undefined;
   if (!pathEnv) {
@@ -249,7 +263,7 @@ const AGENT_SUMMARY_UUID_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-
  * whitelisted string fields only (label/engine/model) — never the adapter
  * object itself, which carries callbacks, options, and credentials.
  *
- * Mirrors `DevToolsAgentRef` in `@smithers-orchestrator/protocol/devtools`.
+ * Mirrors `DevToolsAgentRef` in `@smthrs/protocol/devtools`.
  *
  * @param {unknown} agent
  * @returns {{ label?: string; engine?: string; model?: string } | undefined}
@@ -302,7 +316,7 @@ function summarizeAgentLikeForIndex(agent) {
  * for QUEUED nodes. For a list, the top-level fields describe the primary and
  * `chain` preserves every declared entry in order.
  *
- * Mirrors `DevToolsAgentSummary` in `@smithers-orchestrator/protocol/devtools`.
+ * Mirrors `DevToolsAgentSummary` in `@smthrs/protocol/devtools`.
  *
  * @param {unknown} agent
  * @returns {{ label?: string; engine?: string; model?: string; chain?: Array<{ label?: string; engine?: string; model?: string }> } | undefined}
@@ -485,6 +499,7 @@ function parseAttemptMetaJson(metaJson) {
  * literal is duplicated deliberately, like other cross-package wire constants.
  */
 const RESET_CANCELLED_META_KEY = "resetCancelled";
+const RESET_RESUME_BOUNDARY_META_KEY = "resetResumeBoundaryMs";
 /**
  * A reset-cancelled attempt is one a time-travel reset deliberately voided so the
  * node re-runs from attempt 1. Ordinary crash-recovery cancellations (engine
@@ -509,12 +524,163 @@ function nextAttemptNumber(attempts) {
   const countedAttempts = attempts.filter((attempt) => !isResetCancelledAttempt(attempt));
   return (countedAttempts[0]?.attempt ?? 0) + 1;
 }
+
+/**
+ * Return the only attempt history eligible to supply heartbeat/session state.
+ * Attempt numbers can be reused after reset, so chronological order—not a
+ * stale higher attempt number—is authoritative. Legacy reset rows have no
+ * reconstructable wall-clock boundary and therefore remain fail-closed.
+ *
+ * @param {ReadonlyArray<{ attempt: number, state?: string | null, startedAtMs?: number | null, metaJson?: string | null }>} attempts
+ */
+function resumeEligibleAttempts(attempts) {
+  let resetBoundaryMs = null;
+  for (const attempt of attempts) {
+    if (!isResetCancelledAttempt(attempt)) continue;
+    const explicitBoundary = Number(parseAttemptMetaJson(attempt.metaJson)[RESET_RESUME_BOUNDARY_META_KEY]);
+    if (!Number.isSafeInteger(explicitBoundary) || explicitBoundary < 0) return [];
+    resetBoundaryMs = resetBoundaryMs === null ? explicitBoundary : Math.max(resetBoundaryMs, explicitBoundary);
+  }
+  return attempts
+    .filter((attempt) => {
+      if (isResetCancelledAttempt(attempt)) return false;
+      if (resetBoundaryMs === null) return true;
+      const startedAtMs = Number(attempt.startedAtMs);
+      return Number.isFinite(startedAtMs) && startedAtMs >= resetBoundaryMs;
+    })
+    .toSorted((left, right) => {
+      const timeDelta = Number(right.startedAtMs ?? 0) - Number(left.startedAtMs ?? 0);
+      return timeDelta || Number(right.attempt ?? 0) - Number(left.attempt ?? 0);
+    });
+}
+/**
+ * Decide whether pre-existing agent resume state is unusable for this task
+ * start. Explicit agent failures apply chronologically. A deliberate reset
+ * creates a one-shot boundary: it vetoes old heartbeat/session state before
+ * the first fresh attempt, then stops affecting retries of that fresh attempt.
+ *
+ * @param {ReadonlyArray<{ attempt: number, state?: string | null, startedAtMs?: number | null, finishedAtMs?: number | null, metaJson?: string | null }>} attempts
+ * @returns {boolean}
+ */
+function shouldDiscardResumeSession(attempts) {
+  const hasReset = attempts.some(isResetCancelledAttempt);
+  const eligibleAttempts = resumeEligibleAttempts(attempts);
+  if (hasReset && eligibleAttempts.length === 0) return true;
+
+  const newestRelevantAttempt = eligibleAttempts
+    .filter(
+      (attempt) => attempt.state === "failed" || parseAttemptMetaJson(attempt.metaJson).discardResumeSession === true,
+    )
+    .at(0);
+  return parseAttemptMetaJson(newestRelevantAttempt?.metaJson).discardResumeSession === true;
+}
 /**
  * @param {unknown} value
  * @returns {unknown[] | undefined}
  */
 function asConversationMessages(value) {
   return Array.isArray(value) ? value : undefined;
+}
+/**
+ * Effective launch configuration of the task's CLI agent, persisted on the
+ * hijack hand-off so `smithers hijack` can relaunch the interactive session
+ * with the same model / permission flags / config dir the workflow agent ran
+ * with (`--resume` alone does not restore per-process argv).
+ * @param {any} agent
+ * @param {Record<string, unknown>} attemptMeta
+ * @returns {{ model: string | null; yolo: boolean | null; permissionMode: string | null; dangerouslySkipPermissions: boolean; configDir: string | null }}
+ */
+function agentHijackConfig(agent, attemptMeta) {
+  const opts = agent && typeof agent.opts === "object" && agent.opts ? agent.opts : {};
+  return {
+    model:
+      typeof attemptMeta.agentModel === "string"
+        ? attemptMeta.agentModel
+        : typeof agent?.model === "string"
+          ? agent.model
+          : null,
+    yolo: typeof opts.yolo === "boolean" ? opts.yolo : typeof agent?.yolo === "boolean" ? agent.yolo : null,
+    permissionMode: typeof opts.permissionMode === "string" ? opts.permissionMode : null,
+    dangerouslySkipPermissions: opts.dangerouslySkipPermissions === true,
+    configDir: typeof opts.configDir === "string" ? opts.configDir : null,
+  };
+}
+
+const CLI_SESSION_CHECKPOINT_CODEC = "smithers.cli-session";
+
+/**
+ * @param {unknown} checkpoint
+ * @param {string | null} engine
+ * @returns {string | undefined}
+ */
+function resumeSessionFromCheckpoint(checkpoint, engine) {
+  if (!checkpoint || typeof checkpoint !== "object" || Array.isArray(checkpoint)) return undefined;
+  const candidate = /** @type {Record<string, unknown>} */ (checkpoint);
+  if (candidate.codec !== CLI_SESSION_CHECKPOINT_CODEC || candidate.version !== 1) return undefined;
+  const payload = candidate.payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
+  const value = /** @type {Record<string, unknown>} */ (payload);
+  if (typeof value.engine !== "string" || value.engine !== engine || typeof value.resume !== "string") {
+    return undefined;
+  }
+  return value.resume.length > 0 ? value.resume : undefined;
+}
+
+/**
+ * Load and verify a content-addressed checkpoint. Corrupt content is a durable
+ * storage error, not a reason to silently start an unrelated fresh session.
+ *
+ * @param {SmithersDb} adapter
+ * @param {{ contentHash: string; codec: string; version: number }} ref
+ * @param {number} maxBytes
+ */
+async function loadAgentCheckpoint(adapter, ref, maxBytes) {
+  const row = await Effect.runPromise(adapter.getAgentCheckpoint(ref.contentHash));
+  if (!row || typeof row.checkpointJson !== "string") {
+    throw new SmithersError("AGENT_CHECKPOINT_MISSING", `Agent checkpoint content is missing: ${ref.contentHash}`, {
+      contentHash: ref.contentHash,
+      failureRetryable: false,
+    });
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(row.checkpointJson);
+  } catch (cause) {
+    throw new SmithersError(
+      "AGENT_CHECKPOINT_CORRUPT",
+      `Agent checkpoint content is not valid JSON: ${ref.contentHash}`,
+      { contentHash: ref.contentHash, failureRetryable: false },
+      { cause },
+    );
+  }
+  let checkpoint;
+  try {
+    checkpoint = cloneAgentCheckpoint(parsed, maxBytes);
+  } catch (cause) {
+    throw new SmithersError(
+      "AGENT_CHECKPOINT_CORRUPT",
+      `Agent checkpoint content failed validation: ${ref.contentHash}`,
+      { contentHash: ref.contentHash, failureRetryable: false },
+      { cause },
+    );
+  }
+  if (checkpoint.codec !== ref.codec || checkpoint.version !== ref.version) {
+    throw new SmithersError(
+      "AGENT_CHECKPOINT_CORRUPT",
+      `Agent checkpoint metadata does not match its content: ${ref.contentHash}`,
+      { contentHash: ref.contentHash, failureRetryable: false },
+    );
+  }
+  const actualSizeBytes = Buffer.byteLength(row.checkpointJson, "utf8");
+  const actualHash = createHash("sha256").update(row.checkpointJson).digest("hex");
+  if (actualHash !== ref.contentHash || Number(row.sizeBytes) !== actualSizeBytes) {
+    throw new SmithersError(
+      "AGENT_CHECKPOINT_CORRUPT",
+      `Agent checkpoint content address does not match its stored bytes: ${ref.contentHash}`,
+      { contentHash: ref.contentHash, failureRetryable: false },
+    );
+  }
+  return checkpoint;
 }
 /**
  * @template T
@@ -1351,7 +1517,7 @@ async function ensureWorktree(rootDir, worktreePath, branch, baseBranch, owner) 
     if (!vcsToolingStatus().ok) {
       throw new SmithersError(
         "VCS_NOT_FOUND",
-        `Cannot create worktree: no jj or git found. Smithers bundles jj via the optional @smithers-orchestrator/jj-<platform> package; if it could not install for your platform, install jj (https://github.com/jj-vcs/jj) or git, or set SMITHERS_JJ_PATH.`,
+        `Cannot create worktree: no jj or git found. Smithers bundles jj via the optional @smthrs/jj-<platform> package; if it could not install for your platform, install jj (https://github.com/jj-vcs/jj) or git, or set SMITHERS_JJ_PATH.`,
         { rootDir },
       );
     }
@@ -1462,7 +1628,7 @@ async function ensureWorktree(rootDir, worktreePath, branch, baseBranch, owner) 
  * @param {string} runId
  * @param {string} rootDir
  * @param {boolean | undefined} keepWorktrees
- * @returns {Promise<void>}
+ * @returns {Promise<Record<string, unknown>[]>}
  */
 async function reapFinishedRunWorktrees(adapter, runId, rootDir, keepWorktrees) {
   const keep = keepWorktrees ?? ["1", "true"].includes((process.env.SMITHERS_KEEP_WORKTREES ?? "").toLowerCase());
@@ -1502,12 +1668,43 @@ const RUN_HEARTBEAT_MS = 1_000;
 const RUN_HEARTBEAT_STALE_MS = 30_000;
 const RUN_ABORT_SETTLE_POLL_MS = 10;
 const RUN_ABORT_SETTLE_TIMEOUT_MS = 5_000;
+// Agent adapters may need to publish a final checkpoint after the task abort
+// signal fires. Process-backed adapters also need to finish process-group
+// termination. Keep generate attached for this bounded grace period whenever
+// either cleanup protocol is declared. Four seconds accommodates the existing
+// bounded terminate-and-verify adapters and remains below the run's five-second
+// abort-settlement ceiling.
+const AGENT_ABORT_CLEANUP_GRACE_MS = 4_000;
 const RUN_CANCEL_POLL_MS = 250;
 const TASK_HEARTBEAT_THROTTLE_MS = 500;
 const TASK_HEARTBEAT_MAX_PAYLOAD_BYTES = 1_000_000;
 const TASK_HEARTBEAT_TIMEOUT_CHECK_MS = 250;
 // Poll for hijack-handoff readiness between agent events; keeps handoff latency low without hot-spinning.
 const HIJACK_COMPLETION_POLL_MS = 100;
+// Engines whose CLI announces its resumable session id before the session is
+// durable on disk: Codex reports its thread id on `thread.started` (and OMP
+// its session id on `session`) but flushes the file `--resume` reads only as
+// the turn progresses. Aborting the CLI the moment the id appears hands the
+// user a dangling session (#1502), so a native-cli hijack handoff for these
+// engines waits for the turn's terminal `completed` event. Engines that
+// persist at session creation (e.g. claude-code) keep the low-latency early
+// handoff.
+const HIJACK_RESUME_AFTER_TURN_ENGINES = new Set(["codex", "omp"]);
+
+function createCliTurnCompletionState() {
+  let completed = false;
+  return {
+    begin() {
+      completed = false;
+    },
+    complete() {
+      completed = true;
+    },
+    isCompleted() {
+      return completed;
+    },
+  };
+}
 const MAX_CONTINUATION_STATE_BYTES = 10 * 1024 * 1024;
 
 /**
@@ -1829,6 +2026,7 @@ async function restoreDurableStateFromSnapshot(adapter, db, schema, inputTable, 
         ralphId: ralph.ralphId,
         iteration: ralph.iteration ?? 0,
         done: Boolean(ralph.done),
+        exhausted: Boolean(ralph.exhausted),
         updatedAtMs: restoredAtMs,
       }),
     );
@@ -1947,7 +2145,7 @@ function copyRunScopedRowsWithClient(client, table, sourceRunId, targetRunId) {
 }
 /**
  * @param {RalphStateMap} ralphState
- * @returns {Record<string, { iteration: number; done: boolean }>}
+ * @returns {Record<string, { iteration: number; done: boolean; exhausted?: boolean }>}
  */
 function ralphStateToObject(ralphState) {
   const out = {};
@@ -1956,6 +2154,7 @@ function ralphStateToObject(ralphState) {
     out[ralphId] = {
       iteration: state.iteration,
       done: state.done,
+      ...(state.exhausted ? { exhausted: true } : {}),
     };
   }
   return out;
@@ -1967,7 +2166,11 @@ function ralphStateToObject(ralphState) {
 function cloneRalphStateMap(ralphState) {
   const next = new Map();
   for (const [ralphId, state] of ralphState.entries()) {
-    next.set(ralphId, { iteration: state.iteration, done: state.done });
+    next.set(ralphId, {
+      iteration: state.iteration,
+      done: state.done,
+      ...(state.exhausted ? { exhausted: true } : {}),
+    });
   }
   return next;
 }
@@ -2048,7 +2251,7 @@ async function continueRunAsNewPostgres(params) {
     ts,
   } = params;
   const storage = adapter.internalStorage;
-  await Effect.runPromise(
+  return Effect.runPromise(
     adapter.withTransactionEffect(
       "continue-as-new handoff",
       Effect.gen(function* () {
@@ -2129,6 +2332,7 @@ async function continueRunAsNewPostgres(params) {
             ralphId,
             iteration: state.iteration,
             done: Boolean(state.done),
+            exhausted: Boolean(state.exhausted),
             updatedAtMs: ts,
           });
         }
@@ -2186,6 +2390,26 @@ async function continueRunAsNewPostgres(params) {
           catch: (cause) =>
             toSmithersError(cause, "append continuation event", { code: "DB_WRITE_FAILED", details: { runId } }),
         });
+        const expiredEvents = [];
+        const queuedSteers = (yield* adapter.listSteers(runId)).filter((steer) => steer.status === "queued");
+        for (const steer of queuedSteers) {
+          yield* adapter.markSteerExpired(steer.steerId, ts);
+          const event = {
+            type: "SteerExpired",
+            runId,
+            nodeId: steer.nodeId,
+            steerId: steer.steerId,
+            timestampMs: ts,
+          };
+          yield* adapter.insertEventWithNextSeq({
+            runId,
+            timestampMs: ts,
+            type: event.type,
+            payloadJson: JSON.stringify(event),
+          });
+          expiredEvents.push(event);
+        }
+        return expiredEvents;
       }),
     ),
   );
@@ -2283,7 +2507,7 @@ async function continueRunAsNew(params) {
     timestampMs: ts,
   };
   if (db && typeof db === "object" && db.dialect === "postgres") {
-    await continueRunAsNewPostgres({
+    const expiredSteerEvents = await continueRunAsNewPostgres({
       adapter,
       inputTableName,
       inputRow,
@@ -2304,8 +2528,10 @@ async function continueRunAsNew(params) {
       newRunId: targetRunId,
       ancestryDepth: ancestryDepth + 1,
       carriedStateBytes,
+      expiredSteerEvents,
     };
   }
+  let expiredSteerEvents = [];
   await withSqliteWriteRetry(
     async () => {
       const client = db.$client;
@@ -2377,12 +2603,12 @@ async function continueRunAsNew(params) {
         for (const [ralphId, state] of carriedRalphState.entries()) {
           client
             .query(
-              `INSERT INTO _smithers_ralph (run_id, ralph_id, iteration, done, updated_at_ms)
-               VALUES (?, ?, ?, ?, ?)
+              `INSERT INTO _smithers_ralph (run_id, ralph_id, iteration, done, exhausted, updated_at_ms)
+               VALUES (?, ?, ?, ?, ?, ?)
                ON CONFLICT(run_id, ralph_id)
-               DO UPDATE SET iteration = excluded.iteration, done = excluded.done, updated_at_ms = excluded.updated_at_ms`,
+               DO UPDATE SET iteration = excluded.iteration, done = excluded.done, exhausted = excluded.exhausted, updated_at_ms = excluded.updated_at_ms`,
             )
-            .run(targetRunId, ralphId, state.iteration, state.done ? 1 : 0, ts);
+            .run(targetRunId, ralphId, state.iteration, state.done ? 1 : 0, state.exhausted ? 1 : 0, ts);
         }
         client
           .query(
@@ -2411,7 +2637,7 @@ async function continueRunAsNew(params) {
              WHERE run_id = ?`,
           )
           .run("continued", ts, runId);
-        const nextEventSeq = Number(
+        let nextEventSeq = Number(
           client.query("SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM _smithers_events WHERE run_id = ?").get(runId)
             ?.seq ?? 0,
         );
@@ -2421,7 +2647,34 @@ async function continueRunAsNew(params) {
              VALUES (?, ?, ?, ?, ?)`,
           )
           .run(runId, nextEventSeq, ts, continuationEvent.type, JSON.stringify(continuationEvent));
+        const pendingExpiryEvents = [];
+        const queuedSteers = client
+          .query("SELECT steer_id, node_id FROM _smithers_steers WHERE run_id = ? AND status = 'queued'")
+          .all(runId);
+        for (const steer of queuedSteers) {
+          client
+            .query(
+              "UPDATE _smithers_steers SET status = 'expired', expired_at_ms = ? WHERE steer_id = ? AND status = 'queued'",
+            )
+            .run(ts, steer.steer_id);
+          const event = {
+            type: "SteerExpired",
+            runId,
+            nodeId: steer.node_id,
+            steerId: steer.steer_id,
+            timestampMs: ts,
+          };
+          nextEventSeq += 1;
+          client
+            .query(
+              `INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json)
+               VALUES (?, ?, ?, ?, ?)`,
+            )
+            .run(runId, nextEventSeq, ts, event.type, JSON.stringify(event));
+          pendingExpiryEvents.push(event);
+        }
         client.run("COMMIT");
+        expiredSteerEvents = pendingExpiryEvents;
       } catch (error) {
         try {
           client.run("ROLLBACK");
@@ -2437,6 +2690,7 @@ async function continueRunAsNew(params) {
     newRunId: targetRunId,
     ancestryDepth: ancestryDepth + 1,
     carriedStateBytes,
+    expiredSteerEvents,
   };
 }
 /**
@@ -2651,17 +2905,22 @@ function assertResumeDurabilityMetadata(existingRun, existingConfig, current, wo
   ) {
     mismatches.push("VCS root changed");
   }
+  // "unavailable" covers runs recorded without hashes (e.g. legacy or
+  // interrupted starts); accepting re-blesses them from the current source
+  // because resume activation persists the fresh runMetadata hashes.
+  const workflowHashMismatchLabels = [
+    "workflow entry file changed",
+    "workflow module graph changed",
+    "workflow entry hash unavailable",
+    "workflow module graph unavailable",
+  ];
   const acceptedWorkflowMismatches =
     options.acceptWorkflowChange === true
-      ? mismatches.filter(
-          (mismatch) => mismatch === "workflow entry file changed" || mismatch === "workflow module graph changed",
-        )
+      ? mismatches.filter((mismatch) => workflowHashMismatchLabels.includes(mismatch))
       : [];
   const blockingMismatches = mismatches.filter((mismatch) => !acceptedWorkflowMismatches.includes(mismatch));
   if (blockingMismatches.length > 0) {
-    const isWorkflowEdit = blockingMismatches.some(
-      (m) => m === "workflow entry file changed" || m === "workflow module graph changed",
-    );
+    const isWorkflowEdit = blockingMismatches.some((m) => workflowHashMismatchLabels.includes(m));
     const hint = isWorkflowEdit
       ? "The workflow source changed since this run started, so it can no longer be resumed safely. " +
         "To re-bless the durability metadata and resume THIS run in place, pass `--accept-workflow-change` " +
@@ -2816,8 +3075,11 @@ async function markUnattendedResumeFailed(adapter, eventBus, runId, error, onErr
   const errorInfo = errorToJson(error);
   await cancelPendingTimersBridge(adapter, runId, eventBus, "run-failed");
   const failedAtMs = nowMs();
-  const failed = await Effect.runPromise(
-    adapter.updateRunIfNotCancelled(runId, {
+  const failed = await commitTerminalRunWithSteerExpiry(adapter, eventBus, {
+    writeGroup: "unattended resume failure",
+    runId,
+    timestampMs: failedAtMs,
+    transition: adapter.updateRunIfNotCancelled(runId, {
       status: "failed",
       finishedAtMs: failedAtMs,
       heartbeatAtMs: null,
@@ -2827,7 +3089,13 @@ async function markUnattendedResumeFailed(adapter, eventBus, runId, error, onErr
       hijackTarget: null,
       errorJson: JSON.stringify(errorInfo),
     }),
-  );
+    terminalEvent: {
+      type: "RunFailed",
+      runId,
+      error: errorInfo,
+      timestampMs: failedAtMs,
+    },
+  });
   if (!failed) {
     const authoritative = await Effect.runPromise(adapter.getRun(runId));
     if (
@@ -2838,16 +3106,9 @@ async function markUnattendedResumeFailed(adapter, eventBus, runId, error, onErr
       await finalizeCancelledRun(adapter, runId, { eventBus });
       return;
     }
+    return;
   }
   reportSmithersError(onError, error, { phase: "run", runId });
-  await Effect.runPromise(
-    eventBus.emitEventWithPersist({
-      type: "RunFailed",
-      runId,
-      error: errorInfo,
-      timestampMs: failedAtMs,
-    }),
-  );
 }
 /**
  * @param {AbortController} controller
@@ -3115,6 +3376,17 @@ function validateRunOptions(opts) {
   if (opts.maxOutputBytes !== undefined) {
     assertPositiveFiniteInteger("maxOutputBytes", Number(opts.maxOutputBytes));
   }
+  if (opts.maxAgentCheckpointBytes !== undefined) {
+    const maxAgentCheckpointBytes = assertPositiveFiniteInteger(
+      "maxAgentCheckpointBytes",
+      Number(opts.maxAgentCheckpointBytes),
+    );
+    if (maxAgentCheckpointBytes > DEFAULT_AGENT_CHECKPOINT_MAX_BYTES) {
+      throw new RangeError(
+        `maxAgentCheckpointBytes cannot exceed the ${DEFAULT_AGENT_CHECKPOINT_MAX_BYTES}-byte system ceiling`,
+      );
+    }
+  }
   if (opts.toolTimeoutMs !== undefined) {
     assertPositiveFiniteInteger("toolTimeoutMs", Number(opts.toolTimeoutMs));
   }
@@ -3373,6 +3645,7 @@ function buildRalphStateMap(rows) {
     map.set(row.ralphId, {
       iteration: row.iteration ?? 0,
       done: Boolean(row.done),
+      ...(row.exhausted ? { exhausted: true } : {}),
     });
   }
   return map;
@@ -3499,6 +3772,9 @@ function isRetryableTaskFailure(attempt) {
   if (meta?.failureRetryable === false) {
     return false;
   }
+  if (meta?.failureRetryable === true) {
+    return true;
+  }
   const errorCode = parseAttemptErrorCode(attempt?.errorJson);
   // AGENT_CONFIG_INVALID is a deterministic configuration failure (e.g.
   // "LLM not set", unknown model). Retrying is guaranteed to fail again
@@ -3531,6 +3807,83 @@ function isQuotaTaskFailure(attempt) {
   // Legacy: some paths may set failureQuota in metaJson instead of errorJson.
   const meta = parseAttemptMetaJson(attempt?.metaJson);
   return meta?.failureQuota === true;
+}
+
+const HUMAN_REQUEST_REOPEN_ERROR_CODES = new Set(["HUMAN_TASK_INVALID_JSON", "HUMAN_TASK_VALIDATION_FAILED"]);
+
+/**
+ * A rejected human answer is terminal for that answer, but the next resume
+ * reopens the durable request so the human can submit a correction.
+ * @param {{ errorJson?: string | null } | null} [attempt]
+ */
+function isHumanRequestReopenTaskFailure(attempt) {
+  return HUMAN_REQUEST_REOPEN_ERROR_CODES.has(parseAttemptErrorCode(attempt?.errorJson) ?? "");
+}
+
+/**
+ * Rebuild the scheduler's retry rung and absolute wait from durable attempts.
+ * Only the newest live attempt may contribute a deadline: a later finished or
+ * cancelled row makes an older deadline stale. Rows without retryState are
+ * legacy and preserve the old immediate-resume behavior. An own malformed
+ * retryState on the newest failed row fails closed rather than dispatching
+ * before a deadline that can no longer be trusted.
+ *
+ * @param {ReadonlyArray<AttemptRow>} attempts
+ */
+function retrySessionStateFromAttempts(attempts) {
+  /** @type {Map<string, AttemptRow[]>} */
+  const byTask = new Map();
+  for (const attempt of attempts) {
+    if (isResetCancelledAttempt(attempt)) continue;
+    const key = buildStateKey(attempt.nodeId, attempt.iteration ?? 0);
+    const rows = byTask.get(key) ?? [];
+    rows.push(attempt);
+    byTask.set(key, rows);
+  }
+  const retryCounts = new Map();
+  const retryWait = new Map();
+  for (const [key, rows] of byTask) {
+    const failed = rows.filter((attempt) => attempt.state === "failed" && !isQuotaTaskFailure(attempt));
+    const latest = rows.reduce((candidate, attempt) => {
+      if (!candidate) return attempt;
+      const startedDelta = Number(attempt.startedAtMs ?? 0) - Number(candidate.startedAtMs ?? 0);
+      if (startedDelta !== 0) return startedDelta > 0 ? attempt : candidate;
+      return attempt.attempt > candidate.attempt ? attempt : candidate;
+    }, /** @type {AttemptRow | null} */ (null));
+    // A later successful attempt makes every older failure rung irrelevant.
+    // Quota parking grants the next dispatch without consuming the restored
+    // rung. A rejected human answer similarly reopens for a corrected answer.
+    // Cancelled crash-recovery attempts retain the prior rung; they do not
+    // consume it, but the next failure must still advance it.
+    if (
+      !latest ||
+      latest.state === "finished" ||
+      isQuotaTaskFailure(latest) ||
+      isHumanRequestReopenTaskFailure(latest)
+    ) {
+      continue;
+    }
+    if (failed.length > 0) retryCounts.set(key, failed.length);
+    if (latest.state !== "failed") continue;
+    const meta = parseAttemptMetaJson(latest.metaJson);
+    if (!Object.prototype.hasOwnProperty.call(meta, RETRY_STATE_META_KEY)) continue;
+    const retryState = parseDurableRetryState(meta[RETRY_STATE_META_KEY]);
+    if (!retryState || retryState.failureCount !== failed.length) {
+      throw new SmithersError(
+        "INVALID_RETRY_STATE",
+        `Cannot safely resume task ${latest.nodeId}: its durable retry state is malformed.`,
+        {
+          nodeId: latest.nodeId,
+          iteration: latest.iteration ?? 0,
+          attempt: latest.attempt,
+          failureRetryable: false,
+        },
+      );
+    }
+    retryCounts.set(key, retryState.failureCount);
+    retryWait.set(key, retryState.retryAtMs);
+  }
+  return { retryCounts, retryWait };
 }
 /**
  * @param {Record<string, unknown> | null | undefined} errorJson
@@ -3603,18 +3956,63 @@ function quotaBlockedChainRound(attempts, chainLength) {
   return { blocked, resetAtMs };
 }
 /**
+ * Chain rungs whose agents failed preflight, recorded in attempt meta by the
+ * preflight-aware selection scan. The preflight result is cached run-wide, so
+ * a rung that failed once cannot serve a quota failover for the rest of the
+ * run — counting it as an available fallback would send the task back to a
+ * dead agent whose terminal preflight error then consumes the retry budget
+ * and hard-fails the run instead of parking it waiting-quota (issue #1482).
+ * @param {AttemptRow[]} priorAttempts
+ * @param {Record<string, unknown> | null | undefined} currentAttemptMeta
+ * @returns {Set<number>}
+ */
+function preflightFailedChainIndices(priorAttempts, currentAttemptMeta) {
+  /** @type {Set<number>} */
+  const blocked = new Set();
+  /** @param {Record<string, unknown> | null | undefined} meta */
+  const collect = (meta) => {
+    const skips = meta?.agentChainSkips;
+    if (!Array.isArray(skips)) return;
+    for (const skip of skips) {
+      if (
+        skip &&
+        typeof skip === "object" &&
+        skip.reason === "preflight-failed" &&
+        typeof skip.chainIndex === "number" &&
+        Number.isInteger(skip.chainIndex) &&
+        skip.chainIndex >= 0
+      ) {
+        blocked.add(skip.chainIndex);
+      }
+    }
+  };
+  for (const attempt of priorAttempts) collect(parseAttemptMetaJson(attempt.metaJson));
+  collect(currentAttemptMeta);
+  return blocked;
+}
+/**
  * What a rate-limited attempt means for the task's agent chain: fail over to the
  * next agent that is not itself rate-limited, or — when every agent is blocked —
  * park with the EARLIEST reset among them so the run wakes as soon as any
- * provider frees up.
+ * provider frees up. Rungs that are dead for other reasons (preflight-failed,
+ * auth-disabled) cannot serve the failover either, so they don't keep the run
+ * alive past the point where every workable agent is rate-limited.
  * @param {AttemptRow[]} priorAttempts
  * @param {unknown[]} chain
  * @param {number | null} chainIndex
  * @param {number | null} resetAtMs
  * @param {Set<unknown>} [disabledAgents]
+ * @param {Set<number>} [preflightFailedIndices]
  * @returns {{ failoverPending: boolean; earliestResetAtMs: number | null }}
  */
-function resolveQuotaChainFailover(priorAttempts, chain, chainIndex, resetAtMs, disabledAgents) {
+function resolveQuotaChainFailover(
+  priorAttempts,
+  chain,
+  chainIndex,
+  resetAtMs,
+  disabledAgents,
+  preflightFailedIndices,
+) {
   const round = quotaBlockedChainRound(priorAttempts, chain.length);
   const blocked = new Set(round.blocked);
   const resets = new Map(round.resetAtMs);
@@ -3622,7 +4020,9 @@ function resolveQuotaChainFailover(priorAttempts, chain, chainIndex, resetAtMs, 
     blocked.add(chainIndex);
     if (resetAtMs != null) resets.set(chainIndex, resetAtMs);
   }
-  const failoverPending = chain.some((agent, index) => !blocked.has(index) && !disabledAgents?.has(agent));
+  const failoverPending = chain.some(
+    (agent, index) => !blocked.has(index) && !disabledAgents?.has(agent) && !preflightFailedIndices?.has(index),
+  );
   const resetTimes = [...resets.values()];
   return {
     failoverPending,
@@ -4035,6 +4435,86 @@ async function cancelPendingExternalWaits(
 }
 
 /**
+ * Atomically claim a finished/failed run, persist its terminal event, and
+ * expire every remaining steer with a matching event. If any event write
+ * fails, the terminal status and all steer mutations roll back together.
+ * Exported from this module for fault-injection coverage; it is not part of
+ * the package's public index.
+ *
+ * @param {SmithersDb} adapter
+ * @param {{
+ *   emitAndTrack: (event: unknown) => Effect.Effect<void, unknown>;
+ *   persistLog?: (event: unknown) => Effect.Effect<void, unknown>;
+ *   attachCorrelation?: (event: any) => unknown;
+ * }} eventBus
+ * @param {{
+ *   writeGroup: string;
+ *   runId: string;
+ *   timestampMs: number;
+ *   transition: Effect.Effect<boolean, unknown>;
+ *   terminalEvent: { type: string; runId: string; timestampMs: number; [key: string]: unknown };
+ * }} options
+ * @returns {Promise<boolean>}
+ */
+export async function commitTerminalRunWithSteerExpiry(adapter, eventBus, options) {
+  const result = await adapter.withTransaction(
+    options.writeGroup,
+    Effect.gen(function* () {
+      const transitioned = yield* options.transition;
+      if (!transitioned) return { claimed: false, persistedEvents: [] };
+      const persistedEvents = [];
+      const terminalEvent = eventBus.attachCorrelation
+        ? eventBus.attachCorrelation(options.terminalEvent)
+        : options.terminalEvent;
+      yield* adapter.insertEventWithNextSeq({
+        runId: options.runId,
+        timestampMs: options.timestampMs,
+        type: options.terminalEvent.type,
+        payloadJson: JSON.stringify(terminalEvent),
+      });
+      persistedEvents.push(terminalEvent);
+      const queuedSteers = (yield* adapter.listSteers(options.runId)).filter((steer) => steer.status === "queued");
+      for (const steer of queuedSteers) {
+        yield* adapter.markSteerExpired(steer.steerId, options.timestampMs);
+        const rawEvent = {
+          type: "SteerExpired",
+          runId: options.runId,
+          nodeId: steer.nodeId,
+          steerId: steer.steerId,
+          timestampMs: options.timestampMs,
+        };
+        const event = eventBus.attachCorrelation ? eventBus.attachCorrelation(rawEvent) : rawEvent;
+        yield* adapter.insertEventWithNextSeq({
+          runId: options.runId,
+          timestampMs: options.timestampMs,
+          type: rawEvent.type,
+          payloadJson: JSON.stringify(event),
+        });
+        persistedEvents.push(event);
+      }
+      return { claimed: true, persistedEvents };
+    }),
+  );
+  if (result.claimed) {
+    for (const event of result.persistedEvents) {
+      await Effect.runPromise(eventBus.emitAndTrack(event));
+      if (eventBus.persistLog) await Effect.runPromise(Effect.ignore(eventBus.persistLog(event)));
+    }
+  }
+  return result.claimed;
+}
+
+/** @param {string | null | undefined} errorJson */
+function isHijackCancellation(errorJson) {
+  if (!errorJson) return false;
+  try {
+    return JSON.parse(errorJson)?.code === "RUN_HIJACKED";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Complete a cancellation that is being applied by a caller that does not
  * have a live engine (CLI/Gateway waiting-run paths). Keeping this here makes
  * the durable wait cleanup and the cancellation event/metric inseparable.
@@ -4084,6 +4564,42 @@ export async function finalizeCancelledRun(adapter, runId, options = {}) {
           persistedEvents.push(cancelEvent);
           insertedCancellationEvent = true;
         }
+        // Expire any still-queued steers inside the SAME terminal transaction.
+        // A steer queued on an allowed parked run that is cancelled directly —
+        // CLI cancel/down terminalizes it without another engine boot, so the
+        // engine's own expiry loop never runs — would otherwise stay queued
+        // forever; a crash between the terminal commit and a separate expiry
+        // pass strands it the same way. Folding expiry into cancel-finalization
+        // makes it durable and atomic for every terminal cancel transition, and
+        // it stays idempotent on replay because markSteerExpired only touches
+        // rows still in the queued state.
+        // RUN_HIJACKED uses the cancelled status as a resumable handoff. Its
+        // queued steers belong to the resumed attempt and must survive.
+        const preserveSteers = isHijackCancellation(options.errorJson) || isHijackCancellation(current.errorJson);
+        if (!preserveSteers) {
+          const queuedSteers = (await Effect.runPromise(adapter.listSteers(runId))).filter(
+            (steer) => steer.status === "queued",
+          );
+          for (const steer of queuedSteers) {
+            await Effect.runPromise(adapter.markSteerExpired(steer.steerId, cancelledAtMs));
+            const steerExpired = {
+              type: "SteerExpired",
+              runId,
+              nodeId: steer.nodeId,
+              steerId: steer.steerId,
+              timestampMs: cancelledAtMs,
+            };
+            await Effect.runPromise(
+              adapter.insertEventWithNextSeq({
+                runId,
+                timestampMs: cancelledAtMs,
+                type: steerExpired.type,
+                payloadJson: JSON.stringify(steerExpired),
+              }),
+            );
+            persistedEvents.push(steerExpired);
+          }
+        }
       }
     }),
   );
@@ -4091,7 +4607,6 @@ export async function finalizeCancelledRun(adapter, runId, options = {}) {
   if (current.status !== "cancelled" && current.status !== "canceled") {
     return { runId, won: false, status: "already-terminal", terminalStatus: current.status, repaired: false };
   }
-  const cancelEvent = { type: "RunCancelled", runId, timestampMs: cancelledAtMs };
   for (const event of persistedEvents) {
     if (options.eventBus) await Effect.runPromise(options.eventBus.emitAndTrack(event));
     else await Effect.runPromise(trackEvent(event));
@@ -4133,7 +4648,7 @@ export async function finalizeCancelledRun(adapter, runId, options = {}) {
  * @param {Map<string, TaskDescriptor>} descriptorMap
  * @param {SQLiteTable} inputTable
  * @param {EventBus} eventBus
- * @param {{ rootDir: string; allowNetwork: boolean; maxOutputBytes: number; toolTimeoutMs: number; acceptWorkflowChange?: boolean; agentPreflightCache?: WeakMap<object, Promise<void>>; memoryService?: import("@smithers-orchestrator/driver/MemoryRuntimeService").MemoryRuntimeService; memoryPrefetchCache?: Map<string, Promise<string | null>>; traceContext?: { workflowPath: string | null; workflowHash: string | null; logDir?: string; annotations?: Record<string, string | number | boolean>; }; }} toolConfig
+ * @param {{ rootDir: string; allowNetwork: boolean; maxOutputBytes: number; maxAgentCheckpointBytes: number; toolTimeoutMs: number; acceptWorkflowChange?: boolean; agentPreflightCache?: WeakMap<object, Promise<void>>; memoryService?: import("@smthrs/driver/MemoryRuntimeService").MemoryRuntimeService; memoryPrefetchCache?: Map<string, Promise<string | null>>; traceContext?: { workflowPath: string | null; workflowHash: string | null; logDir?: string; annotations?: Record<string, string | number | boolean>; }; }} toolConfig
  * @param {string} workflowName
  * @param {boolean} cacheEnabled
  * @param {AbortSignal} [signal]
@@ -4161,17 +4676,18 @@ async function legacyExecuteTask(
 ) {
   const taskStartMs = performance.now();
   const attempts = await Effect.runPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
+  const resumeAttempts = resumeEligibleAttempts(attempts);
   const maxSchemaRetries =
     Number.isSafeInteger(desc.maxSchemaRetries) && desc.maxSchemaRetries >= 0 ? desc.maxSchemaRetries : 3;
   const previousHeartbeat = (() => {
-    for (const attempt of attempts) {
+    for (const attempt of resumeAttempts) {
       const parsed = parseAttemptHeartbeatData(attempt.heartbeatDataJson);
       if (parsed !== null) return parsed;
     }
     return null;
   })();
   const previousHeartbeatJson = (() => {
-    for (const attempt of attempts) {
+    for (const attempt of resumeAttempts) {
       if (typeof attempt.heartbeatDataJson === "string" && attempt.heartbeatDataJson.length > 0) {
         return attempt.heartbeatDataJson;
       }
@@ -4228,6 +4744,7 @@ async function legacyExecuteTask(
   let heartbeatWriteTimer;
   let traceCollector;
   const liveOwnedPids = new Set();
+  let agentProcessObserved = false;
   // Construct the abort race only for an agent call that consumes it. A
   // static/compute attempt may never observe the promise; constructing it
   // eagerly would leave a rejected promise behind when the watchdog fires.
@@ -4243,7 +4760,43 @@ async function legacyExecuteTask(
     }
     return taskAbortPromise;
   };
-  const raceTaskAbort = (promise) => Promise.race([promise, getTaskAbortPromise()]);
+  /**
+   * Race an in-flight agent call against task cancellation while retaining the
+   * underlying promise long enough for an abort-aware process adapter to finish
+   * bounded cleanup. A late rejection is always observed, including after the
+   * grace expires, so a non-cooperative adapter cannot create an unhandled
+   * rejection after the engine has detached it.
+   * @template A
+   * @param {Promise<A>} promise
+   * @returns {Promise<A>}
+   */
+  const raceAgentCallAbort = async (promise) => {
+    const agentCall = Promise.resolve(promise);
+    agentCall.catch(() => undefined);
+    try {
+      return await Promise.race([agentCall, getTaskAbortPromise()]);
+    } catch (error) {
+      const checkpointCleanupCapable =
+        Array.isArray(effectiveAgent?.checkpointFormats) && effectiveAgent.checkpointFormats.length > 0;
+      if (taskSignal.aborted && (agentProcessObserved || checkpointCleanupCapable)) {
+        let cleanupTimer;
+        try {
+          await Promise.race([
+            agentCall.then(
+              () => undefined,
+              () => undefined,
+            ),
+            new Promise((resolve) => {
+              cleanupTimer = setTimeout(resolve, AGENT_ABORT_CLEANUP_GRACE_MS);
+            }),
+          ]);
+        } finally {
+          if (cleanupTimer !== undefined) clearTimeout(cleanupTimer);
+        }
+      }
+      throw error;
+    }
+  };
   /**
    * @returns {Promise<void>}
    */
@@ -4443,13 +4996,30 @@ async function legacyExecuteTask(
     agentEngine: null,
     agentResume: null,
     agentConversation: null,
+    agentCheckpoint: null,
     resumedFromSession: null,
+    resumedFromCheckpoint: null,
     resumedFromConversation: false,
     hijackHandoff: null,
   };
+  const reusedResetAttempt = attempts.find(
+    (attempt) => Number(attempt.attempt) === attemptNo && isResetCancelledAttempt(attempt),
+  );
   await adapter.withTransaction(
     "task-start",
     Effect.gen(function* () {
+      if (reusedResetAttempt) {
+        const cleared = yield* adapter.deleteResetAgentCheckpoints(
+          runId,
+          desc.nodeId,
+          desc.iteration,
+          attemptNo,
+          executionOwnerId,
+        );
+        if (!cleared) {
+          throw new SmithersError("HEARTBEAT_FENCE_LOST", "Reset checkpoint cleanup ownership was lost.");
+        }
+      }
       yield* adapter.insertAttempt({
         runId,
         nodeId: desc.nodeId,
@@ -4494,6 +5064,7 @@ async function legacyExecuteTask(
   let cacheKey = null;
   let cacheJjBase = null;
   let responseText = null;
+  const cliTurnCompletion = createCliTurnCompletionState();
   let effectiveAgent = null;
   let generationTools;
   /** @type {number | null} */
@@ -4509,6 +5080,10 @@ async function legacyExecuteTask(
   let handleAgentEvent;
   let handleSdkStepFinish;
   let handleProcess;
+  let latestAgentCheckpoint = null;
+  let captureResultCheckpoint = async () => {};
+  let enqueueAgentCheckpoint = async () => null;
+  let checkpointPublicationCount = 0;
   /** @type {ReturnType<typeof createToolJournalContext> | null} */
   let taskEffectJournalContext = null;
   /** @type {Array<ReturnType<typeof createToolJournalContext>>} */
@@ -4520,7 +5095,7 @@ async function legacyExecuteTask(
   const afterHeartbeatOwnership = (callback) => {
     const check = confirmHeartbeatOwnership()
       .then((owned) => {
-        if (owned) callback();
+        if (owned) return callback();
       })
       .catch(() => {})
       .finally(() => {
@@ -4669,6 +5244,7 @@ async function legacyExecuteTask(
         : null;
       const agentSig = cacheAgent?.id ?? "agent";
       const toolsSig = hashCapabilityRegistry(cacheAgent?.capabilities ?? null);
+      const checkpointSig = hashAgentCheckpointCapabilities(cacheAgent);
       // Incorporate JJ state so workspace changes invalidate cache as documented.
       const jjBase = await Effect.runPromise(getJjPointer(taskRoot).pipe(Effect.provide(getPlatformLayer())));
       cacheJjBase = jjBase ?? null;
@@ -4707,6 +5283,7 @@ async function legacyExecuteTask(
           outputSchemaSig,
           agentSig,
           toolsSig,
+          checkpointSig,
           jjPointer: cacheJjBase,
           cacheVersion: desc.cachePolicy.version ?? null,
           cacheKey: desc.cachePolicy.key ?? null,
@@ -4722,6 +5299,7 @@ async function legacyExecuteTask(
           outputSchemaSig,
           agentSig,
           toolsSig,
+          checkpointSig,
           jjPointer: cacheJjBase,
           prompt: desc.prompt ?? null,
           payload: desc.staticPayload ?? null,
@@ -4853,7 +5431,24 @@ async function legacyExecuteTask(
       // quota-failed attempts so the rung reflects only genuine agent failures.
       const quotaFailedAttempts = attempts.filter((a) => a.state === "failed" && isQuotaTaskFailure(a)).length;
       const rung = Math.max(0, attemptNo - 1 - quotaFailedAttempts);
-      const startIndex = Math.min(rung, Math.max(selectionPool.length - 1, 0));
+      // A retry must advance PAST the agent that actually failed, not just to
+      // the raw rung: the preflight scan below can skip forward within one
+      // attempt (e.g. both Codex leads fail preflight and attempt 1 lands on
+      // kimi at chain index 2), so attempt 2's rung 1 would re-scan from an
+      // agent BEFORE the one that failed and re-select the same broken agent
+      // until the retry budget dies without the chain tail ever engaging
+      // (issue #1480). Quota failures stay exempt, same as the rung above.
+      const lastGenuineFailureMeta = parseAttemptMetaJson(
+        attempts.find((a) => a.state === "failed" && !isQuotaTaskFailure(a))?.metaJson,
+      );
+      const lastFailedChainIndex =
+        typeof lastGenuineFailureMeta?.agentChainIndex === "number" ? lastGenuineFailureMeta.agentChainIndex : null;
+      let advanceIndex = 0;
+      if (lastFailedChainIndex != null) {
+        const next = selectionPool.findIndex((entry) => entry.chainIndex > lastFailedChainIndex);
+        advanceIndex = next === -1 ? Math.max(selectionPool.length - 1, 0) : next;
+      }
+      const startIndex = Math.min(Math.max(rung, advanceIndex), Math.max(selectionPool.length - 1, 0));
       // Rungs already rate-limited in this failover round: skip them so a
       // quota-blocked provider hands the work to the next agent in the chain
       // instead of stalling the lane until its window resets.
@@ -4873,6 +5468,7 @@ async function legacyExecuteTask(
       const preflightSelectOptions = {
         rootDir: taskRoot,
         maxOutputBytes: toolConfig.maxOutputBytes,
+        maxAgentCheckpointBytes: toolConfig.maxAgentCheckpointBytes,
         timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
         taskContext: {
           runId,
@@ -4882,9 +5478,17 @@ async function legacyExecuteTask(
         },
       };
       let selectedHealthyAgent = false;
+      // Every candidate the scan passes over is recorded on the attempt meta
+      // with the reason, so a chain that silently lands mid-list (e.g. Codex
+      // leads skipped, task seated on kimi) stays debuggable from the
+      // attempt record instead of the leads vanishing without trace
+      // (issue #1480).
+      const agentChainSkips = [];
+      const skipLabel = (candidate) => candidate.id ?? candidate.constructor?.name ?? null;
       for (let i = startIndex; i < selectionPool.length; i++) {
         const { agent: candidate, chainIndex } = selectionPool[i];
         if (quotaBlockedRungs.has(chainIndex)) {
+          agentChainSkips.push({ agentId: skipLabel(candidate), chainIndex, reason: "quota-blocked" });
           continue;
         }
         effectiveAgent = candidate;
@@ -4901,6 +5505,12 @@ async function legacyExecuteTask(
           const errStr = String(
             (selectionPreflightError && selectionPreflightError.message) ?? selectionPreflightError ?? "",
           );
+          agentChainSkips.push({
+            agentId: skipLabel(candidate),
+            chainIndex,
+            reason: "preflight-failed",
+            error: errStr.slice(0, 300),
+          });
           const isAuthError =
             /invalid_authentication|401|api.key.*invalid|expired.*credentials|authentication.*failed/i.test(errStr);
           if (isAuthError && disabledAgents && i < selectionPool.length - 1) {
@@ -4910,6 +5520,9 @@ async function legacyExecuteTask(
           // the backward scan below gets a chance before the preflight
           // block surfaces the terminal failure.
         }
+      }
+      if (agentChainSkips.length > 0) {
+        attemptMeta.agentChainSkips = agentChainSkips;
       }
       // Backward fallback: the final attempt maps to the LAST rung, so a
       // dead terminal agent (e.g. an uninstalled fallback CLI) has no
@@ -5140,6 +5753,130 @@ async function legacyExecuteTask(
           hijackCapableEngine ??
           (typeof effectiveAgent.constructor?.name === "string" ? effectiveAgent.constructor.name : null);
         attemptMeta.agentEngine = currentAgentEngine;
+        // Persist reasoning/effort when the agent config exposes it so
+        // supervisor / node detail can show "model xhigh" without re-deriving CLI flags.
+        // Precedence mirrors what each adapter ACTUALLY applies at spawn — see
+        // the cascade + rationale below (adapter-winning sources first).
+        const agentOpts =
+          effectiveAgent.opts && typeof effectiveAgent.opts === "object"
+            ? effectiveAgent.opts
+            : effectiveAgent.options && typeof effectiveAgent.options === "object"
+              ? effectiveAgent.options
+              : null;
+        /**
+         * @param {unknown} settings
+         * @returns {string | null}
+         */
+        const effortFromSettings = (settings) => {
+          if (typeof settings === "string" && settings !== "") {
+            try {
+              const parsed = JSON.parse(settings);
+              if (parsed && typeof parsed === "object" && typeof parsed.effortLevel === "string") {
+                return parsed.effortLevel;
+              }
+            } catch {
+              return null;
+            }
+          }
+          if (settings && typeof settings === "object" && !Array.isArray(settings)) {
+            const e = /** @type {Record<string, unknown>} */ (settings).effortLevel;
+            if (typeof e === "string" && e !== "") return e;
+          }
+          return null;
+        };
+        /**
+         * @param {unknown} extraArgs
+         * @returns {string | null}
+         */
+        const effortFromExtraArgs = (extraArgs) => {
+          if (!Array.isArray(extraArgs)) return null;
+          let effort = null;
+          for (let i = 0; i < extraArgs.length; i++) {
+            const a = extraArgs[i];
+            if (a === "--") break;
+            if (a === "--settings" && typeof extraArgs[i + 1] === "string") {
+              effort = effortFromSettings(extraArgs[i + 1]) ?? effort;
+              i += 1;
+            }
+            if (typeof a === "string" && a.startsWith("--settings=")) {
+              effort = effortFromSettings(a.slice("--settings=".length)) ?? effort;
+            }
+          }
+          return effort;
+        };
+        /**
+         * @param {unknown} config
+         * @returns {string | null}
+         */
+        const effortFromCodexConfig = (config) => {
+          if (!Array.isArray(config)) return null;
+          let effort = null;
+          for (const rawEntry of config) {
+            const match = /^\s*model_reasoning_effort\s*=\s*(.*?)\s*$/.exec(String(rawEntry));
+            if (!match || !match[1]) continue;
+            const rawValue = match[1];
+            if (
+              (rawValue.startsWith('"') && rawValue.endsWith('"')) ||
+              (rawValue.startsWith("'") && rawValue.endsWith("'"))
+            ) {
+              effort = rawValue.slice(1, -1);
+            } else {
+              effort = rawValue;
+            }
+          }
+          return effort;
+        };
+        const configObj =
+          agentOpts && agentOpts.config && typeof agentOpts.config === "object" && !Array.isArray(agentOpts.config)
+            ? /** @type {Record<string, unknown>} */ (agentOpts.config)
+            : null;
+        // Record the effort each adapter ACTUALLY applies at spawn. In every
+        // adapter an adapter-specific source WINS over the first-class
+        // `effort`, so those rank first here — and they don't cross-contaminate
+        // (variant is OpenCode-only, model_reasoning_effort is Codex-only,
+        // `--settings` effortLevel is Claude-only):
+        //   OpenCode: an explicit `variant` wins over `effort` (OpenCodeAgent.js)
+        //   Claude:   `--settings` effortLevel (inline JSON; extraArgs > opts)
+        //             wins over `effort` (ClaudeCodeAgent.js)
+        //   Codex:    `config.model_reasoning_effort` wins over `effort` (CodexAgent.js)
+        // The first-class `effort` is the fallback each adapter uses when no
+        // adapter-specific source is set. (A Claude settings FILE's effortLevel
+        // IS applied at spawn but stays opaque to this recorder — an accepted
+        // display limit.) `config.effort` is NOT a reasoning-effort input for
+        // any adapter (Codex forwards it as a raw `-c effort=`), so it ranks
+        // LAST — below the first-class effort it must never override.
+        const effortCandidate =
+          (typeof effectiveAgent.variant === "string" && effectiveAgent.variant) ||
+          (agentOpts && typeof agentOpts.variant === "string" && agentOpts.variant) ||
+          (agentOpts ? effortFromExtraArgs(agentOpts.extraArgs) : null) ||
+          (agentOpts ? effortFromSettings(agentOpts.settings) : null) ||
+          (agentOpts ? effortFromCodexConfig(agentOpts.config) : null) ||
+          (configObj && typeof configObj.model_reasoning_effort === "string"
+            ? configObj.model_reasoning_effort
+            : null) ||
+          (typeof effectiveAgent.effort === "string" && effectiveAgent.effort) ||
+          (typeof effectiveAgent.reasoningEffort === "string" && effectiveAgent.reasoningEffort) ||
+          (typeof effectiveAgent.thinking === "string" && effectiveAgent.thinking) ||
+          (agentOpts && typeof agentOpts.effort === "string" && agentOpts.effort) ||
+          (agentOpts && typeof agentOpts.reasoningEffort === "string" && agentOpts.reasoningEffort) ||
+          (agentOpts && typeof agentOpts.thinking === "string" && agentOpts.thinking) ||
+          (configObj && typeof configObj.effort === "string" ? configObj.effort : null) ||
+          null;
+        if (effortCandidate) {
+          attemptMeta.effort = effortCandidate;
+        }
+        // Persist the project directory the agent session is keyed by
+        // (Claude --resume is per-project). Prefer agent.cwd / opts.cwd over
+        // worktree/rootDir so plain-cwd lanes hijack correctly.
+        const agentCwdCandidate =
+          (typeof effectiveAgent.cwd === "string" && effectiveAgent.cwd) ||
+          (agentOpts && typeof agentOpts.cwd === "string" && agentOpts.cwd) ||
+          (typeof desc.worktreePath === "string" && desc.worktreePath) ||
+          (typeof toolConfig.rootDir === "string" && toolConfig.rootDir) ||
+          null;
+        if (agentCwdCandidate) {
+          attemptMeta.agentCwd = resolve(agentCwdCandidate);
+        }
         const heartbeatCheckpoint =
           previousHeartbeat && typeof previousHeartbeat === "object" && !Array.isArray(previousHeartbeat)
             ? previousHeartbeat
@@ -5154,34 +5891,111 @@ async function legacyExecuteTask(
         // reproduces the crash), don't reuse the captured agentResume
         // from the heartbeat. Forces the agent to start a fresh
         // session on the next attempt.
-        // Also match reset-cancelled attempts: retry-task flips failed
-        // attempts to "cancelled" but preserves their meta, and the
-        // poisoned heartbeat checkpoint survives the reset — losing the
-        // flag here would resume the corrupt session with a clean-looking
-        // attempt history.
-        const lastFailedAttempt = attempts.find(
-          (a) => a.state === "failed" || parseAttemptMetaJson(a.metaJson)?.discardResumeSession === true,
+        // A reset is a one-shot chronological boundary: suppress stale resume
+        // state for the first fresh execution, without allowing old reset rows
+        // with higher attempt numbers to poison later retries.
+        const discardResumeSession = shouldDiscardResumeSession(attempts);
+        const resetAttempts = new Set(
+          attempts.filter(isResetCancelledAttempt).map((attempt) => `${attempt.iteration}:${attempt.attempt}`),
         );
-        const lastFailedMeta = parseAttemptMetaJson(lastFailedAttempt?.metaJson);
-        const discardResumeSession = lastFailedMeta?.discardResumeSession === true;
+        const checkpointDiscardAttempt = resumeAttempts.find(
+          (attempt) =>
+            !resetAttempts.has(`${attempt.iteration}:${attempt.attempt}`) &&
+            parseAttemptMetaJson(attempt.metaJson)?.discardAgentCheckpoint === true,
+        )?.attempt;
+        let resumeCheckpoint = null;
+        let resumeCheckpointRef = null;
+        let resumeCheckpointRefConsumed = false;
+        let checkpointMode = "resume";
+        // Walk newest-to-oldest with a stable attempt/sequence cursor. An
+        // incompatible newest ref must not hide an older compatible one, and
+        // reset/discard boundaries must remain authoritative. Bound the scan
+        // so corrupt or adversarial histories cannot make task start unbounded.
+        let checkpointCursor;
+        let checkpointScanStopped = false;
+        for (let scanned = 0; scanned < 1_000; scanned += 1) {
+          const [candidate] = await Effect.runPromise(
+            adapter.listLatestAgentCheckpointRefs(runId, desc.nodeId, desc.iteration, {
+              limit: 1,
+              ...(checkpointCursor ? { before: checkpointCursor } : {}),
+            }),
+          );
+          if (!candidate) {
+            checkpointScanStopped = true;
+            break;
+          }
+          checkpointCursor = { attempt: candidate.attempt, sequence: candidate.sequence };
+          if (checkpointDiscardAttempt !== undefined && candidate.attempt <= checkpointDiscardAttempt) {
+            checkpointScanStopped = true;
+            break;
+          }
+          if (resetAttempts.has(`${candidate.iteration}:${candidate.attempt}`)) continue;
+          const mayConsumeCheckpoint =
+            candidate.codec === CLI_SESSION_CHECKPOINT_CODEC ||
+            agentSupportsCheckpoint(effectiveAgent, candidate, "resume");
+          if (!mayConsumeCheckpoint) continue;
+          const loaded = await loadAgentCheckpoint(adapter, candidate, toolConfig.maxAgentCheckpointBytes);
+          const legacyResume = discardResumeSession
+            ? undefined
+            : resumeSessionFromCheckpoint(loaded, currentAgentEngine);
+          if (legacyResume) {
+            resumeCheckpointRef = candidate;
+            checkpointScanStopped = true;
+            break;
+          }
+          if (agentSupportsCheckpoint(effectiveAgent, loaded, "resume")) {
+            resumeCheckpoint = loaded;
+            resumeCheckpointRef = candidate;
+            resumeCheckpointRefConsumed = true;
+            checkpointScanStopped = true;
+            break;
+          }
+        }
+        if (!checkpointScanStopped && checkpointCursor) {
+          const [candidateBeyondLimit] = await Effect.runPromise(
+            adapter.listLatestAgentCheckpointRefs(runId, desc.nodeId, desc.iteration, {
+              limit: 1,
+              before: checkpointCursor,
+            }),
+          );
+          if (candidateBeyondLimit) {
+            throw new SmithersError(
+              "AGENT_CHECKPOINT_HISTORY_EXHAUSTED",
+              `Task ${desc.nodeId} has more than 1,000 incompatible checkpoint references; refusing to start fresh.`,
+              {
+                nodeId: desc.nodeId,
+                iteration: desc.iteration,
+                scanned: 1_000,
+                failureRetryable: false,
+              },
+            );
+          }
+        }
         const checkpointResumeSession =
           !discardResumeSession && heartbeatCheckpointUsable && typeof heartbeatCheckpoint?.agentResume === "string"
             ? heartbeatCheckpoint.agentResume
             : undefined;
-        const checkpointResumeMessages = heartbeatCheckpointUsable
-          ? asConversationMessages(heartbeatCheckpoint?.agentConversation)
-          : undefined;
-        const priorContinuation = hijackCapableEngine
-          ? findHijackContinuation(attempts, hijackCapableEngine)
-          : undefined;
+        const checkpointResumeMessages =
+          !discardResumeSession && heartbeatCheckpointUsable
+            ? asConversationMessages(heartbeatCheckpoint?.agentConversation)
+            : undefined;
+        const priorContinuation =
+          !discardResumeSession && hijackCapableEngine
+            ? findHijackContinuation(resumeAttempts, hijackCapableEngine)
+            : undefined;
         // discardResumeSession must also veto the hijack-continuation
         // path: the corrupt session id lives in prior attempt meta, so
         // resuming it via priorContinuation reproduces the crash on
         // every retry despite the checkpoint gate above.
-        const resumeSession =
+        let resumeSession =
           priorContinuation?.mode === "native-cli" && !discardResumeSession
             ? priorContinuation.resume
             : checkpointResumeSession;
+        if (!resumeSession && resumeCheckpointRef && !resumeCheckpoint) {
+          const stored = await loadAgentCheckpoint(adapter, resumeCheckpointRef, toolConfig.maxAgentCheckpointBytes);
+          resumeSession = resumeSessionFromCheckpoint(stored, currentAgentEngine);
+          resumeCheckpointRefConsumed = Boolean(resumeSession);
+        }
         // Fallback: we should be resuming (the same agent ran before) but
         // no session id was captured. Continue the latest session in this
         // worktree via --continue. CLI agents that support it read
@@ -5190,10 +6004,11 @@ async function legacyExecuteTask(
         // and may attach the most recent session.
         const continueSession =
           !resumeSession &&
+          !resumeCheckpoint &&
           !discardResumeSession &&
           heartbeatCheckpointUsable &&
           typeof heartbeatCheckpoint?.agentEngine === "string" &&
-          attempts.length > 0;
+          resumeAttempts.length > 0;
         const resumeMessages =
           priorContinuation?.mode === "conversation"
             ? (cloneJsonValue(priorContinuation.messages) ?? priorContinuation.messages)
@@ -5206,10 +6021,43 @@ async function legacyExecuteTask(
         // task, guidedResumeMessages (its own checkpoint) takes over and
         // already carries the forked-in context forward.
         let forkSeedMessages = null;
-        if (desc.forkSource && !guidedResumeMessages?.length) {
+        if (
+          desc.forkSource &&
+          !guidedResumeMessages?.length &&
+          !resumeCheckpoint &&
+          !resumeSession &&
+          !continueSession
+        ) {
           const forkSourceAttempts = await Effect.runPromise(adapter.listAttemptsForRun(runId));
           try {
-            forkSeedMessages = resolveForkSessionMessages(forkSourceAttempts, desc.forkSource, desc.nodeId);
+            const forkState = resolveForkAgentState(forkSourceAttempts, desc.forkSource, desc.nodeId);
+            if (forkState.checkpointRef && agentSupportsCheckpoint(effectiveAgent, forkState.checkpointRef, "fork")) {
+              const sourceCheckpoint = await loadAgentCheckpoint(
+                adapter,
+                forkState.checkpointRef,
+                toolConfig.maxAgentCheckpointBytes,
+              );
+              resumeCheckpoint = sourceCheckpoint;
+              resumeCheckpointRef = forkState.checkpointRef;
+              checkpointMode = "fork";
+            }
+            if (!resumeCheckpoint && forkState.messages) {
+              forkSeedMessages = forkState.messages;
+            }
+            if (!resumeCheckpoint && !forkSeedMessages?.length) {
+              throw new SmithersError(
+                "TASK_FORK_CHECKPOINT_INCOMPATIBLE",
+                `Task ${desc.nodeId} cannot consume the checkpoint produced by ${desc.forkSource}.`,
+                {
+                  nodeId: desc.nodeId,
+                  forkSource: desc.forkSource,
+                  codec: forkState.checkpointRef?.codec,
+                  version: forkState.checkpointRef?.version,
+                  mode: "fork",
+                  failureRetryable: false,
+                },
+              );
+            }
           } catch (err) {
             // The fork source is terminal (the scheduler only runs a
             // forked task once its source reaches a terminal state) but
@@ -5269,6 +6117,18 @@ async function legacyExecuteTask(
         if (resumeSession) {
           attemptMeta.resumedFromSession = resumeSession;
         }
+        if (resumeCheckpointRef) {
+          const compactResumeRef = {
+            contentHash: resumeCheckpointRef.contentHash,
+            sequence: resumeCheckpointRef.sequence,
+            codec: resumeCheckpointRef.codec,
+            version: resumeCheckpointRef.version,
+          };
+          attemptMeta.resumedFromCheckpoint = {
+            ...compactResumeRef,
+            mode: checkpointMode,
+          };
+        }
         if (guidedResumeMessages?.length) {
           attemptMeta.resumedFromConversation = true;
           attemptMeta.agentConversation = guidedResumeMessages;
@@ -5279,6 +6139,10 @@ async function legacyExecuteTask(
         await Effect.runPromise(
           adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
             metaJson: JSON.stringify(attemptMeta),
+            // Promote effort to the first-class column alongside the
+            // meta_json back-compat blob so it is queryable and both the
+            // direct-db and gateway display paths can surface it.
+            ...(effortCandidate ? { effort: effortCandidate } : {}),
           }),
         );
         if (isPreflightCapableAgent(effectiveAgent)) {
@@ -5292,6 +6156,7 @@ async function legacyExecuteTask(
               {
                 rootDir: taskRoot,
                 maxOutputBytes: toolConfig.maxOutputBytes,
+                maxAgentCheckpointBytes: toolConfig.maxAgentCheckpointBytes,
                 timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
                 taskContext: {
                   runId,
@@ -5378,6 +6243,7 @@ async function legacyExecuteTask(
           !guidedResumeMessages?.length &&
           !forkSeedMessages?.length &&
           !resumeSession &&
+          !resumeCheckpoint &&
           !continueSession
         ) {
           throw new SmithersError(
@@ -5429,7 +6295,84 @@ async function legacyExecuteTask(
         if (worktreeIsolationNotice && !effectivePrompt.includes(WORKTREE_ISOLATION_NOTICE_MARKER)) {
           effectivePrompt = `${worktreeIsolationNotice}\n\n${effectivePrompt}`;
         }
+        // --- STEER consumption ---
+        // Drain any steers queued against this node and fold
+        // them into the call about to be made. Exactly one indexed read
+        // on the zero-steer hot path. Injected BEFORE the structured
+        // output schema wrap below so the JSON contract (first char `{`,
+        // last char `}`) is preserved. Consumption is marked before
+        // generate() so a retry/replay does not re-inject a steer once the
+        // attempt's conversation has been durably persisted (streaming
+        // checkpoint / post-generate updateAttempt). Delivery is best-effort
+        // at-most-once: a crash in the narrow window between marking a steer
+        // consumed and that first durable write may drop the steer.
+        const queuedSteers = await Effect.runPromise(adapter.listQueuedSteers(runId, desc.nodeId));
+        if (queuedSteers.length > 0) {
+          const steerMessages = queuedSteers.map((steer) => ({
+            role: "user",
+            content: steer.message,
+          }));
+          if (guidedResumeMessages?.length) {
+            // Messages / guided-resume mode: append the steers as new
+            // user turns. guidedResumeMessages is the array handed to
+            // generate() AND (by reference) attemptMeta.agentConversation;
+            // conversationMessages is the separate snapshot persisted
+            // for CLI agents — keep both in sync so the steer lands in
+            // the durable conversation as well as reaching the agent.
+            guidedResumeMessages.push(...steerMessages);
+            if (conversationMessages) {
+              conversationMessages.push(...steerMessages);
+            }
+          } else {
+            // Prompt mode (and the fork base built from effectivePrompt
+            // below): fold the steer text into the user turn as trailing
+            // content, still ahead of the schema wrap. It rides the
+            // persisted `{ role: "user", content: effectivePrompt }`
+            // turn, so it is captured in agentConversation too.
+            const steerText = steerMessages.map((message) => message.content).join("\n\n");
+            effectivePrompt = effectivePrompt.length > 0 ? `${effectivePrompt}\n\n${steerText}` : steerText;
+          }
+          const consumedAtMs = nowMs();
+          const consumedEvents = await adapter.withTransaction(
+            "consume queued steers",
+            Effect.gen(function* () {
+              const events = [];
+              for (const steer of queuedSteers) {
+                yield* adapter.markSteerConsumed(steer.steerId, {
+                  consumedAtMs,
+                  consumedByAttempt: attemptNo,
+                  consumedByIteration: desc.iteration,
+                });
+                const rawEvent = {
+                  type: "SteerConsumed",
+                  runId,
+                  nodeId: desc.nodeId,
+                  iteration: desc.iteration,
+                  attempt: attemptNo,
+                  steerId: steer.steerId,
+                  timestampMs: consumedAtMs,
+                };
+                const event = eventBus.attachCorrelation ? eventBus.attachCorrelation(rawEvent) : rawEvent;
+                yield* adapter.insertEventWithNextSeq({
+                  runId,
+                  timestampMs: consumedAtMs,
+                  type: rawEvent.type,
+                  payloadJson: JSON.stringify(event),
+                });
+                events.push(event);
+              }
+              return events;
+            }),
+          );
+          for (const event of consumedEvents) {
+            await Effect.runPromise(eventBus.emitAndTrack(event));
+            if (typeof eventBus.persistLog === "function") {
+              await Effect.runPromise(Effect.ignore(eventBus.persistLog(event)));
+            }
+          }
+        }
         supportsNativeStructuredOutput = effectiveAgent.supportsNativeStructuredOutput === true;
+        let structuredOutputInstructions = null;
         if (desc.outputTable && !supportsNativeStructuredOutput) {
           const engineName =
             typeof attemptMeta.agentEngine === "string"
@@ -5454,6 +6397,7 @@ async function legacyExecuteTask(
             "The first character of your response must be `{` and the last character must be `}`.",
             "The workflow will fail unless the entire response is the JSON object.",
           ].join("\n");
+          structuredOutputInstructions = jsonInstructions;
           effectivePrompt = [
             "IMPORTANT: After completing the task below, you MUST output ONLY a raw JSON object. Do NOT wrap it in markdown or add any prose — the workflow fails without it.",
             "",
@@ -5463,12 +6407,119 @@ async function legacyExecuteTask(
             jsonInstructions,
           ].join("\n");
         }
+        if (guidedResumeMessages?.length && queuedSteers.length > 0 && structuredOutputInstructions) {
+          // In guided-resume mode generate() receives messages instead of
+          // effectivePrompt. Reissue the JSON contract after the new steer so
+          // the final user turn still constrains the resumed/retried response.
+          const contractMessage = { role: "user", content: structuredOutputInstructions };
+          guidedResumeMessages.push(contractMessage);
+          if (conversationMessages) conversationMessages.push(contractMessage);
+        }
         effectivePrompt = prependToolResumeWarningMessage(effectivePrompt, toolResumeWarningMessage);
         // For a forked task, the conversation starts from the copied
         // source context with this task's prompt appended as a new turn.
         const forkConversationBase = forkSeedMessages?.length
           ? [...forkSeedMessages, { role: "user", content: effectivePrompt }]
           : null;
+        latestAgentCheckpoint = resumeCheckpoint;
+        let checkpointWriteChain = Promise.resolve();
+        /**
+         * @param {unknown} candidate
+         * @param {string} purpose
+         * @param {{ allowLegacy?: boolean }} [options]
+         */
+        const persistAgentCheckpoint = async (candidate, purpose, options) => {
+          let checkpoint;
+          try {
+            checkpoint = cloneAgentCheckpoint(candidate, toolConfig.maxAgentCheckpointBytes);
+          } catch (cause) {
+            throw new SmithersError(
+              "AGENT_CHECKPOINT_INVALID",
+              `Agent ${attemptMeta.agentId ?? "unknown"} returned an invalid checkpoint.`,
+              { nodeId: desc.nodeId, attempt: attemptNo, failureRetryable: false },
+              { cause },
+            );
+          }
+          if (!options?.allowLegacy && !agentProducesCheckpoint(effectiveAgent, checkpoint)) {
+            throw new SmithersError(
+              "AGENT_CHECKPOINT_CAPABILITY_UNDECLARED",
+              `Agent ${attemptMeta.agentId ?? "unknown"} returned an undeclared checkpoint capability.`,
+              {
+                nodeId: desc.nodeId,
+                codec: checkpoint.codec,
+                version: checkpoint.version,
+                checkpointFormats: effectiveAgent.checkpointFormats,
+                failureRetryable: false,
+              },
+            );
+          }
+          const checkpointJson = JSON.stringify(checkpoint);
+          // Abort starts a bounded cleanup window for process-backed agents;
+          // it does not itself revoke checkpoint publication authority. The
+          // durable write atomically fences runtime ownership, cancellation
+          // requests, and the attempt's in-progress state, so cleanup can
+          // publish its final checkpoint while stale or post-terminal callbacks
+          // are still rejected.
+          if (heartbeatOwnerLost)
+            throw new SmithersError("HEARTBEAT_FENCE_LOST", "Agent checkpoint ownership was lost.");
+          const ref = await Effect.runPromise(
+            adapter.putAgentCheckpoint({
+              runId,
+              nodeId: desc.nodeId,
+              iteration: desc.iteration,
+              attempt: attemptNo,
+              checkpointJson,
+              codec: checkpoint.codec,
+              version: checkpoint.version,
+              agentId: typeof attemptMeta.agentId === "string" ? attemptMeta.agentId : null,
+              purpose,
+              createdAtMs: nowMs(),
+              runtimeOwnerId: executionOwnerId,
+            }),
+          );
+          if (!ref) {
+            heartbeatOwnerLost = true;
+            throw new SmithersError("HEARTBEAT_FENCE_LOST", "Agent checkpoint ownership was lost.");
+          }
+          const compactRef = {
+            contentHash: ref.contentHash,
+            sequence: ref.sequence,
+            codec: ref.codec,
+            version: ref.version,
+          };
+          latestAgentCheckpoint = checkpoint;
+          attemptMeta.agentCheckpoint = compactRef;
+          return compactRef;
+        };
+        enqueueAgentCheckpoint = (candidate, purpose, options) => {
+          const write = checkpointWriteChain.then(() => persistAgentCheckpoint(candidate, purpose, options));
+          const observed = write.then((ref) => {
+            checkpointPublicationCount += 1;
+            return ref;
+          });
+          checkpointWriteChain = observed.catch(() => undefined);
+          return observed;
+        };
+        /** @param {unknown} generationResult @param {string} purpose */
+        captureResultCheckpoint = async (generationResult, purpose) => {
+          if (!generationResult || (typeof generationResult !== "object" && typeof generationResult !== "function")) {
+            return;
+          }
+          if (!Object.prototype.hasOwnProperty.call(generationResult, "checkpoint")) return;
+          let checkpoint;
+          try {
+            checkpoint = generationResult.checkpoint;
+          } catch (cause) {
+            throw new SmithersError(
+              "AGENT_CHECKPOINT_INVALID",
+              "Agent checkpoint result property could not be read.",
+              { nodeId: desc.nodeId, attempt: attemptNo, failureRetryable: false },
+              { cause },
+            );
+          }
+          if (checkpoint === undefined) return;
+          return enqueueAgentCheckpoint(checkpoint, purpose);
+        };
         let hijackCompletionCheckInFlight = false;
         const maybeCompleteHijack = async () => {
           if (!hijackState?.request || hijackState.completion || !runAbortController) {
@@ -5493,6 +6544,14 @@ async function legacyExecuteTask(
             if (handoffMode === "native-cli" && activeCliActions.size > 0) {
               return;
             }
+            if (
+              handoffMode === "native-cli" &&
+              HIJACK_RESUME_AFTER_TURN_ENGINES.has(engine) &&
+              !cliTurnCompletion.isCompleted()
+            ) {
+              return;
+            }
+            const handoffConfig = agentHijackConfig(effectiveAgent, attemptMeta);
             const completion = {
               requestedAtMs: hijackState.request.requestedAtMs,
               nodeId: desc.nodeId,
@@ -5503,6 +6562,7 @@ async function legacyExecuteTask(
               resume,
               messages: handoffMode === "conversation" ? cloneJsonValue(messages) : undefined,
               cwd: desc.worktreePath ?? taskRoot,
+              config: handoffConfig,
             };
             hijackState.completion = completion;
             attemptMeta.hijackHandoff = {
@@ -5515,6 +6575,7 @@ async function legacyExecuteTask(
               nodeId: completion.nodeId,
               iteration: completion.iteration,
               attempt: completion.attempt,
+              config: handoffConfig,
             };
             await Effect.runPromise(
               adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
@@ -5531,6 +6592,7 @@ async function legacyExecuteTask(
               mode: completion.mode,
               resume: completion.resume ?? null,
               cwd: completion.cwd,
+              config: handoffConfig,
               timestampMs: nowMs(),
             });
             runAbortController.abort();
@@ -5544,17 +6606,30 @@ async function legacyExecuteTask(
         handleAgentEvent = (event) => {
           if (heartbeatOwnerLost) return;
           recordInternalHeartbeat();
-          afterHeartbeatOwnership(() => {
+          afterHeartbeatOwnership(async () => {
             attemptMeta.agentEngine = event.engine ?? attemptMeta.agentEngine;
+            let checkpointWrite = null;
             if ("resume" in event && typeof event.resume === "string") {
               attemptMeta.agentResume = event.resume;
+              checkpointWrite = enqueueAgentCheckpoint(
+                {
+                  codec: CLI_SESSION_CHECKPOINT_CODEC,
+                  version: 1,
+                  payload: { engine: event.engine ?? attemptMeta.agentEngine, resume: event.resume },
+                },
+                "session",
+                { allowLegacy: true },
+              );
             }
             recordInternalHeartbeat({
               agentEngine: event.engine,
               ...(typeof event.resume === "string" ? { agentResume: event.resume } : {}),
             });
-            if (event.type === "completed" && !responseText && event.answer) {
-              responseText = event.answer;
+            if (event.type === "completed") {
+              cliTurnCompletion.complete();
+              if (!responseText && event.answer) {
+                responseText = event.answer;
+              }
             }
             if (event.type === "action" && isBlockingAgentActionKind(event.action.kind)) {
               if (event.phase === "started") activeCliActions.add(event.action.id);
@@ -5571,6 +6646,24 @@ async function legacyExecuteTask(
               timestampMs: nowMs(),
             });
             void maybeCompleteHijack(true).catch(() => {});
+            if (checkpointWrite) {
+              try {
+                await checkpointWrite;
+              } catch (error) {
+                logWarning(
+                  "failed to persist CLI session checkpoint",
+                  {
+                    runId,
+                    nodeId: desc.nodeId,
+                    iteration: desc.iteration,
+                    attempt: attemptNo,
+                    engine: event.engine,
+                    error: error instanceof Error ? error.message : String(error),
+                  },
+                  "engine:agent-checkpoint",
+                );
+              }
+            }
           });
         };
         /**
@@ -5600,6 +6693,7 @@ async function legacyExecuteTask(
         };
         handleProcess = ({ phase, pid }) => {
           if (typeof pid !== "number" || pid <= 0 || heartbeatOwnerLost) return;
+          if (phase === "started") agentProcessObserved = true;
           // A process callback is evidence only after the same fenced
           // heartbeat used by stdout/stderr has proved ownership.
           recordInternalHeartbeat();
@@ -5607,6 +6701,22 @@ async function legacyExecuteTask(
             if (phase === "started") liveOwnedPids.add(pid);
             else liveOwnedPids.delete(pid);
           });
+          // Durable registry of live agent subprocesses: if this engine dies
+          // without running cleanup (SIGKILL, OOM), the next CLI invocation
+          // reaps whatever is still registered here instead of leaving
+          // unsupervised agents burning quota (#1464 AWF-3, #1332).
+          // Best-effort — a registry miss never breaks the task.
+          const registryEffect =
+            phase === "started"
+              ? adapter.registerAgentProcess({
+                  pid,
+                  runId,
+                  nodeId: desc.nodeId,
+                  enginePid: process.pid,
+                  startedAtMs: nowMs(),
+                })
+              : adapter.unregisterAgentProcess(pid);
+          void Effect.runPromise(registryEffect).catch(() => {});
         };
         const hijackPollingInterval = hijackState
           ? setInterval(() => {
@@ -5642,12 +6752,21 @@ async function legacyExecuteTask(
         // transcript before it resumes. Runs before the watcher starts so
         // we don't snapshot the pre-restore tree. No-op when disabled or
         // when there is no prior checkpoint.
-        if (process.env.SMITHERS_DURABILITY_SNAPSHOTS === "1" && resumeSession) {
+        if (
+          process.env.SMITHERS_DURABILITY_SNAPSHOTS === "1" &&
+          shouldRestoreWorkspaceForResume({ resumeSession, resumeCheckpoint, checkpointMode })
+        ) {
           const restoreResult = await restoreWorkspaceToLatestCheckpoint({
             adapter,
             runId,
             nodeId: desc.nodeId,
             iteration: desc.iteration,
+            ...(checkpointMode === "resume" && resumeCheckpointRefConsumed && resumeCheckpointRef
+              ? {
+                  checkpointAttempt: resumeCheckpointRef.attempt,
+                  checkpointCreatedAtMs: resumeCheckpointRef.createdAtMs,
+                }
+              : {}),
           });
           // A failed restore means the agent is about to resume against a
           // stale or half-written tree. Never swallow it: surface a
@@ -5738,30 +6857,38 @@ async function legacyExecuteTask(
               : {}),
           };
           try {
-            result = await Promise.race([
+            result = await raceAgentCallAbort(
               runPromisePreservingFailure(
                 withSmithersSpan(
                   smithersSpanNames.agent,
                   Effect.tryPromise({
                     try: () => {
-                      const agentCall = guidedResumeMessages?.length
-                        ? {
-                            messages: guidedResumeMessages,
-                          }
-                        : forkConversationBase
+                      const resumeCheckpointForCall = latestAgentCheckpoint
+                        ? cloneAgentCheckpoint(latestAgentCheckpoint, toolConfig.maxAgentCheckpointBytes)
+                        : null;
+                      const agentCall = resumeCheckpointForCall
+                        ? { prompt: effectivePrompt }
+                        : guidedResumeMessages?.length
                           ? {
-                              messages: forkConversationBase,
+                              messages: guidedResumeMessages,
                             }
-                          : {
-                              prompt: effectivePrompt,
-                            };
-                      const doGenerate = () =>
-                        effectiveAgent.generate({
+                          : forkConversationBase
+                            ? {
+                                messages: forkConversationBase,
+                              }
+                            : {
+                                prompt: effectivePrompt,
+                              };
+                      const doGenerate = () => {
+                        cliTurnCompletion.begin();
+                        return effectiveAgent.generate({
                           options: undefined,
                           abortSignal: taskSignal,
                           ...agentCall,
                           ...(generationTools ? { tools: generationTools } : {}),
-                          resumeSession,
+                          ...(resumeCheckpointForCall
+                            ? { resumeCheckpoint: resumeCheckpointForCall, checkpointMode }
+                            : { resumeSession }),
                           continueSession,
                           durabilitySocket: durability.socketPath,
                           lastHeartbeat: previousHeartbeat,
@@ -5773,6 +6900,7 @@ async function legacyExecuteTask(
                             attempt: attemptNo,
                           },
                           maxOutputBytes: toolConfig.maxOutputBytes,
+                          maxAgentCheckpointBytes: toolConfig.maxAgentCheckpointBytes,
                           timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
                           onStdout: (text) => {
                             if (heartbeatOwnerLost) return;
@@ -5792,10 +6920,14 @@ async function legacyExecuteTask(
                           },
                           onProcess: handleProcess,
                           onEvent: handleAgentEvent,
+                          onCheckpoint: async (checkpoint) => {
+                            await enqueueAgentCheckpoint(checkpoint, "progress");
+                          },
                           onStepFinish: handleSdkStepFinish,
                           onStepEnd: handleSdkStepFinish,
                           outputSchema: desc.outputSchema,
                         });
+                      };
                       return runWithToolContext(toolCtx, doGenerate);
                     },
                     catch: (error) => error,
@@ -5807,14 +6939,14 @@ async function legacyExecuteTask(
                   },
                 ),
               ),
-              getTaskAbortPromise(),
-            ]);
+            );
           } finally {
             if (hijackPollingInterval) {
               clearInterval(hijackPollingInterval);
             }
           }
         } catch (error) {
+          await Promise.all([...pendingOwnershipChecks]);
           const errorDetails = {
             attempt: attemptNo,
             iteration: desc.iteration,
@@ -5852,6 +6984,21 @@ async function legacyExecuteTask(
                   timestampMs: nowMs(),
                 })
                 .catch(() => {});
+              await Effect.runPromise(
+                adapter.recordRunTokenUsage({
+                  runId,
+                  nodeId: desc.nodeId,
+                  iteration: desc.iteration ?? 0,
+                  attempt: attemptNo,
+                  model: reportedModelId,
+                  agent:
+                    (typeof effectiveAgent.id === "string" ? effectiveAgent.id : undefined) ??
+                    effectiveAgent.constructor?.name ??
+                    "unknown",
+                  ...failedUsage,
+                  updatedAtMs: nowMs(),
+                }),
+              ).catch(() => {});
             }
           } catch {
             /* token telemetry must not mask the original provider error */
@@ -5875,7 +7022,8 @@ async function legacyExecuteTask(
             await docFileSync.stop();
           }
         }
-        await Promise.all([...pendingOwnershipChecks]);
+        await Promise.all(pendingOwnershipChecks);
+        await captureResultCheckpoint(result, "turn");
         if (traceCollector) {
           traceCollector.observeResult(result);
           await traceCollector.flush();
@@ -5916,7 +7064,10 @@ async function legacyExecuteTask(
         // not the generate() return value — without the `?? responseText`
         // fallback a schema-conforming final message is discarded and the
         // task finishes "succeeded" with an empty output row (NodeHasNoOutput).
-        responseText = result.text ?? responseText ?? null;
+        responseText =
+          typeof result.text === "string" && result.text.length > 0
+            ? result.text
+            : (responseText ?? result.text ?? null);
         if (responseText) {
           void Effect.runPromise(Metric.update(responseSizeBytes, Buffer.byteLength(responseText, "utf8")));
         }
@@ -5958,6 +7109,30 @@ async function legacyExecuteTask(
               reasoningTokens,
               timestampMs: nowMs(),
             });
+            // Same numbers, persisted as a queryable row. The event log stays
+            // the audit trail; `_smithers_run_usage` is the authoritative
+            // per-run total nobody has to replay events to compute (#1464
+            // AWF-6, #1436). Awaited so the row is durable before the attempt
+            // settles, but swallowed — usage accounting never fails a task.
+            await Effect.runPromise(
+              adapter.recordRunTokenUsage({
+                runId,
+                nodeId: desc.nodeId,
+                iteration: desc.iteration ?? 0,
+                attempt: attemptNo,
+                model: reportedModelId,
+                agent:
+                  (typeof effectiveAgent.id === "string" ? effectiveAgent.id : undefined) ??
+                  effectiveAgent.constructor?.name ??
+                  "unknown",
+                inputTokens,
+                outputTokens,
+                cacheReadTokens,
+                cacheWriteTokens,
+                reasoningTokens,
+                updatedAtMs: nowMs(),
+              }),
+            ).catch(() => {});
           }
         }
         let output;
@@ -5977,7 +7152,10 @@ async function legacyExecuteTask(
         // agents) so structured output is recovered even when the agent
         // exposes no `result.text`.
         if (output === undefined) {
-          const text = result.text ?? responseText ?? "";
+          const text =
+            typeof result.text === "string" && result.text.length > 0
+              ? result.text
+              : (responseText ?? result.text ?? "");
           // Try to parse the whole text as JSON first. Strip a leading
           // UTF-8 BOM and accept either object or array at the root,
           // since Zod schemas occasionally validate arrays.
@@ -6073,7 +7251,13 @@ async function legacyExecuteTask(
             schemaCorrectionAttempts += 1;
             attemptMeta.schemaCorrectionAttempts = schemaCorrectionAttempts;
             const schemaDesc = describeSchemaShape(desc.outputTable, desc.outputSchema);
-            const correctionResumeSession = resolveCorrectionResumeSession(effectiveAgent, attemptMeta);
+            const correctionCheckpoint =
+              latestAgentCheckpoint && agentSupportsCheckpoint(effectiveAgent, latestAgentCheckpoint, "resume")
+                ? cloneAgentCheckpoint(latestAgentCheckpoint, toolConfig.maxAgentCheckpointBytes)
+                : null;
+            const correctionResumeSession = correctionCheckpoint
+              ? undefined
+              : resolveCorrectionResumeSession(effectiveAgent, attemptMeta);
             // Include a truncated summary of the latest non-JSON response so the model has context
             const responseSummary =
               latestNoJsonText.length > 2000
@@ -6123,18 +7307,26 @@ async function legacyExecuteTask(
                 maxSchemaRetries,
                 correctionKind: "json-format",
                 resumedSession: Boolean(correctionResumeSession),
+                resumedCheckpoint: Boolean(correctionCheckpoint),
               },
               "engine:schema-retry",
             );
-            const retryResult = await raceTaskAbort(
+            const checkpointPublicationBeforeCorrection = checkpointPublicationCount;
+            cliTurnCompletion.begin();
+            const retryResult = await raceAgentCallAbort(
               effectiveAgent.generate({
                 options: undefined,
                 abortSignal: taskSignal,
                 prompt: jsonPrompt,
-                resumeSession: correctionResumeSession,
+                ...(correctionCheckpoint
+                  ? { resumeCheckpoint: correctionCheckpoint, checkpointMode: "resume" }
+                  : correctionResumeSession
+                    ? { resumeSession: correctionResumeSession }
+                    : {}),
                 ...(generationTools ? { tools: generationTools } : {}),
                 rootDir: taskRoot,
                 maxOutputBytes: toolConfig.maxOutputBytes,
+                maxAgentCheckpointBytes: toolConfig.maxAgentCheckpointBytes,
                 taskContext: {
                   runId,
                   nodeId: desc.nodeId,
@@ -6158,6 +7350,9 @@ async function legacyExecuteTask(
                 },
                 onProcess: handleProcess,
                 onEvent: handleAgentEvent,
+                onCheckpoint: async (checkpoint) => {
+                  await enqueueAgentCheckpoint(checkpoint, "progress");
+                },
                 onStepFinish: handleSdkStepFinish,
                 onStepEnd: handleSdkStepFinish,
               }),
@@ -6165,7 +7360,14 @@ async function legacyExecuteTask(
             // Flush deferred event handlers so a fresh session id
             // emitted by this correction call is visible before the
             // next iteration decides what to resume.
-            await Promise.all([...pendingOwnershipChecks]);
+            await Promise.all(pendingOwnershipChecks);
+            await captureResultCheckpoint(retryResult, "schema-correction");
+            if (
+              checkpointPublicationCount === checkpointPublicationBeforeCorrection &&
+              attemptMeta.agentCheckpoint?.codec !== CLI_SESSION_CHECKPOINT_CODEC
+            ) {
+              attemptMeta.agentCheckpoint = null;
+            }
             const retryText = retryResult.text ?? "";
             responseText = retryText || responseText;
             latestNoJsonText = retryText || latestNoJsonText;
@@ -6448,7 +7650,13 @@ async function legacyExecuteTask(
       // CLI harness agents resume their own session so the correction
       // runs with the full task context; SDK agents replay the recorded
       // conversation messages instead.
-      const correctionResumeSession = resolveCorrectionResumeSession(effectiveAgent, attemptMeta);
+      const correctionCheckpoint =
+        latestAgentCheckpoint && agentSupportsCheckpoint(effectiveAgent, latestAgentCheckpoint, "resume")
+          ? cloneAgentCheckpoint(latestAgentCheckpoint, toolConfig.maxAgentCheckpointBytes)
+          : null;
+      const correctionResumeSession = correctionCheckpoint
+        ? undefined
+        : resolveCorrectionResumeSession(effectiveAgent, attemptMeta);
       logInfo(
         "schema validation retry",
         {
@@ -6460,22 +7668,28 @@ async function legacyExecuteTask(
           maxSchemaRetries,
           correctionKind: "schema-validation",
           resumedSession: Boolean(correctionResumeSession),
+          resumedCheckpoint: Boolean(correctionCheckpoint),
           zodIssues,
         },
         "engine:schema-retry",
       );
       // Append the correction as a user message to the conversation
       const retryMessages = [...schemaCorrectionMessages, { role: "user", content: schemaRetryPrompt }];
-      const schemaRetryResult = await raceTaskAbort(
+      const checkpointPublicationBeforeCorrection = checkpointPublicationCount;
+      cliTurnCompletion.begin();
+      const schemaRetryResult = await raceAgentCallAbort(
         effectiveAgent.generate({
           options: undefined,
           abortSignal: taskSignal,
-          ...(correctionResumeSession
-            ? { prompt: schemaRetryPrompt, resumeSession: correctionResumeSession }
-            : { messages: retryMessages }),
+          ...(correctionCheckpoint
+            ? { prompt: schemaRetryPrompt, resumeCheckpoint: correctionCheckpoint, checkpointMode: "resume" }
+            : correctionResumeSession
+              ? { prompt: schemaRetryPrompt, resumeSession: correctionResumeSession }
+              : { messages: retryMessages }),
           ...(generationTools ? { tools: generationTools } : {}),
           rootDir: taskRoot,
           maxOutputBytes: toolConfig.maxOutputBytes,
+          maxAgentCheckpointBytes: toolConfig.maxAgentCheckpointBytes,
           taskContext: {
             runId,
             nodeId: desc.nodeId,
@@ -6499,6 +7713,9 @@ async function legacyExecuteTask(
           },
           onProcess: handleProcess,
           onEvent: handleAgentEvent,
+          onCheckpoint: async (checkpoint) => {
+            await enqueueAgentCheckpoint(checkpoint, "progress");
+          },
           onStepFinish: handleSdkStepFinish,
           onStepEnd: handleSdkStepFinish,
           ...(supportsNativeStructuredOutput ? { outputSchema: desc.outputSchema } : {}),
@@ -6506,7 +7723,14 @@ async function legacyExecuteTask(
       );
       // Flush deferred event handlers so a fresh session id emitted by
       // this correction call is visible to the next iteration.
-      await Promise.all([...pendingOwnershipChecks]);
+      await Promise.all(pendingOwnershipChecks);
+      await captureResultCheckpoint(schemaRetryResult, "schema-correction");
+      if (
+        checkpointPublicationCount === checkpointPublicationBeforeCorrection &&
+        attemptMeta.agentCheckpoint?.codec !== CLI_SESSION_CHECKPOINT_CODEC
+      ) {
+        attemptMeta.agentCheckpoint = null;
+      }
       const retryText = (schemaRetryResult.text ?? "").trim();
       responseText = retryText || responseText;
       if (!(await confirmHeartbeatOwnership())) {
@@ -6779,18 +8003,17 @@ async function legacyExecuteTask(
     if (isHeartbeatPayloadValidationError(effectiveError)) {
       attemptMeta.failureRetryable = false;
     }
-    // Allow agents (e.g. BaseCliAgent on "LLM not set") to flag a failure as
-    // non-retryable via SmithersError details. Without this, the engine would
-    // retry deterministic configuration errors up to desc.retries times.
-    if (
-      effectiveError &&
-      typeof effectiveError === "object" &&
+    // An authored retryability decision is authoritative. In its absence,
+    // deterministic configuration errors keep their fail-fast default.
+    if (effectiveError && typeof effectiveError === "object") {
       // @ts-ignore — duck-type on SmithersError shape
-      (effectiveError.details?.failureRetryable === false ||
-        // @ts-ignore
-        effectiveError.code === "AGENT_CONFIG_INVALID")
-    ) {
-      attemptMeta.failureRetryable = false;
+      const explicitRetryability = effectiveError.details?.failureRetryable;
+      if (explicitRetryability === false || explicitRetryability === true) {
+        attemptMeta.failureRetryable = explicitRetryability;
+        // @ts-ignore — duck-type on SmithersError shape
+      } else if (effectiveError.code === "AGENT_CONFIG_INVALID") {
+        attemptMeta.failureRetryable = false;
+      }
     }
     // Honour `discardResumeSession: true` from agent-side errors (e.g. kimi
     // session-loss). The next attempt's resumeSession resolution checks
@@ -6806,6 +8029,14 @@ async function legacyExecuteTask(
       effectiveError.details.discardResumeSession === true
     ) {
       attemptMeta.discardResumeSession = true;
+    }
+    if (
+      effectiveError &&
+      typeof effectiveError === "object" &&
+      effectiveError.details &&
+      effectiveError.details.discardAgentCheckpoint === true
+    ) {
+      attemptMeta.discardAgentCheckpoint = true;
     }
     if (!heartbeatTimeoutError && (taskSignal.aborted || isAbortError(err))) {
       const currentAttempt = await Effect.runPromise(adapter.getAttempt(runId, desc.nodeId, desc.iteration, attemptNo));
@@ -6921,6 +8152,7 @@ async function legacyExecuteTask(
         effectiveChainIndex,
         quotaResetAtMs,
         disabledAgents,
+        preflightFailedChainIndices(priorAttempts, attemptMeta),
       );
       if (failoverPending) {
         details.quotaFailoverPending = true;
@@ -6929,6 +8161,13 @@ async function legacyExecuteTask(
       }
       failureErrorJson.details = details;
     }
+    stampDurableRetryState({
+      attemptMeta,
+      attempts,
+      descriptor: desc,
+      error: failureErrorJson,
+      failedAtMs,
+    });
     const failureClaimed = await adapter.withTransaction(
       "task-fail",
       Effect.gen(function* () {
@@ -7006,8 +8245,8 @@ async function legacyExecuteTask(
     await annotateTaskSpan({
       status: "failed",
     });
-    const attempts = await Effect.runPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
-    const failedAttempts = attempts.filter((a) => a.state === "failed");
+    const updatedAttempts = await Effect.runPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
+    const failedAttempts = updatedAttempts.filter((a) => a.state === "failed");
     const hasNonRetryableFailure = failedAttempts.some((attempt) => !isRetryableTaskFailure(attempt));
     const retryConsumingFailedAttempts = failedAttempts.filter((a) => !isQuotaTaskFailure(a));
     const latestFailedAttemptIsQuota = isQuotaTaskFailure(failedAttempts[0]);
@@ -7362,6 +8601,7 @@ function ralphStateFromDriverTransition(transition) {
     state.set(ralphId, {
       iteration: Number.isFinite(iteration) ? iteration : 0,
       done: Boolean(value.done),
+      ...(value.exhausted ? { exhausted: true } : {}),
     });
   }
   return state;
@@ -7483,6 +8723,11 @@ async function runWorkflowBodyDriver(workflow, opts) {
   // not pin it; every read (withTaskSlot admission included) sees the raise.
   let maxConcurrency = coercePositiveInt("maxConcurrency", opts.maxConcurrency, DEFAULT_MAX_CONCURRENCY);
   const maxOutputBytes = coercePositiveInt("maxOutputBytes", opts.maxOutputBytes, DEFAULT_MAX_OUTPUT_BYTES);
+  const maxAgentCheckpointBytes = coercePositiveInt(
+    "maxAgentCheckpointBytes",
+    opts.maxAgentCheckpointBytes,
+    DEFAULT_AGENT_CHECKPOINT_MAX_BYTES,
+  );
   const toolTimeoutMs = coercePositiveInt("toolTimeoutMs", opts.toolTimeoutMs, DEFAULT_TOOL_TIMEOUT_MS);
   const allowNetwork = Boolean(opts.allowNetwork);
   const runtimeOwnerId = buildRuntimeOwnerId();
@@ -7535,6 +8780,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
     rootDir,
     allowNetwork,
     maxOutputBytes,
+    maxAgentCheckpointBytes,
     toolTimeoutMs,
     acceptWorkflowChange: opts.acceptWorkflowChange === true,
     reportError: (rawError, context) => reportSmithersError(opts.onError, rawError, context),
@@ -7704,7 +8950,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
   // resume/continue-as-new, not the next frame.
   const incrementalFrameSnapshotsEnabled = process.env.SMITHERS_INCREMENTAL_FRAME_SNAPSHOTS !== "0";
   /**
-   * @type {{ inputRow: Record<string, unknown> | undefined; outputs: import("@smithers-orchestrator/db/snapshot").OutputSnapshot; framesSinceFullLoad: number } | null}
+   * @type {{ inputRow: Record<string, unknown> | undefined; outputs: import("@smthrs/db/snapshot").OutputSnapshot; framesSinceFullLoad: number } | null}
    */
   let frameSnapshotCache = null;
   // Monotonic count of output-row read-backs (noteTaskOutputRowForFrameCache
@@ -7722,11 +8968,11 @@ async function runWorkflowBodyDriver(workflow, opts) {
    * lists. loadOutputs registers each table's rows under BOTH the sql table
    * name and the schema key as the SAME array, and patches rely on that
    * aliasing — so aliased entries stay aliased in the copy.
-   * @param {import("@smithers-orchestrator/db/snapshot").OutputSnapshot} outputs
-   * @returns {import("@smithers-orchestrator/db/snapshot").OutputSnapshot}
+   * @param {import("@smthrs/db/snapshot").OutputSnapshot} outputs
+   * @returns {import("@smthrs/db/snapshot").OutputSnapshot}
    */
   const copyOutputSnapshot = (outputs) => {
-    /** @type {import("@smithers-orchestrator/db/snapshot").OutputSnapshot} */
+    /** @type {import("@smthrs/db/snapshot").OutputSnapshot} */
     const copy = {};
     /** @type {Map<Array<unknown>, Array<unknown>>} */
     const copiedRows = new Map();
@@ -7751,8 +8997,8 @@ async function runWorkflowBodyDriver(workflow, opts) {
    * caller must fall back to a full load. Node rows naming tables outside the
    * outputs snapshot are skipped — loadOutputs never scans those, so the
    * full-load path would not include them either.
-   * @param {import("@smithers-orchestrator/db/adapter/NodeRow").NodeRow[]} frameNodeRows
-   * @param {import("@smithers-orchestrator/db/snapshot").OutputSnapshot} outputs
+   * @param {import("@smthrs/db/adapter/NodeRow").NodeRow[]} frameNodeRows
+   * @param {import("@smthrs/db/snapshot").OutputSnapshot} outputs
    * @returns {Record<string, unknown> | null} details of the first finished node missing its cached output row, or null when the invariant holds
    */
   const findFinishedNodeMissingCachedOutput = (frameNodeRows, outputs) => {
@@ -7871,7 +9117,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
     const latest = attempts[0];
     if (latest?.errorJson) {
       try {
-        return JSON.parse(latest.errorJson);
+        const error = JSON.parse(latest.errorJson);
+        const retryState = parseDurableRetryState(parseAttemptMetaJson(latest.metaJson)[RETRY_STATE_META_KEY]);
+        return attachDurableRetryState(error, retryState);
       } catch {
         return latest.errorJson;
       }
@@ -8287,7 +9535,10 @@ async function runWorkflowBodyDriver(workflow, opts) {
       case "Timer":
         return reconcileTimerWait(reason.resumeAtMs);
       case "RetryBackoff":
-        await sleep(reason.waitMs);
+        await sleep(reason.waitMs, runAbortController.signal);
+        if (runAbortController.signal.aborted) {
+          return { runId, status: "cancelled" };
+        }
         return submitLastGraph();
       case "Quota":
         return markRunWaiting("waiting-quota", "quota", {
@@ -8319,13 +9570,19 @@ async function runWorkflowBodyDriver(workflow, opts) {
       try {
         const existingOutput = await readTaskOutput(task);
         if (existingOutput !== undefined) {
+          const existingNode = await Effect.runPromise(adapter.getNode(runId, task.nodeId, task.iteration));
+          let lastAttempt = existingNode?.lastAttempt ?? null;
+          if (lastAttempt == null) {
+            const attempts = await Effect.runPromise(adapter.listAttempts(runId, task.nodeId, task.iteration));
+            lastAttempt = attempts[0]?.attempt ?? null;
+          }
           await Effect.runPromise(
             adapter.insertNode({
               runId,
               nodeId: task.nodeId,
               iteration: task.iteration,
               state: "finished",
-              lastAttempt: null,
+              lastAttempt,
               updatedAtMs: nowMs(),
               outputTable: task.outputTableName,
               label: task.label ?? null,
@@ -8431,7 +9688,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
   /**
    * @param {WorkflowGraph} graph
    * @param {RenderContext["trigger"]} [trigger]
-   * @param {import("@smithers-orchestrator/db/adapter/NodeRow").NodeRow[]} [frameNodeRows] this frame's node rows, shared from the listing persistDriverGraphTaskStates just took (plus the rows it wrote) so the incremental snapshot path can skip a second listNodes scan
+   * @param {import("@smthrs/db/adapter/NodeRow").NodeRow[]} [frameNodeRows] this frame's node rows, shared from the listing persistDriverGraphTaskStates just took (plus the rows it wrote) so the incremental snapshot path can skip a second listNodes scan
    */
   const persistDriverFrame = async (graph, trigger, frameNodeRows) => {
     const xmlJson = canonicalizeXml(graph.xml);
@@ -8483,13 +9740,13 @@ async function runWorkflowBodyDriver(workflow, opts) {
         snapshotCache = null;
       }
     }
-    /** @type {import("@smithers-orchestrator/db/adapter/NodeRow").NodeRow[]} */
+    /** @type {import("@smthrs/db/adapter/NodeRow").NodeRow[]} */
     let snapNodes;
     /** @type {Array<Record<string, unknown>>} */
     let snapRalph;
     /** @type {Record<string, unknown> | undefined} */
     let snapInputRow;
-    /** @type {import("@smithers-orchestrator/db/snapshot").OutputSnapshot} */
+    /** @type {import("@smthrs/db/snapshot").OutputSnapshot} */
     let snapOutputs;
     if (snapshotCache && frameNodeRows) {
       // Incremental path: reuse the cache seeded by the last full load.
@@ -8599,13 +9856,13 @@ async function runWorkflowBodyDriver(workflow, opts) {
   };
   /**
    * @param {WorkflowGraph} graph
-   * @returns {Promise<import("@smithers-orchestrator/db/adapter/NodeRow").NodeRow[]>} the run's node rows as of this frame — the listing taken above plus every row written below, mirrored the way insertNode upserts them (replace by (nodeId, iteration) in place, append when new) so persistDriverFrame can snapshot nodes without a second listNodes scan
+   * @returns {Promise<import("@smthrs/db/adapter/NodeRow").NodeRow[]>} the run's node rows as of this frame — the listing taken above plus every row written below, mirrored the way insertNode upserts them (replace by (nodeId, iteration) in place, append when new) so persistDriverFrame can snapshot nodes without a second listNodes scan
    */
   const persistDriverGraphTaskStates = async (graph) => {
     const existingRows = await Effect.runPromise(adapter.listNodes(runId));
     const frameNodeRows = existingRows.slice();
     /**
-     * @param {import("@smithers-orchestrator/db/adapter/NodeRow").NodeRow} row
+     * @param {import("@smthrs/db/adapter/NodeRow").NodeRow} row
      */
     const applyFrameNodeRow = (row) => {
       const index = frameNodeRows.findIndex(
@@ -8783,10 +10040,14 @@ async function runWorkflowBodyDriver(workflow, opts) {
       }
       if (runOwnedByCurrentProcess) {
         await cancelPendingTimersBridge(adapter, runId, eventBus, "run-failed");
-        const failed = await Effect.runPromise(
-          adapter.updateRunIfNotCancelledOwned(runId, runtimeOwnerId, {
+        const failedAtMs = nowMs();
+        const failed = await commitTerminalRunWithSteerExpiry(adapter, eventBus, {
+          writeGroup: "driver run failure",
+          runId,
+          timestampMs: failedAtMs,
+          transition: adapter.updateRunIfNotCancelledOwned(runId, runtimeOwnerId, {
             status: "failed",
-            finishedAtMs: nowMs(),
+            finishedAtMs: failedAtMs,
             heartbeatAtMs: null,
             runtimeOwnerId: null,
             cancelRequestedAtMs: null,
@@ -8794,7 +10055,13 @@ async function runWorkflowBodyDriver(workflow, opts) {
             hijackTarget: null,
             errorJson: JSON.stringify(errorInfo),
           }),
-        );
+          terminalEvent: {
+            type: "RunFailed",
+            runId,
+            error: errorInfo,
+            timestampMs: failedAtMs,
+          },
+        });
         if (!failed) {
           const authoritative = await Effect.runPromise(adapter.getRun(runId));
           if (
@@ -8808,38 +10075,38 @@ async function runWorkflowBodyDriver(workflow, opts) {
           return { runId, status: authoritative?.status ?? "failed" };
         }
         reportSmithersError(opts.onError, rawError, { phase: "run", runId });
-        await Effect.runPromise(
-          eventBus.emitEventWithPersist({
-            type: "RunFailed",
-            runId,
-            error: errorInfo,
-            timestampMs: nowMs(),
-          }),
-        );
       }
       await annotateRunSpan({ status: "failed" });
       return { runId, status: "failed", error: errorInfo };
     }
     const completedAtMs = nowMs();
-    const completed = await Effect.runPromise(adapter.completeRun(runId, runtimeOwnerId, completedAtMs));
-    if (!completed) {
-      const authoritativeRun = await Effect.runPromise(adapter.getRun(runId));
-      return { runId, status: authoritativeRun?.status ?? "cancelled" };
-    }
     // A `finished` run can still have tolerated child failures (continueOnFail
     // tasks, transient agent failures) that the binary status cannot express.
     // Carry the count onto the result and the RunFinished event row so callers
     // and surfaces can flag the degraded outcome without re-deriving it. (#295)
     const failedChildren = typeof result.failedChildren === "number" ? result.failedChildren : 0;
     const failedChildKeys = Array.isArray(result.failedChildKeys) ? result.failedChildKeys : [];
-    await Effect.runPromise(
-      eventBus.emitEventWithPersist({
+    // Loops that hit maxIterations under return-last without their `until`
+    // ever passing did not converge — carry them onto the event row and result
+    // so status/why can report a degraded (non-done) verdict. (#1464 AWF-1)
+    const exhaustedLoops = Array.isArray(result.exhaustedLoops) ? result.exhaustedLoops : [];
+    const completed = await commitTerminalRunWithSteerExpiry(adapter, eventBus, {
+      writeGroup: "driver run completion",
+      runId,
+      timestampMs: completedAtMs,
+      transition: adapter.completeRun(runId, runtimeOwnerId, completedAtMs),
+      terminalEvent: {
         type: "RunFinished",
         runId,
-        timestampMs: nowMs(),
+        timestampMs: completedAtMs,
         ...(failedChildren > 0 ? { failedChildren, failedChildKeys } : {}),
-      }),
-    );
+        ...(exhaustedLoops.length > 0 ? { exhaustedLoops } : {}),
+      },
+    });
+    if (!completed) {
+      const authoritativeRun = await Effect.runPromise(adapter.getRun(runId));
+      return { runId, status: authoritativeRun?.status ?? "cancelled" };
+    }
     void Effect.runPromise(Metric.update(runDuration, performance.now() - runStartPerformanceMs));
     logInfo(
       "workflow run finished",
@@ -8861,6 +10128,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
       status: "finished",
       output,
       ...(failedChildren > 0 ? { failedChildren, failedChildKeys } : {}),
+      ...(exhaustedLoops.length > 0 ? { exhaustedLoops } : {}),
     };
   };
   try {
@@ -9209,6 +10477,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
       eventBus,
       runStartMs: activeRun?.createdAtMs ?? nowMs(),
     });
+    const retrySessionState = opts.resume
+      ? retrySessionStateFromAttempts(await Effect.runPromise(adapter.listAttemptsForRun(runId)))
+      : { retryCounts: new Map(), retryWait: new Map() };
     workflowSession = makeWorkflowSession({
       runId,
       nowMs,
@@ -9216,6 +10487,8 @@ async function runWorkflowBodyDriver(workflow, opts) {
       requireRerenderOnOutputChange: opts.requireRerenderOnOutputChange ?? true,
       initialRalphState: ralphState,
       initialTimerStarts: carriedTimerStarts,
+      initialRetryCounts: retrySessionState.retryCounts,
+      initialRetryWait: retrySessionState.retryWait,
       evaluateAspectBudget: (descriptor) =>
         budgetTracker ? evaluateAspectBudget(descriptor.aspects, budgetTracker.snapshot(nowMs())) : null,
       onAspectBudgetSkip: (descriptor) => {
@@ -9336,6 +10609,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
           const nextState = {
             iteration,
             done: existing?.done ?? false,
+            ...(existing?.exhausted ? { exhausted: true } : {}),
           };
           ralphState.set(ralphId, nextState);
           if (existing?.iteration !== nextState.iteration || existing?.done !== nextState.done) {
@@ -9345,6 +10619,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 ralphId,
                 iteration: nextState.iteration,
                 done: nextState.done,
+                exhausted: Boolean(nextState.exhausted),
                 updatedAtMs: nowMs(),
               }),
             );
@@ -9454,6 +10729,10 @@ async function runWorkflowBodyDriver(workflow, opts) {
         };
         eventBus.emit("event", continuationEvent);
         Effect.runSync(trackEvent(continuationEvent));
+        for (const expiredEvent of driverTransition.expiredSteerEvents ?? []) {
+          eventBus.emit("event", expiredEvent);
+          Effect.runSync(trackEvent(expiredEvent));
+        }
         logInfo(
           `Continuing run ${runId} as ${driverTransition.newRunId} at iteration ${continuationIteration}`,
           {
@@ -9533,10 +10812,14 @@ async function runWorkflowBodyDriver(workflow, opts) {
     const errorInfo = errorToJson(err);
     if (runOwnedByCurrentProcess) {
       await cancelPendingTimersBridge(adapter, runId, eventBus, "run-failed");
-      const failed = await Effect.runPromise(
-        adapter.updateRunIfNotCancelledOwned(runId, runtimeOwnerId, {
+      const failedAtMs = nowMs();
+      const failed = await commitTerminalRunWithSteerExpiry(adapter, eventBus, {
+        writeGroup: "unhandled run failure",
+        runId,
+        timestampMs: failedAtMs,
+        transition: adapter.updateRunIfNotCancelledOwned(runId, runtimeOwnerId, {
           status: "failed",
-          finishedAtMs: nowMs(),
+          finishedAtMs: failedAtMs,
           heartbeatAtMs: null,
           runtimeOwnerId: null,
           cancelRequestedAtMs: null,
@@ -9544,7 +10827,13 @@ async function runWorkflowBodyDriver(workflow, opts) {
           hijackTarget: null,
           errorJson: JSON.stringify(errorInfo),
         }),
-      );
+        terminalEvent: {
+          type: "RunFailed",
+          runId,
+          error: errorInfo,
+          timestampMs: failedAtMs,
+        },
+      });
       if (!failed) {
         const authoritative = await Effect.runPromise(adapter.getRun(runId));
         if (
@@ -9559,14 +10848,6 @@ async function runWorkflowBodyDriver(workflow, opts) {
         return { runId, status: authoritative?.status ?? "failed", error: errorInfo };
       }
       reportSmithersError(opts.onError, err, { phase: "run", runId });
-      await Effect.runPromise(
-        eventBus.emitEventWithPersist({
-          type: "RunFailed",
-          runId,
-          error: errorInfo,
-          timestampMs: nowMs(),
-        }),
-      );
     }
     await annotateRunSpan({ status: "failed" });
     return { runId, status: "failed", error: errorInfo };
@@ -9576,6 +10857,12 @@ async function runWorkflowBodyDriver(workflow, opts) {
     detachAbort();
     detachPause();
     wakeLock.release();
+    // Normal exits deregister each agent pid as it settles; this sweeps any
+    // rows left over from an abrupt task teardown so the orphan reaper never
+    // mistakes a finished engine's stale rows for live orphans (#1464 AWF-3).
+    if (typeof adapter.clearAgentProcessesForOwner === "function") {
+      await Effect.runPromise(adapter.clearAgentProcessesForOwner(process.pid)).catch(() => {});
+    }
   }
 }
 /**
@@ -9614,6 +10901,7 @@ export function runWorkflow(workflow, opts) {
 }
 
 export const __engineInternals = {
+  createCliTurnCompletionState,
   isSamePath,
   sha256Hex,
   isBlockingAgentActionKind,
@@ -9624,6 +10912,8 @@ export const __engineInternals = {
   isStructuredOutputParseFailure,
   isResetCancelledAttempt,
   nextAttemptNumber,
+  resumeEligibleAttempts,
+  shouldDiscardResumeSession,
   depsTextAccessHint,
   makeStructuredOutputCompatibilityError,
   makePlainTextOutputError,
@@ -9665,6 +10955,7 @@ export const __engineInternals = {
   cloneRalphStateMap,
   buildCarriedInputRow,
   continueRunAsNew,
+  resolveBinary,
   resolveRootDir,
   resolveLogDir,
   getWorkflowImportScanLoader,
@@ -9697,6 +10988,7 @@ export const __engineInternals = {
   parseAttemptErrorCode,
   isRetryableTaskFailure,
   isQuotaTaskFailure,
+  retrySessionStateFromAttempts,
   cancelInProgress,
   cancelStaleAttempts,
   cancelPendingExternalWaits,

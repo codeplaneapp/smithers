@@ -3,14 +3,14 @@ title: Gateway UI Components
 description: Prebuilt React components (RunList, RunTree, RunEventLog, ApprovalPanel, LaunchButton, and more) for assembling a custom workflow UI in minutes, built on the gateway-react hooks.
 ---
 
-`@smithers-orchestrator/gateway-ui` is a set of drop-in React components for
+`@smthrs/gateway-ui` is a set of drop-in React components for
 building a custom workflow UI. They are built on the
 [`gateway-react`](/reference/gateway-react) hooks, so each one connects to the
 Gateway by itself: give it a `runId` or a filter and it renders live data and
 wires the actions. Reach for these instead of hand-wiring hooks when you want a
 run dashboard fast.
 
-Import them from the `smithers-orchestrator/gateway-ui` subpath, alongside
+Import them from the `smthrs/gateway-ui` subpath, alongside
 `createGatewayReactRoot` from `gateway-react`. Every component is styled with
 inline styles (no CSS import), so it bundles cleanly through the Gateway's
 bundler, and every component accepts `className` and `style` to override.
@@ -53,7 +53,7 @@ tokens, never hex-plus-alpha.
 | `GatewayApprovalConfirmation` | One pending approval row as the `Confirmation` lifecycle anatomy with approve/deny actions, resolved through `submitApproval`. | `approval`, `note`, `onResolved` |
 | `GatewayCheckpointControls` | Durability checkpoint list. Only `rewind` is bound natively (to the Gateway's `rewindRun` RPC); restore/fork/replay/return-to-live render only when the host supplies `onAction`. Rejected rewind or host actions render an accessible row-level alert, normalize the failure to `Error`, call `onError`, and re-enable controls for retry. | `runId`, `checkpoints`, `currentFrameNo`, `onAction`, `onRewound`, `onError` |
 | `WorkflowGraph` | A workflow DAG rendered as an interactive canvas: lays a `WorkflowSpecNode[]` (`id`, `label`, `kind`, `dependsOn?`, `output?`, `status?`) out left-to-right with dagre and renders each node as a `SmithersTaskNode` card (kind kicker, status dot, latest output line). `workflowToFlow(spec)` is exported separately for pure layout without mounting ReactFlow, and `workflowGraphCss` carries the node/edge styles. | `spec`, `nodeTypes`, `className`, `style` |
-| `SmithersCanvasNode`, `SmithersNodeHandles` | The `WorkflowGraph` `nodeTypes` binding that renders flow nodes with the `WorkflowNode` canvas anatomy from `smithers-orchestrator/ui`. Any custom `nodeTypes` renderer must render `SmithersNodeHandles` (target handle left, source handle right) or its edges detach. | `@xyflow/react` `NodeProps` |
+| `SmithersCanvasNode`, `SmithersNodeHandles` | The `WorkflowGraph` `nodeTypes` binding that renders flow nodes with the `WorkflowNode` canvas anatomy from `smthrs/ui`. Any custom `nodeTypes` renderer must render `SmithersNodeHandles` (target handle left, source handle right) or its edges detach. | `@xyflow/react` `NodeProps` |
 
 `StatusPill`, `statusColor`, `statusColors`, and the `theme` style tokens are
 also exported for building your own rows that match the components, plus the
@@ -79,7 +79,7 @@ define any `status` vocabulary it likes; this applies only to run-tree rows.
 **Live-feedback rule:** every agent node a UI surfaces should get a
 `NodeChatStream` so humans can watch the agent work in real time; the
 `create-ui` workflow's deterministic compliance gate
-(`gradeWorkflowUiSource` from `smithers-orchestrator/scorers`) rejects
+(`gradeWorkflowUiSource` from `smthrs/scorers`) rejects
 generated UIs that hand-roll pills/tables/colors, match node statuses against
 engine states, or omit live agent chat.
 The gate also requires the author's verified result and independently checks
@@ -92,7 +92,7 @@ For a workflow whose UI just needs launch-watch-approve, render
 `createGatewayReactRoot` and you are done. For everything you compose *around*
 these run widgets (buttons, cards, inputs, dialogs, tabs, empty states, chat
 surfaces), reach for the shared
-[`smithers-orchestrator/ui`](/reference/ui) component library instead of
+[`smthrs/ui`](/reference/ui) component library instead of
 hand-writing markup and CSS.
 
 ## A complete UI
@@ -101,14 +101,14 @@ This is a full `.smithers/ui/<workflow>.tsx` bundle: a run picker, the node tree
 a live event log, a node-output pane, and the approval queue, wired together with
 local state. Save it next to a workflow, declare it from that workflow with
 `<UI entry="../ui/<workflow>.tsx" />`, and open it with
-`bunx smithers-orchestrator ui RUN_ID` (or `bunx smithers-orchestrator ui --workflow <workflow>`).
+`bunx smthrs ui RUN_ID` (or `bunx smthrs ui --workflow <workflow>`).
 To open the full local control surface instead of a single workflow UI, see
-[`bunx smithers-orchestrator ui --app`](#the-full-local-smithers-ui) below.
+[`bunx smthrs ui --app`](#the-full-local-smithers-ui) below.
 
 ```tsx
 /** @jsxImportSource react */
 import { useState } from "react";
-import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";
+import { createGatewayReactRoot } from "smthrs/gateway-react";
 import {
   ApprovalPanel,
   ConnectionBadge,
@@ -120,7 +120,7 @@ import {
   RunList,
   RunTree,
   WorkflowPicker,
-} from "smithers-orchestrator/gateway-ui";
+} from "smthrs/gateway-ui";
 
 const WORKFLOW = "implement";
 
@@ -173,7 +173,7 @@ components do not cover.
 
 ## The full local Smithers UI
 
-`bunx smithers-orchestrator ui --app` serves the full local control surface (`apps/smithers`)
+`bunx smthrs ui --app` serves the full local control surface (`apps/smithers`)
 instead of a single workflow's UI. It builds the app bundle on first use, serves
 it same-origin with a local Gateway (reverse-proxying the Gateway's RPC,
 WebSocket, and health paths), and opens it in your browser as a dashboard for
@@ -192,7 +192,7 @@ workflows for you, so `--app` fails fast unless both of these hold:
   up front and exits with an install hint if it is missing.
 
 ```bash
-CEREBRAS_API_KEY=csk-... bunx smithers-orchestrator ui --app
+CEREBRAS_API_KEY=csk-... bunx smthrs ui --app
 ```
 
 ### The concierge
@@ -232,7 +232,7 @@ These bind to `127.0.0.1` only and are scoped to the directory you launch from.
 | `--no-autostart` | autostarts | Do not start a Gateway if none is reachable. |
 | `--no-daemon` | daemon allowed | Force direct/embedded operation and never start a background Gateway daemon. |
 
-Without `--app`, `bunx smithers-orchestrator ui [runId]` opens a single workflow run's custom UI
+Without `--app`, `bunx smthrs ui [runId]` opens a single workflow run's custom UI
 (the component gallery above) against the Gateway rather than the full surface.
 
 ## When to drop to hooks

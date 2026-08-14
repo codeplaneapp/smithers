@@ -1,4 +1,4 @@
-# @smithers-orchestrator/pi-plugin — src
+# @smthrs/pi-plugin — src
 
 Pi coding-agent (`@earendil-works/pi-coding-agent`) extension for Smithers.
 

@@ -1,8 +1,8 @@
 import { resolve, isAbsolute, sep, dirname } from "node:path";
 import { realpath } from "node:fs/promises";
 import { Effect } from "effect";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 /**
  * @param {string} rootDir
  * @param {string} inputPath

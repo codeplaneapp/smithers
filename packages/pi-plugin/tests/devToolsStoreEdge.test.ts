@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { DevToolsStore } from "../src/runtime/DevToolsStore.js";
 import type { DevToolsClient } from "../src/runtime/DevToolsClient.js";
-import type { DevToolsNode, DevToolsSnapshot } from "@smithers-orchestrator/protocol";
+import type { DevToolsNode, DevToolsSnapshot } from "@smthrs/protocol";
 
 function task(id: number, nodeId: string, state: string): DevToolsNode {
   return {

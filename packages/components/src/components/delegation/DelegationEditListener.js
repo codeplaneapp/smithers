@@ -3,7 +3,7 @@
 // @smithers-type-exports-end
 
 import React from "react";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
 import { Loop } from "../Ralph.js";
 import { Signal } from "../Signal.js";
 import { DC_EDIT_SIGNAL } from "./delegationSchemasRuntime.js";

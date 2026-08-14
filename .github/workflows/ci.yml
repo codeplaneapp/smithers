@@ -6,6 +6,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   runtime-conformance:
     strategy:
@@ -20,11 +23,13 @@ jobs:
             script: test:runtime:vercel
           - lane: Node.js
             script: test:runtime:node
+          - lane: Node.js CLI
+            script: test:runtime:node:cli
           - lane: Bun
             script: test:runtime:bun
     name: Runtime conformance -- ${{ matrix.lane }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: pnpm/action-setup@v6.0.8
@@ -127,7 +132,12 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      # These jobs run only checked-in fake bridge fixtures; they never fetch or
+      # execute the Nanocodex release. Avoid persisting even the read-only token
+      # so process-containment tests cannot inherit repository credentials.
       - uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v6.0.8
         with:
@@ -142,12 +152,33 @@ jobs:
         with:
           bun-version: 1.3.13
 
-      # The grep tool shells out to ripgrep (`rg`), which the clean runner image
-      # does not ship. Without it packages/smithers file-tool tests spawn-fail
-      # with PROCESS_FAILED instead of exercising real search.
-      - name: Install ripgrep (Linux)
+      # The grep tool shells out to ripgrep (`rg`), and Nanocodex tests exercise
+      # the real PID-containment launcher with checked-in fake payloads.
+      - name: Install Linux test dependencies and probe Bubblewrap
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ripgrep
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap ripgrep
+          probe_bwrap() {
+            bwrap \
+              --unshare-pid \
+              --die-with-parent \
+              --new-session \
+              --bind / / \
+              --proc /proc \
+              --dev-bind /dev /dev \
+              -- /bin/true
+          }
+          # Ubuntu >= 23.10 ships kernel.apparmor_restrict_unprivileged_userns=1,
+          # which denies the unprivileged user namespace bwrap needs. Relax it
+          # once on the throwaway runner so the containment tests actually run
+          # instead of silently skipping.
+          if ! probe_bwrap; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          fi
+          if ! probe_bwrap; then
+            echo "Bubblewrap namespaces are unavailable on this runner; Nanocodex containment tests will skip."
+          fi
 
       - name: Install ripgrep (Windows)
         if: runner.os == 'Windows'
@@ -179,6 +210,7 @@ jobs:
           gate node scripts/check-dependency-boundaries.mjs
           gate node scripts/check-ui-architecture.mjs
           gate node --test scripts/check-ui-architecture.test.mjs
+          gate node --test scripts/qualify-nanocodex-release.test.mjs
           gate node scripts/check-docs.mjs
           gate node scripts/check-llms.mjs
           gate node scripts/check-smithers-test-script.mjs
@@ -270,7 +302,10 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      # Coverage uses the checked-in fake bridge, never the release artifact.
       - uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v6.0.8
         with:
@@ -285,8 +320,32 @@ jobs:
         with:
           bun-version: 1.3.13
 
-      # Same ripgrep dependency as the `test` job (file-tool search tests).
-      - run: sudo apt-get update && sudo apt-get install -y ripgrep
+      # Coverage runs the packages/agents suite, including real Bubblewrap
+      # containment around checked-in fake payloads.
+      - name: Install coverage dependencies and probe Bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap ripgrep
+          probe_bwrap() {
+            bwrap \
+              --unshare-pid \
+              --die-with-parent \
+              --new-session \
+              --bind / / \
+              --proc /proc \
+              --dev-bind /dev /dev \
+              -- /bin/true
+          }
+          # Ubuntu >= 23.10 ships kernel.apparmor_restrict_unprivileged_userns=1,
+          # which denies the unprivileged user namespace bwrap needs. Relax it
+          # once on the throwaway runner so the containment tests actually run
+          # instead of silently skipping.
+          if ! probe_bwrap; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          fi
+          if ! probe_bwrap; then
+            echo "Bubblewrap namespaces are unavailable on this runner; Nanocodex containment tests will skip."
+          fi
 
       - run: pnpm install --frozen-lockfile
 
@@ -352,6 +411,13 @@ jobs:
         # for every file preserves coverage while bounding each process to one.
         run: |
           bun test packages/db/tests/db-postgres-dialect.test.js
+          bun test packages/smithers/tests/agentCheckpointRestart.pg.test.js
+          bun test packages/smithers/tests/sharedPostgresPool.pg.test.js
+          # Keep the two storage-only regressions in the real-PG lane. The
+          # workflow E2E in this file is already exercised with the engine
+          # PostgreSQL tests below and currently shares their upstream Effect
+          # Workflow.make compatibility blocker; re-enable it in #1466.
+          bun test packages/time-travel/tests/jumpToFrame.postgres.test.ts --test-name-pattern 'bulk checkpoint restoration|claims stale audits'
           bun test apps/cli/tests/*postgres*
           for test_file in \
             packages/smithers/tests/migrateSmithersStore.test.js \

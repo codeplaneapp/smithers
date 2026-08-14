@@ -1,4 +1,4 @@
-import { SmithersError } from "@smithers-orchestrator/errors";
+import { SmithersError } from "@smthrs/errors";
 import { listNarratorCandidates } from "./narrator-agents.js";
 import { aggregateNodeDetailEffect } from "./node-detail.js";
 import { runPromise } from "./smithersRuntime.js";
@@ -74,7 +74,7 @@ function trimText(text, max) {
  * Bounded factual context for a whole run: run row + lifecycle counts +
  * per-node output text from the event log.
  *
- * @param {import("@smithers-orchestrator/db/adapter").SmithersDb} adapter
+ * @param {import("@smthrs/db/adapter").SmithersDb} adapter
  * @param {string} runId
  */
 async function buildRunContext(adapter, runId) {
@@ -152,7 +152,7 @@ async function buildRunContext(adapter, runId) {
  * Bounded factual context for one node: state, attempts, errors, tool usage,
  * agent response, and validated output.
  *
- * @param {import("@smithers-orchestrator/db/adapter").SmithersDb} adapter
+ * @param {import("@smthrs/db/adapter").SmithersDb} adapter
  * @param {string} runId
  * @param {string} nodeId
  * @param {number | undefined} iteration
@@ -232,7 +232,7 @@ async function buildNodeContext(adapter, runId, nodeId, iteration) {
  * `nodeId` is absent, node-scoped otherwise. Throws SmithersError
  * RUN_NOT_FOUND / NODE_NOT_FOUND for a missing target.
  *
- * @param {import("@smithers-orchestrator/db/adapter").SmithersDb} adapter
+ * @param {import("@smthrs/db/adapter").SmithersDb} adapter
  * @param {{ runId: string; nodeId?: string | null; iteration?: number }} params
  * @returns {Promise<{ context: string; facts: WhatHappenedFacts }>}
  */
@@ -307,7 +307,7 @@ export function cleanWhatSummary(text) {
  * throws (RUN_NOT_FOUND / NODE_NOT_FOUND); narrator failures never do.
  *
  * @param {{
- *   adapter: import("@smithers-orchestrator/db/adapter").SmithersDb;
+ *   adapter: import("@smthrs/db/adapter").SmithersDb;
  *   runId: string;
  *   nodeId?: string | null;
  *   iteration?: number;

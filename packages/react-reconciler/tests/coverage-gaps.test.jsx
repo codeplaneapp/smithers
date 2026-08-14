@@ -1,5 +1,5 @@
 /**
- * Closes the remaining own-src coverage gaps for @smithers-orchestrator/react-reconciler:
+ * Closes the remaining own-src coverage gaps for @smthrs/react-reconciler:
  *
  *  - src/context.js            createSmithersContext() + useCtx() (both branches)
  *  - src/devtools/preload.js   side-effect module that installs the RDT hook
@@ -18,7 +18,7 @@ import { SmithersRenderer } from "../src/dom/renderer.js";
 import { __testingHostConfig, __testingInjectedDevToolsConfig } from "../src/reconciler.js";
 import { createSmithersContext, SmithersContext } from "../src/context.js";
 import { SmithersDevTools } from "../src/devtools/SmithersDevTools.js";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 const HOOK_KEY = "__REACT_DEVTOOLS_GLOBAL_HOOK__";
 const HOST_COMPONENT_TAG = 5;

@@ -1,7 +1,7 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { expect, test } from "bun:test";
 import { Effect } from "effect";
-import { Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { Task, Workflow, runWorkflow } from "smthrs";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 

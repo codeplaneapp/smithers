@@ -19,7 +19,7 @@ _via ultracode (Opus multi-agent) review_
 - No DB-side dedup: `packages/db/src/adapter.js:3079` (`listCrons` plain SELECT), `:3090` (`updateCronRunTime` plain UPDATE) — no atomic claim/lock.
 
 ## Failure scenario
-An autostarted daemon owns only a cron schedule (engine not yet imported). The cron comes due. Tick 1 enters `processDueCrons`, passes the skip check, and `await this.startRun(...)` blocks on the cold `import("@smithers-orchestrator/engine")` (can exceed the 1s interval on a cold/contended box). Before `updateCronRunTime` advances `nextRunAtMs`, tick 2 fires `processDueCrons`; the same cron still has `nextRunAtMs <= now`, passes the skip check, and calls `startRun` again with a new `runId`. Result: two runs for one scheduled fire.
+An autostarted daemon owns only a cron schedule (engine not yet imported). The cron comes due. Tick 1 enters `processDueCrons`, passes the skip check, and `await this.startRun(...)` blocks on the cold `import("@smthrs/engine")` (can exceed the 1s interval on a cold/contended box). Before `updateCronRunTime` advances `nextRunAtMs`, tick 2 fires `processDueCrons`; the same cron still has `nextRunAtMs <= now`, passes the skip check, and calls `startRun` again with a new `runId`. Result: two runs for one scheduled fire.
 
 ## Why it matters
 Scheduled workflows execute twice, wasting compute/quota and causing duplicate side effects (duplicate agent work, duplicate external calls). The missing guard mirrors `processDueTimers`' `timerSweepInFlight` and looks like a simple omission.

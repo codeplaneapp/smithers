@@ -1,4 +1,4 @@
-# @smithers-orchestrator/tui
+# @smthrs/tui
 
 Full-screen terminal monitor for a single Smithers run.  Built on
 [OpenTUI](https://github.com/anomalyco/opentui) + React; talks to the

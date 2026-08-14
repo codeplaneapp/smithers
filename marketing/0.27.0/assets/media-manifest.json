@@ -14,11 +14,11 @@
     {
       "tweetIndex": 2,
       "kind": "terminal",
-      "suggestion": "Terminal screenshot of `bunx smithers-orchestrator gateway status` showing the singleton daemon with PID, uptime, and idle spin-down countdown",
+      "suggestion": "Terminal screenshot of `bunx smthrs gateway status` showing the singleton daemon with PID, uptime, and idle spin-down countdown",
       "file": "marketing/0.27.0/assets/tweet-02-terminal.svg",
       "sibling": "assets/tweet-02-terminal.svg",
       "captureRecommended": true,
-      "command": "bunx smithers-orchestrator gateway status"
+      "command": "bunx smthrs gateway status"
     },
     {
       "tweetIndex": 3,
@@ -36,7 +36,7 @@
       "file": "marketing/0.27.0/assets/tweet-04-capability.svg",
       "sibling": "assets/tweet-04-capability.svg",
       "captureRecommended": false,
-      "command": "bunx smithers-orchestrator up --interactive"
+      "command": "bunx smthrs up --interactive"
     },
     {
       "tweetIndex": 5,
@@ -59,27 +59,27 @@
     {
       "tweetIndex": 7,
       "kind": "terminal",
-      "suggestion": "Browser screenshot of the new HTML run report opened via `bunx smithers-orchestrator workflow run --report`",
+      "suggestion": "Browser screenshot of the new HTML run report opened via `bunx smthrs workflow run --report`",
       "file": "marketing/0.27.0/assets/tweet-07-terminal.svg",
       "sibling": "assets/tweet-07-terminal.svg",
       "captureRecommended": true,
-      "command": "bunx smithers-orchestrator workflow run --report"
+      "command": "bunx smthrs workflow run --report"
     },
     {
       "tweetIndex": 8,
       "kind": "terminal",
-      "suggestion": "Terminal recording of `bunx smithers-orchestrator update` upgrading to 0.27.0",
+      "suggestion": "Terminal recording of `bunx smthrs update` upgrading to 0.27.0",
       "file": "marketing/0.27.0/assets/tweet-08-terminal.svg",
       "sibling": "assets/tweet-08-terminal.svg",
       "captureRecommended": true,
-      "command": "bunx smithers-orchestrator update"
+      "command": "bunx smthrs update"
     }
   ],
   "captures": [
     {
       "tweetIndex": 2,
-      "command": "bunx smithers-orchestrator gateway status",
-      "suggestion": "Terminal screenshot of `bunx smithers-orchestrator gateway status` showing the singleton daemon with PID, uptime, and idle spin-down countdown"
+      "command": "bunx smthrs gateway status",
+      "suggestion": "Terminal screenshot of `bunx smthrs gateway status` showing the singleton daemon with PID, uptime, and idle spin-down countdown"
     },
     {
       "tweetIndex": 3,
@@ -98,13 +98,13 @@
     },
     {
       "tweetIndex": 7,
-      "command": "bunx smithers-orchestrator workflow run --report",
-      "suggestion": "Browser screenshot of the new HTML run report opened via `bunx smithers-orchestrator workflow run --report`"
+      "command": "bunx smthrs workflow run --report",
+      "suggestion": "Browser screenshot of the new HTML run report opened via `bunx smthrs workflow run --report`"
     },
     {
       "tweetIndex": 8,
-      "command": "bunx smithers-orchestrator update",
-      "suggestion": "Terminal recording of `bunx smithers-orchestrator update` upgrading to 0.27.0"
+      "command": "bunx smthrs update",
+      "suggestion": "Terminal recording of `bunx smthrs update` upgrading to 0.27.0"
     }
   ]
 }

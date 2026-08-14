@@ -67,7 +67,7 @@ import {
   heartbeatDataSizeBytes,
   heartbeatIntervalMs,
   updateProcessMetrics,
-} from "@smithers-orchestrator/observability/metrics";
+} from "@smthrs/observability/metrics";
 describe("effect/metrics definitions", () => {
   test("all counters can be incremented without error", async () => {
     const counters = [

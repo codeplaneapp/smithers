@@ -4,8 +4,8 @@
 
 import { Effect } from "effect";
 import { HindsightClient, HindsightError, createClient, createConfig, sdk } from "@vectorize-io/hindsight-client";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-import { logWarning } from "@smithers-orchestrator/observability/logging";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
+import { logWarning } from "@smthrs/observability/logging";
 import { namespaceToString } from "./namespaceToString.js";
 import { parseNamespace } from "./parseNamespace.js";
 import { capMemoryRecallResults } from "./capMemoryRecallResults.js";
@@ -184,10 +184,10 @@ export class HindsightMemoryStore {
       new HindsightClient({
         baseUrl: this.baseUrl,
         ...(this.apiKey ? { apiKey: this.apiKey } : {}),
-        userAgent: "smithers-orchestrator/0.28",
+        userAgent: "smthrs/0.28",
       });
     const headers = {
-      "User-Agent": "smithers-orchestrator/0.28",
+      "User-Agent": "smthrs/0.28",
       ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
     };
     this.sdkClient = createClient(createConfig({ baseUrl: this.baseUrl, headers }));

@@ -1,4 +1,4 @@
-# 🧹 react-reconciler: injectIntoDevTools registers stale package name '@smithers-orchestrator/core-react' (version '0.0.0')
+# 🧹 react-reconciler: injectIntoDevTools registers stale package name '@smthrs/core-react' (version '0.0.0')
 
 GitHub: https://github.com/smithersai/smithers/issues/608
 
@@ -8,13 +8,13 @@ GitHub: https://github.com/smithersai/smithers/issues/608
 reconciler.injectIntoDevTools({
     bundleType: ...,
     version: "0.0.0",
-    rendererPackageName: "@smithers-orchestrator/core-react",
+    rendererPackageName: "@smthrs/core-react",
     ...
 });
 ```
 
 **Why it's wrong**
-The package is `@smithers-orchestrator/react-reconciler`; `@smithers-orchestrator/core-react` does not exist anywhere in the repo (repo-wide grep matches only this line). Anyone inspecting the `__REACT_DEVTOOLS_GLOBAL_HOOK__` renderer registry sees a nonexistent package at version 0.0.0.
+The package is `@smthrs/react-reconciler`; `@smthrs/core-react` does not exist anywhere in the repo (repo-wide grep matches only this line). Anyone inspecting the `__REACT_DEVTOOLS_GLOBAL_HOOK__` renderer registry sees a nonexistent package at version 0.0.0.
 
 **Expected behavior**
 Register the real package name, and ideally the real package version.

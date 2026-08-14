@@ -1,6 +1,6 @@
 import React from "react";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { foldMachineState, hashFoldEvents, orderFoldEvents } from "./foldMachine.js";
 import { lintMachine } from "./lintMachine.js";
 import { stableHash } from "./stableHash.js";

@@ -11,11 +11,11 @@
  * review roles are separate gates, and low-confidence claims route to a human
  * approval before the final package is assembled.
  */
-import { Sequence, Parallel } from "smithers-orchestrator";
+import { Sequence, Parallel } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, write, bash, grep } from "smithers-orchestrator/tools";
+import { read, write, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import ParsePrompt from "./prompts/rfp-response-room/parse.mdx";
 import PlanPrompt from "./prompts/rfp-response-room/plan.mdx";

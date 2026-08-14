@@ -78,7 +78,7 @@ The payoff: workflows an agent can refactor, extend, or debug without supervisio
 Smithers is that layer: underneath the JSX surface is an Effect.ts runtime, and users who already think in `Effect.gen` can use the lower-level [Effect API](/effect/overview) for full access to the substrate. The same review workflow:
 
 ```ts
-import { Smithers } from "smithers-orchestrator";
+import { Smithers } from "smthrs";
 import { Effect, Schema } from "effect";
 
 const G = Smithers.workflow({
@@ -227,7 +227,7 @@ You can build this with a queue and a database, but you'll be reinventing 60% of
 </Workflow>
 ```
 
-The `<Approval>` durably suspends the workflow; a reviewer answers tomorrow morning via CLI, web UI, or HTTP. The supervisor (`bunx smithers-orchestrator supervise`) watches for stale heartbeats and resumes runs that died, none of it application code you write.
+The `<Approval>` durably suspends the workflow; a reviewer answers tomorrow morning via CLI, web UI, or HTTP. The supervisor (`bunx smthrs supervise`) watches for stale heartbeats and resumes runs that died, none of it application code you write.
 
 ---
 

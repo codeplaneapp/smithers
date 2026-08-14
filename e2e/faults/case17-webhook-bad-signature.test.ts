@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import React from "react";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { Gateway, type SmithersWorkflow } from "@smithers-orchestrator/server/gateway";
+import { createSmithers } from "smthrs";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { Gateway, type SmithersWorkflow } from "@smthrs/server/gateway";
 
 const WORKFLOW_KEY = "case17-webhook";
 const SECRET = "shared-secret-correct";

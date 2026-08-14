@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { listGatewayRpcMethods } from "@smithers-orchestrator/gateway/rpc";
-import type { GatewayRpcMethod } from "@smithers-orchestrator/gateway-client/rpc";
-import type { GatewayAsyncState } from "@smithers-orchestrator/gateway-react/GatewayAsyncState";
+import { listGatewayRpcMethods } from "@smthrs/gateway/rpc";
+import type { GatewayRpcMethod } from "@smthrs/gateway-client/rpc";
+import type { GatewayAsyncState } from "@smthrs/gateway-react/GatewayAsyncState";
 import type {
   GatewayComparisonScoreRow as ProtocolGatewayComparisonScoreRow,
   GatewayDocKind as ProtocolGatewayDocKind,
@@ -16,7 +16,7 @@ import type {
   ListScoresForRunsResponse,
   ListScoresResponse,
   ListTicketsResponse,
-} from "@smithers-orchestrator/protocol/gateway-rpc";
+} from "@smthrs/protocol/gateway-rpc";
 import {
   GATEWAY_EVENT_BACKPRESSURE_CODE,
   GatewayRpcError,
@@ -33,7 +33,7 @@ import type {
   GatewayTicketRow,
   UsageReport,
 } from "../src/index.ts";
-import type { UsageReport as CanonicalUsageReport } from "@smithers-orchestrator/usage";
+import type { UsageReport as CanonicalUsageReport } from "@smthrs/usage";
 import type { GatewayRpcRequestMap, GatewayRpcResponseMap } from "../src/GatewayRpcTypeMap.ts";
 
 type Equal<Left, Right> =
@@ -198,7 +198,7 @@ async function waitForSent(ws: FakeWebSocket, count: number) {
 
 describe("SmithersGatewayClient HTTP RPC", () => {
   test("keeps the gateway-react legacy subpath facade without a direct gateway dependency", async () => {
-    const legacySubpath = await import("@smithers-orchestrator/gateway-react/useGatewayActions");
+    const legacySubpath = await import("@smthrs/gateway-react/useGatewayActions");
     const manifest = (await Bun.file(new URL("../../gateway-react/package.json", import.meta.url)).json()) as {
       exports?: Record<string, unknown>;
       dependencies?: Record<string, string>;
@@ -210,7 +210,7 @@ describe("SmithersGatewayClient HTTP RPC", () => {
       import: "./src/*.ts",
       default: "./src/*.ts",
     });
-    expect(manifest.dependencies?.["@smithers-orchestrator/gateway"]).toBeUndefined();
+    expect(manifest.dependencies?.["@smthrs/gateway"]).toBeUndefined();
   });
 
   test("typed RPC maps cover every stable gateway method", () => {

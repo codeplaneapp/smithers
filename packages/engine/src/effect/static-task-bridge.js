@@ -1,20 +1,21 @@
 import { Effect, Metric } from "effect";
-import { buildOutputRow, stripAutoColumns, validateOutput } from "@smithers-orchestrator/db/output";
+import { buildOutputRow, stripAutoColumns, validateOutput } from "@smthrs/db/output";
 import { makeAbortError, wireAbortSignal } from "./bridge-utils.js";
-import { logDebug, logError, logInfo } from "@smithers-orchestrator/observability/logging";
-import { attemptDuration, nodeDuration } from "@smithers-orchestrator/observability/metrics";
-import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
-import { getJjPointer } from "@smithers-orchestrator/vcs/jj";
+import { logDebug, logError, logInfo } from "@smthrs/observability/logging";
+import { attemptDuration, nodeDuration } from "@smthrs/observability/metrics";
+import { errorToJson } from "@smthrs/errors/errorToJson";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { nowMs } from "@smthrs/scheduler/nowMs";
+import { getJjPointer } from "@smthrs/vcs/jj";
 import { buildOutputValidationDiagnostics } from "../output-validation-diagnostics.js";
 import { getPlatformLayer } from "../platform-layer.js";
 import { isThenablePayload, makeThenablePayloadError } from "../thenable-payload.js";
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} _SmithersDb */
+import { stampDurableRetryState } from "./retry-state.js";
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} _SmithersDb */
 /**
  * @typedef {{ rootDir: string; }} StaticTaskBridgeToolConfig
  */
-/** @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
+/** @typedef {import("@smthrs/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
 
 /**
  * @param {unknown} err
@@ -327,6 +328,14 @@ export const executeStaticTaskBridge = async (adapter, runId, desc, eventBus, to
       "engine:task",
     );
     const failedAtMs = nowMs();
+    const failureErrorJson = errorToJson(effectiveError);
+    stampDurableRetryState({
+      attemptMeta,
+      attempts,
+      descriptor: desc,
+      error: failureErrorJson,
+      failedAtMs,
+    });
     const failureClaimed = await adapter.withTransaction(
       "task-fail",
       Effect.gen(function* () {
@@ -338,7 +347,7 @@ export const executeStaticTaskBridge = async (adapter, runId, desc, eventBus, to
           executionOwnerId,
           "failed",
           failedAtMs,
-          JSON.stringify(errorToJson(effectiveError)),
+          JSON.stringify(failureErrorJson),
         );
         if (!claimed) return false;
         yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {

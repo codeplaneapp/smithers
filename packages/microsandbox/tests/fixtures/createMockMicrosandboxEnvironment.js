@@ -28,7 +28,7 @@ const RESULT_ENV = "SMITHERS_SANDBOX_RESULT_PATH";
  *   request: Record<string, unknown>;
  *   files: Map<string, string | Uint8Array>;
  *   env: Record<string, string>;
- * }) => import("@smithers-orchestrator/sandbox").SandboxProviderResult | Promise<import("@smithers-orchestrator/sandbox").SandboxProviderResult>} handler
+ * }) => import("@smthrs/sandbox").SandboxProviderResult | Promise<import("@smthrs/sandbox").SandboxProviderResult>} handler
  * @param {MicrosandboxMockFaults} [faults]
  * @returns {import("../../src/MicrosandboxSandboxProviderOptions.ts").MicrosandboxSdkLike & {
  *   sandboxes: Map<string, any>;

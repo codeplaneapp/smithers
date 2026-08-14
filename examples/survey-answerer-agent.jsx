@@ -4,11 +4,11 @@
  *
  * Shape: context gatherer → answer generator → validator.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import GatherContextPrompt from "./prompts/survey-answerer-agent/gather-context.mdx";
 import GenerateAnswersPrompt from "./prompts/survey-answerer-agent/generate-answers.mdx";

@@ -1,7 +1,7 @@
 /**
  * The shared run/feature status vocabulary. This is the single source of truth
  * consumed by StatusPill here and re-exported by
- * `@smithers-orchestrator/gateway-ui` (which previously owned copies of these
+ * `@smthrs/gateway-ui` (which previously owned copies of these
  * helpers; consumer repos duplicated them again on top).
  */
 import { tokens } from "./tokens";

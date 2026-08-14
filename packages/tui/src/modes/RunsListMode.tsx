@@ -1,3 +1,4 @@
+/** @jsxImportSource @opentui/react */
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import {
@@ -7,8 +8,8 @@ import {
   runStatusToNode,
   type RunSummary,
   type RunStatusFilter,
-} from "@smithers-orchestrator/ui-core";
-import { sanitizeTerminalText, StatusGlyph } from "@smithers-orchestrator/tui-ui";
+} from "@smthrs/ui-core";
+import { sanitizeTerminalText, StatusGlyph } from "@smthrs/tui-ui";
 import { isModifiedKeyEvent } from "./treeUtils.ts";
 import { useOverlayOpen } from "../OverlayContext.tsx";
 

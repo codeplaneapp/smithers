@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { withSqliteWriteRetryEffect, isRetryableSqliteWriteError } from "../src/write-retry.js";
 import { Effect } from "effect";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

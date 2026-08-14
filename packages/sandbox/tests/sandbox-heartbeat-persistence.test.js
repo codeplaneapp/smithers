@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync } from "node:fs";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { withTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { withTaskRuntime } from "@smthrs/driver/task-runtime";
 import { executeSandbox } from "../src/execute.js";
 
 const RUN_ID = "sandbox-heartbeat-persistence-run";
@@ -22,7 +22,7 @@ describe("sandbox heartbeat persistence", () => {
     const db = drizzle(sqlite);
     ensureSmithersTables(db);
     const adapter = new SmithersDb(db);
-    const rootDir = mkdtempSync(join(tmpdir(), "smithers-sandbox-heartbeat-"));
+    const rootDir = makeTempDirPath("smithers-sandbox-heartbeat-");
     let shippedHeartbeatAtMs;
     let persistedHeartbeatAtMs;
 

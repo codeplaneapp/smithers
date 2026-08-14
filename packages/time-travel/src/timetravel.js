@@ -1,7 +1,7 @@
 import { Effect } from "effect";
-import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
-import { parseSubflowChildRunId } from "@smithers-orchestrator/graph/subflow-run-lineage";
-import { revertToJjPointer } from "@smithers-orchestrator/vcs/jj";
+import { nowMs } from "@smthrs/scheduler/nowMs";
+import { parseSubflowChildRunId } from "@smthrs/graph/subflow-run-lineage";
+import { revertToJjPointer } from "@smthrs/vcs/jj";
 import { markResetCancelledMeta } from "./resetCancelMarker.js";
 import * as BunContext from "@effect/platform-bun/BunServices";
 import { acquireRewindLock, resolveRewindLeaseRunId } from "./acquireRewindLock.js";
@@ -11,11 +11,11 @@ import { guardEffectBoundary } from "./guardEffectBoundary.js";
 import { archiveDiscardedEffects } from "./archiveDiscardedEffects.js";
 import { isRunLikelyLive } from "./isRunLikelyLive.js";
 import { markRunNeedsAttention } from "./markRunNeedsAttention.js";
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./TimeTravelOptions.ts").TimeTravelOptions} TimeTravelOptions */
 /** @typedef {import("./TimeTravelResult.ts").TimeTravelResult} TimeTravelResult */
-/** @typedef {import("@smithers-orchestrator/db").AttemptRow} AttemptRow */
-/** @typedef {import("@smithers-orchestrator/db").NodeRow} NodeRow */
+/** @typedef {import("@smthrs/db").AttemptRow} AttemptRow */
+/** @typedef {import("@smthrs/db").NodeRow} NodeRow */
 
 function formatError(error) {
   if (error instanceof Error) {
@@ -446,7 +446,7 @@ export async function timeTravel(adapter, opts) {
                 if (attempt.state === "cancelled") continue;
                 const patch = {
                   state: "cancelled",
-                  metaJson: markResetCancelledMeta(attempt.metaJson),
+                  metaJson: markResetCancelledMeta(attempt.metaJson, childResetAtMs),
                 };
                 if (attempt.finishedAtMs == null) patch.finishedAtMs = childResetAtMs;
                 yield* adapter.updateAttempt(plan.runId, childNode.nodeId, childIteration, attempt.attempt, patch);
@@ -472,6 +472,7 @@ export async function timeTravel(adapter, opts) {
               errorJson: null,
             });
           }
+          const targetResetAtMs = nowMs();
           for (const resetNode of resetNodes) {
             const attemptsForNode = attemptsByNode.get(nodeKey(resetNode.nodeId, resetNode.iteration ?? 0)) ?? [];
             for (const attempt of attemptsForNode) {
@@ -480,10 +481,10 @@ export async function timeTravel(adapter, opts) {
               }
               const patch = {
                 state: "cancelled",
-                metaJson: markResetCancelledMeta(attempt.metaJson),
+                metaJson: markResetCancelledMeta(attempt.metaJson, targetResetAtMs),
               };
               if (attempt.finishedAtMs == null) {
-                patch.finishedAtMs = nowMs();
+                patch.finishedAtMs = targetResetAtMs;
               }
               yield* adapter.updateAttempt(runId, resetNode.nodeId, resetNode.iteration ?? 0, attempt.attempt, patch);
             }

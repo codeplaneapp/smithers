@@ -5,7 +5,7 @@ description: Process items through ordered columns with a pluggable ticket sourc
 
 ```ts
 // Props
-import { Kanban } from "smithers-orchestrator";
+import { Kanban } from "smthrs";
 
 type ColumnDef = {
   name: string;
@@ -29,11 +29,11 @@ type KanbanProps = {
 };
 ```
 
-Complete runnable example (renders with `bunx smithers-orchestrator graph`):
+Complete runnable example (renders with `bunx smthrs graph`):
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Kanban, ClaudeCodeAgent } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, Kanban, ClaudeCodeAgent } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, smithers, outputs } = createSmithers({
@@ -262,7 +262,7 @@ export const Task = createTaskComponent({ applyCliToolAllowlist });
 ```
 
 ```ts ColumnDef.ts
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
 import type { TaskProps } from "./TaskProps.ts";
 import type { OutputTarget } from "./OutputTarget.ts";
 
@@ -285,7 +285,7 @@ export type ColumnDef = {
 
 ```ts KanbanProps.ts
 import type React from "react";
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
 import type { ColumnDef } from "./ColumnDef.ts";
 import type { OutputTarget } from "./OutputTarget.ts";
 

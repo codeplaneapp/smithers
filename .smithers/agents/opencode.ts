@@ -1,4 +1,4 @@
-import { OpenCodeAgent as SmithersOpenCodeAgent } from "smithers-orchestrator";
+import { OpenCodeAgent as SmithersOpenCodeAgent } from "smthrs";
 
 // Built-in OpenCode CLI agent (cliEngine: "opencode").
 // Tweak `model` or uncomment extra options below to match your setup.

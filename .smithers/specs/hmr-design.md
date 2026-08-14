@@ -192,8 +192,8 @@ components/workflow.tsx          ← the root workflow component
   ├── ./focuses.ts               ← list of work categories
   ├── ./focusDirs.ts             ← directory mappings
   ├── ./focusTestSuites.ts       ← test suite mappings
-  ├── @smithers-orchestrator/super-ralph  ← smithers package (stable, not user code)
-  └── smithers-orchestrator      ← smithers core (stable, not user code)
+  ├── @smthrs/super-ralph  ← smithers package (stable, not user code)
+  └── smthrs      ← smithers core (stable, not user code)
 ```
 
 The user frequently wants to change:
@@ -274,7 +274,7 @@ Bun supports this same `import.meta.hot` API in `Bun.serve()` with `development:
    - A way to read prompt files that are automatically watched? e.g., `useFile("./prompts/planning.md")`
    - Or is just re-importing the module enough?
 
-8. **Scope of watched files**: The workflow imports smithers-orchestrator and super-ralph packages. These are **library code** and should NOT be watched (just like Vite doesn't watch `node_modules/`). Only the user's workflow files should be watched. How do we distinguish?
+8. **Scope of watched files**: The workflow imports smthrs and super-ralph packages. These are **library code** and should NOT be watched (just like Vite doesn't watch `node_modules/`). Only the user's workflow files should be watched. How do we distinguish?
 
 9. **Error handling**: What happens if the user saves a file with a syntax error?
    - The old workflow should keep running

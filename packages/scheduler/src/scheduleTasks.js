@@ -7,7 +7,7 @@ import { parseStateKey } from "./parseStateKey.js";
 /** @typedef {import("./RalphStateMap.ts").RalphStateMap} RalphStateMap */
 /** @typedef {import("./RetryWaitMap.ts").RetryWaitMap} RetryWaitMap */
 /** @typedef {import("./ScheduleResult.ts").ScheduleResult} ScheduleResult */
-/** @typedef {import("@smithers-orchestrator/graph").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("@smthrs/graph").TaskDescriptor} TaskDescriptor */
 /** @typedef {import("./TaskStateMap.ts").TaskStateMap} TaskStateMap */
 
 /**

@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/benchmark-fleet",
+  "name": "@smthrs/benchmark-fleet",
   "version": "0.0.0",
   "private": true,
   "type": "module",

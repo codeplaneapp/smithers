@@ -1,7 +1,18 @@
 import { closeSync, existsSync, fstatSync, openSync, readFileSync, readSync } from "node:fs";
 
 export const DETACHED_ADMISSION_NONCE_ENV = "SMITHERS_DETACHED_ADMISSION_NONCE";
-export const DETACHED_ADMISSION_TIMEOUT_MS = 30_000;
+export const DETACHED_ADMISSION_TIMEOUT_ENV = "SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS";
+
+function resolveDefaultAdmissionTimeoutMs() {
+  const raw = process.env[DETACHED_ADMISSION_TIMEOUT_ENV];
+  if (raw !== undefined && raw !== "") {
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isFinite(parsed) && parsed >= 1000) return parsed;
+  }
+  return 30_000;
+}
+
+export const DETACHED_ADMISSION_TIMEOUT_MS = resolveDefaultAdmissionTimeoutMs();
 
 const LOG_TAIL_BYTES = 32 * 1024;
 const POLL_INTERVAL_MS = 50;

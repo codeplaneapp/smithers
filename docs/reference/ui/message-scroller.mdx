@@ -9,7 +9,7 @@ reader scrolls away, and exposes a jump button without coupling the UI to a
 Gateway or streaming client.
 
 ```tsx
-import { MessageScroller } from "smithers-orchestrator/ui";
+import { MessageScroller } from "smthrs/ui";
 
 <MessageScroller streaming={pending} firstItemKey={messages[0]?.id}>
   {messages.map((message) => <article key={message.id}>{message.text}</article>)}
@@ -48,7 +48,7 @@ import {
   MessageScrollerContent,
   MessageScrollerItem,
   MessageScrollerButton,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 
 <MessageScrollerProvider scrollAnchor="bottom" streaming={pending}>
   <MessageScrollerViewport fade>

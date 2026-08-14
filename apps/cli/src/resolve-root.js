@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { findSmithersAnchorDir } from "smithers-orchestrator/findSmithersAnchorDir";
+import { findSmithersAnchorDir } from "smthrs/findSmithersAnchorDir";
 
 /**
  * Resolve the effective tool sandbox root for a local workflow launch.

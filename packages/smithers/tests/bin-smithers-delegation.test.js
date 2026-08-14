@@ -22,22 +22,19 @@ function makeTmp() {
 }
 
 /**
- * Scaffold a minimal local smithers-orchestrator install under `root`:
- *   root/node_modules/smithers-orchestrator/package.json  { bin: { smithers: "bin/smithers.js" } }
- *   root/node_modules/smithers-orchestrator/bin/smithers.js
+ * Scaffold a minimal local smthrs install under `root`:
+ *   root/node_modules/smthrs/package.json  { bin: { smithers: "bin/smithers.js" } }
+ *   root/node_modules/smthrs/bin/smithers.js
  *
  * @param {string} root
  * @returns {string} absolute path to the bin file
  */
 function scaffoldLocalInstall(root) {
-  const pkgDir = join(root, "node_modules", "smithers-orchestrator");
+  const pkgDir = join(root, "node_modules", "smthrs");
   const binDir = join(pkgDir, "bin");
   mkdirSync(binDir, { recursive: true });
   const binFile = join(binDir, "smithers.js");
-  writeFileSync(
-    join(pkgDir, "package.json"),
-    JSON.stringify({ name: "smithers-orchestrator", bin: { smithers: "bin/smithers.js" } }),
-  );
+  writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ name: "smthrs", bin: { smithers: "bin/smithers.js" } }));
   writeFileSync(binFile, "#!/usr/bin/env bun\nconsole.log('local smithers');");
   return binFile;
 }
@@ -112,20 +109,20 @@ describe("getExplicitWorkflowPath", () => {
 });
 
 describe("resolveLocalSmithersBinJs", () => {
-  test("returns null when node_modules/smithers-orchestrator does not exist", () => {
+  test("returns null when node_modules/smthrs does not exist", () => {
     const tmp = makeTmp();
     expect(resolveLocalSmithersBinJs(tmp)).toBeNull();
   });
 
   test("returns null when package.json is missing", () => {
     const tmp = makeTmp();
-    mkdirSync(join(tmp, "node_modules", "smithers-orchestrator"), { recursive: true });
+    mkdirSync(join(tmp, "node_modules", "smthrs"), { recursive: true });
     expect(resolveLocalSmithersBinJs(tmp)).toBeNull();
   });
 
   test("returns null when package.json is malformed JSON", () => {
     const tmp = makeTmp();
-    const pkgDir = join(tmp, "node_modules", "smithers-orchestrator");
+    const pkgDir = join(tmp, "node_modules", "smthrs");
     mkdirSync(pkgDir, { recursive: true });
     writeFileSync(join(pkgDir, "package.json"), "not json {{{");
     expect(resolveLocalSmithersBinJs(tmp)).toBeNull();
@@ -133,15 +130,15 @@ describe("resolveLocalSmithersBinJs", () => {
 
   test("returns null when bin field is missing", () => {
     const tmp = makeTmp();
-    const pkgDir = join(tmp, "node_modules", "smithers-orchestrator");
+    const pkgDir = join(tmp, "node_modules", "smthrs");
     mkdirSync(pkgDir, { recursive: true });
-    writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ name: "smithers-orchestrator" }));
+    writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ name: "smthrs" }));
     expect(resolveLocalSmithersBinJs(tmp)).toBeNull();
   });
 
   test("returns null when bin file does not exist on disk", () => {
     const tmp = makeTmp();
-    const pkgDir = join(tmp, "node_modules", "smithers-orchestrator");
+    const pkgDir = join(tmp, "node_modules", "smthrs");
     mkdirSync(pkgDir, { recursive: true });
     writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ bin: { smithers: "bin/missing.js" } }));
     expect(resolveLocalSmithersBinJs(tmp)).toBeNull();
@@ -155,7 +152,7 @@ describe("resolveLocalSmithersBinJs", () => {
 
   test("resolves bin from { bin: '...' } string form", () => {
     const tmp = makeTmp();
-    const pkgDir = join(tmp, "node_modules", "smithers-orchestrator");
+    const pkgDir = join(tmp, "node_modules", "smthrs");
     const binDir = join(pkgDir, "bin");
     mkdirSync(binDir, { recursive: true });
     const binFile = join(binDir, "smithers.js");

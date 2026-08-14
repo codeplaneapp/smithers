@@ -7,7 +7,7 @@ import { Sequence } from "./Sequence.js";
 import { Parallel } from "./Parallel.js";
 import { Task } from "./Task.js";
 import { useOptionalSmithersContext } from "./useOptionalSmithersContext.js";
-/** @typedef {import("@smithers-orchestrator/agents/AgentLike").AgentLike} AgentLike */
+/** @typedef {import("@smthrs/agents/AgentLike").AgentLike} AgentLike */
 /** @typedef {import("./PanelistConfig.ts").PanelistConfig} PanelistConfig */
 
 /**

@@ -1,18 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
 import { Effect } from "effect";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-import { trackEvent } from "@smithers-orchestrator/observability/metrics";
-import { isPidAlive, parseRuntimeOwnerPid } from "@smithers-orchestrator/engine/runtime-owner";
-import * as engineModule from "@smithers-orchestrator/engine/engine";
-import { SmithersError } from "@smithers-orchestrator/errors";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
+import { trackEvent } from "@smthrs/observability/metrics";
+import { isPidAlive, parseRuntimeOwnerPid } from "@smthrs/engine/runtime-owner";
+import * as engineModule from "@smthrs/engine/engine";
+import { SmithersError } from "@smthrs/errors";
 import { isTerminalClaudeMirrorRunStatus } from "./claude-mirror/isTerminalClaudeMirrorRunStatus.js";
 import { findAndOpenDb } from "./find-db.js";
 import { resumeRunDetached, resumeRunDetachedLogFile } from "./resume-detached.js";
 import { buildBuiltinRelaunch, describeResumeTarget, resolveResumeTarget } from "./resume-target.js";
 /** @typedef {import("./RunAutoResumeSkipReason.ts").RunAutoResumeSkipReason} RunAutoResumeSkipReason */
 /** @typedef {import("./ResumeTarget.ts").ResumeTarget} ResumeTarget */
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./SupervisorOptions.ts").SupervisorOptions} SupervisorOptions */
 /** @typedef {import("./SupervisorPollSummary.ts").SupervisorPollSummary} SupervisorPollSummary */
 
@@ -127,7 +127,7 @@ export function parseDurationMs(raw, fieldName) {
   }
   return ms;
 }
-export { isPidAlive, parseRuntimeOwnerPid } from "@smithers-orchestrator/engine/runtime-owner";
+export { isPidAlive, parseRuntimeOwnerPid } from "@smthrs/engine/runtime-owner";
 /**
  * @param {SupervisorOptions} options
  * @returns {NormalizedSupervisorOptions}
@@ -142,7 +142,7 @@ function normalizeSupervisorOptions(options) {
     runsDueForQuotaResume: (adapter, nowMs) => {
       const helper = /** @type {any} */ (engineModule).runsDueForQuotaResume;
       if (typeof helper !== "function") {
-        return Promise.reject(new Error("@smithers-orchestrator/engine does not export runsDueForQuotaResume"));
+        return Promise.reject(new Error("@smthrs/engine does not export runsDueForQuotaResume"));
       }
       return helper(adapter, nowMs);
     },
@@ -206,10 +206,20 @@ function parseTimerFiresAtMs(metaJson) {
   }
 }
 /**
- * Returns true if the given waiting-event run has at least one approval record
- * with a recorded decision (status "approved" or "denied"). This catches the
- * case where an approval was decided while the run was detached and no engine
- * process is alive to resume it.
+ * Returns true if the given parked run has at least one approval gate that was
+ * decided (status "approved" or "denied") while detached AND whose decision the
+ * engine has not yet consumed — i.e. the gate node is still `pending` (approved,
+ * re-armed to run) or `failed` (denied via onDeny:'fail'). This is exactly the
+ * set that needs a fresh engine booted: an approved gate to run its task, a
+ * denied gate so the denial actually propagates.
+ *
+ * Uses listResumableDecidedApprovals (node state IN pending, failed), NOT
+ * listDecidedApprovals (pending only): a real denyNode leaves the gate node in
+ * state "failed", which the pending-only query drops — so a genuinely-denied
+ * detached run would otherwise be seen as having no decided approval and never
+ * resume. Consumed gates (finished/skipped nodes) are still excluded so a run
+ * whose only decision was long since executed is not re-resumed on every stale
+ * park.
  *
  * @param {NormalizedSupervisorOptions} options
  * @param {string} runId
@@ -218,7 +228,7 @@ function parseTimerFiresAtMs(metaJson) {
 function runHasDecidedApprovalEffect(options, runId) {
   return Effect.gen(function* () {
     const approvals = yield* options.adapter
-      .listDecidedApprovalsEffect(runId)
+      .listResumableDecidedApprovalsEffect(runId)
       .pipe(
         Effect.catch((error) =>
           Effect.logWarning(
@@ -227,6 +237,56 @@ function runHasDecidedApprovalEffect(options, runId) {
         ),
       );
     return approvals.length > 0;
+  });
+}
+/**
+ * Load stale parked runs whose approval decision is still actionable.
+ *
+ * Workspace-wide polling delegates the complete predicate to the database so
+ * filtering happens before the 500-row safety limit. Scoped supervisors read
+ * their explicitly-bound run ids directly; otherwise unrelated rows could
+ * still crowd a requested run out of that global page.
+ *
+ * @param {NormalizedSupervisorOptions} options
+ * @param {"waiting-event" | "waiting-approval"} status
+ * @param {number} staleBeforeMs
+ * @returns {Effect.Effect<any[], never>}
+ */
+function listResumableApprovalRunsEffect(options, status, staleBeforeMs) {
+  if (options.runIds === null) {
+    return options.adapter
+      .listResumableApprovalRunsEffect(status, staleBeforeMs, 500)
+      .pipe(
+        Effect.catch((error) =>
+          Effect.logWarning(
+            `[supervisor] ${status} approval query failed: ${error instanceof Error ? error.message : String(error)}`,
+          ).pipe(Effect.as([])),
+        ),
+      );
+  }
+  return Effect.gen(function* () {
+    const runs = yield* Effect.all(
+      [...options.runIds].map((runId) =>
+        options.adapter
+          .getRunEffect(runId)
+          .pipe(
+            Effect.catch((error) =>
+              Effect.logWarning(
+                `[supervisor] failed to load scoped run ${runId}: ${error instanceof Error ? error.message : String(error)}`,
+              ).pipe(Effect.as(undefined)),
+            ),
+          ),
+      ),
+      { concurrency: options.maxConcurrent },
+    );
+    const candidates = runs.filter(
+      (run) => run?.status === status && (run.heartbeatAtMs == null || run.heartbeatAtMs < staleBeforeMs),
+    );
+    const decided = yield* Effect.all(
+      candidates.map((run) => runHasDecidedApprovalEffect(options, run.runId)),
+      { concurrency: options.maxConcurrent },
+    );
+    return candidates.filter((_run, index) => decided[index]);
   });
 }
 /**
@@ -692,9 +752,12 @@ function processTimerCandidateEffect(options, run, staleBeforeMs) {
  * @param {NormalizedSupervisorOptions} options
  * @param {any} run
  * @param {number} staleBeforeMs
+ * @param {"waiting-event" | "waiting-approval"} [expectedStatus] the run's
+ *   persisted status to claim against: `waiting-event` for a run parked on a
+ *   companion event wait, `waiting-approval` for a run parked purely on the gate.
  * @returns {Effect.Effect<"resumed" | "would-resume" | "skipped", never>}
  */
-function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
+function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs, expectedStatus = "waiting-event") {
   const runAnnotations = {
     runId: run.runId,
     status: run.status ?? null,
@@ -727,7 +790,7 @@ function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
           return "skipped";
         }
         return yield* giveUpOnFailedResumesEffect(options, run, staleBeforeMs, priorResumeAttempts, target, {
-          expectedStatus: "waiting-event",
+          expectedStatus,
           requireStale: true,
         });
       }
@@ -741,7 +804,7 @@ function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
       const claimed = yield* options.adapter
         .claimRunForResumeEffect({
           runId: run.runId,
-          expectedStatus: "waiting-event",
+          expectedStatus,
           expectedRuntimeOwnerId: run.runtimeOwnerId ?? null,
           expectedHeartbeatAtMs: run.heartbeatAtMs ?? null,
           staleBeforeMs,
@@ -993,25 +1056,13 @@ function pollEffect(options) {
       );
       const timerResumedCount = timerResults.filter((result) => result === "resumed").length;
       // --- approval-decided runs ---
-      // waiting-event runs whose approval was recorded while detached: the node
-      // is already "pending" in the DB but no engine is running to execute it.
-      const waitingEventRuns = (yield* options.adapter
-        .listRunsEffect(500, "waiting-event")
-        .pipe(
-          Effect.catch((error) =>
-            Effect.logWarning(
-              `[supervisor] waiting-event query failed: ${error instanceof Error ? error.message : String(error)}`,
-            ).pipe(Effect.as([])),
-          ),
-        )).filter(inScope);
-      const claimableEventRuns = waitingEventRuns.filter(
-        (run) => run.heartbeatAtMs == null || run.heartbeatAtMs < staleBeforeMs,
-      );
-      const approvalDecidedChecks = yield* Effect.all(
-        claimableEventRuns.map((run) => runHasDecidedApprovalEffect(options, run.runId)),
-        { concurrency: options.maxConcurrent },
-      );
-      const approvalDecidedRuns = claimableEventRuns.filter((_run, index) => approvalDecidedChecks[index]);
+      // A gate decided while detached moves the run to `waiting-event` (engine
+      // nextRunStatusForApproval: 0 remaining pending -> waiting-event) with the
+      // gate node re-armed to `pending` on approve or `failed` on deny. Either
+      // way no engine is alive to consume the decision; resume so the approved
+      // task runs / the denial propagates. runHasDecidedApprovalEffect matches
+      // both the pending (approved) and failed (denied) node states.
+      const approvalDecidedRuns = yield* listResumableApprovalRunsEffect(options, "waiting-event", staleBeforeMs);
       const approvalSlots = Math.max(0, options.maxConcurrent - staleResumedCount - timerResumedCount);
       const approvalResumable = approvalDecidedRuns.slice(0, approvalSlots);
       const approvalRateLimited = approvalDecidedRuns.slice(approvalSlots);
@@ -1023,6 +1074,33 @@ function pollEffect(options) {
         { concurrency: options.maxConcurrent },
       );
       const approvalResumedCount = approvalResults.filter((result) => result === "resumed").length;
+      // --- gate-decided runs (still parked on an approval gate) ---
+      // A run persists as `waiting-approval` while any approval is still pending
+      // (engine markRunWaiting('waiting-approval','approval')), a status the
+      // waiting-event scan above never sees. When one gate was decided
+      // (approved/denied) while detached but the run stayed waiting-approval and
+      // no engine is alive to act on it, resume it — mirrors the waiting-event
+      // branch but claims against the waiting-approval status. An UNDECIDED gate
+      // (all approvals still "requested") is filtered out by
+      // runHasDecidedApprovalEffect, so a run waiting purely on a human is never
+      // force-resumed.
+      const gateDecidedRuns = yield* listResumableApprovalRunsEffect(options, "waiting-approval", staleBeforeMs);
+      const gateSlots = Math.max(
+        0,
+        options.maxConcurrent - staleResumedCount - timerResumedCount - approvalResumedCount,
+      );
+      const gateResumable = gateDecidedRuns.slice(0, gateSlots);
+      const gateRateLimited = gateDecidedRuns.slice(gateSlots);
+      for (const run of gateRateLimited) {
+        yield* emitSkipEventEffect(options, run.runId, "rate-limited");
+      }
+      const gateResults = yield* Effect.all(
+        gateResumable.map((run) =>
+          processApprovalDecidedCandidateEffect(options, run, staleBeforeMs, "waiting-approval"),
+        ),
+        { concurrency: options.maxConcurrent },
+      );
+      const gateResumedCount = gateResults.filter((result) => result === "resumed").length;
       const dueQuotaRuns = (yield* Effect.tryPromise({
         try: () => options.deps.runsDueForQuotaResume(options.adapter, pollStartedAtMs),
         catch: (cause) => toSmithersError(cause, "find quota runs due for resume"),
@@ -1033,7 +1111,7 @@ function pollEffect(options) {
       )).filter(inScope);
       const quotaSlots = Math.max(
         0,
-        options.maxConcurrent - staleResumedCount - timerResumedCount - approvalResumedCount,
+        options.maxConcurrent - staleResumedCount - timerResumedCount - approvalResumedCount - gateResumedCount,
       );
       const quotaResumable = dueQuotaRuns.slice(0, quotaSlots);
       const quotaRateLimited = dueQuotaRuns.slice(quotaSlots);
@@ -1048,6 +1126,7 @@ function pollEffect(options) {
         staleResumedCount +
         timerResumedCount +
         approvalResumedCount +
+        gateResumedCount +
         quotaResults.filter((result) => result === "resumed").length;
       const skippedCount =
         staleSkippedCount +
@@ -1055,12 +1134,15 @@ function pollEffect(options) {
         timerResults.filter((result) => result !== "resumed").length +
         approvalRateLimited.length +
         approvalResults.filter((result) => result !== "resumed").length +
+        gateRateLimited.length +
+        gateResults.filter((result) => result !== "resumed").length +
         quotaRateLimited.length +
         quotaResults.filter((result) => result !== "resumed").length;
       const wouldResumeRunIds = [
         ...resumable.filter((_run, index) => results[index] === "would-resume"),
         ...timerResumable.filter((_run, index) => timerResults[index] === "would-resume"),
         ...approvalResumable.filter((_run, index) => approvalResults[index] === "would-resume"),
+        ...gateResumable.filter((_run, index) => gateResults[index] === "would-resume"),
         ...quotaResumable.filter((_run, index) => quotaResults[index] === "would-resume"),
       ].map((run) => run.runId);
       const durationMs = Math.max(0, options.deps.now() - pollStartedAtMs);

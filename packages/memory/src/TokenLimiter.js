@@ -1,8 +1,8 @@
 import { Effect } from "effect";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 /** @typedef {import("./MemoryProcessor.ts").MemoryProcessor} MemoryProcessor */
 /** @typedef {import("./store/MemoryStore.ts").MemoryStore} MemoryStore */
-/** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
+/** @typedef {import("@smthrs/errors/SmithersError").SmithersError} SmithersError */
 
 // Rough approximation: 1 token ~= 4 characters of message JSON.
 const CHARS_PER_TOKEN = 4;

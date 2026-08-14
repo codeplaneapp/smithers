@@ -24,7 +24,7 @@ export const attempt = {
   success: true,
   needsHelp: "",
   summary: "verified",
-  commands: ["bun add -g smithers-orchestrator@latest"],
+  commands: ["bun add -g smthrs@latest"],
   details: "version verified",
   versionAfter: "2.0.0",
 };

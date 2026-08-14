@@ -1,16 +1,16 @@
 import { mkdirSync, existsSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { addAccount, defaultConfigDir } from "@smithers-orchestrator/accounts";
+import { addAccount, defaultConfigDir } from "@smthrs/accounts";
 import { regenerateAgentsTsIfPresent } from "./regenerateAgentsTsIfPresent.js";
 
-/** @typedef {import("@smithers-orchestrator/accounts").AccountProvider} AccountProvider */
+/** @typedef {import("@smthrs/accounts").AccountProvider} AccountProvider */
 
 /**
  * Provider id → CLI binary name. For API-key providers this is null because
  * they don't have a separate CLI to log into.
  * @type {Record<string, string | null>}
  */
-const SUBSCRIPTION_LOGIN_BIN = {
+export const SUBSCRIPTION_LOGIN_BIN = {
   "claude-code": "claude",
   antigravity: "agy",
   codex: "codex",
@@ -26,7 +26,7 @@ const SUBSCRIPTION_LOGIN_BIN = {
  * command inside the REPL (the user types /login after launching).
  * @type {Record<string, string[] | ((configDir: string) => string[])>}
  */
-const SUBSCRIPTION_LOGIN_ARGS = {
+export const SUBSCRIPTION_LOGIN_ARGS = {
   "claude-code": [],
   antigravity: (configDir) => ["--gemini_dir", configDir],
   codex: ["login"],
@@ -37,7 +37,7 @@ const SUBSCRIPTION_LOGIN_ARGS = {
  * Provider id → env var the CLI reads to find its config dir.
  * @type {Record<string, string | null>}
  */
-const SUBSCRIPTION_DIR_ENV_VAR = {
+export const SUBSCRIPTION_DIR_ENV_VAR = {
   "claude-code": "CLAUDE_CONFIG_DIR",
   antigravity: "GEMINI_DIR",
   codex: "CODEX_HOME",

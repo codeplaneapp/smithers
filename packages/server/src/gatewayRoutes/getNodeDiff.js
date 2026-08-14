@@ -1,12 +1,12 @@
 import { spawn } from "node:child_process";
 import { Effect, Metric } from "effect";
-import { NodeDiffCache, NodeDiffTooLargeError } from "@smithers-orchestrator/db/cache/nodeDiffCache";
-import { computeDiffBundleBetweenRefs } from "@smithers-orchestrator/engine/effect/diff-bundle";
+import { NODE_DIFF_MAX_BYTES, NodeDiffCache, NodeDiffTooLargeError } from "@smthrs/db/cache/nodeDiffCache";
+import { computeDiffBundle, computeDiffBundleBetweenRefs } from "@smthrs/engine/effect/diff-bundle";
 import { runPromise } from "../smithersRuntime.js";
 import { RUN_ID_PATTERN } from "./RUN_ID_PATTERN.js";
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("@smithers-orchestrator/db/adapter").AttemptRow} AttemptRow */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").AttemptRow} AttemptRow */
 /** @typedef {import("./GetNodeDiffRouteResult.js").GetNodeDiffRouteResult} GetNodeDiffRouteResult */
 /** @typedef {import("./DiffSummary.js").DiffSummary} DiffSummary */
 const NODE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,128}$/;
@@ -259,8 +259,8 @@ function scheduleCacheRowGauge(cache, emitEffect, nowMs) {
  *   iteration: unknown;
  *   resolveRun: (runId: string) => Promise<{ adapter: SmithersDb } | null>;
  *   emitEffect?: (effect: Effect.Effect<void>) => Promise<unknown>;
- *   computeDiffBundleImpl?: (baseRef: string, cwd: string, seq?: number) => Promise<import("@smithers-orchestrator/engine/effect/DiffBundle").DiffBundle>;
- *   computeDiffBundleBetweenRefsImpl?: (baseRef: string, targetRef: string, cwd: string, seq?: number) => Promise<import("@smithers-orchestrator/engine/effect/DiffBundle").DiffBundle>;
+ *   computeDiffBundleImpl?: (baseRef: string, cwd: string, seq?: number) => Promise<import("@smthrs/engine/effect/DiffBundle").DiffBundle>;
+ *   computeDiffBundleBetweenRefsImpl?: (baseRef: string, targetRef: string, cwd: string, seq?: number) => Promise<import("@smthrs/engine/effect/DiffBundle").DiffBundle>;
  *   resolveCommitPointerImpl?: (pointer: string, cwd: string) => Promise<string | null>;
  *   nowMs?: () => number;
  *   stat?: boolean;
@@ -344,7 +344,62 @@ export async function getNodeDiffRoute({
       throw new GetNodeDiffError("AttemptNotFound", `Attempt not found for ${runId}/${nodeId}/${iteration}`);
     }
     if (latestAttempt.state === "in-progress") {
-      throw new GetNodeDiffError("AttemptNotFinished", "Attempt is still running.");
+      // Live path: diff the node's checkout working copy as it stands right
+      // now, so a watching UI sees edits while the agent is still running.
+      // Never cached (the content is mutable); the immutable base-to-pointer
+      // diff below becomes the final snapshot once the attempt finishes.
+      // Best-effort: any VCS failure falls back to the historical
+      // AttemptNotFinished error rather than flashing a transient error.
+      try {
+        const run = await adapter.getRun(runId);
+        if (run && typeof run.vcsType === "string" && run.vcsType !== "jj") {
+          throw new GetNodeDiffError(
+            "VcsError",
+            `Unsupported VCS type: ${run.vcsType}. Only jj-backed runs are supported.`,
+          );
+        }
+        if (typeof latestAttempt.jjCwd !== "string" || latestAttempt.jjCwd.length === 0) {
+          throw new GetNodeDiffError("VcsError", "Attempt did not record a jj working directory.");
+        }
+        const attemptsForRun = await adapter.listAttemptsForRun(runId);
+        const baseRefCandidate = resolveBaseRef(attemptsForRun, latestAttempt, run?.vcsRevision);
+        if (!baseRefCandidate) {
+          throw new GetNodeDiffError("AttemptNotFound", "Could not resolve a base jj pointer for this attempt.");
+        }
+        const resolvedBaseRef =
+          (await resolveCommitPointerImpl(baseRefCandidate, latestAttempt.jjCwd)) ?? baseRefCandidate;
+        const computeLive = computeDiffBundleImpl ?? computeDiffBundle;
+        const computeStartedAt = nowMs();
+        const bundle = await computeLive(resolvedBaseRef, latestAttempt.jjCwd, latestAttempt.attempt ?? 1);
+        computeDurationMs = Math.max(0, nowMs() - computeStartedAt);
+        const payload = { ...bundle, live: true };
+        sizeBytes = Buffer.byteLength(JSON.stringify(payload), "utf8");
+        if (stat) {
+          resultLabel = "ok";
+          rootSpanAttrs.cacheResult = "bypass";
+          await finalize();
+          return {
+            ok: true,
+            payload: {
+              seq: latestAttempt.attempt ?? 1,
+              baseRef: resolvedBaseRef,
+              summary: summarizeBundle(payload),
+              live: true,
+            },
+          };
+        }
+        resultLabel = "ok";
+        rootSpanAttrs.cacheResult = "bypass";
+        // Cap the live full-bundle payload the same way the terminal path
+        // does (NodeDiffCache.getOrCompute throws NodeDiffTooLargeError).
+        if (sizeBytes > NODE_DIFF_MAX_BYTES) throw new NodeDiffTooLargeError(sizeBytes);
+        await finalize();
+        return { ok: true, payload };
+      } catch (error) {
+        if (error instanceof NodeDiffTooLargeError) throw error;
+        if (error instanceof GetNodeDiffError && error.code === "VcsError") throw error;
+        throw new GetNodeDiffError("AttemptNotFinished", "Attempt is still running.");
+      }
     }
     const run = await adapter.getRun(runId);
     // Blocker #8: Explicit branch on VCS type. Only jj is supported today.

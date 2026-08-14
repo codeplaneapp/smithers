@@ -1,4 +1,5 @@
 import * as effect_Cause from 'effect/Cause';
+import * as effect_Types from 'effect/Types';
 
 declare namespace smithersTaggedErrorCodes {
     let TaskAborted: "TASK_ABORTED";
@@ -13,85 +14,25 @@ declare namespace smithersTaggedErrorCodes {
 
 type SmithersTaggedErrorTag$2 = keyof typeof smithersTaggedErrorCodes;
 
-type TaggedErrorDetails$2 = Record<string, unknown>;
-type GenericTaggedErrorArgs$5 = {
+type TaggedErrorDetails$1 = Record<string, unknown>;
+type GenericTaggedErrorArgs$1 = {
     readonly message: string;
-    readonly details?: TaggedErrorDetails$2;
+    readonly details?: TaggedErrorDetails$1;
 };
 
 type SmithersTaggedErrorPayload$3 = {
     readonly _tag: "TaskAborted";
     readonly message: string;
-    readonly details?: TaggedErrorDetails$2;
-    readonly name?: string;
-} | {
-    readonly _tag: "TaskTimeout";
-    readonly message: string;
-    readonly nodeId: string;
-    readonly attempt: number;
-    readonly timeoutMs: number;
-} | {
-    readonly _tag: "TaskHeartbeatTimeout";
-    readonly message: string;
-    readonly nodeId: string;
-    readonly iteration: number;
-    readonly attempt: number;
-    readonly timeoutMs: number;
-    readonly staleForMs: number;
-    readonly lastHeartbeatAtMs: number;
-} | {
-    readonly _tag: "RunNotFound";
-    readonly message: string;
-    readonly runId: string;
-} | {
-    readonly _tag: "InvalidInput";
-    readonly message: string;
-    readonly details?: TaggedErrorDetails$2;
-} | {
-    readonly _tag: "DbWriteFailed";
-    readonly message: string;
-    readonly details?: TaggedErrorDetails$2;
-} | {
-    readonly _tag: "AgentCliError";
-    readonly message: string;
-    readonly details?: TaggedErrorDetails$2;
-} | {
-    readonly _tag: "WorkflowFailed";
-    readonly message: string;
-    readonly details?: TaggedErrorDetails$2;
-    readonly status?: number;
-};
-
-declare const TaskAborted_base: new (args: TaskAbortedArgs) => effect_Cause.YieldableError & {
-    readonly _tag: "TaskAborted";
-} & Readonly<TaskAbortedArgs>;
-declare class TaskAborted extends TaskAborted_base {
-}
-type TaggedErrorDetails$1 = TaggedErrorDetails$2;
-type TaskAbortedArgs = {
-    readonly message: string;
     readonly details?: TaggedErrorDetails$1;
     readonly name?: string;
-};
-
-declare const TaskTimeout_base: new (args: TaskTimeoutArgs) => effect_Cause.YieldableError & {
+} | {
     readonly _tag: "TaskTimeout";
-} & Readonly<TaskTimeoutArgs>;
-declare class TaskTimeout extends TaskTimeout_base {
-}
-type TaskTimeoutArgs = {
     readonly message: string;
     readonly nodeId: string;
     readonly attempt: number;
     readonly timeoutMs: number;
-};
-
-declare const TaskHeartbeatTimeout_base: new (args: TaskHeartbeatTimeoutArgs) => effect_Cause.YieldableError & {
+} | {
     readonly _tag: "TaskHeartbeatTimeout";
-} & Readonly<TaskHeartbeatTimeoutArgs>;
-declare class TaskHeartbeatTimeout extends TaskHeartbeatTimeout_base {
-}
-type TaskHeartbeatTimeoutArgs = {
     readonly message: string;
     readonly nodeId: string;
     readonly iteration: number;
@@ -99,48 +40,116 @@ type TaskHeartbeatTimeoutArgs = {
     readonly timeoutMs: number;
     readonly staleForMs: number;
     readonly lastHeartbeatAtMs: number;
-};
-
-declare const RunNotFound_base: new (args: RunNotFoundArgs) => effect_Cause.YieldableError & {
+} | {
     readonly _tag: "RunNotFound";
-} & Readonly<RunNotFoundArgs>;
-declare class RunNotFound extends RunNotFound_base {
-}
-type RunNotFoundArgs = {
     readonly message: string;
     readonly runId: string;
-};
-
-declare const InvalidInput_base: new (args: GenericTaggedErrorArgs$4) => effect_Cause.YieldableError & {
+} | {
     readonly _tag: "InvalidInput";
-} & Readonly<GenericTaggedErrorArgs$4>;
-declare class InvalidInput extends InvalidInput_base {
-}
-type GenericTaggedErrorArgs$4 = GenericTaggedErrorArgs$5;
-
-declare const DbWriteFailed_base: new (args: GenericTaggedErrorArgs$3) => effect_Cause.YieldableError & {
+    readonly message: string;
+    readonly details?: TaggedErrorDetails$1;
+} | {
     readonly _tag: "DbWriteFailed";
-} & Readonly<GenericTaggedErrorArgs$3>;
-declare class DbWriteFailed extends DbWriteFailed_base {
-}
-type GenericTaggedErrorArgs$3 = GenericTaggedErrorArgs$5;
-
-declare const AgentCliError_base: new (args: GenericTaggedErrorArgs$2) => effect_Cause.YieldableError & {
+    readonly message: string;
+    readonly details?: TaggedErrorDetails$1;
+} | {
     readonly _tag: "AgentCliError";
-} & Readonly<GenericTaggedErrorArgs$2>;
-declare class AgentCliError extends AgentCliError_base {
-}
-type GenericTaggedErrorArgs$2 = GenericTaggedErrorArgs$5;
-
-declare const WorkflowFailed_base: new (args: WorkflowFailedArgs) => effect_Cause.YieldableError & {
+    readonly message: string;
+    readonly details?: TaggedErrorDetails$1;
+} | {
     readonly _tag: "WorkflowFailed";
-} & Readonly<WorkflowFailedArgs>;
-declare class WorkflowFailed extends WorkflowFailed_base {
-}
-type GenericTaggedErrorArgs$1 = GenericTaggedErrorArgs$5;
-type WorkflowFailedArgs = GenericTaggedErrorArgs$1 & {
+    readonly message: string;
+    readonly details?: TaggedErrorDetails$1;
     readonly status?: number;
 };
+
+declare const TaskAborted_base: new <A extends Record<string, any> = {}>(args: effect_Types.VoidIfEmpty<{ readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }>) => effect_Cause.YieldableError & {
+    readonly _tag: "TaskAborted";
+} & Readonly<A>;
+declare class TaskAborted extends TaskAborted_base {
+    /** @param {{ readonly message: string, readonly details?: import("./TaggedErrorDetails.ts").TaggedErrorDetails, readonly name?: string }} args */
+    constructor(args: {
+        readonly message: string;
+        readonly details?: TaggedErrorDetails$1;
+        readonly name?: string;
+    });
+}
+
+declare const TaskTimeout_base: new <A extends Record<string, any> = {}>(args: effect_Types.VoidIfEmpty<{ readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }>) => effect_Cause.YieldableError & {
+    readonly _tag: "TaskTimeout";
+} & Readonly<A>;
+declare class TaskTimeout extends TaskTimeout_base {
+    /** @param {{ readonly message: string, readonly nodeId: string, readonly attempt: number, readonly timeoutMs: number }} args */
+    constructor(args: {
+        readonly message: string;
+        readonly nodeId: string;
+        readonly attempt: number;
+        readonly timeoutMs: number;
+    });
+}
+
+declare const TaskHeartbeatTimeout_base: new <A extends Record<string, any> = {}>(args: effect_Types.VoidIfEmpty<{ readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }>) => effect_Cause.YieldableError & {
+    readonly _tag: "TaskHeartbeatTimeout";
+} & Readonly<A>;
+declare class TaskHeartbeatTimeout extends TaskHeartbeatTimeout_base {
+    /** @param {{ readonly message: string, readonly nodeId: string, readonly iteration: number, readonly attempt: number, readonly timeoutMs: number, readonly staleForMs: number, readonly lastHeartbeatAtMs: number }} args */
+    constructor(args: {
+        readonly message: string;
+        readonly nodeId: string;
+        readonly iteration: number;
+        readonly attempt: number;
+        readonly timeoutMs: number;
+        readonly staleForMs: number;
+        readonly lastHeartbeatAtMs: number;
+    });
+}
+
+declare const RunNotFound_base: new <A extends Record<string, any> = {}>(args: effect_Types.VoidIfEmpty<{ readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }>) => effect_Cause.YieldableError & {
+    readonly _tag: "RunNotFound";
+} & Readonly<A>;
+declare class RunNotFound extends RunNotFound_base {
+    /** @param {{ readonly message: string, readonly runId: string }} args */
+    constructor(args: {
+        readonly message: string;
+        readonly runId: string;
+    });
+}
+
+declare const InvalidInput_base: new <A extends Record<string, any> = {}>(args: effect_Types.VoidIfEmpty<{ readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }>) => effect_Cause.YieldableError & {
+    readonly _tag: "InvalidInput";
+} & Readonly<A>;
+declare class InvalidInput extends InvalidInput_base {
+    /** @param {import("./TaggedErrorDetails.ts").GenericTaggedErrorArgs} args */
+    constructor(args: GenericTaggedErrorArgs$1);
+}
+
+declare const DbWriteFailed_base: new <A extends Record<string, any> = {}>(args: effect_Types.VoidIfEmpty<{ readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }>) => effect_Cause.YieldableError & {
+    readonly _tag: "DbWriteFailed";
+} & Readonly<A>;
+declare class DbWriteFailed extends DbWriteFailed_base {
+    /** @param {import("./TaggedErrorDetails.ts").GenericTaggedErrorArgs} args */
+    constructor(args: GenericTaggedErrorArgs$1);
+}
+
+declare const AgentCliError_base: new <A extends Record<string, any> = {}>(args: effect_Types.VoidIfEmpty<{ readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }>) => effect_Cause.YieldableError & {
+    readonly _tag: "AgentCliError";
+} & Readonly<A>;
+declare class AgentCliError extends AgentCliError_base {
+    /** @param {import("./TaggedErrorDetails.ts").GenericTaggedErrorArgs} args */
+    constructor(args: GenericTaggedErrorArgs$1);
+}
+
+declare const WorkflowFailed_base: new <A extends Record<string, any> = {}>(args: effect_Types.VoidIfEmpty<{ readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }>) => effect_Cause.YieldableError & {
+    readonly _tag: "WorkflowFailed";
+} & Readonly<A>;
+declare class WorkflowFailed extends WorkflowFailed_base {
+    /** @param {{ readonly message: string, readonly details?: import("./TaggedErrorDetails.ts").TaggedErrorDetails, readonly status?: number }} args */
+    constructor(args: {
+        readonly message: string;
+        readonly details?: TaggedErrorDetails$1;
+        readonly status?: number;
+    });
+}
 
 type SmithersTaggedError$3 = TaskAborted | TaskTimeout | TaskHeartbeatTimeout | RunNotFound | InvalidInput | DbWriteFailed | AgentCliError | WorkflowFailed;
 
@@ -193,14 +202,14 @@ declare namespace smithersErrorDefinitions {
         let when_5: string;
         export { when_5 as when };
     }
-    namespace WORKTREE_CREATE_FAILED {
+    namespace INVALID_RETRY_STATE {
         let category_6: string;
         export { category_6 as category };
         let when_6: string;
         export { when_6 as when };
         export let details: string;
     }
-    namespace VCS_NOT_FOUND {
+    namespace AGENT_CHECKPOINT_INVALID {
         let category_7: string;
         export { category_7 as category };
         let when_7: string;
@@ -208,7 +217,7 @@ declare namespace smithersErrorDefinitions {
         let details_1: string;
         export { details_1 as details };
     }
-    namespace SNAPSHOT_NOT_FOUND {
+    namespace AGENT_CHECKPOINT_CAPABILITY_UNDECLARED {
         let category_8: string;
         export { category_8 as category };
         let when_8: string;
@@ -216,7 +225,7 @@ declare namespace smithersErrorDefinitions {
         let details_2: string;
         export { details_2 as details };
     }
-    namespace VCS_WORKSPACE_CREATE_FAILED {
+    namespace AGENT_CHECKPOINT_HISTORY_EXHAUSTED {
         let category_9: string;
         export { category_9 as category };
         let when_9: string;
@@ -224,7 +233,7 @@ declare namespace smithersErrorDefinitions {
         let details_3: string;
         export { details_3 as details };
     }
-    namespace TASK_TIMEOUT {
+    namespace AGENT_CHECKPOINT_MISSING {
         let category_10: string;
         export { category_10 as category };
         let when_10: string;
@@ -232,32 +241,7 @@ declare namespace smithersErrorDefinitions {
         let details_4: string;
         export { details_4 as details };
     }
-    namespace TASK_HIJACK_UNSUPPORTED {
-        let category: string;
-        let when: string;
-        let details: string;
-    }
-    namespace TASK_FORK_SOURCE_NOT_FOUND {
-        let category: string;
-        let when: string;
-        let details: string;
-    }
-    namespace TASK_FORK_SOURCE_NOT_COMPLETE {
-        let category: string;
-        let when: string;
-        let details: string;
-    }
-    namespace TASK_FORK_SESSION_UNAVAILABLE {
-        let category: string;
-        let when: string;
-        let details: string;
-    }
-    namespace TASK_FORK_CYCLE {
-        let category: string;
-        let when: string;
-        let details: string;
-    }
-    namespace RUN_NOT_FOUND {
+    namespace AGENT_CHECKPOINT_CORRUPT {
         let category_11: string;
         export { category_11 as category };
         let when_11: string;
@@ -265,7 +249,7 @@ declare namespace smithersErrorDefinitions {
         let details_5: string;
         export { details_5 as details };
     }
-    namespace NODE_NOT_FOUND {
+    namespace WORKTREE_CREATE_FAILED {
         let category_12: string;
         export { category_12 as category };
         let when_12: string;
@@ -273,7 +257,7 @@ declare namespace smithersErrorDefinitions {
         let details_6: string;
         export { details_6 as details };
     }
-    namespace INVALID_EVENTS_OPTIONS {
+    namespace VCS_NOT_FOUND {
         let category_13: string;
         export { category_13 as category };
         let when_13: string;
@@ -281,7 +265,7 @@ declare namespace smithersErrorDefinitions {
         let details_7: string;
         export { details_7 as details };
     }
-    namespace SANDBOX_BUNDLE_INVALID {
+    namespace SNAPSHOT_NOT_FOUND {
         let category_14: string;
         export { category_14 as category };
         let when_14: string;
@@ -289,7 +273,7 @@ declare namespace smithersErrorDefinitions {
         let details_8: string;
         export { details_8 as details };
     }
-    namespace SANDBOX_BUNDLE_TOO_LARGE {
+    namespace TIME_TRAVEL_SIDE_EFFECT_BLOCKED {
         let category_15: string;
         export { category_15 as category };
         let when_15: string;
@@ -297,7 +281,7 @@ declare namespace smithersErrorDefinitions {
         let details_9: string;
         export { details_9 as details };
     }
-    namespace WORKFLOW_EXECUTION_FAILED {
+    namespace VCS_WORKSPACE_CREATE_FAILED {
         let category_16: string;
         export { category_16 as category };
         let when_16: string;
@@ -305,7 +289,7 @@ declare namespace smithersErrorDefinitions {
         let details_10: string;
         export { details_10 as details };
     }
-    namespace SANDBOX_EXECUTION_FAILED {
+    namespace TASK_TIMEOUT {
         let category_17: string;
         export { category_17 as category };
         let when_17: string;
@@ -313,7 +297,7 @@ declare namespace smithersErrorDefinitions {
         let details_11: string;
         export { details_11 as details };
     }
-    namespace TASK_HEARTBEAT_TIMEOUT {
+    namespace TASK_HIJACK_UNSUPPORTED {
         let category_18: string;
         export { category_18 as category };
         let when_18: string;
@@ -321,7 +305,7 @@ declare namespace smithersErrorDefinitions {
         let details_12: string;
         export { details_12 as details };
     }
-    namespace HEARTBEAT_PAYLOAD_TOO_LARGE {
+    namespace TASK_FORK_SOURCE_NOT_FOUND {
         let category_19: string;
         export { category_19 as category };
         let when_19: string;
@@ -329,7 +313,7 @@ declare namespace smithersErrorDefinitions {
         let details_13: string;
         export { details_13 as details };
     }
-    namespace HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE {
+    namespace TASK_FORK_SOURCE_NOT_COMPLETE {
         let category_20: string;
         export { category_20 as category };
         let when_20: string;
@@ -337,557 +321,657 @@ declare namespace smithersErrorDefinitions {
         let details_14: string;
         export { details_14 as details };
     }
-    namespace TASK_ABORTED {
+    namespace TASK_FORK_SESSION_UNAVAILABLE {
         let category_21: string;
         export { category_21 as category };
         let when_21: string;
         export { when_21 as when };
+        let details_15: string;
+        export { details_15 as details };
     }
-    namespace RUN_CANCELLED {
+    namespace TASK_FORK_CHECKPOINT_INCOMPATIBLE {
         let category_22: string;
         export { category_22 as category };
         let when_22: string;
         export { when_22 as when };
-        let details_15: string;
-        export { details_15 as details };
+        let details_16: string;
+        export { details_16 as details };
     }
-    namespace RUN_NOT_RESUMABLE {
+    namespace TASK_FORK_CYCLE {
         let category_23: string;
         export { category_23 as category };
         let when_23: string;
         export { when_23 as when };
-        let details_16: string;
-        export { details_16 as details };
+        let details_17: string;
+        export { details_17 as details };
     }
-    namespace RUN_OWNER_ALIVE {
+    namespace RUN_NOT_FOUND {
         let category_24: string;
         export { category_24 as category };
         let when_24: string;
         export { when_24 as when };
-        let details_17: string;
-        export { details_17 as details };
+        let details_18: string;
+        export { details_18 as details };
     }
-    namespace RUN_STILL_RUNNING {
+    namespace NODE_NOT_FOUND {
         let category_25: string;
         export { category_25 as category };
         let when_25: string;
         export { when_25 as when };
-        let details_18: string;
-        export { details_18 as details };
+        let details_19: string;
+        export { details_19 as details };
     }
-    namespace RUN_RESUME_CLAIM_LOST {
+    namespace INVALID_EVENTS_OPTIONS {
         let category_26: string;
         export { category_26 as category };
         let when_26: string;
         export { when_26 as when };
-        let details_19: string;
-        export { details_19 as details };
+        let details_20: string;
+        export { details_20 as details };
     }
-    namespace RUN_RESUME_CLAIM_FAILED {
+    namespace SANDBOX_BUNDLE_INVALID {
         let category_27: string;
         export { category_27 as category };
         let when_27: string;
         export { when_27 as when };
-        let details_20: string;
-        export { details_20 as details };
+        let details_21: string;
+        export { details_21 as details };
     }
-    namespace RUN_RESUME_ACTIVATION_FAILED {
+    namespace SANDBOX_BUNDLE_TOO_LARGE {
         let category_28: string;
         export { category_28 as category };
         let when_28: string;
         export { when_28 as when };
-        let details_21: string;
-        export { details_21 as details };
+        let details_22: string;
+        export { details_22 as details };
     }
-    namespace AUTO_RESUME_GAVE_UP {
-        let category_100: string;
-        export { category_100 as category };
-        let when_100: string;
-        export { when_100 as when };
-        let details_100: string;
-        export { details_100 as details };
-    }
-    namespace RUN_HIJACKED {
+    namespace WORKFLOW_EXECUTION_FAILED {
         let category_29: string;
         export { category_29 as category };
         let when_29: string;
         export { when_29 as when };
-        let details_22: string;
-        export { details_22 as details };
+        let details_23: string;
+        export { details_23 as details };
     }
-    namespace CONTINUATION_STATE_TOO_LARGE {
+    namespace SANDBOX_EXECUTION_FAILED {
         let category_30: string;
         export { category_30 as category };
         let when_30: string;
         export { when_30 as when };
-        let details_23: string;
-        export { details_23 as details };
+        let details_24: string;
+        export { details_24 as details };
     }
-    namespace INVALID_CONTINUATION_STATE {
+    namespace TASK_HEARTBEAT_TIMEOUT {
         let category_31: string;
         export { category_31 as category };
         let when_31: string;
         export { when_31 as when };
+        let details_25: string;
+        export { details_25 as details };
     }
-    namespace RALPH_MAX_REACHED {
+    namespace HEARTBEAT_PAYLOAD_TOO_LARGE {
         let category_32: string;
         export { category_32 as category };
         let when_32: string;
         export { when_32 as when };
-        let details_24: string;
-        export { details_24 as details };
+        let details_26: string;
+        export { details_26 as details };
     }
-    namespace SCHEDULER_ERROR {
+    namespace HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE {
         let category_33: string;
         export { category_33 as category };
         let when_33: string;
         export { when_33 as when };
+        let details_27: string;
+        export { details_27 as details };
     }
-    namespace SESSION_ERROR {
+    namespace TASK_ABORTED {
         let category_34: string;
         export { category_34 as category };
         let when_34: string;
         export { when_34 as when };
     }
-    namespace TASK_ID_REQUIRED {
+    namespace RUN_CANCELLED {
         let category_35: string;
         export { category_35 as category };
         let when_35: string;
         export { when_35 as when };
+        let details_28: string;
+        export { details_28 as details };
     }
-    namespace TASK_MISSING_OUTPUT {
+    namespace RUN_NOT_RESUMABLE {
         let category_36: string;
         export { category_36 as category };
         let when_36: string;
         export { when_36 as when };
-        let details_25: string;
-        export { details_25 as details };
+        let details_29: string;
+        export { details_29 as details };
     }
-    namespace TASK_EMPTY_PROMPT {
-        let category_98: string;
-        export { category_98 as category };
-        let when_98: string;
-        export { when_98 as when };
-        let details_98: string;
-        export { details_98 as details };
-    }
-    namespace WORKFLOW_RENDER_FAILED {
-        let category_99: string;
-        export { category_99 as category };
-        let when_99: string;
-        export { when_99 as when };
-        let details_99: string;
-        export { details_99 as details };
-    }
-    namespace DUPLICATE_ID {
+    namespace RUN_OWNER_ALIVE {
         let category_37: string;
         export { category_37 as category };
         let when_37: string;
         export { when_37 as when };
-        let details_26: string;
-        export { details_26 as details };
+        let details_30: string;
+        export { details_30 as details };
     }
-    namespace NESTED_LOOP {
+    namespace RUN_STILL_RUNNING {
         let category_38: string;
         export { category_38 as category };
         let when_38: string;
         export { when_38 as when };
+        let details_31: string;
+        export { details_31 as details };
     }
-    namespace WORKTREE_EMPTY_PATH {
+    namespace RUN_RESUME_CLAIM_LOST {
         let category_39: string;
         export { category_39 as category };
         let when_39: string;
         export { when_39 as when };
+        let details_32: string;
+        export { details_32 as details };
     }
-    namespace MDX_PRELOAD_INACTIVE {
+    namespace RUN_RESUME_CLAIM_FAILED {
         let category_40: string;
         export { category_40 as category };
         let when_40: string;
         export { when_40 as when };
+        let details_33: string;
+        export { details_33 as details };
     }
-    namespace CONTEXT_OUTSIDE_WORKFLOW {
+    namespace RUN_RESUME_ACTIVATION_FAILED {
         let category_41: string;
         export { category_41 as category };
         let when_41: string;
         export { when_41 as when };
+        let details_34: string;
+        export { details_34 as details };
     }
-    namespace MISSING_OUTPUT {
+    namespace AUTO_RESUME_GAVE_UP {
         let category_42: string;
         export { category_42 as category };
         let when_42: string;
         export { when_42 as when };
-        let details_27: string;
-        export { details_27 as details };
+        let details_35: string;
+        export { details_35 as details };
     }
-    namespace DEP_NOT_SATISFIED {
+    namespace RUN_HIJACKED {
         let category_43: string;
         export { category_43 as category };
         let when_43: string;
         export { when_43 as when };
-        let details_28: string;
-        export { details_28 as details };
+        let details_36: string;
+        export { details_36 as details };
     }
-    namespace BOUND_STALE {
-        let category_BOUND_STALE: string;
-        export { category_BOUND_STALE as category };
-        let when_BOUND_STALE: string;
-        export { when_BOUND_STALE as when };
-        let details_BOUND_STALE: string;
-        export { details_BOUND_STALE as details };
-    }
-    namespace ASPECT_BUDGET_EXCEEDED {
+    namespace CONTINUATION_STATE_TOO_LARGE {
         let category_44: string;
         export { category_44 as category };
         let when_44: string;
         export { when_44 as when };
-        let details_29: string;
-        export { details_29 as details };
+        let details_37: string;
+        export { details_37 as details };
     }
-    namespace APPROVAL_OUTSIDE_TASK {
+    namespace INVALID_CONTINUATION_STATE {
         let category_45: string;
         export { category_45 as category };
         let when_45: string;
         export { when_45 as when };
     }
-    namespace APPROVAL_OPTIONS_REQUIRED {
+    namespace RALPH_MAX_REACHED {
         let category_46: string;
         export { category_46 as category };
         let when_46: string;
         export { when_46 as when };
+        let details_38: string;
+        export { details_38 as details };
     }
-    namespace WORKFLOW_MISSING_DEFAULT {
+    namespace SCHEDULER_ERROR {
         let category_47: string;
         export { category_47 as category };
         let when_47: string;
         export { when_47 as when };
     }
-    namespace WORKFLOW_NOT_BUILT {
-        let category_47b: string;
-        export { category_47b as category };
-        let when_47b: string;
-        export { when_47b as when };
-    }
-    namespace TOOL_PATH_INVALID {
+    namespace SESSION_ERROR {
         let category_48: string;
         export { category_48 as category };
         let when_48: string;
         export { when_48 as when };
     }
-    namespace TOOL_PATH_ESCAPE {
+    namespace TASK_ID_REQUIRED {
         let category_49: string;
         export { category_49 as category };
         let when_49: string;
         export { when_49 as when };
     }
-    namespace TOOL_FILE_TOO_LARGE {
+    namespace TASK_MISSING_OUTPUT {
         let category_50: string;
         export { category_50 as category };
         let when_50: string;
         export { when_50 as when };
+        let details_39: string;
+        export { details_39 as details };
     }
-    namespace TOOL_CONTENT_TOO_LARGE {
+    namespace TASK_EMPTY_PROMPT {
         let category_51: string;
         export { category_51 as category };
         let when_51: string;
         export { when_51 as when };
+        let details_40: string;
+        export { details_40 as details };
     }
-    namespace TOOL_PATCH_TOO_LARGE {
+    namespace WORKFLOW_RENDER_FAILED {
         let category_52: string;
         export { category_52 as category };
         let when_52: string;
         export { when_52 as when };
+        let details_41: string;
+        export { details_41 as details };
     }
-    namespace TOOL_PATCH_FAILED {
+    namespace DUPLICATE_ID {
         let category_53: string;
         export { category_53 as category };
         let when_53: string;
         export { when_53 as when };
+        let details_42: string;
+        export { details_42 as details };
     }
-    namespace TOOL_NETWORK_DISABLED {
+    namespace NESTED_LOOP {
         let category_54: string;
         export { category_54 as category };
         let when_54: string;
         export { when_54 as when };
     }
-    namespace TOOL_GIT_REMOTE_DISABLED {
+    namespace WORKTREE_EMPTY_PATH {
         let category_55: string;
         export { category_55 as category };
         let when_55: string;
         export { when_55 as when };
     }
-    namespace TOOL_COMMAND_FAILED {
+    namespace MDX_PRELOAD_INACTIVE {
         let category_56: string;
         export { category_56 as category };
         let when_56: string;
         export { when_56 as when };
     }
-    namespace TOOL_GREP_FAILED {
+    namespace CONTEXT_OUTSIDE_WORKFLOW {
         let category_57: string;
         export { category_57 as category };
         let when_57: string;
         export { when_57 as when };
     }
-    namespace AGENT_CLI_ERROR {
+    namespace MISSING_OUTPUT {
         let category_58: string;
         export { category_58 as category };
         let when_58: string;
         export { when_58 as when };
+        let details_43: string;
+        export { details_43 as details };
     }
-    namespace AGENT_CONFIG_INVALID {
-        let category: string;
-        let when: string;
-    }
-    namespace AGENT_QUOTA_EXCEEDED {
-        let category_90: string;
-        export { category_90 as category };
-        let when_90: string;
-        export { when_90 as when };
-    }
-    namespace AGENT_RPC_FILE_ARGS {
+    namespace DEP_NOT_SATISFIED {
         let category_59: string;
         export { category_59 as category };
         let when_59: string;
         export { when_59 as when };
+        let details_44: string;
+        export { details_44 as details };
     }
-    namespace AGENT_BUILD_COMMAND {
+    namespace BOUND_STALE {
         let category_60: string;
         export { category_60 as category };
         let when_60: string;
         export { when_60 as when };
+        let details_45: string;
+        export { details_45 as details };
     }
-    namespace AGENT_DIAGNOSTIC_TIMEOUT {
+    namespace ASPECT_BUDGET_EXCEEDED {
         let category_61: string;
         export { category_61 as category };
         let when_61: string;
         export { when_61 as when };
+        let details_46: string;
+        export { details_46 as details };
     }
-    namespace ACCOUNT_INVALID {
+    namespace APPROVAL_OUTSIDE_TASK {
         let category_62: string;
         export { category_62 as category };
         let when_62: string;
         export { when_62 as when };
     }
-    namespace ACCOUNT_NOT_FOUND {
+    namespace APPROVAL_OPTIONS_REQUIRED {
         let category_63: string;
         export { category_63 as category };
         let when_63: string;
         export { when_63 as when };
     }
-    namespace ACCOUNT_DUPLICATE_LABEL {
+    namespace WORKFLOW_MISSING_DEFAULT {
         let category_64: string;
         export { category_64 as category };
         let when_64: string;
         export { when_64 as when };
     }
-    namespace ACCOUNTS_FILE_INVALID {
+    namespace WORKFLOW_NOT_BUILT {
         let category_65: string;
         export { category_65 as category };
         let when_65: string;
         export { when_65 as when };
     }
-    namespace DB_MISSING_COLUMNS {
+    namespace TOOL_PATH_INVALID {
         let category_66: string;
         export { category_66 as category };
         let when_66: string;
         export { when_66 as when };
     }
-    namespace DB_REQUIRES_BUN_SQLITE {
+    namespace TOOL_PATH_ESCAPE {
         let category_67: string;
         export { category_67 as category };
         let when_67: string;
         export { when_67 as when };
     }
-    namespace DB_QUERY_FAILED {
+    namespace TOOL_FILE_TOO_LARGE {
         let category_68: string;
         export { category_68 as category };
         let when_68: string;
         export { when_68 as when };
     }
-    namespace DB_WRITE_FAILED {
+    namespace TOOL_CONTENT_TOO_LARGE {
         let category_69: string;
         export { category_69 as category };
         let when_69: string;
         export { when_69 as when };
     }
-    namespace PG_POOL_SATURATED {
-        let category_pgpool: string;
-        export { category_pgpool as category };
-        let when_pgpool: string;
-        export { when_pgpool as when };
-        let details_pgpool: string;
-        export { details_pgpool as details };
-    }
-    namespace SMITHERS_MIGRATION_REQUIRED {
-        let category_mig: string;
-        export { category_mig as category };
-        let when_mig: string;
-        export { when_mig as when };
-        let details_mig: string;
-        export { details_mig as details };
-    }
-    namespace SMITHERS_BACKEND_CONFLICT {
-        let category_backend_conflict: string;
-        export { category_backend_conflict as category };
-        let when_backend_conflict: string;
-        export { when_backend_conflict as when };
-        let details_backend_conflict: string;
-        export { details_backend_conflict as details };
-    }
-    namespace STORAGE_ERROR {
+    namespace TOOL_PATCH_TOO_LARGE {
         let category_70: string;
         export { category_70 as category };
         let when_70: string;
         export { when_70 as when };
     }
-    namespace INTERNAL_ERROR {
+    namespace TOOL_PATCH_FAILED {
         let category_71: string;
         export { category_71 as category };
         let when_71: string;
         export { when_71 as when };
     }
-    namespace PROCESS_ABORTED {
+    namespace TOOL_NETWORK_DISABLED {
         let category_72: string;
         export { category_72 as category };
         let when_72: string;
         export { when_72 as when };
-        let details_30: string;
-        export { details_30 as details };
     }
-    namespace PROCESS_TIMEOUT {
+    namespace TOOL_GIT_REMOTE_DISABLED {
         let category_73: string;
         export { category_73 as category };
         let when_73: string;
         export { when_73 as when };
-        let details_31: string;
-        export { details_31 as details };
     }
-    namespace PROCESS_IDLE_TIMEOUT {
+    namespace TOOL_COMMAND_FAILED {
         let category_74: string;
         export { category_74 as category };
         let when_74: string;
         export { when_74 as when };
-        let details_32: string;
-        export { details_32 as details };
     }
-    namespace PROCESS_SPAWN_FAILED {
+    namespace TOOL_GREP_FAILED {
         let category_75: string;
         export { category_75 as category };
         let when_75: string;
         export { when_75 as when };
-        let details_33: string;
-        export { details_33 as details };
     }
-    namespace TASK_RUNTIME_UNAVAILABLE {
+    namespace AGENT_CLI_ERROR {
         let category_76: string;
         export { category_76 as category };
         let when_76: string;
         export { when_76 as when };
     }
-    namespace SCHEMA_CHANGE_HOT {
+    namespace AGENT_QUOTA_EXCEEDED {
         let category_77: string;
         export { category_77 as category };
         let when_77: string;
         export { when_77 as when };
+        let details_47: string;
+        export { details_47 as details };
     }
-    namespace HOT_OVERLAY_FAILED {
+    namespace AGENT_CONFIG_INVALID {
         let category_78: string;
         export { category_78 as category };
         let when_78: string;
         export { when_78 as when };
     }
-    namespace HOT_RELOAD_INVALID_MODULE {
+    namespace AGENT_RPC_FILE_ARGS {
         let category_79: string;
         export { category_79 as category };
         let when_79: string;
         export { when_79 as when };
     }
-    namespace SCORER_FAILED {
+    namespace AGENT_BUILD_COMMAND {
         let category_80: string;
         export { category_80 as category };
         let when_80: string;
         export { when_80 as when };
     }
-    namespace WORKFLOW_EXISTS {
+    namespace AGENT_DIAGNOSTIC_TIMEOUT {
         let category_81: string;
         export { category_81 as category };
         let when_81: string;
         export { when_81 as when };
     }
-    namespace CLI_DB_NOT_FOUND {
+    namespace ACCOUNT_INVALID {
         let category_82: string;
         export { category_82 as category };
         let when_82: string;
         export { when_82 as when };
     }
-    namespace CLI_AGENT_UNSUPPORTED {
+    namespace ACCOUNT_NOT_FOUND {
         let category_83: string;
         export { category_83 as category };
         let when_83: string;
         export { when_83 as when };
     }
-    namespace PI_HTTP_ERROR {
+    namespace ACCOUNT_DUPLICATE_LABEL {
         let category_84: string;
         export { category_84 as category };
         let when_84: string;
         export { when_84 as when };
     }
-    namespace EXTERNAL_BUILD_FAILED {
+    namespace ACCOUNTS_FILE_INVALID {
         let category_85: string;
         export { category_85 as category };
         let when_85: string;
         export { when_85 as when };
-        let details_34: string;
-        export { details_34 as details };
     }
-    namespace SCHEMA_DISCOVERY_FAILED {
+    namespace DB_MISSING_COLUMNS {
         let category_86: string;
         export { category_86 as category };
         let when_86: string;
         export { when_86 as when };
-        let details_35: string;
-        export { details_35 as details };
     }
-    namespace OPENAPI_SPEC_LOAD_FAILED {
+    namespace DB_REQUIRES_BUN_SQLITE {
         let category_87: string;
         export { category_87 as category };
         let when_87: string;
         export { when_87 as when };
     }
-    namespace OPENAPI_OPERATION_NOT_FOUND {
+    namespace DB_QUERY_FAILED {
         let category_88: string;
         export { category_88 as category };
         let when_88: string;
         export { when_88 as when };
     }
-    namespace OPENAPI_TOOL_EXECUTION_FAILED {
+    namespace DB_WRITE_FAILED {
         let category_89: string;
         export { category_89 as category };
         let when_89: string;
         export { when_89 as when };
     }
-    namespace TIME_TRAVEL_SIDE_EFFECT_BLOCKED {
+    namespace PG_POOL_SATURATED {
+        let category_90: string;
+        export { category_90 as category };
+        let when_90: string;
+        export { when_90 as when };
+        let details_48: string;
+        export { details_48 as details };
+    }
+    namespace SMITHERS_MIGRATION_REQUIRED {
+        let category_91: string;
+        export { category_91 as category };
+        let when_91: string;
+        export { when_91 as when };
+        let details_49: string;
+        export { details_49 as details };
+    }
+    namespace SMITHERS_BACKEND_CONFLICT {
+        let category_92: string;
+        export { category_92 as category };
+        let when_92: string;
+        export { when_92 as when };
+        let details_50: string;
+        export { details_50 as details };
+    }
+    namespace STORAGE_ERROR {
+        let category_93: string;
+        export { category_93 as category };
+        let when_93: string;
+        export { when_93 as when };
+    }
+    namespace INTERNAL_ERROR {
+        let category_94: string;
+        export { category_94 as category };
+        let when_94: string;
+        export { when_94 as when };
+    }
+    namespace PROCESS_ABORTED {
+        let category_95: string;
+        export { category_95 as category };
+        let when_95: string;
+        export { when_95 as when };
+        let details_51: string;
+        export { details_51 as details };
+    }
+    namespace PROCESS_TIMEOUT {
+        let category_96: string;
+        export { category_96 as category };
+        let when_96: string;
+        export { when_96 as when };
+        let details_52: string;
+        export { details_52 as details };
+    }
+    namespace PROCESS_IDLE_TIMEOUT {
+        let category_97: string;
+        export { category_97 as category };
+        let when_97: string;
+        export { when_97 as when };
+        let details_53: string;
+        export { details_53 as details };
+    }
+    namespace PROCESS_SPAWN_FAILED {
+        let category_98: string;
+        export { category_98 as category };
+        let when_98: string;
+        export { when_98 as when };
+        let details_54: string;
+        export { details_54 as details };
+    }
+    namespace TASK_RUNTIME_UNAVAILABLE {
+        let category_99: string;
+        export { category_99 as category };
+        let when_99: string;
+        export { when_99 as when };
+    }
+    namespace SCHEMA_CHANGE_HOT {
+        let category_100: string;
+        export { category_100 as category };
+        let when_100: string;
+        export { when_100 as when };
+    }
+    namespace HOT_OVERLAY_FAILED {
         let category_101: string;
         export { category_101 as category };
         let when_101: string;
         export { when_101 as when };
-        let details_101: string;
-        export { details_101 as details };
     }
-    namespace SINGLE_RUNNER_BUSY {
+    namespace HOT_RELOAD_INVALID_MODULE {
         let category_102: string;
         export { category_102 as category };
         let when_102: string;
         export { when_102 as when };
-        let details_102: string;
-        export { details_102 as details };
     }
-    namespace SINGLE_RUNNER_CLOSED {
+    namespace SCORER_FAILED {
         let category_103: string;
         export { category_103 as category };
         let when_103: string;
         export { when_103 as when };
-        let details_103: string;
-        export { details_103 as details };
+    }
+    namespace WORKFLOW_EXISTS {
+        let category_104: string;
+        export { category_104 as category };
+        let when_104: string;
+        export { when_104 as when };
+    }
+    namespace CLI_DB_NOT_FOUND {
+        let category_105: string;
+        export { category_105 as category };
+        let when_105: string;
+        export { when_105 as when };
+    }
+    namespace CLI_AGENT_UNSUPPORTED {
+        let category_106: string;
+        export { category_106 as category };
+        let when_106: string;
+        export { when_106 as when };
+    }
+    namespace PI_HTTP_ERROR {
+        let category_107: string;
+        export { category_107 as category };
+        let when_107: string;
+        export { when_107 as when };
+    }
+    namespace EXTERNAL_BUILD_FAILED {
+        let category_108: string;
+        export { category_108 as category };
+        let when_108: string;
+        export { when_108 as when };
+        let details_55: string;
+        export { details_55 as details };
+    }
+    namespace SCHEMA_DISCOVERY_FAILED {
+        let category_109: string;
+        export { category_109 as category };
+        let when_109: string;
+        export { when_109 as when };
+        let details_56: string;
+        export { details_56 as details };
+    }
+    namespace OPENAPI_SPEC_LOAD_FAILED {
+        let category_110: string;
+        export { category_110 as category };
+        let when_110: string;
+        export { when_110 as when };
+    }
+    namespace OPENAPI_OPERATION_NOT_FOUND {
+        let category_111: string;
+        export { category_111 as category };
+        let when_111: string;
+        export { when_111 as when };
+    }
+    namespace OPENAPI_TOOL_EXECUTION_FAILED {
+        let category_112: string;
+        export { category_112 as category };
+        let when_112: string;
+        export { when_112 as when };
+    }
+    namespace SINGLE_RUNNER_BUSY {
+        let category_113: string;
+        export { category_113 as category };
+        let when_113: string;
+        export { when_113 as when };
+        let details_57: string;
+        export { details_57 as details };
+    }
+    namespace SINGLE_RUNNER_CLOSED {
+        let category_114: string;
+        export { category_114 as category };
+        let when_114: string;
+        export { when_114 as when };
+        let details_58: string;
+        export { details_58 as details };
     }
 }
 
@@ -900,29 +984,53 @@ type ErrorWrapOptions$2 = {
     readonly details?: Record<string, unknown>;
 };
 
-type EngineErrorCode$2 = "TASK_HEARTBEAT_TIMEOUT" | "DUPLICATE_ID" | "NESTED_LOOP" | "INVALID_CONTINUATION_STATE" | "TASK_ID_REQUIRED" | "TASK_EMPTY_PROMPT" | "TASK_MISSING_OUTPUT" | "WORKTREE_EMPTY_PATH" | "INVALID_INPUT" | "WORKFLOW_EXECUTION_FAILED" | "TASK_TIMEOUT" | "TASK_ABORTED" | "MISSING_OUTPUT" | "DEP_NOT_SATISFIED" | "BOUND_STALE" | "RUN_CANCELLED" | "RUN_NOT_FOUND" | "NODE_NOT_FOUND" | "STORAGE_ERROR" | "SCHEDULER_ERROR" | "SESSION_ERROR" | "INTERNAL_ERROR";
+type EngineErrorCode$1 = "TASK_HEARTBEAT_TIMEOUT" | "DUPLICATE_ID" | "NESTED_LOOP" | "INVALID_CONTINUATION_STATE" | "TASK_ID_REQUIRED" | "TASK_EMPTY_PROMPT" | "TASK_MISSING_OUTPUT" | "WORKTREE_EMPTY_PATH" | "INVALID_INPUT" | "WORKFLOW_EXECUTION_FAILED" | "TASK_TIMEOUT" | "TASK_ABORTED" | "MISSING_OUTPUT" | "DEP_NOT_SATISFIED" | "BOUND_STALE" | "RUN_CANCELLED" | "RUN_NOT_FOUND" | "NODE_NOT_FOUND" | "STORAGE_ERROR" | "SCHEDULER_ERROR" | "SESSION_ERROR" | "INTERNAL_ERROR";
 
-declare const EngineError_base: new (args: EngineErrorArgs) => effect_Cause.YieldableError & {
+/**
+ * Assert that a user-supplied schema is a Zod v4 schema, failing fast and clearly
+ * when it is a Zod v3 (or otherwise pre-v4) schema.
+ *
+ * smithers introspects schemas through Zod v4 runtime internals (`schema._zod`)
+ * and the v4-only static `z.toJSONSchema()`. A Zod v3 schema has no `_zod`, so
+ * without this guard it would (a) silently degrade every output column to a JSON
+ * text column in `zodToTable` (optional chaining swallows the missing `_zod`),
+ * then (b) detonate later, deep inside `z.toJSONSchema`, with the cryptic
+ * `undefined is not an object (evaluating 'schema._zod.def')`. This converts both
+ * failure modes into one actionable error at the earliest boundary — workflow
+ * construction.
+ *
+ * Detection signal: every Zod v4 schema instance carries
+ * `schema._zod.version.major === 4`; Zod v3 schemas have no `_zod` at all.
+ *
+ * @param {unknown} schema - the candidate schema
+ * @param {string} [where] - name of the schema (e.g. an output key) for the message
+ * @returns {void}
+ */
+declare function assertZodV4(schema: unknown, where?: string): void;
+
+declare const EngineError_base: new <A extends Record<string, any> = {}>(args: effect_Types.VoidIfEmpty<{ readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }>) => effect_Cause.YieldableError & {
     readonly _tag: "EngineError";
-} & Readonly<EngineErrorArgs>;
+} & Readonly<A>;
 declare class EngineError extends EngineError_base {
+    /** @param {{ readonly code: import("./EngineErrorCode.ts").EngineErrorCode, readonly message: string, readonly context?: Record<string, unknown> }} args */
+    constructor(args: {
+        readonly code: EngineErrorCode$1;
+        readonly message: string;
+        readonly context?: Record<string, unknown>;
+    });
 }
-type EngineErrorCode$1 = EngineErrorCode$2;
-type EngineErrorArgs = {
-    readonly code: EngineErrorCode$1;
-    readonly message: string;
-    readonly context?: Record<string, unknown>;
-};
 
 declare const ERROR_REFERENCE_URL: "https://smithers.sh/reference/errors";
 
-declare class SmithersError$1 extends Error {
+/** @typedef {import("./SmithersErrorCode.ts").SmithersErrorCode} SmithersErrorCode */
+/** @typedef {import("./SmithersErrorOptions.ts").SmithersErrorOptions} SmithersErrorOptions */
+declare class SmithersError extends Error {
     /**
-   * @param {SmithersErrorCode} code
-   * @param {string} summary
-   * @param {Record<string, unknown>} [details]
-   * @param {unknown | SmithersErrorOptions} [causeOrOptions]
-   */
+     * @param {SmithersErrorCode} code
+     * @param {string} summary
+     * @param {Record<string, unknown>} [details]
+     * @param {unknown | SmithersErrorOptions} [causeOrOptions]
+     */
     constructor(code: SmithersErrorCode$3, summary: string, details?: Record<string, unknown>, causeOrOptions?: unknown | SmithersErrorOptions$1);
     /** @type {SmithersErrorCode} */
     code: SmithersErrorCode$3;
@@ -948,7 +1056,7 @@ declare function errorToJson(error: unknown): Record<string, unknown>;
  * @param {unknown} error
  * @returns {SmithersError | undefined}
  */
-declare function fromTaggedError(error: unknown): SmithersError$1 | undefined;
+declare function fromTaggedError(error: unknown): SmithersError | undefined;
 
 /** @typedef {import("./SmithersTaggedError.ts").SmithersTaggedError} SmithersTaggedError */
 /** @typedef {import("./SmithersTaggedErrorPayload.ts").SmithersTaggedErrorPayload} SmithersTaggedErrorPayload */
@@ -986,13 +1094,11 @@ type SmithersErrorCode$1 = SmithersErrorCode$4;
 declare function isKnownSmithersErrorCode(code: string): code is KnownSmithersErrorCode$2;
 type KnownSmithersErrorCode$2 = KnownSmithersErrorCode$3;
 
-/** @typedef {import("./SmithersError.js").SmithersError} SmithersError */
 /**
  * @param {unknown} value
- * @returns {value is SmithersError}
+ * @returns {value is import("./SmithersError.js").SmithersError}
  */
 declare function isSmithersError(value: unknown): value is SmithersError;
-type SmithersError = SmithersError$1;
 
 /** @typedef {import("./SmithersTaggedError.ts").SmithersTaggedError} SmithersTaggedError */
 /**
@@ -1020,7 +1126,7 @@ type KnownSmithersErrorCode$1 = KnownSmithersErrorCode$3;
  * @param {ErrorWrapOptions} [options]
  * @returns {SmithersError}
  */
-declare function toSmithersError(cause: unknown, label?: string, options?: ErrorWrapOptions$1): SmithersError$1;
+declare function toSmithersError(cause: unknown, label?: string, options?: ErrorWrapOptions$1): SmithersError;
 type ErrorWrapOptions$1 = ErrorWrapOptions$2;
 
 /**
@@ -1030,9 +1136,9 @@ type ErrorWrapOptions$1 = ErrorWrapOptions$2;
 declare function toTaggedErrorPayload(error: unknown): SmithersTaggedErrorPayload$1 | undefined;
 type SmithersTaggedErrorPayload$1 = SmithersTaggedErrorPayload$3;
 
-type EngineErrorCode = EngineErrorCode$2;
+type EngineErrorCode = EngineErrorCode$1;
 type ErrorWrapOptions = ErrorWrapOptions$2;
-type GenericTaggedErrorArgs = GenericTaggedErrorArgs$5;
+type GenericTaggedErrorArgs = GenericTaggedErrorArgs$1;
 type KnownSmithersErrorCode = KnownSmithersErrorCode$3;
 type SmithersErrorCategory = SmithersErrorCategory$1;
 type SmithersErrorCode = SmithersErrorCode$4;
@@ -1041,6 +1147,6 @@ type SmithersErrorOptions = SmithersErrorOptions$2;
 type SmithersTaggedError = SmithersTaggedError$3;
 type SmithersTaggedErrorPayload = SmithersTaggedErrorPayload$3;
 type SmithersTaggedErrorTag = SmithersTaggedErrorTag$2;
-type TaggedErrorDetails = TaggedErrorDetails$2;
+type TaggedErrorDetails = TaggedErrorDetails$1;
 
-export { AgentCliError, DbWriteFailed, ERROR_REFERENCE_URL, EngineError, type EngineErrorArgs, type EngineErrorCode, type ErrorWrapOptions, type GenericTaggedErrorArgs, InvalidInput, type KnownSmithersErrorCode, RunNotFound, type RunNotFoundArgs, SmithersError$1 as SmithersError, type SmithersErrorCategory, type SmithersErrorCode, type SmithersErrorDefinition, type SmithersErrorOptions, type SmithersTaggedError, type SmithersTaggedErrorPayload, type SmithersTaggedErrorTag, type TaggedErrorDetails, TaskAborted, type TaskAbortedArgs, TaskHeartbeatTimeout, type TaskHeartbeatTimeoutArgs, TaskTimeout, type TaskTimeoutArgs, WorkflowFailed, type WorkflowFailedArgs, errorToJson, fromTaggedError, fromTaggedErrorPayload, getSmithersErrorDefinition, getSmithersErrorDocsUrl, isKnownSmithersErrorCode, isSmithersError, isSmithersTaggedError, isSmithersTaggedErrorTag, knownSmithersErrorCodes, smithersErrorDefinitions, smithersTaggedErrorCodes, toSmithersError, toTaggedErrorPayload };
+export { AgentCliError, DbWriteFailed, ERROR_REFERENCE_URL, EngineError, type EngineErrorCode, type ErrorWrapOptions, type GenericTaggedErrorArgs, InvalidInput, type KnownSmithersErrorCode, RunNotFound, SmithersError, type SmithersErrorCategory, type SmithersErrorCode, type SmithersErrorDefinition, type SmithersErrorOptions, type SmithersTaggedError, type SmithersTaggedErrorPayload, type SmithersTaggedErrorTag, type TaggedErrorDetails, TaskAborted, TaskHeartbeatTimeout, TaskTimeout, WorkflowFailed, assertZodV4, errorToJson, fromTaggedError, fromTaggedErrorPayload, getSmithersErrorDefinition, getSmithersErrorDocsUrl, isKnownSmithersErrorCode, isSmithersError, isSmithersTaggedError, isSmithersTaggedErrorTag, knownSmithersErrorCodes, smithersErrorDefinitions, smithersTaggedErrorCodes, toSmithersError, toTaggedErrorPayload };

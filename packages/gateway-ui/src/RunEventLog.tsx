@@ -9,9 +9,9 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { useGatewayRunEvents } from "@smithers-orchestrator/gateway-react";
-import type { GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
-import { Badge, type BadgeProps, Button, EmptyState } from "@smithers-orchestrator/ui";
+import { useGatewayRunEvents } from "@smthrs/gateway-react";
+import type { GatewayEventFrame } from "@smthrs/gateway-client";
+import { Badge, type BadgeProps, Button, EmptyState } from "@smthrs/ui";
 import { ensureGatewayUiStyles, theme } from "./theme";
 
 export type RunEventLogProps = {

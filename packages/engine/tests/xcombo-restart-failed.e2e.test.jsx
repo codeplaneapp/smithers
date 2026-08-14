@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 /**
  * Cross-feature audit lane: RESTARTING A FAILED RUN when the failure came from
  * a <Subflow> child run.
@@ -40,11 +40,11 @@ import { describe, expect, test } from "bun:test";
 import { dirname } from "node:path";
 import { z } from "zod";
 import { Effect } from "effect";
-import { Approval, Task, Workflow, approvalDecisionSchema } from "smithers-orchestrator";
-import { Subflow } from "@smithers-orchestrator/components/components/index";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { listSnapshots } from "@smithers-orchestrator/time-travel/snapshot";
-import { replayFromCheckpoint } from "@smithers-orchestrator/time-travel/replay";
+import { Approval, Task, Workflow, approvalDecisionSchema } from "smthrs";
+import { Subflow } from "@smthrs/components/components/index";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { listSnapshots } from "@smthrs/time-travel/snapshot";
+import { replayFromCheckpoint } from "@smthrs/time-travel/replay";
 // Relative so the run exercises THIS checkout's engine, not the installed one.
 import { runWorkflow } from "../src/engine.js";
 import { approveNode } from "../src/approvals.js";

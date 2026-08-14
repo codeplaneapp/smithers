@@ -4,7 +4,7 @@
 // @smithers-type-exports-end
 
 import { Cause, Effect, Exit, Fiber, Layer, ManagedRuntime, Option, Schedule } from "effect";
-import { logError, logInfo } from "@smithers-orchestrator/observability/logging";
+import { logError, logInfo } from "@smthrs/observability/logging";
 import { deliverEvents } from "./deliverEvents.js";
 import { IntegrationError } from "./IntegrationError.js";
 import { makeWebhookSource } from "./EventSource.js";
@@ -26,7 +26,7 @@ const SOURCE_RESTART_SCHEDULE = Schedule.min([Schedule.exponential("1 second"), 
 export function makeIntegrationRuntime(options) {
   const { adapter, sources = [], webhookSources = [] } = options;
   const runtime = ManagedRuntime.make(Layer.empty);
-  /** @type {Map<string, (request: import("./EventSourceTypes.ts").WebhookRequest) => Effect.Effect<{ accepted: number }, import("@smithers-orchestrator/errors/SmithersError").SmithersError>>} */
+  /** @type {Map<string, (request: import("./EventSourceTypes.ts").WebhookRequest) => Effect.Effect<{ accepted: number }, import("@smthrs/errors/SmithersError").SmithersError>>} */
   const webhookOffers = new Map();
   /** @type {Effect.Effect<void>[]} */
   const webhookShutdowns = [];

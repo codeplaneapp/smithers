@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { assertZodV4 } from "@smithers-orchestrator/errors/assertZodV4";
+import { assertZodV4 } from "@smthrs/errors/assertZodV4";
 import { zodToTable } from "../src/zodToTable.js";
 
 // Real-zod integration: a genuine Zod v4 schema must pass, and a v3-shaped schema

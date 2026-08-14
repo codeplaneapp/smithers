@@ -1,9 +1,9 @@
-# @smithers-orchestrator/react-reconciler — src
+# @smthrs/react-reconciler — src
 
 The custom React reconciler behind Smithers workflows. `reconciler.js` defines
 the mutation-mode host config plus `SmithersRenderer`, which renders
 `<smithers:*>` host elements into a mutable `HostContainer` tree and then
-extracts a `WorkflowGraph` via the peer `@smithers-orchestrator/graph`.
+extracts a `WorkflowGraph` via the peer `@smthrs/graph`.
 `core-peer.js` resolves that package's `extractGraph`, with an in-repo dev
 fallback to `packages/graph/src`.
 

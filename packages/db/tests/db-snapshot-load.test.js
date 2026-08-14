@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
@@ -17,7 +16,7 @@ const testOutput = sqliteTable("test_output", {
   result: text("result"),
 });
 function createTestDb() {
-  const dir = mkdtempSync(join(tmpdir(), "smithers-snap-"));
+  const dir = makeTempDirPath("smithers-snap-");
   const path = join(dir, "db.sqlite");
   const sqlite = new Database(path);
   sqlite.exec(`

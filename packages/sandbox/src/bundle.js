@@ -1,11 +1,11 @@
 import { lstat, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import {
   assertJsonPayloadWithinBounds,
   assertOptionalArrayMaxLength,
   assertOptionalStringMaxLength,
-} from "@smithers-orchestrator/db/input-bounds";
+} from "@smthrs/db/input-bounds";
 import { resolveSandboxPath } from "./sandboxPath.js";
 /** @typedef {import("./SandboxBundleManifest.ts").SandboxBundleManifest} SandboxBundleManifest */
 /** @typedef {import("./ValidatedSandboxBundle.ts").ValidatedSandboxBundle} ValidatedSandboxBundle */
@@ -13,7 +13,7 @@ import { resolveSandboxPath } from "./sandboxPath.js";
 export const SANDBOX_MAX_BUNDLE_BYTES = 100 * 1024 * 1024; // 100MB
 export const SANDBOX_MAX_README_BYTES = 5 * 1024 * 1024; // 5MB
 export const SANDBOX_MAX_PATCH_FILES = 1000;
-// Input bounds enforced on bundle write via @smithers-orchestrator/db input-bounds assertions.
+// Input bounds enforced on bundle write via @smthrs/db input-bounds assertions.
 export const SANDBOX_BUNDLE_RUN_ID_MAX_LENGTH = 256;
 export const SANDBOX_BUNDLE_PATH_MAX_LENGTH = 1024;
 export const SANDBOX_BUNDLE_OUTPUT_MAX_DEPTH = 16;

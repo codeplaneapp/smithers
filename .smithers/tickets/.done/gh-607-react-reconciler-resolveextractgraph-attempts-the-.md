@@ -3,7 +3,7 @@
 GitHub: https://github.com/smithersai/smithers/issues/607
 
 **What happens**
-`packages/react-reconciler/src/core-peer.js:22-26` builds `modules` by awaiting **both** `importModule("@smithers-orchestrator/graph")` and `importModule("../../graph/src/index.js")` before checking either for `extractGraph`.
+`packages/react-reconciler/src/core-peer.js:22-26` builds `modules` by awaiting **both** `importModule("@smthrs/graph")` and `importModule("../../graph/src/index.js")` before checking either for `extractGraph`.
 
 **Why it's wrong / failure scenario**
 In published installs the relative `../../graph/src/index.js` path never exists, so every `resolveExtractGraph()` call (each render without an explicit extractGraph) performs a failing dynamic import that is swallowed by `importCoreModule`'s catch — wasted module-resolution work and noisy loader errors under debugging, purely to support the in-repo dev fallback.

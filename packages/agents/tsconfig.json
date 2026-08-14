@@ -25,10 +25,11 @@
     "noUnusedParameters": false,
     "allowJs": true,
     "allowImportingTsExtensions": true,
-    "rootDir": "src"
+    "rootDir": "."
   },
   "include": [
-    "src/**/*"
+    "src/**/*",
+    "internal/**/*"
   ],
   "exclude": [
     "src/index.d.ts"

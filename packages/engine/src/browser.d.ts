@@ -1,12 +1,12 @@
 import type React from "react";
-import type { RuntimeAdapter } from "@smithers-orchestrator/driver/RuntimeAdapter";
-import type { BrowserRuntimeOptions } from "@smithers-orchestrator/driver/browser-runtime";
-import type { RunResult } from "@smithers-orchestrator/driver/RunResult";
-import type { StoredRunState } from "@smithers-orchestrator/driver/RuntimeAdapter";
-import type { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
+import type { RuntimeAdapter } from "@smthrs/driver/RuntimeAdapter";
+import type { BrowserRuntimeOptions } from "@smthrs/driver/browser-runtime";
+import type { RunResult } from "@smthrs/driver/RunResult";
+import type { StoredRunState } from "@smthrs/driver/RuntimeAdapter";
+import type { SmithersCtx } from "@smthrs/driver/SmithersCtx";
 
 export type { RuntimeAdapter, BrowserRuntimeOptions };
-export { RuntimeCapabilityError, RUNTIME_CAPABILITY_UNAVAILABLE } from "@smithers-orchestrator/driver/RuntimeCapabilityError";
+export { RuntimeCapabilityError, RUNTIME_CAPABILITY_UNAVAILABLE } from "@smthrs/driver/RuntimeCapabilityError";
 
 export type BrowserWorkflow<Schema = unknown> = {
   build: (ctx: SmithersCtx<Schema>) => React.ReactNode;

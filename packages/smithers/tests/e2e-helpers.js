@@ -125,7 +125,7 @@ function linkRepoRuntimeDeps(repoDir) {
   const binDir = join(nodeModulesDir, ".bin");
   ensureDir(nodeModulesDir);
   ensureDir(binDir);
-  symlinkIfMissing(resolve(REPO_ROOT, "packages/smithers"), join(nodeModulesDir, "smithers-orchestrator"));
+  symlinkIfMissing(resolve(REPO_ROOT, "packages/smithers"), join(nodeModulesDir, "smthrs"));
   symlinkIfMissing(resolve(ROOT_NODE_MODULES, "zod"), join(nodeModulesDir, "zod"));
   symlinkIfMissing(resolve(ROOT_NODE_MODULES, "react"), join(nodeModulesDir, "react"));
   symlinkIfMissing(resolve(ROOT_NODE_MODULES, "react-dom"), join(nodeModulesDir, "react-dom"));
@@ -145,10 +145,11 @@ function linkRepoRuntimeDeps(repoDir) {
   symlinkIfMissing(resolve(ROOT_NODE_MODULES, "typescript", "bin", "tsc"), join(binDir, "tsc"), "file");
 }
 /**
+ * @param {{ parentDir?: string }} [options]
  * @returns {TempRepo}
  */
-export function createTempRepo() {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), "smithers-e2e-")));
+export function createTempRepo(options = {}) {
+  const dir = realpathSync(mkdtempSync(join(options.parentDir ?? tmpdir(), ".smithers-e2e-")));
   tempDirs.add(dir);
   onTestFinished(() => {
     cleanupTempDir(dir);
@@ -305,8 +306,8 @@ export function writeTestWorkflow(repo, relativePath = "workflow.tsx") {
   return repo.write(
     relativePath,
     [
-      "/** @jsxImportSource smithers-orchestrator */",
-      'import { createSmithers, Workflow, Task } from "smithers-orchestrator";',
+      "/** @jsxImportSource smthrs */",
+      'import { createSmithers, Workflow, Task } from "smthrs";',
       'import { z } from "zod";',
       "",
       "const { smithers, outputs } = createSmithers({",

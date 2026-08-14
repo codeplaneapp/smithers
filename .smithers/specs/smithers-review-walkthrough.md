@@ -36,7 +36,7 @@ not affect the exit code; smithers review reports, humans decide.
 ## Pipeline
 
 One durable smithers workflow (`createReviewWorkflow`), programmatic engine run
-(`runWorkflow` from `@smithers-orchestrator/engine`), own sqlite db. Tasks:
+(`runWorkflow` from `@smthrs/engine`), own sqlite db. Tasks:
 
 | id                | kind    | what it does |
 |-------------------|---------|--------------|
@@ -143,7 +143,7 @@ variables, word-level intra-line diffs, line numbers, unified or split view
 (`--split`). The reference clone lives at `reference/pierre/` (gitignored).
 
 The integration is the `src/diffs/` domain in `apps/review`, exported as
-`@smithers-orchestrator/review/diffs` so any workspace code, workflow compute
+`@smthrs/review/diffs` so any workspace code, workflow compute
 node, or agent-authored artifact can render the same diffs:
 
 - `renderPierreFileDiff({ diff, diffStyle, themeType })`: one file's git

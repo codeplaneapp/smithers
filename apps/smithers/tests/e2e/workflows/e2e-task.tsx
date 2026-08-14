@@ -1,6 +1,6 @@
 // smithers-display-name: E2E Task
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 
 // A static, no-agent workflow: the task returns a literal value and completes

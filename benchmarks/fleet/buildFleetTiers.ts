@@ -1,4 +1,4 @@
-import { ClaudeCodeAgent } from "smithers-orchestrator";
+import { ClaudeCodeAgent } from "smthrs";
 import type { BuildFleetTiersOptions } from "./BuildFleetTiersOptions";
 import { defaultFleetTierModels } from "./defaultFleetTierModels";
 

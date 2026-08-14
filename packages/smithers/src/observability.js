@@ -1,1 +1,1 @@
-export * from "@smithers-orchestrator/observability";
+export * from "@smthrs/observability";

@@ -10,7 +10,7 @@ self-contained HTML slideshow report you can share without scrolling the
 event log.
 
 ```bash
-bunx smithers-orchestrator workflow run report-slideshow \
+bunx smthrs workflow run report-slideshow \
   --input '{"targetRunId":"RUN_ID","title":"Nightly build report"}'
 ```
 
@@ -19,7 +19,7 @@ a run's own id, so a workflow that reports on another run needs a distinct name.
 
 ## Stages
 
-1. **gather**: deterministic capture via `bunx smithers-orchestrator inspect RUN_ID`, flattening the run state, nodes, and a summary (no agent).
+1. **gather**: deterministic capture via `bunx smthrs inspect RUN_ID`, flattening the run state, nodes, and a summary (no agent).
 2. **render**: an agent writes a self-contained, dependency-free HTML slideshow (inline CSS, no scripts, open or attach anywhere) covering the title/objective, decisions, workflow graph, artifacts, tests/gates, failures/retries, and remaining issues.
 
 ## Inputs
@@ -30,4 +30,4 @@ a run's own id, so a workflow that reports on another run needs a distinct name.
 | `title` | string or null | `null` (the render step derives a title from the run) |
 
 The rendered HTML is the `html` field of the `render` node output. Read it with
-`bunx smithers-orchestrator inspect RUN_ID` or `bunx smithers-orchestrator output RUN_ID --node render`.
+`bunx smthrs inspect RUN_ID` or `bunx smthrs output RUN_ID --node render`.

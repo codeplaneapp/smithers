@@ -22,7 +22,7 @@ the headless **`cursor-agent`** CLI. Smithers plugs into those surfaces; generat
 CLI skill files can also sync to `~/.agents/skills`.
 
 ```bash
-bunx smithers-orchestrator mcp add --agent cursor
+bunx smthrs mcp add --agent cursor
 ```
 
 Registers the MCP server; reopen Cursor and the Smithers tools appear in the
@@ -39,7 +39,7 @@ project (or `~/.cursor/mcp.json` for all projects); Cursor uses the
   "mcpServers": {
     "smithers": {
       "command": "bunx",
-      "args": ["smithers-orchestrator", "--mcp"]
+      "args": ["smthrs", "--mcp"]
     }
   }
 }
@@ -55,7 +55,7 @@ The server exposes `list_workflows`, `run_workflow`, `watch_run`,
 globally, or `.agents/skills` with `--no-global`. Use this if Cursor bridges that directory into its skill context:
 
 ```bash
-bunx smithers-orchestrator skills add
+bunx smthrs skills add
 ```
 
 ## Add a project rule
@@ -70,7 +70,7 @@ globs: .smithers/**/*
 alwaysApply: false
 ---
 Smithers is a durable control plane for long-running coding agents.
-Run `bunx smithers-orchestrator starters` to list ready-made workflows.
+Run `bunx smthrs starters` to list ready-made workflows.
 ```
 
 Cursor also reads a plain `AGENTS.md` at the repo root, the same file Codex
@@ -93,7 +93,7 @@ This is the other direction: Smithers spawns `cursor-agent` to do the work.
 agent goes.
 
 ```ts
-import { CursorAgent, Task } from "smithers-orchestrator";
+import { CursorAgent, Task } from "smthrs";
 
 const cursor = new CursorAgent({ model: "composer-2" });
 
@@ -105,12 +105,12 @@ It runs `cursor-agent --print --output-format stream-json
 events into the run UI: assistant text, thinking, and one row per tool call.
 Smithers maps task resumes onto `cursor-agent --resume <chat-id>`.
 
-`bunx smithers-orchestrator init` scaffolds `.smithers/agents/cursor.ts` and wires Cursor into the
+`bunx smthrs init` scaffolds `.smithers/agents/cursor.ts` and wires Cursor into the
 generated agent pools whenever `cursor-agent` is installed and signed in
 (`cursor-agent login`, or `CURSOR_API_KEY`). Full option list:
 [CLI Agents](/integrations/cli-agents).
 
-Interactive `bunx smithers-orchestrator hijack` takeover is not wired up for Cursor yet, so a
+Interactive `bunx smthrs hijack` takeover is not wired up for Cursor yet, so a
 paused run resumes headlessly rather than handing you a live Cursor session.
 
 ## See also

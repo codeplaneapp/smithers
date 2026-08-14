@@ -2,11 +2,11 @@
 // smithers-display-name: Break Smithers (EDD Loop)
 // smithers-description: Eval-driven-development loop — run haiku fluency evals, adversarially try to break smithers or produce a bad UX, author a new eval from what broke, fix the root cause, commit locally. Loops until a wall-clock deadline.
 // smithers-tags: quality, evals, edd
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
-import { createSmithers, UI } from "smithers-orchestrator";
+import { createSmithers, UI } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 

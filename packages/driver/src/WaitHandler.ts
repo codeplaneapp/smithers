@@ -1,6 +1,6 @@
 import type { RunOptions } from "./RunOptions.ts";
 import type { RunResult } from "./RunResult.ts";
-import type { EngineDecision, WaitReason } from "@smithers-orchestrator/scheduler";
+import type { EngineDecision, WaitReason } from "@smthrs/scheduler";
 
 export type WaitHandler = (
   reason: WaitReason,

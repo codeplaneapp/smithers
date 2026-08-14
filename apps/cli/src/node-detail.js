@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { SmithersError } from "@smithers-orchestrator/errors";
+import { SmithersError } from "@smthrs/errors";
 /** @typedef {import("./AggregateNodeDetailParams.ts").AggregateNodeDetailParams} AggregateNodeDetailParams */
 /**
  * @typedef {{ total: number; failed: number; cancelled: number; succeeded: number; waiting: number; }} AttemptSummary
@@ -9,7 +9,7 @@ import { SmithersError } from "@smithers-orchestrator/errors";
 /** @typedef {import("./NodeDetailTokenUsage.ts").NodeDetailTokenUsage} NodeDetailTokenUsage */
 /** @typedef {import("./NodeDetailToolCall.ts").NodeDetailToolCall} NodeDetailToolCall */
 /** @typedef {import("./RenderNodeDetailOptions.ts").RenderNodeDetailOptions} RenderNodeDetailOptions */
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 
 const MAX_TOOL_PAYLOAD_BYTES_HUMAN = 1024;
 const MAX_VALIDATED_OUTPUT_BYTES_HUMAN = 10 * 1024;

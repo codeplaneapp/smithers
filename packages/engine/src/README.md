@@ -1,4 +1,4 @@
-# @smithers-orchestrator/engine — src
+# @smthrs/engine — src
 
 The concrete Smithers workflow execution engine.
 

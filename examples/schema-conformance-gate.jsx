@@ -7,11 +7,11 @@
  * Use cases: LLM output validation, ETL quality gates, API response conformance,
  * form submission validation, data pipeline integrity checks.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { bash, read } from "smithers-orchestrator/tools";
+import { bash, read } from "smthrs/tools";
 import { z } from "zod";
 import ValidatePrompt from "./prompts/schema-conformance-gate/validate.mdx";
 import DiagnosePrompt from "./prompts/schema-conformance-gate/diagnose.mdx";

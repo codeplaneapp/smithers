@@ -1,5 +1,5 @@
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 
 import { implementerAgent, reviewerAgent } from "./components/agents.js";

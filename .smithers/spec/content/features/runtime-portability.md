@@ -12,7 +12,7 @@ Embed real Smithers workflow execution in a browser or non-Node host while unava
 
 ### Browser facade
 
-`smithers-orchestrator/browser` exports workflow definition, runtime construction, reusable and one-shot runners, and browser-safe primitives.
+`smthrs/browser` exports workflow definition, runtime construction, reusable and one-shot runners, and browser-safe primitives.
 
 ### RuntimeAdapter
 

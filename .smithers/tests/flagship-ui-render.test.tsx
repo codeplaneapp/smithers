@@ -3,8 +3,8 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import * as gatewayReact from "@smithers-orchestrator/gateway-react";
-import * as gatewayUi from "@smithers-orchestrator/gateway-ui";
+import * as gatewayReact from "@smthrs/gateway-react";
+import * as gatewayUi from "@smthrs/gateway-ui";
 
 GlobalRegistrator.register();
 const reactTestEnvironment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
@@ -21,7 +21,7 @@ const output = {
   refetch: async () => {},
 };
 
-mock.module("smithers-orchestrator/gateway-react", () => ({
+mock.module("smthrs/gateway-react", () => ({
   ...gatewayReact,
   createGatewayReactRoot: () => {},
   useGatewayActions: () => ({ launchRun: async () => run, cancelRun: async () => {} }),
@@ -31,7 +31,7 @@ mock.module("smithers-orchestrator/gateway-react", () => ({
   useGatewayRuns: () => ({ data: [run], refetch: async () => {} }),
 }));
 
-mock.module("smithers-orchestrator/gateway-ui", () => ({
+mock.module("smthrs/gateway-ui", () => ({
   ...gatewayUi,
   NodeOutputView: ({ nodeId }: { nodeId?: string }) => <div data-testid="node-output">{nodeId}</div>,
   RunEventLog: () => <div data-testid="event-log" />,

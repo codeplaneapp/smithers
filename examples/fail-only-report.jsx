@@ -7,11 +7,11 @@
  * Shape: trigger → shell runner → artifact collector → notable-event detector
  *        → report agent → sink (PR comment, Slack, issue).
  */
-import { Sequence, Parallel, Branch } from "smithers-orchestrator";
+import { Sequence, Parallel, Branch } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { bash, read } from "smithers-orchestrator/tools";
+import { bash, read } from "smthrs/tools";
 import { z } from "zod";
 import RunPrompt from "./prompts/fail-only-report/run.mdx";
 import AnalyzePrompt from "./prompts/fail-only-report/analyze.mdx";

@@ -1,1 +1,1 @@
-export * from "@smithers-orchestrator/gcp";
+export * from "@smthrs/gcp";

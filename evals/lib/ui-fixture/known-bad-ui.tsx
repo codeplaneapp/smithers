@@ -3,7 +3,7 @@
 // stream events, does NOT surface the failed node, does NOT render node output,
 // and has NO approval control. The verifier must FAIL it on events/output/error/
 // approval while passing mounts/status — proving the checks discriminate.
-import { createGatewayReactRoot, useGatewayRun } from "smithers-orchestrator/gateway-react";
+import { createGatewayReactRoot, useGatewayRun } from "smthrs/gateway-react";
 
 function App() {
   const runId = new URLSearchParams(location.search).get("runId") ?? undefined;

@@ -3,9 +3,9 @@
 // smithers-display-name: Post-Failure Autopsy
 // smithers-description: Auto-launched when a run fails: investigate why, suggest the fix (retry / rewind / edit-and-reset), and — gated on approval — report suspected smithers bugs via `smithers bug`.
 // smithers-tags: ops, debugging
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { $ } from "bun";
-import { createSmithers, Approval } from "smithers-orchestrator";
+import { createSmithers, Approval } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 
@@ -130,11 +130,9 @@ export default smithers((ctx) => {
         {/* 1 — Deterministically pull the failed run's state, events, and source. */}
         <Task id="gather" output={outputs.gather}>
           {async () => {
-            const inspectRes = await $`${cliRunner} smithers-orchestrator inspect ${targetRunId} --format json`
-              .nothrow()
-              .quiet();
-            const eventsRes = await $`${cliRunner} smithers-orchestrator events ${targetRunId}`.nothrow().quiet();
-            const versionRes = await $`${cliRunner} smithers-orchestrator --version`.nothrow().quiet();
+            const inspectRes = await $`${cliRunner} smthrs inspect ${targetRunId} --format json`.nothrow().quiet();
+            const eventsRes = await $`${cliRunner} smthrs events ${targetRunId}`.nothrow().quiet();
+            const versionRes = await $`${cliRunner} smthrs --version`.nothrow().quiet();
 
             const inspectText = inspectRes.stdout?.toString() ?? "";
             const eventsText = `${eventsRes.stdout?.toString() ?? ""}\n${eventsRes.stderr?.toString() ?? ""}`;
@@ -202,7 +200,7 @@ export default smithers((ctx) => {
             deps,
           ) => `You are the investigator in a post-failure autopsy. Smithers run "${targetRunId}" failed and this autopsy was launched automatically. Find out WHY, classify the failure, and produce ONE concrete suggestion.
 
-You have shell access — use it for READ-ONLY digging only: \`bunx smithers-orchestrator inspect ${targetRunId} --format json\`, \`bunx smithers-orchestrator events ${targetRunId}\`, \`bunx smithers-orchestrator output ${targetRunId} <nodeId>\`, reading workflow/prompt source files, checking tool availability (\`which\`, versions), and reading logs. Do NOT mutate anything: no retry, no rewind, no edits, no commits — you only diagnose and recommend.
+You have shell access — use it for READ-ONLY digging only: \`bunx smthrs inspect ${targetRunId} --format json\`, \`bunx smthrs events ${targetRunId}\`, \`bunx smthrs output ${targetRunId} <nodeId>\`, reading workflow/prompt source files, checking tool availability (\`which\`, versions), and reading logs. Do NOT mutate anything: no retry, no rewind, no edits, no commits — you only diagnose and recommend.
 
 Pre-gathered evidence (dig deeper yourself where it is thin):
 ${JSON.stringify({ state: deps.gather.state, runError: deps.gather.runError, smithersVersion: deps.gather.smithersVersion, lastEvents: deps.gather.lastEvents, workflowPath, workflowSourcePreview: deps.gather.workflowSource.slice(0, 4000) }, null, 2)}
@@ -211,7 +209,7 @@ Classify failureClass strictly:
 - "workflow-bug": the workflow script/prompts are at fault (bad schema, wrong deps/needs, a compute task throwing, a prompt asking the impossible).
 - "environment": missing CLI/auth/network/disk on this machine; the workflow and smithers are fine.
 - "agent-flake": a transient provider fault (rate limit/429, 5xx, timeout, truncated agent output that a re-run would likely clear).
-- "smithers-bug": smithers itself misbehaved — an engine/CLI/component defect, e.g. a crash inside smithers-orchestrator code, a scheduler deadlock on a valid graph, state corruption, an error message pointing into smithers internals rather than the workflow. Be conservative: only pick this when the evidence points INTO smithers code, and say why the workflow/environment are exonerated.
+- "smithers-bug": smithers itself misbehaved — an engine/CLI/component defect, e.g. a crash inside smthrs code, a scheduler deadlock on a valid graph, state corruption, an error message pointing into smithers internals rather than the workflow. Be conservative: only pick this when the evidence points INTO smithers code, and say why the workflow/environment are exonerated.
 - "unknown": evidence too thin to say; keep confidence low.
 
 Choose suggestion (one):
@@ -245,7 +243,7 @@ If (and only if) failureClass is "smithers-bug", also write \`bugTitle\` (one li
           <Task id="report-bug" output={outputs.bugReport}>
             {async () => {
               const res =
-                await $`${cliRunner} smithers-orchestrator bug --run ${targetRunId} --title ${investigate.bugTitle || "Smithers failure detected by post-failure autopsy"} --body ${investigate.bugBody || investigate.rootCause} --json`
+                await $`${cliRunner} smthrs bug --run ${targetRunId} --title ${investigate.bugTitle || "Smithers failure detected by post-failure autopsy"} --body ${investigate.bugBody || investigate.rootCause} --json`
                   .nothrow()
                   .quiet();
               const text = res.stdout?.toString() ?? "";

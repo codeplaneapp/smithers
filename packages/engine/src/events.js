@@ -2,20 +2,20 @@ import { EventEmitter } from "node:events";
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { Effect } from "effect";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-import { trackEvent } from "@smithers-orchestrator/observability/metrics";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
+import { trackEvent } from "@smthrs/observability/metrics";
 import {
   correlationContextToLogAnnotations,
   getCurrentCorrelationContext,
   mergeCorrelationContext,
   withCurrentCorrelationContext,
-} from "@smithers-orchestrator/observability/correlation";
-/** @typedef {import("@smithers-orchestrator/observability/correlation").CorrelationContext} CorrelationContext */
+} from "@smthrs/observability/correlation";
+/** @typedef {import("@smthrs/observability/correlation").CorrelationContext} CorrelationContext */
 
 /**
  * @typedef {SmithersEvent & { correlation?: CorrelationContext; }} CorrelatedSmithersEvent
  */
-/** @typedef {import("@smithers-orchestrator/observability/SmithersEvent").SmithersEvent} SmithersEvent */
+/** @typedef {import("@smthrs/observability/SmithersEvent").SmithersEvent} SmithersEvent */
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<Record<string, unknown>>} _BunSQLiteDatabase */
 
 /**

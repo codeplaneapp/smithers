@@ -10,11 +10,11 @@
  * bounded Loop persists every test run and repair attempt so failed traces and
  * healed tests are inspectable after resume or replay.
  */
-import { Sequence, Loop } from "smithers-orchestrator";
+import { Sequence, Loop } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, write, bash, grep } from "smithers-orchestrator/tools";
+import { read, write, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import PlanPrompt from "./prompts/playwright-test-agent/plan.mdx";
 import GeneratePrompt from "./prompts/playwright-test-agent/generate.mdx";

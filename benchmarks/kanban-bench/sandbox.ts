@@ -38,7 +38,7 @@ const SANDBOX_TSCONFIG = JSON.stringify(
       target: "ESNext",
       module: "ESNext",
       jsx: "react-jsx",
-      jsxImportSource: "smithers-orchestrator",
+      jsxImportSource: "smthrs",
       moduleResolution: "bundler",
       allowImportingTsExtensions: true,
       noEmit: true,
@@ -83,7 +83,7 @@ export function createKanbanBenchSandbox(options: KanbanBenchSandboxOptions): Ka
   mkdirSync(root, { recursive: true });
 
   // Module resolution: reuse the repo's node_modules (workspace links resolve
-  // smithers-orchestrator to packages/smithers, same code the CLI runs).
+  // smthrs to packages/smithers, same code the CLI runs).
   symlinkSync(join(repoRoot, "node_modules"), join(root, "node_modules"), "dir");
   writeFileSync(join(root, "package.json"), `${JSON.stringify({ name: "kanban-bench-sandbox", private: true, type: "module" })}\n`);
   writeFileSync(

@@ -5,12 +5,12 @@
 // `buildRunStatusSummary` is the thin adapter-facing wrapper the CLI calls and
 // `renderRunStatusHuman` the compact (~5-8 line) human formatter.
 
-import { SmithersError } from "@smithers-orchestrator/errors";
-import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
+import { SmithersError } from "@smthrs/errors";
+import { computeRunStateFromRow, deriveRunState } from "@smthrs/db/runState";
 import { formatElapsedCompact } from "./format.js";
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("@smithers-orchestrator/db/runState").RunStateView} RunStateView */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/db/runState").RunStateView} RunStateView */
 
 /** Window used to answer "is it moving?" — nodes finished in the last N ms. */
 export const RUN_STATUS_RECENT_WINDOW_MS = 10 * 60 * 1000;
@@ -46,6 +46,20 @@ function parseObjectJson(raw) {
     return isRecord(parsed) ? parsed : {};
   } catch {
     return {};
+  }
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {Record<string, unknown> | null}
+ */
+function parseEventPayloadJson(raw) {
+  if (typeof raw !== "string" || raw.length === 0) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
   }
 }
 
@@ -204,7 +218,7 @@ export function parseFrameDependsOn(xmlJson) {
  * @property {string} runId
  * @property {string} workflow
  * @property {string} status raw run row status
- * @property {"done"|"running-healthy"|"progressing"|"stalled"|"orphaned"|"blocked"|"waiting-quota"|"paused"|"cancelled"|"failed"} verdict
+ * @property {"done"|"degraded"|"running-healthy"|"progressing"|"stalled"|"orphaned"|"blocked"|"waiting-quota"|"paused"|"cancelled"|"failed"} verdict
  * @property {string} reason
  * @property {{ state: string; unhealthy?: { kind: string; lastHeartbeatAt?: string } } | undefined} [liveness] derived process liveness; absent when it was not computed
  * @property {{ finished: number; inProgress: number; pending: number; failed: number; waitingApproval: number; waitingEvent: number; waitingTimer: number; skipped: number; other: number; total: number }} counts
@@ -233,6 +247,7 @@ export function parseFrameDependsOn(xmlJson) {
  *   recentWindowMs?: number;
  *   deps?: Map<string, { dependsOn: string[]; continueOnFail: boolean }> | null;
  *   liveness?: RunStateView | null;
+ *   exhaustedLoops?: Array<{ id: string; iteration?: number; maxIterations?: number | null }> | null;
  * }} params
  * @returns {RunStatusSummary}
  */
@@ -245,6 +260,7 @@ export function summarizeRunStatus(params) {
     recentWindowMs = RUN_STATUS_RECENT_WINDOW_MS,
     deps = null,
     liveness = null,
+    exhaustedLoops = null,
   } = params;
 
   // A continued run whose segment has not finished is still logically running
@@ -417,11 +433,27 @@ export function summarizeRunStatus(params) {
   const windowLabel = `${Math.max(1, Math.round(recentWindowMs / 60_000))}m`;
   const quotaParked = parkedAttempts.length > 0;
   if (status === "finished" || status === "continued") {
-    verdict = "done";
-    reason =
-      run.startedAtMs && run.finishedAtMs
-        ? `run finished in ${formatElapsedCompact(run.startedAtMs, run.finishedAtMs)}`
-        : "run finished";
+    if (Array.isArray(exhaustedLoops) && exhaustedLoops.length > 0) {
+      // A loop that exited via return-last with `until` still false never
+      // converged — the run finished, but "done" would be a lie (#1464 AWF-1).
+      verdict = "degraded";
+      const loopDescriptions = exhaustedLoops
+        .slice(0, MAX_BOTTLENECK_NODES)
+        .map((loop) =>
+          loop.maxIterations != null
+            ? `'${loop.id}' (maxIterations ${loop.maxIterations} reached, until condition never satisfied)`
+            : `'${loop.id}' (until condition never satisfied)`,
+        );
+      const extra =
+        exhaustedLoops.length > MAX_BOTTLENECK_NODES ? `, +${exhaustedLoops.length - MAX_BOTTLENECK_NODES} more` : "";
+      reason = `run finished, but loop ${loopDescriptions.join(", ")}${extra} exhausted without converging`;
+    } else {
+      verdict = "done";
+      reason =
+        run.startedAtMs && run.finishedAtMs
+          ? `run finished in ${formatElapsedCompact(run.startedAtMs, run.finishedAtMs)}`
+          : "run finished";
+    }
   } else if (status === "cancelled") {
     verdict = "cancelled";
     reason = run.finishedAtMs
@@ -476,7 +508,14 @@ export function summarizeRunStatus(params) {
   // was killed stays `running` in the DB forever, so node counts alone happily
   // report "progressing" for a corpse. `ps` already classifies this correctly;
   // `status` is the command an operator actually reaches for, so it must agree.
-  if (liveness?.state === "orphaned" || liveness?.state === "stale") {
+  if (liveness?.state === "cancel-pending") {
+    verdict = "cancel-pending";
+    const since =
+      liveness.unhealthy?.kind === "engine-heartbeat-stale" && liveness.unhealthy.lastHeartbeatAt
+        ? ` (last heartbeat ${liveness.unhealthy.lastHeartbeatAt})`
+        : "";
+    reason = `cancellation was requested, but the engine died before recording the terminal status${since}; do not resume this run`;
+  } else if (liveness?.state === "orphaned" || liveness?.state === "stale") {
     const orphaned = liveness.state === "orphaned";
     verdict = orphaned ? "orphaned" : "stalled";
     const since =
@@ -688,23 +727,52 @@ export async function buildRunStatusSummary(adapter, runId, options = {}) {
   if (!run) {
     throw new SmithersError("RUN_NOT_FOUND", `Run not found: ${runId}`);
   }
-  const [nodes, attempts, lastFrame, forcedBoundaryEvents, liveness, ...oneshotControlEventGroups] = await Promise.all([
-    adapter.listNodes(runId),
-    adapter.listAttemptsForRun(runId),
-    adapter.getLastFrame(runId),
-    adapter.listEventsByType(runId, "SideEffectBoundaryCrossed"),
-    // Same derivation `ps` uses, so the two commands can never disagree about
-    // whether a run is alive. A liveness probe that throws must not sink the
-    // whole summary — the row-derived half is still worth printing.
-    computeRunStateFromRow(adapter, run, options.nowMs != null ? { now: options.nowMs } : {}).catch(() => null),
-    ...ONESHOT_CONTROL_EVENT_TYPES.map((type) => adapter.listEventsByType(runId, type)),
-  ]);
+  // A continued run whose segment never finished is logically still running;
+  // feed the liveness probe the same normalized status the verdict uses, or a
+  // killed engine on a continued run never classifies as stale (#1464 AWF-2).
+  const livenessRun = run.status === "continued" && run.finishedAtMs == null ? { ...run, status: "running" } : run;
+  // Row-only liveness fallback: the full probe also reads sandboxes/nodes, and
+  // any throw there must not leave a dead engine reporting "running-healthy".
+  // The run row alone (heartbeat_at_ms + runtime_owner_id) is enough to
+  // classify stale/orphaned (#1464 AWF-2).
+  const rowOnlyLiveness = () => {
+    try {
+      return deriveRunState({
+        run: livenessRun,
+        ...(options.nowMs != null ? { now: options.nowMs } : {}),
+      });
+    } catch {
+      return null;
+    }
+  };
+  const [nodes, attempts, lastFrame, forcedBoundaryEvents, liveness, finishedEvents, ...oneshotControlEventGroups] =
+    await Promise.all([
+      adapter.listNodes(runId),
+      adapter.listAttemptsForRun(runId),
+      adapter.getLastFrame(runId),
+      adapter.listEventsByType(runId, "SideEffectBoundaryCrossed"),
+      // Same derivation `ps` uses, so the two commands can never disagree about
+      // whether a run is alive. A liveness probe that throws must not sink the
+      // whole summary — fall back to the row-only classification.
+      computeRunStateFromRow(adapter, livenessRun, options.nowMs != null ? { now: options.nowMs } : {}).catch(
+        rowOnlyLiveness,
+      ),
+      // listEventsByType returns a RunnableEffect on some adapters, not a bare
+      // Promise — normalize before attaching the fallback or `.catch` explodes.
+      Promise.resolve(adapter.listEventsByType(runId, "RunFinished")).catch(() => []),
+      ...ONESHOT_CONTROL_EVENT_TYPES.map((type) => adapter.listEventsByType(runId, type)),
+    ]);
+  const finishedPayload = parseEventPayloadJson(finishedEvents?.at(-1)?.payloadJson);
+  const exhaustedLoops = Array.isArray(finishedPayload?.exhaustedLoops)
+    ? finishedPayload.exhaustedLoops.filter((loop) => loop && typeof loop.id === "string")
+    : null;
   const summary = summarizeRunStatus({
     run,
     nodes: nodes ?? [],
     attempts: attempts ?? [],
     deps: parseFrameDependsOn(lastFrame?.xmlJson),
     liveness,
+    exhaustedLoops,
     ...(options.nowMs != null ? { nowMs: options.nowMs } : {}),
     ...(options.recentWindowMs != null ? { recentWindowMs: options.recentWindowMs } : {}),
   });

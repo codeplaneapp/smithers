@@ -3,8 +3,8 @@ import { getTableColumns } from "drizzle-orm/utils";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { Cause, Effect, Exit } from "effect";
 import { z } from "zod";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
 import { getJsonColumnKeys, isPostgresDb, OUTPUT_PROVENANCE_SEQ, pgRowToDrizzle } from "./snapshot.js";
 import { withSqliteWriteRetryEffect } from "./write-retry.js";
 /** @typedef {import("drizzle-orm").AnyColumn} AnyColumn */

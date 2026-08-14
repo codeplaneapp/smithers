@@ -5,7 +5,7 @@
  * can author, load, and register Smithers workflows with familiar patterns.
  */
 
-import type { SmithersWorkflow } from "smithers-orchestrator";
+import type { SmithersWorkflow } from "smthrs";
 
 /**
  * The parsed frontmatter block from a workflow file.

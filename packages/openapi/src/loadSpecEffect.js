@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 import { readFileSync } from "node:fs";
 import { Effect } from "effect";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
 import { parseSpecText } from "./_specHelpers.js";
 import { SPEC_SOURCE_URL } from "./specSourceUrl.js";
 

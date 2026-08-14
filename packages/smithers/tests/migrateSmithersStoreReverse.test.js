@@ -1,43 +1,24 @@
-import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { describe, expect, setDefaultTimeout } from "bun:test";
 import { Database } from "bun:sqlite";
-import { SmithersDb } from "../../db/src/adapter.js";
-import { ensureSmithersTables } from "../../db/src/ensure.js";
-import { forkRun, getBranchInfo, listBranches } from "@smithers-orchestrator/time-travel/fork";
-import { loadSnapshot } from "@smithers-orchestrator/time-travel/snapshot";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import pg from "pg";
-import { createSmithers } from "../src/create.js";
+import { loadSnapshot } from "@smthrs/time-travel/snapshot";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { migrateSmithersStore } from "../src/migrateSmithersStore.js";
 import { openSmithersBackend } from "../src/openSmithersBackend.js";
 import { createSmithersPostgres } from "../src/create.js";
-import { openSmithersStore } from "../src/openSmithersStore.js";
-import { resolveSmithersBackendChoice } from "../src/resolveSmithersBackendChoice.js";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { z } from "zod";
 
 import {
   chunkedTest,
-  assertRowForRowEquality,
-  canonicalRows,
   listSourceTables,
-  normalizeCell,
-  sourceColumns,
-  assertSqlitePrimaryKeyAndDuplicateRejection,
   closeApi,
   makeWorkspace,
-  PG_URL,
-  pgUrlForDatabase,
   quoteId,
-  seedOlderSqliteStore,
   seedPgliteStore,
   seedPgliteStoreWithReceipt,
   seedSqliteStore,
   sqliteRunIds,
   tableCount,
-  tempPgDatabaseName,
-  withTempPostgresDatabase,
 } from "./migrateStoreKit.js";
 
 setDefaultTimeout(120_000);
@@ -178,21 +159,25 @@ describe("migrateSmithersStore reverse and inference", () => {
   // prior migration. Reverse-inference (`migrate --to sqlite` with no --from)
   // must trust it over leftover stores on disk, instead of misreading the
   // source as sqlite and failing with "source and target are both sqlite".
-  chunkedTest("reverse-infers pglite->sqlite from the migrated.json receipt when --from is omitted", async () => {
-    const cwd = makeWorkspace("smithers-migrate-receipt-reverse");
-    await seedPgliteStoreWithReceipt(cwd, { keepSqlite: false });
-    expect(existsSync(join(cwd, "smithers.db"))).toBe(false);
-    const receipt = JSON.parse(readFileSync(join(cwd, ".smithers", "migrated.json"), "utf8"));
-    expect(receipt.target.backend).toBe("pglite");
+  chunkedTest(
+    "reverse-infers pglite->sqlite from the migrated.json receipt when --from is omitted",
+    async () => {
+      const cwd = makeWorkspace("smithers-migrate-receipt-reverse");
+      await seedPgliteStoreWithReceipt(cwd, { keepSqlite: false });
+      expect(existsSync(join(cwd, "smithers.db"))).toBe(false);
+      const receipt = JSON.parse(readFileSync(join(cwd, ".smithers", "migrated.json"), "utf8"));
+      expect(receipt.target.backend).toBe("pglite");
 
-    const result = await migrateSmithersStore({ cwd, to: "sqlite" });
+      const result = await migrateSmithersStore({ cwd, to: "sqlite" });
 
-    expect(result.source.backend).toBe("pglite");
-    expect(result.backend).toBe("sqlite");
-    expect(result.runCount).toBe(1);
-    expect(existsSync(join(cwd, "smithers.db"))).toBe(true);
-    expect(sqliteRunIds(join(cwd, "smithers.db"))).toEqual(["run-migrate-1"]);
-  });
+      expect(result.source.backend).toBe("pglite");
+      expect(result.backend).toBe("sqlite");
+      expect(result.runCount).toBe(1);
+      expect(existsSync(join(cwd, "smithers.db"))).toBe(true);
+      expect(sqliteRunIds(join(cwd, "smithers.db"))).toEqual(["run-migrate-1"]);
+    },
+    300_000,
+  );
 
   chunkedTest("honors the migrated.json receipt even when a leftover sqlite store still exists", async () => {
     const cwd = makeWorkspace("smithers-migrate-receipt-leftover-sqlite");

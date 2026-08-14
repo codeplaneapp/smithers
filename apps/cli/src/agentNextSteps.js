@@ -62,7 +62,7 @@ function buildHumanNextSteps(context = {}) {
  * so every command suggests the same three things in the same words:
  *
  *  1. Build or open a custom workflow UI (`.smithers/ui/<workflowId>.tsx`
- *     authored with the smithers-orchestrator/gateway-react hooks, declared in
+ *     authored with the smthrs/gateway-react hooks, declared in
  *     the workflow with `<UI entry="../ui/<workflowId>.tsx" />`, opened via
  *     `smithers ui <runId>`; `smithers ui --app` for the full control plane).
  *  2. Visualize the workflow (`smithers graph <file>`, `smithers tree <runId>`,
@@ -113,11 +113,11 @@ export function buildAgentNextSteps(context = {}) {
   const lines = ["Suggest to the user:"];
   if (uiOpened) {
     lines.push(
-      `1. Iterate on the workflow UI source at ${uiFile} (composed from the smithers-orchestrator/gateway-ui widgets and smithers-orchestrator/ui primitives over the gateway-react hooks, declared by the workflow's <UI> component); the Gateway serves the file from disk, so edits show up on browser refresh.`,
+      `1. Iterate on the workflow UI source at ${uiFile} (composed from the smthrs/gateway-ui widgets and smthrs/ui primitives over the gateway-react hooks, declared by the workflow's <UI> component); the Gateway serves the file from disk, so edits show up on browser refresh.`,
     );
     lines.push("2. Open the full Smithers control-plane UI with `smithers ui --app`.");
     lines.push(
-      `3. Build custom UIs for other workflows that lack one: author .smithers/ui/<workflowId>.tsx by composing the smithers-orchestrator/gateway-ui widgets (WorkflowUiShell, RunTree, RunEventLog, ApprovalPanel, ...) and smithers-orchestrator/ui primitives over the gateway-react hooks, add \`<UI entry="../ui/<workflowId>.tsx" />\` to that workflow, then open it with \`smithers ui <runId>\`.`,
+      `3. Build custom UIs for other workflows that lack one: author .smithers/ui/<workflowId>.tsx by composing the smthrs/gateway-ui widgets (WorkflowUiShell, RunTree, RunEventLog, ApprovalPanel, ...) and smthrs/ui primitives over the gateway-react hooks, add \`<UI entry="../ui/<workflowId>.tsx" />\` to that workflow, then open it with \`smithers ui <runId>\`.`,
     );
     lines.push(`4. ${buildWorkflowLine}`);
     commands.push({ command: "ui --app", description: "Open the full Smithers control-plane UI" });
@@ -131,7 +131,7 @@ export function buildAgentNextSteps(context = {}) {
         commands.push({ command: `ui ${runRef}`, description: "Open the custom workflow UI" });
       } else {
         lines.push(
-          `${step}. Build the user a custom workflow UI: author ${uiFile} by composing the smithers-orchestrator/gateway-ui widgets (WorkflowUiShell, RunTree, RunEventLog, ApprovalPanel, ...) and smithers-orchestrator/ui primitives over the gateway-react hooks, add \`<UI entry="../ui/${workflowId ?? "<workflowId>"}.tsx" />\` to the workflow, then open it with \`smithers ui ${runRef}\`. \`smithers ui --app\` opens the full Smithers control-plane UI.`,
+          `${step}. Build the user a custom workflow UI: author ${uiFile} by composing the smthrs/gateway-ui widgets (WorkflowUiShell, RunTree, RunEventLog, ApprovalPanel, ...) and smthrs/ui primitives over the gateway-react hooks, add \`<UI entry="../ui/${workflowId ?? "<workflowId>"}.tsx" />\` to the workflow, then open it with \`smithers ui ${runRef}\`. \`smithers ui --app\` opens the full Smithers control-plane UI.`,
         );
         commands.push({ command: `ui ${runRef}`, description: `Open the workflow UI (after authoring ${uiFile})` });
       }

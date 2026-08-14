@@ -16,7 +16,7 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import type { AgentLike } from "smithers-orchestrator";
+import type { AgentLike } from "smthrs";
 
 type DelayTable = Partial<Record<"implement" | "validate" | "review" | "merge" | "other", number>>;
 

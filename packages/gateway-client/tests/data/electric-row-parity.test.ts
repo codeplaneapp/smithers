@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { SmithersDb } from "@smthrs/db/adapter";
 import {
   serializeApprovalRow,
   serializeComparisonScoreRow,
@@ -10,8 +10,8 @@ import {
   serializeRunRow,
   serializeScoreRow,
   serializeTicketRow,
-} from "@smithers-orchestrator/gateway/api";
-import { createSmithersPostgres } from "smithers-orchestrator";
+} from "@smthrs/gateway/api";
+import { createSmithersPostgres } from "smthrs";
 import type { GatewayComparisonScoreRow, GatewayScoreDetail, GatewayScoreRow } from "../../src/index.ts";
 import { mapSmithersElectricRow } from "../../src/data/mapSmithersElectricRow.ts";
 

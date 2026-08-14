@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from "react";
-import { useGatewayApprovals, useGatewayMutation, useGatewayWorkflows } from "@smithers-orchestrator/gateway-react";
-import { gatewayKeys } from "@smithers-orchestrator/gateway-client";
-import { EmptyState, Skeleton } from "@smithers-orchestrator/ui";
+import { useGatewayApprovals, useGatewayMutation, useGatewayWorkflows } from "@smthrs/gateway-react";
+import { gatewayKeys } from "@smthrs/gateway-client";
+import { EmptyState, Skeleton } from "@smthrs/ui";
 import { openSurface } from "../app/navigation";
 import { StatusPill } from "../cards/StatusPill";
 import { findNode } from "../runs/Run";

@@ -10,8 +10,8 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { getTableConfig } from "drizzle-orm/sqlite-core";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
 import * as timeTravelBarrel from "../src/index.js";
 import * as rewindRateLimitBarrel from "../src/rewindRateLimit.js";
 import { diffSnapshots, formatDiffForTui, formatDiffAsJson } from "../src/diff.js";
@@ -536,18 +536,15 @@ describe("forkRun failure branches", () => {
       contentHash: "h",
       createdAtMs: 1,
     };
-    const fakePgAdapter = {
-      internalStorage: {
-        dialect: "postgres",
-        execute: async () => {},
-        queryAll: async () => [],
-        queryOne: async () => tornRow,
-      },
-      getRun: async () => null,
-    };
-    await expect(
-      forkRun(fakePgAdapter as never, { parentRunId: "run-torn", frameNo: 1, resetNodes: ["analyze"] }),
-    ).rejects.toThrow(/parse snapshot nodes|not valid JSON/);
+    const { adapter, sqlite } = createTestDb();
+    try {
+      await adapter.internalStorage.upsert("_smithers_snapshots", tornRow, ["runId", "frameNo"]);
+      await expect(forkRun(adapter, { parentRunId: "run-torn", frameNo: 1, resetNodes: ["analyze"] })).rejects.toThrow(
+        /parse snapshot agent checkpoint provenance|not valid JSON/,
+      );
+    } finally {
+      sqlite.close();
+    }
   });
 
   test("a blocked child snapshot insert rolls the whole fork back", async () => {
@@ -700,8 +697,8 @@ describe("retryTask branches", () => {
     pinSqliteBackend(repo.dir);
     repo.write(
       "workflow.tsx",
-      `/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Subflow } from "smithers-orchestrator";
+      `/** @jsxImportSource smthrs */
+import { createSmithers, Subflow } from "smthrs";
 import { z } from "zod";
 
 const { smithers, Workflow, Task, outputs } = createSmithers({
@@ -963,7 +960,7 @@ export default smithers(() => (
     }
   });
 
-  test("nodes without attempts fall back to updatedAtMs ordering; terminal attempts are not cancelled", async () => {
+  test("nodes without attempts fall back to updatedAtMs ordering; reset attempts are consistently cancelled", async () => {
     const { adapter, sqlite } = createTestDb();
     try {
       await adapter.insertRun({ runId: "run-retry", workflowName: "wf", status: "failed", createdAtMs: 1 });
@@ -1000,7 +997,9 @@ export default smithers(() => (
         label: null,
       });
       // Target has one failed attempt (finishedAtMs null → stamped at reset)
-      // and one already-finished attempt that must be left untouched.
+      // and one already-finished attempt. Both are reset-cancelled so retry
+      // attempt numbering can restart consistently, while existing finish
+      // timestamps remain intact.
       await adapter.insertAttempt({
         runId: "run-retry",
         nodeId: "task:target",
@@ -1027,7 +1026,9 @@ export default smithers(() => (
       const attempts = await adapter.listAttempts("run-retry", "task:target", 0);
       const finished = attempts.find((a: { attempt: number }) => a.attempt === 1);
       const failed = attempts.find((a: { attempt: number }) => a.attempt === 2);
-      expect(finished?.state).toBe("finished");
+      expect(finished?.state).toBe("cancelled");
+      expect(finished?.finishedAtMs).toBe(95);
+      expect(JSON.parse(finished?.metaJson ?? "{}")).toMatchObject({ resetCancelled: true });
       expect(failed?.state).toBe("cancelled");
       expect(failed?.finishedAtMs).not.toBeNull();
 
@@ -1070,7 +1071,10 @@ export default smithers(() => (
       const [attempt] = await adapter.listAttempts(runId, "task:quota", 0);
       expect(attempt?.state).toBe("cancelled");
       expect(attempt?.finishedAtMs).not.toBeNull();
-      expect(JSON.parse(attempt?.metaJson ?? "{}")).toMatchObject({ resetCancelled: true });
+      const resetMeta = JSON.parse(attempt?.metaJson ?? "{}");
+      expect(resetMeta).toMatchObject({ resetCancelled: true });
+      expect(Number.isSafeInteger(resetMeta.resetResumeBoundaryMs)).toBe(true);
+      expect(resetMeta.discardResumeSession).toBeUndefined();
     } finally {
       sqlite.close();
     }
@@ -1147,8 +1151,8 @@ describe("oneshot resume preflight", () => {
     chmodSync(repo.path("bin/codex"), 0o755);
     repo.write(
       ".smithers/workflows/oneshot.tsx",
-      `/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+      `/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 const { Workflow, Task, smithers, outputs } = createSmithers({
   input: z.object({ goal: z.string(), review: z.enum(["on", "off"]), model: z.string() }),

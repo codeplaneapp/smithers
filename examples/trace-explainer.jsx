@@ -5,11 +5,11 @@
  *
  * Shape: trace store → analyzer agent → optimization report.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import IngestPrompt from "./prompts/trace-explainer/ingest.mdx";
 import AnalyzePrompt from "./prompts/trace-explainer/analyze.mdx";

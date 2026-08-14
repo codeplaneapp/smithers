@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createVersionedArtifactGuard } from "./llms-version-guard.ts";
+import { checkVersionRelease, createVersionedArtifactGuard } from "./llms-version-guard.ts";
 import { versionedGeneratorArgs } from "./llms-check-mode.mjs";
 
 const VERSION = "0.28.0";
@@ -17,6 +17,20 @@ function withFixture(run: (dir: string) => void): void {
 }
 
 describe("versioned llms artifact guard", () => {
+  test("treats a release tag as immutable without consulting npm", () => {
+    let publicationChecks = 0;
+    expect(
+      checkVersionRelease(VERSION, {
+        hasReleaseTag: () => true,
+        checkPublication: () => {
+          publicationChecks += 1;
+          return "unpublished";
+        },
+      }),
+    ).toBe("published");
+    expect(publicationChecks).toBe(0);
+  });
+
   test("check mode skips versioned bundles only for a confirmed published version", () => {
     expect(versionedGeneratorArgs("published", VERSION)).toEqual(["--skip-versioned"]);
     expect(versionedGeneratorArgs("unpublished", VERSION)).toEqual([]);
@@ -43,7 +57,7 @@ describe("versioned llms artifact guard", () => {
     });
   });
 
-  test("refuses to overwrite a version already published on npm", () => {
+  test("refuses to overwrite an already released version", () => {
     withFixture((dir) => {
       const path = join(dir, "llms-full-v0.28.0.txt");
       writeFileSync(path, "historic bundle\n");
@@ -56,7 +70,7 @@ describe("versioned llms artifact guard", () => {
       expect(guard.write(path, "new bundle\n")).toBe("refused");
       expect(readFileSync(path, "utf8")).toBe("historic bundle\n");
       expect(errors[0]).toContain("Bump the package version first");
-      expect(() => guard.assertNoPublishedVersion()).toThrow(/already published on npm/);
+      expect(() => guard.assertNoPublishedVersion()).toThrow(/already released/);
     });
   });
 
@@ -89,7 +103,7 @@ describe("versioned llms artifact guard", () => {
 
       expect(guard.write(path, "unchecked bundle\n")).toBe("skipped");
       expect(existsSync(path)).toBe(false);
-      expect(warnings[0]).toMatch(/npm registry status .* unavailable/);
+      expect(warnings[0]).toMatch(/release status .* unavailable/);
       expect(warnings[0]).toContain(path);
       guard.assertNoPublishedVersion();
     });

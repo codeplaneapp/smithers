@@ -1,7 +1,7 @@
 import type { Effect, Schema } from "effect";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
-import type { CachePolicy } from "@smithers-orchestrator/scheduler/CachePolicy";
-import type { RetryPolicy } from "@smithers-orchestrator/scheduler/RetryPolicy";
+import type { CachePolicy } from "@smthrs/scheduler/CachePolicy";
+import type { RetryPolicy } from "@smthrs/scheduler/RetryPolicy";
 
 // `unknown` here made every concrete `Schema.Struct<...>` unassignable (schema
 // type params are invariant), so the documented Effect API could not typecheck

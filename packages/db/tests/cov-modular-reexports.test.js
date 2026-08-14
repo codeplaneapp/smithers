@@ -34,7 +34,7 @@ import { parseFrameDelta as mParseFrameDelta } from "../src/frame-codec/parseFra
 import { serializeFrameDelta as mSerializeFrameDelta } from "../src/frame-codec/serializeFrameDelta.js";
 import { normalizeFrameEncoding as mNormalizeFrameEncoding } from "../src/frame-codec/normalizeFrameEncoding.js";
 import { FRAME_KEYFRAME_INTERVAL as mFrameKeyframeInterval } from "../src/frame-codec/FRAME_KEYFRAME_INTERVAL.js";
-import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
+import { canonicalizeXml } from "@smthrs/graph/utils/xml";
 
 describe("top-level + subpath barrels", () => {
   test("src/index.js re-exports the public surface", () => {

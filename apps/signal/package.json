@@ -1,5 +1,5 @@
 {
-  "name": "@smithers-orchestrator/signal",
+  "name": "@smthrs/signal",
   "version": "0.0.1",
   "private": true,
   "description": "The Smithers Signal — Cloudflare productionization of the daily-ceo-intel workflow: runner container, scheduler Worker, and the signal.smithers.sh magazine site.",
@@ -20,7 +20,7 @@
     "alchemy": "^0.93.12",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "smithers-orchestrator": "workspace:*",
+    "smthrs": "workspace:*",
     "zod": "4.4.3"
   },
   "devDependencies": {

@@ -12,8 +12,8 @@
 //     --run-id fix-all --input '{"maxConcurrency":8,"reviewIterations":3}' -d
 // Scope a first validation run to one standalone bug:
 //   ... --input '{"numbers":[296],"reviewIterations":2}'
-/** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { ClaudeCodeAgent, createSmithers } from "smthrs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";

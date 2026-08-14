@@ -30,7 +30,7 @@ PLATFORM-VISUAL (leaf rendering, props-in/callbacks-out, no business logic)
   packages/ui, packages/gateway-ui   exist: web DOM. Note: the smithers repo's
                                  own scripts/check-ui-architecture.mjs already
                                  ratchets gateway-ui + ui-styleguide as LEGACY;
-                                 new web code prefers @smithers-orchestrator/ui.
+                                 new web code prefers @smthrs/ui.
   packages/tui-ui    [NEW]       opentui leaf library mirroring the ui/
                                  gateway-ui vocabulary: StatusPill, EmptyState,
                                  Keybar, RunTree, RunEventLog, ApprovalCard,
@@ -41,7 +41,7 @@ SHELLS
                                  pnpm overrides (verified: 4 link:../smithers/
                                  packages/* entries), so extracted packages are
                                  immediately consumable
-  packages/tui                   terminal shell (@smithers-orchestrator/tui,
+  packages/tui                   terminal shell (@smthrs/tui,
                                  bin smithers-mon): modes, keybindings, layout,
                                  hijack = ui-core + tui-ui
 ```
@@ -87,7 +87,7 @@ Explicitly out of scope for v1: service worker/push, pair multiplayer, WebLLM an
 - `docs/spec/features.json` holds 78 records (prompt said ~90); `docs/spec/content/features/` has 78 pages (prompt said ~80); `docs/deck/assets/` is 26 PNGs + 4 GIFs + a manifest (prompt said 28 screenshots).
 - Clipboard touches 3 flow descriptors, not 4 (`copy-text`, `copy-file-content`, `copy-pair-link`).
 - Zustand store count: 63 `*Store.ts` files, 62 modules importing zustand; the prompt's "62" matches the latter.
-- multi imports the scoped names `@smithers-orchestrator/gateway-react` (23 files) and `@smithers-orchestrator/gateway-client` (14 files).
+- multi imports the scoped names `@smthrs/gateway-react` (23 files) and `@smthrs/gateway-client` (14 files).
 - The 300 flow descriptor dirs are exactly 300 and the tree is flat (nesting is documented but unused).
 - zmux corrections are material and collected in 06-zmux-harness.md (no caller-supplied session id; `command` is a shell string; `env` replaces the whole child environment; capture is raw ANSI bytes with no grid; notifications broadcast to every connection; backpressure closes slow clients).
 - smithers root scripts use colons (`check:docs`, not `check-docs`), and `smithers up --interactive` today hard-fails with `TUI_MONITOR_UNAVAILABLE` when the TUI package is missing (no inline-stream fallback, contrary to older design notes).

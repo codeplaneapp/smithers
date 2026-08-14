@@ -12,7 +12,7 @@ For simpler inline approval, use the `needsApproval` prop on `<Task>`: see [work
 ## Workflow Definition
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 // approval-gate.tsx
 import {
   Approval,
@@ -20,7 +20,7 @@ import {
   Task,
   approvalDecisionSchema,
   createSmithers,
-} from "smithers-orchestrator";
+} from "smthrs";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
@@ -91,14 +91,14 @@ export default smithers((ctx) => {
 ## Running
 
 ```bash
-bunx smithers-orchestrator up approval-gate.tsx --input '{}'
+bunx smthrs up approval-gate.tsx --input '{}'
 ```
 
 ```
 [approval-gate] Starting run mno345
 [write-draft] Done -> { title: "Why Resumability Matters", content: "In production AI systems..." }
 [approve-publish] Waiting for approval...
-[approval-gate] Paused. Run `bunx smithers-orchestrator approve` or `bunx smithers-orchestrator deny` to continue.
+[approval-gate] Paused. Run `bunx smthrs approve` or `bunx smthrs deny` to continue.
 ```
 
 ## Approving or Denying
@@ -106,8 +106,8 @@ bunx smithers-orchestrator up approval-gate.tsx --input '{}'
 Approve and resume:
 
 ```bash
-bunx smithers-orchestrator approve mno345 --node approve-publish
-bunx smithers-orchestrator up approval-gate.tsx --run-id mno345 --resume true
+bunx smthrs approve mno345 --node approve-publish
+bunx smthrs up approval-gate.tsx --run-id mno345 --resume true
 ```
 
 ```
@@ -120,7 +120,7 @@ bunx smithers-orchestrator up approval-gate.tsx --run-id mno345 --resume true
 Deny and halt:
 
 ```bash
-bunx smithers-orchestrator deny mno345 --node approve-publish
+bunx smthrs deny mno345 --node approve-publish
 ```
 
 ```
@@ -131,7 +131,7 @@ bunx smithers-orchestrator deny mno345 --node approve-publish
 ## Listing Pending Approvals
 
 ```bash
-bunx smithers-orchestrator ps --status waiting-approval
+bunx smthrs ps --status waiting-approval
 ```
 
 ```json

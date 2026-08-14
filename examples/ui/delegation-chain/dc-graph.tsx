@@ -19,7 +19,7 @@ import {
 } from "@xyflow/react";
 import dagre from "dagre";
 import type { CSSProperties } from "react";
-import type { DelegationGraph } from "smithers-orchestrator/gateway-react";
+import type { DelegationGraph } from "smthrs/gateway-react";
 import {
   EstimateChip,
   attentionCount,

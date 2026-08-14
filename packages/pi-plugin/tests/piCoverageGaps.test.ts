@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createServer, type Server } from "node:http";
-import { createSmithersAgentContract } from "@smithers-orchestrator/agents/agent-contract";
+import { createSmithersAgentContract } from "@smthrs/agents/agent-contract";
 import { buildSmithersPiSystemPrompt } from "../src/buildSmithersPiSystemPrompt.js";
 import { SmithersPiHttpClient } from "../src/api/SmithersPiHttpClient.js";
 import { DevToolsClient } from "../src/runtime/DevToolsClient.js";

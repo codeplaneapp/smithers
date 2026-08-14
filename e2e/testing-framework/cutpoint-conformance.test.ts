@@ -4,12 +4,12 @@ import { existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import * as sourceEntry from "@smithers-orchestrator/testing";
+import { createSmithers } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import * as sourceEntry from "@smthrs/testing";
 import * as shippedEntry from "../../packages/testing/src/index.js";
-import type { ScenarioResult } from "@smithers-orchestrator/testing";
+import type { ScenarioResult } from "@smthrs/testing";
 import { makeEngineChildFixture } from "./testingProcessFixture.ts";
 
 /**
@@ -27,7 +27,7 @@ import { makeEngineChildFixture } from "./testingProcessFixture.ts";
  *
  * The table runs against BOTH runtime entrypoints: the tsconfig-alias
  * TypeScript source AND the committed src/index.js package artifact that
- * `@smithers-orchestrator/testing` actually publishes via its exports map —
+ * `@smthrs/testing` actually publishes via its exports map —
  * a green source suite must never mask a stale shipped bundle.
  */
 const ENTRYPOINTS = [
@@ -42,7 +42,7 @@ test("the shipped entrypoint is the committed JavaScript artifact, not a rewrite
   expect(shippedEntry as unknown).not.toBe(sourceEntry as unknown);
   const resolved = Bun.resolveSync("../../packages/testing/src/index.js", import.meta.dir);
   expect(resolved.endsWith("/packages/testing/src/index.js")).toBe(true);
-  expect(Bun.resolveSync("@smithers-orchestrator/testing", import.meta.dir).endsWith("/packages/testing/src/index.ts")).toBe(true);
+  expect(Bun.resolveSync("@smthrs/testing", import.meta.dir).endsWith("/packages/testing/src/index.ts")).toBe(true);
 });
 
 const paths: string[] = [];

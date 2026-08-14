@@ -5,7 +5,7 @@
 // @smithers-type-exports-end
 
 import pc from "picocolors";
-import { getNodeDiffRoute } from "@smithers-orchestrator/server/gatewayRoutes/getNodeDiff";
+import { getNodeDiffRoute } from "@smthrs/server/gatewayRoutes/getNodeDiff";
 import { EXIT_OK } from "./util/exitCodes.js";
 import { formatCliErrorForStderr, getCliErrorMapping } from "./util/errorMessage.js";
 

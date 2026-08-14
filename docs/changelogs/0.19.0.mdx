@@ -18,7 +18,7 @@ notably `Smithers.createWorkflow` / `Smithers.createComponent` and the
 - **`Smithers.createWorkflow` and `Smithers.createComponent` are now public.**
   The previously-internal `_createWorkflow` and `_createComponent` Effect
   builders are exported from the engine and re-exported through
-  `smithers-orchestrator`. Authors can compose workflows with `Effect`,
+  `smthrs`. Authors can compose workflows with `Effect`,
   `Layer`, and `Schema` directly, without going through JSX.
 
 - **New TypeScript surface for the Effect builder.** The engine type bundle
@@ -54,7 +54,7 @@ notably `Smithers.createWorkflow` / `Smithers.createComponent` and the
 
 ## CLI
 
-- **`bunx smithers-orchestrator init` scaffolds a Kanban gateway UI.** New projects get a
+- **`bunx smthrs init` scaffolds a Kanban gateway UI.** New projects get a
   `.smithers/gateway.ts` entry, a `.smithers/ui/kanban.tsx` browser entry,
   and a `gateway` script so `bun ./gateway.ts` starts a local Gateway
   with the Kanban workflow mounted at `/workflows/kanban`.

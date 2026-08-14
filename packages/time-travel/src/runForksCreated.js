@@ -1,1 +1,1 @@
-export { runForksCreated } from "@smithers-orchestrator/observability/metrics";
+export { runForksCreated } from "@smthrs/observability/metrics";

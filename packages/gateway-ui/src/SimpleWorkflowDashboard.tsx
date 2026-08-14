@@ -1,7 +1,7 @@
 /** @jsxImportSource react */
 import { useEffect, useMemo, useState } from "react";
-import { useGatewayActions, useGatewayRuns } from "@smithers-orchestrator/gateway-react";
-import { RelativeTime } from "@smithers-orchestrator/ui";
+import { useGatewayActions, useGatewayRuns } from "@smthrs/gateway-react";
+import { RelativeTime } from "@smthrs/ui";
 import { formatStatus, statusClass } from "./theme";
 import { ConnectionBadge } from "./ConnectionBadge";
 import { MonitorButton } from "./MonitorButton";

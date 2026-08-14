@@ -17,7 +17,7 @@ Each item below is still open in current `main`. Text is the original audit find
   - _remaining:_ No extraction performed; monolith remains and grew larger.
 - [x] **P1** dependency-boundary check scans ZERO files for the e2e workspace (directWorkspaceDirs entry is effectively dead) — `scripts/check-dependency-boundaries.mjs:101 (filesForPackage)`
   - _done (2026-06-20):_ `directWorkspaceDirs = ["e2e"]` (scripts/check-dependency-boundaries.mjs:14); `filesForPackage` now scans e2e source files.
-- [ ] **P2** Circular dependency between @smithers-orchestrator/agents and @smithers-orchestrator/observability ships to npm — `packages/agents/src/BaseCliAgent/BaseCliAgent.js:5-6 and apps/observability/src/_traceEventNormalizers.js:1-2`
+- [ ] **P2** Circular dependency between @smthrs/agents and @smthrs/observability ships to npm — `packages/agents/src/BaseCliAgent/BaseCliAgent.js:5-6 and apps/observability/src/_traceEventNormalizers.js:1-2`
   - _remaining:_ Published circular dependency still ships.
 - [ ] **P2** observability is a foundational library but lives in apps/ (package masquerading as an app) — `apps/observability/package.json`
   - _remaining:_ Still lives under apps/ as a published foundational library.
@@ -31,7 +31,7 @@ Each item below is still open in current `main`. Text is the original audit find
   - _remaining:_ Bidirectional smithers<->cli dependency persists.
 - [ ] **P2** Root package.json exports map is a dev-only alias that diverges structurally from the actually-published exports — `package.json:18-40 vs packages/smithers/package.json exports`
   - _remaining:_ Root dev alias still structurally diverges from published exports; no sync guard.
-- [ ] **P2** Published smithers-orchestrator ./* wildcard publicly exposes internal helper files — `packages/smithers/package.json (exports "./*" -> ./src/*.js)`
+- [ ] **P2** Published smthrs ./* wildcard publicly exposes internal helper files — `packages/smithers/package.json (exports "./*" -> ./src/*.js)`
   - _remaining:_ ./* wildcard still present on published package.
 - [ ] **P2** No automated guard that every documented public subpath export resolves — `e2e/exports/programmatic-api.test.ts`
   - _remaining:_ No automated guard that every documented subpath export resolves.
@@ -73,11 +73,11 @@ Each item below is still open in current `main`. Text is the original audit find
   - _remaining:_ checkJs still off in all but 1 package.
 - [ ] **P1** 28 packages commit a generated bundled src/index.d.ts that ships as exports `types` and can drift; drift guard exists only at publish, not in CI — ``
   - _remaining:_ 28 committed generated d.ts files still have no CI drift guard.
-- [ ] **P1** Published @smithers-orchestrator/observability lives under apps/ and forms a publish cycle with agents (depended on by 14 published packages) — ``
+- [ ] **P1** Published @smthrs/observability lives under apps/ and forms a publish cycle with agents (depended on by 14 published packages) — ``
   - _remaining:_ Published observability still under apps/ in a publish cycle with agents.
 - [ ] **P2** isRecord / isObject / asRecord predicate family re-implemented across 7+ packages with divergent bodies; 99 inline error-message extractions — ``
   - _remaining:_ No shared predicate package; helpers still re-implemented; inline error extraction remains.
-- [ ] **P2** apps/cli is also published from apps/ (non-private @smithers-orchestrator/cli) — apps/ contains 2 shipping packages, not the conventional zero — `apps/cli/package.json`
+- [ ] **P2** apps/cli is also published from apps/ (non-private @smthrs/cli) — apps/ contains 2 shipping packages, not the conventional zero — `apps/cli/package.json`
   - _remaining:_ apps/cli still published from apps/.
 - [ ] **P2** Workflow-to-UI binding is implicit filename convention with no missing-UI signal — `apps/cli/src/index.js:1990-1998; apps/cli/src/workflow-pack.js:1716-1727 (renderGatewayFile)`
   - _remaining:_ Workflow-to-UI binding still implicit filename convention with no missing-UI signal.

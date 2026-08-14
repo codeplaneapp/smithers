@@ -34,8 +34,8 @@
 // worktree that green-builds the whole stack + a cross-cutting observability and
 // backpressure audit → a final human approval gate → a DRAFT PR (never merges main).
 // ─────────────────────────────────────────────────────────────────────────────
-/** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { ClaudeCodeAgent, createSmithers } from "smthrs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
@@ -467,10 +467,10 @@ REPO CONVENTIONS (follow EXACTLY):
 
 VERIFY COMMANDS (pnpm filter names):
 - typecheck: \`pnpm --filter <pkg> typecheck\`   tests: \`pnpm --filter <pkg> test\`
-  pkgs: @smithers-orchestrator/db, smithers-orchestrator, @smithers-orchestrator/errors,
-        @smithers-orchestrator/engine, @smithers-orchestrator/server, @smithers-orchestrator/gateway,
-        @smithers-orchestrator/gateway-client, @smithers-orchestrator/gateway-react, @smithers-orchestrator/cli
-        (a NEW @smithers-orchestrator/electric-proxy package is introduced in phase 7).
+  pkgs: @smthrs/db, smthrs, @smthrs/errors,
+        @smthrs/engine, @smthrs/server, @smthrs/gateway,
+        @smthrs/gateway-client, @smthrs/gateway-react, @smthrs/cli
+        (a NEW @smthrs/electric-proxy package is introduced in phase 7).
 - apps/smithers unit: \`pnpm -C apps/smithers test:unit\`   e2e (real backend, NO mocks):
   \`pnpm -C apps/smithers exec playwright test\`.
 - dialect parity: the PG suites in packages/db and packages/engine run on embedded PGlite by default and on
@@ -526,11 +526,7 @@ const SPEC_P2: PhaseSpec = {
     "runEvents stays a bounded ring (maxRows 1024); persisted collections EXCLUDE large blobs.",
     "Add slow-consumer and large-burst tests; persistence writes do not grow memory without bound.",
   ],
-  packages: [
-    "@smithers-orchestrator/gateway-client",
-    "@smithers-orchestrator/gateway-react",
-    "@smithers-orchestrator/smithers",
-  ],
+  packages: ["@smthrs/gateway-client", "@smthrs/gateway-react", "@smthrs/smithers"],
   commitSubject: "✨ feat(sync): client SQLite persistence + pluggable SyncSource seam (close PR #286 edges)",
 };
 
@@ -562,12 +558,7 @@ const SPEC_P3: PhaseSpec = {
   backpressure: [
     "The PGlite socket-server path does not block the engine event loop; the gateway's bounded replay window is unchanged.",
   ],
-  packages: [
-    "@smithers-orchestrator/db",
-    "smithers-orchestrator",
-    "@smithers-orchestrator/server",
-    "@smithers-orchestrator/cli",
-  ],
+  packages: ["@smthrs/db", "smthrs", "@smthrs/server", "@smthrs/cli"],
   commitSubject: "✨ feat(db): PGlite local backend (openSmithersBackend) + versioned Postgres migration runner",
 };
 
@@ -596,13 +587,7 @@ const SPEC_P4: PhaseSpec = {
   backpressure: [
     "Bulk copy batches rows (bounded memory) rather than loading whole tables; large blob columns (outputs/diffs) copy without buffering an entire table in memory.",
   ],
-  packages: [
-    "@smithers-orchestrator/db",
-    "smithers-orchestrator",
-    "@smithers-orchestrator/errors",
-    "@smithers-orchestrator/server",
-    "@smithers-orchestrator/cli",
-  ],
+  packages: ["@smthrs/db", "smthrs", "@smthrs/errors", "@smthrs/server", "@smthrs/cli"],
   commitSubject: "✨ feat(cli): smithers migrate + fail-loud SMITHERS_MIGRATION_REQUIRED detection",
 };
 
@@ -631,11 +616,7 @@ const SPEC_P5: PhaseSpec = {
   backpressure: [
     "Honor the gateway per-connection outbound queue and BackpressureDisconnect; optimistic writes do not bypass the bounded write path.",
   ],
-  packages: [
-    "@smithers-orchestrator/gateway-client",
-    "@smithers-orchestrator/gateway-react",
-    "@smithers-orchestrator/smithers",
-  ],
+  packages: ["@smthrs/gateway-client", "@smthrs/gateway-react", "@smthrs/smithers"],
   commitSubject: "✨ feat(sync): unify writes onto TanStack DB optimistic transactions ($synced surfaced)",
 };
 
@@ -665,13 +646,7 @@ const SPEC_P6: PhaseSpec = {
   backpressure: [
     "Tickets are small and persisted; the docs collection is bounded; the watcher debounces bursts of edits.",
   ],
-  packages: [
-    "@smithers-orchestrator/db",
-    "@smithers-orchestrator/engine",
-    "@smithers-orchestrator/gateway-client",
-    "@smithers-orchestrator/gateway-react",
-    "@smithers-orchestrator/smithers",
-  ],
+  packages: ["@smthrs/db", "@smthrs/engine", "@smthrs/gateway-client", "@smthrs/gateway-react", "@smthrs/smithers"],
   commitSubject:
     "✨ feat(sync): _smithers_docs table + DB-backed file sync (watcher + tickets collection + materializer)",
 };
@@ -685,7 +660,7 @@ const SPEC_P7: PhaseSpec = {
   designRef: "§5.1, §5.3, §5.5, §10, §11.1; rollout §12.7",
   goal: "Add the Electric SyncSource for cloud: a smithers-electric-proxy over the _smithers_* schema, createElectricCollection, and Electric txid-matching writes. GATED behind verifying PGlite-cannot-be-Electric and cloud-infra readiness.",
   build: [
-    "New packages/electric-proxy (@smithers-orchestrator/electric-proxy), or a server mode: an auth + scope + rate-limit reverse proxy in front of electricsql/electric. Shape catalog = the _smithers_* tables scoped by run/grant: runs (where workspace_id IN {granted}), run/nodes/attempts/events/approvals/node_diffs (where run_id IN {granted_run_ids}), output tables (where run_id IN ...). Validate + fill the where template; enforce user-private predicates; STRIP Authorization before forwarding to Electric. Model on plue's Go proxy ONE-FOR-ONE as a reference — do NOT touch plue.",
+    "New packages/electric-proxy (@smthrs/electric-proxy), or a server mode: an auth + scope + rate-limit reverse proxy in front of electricsql/electric. Shape catalog = the _smithers_* tables scoped by run/grant: runs (where workspace_id IN {granted}), run/nodes/attempts/events/approvals/node_diffs (where run_id IN {granted_run_ids}), output tables (where run_id IN ...). Validate + fill the where template; enforce user-private predicates; STRIP Authorization before forwarding to Electric. Model on plue's Go proxy ONE-FOR-ONE as a reference — do NOT touch plue.",
     "Map gateway scopes (run:read/write/admin, approval:submit, signal:submit, observability:read) onto shape access: run:read gates read shapes; writes NEVER use shapes.",
     "Add createElectricCollection in packages/gateway-client via @tanstack/electric-db-collection (electricCollectionOptions, shapeOptions → proxy URL). The collection shape + key MATCH the gateway source so the gateway-react hooks are IDENTICAL (the phase-2 SyncSource seam pays off here).",
     "Electric write commit: the mutation handler POSTs to a smithers write endpoint that returns the Postgres txid; the collection holds the optimistic state until that txid appears in the Electric stream, then drops it (standard txid-matching, no reapply flicker).",
@@ -705,11 +680,11 @@ const SPEC_P7: PhaseSpec = {
     "Honor the Electric proxy rate limits (60 shape-opens/min, 50 active) and a 4 MiB per-frame payload bound; reject or queue excess. Add slow-consumer and large-burst tests against the proxy fixture.",
   ],
   packages: [
-    "@smithers-orchestrator/electric-proxy",
-    "@smithers-orchestrator/gateway-client",
-    "@smithers-orchestrator/gateway-react",
-    "@smithers-orchestrator/server",
-    "@smithers-orchestrator/smithers",
+    "@smthrs/electric-proxy",
+    "@smthrs/gateway-client",
+    "@smthrs/gateway-react",
+    "@smthrs/server",
+    "@smthrs/smithers",
   ],
   commitSubject: "✨ feat(sync): Electric cloud source — smithers-electric-proxy + shapes + txid-commit writes",
 };
@@ -839,7 +814,7 @@ function reviewPrompt(spec: PhaseSpec, who: "opus" | "codex"): string {
 
 function verifyPrompt(spec: PhaseSpec, feedback: string, runE2e: boolean): string {
   const e2eLine =
-    spec.packages.includes("@smithers-orchestrator/smithers") && runE2e
+    spec.packages.includes("@smthrs/smithers") && runE2e
       ? "Because this milestone touches apps/smithers, also run `pnpm -C apps/smithers test:unit` and the real-backend e2e `pnpm -C apps/smithers exec playwright test` (no mocks)."
       : "Run `pnpm -C apps/smithers test:unit` if this milestone touched apps/smithers.";
   return [
@@ -950,8 +925,8 @@ function integratePrompt(baseBranch: string, runE2e: boolean): string {
     "",
     "Steps:",
     "1. `pnpm install`, then run the FULL gate and fix until green:",
-    "   - for EACH of @smithers-orchestrator/{db,errors,engine,server,gateway,gateway-client,gateway-react,cli},",
-    "     smithers-orchestrator, and (if present) @smithers-orchestrator/electric-proxy:",
+    "   - for EACH of @smthrs/{db,errors,engine,server,gateway,gateway-client,gateway-react,cli},",
+    "     smthrs, and (if present) @smthrs/electric-proxy:",
     "     `pnpm --filter <pkg> typecheck` && `pnpm --filter <pkg> test`.",
     "   - `pnpm -C apps/smithers typecheck` && `pnpm -C apps/smithers test:unit`" +
       (runE2e ? " && `pnpm -C apps/smithers exec playwright test` (real backend, NO mocks)." : "."),

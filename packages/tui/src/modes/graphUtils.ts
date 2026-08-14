@@ -1,4 +1,4 @@
-import { runNodeKey, type GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import { runNodeKey, type GatewayRunNode } from "@smthrs/gateway-client";
 
 export type GraphPos = { col: number; row: number };
 

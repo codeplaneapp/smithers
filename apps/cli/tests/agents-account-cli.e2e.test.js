@@ -143,6 +143,12 @@ test("agents list emits JSON via --format json and a human table on stderr other
     format: "json",
     env: { SMITHERS_HOME: home },
   });
+  const registered = JSON.parse(readFileSync(join(home, "accounts.json"), "utf8"));
+  const claude = registered.accounts.find((account) => account.label === "claude-1");
+  writeFileSync(
+    join(claude.configDir, ".claude.json"),
+    JSON.stringify({ oauthAccount: { emailAddress: "claude@example.com", accountUuid: "uuid-claude" } }),
+  );
   const json = runSmithers(["agents", "list"], {
     cwd: repo.dir,
     format: "json",
@@ -150,6 +156,7 @@ test("agents list emits JSON via --format json and a human table on stderr other
   });
   expect(json.exitCode).toBe(0);
   expect(json.json.accounts.map((a) => a.label).sort()).toEqual(["claude-1", "openai-1"]);
+  expect(json.json.accounts.find((account) => account.label === "claude-1")?.signedInAs).toBe("claude@example.com");
   const human = runSmithers(["agents", "list"], {
     cwd: repo.dir,
     format: null,

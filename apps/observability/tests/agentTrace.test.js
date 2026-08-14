@@ -95,6 +95,9 @@ describe("detectCaptureMode", () => {
   test("Codex always reports cli-json-stream", () => {
     expect(detectCaptureMode({ constructor: { name: "CodexAgent" } })).toBe("cli-json-stream");
   });
+  test("decoded Nanocodex output is cli-text rather than Codex CLI JSONL", () => {
+    expect(detectCaptureMode({ constructor: { name: "NanocodexAgent" } })).toBe("cli-text");
+  });
   test("OpenAI/Anthropic SDK agents are sdk-events", () => {
     expect(detectCaptureMode({ constructor: { name: "OpenAIAgent" } })).toBe("sdk-events");
     expect(detectCaptureMode({ constructor: { name: "AnthropicAgent" } })).toBe("sdk-events");

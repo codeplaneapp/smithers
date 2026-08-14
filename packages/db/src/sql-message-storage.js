@@ -112,7 +112,30 @@ const CREATE_TABLE_STATEMENTS = [
     jj_cwd TEXT,
     cached INTEGER DEFAULT 0,
     meta_json TEXT,
+    effort TEXT,
     PRIMARY KEY (run_id, node_id, iteration, attempt)
+  )`,
+  `CREATE TABLE IF NOT EXISTS _smithers_agent_checkpoint_contents (
+    content_hash TEXT NOT NULL PRIMARY KEY,
+    checkpoint_json TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    created_at_ms INTEGER NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS _smithers_agent_checkpoints (
+    run_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    iteration INTEGER NOT NULL,
+    attempt INTEGER NOT NULL,
+    sequence INTEGER NOT NULL,
+    content_hash TEXT NOT NULL,
+    codec TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    agent_id TEXT,
+    purpose TEXT NOT NULL,
+    created_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (run_id, node_id, iteration, attempt, sequence),
+    FOREIGN KEY (run_id, node_id, iteration, attempt) REFERENCES _smithers_attempts(run_id, node_id, iteration, attempt) ON DELETE CASCADE,
+    FOREIGN KEY (content_hash) REFERENCES _smithers_agent_checkpoint_contents(content_hash)
   )`,
   `CREATE TABLE IF NOT EXISTS _smithers_frames (
     run_id TEXT NOT NULL,
@@ -192,6 +215,19 @@ const CREATE_TABLE_STATEMENTS = [
     received_at_ms INTEGER NOT NULL,
     received_by TEXT,
     PRIMARY KEY (run_id, seq)
+  )`,
+  `CREATE TABLE IF NOT EXISTS _smithers_steers (
+    steer_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    message TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    author TEXT,
+    created_at_ms INTEGER NOT NULL,
+    consumed_at_ms INTEGER,
+    consumed_by_attempt INTEGER,
+    consumed_by_iteration INTEGER,
+    expired_at_ms INTEGER
   )`,
   `CREATE TABLE IF NOT EXISTS _smithers_cache (
     cache_key TEXT PRIMARY KEY,
@@ -334,6 +370,21 @@ const CREATE_TABLE_STATEMENTS = [
     payload_json TEXT NOT NULL,
     PRIMARY KEY (run_id, seq)
   )`,
+  `CREATE TABLE IF NOT EXISTS _smithers_run_usage (
+    run_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    iteration INTEGER NOT NULL DEFAULT 0,
+    attempt INTEGER NOT NULL DEFAULT 0,
+    model TEXT,
+    agent TEXT,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+    reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+    updated_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (run_id, node_id, iteration, attempt)
+  )`,
   `CREATE TABLE IF NOT EXISTS _smithers_output_provenance (
     run_id TEXT NOT NULL,
     output_table TEXT NOT NULL,
@@ -348,8 +399,17 @@ const CREATE_TABLE_STATEMENTS = [
     ralph_id TEXT NOT NULL,
     iteration INTEGER NOT NULL DEFAULT 0,
     done INTEGER NOT NULL DEFAULT 0,
+    exhausted INTEGER NOT NULL DEFAULT 0,
     updated_at_ms INTEGER NOT NULL,
     PRIMARY KEY (run_id, ralph_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS _smithers_agent_processes (
+    pid INTEGER NOT NULL,
+    run_id TEXT NOT NULL,
+    node_id TEXT,
+    engine_pid INTEGER NOT NULL,
+    started_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (pid)
   )`,
   `CREATE TABLE IF NOT EXISTS _smithers_cron (
     cron_id TEXT PRIMARY KEY,
@@ -546,10 +606,14 @@ const CREATE_TABLE_STATEMENTS = [
   )`,
 ];
 const CREATE_INDEX_STATEMENTS = [
+  `CREATE INDEX IF NOT EXISTS _smithers_agent_checkpoints_content_hash_idx
+    ON _smithers_agent_checkpoints (content_hash)`,
   `CREATE INDEX IF NOT EXISTS _smithers_runs_status_heartbeat_idx
     ON _smithers_runs (status, heartbeat_at_ms)`,
   `CREATE INDEX IF NOT EXISTS _smithers_signals_lookup_idx
     ON _smithers_signals (run_id, signal_name, correlation_id, received_at_ms)`,
+  `CREATE INDEX IF NOT EXISTS _smithers_steers_queued_idx
+    ON _smithers_steers (run_id, node_id, status, created_at_ms)`,
   `CREATE INDEX IF NOT EXISTS _smithers_time_travel_audit_lookup_idx
     ON _smithers_time_travel_audit (run_id, caller, timestamp_ms)`,
   `CREATE INDEX IF NOT EXISTS _smithers_docs_kind_live_idx

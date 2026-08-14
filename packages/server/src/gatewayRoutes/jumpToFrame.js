@@ -1,8 +1,8 @@
-import { jumpToFrame, JumpToFrameError } from "@smithers-orchestrator/time-travel/jumpToFrame";
+import { jumpToFrame, JumpToFrameError } from "@smthrs/time-travel/jumpToFrame";
 
-/** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("@smithers-orchestrator/observability/SmithersEvent").SmithersEvent} SmithersEvent */
-/** @typedef {import("@smithers-orchestrator/time-travel/jumpToFrame").JumpResult} JumpResult */
+/** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smthrs/observability/SmithersEvent").SmithersEvent} SmithersEvent */
+/** @typedef {import("@smthrs/time-travel/jumpToFrame").JumpResult} JumpResult */
 
 /**
  * Gateway wrapper around time-travel jump orchestration.

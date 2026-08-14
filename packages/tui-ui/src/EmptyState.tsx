@@ -10,7 +10,7 @@ export function emptyStateLines({ title, description }: EmptyStateProps): string
   return description ? [title, description] : [title];
 }
 
-/** Centered zero-data placeholder, mirroring `@smithers-orchestrator/ui`'s EmptyState. */
+/** Centered zero-data placeholder, mirroring `@smthrs/ui`'s EmptyState. */
 export function EmptyState(props: EmptyStateProps) {
   const lines = emptyStateLines(props);
   return (

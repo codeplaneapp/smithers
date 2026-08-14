@@ -1,0 +1,1 @@
+{"protocol":"smithers.nanocodex","version":1,"type":"turn.cancel","commandId":"command-2","requestId":"request-1","sessionId":"session-1","data":{"reason":"idle_timeout"}}

@@ -57,8 +57,8 @@ function commandExists(command) {
 function smithersCommand() {
   if (process.env.SMITHERS_BIN?.trim()) return [process.env.SMITHERS_BIN];
   if (commandExists("smithers")) return ["smithers"];
-  if (commandExists("bunx")) return ["bunx", "smithers-orchestrator"];
-  if (commandExists("npx")) return ["npx", "smithers-orchestrator"];
+  if (commandExists("bunx")) return ["bunx", "smthrs"];
+  if (commandExists("npx")) return ["npx", "smthrs"];
   return ["smithers"];
 }
 

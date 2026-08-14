@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Effect } from "effect";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { buildKillResumeWorkflow } from "../harness/killResumeWorkflow.ts";
-import { fault, e2eHarness, realProcessAdapter, runScenario, scenario, step } from "@smithers-orchestrator/testing";
+import { fault, e2eHarness, realProcessAdapter, runScenario, scenario, step } from "@smthrs/testing";
 import { makeEngineChildFixture } from "./testingProcessFixture.ts";
 
 describe("testing framework real-process durability", () => {

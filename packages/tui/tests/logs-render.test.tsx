@@ -3,7 +3,7 @@ import { it, expect } from "bun:test";
 import { describeHeadlessRender, renderForTest } from "./renderHelpers.tsx";
 import { act, useState } from "react";
 import { useKeyboard } from "@opentui/react";
-import type { GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
+import type { GatewayEventFrame } from "@smthrs/gateway-client";
 import { LogView } from "../src/modes/LogMode.tsx";
 
 /**

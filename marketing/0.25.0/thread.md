@@ -13,7 +13,7 @@ an asset in `assets/` (PNG, plus an animated GIF for tweets 5 and 8).
 >
 > Hit a rate limit mid-run? The run now parks and resumes itself instead of failing. Plus new built-in agent tools and workflows that burn down your backlog and open PRs on their own.
 >
-> bunx smithers-orchestrator@0.25.0
+> bunx smthrs@0.25.0
 
 Claim IDs: none
 

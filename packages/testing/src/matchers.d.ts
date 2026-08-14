@@ -1,8 +1,8 @@
 /// <reference path="../types/bun-test-shim.d.ts" />
 import { Sim } from './simulate.js';
-import '@smithers-orchestrator/driver/WorkflowDefinition';
-import '@smithers-orchestrator/graph';
-import '@smithers-orchestrator/scheduler';
+import '@smthrs/driver/WorkflowDefinition';
+import '@smthrs/graph';
+import '@smthrs/scheduler';
 
 type MatcherContext = {
     isNot?: boolean;

@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { Schedule } from "effect";
 import { retryPolicyToSchedule } from "../src/retryPolicyToSchedule.js";
 import { retryScheduleDelayMs } from "../src/retryScheduleDelayMs.js";
 

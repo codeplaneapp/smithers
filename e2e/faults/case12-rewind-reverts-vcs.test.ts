@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { jumpToFrame } from "@smithers-orchestrator/time-travel/jumpToFrame";
-import { listRewindAuditRows } from "@smithers-orchestrator/time-travel/rewindAudit";
-import { resetRewindLocksForTests } from "@smithers-orchestrator/time-travel/rewindLock";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { jumpToFrame } from "@smthrs/time-travel/jumpToFrame";
+import { listRewindAuditRows } from "@smthrs/time-travel/rewindAudit";
+import { resetRewindLocksForTests } from "@smthrs/time-travel/rewindLock";
 
 const RUN_ID = "case12-run";
 const REWIND_TO_FRAME = 2;

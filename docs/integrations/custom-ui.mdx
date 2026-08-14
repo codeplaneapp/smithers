@@ -9,38 +9,38 @@ The Smithers Gateway is a versioned RPC + WebSocket contract: any UI (`apps/smit
 
 There are two SDKs:
 
-- **`@smithers-orchestrator/gateway-client`**: framework-neutral. One small class (`SmithersGatewayClient`) with typed RPC methods, a resilient event stream, and no React dependency. Use it from vanilla JS, Node, Bun, workers, Svelte, Solid, anywhere.
-- **`@smithers-orchestrator/gateway-react`**: declarative hooks (`useGatewayRun`, `useGatewayRunEvents`, `useGatewayActions`, …) over the same client. Use it from React 19. The hooks own the lifecycle: stale-result guards, abort on unmount, ring-buffered event feeds.
+- **`@smthrs/gateway-client`**: framework-neutral. One small class (`SmithersGatewayClient`) with typed RPC methods, a resilient event stream, and no React dependency. Use it from vanilla JS, Node, Bun, workers, Svelte, Solid, anywhere.
+- **`@smthrs/gateway-react`**: declarative hooks (`useGatewayRun`, `useGatewayRunEvents`, `useGatewayActions`, …) over the same client. Use it from React 19. The hooks own the lifecycle: stale-result guards, abort on unmount, ring-buffered event feeds.
 
 Pick the client for plumbing, the React layer for views.
 
-For local workflow UIs, `bunx smithers-orchestrator ui RUN_ID` is the one-command launch path. If no Gateway is reachable on the local port, it starts `smithers gateway` for the workspace and waits before opening the browser. The workflow owns the UI route: put the browser source in `.smithers/ui/<workflow>.tsx`, declare it from the workflow with `<UI entry="../ui/<workflow>.tsx" />`, and the Gateway serves it at `/workflows/<workflow>`. Creating the `.smithers/ui/<workflow>.tsx` file alone is **not** enough; without the `<UI>` declaration the Gateway reports `NO_UI`.
+For local workflow UIs, `bunx smthrs ui RUN_ID` is the one-command launch path. If no Gateway is reachable on the local port, it starts `smithers gateway` for the workspace and waits before opening the browser. The workflow owns the UI route: put the browser source in `.smithers/ui/<workflow>.tsx`, declare it from the workflow with `<UI entry="../ui/<workflow>.tsx" />`, and the Gateway serves it at `/workflows/<workflow>`. Creating the `.smithers/ui/<workflow>.tsx` file alone is **not** enough; without the `<UI>` declaration the Gateway reports `NO_UI`.
 
 <Warning>
-**Adding `<UI>` to an already-running detached workflow means starting a fresh run.** Resume hashes the **workflow file's content** (not git), so any edit to `.smithers/workflows/<workflow>.tsx` (including adding the `<UI entry>` line) makes that run fail to resume with `RESUME_METADATA_MISMATCH`. Declare `<UI>` before you launch, or `bunx smithers-orchestrator fork` from a checkpoint or start a fresh `bunx smithers-orchestrator up` after editing. Editing the `.smithers/ui/<workflow>.tsx` bundle itself is always safe: it is not hashed, and the Gateway rebuilds it (restart the Gateway if a change is not picked up).</Warning>
+**Adding `<UI>` to an already-running detached workflow means starting a fresh run.** Resume hashes the **workflow file's content** (not git), so any edit to `.smithers/workflows/<workflow>.tsx` (including adding the `<UI entry>` line) makes that run fail to resume with `RESUME_METADATA_MISMATCH`. Declare `<UI>` before you launch, or `bunx smthrs fork` from a checkpoint or start a fresh `bunx smthrs up` after editing. Editing the `.smithers/ui/<workflow>.tsx` bundle itself is always safe: it is not hashed, and the Gateway rebuilds it (restart the Gateway if a change is not picked up).</Warning>
 
 ## Install
 
-Re-export the SDKs through `smithers-orchestrator` so a UI bundle does not duplicate the runtime:
+Re-export the SDKs through `smthrs` so a UI bundle does not duplicate the runtime:
 
 ```ts
-import { SmithersGatewayClient } from "smithers-orchestrator/gateway-client";
+import { SmithersGatewayClient } from "smthrs/gateway-client";
 import {
   SmithersGatewayProvider,
   useGatewayRun,
   useGatewayRunEvents,
   useGatewayActions,
-} from "smithers-orchestrator/gateway-react";
+} from "smthrs/gateway-react";
 ```
 
-The scoped packages (`@smithers-orchestrator/gateway-client`, `@smithers-orchestrator/gateway-react`) work equivalently; use whichever your bundler / version policy prefers. Both ship typed RPC params and payloads keyed off the gateway's `GatewayRpcMethod` union, so a typo at the call site is a build error.
+The scoped packages (`@smthrs/gateway-client`, `@smthrs/gateway-react`) work equivalently; use whichever your bundler / version policy prefers. Both ship typed RPC params and payloads keyed off the gateway's `GatewayRpcMethod` union, so a typo at the call site is a build error.
 
 ## The client (vanilla)
 
 `SmithersGatewayClient` is the only thing you instantiate. It owns nothing but configuration.
 
 ```ts
-import { SmithersGatewayClient } from "smithers-orchestrator/gateway-client";
+import { SmithersGatewayClient } from "smthrs/gateway-client";
 
 const gateway = new SmithersGatewayClient({
   baseUrl: "https://gateway.example.com",
@@ -58,7 +58,7 @@ const workflows = await gateway.listWorkflows({ filter: { hasUi: true } });
 Every gateway RPC is a typed instance method that returns the payload directly. Failures throw a `GatewayRpcError` with `code`, `status`, and (if relevant) `requiredScope` / `refresh` / `details`.
 
 ```ts
-import { GatewayRpcError } from "smithers-orchestrator/gateway-client";
+import { GatewayRpcError } from "smthrs/gateway-client";
 
 try {
   const run = await gateway.getRun({ runId: "run-1" });
@@ -148,7 +148,7 @@ For React, `useGatewayRpc` does this internally; see below.
 The gateway protects itself: over-capacity subscribers receive a `BackpressureDisconnect` close. Treat it like any other drop; `streamRunEventsResilient` already reconnects with backoff, so the UI naturally throttles to the rate the gateway can serve. For HTTP RPCs the gateway returns `429` / `RateLimited`; catch the error and retry with `gatewayBackoffDelay(attempt, …)`:
 
 ```ts
-import { gatewayBackoffDelay, GatewayRpcError } from "smithers-orchestrator/gateway-client";
+import { gatewayBackoffDelay, GatewayRpcError } from "smthrs/gateway-client";
 
 async function withRetry<T>(call: () => Promise<T>): Promise<T> {
   let attempt = 0;
@@ -220,7 +220,7 @@ Ownership is per instance: whoever constructed the client closes it. `SmithersGa
 Wrap the tree once in a provider, then read with hooks. The provider memoizes the client on the *content* of `options` (`baseUrl`, `token`, `headers`, `fetch`, `WebSocket`, and the `client` metadata), so an inline options literal does not trigger a reconnect storm on every render, while rotating any of them does rebuild the client so the new credentials and transports reach the wire. (`fetch` and `WebSocket` are compared by reference: hoist them out of render or memoize them.)
 
 ```tsx
-import { SmithersGatewayProvider } from "smithers-orchestrator/gateway-react";
+import { SmithersGatewayProvider } from "smthrs/gateway-react";
 
 export function App({ token }: { token: string }) {
   return (
@@ -242,7 +242,7 @@ export function App({ token }: { token: string }) {
 - a stable `refetch` that re-issues the call against the current params.
 
 ```tsx
-import { useGatewayRpc } from "smithers-orchestrator/gateway-react";
+import { useGatewayRpc } from "smthrs/gateway-react";
 
 function Runs() {
   const { data, loading, error, refetch } = useGatewayRpc("listRuns", {
@@ -277,7 +277,7 @@ const title = out.data?.row?.title;   // ✅  the task's output field
 </Warning>
 
 <Note>
-**Scope to the run the URL names.** `bunx smithers-orchestrator ui RUN_ID` opens `/workflows/<key>?runId=RUN_ID`. Read it with `new URLSearchParams(location.search).get("runId")` and pin your views to that id, rather than always picking the newest run from `useGatewayRuns`; otherwise the UI drifts to a different run than the one the user opened.
+**Scope to the run the URL names.** `bunx smthrs ui RUN_ID` opens `/workflows/<key>?runId=RUN_ID`. Read it with `new URLSearchParams(location.search).get("runId")` and pin your views to that id, rather than always picking the newest run from `useGatewayRuns`; otherwise the UI drifts to a different run than the one the user opened.
 </Note>
 
 ### Pushed updates (with ring-buffer)
@@ -319,7 +319,7 @@ Unmount or change `runId` and the hook aborts the underlying signal: no manual c
 
 ```tsx
 import { useState, useCallback } from "react";
-import { useGatewayActions } from "smithers-orchestrator/gateway-react";
+import { useGatewayActions } from "smthrs/gateway-react";
 
 function Approve({ runId, nodeId }: { runId: string; nodeId: string }) {
   const actions = useGatewayActions();
@@ -357,7 +357,7 @@ End-to-end, vanilla + React mixed because real UIs are:
 
 ```tsx
 /// app.tsx
-import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";
+import { createGatewayReactRoot } from "smthrs/gateway-react";
 import { Dashboard } from "./Dashboard";
 
 createGatewayReactRoot(<Dashboard />, {
@@ -374,7 +374,7 @@ import {
   useGatewayRun,
   useGatewayRunEvents,
   useGatewayWorkflows,
-} from "smithers-orchestrator/gateway-react";
+} from "smthrs/gateway-react";
 import { useState } from "react";
 
 export function Dashboard() {

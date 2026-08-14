@@ -1,7 +1,7 @@
 /** @jsxImportSource react */
 import { useInsertionEffect, useState, type CSSProperties, type ReactNode } from "react";
-import { useGatewayActions } from "@smithers-orchestrator/gateway-react";
-import type { RunStartedBy } from "@smithers-orchestrator/gateway-client";
+import { useGatewayActions } from "@smthrs/gateway-react";
+import type { RunStartedBy } from "@smthrs/gateway-client";
 import { ensureGatewayUiStyles, theme } from "./theme";
 
 export type LaunchButtonProps = {
@@ -68,7 +68,7 @@ export function LaunchButton({
         borderRadius: theme.radius,
         border: "none",
         background: theme.accent,
-        color: "var(--inverse-text, #fafafa)",
+        color: "var(--inverse-text, #FBFBFB)",
         fontFamily: theme.fontSans,
         fontWeight: 600,
         fontSize: 13,

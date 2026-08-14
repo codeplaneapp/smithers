@@ -1,4 +1,4 @@
-import type { GatewayComparisonScoreRow as ProtocolGatewayComparisonScoreRow } from "@smithers-orchestrator/protocol/gateway-rpc";
+import type { GatewayComparisonScoreRow as ProtocolGatewayComparisonScoreRow } from "@smthrs/protocol/gateway-rpc";
 
 /**
  * One score row returned by the cross-run `listScoresForRuns` query.

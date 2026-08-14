@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Task, outputs } from "./ferricSmithers";

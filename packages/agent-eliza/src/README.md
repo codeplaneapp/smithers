@@ -1,4 +1,4 @@
-# @smithers-orchestrator/agent-eliza — src
+# @smthrs/agent-eliza — src
 
 Opt-in Smithers agent harness that runs an elizaOS `AgentRuntime` in-process.
 The package entry is `index.js`, which exports `ElizaAgent` only (the
@@ -8,7 +8,7 @@ The package entry is `index.js`, which exports `ElizaAgent` only (the
   (`#ensureRuntime`); `preflight()` resolves `@elizaos/core` early so
   missing-dep errors fail the task before `generate()`. `generate()` routes
   prompts through the shared `extractPrompt` from
-  `@smithers-orchestrator/agents/BaseCliAgent` and falls back
+  `@smthrs/agents/BaseCliAgent` and falls back
   `TEXT_LARGE` → `TEXT_SMALL` only on unrecognised-model errors, never on
   transient failures. Aborts use `name = "AbortError"` so the driver's
   classifier treats them as aborts, not retryable task failures.

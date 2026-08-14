@@ -9,26 +9,28 @@ class in `packages/agents` satisfies one interface, [`AgentLike`](#agentlike), s
 they are interchangeable wherever a component takes an `agent` prop, including
 [`<Task>`](/components/task).
 
-There are two families. **SDK agents** wrap the [AI SDK](https://ai-sdk.dev) and
+There are three families. **SDK agents** wrap the [AI SDK](https://ai-sdk.dev) and
 bill a provider over HTTP; they take an `Options` object and a model id. **CLI
 agents** spawn a vendor's local command-line tool and share
-[`BaseCliAgentOptions`](#base-cli-options). Two helpers round out the surface:
+[`BaseCliAgentOptions`](#base-cli-options). The native `NanocodexAgent` launches
+one external, pinned stock-agent bridge worker per turn. Two helpers round out the surface:
 `createHttpTool` builds an ad-hoc REST tool, and `hashCapabilityRegistry`
 fingerprints an agent's capabilities for cache keys.
 
 ```ts
 import {
   CodexAgent,
+  NanocodexAgent,
   OpenAIAgent,
   createHttpTool,
   hashCapabilityRegistry,
-} from "smithers-orchestrator";
-import type { AgentLike, OpenAIAgentOptions } from "smithers-orchestrator";
+} from "smthrs";
+import type { AgentLike, NanocodexAgentOptions, OpenAIAgentOptions } from "smthrs";
 ```
 
 <Note>
 Import agent classes, the tool factories, and their option **types** from the
-`smithers-orchestrator` facade. The option type shapes are also listed in the
+`smthrs` facade. The option type shapes are also listed in the
 [Types reference](/reference/types).
 </Note>
 
@@ -46,7 +48,17 @@ agent.
     </ResponseField>
     <ResponseField name="generate" type="(args?: AgentGenerateOptions) => Promise<unknown>" required>
       Runs one generation. `args` carries `prompt`, `outputSchema`, `abortSignal`,
-      `timeout`, and `onStdout` / `onStderr` streaming callbacks.
+      `timeout`, streaming callbacks, checkpoint continuation state, the
+      effective `maxAgentCheckpointBytes` ceiling, and the awaited
+      `onCheckpoint` durability fence.
+    </ResponseField>
+    <ResponseField name="checkpointFormats" type="readonly AgentCheckpointFormat[]">
+      Native checkpoint codecs and exact versions the agent may return or
+      publish. This production declaration is independent of consumption.
+    </ResponseField>
+    <ResponseField name="checkpointCapabilities" type="readonly AgentCheckpointCapability[]">
+      Native checkpoint codecs, exact versions, and resume/fork modes the agent
+      can consume. Fork support must be declared explicitly.
     </ResponseField>
     <ResponseField name="tools" type="Record<string, unknown>">
       Tools the agent may call during generation.
@@ -66,6 +78,54 @@ agent.
   </Expandable>
 </ResponseField>
 
+## Durable agent checkpoints
+
+Checkpoint-aware agents declare what they produce with `checkpointFormats` and
+what they consume with `checkpointCapabilities`. They can return
+`{ checkpoint: { codec, version, payload } }` from `generate()` or publish
+progress through `await args.onCheckpoint(checkpoint)`. The promise is a
+durability fence: resolution means Smithers stored the checkpoint while it
+still owned the invocation; rejection means publication failed or ownership
+was lost. Agents must await it before treating state as durable.
+
+Smithers requires the exact `{ codec, version, payload }` envelope: `codec` is a
+non-empty string, `version` is a positive safe integer, and `payload` is strict,
+lossless JSON (finite numbers, strings, booleans, null, arrays, and plain
+string-keyed objects only). Accessors, sparse arrays, `undefined`, bigint,
+symbols, functions, cycles, non-finite numbers, and custom prototypes are
+rejected. The encoded limit defaults to 16 MiB and can be lowered with
+`maxAgentCheckpointBytes` on the workflow run; values above the 16 MiB system
+ceiling are rejected because durability snapshots enforce the same ceiling.
+Smithers passes the effective ceiling to agent preflight and every generation,
+including correction turns, so an agent can enforce it before publishing state.
+An agent with a smaller local or protocol limit must enforce the lower value.
+
+A later call receives compatible state as the discriminated pair
+`{ resumeCheckpoint, checkpointMode: "resume" | "fork" }`; it never receives a
+checkpoint together with `resumeSession`. Compatibility requires an exact
+codec, version, and mode match in `checkpointCapabilities`. An omitted result
+checkpoint preserves the last published state. Agents without compatible
+native state continue through existing CLI sessions, recorded messages, or
+fresh stateless generation as applicable.
+
+Checkpoint bytes are opaque to Smithers: it validates, hashes, stores, and
+returns them but never interprets `payload`. Time-travel snapshots privately
+embed the snapshot-visible attempt/checkpoint provenance so later GC or attempt
+reuse cannot change an older frame; this metadata is removed from parsed user
+outputs. Snapshot capture caps each checkpoint at 16 MiB, total encoded
+checkpoint provenance at 64 MiB, and visible attempts and references at 100,000
+each; capture fails if a bound is exceeded.
+
+Checkpoint production and consumption declarations are part of task cache
+identity. The semantic codec/version/mode sets are hashed, so changing support
+invalidates prior cache entries while declaration order and duplicates do not.
+
+Use `cloneAgentCheckpoint(checkpoint, maxBytes?)` to validate and detach data at
+adapter boundaries. `agentProducesCheckpoint` checks the production declaration;
+`agentSupportsCheckpoint` checks consumption; and
+`hashAgentCheckpointCapabilities` computes the cache-identity hash.
+`DEFAULT_AGENT_CHECKPOINT_MAX_BYTES` exposes the 16 MiB default.
+
 **Source** [`AgentLike.ts`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/AgentLike.ts) · **Tests** [`agent-contract.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/agent-contract.test.js) · **See also** [Agents overview](/agents/overview), [`SmithersCtx`](/reference/types)
 
 ## SDK agents
@@ -78,7 +138,7 @@ plus a `model`. Reach for these to bill a provider's API directly. For a vendor'
 full CLI surface, use a [CLI agent](#cli-agents).
 
 ```ts
-import { OpenAIAgent, AnthropicAgent, tools } from "smithers-orchestrator";
+import { OpenAIAgent, AnthropicAgent, tools } from "smthrs";
 import { stepCountIs } from "ai";
 
 const implementer = new OpenAIAgent({
@@ -207,7 +267,7 @@ See [SOTA role defaults](/reference/sota-models#role-defaults).
 </Note>
 
 ```tsx
-import { CodexAgent, Task, Workflow, createSmithers } from "smithers-orchestrator";
+import { CodexAgent, Task, Workflow, createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { smithers, outputs } = createSmithers({
@@ -271,6 +331,42 @@ export default smithers(() => (
     </ParamField>
   </Expandable>
 </ParamField>
+
+<a id="file-change-parsing" />
+
+### File-change parsing
+
+CLI agent subclasses may implement an optional `parseFileChanges` method that
+normalizes a `file_change` action (as emitted by `createOutputInterpreter`)
+into [`AgentFileChange`](/reference/types#agentfilechange) records:
+
+```ts
+parseFileChanges?(action: { title?: string; detail?: unknown }): AgentFileChange[] | undefined;
+```
+
+Callers check `typeof agent.parseFileChanges === "function"` before calling:
+an agent that can't normalize simply omits the method (a graceful absence,
+not a stub returning `[]`, since an empty array would wrongly imply "no
+changes" rather than "unsupported"). When implemented, the same normalization
+also runs live inside `createOutputInterpreter`, which attaches the result to
+the streamed action's `detail.fileChanges`.
+
+Each `AgentCapabilityRegistry.fileChanges` declares what an engine supports:
+`supportsFileChanges` (can it identify file-mutating tool calls at all) and
+`supportsUnifiedDiff` (can it additionally report or reconstruct full diff
+content). Per-engine support:
+
+| Engine | `supportsFileChanges` | `supportsUnifiedDiff` | Notes |
+|---|---|---|---|
+| `ClaudeCodeAgent` | `true` | `true` | `Edit`/`MultiEdit` carry both before and after text and reconstruct a unified diff (`source: "reconstructed"`). `Write` reconstructs a full-creation diff once the tool result confirms the file was newly created (known-empty old side); over an existing file with unknown prior content it stays paths-only rather than fabricating an empty-old diff. `NotebookEdit` reconstructs inserts only (a genuinely empty old cell). |
+| `KimiAgent` | `true` | `true` | Kimi's `StrReplaceFile` carries before/after text; `WriteFile` is paths-only because it does not carry prior content. Verified against the `kimi_cli` vendor source. |
+| `CodexAgent` | `true` | `false` | Native `item.changes: {path, kind}[]` gives path + kind only (`source: "reported"`); no diff content ships in the protocol. |
+| `OpenCodeAgent` | `true` | `false` | Tool input carries a path, reported without a diff pending verification of its full tool-call surface. |
+| `CursorAgent` | `true` | `false` | The protobuf `agent.v1.ToolCall` oneof (`writeToolCall`/`editToolCall`/`deleteToolCall`) carries the target path in `args.path` but no verified before/after content, so paths-only (`source: "reported"`). |
+| `AmpAgent` | `true` | `false` | Amp speaks Claude-compatible stream-json with `create_file`/`edit_file` tool schemas; the input carries a path but no verified prior content, so paths-only (`source: "reported"`). |
+| `GeminiAgent` and all other CLI agents | `false` | `false` | No adapter evidence of a verifiable file-change reporting shape yet. |
+
+**Source** [`AgentFileChange.ts`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/agent-contract/AgentFileChange.ts) · [`parseAnthropicStyleFileChanges.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/BaseCliAgent/parseAnthropicStyleFileChanges.js) · **Tests** [`file-change-contract.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/file-change-contract.test.js)
 
 ### ClaudeCodeAgent
 
@@ -376,6 +472,68 @@ emits `--model` / `--provider` flags. See
 [`HermesCliAgentOptions`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/HermesCliAgentOptions.ts).
 
 **Source** [`CodexAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/CodexAgent.js) · [`ClaudeCodeAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/ClaudeCodeAgent.js) · [`BaseCliAgentOptions.ts`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/BaseCliAgent/BaseCliAgentOptions.ts) · **Tests** [`codex-support.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/codex-support.test.js) · [`claude-support.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/claude-support.test.js) · **See also** [CLI Agents](/integrations/cli-agents), [Agents overview](/agents/overview)
+
+## NanocodexAgent
+
+Runs stock Nanocodex 0.5.0 through the separately installed
+`smithers-nanocodex` v0.0.2 bridge. It starts one fresh `serve` worker per
+`generate()` call, supports same-canonical-workspace resume checkpoints, and
+does not reuse a daemon or bridge session. Linux x86_64 (glibc 2.35+) and
+macOS arm64 are supported. The adapter spawns the matching binary directly;
+Bubblewrap / `sandbox-exec` must not wrap it.
+
+```tsx
+import { NanocodexAgent } from "smthrs";
+
+const worker = new NanocodexAgent({
+  binary: "/usr/local/bin/smithers-nanocodex",
+  auth: { mode: "api-key-env", environmentVariable: "OPENAI_API_KEY" },
+  model: "gpt-5.6-sol",
+  thinking: "high",
+});
+```
+
+<ParamField path="options" type="NanocodexAgentOptions">
+  <Expandable title="NanocodexAgentOptions">
+    <ParamField path="binary" type="string" default='"smithers-nanocodex"'>
+      Executable path or command resolved on `PATH`. The binary is external;
+      Smithers never bundles or downloads it at runtime.
+    </ParamField>
+    <ParamField path="cwd" type="string">
+      Absolute workspace fallback. A task `rootDir` takes precedence.
+    </ParamField>
+    <ParamField path="auth" type="NanocodexAuth">
+      API-key environment mode (default `OPENAI_API_KEY`) or managed ChatGPT
+      auth-file mode.
+    </ParamField>
+    <ParamField path="instructions" type="string">
+      Complete replacement instructions, not an append operation.
+    </ParamField>
+    <ParamField path="model" type='"gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" | "sol" | "terra" | "luna"' default='"gpt-5.6-sol"'>
+      Stock Nanocodex 0.5.0 model. Fixed for a native thread. Resume rejects a
+      constructor model that does not match the checkpoint; an absent
+      checkpoint model is treated as Sol.
+    </ParamField>
+    <ParamField path="thinking" type='"none" | "low" | "medium" | "high" | "xhigh" | "max"' />
+    <ParamField path="reasoningMode" type='"standard" | "pro"' />
+    <ParamField path="fastMode" type="boolean" />
+    <ParamField path="env" type="Record<string, string>" />
+    <ParamField path="inheritEnv" type="boolean" default="true" />
+    <ParamField path="timeoutMs" type="number" />
+    <ParamField path="idleTimeoutMs" type="number" />
+    <ParamField path="cancellationGraceMs" type="number" />
+    <ParamField path="maxCheckpointBytes" type="number" />
+  </Expandable>
+</ParamField>
+
+Protocol v1 keeps stock Code Mode and native tools enabled. It rejects
+JavaScript tools, MCP, subagents, steering, custom endpoints, Code Mode
+disablement, checkpoint fork, and workspace relocation. Checkpoints are opaque
+secrets. Process-group cleanup is best-effort, not filesystem, network, device,
+or credential isolation. Use an outer Smithers `<Sandbox>` when those
+boundaries are required. v0.0.1 / Nanocodex 0.3.0 checkpoints do not resume.
+
+**Source** [`NanocodexAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/NanocodexAgent.js) · **Tests** [`nanocodex-agent.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/nanocodex-agent.test.js) · **See also** [Nanocodex integration](/integrations/nanocodex), [`NanocodexAgentOptions`](/reference/types)
 
 ## createHttpTool
 
@@ -517,6 +675,12 @@ function hashCapabilityRegistry(
     </ParamField>
     <ParamField path="humanInteraction" type="{ supportsUiRequests, methods }" required>
       Human-interaction support descriptor.
+    </ParamField>
+    <ParamField path="fileChanges" type="{ supportsFileChanges, supportsUnifiedDiff }" required>
+      File-change reporting descriptor. `supportsFileChanges` is `true` when the
+      engine can identify file-mutating tool calls at all; `supportsUnifiedDiff`
+      is `true` when it can additionally produce (report or reconstruct) full
+      diff content. See [File-change parsing](#file-change-parsing).
     </ParamField>
     <ParamField path="builtIns" type="string[]" required>
       Names of built-in capabilities.

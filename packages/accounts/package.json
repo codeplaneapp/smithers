@@ -1,6 +1,6 @@
 {
-  "name": "@smithers-orchestrator/accounts",
-  "version": "0.32.0",
+  "name": "@smthrs/accounts",
+  "version": "0.34.0",
   "description": "Manage multiple Claude/Antigravity/Codex/Gemini/Kimi subscription and API-key accounts that Smithers agents can round-robin through.",
   "type": "module",
   "sideEffects": false,
@@ -25,7 +25,7 @@
     "build": "tsup --dts-only"
   },
   "dependencies": {
-    "@smithers-orchestrator/errors": "workspace:*"
+    "@smthrs/errors": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest",

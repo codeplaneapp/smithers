@@ -64,16 +64,16 @@ Agents raise questions too, mid-task: the `ask-human` CLI command and the MCP `a
 
 ### Suspension, not blocking
 
-When a run hits an unresolved gate, `bunx smithers-orchestrator up` **exits**. This is deliberate:
+When a run hits an unresolved gate, `bunx smthrs up` **exits**. This is deliberate:
 
 ```bash
-bunx smithers-orchestrator up deploy.tsx        # exits with status waiting-approval
-bunx smithers-orchestrator ps --status waiting-approval
-bunx smithers-orchestrator approve RUN_ID --node ship-decision --by alice --note "LGTM"
-bunx smithers-orchestrator up deploy.tsx --run-id RUN_ID --resume true
+bunx smthrs up deploy.tsx        # exits with status waiting-approval
+bunx smthrs ps --status waiting-approval
+bunx smthrs approve RUN_ID --node ship-decision --by alice --note "LGTM"
+bunx smthrs up deploy.tsx --run-id RUN_ID --resume true
 ```
 
-The pending request, the run frame, and every completed task output live in the database. Nothing is in memory; nothing is burning a process. When the human answers Tuesday, resume re-renders the graph, skips every completed task, and continues from the gate. The same flow drives signals - `bunx smithers-orchestrator signal RUN_ID user-feedback --data '{"rating":5}'` then resume - and durable human requests: `bunx smithers-orchestrator human inbox`, `bunx smithers-orchestrator human answer <requestId> --value '"yes"'`.
+The pending request, the run frame, and every completed task output live in the database. Nothing is in memory; nothing is burning a process. When the human answers Tuesday, resume re-renders the graph, skips every completed task, and continues from the gate. The same flow drives signals - `bunx smthrs signal RUN_ID user-feedback --data '{"rating":5}'` then resume - and durable human requests: `bunx smthrs human inbox`, `bunx smthrs human answer <requestId> --value '"yes"'`.
 
 <Note>
 Delivering a decision does not resume a suspended run by itself. An external controller - the Gateway's `submitApproval`/`submitSignal` + `resumeRun`, the `supervise` command, or an explicit `up --resume` - restarts execution. This is the same split Temporal makes between signal delivery and workflow progress, surfaced instead of hidden.
@@ -83,8 +83,8 @@ Delivering a decision does not resume a suspended run by itself. An external con
 
 - **CLI:** `approve`, `deny` (auto-detect the node when only one gate is pending), `signal`, `human inbox|answer|cancel`, `ask-human`, `why RUN_ID` to see what a run is blocked on.
 - **MCP:** `list_pending_approvals`, `resolve_approval` (with an ambiguity guard - it errors rather than guessing among multiple matches), `ask_human`. This is how an orchestrating agent (Claude Code, Hermes) relays a question to the human in conversation and records the answer.
-- **Gateway UI:** the `ApprovalPanel` component from `@smithers-orchestrator/gateway-ui` renders pending approvals with approve/deny buttons over `useGatewayApprovals` + `submitApproval`; drop it into any [custom workflow UI](/guides/custom-workflow-ui).
-- **Notifications:** the `@smithers-orchestrator/telegram` package plus the reference Telegram approval Mini App push gates to a phone; GitHub/Linear/Telegram integrations turn inbound webhooks into durable workflow signals.
+- **Gateway UI:** the `ApprovalPanel` component from `@smthrs/gateway-ui` renders pending approvals with approve/deny buttons over `useGatewayApprovals` + `submitApproval`; drop it into any [custom workflow UI](/guides/custom-workflow-ui).
+- **Notifications:** the `@smthrs/telegram` package plus the reference Telegram approval Mini App push gates to a phone; GitHub/Linear/Telegram integrations turn inbound webhooks into durable workflow signals.
 
 ## Guarantees and limits
 

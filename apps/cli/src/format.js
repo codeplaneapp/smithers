@@ -3,6 +3,7 @@
 // @smithers-type-exports-end
 
 import pc from "picocolors";
+import { sanitizeTerminalText } from "@smthrs/tui/src/sanitizeTerminalText.ts";
 import { eventCategoryForType } from "./event-categories.js";
 /**
  * Format a timestamp as relative age: "2m ago", "1h ago", "3d ago"
@@ -173,10 +174,18 @@ export function formatEventLine(event, baseMs, options) {
       return `${prefix}▶ Run started`;
     case "RunStatusChanged":
       return `${prefix}↺ Run status: ${payload?.status ?? "unknown"}`;
-    case "RunFinished":
-      return payload?.failedChildren > 0
-        ? `${prefix}✓ Run finished (${payload.failedChildren} failed ${payload.failedChildren === 1 ? "child" : "children"})`
-        : `${prefix}✓ Run finished`;
+    case "RunFinished": {
+      const notes = [];
+      if (payload?.failedChildren > 0) {
+        notes.push(`${payload.failedChildren} failed ${payload.failedChildren === 1 ? "child" : "children"}`);
+      }
+      if (Array.isArray(payload?.exhaustedLoops) && payload.exhaustedLoops.length > 0) {
+        notes.push(
+          `${payload.exhaustedLoops.length} exhausted ${payload.exhaustedLoops.length === 1 ? "loop" : "loops"} (until never satisfied)`,
+        );
+      }
+      return notes.length > 0 ? `${prefix}✓ Run finished (${notes.join(", ")})` : `${prefix}✓ Run finished`;
+    }
     case "RunFailed":
       return `${prefix}✗ Run failed: ${truncateText(formatErrorPayload(payload?.error ?? "unknown"), truncatePayloadAt)}`;
     case "RunCancelled":
@@ -251,6 +260,12 @@ export function formatEventLine(event, baseMs, options) {
       return `${prefix}✓ Auto-approved: ${payload?.nodeId ?? "?"}`;
     case "ApprovalDenied":
       return `${prefix}✗ Denied: ${payload?.nodeId ?? "?"}`;
+    case "SteerQueued":
+      return `${prefix}↪ steer queued: ${truncateText(sanitizeTerminalText(String(payload?.message ?? "")), 100)}`.trim();
+    case "SteerConsumed":
+      return `${prefix}✓ steer consumed by attempt ${payload?.attempt ?? 1}`;
+    case "SteerExpired":
+      return `${prefix}✗ steer expired — node finished first; press h to hijack`;
     case "ToolCallStarted":
       return `${prefix}🔧 ${payload?.nodeId ?? "?"} → ${payload?.toolName ?? "tool"} (attempt ${payload?.attempt ?? 1})`;
     case "ToolCallFinished":

@@ -16,9 +16,9 @@
   <circle cx="160" cy="252" r="9" fill="#FBBF24"/>
   <circle cx="190" cy="252" r="9" fill="#34D399"/>
   <text x="800" y="260" font-size="24" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#6B7280" text-anchor="middle">smithers</text>
-<text font-size="32" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#E7E9EE"><tspan x="136" y="360"><tspan fill="#4C8DFF">$ </tspan>bunx smithers-orchestrator --help</tspan></text>
+<text font-size="32" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#E7E9EE"><tspan x="136" y="360"><tspan fill="#4C8DFF">$ </tspan>bunx smthrs --help</tspan></text>
 <text font-size="26" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" fill="#6B7280"><tspan x="136" y="438">▸ run this command to capture real output</tspan></text>
-<text font-size="28" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#9CA3B4"><tspan x="96" y="720">bunx smithers-orchestrator@0.25.1 https://smithers.sh/changelogs/0.25.1</tspan><tspan x="96" y="760">5/5</tspan></text>
+<text font-size="28" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#9CA3B4"><tspan x="96" y="720">bunx smthrs@0.25.1 https://smithers.sh/changelogs/0.25.1</tspan><tspan x="96" y="760">5/5</tspan></text>
 
   <rect x="96" y="812" width="16" height="16" rx="4" fill="#4C8DFF"/>
   <text x="124" y="826" font-size="26" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fill="#6B7280">smithers.sh</text>

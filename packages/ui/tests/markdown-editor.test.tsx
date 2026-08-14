@@ -17,6 +17,7 @@ import {
   MarkdownEditorStyles,
   markdownEditorCss,
 } from "../src/adapters/markdown-editor";
+import { themeRegistry } from "../src/styles";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -167,6 +168,31 @@ describe("MarkdownEditor (fallback path)", () => {
 });
 
 describe("MarkdownEditor styling", () => {
+  test("keeps generated Crepe fallbacks synchronized with Night Owl", () => {
+    const variants = [themeRegistry["night-owl"].light, themeRegistry["night-owl"].dark];
+    const mappings = {
+      bg: "bg",
+      text: "text",
+      textMuted: "text-muted",
+      textFaint: "text-faint",
+      surface: "surface",
+      surface2: "surface-2",
+      hover: "hover",
+      inverseBg: "inverse-bg",
+      inverseText: "inverse-text",
+      inlineCodeBg: "inline-code-bg",
+      brand: "brand",
+      success: "success",
+      danger: "danger",
+    } as const;
+    for (const variant of variants) {
+      for (const [field, token] of Object.entries(mappings)) {
+        const value = variant[field as keyof typeof mappings];
+        expect(markdownEditorCss).toContain(`var(--${token},${value})`);
+      }
+    }
+  });
+
   test("ships the Crepe theme plus host chrome through markdownEditorCss", () => {
     expect(markdownEditorCss).toContain(".ProseMirror");
     expect(markdownEditorCss).toContain(".milkdown");
@@ -174,14 +200,14 @@ describe("MarkdownEditor styling", () => {
     expect(markdownEditorCss).toContain("prefers-color-scheme: dark");
     expect(markdownEditorCss).toContain(":root:not([data-theme='light']) .milkdown");
     expect(markdownEditorCss).toContain(":root[data-theme='dark'] .milkdown");
-    expect(markdownEditorCss).toContain("--crepe-color-primary:var(--brand,#6d56d8)");
+    expect(markdownEditorCss).toContain("--crepe-color-primary:var(--brand,#9449bc)");
     expect(markdownEditorCss).toContain("--crepe-font-default:var(--font-sans");
     expect(markdownEditorCss).toContain("--crepe-font-code:var(--font-mono");
     expect(markdownEditorCss).toContain(".milkdown :focus-visible{outline:2px solid var(--ring-border");
     expect(markdownEditorCss).toContain("transparent))!important;outline-offset:2px}");
     expect(markdownEditorCss).toContain("@media (prefers-reduced-motion: reduce)");
     expect(markdownEditorCss).toContain("animation-duration:0.001ms!important");
-    expect(markdownEditorCss).toContain("--crepe-color-outline:var(--text-faint,#8c8c95)");
+    expect(markdownEditorCss).toContain("--crepe-color-outline:var(--text-faint,#909caa)");
   });
 
   test("ships no external resource references", () => {
@@ -196,16 +222,16 @@ describe("MarkdownEditor styling", () => {
     document.body.appendChild(milkdown);
 
     document.documentElement.setAttribute("data-theme", "light");
-    expect(getComputedStyle(milkdown).getPropertyValue("--crepe-color-background")).toContain("#fafafa");
-    expect(getComputedStyle(milkdown).getPropertyValue("--crepe-color-primary")).toContain("#6d56d8");
+    expect(getComputedStyle(milkdown).getPropertyValue("--crepe-color-background")).toContain("#FBFBFB");
+    expect(getComputedStyle(milkdown).getPropertyValue("--crepe-color-primary")).toContain("#9449bc");
 
     document.documentElement.setAttribute("data-theme", "dark");
     // happy-dom caches computed custom properties until the node reconnects;
     // browsers invalidate this automatically when the root attribute changes.
     milkdown.remove();
     document.body.appendChild(milkdown);
-    expect(getComputedStyle(milkdown).getPropertyValue("--crepe-color-background")).toContain("#09090b");
-    expect(getComputedStyle(milkdown).getPropertyValue("--crepe-color-primary")).toContain("#8b78e6");
+    expect(getComputedStyle(milkdown).getPropertyValue("--crepe-color-background")).toContain("#011627");
+    expect(getComputedStyle(milkdown).getPropertyValue("--crepe-color-primary")).toContain("#c792ea");
     milkdown.remove();
     document.documentElement.removeAttribute("data-theme");
   });

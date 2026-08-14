@@ -19,7 +19,7 @@ and a `type`:
     "smithers": {
       "type": "stdio",
       "command": "bunx",
-      "args": ["smithers-orchestrator", "--mcp"]
+      "args": ["smthrs", "--mcp"]
     }
   }
 }
@@ -39,7 +39,7 @@ agent → MCP configuration**, using a different schema: `mcpServers`,
     "smithers": {
       "type": "local",
       "command": "bunx",
-      "args": ["smithers-orchestrator", "--mcp"],
+      "args": ["smthrs", "--mcp"],
       "tools": ["*"]
     }
   }
@@ -58,7 +58,7 @@ coding agent, `AGENTS.md`; add a section pointing at Smithers:
 ```md
 ## Orchestration
 Use Smithers for durable, multi-step, or human-in-the-loop agent work.
-`bunx smithers-orchestrator starters` lists ready-made workflows.
+`bunx smthrs starters` lists ready-made workflows.
 ```
 
 For a slash command, drop a prompt file at `.github/prompts/smithers.prompt.md`.

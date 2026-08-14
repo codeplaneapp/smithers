@@ -12,7 +12,7 @@ findings replan the affected subtree without a restart.
 
 ```ts
 // Props
-import { DelegationChain } from "smithers-orchestrator";
+import { DelegationChain } from "smthrs";
 
 type Tier = "fable" | "opus" | "sonnet" | "haiku";
 type DelegationAgents = Partial<Record<Tier, AgentLike | AgentLike[]>>;
@@ -42,7 +42,7 @@ type DelegationChainProps = DelegationSharedProps & {
 ```
 
 ```tsx
-import { CodexAgent, DelegationChain, createSmithers, delegationSchemas } from "smithers-orchestrator";
+import { CodexAgent, DelegationChain, createSmithers, delegationSchemas } from "smthrs";
 
 const { Workflow, smithers, outputs } = createSmithers({ ...delegationSchemas });
 
@@ -89,7 +89,7 @@ Each phase is exported separately for standalone use and takes
 
 ## Output tables
 
-`delegationSchemas` (from `smithers-orchestrator`) registers every table;
+`delegationSchemas` (from `smthrs`) registers every table;
 `DelegationOutputs` is the matching prop shape. `dcApproval` needs an
 `approvalPolicy`, `dcBudget` needs a `budget`, and `dcScore` needs run-level
 `scorers`.
@@ -169,7 +169,7 @@ run always ends showable.
 
 ## UI side
 
-`smithers-orchestrator/gateway-react` exports the matching read model:
+`smthrs/gateway-react` exports the matching read model:
 [`useDelegationChain`](/reference/gateway-react#usedelegationchain) folds a
 run's `dc*` rows into a `DelegationGraph` (nodes with status, versions,
 attention rollups, budget rollup, phase) and returns `submitEdit`,
@@ -186,4 +186,4 @@ attention rollups, budget rollup, phase) and returns `submitEdit`,
   `useDelegationChain` runs on Effect.ts behind the frozen hook signature.
 - Scoring wiring: `scorers.exec` / `scorers.review` ride the exec and review
   tasks; `scorers.run` rides the digest task. The delegation scorers live in
-  `smithers-orchestrator/scorers` (see [scorer reference](/reference/scorers)).
+  `smthrs/scorers` (see [scorer reference](/reference/scorers)).

@@ -1,10 +1,10 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 
 // Engine-backed validation runs push past bun's 5s default on the slower
 // Windows CI runners (observed 5.2s); the work is real, not hung.
 setDefaultTimeout(20_000);
-import { Workflow, Task, runWorkflow } from "smithers-orchestrator";
+import { Workflow, Task, runWorkflow } from "smthrs";
 import { createTestSmithers } from "./helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";

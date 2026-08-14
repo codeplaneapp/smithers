@@ -2,12 +2,12 @@ import { describe, expect, mock, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Effect } from "effect";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
 
 const restoreCalls = [];
 
-mock.module("@smithers-orchestrator/vcs/jj", () => ({
+mock.module("@smthrs/vcs/jj", () => ({
   captureWorkspaceSnapshot: (cwd) => {
     restoreCalls.push({ fn: "captureWorkspaceSnapshot", cwd });
     return Effect.succeed({

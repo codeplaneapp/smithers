@@ -3,7 +3,7 @@
 // the haiku prefetch queue surfaced), the refined-prompt approval editor, and
 // the end-of-run poll form.
 import { useMemo, useState } from "react";
-import type { DelegationGraph } from "smithers-orchestrator/gateway-react";
+import type { DelegationGraph } from "smthrs/gateway-react";
 import {
   DcMarkdownEditor,
   goalApprovalTarget,

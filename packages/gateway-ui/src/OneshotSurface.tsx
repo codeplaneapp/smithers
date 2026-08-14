@@ -13,7 +13,7 @@
  *
  * The hijack terminal attaches to the gateway's `/v1/pty/hijack` websocket
  * (which runs `smithers hijack <runId> --target <nodeId>` in a real PTY) and
- * renders through the shared `@smithers-orchestrator/ui` terminal adapter:
+ * renders through the shared `@smthrs/ui` terminal adapter:
  * binary frames are raw PTY bytes both ways, text frames are JSON control
  * messages (`resize` up, `exit`/`error` down).
  */
@@ -35,7 +35,7 @@ import {
   useGatewayRun,
   useGatewayRunDiff,
   useSmithersGateway,
-} from "@smithers-orchestrator/gateway-react";
+} from "@smthrs/gateway-react";
 import {
   Button,
   Card,
@@ -53,8 +53,8 @@ import {
   TabsList,
   TabsTrigger,
   normalizeStatus,
-} from "@smithers-orchestrator/ui";
-import { PierreDiffView } from "@smithers-orchestrator/ui/adapters/pierre-diff-view";
+} from "@smthrs/ui";
+import { PierreDiffView } from "@smthrs/ui/adapters/pierre-diff-view";
 import { HijackTerminal } from "./HijackTerminal";
 import { NodeChatStream } from "./NodeChatStream";
 import { RunEventLog } from "./RunEventLog";
@@ -103,6 +103,9 @@ type OneshotStatus = { text: string; engine?: string; timestampMs?: number; seq?
 type SteerDelivery = "idle" | "sending" | "queued" | "delivered" | "agent-acked" | "failed";
 
 const STATUS_NODE_ID = "status";
+// Trailing debounce for live diff refreshes: agent edits arrive in bursts of
+// run events, so refetch once the burst settles instead of polling tightly.
+const LIVE_DIFF_REFETCH_DEBOUNCE_MS = 1500;
 // Keep request cancellation paired with the fetch implementation captured by
 // the Gateway client. Test/browser hosts may replace DOM globals after modules
 // load (happy-dom does); mixing constructors produces an invalid AbortSignal.
@@ -622,6 +625,7 @@ export function OneshotSurface({
   const candidates = useHijackCandidates(runId, running);
   const diff = diffState.data;
   const oversized = diff && "status" in diff && diff.status === "oversized";
+  const liveDiff = Boolean(diff && "live" in diff && diff.live);
   const patch = useMemo(
     () => (diff && "patches" in diff ? diff.patches.map((item) => item.diff).join("\n") : ""),
     [diff],
@@ -668,6 +672,27 @@ export function OneshotSurface({
     poller.pollNow();
     return () => poller.dispose();
   }, [gateway, runId, running, oneshotControls]);
+
+  // Live diff: the gateway diffs the run's working copy while the run is
+  // live, so refresh on run events (trailing-debounced — edits arrive in
+  // bursts) rather than a tight poll, and once more on the terminal
+  // transition to land the authoritative base-to-terminal snapshot.
+  const diffRefetch = diffState.refetch;
+  // Key on the last event's seq, not the array length: the events ring is
+  // capped (maxEvents), so its length stops changing on a long run and a
+  // length-keyed effect would silently stop refreshing the diff.
+  const lastDiffEventSeq =
+    controlEvents.events.length > 0 ? Number(controlEvents.events[controlEvents.events.length - 1]?.seq ?? 0) : 0;
+  useEffect(() => {
+    if (!running) return;
+    const timer = setTimeout(() => void diffRefetch(), LIVE_DIFF_REFETCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [running, lastDiffEventSeq, diffRefetch]);
+  const wasRunningRef = useRef(running);
+  useEffect(() => {
+    if (wasRunningRef.current && !running) void diffRefetch();
+    wasRunningRef.current = running;
+  }, [running, diffRefetch]);
 
   useEffect(() => {
     if (!steerMessageId) return;
@@ -820,7 +845,7 @@ export function OneshotSurface({
         labelPrefix={workflowName === "chat" ? "Live status" : "Cheap narrator"}
         available={narratorAvailable}
       />
-      <Tabs value={tab} onValueChange={(value) => setTab(value as OneshotSurfaceTab)}>
+      <Tabs value={tab} onValueChange={(value: string) => setTab(value as OneshotSurfaceTab)}>
         <TabsList>
           <TabsTrigger value="chat">Chat</TabsTrigger>
           <TabsTrigger value="diff" count={filesChanged}>
@@ -880,7 +905,21 @@ export function OneshotSurface({
           ) : diffState.error ? (
             <EmptyState title="Diff unavailable" description={diffState.error.message} />
           ) : (
-            <PierreDiffView patch={patch} emptyLabel="No finished diff is available yet." />
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, minHeight: 0 }}>
+              {liveDiff ? (
+                <span data-testid="oneshot-diff-live" style={{ color: theme.textDim, fontSize: 12 }}>
+                  Live working-copy diff — refreshes as the agent edits; the final snapshot lands when the run ends.
+                </span>
+              ) : null}
+              <PierreDiffView
+                patch={patch}
+                emptyLabel={
+                  running
+                    ? "No changes yet — the diff appears here as the agent edits files."
+                    : "No finished diff is available yet."
+                }
+              />
+            </div>
           )}
         </TabsContent>
         <TabsContent value="events">
@@ -934,13 +973,13 @@ export function OneshotSurface({
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose?.()}>
+    <Dialog open onOpenChange={(open: boolean) => !open && onClose?.()}>
       <DialogContent
         showCloseButton={false}
         className={`oneshot-surface-panel${className ? ` ${className}` : ""}`}
         data-maximized={maximized}
         data-testid={testId}
-        onEscapeKeyDown={(event) => {
+        onEscapeKeyDown={(event: KeyboardEvent) => {
           if (!maximized) return;
           event.preventDefault();
           setMaximized(false);

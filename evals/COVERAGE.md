@@ -114,7 +114,7 @@ Immediate docs-gap candidates — an eval that fails here points straight at a d
 
 ### agent-lifecycle
 
-- **Hijack (interactive resume)** (`-`) — Most CLI agents support native interactive takeover via bunx smithers-orchestrator hijack RUN_ID using vendor-specific resume flags. · _?_
+- **Hijack (interactive resume)** (`-`) — Most CLI agents support native interactive takeover via bunx smthrs hijack RUN_ID using vendor-specific resume flags. · _?_
 - **Session resumption** (`-`) — Agents persist and resume sessions via native IDs (sessionId, threadId, conversationId) passed through resumeSession or generate() options. · _?_
 
 ### agents
@@ -189,29 +189,29 @@ Immediate docs-gap candidates — an eval that fails here points straight at a d
 
 ### cli
 
-- **Agents-Only Init Flag** (`bunx smithers-orchestrator init --agents-only`) — Only create .smithers/agents/ configuration without touching the workflow pack. · _docs/llms-full.txt (line 1705)_
+- **Agents-Only Init Flag** (`bunx smthrs init --agents-only`) — Only create .smithers/agents/ configuration without touching the workflow pack. · _docs/llms-full.txt (line 1705)_
 - **Diff snapshots between frames** (`smithers diff <runId> <nodeId>`) — Compute structured diff of nodes, outputs, loops, and input changes between two snapshots. · _llms-core.txt_
-- **Force Init Flag** (`bunx smithers-orchestrator init --force`) — Overwrite existing .smithers/ scaffold files during init. · _docs/llms-full.txt (line 1704)_
+- **Force Init Flag** (`bunx smthrs init --force`) — Overwrite existing .smithers/ scaffold files during init. · _docs/llms-full.txt (line 1704)_
 - **Fork run from checkpoint** (`smithers fork <workflow> --run-id <runId> --frame <frameNo>`) — Create an independent branched run from a snapshot checkpoint with optional node reset and input overrides. · _llms-core.txt_
-- **Global Init Flag** (`bunx smithers-orchestrator init --global`) — Scaffold the workflow pack in ~/.smithers (global) instead of ./.smithers (local). · _docs/llms-full.txt (line 1708)_
-- **Init Templates (Starters)** (`bunx smithers-orchestrator init --template <id>`) — Pre-built starter templates for common workflows (idea-to-prd, idea-to-tickets, research, debug, etc.). · _docs/llms-full.txt (lines 550-590)_
+- **Global Init Flag** (`bunx smthrs init --global`) — Scaffold the workflow pack in ~/.smithers (global) instead of ./.smithers (local). · _docs/llms-full.txt (line 1708)_
+- **Init Templates (Starters)** (`bunx smthrs init --template <id>`) — Pre-built starter templates for common workflows (idea-to-prd, idea-to-tickets, research, debug, etc.). · _docs/llms-full.txt (lines 550-590)_
 - **List durability snapshots** (`smithers snapshots <runId>`) — List workspace checkpoints (durability snapshots) captured during a run's execution. · _llms-core.txt_
 - **Replay from checkpoint and resume** (`smithers replay <workflow> --run-id <runId> --frame <frameNo> --restore-vcs`) — Fork from a checkpoint and immediately resume execution, optionally restoring the VCS working copy to match the original attempt. · _llms-core.txt_
 - **Restore worktree to checkpoint** (`smithers restore <runId> --node <nodeId>`) — Restore a worktree to a durability checkpoint by running jj restore with the checkpoint's commit ID. · _llms-core.txt_
 - **Retry a task within a run** (`smithers retry-task <workflow> --run-id <runId> --node <nodeId>`) — Reset a node to pending state and optionally reset all dependent downstream nodes, then resume the run. · _llms-core.txt_
 - **Rewind run to prior frame** (`smithers rewind <runId> --frame <frameNo> --yes`) — Destructively time-travel backwards by reverting VCS state and deleting frames recorded after the target frame. · _llms-core.txt_
-- **Smithers Init Command** (`bunx smithers-orchestrator init`) — Scaffold .smithers/ with seeded workflows, prompts, components, agent configs, and optional dependencies. · _docs/llms-full.txt (lines 380-410)_
-- **Starter Templates Reference** (`bunx smithers-orchestrator starters`) — 10 canonical starter template IDs with audiences and corresponding seeded workflows (idea-to-prd, idea-to-tickets, launch-checklist, etc.). · _docs/llms-full.txt (lines 575-590)_
-- **Starters Browsing Command** (`bunx smithers-orchestrator starters [--audience|--goal|--workflow|--tag]`) — Browse and filter available starter templates by audience, goal, workflow, or tag. · _docs/llms-full.txt (lines 595-610)_
+- **Smithers Init Command** (`bunx smthrs init`) — Scaffold .smithers/ with seeded workflows, prompts, components, agent configs, and optional dependencies. · _docs/llms-full.txt (lines 380-410)_
+- **Starter Templates Reference** (`bunx smthrs starters`) — 10 canonical starter template IDs with audiences and corresponding seeded workflows (idea-to-prd, idea-to-tickets, launch-checklist, etc.). · _docs/llms-full.txt (lines 575-590)_
+- **Starters Browsing Command** (`bunx smthrs starters [--audience|--goal|--workflow|--tag]`) — Browse and filter available starter templates by audience, goal, workflow, or tag. · _docs/llms-full.txt (lines 595-610)_
 - **Time-travel to prior attempt** (`smithers timetravel <workflow> --run-id <runId> --node <nodeId> --attempt <attemptNo>`) — Revert a specific node to a prior attempt by restoring filesystem state and resetting dependent nodes. · _llms-core.txt_
 - **View execution timeline** (`smithers timeline <runId> --tree`) — Display all frames and fork branches for a run, with optional recursive tree view of descendants. · _llms-core.txt_
-- **Workflow Create Scaffold Command** (`bunx smithers-orchestrator workflow.create <name>`) — Create a new minimal flat workflow scaffold in .smithers/workflows/ with TypeScript and JSX setup. · _docs/llms-full.txt (~1835)_
-- **Workflow Graph Rendering** (`bunx smithers-orchestrator graph <workflow>`) — Render the workflow graph without executing it to verify structure and detect syntax errors. · _docs/llms-full.txt (~1800)_
-- **Workflow Inspection Command** (`bunx smithers-orchestrator workflow.inspect <name>`) — Show workflow metadata, input/output schemas, and agent-facing skill documentation. · _docs/llms-full.txt (~1828)_
-- **Workflow List Discovery** (`bunx smithers-orchestrator workflow.list`) — List all discovered workflows from local .smithers/workflows/ and global ~/.smithers/workflows/. · _docs/llms-full.txt (~1715)_
-- **Workflow Run Command** (`bunx smithers-orchestrator workflow run <name>`) — Execute a discovered workflow by ID with input, concurrency control, resumption, and HTTP serving. · _docs/llms-full.txt (lines ~1720-1770)_
-- **Workflow Skills Generation** (`bunx smithers-orchestrator workflow.skills [name] [--output]`) — Generate SKILL.md documentation for discovered workflows for agent use. · _docs/llms-full.txt (~1839)_
-- **Workflow Up Command** (`bunx smithers-orchestrator up <workflow>`) — Start or resume a workflow execution with input, run ID, resource limits, and optional HTTP serving. · _docs/llms-full.txt (~1720)_
+- **Workflow Create Scaffold Command** (`bunx smthrs workflow.create <name>`) — Create a new minimal flat workflow scaffold in .smithers/workflows/ with TypeScript and JSX setup. · _docs/llms-full.txt (~1835)_
+- **Workflow Graph Rendering** (`bunx smthrs graph <workflow>`) — Render the workflow graph without executing it to verify structure and detect syntax errors. · _docs/llms-full.txt (~1800)_
+- **Workflow Inspection Command** (`bunx smthrs workflow.inspect <name>`) — Show workflow metadata, input/output schemas, and agent-facing skill documentation. · _docs/llms-full.txt (~1828)_
+- **Workflow List Discovery** (`bunx smthrs workflow.list`) — List all discovered workflows from local .smithers/workflows/ and global ~/.smithers/workflows/. · _docs/llms-full.txt (~1715)_
+- **Workflow Run Command** (`bunx smthrs workflow run <name>`) — Execute a discovered workflow by ID with input, concurrency control, resumption, and HTTP serving. · _docs/llms-full.txt (lines ~1720-1770)_
+- **Workflow Skills Generation** (`bunx smthrs workflow.skills [name] [--output]`) — Generate SKILL.md documentation for discovered workflows for agent use. · _docs/llms-full.txt (~1839)_
+- **Workflow Up Command** (`bunx smthrs up <workflow>`) — Start or resume a workflow execution with input, run ID, resource limits, and optional HTTP serving. · _docs/llms-full.txt (~1720)_
 - **smithers eval CLI command** (`smithers eval`) — Runs an eval suite: `smithers eval <workflow> --cases <file.jsonl> --suite <name> [--concurrency N] [--dry-run]`. · _?_
 - **smithers optimize CLI command** (`smithers optimize`) — Runs prompt optimization: baseline eval, GEPA patch generation, optimized eval, score comparison, and artifact output. · _?_
 
@@ -374,7 +374,7 @@ Immediate docs-gap candidates — an eval that fails here points straight at a d
 ### memory
 
 - **Fact storage (working memory)** (`store.setFact(ns, key, value, ttlMs?)`) — Namespace-scoped JSON fact storage with optional TTL, supporting get/set/delete/list operations across workflow, agent, user, and global scopes. · _llms-memory.txt_
-- **Memory CLI listing** (`bunx smithers-orchestrator memory list`) — CLI command to inspect facts in a namespace for debugging and observability. · _llms-memory.txt_
+- **Memory CLI listing** (`bunx smthrs memory list`) — CLI command to inspect facts in a namespace for debugging and observability. · _llms-memory.txt_
 - **Memory metrics** (`memoryFactReads, memoryFactWrites, memoryRecallQueries, memoryMessageSaves, memoryRecallDuration`) — Observability metrics: memoryFactReads, memoryFactWrites, memoryRecallQueries, memoryMessageSaves, memoryRecallDuration. · _llms-memory.txt_
 - **Memory namespaces** (`MemoryNamespace { kind, id }`) — Four namespace kinds (workflow, agent, user, global) provide isolated scopes for facts and threads, matching lifetime semantics. · _llms-memory.txt_
 - **Memory schema (Drizzle tables)** (`smithersMemoryFacts, smithersMemoryThreads, smithersMemoryMessages`) — SQLite schema tables for persistent storage: smithersMemoryFacts, smithersMemoryThreads, smithersMemoryMessages. · _**UNDOCUMENTED**_
@@ -400,7 +400,7 @@ Immediate docs-gap candidates — an eval that fails here points straight at a d
 - **Gateway server (multi-workflow)** (`Gateway, gateway.register(), gateway.listen(), GatewayOptions, GatewayAuthConfig`) — Multi-workflow headless control plane with WebSocket RPC, event subscriptions, UI mounting, cron scheduling, and auth. · _?_
 - **HTTP server (REST multi-workflow)** (`startServer, ServerOptions, /v1/runs, /v1/approvals, /metrics, /events`) — Node.js http-based multi-workflow REST server with bearer auth, SSE events, approval submission, and Prometheus metrics. · _?_
 - **Metric definitions catalog** (`SmithersMetricDefinition, smithersMetricCatalog, toPrometheusMetricName`) — Typed metric registry: counter/gauge/histogram with unit, labels, boundaries; label cardinality safeguards and overflow protection. · _?_
-- **Serve mode (single-workflow HTTP server)** (`createServeApp, bunx smithers-orchestrator up --serve, --port, --host, --auth-token, --metrics`) — Hono-based HTTP server for a single workflow: REST routes, SSE events, approvals, metrics, and health endpoint. · _?_
+- **Serve mode (single-workflow HTTP server)** (`createServeApp, bunx smthrs up --serve, --port, --host, --auth-token, --metrics`) — Hono-based HTTP server for a single workflow: REST routes, SSE events, approvals, metrics, and health endpoint. · _?_
 - **Smithers metrics system (Prometheus/OTLP)** (`renderPrometheusMetrics, prometheusContentType, smithersMetrics, MetricsService, MetricsServiceLive`) — In-process metrics registry with 100+ Prometheus counters/gauges/histograms for runs, nodes, timers, tokens, sandbox, DB, and networking. · _?_
 - **Smithers observability service layer** (`SmithersObservability, createSmithersObservabilityLayer, createSmithersOtelLayer, resolveSmithersObservabilityOptions`) — Effect-based service for OpenTelemetry integration: span context, tracing, logging format (json/pretty/logfmt), and log-level configuration. · _?_
 - **SmithersEvent Union Type** (`SmithersEvent, event.type`) — Tagged union of all runtime events: SupervisorStarted, RunStarted, NodePending, NodeStarted, TaskHeartbeat, TaskHeartbeatTimeout, NodeFinished, NodeFailed, ApprovalRequested, etc. · _apps/observability/src/SmithersEvent.ts_

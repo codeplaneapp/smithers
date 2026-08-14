@@ -1,8 +1,8 @@
 import { eq, getTableName } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm/utils";
 import { Effect, Option } from "effect";
-import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { toSmithersError } from "@smthrs/errors/toSmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 /** @typedef {Record<string, Array<unknown>>} OutputSnapshot */
 // This is deliberately a distinct, enumerable transport field. A symbol is
 // lost by spreads and JSON storage, while a user-owned `seq` field must never

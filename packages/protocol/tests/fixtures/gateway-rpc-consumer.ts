@@ -23,8 +23,8 @@ import type {
   BrowserJournalEntry,
   BrowserActivityEvent,
   BrowserSummary,
-} from "@smithers-orchestrator/protocol/gateway-rpc";
-import type { RunStartedBy as DriverRunStartedBy } from "@smithers-orchestrator/driver";
+} from "@smthrs/protocol/gateway-rpc";
+import type { RunStartedBy as DriverRunStartedBy } from "@smthrs/driver";
 
 const method: GatewayRpcMethod = "launchRun";
 const request: LaunchRunRequest = {

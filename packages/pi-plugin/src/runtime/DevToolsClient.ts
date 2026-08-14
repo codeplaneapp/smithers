@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import type { DevToolsDelta, DevToolsSnapshot } from "@smithers-orchestrator/protocol";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import type { DevToolsDelta, DevToolsSnapshot } from "@smthrs/protocol";
 
 type RequestOptions = {
   baseUrl?: string;

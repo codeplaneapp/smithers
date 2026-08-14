@@ -33,6 +33,32 @@ export type {
   WorkflowCoverageValidation,
 } from "./coverWorkflow.ts";
 export { simMatchers, toHaveExecuted, toHaveExecutedInOrder, toHaveFinished } from "./matchers.ts";
+
+export {
+  AGENT_TRACE_VECTOR_VERSION,
+  flattenGeneratePrompt,
+  loadAgentTraceVector,
+  parseAgentTraceVector,
+  selectTurn,
+} from "./agentTraceVector.ts";
+export type {
+  AgentTraceStreamEvent,
+  AgentTraceTurn,
+  AgentTraceTurnResult,
+  AgentTraceTurnWhen,
+  AgentTraceVector,
+} from "./agentTraceVector.ts";
+
+export { createVirtualClock } from "./virtualClock.ts";
+export type {
+  CreateVirtualClockOptions,
+  VirtualClock as CampaignVirtualClock,
+  VirtualClockMode,
+} from "./virtualClock.ts";
+
+export { scriptedAgent } from "./scriptedAgent.ts";
+export type { ScriptedAgent, ScriptedAgentOptions } from "./scriptedAgent.ts";
+
 export { scenario, step, barrier, fault, extension } from "./scenario/builder.ts";
 export type { TaskRuntime, StepRunner } from "./scenario/builder.ts";
 export { compileScenario } from "./scenario/compile.ts";
@@ -76,8 +102,15 @@ export {
   serializeSimulationDurableError,
 } from "./harness/errors.ts";
 export type { SimulationNativeErrorSpec } from "./harness/errors.ts";
-export { runScenario } from "./runScenario.ts";
-export type { RunScenarioOptions, ScenarioResult } from "./runScenario.ts";
+
+export { runScenario, runKernelScenario, runWorkflowScenario } from "./runScenario.ts";
+export type {
+  RunScenarioOptions,
+  ScenarioResult,
+  RunWorkflowScenarioOptions,
+  WorkflowScenarioResult,
+  ScenarioWorkflow,
+} from "./runScenario.ts";
 export { dryRun } from "./dryRun.ts";
 export { ambiguity } from "./durability/ambiguity.ts";
 export type { AmbiguityOutcome, AmbiguityResult } from "./durability/ambiguity.ts";
@@ -118,3 +151,43 @@ export type {
   RealProcessObservation,
   RealProcessResource,
 } from "./adapters/realProcessAdapter.ts";
+
+export {
+  expectEventCount,
+  expectNodeState,
+  expectNodeStates,
+  expectSteerConsumed,
+  expectRunStatus,
+  expectSoftPinBoard,
+  tallyNodeStates,
+} from "./scenarioAssert.ts";
+export type { ScenarioAdapter } from "./scenarioAssert.ts";
+
+export { runMaybeEffect } from "./runEffect.ts";
+
+export {
+  tryCreateHerdrBridge,
+  tryOpenHerdrClient,
+  snapshotHerdrWorkspace,
+  assertHerdrBridge,
+  tryCloseHerdrWorkspacesForRun,
+  tryCloseCampaignHerdrWorkspaces,
+  focusHerdrWorkspaceByLabel,
+  isCampaignWorkspaceLabel,
+} from "./herdrBridge.ts";
+export type {
+  HerdrBridge,
+  HerdrBridgeClient,
+  HerdrBridgeOptions,
+  HerdrWorkspaceSnapshot,
+  HerdrAssertOptions,
+} from "./herdrBridge.ts";
+
+export { runCampaign } from "./campaign.ts";
+export type {
+  CampaignScenario,
+  CampaignRunContext,
+  CampaignScenarioResult,
+  CampaignReport,
+  RunCampaignOptions,
+} from "./campaign.ts";

@@ -1,0 +1,170 @@
+---
+title: Token-free visibility testing
+description: How agent-trace fixtures, core workflow scenarios, and plane adapters (overview HUD, herdr, gateway/TUI) compose for deterministic UI testing without LLMs.
+---
+
+# Token-free visibility testing
+
+Smithers can exercise **every visibility plane** (overview HUD, herdr cockpit, gateway monitor, TUI, pack UIs) without calling a model. Behavior is scripted; the engine and surfaces stay real where it matters.
+
+This is the cross-plane testing model used while building the Herdr × Smithers terminal experience. It is **not** herdr-specific: herdr is one **plane adapter**.
+
+## Layer cake
+
+```text
+AgentTraceVector fixtures     → what an agent does (streams, fail, hang, steer)
+        ↓ scriptedAgent
+Core workflow scenarios       → real graph + engine + sqlite (authoritative state)
+        ↓ runId / events / DB
+Plane adapters                → HUD · herdr · gateway/TUI · smithers ui
+```
+
+| Layer | Owns | Does not own |
+|---|---|---|
+| **Fixtures** (`packages/testing/fixtures/agent-traces/`) | Turns, delays, ok/fail/hang, prompt matchers | Tabs, HUD layout, gateway RPC shapes |
+| **Scenarios** (`packages/testing/tests/scenarios/`) | Workflow shapes + engine asserts | UI chrome |
+| **Campaign** (`packages/testing/scripts/core-campaign.mjs`) | Ordered catalog, pacing, optional plane attach | A second fixture catalog |
+| **Plane adapter** | Map a real (or exported) run onto a surface | Re-implement agent scripts |
+
+### Related product docs
+
+- [Herdr integration](/integrations/herdr) - first-class terminal host
+
+## Fixtures (agent-trace vectors)
+
+Reusable JSON scripts loaded by `loadAgentTraceVector` / `scriptedAgent`.
+
+- **One fixture ≠ one UI test.** Compose vectors into scenarios.
+- Versioned (`version: 1`), stable `id`, ordered `turns` with optional `when` matchers.
+- Stream events: `delay`, `text`, `tool_*`, `progress`; results: `ok` | `fail` | `hang`.
+- **Pacing is runtime:** virtual clock in CI; real wall-clock delays only for human watch.
+
+Catalog: `packages/testing/fixtures/agent-traces/README.md`.
+
+## Core scenarios (engine truth)
+
+Token-free **real engine + sqlite** tests of practical graphs: hello, sequence, parallel fail, hitl, steer, retry, loop, hang, stream, branch, continueAsNew, system frontmatter, etc.
+
+```bash
+pnpm -C packages/testing test
+```
+
+Assert **node/run state**, steers, and event counts - not UI.
+
+Catalog: `packages/testing/tests/scenarios/README.md`.
+
+## Watch-pack (human-visible subset)
+
+Plane-agnostic **scenario ids** optimized for watching a surface:
+
+| Id | Story | Why it matters for visibility |
+|---|---|---|
+| `hello` | Single agent finishes | Minimal HUD + one detail tab |
+| `sequence` | implement → validate | Soft-pin / stage tabs |
+| `parallel` | 4 workers, one hard-fail | Fail-promote, workers board-only |
+
+Implementations: `packages/testing/scripts/watch-pack.mjs` (campaign + herdr bridge). Same ids should be reused for HUD-only or future gateway exports.
+
+## Plane adapters
+
+### Overview / smithtop (portable product)
+
+```bash
+# Long-lived fleet board (preferred for live watch + herdr right pane)
+smithers supervisor --db /path/to/smithers.db
+
+# Single-run HUD still valid
+smithers tail RUN_ID --overview --hud --linger
+```
+
+| Gate | How |
+|---|---|
+| Pure model | `buildOverviewHudModel` / `renderOverviewHudFrame` / `buildTopPaintInput` unit tests |
+| Live | Scenario → real DB → `smithers supervisor --db …` |
+
+Guide: [workflow supervisor](/guide/workflow-supervisor). **Herdr-only** pieces (dock, soft-pin, workspace labels) stay out of this layer.
+
+### Herdr cockpit (host plane)
+
+| Gate | How |
+|---|---|
+| Machine | `herdr-bridge.test.jsx` (soft-skip if no herdr server) |
+| Human | Ops dock or campaign with `--herdr` / `--ops` |
+
+Live campaigns set **`SMITHERS_CAMPAIGN_DB`** (shared store) so one top process
+fleet-watches every scenario. That env is campaign plumbing, not product API.
+
+```bash
+# Engine-only campaign (no UI host)
+pnpm -C packages/testing campaign
+
+# Herdr plane (leaves workspaces open unless --cleanup)
+pnpm -C packages/testing campaign:herdr -- --session smithers-dev --ops
+
+# Preferred human flow: operator-owned left harness + right smithtop
+bun packages/testing/scripts/setup-ops-workspace.mjs --session smithers-dev
+# focus smithers-ops, left: grok
+SMITHERS_HERDR_DOCK=1 bun packages/testing/scripts/core-campaign.mjs \
+  --herdr --watch-pack --session smithers-dev --ops --pause-ms 6000
+```
+
+Runbook: `packages/testing/docs/VIBE_CHECK_RUNBOOK.md`.
+
+### Gateway / TUI / pack UIs
+
+| Pattern | When |
+|---|---|
+| **Live run** | Scenario completed against shared DB/gateway |
+| **Seeded gateway** | Deterministic snapshot for render tests (prefer generating seeds from real scenario exports over hand-maintaining forever) |
+
+TUI already uses a real in-process gateway with seeds (`packages/tui/tests/seededGateway.ts`). Long-term, seeds should track **scenario-exported** run shapes so they do not drift from the engine.
+
+## Gates (CI vs human)
+
+| Gate | What | CI default |
+|---|---|---|
+| **A0** | Vector parse + scriptedAgent unit | yes |
+| **A** | Core scenario catalog (engine) | yes |
+| **B0** | Pure plane render (HUD model, cockpit policy) | yes |
+| **B** | Plane machine (herdr bridge, optional live tail) | soft-skip if host missing |
+| **C** | Human vibe (herdr ops / bare HUD) | no - local |
+| **D** | Fuzz / long campaign | no |
+| **E** | Real LLM smoke | no |
+
+Product and e2e code still use **real backends** (engine, herdr, gateway). Fixtures replace **LLM agents**, not the control plane.
+
+## Campaign CLI (planes)
+
+```bash
+bun packages/testing/scripts/core-campaign.mjs --help
+
+# engine only (default without --herdr)
+bun packages/testing/scripts/core-campaign.mjs --plane engine
+
+# herdr host (implies live UI defaults)
+bun packages/testing/scripts/core-campaign.mjs --plane herdr --session smithers-dev --ops
+
+# alias of watch-pack filter
+bun packages/testing/scripts/core-campaign.mjs --only hello,sequence,parallel
+```
+
+`--plane engine` never touches herdr. `--plane herdr` attaches the herdr adapter. Future: `--plane hud` for terminal-only overview smoke without herdr.
+
+## Principles
+
+1. **One fixture catalog, many planes** - do not fork agent-traces per host.
+2. **Assert at the right altitude** - engine state vs tabs/panes vs pure render frames.
+3. **Watch-pack is a subset of scenarios**, not a second product.
+4. **Virtual clock in CI; real pacing only for humans.**
+5. **No mocks of the plane under test** - soft-skip or seed a real server.
+
+## Package map
+
+| Path | Role |
+|---|---|
+| `packages/testing/src/*` | Vectors, scriptedAgent, runScenario, campaign, herdrBridge |
+| `packages/testing/fixtures/agent-traces/` | Shared vectors |
+| `packages/testing/tests/scenarios/` | Engine + herdr-bridge tests |
+| `packages/testing/scripts/` | Campaign CLI, watch-pack, setup-ops-workspace |
+| `apps/cli` `tail --overview/--node --hud` | Portable HUD process |
+| `packages/herdr` | Socket client + run surface (placement) |

@@ -1,10 +1,10 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { Task, Workflow } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { withTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
+import { Task, Workflow } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { withTaskRuntime } from "@smthrs/driver/task-runtime";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers.js";
 import { __childWorkflowInternals, executeChildWorkflow } from "../src/child-workflow.js";
 

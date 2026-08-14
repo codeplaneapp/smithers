@@ -19,15 +19,15 @@ Type "cd .smithers/workflows/demo-stage && rm -f smithers.db*" Enter
 Sleep 600ms
 Show
 
-Type "bunx smithers-orchestrator up sample.tsx --run-id r1"  Sleep 400ms  Enter
+Type "bunx smthrs up sample.tsx --run-id r1"  Sleep 400ms  Enter
 Sleep 3500ms
 # laptop closes mid-run
 Ctrl+C
 Sleep 1200ms
-Type "bunx smithers-orchestrator cancel r1 || true"  Enter
+Type "bunx smthrs cancel r1 || true"  Enter
 Sleep 900ms
 
-Type "bunx smithers-orchestrator up sample.tsx --run-id r1 --resume true --force"  Sleep 400ms  Enter
+Type "bunx smthrs up sample.tsx --run-id r1 --resume true --force"  Sleep 400ms  Enter
 # research skipped · plan -> attempt 2 · implement runs fresh
 Sleep 6500ms
 Sleep 2s

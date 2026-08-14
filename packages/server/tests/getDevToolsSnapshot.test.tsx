@@ -1,4 +1,4 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
@@ -8,11 +8,11 @@ import { tmpdir } from "node:os";
 import { WebSocket } from "ws";
 import { z } from "zod";
 import { Effect } from "effect";
-import { createSmithers, runWorkflow } from "smithers-orchestrator";
-import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import type { DevToolsSnapshot } from "@smithers-orchestrator/protocol";
+import { createSmithers, runWorkflow } from "smthrs";
+import { canonicalizeXml } from "@smthrs/graph/utils/xml";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
+import type { DevToolsSnapshot } from "@smthrs/protocol";
 import { Gateway } from "../src/gateway.js";
 import { DEVTOOLS_TASK_PROMPT_MAX_CHARS, getDevToolsSnapshotRoute } from "../src/gatewayRoutes/getDevToolsSnapshot.js";
 import { sleep } from "../../smithers/tests/helpers.js";
@@ -565,6 +565,76 @@ describe("getDevToolsSnapshotRoute", () => {
     sqlite.close();
   });
 
+  test("agentRan carries effort — first-class column, with meta_json fallback", async () => {
+    const { adapter, sqlite } = createAdapter();
+    const runId = "run-agent-effort";
+    await adapter.insertRun({ runId, workflowName: "wf", status: "running", createdAtMs: now() });
+    await adapter.insertFrame({
+      runId,
+      frameNo: 0,
+      createdAtMs: now() + 1_000,
+      xmlJson: canonicalizeXml({
+        kind: "element",
+        tag: "smithers:workflow",
+        props: { name: "agent-effort" },
+        children: [
+          { kind: "element", tag: "smithers:task", props: { id: "col::0" }, children: [] },
+          { kind: "element", tag: "smithers:task", props: { id: "legacy::0" }, children: [] },
+        ],
+      }),
+      xmlHash: "hash-agent-effort",
+      mountedTaskIdsJson: "[]",
+      taskIndexJson: "[]",
+    });
+    for (const nodeId of ["col", "legacy"]) {
+      await adapter.insertNode({
+        runId,
+        nodeId,
+        iteration: 0,
+        state: "in-progress",
+        lastAttempt: 1,
+        updatedAtMs: now(),
+        outputTable: "",
+        label: null,
+      });
+    }
+    // `col` persisted effort to the FIRST-CLASS column (meta_json has none).
+    await adapter.insertAttempt({
+      runId,
+      nodeId: "col",
+      iteration: 0,
+      attempt: 1,
+      state: "in-progress",
+      startedAtMs: now(),
+      metaJson: JSON.stringify({ agentEngine: "claude-code", agentModel: "claude-fable-5" }),
+      effort: "xhigh",
+    });
+    // `legacy` predates the column: effort survives only inside meta_json.
+    await adapter.insertAttempt({
+      runId,
+      nodeId: "legacy",
+      iteration: 0,
+      attempt: 1,
+      state: "in-progress",
+      startedAtMs: now(),
+      metaJson: JSON.stringify({ agentEngine: "codex", agentModel: "gpt-5", effort: "high" }),
+    });
+
+    const snapshot = await getDevToolsSnapshotRoute({ adapter, runId, frameNo: 0 });
+    const byNodeId = new Map(snapshot.root.children.map((child) => [child.task?.nodeId, child.task]));
+    expect(byNodeId.get("col")?.agentRan).toEqual({
+      engine: "claude-code",
+      model: "claude-fable-5",
+      effort: "xhigh",
+    });
+    expect(byNodeId.get("legacy")?.agentRan).toEqual({
+      engine: "codex",
+      model: "gpt-5",
+      effort: "high",
+    });
+    sqlite.close();
+  });
+
   test("real engine run captures the declared agent end to end", async () => {
     // No mocks: a real workflow run with an agent-backed task must land the
     // declared assignment in the frame task index (engine-side capture) AND
@@ -623,6 +693,57 @@ describe("getDevToolsSnapshotRoute", () => {
         engine: "fake-cli",
         model: "fake-model-1",
       });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("real engine run persists first-class effort (column + snapshot agentRan)", async () => {
+    // End-to-end: the engine derives effort from the agent at spawn, writes it
+    // to the first-class `_smithers_attempts.effort` column (alongside the
+    // meta_json blob), and it surfaces on the snapshot's agentRan.
+    const dir = mkdtempSync(join(tmpdir(), "smithers-devtools-effort-"));
+    const dbPath = join(dir, "smithers.db");
+    try {
+      const { smithers, Workflow, Task } = createSmithers({ out: z.object({ value: z.number() }) }, { dbPath });
+      const fakeAgent = {
+        id: "fake-thinker",
+        label: "Thinker",
+        cliEngine: "fake-cli",
+        model: "fake-model-1",
+        effort: "xhigh",
+        async generate() {
+          return { output: { value: 7 } };
+        },
+      };
+      const workflow = smithers(() => (
+        <Workflow name="devtools-effort-capture">
+          <Task id="think" agent={fakeAgent as never} output="out">
+            {"Think hard."}
+          </Task>
+        </Workflow>
+      ));
+      const result = await Effect.runPromise(runWorkflow(workflow, { rootDir: dir, input: {} }));
+      expect(result.status).toBe("finished");
+      const adapter = new SmithersDb(workflow.db);
+
+      // First-class column populated at spawn.
+      const attempts = await adapter.listAttemptsForRun(result.runId);
+      const think = attempts.find((a: any) => a.nodeId === "think");
+      expect(think?.effort).toBe("xhigh");
+
+      // ...and it rides the snapshot's agentRan.
+      const snapshot = await getDevToolsSnapshotRoute({ adapter, runId: result.runId });
+      const findTask = (node: any): any => {
+        if (node.task?.nodeId === "think") return node.task;
+        for (const child of node.children ?? []) {
+          const found = findTask(child);
+          if (found) return found;
+        }
+        return undefined;
+      };
+      const task = findTask(snapshot.root);
+      expect(task?.agentRan?.effort).toBe("xhigh");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

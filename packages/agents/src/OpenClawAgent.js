@@ -28,6 +28,10 @@ export function createOpenClawCapabilityRegistry() {
       supportsUiRequests: false,
       methods: [],
     },
+    fileChanges: {
+      supportsFileChanges: false,
+      supportsUnifiedDiff: false,
+    },
     builtIns: ["default"],
   };
 }

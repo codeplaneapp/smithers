@@ -23,8 +23,8 @@ service or for a React-free API over generated workflow definitions.
 ## Minimal workflow
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({

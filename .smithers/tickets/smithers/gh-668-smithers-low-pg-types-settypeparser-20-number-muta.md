@@ -12,6 +12,6 @@ _via ultracode (Opus multi-agent) review_
 
 **Why it's a bug:** `pg.types` is the process-global singleton (`pg-types`) shared by every `pg.Client`/`Pool`. node-postgres deliberately returns int8/BIGINT as a *string* to preserve full 64-bit precision; this override replaces that behavior for the entire process, not just smithers' own connection.
 
-**Failure scenario:** A host application embeds `smithers-orchestrator` and also uses `pg` for its own DB, reading a BIGINT id above 2^53 (e.g. `9007199254740993`). Before smithers opens a Postgres backend the app reads the exact string; afterward the same query silently returns `9007199254740992` (`Number("9007199254740993") === 9007199254740992`) — data corruption with no error, in code smithers doesn't own.
+**Failure scenario:** A host application embeds `smthrs` and also uses `pg` for its own DB, reading a BIGINT id above 2^53 (e.g. `9007199254740993`). Before smithers opens a Postgres backend the app reads the exact string; afterward the same query silently returns `9007199254740992` (`Number("9007199254740993") === 9007199254740992`) — data corruption with no error, in code smithers doesn't own.
 
 **Fix:** Register the coercion per-client instead of globally — pass a client-scoped `types` object (`{ getTypeParser }`) to the `pg.Client` constructor so only smithers' own connections coerce oid 20, leaving the shared `pg.types` registry untouched.

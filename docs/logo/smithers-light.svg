@@ -1,4 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 48" fill="none">
-  <path fill="#8a7a52" d="M7.86 9.58 42.26 26.78 39.22 28.3 4.81 11.1Z M8.78 19.7 43.19 36.9 40.14 38.42 5.74 21.22Z"/>
+  <g transform="translate(4 4) scale(0.078125)">
+    <rect width="512" height="512" rx="96" fill="#134e4a"/>
+    <path d="M88 256H190M190 256C236 208 300 166 424 166M190 256H424M190 256C236 304 300 346 424 346" fill="none" stroke="#f7f4ee" stroke-width="34" stroke-linecap="round"/>
+    <circle cx="190" cy="256" r="36" fill="#e8a33d"/>
+  </g>
   <text x="58" y="33" font-family="Newsreader, Georgia, 'Times New Roman', serif" font-size="30" letter-spacing="-0.5" fill="#1a1712">smithers</text>
 </svg>

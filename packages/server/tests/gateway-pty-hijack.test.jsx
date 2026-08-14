@@ -1,12 +1,12 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebSocket } from "ws";
 import { z } from "zod";
-import { createSmithers } from "smithers-orchestrator";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { createSmithers } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { Gateway } from "../src/gateway.js";
 import { hijackCandidatesFromAttempts } from "../src/hijackCandidates.js";
 import { sleep } from "../../smithers/tests/helpers.js";
@@ -186,8 +186,17 @@ describe("gateway /v1/pty/hijack", () => {
   });
 
   test("resize control frames reach the PTY (stty size sees the new geometry)", async () => {
+    // Poll for the geometry instead of sleeping a fixed window before reading
+    // it: on a loaded machine the resize frame lands well after any fixed
+    // budget, and the shell would then print the pre-resize size. The loop
+    // still exits with whatever it last read, so a resize that never arrives
+    // fails the assertion rather than hanging.
     const { port } = await bootGateway(() => ({
-      command: ["bash", "-c", "sleep 0.5; stty size"],
+      command: [
+        "bash",
+        "-c",
+        'for _ in $(seq 300); do size=$(stty size); [ "$size" = "40 120" ] && break; sleep 0.05; done; printf "%s" "$size"',
+      ],
     }));
     const ws = new WebSocket(`ws://127.0.0.1:${port}/v1/pty/hijack?runId=run-pty&cols=80&rows=24`);
     const pty = collectPty(ws);
@@ -257,6 +266,131 @@ describe("gateway /v1/pty/hijack", () => {
       new URL(`http://127.0.0.1:${barePort}/v1/pty/hijack?runId=run-pty`),
     );
     expect(bare.written).toStartWith("HTTP/1.1 501");
+  });
+});
+
+describe("gateway hijack lifecycle", () => {
+  /**
+   * Park a finished run exactly the way the engine leaves it after a hijack
+   * hand-off: cancelled, with the RUN_HIJACKED marker on errorJson and the
+   * durable hijack request still stamped on the row.
+   * @param {ReturnType<typeof createValueWorkflow>} workflow
+   * @param {string} runId
+   */
+  async function parkRunAsHijacked(workflow, runId) {
+    const adapter = new SmithersDb(workflow.db);
+    await adapter.updateRun(runId, {
+      status: "cancelled",
+      finishedAtMs: Date.now(),
+      heartbeatAtMs: null,
+      runtimeOwnerId: null,
+      hijackRequestedAtMs: Date.now(),
+      hijackTarget: "claude-code",
+      errorJson: JSON.stringify({
+        code: "RUN_HIJACKED",
+        nodeId: "task1",
+        engine: "claude-code",
+        mode: "native-cli",
+        resume: "session-xyz",
+      }),
+    });
+  }
+
+  /**
+   * @param {ReturnType<typeof createValueWorkflow>} workflow
+   * @param {string} runId
+   * @param {string} status
+   */
+  async function waitForRunStatus(workflow, runId, status, timeoutMs = 20_000) {
+    const adapter = new SmithersDb(workflow.db);
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const run = await adapter.getRun(runId);
+      if (run && run.status === status) {
+        return run;
+      }
+      await sleep(50);
+    }
+    throw new Error(`run ${runId} never reached ${status}`);
+  }
+
+  /** Minimal RPC client: challenge → connect → one request. */
+  async function rpcCall(port, method, params) {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+    /** @type {Record<string, unknown>[]} */
+    const messages = [];
+    ws.on("message", (data) => {
+      try {
+        messages.push(JSON.parse(String(data)));
+      } catch {}
+    });
+    await new Promise((resolve, reject) => {
+      ws.once("open", resolve);
+      ws.once("error", reject);
+    });
+    const waitForMessage = async (predicate) => {
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const found = messages.find(predicate);
+        if (found) return found;
+        await sleep(10);
+      }
+      throw new Error(`timed out waiting for gateway message; saw ${JSON.stringify(messages)}`);
+    };
+    await waitForMessage((message) => message.type === "event" && message.event === "connect.challenge");
+    ws.send(
+      JSON.stringify({
+        type: "req",
+        id: "hello",
+        method: "connect",
+        params: { minProtocol: 1, maxProtocol: 1, client: { id: "pty-test", version: "1.0.0", platform: "bun-test" } },
+      }),
+    );
+    const hello = await waitForMessage((message) => message.type === "res" && message.id === "hello");
+    expect(hello.ok).toBe(true);
+    const id = `rpc-${Math.random().toString(36).slice(2)}`;
+    ws.send(JSON.stringify({ type: "req", id, method, params }));
+    const response = await waitForMessage((message) => message.type === "res" && message.id === id);
+    ws.close();
+    return response;
+  }
+
+  test("resumeRun on a hijack-parked run is not a no-op: it restarts the run in-engine", async () => {
+    const { gateway, workflow, port } = await bootGateway(() => ({ command: ["bash", "-c", "sleep 30"] }));
+    // Sanity: the plain terminal path still short-circuits.
+    const adapter = new SmithersDb(workflow.db);
+    expect((await adapter.getRun("run-pty"))?.status).toBe("finished");
+    const terminal = await rpcCall(port, "resumeRun", { runId: "run-pty" });
+    expect(terminal.payload).toMatchObject({ runId: "run-pty", status: "already_terminal" });
+
+    await parkRunAsHijacked(workflow, "run-pty");
+    const response = await rpcCall(port, "resumeRun", { runId: "run-pty" });
+    expect(response.ok).toBe(true);
+    expect(response.payload).toMatchObject({ runId: "run-pty", status: "resume_requested" });
+    // The hijack ends and the workflow continues autonomously to completion.
+    const resumed = await waitForRunStatus(workflow, "run-pty", "finished");
+    expect(resumed.hijackRequestedAtMs).toBeNull();
+    expect(resumed.errorJson).toBeNull();
+  });
+
+  test("closing the PTY hijack socket hands the parked run back to the workflow", async () => {
+    const { gateway, workflow, port } = await bootGateway(() => ({ command: ["bash", "-c", "sleep 30"] }));
+    await parkRunAsHijacked(workflow, "run-pty");
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/v1/pty/hijack?runId=run-pty&nodeId=task1&cols=80&rows=24`);
+    await new Promise((resolve, reject) => {
+      ws.once("open", resolve);
+      ws.once("error", reject);
+    });
+    const deadline = Date.now() + 5_000;
+    while (gateway.ptySessions.size === 0 && Date.now() < deadline) {
+      await sleep(10);
+    }
+    expect(gateway.ptySessions.size).toBe(1);
+    // The monitor tab closes: the socket drops, teardown kills the hijack
+    // process mid-session, and the gateway must resume the run itself.
+    ws.close();
+    const resumed = await waitForRunStatus(workflow, "run-pty", "finished");
+    expect(resumed.hijackRequestedAtMs).toBeNull();
   });
 });
 

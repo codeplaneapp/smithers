@@ -5,7 +5,7 @@ description: Parallel specialist agents review the same input; a moderator synth
 
 ```ts
 // Props
-import { Panel } from "smithers-orchestrator";
+import { Panel } from "smthrs";
 
 // agent may be a single agent or a failover chain (AgentLike[]) run as one panelist.
 type PanelistConfig = { agent: AgentLike | AgentLike[]; role?: string; label?: string };
@@ -69,7 +69,7 @@ import { Sequence } from "./Sequence.js";
 import { Parallel } from "./Parallel.js";
 import { Task } from "./Task.js";
 import { useOptionalSmithersContext } from "./useOptionalSmithersContext.js";
-/** @typedef {import("@smithers-orchestrator/agents/AgentLike").AgentLike} AgentLike */
+/** @typedef {import("@smthrs/agents/AgentLike").AgentLike} AgentLike */
 /** @typedef {import("./PanelistConfig.ts").PanelistConfig} PanelistConfig */
 
 /**
@@ -266,7 +266,7 @@ export const Task = createTaskComponent({ applyCliToolAllowlist });
 
 ```js useOptionalSmithersContext.js
 import React from "react";
-import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
+import { SmithersContext } from "@smthrs/react-reconciler/context";
 
 /**
  * Read the workflow context when React is rendering the component, but allow
@@ -289,7 +289,7 @@ export function useOptionalSmithersContext() {
 
 ```ts PanelProps.ts
 import type React from "react";
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
 import type { PanelistConfig } from "./PanelistConfig.ts";
 import type { OutputTarget } from "./OutputTarget.ts";
 
@@ -325,7 +325,7 @@ export type PanelProps = {
 ```
 
 ```ts PanelistConfig.ts
-import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
+import type { AgentLike } from "@smthrs/agents/AgentLike";
 
 export type PanelistConfig = {
   /** A single agent, or a failover CHAIN (`AgentLike[]`) run as one panelist. */

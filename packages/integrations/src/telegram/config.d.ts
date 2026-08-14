@@ -1,6 +1,6 @@
 import { TelegramClientConfig as TelegramClientConfig$1, TelegramClientService } from './TelegramClientTypes.js';
 import 'effect';
-import '@smithers-orchestrator/errors/SmithersError';
+import '@smthrs/errors/SmithersError';
 
 /**
  * Register process-wide Telegram config for outbound components.

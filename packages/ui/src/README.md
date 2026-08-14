@@ -1,4 +1,4 @@
-# @smithers-orchestrator/ui — src
+# @smthrs/ui — src
 
 The shared component library for Smithers UIs: shadcn anatomy (`data-slot`
 attributes, CVA variant APIs, `asChild` via Radix Slot) styled exclusively
@@ -40,9 +40,9 @@ How the pieces fit, infrastructure first:
   chat and primitive layers but remains independent of agent/runtime SDKs.
 - `adapters/` wraps heavy third-party widgets that must NOT weigh down the base
   barrel. Each ships behind its own package subpath, never `index.ts`, so
-  `@smithers-orchestrator/ui` stays light and `check-ui-architecture.mjs` keeps
+  `@smthrs/ui` stays light and `check-ui-architecture.mjs` keeps
   the heavy dependency out of the base export:
-  - `PierreDiffView` (`@smithers-orchestrator/ui/adapters/pierre-diff-view`) is
+  - `PierreDiffView` (`@smthrs/ui/adapters/pierre-diff-view`) is
     the syntax-highlighted diff surface over `@pierre/diffs` `processPatch` +
     `CodeView`. It is props-driven with no app coupling: an explicit `mode`
     (`"light" | "dark"`) maps onto a `DiffsThemeNames` value, and otherwise
@@ -57,8 +57,8 @@ How the pieces fit, infrastructure first:
     name but exposes no custom theme-registration prop, so replacing those
     tokens requires owning a separate highlighter/worker registration path and
     is intentionally deferred until that integration can be tested end to end.
-  - `Terminal` (`@smithers-orchestrator/ui/adapters/terminal`, also
-    `smithers-orchestrator/ui/adapters/terminal` off the published facade) — a
+  - `Terminal` (`@smthrs/ui/adapters/terminal`, also
+    `smthrs/ui/adapters/terminal` off the published facade) — a
     generic xterm.js render surface. The data source is lifted entirely onto
     props (`lines` snapshot, a `stream` write seam, `onData` out), so it has
     zero app-store coupling and drops into any workflow UI. Its default palette

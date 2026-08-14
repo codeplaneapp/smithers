@@ -7,11 +7,11 @@
  * Use cases: API client generation, structured extraction from specs,
  * contract-first tool scaffolding, schema-to-zod conversion.
  */
-import { Sequence } from "smithers-orchestrator";
+import { Sequence } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash, grep } from "smithers-orchestrator/tools";
+import { read, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import ParseContractPrompt from "./prompts/openapi-contract-agent/parse-contract.mdx";
 import GenerateInterfacesPrompt from "./prompts/openapi-contract-agent/generate-interfaces.mdx";

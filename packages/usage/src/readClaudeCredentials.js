@@ -1,12 +1,18 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 /**
  * Reads the Claude Code subscription OAuth token for an account. Tries the
  * account's `configDir/.credentials.json` first (the cross-platform location
- * when `CLAUDE_CONFIG_DIR` is set), then falls back to the macOS Keychain item
- * `Claude Code-credentials`.
+ * when `CLAUDE_CONFIG_DIR` is set), then the macOS Keychain: Claude Code keys
+ * per-config-dir logins as `Claude Code-credentials-<first 8 hex of
+ * sha256(configDir)>`, so an isolated account's item is tried before the
+ * unsuffixed default-install item. For accounts with a `configDir`, the
+ * unsuffixed item is NOT used as a fallback — it belongs to the default
+ * `~/.claude` login and would silently attribute another account's token.
  *
  * Returns `null` when no credential can be read, so the adapter degrades to a
  * "none" report rather than throwing. The token is returned only to mint an
@@ -26,16 +32,34 @@ export function readClaudeCredentials(account, platform = process.platform, spaw
     }
   }
   if (platform === "darwin") {
-    const result = spawn("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"], {
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 4_000,
-    });
-    if (result.status === 0) {
-      const parsed = parseCredentials(result.stdout?.toString("utf8") ?? "");
-      if (parsed) return parsed;
+    const isDefaultDir = !account.configDir || account.configDir === join(homedir(), ".claude");
+    const services = [
+      ...(account.configDir ? [`Claude Code-credentials-${claudeKeychainSuffix(account.configDir)}`] : []),
+      // The unsuffixed item belongs to the default ~/.claude install only.
+      ...(isDefaultDir ? ["Claude Code-credentials"] : []),
+    ];
+    for (const service of services) {
+      const result = spawn("security", ["find-generic-password", "-s", service, "-w"], {
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 4_000,
+      });
+      if (result.status === 0) {
+        const parsed = parseCredentials(result.stdout?.toString("utf8") ?? "");
+        if (parsed) return parsed;
+      }
     }
   }
   return null;
+}
+
+/**
+ * Claude Code's per-config-dir Keychain item suffix.
+ *
+ * @param {string} configDir
+ * @returns {string}
+ */
+export function claudeKeychainSuffix(configDir) {
+  return createHash("sha256").update(configDir).digest("hex").slice(0, 8);
 }
 
 /**

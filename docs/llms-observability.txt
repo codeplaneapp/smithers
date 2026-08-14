@@ -8,14 +8,14 @@
 
 > Run Smithers as an HTTP server: REST routes for runs, approvals, tools.
 
-`startServer` boots a multi-workflow HTTP server with REST endpoints for run lifecycle, SSE event streams, and [human-in-the-loop approvals](/components/approval). For a single-workflow variant alongside `bunx smithers-orchestrator up`, see [Serve Mode](/integrations/serve).
+`startServer` boots a multi-workflow HTTP server with REST endpoints for run lifecycle, SSE event streams, and [human-in-the-loop approvals](/components/approval). For a single-workflow variant alongside `bunx smthrs up`, see [Serve Mode](/integrations/serve).
 
 <Note>API reference: [Server & Gateway](/reference/server-gateway) lists every server and gateway export, its options, and links to source and tests.</Note>
 
 ## Quick start
 
 ```ts
-import { startServer } from "smithers-orchestrator";
+import { startServer } from "smthrs";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 
 const server = startServer({
@@ -85,9 +85,9 @@ Errors use the envelope `{ "error": { "code", "message", "details" } }`. Common 
 Tools resolve relative to `rootDir`. The example below exposes a workflow using the built-in `bash` tool through the server, called via `POST /v1/runs`.
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { Task, Workflow, createSmithers } from "smithers-orchestrator";
-import { bashTool } from "smithers-orchestrator/tools";
+/** @jsxImportSource smthrs */
+import { Task, Workflow, createSmithers } from "smthrs";
+import { bashTool } from "smthrs/tools";
 import { z } from "zod";
 
 const { smithers, outputs } = createSmithers({
@@ -134,7 +134,7 @@ Serve mode starts a Hono-based HTTP server alongside a running workflow. Every r
 ## CLI
 
 ```bash
-bunx smithers-orchestrator up workflow.tsx --serve --port 3000 --host 0.0.0.0 --auth-token "$SMITHERS_API_KEY"
+bunx smthrs up workflow.tsx --serve --port 3000 --host 0.0.0.0 --auth-token "$SMITHERS_API_KEY"
 ```
 
 A non-loopback `--host` (like `0.0.0.0`) requires `--auth-token` (or `--insecure`, dangerous). The default `127.0.0.1` needs neither.
@@ -154,13 +154,13 @@ The process stays alive after the workflow completes, so final state stays query
 Detached mode:
 
 ```bash
-bunx smithers-orchestrator up workflow.tsx --serve --port 8080 -d
+bunx smthrs up workflow.tsx --serve --port 8080 -d
 ```
 
 ## Programmatic
 
 ```ts
-import { SmithersDb, createServeApp } from "smithers-orchestrator";
+import { SmithersDb, createServeApp } from "smthrs";
 
 const adapter = new SmithersDb(workflow.db);
 const abort = new AbortController();
@@ -316,7 +316,7 @@ Unknown routes return `404` with code `NOT_FOUND`.
 | | Serve mode | [Multi-workflow server](/integrations/server) |
 |---|---|---|
 | Scope | Single workflow, single run | Any workflow, multiple concurrent runs |
-| Start | `bunx smithers-orchestrator up --serve` or `createServeApp()` | `startServer()` |
+| Start | `bunx smthrs up --serve` or `createServeApp()` | `startServer()` |
 | Routes | `/`, `/events`, `/approve/:nodeId`, ... | `/v1/runs`, `/v1/runs/:runId`, ... |
 | Framework | Hono | Node.js `http` |
 | Use case | Development, single-purpose services | Production API gateway |
@@ -327,7 +327,7 @@ Unknown routes return `404` with code `NOT_FOUND`.
 
 ```bash
 # Start a workflow with serve mode
-bunx smithers-orchestrator up workflow.tsx --serve --port 8080 --auth-token sk-secret
+bunx smthrs up workflow.tsx --serve --port 8080 --auth-token sk-secret
 
 # Status
 curl http://localhost:8080/ -H "Authorization: Bearer sk-secret"
@@ -351,7 +351,7 @@ curl http://localhost:8080/health
 
 > WebSocket / RPC gateway for connecting clients and custom UIs to Smithers runs, providing pushed updates, subscriptions, metrics, and resilient reconnection.
 
-`Gateway` is Smithers' headless control plane. Reach for it (instead of [`startServer()`](/integrations/server)) when long-lived clients (bots, dashboards, schedulers, and custom UIs) need to authenticate once, stream events over WebSocket with resilient reconnection, decide [approvals](/components/approval), inject [signals](/runtime/events), access metrics, and manage cron schedules across many registered workflows. Custom UIs, whether using the vanilla SDK or React hooks, rely on the Gateway to provide pushed updates and a stale-data-free model. For the single-workflow Hono-based HTTP surface, see [Serve Mode](/integrations/serve) (`createServeApp()` / `bunx smithers-orchestrator up --serve`).
+`Gateway` is Smithers' headless control plane. Reach for it (instead of [`startServer()`](/integrations/server)) when long-lived clients (bots, dashboards, schedulers, and custom UIs) need to authenticate once, stream events over WebSocket with resilient reconnection, decide [approvals](/components/approval), inject [signals](/runtime/events), access metrics, and manage cron schedules across many registered workflows. Custom UIs, whether using the vanilla SDK or React hooks, rely on the Gateway to provide pushed updates and a stale-data-free model. For the single-workflow Hono-based HTTP surface, see [Serve Mode](/integrations/serve) (`createServeApp()` / `bunx smthrs up --serve`).
 
 <Warning>
   **Gateway-first client contract:** controllers, Bun cron jobs, monitors, bots,
@@ -368,8 +368,8 @@ curl http://localhost:8080/health
 ## Quick start
 
 ```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { Gateway, Task, Workflow, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { Gateway, Task, Workflow, createSmithers } from "smthrs";
 import { z } from "zod";
 
 const { smithers, outputs } = createSmithers({
@@ -415,7 +415,7 @@ ws.onopen = () => ws.send(JSON.stringify({
 Programmatic clients (bots, schedulers, dashboards, third-party UIs) talk to the Gateway through the typed client SDK over the same RPC and WebSocket API. For the full custom-UI guide (declarative queries, pushed updates, stale guards, reconnect/resume, backpressure, optimistic mutations, auth, vanilla JS + React hooks) see [Custom UIs](/integrations/custom-ui).
 
 ```ts
-import { SmithersGatewayClient } from "smithers-orchestrator/gateway-client";
+import { SmithersGatewayClient } from "smthrs/gateway-client";
 
 const gateway = new SmithersGatewayClient();
 const workflows = await gateway.listWorkflows();
@@ -431,8 +431,8 @@ Gateway client exports:
 
 | Package | Exports |
 |---|---|
-| `smithers-orchestrator/gateway-client` | `SmithersGatewayClient`, `SmithersGatewayConnection`, `GatewayRpcError`, `gatewayBackoffDelay`, RPC frame/type-map types, extension envelope helpers/types, `GatewayUiBootConfig`, `SmithersGatewayClientOptions`, `createSmithersCollections`, `createSmithersDataClient`, `WorkspaceMode`, `SmithersCollections`, `SmithersDataClient`, collection row types, `gatewayKeys`, `smithersCollectionKeys`, `smithersLocalCollectionOptions`, `smithersElectricCollectionOptions`, `flattenGatewayRunNode`, `snapshotToGatewayRunNode`, `reconcileSnapshotNodes` |
-| `smithers-orchestrator/gateway-react` | `SmithersGatewayProvider`, `SmithersCollectionsProvider`, `createGatewayReactRoot`, `useSmithersCollections`, `useGatewayRun`, `useGatewayRuns`, `useGatewayWorkflows`, `useGatewayApprovals`, `useGatewayNodeOutput`, `useGatewayNodeEvents`, `useGatewayRunEvents`, `useGatewayActions`, `useGatewayRpc`, `useSmithersGateway`, `useGatewayExtensionResource`, `useGatewayExtensionAction`, `useGatewayExtensionStream`, `useGatewayRunTree`, `useGatewayConnectionStatus`, `useGatewayCrons`, `useGatewayMemoryFacts`, `useGatewayScores`, `useGatewayTickets`, `useGatewayPrompts` |
+| `smthrs/gateway-client` | `SmithersGatewayClient`, `SmithersGatewayConnection`, `GatewayRpcError`, `gatewayBackoffDelay`, RPC frame/type-map types, extension envelope helpers/types, `GatewayUiBootConfig`, `SmithersGatewayClientOptions`, `createSmithersCollections`, `createSmithersDataClient`, `WorkspaceMode`, `SmithersCollections`, `SmithersDataClient`, collection row types, `gatewayKeys`, `smithersCollectionKeys`, `smithersLocalCollectionOptions`, `smithersElectricCollectionOptions`, `flattenGatewayRunNode`, `snapshotToGatewayRunNode`, `reconcileSnapshotNodes` |
+| `smthrs/gateway-react` | `SmithersGatewayProvider`, `SmithersCollectionsProvider`, `createGatewayReactRoot`, `useSmithersCollections`, `useGatewayRun`, `useGatewayRuns`, `useGatewayWorkflows`, `useGatewayApprovals`, `useGatewayNodeOutput`, `useGatewayNodeEvents`, `useGatewayRunEvents`, `useGatewayActions`, `useGatewayRpc`, `useSmithersGateway`, `useGatewayExtensionResource`, `useGatewayExtensionAction`, `useGatewayExtensionStream`, `useGatewayRunTree`, `useGatewayConnectionStatus`, `useGatewayCrons`, `useGatewayMemoryFacts`, `useGatewayScores`, `useGatewayTickets`, `useGatewayPrompts` |
 
 ### Launch attribution
 
@@ -473,10 +473,10 @@ public `gateway status` command rather than reading the runtime state file or
 assuming port 7331 (the preferred port may already be occupied):
 
 ```ts
-import { SmithersGatewayClient } from "smithers-orchestrator/gateway-client";
+import { SmithersGatewayClient } from "smthrs/gateway-client";
 
 const statusProcess = Bun.spawnSync([
-  "bunx", "smithers-orchestrator", "gateway", "status", "--format", "json",
+  "bunx", "smthrs", "gateway", "status", "--format", "json",
 ], {
   cwd: process.cwd(),
   stdout: "pipe",
@@ -501,7 +501,7 @@ const gateway = new SmithersGatewayClient({
 const runs = await gateway.listRuns({ filter: { limit: 50 } });
 ```
 
-Start `bunx smithers-orchestrator gateway` under your service manager when
+Start `bunx smthrs gateway` under your service manager when
 `status.running` is false. A health cron should report the missing Gateway and
 restart that singleton; it should not fall back to opening a store. Once it has
 a run ID, use `getRun` for snapshots and `streamRunEventsResilient` for a live
@@ -512,7 +512,7 @@ invalidation, and event emission stay intact.
 <Note>
   **Bundling in Next.js / webpack:** in published versions up to and including
   0.28.0, `gateway-client` transitively imports
-  `@smithers-orchestrator/electric-proxy`, which shipped raw TypeScript
+  `@smthrs/electric-proxy`, which shipped raw TypeScript
   sources. Bun and Vite handle that natively, but webpack-based builds
   (Next.js) fail hard unless you add it to
   [`transpilePackages`](https://nextjs.org/docs/app/api-reference/config/next-config-js/transpilePackages):
@@ -520,7 +520,7 @@ invalidation, and event emission stay intact.
   ```js
   // next.config.mjs
   export default {
-    transpilePackages: ["@smithers-orchestrator/electric-proxy"],
+    transpilePackages: ["@smthrs/electric-proxy"],
   };
   ```
 
@@ -922,7 +922,7 @@ For stateless callers, `POST /rpc` accepts the same body shape (`{ id, method, p
 
 Browsers cannot send an `Authorization` header on top-level navigations or
 WebSocket upgrades, so a token-protected gateway would 401 the very UI URLs
-`bunx smithers-orchestrator monitor` / `bunx smithers-orchestrator ui` print.
+`bunx smthrs monitor` / `bunx smthrs ui` print.
 The gateway closes that gap with a session handoff:
 
 ```
@@ -941,8 +941,8 @@ The cookie also gets `Secure` when the request arrives over TLS (directly or
 through a proxy that sets `X-Forwarded-Proto: https`). With no `?token=`, the
 endpoint falls back to the `Authorization` header or an existing session
 cookie, so a re-navigation refreshes the session instead of returning 401.
-`bunx smithers-orchestrator monitor` / `bunx smithers-orchestrator ui` /
-`bunx smithers-orchestrator gui` build this handoff URL automatically
+`bunx smthrs monitor` / `bunx smthrs ui` /
+`bunx smthrs gui` build this handoff URL automatically
 whenever the resolved gateway has a token.
 
 ### Remote access (Tailscale / SSH / LAN)
@@ -951,15 +951,15 @@ A gateway bound to `127.0.0.1` is unreachable from another machine. To drive
 the monitor or a workflow UI over Tailscale, SSH, or the LAN:
 
 ```sh
-bunx smithers-orchestrator gateway --host 0.0.0.0 --mint-token
+bunx smthrs gateway --host 0.0.0.0 --mint-token
 # or let the UI command autostart it:
-bunx smithers-orchestrator monitor --host 0.0.0.0
+bunx smthrs monitor --host 0.0.0.0
 ```
 
 The gateway refuses an unauthenticated non-loopback bind, so `--mint-token`
 (or `--auth-token` / `SMITHERS_API_KEY`) is required; `bunx
-smithers-orchestrator monitor` / `bunx smithers-orchestrator ui` / `bunx
-smithers-orchestrator gui` add `--mint-token` automatically when they
+smthrs monitor` / `bunx smthrs ui` / `bunx
+smthrs gui` add `--mint-token` automatically when they
 autostart on a non-loopback `--host` (also settable via
 `SMITHERS_GATEWAY_HOST`). A wildcard (`0.0.0.0`) bind is not dialable, so the
 CLI prints one URL per candidate interface address (Tailscale `100.x` first,
@@ -1076,8 +1076,8 @@ An acquire waits a bounded 10 seconds for a free connection; set `SMITHERS_POSTG
 - Identity: `GET /health`, the `health` RPC, and the WS hello carry `identity: { workspaceRoot, backend, version, pid, startedAtMs }`. Clients (the CLI's `ui`/`gateway status` among them) verify `workspaceRoot` against the workspace they resolved locally instead of trusting whichever process owns the port.
 - Bind failures reject: `gateway.listen()` rejects on `EADDRINUSE` (and any other bind error) instead of crashing the process. The `smithers gateway` command retries on an ephemeral port and records the real port in its runtime state file.
 - Singleton per workspace: `smithers gateway` writes `{pid, host, port, url, token, workspaceRoot, backend, version, protocol, startedAtMs}` to `<tmpdir>/smithers-gateway/<workspace-hash>.json` (mode 0600) after listening, refuses to start when a healthy gateway for the same workspace is already running, and cleans the file up on shutdown. `smithers gateway status` and `smithers gateway stop` manage it; stale files (dead pid, identity mismatch) are cleaned up on the next discovery.
-- Monitor mount: the `smithers gateway` CLI singleton also serves the [Smithers Monitor](/guides/monitor), a live web UI over every run in the workspace, at `/monitor` (open it with `bunx smithers-orchestrator monitor`). The mount ships inside the CLI, so it needs no `.smithers/` pack and no registered workflow UI. Library embedders control the other UI mounts through `ui` (custom gateway UI, workflow UIs at `/workflows/<key>`) and `operatorUi` (the embeddable operator console, default `/console`).
-- `--mint-token`: mints a random bearer, requires it on every request, and records it only in the runtime state file (plus the daemon's own stderr). `bunx smithers-orchestrator ui` reads the token from the state file automatically for CLI RPC calls, but browser navigation to the printed workflow UI URL cannot send that bearer header until UI token injection ships; use `smithers gateway` without `--mint-token` when you need browser-served workflow UIs. Other clients can read `SMITHERS_TOKEN` / `SMITHERS_API_KEY`.
+- Monitor mount: the `smithers gateway` CLI singleton also serves the [Smithers Monitor](/guides/monitor), a live web UI over every run in the workspace, at `/monitor` (open it with `bunx smthrs monitor`). The mount ships inside the CLI, so it needs no `.smithers/` pack and no registered workflow UI. Library embedders control the other UI mounts through `ui` (custom gateway UI, workflow UIs at `/workflows/<key>`) and `operatorUi` (the embeddable operator console, default `/console`).
+- `--mint-token`: mints a random bearer, requires it on every request, and records it only in the runtime state file (plus the daemon's own stderr). `bunx smthrs ui` reads the token from the state file automatically for CLI RPC calls, but browser navigation to the printed workflow UI URL cannot send that bearer header until UI token injection ships; use `smithers gateway` without `--mint-token` when you need browser-served workflow UIs. Other clients can read `SMITHERS_TOKEN` / `SMITHERS_API_KEY`.
 - Cron: `gateway.register(name, wf, { schedule })` writes a cron row keyed `gateway:<name>`; the gateway polls between 1 s and 15 s (clamped from `heartbeatMs`). Cron-fired runs get `ctx.auth.role = "system"`, `triggeredBy = "cron:gateway"`, `scopes = ["*"]`.
 - Host defense: an unauthenticated gateway (the autostart default) rejects any request whose `Host` header is non-loopback, as a DNS-rebinding defense, so binding `--host 0.0.0.0` without a token returns 403 `Host is not allowed`. This applies only when no `auth` is configured. To deliberately expose an unauthenticated remote bind, pass `smithers gateway --insecure` (or `up --serve --insecure`), which trusts any Host; `SMITHERS_GATEWAY_TRUST_ANY_HOST=1` (gateway) and `SMITHERS_SERVE_TRUST_ANY_HOST=1` (serve) do the same via the environment.
 - JWT mode currently validates `alg=HS256`, HMAC, `iss`, `aud`, `exp`, `nbf`. Scope claims may be arrays or space/comma-separated strings.
@@ -1101,7 +1101,7 @@ Use the MCP server when an AI agent should drive Smithers autonomously. Use the 
 ### Start the server
 
 ```bash
-bunx smithers-orchestrator --mcp
+bunx smthrs --mcp
 ```
 
 This starts the semantic surface: a stable, structured tool set for AI agent consumption, documented on this page.
@@ -1110,13 +1110,13 @@ Two additional surfaces are available via `--surface`:
 
 ```bash
 # Semantic tools only (default)
-bunx smithers-orchestrator --mcp --surface semantic
+bunx smthrs --mcp --surface semantic
 
 # Raw CLI-mirroring tools only
-bunx smithers-orchestrator --mcp --surface raw
+bunx smthrs --mcp --surface raw
 
 # Both surfaces registered on the same server
-bunx smithers-orchestrator --mcp --surface both
+bunx smthrs --mcp --surface both
 ```
 
 Use `--surface raw` only for direct CLI parity; prefer the semantic surface for new integrations, where every tool returns a `{ ok, data, error }` envelope with Zod-validated input and output schemas.
@@ -1125,10 +1125,10 @@ Scope the semantic surface when a client should not receive every Smithers contr
 
 ```bash
 # Expose only selected semantic tools
-bunx smithers-orchestrator --mcp --allowed-tools list_workflows,get_run
+bunx smthrs --mcp --allowed-tools list_workflows,get_run
 
 # Expose only tools annotated as read-only
-bunx smithers-orchestrator --mcp --read-only
+bunx smthrs --mcp --read-only
 ```
 
 `--allowed-tools` takes a comma-separated list of semantic tool names; an empty allowlist exposes no semantic tools. `--read-only` removes semantic tools with write or control side effects, such as starting runs, resolving approvals, or reverting attempts. Under `--surface both`, both flags apply to the semantic toolset only; raw CLI-mirroring tools are always registered by the raw surface.
@@ -1142,20 +1142,20 @@ For clients that read JSON config directly:
   "mcpServers": {
     "smithers": {
       "command": "bunx",
-      "args": ["smithers-orchestrator", "--mcp"]
+      "args": ["smthrs", "--mcp"]
     }
   }
 }
 ```
 
-Project-scoped install (e.g. a monorepo where Smithers is a dev dependency; ensure `smithers-orchestrator` is in the local `package.json`):
+Project-scoped install (e.g. a monorepo where Smithers is a dev dependency; ensure `smthrs` is in the local `package.json`):
 
 ```json
 {
   "mcpServers": {
     "smithers": {
       "command": "bunx",
-      "args": ["smithers-orchestrator", "--mcp"]
+      "args": ["smthrs", "--mcp"]
     }
   }
 }
@@ -1163,7 +1163,7 @@ Project-scoped install (e.g. a monorepo where Smithers is a dev dependency; ensu
 
 ### If `mcp add` fails
 
-`bunx smithers-orchestrator mcp add` hands the launch command to a registration helper expecting a single argument. If a runner or shell word-splits it, the helper sees a bare `--mcp` token and aborts:
+`bunx smthrs mcp add` hands the launch command to a registration helper expecting a single argument. If a runner or shell word-splits it, the helper sees a bare `--mcp` token and aborts:
 
 ```
 Registering MCP server...
@@ -1174,8 +1174,8 @@ message: "error: unknown option '--mcp'"
 Register with your agent's own CLI instead: the `--` separator marks everything after it as the launch command, so `--mcp` never gets parsed as one of the agent's own flags:
 
 ```bash
-codex mcp add smithers -- bunx smithers-orchestrator --mcp
-claude mcp add smithers -- bunx smithers-orchestrator --mcp
+codex mcp add smithers -- bunx smthrs --mcp
+claude mcp add smithers -- bunx smthrs --mcp
 ```
 
 Any MCP-aware CLI follows the same `<agent> mcp add <name> -- <command>` shape, or write the JSON/TOML config by hand from the snippets above. The Smithers CLI prints these fallback commands automatically whenever `mcp add` fails.
@@ -1513,7 +1513,7 @@ Block the current run, ask a human to make a decision, and wait for their answer
 
 When run inside a Smithers task, the run/node context is taken from the `SMITHERS_RUN_ID` / `SMITHERS_NODE_ID` / `SMITHERS_ITERATION` environment variables Smithers injects into the agent; pass `runId`/`nodeId`/`iteration` explicitly to override, or rely on single-active-run autodetection.
 
-The orchestrating agent resolves the request on the human's behalf: relay the question in conversation, collect their decision, then run `bunx smithers-orchestrator human answer <requestId> --value '<json>'` (or `bunx smithers-orchestrator human cancel <requestId>`) yourself, never instructing the human to run these. `bunx smithers-orchestrator human inbox` lists everything waiting.
+The orchestrating agent resolves the request on the human's behalf: relay the question in conversation, collect their decision, then run `bunx smthrs human answer <requestId> --value '<json>'` (or `bunx smthrs human cancel <requestId>`) yourself, never instructing the human to run these. `bunx smthrs human inbox` lists everything waiting.
 
 **Input:**
 

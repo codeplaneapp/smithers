@@ -7,7 +7,7 @@ import { runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
 // workflow list (pack source tier) → workflow run (real engine executing the
 // pack's workflow) → remove. The fixture workflow is compute-only so the run
 // needs no agent CLI (CI has none). The temp project lives inside the repo so
-// the pack workflow's `smithers-orchestrator` import resolves from the
+// the pack workflow's `smthrs` import resolves from the
 // monorepo's node_modules by directory walk-up.
 test("pack lifecycle end to end through the CLI: add, list, run, remove", () => {
   const dir = mkdtempSync(join(import.meta.dir, ".tmp-packs-e2e-"));
@@ -19,8 +19,8 @@ test("pack lifecycle end to end through the CLI: add, list, run, remove", () => 
   writeFileSync(
     join(fixture, "workflows", "noop.tsx"),
     [
-      "/** @jsxImportSource smithers-orchestrator */",
-      'import { createSmithers } from "smithers-orchestrator";',
+      "/** @jsxImportSource smthrs */",
+      'import { createSmithers } from "smthrs";',
       'import { z } from "zod/v4";',
       "const { Workflow, Task, smithers, outputs } = createSmithers({",
       "    input: z.object({}),",

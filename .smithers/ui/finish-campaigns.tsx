@@ -1,14 +1,7 @@
 /** @jsxImportSource react */
 import { useMemo, useState } from "react";
-import { createGatewayReactRoot, useGatewayNodeOutput, useGatewayRunTree } from "smithers-orchestrator/gateway-react";
-import {
-  ApprovalPanel,
-  ConnectionBadge,
-  RunEventLog,
-  RunTree,
-  StatusPill,
-  WorkflowUiShell,
-} from "smithers-orchestrator/gateway-ui";
+import { createGatewayReactRoot, useGatewayNodeOutput, useGatewayRunTree } from "smthrs/gateway-react";
+import { ApprovalPanel, ConnectionBadge, RunEventLog, RunTree, StatusPill, WorkflowUiShell } from "smthrs/gateway-ui";
 type GatewayRunNode = ReturnType<typeof useGatewayRunTree>["nodes"][number];
 
 function isRecord(value: unknown): value is Record<string, unknown> {

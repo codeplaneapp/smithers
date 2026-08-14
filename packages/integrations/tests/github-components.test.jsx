@@ -1,14 +1,14 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { Effect } from "effect";
 import { z } from "zod";
-import { createSmithers, renderFrame, runWorkflow } from "smithers-orchestrator";
-import { SmithersCtx } from "@smithers-orchestrator/react-reconciler/context";
+import { createSmithers, renderFrame, runWorkflow } from "smthrs";
+import { SmithersCtx } from "@smthrs/react-reconciler/context";
 import { OnPullRequest, OnWebhook } from "../src/github/components/OnWebhook.js";
+import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 import {
   AddLabels,
   Comment,
@@ -59,8 +59,19 @@ function startFixture() {
 const fixture = startFixture();
 afterAll(() => fixture.server.stop(true));
 
+// Allocated once, at module scope. `makeTempDirPath` arms its drain with a
+// `bun:test` hook whenever its registry is empty, and bun runs a hook that was
+// registered from inside a running test immediately after that test — which
+// empties the registry again, so a per-test allocation re-registers a hook
+// inside every single test. That mid-test registration is what intermittently
+// stalls a test for the full 5s timeout on CI. One module-scope directory arms
+// the drain once, during module evaluation, and never again.
+const apiRoot = makeTempDirPath("smithers-gh-");
+let apiCount = 0;
+
 function makeApi(schemas) {
-  const dir = mkdtempSync(join(tmpdir(), "smithers-gh-"));
+  const dir = join(apiRoot, `api-${(apiCount += 1)}`);
+  mkdirSync(dir, { recursive: true });
   const dbPath = join(dir, "db.sqlite");
   return { ...createSmithers(schemas, { dbPath }), dbPath };
 }

@@ -3,8 +3,8 @@
 // smithers-display-name: Federation Architecture Fix
 // smithers-description: Resolve clean-snapshot boundary, dependency, licensing, and release-coordinator blockers.
 // smithers-tags: maintenance, federation, architecture
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 
@@ -59,7 +59,7 @@ Preserve:
 Fix all real findings:
 
 1. All 50 packages/pi-plugin/** paths belong to smithers-plugins, consistent
-   with the @smithers-orchestrator/pi-plugin package record. Update manifest
+   with the @smthrs/pi-plugin package record. Update manifest
    ownership/notes and destination counts without changing the path set.
 
 2. Reconcile every release-plan package path with manifest ownership. Prove
@@ -69,12 +69,12 @@ Fix all real findings:
 
 3. Model actual direct dependencies of smithers-examples. Its generated root
    manifest must include semver dependencies/devDependencies for every directly
-   imported @smithers-orchestrator package, not only the facade. Add only real
+   imported @smthrs package, not only the facade. Add only real
    initial-DAG edges to new repos (for example agents -> examples if required);
    concrete already-published Smithers packages remain external semver
    prerequisites.
 
-4. apps/cli stays in Smithers but depends on @smithers-orchestrator/review,
+4. apps/cli stays in Smithers but depends on @smthrs/review,
    whose npm publication is future after multi/ui-styleguide. Add a precise
    future aggregate rewrite: keep source intact until review publishes, then
    pin CLI to review semver before source removal. Order multi -> review ->

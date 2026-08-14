@@ -1,5 +1,5 @@
 import { sqliteTable, text, integer, real, primaryKey } from "drizzle-orm/sqlite-core";
-import { assertZodV4 } from "@smithers-orchestrator/errors/assertZodV4";
+import { assertZodV4 } from "@smthrs/errors/assertZodV4";
 import { assertNoReservedColumns } from "./assertNoReservedColumns.js";
 import { unwrapZodType } from "./unwrapZodType.js";
 import { camelToSnake } from "./utils/camelToSnake.js";

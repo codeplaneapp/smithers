@@ -45,13 +45,9 @@ export function installWorkflowModuleResolution() {
     ["react", resolveEngineModule("react")],
     ["react/jsx-runtime", resolveEngineModule("react/jsx-runtime")],
     ["react/jsx-dev-runtime", resolveEngineModule("react/jsx-dev-runtime")],
-    ["@smithers-orchestrator/components", resolveEngineModule("@smithers-orchestrator/components")],
+    ["@smthrs/components", resolveEngineModule("@smthrs/components")],
   ]);
-  for (const specifier of [
-    "smithers-orchestrator",
-    "smithers-orchestrator/jsx-runtime",
-    "smithers-orchestrator/jsx-dev-runtime",
-  ]) {
+  for (const specifier of ["smthrs", "smthrs/jsx-runtime", "smthrs/jsx-dev-runtime"]) {
     const resolved = resolveEngineModule(specifier, true);
     if (resolved) {
       aliases.set(specifier, resolved);

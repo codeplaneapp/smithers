@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Cli } from "incur";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersDb } from "@smthrs/db/adapter";
+import { ensureSmithersTables } from "@smthrs/db/ensure";
 
 const previousDisableAutoMain = process.env.SMITHERS_CLI_DISABLE_AUTO_MAIN;
 process.env.SMITHERS_CLI_DISABLE_AUTO_MAIN = "1";
@@ -69,7 +69,7 @@ function seedWorkspace() {
 }
 
 /**
- * @param {Partial<import("@smithers-orchestrator/db/adapter").AlertRow>} [overrides]
+ * @param {Partial<import("@smthrs/db/adapter").AlertRow>} [overrides]
  */
 function alertRow(overrides = {}) {
   return {

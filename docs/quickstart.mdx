@@ -14,27 +14,27 @@ description: Scaffold and run a Smithers workflow in two commands.
     `init` creates `.smithers/`: authoring workflows, DDD spec/UI closure, and agent
     config. `--template <id>` requests a create-workflow-driven starter with follow-up
     notes, not an archived workflow. Browse template IDs with
-    `bunx smithers-orchestrator starters`.
+    `bunx smthrs starters`.
 
     ```bash
-    bunx smithers-orchestrator init
-    bunx smithers-orchestrator init --template idea-to-tickets
+    bunx smthrs init
+    bunx smthrs init --template idea-to-tickets
     ```
   </Step>
   <Step title="Run a workflow">
     Point a seeded workflow at a prompt and Smithers starts a durable run.
 
     ```bash
-    bunx smithers-orchestrator workflow run create-workflow --prompt "Add a rate-limiting workflow"
+    bunx smthrs workflow run create-workflow --prompt "Add a rate-limiting workflow"
     ```
   </Step>
   <Step title="Inspect the run">
     Watch run state, tail the event log, and read structured output as it executes.
 
     ```bash
-    bunx smithers-orchestrator ps
-    bunx smithers-orchestrator inspect RUN_ID
-    bunx smithers-orchestrator logs RUN_ID --tail 20
+    bunx smthrs ps
+    bunx smthrs inspect RUN_ID
+    bunx smthrs logs RUN_ID --tail 20
     ```
   </Step>
   <Step title="Resume after a crash">
@@ -42,7 +42,7 @@ description: Scaffold and run a Smithers workflow in two commands.
     checkpoint.
 
     ```bash
-    bunx smithers-orchestrator workflow run create-workflow --run-id RUN_ID --resume true
+    bunx smthrs workflow run create-workflow --run-id RUN_ID --resume true
     ```
   </Step>
 </Steps>

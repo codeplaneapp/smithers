@@ -1,5 +1,5 @@
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, defineTool } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, defineTool } from "smthrs";
 import { z } from "zod";
 
 const { smithers, Workflow, Task, outputs } = createSmithers(

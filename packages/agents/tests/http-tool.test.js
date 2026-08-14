@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { AnthropicAgent, createHttpTool } from "../src/index.js";
-import { createHttpTool as createHttpToolFromFacade } from "smithers-orchestrator";
+import { createHttpTool as createHttpToolFromFacade } from "smthrs";
 
 /** AI SDK passes these to `execute`; the HTTP tool ignores them. */
 const callOptions = { toolCallId: "test-call", messages: [] };
@@ -40,7 +40,7 @@ afterAll(() => {
 });
 
 describe("createHttpTool", () => {
-  test("is exported from the documented smithers-orchestrator facade", () => {
+  test("is exported from the documented smthrs facade", () => {
     expect(createHttpToolFromFacade).toBe(createHttpTool);
     expect(typeof createHttpToolFromFacade().execute).toBe("function");
   });

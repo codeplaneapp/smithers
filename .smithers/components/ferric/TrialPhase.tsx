@@ -1,6 +1,6 @@
-/** @jsxImportSource smithers-orchestrator */
+/** @jsxImportSource smthrs */
 import type { ReactNode } from "react";
-import { ContinueAsNew, Sequence } from "smithers-orchestrator";
+import { ContinueAsNew, Sequence } from "smthrs";
 import { outputs } from "./ferricSmithers";
 import { CampaignGate, gateRow } from "./CampaignGate";
 import { NEXT, type FerricConfig, type Milestone, type SliceDef } from "./ferricConfig";

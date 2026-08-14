@@ -19,6 +19,7 @@ import { SqlMessageStorage } from "../src/sql-message-storage.js";
 import { zodToTable } from "../src/zodToTable.js";
 import { syncZodTableSchemaPostgres } from "../src/zodToCreateTableSQL.js";
 import { POSTGRES } from "../src/dialect.js";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 // node-postgres returns int8 (BIGINT) as a string by default to avoid precision
 // loss; Smithers stores millisecond timestamps and booleans in BIGINT columns
@@ -77,8 +78,51 @@ function blockFirstInsert(connection, table, waitForPeer) {
   };
 }
 
+function blockFirstMatchingQuery(connection, pattern, onBlocked) {
+  let blocked = false;
+  return {
+    async query(config) {
+      const text = typeof config === "string" ? config : config.text;
+      if (!blocked && pattern.test(text)) {
+        blocked = true;
+        await onBlocked();
+      }
+      return connection.query(config);
+    },
+  };
+}
+
 function postgresAdapter(connection) {
   return new SmithersDb({ dialect: "postgres", connection });
+}
+
+async function waitForBlockedPostgresClients(observer, applicationNames) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const result = await observer.query(
+      `SELECT application_name
+       FROM pg_stat_activity
+       WHERE application_name = ANY($1) AND wait_event_type = 'Lock'`,
+      [applicationNames],
+    );
+    if (new Set(result.rows.map((row) => row.application_name)).size === applicationNames.length) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for blocked PostgreSQL clients: ${applicationNames.join(", ")}`);
+}
+
+async function waitForTestSignal(signal, label) {
+  let timeout;
+  try {
+    await Promise.race([
+      signal,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), 5_000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 // PGlite's socket server currently desyncs node-postgres on Windows CI. The
@@ -126,7 +170,8 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
     const result = await client.query(`
             SELECT column_name
             FROM information_schema.columns
-            WHERE table_name = '_smithers_scorers'
+            WHERE table_schema = current_schema()
+              AND table_name = '_smithers_scorers'
               AND column_name IN ('ground_truth_json', 'context_json')
             ORDER BY column_name
         `);
@@ -156,6 +201,385 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
     const after = await storage.queryAll("SELECT id FROM _smithers_schema_migrations ORDER BY id");
     expect(after.map((row) => row.id)).toEqual(ids);
   });
+
+  test("0037 repairs missing checkpoint objects and re-runs idempotently", async () => {
+    await client.query("DROP TABLE _smithers_agent_checkpoints");
+    await client.query("DROP TABLE _smithers_agent_checkpoint_contents");
+    await client.query("DELETE FROM _smithers_schema_migrations WHERE id = '0037_agent_checkpoints'");
+
+    await storage.ensureSchema();
+    await storage.ensureSchema();
+
+    const objects = await client.query(`
+      SELECT 'table' AS kind, table_name AS name
+      FROM information_schema.tables
+      WHERE table_schema = current_schema()
+        AND table_name IN ('_smithers_agent_checkpoint_contents', '_smithers_agent_checkpoints')
+      UNION ALL
+      SELECT 'index' AS kind, indexname AS name
+      FROM pg_indexes
+      WHERE schemaname = current_schema()
+        AND indexname = '_smithers_agent_checkpoints_content_hash_idx'
+      UNION ALL
+      SELECT 'trigger' AS kind, trigger_name AS name
+      FROM information_schema.triggers
+      WHERE trigger_schema = current_schema()
+        AND trigger_name = '_smithers_agent_checkpoint_refs_delete'
+      ORDER BY kind, name
+    `);
+    expect(objects.rows).toEqual([
+      { kind: "index", name: "_smithers_agent_checkpoints_content_hash_idx" },
+      { kind: "table", name: "_smithers_agent_checkpoint_contents" },
+      { kind: "table", name: "_smithers_agent_checkpoints" },
+      { kind: "trigger", name: "_smithers_agent_checkpoint_refs_delete" },
+    ]);
+    const ledger = await client.query(
+      "SELECT COUNT(*)::int AS count FROM _smithers_schema_migrations WHERE id = '0037_agent_checkpoints'",
+    );
+    expect(ledger.rows).toEqual([{ count: 1 }]);
+  });
+
+  test("0037 enforces checkpoint nullability without making agent_id required", async () => {
+    const contents = await client.query(`
+      SELECT column_name, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = '_smithers_agent_checkpoint_contents'
+        AND column_name = 'content_hash'
+    `);
+    expect(contents.rows).toEqual([{ column_name: "content_hash", is_nullable: "NO" }]);
+
+    const refs = await client.query(`
+      SELECT column_name, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = '_smithers_agent_checkpoints'
+        AND column_name = 'agent_id'
+    `);
+    expect(refs.rows).toEqual([{ column_name: "agent_id", is_nullable: "YES" }]);
+
+    await client.query("ALTER TABLE _smithers_agent_checkpoint_contents ALTER COLUMN checkpoint_json DROP NOT NULL");
+    await expect(storage.ensureSchema()).rejects.toThrow(/Failed to initialize Postgres schema/);
+    await client.query("ALTER TABLE _smithers_agent_checkpoint_contents ALTER COLUMN checkpoint_json SET NOT NULL");
+
+    await client.query("ALTER TABLE _smithers_agent_checkpoints ALTER COLUMN agent_id SET NOT NULL");
+    await expect(storage.ensureSchema()).rejects.toThrow(/Failed to initialize Postgres schema/);
+    await client.query("ALTER TABLE _smithers_agent_checkpoints ALTER COLUMN agent_id DROP NOT NULL");
+    await storage.ensureSchema();
+  });
+
+  test.skipIf(!PG_URL)("concurrent startup atomically repairs the checkpoint ref-delete trigger", async () => {
+    await client.query("DROP TRIGGER IF EXISTS _smithers_agent_checkpoint_refs_delete ON _smithers_agent_checkpoints");
+    const leftClient = await connectPeerClient();
+    const rightClient = await connectPeerClient();
+    const waitForPeer = twoPartyBarrier();
+    // Release both callers immediately before they request the same schema
+    // advisory lock. One initializer proceeds while PostgreSQL blocks the
+    // other, preventing concurrent system-catalog DDL updates.
+    const pattern = /pg_advisory_xact_lock/;
+    try {
+      await Promise.all([
+        new SqlMessageStorage({
+          dialect: "postgres",
+          connection: blockFirstMatchingQuery(leftClient, pattern, waitForPeer),
+        }).ensureSchema(),
+        new SqlMessageStorage({
+          dialect: "postgres",
+          connection: blockFirstMatchingQuery(rightClient, pattern, waitForPeer),
+        }).ensureSchema(),
+      ]);
+      const triggers = await client.query(`
+        SELECT COUNT(*)::int AS count
+        FROM information_schema.triggers
+        WHERE trigger_schema = current_schema()
+          AND trigger_name = '_smithers_agent_checkpoint_refs_delete'
+      `);
+      expect(triggers.rows).toEqual([{ count: 1 }]);
+    } finally {
+      await leftClient.end();
+      await rightClient.end();
+    }
+  });
+
+  test("independent same-attempt checkpoint appends allocate distinct sequences", async () => {
+    const adapter = postgresAdapter(client);
+    await adapter.insertRun({
+      runId: "checkpoint-append-race",
+      workflowName: "wf",
+      status: "running",
+      createdAtMs: 1,
+    });
+    await adapter.insertAttempt({
+      runId: "checkpoint-append-race",
+      nodeId: "agent",
+      iteration: 0,
+      attempt: 1,
+      state: "in-progress",
+      startedAtMs: 1,
+    });
+    const leftClient = await connectPeerClient();
+    const rightClient = await connectPeerClient();
+    const base = {
+      runId: "checkpoint-append-race",
+      nodeId: "agent",
+      iteration: 0,
+      attempt: 1,
+      codec: "json",
+      version: 1,
+      purpose: "resume",
+      createdAtMs: 2,
+      runtimeOwnerId: null,
+    };
+    try {
+      const rows = await Promise.all([
+        postgresAdapter(leftClient).putAgentCheckpoint({ ...base, checkpointJson: '{"writer":"left"}' }),
+        postgresAdapter(rightClient).putAgentCheckpoint({ ...base, checkpointJson: '{"writer":"right"}' }),
+      ]);
+      expect(rows.map((row) => row.sequence).sort()).toEqual([0, 1]);
+    } finally {
+      await leftClient.end();
+      await rightClient.end();
+    }
+  });
+
+  test.skipIf(!PG_URL)("checkpoint publication serializes with owner takeover and cancellation", async () => {
+    const runId = "checkpoint-fence-overlap";
+    const adapter = postgresAdapter(client);
+    await adapter.insertRun({
+      runId,
+      workflowName: "wf",
+      status: "running",
+      createdAtMs: 1,
+      runtimeOwnerId: "owner-before",
+      heartbeatAtMs: 1,
+    });
+    await adapter.insertAttempt({
+      runId,
+      nodeId: "agent",
+      iteration: 0,
+      attempt: 1,
+      state: "in-progress",
+      startedAtMs: 1,
+    });
+    const writerClient = await connectPeerClient();
+    const takeoverClient = await connectPeerClient();
+    const cancelClient = await connectPeerClient();
+    await takeoverClient.query("SET application_name = 'smithers_checkpoint_takeover'");
+    await cancelClient.query("SET application_name = 'smithers_checkpoint_cancel'");
+    let releaseWriter;
+    const writerRelease = new Promise((resolve) => {
+      releaseWriter = resolve;
+    });
+    let attemptLockReached;
+    const writerHasRunLock = new Promise((resolve) => {
+      attemptLockReached = resolve;
+    });
+    const blockedWriter = blockFirstMatchingQuery(
+      writerClient,
+      /FROM _smithers_attempts[\s\S]*FOR UPDATE/,
+      async () => {
+        attemptLockReached();
+        await writerRelease;
+      },
+    );
+    try {
+      const checkpoint = Effect.runPromise(
+        postgresAdapter(blockedWriter).putAgentCheckpoint({
+          runId,
+          nodeId: "agent",
+          iteration: 0,
+          attempt: 1,
+          checkpointJson: '{"overlap":true}',
+          codec: "json",
+          version: 1,
+          purpose: "resume",
+          createdAtMs: 2,
+          runtimeOwnerId: "owner-before",
+        }),
+      );
+      await waitForTestSignal(writerHasRunLock, "checkpoint writer to acquire the run lock");
+      const takeover = Effect.runPromise(
+        postgresAdapter(takeoverClient).claimRunForResume({
+          runId,
+          expectedRuntimeOwnerId: "owner-before",
+          expectedHeartbeatAtMs: 1,
+          staleBeforeMs: 2,
+          claimOwnerId: "owner-after",
+          claimHeartbeatAtMs: 3,
+          requireStale: false,
+        }),
+      );
+      const cancellation = Effect.runPromise(postgresAdapter(cancelClient).requestRunCancel(runId, 4));
+      await waitForBlockedPostgresClients(client, ["smithers_checkpoint_takeover", "smithers_checkpoint_cancel"]);
+      releaseWriter();
+      const [stored, claimed, cancelled] = await Promise.all([checkpoint, takeover, cancellation]);
+      expect(stored).toMatchObject({ runId, sequence: 0 });
+      expect(claimed).toBe(true);
+      expect(cancelled).toBe(true);
+      expect(
+        await postgresAdapter(writerClient).putAgentCheckpoint({
+          runId,
+          nodeId: "agent",
+          iteration: 0,
+          attempt: 1,
+          checkpointJson: '{"stale":true}',
+          codec: "json",
+          version: 1,
+          purpose: "resume",
+          createdAtMs: 5,
+          runtimeOwnerId: "owner-before",
+        }),
+      ).toBeNull();
+    } finally {
+      releaseWriter();
+      await writerClient.end();
+      await takeoverClient.end();
+      await cancelClient.end();
+    }
+  });
+
+  test.skipIf(!PG_URL)("checkpoint writer recovers after orphan GC wins a forced overlap", async () => {
+    const adapter = postgresAdapter(client);
+    await adapter.insertRun({
+      runId: "checkpoint-gc-overlap",
+      workflowName: "wf",
+      status: "running",
+      createdAtMs: 1,
+    });
+    await adapter.insertAttempt({
+      runId: "checkpoint-gc-overlap",
+      nodeId: "agent",
+      iteration: 0,
+      attempt: 1,
+      state: "in-progress",
+      startedAtMs: 1,
+    });
+    const checkpointJson = '{"cursor":"forced-overlap"}';
+    const { createHash } = await import("node:crypto");
+    const contentHash = createHash("sha256").update(checkpointJson).digest("hex");
+    await client.query(
+      `INSERT INTO _smithers_agent_checkpoint_contents
+         (content_hash, checkpoint_json, size_bytes, created_at_ms)
+       VALUES ($1, $2, $3, $4)`,
+      [contentHash, checkpointJson, Buffer.byteLength(checkpointJson), 1],
+    );
+
+    const gcClient = await connectPeerClient();
+    const writerClient = await connectPeerClient();
+    await writerClient.query("SET application_name = 'smithers_checkpoint_gc_writer'");
+    let releaseGc;
+    const gcBlocked = new Promise((resolve) => {
+      releaseGc = resolve;
+    });
+    let notifyDelete;
+    const deleteReached = new Promise((resolve) => {
+      notifyDelete = resolve;
+    });
+    const blockedGc = blockFirstMatchingQuery(gcClient, /DELETE FROM _smithers_agent_checkpoint_contents/, async () => {
+      notifyDelete();
+      await gcBlocked;
+    });
+    try {
+      const gc = Effect.runPromise(postgresAdapter(blockedGc).pruneOrphanedAgentCheckpointContents());
+      await waitForTestSignal(deleteReached, "orphan GC delete barrier");
+      const stored = Effect.runPromise(
+        postgresAdapter(writerClient).putAgentCheckpoint({
+          runId: "checkpoint-gc-overlap",
+          nodeId: "agent",
+          iteration: 0,
+          attempt: 1,
+          checkpointJson,
+          codec: "json",
+          version: 1,
+          purpose: "resume",
+          createdAtMs: 2,
+          runtimeOwnerId: null,
+        }),
+      );
+      await waitForBlockedPostgresClients(client, ["smithers_checkpoint_gc_writer"]);
+      releaseGc();
+      const [gcResult, storedResult] = await Promise.all([gc, stored]);
+      expect(gcResult).toEqual({ deletedCount: 1, nextCursor: null });
+      expect(storedResult.contentHash).toBe(contentHash);
+      expect(await adapter.getAgentCheckpoint(contentHash)).not.toBeNull();
+    } finally {
+      releaseGc();
+      await gcClient.end();
+      await writerClient.end();
+    }
+  });
+
+  test("0040 repairs missing and malformed owned steer indexes with a recorded ledger row", async () => {
+    const assertCanonicalIndex = async () => {
+      const result = await client.query({
+        text: `SELECT a.attname AS name, i.indisunique, i.indisvalid, i.indisready,
+                      (i.indpred IS NOT NULL) AS is_partial
+               FROM pg_index i
+               JOIN pg_class idx ON idx.oid = i.indexrelid
+               JOIN pg_class t ON t.oid = i.indrelid
+               JOIN pg_namespace n ON n.oid = t.relnamespace
+               JOIN unnest(i.indkey) WITH ORDINALITY keys(attnum, ord) ON true
+               JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = keys.attnum
+               WHERE n.nspname = current_schema()
+                 AND t.relname = '_smithers_steers'
+                 AND idx.relname = '_smithers_steers_queued_idx'
+               ORDER BY keys.ord`,
+      });
+      expect(result.rows.map((row) => row.name)).toEqual(["run_id", "node_id", "status", "created_at_ms"]);
+      expect(result.rows.every((row) => !row.indisunique && row.indisvalid && row.indisready && !row.is_partial)).toBe(
+        true,
+      );
+    };
+
+    await client.query(`DROP INDEX _smithers_steers_queued_idx`);
+    await storage.ensureSchema();
+    await assertCanonicalIndex();
+
+    await client.query(`DROP INDEX _smithers_steers_queued_idx`);
+    await client.query(`CREATE UNIQUE INDEX _smithers_steers_queued_idx ON _smithers_steers (status, run_id)`);
+    await storage.ensureSchema();
+    await assertCanonicalIndex();
+  }, 60_000);
+
+  test("atomic steer publication rolls back event faults and deduplicates explicit ids", async () => {
+    const adapter = postgresAdapter(client);
+    const runId = `pg-steer-${Date.now().toString(36)}`;
+    await adapter.insertRun({ runId, workflowName: "steer-test", status: "running", createdAtMs: Date.now() });
+    const row = {
+      steerId: `${runId}-id`,
+      runId,
+      nodeId: "task",
+      message: "postgres atomic",
+      createdAtMs: Date.now(),
+    };
+    const eventRow = {
+      runId,
+      timestampMs: row.createdAtMs,
+      type: "SteerQueued",
+      payloadJson: JSON.stringify({
+        type: "SteerQueued",
+        runId,
+        nodeId: row.nodeId,
+        steerId: row.steerId,
+        message: row.message,
+        timestampMs: row.createdAtMs,
+      }),
+    };
+    const originalInsertEvent = adapter.insertEventWithNextSeq.bind(adapter);
+    adapter.insertEventWithNextSeq = () => Effect.fail(new SmithersError("DB_WRITE_FAILED", "postgres event fault"));
+    await expect(Effect.runPromise(adapter.enqueueSteerWithEvent(row, eventRow))).rejects.toThrow(
+      "postgres event fault",
+    );
+    expect(await storage.queryAll("SELECT steer_id FROM _smithers_steers WHERE run_id = ?", [runId])).toHaveLength(0);
+
+    adapter.insertEventWithNextSeq = originalInsertEvent;
+    expect(await Effect.runPromise(adapter.enqueueSteerWithEvent(row, eventRow))).toBe(true);
+    expect(await Effect.runPromise(adapter.enqueueSteerWithEvent(row, eventRow))).toBe(false);
+    expect(await storage.queryAll("SELECT steer_id FROM _smithers_steers WHERE run_id = ?", [runId])).toHaveLength(1);
+    expect(
+      await storage.queryAll("SELECT seq FROM _smithers_events WHERE run_id = ? AND type = 'SteerQueued'", [runId]),
+    ).toHaveLength(1);
+  }, 60_000);
 
   test("0030 skips missing/incompatible output tables, resolves quoted names, and re-runs idempotently", async () => {
     await client.query(`

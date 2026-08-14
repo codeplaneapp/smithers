@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { diffSnapshots } from "@smithers-orchestrator/devtools";
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 import { DevToolsStore } from "../src/runtime/DevToolsStore.js";
 import type { DevToolsClient } from "../src/runtime/DevToolsClient.js";
-import type { DevToolsNode, DevToolsSnapshot } from "@smithers-orchestrator/protocol";
+import type { DevToolsNode, DevToolsSnapshot } from "@smthrs/protocol";
 
 function task(id: number, nodeId: string, state: string, props: Record<string, unknown> = {}): DevToolsNode {
   return {

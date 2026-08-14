@@ -6,7 +6,7 @@ metadata:
 spec:
   type: LoadBalancer
   selector:
-    app: smithers-orchestrator
+    app: smthrs
   ports:
     - name: http
       port: 80

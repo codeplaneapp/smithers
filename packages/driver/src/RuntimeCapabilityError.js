@@ -1,4 +1,4 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SmithersError } from "@smthrs/errors/SmithersError";
 
 // @smithers-type-exports-begin
 /** @typedef {"filesystem" | "subprocess" | "worktree" | "sandbox"} RuntimeCapability */

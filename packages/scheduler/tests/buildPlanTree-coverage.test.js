@@ -47,13 +47,22 @@ describe("buildPlanTree stable id fallbacks", () => {
     expect(ralphIds).toContain("inner@@outer=0");
   });
 
-  test("ralph maxIterations falls back for non-finite numeric caps", () => {
+  test("ralph maxIterations preserves Infinity as an explicitly unbounded cap (#1492)", () => {
     const { plan, ralphs } = buildPlanTree(
       el("smithers:ralph", { id: "loop", maxIterations: "Infinity" }, [el("smithers:task", { id: "body" })]),
     );
 
-    expect(ralphs[0].maxIterations).toBe(5);
-    expect(plan.maxIterations).toBe(5);
+    expect(ralphs[0].maxIterations).toBe(Number.POSITIVE_INFINITY);
+    expect(plan.maxIterations).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  test("ralph maxIterations still falls back for invalid non-finite caps", () => {
+    for (const cap of ["NaN", "-Infinity", "not-a-number"]) {
+      const { plan } = buildPlanTree(
+        el("smithers:ralph", { id: "loop", maxIterations: cap }, [el("smithers:task", { id: "body" })]),
+      );
+      expect(plan.maxIterations).toBe(5);
+    }
   });
 
   test("a root try-catch-finally without an id gets the :root stable path id", () => {

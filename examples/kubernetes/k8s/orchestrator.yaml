@@ -1,21 +1,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: smithers-orchestrator
+  name: smthrs
   namespace: smithers-system
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: smithers-orchestrator
+      app: smthrs
   template:
     metadata:
       labels:
-        app: smithers-orchestrator
+        app: smthrs
     spec:
       containers:
         - name: orchestrator
-          image: smithers-orchestrator:latest
+          image: smthrs:latest
           imagePullPolicy: IfNotPresent
           ports:
             - name: gateway
@@ -64,11 +64,11 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: smithers-orchestrator
+  name: smthrs
   namespace: smithers-system
 spec:
   selector:
-    app: smithers-orchestrator
+    app: smthrs
   ports:
     - name: gateway
       port: 3000

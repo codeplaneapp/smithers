@@ -1,5 +1,5 @@
-import * as _smithers_orchestrator_accounts from '@smithers-orchestrator/accounts';
-import { AccountProvider } from '@smithers-orchestrator/accounts';
+import * as _smthrs_accounts from '@smthrs/accounts';
+import { AccountProvider } from '@smthrs/accounts';
 import { spawnSync } from 'node:child_process';
 
 /**
@@ -75,7 +75,7 @@ type UsageReport$5 = {
     error?: string;
 };
 
-/** @typedef {import("@smithers-orchestrator/accounts").Account} Account */
+/** @typedef {import("@smthrs/accounts").Account} Account */
 /** @typedef {import("./UsageReport.ts").UsageReport} UsageReport */
 /**
  * Routes an account to its usage adapter and returns a normalized report. This
@@ -89,7 +89,7 @@ type UsageReport$5 = {
  * @returns {Promise<UsageReport>}
  */
 declare function getAccountUsage(account: Account$3): Promise<UsageReport$4>;
-type Account$3 = _smithers_orchestrator_accounts.Account;
+type Account$3 = _smthrs_accounts.Account;
 type UsageReport$4 = UsageReport$5;
 
 /**
@@ -106,10 +106,10 @@ declare function getUsageForAccounts(accounts: Account$2[], options?: {
     env?: NodeJS.ProcessEnv;
     nowMs?: number;
 }): Promise<UsageReport$3[]>;
-type Account$2 = _smithers_orchestrator_accounts.Account;
+type Account$2 = _smthrs_accounts.Account;
 type UsageReport$3 = UsageReport$5;
 
-/** @typedef {import("@smithers-orchestrator/accounts").Account} Account */
+/** @typedef {import("@smthrs/accounts").Account} Account */
 /** @typedef {import("./UsageReport.ts").UsageReport} UsageReport */
 /** @typedef {import("./UsageWindow.ts").UsageWindow} UsageWindow */
 /**
@@ -136,7 +136,7 @@ type UsageReport$3 = UsageReport$5;
 declare function buildUsageReport(account: Account$1, probe: UsageProbe$6, options?: {
     nowIso?: string;
 }): UsageReport$2;
-type Account$1 = _smithers_orchestrator_accounts.Account;
+type Account$1 = _smthrs_accounts.Account;
 type UsageReport$2 = UsageReport$5;
 /**
  * The partial result an adapter returns. The dispatcher wraps it with the
@@ -292,8 +292,12 @@ declare function decodeJwtClaims(token: string | null | undefined): Record<strin
 /**
  * Reads the Claude Code subscription OAuth token for an account. Tries the
  * account's `configDir/.credentials.json` first (the cross-platform location
- * when `CLAUDE_CONFIG_DIR` is set), then falls back to the macOS Keychain item
- * `Claude Code-credentials`.
+ * when `CLAUDE_CONFIG_DIR` is set), then the macOS Keychain: Claude Code keys
+ * per-config-dir logins as `Claude Code-credentials-<first 8 hex of
+ * sha256(configDir)>`, so an isolated account's item is tried before the
+ * unsuffixed default-install item. For accounts with a `configDir`, the
+ * unsuffixed item is NOT used as a fallback — it belongs to the default
+ * `~/.claude` login and would silently attribute another account's token.
  *
  * Returns `null` when no credential can be read, so the adapter degrades to a
  * "none" report rather than throwing. The token is returned only to mint an
@@ -507,7 +511,7 @@ declare const PUBLISHED_CAPS: Record<string, {
 }>;
 
 /** @typedef {import("./UsageReport.ts").UsageReport} UsageReport */
-/** @typedef {import("@smithers-orchestrator/accounts").Account} Account */
+/** @typedef {import("@smthrs/accounts").Account} Account */
 /** @typedef {{ provider: Account["provider"]; configDir?: string; model?: string; apiKeyHash?: string }} UsageCacheAccountIdentity */
 /** @typedef {{ version: 1; entries: Record<string, { identity?: UsageCacheAccountIdentity; report: UsageReport }> }} UsageCacheFile */
 /**
@@ -535,7 +539,7 @@ declare function readUsageCache(env?: NodeJS.ProcessEnv): UsageCacheFile;
  */
 declare function writeUsageCache(contents: UsageCacheFile, env?: NodeJS.ProcessEnv): string;
 type UsageReport = UsageReport$5;
-type Account = _smithers_orchestrator_accounts.Account;
+type Account = _smthrs_accounts.Account;
 type UsageCacheAccountIdentity = {
     provider: Account["provider"];
     configDir?: string;

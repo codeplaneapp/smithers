@@ -1,6 +1,6 @@
 {
-  "name": "@smithers-orchestrator/ui-core",
-  "version": "0.32.0",
+  "name": "@smthrs/ui-core",
+  "version": "0.34.0",
   "description": "Isomorphic headless product layer for Smithers UIs: pure domain modules, Platform DI interfaces, and view-model hooks shared by the web app and the terminal UI",
   "type": "module",
   "sideEffects": false,
@@ -25,8 +25,8 @@
     "test": "bun test tests"
   },
   "dependencies": {
-    "@smithers-orchestrator/gateway-client": "workspace:*",
-    "@smithers-orchestrator/gateway-react": "workspace:*",
+    "@smthrs/gateway-client": "workspace:*",
+    "@smthrs/gateway-react": "workspace:*",
     "zustand": "^5.0.13"
   },
   "peerDependencies": {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { renderFrame } from "smithers-orchestrator";
+import { renderFrame } from "smthrs";
 import workflow from "./workflow";
 
 // No mocks: load the REAL example workflow and render one frame the same way

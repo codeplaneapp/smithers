@@ -6,11 +6,11 @@
  * Use cases: incident response, maintenance windows, deployment runbooks,
  * infrastructure changes, database migrations with manual gates.
  */
-import { Sequence, Loop } from "smithers-orchestrator";
+import { Sequence, Loop } from "smthrs";
 import { createExampleSmithers } from "./_example-kit.js";
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { read, write, bash, grep } from "smithers-orchestrator/tools";
+import { read, write, bash, grep } from "smthrs/tools";
 import { z } from "zod";
 import ClassifyPrompt from "./prompts/runbook-executor/classify.mdx";
 import ExecutePrompt from "./prompts/runbook-executor/execute.mdx";

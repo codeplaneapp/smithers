@@ -1,5 +1,5 @@
-import { Gateway, mdxPlugin } from "smithers-orchestrator";
-import type { AgentLike } from "smithers-orchestrator";
+import { Gateway, mdxPlugin } from "smthrs";
+import type { AgentLike } from "smthrs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 

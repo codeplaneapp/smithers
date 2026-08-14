@@ -2,343 +2,218 @@
 
 ## Why a strong AI reviewer may fail to repair a weaker AI implementer
 
-**A controlled study of delegation, review, and correlated failure in coding agents**
+**A four-task pilot and a preregistered 330-cell study of delegation and review
+in coding agents. Pilot: complete. Confirmatory study: frozen and launched
+2026-08-08; results will replace this draft's pilot-only tables.**
 
 ### Abstract
 
-A common recipe for economical AI engineering is to let a frontier model plan,
-delegate implementation to a cheaper model, and then review the result with the
-frontier model. The intuition is compelling: the reviewer can keep sending the
-work back until it is as good as the reviewer would have produced alone.
+A common recipe for economical AI engineering: a frontier model plans, a cheaper
+model implements, the frontier model reviews. The hope is that review converges
+the work to reviewer-level quality.
 
-Our pilot results challenge that intuition. Across four real repository-level
-coding tasks, a single GPT-5.6 Sol agent achieved a mean hidden-test reward of
-**0.901**.
-The matched Sol→Luna→Sol pipeline achieved **0.817**, despite costing **73% more**
-and taking **2.5× as long**. A three-model review panel performed worse still:
-**0.734**, and it beat solo Sol on none of the four tasks.
+In our four-task pilot it did not. A single GPT-5.6 Sol agent scored a mean
+hidden-test reward of **0.901** at $10.49 and 19.4 minutes. The task-matched
+Sol→Luna→Sol pipeline scored **0.817** at 73% more cost and 2.5× the wall
+clock. A three-model review panel scored **0.734** and beat solo Sol on none of
+the four tasks.
 
-We call the proposed mechanism the **persuasion gap**: producing an artifact and
-producing a plausible account of that artifact are different capabilities. A
-weaker implementer may leave defects that are hard to discover while supplying
-a coherent summary that makes them easy to overlook. Review then becomes
-anchored to the implementer's framing instead of independently reconstructing
-the solution. In informal language this can feel like the student “gaslighting”
-the teacher. We find no evidence of intent, deception, or a learned relationship
-between these specific models; the scientific claim is narrower: **review text
+We call the proposed mechanism the **persuasion gap**: producing an artifact
+and producing a plausible account of that artifact are different capabilities.
+A weaker implementer can leave defects that are hard to discover while
+supplying a coherent summary that makes them easy to overlook, so review
+anchors to the implementer's framing instead of independently reconstructing
+the solution. Informally, the student "gaslights" the teacher — but we find no
+evidence of intent or deception; the narrow hypothesis is that **review text
 can be correlated with the errors it is supposed to expose**.
 
-Because four tasks cannot support a strong general claim, we use them only as a
-hypothesis-generating pilot. A preregistered confirmatory study uses 30 new tasks
-drawn deterministically from the 115-task RoadmapBench suite, balanced across
-five programming languages. It adds matched solo-Fable and Fable→Luna→Fable
-conditions and scores Luna's artifact both before and after teacher review.
+Four tasks cannot support a general claim, and the pilot comparison changed the
+execution graph as well as the implementer. It is a hypothesis-generating
+pilot, nothing more. A preregistered 30-task, eleven-condition confirmatory
+study (330 cells) is frozen and running; see below.
 
-### The surprising result
+### The pilot result
 
-Suppose a strong agent can produce quality \(Q_s\), while a cheaper agent
-produces \(Q_w < Q_s\). It is tempting to assume that strong review will close
-most of the gap:
+| Pattern                    | Mean reward | Resolved | Est. API-equiv. cost |    Mean time |
+| -------------------------- | ----------: | -------: | -------------------: | -----------: |
+| Solo Sol                   |   **0.901** |      2/4 |           **$10.49** | **19.4 min** |
+| Sol→Luna→Sol               |       0.817 |      1/4 |               $18.15 |     48.8 min |
+| Luna research→Sol→Luna→Sol |   **0.929** |      3/4 |               $17.22 |     46.1 min |
+| Three-model review panel   |       0.734 |      1/4 |               $15.83 |     40.9 min |
 
-\[
-Q(\text{strong plan} \rightarrow \text{weak implementation} \rightarrow
-\text{strong review}) \approx Q_s.
-\]
+Why this surprises: the reviewer never receives the solution the stronger model
+would have generated. It receives a changed repository, the implementer's
+summary, a limited budget, and a huge search space of possible omissions.
+Repair requires detection first — `P(repair) = P(detect) ×
+P(diagnose|detect) × P(fix|diagnose)` — and once a defect survives detection,
+the review loop supplies no pressure toward correctness.
 
-That equation hides the hard part. The reviewer does not receive the solution
-the stronger model would have generated. It receives a changed repository, a
-summary written by the implementer, a limited time budget, and a very large
-search space of possible omissions. Repair requires the reviewer to first
-_notice_ each defect. Once an error survives detection, the review loop provides
-no magical pressure toward correctness.
+### Pilot method, in brief
 
-The benchmark made this visible:
+OrchBench: four medium-difficulty
+[RoadmapBench](https://arxiv.org/abs/2605.15846) release tasks (TypeScript,
+Python, Go, Rust). Each starts from a real old-version repository plus a
+detailed release roadmap; agents edit the real repo with its real toolchain and
+are scored by the benchmark's hidden per-target tests. Task, checkout, roadmap,
+tool/network policy, and grader were held constant; the orchestration graph
+varied. Fallback chains disabled. The grader was validated per task (oracle
+patch = 1.0, no-op < 1.0). The review prompt was deliberately adversarial —
+verify every roadmap target, run the tests, fix defects directly — not a
+ceremonial approval step. Review is a **single review-and-fix session**: the
+reviewer edits the code itself, nothing is sent back to the implementer, and
+there is no iterate-until-LGTM gate (the reviewer may test/fix/re-verify
+internally within its one budget).
 
-| Pattern                    | Mean reward | Resolved |  Mean cost |    Mean time |
-| -------------------------- | ----------: | -------: | ---------: | -----------: |
-| Solo Sol                   |   **0.901** |      2/4 | **$10.49** | **19.4 min** |
-| Sol→Luna→Sol               |       0.817 |      1/4 |     $18.15 |     48.8 min |
-| Luna research→Sol→Luna→Sol |   **0.929** |      3/4 |     $17.22 |     46.1 min |
-| Three-model review panel   |       0.734 |      1/4 |     $15.83 |     40.9 min |
+### Pilot findings
 
-This is not a blanket result against decomposition. Cheap reconnaissance before
-planning slightly exceeded solo Sol in Round 1, though at sharply higher cost
-and latency. The narrower result is more useful: **adding review does not imply
-that delegated work converges to reviewer-level quality**.
+**1. The delegated pipeline did not recover solo quality.** Sol→Luna→Sol
+trailed solo Sol by 0.083 mean reward (tied on three tasks, lost 0.667 vs
+1.000 on Fiber/Go, never won) while costing $18.15 vs $10.49 and taking 48.8 vs
+19.4 minutes. Review alone averaged 24 minutes — longer than the 16-minute
+implementation stage. With one nonzero paired difference the sign-flip test is
+uninformative (`p=1.0`); this is an observation, not a demonstrated effect.
+Solo also preserves one continuous context while the pipeline uses three
+sessions, so the confirmatory Sol→Sol→Sol control — same graph, only the
+middle model replaced — is what isolates the student.
 
-### Pilot method
+**2. The panel scored worse.** Three frontier reviewers producing parallel
+findings, applied by Luna: 0.734, below the single-reviewer pipeline. The
+condition also changed the review/fix graph, so it is not a clean reviewer-count
+test — but findings-only review followed by a weaker fixer adds another lossy
+channel: reviewers must detect, express, and successfully transmit each repair.
+More commentary is not more verified correctness.
 
-We used OrchBench, a controlled pilot built on four medium-difficulty
-[RoadmapBench](https://github.com/UniPat-AI/RoadmapBench) release tasks in
-TypeScript, Python, Go, and Rust. Each task begins
-from the same old-version repository and a detailed release roadmap. Agents edit
-the real repository, use its real toolchain, and are scored after the run by the
-benchmark's hidden per-target tests.
+**3. Reconnaissance is different from delegation.** The best round-1 pipeline
+put Luna on read-only reconnaissance before Sol planned (0.929). A round-2
+replicate reversed the ordering (solo 1.000 vs pipeline 0.889 at 2.3× cost).
+Promising, unsettled. Cheap stages seem most useful when they compress
+information without owning the final artifact.
 
-We held constant:
+### The proposed mechanism
 
-- the task and starting checkout;
-- the roadmap supplied to the agents;
-- tool and network policy;
-- stage prompts and time budgets;
-- the hidden-test grader; and
-- single-model identity, with fallback chains disabled.
+Four coupled failure modes, none requiring intent:
 
-Only the orchestration graph changed. The principal comparison was:
-
-- **Solo Sol:** one Sol agent explores, plans, implements, tests, and verifies.
-- **Sol→Luna→Sol:** Sol plans without editing; Luna implements from that plan;
-  a fresh Sol agent independently reviews, edits, tests, and fixes.
-
-The review prompt was deliberately strong. It told the reviewer to be
-adversarial, verify every roadmap target, inspect signatures and public exports,
-run the project's tests, fix defects directly, and perform a final completeness
-pass. This was not a ceremonial approval step.
-
-The primary outcome was hidden-test reward in \([0,1]\). We also recorded
-complete resolution, wall-clock duration, per-stage time, model usage, estimated
-API cost, quota stalls, and audit signals. The grader was validated on every
-task: the reference patch scored 1.0 and a no-op scored below 1.0.
-
-### Pilot results
-
-#### Review did not recover solo quality
-
-Sol→Luna→Sol trailed solo Sol by **0.084 reward**, a relative decline of 9.3%.
-It tied solo on two tasks and lost on two; it never beat solo:
-
-| Task                 | Solo Sol | Sol→Luna→Sol | Difference |
-| -------------------- | -------: | -----------: | ---------: |
-| Fiber (Go)           |    1.000 |        0.667 |     −0.333 |
-| Optuna (Python)      |    0.889 |        0.889 |      0.000 |
-| Ratatui (Rust)       |    1.000 |        1.000 |      0.000 |
-| Valibot (TypeScript) |    0.714 |        0.714 |      0.000 |
-
-The pipeline paid more for the lower score. Mean cost rose from $10.49 to
-$18.15, and mean time rose from 19.4 to 48.8 minutes. Review alone averaged 24
-minutes—longer than the 16-minute implementation stage.
-
-#### More reviewers made the outcome worse
-
-The panel condition used Sol to plan, Luna to implement, three different
-frontier reviewers to produce findings in parallel, and Luna to apply the merged
-findings. Its mean reward was 0.734. It scored below solo Sol on every task or
-tied it; it never improved one.
-
-This matters because “use diverse reviewers” is the most obvious repair for
-correlated blind spots. Diversity can help, but findings-only review followed by
-a weaker fixer introduces another lossy channel: reviewers must identify the
-defect, express it precisely, and persuade the implementer to repair it
-correctly. More commentary is not the same as more verified correctness.
-
-#### Reconnaissance is different from delegation
-
-The best Round 1 pipeline began with Luna doing read-only reconnaissance, then
-used Sol for planning, Luna for implementation, and Sol for review. It averaged
-0.929. This suggests decomposition can help when the cheap stage compresses
-information without owning the final artifact. Yet a Round 2 replicate on the
-Python task reversed the ordering: solo Sol scored 1.000, while the four-stage
-pipeline scored 0.889 at 2.3× the cost and 2.5× the time. With these small
-samples, the reconnaissance result is promising but not settled.
-
-### A mechanism: correlated oversight failure
-
-The phrase “the student gaslights the teacher” is memorable but too strong as a
-scientific explanation. It attributes intention and a social relationship that
-the experiment did not measure. The observable mechanism can be stated without
-either assumption.
-
-Let an implementation contain a set of defects \(E\). Review succeeds only if
-each important defect passes through three gates:
-
-\[
-P(\text{repair}) = P(\text{detect}) \times P(\text{diagnose}\mid\text{detect})
-\times P(\text{fix}\mid\text{diagnose}).
-\]
-
-A strong reviewer may have high conditional ability at diagnosis and repair
-while still having modest detection probability over a large repository. The
-implementer's report can reduce that probability by anchoring attention on what
-was attempted, what passed, and why the approach is coherent. The most dangerous
-errors are often absences—an unimplemented edge case, export, warning, or
-compatibility path—which produce no local symptom unless the reviewer derives a
-specific check from the original specification.
-
-This creates four coupled failure modes:
-
-1. **Framing inheritance.** The reviewer starts from the implementer's summary
+1. **Framing inheritance** — the reviewer starts from the implementer's summary
    and inherits its decomposition of the problem.
-2. **Shared blind spots.** Related models may compress specifications and code
-   in similar ways, making their errors statistically correlated.
-3. **Verification substitution.** Plausible explanations and passing familiar
-   tests substitute for checks targeted at omitted behavior.
-4. **Repair bottlenecks.** A reviewer can find more issues than the remaining
-   time, context, or fixer can correctly resolve.
+2. **Shared blind spots** — related models compress specs and code similarly,
+   so their errors correlate.
+3. **Verification substitution** — plausible explanations and passing familiar
+   tests substitute for checks targeted at omitted behavior. The most dangerous
+   defects are absences, which produce no local symptom.
+4. **Repair bottlenecks** — a reviewer can find more than the remaining budget
+   or fixer can correctly resolve.
 
-The prediction is not merely that weak implementations score lower. It is that
-**review gains shrink when reviewer evidence is derived from the same narrative
-and tests that produced the artifact**. Review should recover when supplied with
-independent evidence: hidden tests, mechanically derived requirement checklists,
-counterexample search, isolated reproduction, or reviewers whose context omits
-the implementer's self-report.
+The testable prediction: **review gains shrink when reviewer evidence derives
+from the same narrative and tests that produced the artifact**, and recover
+when the reviewer gets independent evidence (hidden tests, derived checklists,
+or a context that omits the implementer's self-report).
 
-### Relation to prior work
+This sits between known results: weak-to-strong generalization
+([Burns et al.](https://arxiv.org/abs/2312.09390)) shows supervision quality ≠
+supervisor capability; self-correction fails without external feedback
+([Huang et al.](https://arxiv.org/abs/2310.01798),
+[Kamoi et al.](https://aclanthology.org/2024.tacl-1.78/)); models favor
+model-generated answers ([Xu et al.](https://aclanthology.org/2024.acl-long.826/))
+and convincing agreement over correctness
+([Sharma et al.](https://arxiv.org/abs/2310.13548)); and a capable judge can
+fail when the protocol produces narrative continuity rather than adversarial
+evidence ([Kenton et al.](https://arxiv.org/abs/2407.04622)). Our reviewer was
+a separate model instance, but its evidence still came from the same spec,
+repo, tests, and implementer report — an external agent is not external
+evidence.
 
-This result sits between several established findings.
+### The confirmatory study (frozen, running since 2026-08-08)
 
-Work on [weak-to-strong generalization](https://arxiv.org/abs/2312.09390) shows
-that stronger systems trained from weaker supervision can exceed the supervisor,
-but naive weak supervision does not recover the stronger model's full ability.
-Our setting runs in the opposite direction—strong oversight of weaker execution—
-yet exposes the same missing premise: supervision quality is not equal to
-supervisor capability.
+Thirty tasks (7 C++, 6 Go, 6 Python, 5 Rust, 6 TypeScript) drawn
+deterministically from the 115-task RoadmapBench train split, oracle-validated,
+with a frozen reserve order. Eleven conditions per task, 330 cells, condition
+order rotated:
 
-Research on [intrinsic self-correction](https://arxiv.org/abs/2310.01798) found
-that critique without external feedback can fail or reduce accuracy. A later
-[critical survey](https://aclanthology.org/2024.tacl-1.78/) concluded that
-reliable external feedback is the clearest condition under which correction
-works. Our reviewer was a different model instance, but its main evidence still
-came from the same specification, repository, familiar tests, and implementer
-report. “External agent” did not guarantee external evidence.
+| Condition          | Plan + implement                    | Review                      |
+| ------------------ | ----------------------------------- | --------------------------- |
+| Solo Sol           | one continuous Sol session          | none                        |
+| Sol→Sol→Sol        | Sol planner, Sol implementer        | fresh Sol, report visible   |
+| Sol→Terra→Sol      | Sol planner, Terra implementer      | fresh Sol, report visible   |
+| Sol→Luna→Sol       | Sol planner, Luna implementer       | fresh Sol, report visible   |
+| Sol→Luna→Sol blind | Sol planner, Luna implementer       | fresh Sol, report hidden    |
+| Sol(work)→Sol      | one continuous Sol work session     | fresh Sol, report visible   |
+| Sol(work)→Fable    | one continuous Sol work session     | fresh Fable, report visible |
+| Solo Fable         | one continuous Fable session        | none                        |
+| Fable→Fable→Fable  | Fable planner, Fable implementer    | fresh Fable, report visible |
+| Fable→Luna→Fable   | Fable planner, Luna implementer     | fresh Fable, report visible |
+| Fable→Luna→Fable blind | Fable planner, Luna implementer | fresh Fable, report hidden  |
 
-[Self-bias in refinement](https://aclanthology.org/2024.acl-long.826/) provides
-a closely related mechanism: models can favor model-generated answers, and
-refinement can improve fluency while amplifying that bias. Meanwhile,
-[sycophancy research](https://arxiv.org/abs/2310.13548) shows that humans and
-preference models sometimes favor convincing agreement over correctness. These
-findings make the persuasion-gap hypothesis plausible, but they do not prove
-that Luna was trained to deceive Sol. That stronger causal claim would require
-training-data or behavioral evidence absent here.
+Models: Sol=`gpt-5.6-sol` (xhigh), Terra=`gpt-5.6-terra` (high),
+Luna=`gpt-5.6-luna` (medium), Fable=`claude-fable-5`. Every reviewed condition
+is scored **before and after review**, so the study separates: the
+Luna-substitution effect (H1), whether review helps at all (H3), a
+Sol→Terra→Luna tier gradient, teacher-family differences (H2), continuous vs
+split context, Sol vs Fable review of the same-shaped work, and whether hiding
+the self-report changes the outcome (H4 — the persuasion-gap mechanism test).
+The blinded arm exists for **both** teacher families (a 2026-08-08 pre-launch
+amendment added the blinded Fable arm), so the {Sol, Fable} × {visible, blind}
+factorial separates "which teacher is more swayed by the implementer's
+narrative" from "which teacher repairs better" (H4-Fable, secondary).
+Primary family: H1-Sol and H4, Holm-adjusted at 0.025; 30 paired tasks give
+~80% power for a moderate paired effect (`d_z ≈ 0.57`). Full protocol:
+`benchmarks/orchbench/PERSUASION_GAP_PREREGISTRATION.md`; frozen sample and
+receipts: `persuasion-gap-selected.json`; conditions:
+`.smithers/workflows/orchbench.tsx`.
 
-Scalable-oversight work on
-[weak judges evaluating strong models](https://arxiv.org/abs/2407.04622) studies
-how debate or consultancy can expose information to a limited judge. Our result
-highlights a complementary concern: a capable judge can still fail when the
-protocol produces agreement and narrative continuity rather than adversarial,
-independently checkable evidence.
+### Open design gaps
 
-### The cross-family test
+Named here so nobody mistakes the running design for the last word. The
+protocol locked when the first confirmatory cell launched (2026-08-08); these
+are for the study after this one.
 
-To test whether the effect is specific to the Sol/Luna pairing, we added a
-matched **Fable→Luna→Fable** condition. Fable receives the same planning prompt
-and budget as Sol; Luna receives the same plan-shaped input and implementation
-prompt; a fresh Fable receives the same adversarial review-and-fix prompt. All
-four tasks and the hidden scorer are unchanged. We also added **solo Fable**
-with the identical 150-minute end-to-end prompt used by solo Sol. This baseline
-separates the value of Fable review from Fable's underlying task capability.
+1. **One run per cell.** The design estimates across-task variation, not
+   within-task stochastic variation. Repeated seeds on a task subset would
+   separate the two.
+2. **No shared-artifact fork.** Blind vs visible review uses independent
+   implementation runs matched by task, so the contrast includes artifact
+   variance. Forking one frozen implementation across reviewer conditions would
+   isolate the report effect directly.
+3. **No iterated-review condition.** The folk version of the recipe — "the
+   reviewer keeps sending it back until LGTM" — is untested: every reviewed
+   condition reviews once and fixes directly. A bounded loop (Luna fixes,
+   fresh-context Sol re-reviews, until LGTM or round cap) would test the
+   convergence claim in its strongest form.
+4. **One task family.** Long-horizon release implementation only; transfer to
+   small patches, security review, or non-code work is untested.
 
-The clean cross-family cells are part of the confirmatory study below. A first
-pilot attempt reached the provider's five-hour quota boundary before producing
-work and is excluded as quota-poisoned; treating a rejected attempt as model
-evidence would confound availability with capability.
+### Provisional practical implications
 
-The interpretation is deliberately asymmetric:
-
-- If Fable→Luna→Fable materially beats Sol→Luna→Sol, the evidence favors a
-  pair-specific or model-family-specific correlation hypothesis, provided the
-  gain remains after normalizing against solo Fable.
-- If both pipelines trail their matched solo-teacher baselines, the evidence
-  favors a general delegation bottleneck.
-- If Fable→Luna→Fable matches solo Fable while Sol→Luna→Sol trails solo Sol,
-  model diversity or pair-specific compatibility becomes a promising mechanism.
-
-### Confirmatory study
-
-The confirmatory sample is frozen before agent execution: 30 previously unseen
-RoadmapBench tasks, six each in C++, Go, Python, Rust, and TypeScript. Within
-language, tasks are selected by a deterministic hash of task ID after excluding
-the four pilot tasks. A task enters only if the benchmark's oracle patch scores
-1.0 and an untouched repository scores below 1.0; failures are replaced in a
-frozen reserve order and reported. After the first broken grader was observed
-but before any confirmatory agent cell ran, we extended the machine-readable
-reserve list from ten candidates per language to the complete non-pilot frame.
-The declared hash ordering and first ten ranks were unchanged; this amendment
-protects the planned sample size without selecting on model performance.
-
-Every task runs four matched conditions: solo Sol, Sol→Luna→Sol, solo Fable, and
-Fable→Luna→Fable. Condition order rotates across tasks. Thirty paired tasks give
-about 80% power for a moderate paired effect (`d_z ≈ 0.53`) at two-sided alpha
-0.05. This is a substantial subset of a real benchmark suite, but it is not
-powered to establish very small effects.
-
-Crucially, each delegated condition is scored immediately after Luna finishes
-and again after teacher review. The study therefore separates three questions:
-
-1. Is delegated final quality below the same teacher working alone?
-2. Does teacher review improve Luna's checkpoint at all?
-3. Does changing the teacher family change either effect?
-
-Every confirmatory score uses a private disposable repository snapshot,
-preventing mutating test/build steps from changing the artifact subsequently
-reviewed or audited.
-
-We will report every task-level score, paired mean differences, 95% paired
-bootstrap intervals, paired permutation tests, win/tie/loss counts, and
-language-stratified descriptive means. Because several releases come from the
-same upstream projects, we also report project-clustered bootstrap and sign-flip
-sensitivity analyses. The complete frozen protocol appears in
-`benchmarks/orchbench/PERSUASION_GAP_PREREGISTRATION.md`.
-
-### Reproducibility
-
-The study is executable rather than merely described. The frozen sampling frame
-and reserve order live in `benchmarks/orchbench/persuasion-gap-sample.json`; a
-separate verifier recomputes every rank from the pinned 115-task dataset tree.
-The four conditions and intermediate checkpoint are defined in
-`.smithers/workflows/orchbench.tsx`. The driver retains failed, quota-poisoned,
-and tainted attempts under distinct IDs, while the analysis script accepts only
-clean finished cells and emits task-level, paired, language-stratified, and
-project-clustered results. Raw run events, diffs, audits, grader logs, and scores
-remain available under `.context/orchbench/`.
-
-### Practical implications
-
-The safe default is not “never delegate.” It is to stop treating review as an
+The safe default is not "never delegate" — it is to stop treating review as an
 automatic quality equalizer.
 
-1. **Use one strong agent when the task fits one context.** Continuity preserves
-   tacit discoveries made during implementation and avoids lossy handoffs.
-2. **Delegate bounded work with objective interfaces.** Cheap agents are most
-   attractive for reconnaissance, enumeration, mechanical edits, and tasks with
-   deterministic acceptance checks.
-3. **Hide the implementer's sales pitch.** Give reviewers the original spec and
-   diff first; reveal the self-report only after an independent checklist.
-4. **Make review generate evidence.** Require new tests, counterexamples,
-   imports, traces, or requirement-to-code coverage—not only prose findings.
-5. **Measure correction, not approval.** Score the artifact before and after
-   review. A high approval rate can coexist with zero quality gain.
-6. **Prefer orthogonal reviewers.** Different model families, tools, prompts,
-   and evidence sources matter more than simply adding reviewer seats.
-
-### Limitations
-
-This is an exploratory study, not a final causal demonstration. Round 1 has only
-four tasks per pattern and one run per cell. Tasks are long-horizon release
-implementations, so results may not transfer to writing, mathematics, security
-review, or small isolated patches. Model versions and inference settings are
-specific. The pipeline grants each stage a separate time budget, so it uses more
-total compute than solo while fragmenting context. We measured final hidden-test
-quality, not every intermediate implementation, which limits direct estimation
-of review's marginal correction rate. Finally, four tasks with one run per cell
-remain too few for precise estimates of model-family interactions.
-
-The next decisive study should use more tasks and seeds, score immediately after
-implementation and again after review, cross every teacher with every student,
-and randomize whether reviewers see the implementer's report. That factorial
-design would distinguish capability, family correlation, anchoring, and review
-protocol effects.
+1. **Use one strong agent when the task fits one context.**
+2. **Delegate bounded work with objective interfaces** — reconnaissance,
+   enumeration, mechanical edits, deterministic acceptance checks.
+3. **Hide the implementer's sales pitch** — spec and diff first, self-report
+   only after an independent checklist.
+4. **Make review generate evidence** — new tests, counterexamples, traces —
+   not prose findings.
+5. **Measure correction, not approval** — score before and after review; high
+   approval can coexist with zero gain.
+6. **Test orthogonal reviewers** rather than assuming more seats help; our
+   panel was net-negative.
 
 ### Conclusion
 
-The appealing story of student–teacher agents is that a strong teacher can
-always inspect a weaker student's work until it becomes strong. Our data show
-why that story is unsafe. Review is not direct access to correctness. It is a
-search process mediated by context, tests, summaries, and attention. When those
-signals are correlated with the implementation's blind spots, a capable reviewer
-can spend more time and money while delivering a worse artifact than it would
-have produced alone.
+Review is not direct access to correctness. It is a search process mediated by
+context, tests, summaries, and attention — and when those signals correlate
+with the implementation's blind spots, a capable reviewer spends more time and
+money without closing the gap. **A reviewer is only as independent as the
+evidence it receives.** Build delegation around falsification and objective
+checks, not the hope that a stronger model will talk a weaker one into being
+perfect.
 
-The practical lesson is simple: **a reviewer is only as independent as the
-evidence it receives**. Build delegation systems around falsification and
-objective checks, not the hope that a stronger model will eventually talk a
-weaker model into being perfect.
+### References
+
+- Burns et al. (2023), [Weak-to-Strong Generalization](https://arxiv.org/abs/2312.09390)
+- Huang et al. (2023), [Large Language Models Cannot Self-Correct Reasoning Yet](https://arxiv.org/abs/2310.01798)
+- Kamoi et al. (2024), [When Can LLMs Actually Correct Their Own Mistakes?](https://aclanthology.org/2024.tacl-1.78/)
+- Xu et al. (2024), [Pride and Prejudice: LLM Amplifies Self-Bias in Self-Refinement](https://aclanthology.org/2024.acl-long.826/)
+- Sharma et al. (2023), [Towards Understanding Sycophancy in Language Models](https://arxiv.org/abs/2310.13548)
+- Kenton et al. (2024), [On Scalable Oversight with Weak LLMs Judging Strong LLMs](https://arxiv.org/abs/2407.04622)
+- Xu et al. (2026), [RoadmapBench](https://arxiv.org/abs/2605.15846)

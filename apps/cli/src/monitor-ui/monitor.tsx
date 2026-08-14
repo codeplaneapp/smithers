@@ -22,9 +22,9 @@ import {
   useGatewayUsageReports,
   useGatewayWorkflows,
   type UseGatewayRunTreeResult,
-} from "smithers-orchestrator/gateway-react";
-import { snapshotToGatewayRunNode, type DevToolsSnapshot } from "smithers-orchestrator/gateway-client";
-import { HijackCandidateButton, OneshotSurface, WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
+} from "smthrs/gateway-react";
+import { snapshotToGatewayRunNode, type DevToolsSnapshot } from "smthrs/gateway-client";
+import { HijackCandidateButton, OneshotSurface, WorkflowUiStyles } from "smthrs/gateway-ui";
 import {
   Button,
   observeReducedMotion,
@@ -36,7 +36,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "smithers-orchestrator/ui";
+} from "smthrs/ui";
 import { Chip, MonitorToolbar, RunLifecycleControls, RunRailRow, RunsPagination, ToneDot } from "./monitorShell.tsx";
 import { processPatch, type CodeViewItem } from "@pierre/diffs";
 import { CodeView } from "@pierre/diffs/react";
@@ -2807,14 +2807,20 @@ const FOLLOW_THRESHOLD_PX = 80;
 
 type EventView = "notable" | "activity" | "all";
 
+const EVENT_VIEW_LABELS: Record<EventView, string> = {
+  notable: "Notable",
+  activity: "Activity",
+  all: "All",
+};
+
 /** The shared run-event subscription, lifted to RunDetail so the log reads one
  * buffer. Token-usage totals come from useGatewayRunTokenUsage (full durable
  * scan), not this ring. */
 type RunEventsState = ReturnType<typeof useGatewayRunEvents>;
 
-function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEventsState }) {
+export function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEventsState }) {
   const { events: allEvents, lastHeartbeat, streaming, error, loading } = eventsState;
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const containerRef = useRef<HTMLOListElement | null>(null);
   const [following, setFollowing] = useState(true);
   // Default to Activity: lifecycle transitions plus the agent's visible work
   // (tool calls, chat output, frames, token usage). Heartbeats and session
@@ -2847,9 +2853,10 @@ function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEvent
     if (!following) return;
     const el = containerRef.current;
     if (!el) return;
-    requestAnimationFrame(() => {
+    const frame = requestAnimationFrame(() => {
       el.scrollTop = el.scrollHeight;
     });
+    return () => cancelAnimationFrame(frame);
   }, [events.length, following, runId]);
 
   const onScroll = () => {
@@ -2858,6 +2865,8 @@ function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEvent
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_THRESHOLD_PX;
     setFollowing(nearBottom);
   };
+  const eventListId = `monitor-events-${runId}`;
+  const followStatusId = `${eventListId}-follow-status`;
 
   return (
     <section className="mon-panel mon-events-panel">
@@ -2877,6 +2886,9 @@ function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEvent
         ) : null}
         <Chip
           on={view === "notable"}
+          aria-controls={eventListId}
+          aria-label="Show notable events"
+          data-testid="monitor-events-filter-notable"
           onClick={() => setView("notable")}
           title="Node/run lifecycle, approvals, human requests"
         >
@@ -2884,6 +2896,9 @@ function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEvent
         </Chip>
         <Chip
           on={view === "activity"}
+          aria-controls={eventListId}
+          aria-label="Show activity events"
+          data-testid="monitor-events-filter-activity"
           onClick={() => setView("activity")}
           title="Notable plus tool calls, agent output, frames, and token usage"
         >
@@ -2891,6 +2906,9 @@ function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEvent
         </Chip>
         <Chip
           on={view === "all"}
+          aria-controls={eventListId}
+          aria-label="Show all events"
+          data-testid="monitor-events-filter-all"
           onClick={() => setView("all")}
           title="Every event except heartbeats (collapsed to one liveness row)"
         >
@@ -2898,6 +2916,9 @@ function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEvent
         </Chip>
         <Chip
           on={following}
+          aria-controls={eventListId}
+          aria-label={following ? "Following new events" : "Resume following new events"}
+          data-testid="monitor-events-follow"
           onClick={() => {
             setFollowing(true);
             const el = containerRef.current;
@@ -2905,13 +2926,35 @@ function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEvent
           }}
           title="Auto-scroll to new events"
         >
-          {streaming ? "● " : ""}Follow
+          {following ? `${streaming ? "● " : ""}Following` : "Resume follow"}
         </Chip>
+        <span
+          id={followStatusId}
+          className="sui-sr-only"
+          role="status"
+          aria-live="polite"
+          data-testid="monitor-events-follow-status"
+        >
+          {following ? "Following new events." : "Event stream paused."}
+        </span>
       </header>
       {error ? <div className="mon-banner tone-failed">{error.message}</div> : null}
-      <div className="mon-events" ref={containerRef} onScroll={onScroll} data-testid="monitor-events">
+      <ol
+        id={eventListId}
+        className="mon-events"
+        ref={containerRef}
+        onScroll={onScroll}
+        data-testid="monitor-events"
+        tabIndex={0}
+        aria-label={`${EVENT_VIEW_LABELS[view]} event stream`}
+        aria-describedby={followStatusId}
+        aria-live={following ? "polite" : "off"}
+        aria-relevant="additions text"
+        aria-atomic={false}
+        aria-busy={loading}
+      >
         {events.length === 0 ? (
-          <div className="mon-empty">
+          <li className="mon-empty">
             {loading
               ? "Loading events…"
               : allEvents.length === 0
@@ -2919,31 +2962,31 @@ function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEvent
                 : view === "notable"
                   ? "No notable events yet."
                   : "No activity yet."}
-          </div>
+          </li>
         ) : null}
         {events.map((frame) => {
           if (frame.event === "__heartbeats__") {
             const count = isRecord(frame.payload) ? (asNumber(frame.payload.count) ?? 0) : 0;
             return (
-              <div className="mon-event mon-event-heartbeats" key={`${runId}:heartbeats`}>
+              <li className="mon-event mon-event-heartbeats" key={`${runId}:heartbeats`}>
                 <span className="mon-mono mon-dim">#{frame.seq}</span>
                 <span className="mon-event-name mon-dim">TaskHeartbeat</span>
                 <span className="mon-event-detail mon-dim">×{count} — collapsed; the engine is alive</span>
                 <EventWhen ms={frame.timestampMs} />
-              </div>
+              </li>
             );
           }
           const line = formatEventLine(frame);
           return (
-            <div className="mon-event" key={`${runId}:${line.seq}`}>
+            <li className="mon-event" key={`${runId}:${line.seq}`}>
               <span className="mon-mono mon-dim">#{line.seq}</span>
               <span className="mon-event-name">{line.name}</span>
               <span className="mon-event-detail mon-dim">{line.detail}</span>
               <EventWhen ms={frame.timestampMs} />
-            </div>
+            </li>
           );
         })}
-      </div>
+      </ol>
     </section>
   );
 }
@@ -4643,7 +4686,7 @@ function App() {
 // variable or a shared semantic soft/border token; tones carry state, never decoration.
 //
 // Controls (buttons, chips, inputs, selects, row buttons, tables) are the
-// shared smithers-orchestrator/ui primitives rendered by SmithersUiStyles at
+// shared smthrs/ui primitives rendered by SmithersUiStyles at
 // the root — their geometry, hover, focus-ring, and disabled styling live in
 // that package, never here. This sheet only carries monitor layout plus
 // monitor-specific accents on those primitives (.mon-btn-ok, .mon-toggle).
@@ -4681,7 +4724,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-toolbar { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .mon-count-note { font-size: var(--fs-1); font-variant-numeric: tabular-nums; }
 
-/* Controls are the shared smithers-orchestrator/ui primitives (sui-*): Button,
+/* Controls are the shared smthrs/ui primitives (sui-*): Button,
    Input, Select, RowButton carry their own geometry, hover, focus ring, and
    disabled styling. Only monitor-specific accents live here. */
 .mon-filter-input { min-width: 200px; }
@@ -4799,7 +4842,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-runs-table-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; margin: 0; }
 .mon-runs-table-panel .mon-panel-head { margin-bottom: var(--sp-2); }
 .mon-runs-scroll { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: var(--r-2); }
-.mon-runs-scroll:focus-visible, .mon-tree:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--ring-border); }
+.mon-runs-scroll:focus-visible, .mon-tree:focus-visible, .mon-events:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--ring-border); }
 /* The shared Table wraps itself in an overflow-x container; inside the
    monitor's scrollports that inner scroller would defeat the sticky header,
    so let the outer .mon-*-scroll own all scrolling. */
@@ -4931,7 +4974,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-scrub-loading { font-size: var(--fs-1); white-space: nowrap; animation: mon-pulse 1.2s ease-in-out infinite; }
 
 .mon-events-panel { display: flex; flex-direction: column; }
-.mon-events { max-height: 300px; overflow-y: auto; font-size: var(--fs-1); }
+.mon-events { max-height: 300px; overflow-y: auto; margin: 0; padding: 0; list-style: none; font-size: var(--fs-1); }
 .mon-event { display: flex; gap: var(--sp-2); padding: var(--sp-1) 0; border-bottom: 1px solid var(--border); align-items: baseline; }
 .mon-event:last-child { border-bottom: 0; }
 .mon-event-name { font-weight: 600; white-space: nowrap; }

@@ -26,6 +26,10 @@ export function createForgeCapabilityRegistry() {
       supportsUiRequests: false,
       methods: [],
     },
+    fileChanges: {
+      supportsFileChanges: false,
+      supportsUnifiedDiff: false,
+    },
     builtIns: ["default"],
   };
 }

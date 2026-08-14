@@ -1,4 +1,4 @@
-# @smithers-orchestrator/scheduler — src
+# @smthrs/scheduler — src
 
 The pure decision engine for Smithers workflows: no IO, no DB, no timers. It
 maps a rendered workflow graph plus task states to the next `EngineDecision`.

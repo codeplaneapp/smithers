@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
-import type { GatewayRunNode, GatewayApprovalRow } from "@smithers-orchestrator/gateway-client";
-import { snapshotToGatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import type { GatewayRunNode, GatewayApprovalRow } from "@smthrs/gateway-client";
+import { snapshotToGatewayRunNode } from "@smthrs/gateway-client";
 import { isHumanTaskNode, buildHumanRequestUi, mayAwaitHumanInput } from "../src/modes/humanUtils.ts";
 
 function node(overrides: Partial<GatewayRunNode> = {}): GatewayRunNode {

@@ -2,8 +2,8 @@
 // smithers-source: one-off — migrate the gateway sync layer to TanStack DB.
 //
 // Replaces the bespoke client sync layer (SyncClient/SyncCache/SyncSubscriptionHub in
-// @smithers-orchestrator/gateway-client) with TanStack DB collections + live queries,
-// reimplements @smithers-orchestrator/gateway-react hooks on top, and rewires the
+// @smthrs/gateway-client) with TanStack DB collections + live queries,
+// reimplements @smthrs/gateway-react hooks on top, and rewires the
 // apps/smithers UI off its hand-rolled zustand gatewayStore onto those hooks — all over
 // the EXISTING gateway WebSocket+RPC transport (no DB migration; smithers stays SQLite).
 // Large blobs (node outputs / diffs) stay fetched on-demand by id, never synced.
@@ -13,8 +13,8 @@
 // run typecheck/test gates. gateway-client is the foundation (committed first); gateway-react
 // and apps/smithers then migrate in PARALLEL worktrees off the client branch; an integrate
 // worktree merges + green-builds everything; a human approval gate guards landing.
-/** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, createSmithers } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { ClaudeCodeAgent, createSmithers } from "smthrs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
@@ -258,7 +258,7 @@ GOAL: Replace the bespoke client-side sync layer with TanStack DB, keeping the E
 WebSocket+RPC transport. No database migration — smithers stays SQLite; this is a CLIENT-side change.
 
 TARGET PACKAGES & CURRENT STATE:
-- packages/gateway-client (@smithers-orchestrator/gateway-client) — the transport + bespoke sync core.
+- packages/gateway-client (@smthrs/gateway-client) — the transport + bespoke sync core.
   KEEP: src/SmithersGatewayClient.ts (rpcRaw, streamRunEventsResilient, streamDevTools),
         src/sync/SyncTransport.ts, src/sync/createSmithersGatewayTransport.ts (the WS+RPC seam),
         src/sync/SyncKey.ts, src/sync/gatewayKeys.ts (reuse these keys as TanStack DB collection ids).
@@ -267,7 +267,7 @@ TARGET PACKAGES & CURRENT STATE:
           (createGatewayCollection) that: (a) does the initial load via client.rpc(method, params),
           (b) subscribes to the existing stream (streamRunEvents / streamDevTools) and applies frames
           through the collection sync writer's begin()→write()→commit() callbacks.
-- packages/gateway-react (@smithers-orchestrator/gateway-react) — React bindings (peer react ^19).
+- packages/gateway-react (@smthrs/gateway-react) — React bindings (peer react ^19).
   src/sync/* hooks: SyncProvider, useSyncQuery, useSyncMutation, useSyncSubscription, useGatewayQuery,
   useGatewayMutation, useGatewayRunStream; legacy hooks: useGatewayRpc, useGatewayRuns, useGatewayRun,
   useGatewayApprovals, useGatewayNodeOutput, useGatewayActions, useGatewayRunEvents, extension hooks.
@@ -275,7 +275,7 @@ TARGET PACKAGES & CURRENT STATE:
   KEEPING the public hook names/signatures stable. ADD: a devtools-snapshot hook (run node tree as a
   live query, fed by getDevToolsSnapshot + streamDevTools) and a connection-status hook (replacing the
   app's GatewayStatus). Regenerate the stale src/index.d.ts.
-- apps/smithers (@smithers-orchestrator/smithers) — Vite React UI. Already depends on gateway-client,
+- apps/smithers (@smthrs/smithers) — Vite React UI. Already depends on gateway-client,
   gateway-react, @tanstack/ai*, @tanstack/react-router; main.tsx already mounts <SyncProvider> and has
   src/sync/appSyncClient.ts. The live data today is a hand-rolled ZUSTAND store:
   src/gateway/gatewayStore.ts (+ src/gateway/bindGateway.ts bridge) that REFETCHES THE WHOLE run
@@ -300,8 +300,8 @@ REPO CONVENTIONS (follow exactly):
 VERIFY COMMANDS:
 - typecheck: \`pnpm --filter <pkgName> typecheck\`  (tsc -p tsconfig.json --noEmit)
 - tests:     \`pnpm --filter <pkgName> test\`       (bun test tests)
-  pkgNames: @smithers-orchestrator/gateway-client, @smithers-orchestrator/gateway-react,
-            @smithers-orchestrator/smithers
+  pkgNames: @smthrs/gateway-client, @smthrs/gateway-react,
+            @smthrs/smithers
 `.trim();
 
 function designBlock(design: Design | undefined): string {
@@ -379,7 +379,7 @@ function clientImplPrompt(design: Design | undefined, feedback: string): string 
     "   (or reduce them to a thin transport adapter feeding TanStack DB) — but keep any types still re-exported.",
     "4. getNodeOutput/getNodeDiff stay on-demand by id (helpers, NOT collections).",
     "5. Update packages/gateway-client/src/index.ts exports and the package's tests to match the new surface.",
-    "6. Verify: `pnpm --filter @smithers-orchestrator/gateway-client typecheck` and `... test` must pass.",
+    "6. Verify: `pnpm --filter @smthrs/gateway-client typecheck` and `... test` must pass.",
     "",
     "One named export per file; no deps beyond @tanstack/db; match surrounding style. Do NOT commit/push.",
     feedback ? `\nReviewer feedback you MUST fully address this iteration:\n${feedback}` : "",
@@ -419,8 +419,8 @@ function clientVerifyPrompt(feedback: string): string {
       ? `Apply ALL of this review feedback, then verify:\n${feedback}\n`
       : "No blocking review feedback; verify and harden.",
     "",
-    "Then ensure green: run `pnpm install` (if node_modules absent), `pnpm --filter @smithers-orchestrator/gateway-client typecheck`,",
-    "and `pnpm --filter @smithers-orchestrator/gateway-client test`. Fix every type error and test failure until both pass.",
+    "Then ensure green: run `pnpm install` (if node_modules absent), `pnpm --filter @smthrs/gateway-client typecheck`,",
+    "and `pnpm --filter @smthrs/gateway-client test`. Fix every type error and test failure until both pass.",
     "Do NOT commit/push.",
     "",
     "Return JSON: layer ('gateway-client'), status (done|partial|blocked), summary, filesChanged[], commandsRun[],",
@@ -445,7 +445,7 @@ function reactImplPrompt(design: Design | undefined): string {
     "3. ADD a devtools-snapshot hook (run node tree as a live query over the nodes collection, fed by",
     "   getDevToolsSnapshot + streamDevTools) and a connection-status hook (replaces the app's GatewayStatus).",
     "4. Regenerate src/index.d.ts so it matches src/index.ts (it is currently stale — missing sync + extension exports).",
-    "5. Update gateway-react tests. Verify: `pnpm --filter @smithers-orchestrator/gateway-react typecheck` and `... test`.",
+    "5. Update gateway-react tests. Verify: `pnpm --filter @smthrs/gateway-react typecheck` and `... test`.",
     "",
     "Preserve the public contract EXACTLY (apps/smithers is being migrated against it in parallel). One export per",
     "file; no deps beyond @tanstack/react-db. Do NOT commit/push.",
@@ -460,8 +460,8 @@ function reactVerifyPrompt(): string {
     "",
     ARCH,
     "",
-    "Run `pnpm install` (if needed), `pnpm --filter @smithers-orchestrator/gateway-react typecheck`, and",
-    "`pnpm --filter @smithers-orchestrator/gateway-react test`. Fix every type error and test failure until both",
+    "Run `pnpm install` (if needed), `pnpm --filter @smthrs/gateway-react typecheck`, and",
+    "`pnpm --filter @smthrs/gateway-react test`. Fix every type error and test failure until both",
     "pass. Confirm the public hook contract is unchanged and index.d.ts matches index.ts. Do NOT commit/push.",
     "",
     "Return JSON: layer ('gateway-react'), status, summary, filesChanged[], commandsRun[], typecheck, tests, notes.",
@@ -486,7 +486,7 @@ function appImplPrompt(design: Design | undefined): string {
     "   gatewayInspectorStore.ts. main.tsx already mounts <SyncProvider> via src/sync/appSyncClient.ts — wire the",
     "   collections through it (mount any required provider). Node output/diff stay fetched ON-DEMAND by id.",
     "3. Remove the now-unused zustand dependency usage for the gateway layer if nothing else needs it.",
-    "4. Update apps/smithers tests. Verify: `pnpm --filter @smithers-orchestrator/smithers typecheck` and `... test`.",
+    "4. Update apps/smithers tests. Verify: `pnpm --filter @smthrs/smithers typecheck` and `... test`.",
     "   NOTE: gateway-react internals may still be changing in a sibling worktree — code against the FROZEN contract;",
     "   if a hook isn't importable yet, rely on the contract's types and report it in notes (the integrate step reconciles).",
     "",
@@ -502,8 +502,8 @@ function appVerifyPrompt(): string {
     "",
     ARCH,
     "",
-    "Run `pnpm install` (if needed), `pnpm --filter @smithers-orchestrator/smithers typecheck`, and",
-    "`pnpm --filter @smithers-orchestrator/smithers test`. Fix type errors and test failures that are within",
+    "Run `pnpm install` (if needed), `pnpm --filter @smthrs/smithers typecheck`, and",
+    "`pnpm --filter @smthrs/smithers test`. Fix type errors and test failures that are within",
     "apps/smithers. If failures are caused by gateway-react internals not yet present in this worktree, record them",
     "in notes for the integrate step rather than working around the frozen contract. Confirm gatewayStore.ts is",
     "deleted and no consumer imports it. Do NOT commit/push.",
@@ -525,9 +525,9 @@ function integratePrompt(): string {
     "   conflicts in pnpm-lock.yaml (regenerate via `pnpm install`) and possibly shared index/exports.",
     "2. Run a FULL verification and fix until green:",
     "   - `pnpm install`",
-    "   - `pnpm --filter @smithers-orchestrator/gateway-client typecheck && pnpm --filter @smithers-orchestrator/gateway-client test`",
-    "   - `pnpm --filter @smithers-orchestrator/gateway-react typecheck && pnpm --filter @smithers-orchestrator/gateway-react test`",
-    "   - `pnpm --filter @smithers-orchestrator/smithers typecheck && pnpm --filter @smithers-orchestrator/smithers test`",
+    "   - `pnpm --filter @smthrs/gateway-client typecheck && pnpm --filter @smthrs/gateway-client test`",
+    "   - `pnpm --filter @smthrs/gateway-react typecheck && pnpm --filter @smthrs/gateway-react test`",
+    "   - `pnpm --filter @smthrs/smithers typecheck && pnpm --filter @smthrs/smithers test`",
     "   Fix every remaining type error, test failure, and integration gap (the app↔react seam is the likely hotspot).",
     "3. Confirm: apps/smithers no longer imports the deleted zustand gatewayStore; the public hook contract holds;",
     "   blobs are on-demand; src/index.d.ts matches src/index.ts in gateway-react.",

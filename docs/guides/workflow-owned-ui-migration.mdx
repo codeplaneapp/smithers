@@ -31,8 +31,8 @@ file; an explicit workflow declaration replaces it.
 Add `<UI>` inside the workflow's root `<Workflow>`:
 
 ```tsx .smithers/workflows/release.tsx
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, UI } from "smithers-orchestrator";
+/** @jsxImportSource smthrs */
+import { createSmithers, UI } from "smthrs";
 
 const { Workflow, Task, smithers } = createSmithers({
   // schemas...
@@ -83,14 +83,14 @@ APIs, agents, prompts, and database setup that can't run in the browser.
 
 ## Checklist
 
-1. Add `UI` to the workflow's `smithers-orchestrator` import.
+1. Add `UI` to the workflow's `smthrs` import.
 2. Add `<UI entry="../ui/<workflow>.tsx" title="..." />` as a direct child of
    the root `<Workflow>`.
 3. Remove `ui: { entry, title }` from `gateway.register`; keep `entryFile`.
 4. Leave the browser UI file in `.smithers/ui/<workflow>.tsx` unless converting
    it to the `source` component-export shape.
-5. Verify with `bunx smithers-orchestrator gateway` and open
-   `/workflows/<workflow>` or run `bunx smithers-orchestrator ui RUN_ID`.
+5. Verify with `bunx smthrs gateway` and open
+   `/workflows/<workflow>` or run `bunx smthrs ui RUN_ID`.
 
 The Gateway discovers `<UI>` during `register()`; the component renders nothing
 into the workflow graph and never executes client code on the backend.
