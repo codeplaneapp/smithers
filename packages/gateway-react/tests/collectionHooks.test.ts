@@ -548,11 +548,13 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
   test("keeps run event results stable across renders without new collection data", async () => {
     const { baseUrl } = await bootGateway();
     const runId = await launchRun(baseUrl, 3);
-    const captured: { events?: any; rerender?: () => void } = {};
+    const captured: { events?: any; refetch?: () => Promise<void>; rerender?: () => void } = {};
 
     function Probe() {
       const [renderCount, setRenderCount] = React.useState(0);
-      captured.events = useGatewayRunEvents(runId).events;
+      const state = useGatewayRunEvents(runId);
+      captured.events = state.events;
+      captured.refetch = state.refetch;
       captured.rerender = () => setRenderCount((count) => count + 1);
       // Keep the state update observable to React while avoiding an unused
       // state variable in the regression harness.
@@ -564,11 +566,13 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
     await waitFor(() => (captured.events?.length ?? 0) > 0, "run events");
 
     const firstEvents = captured.events;
+    const firstRefetch = captured.refetch;
     await act(async () => {
       captured.rerender!();
     });
 
     expect(captured.events).toBe(firstEvents);
+    expect(captured.refetch).toBe(firstRefetch);
     await harness.unmount();
   });
 
@@ -613,6 +617,7 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
     });
 
     expect(snapshot?.error?.message).toBe("Run event stream failed.");
+    expect(snapshot?.connectionStatus).toBe("offline");
     expect(snapshot?.events).toBe(bufferedEvents);
     expect(snapshot?.events[0]?.event).toBe("NodeStarted");
     await harness.unmount();
@@ -951,7 +956,7 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
 
     grantToken("run-events-recover-token");
     await act(async () => {
-      await captured.collections.collections.invalidate(["runEvents"]);
+      await captured.runEvents.refetch();
     });
 
     await waitFor(

@@ -2812,8 +2812,8 @@ type EventView = "notable" | "activity" | "all";
  * scan), not this ring. */
 type RunEventsState = ReturnType<typeof useGatewayRunEvents>;
 
-function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEventsState }) {
-  const { events: allEvents, lastHeartbeat, streaming, error, loading } = eventsState;
+export function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEventsState }) {
+  const { events: allEvents, lastHeartbeat, streaming, error, loading, refetch, connectionStatus } = eventsState;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [following, setFollowing] = useState(true);
   // Default to Activity: lifecycle transitions plus the agent's visible work
@@ -2858,6 +2858,36 @@ function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEvent
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_THRESHOLD_PX;
     setFollowing(nearBottom);
   };
+
+  const hasLastKnownEvents = allEvents.length > 0;
+  const errorState =
+    connectionStatus === "unauthorized"
+      ? "unauthorized"
+      : connectionStatus === "offline"
+        ? hasLastKnownEvents
+          ? "offline-stale"
+          : "offline"
+        : hasLastKnownEvents
+          ? "stale"
+          : "error";
+  const errorTitle =
+    connectionStatus === "unauthorized"
+      ? "Event stream unauthorized."
+      : connectionStatus === "offline"
+        ? "Live event connection lost."
+        : hasLastKnownEvents
+          ? "Live event updates interrupted."
+          : "Couldn't load events.";
+  const errorDetail =
+    connectionStatus === "unauthorized"
+      ? `${hasLastKnownEvents ? "Showing last-known events. " : "No event history is available. "}Re-open with smithers monitor to mint fresh gateway credentials.`
+      : connectionStatus === "offline"
+        ? hasLastKnownEvents
+          ? "Showing last-known events while the gateway reconnects automatically."
+          : "No last-known events are available. The gateway is reconnecting automatically."
+        : hasLastKnownEvents
+          ? `Showing last-known events. ${error?.message ?? "Live updates are unavailable."}`
+          : `${error?.message ?? "The event query failed."} Check the gateway connection and credentials, then retry.`;
 
   return (
     <section className="mon-panel mon-events-panel">
@@ -2908,17 +2938,43 @@ function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEvent
           {streaming ? "● " : ""}Follow
         </Chip>
       </header>
-      {error ? <div className="mon-banner tone-failed">{error.message}</div> : null}
-      <div className="mon-events" ref={containerRef} onScroll={onScroll} data-testid="monitor-events">
-        {events.length === 0 ? (
-          <div className="mon-empty">
+      {error ? (
+        <div
+          className="mon-banner tone-failed mon-events-error"
+          data-testid="monitor-events-error"
+          data-state={errorState}
+          role="alert"
+        >
+          <div>
+            <strong>{errorTitle}</strong>
+            <div className="mon-dim">{errorDetail}</div>
+          </div>
+          <Button variant="outline" data-testid="monitor-events-retry" onClick={() => void refetch()}>
+            Retry
+          </Button>
+        </div>
+      ) : null}
+      <div
+        className="mon-events"
+        ref={containerRef}
+        onScroll={onScroll}
+        data-testid="monitor-events"
+        aria-busy={loading || undefined}
+      >
+        {events.length === 0 && !error ? (
+          <div
+            className="mon-empty"
+            data-testid="monitor-events-state"
+            data-state={loading ? "loading" : allEvents.length === 0 ? "empty" : `filtered-${view}`}
+            role={loading ? "status" : undefined}
+          >
             {loading
               ? "Loading events…"
               : allEvents.length === 0
-                ? "No events yet."
+                ? "No events recorded for this run yet."
                 : view === "notable"
-                  ? "No notable events yet."
-                  : "No activity yet."}
+                  ? "No notable events in this buffer. Switch to Activity or All to inspect other events."
+                  : "No activity events in this buffer. Switch to All to inspect session and heartbeat events."}
           </div>
         ) : null}
         {events.map((frame) => {
