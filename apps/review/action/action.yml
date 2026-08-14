@@ -61,7 +61,11 @@ runs:
     - name: Install Codex CLI
       if: steps.gate.outputs.should-run == 'true' && env.CODEX_AUTH_JSON != ''
       shell: bash
-      run: npm install -g @openai/codex
+      run: |
+        npm install -g @openai/codex
+        codex_bin="$(npm prefix -g)/bin"
+        "$codex_bin/codex" --version
+        echo "$codex_bin" >> "$GITHUB_PATH"
 
     - name: Check out the user's repository
       if: steps.gate.outputs.should-run == 'true'

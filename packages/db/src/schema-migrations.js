@@ -206,6 +206,15 @@ const LEGACY_COLUMN_MIGRATIONS = [
     table: "_smithers_attempts",
     columns: [["effort", "effort TEXT"]],
   },
+  {
+    id: "0041_run_usage_breakdown_columns",
+    name: "Add fresh-input and estimated-cost columns to run usage",
+    table: "_smithers_run_usage",
+    columns: [
+      ["fresh_input_tokens", "fresh_input_tokens INTEGER"],
+      ["cost_usd", "cost_usd REAL"],
+    ],
+  },
 ];
 
 const EXTRA_INDEX_STATEMENTS = [

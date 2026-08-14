@@ -384,10 +384,12 @@ const CREATE_TABLE_STATEMENTS = [
     model TEXT,
     agent TEXT,
     input_tokens INTEGER NOT NULL DEFAULT 0,
+    fresh_input_tokens INTEGER,
     output_tokens INTEGER NOT NULL DEFAULT 0,
     cache_read_tokens INTEGER NOT NULL DEFAULT 0,
     cache_write_tokens INTEGER NOT NULL DEFAULT 0,
     reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_usd REAL,
     updated_at_ms INTEGER NOT NULL,
     PRIMARY KEY (run_id, node_id, iteration, attempt)
   )`,
@@ -1445,6 +1447,15 @@ export class SqlMessageStorage {
     if (query.nodeId) {
       clauses.push(`${jsonExtractText(this.dialect, "payload_json", "$.nodeId")} = ?`);
       params.push(query.nodeId);
+    }
+    for (const key of ["iteration", "attempt"]) {
+      const value = query[key];
+      if (typeof value !== "number") continue;
+      // jsonExtractText returns a scalar with dialect-specific affinity:
+      // SQLite preserves JSON numbers while PostgreSQL returns text. Casting
+      // both sides to text keeps the same exact-match contract on each backend.
+      clauses.push(`CAST(${jsonExtractText(this.dialect, "payload_json", `$.${key}`)} AS TEXT) = ?`);
+      params.push(String(value));
     }
     return {
       whereSql: clauses.join(" AND "),

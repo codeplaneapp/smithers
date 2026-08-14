@@ -892,6 +892,42 @@ describe("SmithersDb adapter", () => {
     expect(events[0].seq).toBe(31);
     expect(events.at(-1)?.seq).toBe(150);
   });
+  test("listNodeEvents isolates one iteration and attempt while advancing its cursor", async () => {
+    const { adapter } = createTestDb();
+    const payloads = [
+      { nodeId: "task-a", iteration: 0, attempt: 1, text: "older iteration" },
+      { nodeId: "task-a", iteration: 1, attempt: 1, text: "older attempt" },
+      { nodeId: "task-a", iteration: 1, attempt: 2, text: "target" },
+      { nodeId: "task-b", iteration: 1, attempt: 2, text: "other node" },
+    ];
+    for (const [seq, payload] of payloads.entries()) {
+      await adapter.insertEvent({
+        runId: "r1",
+        seq,
+        timestampMs: now + seq,
+        type: "NodeOutput",
+        payloadJson: JSON.stringify(payload),
+      });
+    }
+
+    const first = await adapter.listNodeEvents("r1", "task-a", { iteration: 1, attempt: 2, limit: 120 });
+    expect(first.map((event) => event.seq)).toEqual([2]);
+
+    await adapter.insertEvent({
+      runId: "r1",
+      seq: 4,
+      timestampMs: now + 4,
+      type: "NodeOutput",
+      payloadJson: JSON.stringify({ nodeId: "task-a", iteration: 1, attempt: 2, text: "next" }),
+    });
+    const incremental = await adapter.listNodeEvents("r1", "task-a", {
+      iteration: 1,
+      attempt: 2,
+      afterSeq: 2,
+      limit: 120,
+    });
+    expect(incremental.map((event) => event.seq)).toEqual([4]);
+  });
   test("listEventHistory composes type and since filters", async () => {
     const { adapter } = createTestDb();
     await adapter.insertEvent({
@@ -1279,17 +1315,27 @@ describe("per-run token usage (#1464 AWF-6)", () => {
     const { adapter } = createTestDb();
     await adapter.recordRunTokenUsage(usageRow("r1", "one"));
     await adapter.recordRunTokenUsage(
-      usageRow("r1", "two", { inputTokens: 50, outputTokens: 5, cacheReadTokens: 7, reasoningTokens: 3 }),
+      usageRow("r1", "two", {
+        inputTokens: 50,
+        freshInputTokens: 20,
+        outputTokens: 5,
+        cacheReadTokens: 7,
+        reasoningTokens: 3,
+        costUsd: 0.02,
+      }),
     );
     await adapter.recordRunTokenUsage(usageRow("r2", "one", { inputTokens: 999, outputTokens: 999 }));
     const usage = await adapter.getRunTokenUsage("r1");
     expect(usage).toMatchObject({
       runId: "r1",
       inputTokens: 150,
+      freshInputTokens: 120,
       outputTokens: 25,
       cacheReadTokens: 7,
       reasoningTokens: 3,
       totalTokens: 175,
+      costUsd: null,
+      pricedAttempts: 1,
       attempts: 2,
     });
     // No TokenUsageReported events were written; the total came from the table.
@@ -1297,14 +1343,20 @@ describe("per-run token usage (#1464 AWF-6)", () => {
   });
   test("re-reporting one attempt replaces its row instead of inflating the total", async () => {
     const { adapter } = createTestDb();
-    await adapter.recordRunTokenUsage(usageRow("r1", "one", { inputTokens: 100, outputTokens: 10 }));
+    await adapter.recordRunTokenUsage(
+      usageRow("r1", "one", { inputTokens: 100, freshInputTokens: 30, outputTokens: 10, costUsd: 0.01 }),
+    );
     // A provider that re-emits a cumulative running total for the same attempt
     // (#1436) must not be summed on top of what it already reported.
-    await adapter.recordRunTokenUsage(usageRow("r1", "one", { inputTokens: 300, outputTokens: 30 }));
+    await adapter.recordRunTokenUsage(
+      usageRow("r1", "one", { inputTokens: 300, freshInputTokens: 40, outputTokens: 30, costUsd: 0.03 }),
+    );
     const usage = await adapter.getRunTokenUsage("r1");
     expect(usage.inputTokens).toBe(300);
     expect(usage.outputTokens).toBe(30);
+    expect(usage.freshInputTokens).toBe(40);
     expect(usage.totalTokens).toBe(330);
+    expect(usage.costUsd).toBeCloseTo(0.03);
     expect(usage.attempts).toBe(1);
   });
   test("retries of the same node accumulate as separate attempts", async () => {
@@ -1318,7 +1370,16 @@ describe("per-run token usage (#1464 AWF-6)", () => {
   test("a run with no usage reads as zero rather than missing", async () => {
     const { adapter } = createTestDb();
     const usage = await adapter.getRunTokenUsage("nope");
-    expect(usage).toMatchObject({ runId: "nope", inputTokens: 0, outputTokens: 0, totalTokens: 0, attempts: 0 });
+    expect(usage).toMatchObject({
+      runId: "nope",
+      inputTokens: 0,
+      freshInputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      costUsd: null,
+      pricedAttempts: 0,
+      attempts: 0,
+    });
   });
   test("negative or non-finite counts are coerced to zero", async () => {
     const { adapter } = createTestDb();

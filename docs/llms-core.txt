@@ -1886,6 +1886,18 @@ workflows. The human talks to you. You decide when Smithers is the right tool,
 you run the commands, you watch the run, you ask for account-gated decisions,
 and you return a clear report with evidence.
 
+Before any of that, check one thing:
+
+> **If `SMITHERS_INSIDE_RUN` is set in your environment, none of this page
+> applies to you.** That variable means you are already a worker agent executing
+> one node of a Smithers run; Smithers sets it on every agent it spawns. Do the
+> node's task directly with your ordinary tools and finish your turn. Never
+> invoke the Smithers CLI or MCP tools to launch, poll, or steer a run from
+> inside a node; the prompt you were handed is the work, not a request to
+> orchestrate. The one exception is escalating upward with
+> `bunx smthrs ask-human` (or the `ask_human` MCP tool) when you are blocked or
+> about to do something irreversible.
+
 If you remember one rule, remember this:
 
 > Do not ask the human to run Smithers commands. The human's job is to state the
@@ -2278,6 +2290,12 @@ Before closing:
 authoring. It launches in the background by default and serves a live
 dashboard with chat, diff, hijack, pause, and cancel controls.
 
+Its long-running `implement` and optional `review` tasks use the existing
+per-task `heartbeatTimeoutMs` override with a 10-minute inactivity window. Live
+tool execution, output streaming, and owned CLI subprocesses refresh that
+window; an agent with no activity still fails. This does not raise the global
+heartbeat default.
+
 ```bash
 bunx smthrs oneshot "add a loading spinner to the login button"
 bunx smthrs oneshot --goal-file TICKET.md
@@ -2389,6 +2407,27 @@ Oneshot runs directly in `--cwd`, so a stale detached lineage, foreign WIP, or
 `.jjconflict*` tree can be swept into a goal commit and make landing unsafe.
 The default `--preflight auto` warns and prepends agent-judged triage
 instructions; use `warn` to warn without injection or `off` to skip assessment.
+
+### Sharing a directory with another run
+
+Preflight treats dirty paths as pre-existing work the agent may snapshot into
+its own commit. That is only true when nothing else is producing them. Launch
+therefore asks the workspace store which runs are still working in `--cwd`,
+using the same PID-verified liveness `bunx smthrs ps` reports. A run whose engine
+is dead does not count.
+
+When another run is live there, preflight names it, and the injected
+instructions flip: the agent commits only the paths its own goal work touches,
+by explicit pathspec, and leaves every other path alone. It does not snapshot,
+stash, revert, or gitignore anything, because those changes belong to a run
+that is still editing them.
+
+The two clean fixes are to wait for that run, or to relaunch with `--cwd`
+pointing at an isolated worktree. `--preflight force-commit` keeps the old
+behavior for the case where you know the tree is yours.
+
+Two launches that race inside the scan window can still each see an empty
+store and proceed. Sequential launches, the common case, are covered.
 
 ## Watching and steering a oneshot
 
@@ -4162,6 +4201,20 @@ Smithers infers `outputSchema` from it, passes that to native
 structured-output agents, validates the returned row, and persists to the
 matching table. Set `outputSchema={...}` only for a custom Drizzle table or
 string key it can't infer a schema from.
+
+`heartbeatTimeoutMs` is opt-in and does not change the global timeout. While
+an agent tool is executing, Smithers emits fenced periodic heartbeats until
+that tool finishes; streamed stdout/stderr and a live owned CLI subprocess also
+count as activity. A stalled agent with no stream, tool, subprocess, or explicit
+`runtime.heartbeat()` still fails when the window expires. Process-exit and
+task-completion cleanup remove liveness before a later timer tick, so stale
+activity cannot keep a dead attempt alive.
+
+A single tool call holds the task alive for at most twelve heartbeat windows.
+An adapter that reports a tool start and then wedges emits nothing further, so
+that lease expires and the attempt fails as a hung agent rather than running
+forever. Raise `heartbeatTimeoutMs` when a node runs tools that legitimately
+take longer than the lease allows.
 
 <Warning>
 **Don't name an output field `iteration`, `runId`, or `nodeId`.** Smithers persists every output alongside those internal columns, so declaring one collides and the workflow fails to load (`bunx smthrs graph` errors before running). Loop counters hit this most: use `round`, `pass`, or `attempt` instead.

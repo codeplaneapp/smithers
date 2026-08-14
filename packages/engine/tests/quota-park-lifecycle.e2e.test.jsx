@@ -124,26 +124,23 @@ describe("quota-aware park lifecycle e2e", () => {
   );
 
   test(
-    "a quota block fails the task over to the fallback rung, and does NOT demote the rest of the run down the chain",
+    "a quota-dead engine stays disabled for every later node in the run",
     async () => {
       const { smithers, outputs, tables, db, cleanup } = createTestSmithers(outputSchemas);
       try {
         let primaryCalls = 0;
         let fallbackCalls = 0;
-        // The agent the user actually chose (think: Codex sol/luna). Its quota
-        // window is exhausted for the first task only.
+        // The agent the user actually chose (think: Codex sol/luna). Once its
+        // quota is exhausted, later nodes must not probe it again in this run.
         const primary = {
           id: "primary",
           tools: {},
           async generate() {
             primaryCalls += 1;
-            if (primaryCalls === 1) {
-              throw new SmithersError("AGENT_QUOTA_EXCEEDED", "You've hit your usage limit.", {
-                failureQuota: true,
-                quotaResetAtMs: Date.now() + 60_000,
-              });
-            }
-            return { output: { value: primaryCalls } };
+            throw new SmithersError("AGENT_QUOTA_EXCEEDED", "You've hit your usage limit.", {
+              failureQuota: true,
+              quotaResetAtMs: Date.now() + 60_000,
+            });
           },
         };
         // The failover rung behind it (think: the Claude fallback).
@@ -155,17 +152,15 @@ describe("quota-aware park lifecycle e2e", () => {
             return { output: { value: -1 } };
           },
         };
-        // A rate limit must not stall the lane: task "q" fails over to the
-        // fallback instead of parking. It must not demote the run either — the
-        // rung is discounted for quota attempts, so task "r" starts back at the
-        // agent the user chose.
+        // Task "q" fails over on attempt 2. Task "r" must start directly on the
+        // healthy engine without another dead probe.
         const workflow = smithers(() => (
           <Workflow name="quota-failover-no-demote">
             <Task id="q" output={outputs.outputA} agent={[primary, fallback]}>
               do the work on the chosen agent
             </Task>
             <Task id="r" output={outputs.outputB} agent={[primary, fallback]}>
-              and the next task starts at the chosen agent again
+              and the next task skips the quota-dead engine
             </Task>
           </Workflow>
         ));
@@ -174,13 +169,12 @@ describe("quota-aware park lifecycle e2e", () => {
         const result = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId }));
         expect(result.status).toBe("finished");
 
-        // "q" fell over to the fallback; "r" went back to the primary.
-        expect(primaryCalls).toBe(2);
-        expect(fallbackCalls).toBe(1);
+        expect(primaryCalls).toBe(1);
+        expect(fallbackCalls).toBe(2);
         const rowsA = await db.select().from(tables.outputA);
         expect(rowsA.at(-1)?.value).toBe(-1);
         const rowsB = await db.select().from(tables.outputB);
-        expect(rowsB.at(-1)?.value).toBe(2);
+        expect(rowsB.at(-1)?.value).toBe(-1);
       } finally {
         cleanup();
       }

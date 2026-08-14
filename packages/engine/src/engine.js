@@ -83,6 +83,8 @@ import {
   updateAsyncExternalWaitPending,
 } from "@smthrs/observability/metrics";
 import { runScorersAsync } from "@smthrs/scorers/run-scorers";
+import { estimateCostUsd } from "@smthrs/scorers/estimateCostUsd";
+import { modelTokenPrices } from "@smthrs/scorers/modelTokenPrices";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { toSmithersError } from "@smthrs/errors/toSmithersError";
@@ -1679,6 +1681,12 @@ const RUN_CANCEL_POLL_MS = 250;
 const TASK_HEARTBEAT_THROTTLE_MS = 500;
 const TASK_HEARTBEAT_MAX_PAYLOAD_BYTES = 1_000_000;
 const TASK_HEARTBEAT_TIMEOUT_CHECK_MS = 250;
+// A tool call that is genuinely executing keeps the task alive past the
+// heartbeat window, but not forever. An adapter that reports a tool start and
+// then wedges reports no further activity, so the lease expires and the task
+// times out as a hung agent. The lease scales with the node's configured
+// heartbeat timeout: raising `heartbeatTimeoutMs` also buys longer tool calls.
+const TASK_TOOL_EXECUTION_LEASE_MULTIPLIER = 12;
 // Poll for hijack-handoff readiness between agent events; keeps handoff latency low without hot-spinning.
 const HIJACK_COMPLETION_POLL_MS = 100;
 // Engines whose CLI announces its resumable session id before the session is
@@ -3746,23 +3754,62 @@ function parseAttemptErrorCode(errorJson) {
  * failure-path telemetry guard because exotic error objects may expose
  * throwing getters.
  * @param {unknown} value
- * @returns {{ inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number } | null}
+ * @returns {{ inputTokens: number; freshInputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number } | null}
  */
 function extractTokenUsage(value) {
   if (!value || typeof value !== "object") return null;
   const container = /** @type {any} */ (value);
   const usage = container.usage ?? container.result?.usage ?? container.totalUsage;
   if (!usage || typeof usage !== "object") return null;
+  return normalizeTokenUsage(usage);
+}
+/**
+ * Normalize the AI SDK usage shape once for success and failure paths. Input
+ * tokens are the provider's total; cache/reasoning counters are breakdowns,
+ * not additional tokens. AI SDK providers expose exact fresh input as
+ * `noCacheTokens`; older CLI adapters report their uncached input counter as
+ * `inputTokens`, so that remains the compatibility fallback.
+ * @param {any} usage
+ * @returns {{ inputTokens: number; freshInputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number } | null}
+ */
+function normalizeTokenUsage(usage) {
+  if (!usage || typeof usage !== "object") return null;
   const inputTokens = usage.inputTokens ?? usage.promptTokens ?? 0;
   const outputTokens = usage.outputTokens ?? usage.completionTokens ?? 0;
+  const cacheReadTokens = usage.inputTokenDetails?.cacheReadTokens ?? usage.cacheReadTokens ?? undefined;
+  const cacheWriteTokens = usage.inputTokenDetails?.cacheWriteTokens ?? usage.cacheWriteTokens ?? undefined;
   if (!(inputTokens > 0 || outputTokens > 0)) return null;
+  const reportedFreshInputTokens = usage.inputTokenDetails?.noCacheTokens ?? usage.freshInputTokens;
+  const freshInputTokens =
+    typeof reportedFreshInputTokens === "number" && Number.isFinite(reportedFreshInputTokens)
+      ? Math.max(0, reportedFreshInputTokens)
+      : Math.max(0, inputTokens);
   return {
     inputTokens,
+    freshInputTokens,
     outputTokens,
-    cacheReadTokens: usage.inputTokenDetails?.cacheReadTokens ?? usage.cacheReadTokens ?? undefined,
-    cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens ?? usage.cacheWriteTokens ?? undefined,
+    cacheReadTokens,
+    cacheWriteTokens,
     reasoningTokens: usage.outputTokenDetails?.reasoningTokens ?? usage.reasoningTokens ?? undefined,
   };
+}
+/**
+ * Price only models in the built-in table. Unknown models retain complete
+ * token accounting but report no cost instead of a misleading $0 estimate.
+ * @param {string} model
+ * @param {{ freshInputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number }} usage
+ * @returns {number | undefined}
+ */
+function estimateReportedCostUsd(model, usage) {
+  const price = modelTokenPrices(model);
+  if (![price.input, price.output, price.cacheRead, price.cacheWrite].some((value) => value > 0)) return undefined;
+  return estimateCostUsd({
+    model,
+    inputTokens: usage.freshInputTokens,
+    outputTokens: usage.outputTokens,
+    cacheReadTokens: usage.cacheReadTokens,
+    cacheWriteTokens: usage.cacheWriteTokens,
+  });
 }
 /**
  * @param {{ errorJson?: string | null; metaJson?: string | null } | null} [attempt]
@@ -3920,6 +3967,112 @@ function attemptQuotaResetAtMs(attempt) {
     return null;
   }
 }
+
+const RUN_DISABLED_AGENTS_META_KEY = "runDisabledAgents";
+
+/**
+ * Stable identity for a run-scoped agent circuit breaker. Registered/custom
+ * agents already carry durable ids; anonymous CLI agents fall back to their
+ * engine, model, and account config directory so a fresh process can rebuild
+ * the same identity on resume without persisting credentials.
+ * @param {any} agent
+ * @returns {string | null}
+ */
+function agentRunDisableKey(agent) {
+  if (!agent || typeof agent !== "object") return null;
+  const opts =
+    agent.opts && typeof agent.opts === "object"
+      ? agent.opts
+      : agent.options && typeof agent.options === "object"
+        ? agent.options
+        : null;
+  const explicitId = typeof opts?.id === "string" && opts.id ? opts.id : null;
+  if (explicitId) return `id:${explicitId}`;
+  if (agent.constructor?.name === "Object" && typeof agent.id === "string" && agent.id) {
+    return `id:${agent.id}`;
+  }
+  const engine =
+    typeof agent.cliEngine === "string" && agent.cliEngine
+      ? agent.cliEngine
+      : typeof agent.constructor?.name === "string" && agent.constructor.name
+        ? agent.constructor.name
+        : null;
+  if (!engine) return typeof agent.id === "string" && agent.id ? `id:${agent.id}` : null;
+  const model = typeof agent.model === "string" ? agent.model : typeof opts?.model === "string" ? opts.model : "";
+  const configDir = typeof opts?.configDir === "string" ? opts.configDir : "";
+  return `engine:${engine}:${model}:${configDir}`;
+}
+
+/** @param {Set<any> | undefined} disabledAgents @param {any} agent */
+function isAgentDisabledForRun(disabledAgents, agent) {
+  const key = agentRunDisableKey(agent);
+  return Boolean(disabledAgents?.has(agent) || (key && disabledAgents?.has(key)));
+}
+
+/**
+ * Persist a circuit-breaker decision on the attempt that observed it while
+ * applying it immediately to the live run.
+ * @param {Set<any> | undefined} disabledAgents
+ * @param {Record<string, any>} attemptMeta
+ * @param {any} agent
+ * @param {string} reason
+ */
+function disableAgentForRun(disabledAgents, attemptMeta, agent, reason) {
+  const key = agentRunDisableKey(agent);
+  if (!disabledAgents || !key) return;
+  disabledAgents.add(agent);
+  disabledAgents.add(key);
+  const existing = Array.isArray(attemptMeta[RUN_DISABLED_AGENTS_META_KEY])
+    ? attemptMeta[RUN_DISABLED_AGENTS_META_KEY]
+    : [];
+  if (!existing.some((entry) => entry?.key === key)) {
+    attemptMeta[RUN_DISABLED_AGENTS_META_KEY] = [...existing, { key, reason }];
+  }
+}
+
+/** @param {AttemptRow[]} attempts */
+function durableDisabledAgentsFromAttempts(attempts) {
+  const disabled = new Set();
+  for (const attempt of attempts) {
+    const entries = parseAttemptMetaJson(attempt.metaJson)?.[RUN_DISABLED_AGENTS_META_KEY];
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      if (typeof entry?.key === "string" && entry.key) disabled.add(entry.key);
+    }
+  }
+  return disabled;
+}
+
+/**
+ * Kimi can identify a discarded broken session precisely. Two such failures
+ * from the same engine are enough to stop opening more sessions in this run.
+ * @param {Record<string, unknown>} errorJson
+ * @param {Record<string, unknown>} attemptMeta
+ */
+function isKimiBrokenSessionFailure(errorJson, attemptMeta) {
+  if (errorJson.code !== "AGENT_SESSION_LOST") return false;
+  const details = errorJson.details;
+  if (!details || typeof details !== "object") return false;
+  const typed = /** @type {{ discardResumeSession?: unknown; command?: unknown }} */ (details);
+  return typed.discardResumeSession === true && (typed.command === "kimi" || attemptMeta.agentEngine === "kimi");
+}
+
+/** @param {AttemptRow[]} attempts @param {string | null} key */
+function priorKimiBrokenSessionCount(attempts, key) {
+  if (!key) return 0;
+  let count = 0;
+  for (const attempt of attempts) {
+    if (attempt.state !== "failed" || !attempt.errorJson) continue;
+    const meta = parseAttemptMetaJson(attempt.metaJson);
+    if (meta.agentRunKey !== key) continue;
+    try {
+      if (isKimiBrokenSessionFailure(JSON.parse(attempt.errorJson), meta)) count += 1;
+    } catch {
+      // Malformed legacy failures cannot justify disabling an engine.
+    }
+  }
+  return count;
+}
 /**
  * Chain rungs that are rate-limited in the CURRENT failover round, with the
  * provider reset time each one reported.
@@ -4021,7 +4174,8 @@ function resolveQuotaChainFailover(
     if (resetAtMs != null) resets.set(chainIndex, resetAtMs);
   }
   const failoverPending = chain.some(
-    (agent, index) => !blocked.has(index) && !disabledAgents?.has(agent) && !preflightFailedIndices?.has(index),
+    (agent, index) =>
+      !blocked.has(index) && !isAgentDisabledForRun(disabledAgents, agent) && !preflightFailedIndices?.has(index),
   );
   const resetTimes = [...resets.values()];
   return {
@@ -4766,7 +4920,14 @@ async function legacyExecuteTask(
   let heartbeatWriteTimer;
   let traceCollector;
   const liveOwnedPids = new Set();
+  const pendingOwnedPids = new Set();
+  const activeCliActions = new Set();
+  const activeSdkToolExecutions = new Set();
+  const pendingSdkToolExecutions = new Set();
+  let streamActivityLeaseUntilMs = 0;
+  let toolActivityLeaseUntilMs = 0;
   let agentProcessObserved = false;
+  let agentProcessExited = false;
   // Construct the abort race only for an agent call that consumes it. A
   // static/compute attempt may never observe the promise; constructing it
   // eagerly would leave a rejected promise behind when the watchdog fires.
@@ -4868,6 +5029,12 @@ async function legacyExecuteTask(
         heartbeatHasPendingWrite = false;
         heartbeatOwnerLost = true;
         liveOwnedPids.clear();
+        pendingOwnedPids.clear();
+        activeCliActions.clear();
+        activeSdkToolExecutions.clear();
+        pendingSdkToolExecutions.clear();
+        streamActivityLeaseUntilMs = 0;
+        toolActivityLeaseUntilMs = 0;
         traceCollector?.discard();
         heartbeatEvidenceAtMs = Math.max(startedAtMs, heartbeatLastPersistedWriteAtMs);
         if (!taskSignal.aborted) {
@@ -4976,6 +5143,18 @@ async function legacyExecuteTask(
    */
   const recordInternalHeartbeat = (data) => {
     queueHeartbeat(data, { internal: true });
+  };
+  const recordStreamActivityHeartbeat = () => {
+    if (agentProcessExited) return;
+    streamActivityLeaseUntilMs = desc.heartbeatTimeoutMs
+      ? nowMs() + desc.heartbeatTimeoutMs + TASK_HEARTBEAT_TIMEOUT_CHECK_MS
+      : 0;
+    recordInternalHeartbeat();
+  };
+  const extendToolActivityLease = () => {
+    toolActivityLeaseUntilMs = desc.heartbeatTimeoutMs
+      ? nowMs() + desc.heartbeatTimeoutMs * TASK_TOOL_EXECUTION_LEASE_MULTIPLIER
+      : 0;
   };
   const waitForHeartbeatWriteDrain = async () => {
     while (heartbeatWriteInFlight) {
@@ -5102,6 +5281,8 @@ async function legacyExecuteTask(
   let handleAgentEvent;
   let handleSdkStepFinish;
   let handleProcess;
+  let handleToolExecutionStart;
+  let handleToolExecutionEnd;
   let latestAgentCheckpoint = null;
   let captureResultCheckpoint = async () => {};
   let enqueueAgentCheckpoint = async () => null;
@@ -5173,7 +5354,11 @@ async function legacyExecuteTask(
             return Effect.void;
           }
           const lastHeartbeatAtMs = Math.max(startedAtMs, heartbeatEvidenceAtMs);
-          if ([...liveOwnedPids].some((pid) => isPidAlive(pid))) {
+          const hasLiveActivity =
+            [...liveOwnedPids].some((pid) => isPidAlive(pid)) ||
+            ((activeCliActions.size > 0 || activeSdkToolExecutions.size > 0) && nowMs() < toolActivityLeaseUntilMs) ||
+            nowMs() < streamActivityLeaseUntilMs;
+          if (hasLiveActivity) {
             recordInternalHeartbeat();
             return Effect.void;
           }
@@ -5437,7 +5622,7 @@ async function legacyExecuteTask(
       const allAgents = Array.isArray(desc.agent) ? desc.agent : desc.agent ? [desc.agent] : [];
       const chainEntries = allAgents.map((agent, chainIndex) => ({ agent, chainIndex }));
       const enabledEntries = disabledAgents
-        ? chainEntries.filter((entry) => !disabledAgents.has(entry.agent))
+        ? chainEntries.filter((entry) => !isAgentDisabledForRun(disabledAgents, entry.agent))
         : chainEntries;
       const selectionPool = enabledEntries.length > 0 ? enabledEntries : chainEntries; // fall back to disabled agents if all disabled
       // Which rung of the failover chain this attempt lands on. Attempts are
@@ -5536,7 +5721,7 @@ async function legacyExecuteTask(
           const isAuthError =
             /invalid_authentication|401|api.key.*invalid|expired.*credentials|authentication.*failed/i.test(errStr);
           if (isAuthError && disabledAgents && i < selectionPool.length - 1) {
-            disabledAgents.add(candidate);
+            disableAgentForRun(disabledAgents, attemptMeta, candidate, "authentication");
           }
           // Advance to the next candidate; if this was the last one,
           // the backward scan below gets a chance before the preflight
@@ -5764,6 +5949,7 @@ async function legacyExecuteTask(
           attemptMeta.agentChainIndex = effectiveChainIndex;
         }
         attemptMeta.agentId = effectiveAgent.id ?? effectiveAgent.constructor?.name ?? null;
+        attemptMeta.agentRunKey = agentRunDisableKey(effectiveAgent);
         attemptMeta.agentModel = effectiveAgent.model ?? effectiveAgent.modelId ?? null;
         const hijackCapableEngine =
           typeof effectiveAgent.cliEngine === "string"
@@ -6232,7 +6418,6 @@ async function legacyExecuteTask(
             );
           }
         }
-        const activeCliActions = new Set();
         let conversationMessages = guidedResumeMessages ? [...guidedResumeMessages] : null;
         /**
          * @param {unknown[] | undefined} messages
@@ -6654,8 +6839,10 @@ async function legacyExecuteTask(
               }
             }
             if (event.type === "action" && isBlockingAgentActionKind(event.action.kind)) {
-              if (event.phase === "started") activeCliActions.add(event.action.id);
-              else if (event.phase === "completed") activeCliActions.delete(event.action.id);
+              if (event.phase === "started") {
+                activeCliActions.add(event.action.id);
+                extendToolActivityLease();
+              } else if (event.phase === "completed") activeCliActions.delete(event.action.id);
             }
             void eventBus.emitEventQueued({
               type: "AgentEvent",
@@ -6713,16 +6900,53 @@ async function legacyExecuteTask(
             })
             .catch(() => {});
         };
-        handleProcess = ({ phase, pid }) => {
-          if (typeof pid !== "number" || pid <= 0 || heartbeatOwnerLost) return;
-          if (phase === "started") agentProcessObserved = true;
-          // A process callback is evidence only after the same fenced
-          // heartbeat used by stdout/stderr has proved ownership.
+        const toolExecutionKey = (event) =>
+          `${typeof event?.callId === "string" ? event.callId : "call"}:${
+            typeof event?.toolCall?.toolCallId === "string" ? event.toolCall.toolCallId : "tool"
+          }`;
+        // A tool event that arrives after the reported agent process exited is
+        // stale: it describes work that is already over and must not count as
+        // evidence that the attempt is still alive.
+        handleToolExecutionStart = (event) => {
+          if (heartbeatOwnerLost || agentProcessExited) return;
+          const key = toolExecutionKey(event);
+          pendingSdkToolExecutions.add(key);
+          extendToolActivityLease();
           recordInternalHeartbeat();
           afterHeartbeatOwnership(() => {
-            if (phase === "started") liveOwnedPids.add(pid);
-            else liveOwnedPids.delete(pid);
+            if (pendingSdkToolExecutions.has(key)) activeSdkToolExecutions.add(key);
           });
+        };
+        handleToolExecutionEnd = (event) => {
+          const key = toolExecutionKey(event);
+          pendingSdkToolExecutions.delete(key);
+          activeSdkToolExecutions.delete(key);
+          if (!heartbeatOwnerLost && !agentProcessExited) recordInternalHeartbeat();
+        };
+        handleProcess = ({ phase, pid }) => {
+          if (typeof pid !== "number" || pid <= 0 || heartbeatOwnerLost) return;
+          if (phase === "exited") {
+            agentProcessExited = true;
+            pendingOwnedPids.delete(pid);
+            liveOwnedPids.delete(pid);
+            activeCliActions.clear();
+            pendingSdkToolExecutions.clear();
+            activeSdkToolExecutions.clear();
+            streamActivityLeaseUntilMs = 0;
+            toolActivityLeaseUntilMs = 0;
+          } else {
+            agentProcessObserved = true;
+            agentProcessExited = false;
+          }
+          // A process callback is evidence only after the same fenced
+          // heartbeat used by stdout/stderr has proved ownership.
+          if (phase === "started") {
+            pendingOwnedPids.add(pid);
+            recordInternalHeartbeat();
+            afterHeartbeatOwnership(() => {
+              if (pendingOwnedPids.has(pid)) liveOwnedPids.add(pid);
+            });
+          }
           // Durable registry of live agent subprocesses: if this engine dies
           // without running cleanup (SIGKILL, OOM), the next CLI invocation
           // reaps whatever is still registered here instead of leaving
@@ -6926,7 +7150,7 @@ async function legacyExecuteTask(
                           timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
                           onStdout: (text) => {
                             if (heartbeatOwnerLost) return;
-                            recordInternalHeartbeat();
+                            recordStreamActivityHeartbeat();
                             afterHeartbeatOwnership(() => {
                               emitOutput(text, "stdout");
                               traceCollector?.onStdout(text);
@@ -6934,13 +7158,15 @@ async function legacyExecuteTask(
                           },
                           onStderr: (text) => {
                             if (heartbeatOwnerLost) return;
-                            recordInternalHeartbeat();
+                            recordStreamActivityHeartbeat();
                             afterHeartbeatOwnership(() => {
                               emitOutput(text, "stderr");
                               traceCollector?.onStderr(text);
                             });
                           },
                           onProcess: handleProcess,
+                          onToolExecutionStart: handleToolExecutionStart,
+                          onToolExecutionEnd: handleToolExecutionEnd,
                           onEvent: handleAgentEvent,
                           onCheckpoint: async (checkpoint) => {
                             await enqueueAgentCheckpoint(checkpoint, "progress");
@@ -6990,6 +7216,7 @@ async function legacyExecuteTask(
                   : undefined) ??
                 (typeof effectiveAgent.model === "string" ? effectiveAgent.model : undefined) ??
                 "unknown";
+              const costUsd = estimateReportedCostUsd(reportedModelId, failedUsage);
               void eventBus
                 .emitEventQueued({
                   type: "TokenUsageReported",
@@ -7003,6 +7230,7 @@ async function legacyExecuteTask(
                     effectiveAgent.constructor?.name ??
                     "unknown",
                   ...failedUsage,
+                  ...(costUsd !== undefined ? { costUsd } : {}),
                   timestampMs: nowMs(),
                 })
                 .catch(() => {});
@@ -7018,6 +7246,7 @@ async function legacyExecuteTask(
                     effectiveAgent.constructor?.name ??
                     "unknown",
                   ...failedUsage,
+                  costUsd,
                   updatedAtMs: nowMs(),
                 }),
               ).catch(() => {});
@@ -7094,30 +7323,52 @@ async function legacyExecuteTask(
           void Effect.runPromise(Metric.update(responseSizeBytes, Buffer.byteLength(responseText, "utf8")));
         }
         // --- Track token usage ---
-        const usage = result.usage ?? result.totalUsage;
+        const usage = normalizeTokenUsage(result.usage ?? result.totalUsage);
         if (usage) {
-          const inputTokens = usage.inputTokens ?? usage.promptTokens ?? 0;
-          const outputTokens = usage.outputTokens ?? usage.completionTokens ?? 0;
-          const cacheReadTokens = usage.inputTokenDetails?.cacheReadTokens ?? usage.cacheReadTokens ?? undefined;
-          const cacheWriteTokens = usage.inputTokenDetails?.cacheWriteTokens ?? usage.cacheWriteTokens ?? undefined;
-          const reasoningTokens = usage.outputTokenDetails?.reasoningTokens ?? usage.reasoningTokens ?? undefined;
-          if (inputTokens > 0 || outputTokens > 0) {
-            // Prefer the authoritative resolved model id from the result.
-            // effectiveAgent.model is often unset (SDK agents) or, for CLI
-            // agents, falls through to a random-UUID id — which both breaks
-            // per-model cost attribution and explodes metric label
-            // cardinality. result.response.modelId carries the real id.
-            const reportedModelId =
-              (typeof result?.response?.modelId === "string" && result.response.modelId.length > 0
-                ? result.response.modelId
-                : undefined) ??
-              (typeof effectiveAgent.model === "string" ? effectiveAgent.model : undefined) ??
-              "unknown";
-            void eventBus.emitEventQueued({
-              type: "TokenUsageReported",
+          const { inputTokens, freshInputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens } =
+            usage;
+          // Prefer the authoritative resolved model id from the result.
+          // effectiveAgent.model is often unset (SDK agents) or, for CLI
+          // agents, falls through to a random-UUID id — which both breaks
+          // per-model cost attribution and explodes metric label
+          // cardinality. result.response.modelId carries the real id.
+          const reportedModelId =
+            (typeof result?.response?.modelId === "string" && result.response.modelId.length > 0
+              ? result.response.modelId
+              : undefined) ??
+            (typeof effectiveAgent.model === "string" ? effectiveAgent.model : undefined) ??
+            "unknown";
+          const costUsd = estimateReportedCostUsd(reportedModelId, usage);
+          void eventBus.emitEventQueued({
+            type: "TokenUsageReported",
+            runId,
+            nodeId: desc.nodeId,
+            iteration: desc.iteration,
+            attempt: attemptNo,
+            model: reportedModelId,
+            agent:
+              (typeof effectiveAgent.id === "string" ? effectiveAgent.id : undefined) ??
+              effectiveAgent.constructor?.name ??
+              "unknown",
+            inputTokens,
+            freshInputTokens,
+            outputTokens,
+            cacheReadTokens,
+            cacheWriteTokens,
+            reasoningTokens,
+            ...(costUsd !== undefined ? { costUsd } : {}),
+            timestampMs: nowMs(),
+          });
+          // Same numbers, persisted as a queryable row. The event log stays
+          // the audit trail; `_smithers_run_usage` is the authoritative
+          // per-run total nobody has to replay events to compute (#1464
+          // AWF-6, #1436). Awaited so the row is durable before the attempt
+          // settles, but swallowed — usage accounting never fails a task.
+          await Effect.runPromise(
+            adapter.recordRunTokenUsage({
               runId,
               nodeId: desc.nodeId,
-              iteration: desc.iteration,
+              iteration: desc.iteration ?? 0,
               attempt: attemptNo,
               model: reportedModelId,
               agent:
@@ -7125,37 +7376,15 @@ async function legacyExecuteTask(
                 effectiveAgent.constructor?.name ??
                 "unknown",
               inputTokens,
+              freshInputTokens,
               outputTokens,
               cacheReadTokens,
               cacheWriteTokens,
               reasoningTokens,
-              timestampMs: nowMs(),
-            });
-            // Same numbers, persisted as a queryable row. The event log stays
-            // the audit trail; `_smithers_run_usage` is the authoritative
-            // per-run total nobody has to replay events to compute (#1464
-            // AWF-6, #1436). Awaited so the row is durable before the attempt
-            // settles, but swallowed — usage accounting never fails a task.
-            await Effect.runPromise(
-              adapter.recordRunTokenUsage({
-                runId,
-                nodeId: desc.nodeId,
-                iteration: desc.iteration ?? 0,
-                attempt: attemptNo,
-                model: reportedModelId,
-                agent:
-                  (typeof effectiveAgent.id === "string" ? effectiveAgent.id : undefined) ??
-                  effectiveAgent.constructor?.name ??
-                  "unknown",
-                inputTokens,
-                outputTokens,
-                cacheReadTokens,
-                cacheWriteTokens,
-                reasoningTokens,
-                updatedAtMs: nowMs(),
-              }),
-            ).catch(() => {});
-          }
+              costUsd,
+              updatedAtMs: nowMs(),
+            }),
+          ).catch(() => {});
         }
         let output;
         // Try structured output first (wrapping in try/catch since getters may throw)
@@ -7358,19 +7587,21 @@ async function legacyExecuteTask(
                 timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
                 onStdout: (text) => {
                   if (heartbeatOwnerLost) return;
-                  recordInternalHeartbeat();
+                  recordStreamActivityHeartbeat();
                   afterHeartbeatOwnership(() => {
                     emitOutput(text, "stdout");
                   });
                 },
                 onStderr: (text) => {
                   if (heartbeatOwnerLost) return;
-                  recordInternalHeartbeat();
+                  recordStreamActivityHeartbeat();
                   afterHeartbeatOwnership(() => {
                     emitOutput(text, "stderr");
                   });
                 },
                 onProcess: handleProcess,
+                onToolExecutionStart: handleToolExecutionStart,
+                onToolExecutionEnd: handleToolExecutionEnd,
                 onEvent: handleAgentEvent,
                 onCheckpoint: async (checkpoint) => {
                   await enqueueAgentCheckpoint(checkpoint, "progress");
@@ -7721,19 +7952,21 @@ async function legacyExecuteTask(
           timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
           onStdout: (text) => {
             if (heartbeatOwnerLost) return;
-            recordInternalHeartbeat();
+            recordStreamActivityHeartbeat();
             afterHeartbeatOwnership(() => {
               emitOutput(text, "stdout");
             });
           },
           onStderr: (text) => {
             if (heartbeatOwnerLost) return;
-            recordInternalHeartbeat();
+            recordStreamActivityHeartbeat();
             afterHeartbeatOwnership(() => {
               emitOutput(text, "stderr");
             });
           },
           onProcess: handleProcess,
+          onToolExecutionStart: handleToolExecutionStart,
+          onToolExecutionEnd: handleToolExecutionEnd,
           onEvent: handleAgentEvent,
           onCheckpoint: async (checkpoint) => {
             await enqueueAgentCheckpoint(checkpoint, "progress");
@@ -8154,6 +8387,26 @@ async function legacyExecuteTask(
     );
     const failedAtMs = nowMs();
     const failureErrorJson = errorToJson(effectiveError);
+    const failureText = String(effectiveError?.message ?? effectiveError ?? "") + (responseText ?? "");
+    const isAuthError = /invalid_authentication|401|api.key.*invalid|expired.*credentials|authentication.*failed/i.test(
+      failureText,
+    );
+    if (effectiveAgent && isQuotaErrorPayload(failureErrorJson)) {
+      disableAgentForRun(disabledAgents, attemptMeta, effectiveAgent, "quota");
+    } else if (effectiveAgent && isAuthError) {
+      disableAgentForRun(disabledAgents, attemptMeta, effectiveAgent, "authentication");
+    } else if (
+      effectiveAgent &&
+      isKimiBrokenSessionFailure(failureErrorJson, attemptMeta) &&
+      priorKimiBrokenSessionCount(
+        await Effect.runPromise(adapter.listAttemptsForRun(runId)),
+        agentRunDisableKey(effectiveAgent),
+      ) +
+        1 >=
+        2
+    ) {
+      disableAgentForRun(disabledAgents, attemptMeta, effectiveAgent, "kimi-broken-session");
+    }
     // A rate limit on one rung of a failover chain is not a reason to stall the
     // whole lane: tell the scheduler to retry the task on the next agent that
     // is not itself rate-limited. The run only parks (waiting-quota) once every
@@ -8225,26 +8478,19 @@ async function legacyExecuteTask(
       }),
     );
     if (!failureClaimed) return;
-    // Circuit-breaker: disable agents that fail with auth errors
-    if (disabledAgents && effectiveAgent) {
-      const errStr = String(effectiveError?.message ?? effectiveError ?? "") + (responseText ?? "");
-      const isAuthError =
-        /invalid_authentication|401|api.key.*invalid|expired.*credentials|authentication.*failed/i.test(errStr);
-      if (isAuthError) {
-        disabledAgents.add(effectiveAgent);
-        const agentName = effectiveAgent?.model ?? effectiveAgent?.id ?? "unknown";
-        logWarning(
-          "disabled agent after auth failure",
-          {
-            runId,
-            nodeId: desc.nodeId,
-            iteration: desc.iteration,
-            attempt: attemptNo,
-            agentName,
-          },
-          "engine:task-circuit-breaker",
-        );
-      }
+    if (disabledAgents && effectiveAgent && isAuthError) {
+      const agentName = effectiveAgent?.model ?? effectiveAgent?.id ?? "unknown";
+      logWarning(
+        "disabled agent after auth failure",
+        {
+          runId,
+          nodeId: desc.nodeId,
+          iteration: desc.iteration,
+          attempt: attemptNo,
+          agentName,
+        },
+        "engine:task-circuit-breaker",
+      );
     }
     /** @type {any} */ (toolConfig).reportError?.(effectiveError, {
       phase: "node",
@@ -8301,6 +8547,13 @@ async function legacyExecuteTask(
   } finally {
     taskCompleted = true;
     heartbeatClosed = true;
+    pendingOwnedPids.clear();
+    liveOwnedPids.clear();
+    activeCliActions.clear();
+    pendingSdkToolExecutions.clear();
+    activeSdkToolExecutions.clear();
+    streamActivityLeaseUntilMs = 0;
+    toolActivityLeaseUntilMs = 0;
     if (heartbeatWatchdogFiber) {
       await Effect.runPromise(Fiber.interrupt(heartbeatWatchdogFiber)).catch(() => {});
       heartbeatWatchdogFiber = null;
@@ -8797,7 +9050,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
     );
   let workflowSession;
   const renderer = new SmithersRenderer();
-  const disabledAgents = new Set();
+  const disabledAgents = durableDisabledAgentsFromAttempts(await Effect.runPromise(adapter.listAttemptsForRun(runId)));
   const toolConfig = {
     rootDir,
     allowNetwork,

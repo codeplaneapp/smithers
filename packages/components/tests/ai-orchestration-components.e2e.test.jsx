@@ -3,11 +3,12 @@ import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { z } from "zod";
 import { Effect } from "effect";
 import {
+  Approval,
   ClassifyAndRoute,
   Debate,
   DecisionTable,
@@ -21,9 +22,12 @@ import {
   Supervisor,
   Task,
   Workflow,
+  approvalDecisionSchema,
+  approveNode,
   createSmithers,
   runWorkflow,
 } from "smthrs";
+import { SmithersDb } from "@smthrs/db/adapter";
 import { createTestSmithers } from "./helpers.js";
 
 setDefaultTimeout(30_000);
@@ -464,6 +468,71 @@ describe("AI orchestration components across the real workflow engine", () => {
       expect(tableRows(db, tables.review).map((row) => row.approved)).toEqual([false, true]);
       expect(producer.calls).toHaveLength(2);
       expect(approvingReviewer.calls).toHaveLength(2);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("ReviewLoop resolves producer dependencies after an approval resume", async () => {
+    const { smithers, outputs, tables, db, dbPath, cleanup } = createTestSmithers({
+      gateDecision: approvalDecisionSchema,
+      produced: z.object({ draft: z.string() }),
+      review: z.object({ approved: z.boolean(), feedback: z.string() }),
+    });
+    const producer = scriptedAgent("resumed-producer", (args) => ({
+      draft: `draft-${args.taskContext?.iteration}`,
+    }));
+    const reviewer = scriptedAgent("resumed-reviewer", (_args, callNo) => ({
+      approved: callNo >= 2,
+      feedback: `review-${callNo}`,
+    }));
+    const adapter = new SmithersDb(db);
+    const workflow = smithers(() => (
+      <Workflow name="review-loop-after-approval-resume">
+        <Sequence>
+          <Approval id="release-gate" output={outputs.gateDecision} request={{ title: "Release?" }} />
+          <ReviewLoop
+            id="releaseReviewLoop"
+            producer={producer}
+            reviewer={reviewer}
+            produceOutput={outputs.produced}
+            reviewOutput={outputs.review}
+            maxIterations={5}
+            onMaxReached="fail"
+          >
+            Produce the release.
+          </ReviewLoop>
+        </Sequence>
+      </Workflow>
+    ));
+    const rootDir = dirname(dbPath);
+    try {
+      const first = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir }));
+      expect(first.status).toBe("waiting-approval");
+      expect(producer.calls).toHaveLength(0);
+      expect(reviewer.calls).toHaveLength(0);
+
+      await Effect.runPromise(approveNode(adapter, first.runId, "release-gate", 0, "approved", "tester"));
+      const resumed = await Effect.runPromise(
+        runWorkflow(workflow, {
+          input: {},
+          rootDir,
+          runId: first.runId,
+          resume: true,
+        }),
+      );
+
+      expect(resumed.status).toBe("finished");
+      expect(tableRows(db, tables.produced).map((row) => [row.nodeId, row.iteration, row.draft])).toEqual([
+        ["releaseReviewLoop-produce", 0, "draft-0"],
+        ["releaseReviewLoop-produce", 1, "draft-1"],
+      ]);
+      expect(tableRows(db, tables.review).map((row) => [row.nodeId, row.iteration, row.approved])).toEqual([
+        ["releaseReviewLoop-review", 0, false],
+        ["releaseReviewLoop-review", 1, true],
+      ]);
+      expect(producer.calls).toHaveLength(2);
+      expect(reviewer.calls).toHaveLength(2);
     } finally {
       cleanup();
     }

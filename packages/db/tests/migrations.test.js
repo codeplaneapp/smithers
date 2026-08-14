@@ -657,6 +657,48 @@ describe("DB migration edges", () => {
     sqlite.close();
   });
 
+  test("0041 adds fresh-input and cost columns without losing legacy usage rows", async () => {
+    const sqlite = new Database(":memory:");
+    sqlite.exec(`
+      CREATE TABLE _smithers_run_usage (
+        run_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        iteration INTEGER NOT NULL DEFAULT 0,
+        attempt INTEGER NOT NULL DEFAULT 0,
+        model TEXT,
+        agent TEXT,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+        reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+        updated_at_ms INTEGER NOT NULL,
+        PRIMARY KEY (run_id, node_id, iteration, attempt)
+      );
+      INSERT INTO _smithers_run_usage
+        (run_id, node_id, input_tokens, output_tokens, cache_read_tokens, updated_at_ms)
+      VALUES ('legacy', 'work', 100, 20, 80, 1);
+    `);
+    const db = drizzle(sqlite);
+    ensureSmithersTables(db);
+
+    const columns = sqlite
+      .query('PRAGMA table_info("_smithers_run_usage")')
+      .all()
+      .map((column) => column.name);
+    expect(columns).toEqual(expect.arrayContaining(["fresh_input_tokens", "cost_usd"]));
+    expect(migrationRows(sqlite).map((row) => row.id)).toContain("0041_run_usage_breakdown_columns");
+    expect(await new SmithersDb(db).getRunTokenUsage("legacy")).toMatchObject({
+      inputTokens: 100,
+      freshInputTokens: 100,
+      outputTokens: 20,
+      cacheReadTokens: 80,
+      totalTokens: 120,
+      costUsd: null,
+    });
+    sqlite.close();
+  });
+
   test("0014 current-indexes upgrades a store whose ledger predates _smithers_docs", () => {
     // Regression: the `_smithers_docs` index lives in the current-index list that
     // migration 0014 runs, but the table is only created by 0018. A store whose
@@ -732,7 +774,7 @@ describe("DB migration edges", () => {
     sqlite.close();
   });
 
-  test("effort and steer migrations follow the current 0038 ledger head", () => {
+  test("effort, steer, and usage-breakdown migrations follow the current ledger head", () => {
     const sqlite = new Database(":memory:");
     sqlite.exec(`
       CREATE TABLE _smithers_schema_migrations (
@@ -802,6 +844,7 @@ describe("DB migration edges", () => {
         "0038_run_token_usage",
         "0039_attempt_effort_column",
         "0040_add_steers",
+        "0041_run_usage_breakdown_columns",
       ]),
     );
     sqlite.close();

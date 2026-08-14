@@ -87,6 +87,7 @@ import {
   getRequiredScopeForGatewayMethod,
 } from "@smthrs/gateway/rpc";
 import { hasGatewayScope, isGatewayScope } from "@smthrs/gateway/auth/scopes";
+import { approvalDecision } from "./approvalDecision.js";
 import {
   apiCollectionNames,
   serializeAccountRow,
@@ -1816,98 +1817,7 @@ function parseJwtScopes(value) {
   }
   return parseStringArray(value);
 }
-/**
- * Normalized approval request stored in an approval row's requestJson.
- * @typedef {{
- *   mode: "gate" | "select" | "rank" | "decision";
- *   title: string | null;
- *   summary: string | null;
- *   options: Array<{ key: string; label: string; summary?: string }>;
- *   allowedScopes: string[];
- *   allowedUsers: string[];
- *   restrictionError: string | null;
- *   autoApprove: Record<string, unknown> | null;
- * }} ApprovalRequestRecord
- */
-/**
- * @param {unknown} value
- * @param {"allowedScopes" | "allowedUsers"} field
- * @returns {{ values: string[]; error: string | null }}
- */
-function parseApprovalRestriction(value, field) {
-  if (value === undefined) {
-    return { values: [], error: null };
-  }
-  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string" || entry.trim().length === 0)) {
-    return {
-      values: [],
-      error: `${field} must be an array of non-empty strings`,
-    };
-  }
-  return { values: value, error: null };
-}
-/**
- * @param {unknown} value
- * @param {string | null} fallbackTitle
- * @returns {ApprovalRequestRecord}
- */
-function parseApprovalRequest(value, fallbackTitle) {
-  const record = asObject(value);
-  const allowedScopes = parseApprovalRestriction(record?.allowedScopes, "allowedScopes");
-  const allowedUsers = parseApprovalRestriction(record?.allowedUsers, "allowedUsers");
-  const options = Array.isArray(record?.options)
-    ? record.options
-        .filter((entry) => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)))
-        .map((entry) => ({
-          key: asString(entry.key) ?? "",
-          label: asString(entry.label) ?? "",
-          ...(asString(entry.summary) ? { summary: asString(entry.summary) } : {}),
-        }))
-        .filter((entry) => entry.key.length > 0 && entry.label.length > 0)
-    : [];
-  const autoApprove =
-    record?.autoApprove && typeof record.autoApprove === "object" && !Array.isArray(record.autoApprove)
-      ? record.autoApprove
-      : null;
-  return {
-    mode: record?.mode === "select" || record?.mode === "rank" || record?.mode === "decision" ? record.mode : "gate",
-    title: asString(record?.title) ?? fallbackTitle,
-    summary: asString(record?.summary) ?? null,
-    options,
-    allowedScopes: allowedScopes.values,
-    allowedUsers: allowedUsers.values,
-    restrictionError: allowedScopes.error ?? allowedUsers.error,
-    autoApprove,
-  };
-}
-/**
- * @param {ApprovalRequestRecord} request
- * @param {unknown} decision
- */
-function validateApprovalDecision(request, decision) {
-  if (request.mode === "select") {
-    const payload = asObject(decision);
-    const selected = asString(payload?.selected);
-    if (!selected) {
-      return { ok: false, code: "INVALID_REQUEST", message: "select approvals require decision.selected" };
-    }
-    if (request.options.length > 0 && !request.options.some((option) => option.key === selected)) {
-      return { ok: false, code: "INVALID_REQUEST", message: `Unknown selection: ${selected}` };
-    }
-  }
-  if (request.mode === "rank") {
-    const payload = asObject(decision);
-    const ranked = parseStringArray(payload?.ranked);
-    if (ranked.length === 0) {
-      return { ok: false, code: "INVALID_REQUEST", message: "rank approvals require decision.ranked" };
-    }
-    const allowed = new Set(request.options.map((option) => option.key));
-    if (allowed.size > 0 && ranked.some((value) => !allowed.has(value))) {
-      return { ok: false, code: "INVALID_REQUEST", message: "rank approval included unknown options" };
-    }
-  }
-  return { ok: true };
-}
+const { parseApprovalRequest, validateApprovalDecision, normalizeDecision } = approvalDecision;
 /**
  * @param {string} pattern
  */
@@ -2455,7 +2365,7 @@ function serializeGatewayApiPayload(method, payload) {
  * shape. Persisted event payloads are authoritative; the row timestamp only
  * fills the timestampMs field for older payloads that predate it.
  * @param {Record<string, unknown>} row
- * @returns {Record<string, string | number> | null}
+ * @returns {Record<string, string | number | null> | null}
  */
 function parseRunTokenUsageRow(row) {
   const payloadJson = asString(row.payloadJson);
@@ -2478,10 +2388,12 @@ function parseRunTokenUsageRow(row) {
     model: asString(payload.model) ?? "unknown",
     agent: asString(payload.agent) ?? "unknown",
     inputTokens: asNumber(payload.inputTokens) ?? 0,
+    freshInputTokens: asNumber(payload.freshInputTokens) ?? asNumber(payload.inputTokens) ?? 0,
     outputTokens: asNumber(payload.outputTokens) ?? 0,
     cacheReadTokens: asNumber(payload.cacheReadTokens) ?? 0,
     cacheWriteTokens: asNumber(payload.cacheWriteTokens) ?? 0,
     reasoningTokens: asNumber(payload.reasoningTokens) ?? 0,
+    costUsd: asNumber(payload.costUsd) ?? null,
     timestampMs: asNumber(payload.timestampMs) ?? asNumber(row.timestampMs) ?? 0,
   };
 }
@@ -4619,6 +4531,8 @@ a { color: var(--brand); }</style>
         params: {
           runId: runEvents ? decodeURIComponent(runEvents[1]) : queryString(url.searchParams, "runId"),
           nodeId: queryString(url.searchParams, "nodeId"),
+          iteration: queryNonNegativeInt(url.searchParams, "iteration"),
+          attempt: queryNonNegativeInt(url.searchParams, "attempt"),
           afterSeq: queryNonNegativeInt(url.searchParams, "afterSeq"),
           limit: queryPositiveInt(url.searchParams, "limit"),
         },
@@ -4794,9 +4708,13 @@ a { color: var(--brand); }</style>
     }
     const nodeId = asString(params.nodeId);
     const limit = asOptionalPositiveInt(params.limit, "limit") ?? 100;
+    const iteration = asOptionalNonNegativeInt(params.iteration, "iteration");
+    const attempt = asOptionalNonNegativeInt(params.attempt, "attempt");
     if (!nodeId) {
       const rows = await resolved.adapter.listEventHistory(runId, {
         afterSeq: asOptionalNonNegativeInt(params.afterSeq, "afterSeq"),
+        iteration,
+        attempt,
         limit,
       });
       return rows.map((row) => serializeRunEventRow(row));
@@ -4810,6 +4728,8 @@ a { color: var(--brand); }</style>
     }
     const matches = await resolved.adapter.listNodeEvents(runId, nodeId, {
       afterSeq: asOptionalNonNegativeInt(params.afterSeq, "afterSeq"),
+      iteration,
+      attempt,
       limit,
     });
     return matches.map((row) => serializeRunEventRow(row));
@@ -9060,10 +8980,12 @@ a { color: var(--brand); }</style>
             model: event.model,
             agent: event.agent,
             inputTokens: event.inputTokens,
+            freshInputTokens: event.freshInputTokens,
             outputTokens: event.outputTokens,
             cacheReadTokens: event.cacheReadTokens,
             cacheWriteTokens: event.cacheWriteTokens,
             reasoningTokens: event.reasoningTokens,
+            costUsd: event.costUsd,
             timestampMs: event.timestampMs,
           },
         };
@@ -10207,8 +10129,7 @@ a { color: var(--brand); }</style>
         ) {
           return responseError(frame.id, "FORBIDDEN", "Connection is missing required approval scope");
         }
-        const decision = stableDecision && "value" in stableDecision ? stableDecision.value : params.decision;
-        const note = asString(params.note) ?? asString(stableDecision?.note);
+        const { decision, note } = normalizeDecision(params.decision, params.note);
         if (approved) {
           const validation = validateApprovalDecision(request, decision);
           if (!validation.ok) {

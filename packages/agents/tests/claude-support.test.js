@@ -315,6 +315,33 @@ process.exit(1);
       await rm(fake.dir, { recursive: true, force: true });
     }
   });
+  test("bounds a raw system/init fallback when claude exits without a structured error", async () => {
+    const fake = await makeFakeClaude(`
+const largeToolList = "tool-entry-".repeat(1_000) + "UNBOUNDED_INIT_MARKER" + "tool-entry-".repeat(49_000);
+process.stdout.write(JSON.stringify({ type: "system", subtype: "init", cwd: "/tmp", session_id: "abc", tools: [largeToolList] }) + "\\n");
+process.exit(1);
+`);
+    try {
+      process.env.PATH = prependPath(fake.dir, originalPath);
+      const agent = new ClaudeCodeAgent({ model: "claude-fable-5", env: { PATH: process.env.PATH } });
+      let error;
+      try {
+        await agent.generate({ messages: [{ role: "user", content: "audit this" }] });
+      } catch (err) {
+        error = err;
+      }
+      const message = String(error?.message ?? "");
+      expect(error?.code).toBe("AGENT_CLI_ERROR");
+      expect(message).toContain("event=system/init");
+      expect(message).toContain("bytes=");
+      expect(message).toContain('preview={"type":"system","subtype":"init"');
+      expect(Number(/bytes=(\d+)/.exec(message)?.[1])).toBeGreaterThan(400_000);
+      expect(Buffer.byteLength(message, "utf8")).toBeLessThan(1_024);
+      expect(message).not.toContain("UNBOUNDED_INIT_MARKER");
+    } finally {
+      await rm(fake.dir, { recursive: true, force: true });
+    }
+  });
   test("does not add --verbose for text output by default", async () => {
     const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-claude-args-"));
     const argsFile = join(argsFileDir, "args.json");
