@@ -7,7 +7,7 @@
  *   review: "on" | "off";
  *   model?: string;
  *   agent?: string;
- *   preflight?: "auto" | "warn" | "off";
+ *   preflight?: "auto" | "warn" | "off" | "force-commit";
  *   runId?: string;
  *   resume?: boolean;
  *   force?: boolean;
