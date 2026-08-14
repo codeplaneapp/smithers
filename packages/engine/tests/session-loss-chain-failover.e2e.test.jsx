@@ -99,4 +99,57 @@ describe("fallback chain: session-loss failover and skip records", () => {
     },
     TIMEOUT_MS,
   );
+
+  test(
+    "two clearly identified Kimi broken sessions disable that engine for later nodes",
+    async () => {
+      const { smithers, outputs, cleanup } = createTestSmithers(outputSchemas);
+      try {
+        let brokenCalls = 0;
+        let healthyCalls = 0;
+        const broken = {
+          id: "kimi-repeatedly-broken",
+          cliEngine: "kimi",
+          tools: {},
+          async generate() {
+            brokenCalls += 1;
+            throw new SmithersError("AGENT_SESSION_LOST", "Kimi session is broken.", {
+              failureRetryable: true,
+              discardResumeSession: true,
+              command: "kimi",
+            });
+          },
+        };
+        const healthy = {
+          id: "healthy-kimi-fallback",
+          tools: {},
+          async generate() {
+            healthyCalls += 1;
+            return { output: { value: healthyCalls } };
+          },
+        };
+        const workflow = smithers(() => (
+          <Workflow name="repeated-kimi-session-loss">
+            <Task id="one" output={outputs.outputA} agent={[broken, healthy]} retries={1}>
+              one
+            </Task>
+            <Task id="two" output={outputs.outputB} agent={[broken, healthy]} retries={1}>
+              two
+            </Task>
+            <Task id="three" output={outputs.outputC} agent={[broken, healthy]} retries={1}>
+              three
+            </Task>
+          </Workflow>
+        ));
+
+        const result = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "kimi-disable-after-two" }));
+        expect(result.status).toBe("finished");
+        expect(brokenCalls).toBe(2);
+        expect(healthyCalls).toBe(3);
+      } finally {
+        cleanup();
+      }
+    },
+    TIMEOUT_MS,
+  );
 });

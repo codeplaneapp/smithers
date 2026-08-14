@@ -1,7 +1,6 @@
-import { EmptyState } from "@smthrs/ui";
+import { Alert, AlertDescription, EmptyState, StatusPill } from "@smthrs/ui";
 import { WorkflowGraph } from "../askme/WorkflowGraph";
 import { useCardUiStore } from "../cards/cardUiStore";
-import { StatusPill } from "../cards/StatusPill";
 import { useChatStore } from "../chat/chatStore";
 import { useNotificationsStore } from "../notifications/notificationsStore";
 import { findNode, type RunNode } from "./Run";
@@ -10,6 +9,7 @@ import { RunTree } from "./RunTree";
 import { runToFlow } from "./runToFlow";
 import { useRunsStore } from "./runsStore";
 import { selectRun } from "./selectRun";
+import { statusLabel } from "./statusMeta";
 
 /** First node still waiting on approval, i.e. the blocked node. The deploy gate
  *  is surfaced as an overall "waiting" status rather than a tree node, so fall
@@ -96,7 +96,7 @@ export function RunInspector({ runId, theme }: { runId: string; theme: "light" |
     <section className="surface" data-testid="run-inspector">
       <header className="surface-head">
         <span className="surface-title">{run.title}</span>
-        <StatusPill status={run.status} />
+        <StatusPill status={run.status} label={statusLabel(run.status)} />
         {canResume ? (
           <button type="button" className="btn btn-brand run-resume" onClick={onResume}>
             ↻ Resume run
@@ -115,11 +115,11 @@ export function RunInspector({ runId, theme }: { runId: string; theme: "light" |
       {view === "tree" ? (
         <>
           {waiting ? (
-            <div className="runs-approval tone-waiting">
-              <span>
+            <Alert variant="warning" className="runs-inspector-approval">
+              <AlertDescription>
                 Waiting for approval: <b>{blockedLabel}</b>
-              </span>
-              <div className="runs-approval-actions">
+              </AlertDescription>
+              <div className="runs-inspector-approval-actions">
                 <button type="button" className="btn btn-brand" onClick={onApprove}>
                   Approve
                 </button>
@@ -127,7 +127,7 @@ export function RunInspector({ runId, theme }: { runId: string; theme: "light" |
                   Deny
                 </button>
               </div>
-            </div>
+            </Alert>
           ) : null}
           <div className="inspector-body">
             <div className="tree-pane">

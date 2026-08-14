@@ -1,11 +1,11 @@
 import { useEffect, useMemo } from "react";
 import { useGatewayApprovals, useGatewayMutation, useGatewayWorkflows } from "@smthrs/gateway-react";
 import { gatewayKeys } from "@smthrs/gateway-client";
-import { EmptyState, Skeleton } from "@smthrs/ui";
+import { Alert, AlertDescription, AlertTitle, EmptyState, Skeleton, StatusPill } from "@smthrs/ui";
 import { openSurface } from "../app/navigation";
-import { StatusPill } from "../cards/StatusPill";
 import { findNode } from "../runs/Run";
 import { RunTree } from "../runs/RunTree";
+import { statusLabel } from "../runs/statusMeta";
 import { useGatewayRunTree } from "../sync/useGatewayRunTree";
 import { GatewayNodeDetail } from "./GatewayNodeDetail";
 import { WorkflowRunUi } from "./WorkflowRunUi";
@@ -83,7 +83,7 @@ export function GatewayRunInspector({ workflowKey, runId }: { workflowKey: strin
     <section className="surface" data-testid="gateway-run-inspector">
       <header className="surface-head">
         <span className="surface-title">{title}</span>
-        <StatusPill status={runTree.status} />
+        <StatusPill status={runTree.status} label={statusLabel(runTree.status)} />
         <div className="seg">
           {uiPath ? (
             <button
@@ -114,10 +114,10 @@ export function GatewayRunInspector({ workflowKey, runId }: { workflowKey: strin
       </header>
 
       {approval ? (
-        <div className="gw-approval-banner" data-testid="gateway-approval-banner">
+        <Alert variant="warning" className="gw-approval-banner" data-testid="gateway-approval-banner">
           <div className="gw-approval-copy">
-            <span className="gw-approval-title">{approval.requestTitle || "Approval required"}</span>
-            {approval.requestSummary ? <span className="gw-approval-summary">{approval.requestSummary}</span> : null}
+            <AlertTitle>{approval.requestTitle || "Approval required"}</AlertTitle>
+            {approval.requestSummary ? <AlertDescription>{approval.requestSummary}</AlertDescription> : null}
           </div>
           <button
             type="button"
@@ -128,7 +128,7 @@ export function GatewayRunInspector({ workflowKey, runId }: { workflowKey: strin
           >
             {submitApproval.isLoading ? "Approving" : "Approve"}
           </button>
-        </div>
+        </Alert>
       ) : null}
 
       {effectiveView === "flow" && uiPath ? (

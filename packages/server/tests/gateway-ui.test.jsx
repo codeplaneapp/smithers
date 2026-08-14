@@ -171,6 +171,34 @@ describe("Gateway UI", () => {
     expect(await assetResponse.text()).toContain("Gateway Console");
   });
 
+  test("rebuilds a cached UI bundle when an imported source file changes", async () => {
+    tempDir = mkdtempSync(join(process.cwd(), ".smithers-gateway-ui-refresh-"));
+    const labelModule = join(tempDir, "label.js");
+    const entry = join(tempDir, "ui.jsx");
+    writeFileSync(labelModule, 'export default "Before UI edit";\n');
+    writeFileSync(
+      entry,
+      [
+        'import { createElement } from "react";',
+        'import { createRoot } from "react-dom/client";',
+        'import label from "./label.js";',
+        'createRoot(document.getElementById("root")).render(createElement("main", null, label));',
+      ].join("\n"),
+    );
+    gateway = new Gateway({ ui: { entry, path: "/console" } });
+    const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    const port = getPort(server);
+    const assetUrl = `http://127.0.0.1:${port}/console/__smithers_ui/client.js`;
+
+    const before = await (await fetch(assetUrl)).text();
+    expect(before).toContain("Before UI edit");
+
+    writeFileSync(labelModule, 'export default "After UI edit is live";\n');
+    const after = await (await fetch(assetUrl)).text();
+    expect(after).toContain("After UI edit is live");
+    expect(after).not.toContain("Before UI edit");
+  });
+
   test("serves the built-in operator console by default", async () => {
     gateway = new Gateway();
     const server = await gateway.listen({ port: 0, host: "127.0.0.1" });

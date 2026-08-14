@@ -172,6 +172,8 @@ export function RunRailRow({
   return (
     <RowButton
       active={active}
+      aria-current={active ? "true" : undefined}
+      aria-label={`${name}, run ${runId}`}
       className="mon-run-row"
       data-testid="monitor-run-row"
       data-run-id={runId}

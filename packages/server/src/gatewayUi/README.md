@@ -19,8 +19,8 @@ Gotchas:
   `/*__SMITHERS_WORKFLOW_UI_THEME_CSS__*/` placeholder.
 - `bundle.js` pins BOTH `react` and `react-dom` to this package's copies via an
   `onResolve` plugin (mixed React copies crash react-dom). The bundle cache is
-  keyed by entry path; `SMITHERS_GATEWAY_UI_NO_CACHE=1` rebuilds on every
-  request for dev.
+  keyed by entry path and invalidated when any build input changes;
+  `SMITHERS_GATEWAY_UI_NO_CACHE=1` still rebuilds on every request.
 - Consumers are `gateway.js` and tests, but these modules are also reachable as
   public subpaths through the package's `./*` wildcard export, so keep exported
   names stable.

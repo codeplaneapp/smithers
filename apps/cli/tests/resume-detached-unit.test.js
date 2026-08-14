@@ -82,16 +82,17 @@ describe("resumeRunDetached", () => {
     }
   });
 
-  test("still spawns when the detached log location is unusable", async () => {
+  test("fails before spawning when the detached log location is unusable", () => {
     const wfDir = mkdtempSync(join(tmpdir(), "smithers-resume-detached-"));
     try {
       mkdirSync(join(wfDir, ".smithers"), { recursive: true });
       writeFileSync(join(wfDir, ".smithers", "logs"), "not a directory");
       const { executable, recordFile } = createSpawnStub(wfDir);
 
-      const pid = resumeRunDetached(join(wfDir, "workflow.tsx"), "run-nolog", undefined, { executable });
-      expect(pid).toBeGreaterThan(0);
-      await waitFor(() => existsSync(recordFile) && readFileSync(recordFile, "utf8").includes("arg=run-nolog"));
+      expect(() => resumeRunDetached(join(wfDir, "workflow.tsx"), "run-nolog", undefined, { executable })).toThrow(
+        `Cannot resume run run-nolog: detached log is unavailable at ${join(wfDir, ".smithers", "logs")}`,
+      );
+      expect(existsSync(recordFile)).toBe(false);
     } finally {
       rmSync(wfDir, { recursive: true, force: true });
     }

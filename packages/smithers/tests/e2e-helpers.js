@@ -145,10 +145,11 @@ function linkRepoRuntimeDeps(repoDir) {
   symlinkIfMissing(resolve(ROOT_NODE_MODULES, "typescript", "bin", "tsc"), join(binDir, "tsc"), "file");
 }
 /**
+ * @param {{ parentDir?: string }} [options]
  * @returns {TempRepo}
  */
-export function createTempRepo() {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), "smithers-e2e-")));
+export function createTempRepo(options = {}) {
+  const dir = realpathSync(mkdtempSync(join(options.parentDir ?? tmpdir(), ".smithers-e2e-")));
   tempDirs.add(dir);
   onTestFinished(() => {
     cleanupTempDir(dir);

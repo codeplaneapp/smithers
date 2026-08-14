@@ -1156,7 +1156,9 @@ const agent = new NanocodexAgent({
 When `inheritEnv` is `false`, ambient process variables are not inherited. The
 `serve` worker receives variables configured in `env` plus any Smithers
 task-context identifiers supplied for the call: `SMITHERS_RUN_ID`,
-`SMITHERS_NODE_ID`, `SMITHERS_ITERATION`, and `SMITHERS_ATTEMPT`. Include `PATH`
+`SMITHERS_NODE_ID`, `SMITHERS_ITERATION`, `SMITHERS_ATTEMPT`, and
+`SMITHERS_INSIDE_RUN` (the recursion marker that tells the worker it is already
+running inside a node and must not launch or steer another run). Include `PATH`
 in `env` if `binary` is a command name; ambient `PATH` is not used in this mode.
 Prompts, credentials, and snapshots never appear in process arguments.
 
