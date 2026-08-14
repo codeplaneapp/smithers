@@ -16,7 +16,7 @@ import {
 } from "./argv-utils.js";
 import { CHAT_CREATE_PROMPT, INLINE_CHAT_ENGINES, buildInlineChatWorkflow } from "./buildInlineChatWorkflow.js";
 import { parseJsonArgument, tryParseJsonInput } from "./json-args.js";
-import { wrapCliCommandHandlersWithInputBounds } from "./cli-command-bounds.js";
+import { CLI_TEXT_ARGUMENT_MAX_LENGTH, wrapCliCommandHandlersWithInputBounds } from "./cli-command-bounds.js";
 import { resolve, dirname, basename, relative, join, isAbsolute } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { closeSync, readFileSync, existsSync, mkdirSync, openSync, statSync, writeFileSync, writeSync } from "node:fs";
@@ -8257,6 +8257,17 @@ const cli = Cli.create({
     alias: { detach: "d" },
     async run(c) {
       const fail = makeFail(c);
+      if (
+        !c.options.goalFile &&
+        typeof c.args.goal === "string" &&
+        Buffer.byteLength(c.args.goal, "utf8") > CLI_TEXT_ARGUMENT_MAX_LENGTH
+      ) {
+        return fail({
+          code: "ONESHOT_GOAL_TOO_LARGE",
+          message: "Inline goals above 64KB must be supplied with --goal-file <path>.",
+          exitCode: 4,
+        });
+      }
       const taskCwd = resolve(process.cwd(), c.options.cwd);
       if (!existsSync(taskCwd))
         return fail({ code: "PATH_NOT_FOUND", message: `Path does not exist: ${taskCwd}`, exitCode: 4 });
@@ -8312,13 +8323,6 @@ const cli = Cli.create({
         return fail({
           code: "ONESHOT_GOAL_REQUIRED",
           message: "Provide a goal or --goal-file, or use --status/--set-review/--set-trivial alone.",
-          exitCode: 4,
-        });
-      }
-      if (Buffer.byteLength(goal, "utf8") > 64 * 1024 && !c.options.goalFile) {
-        return fail({
-          code: "ONESHOT_GOAL_TOO_LARGE",
-          message: "Goals above 64KB must be supplied with --goal-file.",
           exitCode: 4,
         });
       }
