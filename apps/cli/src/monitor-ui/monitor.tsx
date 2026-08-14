@@ -29,6 +29,7 @@ import {
   Button,
   observeReducedMotion,
   prefersReducedMotion,
+  Progress,
   SmithersUiStyles,
   Table,
   TableBody,
@@ -1445,14 +1446,22 @@ export function RunProgressCell({ run }: { run: RunRow }) {
   const progress = isRecord(run) ? runProgress(run.summary) : null;
   if (!progress) return <span className="mon-dim">—</span>;
   return (
-    <span
+    <div
       className="mon-mono"
       data-testid="monitor-run-progress"
       title={`${progress.done} done · ${progress.failed} failed · ${progress.total} nodes`}
     >
-      {progress.done + progress.failed}/{progress.total}
-      {progress.failed > 0 ? <span className="tone-failed mon-table-failed"> · {progress.failed} failed</span> : null}
-    </span>
+      <Progress
+        className="mon-table-progress"
+        value={progress.done + progress.failed}
+        max={progress.total}
+        aria-label={`${progress.done + progress.failed} of ${progress.total} nodes complete`}
+      />
+      <span>
+        {progress.done + progress.failed}/{progress.total}
+        {progress.failed > 0 ? <span className="tone-failed mon-table-failed"> · {progress.failed} failed</span> : null}
+      </span>
+    </div>
   );
 }
 
@@ -4818,6 +4827,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-runs-table-row:hover .mon-table-workflow-name { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
 .mon-table-runid { display: block; font-size: var(--fs-1); }
 .mon-table-failed { color: var(--tone); font-weight: 600; }
+.mon-table-progress { min-width: 72px; margin-bottom: var(--sp-1); }
 .mon-th-sort { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; font-weight: inherit; }
 .mon-th-sort:hover { color: var(--brand); }
 .mon-sort-arrow { color: var(--brand); }
