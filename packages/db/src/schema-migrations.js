@@ -2435,7 +2435,7 @@ function buildMigrations(context) {
       },
     },
     {
-      id: "0041_run_cancellation_source_details",
+      id: "0042_run_cancellation_source_details",
       name: "Add cancellation detail and signal columns to runs",
       checksum: checksumForStatements(
         RUN_CANCELLATION_SOURCE_DETAIL_COLUMNS.map(

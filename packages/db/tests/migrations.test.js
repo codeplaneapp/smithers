@@ -1225,7 +1225,7 @@ describe("DB migration edges", () => {
         cancelRequestClientPid: null,
       });
       expect(migrationRows(sqlite).map((row) => row.id)).toContain("0034_run_cancellation_attribution");
-      expect(migrationRows(sqlite).map((row) => row.id)).toContain("0041_run_cancellation_source_details");
+      expect(migrationRows(sqlite).map((row) => row.id)).toContain("0042_run_cancellation_source_details");
     } finally {
       sqlite.close();
     }
