@@ -4961,7 +4961,6 @@ async function legacyExecuteTask(
    * @param {unknown} [data]
    */
   const recordInternalHeartbeat = (data) => {
-    if (agentProcessExited) return;
     queueHeartbeat(data, { internal: true });
   };
   const recordStreamActivityHeartbeat = () => {
@@ -6629,7 +6628,6 @@ async function legacyExecuteTask(
           if (heartbeatOwnerLost) return;
           recordInternalHeartbeat();
           afterHeartbeatOwnership(async () => {
-            if (agentProcessExited) return;
             attemptMeta.agentEngine = event.engine ?? attemptMeta.agentEngine;
             let checkpointWrite = null;
             if ("resume" in event && typeof event.resume === "string") {
