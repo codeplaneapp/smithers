@@ -592,6 +592,21 @@ describe("oneshot monitor controls", () => {
     });
   });
 
+  test("CTA pins operator commands to the oneshot workspace", () => {
+    const cta = oneshotCta("oneshot-123", "/tmp/work tree's");
+    expect(cta.description).toContain("workspace /tmp/work tree's");
+    expect(cta.commands.map((entry) => entry.command)).toEqual([
+      "monitor oneshot-123 --cwd '/tmp/work tree'\\''s'",
+      "status oneshot-123 --cwd '/tmp/work tree'\\''s'",
+      "inspect oneshot-123 --cwd '/tmp/work tree'\\''s'",
+      "ui oneshot-123 --cwd '/tmp/work tree'\\''s'",
+      "chat oneshot-123 --cwd '/tmp/work tree'\\''s'",
+      "hijack oneshot-123 --cwd '/tmp/work tree'\\''s'",
+      "pause oneshot-123 --cwd '/tmp/work tree'\\''s'",
+      "cancel oneshot-123 --cwd '/tmp/work tree'\\''s'",
+    ]);
+  });
+
   function controlDb(status = "running") {
     const { db, cleanup } = createTestDb(schema, ddl);
     ensureSmithersTables(db);
