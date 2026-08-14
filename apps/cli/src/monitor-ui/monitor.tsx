@@ -2782,6 +2782,29 @@ function UsagePanel({
           <BurnSparkline buckets={buckets} />
         )}
       </section>
+      {fold.eventCount > 0 ? (
+        <section className="mon-usage-section" data-testid="monitor-input-mix">
+          <h3 className="mon-kicker">Input mix</h3>
+          <div className="mon-usage-row">
+            <span className="mon-usage-label">Fresh</span>
+            <span className="mon-mono mon-usage-text">{formatTokens(fold.freshInputTokens)}</span>
+          </div>
+          <div className="mon-usage-row">
+            <span className="mon-usage-label">Cache read</span>
+            <span className="mon-mono mon-usage-text">{formatTokens(fold.cacheReadTokens)}</span>
+          </div>
+          <div className="mon-usage-row">
+            <span className="mon-usage-label">Cache write</span>
+            <span className="mon-mono mon-usage-text">{formatTokens(fold.cacheWriteTokens)}</span>
+          </div>
+          {fold.costUsd !== null ? (
+            <div className="mon-usage-row">
+              <span className="mon-usage-label">Estimated cost</span>
+              <span className="mon-mono mon-usage-text">~${fold.costUsd.toFixed(4)}</span>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
       {agentRows.length > 0 ? (
         <section className="mon-usage-section">
           <h3 className="mon-kicker">By agent</h3>
@@ -3988,9 +4011,15 @@ function RunUsageChip({
     () => runUsageChipOf(predictRunUsage({ events, timings, tree, nowMs: now, live }), { live }),
     [events, timings, tree, live, now],
   );
+  const usage = useMemo(() => foldTokenUsage(events), [events]);
   return (
-    <span className="mon-usage-chip" title={chip.title} data-testid="monitor-usage-chip">
+    <span
+      className="mon-usage-chip"
+      title={`${chip.title}${usage.costUsd === null ? "" : ` · estimated cost $${usage.costUsd.toFixed(4)}`}`}
+      data-testid="monitor-usage-chip"
+    >
       <span className="mon-mono">{chip.spent}</span>
+      {usage.costUsd !== null ? <span className="mon-usage-est">&nbsp;· ~${usage.costUsd.toFixed(4)}</span> : null}
       {chip.inFlight ? <span className="mon-usage-est">&nbsp;({chip.inFlight})</span> : null}
       {chip.total ? <span className="mon-usage-est">&nbsp;· {chip.total}</span> : null}
       {chip.eta ? <span className="mon-usage-est">&nbsp;· {chip.eta}</span> : null}

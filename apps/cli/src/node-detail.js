@@ -19,6 +19,7 @@ const DEFAULT_EXPANDED_ATTEMPT_LIMIT = 5;
  */
 const emptyTokenUsage = () => ({
   inputTokens: 0,
+  freshInputTokens: 0,
   outputTokens: 0,
   cacheReadTokens: 0,
   cacheWriteTokens: 0,
@@ -101,6 +102,7 @@ function parseTokenUsageEvent(row, params) {
   const model = typeof entry.model === "string" ? entry.model : null;
   const agent = typeof entry.agent === "string" ? entry.agent : null;
   const inputTokens = asNumber(entry.inputTokens) ?? 0;
+  const freshInputTokens = asNumber(entry.freshInputTokens) ?? inputTokens;
   const outputTokens = asNumber(entry.outputTokens) ?? 0;
   const cacheReadTokens = asNumber(entry.cacheReadTokens) ?? 0;
   const cacheWriteTokens = asNumber(entry.cacheWriteTokens) ?? 0;
@@ -111,6 +113,7 @@ function parseTokenUsageEvent(row, params) {
     model,
     agent,
     inputTokens,
+    freshInputTokens,
     outputTokens,
     cacheReadTokens,
     cacheWriteTokens,
@@ -129,9 +132,14 @@ function mergeTokenUsage(current, event) {
   const nextAgents = new Set(current.agents);
   if (event.agent) nextAgents.add(event.agent);
   const mergedCost =
-    current.costUsd == null && event.costUsd == null ? null : (current.costUsd ?? 0) + (event.costUsd ?? 0);
+    current.eventCount === 0
+      ? event.costUsd
+      : current.costUsd != null && event.costUsd != null
+        ? current.costUsd + event.costUsd
+        : null;
   return {
     inputTokens: current.inputTokens + event.inputTokens,
+    freshInputTokens: current.freshInputTokens + event.freshInputTokens,
     outputTokens: current.outputTokens + event.outputTokens,
     cacheReadTokens: current.cacheReadTokens + event.cacheReadTokens,
     cacheWriteTokens: current.cacheWriteTokens + event.cacheWriteTokens,
@@ -425,8 +433,10 @@ export function aggregateNodeDetailEffect(adapter, params) {
         iteration: resolvedIteration,
       });
       if (!parsed) continue;
-      const existing = tokenByAttempt.get(parsed.attempt) ?? emptyTokenUsage();
-      tokenByAttempt.set(parsed.attempt, mergeTokenUsage(existing, parsed));
+      // Historical runtimes emitted a cumulative record repeatedly during one
+      // attempt. Rows are ordered by event sequence, so replacing keeps the
+      // final cumulative sample instead of summing it (#1436).
+      tokenByAttempt.set(parsed.attempt, mergeTokenUsage(emptyTokenUsage(), parsed));
     }
     const toolCalls = toolCallRows.map((call) => {
       const parsedError = parseErrorSummary(call.errorJson);
@@ -474,21 +484,21 @@ export function aggregateNodeDetailEffect(adapter, params) {
         jjCwd: attempt.jjCwd ?? null,
       };
     });
-    const totalUsage = attemptsDetailed.reduce(
-      (acc, attempt) =>
-        mergeTokenUsage(acc, {
-          attempt: attempt.attempt,
-          model: null,
-          agent: null,
-          inputTokens: attempt.tokenUsage.inputTokens,
-          outputTokens: attempt.tokenUsage.outputTokens,
-          cacheReadTokens: attempt.tokenUsage.cacheReadTokens,
-          cacheWriteTokens: attempt.tokenUsage.cacheWriteTokens,
-          reasoningTokens: attempt.tokenUsage.reasoningTokens,
-          costUsd: attempt.tokenUsage.costUsd,
-        }),
-      emptyTokenUsage(),
-    );
+    const totalUsage = attemptsDetailed.reduce((acc, attempt) => {
+      if (attempt.tokenUsage.eventCount === 0) return acc;
+      return mergeTokenUsage(acc, {
+        attempt: attempt.attempt,
+        model: null,
+        agent: null,
+        inputTokens: attempt.tokenUsage.inputTokens,
+        freshInputTokens: attempt.tokenUsage.freshInputTokens,
+        outputTokens: attempt.tokenUsage.outputTokens,
+        cacheReadTokens: attempt.tokenUsage.cacheReadTokens,
+        cacheWriteTokens: attempt.tokenUsage.cacheWriteTokens,
+        reasoningTokens: attempt.tokenUsage.reasoningTokens,
+        costUsd: attempt.tokenUsage.costUsd,
+      });
+    }, emptyTokenUsage());
     const tokenUsage = {
       ...totalUsage,
       byAttempt: attemptsDetailed.map((attempt) => ({
@@ -631,7 +641,9 @@ export function renderNodeDetailHuman(detail, options) {
     if (usage.inputTokens > 0 || usage.outputTokens > 0 || usage.cacheReadTokens > 0 || usage.cacheWriteTokens > 0) {
       const cost = formatCostUsd(usage.costUsd);
       lines.push(
-        `  Tokens: ${formatCount(usage.inputTokens)} in / ${formatCount(usage.outputTokens)} out${cost ? ` ($${cost})` : ""}`,
+        `  Tokens: ${formatCount(usage.inputTokens)} in (${formatCount(usage.freshInputTokens)} fresh / ` +
+          `${formatCount(usage.cacheReadTokens)} cache read / ${formatCount(usage.cacheWriteTokens)} cache write) / ` +
+          `${formatCount(usage.outputTokens)} out${cost ? ` (~$${cost})` : ""}`,
       );
     }
     if (attempt.toolCalls.length > 0) {

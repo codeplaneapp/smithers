@@ -2648,6 +2648,14 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
   } catch {
     steers = [];
   }
+  // Soft for the same read-mode compatibility reason as steers: stores last
+  // written before the run-usage migrations must remain inspectable.
+  let tokenUsage;
+  try {
+    tokenUsage = await adapter.getRunTokenUsage(runId);
+  } catch {
+    tokenUsage = undefined;
+  }
   const ancestry = await adapter.listRunAncestry(runId, 1_000);
   const continuedFromRunIds = ancestry.slice(1).map((row) => row.runId);
   const lineagePageSize = 100;
@@ -2740,6 +2748,7 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
     },
     ...(runState ? { runState } : {}),
     ...(failedChildren > 0 ? { failedChildren, failedChildKeys } : {}),
+    ...(tokenUsage ? { tokenUsage } : {}),
     steps,
     nodes: canonicalNodes,
   };
@@ -10035,7 +10044,7 @@ const cli = Cli.create({
   // =========================================================================
   .command("inspect", {
     description:
-      "Output detailed run state. Structured output canonically uses nodes[].nodeId (legacy steps[].id remains for compatibility); --pool tallies attempt engine/model usage.",
+      "Output detailed run state and authoritative token/cost usage. Structured output canonically uses nodes[].nodeId (legacy steps[].id remains for compatibility); --pool tallies attempt engine/model usage.",
     args: inspectArgs,
     options: inspectOptions,
     alias: { watch: "w", interval: "i" },
@@ -12602,9 +12611,13 @@ const cli = Cli.create({
               return fail({ code: "RUN_NOT_FOUND", message: `Run not found: ${runId}`, exitCode: 4 });
             }
             const usage = await adapter.getRunTokenUsage(runId);
+            const cost = usage.costUsd == null ? "" : ` / ~$${usage.costUsd.toFixed(4)}`;
             process.stderr.write(
-              `${runId}: ${usage.totalTokens.toLocaleString()} tokens ` +
-                `(${usage.inputTokens.toLocaleString()} in / ${usage.outputTokens.toLocaleString()} out) ` +
+              `${runId}: ${usage.totalTokens.toLocaleString()} tokens${cost} ` +
+                `(${usage.freshInputTokens.toLocaleString()} fresh / ` +
+                `${usage.cacheReadTokens.toLocaleString()} cache read / ` +
+                `${usage.cacheWriteTokens.toLocaleString()} cache write / ` +
+                `${usage.outputTokens.toLocaleString()} out) ` +
                 `across ${usage.attempts} agent attempt(s)\n`,
             );
             return c.ok({ usage });

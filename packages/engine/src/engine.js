@@ -83,6 +83,8 @@ import {
   updateAsyncExternalWaitPending,
 } from "@smthrs/observability/metrics";
 import { runScorersAsync } from "@smthrs/scorers/run-scorers";
+import { estimateCostUsd } from "@smthrs/scorers/estimateCostUsd";
+import { modelTokenPrices } from "@smthrs/scorers/modelTokenPrices";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { toSmithersError } from "@smthrs/errors/toSmithersError";
@@ -3743,23 +3745,62 @@ function parseAttemptErrorCode(errorJson) {
  * failure-path telemetry guard because exotic error objects may expose
  * throwing getters.
  * @param {unknown} value
- * @returns {{ inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number } | null}
+ * @returns {{ inputTokens: number; freshInputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number } | null}
  */
 function extractTokenUsage(value) {
   if (!value || typeof value !== "object") return null;
   const container = /** @type {any} */ (value);
   const usage = container.usage ?? container.result?.usage ?? container.totalUsage;
   if (!usage || typeof usage !== "object") return null;
+  return normalizeTokenUsage(usage);
+}
+/**
+ * Normalize the AI SDK usage shape once for success and failure paths. Input
+ * tokens are the provider's total; cache/reasoning counters are breakdowns,
+ * not additional tokens. AI SDK providers expose exact fresh input as
+ * `noCacheTokens`; older CLI adapters report their uncached input counter as
+ * `inputTokens`, so that remains the compatibility fallback.
+ * @param {any} usage
+ * @returns {{ inputTokens: number; freshInputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number } | null}
+ */
+function normalizeTokenUsage(usage) {
+  if (!usage || typeof usage !== "object") return null;
   const inputTokens = usage.inputTokens ?? usage.promptTokens ?? 0;
   const outputTokens = usage.outputTokens ?? usage.completionTokens ?? 0;
+  const cacheReadTokens = usage.inputTokenDetails?.cacheReadTokens ?? usage.cacheReadTokens ?? undefined;
+  const cacheWriteTokens = usage.inputTokenDetails?.cacheWriteTokens ?? usage.cacheWriteTokens ?? undefined;
   if (!(inputTokens > 0 || outputTokens > 0)) return null;
+  const reportedFreshInputTokens = usage.inputTokenDetails?.noCacheTokens ?? usage.freshInputTokens;
+  const freshInputTokens =
+    typeof reportedFreshInputTokens === "number" && Number.isFinite(reportedFreshInputTokens)
+      ? Math.max(0, reportedFreshInputTokens)
+      : Math.max(0, inputTokens);
   return {
     inputTokens,
+    freshInputTokens,
     outputTokens,
-    cacheReadTokens: usage.inputTokenDetails?.cacheReadTokens ?? usage.cacheReadTokens ?? undefined,
-    cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens ?? usage.cacheWriteTokens ?? undefined,
+    cacheReadTokens,
+    cacheWriteTokens,
     reasoningTokens: usage.outputTokenDetails?.reasoningTokens ?? usage.reasoningTokens ?? undefined,
   };
+}
+/**
+ * Price only models in the built-in table. Unknown models retain complete
+ * token accounting but report no cost instead of a misleading $0 estimate.
+ * @param {string} model
+ * @param {{ freshInputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number }} usage
+ * @returns {number | undefined}
+ */
+function estimateReportedCostUsd(model, usage) {
+  const price = modelTokenPrices(model);
+  if (![price.input, price.output, price.cacheRead, price.cacheWrite].some((value) => value > 0)) return undefined;
+  return estimateCostUsd({
+    model,
+    inputTokens: usage.freshInputTokens,
+    outputTokens: usage.outputTokens,
+    cacheReadTokens: usage.cacheReadTokens,
+    cacheWriteTokens: usage.cacheWriteTokens,
+  });
 }
 /**
  * @param {{ errorJson?: string | null; metaJson?: string | null } | null} [attempt]
@@ -6965,6 +7006,7 @@ async function legacyExecuteTask(
                   : undefined) ??
                 (typeof effectiveAgent.model === "string" ? effectiveAgent.model : undefined) ??
                 "unknown";
+              const costUsd = estimateReportedCostUsd(reportedModelId, failedUsage);
               void eventBus
                 .emitEventQueued({
                   type: "TokenUsageReported",
@@ -6978,6 +7020,7 @@ async function legacyExecuteTask(
                     effectiveAgent.constructor?.name ??
                     "unknown",
                   ...failedUsage,
+                  ...(costUsd !== undefined ? { costUsd } : {}),
                   timestampMs: nowMs(),
                 })
                 .catch(() => {});
@@ -6993,6 +7036,7 @@ async function legacyExecuteTask(
                     effectiveAgent.constructor?.name ??
                     "unknown",
                   ...failedUsage,
+                  costUsd,
                   updatedAtMs: nowMs(),
                 }),
               ).catch(() => {});
@@ -7069,30 +7113,52 @@ async function legacyExecuteTask(
           void Effect.runPromise(Metric.update(responseSizeBytes, Buffer.byteLength(responseText, "utf8")));
         }
         // --- Track token usage ---
-        const usage = result.usage ?? result.totalUsage;
+        const usage = normalizeTokenUsage(result.usage ?? result.totalUsage);
         if (usage) {
-          const inputTokens = usage.inputTokens ?? usage.promptTokens ?? 0;
-          const outputTokens = usage.outputTokens ?? usage.completionTokens ?? 0;
-          const cacheReadTokens = usage.inputTokenDetails?.cacheReadTokens ?? usage.cacheReadTokens ?? undefined;
-          const cacheWriteTokens = usage.inputTokenDetails?.cacheWriteTokens ?? usage.cacheWriteTokens ?? undefined;
-          const reasoningTokens = usage.outputTokenDetails?.reasoningTokens ?? usage.reasoningTokens ?? undefined;
-          if (inputTokens > 0 || outputTokens > 0) {
-            // Prefer the authoritative resolved model id from the result.
-            // effectiveAgent.model is often unset (SDK agents) or, for CLI
-            // agents, falls through to a random-UUID id — which both breaks
-            // per-model cost attribution and explodes metric label
-            // cardinality. result.response.modelId carries the real id.
-            const reportedModelId =
-              (typeof result?.response?.modelId === "string" && result.response.modelId.length > 0
-                ? result.response.modelId
-                : undefined) ??
-              (typeof effectiveAgent.model === "string" ? effectiveAgent.model : undefined) ??
-              "unknown";
-            void eventBus.emitEventQueued({
-              type: "TokenUsageReported",
+          const { inputTokens, freshInputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens } =
+            usage;
+          // Prefer the authoritative resolved model id from the result.
+          // effectiveAgent.model is often unset (SDK agents) or, for CLI
+          // agents, falls through to a random-UUID id — which both breaks
+          // per-model cost attribution and explodes metric label
+          // cardinality. result.response.modelId carries the real id.
+          const reportedModelId =
+            (typeof result?.response?.modelId === "string" && result.response.modelId.length > 0
+              ? result.response.modelId
+              : undefined) ??
+            (typeof effectiveAgent.model === "string" ? effectiveAgent.model : undefined) ??
+            "unknown";
+          const costUsd = estimateReportedCostUsd(reportedModelId, usage);
+          void eventBus.emitEventQueued({
+            type: "TokenUsageReported",
+            runId,
+            nodeId: desc.nodeId,
+            iteration: desc.iteration,
+            attempt: attemptNo,
+            model: reportedModelId,
+            agent:
+              (typeof effectiveAgent.id === "string" ? effectiveAgent.id : undefined) ??
+              effectiveAgent.constructor?.name ??
+              "unknown",
+            inputTokens,
+            freshInputTokens,
+            outputTokens,
+            cacheReadTokens,
+            cacheWriteTokens,
+            reasoningTokens,
+            ...(costUsd !== undefined ? { costUsd } : {}),
+            timestampMs: nowMs(),
+          });
+          // Same numbers, persisted as a queryable row. The event log stays
+          // the audit trail; `_smithers_run_usage` is the authoritative
+          // per-run total nobody has to replay events to compute (#1464
+          // AWF-6, #1436). Awaited so the row is durable before the attempt
+          // settles, but swallowed — usage accounting never fails a task.
+          await Effect.runPromise(
+            adapter.recordRunTokenUsage({
               runId,
               nodeId: desc.nodeId,
-              iteration: desc.iteration,
+              iteration: desc.iteration ?? 0,
               attempt: attemptNo,
               model: reportedModelId,
               agent:
@@ -7100,37 +7166,15 @@ async function legacyExecuteTask(
                 effectiveAgent.constructor?.name ??
                 "unknown",
               inputTokens,
+              freshInputTokens,
               outputTokens,
               cacheReadTokens,
               cacheWriteTokens,
               reasoningTokens,
-              timestampMs: nowMs(),
-            });
-            // Same numbers, persisted as a queryable row. The event log stays
-            // the audit trail; `_smithers_run_usage` is the authoritative
-            // per-run total nobody has to replay events to compute (#1464
-            // AWF-6, #1436). Awaited so the row is durable before the attempt
-            // settles, but swallowed — usage accounting never fails a task.
-            await Effect.runPromise(
-              adapter.recordRunTokenUsage({
-                runId,
-                nodeId: desc.nodeId,
-                iteration: desc.iteration ?? 0,
-                attempt: attemptNo,
-                model: reportedModelId,
-                agent:
-                  (typeof effectiveAgent.id === "string" ? effectiveAgent.id : undefined) ??
-                  effectiveAgent.constructor?.name ??
-                  "unknown",
-                inputTokens,
-                outputTokens,
-                cacheReadTokens,
-                cacheWriteTokens,
-                reasoningTokens,
-                updatedAtMs: nowMs(),
-              }),
-            ).catch(() => {});
-          }
+              costUsd,
+              updatedAtMs: nowMs(),
+            }),
+          ).catch(() => {});
         }
         let output;
         // Try structured output first (wrapping in try/catch since getters may throw)
