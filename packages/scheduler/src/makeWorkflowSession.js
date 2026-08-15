@@ -453,7 +453,9 @@ export function makeWorkflowSession(options = {}) {
     retryWait: new Map(
       [...(options.initialRetryWait ?? [])].filter(([, retryAtMs]) => Number.isFinite(retryAtMs) && retryAtMs >= 0),
     ),
-    approvals: new Set(),
+    approvals: new Set(
+      [...(options.initialApprovals ?? [])].filter((key) => typeof key === "string" && key.length > 0),
+    ),
     ralphState: new Map(options.initialRalphState ?? []),
     quotaResetTimes: new Map(),
     /** @type {Map<string, number>} Maps state key → duration-timer start (ms), the anchor its deadline is computed from */
@@ -530,6 +532,7 @@ export function makeWorkflowSession(options = {}) {
       state.retryWait,
       nowMs(),
       state.failures,
+      state.approvals,
     );
     state.schedule = {
       plan: state.plan,

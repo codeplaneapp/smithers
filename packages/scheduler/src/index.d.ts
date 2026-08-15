@@ -277,6 +277,8 @@ type WorkflowSessionOptions$2 = {
         readonly done: boolean;
     }>;
     readonly initialTimerStarts?: ReadonlyMap<string, number>;
+    /** Approval task keys restored from durable approved rows. */
+    readonly initialApprovals?: ReadonlySet<string>;
     /**
      * Evaluate a runnable task's Aspects budgets against the run's accumulated
      * usage. Return the first breach, or `null`/`undefined` when within budget.
@@ -464,9 +466,11 @@ type XmlNode = _smthrs_graph.XmlNode;
  * @param {ReadonlyMap<string, unknown>} [taskFailures] recorded failure payloads
  *   keyed by task state key; consulted by the <TryCatchFinally catchErrors>
  *   gate to match failed try tasks against the filtered error codes
+ * @param {ReadonlySet<string>} [approvedTaskKeys] approval task keys restored
+ *   from durable decisions; these keep their subtree admission across resume
  * @returns {ScheduleResult}
  */
-declare function scheduleTasks(plan: PlanNode$1 | null, states: TaskStateMap$1, descriptors: Map<string, TaskDescriptor>, ralphState: RalphStateMap$1, retryWait: RetryWaitMap$1, nowMs: number, taskFailures?: ReadonlyMap<string, unknown>): ScheduleResult$1;
+declare function scheduleTasks(plan: PlanNode$1 | null, states: TaskStateMap$1, descriptors: Map<string, TaskDescriptor>, ralphState: RalphStateMap$1, retryWait: RetryWaitMap$1, nowMs: number, taskFailures?: ReadonlyMap<string, unknown>, approvedTaskKeys?: ReadonlySet<string>): ScheduleResult$1;
 type PlanNode$1 = PlanNode$4;
 type RalphStateMap$1 = RalphStateMap$4;
 type RetryWaitMap$1 = RetryWaitMap$3;

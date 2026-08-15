@@ -1074,6 +1074,21 @@ function parseJsonRecord(value) {
   }
 }
 /**
+ * Only ordinary approval tasks can be restored directly into a fresh
+ * scheduler session. Replay-safety approvals gate an attempt rather than the
+ * task descriptor, and HumanTask decisions must pass through the durable
+ * request-validation bridge on every resume.
+ * @param {ApprovalRow} approval
+ * @returns {boolean}
+ */
+function isRestorableApprovedTask(approval) {
+  if (approval.status !== "approved") return false;
+  const request = parseJsonRecord(approval.requestJson);
+  if (request?.kind === "ReplayUnsafeApproval") return false;
+  const metadata = request?.metadata;
+  return !(metadata && typeof metadata === "object" && !Array.isArray(metadata) && metadata.humanTask === true);
+}
+/**
  * @param {ApprovalRow | undefined} approval
  * @param {{ runId: string; nodeId: string; iteration: number; fingerprint: string; authorizedAttempt: number }} expected
  * @returns {boolean}
@@ -10803,6 +10818,14 @@ async function runWorkflowBodyDriver(workflow, opts) {
     const retrySessionState = opts.resume
       ? retrySessionStateFromAttempts(await Effect.runPromise(adapter.listAttemptsForRun(runId)))
       : { retryCounts: new Map(), retryWait: new Map() };
+    const initialApprovals = new Set();
+    if (opts.resume) {
+      const decidedApprovals = await Effect.runPromise(adapter.listAllDecidedApprovals(runId));
+      for (const approval of decidedApprovals) {
+        if (!isRestorableApprovedTask(approval)) continue;
+        initialApprovals.add(buildStateKey(approval.nodeId, approval.iteration));
+      }
+    }
     workflowSession = makeWorkflowSession({
       runId,
       nowMs,
@@ -10812,6 +10835,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
       initialTimerStarts: carriedTimerStarts,
       initialRetryCounts: retrySessionState.retryCounts,
       initialRetryWait: retrySessionState.retryWait,
+      initialApprovals,
       evaluateAspectBudget: (descriptor) =>
         budgetTracker ? evaluateAspectBudget(descriptor.aspects, budgetTracker.snapshot(nowMs())) : null,
       onAspectBudgetSkip: (descriptor) => {
@@ -11265,6 +11289,7 @@ export const __engineInternals = {
   summarizeWorkflowSessionDecision,
   summarizeLegacySchedulerDecision,
   workflowSessionSummaryKey,
+  isRestorableApprovedTask,
   coercePositiveInt,
   buildInputRow,
   normalizeInputRow,

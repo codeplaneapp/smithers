@@ -92,9 +92,11 @@ function forkSourceTerminal(forkSource, states, descriptors) {
  * @param {ReadonlyMap<string, unknown>} [taskFailures] recorded failure payloads
  *   keyed by task state key; consulted by the <TryCatchFinally catchErrors>
  *   gate to match failed try tasks against the filtered error codes
+ * @param {ReadonlySet<string>} [approvedTaskKeys] approval task keys restored
+ *   from durable decisions; these keep their subtree admission across resume
  * @returns {ScheduleResult}
  */
-export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, nowMs, taskFailures) {
+export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, nowMs, taskFailures, approvedTaskKeys) {
   const runnable = [];
   let pendingExists = false;
   let waitingApprovalExists = false;
@@ -141,7 +143,8 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
         childStats.set(statsKey, stats);
       }
       const state = states.get(buildStateKey(descriptor.nodeId, descriptor.iteration)) ?? "pending";
-      if (state !== "pending" && state !== "cancelled") stats.started = true;
+      const stateKey = buildStateKey(descriptor.nodeId, descriptor.iteration);
+      if ((state !== "pending" && state !== "cancelled") || approvedTaskKeys?.has(stateKey)) stats.started = true;
       if (!isTraversalTerminal(state, descriptor)) stats.allTerminal = false;
     }
     for (const stats of childStats.values()) {
