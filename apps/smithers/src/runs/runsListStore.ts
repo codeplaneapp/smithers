@@ -1,36 +1,38 @@
 import { create } from "zustand";
-import { useChatStore } from "../chat/chatStore";
-import { useNotificationsStore } from "../notifications/notificationsStore";
-import { DEFAULT_FILTERS, shortRunId, type AgeFilter, type RunStatusFilter, type RunSummary } from "./runsList";
+import {
+  DEFAULT_FILTERS,
+  runActionAvailability,
+  type AgeFilter,
+  type RunStatusFilter,
+  type RunSummary,
+} from "./runsList";
 
 /**
  * The runs-list store: the live run roster (pushed in by `RunsListBridge` from
- * the gateway `runs` collection) plus the header filters, search, the
- * Live/Polling badge flag, and a selected-row highlight the card and canvas
- * read.
- *
- * The roster is sourced from `useGatewayRuns()` via the bridge — NOT from any
- * in-app seed. The mutations below (rerun / approve / deny / resume) remain
- * demo echoes: they post a chat line + transient toast the way the vcs/issues
- * stores do. Real run-control (approve/deny/resume/cancel) belongs to the
- * inspector (`GatewayRunInspector`), which already wires the gateway RPCs; the
- * LIST surface only surfaces and navigates. The gateway summary row carries no
- * `blockedNodeLabel`, so the approve/deny status-flip guards naturally no-op on
- * live rows — kept as echoes, never fabricating or flipping a live row.
+ * the gateway `runs` collection), filters, and real lifecycle-action state.
+ * The bridge owns gateway hooks and installs an RPC seam; action success never
+ * fabricates a local status transition because the collection is authoritative.
  */
 export type StreamMode = "live" | "polling";
 // Mirrors gateway-react's GatewayConnectionStatus. Restated locally because the
 // UI architecture guard forbids this store importing gateway-react at all,
 // type-only imports included.
 type GatewayConnectionStatus = "idle" | "connecting" | "online" | "offline" | "unauthorized";
+export type RunAction = "pause" | "resume" | "cancel" | "retry" | "health";
+
+type RunActionsRpc = {
+  pause: (runId: string) => Promise<unknown>;
+  resume: (runId: string, forceRetry?: boolean) => Promise<unknown>;
+  cancel: (runId: string) => Promise<unknown>;
+  retry?: (runId: string) => Promise<unknown>;
+  health: (runId: string) => Promise<string>;
+  refetch: () => Promise<unknown> | void;
+};
 
 type RunsListState = {
   runs: RunSummary[];
-  /** Initial collection synchronization is still in progress. */
   loading: boolean;
-  /** The live collection could not be read; null after a successful read. */
   error: string | null;
-  /** Real gateway transport state, mirrored by RunsListBridge. */
   connectionStatus: GatewayConnectionStatus;
   statusFilter: RunStatusFilter;
   workflowFilter: string | "all";
@@ -38,6 +40,10 @@ type RunsListState = {
   search: string;
   streamMode: StreamMode;
   selectedRunId: string | null;
+  actingRunId: string | null;
+  actingAction: RunAction | null;
+  actionFeedback: { runId: string; kind: "success" | "error"; message: string } | null;
+  rpc: RunActionsRpc | null;
   setStatusFilter: (status: RunStatusFilter) => void;
   setWorkflowFilter: (name: string | "all") => void;
   setAgeFilter: (bucket: AgeFilter) => void;
@@ -45,26 +51,48 @@ type RunsListState = {
   clearFilters: () => void;
   setStreamMode: (mode: StreamMode) => void;
   selectRun: (runId: string | null) => void;
-  rerun: (runId: string) => void;
-  approve: (runId: string) => void;
-  deny: (runId: string) => void;
-  resume: (runId: string) => void;
+  performAction: (runId: string, action: RunAction) => void;
 };
 
-/** Echo a side effect to chat + the toast stack, the gateway-less PWA pattern. */
-function echo(say: string, title: string, detail: string): void {
-  useChatStore.getState().say(say);
-  useNotificationsStore.getState().notify({
-    title,
-    detail,
-    kind: "transient",
-    command: "chat",
-  });
+const ACTION_LABEL: Record<RunAction, string> = {
+  pause: "Pause",
+  resume: "Resume",
+  cancel: "Cancel",
+  retry: "Retry",
+  health: "Health check",
+};
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function assertActionAccepted(action: RunAction, result: unknown): void {
+  const status = asRecord(result).status;
+  if (action === "resume" && status === "already_terminal") {
+    throw new Error("run already reached a terminal state");
+  }
+  if (action === "cancel" && status === "already-terminal") {
+    throw new Error("run already reached a terminal state");
+  }
+  if (action === "cancel" && status === "not-found") {
+    throw new Error("run was not found");
+  }
+}
+
+function actionSuccess(action: RunAction, runId: string, result: unknown): string {
+  if (action === "health") {
+    return `Health check for ${runId}: ${typeof result === "string" ? result : "available"}.`;
+  }
+  if (action === "retry") {
+    const newRunId = asRecord(result).runId;
+    return typeof newRunId === "string"
+      ? `Retry launched for ${runId} as ${newRunId}.`
+      : `Retry launched for ${runId}.`;
+  }
+  return `${ACTION_LABEL[action]} requested for ${runId}.`;
 }
 
 export const useRunsListStore = create<RunsListState>((set, get) => ({
-  // Sourced live from the gateway `runs` collection via `RunsListBridge`; starts
-  // empty until the first collection push.
   runs: [],
   loading: true,
   error: null,
@@ -75,15 +103,15 @@ export const useRunsListStore = create<RunsListState>((set, get) => ({
   search: DEFAULT_FILTERS.search,
   streamMode: "live",
   selectedRunId: null,
+  actingRunId: null,
+  actingAction: null,
+  actionFeedback: null,
+  rpc: null,
 
   setStatusFilter: (status) => set({ statusFilter: status }),
-
   setWorkflowFilter: (name) => set({ workflowFilter: name }),
-
   setAgeFilter: (bucket) => set({ ageFilter: bucket }),
-
   setSearch: (value) => set({ search: value }),
-
   clearFilters: () =>
     set({
       statusFilter: DEFAULT_FILTERS.status,
@@ -91,68 +119,65 @@ export const useRunsListStore = create<RunsListState>((set, get) => ({
       ageFilter: DEFAULT_FILTERS.age,
       search: DEFAULT_FILTERS.search,
     }),
-
   setStreamMode: (mode) => set({ streamMode: mode }),
-
   selectRun: (runId) => set({ selectedRunId: runId }),
 
-  rerun: (runId) => {
-    const run = get().runs.find((r) => r.runId === runId);
-    if (!run) return;
-    const id = shortRunId(run.runId);
-    // RunInspectView.startRerun: a demo acknowledgement, not a fabricated run.
-    echo(`Triggering rerun of ${run.workflowName} (${id})…`, "Run rerun", id);
-  },
+  performAction: (runId, action) => {
+    const { rpc, actingRunId, runs, connectionStatus } = get();
+    const run = runs.find((candidate) => candidate.runId === runId);
+    if (!run || !rpc || actingRunId !== null || connectionStatus !== "online") return;
+    if (action !== "health" && !runActionAvailability(run)[action]) return;
+    set({ actingRunId: runId, actingAction: action, actionFeedback: null });
 
-  approve: (runId) => {
-    const run = get().runs.find((r) => r.runId === runId);
-    if (!run || run.status !== "waiting") return;
-    set((state) => ({
-      runs: state.runs.map((r) =>
-        r.runId === runId ? { ...r, status: "running", lifecycleStatus: "running", blockedNodeLabel: undefined } : r,
-      ),
-    }));
-    const id = shortRunId(run.runId);
-    echo(
-      `Approved \`${run.blockedNodeLabel ?? "gate"}\` on ${run.workflowName} (${id}). Resuming…`,
-      "Approval granted",
-      `${run.blockedNodeLabel ?? "gate"} · ${id}`,
-    );
-  },
+    const request =
+      action === "pause"
+        ? rpc.pause(runId)
+        : action === "cancel"
+          ? rpc.cancel(runId)
+          : action === "resume"
+            ? rpc.resume(runId)
+            : action === "retry"
+              ? rpc.retry
+                ? rpc.retry(runId)
+                : rpc.resume(runId, true)
+              : rpc.health(runId);
 
-  deny: (runId) => {
-    const run = get().runs.find((r) => r.runId === runId);
-    if (!run || run.status !== "waiting") return;
-    set((state) => ({
-      runs: state.runs.map((r) =>
-        r.runId === runId
-          ? {
-              ...r,
-              status: "failed",
-              lifecycleStatus: "failed",
-              blockedNodeLabel: undefined,
-              errorText: `Denied at \`${run.blockedNodeLabel ?? "gate"}\`.`,
-            }
-          : r,
-      ),
-    }));
-    const id = shortRunId(run.runId);
-    echo(
-      `Denied \`${run.blockedNodeLabel ?? "gate"}\` on ${run.workflowName} (${id}). Run failed.`,
-      "Approval denied",
-      `${run.blockedNodeLabel ?? "gate"} · ${id}`,
-    );
-  },
-
-  resume: (runId) => {
-    const run = get().runs.find((r) => r.runId === runId);
-    if (!run || (run.status !== "failed" && run.status !== "cancelled")) return;
-    set((state) => ({
-      runs: state.runs.map((r) =>
-        r.runId === runId ? { ...r, status: "running", lifecycleStatus: "running", errorText: undefined } : r,
-      ),
-    }));
-    const id = shortRunId(run.runId);
-    echo(`Resumed ${run.workflowName} (${id}).`, "Run resumed", id);
+    void request
+      .then(async (result) => {
+        assertActionAccepted(action, result);
+        if (action !== "health") {
+          try {
+            await rpc.refetch();
+          } catch {
+            // The accepted lifecycle request remains authoritative.
+          }
+        }
+        set({
+          actingRunId: null,
+          actingAction: null,
+          actionFeedback: {
+            runId,
+            kind: "success",
+            message: actionSuccess(action, runId, result),
+          },
+        });
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        set({
+          actingRunId: null,
+          actingAction: null,
+          actionFeedback: {
+            runId,
+            kind: "error",
+            message: `${ACTION_LABEL[action]} failed for ${runId}: ${message}. Try again.`,
+          },
+        });
+      });
   },
 }));
+
+/** Install the real lifecycle RPC seam from the gateway-backed bridge. */
+export function bindRunActions(rpc: RunActionsRpc): void {
+  useRunsListStore.setState({ rpc });
+}

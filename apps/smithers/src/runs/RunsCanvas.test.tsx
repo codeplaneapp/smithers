@@ -14,7 +14,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { RunsCanvas } from "./RunsCanvas";
 import type { RunSummary } from "./runsList";
-import { useRunsListStore } from "./runsListStore";
+import { bindRunActions, useRunsListStore } from "./runsListStore";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -27,6 +27,48 @@ function renderCanvas(): HTMLElement {
   root = createRoot(container);
   act(() => root?.render(<RunsCanvas />));
   return container;
+}
+
+function run(runId: string, lifecycleStatus: string): RunSummary {
+  const status =
+    lifecycleStatus === "failed"
+      ? "failed"
+      : lifecycleStatus === "cancelled"
+        ? "cancelled"
+        : lifecycleStatus === "finished"
+          ? "finished"
+          : lifecycleStatus === "running"
+            ? "running"
+            : "waiting";
+  return {
+    id: runId,
+    runId,
+    workflowName: "release",
+    workflowKey: "release",
+    model: "",
+    status,
+    lifecycleStatus,
+    totalNodes: 0,
+    doneNodes: 0,
+    failedNodes: 0,
+    progress: 0,
+    elapsedLabel: "1m",
+    ageBucket: "today",
+  };
+}
+
+function click(target: Element | null) {
+  if (!target) throw new Error("Missing click target");
+  act(() => {
+    target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  });
+}
+
+async function flush() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
 }
 
 afterEach(() => {
@@ -192,5 +234,169 @@ describe("RunsCanvas collection states", () => {
 
     expect(canvas.querySelector('[data-testid="runs-landing-state"]')?.getAttribute("data-state")).toBe("filtered");
     expect(canvas.textContent).toContain("No runs match your filters.");
+  });
+  test("gates pause, resume, cancel, and retry controls by live lifecycle state", () => {
+    bindRunActions({
+      pause: async () => undefined,
+      resume: async () => undefined,
+      cancel: async () => undefined,
+      retry: async () => ({ runId: "retry-run" }),
+      health: async () => "healthy",
+      refetch: () => undefined,
+    });
+    useRunsListStore.setState({
+      runs: [
+        run("run-running", "running"),
+        run("run-paused", "paused"),
+        run("run-failed", "failed"),
+        run("run-finished", "finished"),
+        run("run-cancelled", "cancelled"),
+      ],
+      loading: false,
+      error: null,
+      connectionStatus: "online",
+    });
+    const canvas = renderCanvas();
+    const row = (id: string) => canvas.querySelector<HTMLElement>(`[data-run-id='${id}']`)!;
+
+    expect(row("run-running").querySelector("[data-testid='runs-pause']")).not.toBeNull();
+    expect(row("run-running").querySelector("[data-testid='runs-cancel']")).not.toBeNull();
+    expect(row("run-running").querySelector("[data-testid='runs-resume']")).toBeNull();
+    expect(row("run-paused").querySelector("[data-testid='runs-resume']")).not.toBeNull();
+    expect(row("run-paused").querySelector("[data-testid='runs-cancel']")).not.toBeNull();
+    expect(row("run-failed").querySelector("[data-testid='runs-retry']")).not.toBeNull();
+    expect(row("run-failed").querySelector("[data-testid='runs-cancel']")).toBeNull();
+    expect(row("run-finished").querySelector("[data-testid='runs-pause']")).toBeNull();
+    expect(row("run-finished").querySelector("[data-testid='runs-resume']")).toBeNull();
+    expect(row("run-finished").querySelector("[data-testid='runs-cancel']")).toBeNull();
+    expect(row("run-cancelled").querySelector("[data-testid='runs-resume']")).toBeNull();
+    expect(canvas.querySelectorAll("[data-testid='runs-health']")).toHaveLength(5);
+  });
+
+  test("uses real lifecycle seams, confirms destructive actions, and blocks duplicates", async () => {
+    const calls: string[] = [];
+    let releasePause!: () => void;
+    bindRunActions({
+      pause: (runId) =>
+        new Promise<void>((resolve) => {
+          calls.push(`pause:${runId}`);
+          releasePause = resolve;
+        }),
+      resume: async (runId) => {
+        calls.push(`resume:${runId}`);
+      },
+      cancel: async (runId) => {
+        calls.push(`cancel:${runId}`);
+      },
+      retry: async (runId) => {
+        calls.push(`retry:${runId}`);
+        return { runId: "run-retry" };
+      },
+      health: async (runId) => {
+        calls.push(`health:${runId}`);
+        return "healthy";
+      },
+      refetch: () => undefined,
+    });
+    useRunsListStore.setState({
+      runs: [run("run-running", "running"), run("run-paused", "paused"), run("run-failed", "failed")],
+      loading: false,
+      error: null,
+      connectionStatus: "online",
+    });
+    const canvas = renderCanvas();
+    const row = (id: string) => canvas.querySelector<HTMLElement>(`[data-run-id='${id}']`)!;
+
+    const pause = row("run-running").querySelector<HTMLButtonElement>("[data-testid='runs-pause']")!;
+    click(pause);
+    click(pause);
+    await flush();
+    expect(calls).toEqual(["pause:run-running"]);
+    expect(pause.disabled).toBe(true);
+    expect(row("run-paused").querySelector<HTMLButtonElement>("[data-testid='runs-resume']")!.disabled).toBe(true);
+    releasePause();
+    await flush();
+    expect(row("run-running").querySelector("[role='status']")?.textContent).toContain(
+      "Pause requested for run-running",
+    );
+
+    click(row("run-paused").querySelector("[data-testid='runs-resume']"));
+    await flush();
+    expect(calls).toContain("resume:run-paused");
+
+    const retry = row("run-failed").querySelector<HTMLButtonElement>("[data-testid='runs-retry']")!;
+    click(retry);
+    await flush();
+    expect(row("run-failed").querySelector("[role='alertdialog']")).not.toBeNull();
+    expect(document.activeElement).toBe(row("run-failed").querySelector("[data-testid='runs-confirm-retry']"));
+    click(row("run-failed").querySelector("[data-testid='runs-confirm-retry']"));
+    await flush();
+    expect(calls).toContain("retry:run-failed");
+
+    const cancel = row("run-running").querySelector<HTMLButtonElement>("[data-testid='runs-cancel']")!;
+    click(cancel);
+    await flush();
+    expect(calls).not.toContain("cancel:run-running");
+    const dialog = row("run-running").querySelector<HTMLElement>("[role='alertdialog']")!;
+    await act(async () => {
+      dialog.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+    expect(row("run-running").querySelector("[role='alertdialog']")).toBeNull();
+    expect(document.activeElement).toBe(cancel);
+
+    click(cancel);
+    await flush();
+    click(row("run-running").querySelector("[data-testid='runs-confirm-cancel']"));
+    await flush();
+    expect(calls).toContain("cancel:run-running");
+  });
+
+  test("announces lifecycle and health failures and allows recovery", async () => {
+    let pauseAttempts = 0;
+    let healthAttempts = 0;
+    bindRunActions({
+      pause: async () => {
+        pauseAttempts += 1;
+        if (pauseAttempts === 1) throw new Error("engine unavailable");
+      },
+      resume: async () => undefined,
+      cancel: async () => undefined,
+      retry: async () => ({ runId: "retry-run" }),
+      health: async () => {
+        healthAttempts += 1;
+        if (healthAttempts === 1) throw new Error("probe timed out");
+        return "running";
+      },
+      refetch: () => undefined,
+    });
+    useRunsListStore.setState({
+      runs: [run("run-running", "running")],
+      loading: false,
+      error: null,
+      connectionStatus: "online",
+    });
+    const canvas = renderCanvas();
+    const pause = () => canvas.querySelector("[data-testid='runs-pause']");
+    const health = () => canvas.querySelector("[data-testid='runs-health']");
+
+    click(pause());
+    await flush();
+    expect(canvas.querySelector("[role='alert']")?.textContent).toContain(
+      "Pause failed for run-running: engine unavailable. Try again.",
+    );
+    expect((pause() as HTMLButtonElement).disabled).toBe(false);
+    click(pause());
+    await flush();
+    expect(pauseAttempts).toBe(2);
+
+    click(health());
+    await flush();
+    expect(canvas.querySelector("[role='alert']")?.textContent).toContain(
+      "Health check failed for run-running: probe timed out. Try again.",
+    );
+    click(health());
+    await flush();
+    expect(healthAttempts).toBe(2);
+    expect(canvas.querySelector("[role='status']")?.textContent).toContain("Health check for run-running: running.");
   });
 });

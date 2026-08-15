@@ -52,6 +52,7 @@ export type InMemoryGateway = {
     approvalSubmitWaiters: Array<() => void>;
   };
   launches: Array<{ workflow: string; input: unknown; options?: unknown }>;
+  runActions: Array<{ action: "pause" | "resume" | "cancel" | "retry"; runId: string; newRunId?: string }>;
   approvalsSubmitted: Array<Record<string, unknown>>;
   /** Every rewindRun body the UI POSTed, in order. */
   rewinds: Array<Record<string, unknown>>;
@@ -158,6 +159,34 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
         return fail(500, "BOOM", `Forced failure for ${path}`);
       }
 
+      // POST /v1/rpc/runs.rerun (copy the source input into a fresh run)
+      if (path === "/v1/rpc/runs.rerun" && request.method === "POST") {
+        const body = (await request.json().catch(() => ({}))) as { runId?: string };
+        const source = state.runs.find((row) => row.runId === body.runId);
+        if (!source) {
+          return NativeResponse.json(
+            {
+              type: "res",
+              id: "in-memory",
+              ok: false,
+              error: { code: "NOT_FOUND", message: `No run ${body.runId ?? ""}` },
+            },
+            { status: 404 },
+          );
+        }
+        const retryCount = gateway.runActions.filter((entry) => entry.action === "retry").length;
+        const newRunId = `${body.runId}-rerun-${retryCount + 1}`;
+        state.runs = [{ ...source, runId: newRunId, status: "running", createdAtMs: Date.now() }, ...state.runs];
+        gateway.runActions.push({ action: "retry", runId: body.runId!, newRunId });
+        broadcast(["runs"]);
+        return NativeResponse.json({
+          type: "res",
+          id: "in-memory",
+          ok: true,
+          payload: { runId: newRunId, workflow: source.workflowKey },
+        });
+      }
+
       // GET /v1/api/runs
       if (path === "/v1/api/runs" && request.method === "GET") {
         if (state.runsDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, state.runsDelayMs));
@@ -169,6 +198,47 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
         const runId = decodeURIComponent(runMatch[1]!);
         const run = state.runs.find((row) => row.runId === runId);
         return run ? ok(run) : fail(404, "NOT_FOUND", `No run ${runId}`);
+      }
+      // POST /v1/api/runs/:id/pause
+      const pauseMatch = path.match(/^\/v1\/api\/runs\/([^/]+)\/pause$/);
+      if (pauseMatch && request.method === "POST") {
+        const runId = decodeURIComponent(pauseMatch[1]!);
+        const run = state.runs.find((row) => row.runId === runId);
+        gateway.runActions.push({ action: "pause", runId });
+        if (!run || run.status !== "running") {
+          return fail(409, "RUN_NOT_ACTIVE", "Run is not currently executing");
+        }
+        run.status = "paused";
+        const emitted = broadcast(["runs"]);
+        return ok({ runId, status: "pausing" }, { seq: emitted });
+      }
+      // POST /v1/api/runs/:id/resume
+      const resumeMatch = path.match(/^\/v1\/api\/runs\/([^/]+)\/resume$/);
+      if (resumeMatch && request.method === "POST") {
+        const runId = decodeURIComponent(resumeMatch[1]!);
+        const run = state.runs.find((row) => row.runId === runId);
+        gateway.runActions.push({ action: "resume", runId });
+        if (!run) return fail(404, "NOT_FOUND", `No run ${runId}`);
+        if (run.status === "finished" || run.status === "failed" || run.status === "cancelled") {
+          return ok({ runId, status: "already_terminal" });
+        }
+        run.status = "running";
+        const emitted = broadcast(["runs"]);
+        return ok({ runId, status: "resume_requested" }, { seq: emitted });
+      }
+      // POST /v1/api/runs/:id/cancel
+      const cancelMatch = path.match(/^\/v1\/api\/runs\/([^/]+)\/cancel$/);
+      if (cancelMatch && request.method === "POST") {
+        const runId = decodeURIComponent(cancelMatch[1]!);
+        const run = state.runs.find((row) => row.runId === runId);
+        gateway.runActions.push({ action: "cancel", runId });
+        if (!run) return ok({ runId, won: false, status: "not-found", repaired: false });
+        if (run.status === "finished" || run.status === "failed" || run.status === "cancelled") {
+          return ok({ runId, won: false, status: "already-terminal", repaired: false });
+        }
+        run.status = "cancelled";
+        const emitted = broadcast(["runs"]);
+        return ok({ runId, won: true, status: "cancelled", repaired: false }, { seq: emitted });
       }
       // GET /v1/api/runs/:id/hijack-candidates
       const hijackCandidatesMatch = path.match(/^\/v1\/api\/runs\/([^/]+)\/hijack-candidates$/);
@@ -306,6 +376,7 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
     },
     state,
     launches: [],
+    runActions: [],
     approvalsSubmitted: [],
     rewinds: [],
     cronsCreated: [],

@@ -1,4 +1,5 @@
 import "./approvals.css";
+import { useEffect, useRef } from "react";
 import {
   filterPending,
   formatTimestamp,
@@ -121,13 +122,30 @@ function PendingDetail({ gate }: { gate: ApprovalGate }) {
   const requestDeny = useApprovalsStore((state) => state.requestDeny);
   const cancelDeny = useApprovalsStore((state) => state.cancelDeny);
   const confirmDeny = useApprovalsStore((state) => state.confirmDeny);
+  const denyButtonRef = useRef<HTMLButtonElement>(null);
+  const confirmButtonRef = useRef<HTMLButtonElement>(null);
 
   const label = gateLabel(gate);
   const payload = prettyJson(gate.payload);
   const confirming = pendingDenyId === gate.id;
-  const busy = actingId === gate.id;
+  const busy = actingId !== null;
   const elapsed = waitTime(gate.requestedAtMs, nowMs);
   const waitState = waitTimeState(gate.requestedAtMs, nowMs);
+  const restoreDenyFocus = useRef(false);
+
+  useEffect(() => {
+    if (confirming) {
+      confirmButtonRef.current?.focus();
+    } else if (restoreDenyFocus.current) {
+      restoreDenyFocus.current = false;
+      denyButtonRef.current?.focus();
+    }
+  }, [confirming]);
+
+  const dismissDeny = () => {
+    restoreDenyFocus.current = true;
+    cancelDeny();
+  };
 
   return (
     <div className="appr-detail-scroll" data-testid="approvals-detail">
@@ -177,27 +195,47 @@ function PendingDetail({ gate }: { gate: ApprovalGate }) {
         className="field-input appr-note"
         data-testid="approvals-note"
         placeholder="Add a decision note (optional)…"
+        aria-label={`Decision note for ${label} on run ${gate.runId}`}
         value={note}
         onChange={(event) => setNote(gate.id, event.target.value)}
         disabled={busy}
       />
 
       {confirming ? (
-        <div className="appr-confirm" data-testid="approvals-deny-confirm">
-          <div className="appr-confirm-msg">
+        <div
+          className="appr-confirm"
+          data-testid="approvals-deny-confirm"
+          role="alertdialog"
+          aria-labelledby={`approvals-deny-title-${gate.id}`}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            event.stopPropagation();
+            dismissDeny();
+          }}
+        >
+          <div className="appr-confirm-msg" id={`approvals-deny-title-${gate.id}`}>
             Deny approval for <b>{label}</b> on run <b>{shortRunId(gate.runId)}</b>? This will fail the waiting gate.
           </div>
           <div className="appr-actions">
             <button
               className="btn btn-deny"
+              ref={confirmButtonRef}
               type="button"
               data-testid="approvals-deny-commit"
+              aria-label={`Confirm denial of ${label} for run ${gate.runId}`}
               onClick={() => confirmDeny(gate.id)}
               disabled={busy}
             >
               Deny Approval
             </button>
-            <button className="btn" type="button" onClick={cancelDeny} disabled={busy}>
+            <button
+              className="btn"
+              type="button"
+              aria-label={`Cancel denial of ${label} for run ${gate.runId}`}
+              onClick={dismissDeny}
+              disabled={busy}
+            >
               Cancel
             </button>
           </div>
@@ -208,15 +246,18 @@ function PendingDetail({ gate }: { gate: ApprovalGate }) {
             className="btn btn-brand"
             type="button"
             data-testid="approvals-approve"
+            aria-label={`Approve ${label} for run ${gate.runId}`}
             onClick={() => approve(gate.id)}
             disabled={busy}
           >
             Approve
           </button>
           <button
+            ref={denyButtonRef}
             className="btn btn-deny"
             type="button"
             data-testid="approvals-deny"
+            aria-label={`Deny ${label} for run ${gate.runId}`}
             onClick={() => requestDeny(gate.id)}
             disabled={busy}
           >
@@ -284,7 +325,13 @@ export function ApprovalsCanvas() {
   const selectedId = useApprovalsStore((state) => state.selectedId);
   const loading = useApprovalsStore((state) => state.loading);
   const error = useApprovalsStore((state) => state.error);
+  const actionFeedback = useApprovalsStore((state) => state.actionFeedback);
   const setTab = useApprovalsStore((state) => state.setTab);
+  const feedbackRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (actionFeedback) feedbackRef.current?.focus();
+  }, [actionFeedback]);
 
   const pending = filterPending(gates);
   const history = orderHistory(decisions);
@@ -315,6 +362,18 @@ export function ApprovalsCanvas() {
       </header>
 
       <div className="appr-body">
+        {actionFeedback ? (
+          <div
+            ref={feedbackRef}
+            className={`appr-feedback is-${actionFeedback.kind}`}
+            role={actionFeedback.kind === "success" ? "status" : "alert"}
+            aria-live={actionFeedback.kind === "success" ? "polite" : "assertive"}
+            tabIndex={-1}
+            data-testid="approvals-action-feedback"
+          >
+            {actionFeedback.message}
+          </div>
+        ) : null}
         {error ? (
           <div className="appr-status" data-testid="approvals-unavailable">
             <ShieldIcon />

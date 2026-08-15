@@ -35,7 +35,7 @@ export type { ApprovalsTab };
 type ApprovalRpc = {
   /**
    * Submit a real approval decision. Resolves on success; rejects on RPC
-   * failure (the store suppresses an `AlreadyDecided` reject as a benign no-op).
+   * failure (the store distinguishes `AlreadyDecided` as a stale request).
    */
   submit: (vars: {
     runId: string;
@@ -56,6 +56,8 @@ type ApprovalsState = {
   pendingDenyId: string | null;
   /** The gate currently being approved/denied, for the in-flight row/button state. */
   actingId: string | null;
+  /** Accessible result of the latest operator action. */
+  actionFeedback: { kind: "success" | "error" | "stale"; message: string } | null;
   /** Per-gate draft decision note, mirroring ApprovalCard's noteByRun. */
   noteById: Record<string, string>;
   nowMs: number;
@@ -98,8 +100,16 @@ export function syncSelection(state: {
   return ids.length > 0 ? ids[0] : null;
 }
 
-/** True when an RPC reject is the idempotent "already decided" case to suppress. */
+/** True when an RPC reject reports that another operator already resolved it. */
 function isAlreadyDecided(error: unknown): boolean {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "AlreadyDecided"
+  ) {
+    return true;
+  }
   const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
   return /already.?decided/i.test(message);
 }
@@ -111,6 +121,7 @@ export const useApprovalsStore = create<ApprovalsState>((set, get) => ({
   selectedId: null,
   pendingDenyId: null,
   actingId: null,
+  actionFeedback: null,
   noteById: {},
   nowMs: Date.now(),
   loading: true,
@@ -133,8 +144,9 @@ export const useApprovalsStore = create<ApprovalsState>((set, get) => ({
     const gate = gates.find((entry) => entry.id === id);
     if (!gate || gate.status !== "pending") return;
     if (!rpc) return;
+    if (get().actingId !== null) return;
 
-    set({ actingId: id });
+    set({ actingId: id, actionFeedback: null });
     const note = (noteById[id] ?? "").trim();
 
     void rpc
@@ -144,9 +156,13 @@ export const useApprovalsStore = create<ApprovalsState>((set, get) => ({
         iteration: gate.iteration ?? 0,
         decision: { approved: true, note: note === "" ? undefined : note },
       })
-      .then(() => rpc.refetch())
-      .catch((error: unknown) => {
-        if (!isAlreadyDecided(error)) throw error;
+      .then(async () => {
+        try {
+          await rpc.refetch();
+        } catch {
+          // The decision was accepted. Keep it non-actionable even if the
+          // pending-list refresh fails; polling can reconcile later.
+        }
       })
       .then(() => {
         // Optimistic History move + chat/toast echo AFTER the RPC lands.
@@ -176,7 +192,16 @@ export const useApprovalsStore = create<ApprovalsState>((set, get) => ({
           decisions: nextDecisions,
           selectedId: state.selectedId === id ? null : state.selectedId,
         });
-        set({ gates: nextGates, decisions: nextDecisions, selectedId, actingId: null });
+        set({
+          gates: nextGates,
+          decisions: nextDecisions,
+          selectedId,
+          actingId: null,
+          actionFeedback: {
+            kind: "success",
+            message: `Approved ${gateLabel(gate)} for run ${shortRunId(gate.runId)}.`,
+          },
+        });
 
         const label = gateLabel(gate);
         useChatStore
@@ -193,9 +218,41 @@ export const useApprovalsStore = create<ApprovalsState>((set, get) => ({
         });
         void stillGate;
       })
-      .catch(() => {
-        // A genuine RPC failure: clear the in-flight flag, leave the gate pending.
-        set({ actingId: null });
+      .catch(async (error: unknown) => {
+        if (isAlreadyDecided(error)) {
+          try {
+            await rpc.refetch();
+          } catch {
+            // Remove the known-stale gate locally even when refresh is down.
+          }
+          set((state) => {
+            const gates = state.gates.filter((entry) => entry.id !== id);
+            const selectedId = syncSelection({
+              ...state,
+              gates,
+              selectedId: state.selectedId === id ? null : state.selectedId,
+            });
+            return {
+              gates,
+              selectedId,
+              actingId: null,
+              pendingDenyId: null,
+              actionFeedback: {
+                kind: "stale",
+                message: `${gateLabel(gate)} was already resolved elsewhere and was removed from the pending queue.`,
+              },
+            };
+          });
+          return;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        set({
+          actingId: null,
+          actionFeedback: {
+            kind: "error",
+            message: `Could not approve ${gateLabel(gate)}: ${message}. Try again.`,
+          },
+        });
       });
   },
 
@@ -214,8 +271,9 @@ export const useApprovalsStore = create<ApprovalsState>((set, get) => ({
       set({ pendingDenyId: null });
       return;
     }
+    if (get().actingId !== null) return;
 
-    set({ actingId: id });
+    set({ actingId: id, actionFeedback: null });
     const note = (noteById[id] ?? "").trim();
 
     void rpc
@@ -225,9 +283,13 @@ export const useApprovalsStore = create<ApprovalsState>((set, get) => ({
         iteration: gate.iteration ?? 0,
         decision: { approved: false, note: note === "" ? undefined : note },
       })
-      .then(() => rpc.refetch())
-      .catch((error: unknown) => {
-        if (!isAlreadyDecided(error)) throw error;
+      .then(async () => {
+        try {
+          await rpc.refetch();
+        } catch {
+          // The decision was accepted. Keep it non-actionable even if the
+          // pending-list refresh fails; polling can reconcile later.
+        }
       })
       .then(() => {
         const state = get();
@@ -262,6 +324,10 @@ export const useApprovalsStore = create<ApprovalsState>((set, get) => ({
           selectedId,
           actingId: null,
           pendingDenyId: null,
+          actionFeedback: {
+            kind: "success",
+            message: `Denied ${gateLabel(gate)} for run ${shortRunId(gate.runId)}.`,
+          },
         });
 
         const label = gateLabel(gate);
@@ -278,8 +344,42 @@ export const useApprovalsStore = create<ApprovalsState>((set, get) => ({
           command: "chat",
         });
       })
-      .catch(() => {
-        set({ actingId: null, pendingDenyId: null });
+      .catch(async (error: unknown) => {
+        if (isAlreadyDecided(error)) {
+          try {
+            await rpc.refetch();
+          } catch {
+            // Remove the known-stale gate locally even when refresh is down.
+          }
+          set((state) => {
+            const gates = state.gates.filter((entry) => entry.id !== id);
+            const selectedId = syncSelection({
+              ...state,
+              gates,
+              selectedId: state.selectedId === id ? null : state.selectedId,
+            });
+            return {
+              gates,
+              selectedId,
+              actingId: null,
+              pendingDenyId: null,
+              actionFeedback: {
+                kind: "stale",
+                message: `${gateLabel(gate)} was already resolved elsewhere and was removed from the pending queue.`,
+              },
+            };
+          });
+          return;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        set({
+          actingId: null,
+          pendingDenyId: null,
+          actionFeedback: {
+            kind: "error",
+            message: `Could not deny ${gateLabel(gate)}: ${message}. Try again.`,
+          },
+        });
       });
   },
 }));
