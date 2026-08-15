@@ -4,6 +4,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   anthropicHeaderUsage,
+  accountUsageScore,
+  accountQuotaBlock,
+  clearAccountQuotaLimit,
   claudeOauthUsage,
   codexWhamUsage,
   decodeJwtClaims,
@@ -14,16 +17,19 @@ import {
   humanizeDurationShort,
   kimiCodeUsage,
   openaiHeaderUsage,
+  orderAccountsByUsage,
   parseAnthropicRateLimitHeaders,
   parseCodexUsage,
   parseDurationSeconds,
   parseKimiUsage,
   parseOpenAiRateLimitHeaders,
   readUsageCache,
+  readAccountQuotaState,
   readClaudeCredentials,
   readCodexCredentials,
   readKimiCredentials,
   refreshKimiToken,
+  recordAccountQuotaLimit,
   writeUsageCache,
 } from "../src/index.js";
 
@@ -915,6 +921,83 @@ describe("getUsageForAccounts cache decisions", () => {
     expect(km).toMatchObject({ stale: true, error: "kimi-cached" });
     expect(cl?.stale).toBe(false);
     expect(cl?.source).toBe("oauth");
+  });
+});
+
+describe("quota-aware account selection", () => {
+  test("prefers model-specific headroom", () => {
+    const env = { SMITHERS_HOME: tempDir() };
+    const entry = (label, fiveHour, weekly, fable) => ({
+      identity: { provider: "claude-code", configDir: `/${label}` },
+      report: {
+        accountLabel: label,
+        provider: "claude-code",
+        authMode: "subscription",
+        source: "oauth",
+        stale: false,
+        estimate: false,
+        fetchedAt: "2026-08-15T00:00:00Z",
+        windows: [
+          { id: "5h", label: "5-hour session", unit: "percent", usedPercent: fiveHour },
+          { id: "weekly", label: "weekly", unit: "percent", usedPercent: weekly },
+          { id: "weekly-fable", label: "weekly (Fable, 50% plan cap)", unit: "percent", usedPercent: fable },
+        ],
+      },
+    });
+    const a = entry("a", 10, 20, 90);
+    const b = entry("b", 20, 30, 40);
+    writeUsageCache({ version: 1, entries: { a, b } }, env);
+    const accounts = [
+      { label: "a", provider: "claude-code", configDir: "/a" },
+      { label: "b", provider: "claude-code", configDir: "/b" },
+    ];
+    expect(orderAccountsByUsage(accounts, { env, modelFor: () => "claude-fable-5" }).map((row) => row.label)).toEqual([
+      "b",
+      "a",
+    ]);
+    expect(accountUsageScore(a.report, "claude-opus-5")).toBe(20);
+    expect(
+      accountUsageScore(
+        { ...a.report, windows: a.report.windows.filter((window) => window.id !== "weekly-fable") },
+        "claude-fable-5",
+      ),
+    ).toBe(40);
+  });
+
+  test("persists quota blocks and orders the soonest reset first", () => {
+    const env = { SMITHERS_HOME: tempDir() };
+    const nowMs = Date.parse("2026-08-15T00:00:00Z");
+    recordAccountQuotaLimit("a", { env, nowMs, untilMs: nowMs + 20_000 });
+    recordAccountQuotaLimit("b", { env, nowMs, untilMs: nowMs + 10_000 });
+    const accounts = [
+      { label: "a", provider: "claude-code", configDir: "/a" },
+      { label: "b", provider: "claude-code", configDir: "/b" },
+      { label: "c", provider: "claude-code", configDir: "/c" },
+    ];
+    expect(orderAccountsByUsage(accounts, { env, nowMs }).map((row) => row.label)).toEqual(["c", "b", "a"]);
+    expect(readAccountQuotaState(env, nowMs).entries.b.untilMs).toBe(nowMs + 10_000);
+    expect(clearAccountQuotaLimit("b", env)).toBe(true);
+  });
+
+  test("keeps model quota blocks separate from shared account blocks", () => {
+    const env = { SMITHERS_HOME: tempDir() };
+    const nowMs = Date.parse("2026-08-15T00:00:00Z");
+    recordAccountQuotaLimit("a", {
+      env,
+      nowMs,
+      untilMs: nowMs + 10_000,
+      model: "claude-fable-5",
+      scope: "model",
+    });
+    const entries = readAccountQuotaState(env, nowMs).entries;
+    expect(accountQuotaBlock(entries, "a", "claude-fable-5")?.untilMs).toBe(nowMs + 10_000);
+    expect(accountQuotaBlock(entries, "a", "claude-opus-5")).toBeUndefined();
+    recordAccountQuotaLimit("a", { env, nowMs, untilMs: nowMs + 20_000 });
+    expect(accountQuotaBlock(readAccountQuotaState(env, nowMs).entries, "a", "claude-opus-5")?.untilMs).toBe(
+      nowMs + 20_000,
+    );
+    expect(clearAccountQuotaLimit("a", env)).toBe(true);
+    expect(Object.keys(readAccountQuotaState(env, 0).entries)).toEqual([]);
   });
 });
 

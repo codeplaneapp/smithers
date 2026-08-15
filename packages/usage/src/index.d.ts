@@ -39,6 +39,8 @@ type UsageWindow$5 = {
     remaining?: number;
     /** ISO-8601 timestamp when this window rolls over. */
     resetsAt?: string;
+    /** Share of the plan available to this model-specific window. */
+    capPercent?: number;
 };
 
 /**
@@ -46,7 +48,7 @@ type UsageWindow$5 = {
  * utilization, API-key headers, local estimate — produces this same shape so the
  * CLI, gateway, and UI render one model.
  */
-type UsageReport$5 = {
+type UsageReport$6 = {
     /** The account's label in `~/.smithers/accounts.json`. */
     accountLabel: string;
     /** The account's provider. */
@@ -73,6 +75,10 @@ type UsageReport$5 = {
     estimate: boolean;
     /** Human-readable reason when `source` is `none` or a probe failed. */
     error?: string;
+    /** Non-secret signed-in subscription identity added by the CLI. */
+    signedInAs?: string;
+    /** Registered labels that resolve to the same provider subscription. */
+    duplicateOf?: string[];
 };
 
 /** @typedef {import("@smthrs/accounts").Account} Account */
@@ -88,9 +94,9 @@ type UsageReport$5 = {
  * @param {Account} account
  * @returns {Promise<UsageReport>}
  */
-declare function getAccountUsage(account: Account$3): Promise<UsageReport$4>;
-type Account$3 = _smthrs_accounts.Account;
-type UsageReport$4 = UsageReport$5;
+declare function getAccountUsage(account: Account$4): Promise<UsageReport$5>;
+type Account$4 = _smthrs_accounts.Account;
+type UsageReport$5 = UsageReport$6;
 
 /**
  * Gathers usage for many accounts in parallel, served through the on-disk cache.
@@ -101,13 +107,13 @@ type UsageReport$4 = UsageReport$5;
  * @param {{ fresh?: boolean; env?: NodeJS.ProcessEnv; nowMs?: number }} [options]
  * @returns {Promise<UsageReport[]>}
  */
-declare function getUsageForAccounts(accounts: Account$2[], options?: {
+declare function getUsageForAccounts(accounts: Account$3[], options?: {
     fresh?: boolean;
     env?: NodeJS.ProcessEnv;
     nowMs?: number;
-}): Promise<UsageReport$3[]>;
-type Account$2 = _smthrs_accounts.Account;
-type UsageReport$3 = UsageReport$5;
+}): Promise<UsageReport$4[]>;
+type Account$3 = _smthrs_accounts.Account;
+type UsageReport$4 = UsageReport$6;
 
 /** @typedef {import("@smthrs/accounts").Account} Account */
 /** @typedef {import("./UsageReport.ts").UsageReport} UsageReport */
@@ -133,11 +139,11 @@ type UsageReport$3 = UsageReport$5;
  * @param {{ nowIso?: string }} [options]
  * @returns {UsageReport}
  */
-declare function buildUsageReport(account: Account$1, probe: UsageProbe$6, options?: {
+declare function buildUsageReport(account: Account$2, probe: UsageProbe$6, options?: {
     nowIso?: string;
-}): UsageReport$2;
-type Account$1 = _smthrs_accounts.Account;
-type UsageReport$2 = UsageReport$5;
+}): UsageReport$3;
+type Account$2 = _smthrs_accounts.Account;
+type UsageReport$3 = UsageReport$6;
 /**
  * The partial result an adapter returns. The dispatcher wraps it with the
  * account identity and timestamp to form a complete {@link UsageReport}.
@@ -163,8 +169,8 @@ type UsageProbe$6 = {
  * @param {number} [nowMs]
  * @returns {string}
  */
-declare function formatUsageReports(reports: UsageReport$1[], nowMs?: number): string;
-type UsageReport$1 = UsageReport$5;
+declare function formatUsageReports(reports: UsageReport$2[], nowMs?: number): string;
+type UsageReport$2 = UsageReport$6;
 
 /**
  * Formats an ISO reset timestamp as a relative "resets in" string. Returns an
@@ -290,32 +296,6 @@ declare function parseDurationSeconds(value: string | null | undefined): number 
 declare function decodeJwtClaims(token: string | null | undefined): Record<string, unknown>;
 
 /**
- * Reads the Claude Code subscription OAuth token for an account. Tries the
- * account's `configDir/.credentials.json` first (the cross-platform location
- * when `CLAUDE_CONFIG_DIR` is set), then the macOS Keychain: Claude Code keys
- * per-config-dir logins as `Claude Code-credentials-<first 8 hex of
- * sha256(configDir)>`, so an isolated account's item is tried before the
- * unsuffixed default-install item. For accounts with a `configDir`, the
- * unsuffixed item is NOT used as a fallback — it belongs to the default
- * `~/.claude` login and would silently attribute another account's token.
- *
- * Returns `null` when no credential can be read, so the adapter degrades to a
- * "none" report rather than throwing. The token is returned only to mint an
- * outbound Authorization header; callers must never log or persist it.
- *
- * @param {{ configDir?: string }} account
- * @param {NodeJS.Platform} [platform]
- * @param {typeof spawnSync} [spawn] Injectable for tests; defaults to `node:child_process` `spawnSync`.
- * @returns {{ accessToken: string; expiresAt?: number } | null}
- */
-declare function readClaudeCredentials(account: {
-    configDir?: string;
-}, platform?: NodeJS.Platform, spawn?: typeof spawnSync): {
-    accessToken: string;
-    expiresAt?: number;
-} | null;
-
-/**
  * Reads the Codex ChatGPT-subscription OAuth token for an account from
  * `configDir/auth.json` (the per-account `CODEX_HOME`). The ChatGPT account id
  * comes from `tokens.account_id`, or failing that the `chatgpt_account_id`
@@ -398,6 +378,40 @@ type KimiRefreshFailure = {
      */
     reauth: boolean;
 };
+
+/**
+ * Reads the Claude Code subscription OAuth token for an account. Tries the
+ * account's `configDir/.credentials.json` first (the cross-platform location
+ * when `CLAUDE_CONFIG_DIR` is set), then the macOS Keychain: Claude Code keys
+ * per-config-dir logins as `Claude Code-credentials-<first 8 hex of
+ * sha256(configDir)>`, so an isolated account's item is tried before the
+ * unsuffixed default-install item. For accounts with a `configDir`, the
+ * unsuffixed item is NOT used as a fallback — it belongs to the default
+ * `~/.claude` login and would silently attribute another account's token.
+ *
+ * Returns `null` when no credential can be read, so the adapter degrades to a
+ * "none" report rather than throwing. The token is returned only to mint an
+ * outbound Authorization header; callers must never log or persist it.
+ *
+ * @param {{ configDir?: string }} account
+ * @param {NodeJS.Platform} [platform]
+ * @param {typeof spawnSync} [spawn] Injectable for tests; defaults to `node:child_process` `spawnSync`.
+ * @returns {{ accessToken: string; expiresAt?: number; subscriptionType?: string } | null}
+ */
+declare function readClaudeCredentials(account: {
+    configDir?: string;
+}, platform?: NodeJS.Platform, spawn?: typeof spawnSync): {
+    accessToken: string;
+    expiresAt?: number;
+    subscriptionType?: string;
+} | null;
+/**
+ * Claude Code's per-config-dir Keychain item suffix.
+ *
+ * @param {string} configDir
+ * @returns {string}
+ */
+declare function claudeKeychainSuffix(configDir: string): string;
 
 /**
  * Probes the Claude Code subscription usage endpoint for an account's 5-hour and
@@ -512,7 +526,7 @@ declare const PUBLISHED_CAPS: Record<string, {
 
 /** @typedef {import("./UsageReport.ts").UsageReport} UsageReport */
 /** @typedef {import("@smthrs/accounts").Account} Account */
-/** @typedef {{ provider: Account["provider"]; configDir?: string; model?: string; apiKeyHash?: string }} UsageCacheAccountIdentity */
+/** @typedef {{ provider: Account["provider"]; configDir?: string; model?: string; apiKeyHash?: string; credentialHash?: string }} UsageCacheAccountIdentity */
 /** @typedef {{ version: 1; entries: Record<string, { identity?: UsageCacheAccountIdentity; report: UsageReport }> }} UsageCacheFile */
 /**
  * Path to the on-disk usage cache. Lives next to `accounts.json` under the
@@ -538,20 +552,102 @@ declare function readUsageCache(env?: NodeJS.ProcessEnv): UsageCacheFile;
  * @returns {string} the path written
  */
 declare function writeUsageCache(contents: UsageCacheFile, env?: NodeJS.ProcessEnv): string;
-type UsageReport = UsageReport$5;
-type Account = _smthrs_accounts.Account;
+/** @param {string} label @param {NodeJS.ProcessEnv} [env] */
+declare function clearAccountUsageCache(label: string, env?: NodeJS.ProcessEnv): boolean;
+type UsageReport$1 = UsageReport$6;
+type Account$1 = _smthrs_accounts.Account;
 type UsageCacheAccountIdentity = {
-    provider: Account["provider"];
+    provider: Account$1["provider"];
     configDir?: string;
     model?: string;
     apiKeyHash?: string;
+    credentialHash?: string;
 };
 type UsageCacheFile = {
     version: 1;
     entries: Record<string, {
         identity?: UsageCacheAccountIdentity;
-        report: UsageReport;
+        report: UsageReport$1;
     }>;
 };
 
-export { PUBLISHED_CAPS, type UsageReport$5 as UsageReport, type UsageWindow$5 as UsageWindow, anthropicHeaderUsage, buildUsageReport, claudeOauthUsage, codexWhamUsage, decodeJwtClaims, formatRelativeReset, formatUsageReports, getAccountUsage, getUsageForAccounts, googleUsage, humanizeDurationShort, kimiCodeUsage, openaiHeaderUsage, parseAnthropicRateLimitHeaders, parseClaudeOauthUsage, parseCodexUsage, parseDurationSeconds, parseKimiUsage, parseOpenAiRateLimitHeaders, publishedCapForTier, readClaudeCredentials, readCodexCredentials, readKimiCredentials, readUsageCache, refreshKimiToken, usageCachePath, writeUsageCache };
+/** @param {NodeJS.ProcessEnv} [env] */
+declare function accountQuotaStatePath(env?: NodeJS.ProcessEnv): string;
+/**
+ * Read persisted account quota blocks. Expired and malformed entries are
+ * ignored so an old marker never disables an account permanently.
+ *
+ * @param {NodeJS.ProcessEnv} [env]
+ * @param {number} [nowMs]
+ * @returns {{ version: 1; entries: Record<string, { untilMs: number; model?: string; observedAt: string }> }}
+ */
+declare function readAccountQuotaState(env?: NodeJS.ProcessEnv, nowMs?: number): {
+    version: 1;
+    entries: Record<string, {
+        untilMs: number;
+        model?: string;
+        observedAt: string;
+    }>;
+};
+/**
+ * Persist a provider-reported quota reset for an account. A short bounded TTL
+ * is used when the provider omits a reset, which prevents immediate hammering
+ * without permanently disabling the account.
+ *
+ * @param {string} label
+ * @param {{ untilMs?: number; model?: string; scope?: "shared" | "model"; nowMs?: number; env?: NodeJS.ProcessEnv }} [options]
+ */
+declare function recordAccountQuotaLimit(label: string, options?: {
+    untilMs?: number;
+    model?: string;
+    scope?: "shared" | "model";
+    nowMs?: number;
+    env?: NodeJS.ProcessEnv;
+}): {
+    untilMs: number;
+    model?: string;
+    observedAt: string;
+};
+/** @param {string} label @param {NodeJS.ProcessEnv} [env] */
+declare function clearAccountQuotaLimit(label: string, env?: NodeJS.ProcessEnv): boolean;
+/**
+ * Find the quota block that applies to a model. Shared blocks apply to every
+ * model. Fable, Opus, and Sonnet blocks apply only to their own family. When
+ * both apply, the later reset is when the account becomes usable.
+ *
+ * @param {ReturnType<typeof readAccountQuotaState>["entries"]} entries
+ * @param {string} label
+ * @param {string | undefined} model
+ */
+declare function accountQuotaBlock(entries: ReturnType<typeof readAccountQuotaState>["entries"], label: string, model: string | undefined): {
+    untilMs: number;
+    model?: string;
+    observedAt: string;
+};
+/** @param {UsageReport | undefined} report @param {string | undefined} model */
+declare function accountUsageScore(report: UsageReport | undefined, model: string | undefined): number;
+/**
+ * Order registered accounts from most headroom to least. Persisted quota-dead
+ * accounts sort last, with the soonest reset first. The caller can replace
+ * those rows with no-network quota sentinels instead of probing them again.
+ *
+ * @param {Account[]} accounts
+ * @param {{ env?: NodeJS.ProcessEnv; modelFor?: (account: Account) => string | undefined; nowMs?: number; tieBreak?: Map<string, number> }} [options]
+ */
+declare function orderAccountsByUsage(accounts: Account[], options?: {
+    env?: NodeJS.ProcessEnv;
+    modelFor?: (account: Account) => string | undefined;
+    nowMs?: number;
+    tieBreak?: Map<string, number>;
+}): {
+    label: string;
+    provider: "claude-code" | "antigravity" | "codex" | "kimi" | "anthropic-api" | "openai-api" | "gemini-api";
+    configDir?: string;
+    apiKey?: string;
+    model?: string;
+    addedAt?: string;
+}[];
+type Account = _smthrs_accounts.Account;
+type UsageReport = UsageReport$6;
+
+export { PUBLISHED_CAPS, type UsageReport$6 as UsageReport, type UsageWindow$5 as UsageWindow, accountQuotaBlock, accountQuotaStatePath, accountUsageScore, anthropicHeaderUsage, buildUsageReport, claudeKeychainSuffix, claudeOauthUsage, clearAccountQuotaLimit, clearAccountUsageCache, codexWhamUsage, decodeJwtClaims, formatRelativeReset, formatUsageReports, getAccountUsage, getUsageForAccounts, googleUsage, humanizeDurationShort, kimiCodeUsage, openaiHeaderUsage, orderAccountsByUsage, parseAnthropicRateLimitHeaders, parseClaudeOauthUsage, parseCodexUsage, parseDurationSeconds, parseKimiUsage, parseOpenAiRateLimitHeaders, publishedCapForTier, readAccountQuotaState, readClaudeCredentials, readCodexCredentials, readKimiCredentials, readUsageCache, recordAccountQuotaLimit, refreshKimiToken, usageCachePath, writeUsageCache };

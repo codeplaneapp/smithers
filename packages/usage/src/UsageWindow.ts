@@ -25,4 +25,6 @@ export type UsageWindow = {
   remaining?: number;
   /** ISO-8601 timestamp when this window rolls over. */
   resetsAt?: string;
+  /** Share of the plan available to this model-specific window. */
+  capPercent?: number;
 };

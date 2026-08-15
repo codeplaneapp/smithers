@@ -52,7 +52,7 @@ export async function claudeOauthUsage(account, readCreds = readClaudeCredential
       return { source: "none", error: `Claude usage endpoint returned ${res.status}` };
     }
     const payload = await res.json();
-    return { source: "oauth", windows: parseClaudeOauthUsage(payload) };
+    return { source: "oauth", windows: parseClaudeOauthUsage(payload), planType: creds.subscriptionType };
   } catch (err) {
     return { source: "none", error: `Claude usage probe failed: ${err instanceof Error ? err.message : String(err)}` };
   }

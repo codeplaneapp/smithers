@@ -21,7 +21,7 @@ import { join } from "node:path";
  * @param {{ configDir?: string }} account
  * @param {NodeJS.Platform} [platform]
  * @param {typeof spawnSync} [spawn] Injectable for tests; defaults to `node:child_process` `spawnSync`.
- * @returns {{ accessToken: string; expiresAt?: number } | null}
+ * @returns {{ accessToken: string; expiresAt?: number; subscriptionType?: string } | null}
  */
 export function readClaudeCredentials(account, platform = process.platform, spawn = spawnSync) {
   if (account.configDir) {
@@ -76,7 +76,7 @@ function readFileSafe(path) {
 
 /**
  * @param {string} raw
- * @returns {{ accessToken: string; expiresAt?: number } | null}
+ * @returns {{ accessToken: string; expiresAt?: number; subscriptionType?: string } | null}
  */
 function parseCredentials(raw) {
   if (!raw.trim()) return null;
@@ -86,7 +86,8 @@ function parseCredentials(raw) {
     const accessToken = oauth?.accessToken;
     if (typeof accessToken !== "string" || accessToken === "") return null;
     const expiresAt = typeof oauth?.expiresAt === "number" ? oauth.expiresAt : undefined;
-    return { accessToken, expiresAt };
+    const subscriptionType = typeof oauth?.subscriptionType === "string" ? oauth.subscriptionType : undefined;
+    return { accessToken, expiresAt, subscriptionType };
   } catch {
     return null;
   }

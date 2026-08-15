@@ -43,5 +43,10 @@ export function parseClaudeOauthUsage(payload) {
   if (opus) windows.push(opus);
   const sonnet = windowFrom(p.seven_day_sonnet, "weekly-sonnet", "weekly (Sonnet)");
   if (sonnet) windows.push(sonnet);
+  const fable = windowFrom(p.seven_day_fable, "weekly-fable", "weekly (Fable, 50% plan cap)");
+  if (fable) {
+    fable.capPercent = 50;
+    windows.push(fable);
+  }
   return windows;
 }

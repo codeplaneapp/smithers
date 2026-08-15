@@ -87,6 +87,7 @@
     "@smthrs/driver": "workspace:*",
     "@smthrs/errors": "workspace:*",
     "@smthrs/observability": "workspace:*",
+    "@smthrs/usage": "workspace:*",
     "ai": "^7.0.10",
     "effect": "4.0.0-beta.105",
     "zod": "^4.4.3"

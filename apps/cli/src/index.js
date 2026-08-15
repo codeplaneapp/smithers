@@ -191,10 +191,12 @@ import {
   preflightConfigEntry,
 } from "./oneshot-preflight.js";
 import { listAccounts, removeAccount } from "@smthrs/accounts";
-import { getUsageForAccounts, formatUsageReports } from "@smthrs/usage";
+import { getUsageForAccounts, formatUsageReports, readClaudeCredentials } from "@smthrs/usage";
 import { runAgentAdd, pingAccount } from "./agent-commands/runAgentAdd.js";
 import { runAgentAddWithTmuxLogin } from "./agent-commands/tmuxLogin.js";
-import { formatAccountIdentity, readAccountIdentity } from "./agent-commands/accountIdentity.js";
+import { reauthClaudeAccounts } from "./agent-commands/reauthClaudeAccounts.js";
+import { runClaudeShell } from "./agent-commands/claudeShell.js";
+import { findDuplicateAccounts, formatAccountIdentity, readAccountIdentity } from "./agent-commands/accountIdentity.js";
 import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
 import { getWorkflowFollowUpCtas } from "./workflow-pack.js";
 import { buildMonitoringGuidance, hasCustomUi, workflowIdFromPath } from "./monitoring-suggestion.js";
@@ -6980,18 +6982,72 @@ const agentsCli = Cli.create({
       // need the signed-in subscription too. Without it a machine reader can
       // see that claude-3 is at 90% but not which subscription to go
       // re-authenticate, which is exactly what a quota dashboard is for.
-      const identified = accounts.map((a) => ({
-        ...a,
-        signedInAs: formatAccountIdentity(readAccountIdentity(a.provider, a.configDir)) || null,
-      }));
+      const identified = accounts.map((a) => {
+        const identity = readAccountIdentity(a.provider, a.configDir);
+        return {
+          ...a,
+          signedInAs: formatAccountIdentity(identity) || null,
+          planType: a.provider === "claude-code" ? (readClaudeCredentials(a)?.subscriptionType ?? null) : null,
+          duplicateOf: findDuplicateAccounts(identity, a.provider, accounts, a.label),
+        };
+      });
       const rows = identified.map((a) => {
         const where = a.configDir ?? (a.apiKey ? "(api key set)" : "");
         // Naming the signed-in subscription makes two labels sharing one
         // rate limit obvious instead of silently halving the pool.
-        return `  ${a.label.padEnd(24)}  ${a.provider.padEnd(14)}  ${(a.signedInAs ?? "").padEnd(26)}  ${where}`;
+        return `  ${a.label.padEnd(24)}  ${a.provider.padEnd(14)}  ${(a.signedInAs ?? "").padEnd(26)}  ${(a.planType ?? "").padEnd(8)}  ${where}`;
       });
-      process.stderr.write(`Registered accounts (${accounts.length}):\n${rows.join("\n")}\n`);
+      process.stderr.write(
+        `Registered accounts (${accounts.length}):\n  ${"LABEL".padEnd(24)}  ${"PROVIDER".padEnd(14)}  ${"SUBSCRIPTION".padEnd(26)}  ${"PLAN".padEnd(8)}  CONFIG\n${rows.join("\n")}\n`,
+      );
+      const duplicateGroups = identified.filter((account) => account.duplicateOf.length > 0);
+      if (duplicateGroups.length > 0) {
+        process.stderr.write(
+          `Warning: duplicate subscriptions share one quota: ${duplicateGroups
+            .map((account) => `${account.label}=${account.duplicateOf.join(",")}`)
+            .join("; ")}\n`,
+        );
+      }
       return c.ok({ accounts: identified });
+    },
+  })
+  .command("reauth", {
+    description: "Check and sequentially reauthenticate registered Claude accounts in the browser.",
+    options: z.object({
+      provider: z.enum(["claude-code"]).default("claude-code").describe("Account provider to reauthenticate"),
+      label: z.string().optional().describe("Only reauthenticate this account label"),
+      force: z.boolean().default(false).describe("Reauthenticate even when the current login is live"),
+      includeDefault: z
+        .boolean()
+        .default(false)
+        .describe("Also check the ambient ~/.claude login (not a registered pool account)"),
+    }),
+    async run(c) {
+      try {
+        const results = await reauthClaudeAccounts({
+          force: c.options.force,
+          label: c.options.label,
+          includeDefault: c.options.includeDefault,
+          onStatus: (message) => process.stderr.write(`${message}\n`),
+        });
+        const failed = results.filter((result) => !result.ok);
+        if (failed.length > 0) {
+          commandExitOverride = 1;
+          return c.error({
+            code: "AGENT_REAUTH_FAILED",
+            message: `${failed.length} Claude account(s) did not complete authentication.`,
+            exitCode: 1,
+          });
+        }
+        return c.ok({ accounts: results });
+      } catch (err) {
+        commandExitOverride = 1;
+        return c.error({
+          code: "AGENT_REAUTH_FAILED",
+          message: err?.message ?? String(err),
+          exitCode: 1,
+        });
+      }
     },
   })
   .command("remove", {
@@ -12785,11 +12841,34 @@ const cli = Cli.create({
       if (c.options.provider) {
         accounts = accounts.filter((a) => a.provider === c.options.provider);
       }
-      const reports = await getUsageForAccounts(accounts, { fresh: c.options.fresh });
+      const reports = (await getUsageForAccounts(accounts, { fresh: c.options.fresh })).map((report) => {
+        const account = accounts.find((candidate) => candidate.label === report.accountLabel);
+        const identity = readAccountIdentity(account?.provider, account?.configDir);
+        return {
+          ...report,
+          signedInAs: formatAccountIdentity(identity) || undefined,
+          duplicateOf: account ? findDuplicateAccounts(identity, account.provider, accounts, account.label) : [],
+        };
+      });
       // Human-readable table to stderr; the structured envelope (--format json/toon)
       // goes to stdout, matching `smithers agents list`.
       process.stderr.write(`${formatUsageReports(reports)}\n`);
       return c.ok({ reports });
+    },
+  })
+  .command("claude-shell", {
+    description: "Launch Claude Code with the registered account that has the most quota headroom.",
+    options: z.object({
+      label: z.string().optional().describe("Pin one registered Claude account"),
+      dryRun: z.boolean().default(false).describe("Print the selected account without launching Claude"),
+    }),
+    run(c) {
+      const args = [
+        ...(c.options.label ? ["--label", c.options.label] : []),
+        ...(c.options.dryRun ? ["--dry-run"] : []),
+      ];
+      process.exitCode = runClaudeShell(args);
+      return c.ok({ exitCode: process.exitCode });
     },
   })
   .command(workflowCli)
@@ -13499,6 +13578,11 @@ async function main() {
   }
   const rawArgv = process.argv.slice(2);
   let argv = rawArgv.map((arg) => (arg === "-v" ? "--version" : arg));
+  const claudeShellIndex = argv.indexOf("claude-shell");
+  if (claudeShellIndex >= 0) {
+    process.exitCode = runClaudeShell(argv.slice(claudeShellIndex + 1));
+    return;
+  }
   argv = rewriteGuiShortcutArgv(argv);
   argv = rewriteChatCreateArgv(argv);
   argv = rewriteWorkflowCommandArgv(argv);

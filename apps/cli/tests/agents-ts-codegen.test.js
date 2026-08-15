@@ -89,7 +89,10 @@ describe("generateAgentsTs (account-driven)", () => {
     expect(generated).toContain("codexWork: new SmithersCodexAgent(");
     expect(generated).toContain('id: "smithers-account:claude-work"');
     // pools group by engine family
-    expect(generated).toMatch(/claude:\s*\[\s*providers\.claudeWork,\s*providers\.claudePersonal,\s*\]/);
+    expect(generated).toContain('import { fallbackAgents } from "smthrs";');
+    expect(generated).toMatch(
+      /claude:\s*fallbackAgents\(\{\s*providers: \["claude-code"\][\s\S]*?fallback: \[\],\s*\}\)/,
+    );
     expect(generated).toMatch(/codex:\s*\[\s*providers\.codexWork,\s*\]/);
     // A registered Codex account gets role-specific model siblings. Claude
     // accounts remain behind Codex as runtime fallbacks.
@@ -164,7 +167,9 @@ describe("generateAgentsTs (account-driven)", () => {
     expect(generated).toContain('apiKey: registeredAccountApiKey("anthropic-prod")');
     // openai-api goes in the codex pool, anthropic-api in the claude pool
     expect(generated).toMatch(/codex:\s*\[\s*providers\.openaiProd,\s*\]/);
-    expect(generated).toMatch(/claude:\s*\[\s*providers\.anthropicProd,\s*\]/);
+    expect(generated).toMatch(
+      /claude:\s*fallbackAgents\(\{\s*providers: \["anthropic-api"\][\s\S]*?fallback: \[\],\s*\}\)/,
+    );
     // user-specified model wins over the default
     expect(generated).toContain('model: "gpt-5"');
     // The explicit base-account pin does not weaken the Smithers default

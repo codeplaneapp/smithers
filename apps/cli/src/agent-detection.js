@@ -1544,6 +1544,9 @@ export function generateAgentsTs(env = process.env, options = {}) {
   }
   const smithersImportLines = [
     'import { type AgentLike } from "smthrs";',
+    ...(registeredAccounts.some((account) => ACCOUNT_PROVIDER_POOL[account.provider] === "claude")
+      ? ['import { fallbackAgents } from "smthrs";']
+      : []),
     ...[...activeImportNames].map((importName) => `import { ${importName} as Smithers${importName} } from "smthrs";`),
     ...[...inactiveImportNames].map(
       (importName) => `// import { ${importName} as Smithers${importName} } from "smthrs";`,
@@ -1596,7 +1599,23 @@ export function generateAgentsTs(env = process.env, options = {}) {
     accountPoolMembers.set(family, arr);
   }
   const accountPoolLines = [...accountPoolMembers.entries()]
-    .map(([family, members]) => renderTierLine(family, members, [], []))
+    .map(([family, members]) => {
+      if (family !== "claude") return renderTierLine(family, members, [], []);
+      const providers = [
+        ...new Set(
+          registeredAccounts
+            .filter((account) => ACCOUNT_PROVIDER_POOL[account.provider] === family)
+            .map((account) => account.provider),
+        ),
+      ];
+      return [
+        `  ${family}: fallbackAgents({`,
+        `    providers: ${JSON.stringify(providers)},`,
+        `    models: { "claude-code": ${JSON.stringify(SOTA_SLOTS.fable)}, "anthropic-api": ${JSON.stringify(SOTA_SLOTS.fable)} },`,
+        "    fallback: [],",
+        "  }),",
+      ];
+    })
     .flat();
   // Tier lines: detection-resolved members, then accounts whose engine
   // family is in the tier's preference order get appended.

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
 import { ClaudeCodeAgent, CodexAgent, fallbackAgents } from "../src/index.js";
+import { recordAccountQuotaLimit, writeUsageCache } from "@smthrs/usage";
 
 /**
  * Writes an accounts.json registry into a fresh SMITHERS_HOME and returns the
@@ -99,6 +100,69 @@ describe("fallbackAgents", () => {
     const seeds = ["run-a", "run-b", "run-c", "run-d", "run-e", "run-f"];
     const distinct = new Set(seeds.map((seed) => order(seed).join(">")));
     expect(distinct.size).toBeGreaterThan(1);
+  });
+
+  test("orders by cached Fable headroom before the seeded tie-break", () => {
+    const env = registryEnv([CLAUDE_1, CLAUDE_2]);
+    const entry = (label, usedPercent) => ({
+      identity: { provider: "claude-code", configDir: `/tmp/${label}` },
+      report: {
+        accountLabel: label,
+        provider: "claude-code",
+        authMode: "subscription",
+        source: "oauth",
+        windows: [{ id: "weekly-fable", label: "weekly Fable", unit: "percent", usedPercent }],
+        fetchedAt: new Date().toISOString(),
+        stale: false,
+        estimate: false,
+      },
+    });
+    writeUsageCache(
+      { version: 1, entries: { "claude-1": entry("claude-1", 80), "claude-2": entry("claude-2", 10) } },
+      env,
+    );
+    const chain = fallbackAgents({
+      env,
+      models: { "claude-code": "claude-fable-5" },
+      fallback: [],
+      seed: "run-a",
+    });
+    expect(chain.map((agent) => agent.id)).toEqual(["smithers-account:claude-2", "smithers-account:claude-1"]);
+  });
+
+  test("uses a no-network sentinel for a persisted quota block", async () => {
+    const env = registryEnv([CLAUDE_1]);
+    const nowMs = Date.now();
+    recordAccountQuotaLimit("claude-1", { env, nowMs, untilMs: nowMs + 60_000 });
+    const [blocked] = fallbackAgents({ env, fallback: [] });
+    await expect(blocked.generate()).rejects.toMatchObject({
+      code: "AGENT_QUOTA_EXCEEDED",
+      details: { persistedQuota: true, quotaResetAtMs: nowMs + 60_000 },
+    });
+  });
+
+  test("a Fable quota callback does not block the same account for Opus", async () => {
+    const env = registryEnv([CLAUDE_1]);
+    const untilMs = Date.now() + 60_000;
+    const [fable] = fallbackAgents({
+      env,
+      models: { "claude-code": "claude-fable-5" },
+      fallback: [],
+    });
+    fable.onQuotaExceeded({ underlying: "You're out of usage credits for Fable", quotaResetAtMs: untilMs });
+    const [blockedFable] = fallbackAgents({
+      env,
+      models: { "claude-code": "claude-fable-5" },
+      fallback: [],
+    });
+    await expect(blockedFable.generate()).rejects.toMatchObject({ code: "AGENT_QUOTA_EXCEEDED" });
+    const [availableOpus] = fallbackAgents({
+      env,
+      models: { "claude-code": "claude-opus-5" },
+      fallback: [],
+    });
+    expect(availableOpus).toBeInstanceOf(ClaudeCodeAgent);
+    expect(availableOpus.opts.configDir).toBe(CLAUDE_1.configDir);
   });
 
   test("providers filter narrows the pool and picks the matching default fallback", () => {

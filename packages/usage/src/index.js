@@ -12,7 +12,7 @@ export { parseOpenAiRateLimitHeaders } from "./parseOpenAiRateLimitHeaders.js";
 export { parseDurationSeconds } from "./parseDurationSeconds.js";
 export { decodeJwtClaims } from "./decodeJwtClaims.js";
 export { PUBLISHED_CAPS, publishedCapForTier } from "./publishedCaps.js";
-export { readClaudeCredentials } from "./readClaudeCredentials.js";
+export { readClaudeCredentials, claudeKeychainSuffix } from "./readClaudeCredentials.js";
 export { readCodexCredentials } from "./readCodexCredentials.js";
 export { readKimiCredentials } from "./readKimiCredentials.js";
 export { refreshKimiToken } from "./refreshKimiToken.js";
@@ -22,4 +22,13 @@ export { kimiCodeUsage } from "./kimiCodeUsage.js";
 export { anthropicHeaderUsage } from "./anthropicHeaderUsage.js";
 export { openaiHeaderUsage } from "./openaiHeaderUsage.js";
 export { googleUsage } from "./googleUsage.js";
-export { usageCachePath, readUsageCache, writeUsageCache } from "./usageCache.js";
+export { usageCachePath, readUsageCache, writeUsageCache, clearAccountUsageCache } from "./usageCache.js";
+export {
+  accountQuotaStatePath,
+  readAccountQuotaState,
+  recordAccountQuotaLimit,
+  clearAccountQuotaLimit,
+  accountUsageScore,
+  accountQuotaBlock,
+  orderAccountsByUsage,
+} from "./accountSelection.js";

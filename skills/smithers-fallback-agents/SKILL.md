@@ -1,7 +1,7 @@
 ---
 name: smithers-fallback-agents
 description: >
-  Use every registered Claude Code and Codex subscription as one randomized
+  Use every registered Claude Code and Codex subscription as one quota-aware
   failover pool in Smithers workflows, so rate limits on a single account
   never stall a run. Use when the user mentions rate limits, quota, multiple
   subscriptions/accounts, "fallback agents", adding a new Claude/Codex
@@ -22,11 +22,11 @@ variable per spawned agent.
 `fallbackAgents()` (exported from `smthrs`) turns that registry into a
 failover chain for a `<Task>`:
 
-- One agent per registered Claude/Codex account, **randomly ordered on every
-  call** — load spreads across subscriptions (round robin in expectation).
+- One agent per registered Claude/Codex account. Cached 5-hour and weekly
+  headroom orders healthy accounts first. A seeded shuffle breaks ties.
 - The Smithers engine already fails over along the chain when a rung is
-  rate-limited (persisted `chainIndex`, quota-blocked rungs are skipped for
-  the round), so a 429 on one account just moves the task to the next one.
+  rate-limited. Smithers persists the reset per account and turns a known
+  blocked account into a no-network quota rung until that time.
 - The "normal" agent is appended as the last rung, and is returned alone when
   the registry is missing, empty, or unreadable — a workflow using this
   helper still runs on machines with no registered accounts (CI, teammates).
@@ -74,14 +74,33 @@ smithers usage                  # per-account quota consumption
 smithers agents remove <label>  # deregister (credentials dir is left alone)
 ```
 
+Reauthenticate the complete Claude pool sequentially:
+
+```sh
+smithers agents reauth --provider claude-code --include-default
+```
+
+Without `--force`, Smithers probes each account, refreshes an expired access
+token when its refresh token still works, and opens a browser only for missing
+or rejected credentials. `--include-default` also checks `~/.claude`.
+`--label <name>` selects one account. `--force` logs out and authenticates
+every target. On macOS, the forced path deletes the exact suffixed Keychain
+item before login. The result names the subscription and warns on duplicate
+Anthropic organizations.
+
+`smithers usage --fresh` identifies each subscription and reports 5-hour,
+weekly, and model-specific windows. Fable has a 50% weekly plan cap. Smithers
+uses the dedicated Fable window when present and normalizes shared weekly
+usage against 50% otherwise. Opus and Sonnet use their model window plus the
+shared plan window.
+
 ## Use the pool in a workflow
 
 ```tsx
 import { fallbackAgents, ClaudeCodeAgent } from "smthrs";
 
-// All Claude + Codex subscriptions, shuffled, then the stock agent last.
-// Seed with the run id: the chain stays stable across every render and retry
-// of one run, and still varies run to run. Prefer this in real workflows.
+// All Claude + Codex subscriptions, ordered by quota headroom, then the stock
+// agent last. The seed keeps equal-headroom ties stable for one run.
 <Task agent={fallbackAgents({ seed: ctx.runId })} ... />
 
 // Only Codex accounts, pinned to a model, with an explicit normal agent:
@@ -96,10 +115,35 @@ import { fallbackAgents, ClaudeCodeAgent } from "smthrs";
 />
 ```
 
+Replace a direct Fable agent while preserving unattended permissions:
+
+```tsx
+<Task
+  agent={fallbackAgents({
+    seed: ctx.runId,
+    providers: ["claude-code"],
+    models: { "claude-code": "claude-fable-5" },
+    fallback: [],
+    agentOptions: {
+      "claude-code": {
+        permissionMode: "bypassPermissions",
+        dangerouslySkipPermissions: true,
+      },
+    },
+  })}
+  {...taskProps}
+/>
+```
+
+A running agent subprocess cannot swap chains. Edit the workflow, run
+`smithers cancel RUN_ID`, then start the workflow as a new run. Do not use
+`smithers retry-task` for this edit. Retry resets state in the existing run,
+and resume rejects a changed workflow source hash.
+
 Options: `providers` (default `["claude-code", "codex"]`, or `"all"`),
 `fallback` (agent, array, or `[]` for no tail), `models` (per-provider
 override; otherwise the account's registered model, else the CLI default),
-`shuffle: false` to keep registration order, `seed` (string or number,
+`shuffle: false` to use registration order as the equal-headroom tie-break, `seed` (string or number,
 usually `ctx.runId`) for a deterministic run-stable order, `random` to
 supply the RNG directly (wins over `seed`), `agentOptions` (per-provider
 constructor options applied to every pooled rung), and `env` to locate the
@@ -128,18 +172,24 @@ checkout that way, and there only that name resolves. Match whatever the
 sibling workflows in the same `.smithers/workflows/` directory already
 import; guessing wrong fails at module load, not at review time.
 
-Why seed at all? A workflow re-renders on every frame, so a bare
-`fallbackAgents()` draws a fresh order each time. The engine tracks quota
-failover by position in the chain, so an order that keeps changing under a
-running task blurs which rungs are already known to be rate-limited. Seeding
-by run id pins one order for the whole run while different runs still start
-on different accounts.
+Why seed at all? A workflow re-renders on every frame. Usage headroom remains
+the primary order. Seeding by run id makes equal-headroom ties stable for the
+whole run while different runs still spread across tied accounts.
 
 Registered accounts also flow into generated `.smithers/agents.ts` pools
 (`smithers agents add` regenerates it when present), so default workflows
 pick them up without `fallbackAgents()`. Reach for `fallbackAgents()` when
-you want the whole subscription fleet behind a single Task, in random order,
+you want the whole subscription fleet behind a single Task, in quota order,
 with graceful degradation on machines that have no accounts.
+
+Use the pool for interactive Claude Code too:
+
+```sh
+smithers claude-shell -- --model claude-fable-5
+```
+
+The wrapper selects an unblocked account and sets `CLAUDE_CONFIG_DIR`. Pass
+`--label <name>` to pin an account or `--dry-run` to inspect the selection.
 
 ## Rules
 

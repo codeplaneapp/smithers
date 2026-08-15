@@ -1166,6 +1166,9 @@ importers:
       '@smthrs/observability':
         specifier: workspace:*
         version: link:../../apps/observability
+      '@smthrs/usage':
+        specifier: workspace:*
+        version: link:../usage
       ai:
         specifier: ^7.0.10
         version: 7.0.10(zod@4.4.3)

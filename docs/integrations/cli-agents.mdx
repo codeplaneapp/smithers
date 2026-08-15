@@ -203,6 +203,76 @@ forces `--output-format stream-json` so Smithers can stream structured progress.
   set, Smithers stops clearing `ANTHROPIC_API_KEY` and forwards your key as
   `ANTHROPIC_API_KEY` to the spawned `claude` process.
 
+Check and reauthenticate every registered Claude subscription sequentially:
+
+```sh
+bunx smthrs agents reauth --provider claude-code --include-default
+```
+
+The command probes each login and refreshes expired access tokens before it
+opens a browser. It prompts only for missing or rejected credentials. Pass
+`--force` to log out and reauthenticate every target. Pass `--label <name>` to
+select one label. `--include-default` also checks the ambient `~/.claude`
+login. On macOS, forced authentication deletes the exact per-config-dir
+Keychain item before login so Claude Code cannot silently reuse a stale token.
+The result names each signed-in subscription and warns when labels share one
+Anthropic organization and quota.
+
+`bunx smthrs usage --fresh` shows the 5-hour, weekly, Opus, Sonnet, and Fable
+windows that the provider returns. Fable has a 50% weekly plan cap. Smithers
+normalizes the shared weekly value against that cap when the provider omits a
+dedicated Fable window.
+
+### Multi-account Claude pool
+
+Use the registered subscriptions as one quota-aware task chain:
+
+```tsx
+import { fallbackAgents } from "smthrs";
+
+<Task
+  agent={fallbackAgents({
+    seed: ctx.runId,
+    providers: ["claude-code"],
+    models: { "claude-code": "claude-fable-5" },
+    fallback: [],
+    agentOptions: {
+      "claude-code": {
+        permissionMode: "bypassPermissions",
+        dangerouslySkipPermissions: true,
+      },
+    },
+  })}
+  {...taskProps}
+/>
+```
+
+Copy every permission, sandbox, and tool option from the old
+`ClaudeCodeAgent` into `agentOptions["claude-code"]`. Smithers orders healthy
+accounts by model-specific headroom. It persists provider reset times and
+skips known rate-limited accounts without starting Claude again.
+
+A live agent process cannot change its account chain. After editing the
+workflow, cancel the old run and start a new run:
+
+```sh
+bunx smthrs cancel RUN_ID
+bunx smthrs up .smithers/workflows/WORKFLOW.tsx -d
+```
+
+Do not use `retry-task` to apply this source edit. It resets task state inside
+the existing run, while resume rejects a changed workflow source hash.
+
+To use the same pool in an interactive shell, run:
+
+```sh
+bunx smthrs claude-shell -- --model claude-fable-5
+```
+
+The wrapper selects an unblocked registered account, sets
+`CLAUDE_CONFIG_DIR`, and launches `claude`. Pass `--label <name>`
+to pin one account or `--dry-run` to print the selection without launching it.
+
 ```ts
 import { ClaudeCodeAgent } from "smthrs";
 

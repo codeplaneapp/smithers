@@ -4,7 +4,7 @@ import { accountsRoot } from "@smthrs/accounts";
 
 /** @typedef {import("./UsageReport.ts").UsageReport} UsageReport */
 /** @typedef {import("@smthrs/accounts").Account} Account */
-/** @typedef {{ provider: Account["provider"]; configDir?: string; model?: string; apiKeyHash?: string }} UsageCacheAccountIdentity */
+/** @typedef {{ provider: Account["provider"]; configDir?: string; model?: string; apiKeyHash?: string; credentialHash?: string }} UsageCacheAccountIdentity */
 /** @typedef {{ version: 1; entries: Record<string, { identity?: UsageCacheAccountIdentity; report: UsageReport }> }} UsageCacheFile */
 
 /**
@@ -61,4 +61,13 @@ export function writeUsageCache(contents, env = process.env) {
   // rename is atomic on the same filesystem
   renameSync(tmp, path);
   return path;
+}
+
+/** @param {string} label @param {NodeJS.ProcessEnv} [env] */
+export function clearAccountUsageCache(label, env = process.env) {
+  const cache = readUsageCache(env);
+  if (!(label in cache.entries)) return false;
+  delete cache.entries[label];
+  writeUsageCache(cache, env);
+  return true;
 }
