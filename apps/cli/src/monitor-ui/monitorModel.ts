@@ -216,6 +216,41 @@ export function quotaInfoOf(row: Record<string, unknown>): {
   };
 }
 
+export type ConcurrencySaturationWarning = {
+  requestedDemand: number;
+  effectiveCap: number;
+  remediationCommand: string;
+  observedAt?: string;
+};
+
+/** Read the durable concurrency-ceiling warning carried on RunStateView. */
+export function concurrencySaturationWarningOf(runState: unknown): ConcurrencySaturationWarning | null {
+  if (!isRecord(runState)) return null;
+  for (const candidate of asArray(runState.warnings)) {
+    if (!isRecord(candidate) || candidate.kind !== "concurrency-ceiling-saturated") continue;
+    const requestedDemand = asNumber(candidate.requestedDemand);
+    const effectiveCap = asNumber(candidate.effectiveCap);
+    const remediationCommand = asString(candidate.remediationCommand)?.trim();
+    const observedAt = asString(candidate.observedAt);
+    if (
+      requestedDemand === undefined ||
+      requestedDemand <= 0 ||
+      effectiveCap === undefined ||
+      effectiveCap <= 0 ||
+      !remediationCommand
+    ) {
+      continue;
+    }
+    return {
+      requestedDemand: Math.floor(requestedDemand),
+      effectiveCap: Math.floor(effectiveCap),
+      remediationCommand,
+      ...(observedAt ? { observedAt } : {}),
+    };
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Run health diagnosis. One always-on verdict per run — green/yellow/red, what
 // the run is doing right now, and the concrete fix — recomputed live from
@@ -292,6 +327,7 @@ export function diagnoseRun(input: {
   runId: string;
   status: string | undefined;
   healthState?: string;
+  concurrencySaturation?: ConcurrencySaturationWarning | null;
   quota: ReturnType<typeof quotaInfoOf>;
   approvalsCount: number;
   treeNodes: ReadonlyArray<{ id?: unknown; status?: unknown }>;
@@ -376,6 +412,15 @@ export function diagnoseRun(input: {
         .map((task) => task.id)
         .join(", ")}${failed.length > 4 ? "…" : ""}.${sample}`,
       fix: `Failed tasks were continue-on-fail or await retry. \`smithers retry-task\` recovers one; the run keeps going meanwhile.`,
+    };
+  }
+  if (input.concurrencySaturation) {
+    const warning = input.concurrencySaturation;
+    return {
+      tone: "warn",
+      headline: "Concurrency ceiling reached",
+      detail: `Requested demand is ${warning.requestedDemand} tasks, but the effective automatic cap is ${warning.effectiveCap}; ${progress}.`,
+      fix: `If the host and providers can take it, raise the cap with \`${warning.remediationCommand}\`.`,
     };
   }
   if (status === "running") {

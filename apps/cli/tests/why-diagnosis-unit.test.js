@@ -103,6 +103,7 @@ function makeAdapter(state = {}) {
     attempts: [],
     events: [],
     boundaryEvents: [],
+    concurrencyEvents: [],
     lastSeq: undefined,
     lastFrame: undefined,
     ...state,
@@ -120,7 +121,14 @@ function makeAdapter(state = {}) {
       queries.push(query);
       return Effect.succeed(data.events);
     },
-    listEventsByTypeEffect: () => Effect.succeed(data.boundaryEvents),
+    listEventsByTypeEffect: (_runId, type) =>
+      Effect.succeed(
+        type === "SideEffectBoundaryCrossed"
+          ? data.boundaryEvents
+          : type === "RunConcurrencySaturated"
+            ? data.concurrencyEvents
+            : [],
+      ),
   };
   return adapter;
 }
@@ -870,6 +878,30 @@ describe("why diagnosis unit coverage", () => {
     expect(
       diagnosisCtaCommands(diagnosis).some((entry) => entry.description === "Inspect forced side-effect crossing"),
     ).toBe(false);
+  });
+
+  test("surfaces durable concurrency-ceiling saturation as an operator warning", async () => {
+    const saturation = eventRow(
+      2,
+      JSON.stringify({
+        type: "RunConcurrencySaturated",
+        runId: "diag-run",
+        requestedDemand: 32,
+        effectiveCap: 16,
+        remediationCommand: "smithers up --max-concurrency 32",
+        timestampMs: NOW - 2_000,
+      }),
+      { type: "RunConcurrencySaturated", timestampMs: NOW - 2_000 },
+    );
+    const diagnosis = await diagnose(makeAdapter({ concurrencyEvents: [saturation] }));
+    const rendered = renderWhyDiagnosisHuman(diagnosis);
+
+    expect(diagnosis.warnings).toEqual([
+      "Concurrency ceiling saturated: requested demand 32, effective cap 16. Remediation: `smithers up --max-concurrency 32`.",
+    ]);
+    expect(rendered).toContain("Warning: Concurrency ceiling saturated");
+    expect(rendered).toContain("requested demand 32, effective cap 16");
+    expect(rendered).toContain("smithers up --max-concurrency 32");
   });
 
   test("reports waiting approval nodes that are missing approval request rows", async () => {

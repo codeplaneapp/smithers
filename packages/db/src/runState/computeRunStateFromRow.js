@@ -19,6 +19,7 @@ export async function computeRunStateFromRow(adapter, run, options = {}) {
   let pendingEvent = null;
   let parkedEventBlock = null;
   let sandboxHeartbeats = [];
+  const warnings = await loadRunStateWarnings(adapter, run.runId);
 
   if (run.status === "waiting-approval") {
     pendingApproval = await loadPendingApproval(adapter, run.runId);
@@ -44,9 +45,57 @@ export async function computeRunStateFromRow(adapter, run, options = {}) {
     pendingEvent,
     parkedEventBlock,
     sandboxHeartbeats,
+    warnings,
     now: options.now,
     staleThresholdMs: options.staleThresholdMs,
   });
+}
+
+/**
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @returns {Promise<import("./RunStateWarning.ts").RunStateWarning[]>}
+ */
+async function loadRunStateWarnings(adapter, runId) {
+  if (typeof adapter.listEventsByType !== "function") return [];
+  const rows = await adapter.listEventsByType(runId, "RunConcurrencySaturated");
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index];
+    let payload;
+    try {
+      payload = JSON.parse(row.payloadJson ?? "{}");
+    } catch {
+      continue;
+    }
+    const requestedDemand = payload?.requestedDemand;
+    const effectiveCap = payload?.effectiveCap;
+    const remediationCommand = payload?.remediationCommand;
+    const timestampMs = payload?.timestampMs ?? row.timestampMs;
+    const observedAt = new Date(timestampMs);
+    if (
+      !Number.isInteger(requestedDemand) ||
+      requestedDemand <= 0 ||
+      !Number.isInteger(effectiveCap) ||
+      effectiveCap <= 0 ||
+      typeof remediationCommand !== "string" ||
+      remediationCommand.trim().length === 0 ||
+      typeof timestampMs !== "number" ||
+      !Number.isFinite(timestampMs) ||
+      Number.isNaN(observedAt.getTime())
+    ) {
+      continue;
+    }
+    return [
+      {
+        kind: "concurrency-ceiling-saturated",
+        requestedDemand,
+        effectiveCap,
+        remediationCommand,
+        observedAt: observedAt.toISOString(),
+      },
+    ];
+  }
+  return [];
 }
 
 /**

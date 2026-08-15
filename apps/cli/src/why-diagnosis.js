@@ -288,6 +288,25 @@ function latestWarningEffectBoundaryInformation(events) {
   }
   return null;
 }
+
+/**
+ * @param {DbEventRow[]} events
+ * @returns {string | null}
+ */
+function latestConcurrencySaturationWarning(events) {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const row = events[index];
+    if (row.type !== "RunConcurrencySaturated") continue;
+    const payload = parseEventPayload(row);
+    if (!payload) continue;
+    const requestedDemand = parseNumber(payload.requestedDemand);
+    const effectiveCap = parseNumber(payload.effectiveCap);
+    const remediationCommand = parseString(payload.remediationCommand);
+    if (requestedDemand == null || effectiveCap == null || !remediationCommand) continue;
+    return `Concurrency ceiling saturated: requested demand ${Math.floor(requestedDemand)}, effective cap ${Math.floor(effectiveCap)}. Remediation: \`${remediationCommand}\`.`;
+  }
+  return null;
+}
 /**
  * @param {string | null | undefined} xmlJson
  * @returns {Map<string, DescriptorMetadata>}
@@ -585,6 +604,8 @@ function buildDiagnosis(params) {
   const forcedBoundary = latestForcedEffectBoundary(events);
   const boundaryInformation = latestWarningEffectBoundaryInformation(events);
   const information = boundaryInformation ? [boundaryInformation] : [];
+  const concurrencyWarning = latestConcurrencySaturationWarning(events);
+  const warnings = concurrencyWarning ? [concurrencyWarning] : [];
   if (status === "finished" || status === "cancelled") {
     // A loop that exited via return-last with its `until` predicate still false
     // is exhaustion, not success — name the loop and the unmet condition
@@ -622,6 +643,7 @@ function buildDiagnosis(params) {
       summary,
       generatedAtMs: nowMs,
       blockers: forcedBoundary ? [forcedBoundary.blocker] : [],
+      warnings,
       information,
       currentNodeId: firstCurrentNode(nodes),
     };
@@ -633,6 +655,7 @@ function buildDiagnosis(params) {
       summary: "Run was gracefully paused; resume with `smithers up --resume <runId>`.",
       generatedAtMs: nowMs,
       blockers: [],
+      warnings,
       information,
       currentNodeId: firstCurrentNode(nodes),
     };
@@ -644,6 +667,7 @@ function buildDiagnosis(params) {
       summary: `Cancellation was requested at ${new Date(run.cancelRequestedAtMs).toISOString()} but has not yet been applied. Do not resume this run.`,
       generatedAtMs: nowMs,
       blockers: [],
+      warnings,
       information,
       currentNodeId: firstCurrentNode(nodes),
     };
@@ -1086,6 +1110,7 @@ function buildDiagnosis(params) {
     summary,
     generatedAtMs: nowMs,
     blockers: dedupedBlockers.sort((left, right) => left.waitingSince - right.waitingSince),
+    warnings,
     information,
     currentNodeId: firstCurrentNode(nodes),
   };
@@ -1114,7 +1139,7 @@ export function diagnoseRunEffect(adapter, runId, nowMs = Date.now()) {
         return yield* Effect.fail(new SmithersError("RUN_NOT_FOUND", `Run not found: ${runId}`));
       }
       const afterSeq = Math.max(-1, (lastSeq ?? -1) - RECENT_EVENTS_LIMIT);
-      const [events, forcedBoundaryEvents, runFinishedEvents] = yield* Effect.all([
+      const [events, forcedBoundaryEvents, runFinishedEvents, concurrencyEvents] = yield* Effect.all([
         adapter.listEventHistoryEffect(runId, {
           afterSeq,
           limit: RECENT_EVENTS_LIMIT,
@@ -1125,11 +1150,16 @@ export function diagnoseRunEffect(adapter, runId, nowMs = Date.now()) {
         typeof adapter.listEventsByTypeEffect === "function"
           ? adapter.listEventsByTypeEffect(runId, "RunFinished")
           : Effect.succeed([]),
+        typeof adapter.listEventsByTypeEffect === "function"
+          ? adapter.listEventsByTypeEffect(runId, "RunConcurrencySaturated")
+          : Effect.succeed([]),
       ]);
       const eventRows = [...(events ?? [])];
       const seenEventSeqs = new Set(eventRows.map((row) => row.seq));
-      for (const row of forcedBoundaryEvents ?? []) {
-        if (!seenEventSeqs.has(row.seq)) eventRows.push(row);
+      for (const row of [...(forcedBoundaryEvents ?? []), ...(concurrencyEvents ?? [])]) {
+        if (seenEventSeqs.has(row.seq)) continue;
+        seenEventSeqs.add(row.seq);
+        eventRows.push(row);
       }
       eventRows.sort((left, right) => left.seq - right.seq);
       const diagnosis = buildDiagnosis({
@@ -1184,18 +1214,30 @@ export function diagnoseRunEffect(adapter, runId, nowMs = Date.now()) {
  */
 export function renderWhyDiagnosisHuman(diagnosis) {
   const information = diagnosis.information ?? [];
+  const warnings = diagnosis.warnings ?? [];
   // A finished run prints its summary: the clean default is "nothing is
   // blocked", but an exhausted loop (#1464 AWF-1) or a boundary warning
   // replaces that text and must survive to the human output.
-  if (diagnosis.status === "finished" && diagnosis.blockers.length === 0 && information.length === 0) {
+  if (
+    diagnosis.status === "finished" &&
+    diagnosis.blockers.length === 0 &&
+    warnings.length === 0 &&
+    information.length === 0
+  ) {
     return diagnosis.summary;
   }
-  if (diagnosis.status === "cancelled" && diagnosis.blockers.length === 0 && information.length === 0) {
+  if (
+    diagnosis.status === "cancelled" &&
+    diagnosis.blockers.length === 0 &&
+    warnings.length === 0 &&
+    information.length === 0
+  ) {
     return diagnosis.summary;
   }
   if (
     diagnosis.status === "running" &&
     diagnosis.blockers.length === 0 &&
+    warnings.length === 0 &&
     information.length === 0 &&
     diagnosis.summary.startsWith("Run is executing normally")
   ) {
@@ -1206,6 +1248,10 @@ export function renderWhyDiagnosisHuman(diagnosis) {
   if (diagnosis.blockers.length === 0) {
     lines.push("");
     lines.push(diagnosis.summary);
+    for (const warning of warnings) {
+      lines.push("");
+      lines.push(`  Warning: ${warning}`);
+    }
     for (const entry of information) {
       lines.push("");
       lines.push(`  Info: ${entry}`);
@@ -1232,6 +1278,10 @@ export function renderWhyDiagnosisHuman(diagnosis) {
         lines.push(`  ${line}`);
       }
     }
+  }
+  for (const warning of warnings) {
+    lines.push("");
+    lines.push(`  Warning: ${warning}`);
   }
   for (const entry of information) {
     lines.push("");

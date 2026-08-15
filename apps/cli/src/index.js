@@ -1052,7 +1052,16 @@ function setupAbortSignal() {
       return;
     }
     process.stderr.write(`[smithers] cancelling run... (signal again to force-exit)\n`);
-    abort.abort();
+    const reason = Object.assign(new Error(`Process received ${signal}`), {
+      name: "AbortError",
+      smithersCancellationSource: {
+        kind: "signal",
+        detail: `process received ${signal}`,
+        signal,
+        clientPid: process.pid,
+      },
+    });
+    abort.abort(reason);
     // Backstop: if graceful cancellation hangs, force-exit after 5s so a hard
     // `kill -9` is never required. unref() so this timer never keeps the loop
     // alive when shutdown completes normally.
@@ -8191,6 +8200,13 @@ function makeFail(c) {
     return c.error(opts);
   };
 }
+/**
+ * @param {string} detail
+ * @returns {{ kind: "cli"; detail: string; clientPid: number }}
+ */
+function cliCancellationAttribution(detail) {
+  return { kind: "cli", detail, clientPid: process.pid };
+}
 // Shared with the init-time incur skill re-sync (SyncSkills.sync uses it as the
 // top-level group description, mirroring what `smithers skills add` passes).
 const CLI_DESCRIPTION =
@@ -11168,7 +11184,9 @@ const cli = Cli.create({
           // "finished" on completion. Stale/waiting/paused runs are flipped
           // directly and any surviving detached owner process group is
           // terminated.
-          const summary = await cascadeCancelRun(adapter, c.args.runId);
+          const summary = await cascadeCancelRun(adapter, c.args.runId, {
+            attribution: cliCancellationAttribution(`smithers cancel ${c.args.runId}`),
+          });
           const rootAction = summary.root?.action ?? "already-terminal";
           const descendantReport = {
             discovered: summary.descendants.length,
@@ -11330,7 +11348,10 @@ const cli = Cli.create({
             // Atomically claim terminal cancellation before terminating
             // any surviving owner group. The claim fences a healthy or
             // hung engine from racing this shutdown with a completion.
-            const { cancellation: result } = await finalizeCancelledOwnedRun(adapter, run, { now });
+            const { cancellation: result } = await finalizeCancelledOwnedRun(adapter, run, {
+              now,
+              attribution: cliCancellationAttribution(`smithers down${c.options.force ? " --force" : ""}`),
+            });
             if (result.won || result.repaired) {
               removeDetachedRunLog(run, { cwd: cliWorkspace.cwd() });
               process.stderr.write(`⊘ Cancelled: ${run.runId}\n`);

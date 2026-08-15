@@ -205,6 +205,13 @@ type SmithersEvent$2 = {
     after: RunState;
     timestampMs: number;
 } | {
+    type: "RunConcurrencySaturated";
+    runId: string;
+    requestedDemand: number;
+    effectiveCap: number;
+    remediationCommand: string;
+    timestampMs: number;
+} | {
     type: "RunFinished";
     runId: string;
     timestampMs: number;
