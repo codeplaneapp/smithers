@@ -79,23 +79,23 @@ browserTest(
         reduced.goto(`${base}/monitor`, { waitUntil: "domcontentloaded" }),
       ]);
       await Promise.all([
-        normal.waitForSelector(".mon-panel"),
-        reduced.waitForSelector(".mon-panel"),
+        normal.waitForSelector('[data-testid="monitor-conn"] .mon-dot-pulse'),
+        reduced.waitForSelector('[data-testid="monitor-conn"] .mon-dot-pulse'),
         normal.waitForSelector("button.sui-button"),
         reduced.waitForSelector("button.sui-button"),
       ]);
 
       const styles = async (page) =>
         page.evaluate(() => {
-          const panel = document.querySelector(".mon-panel");
+          const monitorAnimation = document.querySelector('[data-testid="monitor-conn"] .mon-dot-pulse');
           const refresh = document.querySelector("button.sui-button");
-          if (!(panel instanceof HTMLElement) || !(refresh instanceof HTMLElement))
+          if (!(monitorAnimation instanceof HTMLElement) || !(refresh instanceof HTMLElement))
             throw new Error("Monitor controls did not mount");
           const durationMs = (value) =>
             value.endsWith("ms") ? Number.parseFloat(value) : Number.parseFloat(value) * 1_000;
           return {
             preference: matchMedia("(prefers-reduced-motion: reduce)").matches,
-            panelAnimationMs: durationMs(getComputedStyle(panel).animationDuration),
+            monitorAnimationMs: durationMs(getComputedStyle(monitorAnimation).animationDuration),
             controlTransitionMs: durationMs(getComputedStyle(refresh).transitionDuration),
           };
         });
@@ -103,13 +103,13 @@ browserTest(
       const normalStyles = await styles(normal);
       const reducedStyles = await styles(reduced);
       expect(normalStyles.preference).toBe(false);
-      expect(normalStyles.panelAnimationMs).toBe(140);
+      expect(normalStyles.monitorAnimationMs).toBe(1_200);
       // The control recipe ships pressed-state feedback as a 120ms transition;
       // reduced motion clamps the shared control sheet's transition duration in
       // the browser.
       expect(normalStyles.controlTransitionMs).toBe(120);
       expect(reducedStyles.preference).toBe(true);
-      expect(reducedStyles.panelAnimationMs).toBe(0.001);
+      expect(reducedStyles.monitorAnimationMs).toBe(0.001);
       expect(reducedStyles.controlTransitionMs).toBe(0.001);
     } finally {
       try {

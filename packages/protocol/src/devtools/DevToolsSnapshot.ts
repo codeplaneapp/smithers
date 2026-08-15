@@ -22,6 +22,14 @@ type DevToolsUnhealthyReason =
   | { kind: "sandbox-unreachable" }
   | { kind: "supervisor-backoff"; attempt: number; nextAt: string };
 
+type DevToolsRunStateWarning = {
+  kind: "concurrency-ceiling-saturated";
+  requestedDemand: number;
+  effectiveCap: number;
+  remediationCommand: string;
+  observedAt: string;
+};
+
 /**
  * Derived run state carried on DevTools snapshots. This protocol-owned wire
  * shape keeps consumers independent of the database package that computes it.
@@ -44,6 +52,7 @@ export type DevToolsRunState = {
     | "unknown";
   blocked?: DevToolsBlockedReason;
   unhealthy?: DevToolsUnhealthyReason;
+  warnings?: DevToolsRunStateWarning[];
   computedAt: string;
 };
 
