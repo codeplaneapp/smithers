@@ -17,6 +17,7 @@ export function deriveRunState(input) {
     pendingEvent = null,
     parkedEventBlock = null,
     sandboxHeartbeats = [],
+    warnings = [],
     now = Date.now(),
     staleThresholdMs = RUN_STATE_HEARTBEAT_STALE_MS,
     timerOverdueGraceMs = RUN_STATE_TIMER_OVERDUE_GRACE_MS,
@@ -24,7 +25,11 @@ export function deriveRunState(input) {
   } = input;
 
   const computedAt = new Date(now).toISOString();
-  const base = { runId: run.runId, computedAt };
+  const base = {
+    runId: run.runId,
+    ...(warnings.length > 0 ? { warnings: [...warnings] } : {}),
+    computedAt,
+  };
 
   switch (run.status) {
     case "finished":

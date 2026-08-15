@@ -991,6 +991,13 @@ declare class Gateway {
     /** @type {Map<string, Promise<void>>} */
     workflowRegistryRefreshes: Map<string, Promise<void>>;
     /**
+     * Register-time rewind recovery touches the workflow database after
+     * `register()` returns. Track those jobs so `close()` is a real I/O barrier:
+     * callers may safely close or remove their backend once it resolves.
+     * @type {Set<Promise<void>>}
+     */
+    startupRecoveryJobs: Set<Promise<void>>;
+    /**
      * Background <UI>/<TUI> discovery. register() never renders a workflow
      * synchronously: renders are queued and drained one per macrotask so a slow
      * or throwing workflow can neither block startup nor starve /health.
@@ -1043,6 +1050,8 @@ declare class Gateway {
      */
     inflightResumes: Map<string, Promise<void>>;
     devtoolsSubscribers: Map<any, any>;
+    /** @type {Set<Promise<void>>} */
+    devtoolsStreamJobs: Set<Promise<void>>;
     runEventWindows: Map<any, any>;
     runEventSubscriberCounts: Map<any, any>;
     runEventSubscriberTotal: number;
