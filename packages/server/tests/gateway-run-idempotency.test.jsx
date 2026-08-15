@@ -7,6 +7,7 @@ import { createSmithers } from "smthrs";
 import { retryTask } from "@smthrs/time-travel/retry-task";
 import { z } from "zod";
 import { Gateway } from "../src/gateway.js";
+import { sleep } from "../../smithers/tests/helpers.js";
 
 /**
  * Run-id ownership regressions. A new launch must not overwrite an active run,
@@ -217,6 +218,38 @@ describe("gateway run-id ownership", () => {
     await gateway.resumeRunIfNeeded("retryable-resume", "idem", adapter, AUTH);
     expect(lookupCalls).toBe(2);
     expect(gateway.inflightResumes.has("retryable-resume")).toBe(false);
+  });
+
+  test("close drains an in-flight resume lookup without starting another run", async () => {
+    gateway = new Gateway({ heartbeatMs: 1000 });
+    const lookupStarted = deferred();
+    const releaseLookup = deferred();
+    const adapter = {
+      async getRun() {
+        lookupStarted.resolve();
+        await releaseLookup.promise;
+        return { status: "running" };
+      },
+    };
+    let startCalls = 0;
+    gateway.startRun = async () => {
+      startCalls += 1;
+      return { runId: "closing-resume", workflow: "idem", system: false };
+    };
+
+    const resuming = gateway.resumeRunIfNeeded("closing-resume", "idem", adapter, AUTH);
+    await lookupStarted.promise;
+    let closeSettled = false;
+    const closing = gateway.close().then(() => {
+      closeSettled = true;
+    });
+    await sleep(10);
+    expect(closeSettled).toBe(false);
+
+    releaseLookup.resolve();
+    await Promise.all([resuming, closing]);
+    expect(startCalls).toBe(0);
+    expect(gateway.inflightResumes.has("closing-resume")).toBe(false);
   });
 
   test("an older settling invocation preserves newer same-run tracking", async () => {

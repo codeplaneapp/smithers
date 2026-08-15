@@ -2,10 +2,64 @@
 import { describe, expect, test } from "bun:test";
 import { Workflow, Task, Parallel, runWorkflow } from "smthrs";
 import { SmithersDb } from "@smthrs/db/adapter";
+import { computeRunState } from "@smthrs/db/runState";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers.js";
 import { z } from "zod";
 import { Effect } from "effect";
 describe("slot governor auto-raise", () => {
+  test("persists automatic-ceiling saturation as a durable run-state warning", async () => {
+    const previousCeiling = process.env.SMITHERS_AUTO_MAX_CONCURRENCY_CEILING;
+    process.env.SMITHERS_AUTO_MAX_CONCURRENCY_CEILING = "4";
+    const { smithers, outputs, db, cleanup } = createTestSmithers({
+      out: z.object({ v: z.number() }),
+    });
+    try {
+      const adapter = new SmithersDb(db);
+      const runId = "auto-ceiling-saturated";
+      const workflow = smithers(() => (
+        <Workflow name="auto-ceiling-saturated">
+          <Parallel>
+            {Array.from({ length: 8 }, (_, i) => (
+              <Task key={`t${i}`} id={`t${i}`} output={outputs.out}>
+                {async () => {
+                  await sleep(100);
+                  return { v: i };
+                }}
+              </Task>
+            ))}
+          </Parallel>
+        </Workflow>
+      ));
+
+      const result = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId }));
+      expect(result.status).toBe("finished");
+      const events = await adapter.listEventsByType(runId, "RunConcurrencySaturated");
+      expect(events).toHaveLength(1);
+      expect(JSON.parse(events[0].payloadJson)).toMatchObject({
+        type: "RunConcurrencySaturated",
+        requestedDemand: 8,
+        effectiveCap: 4,
+        remediationCommand: "smithers up --max-concurrency 8",
+      });
+      expect((await computeRunState(adapter, runId)).warnings).toEqual([
+        {
+          kind: "concurrency-ceiling-saturated",
+          requestedDemand: 8,
+          effectiveCap: 4,
+          remediationCommand: "smithers up --max-concurrency 8",
+          observedAt: new Date(events[0].timestampMs).toISOString(),
+        },
+      ]);
+    } finally {
+      cleanup();
+      if (previousCeiling === undefined) {
+        delete process.env.SMITHERS_AUTO_MAX_CONCURRENCY_CEILING;
+      } else {
+        process.env.SMITHERS_AUTO_MAX_CONCURRENCY_CEILING = previousCeiling;
+      }
+    }
+  });
+
   test("run without an explicit maxConcurrency raises past the default cap of 4", async () => {
     const { smithers, outputs, cleanup } = createTestSmithers({
       out: z.object({ v: z.number() }),

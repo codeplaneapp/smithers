@@ -140,11 +140,20 @@ future run-state surfaces.
 ## RunStateView
 
 ```ts
+type RunStateWarning = {
+  kind: "concurrency-ceiling-saturated";
+  requestedDemand: number;
+  effectiveCap: number;
+  remediationCommand: string;
+  observedAt: string;       // ISO-8601
+};
+
 type RunStateView = {
   runId: string;
   state: RunState;
   blocked?: ReasonBlocked;
   unhealthy?: ReasonUnhealthy;
+  warnings?: RunStateWarning[];
   computedAt: string;        // ISO-8601
 };
 ```
@@ -158,6 +167,11 @@ the supporting row is unavailable. `unhealthy` is present for `stale`,
 (see above), and terminal states (`succeeded`, `failed`, `cancelled`) carry
 neither.
 
+`warnings` retains durable operator diagnostics independently of lifecycle
+state. When automatic concurrency reaches its configured ceiling while demand
+remains queued, the latest warning reports the requested demand, effective cap,
+and exact `--max-concurrency` remediation command.
+
 ## computeRunState
 
 ```ts
@@ -167,6 +181,7 @@ const view = await computeRunState(adapter, runId);
 view.state;       // "running" | ...
 view.blocked;     // present for waiting-* only when backing context is found
 view.unhealthy;   // present for stale/orphaned heartbeat expiry or overdue timers
+view.warnings;    // durable operator diagnostics, when present
 ```
 
 `computeRunState` is pure over the DB plus the heartbeat / lease signals on

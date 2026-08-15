@@ -9140,6 +9140,18 @@ async function runWorkflowBodyDriver(workflow, opts) {
     if (decision.warn) {
       logWarning(decision.warn, { runId, maxConcurrency, waiting: taskWaiters.length + 1 }, "engine:concurrency");
     }
+    if (decision.saturation) {
+      await Effect.runPromise(
+        eventBus.emitEventWithPersist({
+          type: "RunConcurrencySaturated",
+          runId,
+          requestedDemand: decision.saturation.requestedDemand,
+          effectiveCap: decision.saturation.effectiveCap,
+          remediationCommand: decision.saturation.remediationCommand,
+          timestampMs: nowMs(),
+        }),
+      );
+    }
     if (decision.raiseTo !== null) {
       const previousCap = maxConcurrency;
       const demand = activeTaskCount + taskWaiters.length + 1;

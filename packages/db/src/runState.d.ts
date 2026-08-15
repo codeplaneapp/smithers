@@ -1,5 +1,6 @@
 export type { RunState } from "./runState/RunState.ts";
 export type { RunStateView } from "./runState/RunStateView.ts";
+export type { RunStateWarning } from "./runState/RunStateWarning.ts";
 
 import type { DeriveRunStateInput } from "./runState/DeriveRunStateInput.ts";
 import type { RunStateView } from "./runState/RunStateView.ts";
