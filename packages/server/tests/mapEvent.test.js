@@ -319,10 +319,12 @@ describe("Gateway.mapEvent — SmithersEvent→wire mapping", () => {
       model: "gpt-5.4-codex",
       agent: "codex-work",
       inputTokens: 120,
+      freshInputTokens: 75,
       outputTokens: 30,
       cacheReadTokens: 40,
       cacheWriteTokens: 5,
       reasoningTokens: 12,
+      costUsd: 0.0042,
       timestampMs: 1000,
     });
     expect(result).toEqual({
@@ -335,10 +337,12 @@ describe("Gateway.mapEvent — SmithersEvent→wire mapping", () => {
         model: "gpt-5.4-codex",
         agent: "codex-work",
         inputTokens: 120,
+        freshInputTokens: 75,
         outputTokens: 30,
         cacheReadTokens: 40,
         cacheWriteTokens: 5,
         reasoningTokens: 12,
+        costUsd: 0.0042,
         timestampMs: 1000,
       },
     });
@@ -456,10 +460,11 @@ describe("Gateway.mapEvent — SmithersEvent→wire mapping", () => {
       type: "RunCancelled",
       runId: "run-1",
       timestampMs: 1000,
+      source: { kind: "signal", signal: "SIGTERM" },
     });
     expect(result).toEqual({
       event: "run.completed",
-      payload: { runId: "run-1", status: "cancelled" },
+      payload: { runId: "run-1", status: "cancelled", source: { kind: "signal", signal: "SIGTERM" } },
     });
   });
 

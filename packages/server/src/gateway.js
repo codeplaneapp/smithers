@@ -2365,7 +2365,7 @@ function serializeGatewayApiPayload(method, payload) {
  * shape. Persisted event payloads are authoritative; the row timestamp only
  * fills the timestampMs field for older payloads that predate it.
  * @param {Record<string, unknown>} row
- * @returns {Record<string, string | number> | null}
+ * @returns {Record<string, string | number | null> | null}
  */
 function parseRunTokenUsageRow(row) {
   const payloadJson = asString(row.payloadJson);
@@ -2388,10 +2388,12 @@ function parseRunTokenUsageRow(row) {
     model: asString(payload.model) ?? "unknown",
     agent: asString(payload.agent) ?? "unknown",
     inputTokens: asNumber(payload.inputTokens) ?? 0,
+    freshInputTokens: asNumber(payload.freshInputTokens) ?? asNumber(payload.inputTokens) ?? 0,
     outputTokens: asNumber(payload.outputTokens) ?? 0,
     cacheReadTokens: asNumber(payload.cacheReadTokens) ?? 0,
     cacheWriteTokens: asNumber(payload.cacheWriteTokens) ?? 0,
     reasoningTokens: asNumber(payload.reasoningTokens) ?? 0,
+    costUsd: asNumber(payload.costUsd) ?? null,
     timestampMs: asNumber(payload.timestampMs) ?? asNumber(row.timestampMs) ?? 0,
   };
 }
@@ -2582,6 +2584,13 @@ export class Gateway {
   /** @type {Map<string, Promise<void>>} */
   workflowRegistryRefreshes = new Map();
   /**
+   * Register-time rewind recovery touches the workflow database after
+   * `register()` returns. Track those jobs so `close()` is a real I/O barrier:
+   * callers may safely close or remove their backend once it resolves.
+   * @type {Set<Promise<void>>}
+   */
+  startupRecoveryJobs = new Set();
+  /**
    * Background <UI>/<TUI> discovery. register() never renders a workflow
    * synchronously: renders are queued and drained one per macrotask so a slow
    * or throwing workflow can neither block startup nor starve /health.
@@ -2623,6 +2632,8 @@ export class Gateway {
    */
   inflightResumes = new Map();
   devtoolsSubscribers = new Map();
+  /** @type {Set<Promise<void>>} */
+  devtoolsStreamJobs = new Set();
   runEventWindows = new Map();
   runEventSubscriberCounts = new Map();
   runEventSubscriberTotal = 0;
@@ -4529,6 +4540,8 @@ a { color: var(--brand); }</style>
         params: {
           runId: runEvents ? decodeURIComponent(runEvents[1]) : queryString(url.searchParams, "runId"),
           nodeId: queryString(url.searchParams, "nodeId"),
+          iteration: queryNonNegativeInt(url.searchParams, "iteration"),
+          attempt: queryNonNegativeInt(url.searchParams, "attempt"),
           afterSeq: queryNonNegativeInt(url.searchParams, "afterSeq"),
           limit: queryPositiveInt(url.searchParams, "limit"),
         },
@@ -4704,9 +4717,13 @@ a { color: var(--brand); }</style>
     }
     const nodeId = asString(params.nodeId);
     const limit = asOptionalPositiveInt(params.limit, "limit") ?? 100;
+    const iteration = asOptionalNonNegativeInt(params.iteration, "iteration");
+    const attempt = asOptionalNonNegativeInt(params.attempt, "attempt");
     if (!nodeId) {
       const rows = await resolved.adapter.listEventHistory(runId, {
         afterSeq: asOptionalNonNegativeInt(params.afterSeq, "afterSeq"),
+        iteration,
+        attempt,
         limit,
       });
       return rows.map((row) => serializeRunEventRow(row));
@@ -4720,6 +4737,8 @@ a { color: var(--brand); }</style>
     }
     const matches = await resolved.adapter.listNodeEvents(runId, nodeId, {
       afterSeq: asOptionalNonNegativeInt(params.afterSeq, "afterSeq"),
+      iteration,
+      attempt,
       limit,
     });
     return matches.map((row) => serializeRunEventRow(row));
@@ -5206,17 +5225,22 @@ a { color: var(--brand); }</style>
     // `needs_attention`. Runs asynchronously; failures are logged and
     // never block registration.
     const adapter = new SmithersDb(workflow.db);
-    recoverInProgressRewindAudits(adapter).catch((error) => {
-      emitGatewayLog(
-        "warning",
-        "rewind audit recovery failed",
-        {
-          workflow: key,
-          ...gatewayErrorAnnotations(error),
-        },
-        "gateway:startup-recovery",
-      );
-    });
+    const recoveryJob = recoverInProgressRewindAudits(adapter)
+      .catch((error) => {
+        emitGatewayLog(
+          "warning",
+          "rewind audit recovery failed",
+          {
+            workflow: key,
+            ...gatewayErrorAnnotations(error),
+          },
+          "gateway:startup-recovery",
+        );
+      })
+      .finally(() => {
+        this.startupRecoveryJobs.delete(recoveryJob);
+      });
+    this.startupRecoveryJobs.add(recoveryJob);
     return this;
   }
   /**
@@ -5825,9 +5849,36 @@ a { color: var(--brand); }</style>
     for (const activeRun of activeRuns) {
       activeRun.abort.abort();
     }
+    // Approval decisions can start a detached resume while the original run
+    // is still settling. Drain that gate before taking the final active/inflight
+    // snapshots so a resume cannot begin using its database after close.
+    const inflightResumes = [...this.inflightResumes.values()];
+    if (inflightResumes.length > 0) {
+      await Promise.allSettled(inflightResumes);
+    }
+    // A resume that had already entered startRun before gatewayClosing was set
+    // may have registered while we awaited it. Abort that raced run too.
+    for (const activeRun of this.activeRuns.values()) {
+      activeRun.abort.abort();
+    }
     const inflightRuns = [...this.inflightRuns.values()];
     if (inflightRuns.length > 0) {
       await Promise.allSettled(inflightRuns);
+    }
+    const startupRecoveryJobs = [...this.startupRecoveryJobs];
+    if (startupRecoveryJobs.length > 0) {
+      await Promise.allSettled(startupRecoveryJobs);
+    }
+    // streamDevTools workers poll workflow databases independently of the
+    // websocket. Abort every registered worker (including direct route users
+    // that are not in `connections`) and wait for its generator finalizer
+    // before callers tear down the backend.
+    for (const subscriber of this.devtoolsSubscribers.values()) {
+      subscriber.abort.abort();
+    }
+    const devtoolsStreamJobs = [...this.devtoolsStreamJobs];
+    if (devtoolsStreamJobs.length > 0) {
+      await Promise.allSettled(devtoolsStreamJobs);
     }
     for (const connection of this.connections) {
       // Fence any subscribe handler still awaiting resolveRun(), then
@@ -6643,6 +6694,9 @@ a { color: var(--brand); }</style>
    * @param {RunStartAuthContext} auth
    */
   async resumeRunIfNeeded(runId, workflowKey, adapter, auth) {
+    if (this.gatewayClosing) {
+      return;
+    }
     const existingResume = this.inflightResumes.get(runId);
     if (existingResume) {
       await existingResume;
@@ -6650,11 +6704,17 @@ a { color: var(--brand); }</style>
     }
     const resumePromise = (async () => {
       for (let attempt = 0; attempt < 20; attempt += 1) {
+        if (this.gatewayClosing) {
+          return;
+        }
         if (this.activeRuns.has(runId)) {
           await delay(25);
           continue;
         }
         const run = await adapter.getRun(runId);
+        if (this.gatewayClosing) {
+          return;
+        }
         if (!run) {
           return;
         }
@@ -8970,10 +9030,12 @@ a { color: var(--brand); }</style>
             model: event.model,
             agent: event.agent,
             inputTokens: event.inputTokens,
+            freshInputTokens: event.freshInputTokens,
             outputTokens: event.outputTokens,
             cacheReadTokens: event.cacheReadTokens,
             cacheWriteTokens: event.cacheWriteTokens,
             reasoningTokens: event.reasoningTokens,
+            costUsd: event.costUsd,
             timestampMs: event.timestampMs,
           },
         };
@@ -9032,6 +9094,7 @@ a { color: var(--brand); }</style>
           payload: {
             runId: event.runId,
             status: "cancelled",
+            ...(event.source ? { source: event.source } : {}),
           },
         };
       default:
@@ -9710,9 +9773,9 @@ a { color: var(--brand); }</style>
               );
             }
           }
-          if (connection.closed) {
+          if (this.gatewayClosing || connection.closed) {
             // The WS closed while resolveRun()/getLastFrame() were in
-            // flight; its close path already ran
+            // flight, or the gateway began closing; teardown already ran
             // cleanupDevToolsSubscribers for this connection.
             // Registering now would leak a subscriber that stays in
             // devtoolsSubscribers with a never-aborted signal (#553).
@@ -9782,7 +9845,7 @@ a { color: var(--brand); }</style>
             outboundQueue.push(payload);
             drainOutboundQueue();
           };
-          void (async () => {
+          const streamJob = (async () => {
             let eventsDelivered = 0;
             try {
               for await (const event of streamDevToolsRoute({
@@ -9876,6 +9939,12 @@ a { color: var(--brand); }</style>
               });
             }
           })();
+          this.devtoolsStreamJobs.add(streamJob);
+          void streamJob
+            .finally(() => {
+              this.devtoolsStreamJobs.delete(streamJob);
+            })
+            .catch(() => {});
           return responseOk(frame.id, {
             streamId,
             runId,

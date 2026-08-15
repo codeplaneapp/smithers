@@ -346,7 +346,7 @@ describe("gateway — many workflows sharing one DB", () => {
     expect(response.ok).toBe(true);
     // Pinned to the current migration head: bump this with every new migration
     // so an accidental head change is a failing test, not a silent drift.
-    expect(response.payload.schemaVersion).toBe("0040");
+    expect(response.payload.schemaVersion).toBe("0042");
     expect(typeof response.payload.signature).toBe("string");
     expect(typeof response.payload.components._smithers_runs).toBe("string");
   });

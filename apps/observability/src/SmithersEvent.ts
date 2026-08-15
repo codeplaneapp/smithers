@@ -77,6 +77,15 @@ type AgentCliCompletedEvent = {
 
 type AgentCliEvent = AgentCliStartedEvent | AgentCliActionEvent | AgentCliCompletedEvent;
 
+export type RunCancellationSource = {
+  kind: "signal" | "rpc" | "cli" | "engine";
+  detail?: string;
+  signal?: string;
+  clientPid?: number;
+  requestId?: string;
+  clientIdentity?: string;
+};
+
 export type SmithersEvent =
   | {
       type: "SupervisorStarted";
@@ -143,7 +152,13 @@ export type SmithersEvent =
       failedChildKeys?: readonly string[];
     }
   | { type: "RunFailed"; runId: string; error: unknown; timestampMs: number }
-  | { type: "RunCancelled"; runId: string; timestampMs: number }
+  | {
+      type: "RunCancelled";
+      runId: string;
+      timestampMs: number;
+      /** Missing only on historical or unattributed cancellation events. */
+      source?: RunCancellationSource;
+    }
   | {
       type: "RunContinuedAsNew";
       runId: string;
@@ -693,10 +708,14 @@ export type SmithersEvent =
       model: string;
       agent: string;
       inputTokens: number;
+      /** Non-cached input tokens. Falls back to inputTokens when the provider omits the breakdown. */
+      freshInputTokens?: number;
       outputTokens: number;
       cacheReadTokens?: number;
       cacheWriteTokens?: number;
       reasoningTokens?: number;
+      /** Estimated USD cost from Smithers' built-in model price table. */
+      costUsd?: number;
       timestampMs: number;
     }
   | {

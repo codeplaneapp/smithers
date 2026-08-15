@@ -67,17 +67,11 @@
 
 /* The dismissable action-error banner at the top of the body (danger tone). */
 .crons-action-banner {
-  display: flex;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
   margin: 10px 14px 0;
-  padding: 8px 12px;
-  font-size: 12.5px;
-  color: var(--st-failed);
-  background: color-mix(in srgb, var(--st-failed) 9%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--st-failed) 28%, transparent);
-  border-radius: 10px;
 }
 .crons-action-banner button {
-  margin-left: auto;
+  grid-column: 2;
+  grid-row: 1;
 }

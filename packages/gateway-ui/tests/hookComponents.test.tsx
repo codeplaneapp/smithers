@@ -197,6 +197,10 @@ describe("ConnectionBadge (live SSE)", () => {
     expect(badge).not.toBeNull();
     // The stream connects against the real gateway, so it reaches online.
     expect(badge?.getAttribute("data-status")).toBe("online");
+    expect(badge?.getAttribute("data-slot")).toBe("badge");
+    expect(badge?.getAttribute("role")).toBe("status");
+    expect(badge?.className).toContain("sui-badge-success");
+    expect(badge?.getAttribute("title")).toContain("Gateway connected");
     expect(badge?.textContent).toContain("Connected");
   });
 
@@ -206,6 +210,7 @@ describe("ConnectionBadge (live SSE)", () => {
     await harness.flush(60);
     const badge = harness.container.querySelector("[data-status]");
     expect(badge).not.toBeNull();
+    expect(badge?.getAttribute("data-slot")).toBe("badge");
     expect(["offline", "connecting", "idle"]).toContain(badge?.getAttribute("data-status"));
   });
 });
@@ -293,6 +298,7 @@ describe("RunList", () => {
     );
     await harness.flush(20);
     expect(harness.container.textContent).toContain("Failed to load runs.");
+    expect(harness.container.querySelector(".sui-alert-destructive")).not.toBeNull();
   });
 });
 
@@ -1029,6 +1035,8 @@ describe("SimpleWorkflowDashboard", () => {
     await harness.flush(80);
     expect(harness.container.querySelector('[data-testid="dash"]')).not.toBeNull();
     expect(harness.container.textContent).toContain("run-bbbb");
+    expect(harness.container.querySelector('[data-status="running"]')?.className).toContain("sui-badge-default");
+    expect(harness.container.querySelector('[data-status="ok"]')?.className).toContain("sui-badge-success");
 
     // Type a prompt and start a run. The typed prompt must reach the launch
     // input, which proves the controlled-input onChange fired.
@@ -1105,6 +1113,6 @@ describe("SimpleWorkflowDashboard", () => {
     )!;
     click(startButton);
     await harness.flush(80);
-    expect(harness.container.querySelector(".alert.err")).not.toBeNull();
+    expect(harness.container.querySelector(".sui-alert-destructive")).not.toBeNull();
   });
 });

@@ -411,6 +411,19 @@ declare function useGatewayRpc<Method extends GatewayRpcMethod>(method: Method, 
 declare function useGatewayRun(runId: string | undefined): GatewayAsyncState<GatewayRpcPayload$1<"getRun">>;
 
 /**
+ * The connection lifecycle of the gateway link, derived from real transport
+ * traffic (RPC resolves, stream frames, auth/transport errors). Mirrors the
+ * union apps/smithers used to keep in its hand-rolled `GatewayStatus` store
+ * field, now surfaced by `useGatewayConnectionStatus`.
+ */
+type GatewayConnectionStatus = "idle" | "connecting" | "online" | "offline" | "unauthorized";
+type GatewayConnectionState = {
+    status: GatewayConnectionStatus;
+    /** Epoch ms of the first failure in the current offline streak; cleared on reconnect. */
+    reconnectingSince?: number;
+};
+
+/**
  * Live run-event buffer over the bounded `runEvents` collection. Local mode
  * refetches after SSE invalidation; multiplayer mode follows the Electric
  * events shape. Heartbeats remain normal collection rows and are filtered in
@@ -434,6 +447,8 @@ declare function useGatewayRunEvents(runId: string | undefined, options?: {
     error: Error | undefined;
     streaming: boolean;
     loading: boolean;
+    refetch: () => Promise<void>;
+    connectionStatus: GatewayConnectionStatus;
 };
 
 type NodeEventsState = {
@@ -529,19 +544,6 @@ declare function useGatewayExtensionStream<T = unknown>(namespace: string | unde
     enabled?: boolean;
     backoff?: GatewayBackoffOptions;
 }): GatewayExtensionStreamState<T>;
-
-/**
- * The connection lifecycle of the gateway link, derived from real transport
- * traffic (RPC resolves, stream frames, auth/transport errors). Mirrors the
- * union apps/smithers used to keep in its hand-rolled `GatewayStatus` store
- * field, now surfaced by `useGatewayConnectionStatus`.
- */
-type GatewayConnectionStatus = "idle" | "connecting" | "online" | "offline" | "unauthorized";
-type GatewayConnectionState = {
-    status: GatewayConnectionStatus;
-    /** Epoch ms of the first failure in the current offline streak; cleared on reconnect. */
-    reconnectingSince?: number;
-};
 
 /** The six tones the run UI knows; mirrors `snapshotToGatewayRunNode`'s output. */
 type NodeStatus = "ok" | "running" | "queued" | "failed" | "waiting" | "cancelled";

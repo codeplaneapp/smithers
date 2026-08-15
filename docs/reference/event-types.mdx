@@ -110,6 +110,10 @@ millis from the stored row) and surface `stateVersion: 0`.
 
 </Warning>
 
+`RunCancelled.source` is optional for historical or unattributed events. When
+present, it contains `kind` (`signal`, `rpc`, `cli`, or `engine`) plus optional
+`detail`, `signal`, `clientPid`, `requestId`, and `clientIdentity` fields.
+
 <!-- prettier-ignore -->
 | Event | Top-level fields |
 |---|---|
@@ -123,7 +127,7 @@ millis from the stored row) and surface `stateVersion: 0`.
 | `RunConcurrencySaturated` | `runId`, `requestedDemand`, `effectiveCap`, `remediationCommand`, `timestampMs` |
 | `RunFinished` | `runId`, `timestampMs` |
 | `RunFailed` | `runId`, `error`, `timestampMs` |
-| `RunCancelled` | `runId`, `timestampMs` |
+| `RunCancelled` | `runId`, `source?`, `timestampMs` |
 | `RunContinuedAsNew` | `runId`, `newRunId`, `iteration`, `carriedStateSize`, `ancestryDepth?`, `timestampMs` |
 | `RunHijackRequested` | `runId`, `target?`, `timestampMs` |
 | `RunHijacked` | `runId`, `nodeId`, `iteration`, `attempt`, `engine`, `mode`, `resume?`, `cwd`, `timestampMs` |

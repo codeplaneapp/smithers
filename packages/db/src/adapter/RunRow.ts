@@ -13,6 +13,8 @@ export type RunRow = {
   cancelRequestedAtMs: number | null;
   cancelRequestId: string | null;
   cancelRequestSource: string | null;
+  cancelRequestDetail: string | null;
+  cancelRequestSignal: string | null;
   cancelRequestClientIdentity: string | null;
   cancelRequestClientPid: number | null;
   pauseRequestedAtMs?: number | null;

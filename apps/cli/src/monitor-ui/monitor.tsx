@@ -26,10 +26,25 @@ import {
 import { snapshotToGatewayRunNode, type DevToolsSnapshot } from "smthrs/gateway-client";
 import { HijackCandidateButton, OneshotSurface, WorkflowUiStyles } from "smthrs/gateway-ui";
 import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+  Badge,
   Button,
+  Card,
+  CardContent,
+  CardHeader,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
   observeReducedMotion,
   prefersReducedMotion,
+  Progress,
   SmithersUiStyles,
+  StatusPill,
   Table,
   TableBody,
   TableCell,
@@ -234,6 +249,14 @@ function ApprovalWait({ requestedAtMs }: { requestedAtMs: number | undefined }) 
 // Shared atoms.
 // ---------------------------------------------------------------------------
 
+function badgeVariantForTone(tone: Tone): "default" | "success" | "warning" | "destructive" | "muted" {
+  if (tone === "ok") return "success";
+  if (tone === "waiting") return "warning";
+  if (tone === "failed") return "destructive";
+  if (tone === "idle") return "muted";
+  return "default";
+}
+
 /**
  * Arm-then-confirm: the monitor's ONE confirmation idiom for destructive or
  * irreversible actions (deny, cancel, retry). First click arms the control
@@ -274,10 +297,12 @@ export function StatusTag({
 }) {
   const tone = toneForStatus(status);
   return (
-    <span className={`mon-pill tone-${tone}`} data-status={labelForStatus(status)}>
-      <span className={`mon-dot${pulse && tone === "running" ? " mon-dot-pulse" : ""}`} aria-hidden />
-      {label ?? labelForStatus(status)}
-    </span>
+    <StatusPill
+      status={status}
+      label={label ?? labelForStatus(status)}
+      className={pulse && tone === "running" ? "mon-status-pulse" : undefined}
+      data-status={labelForStatus(status)}
+    />
   );
 }
 
@@ -291,9 +316,17 @@ function ConnectionBadge() {
   const { status } = useGatewayConnectionStatus();
   const view = connectionViewFor(status);
   return (
-    <span className={`mon-conn tone-${view.tone}`} data-testid="monitor-conn" data-conn={status}>
-      <ToneDot tone={view.tone} pulse={view.pulse} />
-      {view.label}
+    <span className="mon-conn-wrap">
+      <Badge
+        variant={badgeVariantForTone(view.tone)}
+        className="mon-conn"
+        data-testid="monitor-conn"
+        data-conn={status}
+        data-status={status}
+      >
+        <ToneDot tone={view.tone} pulse={view.pulse} />
+        {view.label}
+      </Badge>
       {view.hint ? (
         <span className="mon-conn-hint" data-testid="monitor-conn-hint">
           {view.hint}
@@ -370,9 +403,11 @@ export function createMonitorKeydownHandler(
 ): (event: KeyboardEvent) => void {
   return (event) => {
     if (event.metaKey || event.ctrlKey || event.altKey) return;
-    if (document.querySelector(".mon-modal-backdrop")) return;
-    const state = keyState.current;
     const target = event.target instanceof HTMLElement ? event.target : null;
+    if (target?.closest('[data-slot="dialog-content"]') || document.querySelector('[data-slot="dialog-content"]')) {
+      return;
+    }
+    const state = keyState.current;
     const typing =
       target !== null &&
       (target.tagName === "INPUT" ||
@@ -727,12 +762,12 @@ export function RunsRail({
   return (
     <nav className="mon-rail-runs" data-testid="monitor-runs">
       {banner ? (
-        <div className="mon-banner tone-failed" data-testid={`monitor-runs-${connStatus}`}>
-          <div>{banner.title}</div>
+        <Alert variant="destructive" data-testid={`monitor-runs-${connStatus}`}>
+          <AlertTitle>{banner.title}</AlertTitle>
           {/* With cached rows below, the banner must say they are last-known
               rather than reuse the no-data copy — the rows are still on screen. */}
-          <div className="mon-dim">{lastKnown && connection.hint ? connection.hint : banner.detail}</div>
-        </div>
+          <AlertDescription>{lastKnown && connection.hint ? connection.hint : banner.detail}</AlertDescription>
+        </Alert>
       ) : null}
       {!banner && zeroState !== "ready" ? (
         <RunsZeroState
@@ -745,15 +780,15 @@ export function RunsRail({
         />
       ) : null}
       {queryError && zeroState === "ready" && !banner ? (
-        <div className="mon-banner tone-failed" data-testid="monitor-runs-query-error" role="alert">
-          <div>Couldn&apos;t refresh runs.</div>
-          <div className="mon-dim">{queryError.message}</div>
+        <Alert variant="destructive" data-testid="monitor-runs-query-error">
+          <AlertTitle>Couldn&apos;t refresh runs.</AlertTitle>
+          <AlertDescription>{queryError.message}</AlertDescription>
           {onRetry ? (
             <Button variant="outline" data-testid="monitor-runs-query-error-retry" onClick={() => void onRetry()}>
               Retry
             </Button>
           ) : null}
-        </div>
+        </Alert>
       ) : null}
       {!blocked &&
         groups.map((group) => (
@@ -875,19 +910,21 @@ export function StatCard({
   testId?: string;
 }) {
   return (
-    <div className={`mon-stat${tone ? ` tone-${tone}` : ""}`} data-testid={testId ?? "monitor-stat"}>
-      <div className="mon-stat-value" title={value}>
-        {value}
-      </div>
-      <div className="mon-stat-label" title={label}>
-        {label}
-      </div>
-      {sub ? (
-        <div className="mon-stat-sub mon-dim" title={sub}>
-          {sub}
+    <Card className={`mon-stat${tone ? ` tone-${tone}` : ""}`} data-testid={testId ?? "monitor-stat"}>
+      <CardContent>
+        <div className="mon-stat-value" title={value}>
+          {value}
         </div>
-      ) : null}
-    </div>
+        <div className="mon-stat-label" title={label}>
+          {label}
+        </div>
+        {sub ? (
+          <div className="mon-stat-sub mon-dim" title={sub}>
+            {sub}
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1008,26 +1045,28 @@ function ActiveNowBand({ runs, onSelectRun }: { runs: RunRow[]; onSelectRun: (ru
   const active = useMemo(() => groupRuns(runs).find((group) => group.group === "active")?.runs ?? [], [runs]);
   if (active.length === 0) return null;
   return (
-    <section className="mon-panel mon-active-band" data-testid="monitor-active-now">
-      <header className="mon-panel-head">
+    <Card className="mon-active-band" data-testid="monitor-active-now">
+      <CardHeader className="mon-panel-head">
         <h2 className="mon-kicker">
           Active now <span className="mon-count">{active.length}</span>
         </h2>
-      </header>
-      {active.map((run) => (
-        <button type="button" className="mon-active-row" key={run.runId} onClick={() => onSelectRun(run.runId)}>
-          <ToneDot tone={toneForStatus(run.status)} pulse={toneForStatus(run.status) === "running"} />
-          <span className="mon-active-name">{middleTruncate(run.workflowKey ?? "unknown", 56)}</span>
-          <span className="mon-mono mon-dim">{shortRunId(run.runId)}</span>
-          <span className="mon-active-progress">
-            <RunProgressCell run={run} />
-          </span>
-          <span className="mon-mono mon-dim mon-active-elapsed">
-            <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={undefined} />
-          </span>
-        </button>
-      ))}
-    </section>
+      </CardHeader>
+      <CardContent>
+        {active.map((run) => (
+          <button type="button" className="mon-active-row" key={run.runId} onClick={() => onSelectRun(run.runId)}>
+            <ToneDot tone={toneForStatus(run.status)} pulse={toneForStatus(run.status) === "running"} />
+            <span className="mon-active-name">{middleTruncate(run.workflowKey ?? "unknown", 56)}</span>
+            <span className="mon-mono mon-dim">{shortRunId(run.runId)}</span>
+            <span className="mon-active-progress">
+              <RunProgressCell run={run} />
+            </span>
+            <span className="mon-mono mon-dim mon-active-elapsed">
+              <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={undefined} />
+            </span>
+          </button>
+        ))}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1093,74 +1132,83 @@ function CronsPanel() {
   const cronsApi = useJsonApi("/v1/api/crons", 30_000);
   const crons = useMemo(() => cronRowsOf(cronsApi.body), [cronsApi.body]);
   return (
-    <section className="mon-panel mon-crons-panel" data-testid="monitor-crons">
-      <header className="mon-panel-head">
+    <Card className="mon-crons-panel" data-testid="monitor-crons">
+      <CardHeader className="mon-panel-head">
         <h2 className="mon-kicker">
           Crons <span className="mon-count">{cronsApi.loaded ? crons.length : ""}</span>
         </h2>
-      </header>
-      {!cronsApi.loaded ? (
-        <div className="mon-empty mon-dim">
-          {cronsApi.failed ? (
-            "Could not load crons — the gateway did not answer."
-          ) : (
-            <span className="mon-live-pending">
-              <span className="mon-dot mon-dot-pulse" aria-hidden /> loading crons…
-            </span>
-          )}
-        </div>
-      ) : crons.length === 0 ? (
-        <div className="mon-empty mon-dim">
-          No crons registered. Add one with <code>smithers cron add &lt;pattern&gt; &lt;workflow&gt;</code>.
-        </div>
-      ) : (
-        <div className="mon-crons-scroll">
-          <Table className="mon-runs-table mon-crons-table">
-            <TableHeader>
-              <TableRow>
-                <TableHead scope="col">Pattern</TableHead>
-                <TableHead scope="col">Workflow</TableHead>
-                <TableHead scope="col">Enabled</TableHead>
-                <TableHead scope="col">Last run</TableHead>
-                <TableHead scope="col">Next run</TableHead>
-                <TableHead scope="col">Last error</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {crons.map((cron) => (
-                <TableRow key={cron.cronId} data-cron-id={cron.cronId}>
-                  <TableCell className="mon-mono">{cron.pattern}</TableCell>
-                  <TableCell className="mon-table-workflow" title={cron.workflowPath ?? cron.workflow}>
-                    {cron.workflow}
-                  </TableCell>
-                  <TableCell>
-                    <span className={`mon-pill tone-${cron.enabled ? "ok" : "idle"}`}>
-                      <span className="mon-dot" aria-hidden />
-                      {cron.enabled ? "enabled" : "disabled"}
-                    </span>
-                  </TableCell>
-                  <TableCell className="mon-dim">
-                    <Ago ms={cron.lastRunAtMs} />
-                  </TableCell>
-                  <TableCell className="mon-mono">
-                    {cron.nextRunAtMs === undefined ? (
-                      <span className="mon-dim">—</span>
-                    ) : now >= cron.nextRunAtMs ? (
-                      "due now"
-                    ) : (
-                      <Countdown untilMs={cron.nextRunAtMs} />
-                    )}
-                  </TableCell>
-                  <TableCell className={cron.error ? "tone-failed mon-cron-error" : "mon-dim"} title={cron.error}>
-                    {cron.error ? cron.error.slice(0, 80) : "—"}
-                  </TableCell>
+      </CardHeader>
+      <CardContent>
+        {!cronsApi.loaded ? (
+          <div className="mon-empty mon-dim">
+            {cronsApi.failed ? (
+              "Could not load crons — the gateway did not answer."
+            ) : (
+              <span className="mon-live-pending">
+                <span className="mon-dot mon-dot-pulse" aria-hidden /> loading crons…
+              </span>
+            )}
+          </div>
+        ) : crons.length === 0 ? (
+          <div className="mon-empty mon-dim">
+            No crons registered. Add one with <code>smithers cron add &lt;pattern&gt; &lt;workflow&gt;</code>.
+          </div>
+        ) : (
+          <div className="mon-crons-scroll">
+            <Table className="mon-runs-table mon-crons-table">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Pattern</TableHead>
+                  <TableHead scope="col">Workflow</TableHead>
+                  <TableHead scope="col">Enabled</TableHead>
+                  <TableHead scope="col">Last run</TableHead>
+                  <TableHead scope="col">Next run</TableHead>
+                  <TableHead scope="col">Last error</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
-    </section>
+              </TableHeader>
+              <TableBody>
+                {crons.map((cron) => (
+                  <TableRow key={cron.cronId} data-cron-id={cron.cronId}>
+                    <TableCell className="mon-mono">{cron.pattern}</TableCell>
+                    <TableCell className="mon-table-workflow" title={cron.workflowPath ?? cron.workflow}>
+                      {cron.workflow}
+                    </TableCell>
+                    <TableCell>
+                      <CronStatusTag enabled={cron.enabled} />
+                    </TableCell>
+                    <TableCell className="mon-dim">
+                      <Ago ms={cron.lastRunAtMs} />
+                    </TableCell>
+                    <TableCell className="mon-mono">
+                      {cron.nextRunAtMs === undefined ? (
+                        <span className="mon-dim">—</span>
+                      ) : now >= cron.nextRunAtMs ? (
+                        "due now"
+                      ) : (
+                        <Countdown untilMs={cron.nextRunAtMs} />
+                      )}
+                    </TableCell>
+                    <TableCell className={cron.error ? "tone-failed mon-cron-error" : "mon-dim"} title={cron.error}>
+                      {cron.error ? cron.error.slice(0, 80) : "—"}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+export function CronStatusTag({ enabled }: { enabled: boolean }) {
+  return (
+    <StatusPill
+      status={enabled ? "finished" : "disabled"}
+      label={enabled ? "enabled" : "disabled"}
+      data-status={enabled ? "enabled" : "disabled"}
+    />
   );
 }
 
@@ -1182,12 +1230,12 @@ function useRunScores(runId: string | undefined, live: boolean): RunScores {
 }
 
 function ScoreRowLine({ row }: { row: ScoreRow }) {
+  const tone = scoreTone(row.score);
   return (
     <div className="mon-score-row" data-testid="monitor-score-row">
-      <span className={`mon-pill tone-${scoreTone(row.score)} mon-score-pill`}>
-        <span className="mon-dot" aria-hidden />
+      <Badge variant={badgeVariantForTone(tone)} className="mon-score-pill">
         {formatScore(row.score)}
-      </span>
+      </Badge>
       <span className="mon-score-name">{row.scorerName}</span>
       <span className="mon-mono mon-dim mon-score-node" title={row.nodeId}>
         {row.nodeId}
@@ -1215,27 +1263,29 @@ function ScoresPanel({ scores: { rows, loaded } }: { scores: RunScores }) {
     </div>
   );
   return (
-    <section className="mon-panel mon-scores-panel" data-testid="monitor-scores">
-      <header className="mon-panel-head">
+    <Card className="mon-scores-panel" data-testid="monitor-scores">
+      <CardHeader className="mon-panel-head">
         <h2 className="mon-kicker">
           Scores <span className="mon-count">{summary.count}</span>
         </h2>
         <span className="mon-dim mon-mono">avg {formatScore(summary.avg)}</span>
-      </header>
-      {rows.length > SCORES_COLLAPSE_THRESHOLD ? (
-        <details className="mon-scores-details">
-          <summary className="mon-scores-summary" data-testid="monitor-scores-summary">
-            <span className="mon-diff-caret" aria-hidden>
-              ▸
-            </span>
-            {summary.count} scores · avg {formatScore(summary.avg)}
-          </summary>
-          {list}
-        </details>
-      ) : (
-        list
-      )}
-    </section>
+      </CardHeader>
+      <CardContent>
+        {rows.length > SCORES_COLLAPSE_THRESHOLD ? (
+          <details className="mon-scores-details">
+            <summary className="mon-scores-summary" data-testid="monitor-scores-summary">
+              <span className="mon-diff-caret" aria-hidden>
+                ▸
+              </span>
+              {summary.count} scores · avg {formatScore(summary.avg)}
+            </summary>
+            {list}
+          </details>
+        ) : (
+          list
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1246,13 +1296,14 @@ function NodeScoreChips({ nodeId, scores: { rows, loaded } }: { nodeId: string; 
   return (
     <div className="mon-node-scores" data-testid="monitor-node-scores">
       {nodeScores.map((row) => (
-        <span
+        <Badge
           key={`${row.scorerId}:${row.iteration}:${row.attempt}`}
-          className={`mon-chip mon-score-chip tone-${scoreTone(row.score)}`}
+          variant={badgeVariantForTone(scoreTone(row.score))}
+          className="mon-score-chip"
           title={row.reason ?? row.scorerName}
         >
           {row.scorerName} {formatScore(row.score)}
-        </span>
+        </Badge>
       ))}
     </div>
   );
@@ -1292,36 +1343,38 @@ function MetricsPanel() {
   const errors = useMemo(() => (scrape ? nonZeroErrorCounters(scrape) : []), [scrape]);
   if (!scrape) {
     return (
-      <section className="mon-panel mon-metrics-panel" data-testid="monitor-metrics">
-        <header className="mon-panel-head">
+      <Card className="mon-metrics-panel" data-testid="monitor-metrics">
+        <CardHeader className="mon-panel-head">
           <h2 className="mon-kicker">Metrics</h2>
-        </header>
-        <div className="mon-empty mon-dim">
-          {failed ? (
-            "Could not scrape /metrics — the gateway did not answer."
-          ) : (
-            <span className="mon-live-pending">
-              <span className="mon-dot mon-dot-pulse" aria-hidden /> scraping /metrics…
-            </span>
-          )}
-        </div>
-      </section>
+        </CardHeader>
+        <CardContent>
+          <div className="mon-empty mon-dim">
+            {failed ? (
+              "Could not scrape /metrics — the gateway did not answer."
+            ) : (
+              <span className="mon-live-pending">
+                <span className="mon-dot mon-dot-pulse" aria-hidden /> scraping /metrics…
+              </span>
+            )}
+          </div>
+        </CardContent>
+      </Card>
     );
   }
   const num = (value: number | undefined): string => (value === undefined ? "—" : String(Math.round(value)));
   const uptime = metricValue(scrape, "smithers_process_uptime_seconds");
   return (
-    <section className="mon-panel mon-metrics-panel" data-testid="monitor-metrics">
-      <header className="mon-panel-head">
+    <Card className="mon-metrics-panel" data-testid="monitor-metrics">
+      <CardHeader className="mon-panel-head">
         <h2 className="mon-kicker">Metrics</h2>
-        {failed ? <span className="mon-conn tone-failed">scrape failing — showing last data</span> : null}
+        {failed ? <Badge variant="destructive">scrape failing — showing last data</Badge> : null}
         <span className="mon-dim mon-count-note">
           {scrapedAtMs ? `scraped ${Math.max(0, Math.round((now - scrapedAtMs) / 1000))}s ago` : ""}
           {uptime !== undefined ? ` · gateway up ${formatElapsed(now - uptime * 1000, now)}` : ""}
         </span>
-      </header>
+      </CardHeader>
 
-      <div className="mon-metrics-grid">
+      <CardContent className="mon-metrics-grid">
         <div className="mon-metrics-section" data-testid="monitor-metrics-agents">
           <h3 className="mon-kicker">Agent latency (this gateway process)</h3>
           {agentLatency.length === 0 ? (
@@ -1427,8 +1480,8 @@ function MetricsPanel() {
             </div>
           )}
         </div>
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1446,14 +1499,22 @@ export function RunProgressCell({ run }: { run: RunRow }) {
   const progress = isRecord(run) ? runProgress(run.summary) : null;
   if (!progress) return <span className="mon-dim">—</span>;
   return (
-    <span
+    <div
       className="mon-mono"
       data-testid="monitor-run-progress"
       title={`${progress.done} done · ${progress.failed} failed · ${progress.total} nodes`}
     >
-      {progress.done + progress.failed}/{progress.total}
-      {progress.failed > 0 ? <span className="tone-failed mon-table-failed"> · {progress.failed} failed</span> : null}
-    </span>
+      <Progress
+        className="mon-table-progress"
+        value={progress.done + progress.failed}
+        max={progress.total}
+        aria-label={`${progress.done + progress.failed} of ${progress.total} nodes complete`}
+      />
+      <span>
+        {progress.done + progress.failed}/{progress.total}
+        {progress.failed > 0 ? <span className="tone-failed mon-table-failed"> · {progress.failed} failed</span> : null}
+      </span>
+    </div>
   );
 }
 
@@ -1515,28 +1576,28 @@ export function RunsTable({
   }
   if (landingState === "offline-without-cache") {
     return (
-      <div
+      <Alert
+        variant="destructive"
         className="mon-empty mon-empty-hero tone-failed"
         data-testid="monitor-empty-detail"
         data-state={landingState}
-        role="alert"
       >
-        <div>Gateway offline.</div>
-        <div className="mon-dim">No last-known runs are available. Reconnecting automatically.</div>
-      </div>
+        <AlertTitle>Gateway offline.</AlertTitle>
+        <AlertDescription>No last-known runs are available. Reconnecting automatically.</AlertDescription>
+      </Alert>
     );
   }
   if (landingState === "unauthorized") {
     return (
-      <div
+      <Alert
+        variant="destructive"
         className="mon-empty mon-empty-hero tone-failed"
         data-testid="monitor-empty-detail"
         data-state={landingState}
-        role="alert"
       >
-        <div>Unauthorized.</div>
-        <div className="mon-dim">Re-open with smithers monitor to provide fresh gateway credentials.</div>
-      </div>
+        <AlertTitle>Unauthorized.</AlertTitle>
+        <AlertDescription>Re-open with smithers monitor to provide fresh gateway credentials.</AlertDescription>
+      </Alert>
     );
   }
   if (landingState !== "ready" && landingState !== "offline-with-cache") {
@@ -1570,121 +1631,130 @@ export function RunsTable({
   const lastRow = Math.min(shownPage * RUNS_PAGE_SIZE, total);
   const startedIndicator = sort === "newest" ? "▾" : sort === "oldest" ? "▴" : "";
   return (
-    <section
-      className="mon-panel mon-runs-table-panel"
+    <Card
+      className="mon-runs-table-panel"
       data-state={landingState}
       aria-label={lastKnown ? "Last-known runs" : "Runs"}
     >
-      <header className="mon-panel-head">
+      <CardHeader className="mon-panel-head">
         <h2 className="mon-kicker">
           {lastKnown ? "Last-known runs" : "All runs"} <span className="mon-count">{total}</span>
         </h2>
         {sort === "default" ? <span className="mon-dim mon-sort-note">attention first · newest first</span> : null}
-      </header>
-      {lastKnown ? (
-        <div className="mon-banner tone-waiting" data-testid="monitor-runs-last-known" role="status">
-          Gateway offline. Every run shown below is last-known data and may be out of date.
-        </div>
-      ) : null}
-      {queryError ? (
-        <div className="mon-banner tone-failed" data-testid="monitor-runs-table-query-error" role="alert">
-          <div>Couldn&apos;t refresh runs.</div>
-          <div className="mon-dim">{queryError.message}</div>
-          {onRetry ? (
-            <Button variant="outline" data-testid="monitor-runs-table-query-error-retry" onClick={() => void onRetry()}>
-              Retry
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
-      <div className="mon-runs-scroll" role="region" aria-label="Runs table" tabIndex={0}>
-        <Table className="mon-runs-table" data-testid="monitor-runs-table">
-          <TableHeader>
-            <TableRow>
-              <TableHead scope="col">Status</TableHead>
-              <TableHead scope="col">Workflow</TableHead>
-              <TableHead scope="col">Progress</TableHead>
-              <TableHead
-                scope="col"
-                aria-sort={sort === "default" ? undefined : sort === "newest" ? "descending" : "ascending"}
+      </CardHeader>
+      <CardContent>
+        {lastKnown ? (
+          <Alert variant="warning" data-testid="monitor-runs-last-known" role="status">
+            <AlertTitle>Gateway offline.</AlertTitle>
+            <AlertDescription>Every run shown below is last-known data and may be out of date.</AlertDescription>
+          </Alert>
+        ) : null}
+        {queryError ? (
+          <Alert variant="destructive" data-testid="monitor-runs-table-query-error">
+            <AlertTitle>Couldn&apos;t refresh runs.</AlertTitle>
+            <AlertDescription>{queryError.message}</AlertDescription>
+            {onRetry ? (
+              <Button
+                variant="outline"
+                data-testid="monitor-runs-table-query-error-retry"
+                onClick={() => void onRetry()}
               >
-                <button
-                  type="button"
-                  className="mon-th-sort"
-                  data-testid="monitor-sort-started"
-                  title="Sort by start time"
-                  onClick={() => setSort(sort === "default" ? "newest" : sort === "newest" ? "oldest" : "default")}
+                Retry
+              </Button>
+            ) : null}
+          </Alert>
+        ) : null}
+        <div className="mon-runs-scroll" role="region" aria-label="Runs table" tabIndex={0}>
+          <Table className="mon-runs-table" data-testid="monitor-runs-table">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Status</TableHead>
+                <TableHead scope="col">Workflow</TableHead>
+                <TableHead scope="col">Progress</TableHead>
+                <TableHead
+                  scope="col"
+                  aria-sort={sort === "default" ? undefined : sort === "newest" ? "descending" : "ascending"}
                 >
-                  Started
-                  {startedIndicator ? (
-                    <span className="mon-sort-arrow" aria-hidden>
-                      {" "}
-                      {startedIndicator}
-                    </span>
-                  ) : null}
-                </button>
-              </TableHead>
-              <TableHead scope="col">Duration</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {pageRows.map((run) => (
-              <TableRow
-                key={run.runId}
-                className={`mon-runs-table-row${run.runId === cursorRunId ? " is-kbcursor" : ""}`}
-                data-run-id={run.runId}
-                role="button"
-                tabIndex={0}
-                ref={
-                  run.runId === cursorRunId
-                    ? (el: HTMLTableRowElement | null) => el?.scrollIntoView({ block: "nearest" })
-                    : undefined
-                }
-                onClick={() => onSelect(run.runId)}
-                onKeyDown={(event) => {
-                  if (event.key !== "Enter" && event.key !== " ") return;
-                  event.preventDefault();
-                  onSelect(run.runId);
-                }}
-              >
-                <TableCell>
-                  <StatusTag
-                    status={run.status}
-                    label={lastKnown ? `${labelForStatus(run.status)} · last-known` : undefined}
-                    pulse={!lastKnown}
-                  />
-                </TableCell>
-                <TableCell className="mon-table-workflow" title={run.workflowKey ?? "unknown workflow"}>
-                  <span className="mon-table-workflow-name">{middleTruncate(run.workflowKey ?? "unknown", 56)}</span>
-                  <span className="mon-mono mon-dim mon-table-runid">{shortRunId(run.runId)}</span>
-                </TableCell>
-                <TableCell>
-                  <RunProgressCell run={run} />
-                </TableCell>
-                <TableCell className="mon-dim">
-                  <Ago ms={run.startedAtMs ?? run.createdAtMs} />
-                </TableCell>
-                <TableCell className="mon-dim mon-mono">
-                  {lastKnown && !isTerminalStatus(run.status) ? (
-                    "last-known"
-                  ) : (
-                    <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={run.finishedAtMs} />
-                  )}
-                </TableCell>
+                  <button
+                    type="button"
+                    className="mon-th-sort"
+                    data-testid="monitor-sort-started"
+                    title="Sort by start time"
+                    onClick={() => setSort(sort === "default" ? "newest" : sort === "newest" ? "oldest" : "default")}
+                  >
+                    Started
+                    {startedIndicator ? (
+                      <span className="mon-sort-arrow" aria-hidden>
+                        {" "}
+                        {startedIndicator}
+                      </span>
+                    ) : null}
+                  </button>
+                </TableHead>
+                <TableHead scope="col">Duration</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-      <RunsPagination
-        page={shownPage}
-        pageCount={pageCount}
-        firstRow={firstRow}
-        lastRow={lastRow}
-        total={total}
-        onPageChange={onPageChange}
-      />
-    </section>
+            </TableHeader>
+            <TableBody>
+              {pageRows.map((run) => (
+                <TableRow
+                  key={run.runId}
+                  className={`mon-runs-table-row${run.runId === cursorRunId ? " is-kbcursor" : ""}`}
+                  data-run-id={run.runId}
+                  role="button"
+                  aria-current={run.runId === cursorRunId ? "true" : undefined}
+                  aria-label={`${run.workflowKey ?? "unknown workflow"}, run ${run.runId}, ${labelForStatus(run.status)}${lastKnown ? ", last-known" : ""}`}
+                  tabIndex={0}
+                  ref={
+                    run.runId === cursorRunId
+                      ? (el: HTMLTableRowElement | null) => el?.scrollIntoView({ block: "nearest" })
+                      : undefined
+                  }
+                  onClick={() => onSelect(run.runId)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    onSelect(run.runId);
+                  }}
+                >
+                  <TableCell>
+                    <StatusTag
+                      status={run.status}
+                      label={lastKnown ? `${labelForStatus(run.status)} · last-known` : undefined}
+                      pulse={!lastKnown}
+                    />
+                  </TableCell>
+                  <TableCell className="mon-table-workflow" title={run.workflowKey ?? "unknown workflow"}>
+                    <span className="mon-table-workflow-name">{middleTruncate(run.workflowKey ?? "unknown", 56)}</span>
+                    <span className="mon-mono mon-dim mon-table-runid">{shortRunId(run.runId)}</span>
+                  </TableCell>
+                  <TableCell>
+                    <RunProgressCell run={run} />
+                  </TableCell>
+                  <TableCell className="mon-dim">
+                    <Ago ms={run.startedAtMs ?? run.createdAtMs} />
+                  </TableCell>
+                  <TableCell className="mon-dim mon-mono">
+                    {lastKnown && !isTerminalStatus(run.status) ? (
+                      "last-known"
+                    ) : (
+                      <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={run.finishedAtMs} />
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+        <RunsPagination
+          page={shownPage}
+          pageCount={pageCount}
+          firstRow={firstRow}
+          lastRow={lastRow}
+          total={total}
+          onPageChange={onPageChange}
+        />
+      </CardContent>
+    </Card>
   );
 }
 
@@ -2475,8 +2545,8 @@ function ExecutionPanel({
     return map.size > 0 ? map : undefined;
   }, [predictionTree, usagePrediction]);
   return (
-    <section className="mon-panel mon-tree-panel">
-      <header className="mon-panel-head">
+    <Card className="mon-tree-panel">
+      <CardHeader className="mon-panel-head">
         <h2 className="mon-kicker">Execution</h2>
         {selectedNode && !scrubbing ? <Chip onClick={() => onSelectNode(undefined)}>Clear selection</Chip> : null}
         <Chip
@@ -2554,86 +2624,88 @@ function ExecutionPanel({
         >
           Debug
         </Chip>
-      </header>
-      {scrubbing && !showTimeline && !showUsage ? (
-        <div className="mon-scrub" data-testid="monitor-scrub">
-          <Chip
-            onClick={() => step(-1)}
-            disabled={latestFrameNo === undefined || shownFrame <= bounds.min}
-            aria-label="Previous frame"
-          >
-            ◀
-          </Chip>
-          <input
-            className="mon-scrub-range"
-            type="range"
-            min={bounds.min}
-            max={bounds.max}
-            step={1}
-            value={shownFrame}
-            disabled={latestFrameNo === undefined}
-            onChange={(event) => {
-              if (latestFrameNo === undefined) return;
-              setFrame(clampFrameNo(Number(event.currentTarget.value), latestFrameNo));
-            }}
-            aria-label="Frame"
-          />
-          <Chip
-            onClick={() => step(1)}
-            disabled={latestFrameNo === undefined || shownFrame >= bounds.max}
-            aria-label="Next frame"
-          >
-            ▶
-          </Chip>
-          <span className="mon-mono mon-dim mon-scrub-note">
-            frame {latestFrameNo === undefined ? "… / …" : `${shownFrame} / ${bounds.max}`}
-          </span>
-          {scrubLoading ? <span className="mon-dim mon-scrub-loading">loading…</span> : null}
-          {scrubError && !scrubLoading ? (
-            <span className="mon-dim mon-scrub-note" title={scrubError.message}>
-              frame unavailable
+      </CardHeader>
+      <CardContent>
+        {scrubbing && !showTimeline && !showUsage ? (
+          <div className="mon-scrub" data-testid="monitor-scrub">
+            <Chip
+              onClick={() => step(-1)}
+              disabled={latestFrameNo === undefined || shownFrame <= bounds.min}
+              aria-label="Previous frame"
+            >
+              ◀
+            </Chip>
+            <input
+              className="mon-scrub-range"
+              type="range"
+              min={bounds.min}
+              max={bounds.max}
+              step={1}
+              value={shownFrame}
+              disabled={latestFrameNo === undefined}
+              onChange={(event) => {
+                if (latestFrameNo === undefined) return;
+                setFrame(clampFrameNo(Number(event.currentTarget.value), latestFrameNo));
+              }}
+              aria-label="Frame"
+            />
+            <Chip
+              onClick={() => step(1)}
+              disabled={latestFrameNo === undefined || shownFrame >= bounds.max}
+              aria-label="Next frame"
+            >
+              ▶
+            </Chip>
+            <span className="mon-mono mon-dim mon-scrub-note">
+              frame {latestFrameNo === undefined ? "… / …" : `${shownFrame} / ${bounds.max}`}
             </span>
-          ) : null}
-          <Chip onClick={goLive} title="Return to the live tree">
-            Live
-          </Chip>
-        </div>
-      ) : null}
-      {showUsage ? (
-        <UsagePanel usageEvents={usageEvents} usageLoading={usageLoading} usageFailed={usageFailed} />
-      ) : showTimeline ? (
-        <TimelinePanel
-          nodeStates={nodeStates}
-          treeNodes={treeQuery.nodes as TreeNode[]}
-          selectedNode={selectedNode}
-          onSelectNode={onSelectNode}
-        />
-      ) : (
-        <ExecutionTree
-          runId={runId}
-          treeQuery={treeQuery}
-          selectedNodeKey={selectedNode ? treeNodeKey(selectedNode) : undefined}
-          onSelectNode={onSelectNode}
-          autoSelectNodeId={autoSelectNodeId}
-          onAutoSelected={onAutoSelected}
-          onRetry={() => location.reload()}
-          frameOverride={
-            scrubbing
-              ? {
-                  root: scrubTree,
-                  loading: scrubLoading,
-                  error: scrubError,
-                  onRetry: () => void retryScrub(),
-                  onReturnToLive: goLive,
-                }
-              : undefined
-          }
-          asXml={asXml}
-          durations={durations}
-          tokensById={tokensById}
-        />
-      )}
-    </section>
+            {scrubLoading ? <span className="mon-dim mon-scrub-loading">loading…</span> : null}
+            {scrubError && !scrubLoading ? (
+              <span className="mon-dim mon-scrub-note" title={scrubError.message}>
+                frame unavailable
+              </span>
+            ) : null}
+            <Chip onClick={goLive} title="Return to the live tree">
+              Live
+            </Chip>
+          </div>
+        ) : null}
+        {showUsage ? (
+          <UsagePanel usageEvents={usageEvents} usageLoading={usageLoading} usageFailed={usageFailed} />
+        ) : showTimeline ? (
+          <TimelinePanel
+            nodeStates={nodeStates}
+            treeNodes={treeQuery.nodes as TreeNode[]}
+            selectedNode={selectedNode}
+            onSelectNode={onSelectNode}
+          />
+        ) : (
+          <ExecutionTree
+            runId={runId}
+            treeQuery={treeQuery}
+            selectedNodeKey={selectedNode ? treeNodeKey(selectedNode) : undefined}
+            onSelectNode={onSelectNode}
+            autoSelectNodeId={autoSelectNodeId}
+            onAutoSelected={onAutoSelected}
+            onRetry={() => location.reload()}
+            frameOverride={
+              scrubbing
+                ? {
+                    root: scrubTree,
+                    loading: scrubLoading,
+                    error: scrubError,
+                    onRetry: () => void retryScrub(),
+                    onReturnToLive: goLive,
+                  }
+                : undefined
+            }
+            asXml={asXml}
+            durations={durations}
+            tokensById={tokensById}
+          />
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -2783,6 +2855,29 @@ function UsagePanel({
           <BurnSparkline buckets={buckets} />
         )}
       </section>
+      {fold.eventCount > 0 ? (
+        <section className="mon-usage-section" data-testid="monitor-input-mix">
+          <h3 className="mon-kicker">Input mix</h3>
+          <div className="mon-usage-row">
+            <span className="mon-usage-label">Fresh</span>
+            <span className="mon-mono mon-usage-text">{formatTokens(fold.freshInputTokens)}</span>
+          </div>
+          <div className="mon-usage-row">
+            <span className="mon-usage-label">Cache read</span>
+            <span className="mon-mono mon-usage-text">{formatTokens(fold.cacheReadTokens)}</span>
+          </div>
+          <div className="mon-usage-row">
+            <span className="mon-usage-label">Cache write</span>
+            <span className="mon-mono mon-usage-text">{formatTokens(fold.cacheWriteTokens)}</span>
+          </div>
+          {fold.costUsd !== null ? (
+            <div className="mon-usage-row">
+              <span className="mon-usage-label">Estimated cost</span>
+              <span className="mon-mono mon-usage-text">~${fold.costUsd.toFixed(4)}</span>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
       {agentRows.length > 0 ? (
         <section className="mon-usage-section">
           <h3 className="mon-kicker">By agent</h3>
@@ -2820,7 +2915,7 @@ const EVENT_VIEW_LABELS: Record<EventView, string> = {
 type RunEventsState = ReturnType<typeof useGatewayRunEvents>;
 
 export function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEventsState }) {
-  const { events: allEvents, lastHeartbeat, streaming, error, loading } = eventsState;
+  const { events: allEvents, lastHeartbeat, streaming, error, loading, refetch, connectionStatus } = eventsState;
   const containerRef = useRef<HTMLOListElement | null>(null);
   const [following, setFollowing] = useState(true);
   // Default to Activity: lifecycle transitions plus the agent's visible work
@@ -2866,12 +2961,42 @@ export function EventLog({ runId, eventsState }: { runId: string; eventsState: R
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_THRESHOLD_PX;
     setFollowing(nearBottom);
   };
+
+  const hasLastKnownEvents = allEvents.length > 0;
+  const errorState =
+    connectionStatus === "unauthorized"
+      ? "unauthorized"
+      : connectionStatus === "offline"
+        ? hasLastKnownEvents
+          ? "offline-stale"
+          : "offline"
+        : hasLastKnownEvents
+          ? "stale"
+          : "error";
+  const errorTitle =
+    connectionStatus === "unauthorized"
+      ? "Event stream unauthorized."
+      : connectionStatus === "offline"
+        ? "Live event connection lost."
+        : hasLastKnownEvents
+          ? "Live event updates interrupted."
+          : "Couldn't load events.";
+  const errorDetail =
+    connectionStatus === "unauthorized"
+      ? `${hasLastKnownEvents ? "Showing last-known events. " : "No event history is available. "}Re-open with smithers monitor to mint fresh gateway credentials.`
+      : connectionStatus === "offline"
+        ? hasLastKnownEvents
+          ? "Showing last-known events while the gateway reconnects automatically."
+          : "No last-known events are available. The gateway is reconnecting automatically."
+        : hasLastKnownEvents
+          ? `Showing last-known events. ${error?.message ?? "Live updates are unavailable."}`
+          : `${error?.message ?? "The event query failed."} Check the gateway connection and credentials, then retry.`;
   const eventListId = `monitor-events-${runId}`;
   const followStatusId = `${eventListId}-follow-status`;
 
   return (
-    <section className="mon-panel mon-events-panel">
-      <header className="mon-panel-head">
+    <Card className="mon-events-panel">
+      <CardHeader className="mon-panel-head">
         <h2 className="mon-kicker">
           Events{" "}
           <span className="mon-count">
@@ -2938,57 +3063,77 @@ export function EventLog({ runId, eventsState }: { runId: string; eventsState: R
         >
           {following ? "Following new events." : "Event stream paused."}
         </span>
-      </header>
-      {error ? <div className="mon-banner tone-failed">{error.message}</div> : null}
-      <ol
-        id={eventListId}
-        className="mon-events"
-        ref={containerRef}
-        onScroll={onScroll}
-        data-testid="monitor-events"
-        tabIndex={0}
-        aria-label={`${EVENT_VIEW_LABELS[view]} event stream`}
-        aria-describedby={followStatusId}
-        aria-live={following ? "polite" : "off"}
-        aria-relevant="additions text"
-        aria-atomic={false}
-        aria-busy={loading}
-      >
-        {events.length === 0 ? (
-          <li className="mon-empty">
-            {loading
-              ? "Loading events…"
-              : allEvents.length === 0
-                ? "No events yet."
-                : view === "notable"
-                  ? "No notable events yet."
-                  : "No activity yet."}
-          </li>
+      </CardHeader>
+      <CardContent>
+        {error ? (
+          <Alert
+            variant="destructive"
+            className="mon-events-error"
+            data-testid="monitor-events-error"
+            data-state={errorState}
+          >
+            <AlertTitle>{errorTitle}</AlertTitle>
+            <AlertDescription>{errorDetail}</AlertDescription>
+            <Button variant="outline" data-testid="monitor-events-retry" onClick={() => void refetch()}>
+              Retry
+            </Button>
+          </Alert>
         ) : null}
-        {events.map((frame) => {
-          if (frame.event === "__heartbeats__") {
-            const count = isRecord(frame.payload) ? (asNumber(frame.payload.count) ?? 0) : 0;
+        <ol
+          id={eventListId}
+          className="mon-events"
+          ref={containerRef}
+          onScroll={onScroll}
+          data-testid="monitor-events"
+          tabIndex={0}
+          aria-label={`${EVENT_VIEW_LABELS[view]} event stream`}
+          aria-describedby={followStatusId}
+          aria-live={following ? "polite" : "off"}
+          aria-relevant="additions text"
+          aria-atomic={false}
+          aria-busy={loading}
+        >
+          {events.length === 0 && !error ? (
+            <li
+              className="mon-empty"
+              data-testid="monitor-events-state"
+              data-state={loading ? "loading" : allEvents.length === 0 ? "empty" : `filtered-${view}`}
+              role={loading ? "status" : undefined}
+            >
+              {loading
+                ? "Loading events…"
+                : allEvents.length === 0
+                  ? "No events recorded for this run yet."
+                  : view === "notable"
+                    ? "No notable events in this buffer. Switch to Activity or All to inspect other events."
+                    : "No activity events in this buffer. Switch to All to inspect session and heartbeat events."}
+            </li>
+          ) : null}
+          {events.map((frame) => {
+            if (frame.event === "__heartbeats__") {
+              const count = isRecord(frame.payload) ? (asNumber(frame.payload.count) ?? 0) : 0;
+              return (
+                <li className="mon-event mon-event-heartbeats" key={`${runId}:heartbeats`}>
+                  <span className="mon-mono mon-dim">#{frame.seq}</span>
+                  <span className="mon-event-name mon-dim">TaskHeartbeat</span>
+                  <span className="mon-event-detail mon-dim">×{count} — collapsed; the engine is alive</span>
+                  <EventWhen ms={frame.timestampMs} />
+                </li>
+              );
+            }
+            const line = formatEventLine(frame);
             return (
-              <li className="mon-event mon-event-heartbeats" key={`${runId}:heartbeats`}>
-                <span className="mon-mono mon-dim">#{frame.seq}</span>
-                <span className="mon-event-name mon-dim">TaskHeartbeat</span>
-                <span className="mon-event-detail mon-dim">×{count} — collapsed; the engine is alive</span>
+              <li className="mon-event" key={`${runId}:${line.seq}`}>
+                <span className="mon-mono mon-dim">#{line.seq}</span>
+                <span className="mon-event-name">{line.name}</span>
+                <span className="mon-event-detail mon-dim">{line.detail}</span>
                 <EventWhen ms={frame.timestampMs} />
               </li>
             );
-          }
-          const line = formatEventLine(frame);
-          return (
-            <li className="mon-event" key={`${runId}:${line.seq}`}>
-              <span className="mon-mono mon-dim">#{line.seq}</span>
-              <span className="mon-event-name">{line.name}</span>
-              <span className="mon-event-detail mon-dim">{line.detail}</span>
-              <EventWhen ms={frame.timestampMs} />
-            </li>
-          );
-        })}
-      </ol>
-    </section>
+          })}
+        </ol>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -3074,11 +3219,11 @@ function HealthStrip({
   // an empty tree ("no tasks yet") is wrong, not neutral. Say loading.
   if (tree.isLoading && treeNodes.length === 0) {
     return (
-      <div className="mon-banner tone-waiting mon-health" data-testid="monitor-health-strip">
-        <div className="mon-health-headline">
+      <Alert variant="warning" className="mon-health" data-testid="monitor-health-strip" role="status">
+        <AlertTitle className="mon-health-headline">
           <span className="mon-dot mon-dot-pulse" aria-hidden /> <b>Assessing run health…</b>
-        </div>
-      </div>
+        </AlertTitle>
+      </Alert>
     );
   }
   const diagnosis = diagnoseRun({
@@ -3092,9 +3237,10 @@ function HealthStrip({
     failureSample,
   });
   const tone = diagnosis.tone === "ok" ? "tone-ok" : diagnosis.tone === "crit" ? "tone-failed" : "tone-waiting";
+  const alertVariant = diagnosis.tone === "ok" ? "success" : diagnosis.tone === "crit" ? "destructive" : "warning";
   return (
-    <div className={`mon-banner ${tone} mon-health`} data-testid="monitor-health-strip">
-      <div className="mon-health-headline">
+    <Alert variant={alertVariant} className={`mon-health ${tone}`} data-testid="monitor-health-strip" role="status">
+      <AlertTitle className="mon-health-headline">
         <span className={`mon-health-dot ${tone}`} />
         <b>{diagnosis.headline}</b>
         {status === "waiting-quota" && quota?.resetAtMs ? (
@@ -3103,8 +3249,8 @@ function HealthStrip({
             {new Date(quota.resetAtMs).toLocaleTimeString()} (<Countdown untilMs={quota.resetAtMs} />)
           </span>
         ) : null}
-      </div>
-      <div className="mon-health-detail">{diagnosis.detail}</div>
+      </AlertTitle>
+      <AlertDescription className="mon-health-detail">{diagnosis.detail}</AlertDescription>
       {quota?.blocked.length ? (
         <ul className="mon-quota-list">
           {quota.blocked.map((entry) => (
@@ -3138,7 +3284,7 @@ function HealthStrip({
           {resumeNote ? <span className="mon-dim">{resumeNote}</span> : null}
         </div>
       ) : null}
-    </div>
+    </Alert>
   );
 }
 
@@ -3237,7 +3383,19 @@ function formatSessionTranscriptLine(payload: unknown): { text: string; kind: "c
  * the first poll returns a bounded tail of this node's history, and each
  * subsequent poll reads only past the last seen seq.
  */
-function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string; live: boolean }) {
+function NodeLiveOutput({
+  runId,
+  nodeId,
+  iteration,
+  attempt,
+  live,
+}: {
+  runId: string;
+  nodeId: string;
+  iteration: number;
+  attempt: number;
+  live: boolean;
+}) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [lines, setLines] = useState<Array<{ seq: number; text: string; kind: "cmd" | "text" | "meta" }>>([]);
   const [failed, setFailed] = useState(false);
@@ -3259,6 +3417,8 @@ function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string
       inFlight = true;
       try {
         const search = new URLSearchParams({ nodeId, limit: "120" });
+        search.set("iteration", String(iteration));
+        search.set("attempt", String(attempt));
         if (afterSeq !== undefined) search.set("afterSeq", String(afterSeq));
         const response = await fetch(`/v1/api/runs/${encodeURIComponent(runId)}/events?${search}`);
         if (!response.ok) throw new Error(`events ${response.status}`);
@@ -3313,7 +3473,7 @@ function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string
       cancelled = true;
       if (timer) clearInterval(timer);
     };
-  }, [runId, nodeId, live]);
+  }, [runId, nodeId, iteration, attempt, live]);
   useEffect(() => {
     const el = containerRef.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -3710,6 +3870,11 @@ function NodeInspector({
     engine: string;
     action: { kind: "hijack" | "reopen"; label: string };
   } | null>(null);
+  const hijackReturnFocusRef = useRef<HTMLElement | null>(null);
+  const closeHijackSession = () => {
+    setHijackSession(null);
+    queueMicrotask(() => hijackReturnFocusRef.current?.focus());
+  };
   // Containers (parallel, sequence, loop, worktree, merge-queue, …) group
   // other nodes and never own a transcript or structured output — showing
   // those panels there is pure noise. Leaf kinds keep the full inspector.
@@ -3783,7 +3948,10 @@ function NodeInspector({
           nodeId={nodeId}
           runStatus={runStatus}
           nodeLive={isLive}
-          onOpen={(candidate, action) => setHijackSession({ engine: candidate.engine, action })}
+          onOpen={(candidate, action) => {
+            hijackReturnFocusRef.current = document.activeElement as HTMLElement | null;
+            setHijackSession({ engine: candidate.engine, action });
+          }}
         />
         <StatusTag status={node.status} />
         <Chip
@@ -3806,7 +3974,7 @@ function NodeInspector({
           initialTab="terminal"
           hijackNodeId={nodeId}
           title={`${hijackSession.action.label}: ${nodeId} · ${hijackSession.engine}`}
-          onClose={() => setHijackSession(null)}
+          onClose={closeHijackSession}
           className="mon-hijack-surface"
           data-testid="monitor-hijack-modal"
         />
@@ -3931,11 +4099,13 @@ function NodeInspector({
       ) : null}
       {failure && !isContainer ? (
         <InspectorSection title="Failure" testId="monitor-node-failure">
-          <div className="mon-banner tone-failed">
-            {[failure.name, failure.code].filter(Boolean).join(" · ")}
-            {typeof failure.attempt === "number" ? ` · attempt ${failure.attempt}` : ""}
-            {failure.agent ? ` · ${failure.agent}` : ""}
-          </div>
+          <Alert variant="destructive">
+            <AlertTitle>
+              {[failure.name, failure.code].filter(Boolean).join(" · ")}
+              {typeof failure.attempt === "number" ? ` · attempt ${failure.attempt}` : ""}
+              {failure.agent ? ` · ${failure.agent}` : ""}
+            </AlertTitle>
+          </Alert>
           <pre className="mon-output mon-failure">{failure.message}</pre>
         </InspectorSection>
       ) : null}
@@ -3973,7 +4143,13 @@ function NodeInspector({
               />
             }
           >
-            <NodeLiveOutput runId={runId} nodeId={nodeId} live={isLive} />
+            <NodeLiveOutput
+              runId={runId}
+              nodeId={nodeId}
+              iteration={node.iteration ?? 0}
+              attempt={nodeAttempt ?? 0}
+              live={isLive}
+            />
           </InspectorSection>
           <InspectorSection title="Output" testId="monitor-node-output">
             {row ? (
@@ -4035,9 +4211,15 @@ function RunUsageChip({
     () => runUsageChipOf(predictRunUsage({ events, timings, tree, nowMs: now, live }), { live }),
     [events, timings, tree, live, now],
   );
+  const usage = useMemo(() => foldTokenUsage(events), [events]);
   return (
-    <span className="mon-usage-chip" title={chip.title} data-testid="monitor-usage-chip">
+    <span
+      className="mon-usage-chip"
+      title={`${chip.title}${usage.costUsd === null ? "" : ` · estimated cost $${usage.costUsd.toFixed(4)}`}`}
+      data-testid="monitor-usage-chip"
+    >
       <span className="mon-mono">{chip.spent}</span>
+      {usage.costUsd !== null ? <span className="mon-usage-est">&nbsp;· ~${usage.costUsd.toFixed(4)}</span> : null}
       {chip.inFlight ? <span className="mon-usage-est">&nbsp;({chip.inFlight})</span> : null}
       {chip.total ? <span className="mon-usage-est">&nbsp;· {chip.total}</span> : null}
       {chip.eta ? <span className="mon-usage-est">&nbsp;· {chip.eta}</span> : null}
@@ -4144,22 +4326,8 @@ function RunDetail({
   const [busyAction, setBusyAction] = useState<"cancel" | "resume" | "pause" | null>(null);
   const [showCustomUi, setShowCustomUi] = useState(false);
   const [creatingUi, setCreatingUi] = useState(false);
-  const customUiDialogRef = useRef<HTMLDivElement | null>(null);
-  const customUiReturnFocusRef = useRef<HTMLElement | null>(null);
+  const customUiInitialFocusRef = useRef<HTMLAnchorElement | null>(null);
   const workflowsRefetch = workflowsQuery.refetch;
-  const closeCustomUi = () => {
-    setShowCustomUi(false);
-    queueMicrotask(() => customUiReturnFocusRef.current?.focus());
-  };
-  useEffect(() => {
-    if (!showCustomUi) return;
-    customUiDialogRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeCustomUi();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [showCustomUi]);
   // While a create-ui run is authoring this workflow's UI, poll the workflow
   // list so the Open UI button appears the moment the file lands (the gateway
   // resolves .smithers/ui/<key>.tsx by convention with no restart).
@@ -4250,7 +4418,7 @@ function RunDetail({
 
   return (
     <div className="mon-detail" data-testid="monitor-run-detail">
-      <header className="mon-detail-head mon-panel">
+      <Card className="mon-detail-head">
         <div className="mon-detail-title">
           <StatusTag status={status} />
           {unhealthy ? <StatusTag status={healthState} label={healthState} /> : null}
@@ -4293,16 +4461,35 @@ function RunDetail({
         )}
         <div className="mon-detail-actions">
           {customUiUrl ? (
-            <Button
-              variant="outline"
-              onClick={() => {
-                customUiReturnFocusRef.current = document.activeElement as HTMLElement | null;
-                setShowCustomUi(true);
-              }}
-              title={`Open this workflow's custom UI (${customUiPath})`}
-            >
-              Open UI
-            </Button>
+            <Dialog open={showCustomUi} onOpenChange={setShowCustomUi}>
+              <DialogTrigger asChild>
+                <Button variant="outline" title={`Open this workflow's custom UI (${customUiPath})`}>
+                  Open UI
+                </Button>
+              </DialogTrigger>
+              <DialogContent
+                className="mon-modal"
+                data-testid="monitor-ui-modal"
+                aria-modal="true"
+                onOpenAutoFocus={(event) => {
+                  event.preventDefault();
+                  customUiInitialFocusRef.current?.focus();
+                }}
+              >
+                <DialogHeader className="mon-modal-head">
+                  <DialogTitle className="mon-kicker">{workflowKey} custom UI</DialogTitle>
+                  <DialogDescription className="sui-sr-only">
+                    Embedded workflow interface for {workflowKey}.
+                  </DialogDescription>
+                  <Chip asChild>
+                    <a ref={customUiInitialFocusRef} href={customUiUrl} target="_blank" rel="noreferrer">
+                      Open in new tab
+                    </a>
+                  </Chip>
+                </DialogHeader>
+                <iframe className="mon-modal-frame" src={customUiUrl} title={`${workflowKey} custom UI`} />
+              </DialogContent>
+            </Dialog>
           ) : workflowRow && workflowKey !== "create-ui" ? (
             <Button
               variant="outline"
@@ -4342,7 +4529,7 @@ function RunDetail({
             onAction={(kind) => void act(kind)}
           />
         </div>
-      </header>
+      </Card>
 
       <HealthStrip
         runId={runId}
@@ -4355,31 +4542,6 @@ function RunDetail({
       />
 
       <ScoresPanel scores={scores} />
-
-      {showCustomUi && customUiUrl ? (
-        <div className="mon-modal-backdrop" onClick={closeCustomUi} data-testid="monitor-ui-modal">
-          <div
-            className="mon-modal"
-            ref={customUiDialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label={`${workflowKey} custom UI`}
-            tabIndex={-1}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <header className="mon-modal-head">
-              <span className="mon-kicker">{workflowKey} UI</span>
-              <Chip asChild>
-                <a href={customUiUrl} target="_blank" rel="noreferrer">
-                  Open in new tab
-                </a>
-              </Chip>
-              <Chip onClick={closeCustomUi}>Close</Chip>
-            </header>
-            <iframe className="mon-modal-frame" src={customUiUrl} title={`${workflowKey} custom UI`} />
-          </div>
-        </div>
-      ) : null}
 
       <ExecutionPanel
         runId={runId}
@@ -4590,10 +4752,10 @@ function App() {
       ) : null}
 
       {banner ? (
-        <div className={`mon-banner mon-banner-app tone-${banner.kind === "ok" ? "ok" : "failed"}`} role="status">
-          {banner.text}
+        <Alert variant={banner.kind === "ok" ? "success" : "destructive"} className="mon-banner-app" role="status">
+          <AlertTitle>{banner.text}</AlertTitle>
           <Chip onClick={() => setBanner(null)}>Dismiss</Chip>
-        </div>
+        </Alert>
       ) : null}
 
       <div className={`mon-body${inspectorOpen ? "" : " mon-body-no-inspector"}${railOpen ? "" : " mon-body-no-rail"}`}>
@@ -4724,9 +4886,10 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-brand { display: flex; align-items: center; gap: var(--sp-2); }
 .mon-brand h1 { margin: 0; font-size: var(--fs-4); font-weight: 650; letter-spacing: -0.01em; }
 .mon-brand-mark { width: 10px; height: 10px; border-radius: var(--r-full); background: var(--brand); box-shadow: 0 0 8px var(--brand-border); }
-.mon-conn { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-1); font-weight: 600; color: var(--tone); }
+.mon-conn-wrap { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.mon-conn { font-size: var(--fs-1); }
 .mon-conn-hint { color: var(--muted); font-weight: 400; }
-.mon-conn .mon-chip { height: 20px; padding: 0 var(--sp-2); border-radius: var(--r-full); margin-left: var(--sp-1); }
+.mon-conn-wrap .mon-chip { height: 20px; padding: 0 var(--sp-2); border-radius: var(--r-full); margin-left: var(--sp-1); }
 .mon-toolbar { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .mon-count-note { font-size: var(--fs-1); font-variant-numeric: tabular-nums; }
 
@@ -4765,10 +4928,8 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 
 .mon-dot { width: 8px; height: 8px; border-radius: var(--r-full); background: var(--tone, var(--muted)); flex: none; }
 .mon-dot-pulse { animation: mon-pulse 1.2s ease-in-out infinite; }
-.mon-pill { display: inline-flex; align-items: center; gap: var(--sp-1); height: 20px; padding: 0 var(--sp-2); border-radius: var(--r-full); font-size: var(--fs-1); font-weight: 600; color: var(--tone); background: var(--tone-soft); border: 1px solid var(--tone-border); white-space: nowrap; }
+.mon-status-pulse .sui-status-dot { animation: mon-pulse 1.6s ease-in-out infinite; }
 
-/* Banners (app-level, health strip, inline errors) share one geometry. */
-.mon-banner { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin: 0 0 var(--sp-4); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-2); font-weight: 600; font-size: var(--fs-2); color: var(--tone); background: var(--tone-soft); border: 1px solid var(--tone-border); animation: mon-in 140ms ease-out; }
 .mon-banner-app { margin: var(--sp-2) var(--sp-4) 0; }
 
 .mon-body { display: grid; grid-template-columns: 320px minmax(420px, 1fr) minmax(0, 380px); flex: 1; overflow: hidden; }
@@ -4809,8 +4970,6 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 
   .mon-panel-head, .mon-detail-actions, .mon-progress, .mon-scrub { flex-wrap: wrap; }
   .mon-metrics-grid { grid-template-columns: minmax(0, 1fr); }
-  .mon-modal-backdrop { padding: var(--sp-3); }
-  .mon-modal { width: min(1280px, 100%); height: min(860px, 100%); }
 }
 
 .mon-inbox { border: 1px solid var(--warning-border); border-radius: var(--r-3); padding: var(--panel-pad); background: var(--warning-soft); animation: mon-in 140ms ease-out; }
@@ -4847,6 +5006,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
    panel (sticky header), never the page. */
 .mon-runs-table-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; margin: 0; }
 .mon-runs-table-panel .mon-panel-head { margin-bottom: var(--sp-2); }
+.mon-runs-table-panel > [data-slot="card-content"] { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .mon-runs-scroll { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: var(--r-2); }
 .mon-runs-scroll:focus-visible, .mon-tree:focus-visible, .mon-events:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--ring-border); }
 /* The shared Table wraps itself in an overflow-x container; inside the
@@ -4867,6 +5027,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-runs-table-row:hover .mon-table-workflow-name { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
 .mon-table-runid { display: block; font-size: var(--fs-1); }
 .mon-table-failed { color: var(--tone); font-weight: 600; }
+.mon-table-progress { min-width: 72px; margin-bottom: var(--sp-1); }
 .mon-th-sort { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; font-weight: inherit; }
 .mon-th-sort:hover { color: var(--brand); }
 .mon-sort-arrow { color: var(--brand); }
@@ -4874,12 +5035,11 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-runs-pagination { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding-top: var(--sp-3); flex-wrap: wrap; }
 .mon-runs-pagination-controls { display: inline-flex; align-items: center; gap: var(--sp-2); }
 
-/* All panels share one padding, radius, and stacking rhythm. */
-.mon-panel { border: 1px solid var(--border); border-radius: var(--r-3); background: var(--surface); box-shadow: var(--shadow-1); padding: var(--panel-pad); margin: 0 0 var(--sp-4); animation: mon-in 140ms ease-out; }
 .mon-panel-head { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--ctl-h); margin-bottom: var(--sp-3); }
 .mon-panel-head .mon-kicker { margin-right: auto; }
 
 .mon-detail-head { display: flex; flex-direction: column; gap: var(--sp-2); }
+.mon-detail > [data-slot="card"] { margin: 0 0 var(--sp-4); }
 .mon-detail-title { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .mon-detail-workflow { font-weight: 700; font-size: var(--fs-4); line-height: var(--lh-tight); letter-spacing: -0.01em; }
 .mon-detail-actions { display: flex; gap: var(--sp-2); }
@@ -4905,8 +5065,8 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-tree-duration { flex: none; margin-left: auto; font-size: var(--fs-1); font-variant-numeric: tabular-nums; }
 /* The status pill hugs the right edge — after the duration when one shows,
    self-aligned when it doesn't. */
-.mon-tree-main .mon-pill { margin-left: auto; }
-.mon-tree-duration ~ .mon-pill { margin-left: var(--sp-2); }
+.mon-tree-main .sui-badge { margin-left: auto; }
+.mon-tree-duration ~ .sui-badge { margin-left: var(--sp-2); }
 .mon-tree.is-static .mon-tree-main { cursor: default; }
 .mon-tree.is-static { opacity: 0.92; }
 .mon-tree-state { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); flex-wrap: wrap; margin-bottom: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-2); color: var(--muted); background: var(--panel); font-size: var(--fs-1); }
@@ -4920,7 +5080,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 /* Tree token labels sit beside the duration; alone they take the right edge. */
 .mon-tree-tokens { flex: none; margin-left: auto; font-size: var(--fs-1); font-variant-numeric: tabular-nums; }
 .mon-tree-duration ~ .mon-tree-tokens { margin-left: var(--sp-2); }
-.mon-tree-tokens ~ .mon-pill { margin-left: var(--sp-2); }
+.mon-tree-tokens ~ .sui-badge { margin-left: var(--sp-2); }
 
 /* Usage panel: rate-limit bars show REMAINING quota, toned by headroom. */
 .mon-usage-panel { display: flex; flex-direction: column; gap: var(--sp-4); }
@@ -5038,9 +5198,8 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-health-approval { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; width: 100%; padding: var(--sp-2) 0; border-top: 1px solid var(--tone-border); }
 .mon-health-approval-title { font-weight: 600; }
 .mon-health-approval .mon-approval-actions { margin-left: auto; flex: none; min-width: 220px; }
-.mon-modal-backdrop { position: fixed; inset: 0; z-index: 60; background: rgb(var(--shadow-rgb) / 0.55); display: flex; align-items: center; justify-content: center; padding: var(--sp-6); }
-.mon-modal { width: min(1280px, 96vw); height: min(860px, 92vh); display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-3); overflow: hidden; box-shadow: 0 18px 60px rgb(var(--shadow-rgb) / 0.45); }
-.mon-modal-head { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); }
+.mon-modal.sui-dialog-content { width: min(1280px, 96vw); max-width: none; height: min(860px, 92vh); display: flex; flex-direction: column; gap: 0; padding: 0; overflow: hidden; }
+.mon-modal-head.sui-dialog-header { display: flex; flex-direction: row; align-items: center; gap: var(--sp-2); padding: var(--sp-2) calc(var(--sp-6) + 26px) var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); }
 .mon-modal-head .mon-kicker { flex: 1; }
 .mon-modal-frame { flex: 1; border: 0; width: 100%; background: var(--bg); }
 
@@ -5086,7 +5245,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-runs-table-row.is-kbcursor { background: var(--hover); box-shadow: inset 2px 0 0 var(--brand); }
 
 .mon-ops-strip { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: 0 0 var(--sp-4); }
-.mon-stat { flex: 1 1 120px; min-width: 0; max-width: 240px; border: 1px solid var(--border); border-radius: var(--r-2); background: var(--surface); box-shadow: var(--shadow-1); padding: var(--sp-3) var(--sp-3); }
+.mon-stat { flex: 1 1 120px; min-width: 0; max-width: 240px; }
 .mon-stat-value { font-size: var(--fs-6); font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: var(--lh-tight); color: var(--tone, var(--text)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Labels and subs wrap to two lines before ever clipping mid-word — the value
    carries the glance, the label must stay readable. */

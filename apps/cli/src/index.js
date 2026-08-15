@@ -32,7 +32,7 @@ import { isPidAlive, parseRuntimeOwnerPid } from "@smthrs/engine/runtime-owner";
 import { signalRun } from "@smthrs/engine/signals";
 import { loadInput, loadOutputs } from "@smthrs/db/snapshot";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
-import { SmithersDb } from "@smthrs/db/adapter";
+import { runCancellationSourceFromRow, SmithersDb } from "@smthrs/db/adapter";
 import { computeRunStateFromRow, deriveRunState } from "@smthrs/db/runState";
 import { parseStateKey } from "@smthrs/scheduler/parseStateKey";
 import { normalizeRunStartedBy, SmithersCtx } from "@smthrs/driver";
@@ -180,6 +180,7 @@ import { saveOneshotConfig } from "./oneshot/saveOneshotConfig.js";
 import { resolveOneshotChain } from "./oneshot/resolveOneshotChain.js";
 import { classifyOneshotGoal } from "./oneshot/classifyOneshotGoal.js";
 import { rewriteOneshotBooleanValues } from "./oneshot/rewriteOneshotBooleanValues.js";
+import { resolveOneshotResumeSettings } from "./oneshot/resolveOneshotResumeSettings.js";
 import { selectOneshotAgents } from "./oneshot/selectOneshotAgents.js";
 import { createOneshotMonitorControl } from "./oneshot/monitor-control.js";
 import { oneshotCta } from "./oneshot/oneshotCta.js";
@@ -2649,6 +2650,14 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
   } catch {
     steers = [];
   }
+  // Soft for the same read-mode compatibility reason as steers: stores last
+  // written before the run-usage migrations must remain inspectable.
+  let tokenUsage;
+  try {
+    tokenUsage = await adapter.getRunTokenUsage(runId);
+  } catch {
+    tokenUsage = undefined;
+  }
   const ancestry = await adapter.listRunAncestry(runId, 1_000);
   const continuedFromRunIds = ancestry.slice(1).map((row) => row.runId);
   const lineagePageSize = 100;
@@ -2717,6 +2726,7 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
       return undefined;
     }
   });
+  const cancellationSource = runCancellationSourceFromRow(r);
   const result = {
     run: {
       id: r.runId,
@@ -2726,6 +2736,7 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
       started: r.startedAtMs ? new Date(r.startedAtMs).toISOString() : "—",
       elapsed: r.startedAtMs ? formatElapsedCompact(r.startedAtMs, r.finishedAtMs ?? undefined) : "—",
       ...(r.finishedAtMs ? { finished: new Date(r.finishedAtMs).toISOString() } : {}),
+      ...(cancellationSource ? { cancellationSource } : {}),
       ...(activeDescendantRunId && activeDescendantRunId !== r.runId ? { activeDescendantRunId } : {}),
       ...(error ? { error } : {}),
       ...(config
@@ -2741,6 +2752,7 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
     },
     ...(runState ? { runState } : {}),
     ...(failedChildren > 0 ? { failedChildren, failedChildKeys } : {}),
+    ...(tokenUsage ? { tokenUsage } : {}),
     steps,
     nodes: canonicalNodes,
   };
@@ -3124,7 +3136,12 @@ const bugOptions = z.object({
       "Bug endpoint URL (default https://bug.smithers.sh/api/bugs; the SMITHERS_BUG_ENDPOINT env var takes precedence)",
     ),
 });
+const workspaceCwdOption = z
+  .string()
+  .optional()
+  .describe("Workspace directory for store discovery (default: current directory)");
 const psOptions = z.object({
+  cwd: workspaceCwdOption,
   status: z
     .string()
     .optional()
@@ -3221,6 +3238,7 @@ const chatArgs = z.object({
   runId: z.string().optional().describe("Run ID to inspect (default: latest run)"),
 });
 const chatOptions = z.object({
+  cwd: workspaceCwdOption,
   all: z.boolean().default(false).describe("Show all agent attempts in the run (default: latest only)"),
   follow: z.boolean().default(false).describe("Watch for new agent output"),
   tail: z.number().int().min(1).optional().describe("Show only the last N chat blocks"),
@@ -3246,6 +3264,7 @@ const inspectArgs = z.object({
   runId: z.string().describe("Run ID to inspect"),
 });
 const inspectOptions = z.object({
+  cwd: workspaceCwdOption,
   watch: z.boolean().default(false).describe("Watch mode: refresh output continuously"),
   interval: z.number().positive().default(2).describe("Watch refresh interval in seconds"),
   pool: z.boolean().default(false).describe("Tally attempts by agent engine/model"),
@@ -3271,6 +3290,7 @@ const statusArgs = z.object({
   runId: z.string().describe("Run ID to summarize"),
 });
 const statusOptions = z.object({
+  cwd: workspaceCwdOption,
   json: z.boolean().default(false).describe("Output the structured summary as JSON"),
   window: z
     .number()
@@ -3354,13 +3374,16 @@ const signalOptions = z.object({
 const cancelArgs = z.object({
   runId: z.string().describe("Run ID to cancel"),
 });
+const cancelOptions = z.object({ cwd: workspaceCwdOption });
 const pauseArgs = z.object({
   runId: z.string().describe("Run ID to pause"),
 });
+const pauseOptions = z.object({ cwd: workspaceCwdOption });
 const hijackArgs = z.object({
   runId: z.string().describe("Run ID whose latest agent session should be hijacked"),
 });
 const hijackOptions = z.object({
+  cwd: workspaceCwdOption,
   target: z.string().optional().describe("Agent engine (e.g. claude-code, codex) or node id whose session to hand off"),
   timeoutMs: z.number().int().min(1).default(30_000).describe("How long to wait for a live run to hand off"),
   launch: z.boolean().default(true).describe("Open the hijacked session immediately"),
@@ -7891,9 +7914,19 @@ async function runHijackFlow(params) {
     exitCode = result.code;
   }
   if (exitCode === 0 && runIsLive && run.workflowPath) {
-    const pid = resumeRunDetached(run.workflowPath, runId);
-    resumedBySmithers = true;
-    process.stderr.write(`[smithers] returned control to Smithers${pid ? ` (pid ${pid})` : ""}\n`);
+    // The hijack itself succeeded; a failed handoff (e.g. an unopenable
+    // detached log) must not fail the command, only fall back to the manual
+    // resume instructions.
+    try {
+      const pid = resumeRunDetached(run.workflowPath, runId);
+      resumedBySmithers = true;
+      process.stderr.write(`[smithers] returned control to Smithers${pid ? ` (pid ${pid})` : ""}\n`);
+    } catch (error) {
+      process.stderr.write(`[smithers] could not return control to Smithers: ${error?.message ?? error}\n`);
+      if (resumeCommand) {
+        process.stderr.write(`[smithers] return control to Smithers with:\n  ${resumeCommand}\n`);
+      }
+    }
   } else if (resumeCommand) {
     process.stderr.write(`[smithers] return control to Smithers with:\n  ${resumeCommand}\n`);
   }
@@ -8311,12 +8344,68 @@ const cli = Cli.create({
         });
       }
       let goal = c.args.goal;
-      if (c.options.goalFile) {
+      let goalFile = c.options.goalFile ? resolve(process.cwd(), c.options.goalFile) : undefined;
+      if (goalFile) {
         try {
-          goal = readFileSync(resolve(process.cwd(), c.options.goalFile), "utf8");
+          goal = readFileSync(goalFile, "utf8");
         } catch (error) {
           return fail({ code: "GOAL_FILE_READ_FAILED", message: error?.message ?? String(error), exitCode: 4 });
         }
+      }
+      let resumeSettings;
+      if (c.options.resume) {
+        if (!c.options.runId) {
+          return fail({
+            code: "ONESHOT_RESUME_RUN_ID_REQUIRED",
+            message: "Pass --run-id to resume an existing oneshot run.",
+            exitCode: 4,
+          });
+        }
+        let cleanup;
+        try {
+          const opened = await findAndOpenDb(taskCwd);
+          cleanup = opened.cleanup;
+          const run = await opened.adapter.getRun(c.options.runId);
+          if (!run) {
+            return fail({
+              code: "RUN_NOT_FOUND",
+              message: `Run not found: ${c.options.runId}`,
+              exitCode: 4,
+            });
+          }
+          resumeSettings = resolveOneshotResumeSettings(run.configJson);
+          if (!resumeSettings) {
+            return fail({
+              code: "ONESHOT_RESUME_CONFIG_MISSING",
+              message: `Run ${c.options.runId} does not contain a complete persisted oneshot goal.`,
+              exitCode: 4,
+            });
+          }
+        } catch (error) {
+          return fail({
+            code: error instanceof SmithersError ? error.code : "ONESHOT_RESUME_LOAD_FAILED",
+            message: error?.message ?? String(error),
+            exitCode: 4,
+          });
+        } finally {
+          cleanup?.();
+        }
+
+        const changed = [
+          goal?.trim() && goal !== resumeSettings.goal ? "goal" : null,
+          c.options.review !== undefined && c.options.review !== resumeSettings.review ? "review" : null,
+          c.options.model !== undefined && c.options.model !== resumeSettings.model ? "model" : null,
+          c.options.agent !== undefined && c.options.agent !== resumeSettings.agent ? "agent" : null,
+        ].filter(Boolean);
+        if (changed.length > 0) {
+          return fail({
+            code: "ONESHOT_RESUME_INPUT_MISMATCH",
+            message: `Cannot change persisted oneshot ${changed.join(", ")} while resuming; omit the override or start a new run.`,
+            exitCode: 4,
+          });
+        }
+        goal = resumeSettings.goal;
+        goalFile ??= resumeSettings.goalFile;
       }
       if (!goal?.trim()) {
         if (c.options.setReview || c.options.setTrivial) return c.ok({ preferences: config });
@@ -8328,7 +8417,9 @@ const cli = Cli.create({
       }
       if (usable.length === 0)
         return fail({ code: "NO_USABLE_AGENTS", message: formatNoUsableAgentsMessage(relevant), exitCode: 4 });
-      const review = (c.options.review ?? config.review ?? "off") === "on";
+      const model = resumeSettings?.model ?? c.options.model;
+      const agent = resumeSettings?.agent ?? c.options.agent;
+      const review = (resumeSettings?.review ?? c.options.review ?? config.review ?? "off") === "on";
       const localPack = resolvePackDirs(taskCwd).find((entry) => entry.scope === "local");
       const overrideEntry = localPack ? join(localPack.packDir, "workflows", "oneshot.tsx") : undefined;
       const hasOverride = Boolean(overrideEntry && existsSync(overrideEntry));
@@ -8401,7 +8492,6 @@ const cli = Cli.create({
             exitCode: 4,
           });
         }
-        const goalFile = c.options.goalFile ? resolve(process.cwd(), c.options.goalFile) : undefined;
         return runTuiCommand(
           {
             ...c,
@@ -8437,8 +8527,8 @@ const cli = Cli.create({
                 goalFile,
                 cwd: taskCwd,
                 review: review ? "on" : "off",
-                model: c.options.model,
-                agent: c.options.agent,
+                model,
+                agent,
                 preflight: preflightMode,
                 runId: c.options.runId,
                 resume: c.options.resume,
@@ -8463,11 +8553,11 @@ const cli = Cli.create({
         const childArgs = buildOneshotChildArgs({
           cliPath: fileURLToPath(import.meta.url),
           goal,
-          goalFile: c.options.goalFile ? resolve(process.cwd(), c.options.goalFile) : undefined,
+          goalFile,
           cwd: taskCwd,
           review: review ? "on" : "off",
-          model: c.options.model,
-          agent: c.options.agent,
+          model,
+          agent,
           preflight: preflightMode,
           runId: c.options.runId,
           resume: c.options.resume,
@@ -8512,7 +8602,7 @@ const cli = Cli.create({
         return c.ok(
           { runId: effectiveRunId, pid: child.pid, logFile, workflowName: "oneshot" },
           {
-            cta: oneshotCta(effectiveRunId),
+            cta: oneshotCta(effectiveRunId, taskCwd),
           },
         );
       }
@@ -8520,7 +8610,7 @@ const cli = Cli.create({
         if (c.options.open) openOneshotUi(effectiveRunId, taskCwd);
         const overrideContext = {
           ...c,
-          ok: (data) => c.ok(data, { cta: oneshotCta(effectiveRunId) }),
+          ok: (data) => c.ok(data, { cta: oneshotCta(effectiveRunId, taskCwd) }),
         };
         return executeUpCommand(
           overrideContext,
@@ -8537,7 +8627,7 @@ const cli = Cli.create({
             input: JSON.stringify({
               goal: goalForWorkflow,
               review: review ? "on" : "off",
-              model: c.options.model ?? "auto",
+              model: model ?? "auto",
             }),
             root: taskCwd,
             startedByHarness: c.options.startedByHarness,
@@ -8557,8 +8647,8 @@ const cli = Cli.create({
       try {
         const selected = await selectOneshotAgents(detections, {
           cwd: taskCwd,
-          model: c.options.model,
-          agent: c.options.agent,
+          model,
+          agent,
           goal,
         });
         const workflow = await buildOneshotWorkflow({
@@ -8611,8 +8701,8 @@ const cli = Cli.create({
             review ? "on" : "off",
             "--preflight",
             preflightMode,
-            ...(c.options.model ? ["--model", c.options.model] : []),
-            ...(c.options.agent ? ["--agent", c.options.agent] : []),
+            ...(model ? ["--model", model] : []),
+            ...(agent ? ["--agent", agent] : []),
           ],
           cwd: taskCwd,
         });
@@ -8648,7 +8738,9 @@ const cli = Cli.create({
           }),
         );
         process.exitCode = formatStatusExitCode(result.status);
-        return c.ok(summarizeRunResult(result), { cta: result.runId ? oneshotCta(result.runId) : undefined });
+        return c.ok(summarizeRunResult(result), {
+          cta: result.runId ? oneshotCta(result.runId, taskCwd) : undefined,
+        });
       } catch (error) {
         return fail({
           code: error instanceof SmithersError ? error.code : "ONESHOT_FAILED",
@@ -9326,7 +9418,7 @@ const cli = Cli.create({
     async run(c) {
       const fail = makeFail(c);
       try {
-        const { adapter, cleanup } = await findAndOpenDb();
+        const { adapter, cleanup } = await findAndOpenDb(c.options.cwd);
         try {
           if (c.options.watch) {
             const intervalMs = resolveWatchIntervalMsOrFail("ps", c.options.interval, fail);
@@ -9689,7 +9781,7 @@ const cli = Cli.create({
     async *run(c) {
       let cleanup;
       try {
-        const db = await findAndOpenDb();
+        const db = await findAndOpenDb(c.options.cwd);
         const adapter = db.adapter;
         cleanup = db.cleanup;
         let run;
@@ -10030,7 +10122,7 @@ const cli = Cli.create({
     options: hijackOptions,
     async run(c) {
       const fail = makeFail(c);
-      const { adapter, cleanup } = await findAndOpenDb();
+      const { adapter, cleanup } = await findAndOpenDb(c.options.cwd);
       try {
         const run = await adapter.getRun(c.args.runId);
         if (!run) {
@@ -10077,14 +10169,14 @@ const cli = Cli.create({
   // =========================================================================
   .command("inspect", {
     description:
-      "Output detailed run state. Structured output canonically uses nodes[].nodeId (legacy steps[].id remains for compatibility); --pool tallies attempt engine/model usage.",
+      "Output detailed run state and authoritative token/cost usage. Structured output canonically uses nodes[].nodeId (legacy steps[].id remains for compatibility); --pool tallies attempt engine/model usage.",
     args: inspectArgs,
     options: inspectOptions,
     alias: { watch: "w", interval: "i" },
     async run(c) {
       const fail = makeFail(c);
       try {
-        const { adapter, cleanup } = await findAndOpenDb();
+        const { adapter, cleanup } = await findAndOpenDb(c.options.cwd);
         try {
           /**
            * @param {InspectSnapshot} snapshot
@@ -10324,7 +10416,7 @@ const cli = Cli.create({
     async run(c) {
       const fail = makeFail(c);
       try {
-        const { adapter, cleanup } = await findAndOpenDb();
+        const { adapter, cleanup } = await findAndOpenDb(c.options.cwd);
         try {
           const summary = await buildRunStatusSummary(adapter, c.args.runId, {
             ...(c.options.window ? { recentWindowMs: Math.floor(c.options.window * 60_000) } : {}),
@@ -11010,10 +11102,11 @@ const cli = Cli.create({
   .command("cancel", {
     description: "Safely halt agents and terminate a run.",
     args: cancelArgs,
+    options: cancelOptions,
     async run(c) {
       const fail = makeFail(c);
       try {
-        const { adapter, cleanup } = await findAndOpenDb();
+        const { adapter, cleanup } = await findAndOpenDb(c.options.cwd);
         try {
           const run = await adapter.getRun(c.args.runId);
           if (!run) {
@@ -11131,13 +11224,14 @@ const cli = Cli.create({
     description:
       "Gracefully pause a run: stop scheduling new tasks, let in-flight tasks finish, then park it resumably.",
     args: pauseArgs,
+    options: pauseOptions,
     async run(c) {
       const fail = (opts) => {
         commandExitOverride = opts.exitCode ?? 1;
         return c.error(opts);
       };
       try {
-        const { adapter, cleanup } = await findAndOpenDb();
+        const { adapter, cleanup } = await findAndOpenDb(c.options.cwd);
         try {
           const run = await adapter.getRun(c.args.runId);
           if (!run) {
@@ -12337,6 +12431,7 @@ const cli = Cli.create({
       runId: z.string().optional().describe("Run to open. Defaults to the most recent run."),
     }),
     options: z.object({
+      cwd: workspaceCwdOption,
       gateway: z.string().optional().describe("Gateway base URL (default http://127.0.0.1:<port>)."),
       port: z.number().int().min(1).max(65535).default(7331).describe("Gateway port when --gateway is not set."),
       host: z
@@ -12397,6 +12492,7 @@ const cli = Cli.create({
         .describe("Focus this run; built-in oneshots open their dedicated transcript, steer, and restart monitor."),
     }),
     options: z.object({
+      cwd: workspaceCwdOption,
       gateway: z.string().optional().describe("Gateway base URL (default http://127.0.0.1:<port>)."),
       port: z.number().int().min(1).max(65535).default(7331).describe("Gateway port when --gateway is not set."),
       host: z
@@ -12644,9 +12740,13 @@ const cli = Cli.create({
               return fail({ code: "RUN_NOT_FOUND", message: `Run not found: ${runId}`, exitCode: 4 });
             }
             const usage = await adapter.getRunTokenUsage(runId);
+            const cost = usage.costUsd == null ? "" : ` / ~$${usage.costUsd.toFixed(4)}`;
             process.stderr.write(
-              `${runId}: ${usage.totalTokens.toLocaleString()} tokens ` +
-                `(${usage.inputTokens.toLocaleString()} in / ${usage.outputTokens.toLocaleString()} out) ` +
+              `${runId}: ${usage.totalTokens.toLocaleString()} tokens${cost} ` +
+                `(${usage.freshInputTokens.toLocaleString()} fresh / ` +
+                `${usage.cacheReadTokens.toLocaleString()} cache read / ` +
+                `${usage.cacheWriteTokens.toLocaleString()} cache write / ` +
+                `${usage.outputTokens.toLocaleString()} out) ` +
                 `across ${usage.attempts} agent attempt(s)\n`,
             );
             return c.ok({ usage });

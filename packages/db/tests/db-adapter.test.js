@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { SmithersDb } from "../src/adapter.js";
+import { runCancellationSourceFromRow, SmithersDb } from "../src/adapter.js";
 import { ensureSmithersTables } from "../src/ensure.js";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
@@ -892,6 +892,42 @@ describe("SmithersDb adapter", () => {
     expect(events[0].seq).toBe(31);
     expect(events.at(-1)?.seq).toBe(150);
   });
+  test("listNodeEvents isolates one iteration and attempt while advancing its cursor", async () => {
+    const { adapter } = createTestDb();
+    const payloads = [
+      { nodeId: "task-a", iteration: 0, attempt: 1, text: "older iteration" },
+      { nodeId: "task-a", iteration: 1, attempt: 1, text: "older attempt" },
+      { nodeId: "task-a", iteration: 1, attempt: 2, text: "target" },
+      { nodeId: "task-b", iteration: 1, attempt: 2, text: "other node" },
+    ];
+    for (const [seq, payload] of payloads.entries()) {
+      await adapter.insertEvent({
+        runId: "r1",
+        seq,
+        timestampMs: now + seq,
+        type: "NodeOutput",
+        payloadJson: JSON.stringify(payload),
+      });
+    }
+
+    const first = await adapter.listNodeEvents("r1", "task-a", { iteration: 1, attempt: 2, limit: 120 });
+    expect(first.map((event) => event.seq)).toEqual([2]);
+
+    await adapter.insertEvent({
+      runId: "r1",
+      seq: 4,
+      timestampMs: now + 4,
+      type: "NodeOutput",
+      payloadJson: JSON.stringify({ nodeId: "task-a", iteration: 1, attempt: 2, text: "next" }),
+    });
+    const incremental = await adapter.listNodeEvents("r1", "task-a", {
+      iteration: 1,
+      attempt: 2,
+      afterSeq: 2,
+      limit: 120,
+    });
+    expect(incremental.map((event) => event.seq)).toEqual([4]);
+  });
   test("listEventHistory composes type and since filters", async () => {
     const { adapter } = createTestDb();
     await adapter.insertEvent({
@@ -1069,16 +1105,28 @@ describe("SmithersDb adapter", () => {
     await adapter.insertRun(runRow("r1"));
     await adapter.requestRunCancel("r1", now + 500, {
       requestId: "request-123",
-      transport: "http",
+      kind: "signal",
+      detail: "worker received SIGTERM",
+      signal: "SIGTERM",
       clientIdentity: "user:operator",
       clientPid: 4321,
     });
     const run = await adapter.getRun("r1");
     expect(run.cancelRequestedAtMs).toBe(now + 500);
     expect(run.cancelRequestId).toBe("request-123");
-    expect(run.cancelRequestSource).toBe("http");
+    expect(run.cancelRequestSource).toBe("signal");
+    expect(run.cancelRequestDetail).toBe("worker received SIGTERM");
+    expect(run.cancelRequestSignal).toBe("SIGTERM");
     expect(run.cancelRequestClientIdentity).toBe("user:operator");
     expect(run.cancelRequestClientPid).toBe(4321);
+    expect(runCancellationSourceFromRow(run)).toEqual({
+      kind: "signal",
+      detail: "worker received SIGTERM",
+      signal: "SIGTERM",
+      clientPid: 4321,
+      requestId: "request-123",
+      clientIdentity: "user:operator",
+    });
   });
   test("requestRunCancel preserves the first cancellation attribution", async () => {
     const { adapter } = createTestDb();
@@ -1098,7 +1146,9 @@ describe("SmithersDb adapter", () => {
     const run = await adapter.getRun("r1");
     expect(run.cancelRequestedAtMs).toBe(now + 500);
     expect(run.cancelRequestId).toBe("request-first");
-    expect(run.cancelRequestSource).toBe("websocket");
+    expect(run.cancelRequestSource).toBe("rpc");
+    expect(run.cancelRequestDetail).toBe("websocket cancellation request");
+    expect(run.cancelRequestSignal).toBeNull();
     expect(run.cancelRequestClientIdentity).toBeNull();
     expect(run.cancelRequestClientPid).toBeNull();
   });
@@ -1108,7 +1158,8 @@ describe("SmithersDb adapter", () => {
     expect(
       await adapter.claimRunCancellation("direct", now + 500, null, {
         requestId: "request-direct",
-        source: "cli",
+        kind: "cli",
+        detail: "smithers cancel direct",
         clientIdentity: "local-user",
         clientPid: 1234,
       }),
@@ -1117,6 +1168,8 @@ describe("SmithersDb adapter", () => {
       status: "cancelled",
       cancelRequestId: "request-direct",
       cancelRequestSource: "cli",
+      cancelRequestDetail: "smithers cancel direct",
+      cancelRequestSignal: null,
       cancelRequestClientIdentity: "local-user",
       cancelRequestClientPid: 1234,
     });
@@ -1130,7 +1183,9 @@ describe("SmithersDb adapter", () => {
     expect(await adapter.getRun("requested")).toMatchObject({
       status: "cancelled",
       cancelRequestId: "request-first",
-      cancelRequestSource: "http",
+      cancelRequestSource: "rpc",
+      cancelRequestDetail: "http cancellation request",
+      cancelRequestSignal: null,
       cancelRequestClientIdentity: null,
       cancelRequestClientPid: null,
     });
@@ -1139,6 +1194,23 @@ describe("SmithersDb adapter", () => {
     const { adapter } = createTestDb();
     await adapter.insertRun(runRow("r1"));
     expect(() => adapter.requestRunCancel("r1", now + 500, { clientPid: 1.5 })).toThrow(/cancelRequestClientPid/);
+    expect(() => adapter.requestRunCancel("r1", now + 500, { kind: "unknown" })).toThrow(
+      /Cancellation source must be one of/,
+    );
+  });
+  test("runCancellationSourceFromRow normalizes legacy transport values", () => {
+    expect(
+      runCancellationSourceFromRow({
+        cancelRequestSource: "http",
+        cancelRequestId: "legacy-request",
+        cancelRequestClientPid: 42,
+      }),
+    ).toEqual({
+      kind: "rpc",
+      detail: "http cancellation request",
+      clientPid: 42,
+      requestId: "legacy-request",
+    });
   });
   test("requestRunPause sets pauseRequestedAtMs without touching cancel", async () => {
     const { adapter } = createTestDb();
@@ -1243,17 +1315,27 @@ describe("per-run token usage (#1464 AWF-6)", () => {
     const { adapter } = createTestDb();
     await adapter.recordRunTokenUsage(usageRow("r1", "one"));
     await adapter.recordRunTokenUsage(
-      usageRow("r1", "two", { inputTokens: 50, outputTokens: 5, cacheReadTokens: 7, reasoningTokens: 3 }),
+      usageRow("r1", "two", {
+        inputTokens: 50,
+        freshInputTokens: 20,
+        outputTokens: 5,
+        cacheReadTokens: 7,
+        reasoningTokens: 3,
+        costUsd: 0.02,
+      }),
     );
     await adapter.recordRunTokenUsage(usageRow("r2", "one", { inputTokens: 999, outputTokens: 999 }));
     const usage = await adapter.getRunTokenUsage("r1");
     expect(usage).toMatchObject({
       runId: "r1",
       inputTokens: 150,
+      freshInputTokens: 120,
       outputTokens: 25,
       cacheReadTokens: 7,
       reasoningTokens: 3,
       totalTokens: 175,
+      costUsd: null,
+      pricedAttempts: 1,
       attempts: 2,
     });
     // No TokenUsageReported events were written; the total came from the table.
@@ -1261,14 +1343,20 @@ describe("per-run token usage (#1464 AWF-6)", () => {
   });
   test("re-reporting one attempt replaces its row instead of inflating the total", async () => {
     const { adapter } = createTestDb();
-    await adapter.recordRunTokenUsage(usageRow("r1", "one", { inputTokens: 100, outputTokens: 10 }));
+    await adapter.recordRunTokenUsage(
+      usageRow("r1", "one", { inputTokens: 100, freshInputTokens: 30, outputTokens: 10, costUsd: 0.01 }),
+    );
     // A provider that re-emits a cumulative running total for the same attempt
     // (#1436) must not be summed on top of what it already reported.
-    await adapter.recordRunTokenUsage(usageRow("r1", "one", { inputTokens: 300, outputTokens: 30 }));
+    await adapter.recordRunTokenUsage(
+      usageRow("r1", "one", { inputTokens: 300, freshInputTokens: 40, outputTokens: 30, costUsd: 0.03 }),
+    );
     const usage = await adapter.getRunTokenUsage("r1");
     expect(usage.inputTokens).toBe(300);
     expect(usage.outputTokens).toBe(30);
+    expect(usage.freshInputTokens).toBe(40);
     expect(usage.totalTokens).toBe(330);
+    expect(usage.costUsd).toBeCloseTo(0.03);
     expect(usage.attempts).toBe(1);
   });
   test("retries of the same node accumulate as separate attempts", async () => {
@@ -1282,7 +1370,16 @@ describe("per-run token usage (#1464 AWF-6)", () => {
   test("a run with no usage reads as zero rather than missing", async () => {
     const { adapter } = createTestDb();
     const usage = await adapter.getRunTokenUsage("nope");
-    expect(usage).toMatchObject({ runId: "nope", inputTokens: 0, outputTokens: 0, totalTokens: 0, attempts: 0 });
+    expect(usage).toMatchObject({
+      runId: "nope",
+      inputTokens: 0,
+      freshInputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      costUsd: null,
+      pricedAttempts: 0,
+      attempts: 0,
+    });
   });
   test("negative or non-finite counts are coerced to zero", async () => {
     const { adapter } = createTestDb();

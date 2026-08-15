@@ -368,6 +368,40 @@ for (const backend of backends) {
     );
 
     test.skipIf(backend === "pglite" && process.platform === "win32")(
+      "event history isolates one node iteration and attempt",
+      async () => {
+        const { gateway, baseUrl } = await bootGateway(backend);
+        const launched = await launchRun(baseUrl, "value", { value: 7 });
+        const runId = launched.data.runId;
+        await waitForRun(baseUrl, runId, "finished");
+        const resolved = await (gateway as any).resolveRun(runId);
+        expect(resolved).toBeTruthy();
+        for (const payload of [
+          { nodeId: "task1", iteration: 0, attempt: 1, text: "older iteration" },
+          { nodeId: "task1", iteration: 1, attempt: 1, text: "older attempt" },
+          { nodeId: "task1", iteration: 1, attempt: 2, text: "target" },
+          { nodeId: "other", iteration: 1, attempt: 2, text: "other node" },
+        ]) {
+          await resolved.adapter.insertEventWithNextSeq({
+            runId,
+            timestampMs: Date.now(),
+            type: "NodeOutput",
+            payloadJson: JSON.stringify(payload),
+          });
+        }
+
+        const events = await apiRequest(
+          baseUrl,
+          "GET",
+          `/v1/api/runs/${encodeURIComponent(runId)}/events?nodeId=task1&iteration=1&attempt=2&limit=120`,
+        );
+        expect(events.response.status).toBe(200);
+        expect(events.json.data.map((event: any) => event.payload.text)).toEqual(["target"]);
+      },
+      60_000,
+    );
+
+    test.skipIf(backend === "pglite" && process.platform === "win32")(
       "listRuns REST offset matches the RPC page",
       async () => {
         const { baseUrl } = await bootGateway(backend);
@@ -617,6 +651,7 @@ describe("Gateway run token usage", () => {
           model: "gpt-test",
           agent: "test-agent",
           inputTokens: index + 10,
+          ...(index === 0 ? { freshInputTokens: 5, costUsd: 0.001 } : {}),
           outputTokens: index + 20,
           cacheReadTokens: index + 30,
           cacheWriteTokens: index + 40,
@@ -663,10 +698,12 @@ describe("Gateway run token usage", () => {
       model: "gpt-test",
       agent: "test-agent",
       inputTokens: 10,
+      freshInputTokens: 5,
       outputTokens: 20,
       cacheReadTokens: 30,
       cacheWriteTokens: 40,
       reasoningTokens: 50,
+      costUsd: 0.001,
       timestampMs: 50_000,
     });
     expect((rpc as any).payload.events.at(-1)).toEqual({
@@ -676,10 +713,12 @@ describe("Gateway run token usage", () => {
       model: "gpt-test",
       agent: "test-agent",
       inputTokens: 1_035,
+      freshInputTokens: 1_035,
       outputTokens: 1_045,
       cacheReadTokens: 1_055,
       cacheWriteTokens: 1_065,
       reasoningTokens: 1_075,
+      costUsd: null,
       timestampMs: 91_025,
     });
   }, 60_000);

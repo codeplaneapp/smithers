@@ -18,42 +18,10 @@
 
 /* The Live / Polling badge, a non-functional toggle sat after the title. */
 .runs-stream-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 22px;
-  padding: 0 9px;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  background: var(--surface);
-  color: var(--text-muted);
-  font: 600 11px/1 Inter, sans-serif;
   cursor: pointer;
 }
-.runs-stream-badge.is-live {
-  color: var(--st-ok);
-  background: color-mix(in srgb, var(--st-ok) 11%, var(--surface));
-  border-color: color-mix(in srgb, var(--st-ok) 30%, transparent);
-}
-.runs-stream-badge.is-live::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--st-ok);
+.runs-stream-badge[data-live="true"] .sui-status-dot {
   animation: dot-pulse 1.2s ease-in-out infinite;
-}
-.runs-stream-badge.is-poll {
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--st-idle) 11%, var(--surface));
-  border-color: color-mix(in srgb, var(--st-idle) 30%, transparent);
-}
-.runs-stream-badge.is-poll::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  border: 1px solid currentColor;
 }
 
 /* Search field with a leading magnifier glyph. Self-styled (not .field-input)
@@ -200,13 +168,6 @@
 }
 .runs-freshness {
   margin-bottom: 10px;
-  padding: 9px 11px;
-  border: 1px solid color-mix(in srgb, var(--st-waiting) 35%, var(--border));
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--st-waiting) 8%, var(--surface));
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.4;
 }
 .runs-loading-message {
   font-size: 12px;
@@ -320,22 +281,16 @@
 /* The inline blocked-node approval banner on a waiting row. */
 .runs-approval {
   grid-column: 1 / -1;
-  display: flex;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--st-waiting) 12%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--st-waiting) 30%, transparent);
-  font-size: 12.5px;
-  color: var(--text);
 }
 .runs-approval-node {
   font: 600 12px/1 ui-monospace, Menlo, monospace;
   color: var(--st-waiting);
 }
 .runs-approval-actions {
-  margin-left: auto;
+  grid-column: 2;
+  grid-row: 1;
   display: flex;
   gap: 6px;
 }
@@ -343,8 +298,6 @@
 /* The failed-run error line. */
 .runs-error {
   grid-column: 1 / -1;
-  font-size: 12px;
-  color: var(--st-failed);
 }
 
 /* Resume affordance (failed/cancelled rows). Shares the small btn metrics. */

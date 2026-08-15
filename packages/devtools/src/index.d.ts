@@ -101,6 +101,14 @@ type NodeEventBase = RunEventBase & {
     nodeId: string;
     iteration: number;
 };
+type RunCancellationSource = {
+    kind: "signal" | "rpc" | "cli" | "engine";
+    detail?: string;
+    signal?: string;
+    clientPid?: number;
+    requestId?: string;
+    clientIdentity?: string;
+};
 type RunStartedEvent = RunEventBase & {
     type: "RunStarted";
 };
@@ -121,6 +129,8 @@ type RunFailedEvent = RunEventBase & {
 };
 type RunCancelledEvent = RunEventBase & {
     type: "RunCancelled";
+    /** Missing only on historical or unattributed cancellation events. */
+    source?: RunCancellationSource;
 };
 type FrameCommittedEvent = RunEventBase & {
     type: "FrameCommitted";
@@ -597,4 +607,4 @@ type DevToolsSnapshotV1 = DevToolsSnapshotV1$3;
 type DevToolsDelta = DevToolsDelta$3;
 type DevToolsDeltaOp = DevToolsDeltaOp$1;
 
-export { type DevToolsDelta, type DevToolsDeltaOp, type DevToolsEventBus, type DevToolsEventHandler, type DevToolsNode, DevToolsRunStore, type DevToolsRunStoreOptions, type DevToolsSnapshot, type DevToolsSnapshotV1, InvalidDeltaError, type RunExecutionState, SMITHERS_NODE_ICONS, SNAPSHOT_SERIALIZER_DEFAULT_MAX_DEPTH, SmithersDevToolsCore, type SmithersDevToolsOptions, type SmithersNodeType, type SnapshotSerializerOptions, type SnapshotSerializerWarning, type TaskExecutionState, applyDelta, buildSnapshot, collectTasks, countNodes, diffSnapshots, findNodeById, printTree, snapshotSerialize };
+export { type DevToolsDelta, type DevToolsDeltaOp, type DevToolsEventBus, type DevToolsEventHandler, type DevToolsNode, DevToolsRunStore, type DevToolsRunStoreOptions, type DevToolsSnapshot, type DevToolsSnapshotV1, InvalidDeltaError, type RunCancellationSource, type RunExecutionState, SMITHERS_NODE_ICONS, SNAPSHOT_SERIALIZER_DEFAULT_MAX_DEPTH, SmithersDevToolsCore, type SmithersDevToolsOptions, type SmithersNodeType, type SnapshotSerializerOptions, type SnapshotSerializerWarning, type TaskExecutionState, applyDelta, buildSnapshot, collectTasks, countNodes, diffSnapshots, findNodeById, printTree, snapshotSerialize };

@@ -106,6 +106,7 @@ import { normalizeWaitForEventCorrelationId, parseWaitForEventAttemptSnapshot } 
 
 export const DB_ALERT_ID_MAX_LENGTH = 256;
 const DB_RUN_CANCEL_ATTRIBUTION_MAX_LENGTH = 1024;
+const DB_RUN_CANCELLATION_SOURCE_KINDS = new Set(["signal", "rpc", "cli", "engine"]);
 const STEER_ACTIVE_RUN_STATUSES = new Set(["running", "waiting-approval", "waiting-event", "waiting-timer"]);
 export const DB_ALERT_POLICY_NAME_MAX_LENGTH = 256;
 export const DB_ALERT_MESSAGE_MAX_LENGTH = 4096;
@@ -457,6 +458,19 @@ function validateOptionalPositiveTimestamp(row, field) {
 function validateRunCancellationAttribution(row) {
   assertOptionalStringMaxLength("cancelRequestId", row.cancelRequestId, DB_RUN_CANCEL_ATTRIBUTION_MAX_LENGTH);
   assertOptionalStringMaxLength("cancelRequestSource", row.cancelRequestSource, DB_RUN_CANCEL_ATTRIBUTION_MAX_LENGTH);
+  assertOptionalStringMaxLength("cancelRequestDetail", row.cancelRequestDetail, DB_RUN_CANCEL_ATTRIBUTION_MAX_LENGTH);
+  assertOptionalStringMaxLength("cancelRequestSignal", row.cancelRequestSignal, DB_RUN_CANCEL_ATTRIBUTION_MAX_LENGTH);
+  if (
+    row.cancelRequestSource !== undefined &&
+    row.cancelRequestSource !== null &&
+    !DB_RUN_CANCELLATION_SOURCE_KINDS.has(row.cancelRequestSource)
+  ) {
+    throw toSmithersError(
+      new Error("Invalid cancellation source"),
+      "Cancellation source must be one of: signal, rpc, cli, engine",
+      { code: "INVALID_INPUT", details: { source: row.cancelRequestSource } },
+    );
+  }
   assertOptionalStringMaxLength(
     "cancelRequestClientIdentity",
     row.cancelRequestClientIdentity,
@@ -469,21 +483,61 @@ function validateRunCancellationAttribution(row) {
 /**
  * @param {{
  *   requestId?: string | null;
+ *   kind?: string | null;
  *   source?: string | null;
  *   transport?: string | null;
+ *   detail?: string | null;
+ *   signal?: string | null;
  *   clientIdentity?: string | null;
  *   clientPid?: number | null;
  * }} attribution
  */
 function runCancellationAttributionPatch(attribution) {
+  const requestedSource = attribution.kind ?? attribution.source ?? attribution.transport ?? null;
+  const legacyTransport =
+    requestedSource === "http" || requestedSource === "websocket" || requestedSource === "gateway"
+      ? requestedSource
+      : null;
   const patch = {
     cancelRequestId: attribution.requestId ?? null,
-    cancelRequestSource: attribution.source ?? attribution.transport ?? null,
+    cancelRequestSource: legacyTransport ? "rpc" : requestedSource,
+    cancelRequestDetail: attribution.detail ?? (legacyTransport ? `${legacyTransport} cancellation request` : null),
+    cancelRequestSignal: attribution.signal ?? null,
     cancelRequestClientIdentity: attribution.clientIdentity ?? null,
     cancelRequestClientPid: attribution.clientPid ?? null,
   };
   validateRunCancellationAttribution(patch);
   return patch;
+}
+
+/**
+ * Project the flat persisted run fields into the canonical cancellation-source
+ * contract. Historical transport values remain readable as RPC attribution.
+ * @param {Partial<RunRow> | null | undefined} row
+ * @returns {import("@smthrs/observability").RunCancellationSource | undefined}
+ */
+export function runCancellationSourceFromRow(row) {
+  if (!row || typeof row.cancelRequestSource !== "string") return undefined;
+  const rawKind = row.cancelRequestSource;
+  const legacyTransport = rawKind === "http" || rawKind === "websocket" || rawKind === "gateway";
+  const kind = legacyTransport ? "rpc" : rawKind;
+  if (!DB_RUN_CANCELLATION_SOURCE_KINDS.has(kind)) return undefined;
+  const detail =
+    typeof row.cancelRequestDetail === "string"
+      ? row.cancelRequestDetail
+      : legacyTransport
+        ? `${rawKind} cancellation request`
+        : undefined;
+  return {
+    kind: /** @type {"signal" | "rpc" | "cli" | "engine"} */ (kind),
+    ...(detail !== undefined ? { detail } : {}),
+    ...(typeof row.cancelRequestSignal === "string" ? { signal: row.cancelRequestSignal } : {}),
+    ...(Number.isSafeInteger(row.cancelRequestClientPid) && Number(row.cancelRequestClientPid) > 0
+      ? { clientPid: Number(row.cancelRequestClientPid) }
+      : {}),
+    ...(typeof row.cancelRequestId === "string" ? { requestId: row.cancelRequestId } : {}),
+    ...(typeof row.cancelRequestClientIdentity === "string" ? { clientIdentity: row.cancelRequestClientIdentity } : {}),
+  };
 }
 /**
  * @param {unknown} row
@@ -1459,8 +1513,11 @@ export class SmithersDb {
    * @param {number} cancelRequestedAtMs
    * @param {{
    *   requestId?: string | null;
+   *   kind?: string | null;
    *   source?: string | null;
    *   transport?: string | null;
+   *   detail?: string | null;
+   *   signal?: string | null;
    *   clientIdentity?: string | null;
    *   clientPid?: number | null;
    * }} [attribution]
@@ -1489,8 +1546,11 @@ export class SmithersDb {
    * @param {string | null} [errorJson]
    * @param {{
    *   requestId?: string | null;
+   *   kind?: string | null;
    *   source?: string | null;
    *   transport?: string | null;
+   *   detail?: string | null;
+   *   signal?: string | null;
    *   clientIdentity?: string | null;
    *   clientPid?: number | null;
    * } | null} [attribution]
@@ -4580,14 +4640,14 @@ export class SmithersDb {
     return this.read(`list event history ${runId}`, () => this.internalStorage.listEventHistory(runId, query));
   }
   /**
-   * The newest events naming one node, ascending. One SQL pass (LIKE on the
-   * payload) instead of paging the whole history through JS: node transcripts
-   * on long runs need this to stay interactive, and unlike a bounded recency
-   * scan it finds OLD nodes' events too.
+   * The newest events naming one node, ascending. One SQL pass with exact
+   * top-level payload filters instead of paging the whole history through JS:
+   * node transcripts on long runs need this to stay interactive, and unlike a
+   * bounded recency scan it finds OLD nodes' events too.
    *
    * @param {string} runId
-   * @param {string} nodeId Validated upstream (no quotes/percent — node id charset).
-   * @param {{ afterSeq?: number; limit?: number }} [query]
+   * @param {string} nodeId
+   * @param {{ afterSeq?: number; limit?: number; iteration?: number; attempt?: number }} [query]
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
   listNodeEvents(runId, nodeId, query = {}) {
@@ -4595,17 +4655,21 @@ export class SmithersDb {
     // Event sequences start at zero. With no cursor, include that first
     // event; an explicit cursor remains exclusive and non-negative.
     const afterSeq = query.afterSeq === undefined ? -1 : Math.max(0, Math.floor(query.afterSeq));
-    const escapedNodeId = nodeId.replaceAll(`\\`, `\\\\`).replaceAll(`%`, `\\%`).replaceAll(`_`, `\\_`);
-    const needle = `%"nodeId":"${escapedNodeId}"%`;
+    const { whereSql, params } = this.internalStorage.buildEventHistoryWhere(runId, {
+      afterSeq,
+      nodeId,
+      iteration: query.iteration,
+      attempt: query.attempt,
+    });
     return this.read(`list node events ${nodeId}`, () =>
       this.internalStorage.queryAll(
         `SELECT * FROM (
            SELECT * FROM _smithers_events
-           WHERE run_id = ? AND seq > ? AND payload_json LIKE ? ESCAPE '\\'
+           WHERE ${whereSql}
            ORDER BY seq DESC
            LIMIT ?
          ) ORDER BY seq ASC`,
-        [runId, afterSeq, needle, limit],
+        [...params, limit],
       ),
     );
   }
@@ -4713,10 +4777,12 @@ export class SmithersDb {
    *   model?: string | null;
    *   agent?: string | null;
    *   inputTokens?: number | null;
+   *   freshInputTokens?: number | null;
    *   outputTokens?: number | null;
    *   cacheReadTokens?: number | null;
    *   cacheWriteTokens?: number | null;
    *   reasoningTokens?: number | null;
+   *   costUsd?: number | null;
    *   updatedAtMs: number;
    * }} row
    * @returns {RunnableEffect<void, SmithersError>}
@@ -4724,6 +4790,10 @@ export class SmithersDb {
   recordRunTokenUsage(row) {
     /** @param {unknown} value */
     const count = (value) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0);
+    /** @param {unknown} value */
+    const optionalCount = (value) => (value == null ? null : count(value));
+    const costUsd =
+      typeof row.costUsd === "number" && Number.isFinite(row.costUsd) && row.costUsd >= 0 ? row.costUsd : null;
     const values = [
       row.runId,
       row.nodeId,
@@ -4732,31 +4802,35 @@ export class SmithersDb {
       row.model ?? null,
       row.agent ?? null,
       count(row.inputTokens),
+      optionalCount(row.freshInputTokens),
       count(row.outputTokens),
       count(row.cacheReadTokens),
       count(row.cacheWriteTokens),
       count(row.reasoningTokens),
+      costUsd,
       row.updatedAtMs,
     ];
-    const columns = `(run_id, node_id, iteration, attempt, model, agent, input_tokens, output_tokens,
-              cache_read_tokens, cache_write_tokens, reasoning_tokens, updated_at_ms)`;
+    const columns = `(run_id, node_id, iteration, attempt, model, agent, input_tokens, fresh_input_tokens,
+              output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, cost_usd, updated_at_ms)`;
     return this.write(`record run token usage ${row.runId}/${row.nodeId}`, () =>
       this.internalStorage.dialect === POSTGRES
         ? this.internalStorage.execute(
             `INSERT INTO _smithers_run_usage ${columns}
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(run_id, node_id, iteration, attempt)
              DO UPDATE SET model = excluded.model, agent = excluded.agent,
                            input_tokens = excluded.input_tokens, output_tokens = excluded.output_tokens,
+                           fresh_input_tokens = excluded.fresh_input_tokens,
                            cache_read_tokens = excluded.cache_read_tokens,
                            cache_write_tokens = excluded.cache_write_tokens,
                            reasoning_tokens = excluded.reasoning_tokens,
+                           cost_usd = excluded.cost_usd,
                            updated_at_ms = excluded.updated_at_ms`,
             values,
           )
         : this.internalStorage.execute(
             `INSERT OR REPLACE INTO _smithers_run_usage ${columns}
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             values,
           ),
     );
@@ -4770,11 +4844,14 @@ export class SmithersDb {
    * @returns {RunnableEffect<{
    *   runId: string;
    *   inputTokens: number;
+   *   freshInputTokens: number;
    *   outputTokens: number;
    *   cacheReadTokens: number;
    *   cacheWriteTokens: number;
    *   reasoningTokens: number;
    *   totalTokens: number;
+   *   costUsd: number | null;
+   *   pricedAttempts: number;
    *   attempts: number;
    * }, SmithersError>}
    */
@@ -4782,10 +4859,16 @@ export class SmithersDb {
     return this.read(`get run token usage ${runId}`, async () => {
       const row = await this.internalStorage.queryOne(
         `SELECT COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                COALESCE(SUM(COALESCE(fresh_input_tokens, input_tokens)), 0) AS fresh_input_tokens,
                 COALESCE(SUM(output_tokens), 0) AS output_tokens,
                 COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
                 COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
                 COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+                CASE
+                  WHEN COUNT(*) = 0 OR COUNT(cost_usd) < COUNT(*) THEN NULL
+                  ELSE COALESCE(SUM(cost_usd), 0)
+                END AS cost_usd,
+                COUNT(cost_usd) AS priced_attempts,
                 COUNT(*) AS attempts
          FROM _smithers_run_usage
          WHERE run_id = ?`,
@@ -4800,11 +4883,14 @@ export class SmithersDb {
       return {
         runId,
         inputTokens,
+        freshInputTokens: num(row?.fresh_input_tokens ?? row?.freshInputTokens),
         outputTokens,
         cacheReadTokens: num(row?.cache_read_tokens ?? row?.cacheReadTokens),
         cacheWriteTokens: num(row?.cache_write_tokens ?? row?.cacheWriteTokens),
         reasoningTokens: num(row?.reasoning_tokens ?? row?.reasoningTokens),
         totalTokens: inputTokens + outputTokens,
+        costUsd: row?.cost_usd == null && row?.costUsd == null ? null : num(row?.cost_usd ?? row?.costUsd),
+        pricedAttempts: num(row?.priced_attempts ?? row?.pricedAttempts),
         attempts: num(row?.attempts),
       };
     });

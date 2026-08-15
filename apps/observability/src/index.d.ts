@@ -169,6 +169,14 @@ type AgentCliCompletedEvent = {
     usage?: Record<string, unknown>;
 };
 type AgentCliEvent = AgentCliStartedEvent | AgentCliActionEvent | AgentCliCompletedEvent;
+type RunCancellationSource$1 = {
+    kind: "signal" | "rpc" | "cli" | "engine";
+    detail?: string;
+    signal?: string;
+    clientPid?: number;
+    requestId?: string;
+    clientIdentity?: string;
+};
 type SmithersEvent$2 = {
     type: "SupervisorStarted";
     runId: string;
@@ -237,6 +245,8 @@ type SmithersEvent$2 = {
     type: "RunCancelled";
     runId: string;
     timestampMs: number;
+    /** Missing only on historical or unattributed cancellation events. */
+    source?: RunCancellationSource$1;
 } | {
     type: "RunContinuedAsNew";
     runId: string;
@@ -726,10 +736,14 @@ type SmithersEvent$2 = {
     model: string;
     agent: string;
     inputTokens: number;
+    /** Non-cached input tokens. Falls back to inputTokens when the provider omits the breakdown. */
+    freshInputTokens?: number;
     outputTokens: number;
     cacheReadTokens?: number;
     cacheWriteTokens?: number;
     reasoningTokens?: number;
+    /** Estimated USD cost from Smithers' built-in model price table. */
+    costUsd?: number;
     timestampMs: number;
 } | {
     type: "SnapshotCaptured";
@@ -1341,10 +1355,11 @@ type MetricLabels = MetricLabels$1;
 type MetricsServiceShape = MetricsServiceShape$3;
 type MetricsSnapshot = MetricsSnapshot$1;
 type ResolvedSmithersObservabilityOptions = ResolvedSmithersObservabilityOptions$2;
+type RunCancellationSource = RunCancellationSource$1;
 type SmithersEvent = SmithersEvent$2;
 type SmithersLogFormat = SmithersLogFormat$1;
 type SmithersMetricDefinition = SmithersMetricDefinition$2;
 type SmithersObservabilityOptions = SmithersObservabilityOptions$4;
 type SmithersObservabilityService = SmithersObservabilityService$2;
 
-export { type CorrelationContext, CorrelationContextLive, type CorrelationContextPatch, CorrelationContextService, type CorrelationPatch, type MetricLabels, MetricsService, MetricsServiceLive, type MetricsServiceShape, type MetricsSnapshot, type ResolvedSmithersObservabilityOptions, type SmithersEvent, type SmithersLogFormat, type SmithersMetricDefinition, SmithersObservability, type SmithersObservabilityOptions, type SmithersObservabilityService, TracingService, TracingServiceLive, activeNodes, activeRuns, annotateSmithersTrace, approvalPending, approvalWaitDuration, approvalsDenied, approvalsGranted, approvalsRequested, attemptDuration, cacheHits, cacheMisses, correlationContextFiberRef, correlationContextToLogAnnotations, createSmithersObservabilityLayer, createSmithersOtelLayer, createSmithersRuntimeLayer, dbQueryDuration, dbRetries, dbTransactionDuration, dbTransactionRetries, dbTransactionRollbacks, errorsTotal, eventsEmittedTotal, externalWaitAsyncPending, getCurrentCorrelationContext, getCurrentCorrelationContextEffect, getCurrentSmithersTraceAnnotations, getCurrentSmithersTraceSpan, hotReloadDuration, hotReloadFailures, hotReloads, httpRequestDuration, httpRequests, logDebug, logError, logInfo, logWarning, makeSmithersSpanAttributes, mergeCorrelationContext, metricsServiceAdapter, nodeDuration, nodeRetriesTotal, nodesFailed, nodesFinished, nodesStarted, processHeapUsedBytes, processMemoryRssBytes, processUptimeSeconds, prometheusContentType, promptSizeBytes, renderPrometheusMetrics, replaysStarted, resolveSmithersObservabilityOptions, responseSizeBytes, rewindDurationMs, rewindFramesDeleted, rewindRollbackTotal, rewindSandboxesReverted, rewindTotal, runDuration, runForksCreated, runWithCorrelationContext, runsAncestryDepth, runsCancelledTotal, runsCarriedStateBytes, runsContinuedTotal, runsFailedTotal, runsFinishedTotal, runsResumedTotal, runsTotal, sandboxActive, sandboxBundleSizeBytes, sandboxCompletedTotal, sandboxCreatedTotal, sandboxDurationMs, sandboxPatchCount, sandboxTransportDurationMs, schedulerConcurrencyUtilization, schedulerQueueDepth, schedulerWaitDuration, scorerEventsFailed, scorerEventsFinished, scorerEventsStarted, setSmithersLogRunner, smithersMetricCatalog, smithersMetrics, smithersSpanNames, snapshotDuration, snapshotsCaptured, timerDelayDuration, timersCancelled, timersCreated, timersFired, timersPending, toPrometheusMetricName, tokensCacheReadTotal, tokensCacheWriteTotal, tokensContextWindowBucketTotal, tokensContextWindowPerCall, tokensInputPerCall, tokensInputTotal, tokensOutputPerCall, tokensOutputTotal, tokensReasoningTotal, toolCallErrorsTotal, toolCallsTotal, toolDuration, toolOutputTruncatedTotal, trackEvent as trackSmithersEvent, updateCurrentCorrelationContext, updateProcessMetrics, vcsDuration, withCorrelationContext, withCurrentCorrelationContext, withSmithersSpan };
+export { type CorrelationContext, CorrelationContextLive, type CorrelationContextPatch, CorrelationContextService, type CorrelationPatch, type MetricLabels, MetricsService, MetricsServiceLive, type MetricsServiceShape, type MetricsSnapshot, type ResolvedSmithersObservabilityOptions, type RunCancellationSource, type SmithersEvent, type SmithersLogFormat, type SmithersMetricDefinition, SmithersObservability, type SmithersObservabilityOptions, type SmithersObservabilityService, TracingService, TracingServiceLive, activeNodes, activeRuns, annotateSmithersTrace, approvalPending, approvalWaitDuration, approvalsDenied, approvalsGranted, approvalsRequested, attemptDuration, cacheHits, cacheMisses, correlationContextFiberRef, correlationContextToLogAnnotations, createSmithersObservabilityLayer, createSmithersOtelLayer, createSmithersRuntimeLayer, dbQueryDuration, dbRetries, dbTransactionDuration, dbTransactionRetries, dbTransactionRollbacks, errorsTotal, eventsEmittedTotal, externalWaitAsyncPending, getCurrentCorrelationContext, getCurrentCorrelationContextEffect, getCurrentSmithersTraceAnnotations, getCurrentSmithersTraceSpan, hotReloadDuration, hotReloadFailures, hotReloads, httpRequestDuration, httpRequests, logDebug, logError, logInfo, logWarning, makeSmithersSpanAttributes, mergeCorrelationContext, metricsServiceAdapter, nodeDuration, nodeRetriesTotal, nodesFailed, nodesFinished, nodesStarted, processHeapUsedBytes, processMemoryRssBytes, processUptimeSeconds, prometheusContentType, promptSizeBytes, renderPrometheusMetrics, replaysStarted, resolveSmithersObservabilityOptions, responseSizeBytes, rewindDurationMs, rewindFramesDeleted, rewindRollbackTotal, rewindSandboxesReverted, rewindTotal, runDuration, runForksCreated, runWithCorrelationContext, runsAncestryDepth, runsCancelledTotal, runsCarriedStateBytes, runsContinuedTotal, runsFailedTotal, runsFinishedTotal, runsResumedTotal, runsTotal, sandboxActive, sandboxBundleSizeBytes, sandboxCompletedTotal, sandboxCreatedTotal, sandboxDurationMs, sandboxPatchCount, sandboxTransportDurationMs, schedulerConcurrencyUtilization, schedulerQueueDepth, schedulerWaitDuration, scorerEventsFailed, scorerEventsFinished, scorerEventsStarted, setSmithersLogRunner, smithersMetricCatalog, smithersMetrics, smithersSpanNames, snapshotDuration, snapshotsCaptured, timerDelayDuration, timersCancelled, timersCreated, timersFired, timersPending, toPrometheusMetricName, tokensCacheReadTotal, tokensCacheWriteTotal, tokensContextWindowBucketTotal, tokensContextWindowPerCall, tokensInputPerCall, tokensInputTotal, tokensOutputPerCall, tokensOutputTotal, tokensReasoningTotal, toolCallErrorsTotal, toolCallsTotal, toolDuration, toolOutputTruncatedTotal, trackEvent as trackSmithersEvent, updateCurrentCorrelationContext, updateProcessMetrics, vcsDuration, withCorrelationContext, withCurrentCorrelationContext, withSmithersSpan };

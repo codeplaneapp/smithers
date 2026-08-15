@@ -64,6 +64,8 @@ export type SmithersApi = {
   listRunEvents(params: {
     runId: string;
     nodeId?: string;
+    iteration?: number;
+    attempt?: number;
     afterSeq?: number;
     limit?: number;
   }): Promise<GatewayRunEventRow[]>;

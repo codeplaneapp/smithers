@@ -189,7 +189,11 @@ export function formatEventLine(event, baseMs, options) {
     case "RunFailed":
       return `${prefix}✗ Run failed: ${truncateText(formatErrorPayload(payload?.error ?? "unknown"), truncatePayloadAt)}`;
     case "RunCancelled":
-      return `${prefix}⊘ Run cancelled`;
+      return `${prefix}⊘ Run cancelled${
+        payload?.source?.kind
+          ? ` (${payload.source.kind}${payload.source.signal ? ` ${payload.source.signal}` : ""}${payload.source.detail ? `: ${truncateText(payload.source.detail, truncatePayloadAt)}` : ""})`
+          : ""
+      }`;
     case "RunContinuedAsNew":
       return `${prefix}⇢ Continued as new: ${payload?.newRunId ?? "?"} (iteration ${payload?.iteration ?? 0})`;
     case "RunHijackRequested":

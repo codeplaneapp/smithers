@@ -111,6 +111,40 @@ describe("CLI observability", () => {
             metaJson: JSON.stringify({ agentEngine: engine, agentModel: model }),
           });
         }
+        await adapter.recordRunTokenUsage({
+          runId: "inspect-shape-run",
+          nodeId: "build",
+          iteration: 0,
+          attempt: 1,
+          model: "gpt-5.6-luna",
+          agent: "codex",
+          inputTokens: 1_000,
+          freshInputTokens: 100,
+          outputTokens: 200,
+          cacheReadTokens: 850,
+          cacheWriteTokens: 50,
+          reasoningTokens: 40,
+          costUsd: 0.0004,
+          updatedAtMs: Date.now(),
+        });
+        // Same attempt, later cumulative sample: inspect must expose the
+        // replacement row rather than summing both records (#1436).
+        await adapter.recordRunTokenUsage({
+          runId: "inspect-shape-run",
+          nodeId: "build",
+          iteration: 0,
+          attempt: 1,
+          model: "gpt-5.6-luna",
+          agent: "codex",
+          inputTokens: 1_200,
+          freshInputTokens: 120,
+          outputTokens: 240,
+          cacheReadTokens: 1_020,
+          cacheWriteTokens: 60,
+          reasoningTokens: 45,
+          costUsd: 0.0005,
+          updatedAtMs: Date.now(),
+        });
         const result = runSmithers(["inspect", "inspect-shape-run", "--pool"], {
           cwd: repo.dir,
           format: "json",
@@ -119,6 +153,19 @@ describe("CLI observability", () => {
         expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
         expect(result.json.nodes).toEqual([expect.objectContaining({ nodeId: "build" })]);
         expect(result.json.steps).toEqual([expect.objectContaining({ id: "build" })]);
+        expect(result.json.tokenUsage).toEqual({
+          runId: "inspect-shape-run",
+          inputTokens: 1_200,
+          freshInputTokens: 120,
+          outputTokens: 240,
+          cacheReadTokens: 1_020,
+          cacheWriteTokens: 60,
+          reasoningTokens: 45,
+          totalTokens: 1_440,
+          costUsd: 0.0005,
+          pricedAttempts: 1,
+          attempts: 1,
+        });
         expect(result.json.pool).toEqual({
           attempts: [
             { pool: "codex/gpt-5.6-luna", attempts: 2 },
@@ -126,6 +173,55 @@ describe("CLI observability", () => {
           ],
           summary: "codex/gpt-5.6-luna x2, claude/claude-sonnet-5 x1",
         });
+      } finally {
+        sqlite.close();
+      }
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "inspect exposes structured cancellation attribution in JSON and human output",
+    async () => {
+      const repo = createTempRepo();
+      const { sqlite, adapter } = openRepoDb(repo);
+      try {
+        await insertFinishedRun(adapter, "inspect-cancelled-run");
+        await adapter.updateRun("inspect-cancelled-run", {
+          status: "cancelled",
+          cancelRequestSource: "signal",
+          cancelRequestDetail: "worker received SIGTERM",
+          cancelRequestSignal: "SIGTERM",
+          cancelRequestClientPid: 4321,
+          cancelRequestId: "request-inspect",
+          cancelRequestClientIdentity: "operator",
+        });
+
+        const structured = runSmithers(["inspect", "inspect-cancelled-run"], {
+          cwd: repo.dir,
+          format: "json",
+          timeoutMs: TIMEOUT_MS,
+        });
+        expect(structured.exitCode, `${structured.stdout}\n${structured.stderr}`).toBe(0);
+        expect(structured.json.run.cancellationSource).toEqual({
+          kind: "signal",
+          detail: "worker received SIGTERM",
+          signal: "SIGTERM",
+          clientPid: 4321,
+          requestId: "request-inspect",
+          clientIdentity: "operator",
+        });
+
+        const human = runSmithers(["inspect", "inspect-cancelled-run"], {
+          cwd: repo.dir,
+          format: null,
+          timeoutMs: TIMEOUT_MS,
+        });
+        expect(human.exitCode, `${human.stdout}\n${human.stderr}`).toBe(0);
+        expect(human.stdout).toContain("cancellationSource:");
+        expect(human.stdout).toContain("worker received SIGTERM");
+        expect(human.stdout).toContain("SIGTERM");
+        expect(human.stdout).toContain("request-inspect");
       } finally {
         sqlite.close();
       }

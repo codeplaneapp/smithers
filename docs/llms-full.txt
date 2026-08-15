@@ -22895,6 +22895,40 @@ type AttemptScoped   = NodeScoped   & { attempt: number };
 
 Every event has `type`, `runId`, `timestampMs`; node-scoped adds `nodeId`/`iteration`; attempt-scoped adds `attempt`.
 
+## Token usage semantics
+
+`TokenUsageReported` is a final cumulative total for one agent attempt, not an
+incremental sample. Current runtimes emit one record when the attempt settles,
+including a failed attempt when its provider error carries usage:
+
+```ts
+{
+  type: "TokenUsageReported",
+  nodeId, iteration, attempt, model, agent,
+  inputTokens,       // provider-reported input counter
+  freshInputTokens,  // non-cached input
+  cacheReadTokens,   // input breakdown; do not add to inputTokens
+  cacheWriteTokens,  // input breakdown; do not add to inputTokens
+  outputTokens,      // total provider output
+  reasoningTokens,   // output breakdown; do not add to outputTokens
+  costUsd,           // optional estimate from Smithers' model price table
+}
+```
+
+The token total is `inputTokens + outputTokens`. Cache and reasoning fields
+explain that total; they are not extra tokens. `costUsd` is absent when the
+resolved model is not in the built-in price table. When a provider omits the
+exact non-cached breakdown, `freshInputTokens` falls back to its reported
+`inputTokens` counter for compatibility with CLI adapters and historical logs.
+
+Smithers versions around `0.20` could write the growing cumulative total more
+than once during an attempt. When reading those historical logs, group by
+`nodeId + iteration + attempt` and keep the last record; summing every record
+over-counts the run. Current persistence does this automatically:
+`_smithers_run_usage` upserts by that attempt identity, while retries use new
+attempt numbers and remain separate. Use `bunx smthrs inspect RUN_ID` or
+`bunx smthrs usage --run RUN_ID` for the authoritative aggregate.
+
 ## Event categories
 
 Used by `bunx smthrs events --type <category>` and the metrics layer.
@@ -23063,6 +23097,10 @@ millis from the stored row) and surface `stateVersion: 0`.
 
 </Warning>
 
+`RunCancelled.source` is optional for historical or unattributed events. When
+present, it contains `kind` (`signal`, `rpc`, `cli`, or `engine`) plus optional
+`detail`, `signal`, `clientPid`, `requestId`, and `clientIdentity` fields.
+
 <!-- prettier-ignore -->
 | Event | Top-level fields |
 |---|---|
@@ -23076,7 +23114,7 @@ millis from the stored row) and surface `stateVersion: 0`.
 | `RunConcurrencySaturated` | `runId`, `requestedDemand`, `effectiveCap`, `remediationCommand`, `timestampMs` |
 | `RunFinished` | `runId`, `timestampMs` |
 | `RunFailed` | `runId`, `error`, `timestampMs` |
-| `RunCancelled` | `runId`, `timestampMs` |
+| `RunCancelled` | `runId`, `source?`, `timestampMs` |
 | `RunContinuedAsNew` | `runId`, `newRunId`, `iteration`, `carriedStateSize`, `ancestryDepth?`, `timestampMs` |
 | `RunHijackRequested` | `runId`, `target?`, `timestampMs` |
 | `RunHijacked` | `runId`, `nodeId`, `iteration`, `attempt`, `engine`, `mode`, `resume?`, `cwd`, `timestampMs` |
