@@ -94,7 +94,7 @@ export function isPidAlive(pid) {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    // EPERM means the process exists but we may not signal it — still alive.
+    // EPERM means the process exists but we may not signal it. It is still alive.
     return /** @type {{ code?: string }} */ (error)?.code === "EPERM";
   }
 }

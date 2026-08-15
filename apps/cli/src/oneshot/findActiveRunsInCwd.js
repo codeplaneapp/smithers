@@ -35,11 +35,11 @@ function canonical(path) {
  * those are, so ask it.
  *
  * Liveness comes from `computeRunStateFromRow`, the same PID-verified
- * classifier `ps` and `inspect` use. A run whose heartbeat is stale and whose
- * owner PID is gone classifies as `orphaned` and does not count: nobody is
- * coming back for its tree. Fully soft and read-only. A store that cannot be
- * read yields an empty list, because a preflight problem must never block the
- * goal.
+ * classifier `ps` and `inspect` use. A stale run classifies as `orphaned` when
+ * its local owner PID is gone or its host-scoped owner is remote. It does not
+ * count because the supervisor may recover it. Fully soft and read-only. A
+ * store that cannot be read yields an empty list, because a preflight problem
+ * must never block the goal.
  *
  * @param {any} adapter SmithersDb adapter (read-only)
  * @param {string} cwd the oneshot working directory

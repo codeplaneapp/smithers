@@ -22,7 +22,7 @@ Derives the user-facing `RunStateView` (running / waiting-* / stale / orphaned
   remote owner whose durable heartbeat is stale. New owner IDs use
   `pid:<pid>@<hostname>:<session>`; only matching-host PIDs are probed. Legacy
   PID IDs without `@<hostname>` retain the single-host assumption. A stale run
-  whose local owner PID is alive is `"stale"` — a busy engine with a lagging
+  whose local owner PID is alive is `"stale"`. It is a busy engine with a lagging
   heartbeat, not a candidate for force-resume. An unrecognized owner shape is
   also `"stale"` because its death cannot be proven.
 - The `.ts` sidecars (`RunState`, `RunStateView`, `ReasonBlocked`,

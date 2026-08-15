@@ -947,8 +947,10 @@ When multiple hosts share a run store, each engine records a host-scoped runtime
 owner (`pid:<pid>@<hostname>:<session>`). Smithers probes a PID only when that
 hostname matches the current host; remote owners use the durable heartbeat and
 the configured stale threshold instead. Hosts therefore need stable, unique OS
-hostnames. Legacy owner rows without `@<hostname>` keep the historical
-single-host assumption and are probed against the local process table.
+hostnames. Set `--stale-threshold` longer than the longest expected remote
+heartbeat delay to avoid taking over a live but delayed engine. Legacy owner
+rows without `@<hostname>` keep the historical single-host assumption and are
+probed against the local process table.
 
 ## Session snapshots & fork
 
