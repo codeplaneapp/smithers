@@ -6,7 +6,7 @@
  * `smithers monitor`). Purely an observer: it launches nothing, everything on
  * screen is live gateway state. Domain logic lives in ./monitorModel.ts.
  */
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from "react";
 import {
   createGatewayReactRoot,
   useGatewayActions,
@@ -3372,6 +3372,68 @@ function formatSessionTranscriptLine(payload: unknown): { text: string; kind: "c
   return null;
 }
 
+export type NodeTranscriptLine = { seq: number; text: string; kind: "cmd" | "text" | "meta" };
+
+/** Pure transcript state surface; the polling container below owns transport state. */
+export function NodeTranscriptState({
+  lines,
+  loading,
+  error,
+  live,
+  onRetry,
+  containerRef,
+}: {
+  lines: readonly NodeTranscriptLine[];
+  loading: boolean;
+  error?: Error | null;
+  live: boolean;
+  onRetry: () => void | Promise<void>;
+  containerRef?: RefObject<HTMLDivElement | null>;
+}) {
+  const errorAlert = error ? (
+    <Alert variant="destructive" data-testid="monitor-transcript-error">
+      <AlertTitle>Couldn&apos;t load transcript.</AlertTitle>
+      <AlertDescription>{error.message || "The node event request failed."}</AlertDescription>
+      <Button variant="outline" data-testid="monitor-transcript-retry" onClick={() => void onRetry()}>
+        Retry transcript
+      </Button>
+    </Alert>
+  ) : null;
+
+  if (lines.length === 0) {
+    if (errorAlert) return errorAlert;
+    if (loading) {
+      return (
+        <div className="mon-empty mon-dim" data-testid="monitor-transcript-loading" role="status">
+          <span className="mon-live-pending">
+            <span className="mon-dot mon-dot-pulse" aria-hidden /> loading transcript…
+          </span>
+        </div>
+      );
+    }
+    return (
+      <div className="mon-empty mon-dim" data-testid="monitor-transcript-empty">
+        {live
+          ? "No transcript events from this node yet — new events will appear here."
+          : "This node finished without recording transcript events."}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {errorAlert}
+      <div className="mon-output mon-live-output" ref={containerRef} data-testid="monitor-live-output">
+        {lines.map((line) => (
+          <div key={line.seq} className={`mon-live-line mon-live-${line.kind}`}>
+            {line.text}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 /**
  * Live transcript for an in-flight node. The shared run-event ring drowns any
  * single node on a busy run (16 streaming agents rotate 500 events in
@@ -3393,13 +3455,16 @@ function NodeLiveOutput({
   live: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [lines, setLines] = useState<Array<{ seq: number; text: string; kind: "cmd" | "text" | "meta" }>>([]);
-  const [failed, setFailed] = useState(false);
+  const [lines, setLines] = useState<NodeTranscriptLine[]>([]);
+  const [failed, setFailed] = useState<Error | null>(null);
   const [loadedOnce, setLoadedOnce] = useState(false);
+  const [retryVersion, setRetryVersion] = useState(0);
   useEffect(() => {
     setLines([]);
-    setFailed(false);
+    setFailed(null);
     setLoadedOnce(false);
+  }, [runId, nodeId, iteration, attempt]);
+  useEffect(() => {
     let cancelled = false;
     // An absent cursor asks the node-filtered events route for its newest
     // bounded window. Once seeded, every poll advances forward from the last
@@ -3420,7 +3485,7 @@ function NodeLiveOutput({
         if (!response.ok) throw new Error(`events ${response.status}`);
         const body = (await response.json()) as { data?: unknown[] };
         const rows = Array.isArray(body.data) ? body.data : [];
-        const fresh: Array<{ seq: number; text: string; kind: "cmd" | "text" | "meta" }> = [];
+        const fresh: NodeTranscriptLine[] = [];
         for (const raw of rows) {
           if (!isRecord(raw)) continue;
           const name = String(raw.event ?? "");
@@ -3451,11 +3516,11 @@ function NodeLiveOutput({
           });
         }
         if (!cancelled) {
-          setFailed(false);
+          setFailed(null);
           setLoadedOnce(true);
         }
-      } catch {
-        if (!cancelled) setFailed(true);
+      } catch (cause) {
+        if (!cancelled) setFailed(cause instanceof Error ? cause : new Error(String(cause)));
       } finally {
         inFlight = false;
       }
@@ -3469,34 +3534,24 @@ function NodeLiveOutput({
       cancelled = true;
       if (timer) clearInterval(timer);
     };
-  }, [runId, nodeId, iteration, attempt, live]);
+  }, [runId, nodeId, iteration, attempt, live, retryVersion]);
   useEffect(() => {
     const el = containerRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [lines.length]);
-  if (lines.length === 0) {
-    return (
-      <div className="mon-empty mon-dim">
-        {failed ? (
-          "Could not load this node's events."
-        ) : !loadedOnce ? (
-          <span className="mon-live-pending">
-            <span className="mon-dot mon-dot-pulse" aria-hidden /> loading transcript…
-          </span>
-        ) : (
-          "No output from this node yet — its events land here as they arrive."
-        )}
-      </div>
-    );
-  }
   return (
-    <div className="mon-output mon-live-output" ref={containerRef} data-testid="monitor-live-output">
-      {lines.map((line) => (
-        <div key={line.seq} className={`mon-live-line mon-live-${line.kind}`}>
-          {line.text}
-        </div>
-      ))}
-    </div>
+    <NodeTranscriptState
+      lines={lines}
+      loading={!loadedOnce && !failed}
+      error={failed}
+      live={live}
+      containerRef={containerRef}
+      onRetry={() => {
+        setFailed(null);
+        setLoadedOnce(false);
+        setRetryVersion((version) => version + 1);
+      }}
+    />
   );
 }
 
@@ -3696,6 +3751,74 @@ function OutputFields({ row }: { row: unknown }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** Pure structured-output state surface; NodeInspector supplies the Gateway query state. */
+export function NodeOutputState({
+  row,
+  loading,
+  error,
+  failure,
+  live,
+  onRetry,
+}: {
+  row: Record<string, unknown> | null;
+  loading: boolean;
+  error?: Error;
+  failure: ReturnType<typeof nodeErrorOf>;
+  live: boolean;
+  onRetry: () => void | Promise<void>;
+}) {
+  const errorAlert = error ? (
+    <Alert variant="destructive" data-testid="monitor-output-error">
+      <AlertTitle>Couldn&apos;t load structured output.</AlertTitle>
+      <AlertDescription>{error.message || "The node output request failed."}</AlertDescription>
+      <Button variant="outline" data-testid="monitor-output-retry" onClick={() => void onRetry()}>
+        Retry output
+      </Button>
+    </Alert>
+  ) : null;
+
+  if (row) {
+    return (
+      <>
+        {errorAlert}
+        <OutputFields row={row} />
+      </>
+    );
+  }
+  if (loading) {
+    return (
+      <div className="mon-empty mon-dim" data-testid="monitor-output-loading" role="status">
+        <span className="mon-live-pending">
+          <span className="mon-dot mon-dot-pulse" aria-hidden /> loading output…
+        </span>
+      </div>
+    );
+  }
+  if (errorAlert) return errorAlert;
+  if (failure) {
+    return (
+      <div className="mon-empty mon-dim" data-testid="monitor-output-failed">
+        The node failed before producing structured output. Failure details are shown above.
+      </div>
+    );
+  }
+  if (live) {
+    return (
+      <div className="mon-empty mon-dim" data-testid="monitor-output-live" role="status">
+        <span className="mon-live-pending">
+          <span className="mon-dot mon-dot-pulse" aria-hidden /> running — structured output lands here when the node
+          finishes
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="mon-empty mon-dim" data-testid="monitor-output-empty">
+      This node completed without recording structured output.
     </div>
   );
 }
@@ -4148,32 +4271,14 @@ function NodeInspector({
             />
           </InspectorSection>
           <InspectorSection title="Output" testId="monitor-node-output">
-            {row ? (
-              <OutputFields row={row} />
-            ) : output.loading ? (
-              <div className="mon-empty mon-dim">
-                <span className="mon-live-pending">
-                  <span className="mon-dot mon-dot-pulse" aria-hidden /> loading output…
-                </span>
-              </div>
-            ) : output.error ? (
-              <div className="mon-empty mon-dim" data-testid="monitor-output-error">
-                Couldn't load output: {output.error.message}
-              </div>
-            ) : (
-              <div className="mon-empty mon-dim">
-                {failure ? (
-                  "The node failed before producing output."
-                ) : isLive ? (
-                  <span className="mon-live-pending">
-                    <span className="mon-dot mon-dot-pulse" aria-hidden /> running — structured output lands here when
-                    the node finishes
-                  </span>
-                ) : (
-                  "No output recorded for this node."
-                )}
-              </div>
-            )}
+            <NodeOutputState
+              row={row}
+              loading={output.loading}
+              error={output.error}
+              failure={failure}
+              live={isLive}
+              onRetry={output.refetch}
+            />
           </InspectorSection>
           <NodeDiffSection runId={runId} nodeId={nodeId} iteration={node.iteration ?? 0} enabled={!isLive} />
         </>

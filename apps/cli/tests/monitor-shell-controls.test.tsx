@@ -37,6 +37,8 @@ const {
   EventLog,
   ExecutionTree,
   monitorCss,
+  NodeOutputState,
+  NodeTranscriptState,
   RunProgressCell,
   RunSelectionState,
   RunsRail,
@@ -173,6 +175,91 @@ function buttonNamed(name: string): HTMLButtonElement {
   if (!button) throw new Error(`missing button named ${name}`);
   return button;
 }
+
+function nodeOutputState(overrides: Partial<Parameters<typeof NodeOutputState>[0]> = {}): ReactElement {
+  return <NodeOutputState row={null} loading={false} failure={null} live={false} onRetry={() => {}} {...overrides} />;
+}
+
+function nodeTranscriptState(overrides: Partial<Parameters<typeof NodeTranscriptState>[0]> = {}): ReactElement {
+  return <NodeTranscriptState lines={[]} loading={false} live={false} onRetry={() => {}} {...overrides} />;
+}
+
+describe("node inspector output states", () => {
+  test("renders structured output and keeps it visible when a refresh fails", async () => {
+    await render(nodeOutputState({ row: { summary: "done" } }));
+    expect(byTestId("monitor-output-fields").textContent).toContain("done");
+
+    await rerender(nodeOutputState({ row: { summary: "done" }, error: new Error("gateway timed out") }));
+    expect(byTestId("monitor-output-fields").textContent).toContain("done");
+    expect(byTestId("monitor-output-error").textContent).toContain("gateway timed out");
+  });
+
+  test("distinguishes loading from every missing-output outcome", async () => {
+    await render(nodeOutputState({ loading: true }));
+    expect(byTestId("monitor-output-loading").getAttribute("role")).toBe("status");
+
+    await rerender(nodeOutputState({ failure: { message: "agent failed" } }));
+    expect(byTestId("monitor-output-failed").textContent).toContain("Failure details are shown above");
+
+    await rerender(nodeOutputState({ live: true }));
+    expect(byTestId("monitor-output-live").textContent).toContain("running");
+
+    await rerender(nodeOutputState());
+    expect(byTestId("monitor-output-empty").textContent).toContain("completed without recording structured output");
+  });
+
+  test("makes output query failures actionable", async () => {
+    let retries = 0;
+    await render(
+      nodeOutputState({
+        error: new Error("output unavailable"),
+        onRetry: () => retries++,
+      }),
+    );
+    expect(byTestId("monitor-output-error").getAttribute("role")).toBe("alert");
+    expect(byTestId("monitor-output-error").textContent).toContain("output unavailable");
+    await click(byTestId("monitor-output-retry"));
+    expect(retries).toBe(1);
+  });
+});
+
+describe("node inspector transcript states", () => {
+  test("distinguishes loading and empty live or completed transcripts", async () => {
+    await render(nodeTranscriptState({ loading: true }));
+    expect(byTestId("monitor-transcript-loading").getAttribute("role")).toBe("status");
+
+    await rerender(nodeTranscriptState({ live: true }));
+    expect(byTestId("monitor-transcript-empty").textContent).toContain("No transcript events from this node yet");
+
+    await rerender(nodeTranscriptState());
+    expect(byTestId("monitor-transcript-empty").textContent).toContain("finished without recording transcript events");
+  });
+
+  test("makes transcript fetch failures actionable", async () => {
+    let retries = 0;
+    await render(
+      nodeTranscriptState({
+        error: new Error("events unavailable"),
+        onRetry: () => retries++,
+      }),
+    );
+    expect(byTestId("monitor-transcript-error").getAttribute("role")).toBe("alert");
+    expect(byTestId("monitor-transcript-error").textContent).toContain("events unavailable");
+    await click(byTestId("monitor-transcript-retry"));
+    expect(retries).toBe(1);
+  });
+
+  test("keeps recorded transcript lines visible when a later poll fails", async () => {
+    await render(
+      nodeTranscriptState({
+        lines: [{ seq: 1, text: "agent output", kind: "text" }],
+        error: new Error("poll failed"),
+      }),
+    );
+    expect(byTestId("monitor-live-output").textContent).toContain("agent output");
+    expect(byTestId("monitor-transcript-error").textContent).toContain("poll failed");
+  });
+});
 
 describe("shared control styling contract", () => {
   test("mounting shell controls injects the sui sheet with focus/disabled recipes exactly once", async () => {
