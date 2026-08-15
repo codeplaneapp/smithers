@@ -69,6 +69,7 @@ function reapDetachedProcessesForCwd(cwd) {
 // group, but its JSON receipt gives the harness the new group leader. Keep it
 // alive for the test, then reap it before the fixture workspace disappears.
 function trackDetachedProcess(result, cwd) {
+  if (typeof result?.runId !== "string" || typeof result?.logFile !== "string") return;
   const pid = Number(result?.pid);
   if (!Number.isInteger(pid) || pid <= 0) return;
   const record = { pid, cwd: resolve(cwd) };
