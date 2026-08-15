@@ -181,47 +181,78 @@ describe("CLI observability", () => {
   );
 
   test(
-    "inspect exposes structured cancellation attribution in JSON and human output",
+    "inspect distinguishes every cancellation source in JSON and human output",
     async () => {
       const repo = createTempRepo();
       const { sqlite, adapter } = openRepoDb(repo);
       try {
-        await insertFinishedRun(adapter, "inspect-cancelled-run");
-        await adapter.updateRun("inspect-cancelled-run", {
-          status: "cancelled",
-          cancelRequestSource: "signal",
-          cancelRequestDetail: "worker received SIGTERM",
-          cancelRequestSignal: "SIGTERM",
-          cancelRequestClientPid: 4321,
-          cancelRequestId: "request-inspect",
-          cancelRequestClientIdentity: "operator",
-        });
+        const scenarios = [
+          {
+            runId: "inspect-cancelled-signal",
+            source: {
+              kind: "signal",
+              detail: "worker received SIGTERM",
+              signal: "SIGTERM",
+              clientPid: 4321,
+            },
+          },
+          {
+            runId: "inspect-cancelled-rpc",
+            source: {
+              kind: "rpc",
+              detail: "http cancellation request",
+              clientPid: 5432,
+              requestId: "rpc-request",
+              clientIdentity: "user:operator",
+            },
+          },
+          {
+            runId: "inspect-cancelled-cli",
+            source: {
+              kind: "cli",
+              detail: "smithers cancel inspect-cancelled-cli",
+              clientPid: 6543,
+            },
+          },
+          {
+            runId: "inspect-cancelled-engine",
+            source: {
+              kind: "engine",
+              detail: "task heartbeat timed out",
+            },
+          },
+        ];
 
-        const structured = runSmithers(["inspect", "inspect-cancelled-run"], {
-          cwd: repo.dir,
-          format: "json",
-          timeoutMs: TIMEOUT_MS,
-        });
-        expect(structured.exitCode, `${structured.stdout}\n${structured.stderr}`).toBe(0);
-        expect(structured.json.run.cancellationSource).toEqual({
-          kind: "signal",
-          detail: "worker received SIGTERM",
-          signal: "SIGTERM",
-          clientPid: 4321,
-          requestId: "request-inspect",
-          clientIdentity: "operator",
-        });
+        for (const { runId, source } of scenarios) {
+          await insertFinishedRun(adapter, runId);
+          await adapter.updateRun(runId, {
+            status: "cancelled",
+            cancelRequestSource: source.kind,
+            cancelRequestDetail: source.detail ?? null,
+            cancelRequestSignal: source.signal ?? null,
+            cancelRequestClientPid: source.clientPid ?? null,
+            cancelRequestId: source.requestId ?? null,
+            cancelRequestClientIdentity: source.clientIdentity ?? null,
+          });
 
-        const human = runSmithers(["inspect", "inspect-cancelled-run"], {
-          cwd: repo.dir,
-          format: null,
-          timeoutMs: TIMEOUT_MS,
-        });
-        expect(human.exitCode, `${human.stdout}\n${human.stderr}`).toBe(0);
-        expect(human.stdout).toContain("cancellationSource:");
-        expect(human.stdout).toContain("worker received SIGTERM");
-        expect(human.stdout).toContain("SIGTERM");
-        expect(human.stdout).toContain("request-inspect");
+          const structured = runSmithers(["inspect", runId], {
+            cwd: repo.dir,
+            format: "json",
+            timeoutMs: TIMEOUT_MS,
+          });
+          expect(structured.exitCode, `${structured.stdout}\n${structured.stderr}`).toBe(0);
+          expect(structured.json.run.cancellationSource).toEqual(source);
+
+          const human = runSmithers(["inspect", runId], {
+            cwd: repo.dir,
+            format: null,
+            timeoutMs: TIMEOUT_MS,
+          });
+          expect(human.exitCode, `${human.stdout}\n${human.stderr}`).toBe(0);
+          expect(human.stdout).toContain("cancellationSource:");
+          expect(human.stdout).toContain(`kind: ${source.kind}`);
+          expect(human.stdout).toContain(source.detail);
+        }
       } finally {
         sqlite.close();
       }
