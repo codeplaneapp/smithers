@@ -1178,8 +1178,13 @@ describe("engine internals: durability, options and graph helpers", () => {
     const outer = new AbortController();
     const inner = new AbortController();
     const detach = I.wireAbortSignal(inner, outer.signal);
-    outer.abort();
+    const reason = Object.assign(new Error("process received SIGTERM"), {
+      name: "AbortError",
+      smithersCancellationSource: { kind: "signal", signal: "SIGTERM", clientPid: 4321 },
+    });
+    outer.abort(reason);
     expect(inner.signal.aborted).toBe(true);
+    expect(inner.signal.reason).toBe(reason);
     detach();
   });
 

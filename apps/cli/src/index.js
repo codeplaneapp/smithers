@@ -1052,7 +1052,16 @@ function setupAbortSignal() {
       return;
     }
     process.stderr.write(`[smithers] cancelling run... (signal again to force-exit)\n`);
-    abort.abort();
+    const reason = Object.assign(new Error(`Process received ${signal}`), {
+      name: "AbortError",
+      smithersCancellationSource: {
+        kind: "signal",
+        detail: `process received ${signal}`,
+        signal,
+        clientPid: process.pid,
+      },
+    });
+    abort.abort(reason);
     // Backstop: if graceful cancellation hangs, force-exit after 5s so a hard
     // `kill -9` is never required. unref() so this timer never keeps the loop
     // alive when shutdown completes normally.

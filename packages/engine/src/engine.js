@@ -3124,13 +3124,33 @@ async function markUnattendedResumeFailed(adapter, eventBus, runId, error, onErr
  */
 function wireAbortSignal(controller, signal) {
   if (!signal) return () => {};
+  const forwardAbort = () => controller.abort(signal.reason ?? makeAbortError());
   if (signal.aborted) {
-    controller.abort();
+    forwardAbort();
     return () => {};
   }
-  const onAbort = () => controller.abort();
-  signal.addEventListener("abort", onAbort, { once: true });
-  return () => signal.removeEventListener("abort", onAbort);
+  signal.addEventListener("abort", forwardAbort, { once: true });
+  return () => signal.removeEventListener("abort", forwardAbort);
+}
+/**
+ * POSIX-aware CLI owners attach the durable source to the AbortSignal reason.
+ * Keep ordinary AbortSignals unattributed: only the explicitly branded signal
+ * shape may populate the terminal run row and RunCancelled event.
+ * @param {AbortSignal | undefined} signal
+ */
+function cancellationAttributionFromAbortSignal(signal) {
+  if (!signal?.aborted) return undefined;
+  const reason = signal.reason;
+  if (!reason || typeof reason !== "object") return undefined;
+  const source = reason.smithersCancellationSource;
+  if (!source || typeof source !== "object" || source.kind !== "signal") return undefined;
+  if (typeof source.signal !== "string" || !source.signal.startsWith("SIG")) return undefined;
+  return {
+    kind: "signal",
+    ...(typeof source.detail === "string" ? { detail: source.detail } : {}),
+    signal: source.signal,
+    ...(Number.isSafeInteger(source.clientPid) && source.clientPid > 0 ? { clientPid: source.clientPid } : {}),
+  };
 }
 /**
  * @param {SmithersDb} adapter
@@ -9028,6 +9048,13 @@ async function runWorkflowBodyDriver(workflow, opts) {
   if (opts.onProgress) {
     eventBus.on("event", (e) => opts.onProgress?.(e));
   }
+  /** @param {{ errorJson?: string | null }} [options] */
+  const finalizeCurrentRunCancellation = (options = {}) =>
+    finalizeCancelledRun(adapter, runId, {
+      eventBus,
+      ...options,
+      attribution: cancellationAttributionFromAbortSignal(runAbortController.signal),
+    });
   const wakeLock = acquireCaffeinate();
   let alertRuntime = null;
   let runOwnedByCurrentProcess = false;
@@ -9477,7 +9504,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
         authoritative?.status === "canceled" ||
         authoritative?.cancelRequestedAtMs
       ) {
-        const cancellation = await finalizeCancelledRun(adapter, runId, { eventBus });
+        const cancellation = await finalizeCurrentRunCancellation();
         return { runId, status: cancellation.terminalStatus ?? cancellation.status };
       }
       return { runId, status: authoritative?.status ?? "failed" };
@@ -10286,7 +10313,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
       if (!paused) {
         const authoritative = await Effect.runPromise(adapter.getRun(runId));
         if (authoritative?.status === "cancelled" || authoritative?.status === "canceled") {
-          const cancellation = await finalizeCancelledRun(adapter, runId, { eventBus });
+          const cancellation = await finalizeCurrentRunCancellation();
           await annotateRunSpan({ status: cancellation.terminalStatus ?? authoritative.status });
           return { runId, status: cancellation.terminalStatus ?? authoritative.status };
         }
@@ -10310,8 +10337,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
           }
         : null;
       await waitForAbortedTasksToSettle();
-      const cancellation = await finalizeCancelledRun(adapter, runId, {
-        eventBus,
+      const cancellation = await finalizeCurrentRunCancellation({
         errorJson: hijackError ? JSON.stringify(hijackError) : null,
       });
       await annotateRunSpan({ status: cancellation.terminalStatus ?? cancellation.status });
@@ -10356,7 +10382,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             authoritative?.status === "canceled" ||
             authoritative?.cancelRequestedAtMs
           ) {
-            const cancellation = await finalizeCancelledRun(adapter, runId, { eventBus });
+            const cancellation = await finalizeCurrentRunCancellation();
             return { runId, status: cancellation.terminalStatus ?? cancellation.status };
           }
           return { runId, status: authoritative?.status ?? "failed" };
@@ -11081,8 +11107,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
           }
         : errorToJson(err);
       await waitForAbortedTasksToSettle();
-      const cancellation = await finalizeCancelledRun(adapter, runId, {
-        eventBus,
+      const cancellation = await finalizeCurrentRunCancellation({
         errorJson: JSON.stringify(hijackError),
       });
       await annotateRunSpan({ status: cancellation.terminalStatus ?? cancellation.status });
@@ -11128,7 +11153,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
           authoritative?.status === "canceled" ||
           authoritative?.cancelRequestedAtMs
         ) {
-          const cancellation = await finalizeCancelledRun(adapter, runId, { eventBus });
+          const cancellation = await finalizeCurrentRunCancellation();
           await annotateRunSpan({ status: cancellation.terminalStatus ?? authoritative.status });
           return { runId, status: cancellation.terminalStatus ?? cancellation.status };
         }
