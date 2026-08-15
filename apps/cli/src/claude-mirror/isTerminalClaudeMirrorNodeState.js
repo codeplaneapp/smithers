@@ -1,4 +1,4 @@
-const TERMINAL_NODE_STATES = new Set(["finished", "failed", "skipped", "cancelled"]);
+const TERMINAL_NODE_STATES = new Set(["finished", "failed", "stalled", "skipped", "cancelled"]);
 
 /**
  * @param {string | null | undefined} state

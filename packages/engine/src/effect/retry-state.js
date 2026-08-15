@@ -66,7 +66,7 @@ export function stampDurableRetryState(input) {
       !(kind !== "agent" && code === "INVALID_OUTPUT") &&
       // Terminal failure shapes (#1500: ENOENT preconditions, hard size caps)
       // and the author's retryPolicy.retryable gate must not carry a retry
-      // deadline into a resume — the scheduler will not retry them either.
+      // deadline into a resume. The scheduler will not retry them either.
       isRetryableFailure(
         { agent: kind === "agent" ? true : undefined, retryPolicy: input.descriptor.retryPolicy },
         input.error,

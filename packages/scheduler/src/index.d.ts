@@ -352,8 +352,8 @@ type SmithersWorkflowOptions$1 = {
     cache?: boolean;
     /**
      * Per-workflow opt-out for the default-on post-failure autopsy. When `false`,
-     * a failure of this workflow never auto-launches the `post-failure` autopsy —
-     * use it for workflows that fail deliberately (e.g. fault-injection e2e
+     * a failure of this workflow never auto-launches the `post-failure` autopsy.
+     * Use it for workflows that fail deliberately (e.g. fault-injection e2e
      * suites) so they don't burn agent tokens autopsying an expected failure.
      * Defaults to on. The CLI's `--no-post-failure` flag and `SMITHERS_POST_FAILURE=0`
      * env var remain independent, broader opt-outs.
@@ -511,11 +511,11 @@ declare class WorkflowSession extends Context.ServiceClass.Shape<"WorkflowSessio
 }
 
 /**
- * WARNING — do not consume this layer as-is. `Layer.sync` builds **one** shared
+ * WARNING: Do not consume this layer as-is. `Layer.sync` builds **one** shared
  * `makeWorkflowSession()` instance for the whole layer scope, but a workflow
  * session carries per-run state, so sharing it across runs is a correctness bug.
  * The engine intentionally bypasses this Tag and constructs a fresh session per
- * run via `makeWorkflowSession()` directly — which is why nothing yields
+ * run via `makeWorkflowSession()` directly. This is why nothing yields
  * `WorkflowSession` today. Before any consumer reads the Tag, rework this into a
  * per-run/scoped provider (e.g. `Layer.scoped` or a factory service) so each run
  * gets its own session.
