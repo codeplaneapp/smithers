@@ -85,6 +85,62 @@ describe("makeWorkflowSession retry classification", () => {
     ).toEqual({ _tag: "Wait", reason: { _tag: "RetryBackoff", waitMs: 2_000 } });
   });
 
+  test("reports a hydrated exhausted failure as recorded and actionable", () => {
+    const descriptor = makeAgentDescriptor({ retries: 0 });
+    const recoveryCommand = "smithers retry-task workflow.tsx --run-id resumed-run --node-id agent-task --iteration 0";
+    const session = makeWorkflowSession({
+      runId: "resumed-run",
+      initialRetryCounts: new Map([["agent-task::0", 1]]),
+      initialTaskFailures: new Map([
+        [
+          "agent-task::0",
+          {
+            error: { code: "AGENT_CLI_ERROR", message: "old provider failure" },
+            recoveryCommand,
+          },
+        ],
+      ]),
+    });
+
+    const decision = Effect.runSync(session.submitGraph(makeGraph(descriptor)));
+
+    expect(decision._tag).toBe("Failed");
+    expect(decision.error.message).toContain("exhausted 1 recorded attempt before this resume");
+    expect(decision.error.message).toContain("no new attempt ran");
+    expect(decision.error.message).toContain("Last recorded error: old provider failure");
+    expect(decision.error.message).toContain(recoveryCommand);
+    expect(decision.error.details).toMatchObject({
+      nodeId: "agent-task",
+      iteration: 0,
+      attempts: 1,
+      exhaustedBeforeResume: true,
+      recoveryCommand,
+    });
+  });
+
+  test("drops the recorded marker after a new attempt runs", () => {
+    const descriptor = makeAgentDescriptor({ retries: 1 });
+    const session = makeWorkflowSession({
+      initialRetryCounts: new Map([["agent-task::0", 1]]),
+      initialTaskFailures: new Map([
+        ["agent-task::0", { error: { message: "old failure" }, recoveryCommand: "smithers retry-task old" }],
+      ]),
+    });
+    expect(Effect.runSync(session.submitGraph(makeGraph(descriptor)))._tag).toBe("Execute");
+
+    const decision = Effect.runSync(
+      session.taskFailed({
+        nodeId: descriptor.nodeId,
+        iteration: descriptor.iteration,
+        error: { message: "fresh failure" },
+      }),
+    );
+
+    expect(decision._tag).toBe("Failed");
+    expect(decision.error.message).toContain("Task failed: agent-task");
+    expect(decision.error.message).not.toContain("before this resume");
+  });
+
   test("cancellation interrupts a hydrated retry wait", () => {
     const descriptor = makeAgentDescriptor();
     const session = makeWorkflowSession({

@@ -277,6 +277,11 @@ type WorkflowSessionOptions$2 = {
         readonly done: boolean;
     }>;
     readonly initialTimerStarts?: ReadonlyMap<string, number>;
+    /** Last durable failures restored for tasks that may already be exhausted. */
+    readonly initialTaskFailures?: ReadonlyMap<string, {
+        readonly error: unknown;
+        readonly recoveryCommand?: string;
+    }>;
     /**
      * Evaluate a runnable task's Aspects budgets against the run's accumulated
      * usage. Return the first breach, or `null`/`undefined` when within budget.

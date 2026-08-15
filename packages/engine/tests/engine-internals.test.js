@@ -817,6 +817,9 @@ describe("engine internals: durability, options and graph helpers", () => {
     ]);
     expect(current.retryCounts).toEqual(new Map([["task::0", 1]]));
     expect(current.retryWait).toEqual(new Map([["task::0", 5_000]]));
+    expect(current.taskFailures).toEqual(
+      new Map([["task::0", { nodeId: "task", iteration: 0, error: { message: "failed" } }]]),
+    );
 
     const terminalLater = I.retrySessionStateFromAttempts([
       attempt(1, "failed", { retryState: { version: 1, failureCount: 1, retryAtMs: 5_000 } }),
@@ -841,6 +844,15 @@ describe("engine internals: durability, options and graph helpers", () => {
         attempt(2, "cancelled"),
       ]),
     ).not.toThrow();
+  });
+
+  test("retry-task recovery commands shell-escape durable identifiers", () => {
+    expect(I.buildRetryTaskRecoveryCommand("/tmp/work flow.tsx", "run id", "task'id", 2)).toBe(
+      `smithers retry-task '/tmp/work flow.tsx' --run-id 'run id' --node-id 'task'"'"'id' --iteration 2`,
+    );
+    expect(I.buildRetryTaskRecoveryCommand(null, "run-1", "task", 0)).toBe(
+      "smithers retry-task <workflow> --run-id run-1 --node-id task --iteration 0",
+    );
   });
 
   test("handles carried input rows and durability metadata comparisons", () => {
