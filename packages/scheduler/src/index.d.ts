@@ -1,10 +1,10 @@
 import * as effect from 'effect';
 import { Context, Layer, Effect, Schedule } from 'effect';
 import * as _smthrs_graph from '@smthrs/graph';
-import { TaskDescriptor as TaskDescriptor$3, WorkflowGraph } from '@smthrs/graph';
-import { TaskDescriptor as TaskDescriptor$4 } from '@smthrs/graph/TaskDescriptor';
+import { TaskDescriptor as TaskDescriptor$4, WorkflowGraph } from '@smthrs/graph';
+import { TaskDescriptor as TaskDescriptor$5 } from '@smthrs/graph/TaskDescriptor';
 
-type TaskState$2 = "pending" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "waiting-bound" | "bound-stale" | "in-progress" | "finished" | "failed" | "cancelled" | "skipped";
+type TaskState$2 = "pending" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "waiting-bound" | "bound-stale" | "in-progress" | "finished" | "failed" | "stalled" | "cancelled" | "skipped";
 
 type TaskStateMap$4 = Map<string, TaskState$2>;
 
@@ -68,7 +68,7 @@ type RalphMeta$2 = {
 };
 
 type ScheduleResult$3 = {
-    readonly runnable: readonly TaskDescriptor$3[];
+    readonly runnable: readonly TaskDescriptor$4[];
     readonly pendingExists: boolean;
     readonly waitingApprovalExists: boolean;
     readonly waitingEventExists: boolean;
@@ -216,7 +216,7 @@ type WaitReason$1 = {
 
 type EngineDecision$1 = {
     readonly _tag: "Execute";
-    readonly tasks: readonly TaskDescriptor$3[];
+    readonly tasks: readonly TaskDescriptor$4[];
 } | {
     readonly _tag: "ReRender";
     readonly context: RenderContext$1;
@@ -277,20 +277,24 @@ type WorkflowSessionOptions$2 = {
         readonly done: boolean;
     }>;
     readonly initialTimerStarts?: ReadonlyMap<string, number>;
+    /** Retry-policy failure rungs restored from durable attempts. */
+    readonly initialRetryCounts?: ReadonlyMap<string, number>;
+    /** Absolute retry deadlines restored from durable attempts. */
+    readonly initialRetryWait?: ReadonlyMap<string, number>;
     /**
      * Evaluate a runnable task's Aspects budgets against the run's accumulated
      * usage. Return the first breach, or `null`/`undefined` when within budget.
      * Only invoked for tasks that would otherwise execute.
      */
-    readonly evaluateAspectBudget?: (descriptor: TaskDescriptor$4) => AspectBudgetBreach | null | undefined;
+    readonly evaluateAspectBudget?: (descriptor: TaskDescriptor$5) => AspectBudgetBreach | null | undefined;
     /** Called when a task is skipped because its budget was exceeded (`skip-remaining`). */
-    readonly onAspectBudgetSkip?: (descriptor: TaskDescriptor$4, breach: AspectBudgetBreach) => void;
+    readonly onAspectBudgetSkip?: (descriptor: TaskDescriptor$5, breach: AspectBudgetBreach) => void;
     /** Called when a task continues despite an exceeded budget (`warn`). */
-    readonly onAspectBudgetWarn?: (descriptor: TaskDescriptor$4, breach: AspectBudgetBreach) => void;
+    readonly onAspectBudgetWarn?: (descriptor: TaskDescriptor$5, breach: AspectBudgetBreach) => void;
 };
 
 type TaskRecord$1 = {
-    readonly descriptor: TaskDescriptor$3;
+    readonly descriptor: TaskDescriptor$4;
     readonly state: TaskState$2;
     readonly output?: unknown;
     readonly error?: unknown;
@@ -347,6 +351,15 @@ type SmithersWorkflowOptions$1 = {
     alertPolicy?: SmithersAlertPolicy$1;
     cache?: boolean;
     /**
+     * Per-workflow opt-out for the default-on post-failure autopsy. When `false`,
+     * a failure of this workflow never auto-launches the `post-failure` autopsy —
+     * use it for workflows that fail deliberately (e.g. fault-injection e2e
+     * suites) so they don't burn agent tokens autopsying an expected failure.
+     * Defaults to on. The CLI's `--no-post-failure` flag and `SMITHERS_POST_FAILURE=0`
+     * env var remain independent, broader opt-outs.
+     */
+    postFailureAutopsy?: boolean;
+    /**
      * Explicit workflow-level output schema/table used to populate
      * `RunResult.output` (and therefore a parent `Subflow`'s child result). Pass
      * a `createSmithers(...).outputs.<key>` schema, a Drizzle table, or a string
@@ -359,9 +372,29 @@ type SmithersWorkflowOptions$1 = {
 type RetryWaitMap$3 = Map<string, number>;
 
 type RetryBackoff$1 = "fixed" | "linear" | "exponential";
-type RetryPolicy$3 = {
+/**
+ * Author-facing retry gate (#1500). Return `false` (or set the flag itself to
+ * `false`) to make a failure terminal immediately: no retry is scheduled and
+ * the task goes to its terminal state with the full error payload.
+ */
+type RetryPredicate = (error: unknown) => boolean;
+type RetryPolicy$4 = {
     backoff?: RetryBackoff$1;
     initialDelayMs?: number;
+    /**
+     * Non-progress detection: after this many consecutive attempts fail with an
+     * identical error signature, the task is marked `stalled` (a distinct
+     * terminal state) instead of being retried again. Defaults to 3; set to 0
+     * to disable stall detection for the task.
+     */
+    maxIdenticalFailures?: number;
+    /**
+     * Classify a failure before any retry is scheduled. `false` marks every
+     * failure of the task terminal (equivalent to `retries={0}` but expressed
+     * on the policy); a function is consulted per failure and a `false` return
+     * makes that failure terminal.
+     */
+    retryable?: boolean | RetryPredicate;
 };
 
 type ReadonlyTaskStateMap$2 = ReadonlyMap<string, TaskState$2>;
@@ -421,20 +454,20 @@ type TaskStateMap$3 = TaskStateMap$4;
  * @param {Pick<TaskDescriptor, "continueOnFail">} [descriptor]
  * @returns {boolean}
  */
-declare function isTerminalState(state: TaskState$1, descriptor?: Pick<TaskDescriptor$2, "continueOnFail">): boolean;
-type TaskDescriptor$2 = _smthrs_graph.TaskDescriptor;
+declare function isTerminalState(state: TaskState$1, descriptor?: Pick<TaskDescriptor$3, "continueOnFail">): boolean;
+type TaskDescriptor$3 = _smthrs_graph.TaskDescriptor;
 type TaskState$1 = TaskState$2;
 
 declare class Scheduler extends Context.ServiceClass.Shape<"Scheduler", SchedulerService> {
 }
-type TaskDescriptor$1 = _smthrs_graph.TaskDescriptor;
+type TaskDescriptor$2 = _smthrs_graph.TaskDescriptor;
 type TaskStateMap$2 = TaskStateMap$4;
 type PlanNode$3 = PlanNode$4;
 type RalphStateMap$3 = RalphStateMap$4;
 type RetryWaitMap$2 = RetryWaitMap$3;
 type ScheduleResult$2 = ScheduleResult$3;
 type SchedulerService = {
-    readonly schedule: (plan: PlanNode$3 | null, states: TaskStateMap$2, descriptors: Map<string, TaskDescriptor$1>, ralphState: RalphStateMap$3, retryWait: RetryWaitMap$2, nowMs: number, taskFailures?: ReadonlyMap<string, unknown>) => effect.Effect.Effect<ScheduleResult$2>;
+    readonly schedule: (plan: PlanNode$3 | null, states: TaskStateMap$2, descriptors: Map<string, TaskDescriptor$2>, ralphState: RalphStateMap$3, retryWait: RetryWaitMap$2, nowMs: number, taskFailures?: ReadonlyMap<string, unknown>) => effect.Effect.Effect<ScheduleResult$2>;
 };
 
 /** @type {Layer.Layer<Scheduler, never, never>} */
@@ -466,48 +499,16 @@ type XmlNode = _smthrs_graph.XmlNode;
  *   gate to match failed try tasks against the filtered error codes
  * @returns {ScheduleResult}
  */
-declare function scheduleTasks(plan: PlanNode$1 | null, states: TaskStateMap$1, descriptors: Map<string, TaskDescriptor>, ralphState: RalphStateMap$1, retryWait: RetryWaitMap$1, nowMs: number, taskFailures?: ReadonlyMap<string, unknown>): ScheduleResult$1;
+declare function scheduleTasks(plan: PlanNode$1 | null, states: TaskStateMap$1, descriptors: Map<string, TaskDescriptor$1>, ralphState: RalphStateMap$1, retryWait: RetryWaitMap$1, nowMs: number, taskFailures?: ReadonlyMap<string, unknown>): ScheduleResult$1;
 type PlanNode$1 = PlanNode$4;
 type RalphStateMap$1 = RalphStateMap$4;
 type RetryWaitMap$1 = RetryWaitMap$3;
 type ScheduleResult$1 = ScheduleResult$3;
-type TaskDescriptor = _smthrs_graph.TaskDescriptor;
+type TaskDescriptor$1 = _smthrs_graph.TaskDescriptor;
 type TaskStateMap$1 = TaskStateMap$4;
 
 declare class WorkflowSession extends Context.ServiceClass.Shape<"WorkflowSession", WorkflowSessionService$2> {
 }
-
-/**
- * Mutable per-run session state, owned exclusively by makeWorkflowSession.
- * All maps/sets are keyed by the canonical task state key (`nodeId::iteration`)
- * unless noted otherwise.
- * @typedef {object} SessionState
- * @property {string} runId
- * @property {WorkflowGraph | null} graph
- * @property {PlanNode | null} plan
- * @property {Map<string, TaskDescriptor>} descriptors keyed by nodeId
- * @property {TaskStateMap} states
- * @property {Map<string, TaskOutput>} outputs
- * @property {Map<string, unknown>} failures
- * @property {Map<string, TaskDescriptor>} failureDescriptors
- * @property {Map<string, number>} retryCounts
- * @property {RetryWaitMap} retryWait state key → earliest retry time (ms)
- * @property {Set<string>} approvals
- * @property {RalphStateMap} ralphState keyed by ralph loop id
- * @property {Map<string, number>} quotaResetTimes state key → quota reset timestamp (ms)
- * @property {Map<string, number>} timerStarts state key → duration-timer start (ms), the anchor its deadline is computed from
- * @property {ScheduleSnapshot | null} schedule
- * @property {boolean} cancelled
- * @property {string | null} lastMountedSignature
- * @property {string | null} lastDeadlockSignature
- */
-/**
- * @param {WorkflowSessionOptions} [options]
- * @returns {WorkflowSessionService}
- */
-declare function makeWorkflowSession(options?: WorkflowSessionOptions$1): WorkflowSessionService$1;
-type WorkflowSessionOptions$1 = WorkflowSessionOptions$2;
-type WorkflowSessionService$1 = WorkflowSessionService$2;
 
 /**
  * WARNING — do not consume this layer as-is. `Layer.sync` builds **one** shared
@@ -534,8 +535,8 @@ declare function nowMs(): number;
  * @param {RetryPolicy} policy
  * @returns {Schedule.Schedule<unknown, unknown>}
  */
-declare function retryPolicyToSchedule(policy: RetryPolicy$2): Schedule.Schedule<unknown, unknown>;
-type RetryPolicy$2 = RetryPolicy$3;
+declare function retryPolicyToSchedule(policy: RetryPolicy$3): Schedule.Schedule<unknown, unknown>;
+type RetryPolicy$3 = RetryPolicy$4;
 
 /**
  * @param {import("effect").Schedule.Schedule<unknown, unknown>} schedule
@@ -550,8 +551,194 @@ declare function retryScheduleDelayMs(schedule: effect.Schedule.Schedule<unknown
  * @param {number} attempt
  * @returns {number}
  */
-declare function computeRetryDelayMs(policy: RetryPolicy$1 | undefined, attempt: number): number;
-type RetryPolicy$1 = RetryPolicy$3;
+declare function computeRetryDelayMs(policy: RetryPolicy$2 | undefined, attempt: number): number;
+type RetryPolicy$2 = RetryPolicy$4;
+
+/**
+ * Failure shapes that retrying can never fix, independent of the task kind
+ * (#1500). Classified BEFORE a retry is scheduled so a deterministic failure
+ * goes straight to the terminal state with its full payload instead of
+ * burning the retry budget.
+ *
+ * - `ENOENT` messages: a missing filesystem precondition. Re-running `statx`
+ *   on a path that does not exist cannot succeed on a later attempt.
+ * - `*_TOO_LARGE` codes: hard size-cap breaches (heartbeat payloads, tool
+ *   files/contents/patches, sandbox bundles, continuation state). Regenerating
+ *   the same artifact reproduces the same breach.
+ *
+ * Schema-validation failures (`INVALID_OUTPUT`) are deliberately NOT here:
+ * agent tasks get a fresh generation on each attempt, so only compute tasks
+ * treat them as terminal (see NON_RETRYABLE_COMPUTE_CODES in
+ * makeWorkflowSession). An agent task that cannot satisfy its validator is
+ * caught by stall detection once the failures repeat byte-identically.
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+declare function isTerminalFailureShape(error: unknown): boolean;
+
+/**
+ * Whether a failure may consume retry budget. Exported so the engine can
+ * mirror the scheduler's retry/terminal verdict when it persists attempt
+ * rows and node states (#1500): both sides must agree or a resumed run
+ * would re-classify the same failure differently.
+ * @param {TaskDescriptor} descriptor
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+declare function isRetryableFailure(descriptor: TaskDescriptor, error: unknown): boolean;
+/**
+ * Whether a failure may consume the non-progress budget (#1500). Stall
+ * detection only applies to failures the task could plausibly keep retrying:
+ * a failure the scheduler will not retry at all is already terminal, and a
+ * transient agent-session failure is explicitly exempted from failing the run
+ * (see unhandledFailureDecision), so stalling on one would park the node in a
+ * terminal state the run never acts on.
+ *
+ * Exported so the engine reaches the same verdict when it persists the node
+ * row: both sides must agree or a resumed run would re-classify the same
+ * failure differently.
+ * @param {TaskDescriptor} descriptor
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+declare function isStallableFailure(descriptor: TaskDescriptor, error: unknown): boolean;
+/**
+ * Mutable per-run session state, owned exclusively by makeWorkflowSession.
+ * All maps/sets are keyed by the canonical task state key (`nodeId::iteration`)
+ * unless noted otherwise.
+ * @typedef {object} SessionState
+ * @property {string} runId
+ * @property {WorkflowGraph | null} graph
+ * @property {PlanNode | null} plan
+ * @property {Map<string, TaskDescriptor>} descriptors keyed by nodeId
+ * @property {TaskStateMap} states
+ * @property {Map<string, TaskOutput>} outputs
+ * @property {Map<string, unknown>} failures
+ * @property {Map<string, TaskDescriptor>} failureDescriptors
+ * @property {Map<string, number>} retryCounts
+ * @property {Map<string, { signature: string, streak: number }>} errorStreaks state key → latest error signature and its consecutive-failure count (#1500)
+ * @property {RetryWaitMap} retryWait state key → earliest retry time (ms)
+ * @property {Set<string>} approvals
+ * @property {RalphStateMap} ralphState keyed by ralph loop id
+ * @property {Map<string, number>} quotaResetTimes state key → quota reset timestamp (ms)
+ * @property {Map<string, number>} timerStarts state key → duration-timer start (ms), the anchor its deadline is computed from
+ * @property {ScheduleSnapshot | null} schedule
+ * @property {boolean} cancelled
+ * @property {string | null} lastMountedSignature
+ * @property {string | null} lastDeadlockSignature
+ */
+/**
+ * @param {WorkflowSessionOptions} [options]
+ * @returns {WorkflowSessionService}
+ */
+declare function makeWorkflowSession(options?: WorkflowSessionOptions$1): WorkflowSessionService$1;
+type TaskDescriptor = _smthrs_graph.TaskDescriptor;
+type WorkflowSessionOptions$1 = WorkflowSessionOptions$2;
+type WorkflowSessionService$1 = WorkflowSessionService$2;
+
+/**
+ * Add a validated relative delay without rounding the resulting deadline
+ * below the declared minimum. Very large safe-integer delays can produce an
+ * unsafe-integer absolute timestamp; advance by one representable step when
+ * floating-point addition rounded down.
+ *
+ * @param {number} startedAtMs
+ * @param {number} delayMs
+ */
+declare function retryDeadlineMs(startedAtMs: number, delayMs: number): number;
+/**
+ * @param {{ failureCount: number; failedAtMs: number; retryAfterMs: number; retryPolicy?: RetryPolicy }} input
+ */
+declare function createDurableRetryState(input: {
+    failureCount: number;
+    failedAtMs: number;
+    retryAfterMs: number;
+    retryPolicy?: RetryPolicy$1;
+}): {
+    version: number;
+    failureCount: number;
+    retryAtMs: number;
+};
+/**
+ * Validate the deliberately small attempt-meta wire value. Returning null is
+ * useful both for old rows (which have no value) and for callers that need to
+ * distinguish malformed new rows with an own-property check.
+ *
+ * @param {unknown} value
+ * @returns {{ version: 1; failureCount: number; retryAtMs: number } | null}
+ */
+declare function parseDurableRetryState(value: unknown): {
+    version: 1;
+    failureCount: number;
+    retryAtMs: number;
+} | null;
+/**
+ * Carry the already-persisted retry decision from the engine's failed attempt
+ * row to the in-memory scheduler without putting an internal field on the
+ * public/provider error payload.
+ *
+ * @param {unknown} error
+ * @param {unknown} state
+ * @returns {unknown}
+ */
+declare function attachDurableRetryState(error: unknown, state: unknown): unknown;
+/**
+ * @param {unknown} error
+ * @returns {{ version: 1; failureCount: number; retryAtMs: number } | null}
+ */
+declare function durableRetryStateFromError(error: unknown): {
+    version: 1;
+    failureCount: number;
+    retryAtMs: number;
+} | null;
+type RetryPolicy$1 = RetryPolicy$4;
+
+/**
+ * Normalize the volatile parts of an error message so two failures that are
+ * "the same failure" produce the same signature: absolute paths (run/tmp
+ * dirs), UUIDs and long hex ids, and bare numbers (byte counts, ports,
+ * sizes) are each replaced with a fixed placeholder. The transform is
+ * deliberately simple and deterministic: it never looks at the environment,
+ * only at the string.
+ * @param {string} message
+ * @returns {string}
+ */
+declare function normalizeErrorMessage(message: string): string;
+/**
+ * Compute a stable signature for a failure payload. Two attempts of the same
+ * node that fail for the same reason produce the same signature even when
+ * run ids, temp paths, or byte counts differ.
+ * @param {unknown} error
+ * @returns {string}
+ */
+declare function computeErrorSignature(error: unknown): string;
+/**
+ * Resolve the stall threshold for a retry policy: how many consecutive
+ * identical failures mark the task `stalled`. Defaults to
+ * DEFAULT_MAX_IDENTICAL_FAILURES; a value <= 0 (or Infinity) disables stall
+ * detection for the task.
+ * @param {{ maxIdenticalFailures?: number } | undefined} retryPolicy
+ * @returns {number}
+ */
+declare function resolveMaxIdenticalFailures(retryPolicy: {
+    maxIdenticalFailures?: number;
+} | undefined): number;
+/**
+ * Read the identical-failure streak the engine stamped onto a failure
+ * payload's details before persisting the attempt. The stamp lets stall
+ * detection survive a run resume: the streak is recomputed from durable
+ * attempt rows on every failure, so the in-memory session does not need its
+ * own history.
+ * @param {unknown} error
+ * @returns {number | undefined}
+ */
+declare function readIdenticalFailureStreak(error: unknown): number | undefined;
+/**
+ * Default number of consecutive failures with an identical error signature
+ * after which a task is marked `stalled` instead of being retried again
+ * (#1500). Override per task with `retryPolicy.maxIdenticalFailures`.
+ */
+declare const DEFAULT_MAX_IDENTICAL_FAILURES: 3;
 
 type ApprovalResolution = ApprovalResolution$1;
 type CachePolicy = CachePolicy$1;
@@ -565,7 +752,7 @@ type RalphStateMap = RalphStateMap$4;
 type ReadonlyTaskStateMap = ReadonlyTaskStateMap$2;
 type RenderContext = RenderContext$1;
 type RetryBackoff = RetryBackoff$1;
-type RetryPolicy = RetryPolicy$3;
+type RetryPolicy = RetryPolicy$4;
 type RetryWaitMap = RetryWaitMap$3;
 type RunResult = RunResult$1;
 type ScheduleResult = ScheduleResult$3;
@@ -589,4 +776,4 @@ type WaitReason = WaitReason$1;
 type WorkflowSessionOptions = WorkflowSessionOptions$2;
 type WorkflowSessionService = WorkflowSessionService$2;
 
-export { type ApprovalResolution, type CachePolicy, type ContinuationRequest, type ContinueAsNewTransition, type EngineDecision, type PlanNode, type RalphMeta, type RalphState, type RalphStateMap, type ReadonlyTaskStateMap, type RenderContext, type RetryBackoff, type RetryPolicy, type RetryWaitMap, type RunResult, type ScheduleResult, type ScheduleSnapshot, Scheduler, SchedulerLive, type SmithersAlertLabels, type SmithersAlertPolicy, type SmithersAlertPolicyDefaults, type SmithersAlertPolicyRule, type SmithersAlertReaction, type SmithersAlertReactionKind, type SmithersAlertReactionRef, type SmithersAlertSeverity, type SmithersWorkflowOptions, type TaskFailure, type TaskOutput, type TaskRecord, type TaskState, type TaskStateMap, type TokenUsage, type WaitReason, WorkflowSession, WorkflowSessionLive, type WorkflowSessionOptions, type WorkflowSessionService, buildPlanTree, buildStateKey, cloneTaskStateMap, computeRetryDelayMs, isTerminalState, makeWorkflowSession, nowMs, parseStateKey, retryPolicyToSchedule, retryScheduleDelayMs, scheduleTasks };
+export { type ApprovalResolution, type CachePolicy, type ContinuationRequest, type ContinueAsNewTransition, DEFAULT_MAX_IDENTICAL_FAILURES, type EngineDecision, type PlanNode, type RalphMeta, type RalphState, type RalphStateMap, type ReadonlyTaskStateMap, type RenderContext, type RetryBackoff, type RetryPolicy, type RetryWaitMap, type RunResult, type ScheduleResult, type ScheduleSnapshot, Scheduler, SchedulerLive, type SmithersAlertLabels, type SmithersAlertPolicy, type SmithersAlertPolicyDefaults, type SmithersAlertPolicyRule, type SmithersAlertReaction, type SmithersAlertReactionKind, type SmithersAlertReactionRef, type SmithersAlertSeverity, type SmithersWorkflowOptions, type TaskFailure, type TaskOutput, type TaskRecord, type TaskState, type TaskStateMap, type TokenUsage, type WaitReason, WorkflowSession, WorkflowSessionLive, type WorkflowSessionOptions, type WorkflowSessionService, attachDurableRetryState, buildPlanTree, buildStateKey, cloneTaskStateMap, computeErrorSignature, computeRetryDelayMs, createDurableRetryState, durableRetryStateFromError, isRetryableFailure, isStallableFailure, isTerminalFailureShape, isTerminalState, makeWorkflowSession, normalizeErrorMessage, nowMs, parseDurableRetryState, parseStateKey, readIdenticalFailureStreak, resolveMaxIdenticalFailures, retryDeadlineMs, retryPolicyToSchedule, retryScheduleDelayMs, scheduleTasks };
