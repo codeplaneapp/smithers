@@ -6,6 +6,8 @@ Derives the user-facing `RunStateView` (running / waiting-* / stale / orphaned
 - `deriveRunState` is the pure classifier; `computeRunStateFromRow` loads the
   pending approval/timer/event context from a `SmithersDb` adapter and calls it;
   `computeRunState` resolves the run first (throws `RUN_NOT_FOUND`).
+- `RunConcurrencySaturated` events become durable `warnings` on the view with
+  requested demand, the effective automatic cap, and the remediation command.
 - `parseEventMeta` / `parseTimerMeta` leniently parse attempt `meta_json`
   written by the engine's durable-deferred bridge; malformed JSON degrades to
   `null`, never throws. `parseEventMeta` delegates to the package-level
