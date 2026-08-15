@@ -4147,7 +4147,12 @@ type TaskProps = {
   timeoutMs?: number;
   retries?: number; // default Infinity with exponential backoff
   noRetry?: boolean;
-  retryPolicy?: { backoff?: "fixed" | "linear" | "exponential"; initialDelayMs?: number };
+  retryPolicy?: {
+    backoff?: "fixed" | "linear" | "exponential";
+    initialDelayMs?: number;
+    maxIdenticalFailures?: number; // consecutive identical failures before the task stalls; default 3
+    retryable?: boolean | ((error: unknown) => boolean); // false makes a failure terminal
+  };
   continueOnFail?: boolean;
   cache?: { by?: (ctx) => unknown; version?: string; key?: string; ttlMs?: number; scope?: "run" | "workflow" | "global" };
   label?: string;
@@ -8929,6 +8934,8 @@ type TaskDescriptor = {
 type RetryPolicy = {
   backoff?: "fixed" | "linear" | "exponential";   // default "fixed"
   initialDelayMs?: number;                         // default 0
+  maxIdenticalFailures?: number;                   // default 3; 0 disables stall detection
+  retryable?: boolean | ((error: unknown) => boolean); // author-facing retry gate
 };
 
 type CachePolicy<Ctx = unknown> = {
@@ -10244,7 +10251,7 @@ type KnownSmithersErrorCode =
   | "HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE" | "TASK_ABORTED" | "RUN_CANCELLED" | "RUN_NOT_RESUMABLE"
   | "RUN_OWNER_ALIVE" | "RUN_STILL_RUNNING" | "RUN_RESUME_CLAIM_LOST" | "RUN_RESUME_CLAIM_FAILED"
   | "RUN_RESUME_ACTIVATION_FAILED" | "AUTO_RESUME_GAVE_UP" | "RUN_HIJACKED" | "CONTINUATION_STATE_TOO_LARGE"
-  | "INVALID_CONTINUATION_STATE" | "RALPH_MAX_REACHED" | "SCHEDULER_ERROR" | "SESSION_ERROR"
+  | "INVALID_CONTINUATION_STATE" | "RALPH_MAX_REACHED" | "SCHEDULER_ERROR" | "SESSION_ERROR" | "TASK_STALLED"
   | "TASK_ID_REQUIRED" | "TASK_MISSING_OUTPUT" | "TASK_EMPTY_PROMPT" | "WORKFLOW_RENDER_FAILED" | "DUPLICATE_ID" | "NESTED_LOOP"
   | "WORKTREE_EMPTY_PATH" | "MDX_PRELOAD_INACTIVE" | "CONTEXT_OUTSIDE_WORKFLOW"
   | "MISSING_OUTPUT" | "DEP_NOT_SATISFIED" | "BOUND_STALE" | "ASPECT_BUDGET_EXCEEDED" | "APPROVAL_OUTSIDE_TASK"
@@ -10977,6 +10984,7 @@ try {
 | `RALPH_MAX_REACHED` | A Ralph loop reaches maxIterations with fail-on-max behavior. | `{ ralphId, maxIterations }` |
 | `SCHEDULER_ERROR` | The scheduler cannot produce a valid execution decision. | -- |
 | `SESSION_ERROR` | The workflow session state machine reaches an invalid or failed state. | -- |
+| `TASK_STALLED` | A task stopped retrying after consecutive attempts failed with an identical error signature (non-progress detection) and the run failed. | `{ key, nodeId, attempts, identicalFailures, signature }` |
 
 ## Components
 

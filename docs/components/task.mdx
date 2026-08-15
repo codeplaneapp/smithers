@@ -27,7 +27,12 @@ type TaskProps = {
   timeoutMs?: number;
   retries?: number; // default Infinity with exponential backoff
   noRetry?: boolean;
-  retryPolicy?: { backoff?: "fixed" | "linear" | "exponential"; initialDelayMs?: number };
+  retryPolicy?: {
+    backoff?: "fixed" | "linear" | "exponential";
+    initialDelayMs?: number;
+    maxIdenticalFailures?: number; // consecutive identical failures before the task stalls; default 3
+    retryable?: boolean | ((error: unknown) => boolean); // false makes a failure terminal
+  };
   continueOnFail?: boolean;
   cache?: { by?: (ctx) => unknown; version?: string; key?: string; ttlMs?: number; scope?: "run" | "workflow" | "global" };
   label?: string;
