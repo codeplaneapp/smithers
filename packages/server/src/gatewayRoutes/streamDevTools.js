@@ -19,10 +19,22 @@ export const DEVTOOLS_POLL_INTERVAL_MS = 25;
 
 /**
  * @param {number} timeMs
+ * @param {AbortSignal} [signal]
  * @returns {Promise<void>}
  */
-function delay(timeMs) {
-  return new Promise((resolve) => setTimeout(resolve, timeMs));
+function delay(timeMs, signal) {
+  if (signal?.aborted) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, timeMs);
+    signal?.addEventListener("abort", finish, { once: true });
+  });
 }
 
 /**
@@ -224,6 +236,13 @@ export async function* streamDevToolsRoute(input) {
   let producerErrorCode = undefined;
   const queue = new AsyncEventQueue(maxBufferedEvents);
   let cancelled = false;
+  const pollAbort = new AbortController();
+  const abortPolling = () => pollAbort.abort();
+  if (input.signal?.aborted) {
+    pollAbort.abort();
+  } else {
+    input.signal?.addEventListener("abort", abortPolling, { once: true });
+  }
   input.onLog?.("info", "devtools stream subscribed", {
     runId,
     fromSeq: input.fromSeq ?? null,
@@ -462,7 +481,7 @@ export async function* streamDevToolsRoute(input) {
           if (shouldStop()) {
             break;
           }
-          await delay(pollIntervalMs);
+          await delay(pollIntervalMs, pollAbort.signal);
         }
       } catch (error) {
         producerErrorCode = error?.code ?? undefined;
@@ -487,10 +506,11 @@ export async function* streamDevToolsRoute(input) {
     }
   } finally {
     cancelled = true;
+    pollAbort.abort();
+    input.signal?.removeEventListener("abort", abortPolling);
     queue.close();
-    const closeWaitMs = Math.max(25, pollIntervalMs * 4);
     try {
-      await Promise.race([producer, delay(closeWaitMs)]);
+      await producer;
     } catch {}
     if (!producerErrorCode && queue.error?.code) {
       producerErrorCode = queue.error.code;

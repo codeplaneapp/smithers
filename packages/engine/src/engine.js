@@ -3138,6 +3138,26 @@ function wireAbortSignal(controller, signal) {
   return () => signal.removeEventListener("abort", forwardAbort);
 }
 /**
+ * POSIX-aware CLI owners attach the durable source to the AbortSignal reason.
+ * Keep ordinary AbortSignals unattributed: only the explicitly branded signal
+ * shape may populate the terminal run row and RunCancelled event.
+ * @param {AbortSignal | undefined} signal
+ */
+function cancellationAttributionFromAbortSignal(signal) {
+  if (!signal?.aborted) return undefined;
+  const reason = signal.reason;
+  if (!reason || typeof reason !== "object") return undefined;
+  const source = reason.smithersCancellationSource;
+  if (!source || typeof source !== "object" || source.kind !== "signal") return undefined;
+  if (typeof source.signal !== "string" || !source.signal.startsWith("SIG")) return undefined;
+  return {
+    kind: "signal",
+    ...(typeof source.detail === "string" ? { detail: source.detail } : {}),
+    signal: source.signal,
+    ...(Number.isSafeInteger(source.clientPid) && source.clientPid > 0 ? { clientPid: source.clientPid } : {}),
+  };
+}
+/**
  * @param {SmithersDb} adapter
  * @param {string} runId
  * @param {string} runtimeOwnerId
@@ -9143,6 +9163,18 @@ async function runWorkflowBodyDriver(workflow, opts) {
     const decision = slotGovernor.onSlotWait(activeTaskCount, taskWaiters.length + 1);
     if (decision.warn) {
       logWarning(decision.warn, { runId, maxConcurrency, waiting: taskWaiters.length + 1 }, "engine:concurrency");
+    }
+    if (decision.saturation) {
+      await Effect.runPromise(
+        eventBus.emitEventWithPersist({
+          type: "RunConcurrencySaturated",
+          runId,
+          requestedDemand: decision.saturation.requestedDemand,
+          effectiveCap: decision.saturation.effectiveCap,
+          remediationCommand: decision.saturation.remediationCommand,
+          timestampMs: nowMs(),
+        }),
+      );
     }
     if (decision.raiseTo !== null) {
       const previousCap = maxConcurrency;

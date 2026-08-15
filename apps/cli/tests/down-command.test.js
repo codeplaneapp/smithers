@@ -205,6 +205,12 @@ describe("smithers down --force staleness check", () => {
 
         const after = await adapter.getRun("stale-run");
         expect(after?.status).toBe("cancelled");
+        expect(after).toMatchObject({
+          cancelRequestSource: "cli",
+          cancelRequestDetail: "smithers down",
+        });
+        expect(Number.isSafeInteger(after?.cancelRequestClientPid)).toBe(true);
+        expect(after?.cancelRequestClientPid ?? 0).toBeGreaterThan(0);
       } finally {
         sqlite.close();
       }
@@ -403,6 +409,12 @@ describe("smithers cancel live-run handling", () => {
         expect(after?.cancelRequestedAtMs ?? 0).toBeGreaterThan(0);
         // Status is left for the engine to settle, NOT prematurely flipped.
         expect(after?.status).toBe("running");
+        expect(after).toMatchObject({
+          cancelRequestSource: "cli",
+          cancelRequestDetail: "smithers cancel live-run",
+        });
+        expect(Number.isSafeInteger(after?.cancelRequestClientPid)).toBe(true);
+        expect(after?.cancelRequestClientPid ?? 0).toBeGreaterThan(0);
       } finally {
         sqlite.close();
       }
@@ -430,6 +442,21 @@ describe("smithers cancel live-run handling", () => {
 
         const after = await adapter.getRun("stale-run");
         expect(after?.status).toBe("cancelled");
+        expect(after).toMatchObject({
+          cancelRequestSource: "cli",
+          cancelRequestDetail: "smithers cancel stale-run",
+        });
+        expect(Number.isSafeInteger(after?.cancelRequestClientPid)).toBe(true);
+        expect(after?.cancelRequestClientPid ?? 0).toBeGreaterThan(0);
+        const cancelledEvent = (await adapter.listEventHistory("stale-run", { afterSeq: -1, limit: 50 })).find(
+          (event) => event.type === "RunCancelled",
+        );
+        expect(cancelledEvent).toBeTruthy();
+        expect(JSON.parse(cancelledEvent.payloadJson).source).toEqual({
+          kind: "cli",
+          detail: "smithers cancel stale-run",
+          clientPid: after?.cancelRequestClientPid,
+        });
       } finally {
         sqlite.close();
       }
