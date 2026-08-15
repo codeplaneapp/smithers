@@ -172,16 +172,21 @@ describe("PACKAGE_AND_BUILD process contracts", () => {
         import * as scorers from "smthrs/scorers";
         import * as sandbox from "smthrs/sandbox";
         import * as cloudflare from "smthrs/cloudflare";
-        import type { CreateSmithersApi, SmithersWorkflow, TaskProps } from "smthrs";
+        import type { CreateSmithersApi, GatewayExtensionDefinition, SmithersWorkflow, TaskProps } from "smthrs";
 
         const workflow = <Workflow name="consumer"><Task id="task" output="task">hi</Task></Workflow>;
         const create: typeof createSmithers = createSmithers;
         const api = create({}) satisfies CreateSmithersApi<Record<string, never>>;
         const props: TaskProps<unknown> = { id: "typed", output: "typed", children: "ok" };
+        const extension: GatewayExtensionDefinition = {
+          defaultScope: "run:read",
+          resources: { file: { handler: async (params) => ({ path: String(params.path ?? "") }) } },
+          actions: { save: { scope: "run:write", handler: async () => ({ saved: true }) } },
+        };
         // @ts-expect-error The published TaskProps facade must reject a missing id.
         const invalidProps: TaskProps<unknown> = { output: "typed" };
         let flow: SmithersWorkflow<Record<string, never>> | undefined;
-        void [api, defineTool, jsx, runTask, gatewayClient, gatewayReact, scorers, sandbox, cloudflare, props, invalidProps, flow, workflow];
+        void [api, defineTool, jsx, runTask, gatewayClient, gatewayReact, scorers, sandbox, cloudflare, props, invalidProps, extension, flow, workflow];
       `,
     );
 

@@ -51,6 +51,7 @@
  */
 /** @typedef {import("@smthrs/server/gateway").GatewayAuthConfig} GatewayAuthConfig */
 /** @typedef {import("@smthrs/server/gateway").GatewayDefaults} GatewayDefaults */
+/** @typedef {import("@smthrs/server").GatewayExtensionDefinition} GatewayExtensionDefinition */
 /** @typedef {import("@smthrs/server/gateway").GatewayOperatorUiConfig} GatewayOperatorUiConfig */
 /** @typedef {import("@smthrs/server/gateway").GatewayOptions} GatewayOptions */
 /** @typedef {import("@smthrs/server/gateway").GatewayRegisterOptions} GatewayRegisterOptions */

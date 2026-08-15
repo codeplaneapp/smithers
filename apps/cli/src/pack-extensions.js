@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { resolveWorkflowDirs } from "./workflows.js";
 
 /**
  * Pack-declared Gateway extensions (issue #1438).
@@ -18,10 +19,11 @@ import { pathToFileURL } from "node:url";
  * which fights the one-gateway-per-workspace singleton that `smithers ui`,
  * `smithers monitor`, and cron discovery all resolve to.
  *
- * So: if the workspace ships `.smithers/gateway-extensions.{ts,tsx,js,mjs}`
- * whose default export maps namespace → GatewayExtensionDefinition, mount each
- * one. Failure is isolated per namespace exactly as it is for workflows — a
- * broken extension disables only itself and never takes the Gateway down.
+ * So: if any discovered workflow pack ships
+ * `gateway-extensions.{ts,tsx,js,mjs}` whose default export maps namespace →
+ * GatewayExtensionDefinition, mount each one. Failure is isolated per pack and
+ * namespace exactly as it is for workflows — a broken extension never takes
+ * the Gateway down.
  *
  * Auth is unchanged: definitions carry their own `scope`/`defaultScope` and go
  * through the same `GatewayExtensions` plumbing as the built-in `evals`
@@ -38,15 +40,54 @@ const CANDIDATES = [
 ];
 
 /**
- * @param {string} workspace
+ * Return the first supported declaration file in one pack. Candidate order is
+ * intentional so a pack can migrate from JS to TS without registering twice.
+ *
+ * @param {string} packDir
  * @returns {string | undefined} absolute path, when the workspace declares one
  */
-export function findPackExtensionsFile(workspace) {
+function findExtensionsFileInPack(packDir) {
   for (const name of CANDIDATES) {
-    const candidate = join(workspace, ".smithers", name);
+    const candidate = join(packDir, name);
     if (existsSync(candidate)) return candidate;
   }
   return undefined;
+}
+
+/**
+ * Discover extension declarations from every pack visible to this workspace,
+ * in the same precedence order as workflow discovery: local, installed local,
+ * global, installed global. A pack appears twice in `resolveWorkflowDirs`
+ * (curated and ordinary workflow tiers), so de-duplicate by absolute pack path.
+ *
+ * @param {string} workspace
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string[]}
+ */
+export function findPackExtensionsFiles(workspace, env = process.env) {
+  const seen = new Set();
+  const files = [];
+  for (const { packDir } of resolveWorkflowDirs(workspace, env)) {
+    if (!packDir) continue;
+    const absolutePackDir = resolve(packDir);
+    if (seen.has(absolutePackDir)) continue;
+    seen.add(absolutePackDir);
+    const file = findExtensionsFileInPack(absolutePackDir);
+    if (file) files.push(file);
+  }
+  return files;
+}
+
+/**
+ * Backward-compatible single-file probe: returns the highest-precedence pack
+ * declaration visible from `workspace`.
+ *
+ * @param {string} workspace
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string | undefined}
+ */
+export function findPackExtensionsFile(workspace, env = process.env) {
+  return findPackExtensionsFiles(workspace, env)[0];
 }
 
 /**
@@ -71,31 +112,40 @@ export async function loadPackExtensions(file) {
  * @param {{ extend: (namespace: string, definition: unknown) => unknown }} gateway
  * @param {string} workspace
  * @param {{ warn?: (message: string) => void; info?: (message: string) => void }} [log]
+ * @param {NodeJS.ProcessEnv} [env]
  * @returns {Promise<string[]>} namespaces successfully registered
  */
-export async function registerPackExtensions(gateway, workspace, log) {
-  const file = findPackExtensionsFile(workspace);
-  if (!file) return [];
-
-  let declared;
-  try {
-    declared = await loadPackExtensions(file);
-  } catch (error) {
-    // A pack that cannot be imported must not stop the Gateway from serving
-    // runs — the same contract a broken workflow module gets.
-    log?.warn?.(`[gateway] skipped pack extensions (${file}): ${error?.message ?? String(error)}`);
-    return [];
-  }
-
+export async function registerPackExtensions(gateway, workspace, log, env = process.env) {
   const registered = [];
-  for (const [namespace, definition] of Object.entries(declared)) {
+  for (const file of findPackExtensionsFiles(workspace, env)) {
+    let declared;
     try {
-      gateway.extend(namespace, definition);
-      registered.push(namespace);
+      declared = await loadPackExtensions(file);
     } catch (error) {
-      // Namespace collisions throw by design (two extensions must never
-      // silently take over one namespace); isolate rather than abort.
-      log?.warn?.(`[gateway] skipped extension "${namespace}": ${error?.message ?? String(error)}`);
+      // A pack that cannot be imported must not stop the Gateway from serving
+      // runs or prevent lower-precedence packs from registering.
+      log?.warn?.(`[gateway] skipped pack extensions (${file}): ${error?.message ?? String(error)}`);
+      continue;
+    }
+
+    let namespaces;
+    try {
+      namespaces = Object.keys(declared);
+    } catch (error) {
+      log?.warn?.(`[gateway] skipped pack extensions (${file}): ${error?.message ?? String(error)}`);
+      continue;
+    }
+    for (const namespace of namespaces) {
+      try {
+        // Read inside the per-namespace guard so even a throwing property
+        // getter cannot suppress healthy sibling extensions.
+        gateway.extend(namespace, declared[namespace]);
+        registered.push(namespace);
+      } catch (error) {
+        // Namespace collisions throw by design (two extensions must never
+        // silently take over one namespace); higher-precedence packs win.
+        log?.warn?.(`[gateway] skipped extension "${namespace}" from ${file}: ${error?.message ?? String(error)}`);
+      }
     }
   }
   if (registered.length > 0) log?.info?.(`[gateway] pack extensions: ${registered.join(", ")}`);

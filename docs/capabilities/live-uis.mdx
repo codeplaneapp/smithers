@@ -6,7 +6,7 @@ icon: "gauge"
 
 A background agent run that you cannot see is a run you cannot trust. The failure mode is concrete: a five-hour workflow stalls at hour two on an approval gate, and nobody notices until the morning. Or a lane goes sideways - the agent misread the spec - and the only options are "wait for it to finish wrong" or "kill everything and start over." Long-running agent work needs the same thing long-running infrastructure needed: a live control surface where a human can observe state, decide at gates, and correct mid-run without destroying the work already done.
 
-There is a second, subtler requirement. In most agent tools the UI *is* the process: close the ChatGPT tab or kill the terminal and the work dies with it. That coupling is fine for a thirty-second chat. It is fatal for a run that spans a night. The UI has to be a **view over durable state** - something you can close, reopen from another machine, or hand to a teammate, while the run itself keeps executing against the database.
+There is a second, subtler requirement. In most agent tools the UI _is_ the process: close the ChatGPT tab or kill the terminal and the work dies with it. That coupling is fine for a thirty-second chat. It is fatal for a run that spans a night. The UI has to be a **view over durable state** - something you can close, reopen from another machine, or hand to a teammate, while the run itself keeps executing against the database.
 
 Smithers splits the two cleanly. Runs execute against durable storage (see [Durability](/capabilities/durability)); the **Gateway** is a workspace-level RPC/WebSocket control plane over that state; and every UI - the built-in Monitor, the full-screen TUI, or a custom per-workflow browser app - is a disposable client of the Gateway. Kill any of them and nothing happens to the run.
 
@@ -14,18 +14,18 @@ Smithers splits the two cleanly. Runs execute against durable storage (see [Dura
 
 Every mature orchestrator grew a live UI, and two adjacent traditions feed into agent steering: "UI from your code" frameworks and agent-UI protocols.
 
-| System | Mechanism | Tradeoff |
-| --- | --- | --- |
-| [Temporal Web UI](https://docs.temporal.io/web-ui) | Event-history viewer per workflow execution; query, signal, terminate, reset to an earlier event | Generic history view; per-domain UIs are yours to build separately |
-| [Airflow UI](https://airflow.apache.org/docs/apache-airflow/stable/ui.html) | Grid/graph views over DAG runs, task logs, clear-and-rerun | Batch-oriented; no live token/agent streaming, steering is rerun-shaped |
-| [Argo Workflows UI](https://argo-workflows.readthedocs.io/en/latest/argo-server/) | Argo Server UI over CRD state in etcd; retry, resubmit, suspend/resume | Kubernetes-native only; domain context lives outside the UI |
-| [Prefect UI](https://docs.prefect.io/v3/how-to-guides/self-hosted/server-cli) | Dashboard over flow-run state in the Prefect server/Cloud API; pause, cancel, late-run detection | Observation-first; custom operator surfaces are out of scope |
-| [Streamlit](https://docs.streamlit.io/get-started/fundamentals/main-concepts) / [Gradio](https://www.gradio.app/guides/quickstart) | "UI from your code": a Python script *is* the app, rerun top-to-bottom on interaction | Proved that app authors will write UIs when it costs a page of code - but the process serving the UI is the process doing the work |
-| [AG-UI](https://docs.ag-ui.com/introduction) / [CopilotKit](https://docs.copilotkit.ai/) | Open event protocol (~16 typed event kinds: lifecycle, text deltas, tool calls, state patches) between agent backend and frontend | Standardizes the wire, not the durability underneath; state lives in the agent session |
-| [Vercel AI SDK UI](https://ai-sdk.dev/docs/ai-sdk-ui/overview) + [RSC `streamUI`](https://ai-sdk.dev/docs/ai-sdk-rsc/streaming-react-components) | Generative UI: the model streams React components, not just text | Bound to a live HTTP response; a dropped connection is a dropped generation |
-| [LangGraph Studio](https://docs.langchain.com/langgraph-platform/langgraph-studio) | Graph visualization + thread state editing; interrupts and time travel over checkpoints | Development tool over the LangGraph server; not a shipping operator surface for your own domain |
+| System                                                                                                                                           | Mechanism                                                                                                                         | Tradeoff                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| [Temporal Web UI](https://docs.temporal.io/web-ui)                                                                                               | Event-history viewer per workflow execution; query, signal, terminate, reset to an earlier event                                  | Generic history view; per-domain UIs are yours to build separately                                                                 |
+| [Airflow UI](https://airflow.apache.org/docs/apache-airflow/stable/ui.html)                                                                      | Grid/graph views over DAG runs, task logs, clear-and-rerun                                                                        | Batch-oriented; no live token/agent streaming, steering is rerun-shaped                                                            |
+| [Argo Workflows UI](https://argo-workflows.readthedocs.io/en/latest/argo-server/)                                                                | Argo Server UI over CRD state in etcd; retry, resubmit, suspend/resume                                                            | Kubernetes-native only; domain context lives outside the UI                                                                        |
+| [Prefect UI](https://docs.prefect.io/v3/how-to-guides/self-hosted/server-cli)                                                                    | Dashboard over flow-run state in the Prefect server/Cloud API; pause, cancel, late-run detection                                  | Observation-first; custom operator surfaces are out of scope                                                                       |
+| [Streamlit](https://docs.streamlit.io/get-started/fundamentals/main-concepts) / [Gradio](https://www.gradio.app/guides/quickstart)               | "UI from your code": a Python script _is_ the app, rerun top-to-bottom on interaction                                             | Proved that app authors will write UIs when it costs a page of code - but the process serving the UI is the process doing the work |
+| [AG-UI](https://docs.ag-ui.com/introduction) / [CopilotKit](https://docs.copilotkit.ai/)                                                         | Open event protocol (~16 typed event kinds: lifecycle, text deltas, tool calls, state patches) between agent backend and frontend | Standardizes the wire, not the durability underneath; state lives in the agent session                                             |
+| [Vercel AI SDK UI](https://ai-sdk.dev/docs/ai-sdk-ui/overview) + [RSC `streamUI`](https://ai-sdk.dev/docs/ai-sdk-rsc/streaming-react-components) | Generative UI: the model streams React components, not just text                                                                  | Bound to a live HTTP response; a dropped connection is a dropped generation                                                        |
+| [LangGraph Studio](https://docs.langchain.com/langgraph-platform/langgraph-studio)                                                               | Graph visualization + thread state editing; interrupts and time travel over checkpoints                                           | Development tool over the LangGraph server; not a shipping operator surface for your own domain                                    |
 
-Two lessons recur. First, the steerable systems (Temporal, LangGraph, Argo) all put a **durable state layer under the UI** - the UI reads and writes checkpoints, it doesn't host the computation. Second, the systems people actually enjoy building UIs *for* (Streamlit, Gradio, AI SDK generative UI) made the UI **belong to the code**, declared next to the logic instead of built as a separate frontend project. Smithers takes both: durable state under every surface, and a `<UI>` element declared inside the workflow itself.
+Two lessons recur. First, the steerable systems (Temporal, LangGraph, Argo) all put a **durable state layer under the UI** - the UI reads and writes checkpoints, it doesn't host the computation. Second, the systems people actually enjoy building UIs _for_ (Streamlit, Gradio, AI SDK generative UI) made the UI **belong to the code**, declared next to the logic instead of built as a separate frontend project. Smithers takes both: durable state under every surface, and a `<UI>` element declared inside the workflow itself.
 
 ## How Smithers does it
 
@@ -37,22 +37,22 @@ Because all UI surfaces are Gateway clients over that durable state, the run/UI 
 
 ### Three surfaces, one state
 
-| Surface | Command | What it is |
-| --- | --- | --- |
-| [Monitor](/guides/monitor) | `smithers monitor` | Zero-setup web UI over **every run** in the workspace: a "Needs you" triage band (pending approvals, human-parked runs, 24h failures), live run rows, execution tree with per-node durations, a node inspector (prompt, tool calls, transcript, output, diff), frame scrubber, and an embedded PTY to hijack supported agent sessions |
-| Custom workflow UI | `bunx smthrs ui RUN_ID` | The workflow's **own** browser app at `/workflows/<key>?runId=<id>`, built from `.smithers/ui/<key>.tsx` |
-| TUI | `bunx smthrs up` (interactive) | Full-screen terminal monitoring; workflows can ship their own via [`<TUI>`](/components/tui) |
+| Surface                    | Command                        | What it is                                                                                                                                                                                                                                                                                                                            |
+| -------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Monitor](/guides/monitor) | `smithers monitor`             | Zero-setup web UI over **every run** in the workspace: a "Needs you" triage band (pending approvals, human-parked runs, 24h failures), live run rows, execution tree with per-node durations, a node inspector (prompt, tool calls, transcript, output, diff), frame scrubber, and an embedded PTY to hijack supported agent sessions |
+| Custom workflow UI         | `bunx smthrs ui RUN_ID`        | The workflow's **own** browser app at `/workflows/<key>?runId=<id>`, built from `.smithers/ui/<key>.tsx`                                                                                                                                                                                                                              |
+| TUI                        | `bunx smthrs up` (interactive) | Full-screen terminal monitoring; workflows can ship their own via [`<TUI>`](/components/tui)                                                                                                                                                                                                                                          |
 
 `bunx smthrs gui` opens a directory's workspace at the most recent run's workflow UI; `smithers monitor RUN_ID` deep-links one run. All three autostart a Gateway if none is running (`--no-autostart` to opt out, `--gateway <url>` to point at a remote one).
 
 ### Workflow-owned UIs
 
-A custom UI is declared *in the workflow* with [`<UI>`](/components/ui) - it renders nothing in the graph; the Gateway discovers it at `gateway.register()`, bundles the entry with `Bun.build` into a single browser script, and serves it with a boot config (`__SMITHERS_GATEWAY_UI__`) injected before your code runs:
+A custom UI is declared _in the workflow_ with [`<UI>`](/components/ui) - it renders nothing in the graph; the Gateway discovers it at `gateway.register()`, bundles the entry with `Bun.build` into a single browser script, and serves it with a boot config (`__SMITHERS_GATEWAY_UI__`) injected before your code runs:
 
 ```tsx .smithers/workflows/triage.tsx
 import { createSmithers, UI } from "smthrs";
 
-const { Workflow, Task, smithers } = createSmithers({ /* schemas */ });
+const { Workflow, Task, smithers } = createSmithers({/* schemas */});
 
 export default smithers(() => (
   <Workflow name="triage">
@@ -99,18 +99,17 @@ Workflow code hot-reloads under `RunOptions.hot` (schema-shape changes are block
 
 ## Guarantees and limits
 
-**Guaranteed:** every surface is a stateless client over durable state - closing it never affects the run; reconnecting WebSocket streams resume via `afterSeq`; approvals and signals are durable RPCs that survive the deciding tab. Scoped tokens gate every method. Token-protected gateways serve browser UIs through the [session handoff](/integrations/gateway#browser-session-handoff): `monitor`/`ui`/`gui` exchange the bearer for an HttpOnly cookie before the browser lands, so a `--mint-token` gateway's UI URLs open cleanly.
+**Guaranteed:** every surface is a stateless client over durable state - closing it never affects the run; reconnecting WebSocket streams resume via `afterSeq`; approvals and signals are durable RPCs that survive the deciding tab. Scoped tokens gate every method. Pack-specific domain data can be declared in `gateway-extensions.ts` and is loaded by the workspace Gateway with pack precedence and failure isolation. Token-protected gateways serve browser UIs through the [session handoff](/integrations/gateway#browser-session-handoff): `monitor`/`ui`/`gui` exchange the bearer for an HttpOnly cookie before the browser lands, so a `--mint-token` gateway's UI URLs open cleanly.
 
 **Honest limits, verified in source and the tracker:**
 
-- **Pack-extension UIs have no domain-data path.** The client side of the Gateway extension surface ships (`SmithersGatewayClient.extensionRpc`, `useGatewayExtensionResource` / `useGatewayExtensionAction` / `useGatewayExtensionStream`), but `smithers gateway` cannot load pack-declared extension *servers*, so a custom UI cannot yet read pack-specific domain data through the Gateway ([smithers#1438](https://github.com/smithersai/smithers/issues/1438), open). Workaround: ship the data as node outputs and read them with `useGatewayNodeOutput`.
 - The Monitor is workspace-local by design; multi-workspace fleet views are not a shipped surface.
 
 ## Operating it
 
 ```sh
-smithers gateway              # start the workspace control plane (or: gateway status | stop)
-smithers monitor [RUN_ID]     # all-runs web UI, autostarts the gateway
+bunx smthrs gateway              # start the workspace control plane (or: gateway status | stop)
+bunx smthrs monitor [RUN_ID]     # all-runs web UI, autostarts the gateway
 bunx smthrs ui RUN_ID            # the run's workflow-owned custom UI
 bunx smthrs gui [--workflow id]  # open a directory's workspace UI
 bunx smthrs token issue --scopes run:read --ttl 15m   # scoped short-lived bearer
