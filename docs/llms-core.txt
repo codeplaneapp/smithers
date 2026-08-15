@@ -922,6 +922,13 @@ bunx smthrs supervise --all --interval 30s --stale-threshold 1m
 Standalone supervision requires an explicit scope: pass one or more run IDs with
 `--run`, or opt into the workspace-wide sweep with `--all`.
 
+When multiple hosts share a run store, each engine records a host-scoped runtime
+owner (`pid:<pid>@<hostname>:<session>`). Smithers probes a PID only when that
+hostname matches the current host; remote owners use the durable heartbeat and
+the configured stale threshold instead. Hosts therefore need stable, unique OS
+hostnames. Legacy owner rows without `@<hostname>` keep the historical
+single-host assumption and are probed against the local process table.
+
 ## Session snapshots & fork
 
 Every agent task persists its conversation as a durable session snapshot alongside its output; a later task can start from a **copy** of it with `fork`:

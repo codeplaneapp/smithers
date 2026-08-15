@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
+import { hostname } from "node:os";
 import { SmithersDb } from "@smthrs/db/adapter";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { formatRuntimeOwnerId } from "@smthrs/db/runtime-owner";
 import { supervisorPollEffect } from "../src/supervisor.js";
 
 const now = Date.now();
@@ -46,10 +48,9 @@ async function skipReason(adapter, runId) {
 }
 
 // These tests exercise the real supervisor poll + real SmithersDb (no mocks of
-// the code under test). They pin the false-orphan-under-load fix: a stale
-// heartbeat alone must never trigger a resume — the owner must be verifiably
-// dead. `isPidAlive` is left as the real implementation so process.pid is
-// genuinely alive and a made-up pid is genuinely dead.
+// the code under test). They pin both owner-liveness boundaries: local PID
+// owners must be verifiably dead, while remote-host owners must use the durable
+// heartbeat because their PID has no meaning in this process table.
 describe("supervisor owner-liveness resume gate", () => {
   test("does NOT resume a stale run whose owner pid is still alive (busy engine, lagging heartbeat)", async () => {
     const { adapter, sqlite } = createTestDb();
@@ -77,6 +78,34 @@ describe("supervisor owner-liveness resume gate", () => {
     expect(summary.resumedCount).toBe(0);
     expect(summary.skippedCount).toBe(1);
     expect(await skipReason(adapter, "run-live-owner")).toBe("pid-alive");
+    sqlite.close();
+  });
+
+  test("DOES resume a stale remote-host owner without probing a same-numbered local pid", async () => {
+    const { adapter, sqlite } = createTestDb();
+    const resumed = [];
+    await adapter.insertRun(
+      runRow("run-remote-owner", {
+        runtimeOwnerId: formatRuntimeOwnerId(process.pid, `${hostname()}.remote`, "live-there"),
+      }),
+    );
+    const summary = await Effect.runPromise(
+      supervisorPollEffect({
+        adapter,
+        staleThresholdMs: 30_000,
+        deps: {
+          now: () => now,
+          workflowExists: () => true,
+          spawnResumeDetached: (_workflowPath, runId) => {
+            resumed.push(runId);
+            return 4242;
+          },
+        },
+      }),
+    );
+    expect(summary.staleCount).toBe(1);
+    expect(summary.resumedCount).toBe(1);
+    expect(resumed).toEqual(["run-remote-owner"]);
     sqlite.close();
   });
 
