@@ -198,6 +198,16 @@ export type RunStartedBy = {
   detected?: true;
 };
 
+/** Durable attribution for the first caller that cancelled a run. */
+export type RunCancellationSource = {
+  kind: "signal" | "rpc" | "cli" | "engine";
+  detail?: string;
+  signal?: string;
+  clientPid?: number;
+  requestId?: string;
+  clientIdentity?: string;
+};
+
 export type LaunchRunRequest = {
   workflow: string;
   input?: Record<string, unknown>;
@@ -237,7 +247,12 @@ export type CancelRunRequest = {
 
 export type CancelRunResponse = {
   runId: string;
-  status: "cancelling";
+  won: boolean;
+  status: "cancelled" | "already-terminal" | "not-found";
+  terminalStatus?: string;
+  repaired: boolean;
+  /** Missing only for historical or unattributed cancellations. */
+  cancellationSource?: RunCancellationSource;
 };
 
 export type PauseRunRequest = {
@@ -453,6 +468,23 @@ export type GatewayRunSummary = Record<string, unknown> & {
   /** Missing historical metadata is projected as `true` (fail closed). */
   system: boolean;
   startedBy?: RunStartedBy;
+  /** Missing only when the run has not been cancelled or attribution was not persisted. */
+  cancellationSource?: RunCancellationSource;
+};
+
+export type GetRunResponse = Record<string, unknown> & {
+  runId: string;
+  workflowKey?: string;
+  status?: string;
+  createdAtMs?: number;
+  startedAtMs?: number | null;
+  finishedAtMs?: number | null;
+  system: boolean;
+  summary?: Record<string, number>;
+  runState?: Record<string, unknown>;
+  startedBy?: RunStartedBy;
+  /** Missing only when the run has not been cancelled or attribution was not persisted. */
+  cancellationSource?: RunCancellationSource;
 };
 
 export type ListRunsResponse = GatewayRunSummary[];

@@ -19,6 +19,7 @@ import { createHash } from "node:crypto";
 import { runWithToolContext } from "@smthrs/tool-context";
 import { createToolJournalContext } from "../createToolJournalContext.js";
 import { stampDurableRetryState } from "./retry-state.js";
+import { cancellationAttributionFromAbortSignal, withCancellationSource } from "../cancellation-attribution.js";
 /**
  * @typedef {{ rootDir: string; }} ComputeTaskBridgeToolConfig
  */
@@ -502,6 +503,15 @@ export const executeComputeTaskBridge = async (
   let heartbeatLastPersistedWriteAtMs = 0;
   let heartbeatLastReceivedAtMs = null;
   let heartbeatWriteTimer;
+  /** @param {unknown} error */
+  const engineCancellationSourceForTaskError = (error) => ({
+    kind: /** @type {const} */ ("engine"),
+    detail: `Task ${desc.nodeId} stopped nested work: ${
+      error instanceof Error || (error && typeof error === "object" && "message" in error)
+        ? String(error.message)
+        : String(error)
+    }`,
+  });
   /**
    * @returns {Promise<void>}
    */
@@ -681,7 +691,9 @@ export const executeComputeTaskBridge = async (
         timestampMs: nowMs(),
       });
       heartbeatTimeoutWon = true;
-      taskAbortController.abort(timeoutError);
+      taskAbortController.abort(
+        withCancellationSource(timeoutError, engineCancellationSourceForTaskError(timeoutError)),
+      );
       return Effect.fail(timeoutError);
     });
     const watchdog = Effect.repeat(
@@ -823,17 +835,25 @@ export const executeComputeTaskBridge = async (
     });
     const timeoutMs = desc.timeoutMs;
     if (timeoutMs) {
-      computeEffect = computeEffect.pipe(
-        Effect.timeout(Duration.millis(timeoutMs)),
-        Effect.catchIf(Cause.isTimeoutError, () =>
-          Effect.fail(
-            new TaskTimeout({
-              message: `Compute callback timed out after ${timeoutMs}ms`,
-              attempt: attemptNo,
-              nodeId: desc.nodeId,
-              timeoutMs,
+      const timeoutError = new TaskTimeout({
+        message: `Compute callback timed out after ${timeoutMs}ms`,
+        attempt: attemptNo,
+        nodeId: desc.nodeId,
+        timeoutMs,
+      });
+      computeEffect = Effect.raceFirst(
+        computeEffect,
+        Effect.sleep(Duration.millis(timeoutMs)).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              if (!computeAbortController.signal.aborted) {
+                computeAbortController.abort(
+                  withCancellationSource(timeoutError, engineCancellationSourceForTaskError(timeoutError)),
+                );
+              }
             }),
           ),
+          Effect.flatMap(() => Effect.fail(timeoutError)),
         ),
       );
     }
@@ -987,7 +1007,10 @@ export const executeComputeTaskBridge = async (
       heartbeatTimeoutError ??
       (aborted && taskSignal.reason !== undefined ? taskSignal.reason : aborted ? makeAbortError() : err);
     if (computeAbortController && !computeAbortController.signal.aborted) {
-      computeAbortController.abort(effectiveError);
+      const source =
+        cancellationAttributionFromAbortSignal(taskSignal) ??
+        (aborted ? undefined : engineCancellationSourceForTaskError(effectiveError));
+      computeAbortController.abort(source ? withCancellationSource(effectiveError, source) : effectiveError);
     }
     if (computeToolContext) {
       await computeToolContext.waitForPendingToolCalls(TOOL_ABORT_GRACE_MS);

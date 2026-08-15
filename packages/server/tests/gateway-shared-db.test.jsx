@@ -332,6 +332,66 @@ describe("gateway — many workflows sharing one DB", () => {
     expect((await adapter.getAttempt("quota-run", "agent", 0, 1))?.state).toBe("cancelled");
   });
 
+  test("getRun, listRuns, and cancelRun expose persisted cancellation attribution", async () => {
+    dbPath = makeDbPath("cancel-contract");
+    const wf = createSharedDbWorkflows(dbPath);
+    gateway = new Gateway({ heartbeatMs: 1000 });
+    gateway.register("alpha", wf.alpha);
+    const adapter = gateway.adapterForWorkflow(wf.alpha);
+    await adapter.insertRun({
+      runId: "cancelled-run",
+      workflowName: "alpha",
+      status: "cancelled",
+      createdAtMs: Date.now(),
+      finishedAtMs: Date.now(),
+      cancelRequestedAtMs: Date.now(),
+      cancelRequestSource: "signal",
+      cancelRequestDetail: "worker received SIGTERM",
+      cancelRequestSignal: "SIGTERM",
+      cancelRequestClientPid: 4321,
+      cancelRequestId: "shutdown-1",
+      cancelRequestClientIdentity: "operator",
+      configJson: JSON.stringify({ gatewayWorkflowKey: "alpha", gatewaySystem: false }),
+    });
+    const expectedSource = {
+      kind: "signal",
+      detail: "worker received SIGTERM",
+      signal: "SIGTERM",
+      clientPid: 4321,
+      requestId: "shutdown-1",
+      clientIdentity: "operator",
+    };
+
+    const getResponse = await gateway.routeRequest(
+      { role: "operator", scopes: ["run:read"], userId: "test" },
+      { id: "get-cancelled", method: "getRun", params: { runId: "cancelled-run" } },
+    );
+    expect(getResponse.ok).toBe(true);
+    expect(getResponse.payload.cancellationSource).toEqual(expectedSource);
+
+    const listResponse = await gateway.routeRequest(
+      { role: "operator", scopes: ["run:read"], userId: "test" },
+      { id: "list-cancelled", method: "listRuns", params: { filter: { status: "cancelled" } } },
+    );
+    expect(listResponse.ok).toBe(true);
+    expect(listResponse.payload).toContainEqual(
+      expect.objectContaining({ runId: "cancelled-run", cancellationSource: expectedSource }),
+    );
+
+    const cancelResponse = await gateway.routeRequest(
+      { role: "operator", scopes: ["run:write"], userId: "test" },
+      { id: "cancel-again", method: "cancelRun", params: { runId: "cancelled-run" } },
+    );
+    expect(cancelResponse.ok).toBe(true);
+    expect(cancelResponse.payload).toMatchObject({
+      runId: "cancelled-run",
+      won: false,
+      status: "already-terminal",
+      terminalStatus: "cancelled",
+      cancellationSource: expectedSource,
+    });
+  });
+
   test("getSchemaSignature exposes the migration head over RPC", async () => {
     dbPath = makeDbPath("schema-signature");
     const wf = createSharedDbWorkflows(dbPath);

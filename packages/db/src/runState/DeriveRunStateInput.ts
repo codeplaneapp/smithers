@@ -1,4 +1,5 @@
 import type { RunRow } from "../adapter/RunRow.ts";
+import type { RunStateWarning } from "./RunStateWarning.ts";
 
 export type DeriveRunStateInput = {
   run: RunRow;
@@ -8,6 +9,8 @@ export type DeriveRunStateInput = {
   parkedEventBlock?: { kind: "approval-decided-resume-required"; nodeId: string } | { kind: "external-trigger" } | null;
   /** Heartbeats from active sandboxes associated with the run. */
   sandboxHeartbeats?: ReadonlyArray<number>;
+  /** Durable operator warnings associated with the run. */
+  warnings?: ReadonlyArray<RunStateWarning>;
   now?: number;
   staleThresholdMs?: number;
   /** Grace window (ms) past a timer's wake time before it is flagged overdue. */

@@ -6,4 +6,5 @@ export type GatewayRunSummaryRow = Record<string, unknown> & {
   parentRunId?: string | null;
   system: boolean;
   startedBy?: import("@smthrs/protocol/gateway-rpc").RunStartedBy;
+  cancellationSource?: import("@smthrs/protocol/gateway-rpc").RunCancellationSource;
 };

@@ -11,6 +11,8 @@ apiVersion: v1
 - Scope: `run:write`
 - Transports: HTTP RPC, WebSocket RPC
 - Request: `{ runId }`
-- Response: `{ runId, status: "cancelling" }`
+- Response: `{ runId, won, status, terminalStatus?, repaired, cancellationSource? }`
+
+`status` is `cancelled`, `already-terminal`, or `not-found`. When attribution was persisted, `cancellationSource` identifies the first caller with `kind: "signal" | "rpc" | "cli" | "engine"` plus optional `detail`, `signal`, `clientPid`, `requestId`, and `clientIdentity`. Historical or unattributed cancellations omit it.
 
 Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RUN_NOT_ACTIVE`, and `Internal`. `RUN_NOT_ACTIVE` means the run is not currently active, including already-finished runs; `Forbidden` means the caller lacks `run:write` scope.

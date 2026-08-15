@@ -40,9 +40,11 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  Input,
   observeReducedMotion,
   prefersReducedMotion,
   Progress,
+  RowButton,
   SmithersUiStyles,
   StatusPill,
   Table,
@@ -66,6 +68,7 @@ import {
   embedModeFromSearch,
   clampFrameNo,
   connectionViewFor,
+  concurrencySaturationWarningOf,
   cronRowsOf,
   dataRowsOf,
   describeErrorCounter,
@@ -332,21 +335,20 @@ function ConnectionBadge() {
         </span>
       ) : null}
       {view.action ? (
-        <button
-          type="button"
-          className="mon-chip"
+        <Chip
+          className="mon-conn-action"
           data-testid="monitor-conn-action"
           title="Reload the Monitor page"
           onClick={() => location.reload()}
         >
           {view.action.label}
-        </button>
+        </Chip>
       ) : null}
     </span>
   );
 }
 
-function CopyableRunId({ runId }: { runId: string }) {
+export function CopyableRunId({ runId }: { runId: string }) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
@@ -356,9 +358,10 @@ function CopyableRunId({ runId }: { runId: string }) {
     [],
   );
   return (
-    <button
-      type="button"
+    <Button
+      variant="link"
       className="mon-runid"
+      data-testid="monitor-copy-run-id"
       title="Copy run id"
       onClick={() => {
         void navigator.clipboard?.writeText(runId).then(() => {
@@ -370,7 +373,7 @@ function CopyableRunId({ runId }: { runId: string }) {
     >
       {runId}
       <span className="mon-dim">{copied ? " copied" : ""}</span>
-    </button>
+    </Button>
   );
 }
 
@@ -541,7 +544,7 @@ function ApprovalActions({
  * run-detail rail inbox and the overview's "Needs you" band, so the decision
  * UX is identical wherever an approval appears.
  */
-function ApprovalCard({
+export function ApprovalCard({
   approval,
   busy,
   decide,
@@ -555,9 +558,9 @@ function ApprovalCard({
   const [expanded, setExpanded] = useState(false);
   return (
     <div className="mon-approval">
-      <button
-        type="button"
+      <RowButton
         className="mon-approval-main"
+        data-testid="monitor-approval-open"
         onClick={() => onSelectRun(approval.runId)}
         title={`Open run ${shortRunId(approval.runId)}`}
       >
@@ -567,14 +570,21 @@ function ApprovalCard({
           <span className="mon-mono mon-dim">{shortRunId(approval.runId)}</span>
           <ApprovalWait requestedAtMs={approval.requestedAtMs} />
         </div>
-      </button>
+      </RowButton>
       <ApprovalActions approval={approval} decide={decide} busy={busy} />
       {approval.requestSummary ? (
         <div className="mon-approval-summary-wrap">
           <div className={`mon-approval-summary${expanded ? " is-expanded" : ""}`}>{approval.requestSummary}</div>
-          <button type="button" className="mon-approval-more" onClick={() => setExpanded((value) => !value)}>
+          <Button
+            variant="link"
+            size="sm"
+            className="mon-approval-more"
+            data-testid="monitor-approval-more"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+          >
             {expanded ? "less" : "more"}
-          </button>
+          </Button>
         </div>
       ) : null}
     </div>
@@ -932,9 +942,9 @@ const FAILURE_ATTENTION_WINDOW_MS = 24 * 60 * 60 * 1000;
 /** Per-section row cap in the "Needs you" band; the rest collapses to "+N more". */
 const NEEDS_YOU_ROW_CAP = 6;
 
-function NeedsYouRunRow({ run, onSelectRun }: { run: RunRow; onSelectRun: (runId: string) => void }) {
+export function NeedsYouRunRow({ run, onSelectRun }: { run: RunRow; onSelectRun: (runId: string) => void }) {
   return (
-    <button type="button" className="mon-needs-row" onClick={() => onSelectRun(run.runId)}>
+    <RowButton className="mon-needs-row" data-testid="monitor-needs-run-row" onClick={() => onSelectRun(run.runId)}>
       <StatusTag status={run.status} />
       <span className="mon-needs-name">{middleTruncate(run.workflowKey ?? "unknown", 56)}</span>
       <span className="mon-mono mon-dim">{shortRunId(run.runId)}</span>
@@ -945,7 +955,7 @@ function NeedsYouRunRow({ run, onSelectRun }: { run: RunRow; onSelectRun: (runId
           <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={undefined} />
         )}
       </span>
-    </button>
+    </RowButton>
   );
 }
 
@@ -1040,7 +1050,7 @@ function NeedsYouBand({
 }
 
 /** One rich row per live run: pulse, name, progress, elapsed — click opens it. */
-function ActiveNowBand({ runs, onSelectRun }: { runs: RunRow[]; onSelectRun: (runId: string) => void }) {
+export function ActiveNowBand({ runs, onSelectRun }: { runs: RunRow[]; onSelectRun: (runId: string) => void }) {
   const active = useMemo(() => groupRuns(runs).find((group) => group.group === "active")?.runs ?? [], [runs]);
   if (active.length === 0) return null;
   return (
@@ -1052,7 +1062,12 @@ function ActiveNowBand({ runs, onSelectRun }: { runs: RunRow[]; onSelectRun: (ru
       </CardHeader>
       <CardContent>
         {active.map((run) => (
-          <button type="button" className="mon-active-row" key={run.runId} onClick={() => onSelectRun(run.runId)}>
+          <RowButton
+            className="mon-active-row"
+            data-testid="monitor-active-run-row"
+            key={run.runId}
+            onClick={() => onSelectRun(run.runId)}
+          >
             <ToneDot tone={toneForStatus(run.status)} pulse={toneForStatus(run.status) === "running"} />
             <span className="mon-active-name">{middleTruncate(run.workflowKey ?? "unknown", 56)}</span>
             <span className="mon-mono mon-dim">{shortRunId(run.runId)}</span>
@@ -1062,7 +1077,7 @@ function ActiveNowBand({ runs, onSelectRun }: { runs: RunRow[]; onSelectRun: (ru
             <span className="mon-mono mon-dim mon-active-elapsed">
               <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={undefined} />
             </span>
-          </button>
+          </RowButton>
         ))}
       </CardContent>
     </Card>
@@ -1119,9 +1134,9 @@ function OpsFooter({ runs, onShowMetrics }: { runs: RunRow[]; onShowMetrics: () 
           {part.text}
         </span>
       ))}
-      <button type="button" className="mon-ops-footer-link" onClick={onShowMetrics}>
+      <Button variant="link" className="mon-ops-footer-link" data-testid="monitor-ops-metrics" onClick={onShowMetrics}>
         Metrics
-      </button>
+      </Button>
     </footer>
   );
 }
@@ -1674,8 +1689,9 @@ export function RunsTable({
                   scope="col"
                   aria-sort={sort === "default" ? undefined : sort === "newest" ? "descending" : "ascending"}
                 >
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     className="mon-th-sort"
                     data-testid="monitor-sort-started"
                     title="Sort by start time"
@@ -1688,7 +1704,7 @@ export function RunsTable({
                         {startedIndicator}
                       </span>
                     ) : null}
-                  </button>
+                  </Button>
                 </TableHead>
                 <TableHead scope="col">Duration</TableHead>
               </TableRow>
@@ -1820,11 +1836,13 @@ function XmlRow({
   const status = asString(node.status);
   const name = asString(node.name);
   const openTag = (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
+      size="sm"
       className="mon-xml-open"
-      onClick={selectDisabled ? undefined : () => onSelect(node)}
-      aria-disabled={selectDisabled || undefined}
+      data-testid="monitor-xml-node"
+      disabled={selectDisabled}
+      onClick={() => onSelect(node)}
     >
       <span className="mon-xml-punct">&lt;</span>
       <span className="mon-xml-tag">{tag}</span>
@@ -1859,7 +1877,7 @@ function XmlRow({
           &gt;<span className="mon-xml-ellipsis">…</span>&lt;/<span className="mon-xml-tag">{tag}</span>&gt;
         </span>
       ) : null}
-    </button>
+    </Button>
   );
   return (
     <>
@@ -1868,15 +1886,17 @@ function XmlRow({
         style={{ paddingLeft: 8 + depth * 16 }}
       >
         {children.length > 0 ? (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon"
             className="mon-tree-chevron"
+            data-testid="monitor-tree-toggle"
             onClick={() => onToggle(key)}
             aria-expanded={expanded}
             aria-label={`${expanded ? "Collapse" : "Expand"} ${node.cardLabel ?? node.name ?? node.id ?? key}`}
           >
             {expanded ? "▾" : "▸"}
-          </button>
+          </Button>
         ) : (
           <span className="mon-tree-chevron mon-dim" aria-hidden>
             ·
@@ -1970,30 +1990,33 @@ function TreeRow({
   return (
     <>
       <div
-        className={`mon-tree-row${key === selectedNodeKey ? " is-active" : ""}${isContainer ? " mon-tree-container" : ""}`}
+        className={`mon-tree-row${isContainer ? " mon-tree-container" : ""}`}
         style={{ paddingLeft: 8 + depth * 16 }}
       >
         {children.length > 0 ? (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon"
             className="mon-tree-chevron"
+            data-testid="monitor-tree-toggle"
             onClick={() => onToggle(key)}
             aria-expanded={expanded}
             aria-label={`${expanded ? "Collapse" : "Expand"} ${node.cardLabel ?? node.name ?? node.id ?? key}`}
           >
             {expanded ? "▾" : "▸"}
-          </button>
+          </Button>
         ) : (
           <span className="mon-tree-chevron mon-dim" aria-hidden>
             ·
           </span>
         )}
-        <button
-          type="button"
+        <RowButton
+          active={key === selectedNodeKey}
           className="mon-tree-main"
-          onClick={selectDisabled ? undefined : () => onSelect(node)}
+          data-testid="monitor-tree-node"
+          disabled={selectDisabled}
+          onClick={() => onSelect(node)}
           title={selectDisabled ? "Node selection is disabled while scrubbing frames" : undefined}
-          aria-disabled={selectDisabled || undefined}
         >
           <span className="mon-tree-glyph mon-dim" title={KIND_LABELS[kindKey] ?? kindKey ?? "node"}>
             {glyph}
@@ -2022,7 +2045,7 @@ function TreeRow({
             </span>
           ) : null}
           {showPill ? <StatusTag status={node.status} /> : null}
-        </button>
+        </RowButton>
       </div>
       {expanded
         ? children.map((child) => (
@@ -2316,7 +2339,7 @@ function durationsByKey(entries: readonly { key: string; durationMs?: number }[]
   return map;
 }
 
-function TimelinePanel({
+export function TimelinePanel({
   nodeStates,
   treeNodes,
   selectedNode,
@@ -2368,11 +2391,11 @@ function TimelinePanel({
           selectedNode.id === entry.nodeId &&
           (selectedNode.iteration ?? 0) === entry.iteration;
         return (
-          <button
+          <RowButton
+            active={active}
             key={entry.key}
-            type="button"
             role="listitem"
-            className={`mon-timeline-row${active ? " is-active" : ""}`}
+            className="mon-timeline-row"
             data-testid="monitor-timeline-row"
             data-node-id={entry.nodeId}
             data-iteration={entry.iteration}
@@ -2394,7 +2417,7 @@ function TimelinePanel({
                 {entry.endMs !== undefined ? <Ago ms={entry.endMs} /> : tone === "running" ? "running" : "—"}
               </span>
             </span>
-          </button>
+          </RowButton>
         );
       })}
     </div>
@@ -2634,8 +2657,9 @@ function ExecutionPanel({
             >
               ◀
             </Chip>
-            <input
+            <Input
               className="mon-scrub-range"
+              data-testid="monitor-frame-slider"
               type="range"
               min={bounds.min}
               max={bounds.max}
@@ -3154,6 +3178,7 @@ function HealthStrip({
   runId,
   status,
   healthState,
+  concurrencySaturation,
   quota,
   runError,
   onResult,
@@ -3161,6 +3186,7 @@ function HealthStrip({
   runId: string;
   status: string | undefined;
   healthState: string | undefined;
+  concurrencySaturation: ReturnType<typeof concurrencySaturationWarningOf>;
   quota: ReturnType<typeof quotaInfoOf>;
   /** Run-level failure message (errorJson) — the only error a run that died before its first task has. */
   runError?: string;
@@ -3227,6 +3253,7 @@ function HealthStrip({
     runId,
     status,
     healthState,
+    concurrencySaturation,
     quota,
     approvalsCount,
     treeNodes,
@@ -4461,6 +4488,7 @@ function RunDetail({
   const finishedAtMs = asNumber(pick(run, "finishedAtMs", "finished_at_ms"));
   const runState = isRecord(run.runState) ? run.runState : null;
   const healthState = runState ? asString(runState.state) : undefined;
+  const concurrencySaturation = concurrencySaturationWarningOf(runState);
   const quota = quotaInfoOf(run);
   const workflowRows = (Array.isArray(workflowsQuery.data) ? workflowsQuery.data : []).filter(isRecord);
   const workflowRow = workflowRows.find((row) => asString(row.key) === workflowKey);
@@ -4635,6 +4663,7 @@ function RunDetail({
         runId={runId}
         status={status}
         healthState={healthState}
+        concurrencySaturation={concurrencySaturation}
         quota={quota}
         runError={runError}
         onResult={onResult}
@@ -4988,7 +5017,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-conn-wrap { display: inline-flex; align-items: center; gap: var(--sp-1); }
 .mon-conn { font-size: var(--fs-1); }
 .mon-conn-hint { color: var(--muted); font-weight: 400; }
-.mon-conn-wrap .mon-chip { height: 20px; padding: 0 var(--sp-2); border-radius: var(--r-full); margin-left: var(--sp-1); }
+.mon-conn-action { margin-left: var(--sp-1); border-radius: var(--r-full); }
 .mon-toolbar { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .mon-count-note { font-size: var(--fs-1); font-variant-numeric: tabular-nums; }
 
@@ -5012,9 +5041,8 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-tree-xml { font-family: var(--font-mono); }
 .mon-xml-row { display: flex; align-items: baseline; gap: 2px; line-height: 1.7; }
 .mon-xml-row.is-active { background: var(--brand-soft); border-radius: var(--r-1); }
-.mon-xml-open { display: inline; border: 0; background: none; padding: 0; margin: 0; cursor: pointer; font: inherit; text-align: left; color: inherit; }
+.mon-xml-open { margin: 0; font-family: inherit; font-size: inherit; text-align: left; color: inherit; justify-content: flex-start; white-space: normal; }
 .mon-xml-open:hover .mon-xml-tag { text-decoration: underline; }
-.mon-xml-open:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
 .mon-xml-punct { color: var(--dim); }
 .mon-xml-tag { color: var(--brand); }
 .mon-xml-attr-name { color: var(--muted); }
@@ -5076,9 +5104,8 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-approval { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) 0; border-top: 1px solid var(--border); }
 .mon-approval:first-of-type { border-top: 0; }
 .mon-approval:last-of-type { padding-bottom: 0; }
-.mon-approval-main { text-align: left; background: none; border: 0; padding: 0; cursor: pointer; border-radius: var(--r-1); }
+.mon-approval-main { display: block; padding: var(--sp-2) var(--sp-3); }
 .mon-approval-main:hover .mon-approval-title { color: var(--brand); }
-.mon-approval-main:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
 .mon-approval-title { font-weight: 600; }
 .mon-approval-meta { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
 /* Agent-authored context is clamped to 3 lines — the question and its actions
@@ -5086,8 +5113,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-approval-summary-wrap { display: flex; flex-direction: column; align-items: flex-start; gap: 0; }
 .mon-approval-summary { color: var(--muted); font-size: var(--fs-2); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
 .mon-approval-summary.is-expanded { display: block; overflow: visible; }
-.mon-approval-more { display: inline; background: none; border: 0; padding: 0; cursor: pointer; color: var(--brand); font-size: var(--fs-1); font-weight: 600; }
-.mon-approval-more:hover { text-decoration: underline; }
+.mon-approval-more { font-size: var(--fs-1); font-weight: 600; }
 .mon-approval-actions { display: flex; gap: var(--sp-2); }
 .mon-approval-actions > * { flex: 1 1 0; justify-content: center; }
 /* The decision is the reason the panel exists: Approve is the filled primary. */
@@ -5127,7 +5153,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-table-runid { display: block; font-size: var(--fs-1); }
 .mon-table-failed { color: var(--tone); font-weight: 600; }
 .mon-table-progress { min-width: 72px; margin-bottom: var(--sp-1); }
-.mon-th-sort { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; font-weight: inherit; }
+.mon-th-sort { color: inherit; text-transform: inherit; letter-spacing: inherit; font-size: inherit; font-weight: inherit; }
 .mon-th-sort:hover { color: var(--brand); }
 .mon-sort-arrow { color: var(--brand); }
 .mon-sort-note { font-size: var(--fs-1); }
@@ -5142,20 +5168,16 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-detail-title { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .mon-detail-workflow { font-weight: 700; font-size: var(--fs-4); line-height: var(--lh-tight); letter-spacing: -0.01em; }
 .mon-detail-actions { display: flex; gap: var(--sp-2); }
-.mon-runid { align-self: flex-start; background: none; border: 0; padding: 0; cursor: pointer; font-family: var(--font-mono); font-size: var(--fs-1); color: var(--muted); }
+.mon-runid { align-self: flex-start; font-family: var(--font-mono); font-size: var(--fs-1); color: var(--muted); text-decoration: none; }
 .mon-runid:hover { color: var(--text); }
-.mon-runid:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
 .mon-progress { display: flex; align-items: center; gap: var(--sp-2); }
 .mon-progress-track { flex: 1; max-width: 320px; height: 5px; border-radius: var(--r-full); background: var(--brand-soft); overflow: hidden; }
 .mon-progress-fill { height: 100%; border-radius: var(--r-full); background: var(--brand); transition: width 300ms ease; }
 
 .mon-tree { overflow-x: auto; }
 .mon-tree-row { display: flex; align-items: center; border-radius: var(--r-1); }
-.mon-tree-row:hover { background: var(--hover); }
-.mon-tree-row.is-active { background: var(--brand-soft); }
-.mon-tree-chevron { width: 20px; flex: none; background: none; border: 0; cursor: pointer; color: var(--muted); text-align: center; }
-.mon-tree-main { display: flex; align-items: center; gap: var(--sp-2); flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: var(--sp-1) var(--sp-2) var(--sp-1) 0; cursor: pointer; }
-.mon-tree-chevron:focus-visible, .mon-tree-main:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
+.mon-tree-chevron { flex: none; color: var(--muted); }
+.mon-tree-main { justify-content: flex-start; gap: var(--sp-2); flex: 1; min-width: 0; padding: var(--sp-1) var(--sp-2); }
 .mon-tree-glyph { flex: none; width: 14px; text-align: center; cursor: help; }
 .mon-tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Containers (sequence/parallel/loop…) group tasks — they read quieter so
@@ -5166,7 +5188,6 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
    self-aligned when it doesn't. */
 .mon-tree-main .sui-badge { margin-left: auto; }
 .mon-tree-duration ~ .sui-badge { margin-left: var(--sp-2); }
-.mon-tree.is-static .mon-tree-main { cursor: default; }
 .mon-tree.is-static { opacity: 0.92; }
 .mon-tree-state { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); flex-wrap: wrap; margin-bottom: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-2); color: var(--muted); background: var(--panel); font-size: var(--fs-1); }
 .mon-tree-state-error { color: var(--err); border-color: var(--danger-border); background: var(--danger-soft); }
@@ -5205,10 +5226,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 
 /* Timeline: one row per (nodeId, iteration), chronological, click to inspect. */
 .mon-timeline { display: flex; flex-direction: column; overflow-y: auto; max-height: 60vh; }
-.mon-timeline-row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; text-align: left; padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--r-1); background: none; cursor: pointer; font-size: var(--fs-2); }
-.mon-timeline-row:hover { background: var(--hover); }
-.mon-timeline-row:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
-.mon-timeline-row.is-active { background: var(--brand-soft); box-shadow: inset 2px 0 0 var(--brand); }
+.mon-timeline-row { justify-content: flex-start; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); font-size: var(--fs-2); }
 .mon-timeline-node { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mon-timeline-row .mon-chip { flex: none; }
 .mon-timeline-attempt { flex: none; }
@@ -5317,19 +5335,16 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 /* "Needs you" band: the only colored surface on the overview. */
 .mon-needs { margin: 0 0 var(--sp-4); }
 .mon-needs-clear { display: flex; align-items: center; gap: var(--sp-2); border: 1px solid var(--success-border); border-radius: var(--r-3); padding: var(--sp-3) var(--panel-pad); background: var(--success-soft); color: var(--ok); font-weight: 600; }
-.mon-needs-row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: var(--sp-2) 0; border-top: 1px solid var(--border); background: none; border-left: 0; border-right: 0; border-bottom: 0; cursor: pointer; text-align: left; font: inherit; color: inherit; }
+.mon-needs-row { justify-content: flex-start; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
 .mon-needs-row:hover .mon-needs-name { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
-.mon-needs-row:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
 .mon-needs-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mon-needs-when { margin-left: auto; flex: none; font-variant-numeric: tabular-nums; }
 .mon-needs-more { font-size: var(--fs-1); padding: var(--sp-1) 0; }
 
 /* "Active now" band: one rich row per live run. */
 .mon-active-band { margin: 0 0 var(--sp-4); }
-.mon-active-row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: var(--sp-2) 0; border-top: 1px solid var(--border); background: none; border-left: 0; border-right: 0; border-bottom: 0; cursor: pointer; text-align: left; font: inherit; color: inherit; }
-.mon-active-row:first-of-type { border-top: 0; }
+.mon-active-row { justify-content: flex-start; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
 .mon-active-row:hover .mon-active-name { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
-.mon-active-row:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
 .mon-active-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mon-active-progress { flex: 1 1 220px; min-width: 120px; display: flex; justify-content: flex-end; }
 .mon-active-elapsed { flex: none; min-width: 64px; text-align: right; font-variant-numeric: tabular-nums; }
@@ -5337,8 +5352,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 /* Ops footer: the demoted stat tiles — one quiet line under everything. */
 .mon-ops-footer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); padding: var(--sp-3) 0 0; margin-top: var(--sp-4); border-top: 1px solid var(--border); font-size: var(--fs-1); }
 .mon-ops-footer-item { white-space: nowrap; }
-.mon-ops-footer-link { background: none; border: 0; padding: 0; cursor: pointer; color: var(--brand); font: inherit; font-weight: 600; }
-.mon-ops-footer-link:hover { text-decoration: underline; }
+.mon-ops-footer-link { font-weight: 600; }
 
 /* Keyboard cursor (j/k): distinct from hover so both can coexist. */
 .mon-runs-table-row.is-kbcursor { background: var(--hover); box-shadow: inset 2px 0 0 var(--brand); }

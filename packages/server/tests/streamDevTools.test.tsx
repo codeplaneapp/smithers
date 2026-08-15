@@ -716,6 +716,34 @@ describe("streamDevToolsRoute concurrency + performance", () => {
     sqlite.close();
   });
 
+  test("cancellation wakes a sleeping poller immediately", async () => {
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    ensureSmithersTables(db);
+    const adapter = new SmithersDb(db);
+    await seedFrames(adapter, "run-cancel-poll", 1);
+    const controller = new AbortController();
+    const stream = streamDevToolsRoute({
+      adapter,
+      runId: "run-cancel-poll",
+      signal: controller.signal,
+      pollIntervalMs: 60_000,
+    })[Symbol.asyncIterator]();
+    const first = await stream.next();
+    expect(first.done).toBe(false);
+    await sleep(10);
+
+    controller.abort();
+    const next = await Promise.race([
+      stream.next(),
+      sleep(250).then(() => {
+        throw new Error("sleeping DevTools poller did not observe cancellation");
+      }),
+    ]);
+    expect(next.done).toBe(true);
+    sqlite.close();
+  });
+
   test("reconnect storm: 100 subscribers complete without error", async () => {
     const sqlite = new Database(":memory:");
     const db = drizzle(sqlite);

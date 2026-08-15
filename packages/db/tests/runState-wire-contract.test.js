@@ -59,6 +59,22 @@ describe("RunStateView wire-contract", () => {
         configJson: null,
       },
       approvals: [{ nodeId: "n-approve", requestedAtMs: NOW - 5_000 }],
+      events: [
+        {
+          runId: "r-2",
+          seq: 7,
+          type: "RunConcurrencySaturated",
+          timestampMs: NOW - 10_000,
+          payloadJson: JSON.stringify({
+            type: "RunConcurrencySaturated",
+            runId: "r-2",
+            requestedDemand: 32,
+            effectiveCap: 16,
+            remediationCommand: "smithers up --max-concurrency 32",
+            timestampMs: NOW - 10_000,
+          }),
+        },
+      ],
     });
 
     // Each surface calls computeRunState and embeds the value verbatim.
@@ -85,6 +101,15 @@ describe("RunStateView wire-contract", () => {
         nodeId: "n-approve",
         requestedAt: new Date(NOW - 5_000).toISOString(),
       },
+      warnings: [
+        {
+          kind: "concurrency-ceiling-saturated",
+          requestedDemand: 32,
+          effectiveCap: 16,
+          remediationCommand: "smithers up --max-concurrency 32",
+          observedAt: new Date(NOW - 10_000).toISOString(),
+        },
+      ],
       computedAt: new Date(NOW).toISOString(),
     });
   });
@@ -96,6 +121,7 @@ describe("RunStateView wire-contract", () => {
  *   approvals?: any[],
  *   nodes?: any[],
  *   attemptsByKey?: Record<string, any[]>,
+ *   events?: any[],
  * }} state
  */
 function makeAdapter(state = {}) {
@@ -111,6 +137,9 @@ function makeAdapter(state = {}) {
     },
     async listAttempts(runId, nodeId, iteration) {
       return state.attemptsByKey?.[`${runId}|${nodeId}|${iteration}`] ?? [];
+    },
+    async listEventsByType(_runId, type) {
+      return type === "RunConcurrencySaturated" ? (state.events ?? []) : [];
     },
   };
 }
