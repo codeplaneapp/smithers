@@ -148,6 +148,8 @@ import { renderBrowserViewer } from "./gatewayUi/browserViewer.js";
 /**
  * @typedef {{
  *   connectionId?: string;
+ *   requestId?: string;
+ *   clientPid?: number | null;
  *   role?: string;
  *   scopes?: string[];
  *   userId?: string | null;
@@ -1159,6 +1161,30 @@ function gatewayContextAnnotations(context) {
   };
 }
 /**
+ * @param {GatewayRequestContext} context
+ * @param {RequestFrame} frame
+ * @returns {{
+ *   kind: "rpc";
+ *   detail: string;
+ *   requestId: string;
+ *   clientIdentity?: string;
+ *   clientPid?: number;
+ * }}
+ */
+function gatewayCancellationSource(context, frame) {
+  const transport = context.transport === "ws" ? "websocket" : context.transport === "http" ? "http" : "gateway";
+  const clientIdentity = asString(context.userId) ?? asString(context.tokenId);
+  const clientPid =
+    Number.isSafeInteger(context.clientPid) && Number(context.clientPid) > 0 ? Number(context.clientPid) : undefined;
+  return {
+    kind: "rpc",
+    detail: `${transport} cancellation request`,
+    requestId: asString(context.requestId) ?? frame.id,
+    ...(clientIdentity ? { clientIdentity } : {}),
+    ...(clientPid ? { clientPid } : {}),
+  };
+}
+/**
  * @param {Record<string, unknown>} [params]
  * @param {unknown} [payload]
  * @returns {Record<string, unknown>}
@@ -1277,6 +1303,16 @@ function headerValue(req, name) {
     return value[0] ?? null;
   }
   return typeof value === "string" ? value : null;
+}
+/**
+ * @param {IncomingMessage} req
+ * @returns {number | null}
+ */
+function gatewayClientPidFromHeader(req) {
+  const value = headerValue(req, "x-smithers-client-pid");
+  if (value === null) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 /**
  * Browser session cookie carrying the gateway bearer token. Browsers cannot
@@ -4745,6 +4781,8 @@ a { color: var(--brand); }</style>
     const url = new URL(`http://${host}${req.url ?? "/"}`);
     const baseContext = {
       connectionId: `api:${requestId}`,
+      requestId,
+      clientPid: gatewayClientPidFromHeader(req),
       transport: "http",
       role: null,
       scopes: [],
@@ -6966,6 +7004,12 @@ a { color: var(--brand); }</style>
     try {
       assertPositiveFiniteInteger("minProtocol", request.minProtocol);
       assertPositiveFiniteInteger("maxProtocol", request.maxProtocol);
+      if (request.client.pid !== undefined) {
+        assertPositiveFiniteInteger("client.pid", request.client.pid);
+        if (!Number.isSafeInteger(request.client.pid)) {
+          throw new SmithersError("INVALID_INPUT", "client.pid must be a safe integer greater than 0.");
+        }
+      }
     } catch (error) {
       if (error instanceof SmithersError) {
         return responseError(id, error.code, error.summary);
@@ -7040,6 +7084,7 @@ a { color: var(--brand); }</style>
     connection.scopes = [...authResult.scopes];
     connection.userId = authResult.userId ?? null;
     connection.tokenId = authResult.tokenId ?? null;
+    connection.clientPid = request.client.pid ?? null;
     const previousBrowserSessions = connection.subscribedBrowserSessions ?? new Set();
     connection.subscribedRuns = Array.isArray(request.subscribe)
       ? new Set(request.subscribe.filter((value) => typeof value === "string"))
@@ -7514,6 +7559,8 @@ a { color: var(--brand); }</style>
     const requestId = headerValue(req, "x-request-id") ?? randomUUID();
     const baseContext = {
       connectionId: `http:${requestId}`,
+      requestId,
+      clientPid: gatewayClientPidFromHeader(req),
       transport: "http",
       role: null,
       scopes: [],
@@ -10196,6 +10243,7 @@ a { color: var(--brand); }</style>
         if (!runId) {
           return responseError(frame.id, "INVALID_REQUEST", "runId is required");
         }
+        const attribution = gatewayCancellationSource(connection, frame);
         const active = this.activeRuns.get(runId);
         if (active) {
           const resolved = await this.resolveRun(runId).catch(() => null);
@@ -10203,7 +10251,10 @@ a { color: var(--brand); }</style>
             return responseError(frame.id, "RunNotFound", "Run not found");
           }
           const { finalizeCancelledRun } = await loadEngineRuntime();
-          const claimed = await finalizeCancelledRun(resolved.adapter, runId, { now: Date.now() });
+          const claimed = await finalizeCancelledRun(resolved.adapter, runId, {
+            now: Date.now(),
+            attribution,
+          });
           if (claimed.won) active.abort.abort();
           const cancelledRun = await resolved.adapter.getRun(runId);
           const cancellationSource = cancelledRun
@@ -10234,7 +10285,7 @@ a { color: var(--brand); }</style>
           return responseError(frame.id, "RUN_NOT_ACTIVE", "Run is not currently active");
         }
         const { finalizeCancelledRun } = await loadEngineRuntime();
-        const result = await finalizeCancelledRun(resolved.adapter, runId);
+        const result = await finalizeCancelledRun(resolved.adapter, runId, { attribution });
         const cancelledRun = await resolved.adapter.getRun(runId);
         const cancellationSource = cancelledRun
           ? asObject(serializeRunRow(cancelledRun))?.cancellationSource

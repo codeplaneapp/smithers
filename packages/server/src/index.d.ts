@@ -545,6 +545,7 @@ type ConnectRequest$1 = {
         id: string;
         version: string;
         platform: string;
+        pid?: number;
     };
     auth?: {
         token: string;
@@ -2469,6 +2470,8 @@ type GatewayMetricLabels = Record<string, string | number | null | undefined>;
 type GatewayTransport = "ws" | "http";
 type GatewayRequestContext = {
     connectionId?: string;
+    requestId?: string;
+    clientPid?: number | null;
     role?: string;
     scopes?: string[];
     userId?: string | null;
