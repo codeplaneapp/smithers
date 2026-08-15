@@ -215,6 +215,31 @@ describe("node attempt history", () => {
     ]);
   });
 
+  test("does not charge failures with the nested quota marker against retry budget", () => {
+    expect(
+      nodeAttemptHistoryRowsOf([
+        {
+          iteration: 0,
+          attempt: 1,
+          state: "failed",
+          errorJson: JSON.stringify({
+            code: "PROVIDER_THROTTLED",
+            message: "quota exhausted",
+            details: { failureQuota: true },
+          }),
+        },
+      ]),
+    ).toEqual([
+      {
+        iteration: 0,
+        attempt: 1,
+        state: "failed",
+        error: { code: "PROVIDER_THROTTLED", message: "quota exhausted" },
+        consumesRetryBudget: false,
+      },
+    ]);
+  });
+
   test("distinguishes scheduled, active, exhausted, and successful retries", () => {
     const failed = (attempt: number, retryAtMs?: number) => ({
       iteration: 0,

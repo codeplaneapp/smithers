@@ -248,7 +248,11 @@ export function nodeAttemptHistoryRowsOf(value: unknown): NodeAttemptHistoryRow[
     const retryState = isRecord(meta?.retryState) ? meta.retryState : null;
     const retryAtMs = asNumber(retryState?.retryAtMs);
     const retryable = typeof meta?.failureRetryable === "boolean" ? meta.failureRetryable : undefined;
-    const quota = errorRecord?.code === "AGENT_QUOTA_EXCEEDED" || meta?.failureQuota === true;
+    const errorDetails = isRecord(errorRecord?.details) ? errorRecord.details : null;
+    const quota =
+      errorRecord?.code === "AGENT_QUOTA_EXCEEDED" ||
+      errorDetails?.failureQuota === true ||
+      meta?.failureQuota === true;
     const startedAtMs = asNumber(pick(raw, "startedAtMs", "started_at_ms"));
     const finishedAtMs = asNumber(pick(raw, "finishedAtMs", "finished_at_ms"));
     out.push({
