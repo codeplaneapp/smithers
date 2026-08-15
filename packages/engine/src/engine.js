@@ -10820,7 +10820,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
       : { retryCounts: new Map(), retryWait: new Map() };
     const initialApprovals = new Set();
     if (opts.resume) {
-      const decidedApprovals = await Effect.runPromise(adapter.listAllDecidedApprovals(runId));
+      const decidedApprovals = await Effect.runPromise(adapter.listDecidedApprovals(runId));
       for (const approval of decidedApprovals) {
         if (!isRestorableApprovedTask(approval)) continue;
         initialApprovals.add(buildStateKey(approval.nodeId, approval.iteration));
