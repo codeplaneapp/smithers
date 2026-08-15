@@ -66,6 +66,7 @@ import {
   embedModeFromSearch,
   clampFrameNo,
   connectionViewFor,
+  concurrencySaturationWarningOf,
   cronRowsOf,
   dataRowsOf,
   describeErrorCounter,
@@ -3154,6 +3155,7 @@ function HealthStrip({
   runId,
   status,
   healthState,
+  concurrencySaturation,
   quota,
   runError,
   onResult,
@@ -3161,6 +3163,7 @@ function HealthStrip({
   runId: string;
   status: string | undefined;
   healthState: string | undefined;
+  concurrencySaturation: ReturnType<typeof concurrencySaturationWarningOf>;
   quota: ReturnType<typeof quotaInfoOf>;
   /** Run-level failure message (errorJson) — the only error a run that died before its first task has. */
   runError?: string;
@@ -3227,6 +3230,7 @@ function HealthStrip({
     runId,
     status,
     healthState,
+    concurrencySaturation,
     quota,
     approvalsCount,
     treeNodes,
@@ -4356,6 +4360,7 @@ function RunDetail({
   const finishedAtMs = asNumber(pick(run, "finishedAtMs", "finished_at_ms"));
   const runState = isRecord(run.runState) ? run.runState : null;
   const healthState = runState ? asString(runState.state) : undefined;
+  const concurrencySaturation = concurrencySaturationWarningOf(runState);
   const quota = quotaInfoOf(run);
   const workflowRows = (Array.isArray(workflowsQuery.data) ? workflowsQuery.data : []).filter(isRecord);
   const workflowRow = workflowRows.find((row) => asString(row.key) === workflowKey);
@@ -4530,6 +4535,7 @@ function RunDetail({
         runId={runId}
         status={status}
         healthState={healthState}
+        concurrencySaturation={concurrencySaturation}
         quota={quota}
         runError={runError}
         onResult={onResult}
