@@ -4,6 +4,7 @@ import { isPidAlive, parseRuntimeOwnerPid } from "@smthrs/engine/runtime-owner";
 import { reapOrphanedAgentProcesses } from "./reap-orphaned-agents.js";
 /** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("@smthrs/db/adapter").RunRow} RunRow */
+/** @typedef {import("@smthrs/observability").RunCancellationSource} RunCancellationSource */
 
 /**
  * Statuses `smithers cancel` can act on. Everything else (finished, failed,
@@ -133,10 +134,13 @@ export async function terminateRunOwner(pid, options = {}) {
  *
  * @param {SmithersDb} adapter
  * @param {Pick<RunRow, "runId" | "runtimeOwnerId">} run
- * @param {{ now?: number; terminateOwner?: typeof terminateRunOwner; ownerKillGraceMs?: number }} [options]
+ * @param {{ now?: number; terminateOwner?: typeof terminateRunOwner; ownerKillGraceMs?: number; attribution?: RunCancellationSource }} [options]
  */
 export async function finalizeCancelledOwnedRun(adapter, run, options = {}) {
-  const cancellation = await finalizeCancelledRun(adapter, run.runId, { now: options.now });
+  const cancellation = await finalizeCancelledRun(adapter, run.runId, {
+    now: options.now,
+    attribution: options.attribution,
+  });
   const ownerPid = parseRuntimeOwnerPid(run.runtimeOwnerId);
   let ownerTerminated = false;
   if (cancellation.won && ownerPid !== null && isPidAlive(ownerPid)) {
@@ -306,7 +310,7 @@ async function pruneForkSubtrees(adapter, rows) {
  *
  * @param {SmithersDb} adapter
  * @param {string} rootRunId
- * @param {{ now?: () => number; heartbeatFresh?: (run: RunRow) => boolean; terminateOwner?: typeof terminateRunOwner; ownerKillGraceMs?: number }} [options]
+ * @param {{ now?: () => number; heartbeatFresh?: (run: RunRow) => boolean; terminateOwner?: typeof terminateRunOwner; ownerKillGraceMs?: number; attribution?: RunCancellationSource }} [options]
  * @returns {Promise<CascadeCancelSummary>}
  */
 export async function cascadeCancelRun(adapter, rootRunId, options = {}) {
@@ -347,7 +351,7 @@ export async function cascadeCancelRun(adapter, rootRunId, options = {}) {
       ["in-progress", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota"].includes(attempt.state),
     ).length;
     if (wasFresh && !ownerIsKnownDead) {
-      const requested = await adapter.requestRunCancel(runId, now());
+      const requested = await adapter.requestRunCancel(runId, now(), options.attribution);
       if (requested) {
         outcome.action = "cancel-requested";
         return;
@@ -357,6 +361,7 @@ export async function cascadeCancelRun(adapter, rootRunId, options = {}) {
       now: now(),
       terminateOwner,
       ownerKillGraceMs: options.ownerKillGraceMs,
+      attribution: run.cancelRequestedAtMs == null ? options.attribution : undefined,
     });
     const result = ownedResult.cancellation;
     if (result.won || result.repaired) summary.cancelledAttempts += activeCount;

@@ -69,16 +69,23 @@ describe("createSlotGovernor (auto cap)", () => {
     const governor = createSlotGovernor(4, { explicit: false, ceiling: 6 });
     expect(governor.onSlotWait(4, 2).raiseTo).toBe(6);
     expect(governor.onSlotWait(6, 5)).toEqual({ warn: null, raiseTo: null });
-    const { warn, raiseTo } = governor.onSlotWait(6, 6);
+    const { warn, raiseTo, saturation } = governor.onSlotWait(6, 6);
     expect(raiseTo).toBeNull();
     expect(warn).toContain("maxConcurrency is 6");
+    expect(saturation).toEqual({
+      requestedDemand: 12,
+      effectiveCap: 6,
+      remediationCommand: "smithers up --max-concurrency 12",
+    });
     expect(governor.onSlotWait(6, 20)).toEqual({ warn: null, raiseTo: null });
   });
 
   test("cap already at or above the ceiling behaves as pinned", () => {
     const governor = createSlotGovernor(16, { explicit: false, ceiling: 16 });
     expect(governor.onSlotWait(16, 4).raiseTo).toBeNull();
-    expect(governor.onSlotWait(16, 16).warn).toContain("maxConcurrency is 16");
+    const decision = governor.onSlotWait(16, 16);
+    expect(decision.warn).toContain("maxConcurrency is 16");
+    expect(decision.saturation?.effectiveCap).toBe(16);
   });
 
   test("non-positive cap never raises", () => {
@@ -106,6 +113,14 @@ describe("createSlotGovernor (declared parallel width)", () => {
     // Demand-driven raises stay clamped to the ceiling, which the declared
     // width already exceeds: no further raise past the declared 64.
     expect(governor.onSlotWait(64, 10)).toEqual({ warn: null, raiseTo: null });
+  });
+
+  test("a declared width above the ceiling is not reported as ceiling saturation", () => {
+    const governor = createSlotGovernor(4, { explicit: false, ceiling: 16 });
+    governor.onDeclaredWidth(64);
+    const decision = governor.onSlotWait(64, 64);
+    expect(decision.warn).toContain("maxConcurrency is 64");
+    expect(decision.saturation).toBeUndefined();
   });
 
   test("an explicit pin is never raised by a declared width", () => {

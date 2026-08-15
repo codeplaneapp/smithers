@@ -10,4 +10,5 @@ export type GatewayRunRow = Record<string, unknown> & {
   summary?: unknown;
   runState?: unknown;
   startedBy?: import("@smthrs/protocol/gateway-rpc").RunStartedBy;
+  cancellationSource?: import("@smthrs/protocol/gateway-rpc").RunCancellationSource;
 };

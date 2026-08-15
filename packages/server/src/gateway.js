@@ -148,6 +148,8 @@ import { renderBrowserViewer } from "./gatewayUi/browserViewer.js";
 /**
  * @typedef {{
  *   connectionId?: string;
+ *   requestId?: string;
+ *   clientPid?: number | null;
  *   role?: string;
  *   scopes?: string[];
  *   userId?: string | null;
@@ -1159,6 +1161,30 @@ function gatewayContextAnnotations(context) {
   };
 }
 /**
+ * @param {GatewayRequestContext} context
+ * @param {RequestFrame} frame
+ * @returns {{
+ *   kind: "rpc";
+ *   detail: string;
+ *   requestId: string;
+ *   clientIdentity?: string;
+ *   clientPid?: number;
+ * }}
+ */
+function gatewayCancellationSource(context, frame) {
+  const transport = context.transport === "ws" ? "websocket" : context.transport === "http" ? "http" : "gateway";
+  const clientIdentity = asString(context.userId) ?? asString(context.tokenId);
+  const clientPid =
+    Number.isSafeInteger(context.clientPid) && Number(context.clientPid) > 0 ? Number(context.clientPid) : undefined;
+  return {
+    kind: "rpc",
+    detail: `${transport} cancellation request`,
+    requestId: asString(context.requestId) ?? frame.id,
+    ...(clientIdentity ? { clientIdentity } : {}),
+    ...(clientPid ? { clientPid } : {}),
+  };
+}
+/**
  * @param {Record<string, unknown>} [params]
  * @param {unknown} [payload]
  * @returns {Record<string, unknown>}
@@ -1277,6 +1303,16 @@ function headerValue(req, name) {
     return value[0] ?? null;
   }
   return typeof value === "string" ? value : null;
+}
+/**
+ * @param {IncomingMessage} req
+ * @returns {number | null}
+ */
+function gatewayClientPidFromHeader(req) {
+  const value = headerValue(req, "x-smithers-client-pid");
+  if (value === null) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 /**
  * Browser session cookie carrying the gateway bearer token. Browsers cannot
@@ -2584,6 +2620,13 @@ export class Gateway {
   /** @type {Map<string, Promise<void>>} */
   workflowRegistryRefreshes = new Map();
   /**
+   * Register-time rewind recovery touches the workflow database after
+   * `register()` returns. Track those jobs so `close()` is a real I/O barrier:
+   * callers may safely close or remove their backend once it resolves.
+   * @type {Set<Promise<void>>}
+   */
+  startupRecoveryJobs = new Set();
+  /**
    * Background <UI>/<TUI> discovery. register() never renders a workflow
    * synchronously: renders are queued and drained one per macrotask so a slow
    * or throwing workflow can neither block startup nor starve /health.
@@ -2625,6 +2668,8 @@ export class Gateway {
    */
   inflightResumes = new Map();
   devtoolsSubscribers = new Map();
+  /** @type {Set<Promise<void>>} */
+  devtoolsStreamJobs = new Set();
   runEventWindows = new Map();
   runEventSubscriberCounts = new Map();
   runEventSubscriberTotal = 0;
@@ -4745,6 +4790,8 @@ a { color: var(--brand); }</style>
     const url = new URL(`http://${host}${req.url ?? "/"}`);
     const baseContext = {
       connectionId: `api:${requestId}`,
+      requestId,
+      clientPid: gatewayClientPidFromHeader(req),
       transport: "http",
       role: null,
       scopes: [],
@@ -5216,17 +5263,22 @@ a { color: var(--brand); }</style>
     // `needs_attention`. Runs asynchronously; failures are logged and
     // never block registration.
     const adapter = new SmithersDb(workflow.db);
-    recoverInProgressRewindAudits(adapter).catch((error) => {
-      emitGatewayLog(
-        "warning",
-        "rewind audit recovery failed",
-        {
-          workflow: key,
-          ...gatewayErrorAnnotations(error),
-        },
-        "gateway:startup-recovery",
-      );
-    });
+    const recoveryJob = recoverInProgressRewindAudits(adapter)
+      .catch((error) => {
+        emitGatewayLog(
+          "warning",
+          "rewind audit recovery failed",
+          {
+            workflow: key,
+            ...gatewayErrorAnnotations(error),
+          },
+          "gateway:startup-recovery",
+        );
+      })
+      .finally(() => {
+        this.startupRecoveryJobs.delete(recoveryJob);
+      });
+    this.startupRecoveryJobs.add(recoveryJob);
     return this;
   }
   /**
@@ -5835,9 +5887,36 @@ a { color: var(--brand); }</style>
     for (const activeRun of activeRuns) {
       activeRun.abort.abort();
     }
+    // Approval decisions can start a detached resume while the original run
+    // is still settling. Drain that gate before taking the final active/inflight
+    // snapshots so a resume cannot begin using its database after close.
+    const inflightResumes = [...this.inflightResumes.values()];
+    if (inflightResumes.length > 0) {
+      await Promise.allSettled(inflightResumes);
+    }
+    // A resume that had already entered startRun before gatewayClosing was set
+    // may have registered while we awaited it. Abort that raced run too.
+    for (const activeRun of this.activeRuns.values()) {
+      activeRun.abort.abort();
+    }
     const inflightRuns = [...this.inflightRuns.values()];
     if (inflightRuns.length > 0) {
       await Promise.allSettled(inflightRuns);
+    }
+    const startupRecoveryJobs = [...this.startupRecoveryJobs];
+    if (startupRecoveryJobs.length > 0) {
+      await Promise.allSettled(startupRecoveryJobs);
+    }
+    // streamDevTools workers poll workflow databases independently of the
+    // websocket. Abort every registered worker (including direct route users
+    // that are not in `connections`) and wait for its generator finalizer
+    // before callers tear down the backend.
+    for (const subscriber of this.devtoolsSubscribers.values()) {
+      subscriber.abort.abort();
+    }
+    const devtoolsStreamJobs = [...this.devtoolsStreamJobs];
+    if (devtoolsStreamJobs.length > 0) {
+      await Promise.allSettled(devtoolsStreamJobs);
     }
     for (const connection of this.connections) {
       // Fence any subscribe handler still awaiting resolveRun(), then
@@ -6653,6 +6732,9 @@ a { color: var(--brand); }</style>
    * @param {RunStartAuthContext} auth
    */
   async resumeRunIfNeeded(runId, workflowKey, adapter, auth) {
+    if (this.gatewayClosing) {
+      return;
+    }
     const existingResume = this.inflightResumes.get(runId);
     if (existingResume) {
       await existingResume;
@@ -6660,11 +6742,17 @@ a { color: var(--brand); }</style>
     }
     const resumePromise = (async () => {
       for (let attempt = 0; attempt < 20; attempt += 1) {
+        if (this.gatewayClosing) {
+          return;
+        }
         if (this.activeRuns.has(runId)) {
           await delay(25);
           continue;
         }
         const run = await adapter.getRun(runId);
+        if (this.gatewayClosing) {
+          return;
+        }
         if (!run) {
           return;
         }
@@ -6966,6 +7054,12 @@ a { color: var(--brand); }</style>
     try {
       assertPositiveFiniteInteger("minProtocol", request.minProtocol);
       assertPositiveFiniteInteger("maxProtocol", request.maxProtocol);
+      if (request.client.pid !== undefined) {
+        assertPositiveFiniteInteger("client.pid", request.client.pid);
+        if (!Number.isSafeInteger(request.client.pid)) {
+          throw new SmithersError("INVALID_INPUT", "client.pid must be a safe integer greater than 0.");
+        }
+      }
     } catch (error) {
       if (error instanceof SmithersError) {
         return responseError(id, error.code, error.summary);
@@ -7040,6 +7134,7 @@ a { color: var(--brand); }</style>
     connection.scopes = [...authResult.scopes];
     connection.userId = authResult.userId ?? null;
     connection.tokenId = authResult.tokenId ?? null;
+    connection.clientPid = request.client.pid ?? null;
     const previousBrowserSessions = connection.subscribedBrowserSessions ?? new Set();
     connection.subscribedRuns = Array.isArray(request.subscribe)
       ? new Set(request.subscribe.filter((value) => typeof value === "string"))
@@ -7514,6 +7609,8 @@ a { color: var(--brand); }</style>
     const requestId = headerValue(req, "x-request-id") ?? randomUUID();
     const baseContext = {
       connectionId: `http:${requestId}`,
+      requestId,
+      clientPid: gatewayClientPidFromHeader(req),
       transport: "http",
       role: null,
       scopes: [],
@@ -8023,12 +8120,15 @@ a { color: var(--brand); }</style>
         if (!includeSystem && system) {
           continue;
         }
-        byRunId.set(row.runId, {
-          ...row,
-          workflowKey,
-          system,
-          ...(rowStartedBy ? { startedBy: rowStartedBy } : {}),
-        });
+        byRunId.set(
+          row.runId,
+          serializeRunRow({
+            ...row,
+            workflowKey,
+            system,
+            ...(rowStartedBy ? { startedBy: rowStartedBy } : {}),
+          }),
+        );
       }
     }
     const results = [...byRunId.values()];
@@ -9371,18 +9471,21 @@ a { color: var(--brand); }</style>
           readPersistedDegradedOutcome(resolved.adapter, runId, run.status),
         ]);
         const startedBy = runStartedByFromRow(run);
-        return responseOk(frame.id, {
-          ...run,
-          workflowKey: resolved.workflowKey,
-          system: runSystemFromRow(run),
-          summary: summary.reduce((acc, row) => {
-            acc[row.state] = row.count;
-            return acc;
-          }, {}),
-          ...(runState ? { runState } : {}),
-          ...(startedBy ? { startedBy } : {}),
-          ...degradedOutcome,
-        });
+        return responseOk(
+          frame.id,
+          serializeRunRow({
+            ...run,
+            workflowKey: resolved.workflowKey,
+            system: runSystemFromRow(run),
+            summary: summary.reduce((acc, row) => {
+              acc[row.state] = row.count;
+              return acc;
+            }, {}),
+            ...(runState ? { runState } : {}),
+            ...(startedBy ? { startedBy } : {}),
+            ...degradedOutcome,
+          }),
+        );
       }
       case "frames.list": {
         const runId = asString(params.runId);
@@ -9723,9 +9826,9 @@ a { color: var(--brand); }</style>
               );
             }
           }
-          if (connection.closed) {
+          if (this.gatewayClosing || connection.closed) {
             // The WS closed while resolveRun()/getLastFrame() were in
-            // flight; its close path already ran
+            // flight, or the gateway began closing; teardown already ran
             // cleanupDevToolsSubscribers for this connection.
             // Registering now would leak a subscriber that stays in
             // devtoolsSubscribers with a never-aborted signal (#553).
@@ -9795,7 +9898,7 @@ a { color: var(--brand); }</style>
             outboundQueue.push(payload);
             drainOutboundQueue();
           };
-          void (async () => {
+          const streamJob = (async () => {
             let eventsDelivered = 0;
             try {
               for await (const event of streamDevToolsRoute({
@@ -9889,6 +9992,12 @@ a { color: var(--brand); }</style>
               });
             }
           })();
+          this.devtoolsStreamJobs.add(streamJob);
+          void streamJob
+            .finally(() => {
+              this.devtoolsStreamJobs.delete(streamJob);
+            })
+            .catch(() => {});
           return responseOk(frame.id, {
             streamId,
             runId,
@@ -10190,6 +10299,7 @@ a { color: var(--brand); }</style>
         if (!runId) {
           return responseError(frame.id, "INVALID_REQUEST", "runId is required");
         }
+        const attribution = gatewayCancellationSource(connection, frame);
         const active = this.activeRuns.get(runId);
         if (active) {
           const resolved = await this.resolveRun(runId).catch(() => null);
@@ -10197,9 +10307,19 @@ a { color: var(--brand); }</style>
             return responseError(frame.id, "RunNotFound", "Run not found");
           }
           const { finalizeCancelledRun } = await loadEngineRuntime();
-          const claimed = await finalizeCancelledRun(resolved.adapter, runId, { now: Date.now() });
+          const claimed = await finalizeCancelledRun(resolved.adapter, runId, {
+            now: Date.now(),
+            attribution,
+          });
           if (claimed.won) active.abort.abort();
-          return responseOk(frame.id, claimed);
+          const cancelledRun = await resolved.adapter.getRun(runId);
+          const cancellationSource = cancelledRun
+            ? asObject(serializeRunRow(cancelledRun))?.cancellationSource
+            : undefined;
+          return responseOk(frame.id, {
+            ...claimed,
+            ...(cancellationSource ? { cancellationSource } : {}),
+          });
         }
         const resolved = await this.resolveRun(runId).catch(() => null);
         const run = resolved ? await resolved.adapter.getRun(runId) : null;
@@ -10221,8 +10341,15 @@ a { color: var(--brand); }</style>
           return responseError(frame.id, "RUN_NOT_ACTIVE", "Run is not currently active");
         }
         const { finalizeCancelledRun } = await loadEngineRuntime();
-        const result = await finalizeCancelledRun(resolved.adapter, runId);
-        return responseOk(frame.id, result);
+        const result = await finalizeCancelledRun(resolved.adapter, runId, { attribution });
+        const cancelledRun = await resolved.adapter.getRun(runId);
+        const cancellationSource = cancelledRun
+          ? asObject(serializeRunRow(cancelledRun))?.cancellationSource
+          : undefined;
+        return responseOk(frame.id, {
+          ...result,
+          ...(cancellationSource ? { cancellationSource } : {}),
+        });
       }
       case "runs.pause":
       case "pauseRun": {

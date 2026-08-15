@@ -31,6 +31,7 @@ import {
   cancelConfirmationTransition,
   clampFrameNo,
   connectionViewFor,
+  concurrencySaturationWarningOf,
   diagnoseRun,
   diffPatchesOf,
   diffSummaryOf,
@@ -921,6 +922,38 @@ describe("diagnoseRun", () => {
     expect(d.headline).toContain("Healthy");
     expect(d.detail).toContain("1/3 tasks done");
     expect(d.detail).toContain("b");
+  });
+
+  test("durable concurrency saturation makes the health strip actionable and yellow", () => {
+    const warning = concurrencySaturationWarningOf({
+      warnings: [
+        {
+          kind: "concurrency-ceiling-saturated",
+          requestedDemand: 32,
+          effectiveCap: 16,
+          remediationCommand: "smithers up --max-concurrency 32",
+          observedAt: "2026-01-02T03:04:05.000Z",
+        },
+      ],
+    });
+    expect(warning).toEqual({
+      requestedDemand: 32,
+      effectiveCap: 16,
+      remediationCommand: "smithers up --max-concurrency 32",
+      observedAt: "2026-01-02T03:04:05.000Z",
+    });
+
+    const diagnosis = diagnoseRun({
+      ...base,
+      status: "running",
+      concurrencySaturation: warning,
+      treeNodes: nodes(["a", "ok"], ["b", "running"]),
+    });
+    expect(diagnosis.tone).toBe("warn");
+    expect(diagnosis.headline).toContain("Concurrency ceiling");
+    expect(diagnosis.detail).toContain("32 tasks");
+    expect(diagnosis.detail).toContain("16");
+    expect(diagnosis.fix).toContain("smithers up --max-concurrency 32");
   });
 
   test("quota park is yellow with who and how to fix", () => {

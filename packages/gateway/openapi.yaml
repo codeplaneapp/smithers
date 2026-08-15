@@ -912,13 +912,56 @@ paths:
                       runId:
                         type: string
                         description: "Stable run identifier."
+                      won:
+                        type: boolean
+                        description: "Whether this request won the durable cancellation claim."
                       status:
                         type: string
                         enum:
-                          - cancelling
+                          - cancelled
+                          - already-terminal
+                          - not-found
+                      terminalStatus:
+                        type: string
+                        description: "Persisted terminal status after cancellation finalization."
+                      repaired:
+                        type: boolean
+                        description: "Whether replay repaired incomplete cancellation cleanup."
+                      cancellationSource:
+                        type: object
+                        description: "Durable attribution for the first caller that cancelled the run."
+                        properties:
+                          kind:
+                            type: string
+                            enum:
+                              - signal
+                              - rpc
+                              - cli
+                              - engine
+                          detail:
+                            type: string
+                            description: "Human-readable cancellation detail."
+                          signal:
+                            type: string
+                            description: "POSIX signal that initiated cancellation."
+                          clientPid:
+                            type: integer
+                            minimum: 1
+                            description: "Process id of the cancellation caller."
+                          requestId:
+                            type: string
+                            description: "Request id of the first cancellation caller."
+                          clientIdentity:
+                            type: string
+                            description: "Authenticated identity of the first cancellation caller."
+                        required:
+                          - kind
+                        additionalProperties: false
                     required:
                       - runId
+                      - won
                       - status
+                      - repaired
                     additionalProperties: false
               example:
                 type: res
@@ -927,7 +970,16 @@ paths:
                 apiVersion: v1
                 payload:
                   runId: run_01
-                  status: cancelling
+                  won: true
+                  status: cancelled
+                  terminalStatus: cancelled
+                  repaired: false
+                  cancellationSource:
+                    kind: rpc
+                    detail: "websocket cancellation request"
+                    clientPid: 4321
+                    requestId: cancelRun-1
+                    clientIdentity: user:operator
         400:
           description: "The request shape is invalid."
           content:
@@ -4088,6 +4140,36 @@ paths:
                           - state
                           - computedAt
                         additionalProperties: true
+                      cancellationSource:
+                        type: object
+                        description: "Durable attribution for the first caller that cancelled the run."
+                        properties:
+                          kind:
+                            type: string
+                            enum:
+                              - signal
+                              - rpc
+                              - cli
+                              - engine
+                          detail:
+                            type: string
+                            description: "Human-readable cancellation detail."
+                          signal:
+                            type: string
+                            description: "POSIX signal that initiated cancellation."
+                          clientPid:
+                            type: integer
+                            minimum: 1
+                            description: "Process id of the cancellation caller."
+                          requestId:
+                            type: string
+                            description: "Request id of the first cancellation caller."
+                          clientIdentity:
+                            type: string
+                            description: "Authenticated identity of the first cancellation caller."
+                        required:
+                          - kind
+                        additionalProperties: false
                     required:
                       - runId
                       - system
@@ -5011,6 +5093,36 @@ paths:
                         system:
                           type: boolean
                           description: "Whether this run belongs to an internal system workflow."
+                        cancellationSource:
+                          type: object
+                          description: "Durable attribution for the first caller that cancelled the run."
+                          properties:
+                            kind:
+                              type: string
+                              enum:
+                                - signal
+                                - rpc
+                                - cli
+                                - engine
+                            detail:
+                              type: string
+                              description: "Human-readable cancellation detail."
+                            signal:
+                              type: string
+                              description: "POSIX signal that initiated cancellation."
+                            clientPid:
+                              type: integer
+                              minimum: 1
+                              description: "Process id of the cancellation caller."
+                            requestId:
+                              type: string
+                              description: "Request id of the first cancellation caller."
+                            clientIdentity:
+                              type: string
+                              description: "Authenticated identity of the first cancellation caller."
+                          required:
+                            - kind
+                          additionalProperties: false
                       required:
                         - runId
                         - status
@@ -20509,8 +20621,66 @@ paths:
                     const: true
                   data:
                     type: array
+                    description: "Run summaries."
                     items:
                       type: object
+                      description: "Run summary view."
+                      properties:
+                        runId:
+                          type: string
+                          description: "Stable run identifier."
+                        workflowKey:
+                          type: string
+                          description: "Registered Gateway workflow key."
+                        status:
+                          type: string
+                          description: "Current run status."
+                        createdAtMs:
+                          type: integer
+                          minimum: 0
+                          description: "Unix epoch milliseconds."
+                        parentRunId:
+                          type:
+                            - string
+                            - "null"
+                          description: "Immediate parent run id, if this is a child run."
+                        system:
+                          type: boolean
+                          description: "Whether this run belongs to an internal system workflow."
+                        cancellationSource:
+                          type: object
+                          description: "Durable attribution for the first caller that cancelled the run."
+                          properties:
+                            kind:
+                              type: string
+                              enum:
+                                - signal
+                                - rpc
+                                - cli
+                                - engine
+                            detail:
+                              type: string
+                              description: "Human-readable cancellation detail."
+                            signal:
+                              type: string
+                              description: "POSIX signal that initiated cancellation."
+                            clientPid:
+                              type: integer
+                              minimum: 1
+                              description: "Process id of the cancellation caller."
+                            requestId:
+                              type: string
+                              description: "Request id of the first cancellation caller."
+                            clientIdentity:
+                              type: string
+                              description: "Authenticated identity of the first cancellation caller."
+                          required:
+                            - kind
+                          additionalProperties: false
+                      required:
+                        - runId
+                        - status
+                        - system
                       additionalProperties: true
                   txid:
                     type: string
@@ -21089,6 +21259,105 @@ paths:
                     const: true
                   data:
                     type: object
+                    description: "Current run record, including node-state counts and optional derived runState."
+                    properties:
+                      runId:
+                        type: string
+                        description: "Stable run identifier."
+                      workflowKey:
+                        type: string
+                        description: "Registered Gateway workflow key."
+                      system:
+                        type: boolean
+                        description: "Whether this run belongs to an internal system workflow."
+                      status:
+                        type: string
+                        description: "Persisted run status."
+                      createdAtMs:
+                        type: integer
+                        minimum: 0
+                        description: "Unix epoch milliseconds."
+                      startedAtMs:
+                        type:
+                          - integer
+                          - "null"
+                        minimum: 0
+                        description: "Unix epoch milliseconds."
+                      finishedAtMs:
+                        type:
+                          - integer
+                          - "null"
+                        minimum: 0
+                        description: "Unix epoch milliseconds."
+                      summary:
+                        type: object
+                        description: "Counts keyed by persisted node state."
+                        properties: {}
+                        required: []
+                        additionalProperties: true
+                      runState:
+                        type: object
+                        description: "Derived RunStateView for the run."
+                        properties:
+                          runId:
+                            type: string
+                            description: "Stable run identifier."
+                          state:
+                            type: string
+                            description: "Derived lifecycle state."
+                          computedAt:
+                            type: string
+                            description: "ISO timestamp for when the view was computed."
+                          blocked:
+                            type: object
+                            description: "Optional blocked-run reason."
+                            properties: {}
+                            required: []
+                            additionalProperties: true
+                          unhealthy:
+                            type: object
+                            description: "Optional unhealthy-run reason."
+                            properties: {}
+                            required: []
+                            additionalProperties: true
+                        required:
+                          - runId
+                          - state
+                          - computedAt
+                        additionalProperties: true
+                      cancellationSource:
+                        type: object
+                        description: "Durable attribution for the first caller that cancelled the run."
+                        properties:
+                          kind:
+                            type: string
+                            enum:
+                              - signal
+                              - rpc
+                              - cli
+                              - engine
+                          detail:
+                            type: string
+                            description: "Human-readable cancellation detail."
+                          signal:
+                            type: string
+                            description: "POSIX signal that initiated cancellation."
+                          clientPid:
+                            type: integer
+                            minimum: 1
+                            description: "Process id of the cancellation caller."
+                          requestId:
+                            type: string
+                            description: "Request id of the first cancellation caller."
+                          clientIdentity:
+                            type: string
+                            description: "Authenticated identity of the first cancellation caller."
+                        required:
+                          - kind
+                        additionalProperties: false
+                    required:
+                      - runId
+                      - system
                     additionalProperties: true
                   txid:
                     type: string
@@ -21951,7 +22220,61 @@ paths:
                     const: true
                   data:
                     type: object
-                    additionalProperties: true
+                    properties:
+                      runId:
+                        type: string
+                        description: "Stable run identifier."
+                      won:
+                        type: boolean
+                        description: "Whether this request won the durable cancellation claim."
+                      status:
+                        type: string
+                        enum:
+                          - cancelled
+                          - already-terminal
+                          - not-found
+                      terminalStatus:
+                        type: string
+                        description: "Persisted terminal status after cancellation finalization."
+                      repaired:
+                        type: boolean
+                        description: "Whether replay repaired incomplete cancellation cleanup."
+                      cancellationSource:
+                        type: object
+                        description: "Durable attribution for the first caller that cancelled the run."
+                        properties:
+                          kind:
+                            type: string
+                            enum:
+                              - signal
+                              - rpc
+                              - cli
+                              - engine
+                          detail:
+                            type: string
+                            description: "Human-readable cancellation detail."
+                          signal:
+                            type: string
+                            description: "POSIX signal that initiated cancellation."
+                          clientPid:
+                            type: integer
+                            minimum: 1
+                            description: "Process id of the cancellation caller."
+                          requestId:
+                            type: string
+                            description: "Request id of the first cancellation caller."
+                          clientIdentity:
+                            type: string
+                            description: "Authenticated identity of the first cancellation caller."
+                        required:
+                          - kind
+                        additionalProperties: false
+                    required:
+                      - runId
+                      - won
+                      - status
+                      - repaired
+                    additionalProperties: false
                   txid:
                     type: string
                     pattern: "^\\d+$"

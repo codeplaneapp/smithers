@@ -32,17 +32,24 @@ const { workflowUiThemeCss } = await import("smthrs/gateway-ui");
 const { Chip, MonitorToolbar, RunLifecycleActions, RunLifecycleControls, RunRailRow, RunsPagination } =
   await import("../src/monitor-ui/monitorShell.tsx");
 const {
+  ActiveNowBand,
+  ApprovalCard,
+  CopyableRunId,
   CronStatusTag,
   createMonitorKeydownHandler,
   EventLog,
   ExecutionTree,
   monitorCss,
+  NodeOutputState,
+  NodeTranscriptState,
   RunProgressCell,
   RunSelectionState,
   RunsRail,
   RunsTable,
   StatCard,
   StatusTag,
+  TimelinePanel,
+  NeedsYouRunRow,
 } = await import("../src/monitor-ui/monitor.tsx");
 const monitorSource = readFileSync(new URL("../src/monitor-ui/monitor.tsx", import.meta.url), "utf8");
 
@@ -174,6 +181,91 @@ function buttonNamed(name: string): HTMLButtonElement {
   return button;
 }
 
+function nodeOutputState(overrides: Partial<Parameters<typeof NodeOutputState>[0]> = {}): ReactElement {
+  return <NodeOutputState row={null} loading={false} failure={null} live={false} onRetry={() => {}} {...overrides} />;
+}
+
+function nodeTranscriptState(overrides: Partial<Parameters<typeof NodeTranscriptState>[0]> = {}): ReactElement {
+  return <NodeTranscriptState lines={[]} loading={false} live={false} onRetry={() => {}} {...overrides} />;
+}
+
+describe("node inspector output states", () => {
+  test("renders structured output and keeps it visible when a refresh fails", async () => {
+    await render(nodeOutputState({ row: { summary: "done" } }));
+    expect(byTestId("monitor-output-fields").textContent).toContain("done");
+
+    await rerender(nodeOutputState({ row: { summary: "done" }, error: new Error("gateway timed out") }));
+    expect(byTestId("monitor-output-fields").textContent).toContain("done");
+    expect(byTestId("monitor-output-error").textContent).toContain("gateway timed out");
+  });
+
+  test("distinguishes loading from every missing-output outcome", async () => {
+    await render(nodeOutputState({ loading: true }));
+    expect(byTestId("monitor-output-loading").getAttribute("role")).toBe("status");
+
+    await rerender(nodeOutputState({ failure: { message: "agent failed" } }));
+    expect(byTestId("monitor-output-failed").textContent).toContain("Failure details are shown above");
+
+    await rerender(nodeOutputState({ live: true }));
+    expect(byTestId("monitor-output-live").textContent).toContain("running");
+
+    await rerender(nodeOutputState());
+    expect(byTestId("monitor-output-empty").textContent).toContain("completed without recording structured output");
+  });
+
+  test("makes output query failures actionable", async () => {
+    let retries = 0;
+    await render(
+      nodeOutputState({
+        error: new Error("output unavailable"),
+        onRetry: () => retries++,
+      }),
+    );
+    expect(byTestId("monitor-output-error").getAttribute("role")).toBe("alert");
+    expect(byTestId("monitor-output-error").textContent).toContain("output unavailable");
+    await click(byTestId("monitor-output-retry"));
+    expect(retries).toBe(1);
+  });
+});
+
+describe("node inspector transcript states", () => {
+  test("distinguishes loading and empty live or completed transcripts", async () => {
+    await render(nodeTranscriptState({ loading: true }));
+    expect(byTestId("monitor-transcript-loading").getAttribute("role")).toBe("status");
+
+    await rerender(nodeTranscriptState({ live: true }));
+    expect(byTestId("monitor-transcript-empty").textContent).toContain("No transcript events from this node yet");
+
+    await rerender(nodeTranscriptState());
+    expect(byTestId("monitor-transcript-empty").textContent).toContain("finished without recording transcript events");
+  });
+
+  test("makes transcript fetch failures actionable", async () => {
+    let retries = 0;
+    await render(
+      nodeTranscriptState({
+        error: new Error("events unavailable"),
+        onRetry: () => retries++,
+      }),
+    );
+    expect(byTestId("monitor-transcript-error").getAttribute("role")).toBe("alert");
+    expect(byTestId("monitor-transcript-error").textContent).toContain("events unavailable");
+    await click(byTestId("monitor-transcript-retry"));
+    expect(retries).toBe(1);
+  });
+
+  test("keeps recorded transcript lines visible when a later poll fails", async () => {
+    await render(
+      nodeTranscriptState({
+        lines: [{ seq: 1, text: "agent output", kind: "text" }],
+        error: new Error("poll failed"),
+      }),
+    );
+    expect(byTestId("monitor-live-output").textContent).toContain("agent output");
+    expect(byTestId("monitor-transcript-error").textContent).toContain("poll failed");
+  });
+});
+
 describe("shared control styling contract", () => {
   test("mounting shell controls injects the sui sheet with focus/disabled recipes exactly once", async () => {
     const { element } = toolbarHarness();
@@ -192,6 +284,166 @@ describe("shared control styling contract", () => {
     ]) {
       expect(smithersUiCss).toContain(rule);
     }
+  });
+
+  test("every monitor JSX control delegates native button and input semantics to shared primitives", () => {
+    expect(monitorSource).not.toMatch(/<\/?button\b/);
+    expect(monitorSource).not.toMatch(/<input\b/);
+    expect(monitorSource).toContain("<Button");
+    expect(monitorSource).toContain("<Input");
+    expect(monitorSource).toContain("<RowButton");
+    expect(monitorSource).toContain("<Chip");
+  });
+});
+
+describe("remaining monitor control migrations", () => {
+  const run = {
+    runId: "run-control-42",
+    workflowKey: "control-workflow",
+    status: "running",
+    createdAtMs: Date.now() - 2_000,
+    startedAtMs: Date.now() - 1_000,
+    summary: { finished: 1, pending: 1 },
+  };
+
+  test("copy, approval, overview, and active-run actions expose shared button slots", async () => {
+    const selected: string[] = [];
+    await render(
+      <div>
+        <CopyableRunId runId={run.runId} />
+        <ApprovalCard
+          approval={{
+            runId: run.runId,
+            nodeId: "gate",
+            requestTitle: "Ship it?",
+            requestSummary: "Review the release evidence before deciding.",
+          }}
+          busy={false}
+          decide={async () => {}}
+          onSelectRun={(runId) => selected.push(runId)}
+        />
+        <NeedsYouRunRow run={{ ...run, status: "waiting-approval" }} onSelectRun={(runId) => selected.push(runId)} />
+        <ActiveNowBand runs={[run]} onSelectRun={(runId) => selected.push(runId)} />
+      </div>,
+    );
+
+    const copy = byTestId("monitor-copy-run-id") as HTMLButtonElement;
+    expect(copy.getAttribute("data-slot")).toBe("button");
+    expect(copy.className).toContain("sui-button-link");
+    expect(copy.type).toBe("button");
+    await act(async () => copy.focus());
+    expect(document.activeElement).toBe(copy);
+
+    const approval = byTestId("monitor-approval-open");
+    const needs = byTestId("monitor-needs-run-row");
+    const active = byTestId("monitor-active-run-row");
+    for (const row of [approval, needs, active]) {
+      expect(row.getAttribute("data-slot")).toBe("row-button");
+      expect(row.className).toContain("sui-row-button");
+      expect((row as HTMLButtonElement).type).toBe("button");
+    }
+    await click(approval);
+    await click(needs);
+    await click(active);
+    expect(selected).toEqual([run.runId, run.runId, run.runId]);
+
+    const more = byTestId("monitor-approval-more");
+    expect(more.getAttribute("data-slot")).toBe("button");
+    expect(more.getAttribute("aria-expanded")).toBe("false");
+    await click(more);
+    expect(more.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  test("tree controls expose shared active and disabled states", async () => {
+    const selected: string[] = [];
+    const task = { key: "task#0", id: "task", name: "Task", kind: "task", status: "finished", children: [] };
+    const workflow = {
+      key: "workflow#0",
+      id: "workflow",
+      name: "Workflow",
+      kind: "workflow",
+      status: "finished",
+      children: [task],
+    };
+    const treeQuery = {
+      root: workflow,
+      nodes: [workflow, task],
+      status: "success" as const,
+      isLoading: false,
+      error: undefined,
+    };
+    await render(
+      <ExecutionTree
+        runId={run.runId}
+        treeQuery={treeQuery}
+        selectedNodeKey="task#0"
+        onSelectNode={(node) => selected.push(node.id ?? "")}
+      />,
+    );
+
+    const toggle = byTestId("monitor-tree-toggle");
+    expect(toggle.getAttribute("data-slot")).toBe("button");
+    expect(toggle.className).toContain("sui-button-ghost");
+    const taskRow = [...document.querySelectorAll<HTMLElement>('[data-testid="monitor-tree-node"]')].find((row) =>
+      row.textContent?.includes("Task"),
+    )!;
+    expect(taskRow.getAttribute("data-slot")).toBe("row-button");
+    expect(taskRow.getAttribute("data-active")).toBe("true");
+    await act(async () => taskRow.focus());
+    expect(document.activeElement).toBe(taskRow);
+    await click(taskRow);
+    expect(selected).toEqual(["task"]);
+
+    await rerender(
+      <ExecutionTree
+        runId={run.runId}
+        treeQuery={treeQuery}
+        selectedNodeKey="task#0"
+        onSelectNode={(node) => selected.push(node.id ?? "")}
+        frameOverride={{ root: workflow, loading: false }}
+      />,
+    );
+    const disabledTask = [...document.querySelectorAll<HTMLButtonElement>('[data-testid="monitor-tree-node"]')].find(
+      (row) => row.textContent?.includes("Task"),
+    )!;
+    expect(disabledTask.disabled).toBe(true);
+    await click(disabledTask);
+    expect(selected).toEqual(["task"]);
+  });
+
+  test("timeline rows are shared RowButtons with selected state and preserved activation", async () => {
+    const selected: string[] = [];
+    const treeNodes = [
+      { key: "plan#0", id: "plan", name: "Plan", kind: "task", status: "finished", iteration: 0, children: [] },
+      { key: "build#0", id: "build", name: "Build", kind: "task", status: "running", iteration: 0, children: [] },
+    ];
+    await render(
+      <TimelinePanel
+        nodeStates={{
+          rows: [
+            { nodeId: "plan", iteration: 0, state: "finished", startedAtMs: 10, finishedAtMs: 20 },
+            { nodeId: "build", iteration: 0, state: "running", startedAtMs: 30 },
+          ],
+          failed: false,
+        }}
+        treeNodes={treeNodes}
+        selectedNode={treeNodes[1]}
+        onSelectNode={(node) => selected.push(node.id ?? "")}
+      />,
+    );
+
+    const rows = [...document.querySelectorAll<HTMLButtonElement>('[data-testid="monitor-timeline-row"]')];
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.getAttribute("data-slot")).toBe("row-button");
+      expect(row.type).toBe("button");
+      expect(row.getAttribute("role")).toBe("listitem");
+    }
+    expect(rows[1].getAttribute("data-active")).toBe("true");
+    await act(async () => rows[0].focus());
+    expect(document.activeElement).toBe(rows[0]);
+    await click(rows[0]);
+    expect(selected).toEqual(["plan"]);
   });
 });
 
@@ -579,6 +831,8 @@ describe("migrated monitor surfaces", () => {
     expect(firstCell.querySelector(".mon-table-runid")!.textContent).toBe("run-bloc");
 
     const sortHeader = byTestId("monitor-sort-started");
+    expect(sortHeader.getAttribute("data-slot")).toBe("button");
+    expect(sortHeader.className).toContain("sui-button-ghost");
     await click(sortHeader); // → newest first
     expect(orderedIds()).toEqual(["run-blocked", "run-live", "run-old-finish"]);
     expect(sortHeader.textContent).toContain("▾");
@@ -992,19 +1246,26 @@ describe("monitor theme contract", () => {
     expect(monitorCss).not.toContain("color-mix");
   });
 
-  test("tree, timeline, approval, and summary controls expose the house focus ring", () => {
+  test("migrated controls use shared focus recipes while semantic regions retain local rings", () => {
     for (const selector of [
-      ".mon-tree-chevron:focus-visible",
-      ".mon-tree-main:focus-visible",
       ".mon-events:focus-visible",
-      ".mon-timeline-row:focus-visible",
-      ".mon-approval-main:focus-visible",
       ".mon-runs-table-row:focus-visible",
       ".mon-diff-summary:focus-visible",
       ".mon-scores-summary:focus-visible",
     ]) {
       expect(monitorCss).toContain(selector);
     }
+    for (const selector of [
+      ".mon-tree-chevron:focus-visible",
+      ".mon-tree-main:focus-visible",
+      ".mon-timeline-row:focus-visible",
+      ".mon-approval-main:focus-visible",
+      ".mon-runid:focus-visible",
+    ]) {
+      expect(monitorCss).not.toContain(selector);
+    }
+    expect(smithersUiCss).toContain(".sui-button:focus-visible");
+    expect(smithersUiCss).toContain(".sui-row-button:focus-visible");
     expect(monitorCss).toContain("box-shadow: 0 0 0 3px var(--ring)");
   });
 });

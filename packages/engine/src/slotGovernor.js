@@ -26,7 +26,7 @@
  * @param {{ explicit?: boolean, ceiling?: number }} [options] `explicit` marks
  *   a user-pinned cap (never auto-raised); `ceiling` overrides the auto-raise
  *   ceiling (defaults to the env var above, else 16).
- * @returns {{ onSlotWait: (activeTaskCount: number, waitingCount: number) => { warn: string | null, raiseTo: number | null }, onDeclaredWidth: (declaredWidth: number | undefined) => { raiseTo: number | null } }}
+ * @returns {{ onSlotWait: (activeTaskCount: number, waitingCount: number) => { warn: string | null, raiseTo: number | null, saturation?: { requestedDemand: number, effectiveCap: number, remediationCommand: string } }, onDeclaredWidth: (declaredWidth: number | undefined) => { raiseTo: number | null } }}
  */
 export function createSlotGovernor(maxConcurrency, options = {}) {
   const explicit = Boolean(options.explicit);
@@ -64,9 +64,11 @@ export function createSlotGovernor(maxConcurrency, options = {}) {
      *
      * @param {number} activeTaskCount
      * @param {number} waitingCount
-     * @returns {{ warn: string | null, raiseTo: number | null }} `raiseTo`
+     * @returns {{ warn: string | null, raiseTo: number | null, saturation?: { requestedDemand: number, effectiveCap: number, remediationCommand: string } }} `raiseTo`
      *   is the new cap the engine should adopt (always above the current
-     *   one), `warn` the starvation warning to log once, else nulls
+     *   one), `warn` the starvation warning to log once, and `saturation`
+     *   the durable diagnostic to record when the automatic ceiling is the
+     *   binding cap.
      */
     onSlotWait(activeTaskCount, waitingCount) {
       if (cap <= 0) {
@@ -84,12 +86,25 @@ export function createSlotGovernor(maxConcurrency, options = {}) {
         return { warn: null, raiseTo: null };
       }
       warned = true;
+      const remediationCommand = `smithers up --max-concurrency ${demand}`;
       const warn =
         `${demand} tasks want to run concurrently but maxConcurrency is ${cap}; ` +
         `${waitingCount} are queued waiting for a free slot. ` +
-        `If the host and providers can take it, raise the cap (CLI: smithers up --max-concurrency ${demand}) ` +
+        `If the host and providers can take it, raise the cap (CLI: ${remediationCommand}) ` +
         `to run this workflow at full width.`;
-      return { warn, raiseTo: null };
+      return {
+        warn,
+        raiseTo: null,
+        ...(!explicit && cap === ceiling
+          ? {
+              saturation: {
+                requestedDemand: demand,
+                effectiveCap: cap,
+                remediationCommand,
+              },
+            }
+          : {}),
+      };
     },
   };
 }

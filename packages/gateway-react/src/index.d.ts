@@ -76,7 +76,18 @@ declare function useGatewayActions(): {
         runId: string;
     }) => Promise<{
         runId: string;
-        status: "cancelling";
+        won: boolean;
+        status: "cancelled" | "already-terminal" | "not-found";
+        terminalStatus?: string;
+        repaired: boolean;
+        cancellationSource?: {
+            kind: "signal" | "rpc" | "cli" | "engine";
+            detail?: string;
+            signal?: string;
+            clientPid?: number;
+            requestId?: string;
+            clientIdentity?: string;
+        };
     } & {
         seq?: number;
         txid?: string;

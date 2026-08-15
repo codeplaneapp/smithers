@@ -7,6 +7,7 @@
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayRpcDefinition} GatewayRpcDefinition */
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayRpcMethod} GatewayRpcMethod */
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayResponseFrame} GatewayResponseFrame */
+/** @typedef {import("./gatewayRpcTypes.ts").RunCancellationSource} RunCancellationSource */
 /** @typedef {import("./gatewayRpcTypes.ts").LaunchRunRequest} LaunchRunRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").LaunchRunResponse} LaunchRunResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").ResumeRunRequest} ResumeRunRequest */
@@ -29,6 +30,7 @@
 /** @typedef {import("./gatewayRpcTypes.ts").SubmitApprovalResponse} SubmitApprovalResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").SubmitSignalRequest} SubmitSignalRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").GetRunRequest} GetRunRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").GetRunResponse} GetRunResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").RunTokenUsageEvent} RunTokenUsageEvent */
 /** @typedef {import("./gatewayRpcTypes.ts").ListRunTokenUsageRequest} ListRunTokenUsageRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").ListRunTokenUsageResponse} ListRunTokenUsageResponse */
@@ -219,6 +221,18 @@ const nodeId = stringSchema("Workflow node id.");
 const iteration = integerSchema("Node iteration.", 0);
 const afterSeq = integerSchema("Replay events with sequence numbers greater than this value.", 0);
 const fromSeq = integerSchema("Legacy alias for afterSeq on DevTools streams.", 0);
+const cancellationSource = objectSchema(
+  {
+    kind: { type: "string", enum: ["signal", "rpc", "cli", "engine"] },
+    detail: stringSchema("Human-readable cancellation detail."),
+    signal: stringSchema("POSIX signal that initiated cancellation."),
+    clientPid: integerSchema("Process id of the cancellation caller.", 1),
+    requestId: stringSchema("Request id of the first cancellation caller."),
+    clientIdentity: stringSchema("Authenticated identity of the first cancellation caller."),
+  },
+  ["kind"],
+  "Durable attribution for the first caller that cancelled the run.",
+);
 const runSummary = objectSchema(
   {
     runId,
@@ -227,6 +241,7 @@ const runSummary = objectSchema(
     createdAtMs: integerSchema("Unix epoch milliseconds.", 0),
     parentRunId: { type: ["string", "null"], description: "Immediate parent run id, if this is a child run." },
     system: booleanSchema("Whether this run belongs to an internal system workflow."),
+    cancellationSource,
   },
   ["runId", "status", "system"],
   "Run summary view.",
@@ -264,6 +279,7 @@ const runRecord = objectSchema(
     finishedAtMs: { type: ["integer", "null"], minimum: 0, description: "Unix epoch milliseconds." },
     summary: objectSchema({}, [], "Counts keyed by persisted node state.", true),
     runState: runStateView,
+    cancellationSource,
   },
   ["runId", "system"],
   "Current run record, including node-state counts and optional derived runState.",
@@ -879,10 +895,33 @@ export const GATEWAY_RPC_DEFINITIONS = [
     transport: "http+websocket",
     requiredScope: "run:write",
     requestSchema: objectSchema({ runId }, ["runId"]),
-    responseSchema: objectSchema({ runId, status: { type: "string", enum: ["cancelling"] } }, ["runId", "status"]),
+    responseSchema: objectSchema(
+      {
+        runId,
+        won: booleanSchema("Whether this request won the durable cancellation claim."),
+        status: { type: "string", enum: ["cancelled", "already-terminal", "not-found"] },
+        terminalStatus: stringSchema("Persisted terminal status after cancellation finalization."),
+        repaired: booleanSchema("Whether replay repaired incomplete cancellation cleanup."),
+        cancellationSource,
+      },
+      ["runId", "won", "status", "repaired"],
+    ),
     errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RUN_NOT_ACTIVE", "Internal"],
     exampleRequest: { runId: "run_01" },
-    exampleResponse: { runId: "run_01", status: "cancelling" },
+    exampleResponse: {
+      runId: "run_01",
+      won: true,
+      status: "cancelled",
+      terminalStatus: "cancelled",
+      repaired: false,
+      cancellationSource: {
+        kind: "rpc",
+        detail: "websocket cancellation request",
+        clientPid: 4321,
+        requestId: "cancelRun-1",
+        clientIdentity: "user:operator",
+      },
+    },
   },
   {
     version: SMITHERS_API_VERSION,
