@@ -245,6 +245,7 @@ browserTest(
       expect(await page.locator(`[data-run-id="${SELECTED_RUN}"]`).count()).toBe(1);
 
       await page.getByTestId("monitor-page-prev").click();
+      await page.waitForSelector(`[data-run-id="${ADDED_RUN}"]`);
       expect(await page.locator(`[data-run-id="${ADDED_RUN}"]`).count()).toBe(1);
       expect(await page.locator(`[data-run-id="${REMOVED_RUN}"]`).count()).toBe(0);
     } finally {
