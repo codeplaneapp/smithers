@@ -16,6 +16,7 @@ const EVENT_CATEGORY_BY_TYPE = {
   RunStarted: "run",
   RunStatusChanged: "run",
   RunStateChanged: "run",
+  RunConcurrencySaturated: "run",
   RunFinished: "run",
   RunFailed: "run",
   RunCancelled: "run",

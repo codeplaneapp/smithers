@@ -5,6 +5,7 @@ export type ConnectRequest = {
     id: string;
     version: string;
     platform: string;
+    pid?: number;
   };
   auth?: {
     token: string;

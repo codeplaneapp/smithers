@@ -5,6 +5,10 @@ import type {
   GatewayRpcMethod,
   GatewayTicketRow,
   LaunchRunRequest,
+  CancelRunResponse,
+  GatewayRunSummary,
+  GetRunResponse,
+  RunCancellationSource,
   RunStartedBy,
   ListApprovalsResponse,
   ListTicketsResponse,
@@ -33,6 +37,33 @@ const request: LaunchRunRequest = {
   options: { startedBy: { harness: "codex", sessionId: "thread-1", detected: true } },
 };
 const protocolStartedBy: RunStartedBy = { harness: "codex", sessionId: "thread-1" };
+const cancellationSource: RunCancellationSource = {
+  kind: "rpc",
+  detail: "websocket cancellation request",
+  clientPid: 4321,
+  requestId: "cancel-1",
+  clientIdentity: "user:operator",
+};
+const cancelledRun: GetRunResponse = {
+  runId: "run-cancelled",
+  status: "cancelled",
+  system: false,
+  cancellationSource,
+};
+const cancelledSummary: GatewayRunSummary = {
+  runId: "run-cancelled",
+  status: "cancelled",
+  system: false,
+  cancellationSource,
+};
+const cancelResponse: CancelRunResponse = {
+  runId: "run-cancelled",
+  won: true,
+  status: "cancelled",
+  terminalStatus: "cancelled",
+  repaired: false,
+  cancellationSource,
+};
 const driverStartedBy: DriverRunStartedBy = protocolStartedBy;
 const protocolRoundTrip: RunStartedBy = driverStartedBy;
 const approval: GatewayApprovalSummary = {
@@ -65,7 +96,20 @@ const response: GatewayResponseFrame<ListApprovalsResponse> = {
 };
 const tickets: ListTicketsResponse = [ticket];
 
-void [method, request, protocolStartedBy, driverStartedBy, protocolRoundTrip, event, response, tickets];
+void [
+  method,
+  request,
+  protocolStartedBy,
+  cancellationSource,
+  cancelledRun,
+  cancelledSummary,
+  cancelResponse,
+  driverStartedBy,
+  protocolRoundTrip,
+  event,
+  response,
+  tickets,
+];
 const clickByLocator: BrowserClickAction = { kind: "click", locator: { role: "button" } };
 const clickByPoint: BrowserClickAction = { kind: "click", point: { x: 1, y: 2 } };
 const outcome: BrowserOutcome = { ok: true };

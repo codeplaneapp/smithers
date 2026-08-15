@@ -71,7 +71,7 @@ describe("cancellation attribution contract", () => {
     });
   });
 
-  test("serializes previously requested attribution during finalization", async () => {
+  test("preserves previously requested attribution over a competing engine finalization", async () => {
     const adapter = createAdapter();
     await insertRunningRun(adapter, "requested-run");
     await adapter.requestRunCancel("requested-run", 2000, {
@@ -79,7 +79,19 @@ describe("cancellation attribution contract", () => {
       transport: "websocket",
     });
 
-    await finalizeCancelledRun(adapter, "requested-run", { now: 2001 });
+    await finalizeCancelledRun(adapter, "requested-run", {
+      now: 2001,
+      attribution: {
+        kind: "engine",
+        detail: "engine cleanup raced the RPC request",
+      },
+    });
+
+    expect(await adapter.getRun("requested-run")).toMatchObject({
+      cancelRequestSource: "rpc",
+      cancelRequestDetail: "websocket cancellation request",
+      cancelRequestId: "gateway-request",
+    });
 
     const event = (await adapter.listEventsByType("requested-run", "RunCancelled")).at(-1);
     expect(JSON.parse(event.payloadJson).source).toEqual({
@@ -100,6 +112,28 @@ describe("cancellation attribution contract", () => {
       type: "RunCancelled",
       runId: "unattributed-run",
       timestampMs: 3000,
+    });
+  });
+
+  test("does not relabel an unattributed durable request as engine cleanup", async () => {
+    const adapter = createAdapter();
+    await insertRunningRun(adapter, "legacy-request-run");
+    await adapter.requestRunCancel("legacy-request-run", 4000);
+
+    await finalizeCancelledRun(adapter, "legacy-request-run", {
+      now: 4001,
+      attribution: {
+        kind: "engine",
+        detail: "engine observed the durable request",
+      },
+    });
+
+    expect((await adapter.getRun("legacy-request-run"))?.cancelRequestSource).toBeNull();
+    const event = (await adapter.listEventsByType("legacy-request-run", "RunCancelled")).at(-1);
+    expect(JSON.parse(event.payloadJson)).toEqual({
+      type: "RunCancelled",
+      runId: "legacy-request-run",
+      timestampMs: 4001,
     });
   });
 });

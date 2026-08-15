@@ -142,6 +142,11 @@ import { extractBalancedJson, extractLastBalancedJson } from "./json-extraction.
 import { setupBudgetTracker } from "./aspects/setupBudgetTracker.js";
 import { evaluateAspectBudget } from "./aspects/evaluateAspectBudget.js";
 import { buildMemoryPromptBlock, createTaskMemoryTools, retainTaskMemory } from "./memory-runtime.js";
+import {
+  cancellationAttributionFromAbortSignal,
+  makeCancellationAbortReason,
+  withCancellationSource,
+} from "./cancellation-attribution.js";
 /** @typedef {import("@smthrs/graph/GraphSnapshot").GraphSnapshot} GraphSnapshot */
 /** @typedef {import("./HijackState.ts").HijackState} HijackState */
 /** @typedef {import("@smthrs/driver/RunOptions").RunOptions} RunOptions */
@@ -3124,13 +3129,13 @@ async function markUnattendedResumeFailed(adapter, eventBus, runId, error, onErr
  */
 function wireAbortSignal(controller, signal) {
   if (!signal) return () => {};
+  const forwardAbort = () => controller.abort(signal.reason ?? makeAbortError());
   if (signal.aborted) {
-    controller.abort();
+    forwardAbort();
     return () => {};
   }
-  const onAbort = () => controller.abort();
-  signal.addEventListener("abort", onAbort, { once: true });
-  return () => signal.removeEventListener("abort", onAbort);
+  signal.addEventListener("abort", forwardAbort, { once: true });
+  return () => signal.removeEventListener("abort", forwardAbort);
 }
 /**
  * @param {SmithersDb} adapter
@@ -3207,7 +3212,8 @@ function startRunSupervisor(adapter, runId, runtimeOwnerId, controller, hijackSt
             },
             "engine:cancel-watch",
           );
-          controller.abort();
+          const source = runCancellationSourceFromRow(run);
+          controller.abort(source ? makeCancellationAbortReason(source) : makeAbortError());
           return;
         }
       } catch (error) {
@@ -4703,8 +4709,10 @@ export async function finalizeCancelledRun(adapter, runId, options = {}) {
   await adapter.withTransaction(
     "cancel-finalization",
     Effect.promise(async () => {
+      const beforeClaim = await Promise.resolve(adapter.getRun(runId));
+      const attribution = beforeClaim?.cancelRequestedAtMs ? null : (options.attribution ?? null);
       claimed = await Effect.runPromise(
-        adapter.claimRunCancellation(runId, cancelledAtMs, options.errorJson ?? null, options.attribution ?? null),
+        adapter.claimRunCancellation(runId, cancelledAtMs, options.errorJson ?? null, attribution),
       );
       current = await Promise.resolve(adapter.getRun(runId));
       if (current && (current.status === "cancelled" || current.status === "canceled")) {
@@ -5038,7 +5046,13 @@ async function legacyExecuteTask(
         traceCollector?.discard();
         heartbeatEvidenceAtMs = Math.max(startedAtMs, heartbeatLastPersistedWriteAtMs);
         if (!taskSignal.aborted) {
-          taskAbortController.abort(new SmithersError("HEARTBEAT_FENCE_LOST", "Task heartbeat ownership was lost."));
+          const error = new SmithersError("HEARTBEAT_FENCE_LOST", "Task heartbeat ownership was lost.");
+          taskAbortController.abort(
+            withCancellationSource(error, {
+              kind: "engine",
+              detail: `Task ${desc.nodeId} heartbeat ownership was lost`,
+            }),
+          );
         }
         return;
       }
@@ -5405,7 +5419,12 @@ async function legacyExecuteTask(
             timestampMs: nowMs(),
           });
           heartbeatTimeoutWon = true;
-          taskAbortController.abort(timeoutError);
+          taskAbortController.abort(
+            withCancellationSource(timeoutError, {
+              kind: "engine",
+              detail: `Task ${desc.nodeId} heartbeat timed out after ${desc.heartbeatTimeoutMs}ms`,
+            }),
+          );
           // Abort is the shared terminal signal. Do not fail a detached
           // watchdog fiber or reject an unobserved promise (legacy
           // compute/static tasks do not race that promise).
@@ -6802,7 +6821,12 @@ async function legacyExecuteTask(
               config: handoffConfig,
               timestampMs: nowMs(),
             });
-            runAbortController.abort();
+            runAbortController.abort(
+              makeCancellationAbortReason({
+                kind: "engine",
+                detail: `Run hijacked after task ${desc.nodeId} completed its handoff`,
+              }),
+            );
           } finally {
             hijackCompletionCheckInFlight = false;
           }
@@ -9028,6 +9052,13 @@ async function runWorkflowBodyDriver(workflow, opts) {
   if (opts.onProgress) {
     eventBus.on("event", (e) => opts.onProgress?.(e));
   }
+  /** @param {{ errorJson?: string | null }} [options] */
+  const finalizeCurrentRunCancellation = (options = {}) =>
+    finalizeCancelledRun(adapter, runId, {
+      eventBus,
+      ...options,
+      attribution: cancellationAttributionFromAbortSignal(runAbortController.signal),
+    });
   const wakeLock = acquireCaffeinate();
   let alertRuntime = null;
   let runOwnedByCurrentProcess = false;
@@ -9112,6 +9143,18 @@ async function runWorkflowBodyDriver(workflow, opts) {
     const decision = slotGovernor.onSlotWait(activeTaskCount, taskWaiters.length + 1);
     if (decision.warn) {
       logWarning(decision.warn, { runId, maxConcurrency, waiting: taskWaiters.length + 1 }, "engine:concurrency");
+    }
+    if (decision.saturation) {
+      await Effect.runPromise(
+        eventBus.emitEventWithPersist({
+          type: "RunConcurrencySaturated",
+          runId,
+          requestedDemand: decision.saturation.requestedDemand,
+          effectiveCap: decision.saturation.effectiveCap,
+          remediationCommand: decision.saturation.remediationCommand,
+          timestampMs: nowMs(),
+        }),
+      );
     }
     if (decision.raiseTo !== null) {
       const previousCap = maxConcurrency;
@@ -9465,7 +9508,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
         authoritative?.status === "canceled" ||
         authoritative?.cancelRequestedAtMs
       ) {
-        const cancellation = await finalizeCancelledRun(adapter, runId, { eventBus });
+        const cancellation = await finalizeCurrentRunCancellation();
         return { runId, status: cancellation.terminalStatus ?? cancellation.status };
       }
       return { runId, status: authoritative?.status ?? "failed" };
@@ -10274,7 +10317,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
       if (!paused) {
         const authoritative = await Effect.runPromise(adapter.getRun(runId));
         if (authoritative?.status === "cancelled" || authoritative?.status === "canceled") {
-          const cancellation = await finalizeCancelledRun(adapter, runId, { eventBus });
+          const cancellation = await finalizeCurrentRunCancellation();
           await annotateRunSpan({ status: cancellation.terminalStatus ?? authoritative.status });
           return { runId, status: cancellation.terminalStatus ?? authoritative.status };
         }
@@ -10298,8 +10341,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
           }
         : null;
       await waitForAbortedTasksToSettle();
-      const cancellation = await finalizeCancelledRun(adapter, runId, {
-        eventBus,
+      const cancellation = await finalizeCurrentRunCancellation({
         errorJson: hijackError ? JSON.stringify(hijackError) : null,
       });
       await annotateRunSpan({ status: cancellation.terminalStatus ?? cancellation.status });
@@ -10344,7 +10386,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             authoritative?.status === "canceled" ||
             authoritative?.cancelRequestedAtMs
           ) {
-            const cancellation = await finalizeCancelledRun(adapter, runId, { eventBus });
+            const cancellation = await finalizeCurrentRunCancellation();
             return { runId, status: cancellation.terminalStatus ?? cancellation.status };
           }
           return { runId, status: authoritative?.status ?? "failed" };
@@ -10623,7 +10665,13 @@ async function runWorkflowBodyDriver(workflow, opts) {
           runId,
           adapter,
           eventBus,
-          requestCancel: () => runAbortController.abort(),
+          requestCancel: () =>
+            runAbortController.abort(
+              makeCancellationAbortReason({
+                kind: "engine",
+                detail: "Alert policy requested run cancellation",
+              }),
+            ),
           createHumanRequest: async (reqOpts) => {
             await Effect.runPromise(
               adapter.insertHumanRequest({
@@ -10968,7 +11016,8 @@ async function runWorkflowBodyDriver(workflow, opts) {
         }
         const latestRun = await Effect.runPromise(adapter.getRun(runId));
         if (latestRun?.cancelRequestedAtMs) {
-          runAbortController.abort();
+          const source = runCancellationSourceFromRow(latestRun);
+          runAbortController.abort(source ? makeCancellationAbortReason(source) : makeAbortError());
           return { runId, status: "cancelled" };
         }
         const nextRalphState = ralphStateFromDriverTransition(transition);
@@ -11069,8 +11118,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
           }
         : errorToJson(err);
       await waitForAbortedTasksToSettle();
-      const cancellation = await finalizeCancelledRun(adapter, runId, {
-        eventBus,
+      const cancellation = await finalizeCurrentRunCancellation({
         errorJson: JSON.stringify(hijackError),
       });
       await annotateRunSpan({ status: cancellation.terminalStatus ?? cancellation.status });
@@ -11116,7 +11164,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
           authoritative?.status === "canceled" ||
           authoritative?.cancelRequestedAtMs
         ) {
-          const cancellation = await finalizeCancelledRun(adapter, runId, { eventBus });
+          const cancellation = await finalizeCurrentRunCancellation();
           await annotateRunSpan({ status: cancellation.terminalStatus ?? authoritative.status });
           return { runId, status: cancellation.terminalStatus ?? cancellation.status };
         }

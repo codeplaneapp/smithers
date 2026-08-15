@@ -106,7 +106,14 @@ async function waitForSentinel(dbPath, runId, timeoutMs = 25_000) {
  * @param {string} dbPath
  * @param {string} runId
  * @param {string} status
- * @returns {Promise<{ status: string, heartbeat: number | null } | null>}
+ * @returns {Promise<{
+ *   status: string;
+ *   heartbeat: number | null;
+ *   cancelSource: string | null;
+ *   cancelDetail: string | null;
+ *   cancelSignal: string | null;
+ *   cancelClientPid: number | null;
+ * } | null>}
  */
 async function waitForRunStatus(dbPath, runId, status, timeoutMs = 10_000) {
   const start = Date.now();
@@ -117,10 +124,26 @@ async function waitForRunStatus(dbPath, runId, status, timeoutMs = 10_000) {
         const db = new Database(dbPath, { readonly: true });
         try {
           const row = db
-            .query("SELECT status, heartbeat_at_ms AS heartbeat FROM _smithers_runs WHERE run_id = ?")
+            .query(
+              `SELECT status,
+                      heartbeat_at_ms AS heartbeat,
+                      cancel_request_source AS cancelSource,
+                      cancel_request_detail AS cancelDetail,
+                      cancel_request_signal AS cancelSignal,
+                      cancel_request_client_pid AS cancelClientPid
+                 FROM _smithers_runs
+                WHERE run_id = ?`,
+            )
             .get(runId);
           if (row) {
-            last = { status: row.status, heartbeat: row.heartbeat ?? null };
+            last = {
+              status: row.status,
+              heartbeat: row.heartbeat ?? null,
+              cancelSource: row.cancelSource ?? null,
+              cancelDetail: row.cancelDetail ?? null,
+              cancelSignal: row.cancelSignal ?? null,
+              cancelClientPid: row.cancelClientPid ?? null,
+            };
             if (row.status === status) return last;
           }
         } catch {
@@ -183,12 +206,35 @@ async function runSignalScenario(sig) {
     const runRow = await waitForRunStatus(dbPath, runId, "cancelled");
     expect(runRow?.status).toBe("cancelled");
     expect(runRow?.heartbeat).toBeNull();
+    const expectedSource = {
+      kind: "signal",
+      detail: `process received ${sig}`,
+      signal: sig,
+      clientPid: proc.pid,
+    };
+    expect(runRow).toMatchObject({
+      cancelSource: expectedSource.kind,
+      cancelDetail: expectedSource.detail,
+      cancelSignal: expectedSource.signal,
+      cancelClientPid: expectedSource.clientPid,
+    });
     // DB file should reopen cleanly with no WAL corruption.
     expect(existsSync(dbPath)).toBe(true);
     const db = new Database(dbPath);
     try {
       const rows = db.query("SELECT name FROM sqlite_master WHERE type='table'").all();
       expect(Array.isArray(rows)).toBe(true);
+      const eventRow = db
+        .query(
+          `SELECT payload_json AS payloadJson
+             FROM _smithers_events
+            WHERE run_id = ? AND type = 'RunCancelled'
+            ORDER BY seq DESC
+            LIMIT 1`,
+        )
+        .get(runId);
+      expect(eventRow).toBeTruthy();
+      expect(JSON.parse(eventRow.payloadJson).source).toEqual(expectedSource);
       // size sanity
       expect(statSync(dbPath).size).toBeGreaterThan(0);
     } finally {
