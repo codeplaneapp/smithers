@@ -26,6 +26,15 @@ discovery, and a run status that stops overstating how healthy a run is.
 (0.33.1 was tagged but never published to npm; everything it contained ships
 here.)
 
+Disk use is now bounded and inspectable end to end. Active detached logs cap
+themselves at 100 MiB with a preserved tail and truncation notice, while the
+new `bunx smthrs gc` reports filesystem capacity and reclaims terminal-run
+logs (including workflow-adjacent legacy logs), sandbox roots, and worktrees
+behind age and ownership guards. Legacy
+hidden campaign worktrees and known temp scratch shapes are surfaced but need
+an explicit `--include-unmanaged`; live process directories and unpublished
+worktree changes remain protected.
+
 ## Upgrading
 
 ```bash

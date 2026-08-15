@@ -252,9 +252,12 @@ import { launchPostFailureAutopsy } from "./launchPostFailureAutopsy.js";
 import { classifyTerminalCause } from "./classifyTerminalCause.js";
 import { resolveLaunchRootDir, parsePersistedRootDir } from "./resolve-root.js";
 import { DETACHED_RUN_LOG_FILE_ENV } from "./detachedRunLogEnv.js";
+import { startDetachedRunLogRotation } from "./detachedRunLogRotation.js";
 import { reapDetachedRunLogs } from "./reapDetachedRunLogs.js";
 import { removeDetachedRunLog } from "./removeDetachedRunLog.js";
 import { resolveDetachedRunLogFile } from "./resolveDetachedRunLogFile.js";
+import { runWorkspaceGc } from "./workspaceGc.js";
+import { listUnownedCampaignWorktrees, reapUnownedCampaignWorktrees } from "./campaignWorktrees.js";
 import {
   DETACHED_ADMISSION_NONCE_ENV,
   detachedAdmissionMarker,
@@ -3934,6 +3937,7 @@ const MONITOR_PARENT_POLL_MS = 100;
  */
 async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {}) {
   const detachedLogFile = process.env[DETACHED_RUN_LOG_FILE_ENV];
+  startDetachedRunLogRotation({ logFile: detachedLogFile });
   delete process.env[DETACHED_RUN_LOG_FILE_ENV];
   const runConfig = {
     ...launchConfig,
@@ -7224,6 +7228,7 @@ const tokenCli = Cli.create({
       });
     },
   });
+
 /**
  * @param {number} bytes
  * @returns {string}
@@ -7255,10 +7260,10 @@ function resolveWorktreeRootDir() {
 }
 const worktreeCli = Cli.create({
   name: "worktree",
-  description: "Inspect and reclaim the worktrees Smithers created for <Worktree> lanes.",
+  description: "Inspect owned lanes and legacy worktrees under Smithers' hidden campaign directories.",
 })
   .command("list", {
-    description: "List every worktree Smithers created in this repository and the run that owns it.",
+    description: "List owned worktrees and legacy worktrees registered under Smithers' hidden campaign directories.",
     async run(c) {
       const fail = makeFail(c);
       let rootDir;
@@ -7267,7 +7272,10 @@ const worktreeCli = Cli.create({
       } catch (err) {
         return fail({ code: "VCS_NOT_FOUND", message: err?.message ?? String(err), exitCode: 1 });
       }
-      const worktrees = await listSmithersWorktrees(rootDir);
+      const [worktrees, unownedWorktrees] = await Promise.all([
+        listSmithersWorktrees(rootDir),
+        listUnownedCampaignWorktrees(rootDir),
+      ]);
       const { adapter, cleanup } = await findAndOpenDb();
       try {
         const rows = [];
@@ -7280,14 +7288,30 @@ const worktreeCli = Cli.create({
             status: run?.status ?? "unknown",
             exists: worktree.exists,
             updatedAtMs: worktree.owner.updatedAtMs,
+            managed: true,
           });
         }
+        for (const worktree of unownedWorktrees) {
+          rows.push({
+            path: worktree.path,
+            runId: null,
+            workflow: null,
+            status: "unmanaged",
+            exists: worktree.exists,
+            updatedAtMs: worktree.updatedAtMs,
+            managed: false,
+            branch: worktree.branch,
+          });
+        }
+        rows.sort((left, right) => left.path.localeCompare(right.path));
         if (c.format !== "json") {
           if (rows.length === 0) {
             console.log("No Smithers worktrees in this repository.");
           }
           for (const row of rows) {
-            console.log(`${row.status.padEnd(16)} ${row.runId}  ${row.path}${row.exists ? "" : "  (missing)"}`);
+            console.log(
+              `${row.status.padEnd(16)} ${(row.runId ?? "-").padEnd(20)} ${row.path}${row.exists ? "" : "  (missing)"}`,
+            );
           }
         }
         return c.ok({ worktrees: rows });
@@ -7303,6 +7327,10 @@ const worktreeCli = Cli.create({
       olderThan: z.string().optional().describe("Only prune worktrees untouched for at least this long, e.g. 24h"),
       dryRun: z.boolean().default(false).describe("Report what would be removed without removing anything"),
       force: z.boolean().default(false).describe("Also remove worktrees holding uncommitted or unpushed work"),
+      includeUnmanaged: z
+        .boolean()
+        .default(false)
+        .describe("Also remove stale hidden campaign worktrees without owner metadata when clean and published"),
     }),
     async run(c) {
       const fail = makeFail(c);
@@ -7328,6 +7356,12 @@ const worktreeCli = Cli.create({
           olderThanMs,
           getRunStatus: async (runId) => (await adapter.getRun(runId))?.status ?? null,
         });
+        const unmanaged = await reapUnownedCampaignWorktrees({
+          rootDir,
+          includeUnmanaged: c.options.includeUnmanaged,
+          dryRun: c.options.dryRun,
+          olderThanMs,
+        });
         if (c.format !== "json") {
           const verb = result.dryRun ? "Would remove" : "Removed";
           for (const entry of result.removed) {
@@ -7344,8 +7378,16 @@ const worktreeCli = Cli.create({
           for (const entry of result.skipped) {
             console.log(`Keeping ${entry.path} (${entry.runId}): ${entry.reason}`);
           }
+          for (const entry of unmanaged.removed) {
+            console.log(`${verb} ${entry.path} (unmanaged campaign worktree, ${formatBytes(entry.bytes)})`);
+          }
+          for (const entry of unmanaged.skipped) {
+            console.log(`Keeping ${entry.path} (unmanaged campaign worktree): ${entry.reason}`);
+          }
+          const totalRemoved = result.removed.length + unmanaged.removed.length;
+          const totalFreed = result.bytesFreed + unmanaged.bytesFreed;
           console.log(
-            `${verb.toLowerCase()} ${result.removed.length} worktree(s), ${formatBytes(result.bytesFreed)}${result.dryRun ? "" : " reclaimed"}.`,
+            `${verb.toLowerCase()} ${totalRemoved} worktree(s), ${formatBytes(totalFreed)}${result.dryRun ? "" : " reclaimed"}.`,
           );
           const unsaved = result.skipped.filter((entry) => entry.reason === "unsaved-work").length;
           if (unsaved > 0 && !c.options.force) {
@@ -7354,7 +7396,7 @@ const worktreeCli = Cli.create({
             );
           }
         }
-        return c.ok(result);
+        return c.ok({ ...result, unmanaged, bytesFreed: result.bytesFreed + unmanaged.bytesFreed });
       } catch (err) {
         return fail({
           code: err instanceof SmithersError ? err.code : "WORKTREE_PRUNE_FAILED",
@@ -8677,6 +8719,7 @@ const cli = Cli.create({
         setupSqliteCleanup(workflow);
         if (c.options.open) openOneshotUi(effectiveRunId, taskCwd);
         const detachedLogFile = process.env[DETACHED_RUN_LOG_FILE_ENV];
+        startDetachedRunLogRotation({ logFile: detachedLogFile });
         delete process.env[DETACHED_RUN_LOG_FILE_ENV];
         const startedBy = resolveCliStartedBy({
           harness: c.options.startedByHarness,
@@ -12790,6 +12833,58 @@ const cli = Cli.create({
       // goes to stdout, matching `smithers agents list`.
       process.stderr.write(`${formatUsageReports(reports)}\n`);
       return c.ok({ reports });
+    },
+  })
+  .command("gc", {
+    description: "Report disk use and reclaim stale Smithers logs, sandboxes, worktrees, and campaign scratch.",
+    options: z.object({
+      olderThan: z.string().default("7d").describe("Only reclaim artifacts unused for at least this long, e.g. 24h"),
+      dryRun: z.boolean().default(false).describe("Report what would be removed without removing anything"),
+      includeUnmanaged: z
+        .boolean()
+        .default(false)
+        .describe("Also reclaim recognized legacy campaign worktrees and temp artifacts after safety checks"),
+      force: z.boolean().default(false).describe("Also remove owned worktrees holding uncommitted or unpushed work"),
+    }),
+    async run(c) {
+      const fail = makeFail(c);
+      try {
+        const olderThanMs = parseDurationMs(c.options.olderThan, "older-than");
+        const result = await runWorkspaceGc({
+          cwd: cliWorkspace.cwd(),
+          olderThanMs,
+          dryRun: c.options.dryRun,
+          includeUnmanaged: c.options.includeUnmanaged,
+          forceWorktrees: c.options.force,
+        });
+        if (c.format !== "json") {
+          const disk = result.disk.before;
+          if (disk) {
+            console.log(
+              `Disk: ${formatBytes(disk.freeBytes)} free of ${formatBytes(disk.totalBytes)} (${disk.usedPercent.toFixed(1)}% used).`,
+            );
+          }
+          const verb = result.dryRun ? "Would reclaim" : "Reclaimed";
+          console.log(
+            `${verb} ${formatBytes(result.bytesFreed)}: ${result.logs.removed.length + result.legacyLogs.removed.length} log(s), ${result.sandboxes.removed.length} sandbox root(s), ${result.worktrees.removed.length + result.unownedWorktrees.removed.length} worktree(s), ${result.unmanagedScratch.removed.length} legacy scratch path(s).`,
+          );
+          const unmanagedBytes = [...result.unmanagedScratch.skipped, ...result.unownedWorktrees.skipped]
+            .filter((entry) => entry.reason === "requires-include-unmanaged")
+            .reduce((sum, entry) => sum + entry.bytes, 0);
+          if (unmanagedBytes > 0) {
+            console.log(
+              `Keeping ${formatBytes(unmanagedBytes)} of unowned legacy scratch; inspect with --dry-run and opt in with --include-unmanaged.`,
+            );
+          }
+        }
+        return c.ok(result);
+      } catch (err) {
+        return fail({
+          code: err instanceof SmithersError ? err.code : "GC_FAILED",
+          message: err?.message ?? String(err),
+          exitCode: 1,
+        });
+      }
     },
   })
   .command(workflowCli)

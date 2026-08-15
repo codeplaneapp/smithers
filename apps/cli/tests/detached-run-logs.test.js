@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { existsSync, mkdirSync, utimesSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, utimesSync } from "node:fs";
+import { capDetachedRunLog } from "../src/detachedRunLogRotation.js";
 import { reapDetachedRunLogs } from "../src/reapDetachedRunLogs.js";
 import { removeDetachedRunLog } from "../src/removeDetachedRunLog.js";
 import {
@@ -90,6 +91,52 @@ describe("detached run log paths", () => {
     },
     CLI_COMMAND_TIMEOUT_MS,
   );
+
+  test(
+    "caps a live detached child's inherited log and leaves a truncation notice",
+    async () => {
+      const repo = createTempRepo();
+      pinSqliteBackend(repo.dir);
+      repo.write(
+        "noisy-workflow.tsx",
+        [
+          "/** @jsxImportSource smthrs */",
+          'import { createSmithers, Workflow, Task } from "smthrs";',
+          'import { z } from "zod";',
+          'if (!process.argv.includes("--detach")) {',
+          '  process.stderr.write("noise:" + "x".repeat(8_000) + "\\n");',
+          "  await Bun.sleep(250);",
+          "}",
+          "const { smithers, outputs } = createSmithers({ result: z.object({ ok: z.boolean() }) });",
+          "export default smithers(() => (",
+          '  <Workflow name="noisy-workflow">',
+          '    <Task id="done" output={outputs.result}>{{ ok: true }}</Task>',
+          "  </Workflow>",
+          "));",
+          "",
+        ].join("\n"),
+      );
+      const runId = "bounded-active-log";
+
+      const result = runSmithers(["up", "noisy-workflow.tsx", "--detach", "--run-id", runId], {
+        cwd: repo.dir,
+        format: "json",
+        timeoutMs: CLI_COMMAND_TIMEOUT_MS,
+        env: {
+          SMITHERS_LOG_MAX_BYTES: "1024",
+          SMITHERS_INTERNAL_DETACHED_LOG_CAP_INTERVAL_MS: "100",
+        },
+      });
+      await waitForRunConfig(repo, runId);
+
+      const logFile = repo.path(".smithers", "logs", `${runId}.log`);
+      const contents = readFileSync(logFile, "utf8");
+      expect(result.exitCode).toBe(0);
+      expect(statSync(logFile).size).toBeLessThanOrEqual(1024);
+      expect(contents).toContain("older output was truncated");
+    },
+    CLI_COMMAND_TIMEOUT_MS,
+  );
 });
 
 describe("detached run log GC", () => {
@@ -167,6 +214,108 @@ describe("detached run log GC", () => {
     expect(existsSync(paths.oldest)).toBe(false);
     expect(existsSync(paths.newer)).toBe(true);
     expect(existsSync(paths.missing)).toBe(true);
+  });
+
+  test("dry-run reports expired logs without unlinking them", async () => {
+    const repo = createTempRepo();
+    const logFile = repo.write(".smithers/logs/finished.log", "finished output");
+    const nowMs = Date.UTC(2026, 6, 17);
+    const oldMs = nowMs - 8 * 24 * 60 * 60 * 1_000;
+    utimesSync(logFile, new Date(oldMs), new Date(oldMs));
+
+    const result = await reapDetachedRunLogs({
+      logDir: repo.path(".smithers", "logs"),
+      adapter: { getRun: async () => ({ status: "finished", finishedAtMs: oldMs }) },
+      olderThanMs: 7 * 24 * 60 * 60 * 1_000,
+      dryRun: true,
+      nowMs,
+    });
+
+    expect(result.removed.map((entry) => entry.logFile)).toEqual([logFile]);
+    expect(result.bytesFreed).toBe(Buffer.byteLength("finished output"));
+    expect(existsSync(logFile)).toBe(true);
+  });
+
+  test("a manual minimum age also protects terminal logs from the aggregate size cap", async () => {
+    const repo = createTempRepo();
+    const logFile = repo.write(".smithers/logs/recent.log", "recent output");
+    const nowMs = Date.UTC(2026, 6, 17);
+    const finishedAtMs = nowMs - 60_000;
+
+    const result = await reapDetachedRunLogs({
+      logDir: repo.path(".smithers", "logs"),
+      adapter: { getRun: async () => ({ status: "finished", finishedAtMs }) },
+      env: { SMITHERS_LOG_MAX_TOTAL_BYTES: "0" },
+      olderThanMs: 24 * 60 * 60 * 1_000,
+      minimumAgeForSizeCap: true,
+      nowMs,
+    });
+
+    expect(result.removed).toHaveLength(0);
+    expect(existsSync(logFile)).toBe(true);
+  });
+
+  test("manual GC can require a terminal run record before removing an old log", async () => {
+    const repo = createTempRepo();
+    const logFile = repo.write(".smithers/logs/unknown.log", "unknown output");
+    const nowMs = Date.UTC(2026, 6, 17);
+    const oldMs = nowMs - 8 * 24 * 60 * 60 * 1_000;
+    utimesSync(logFile, new Date(oldMs), new Date(oldMs));
+
+    const result = await reapDetachedRunLogs({
+      logDir: repo.path(".smithers", "logs"),
+      adapter: { getRun: async () => undefined },
+      olderThanMs: 7 * 24 * 60 * 60 * 1_000,
+      allowAbsentRuns: false,
+      nowMs,
+    });
+
+    expect(result.removed).toHaveLength(0);
+    expect(existsSync(logFile)).toBe(true);
+  });
+});
+
+describe("active detached run log cap", () => {
+  test("preserves a bounded tail and writes a truncation notice on the inherited inode", () => {
+    const repo = createTempRepo();
+    const logFile = repo.write(".smithers/logs/active.log", `${"old\n".repeat(2_000)}last-line\n`);
+    const fd = openSync(logFile, "a");
+    let result;
+    try {
+      result = capDetachedRunLog({
+        logFile,
+        fd,
+        env: { SMITHERS_LOG_MAX_BYTES: "1024" },
+      });
+    } finally {
+      closeSync(fd);
+    }
+
+    const contents = readFileSync(logFile, "utf8");
+    expect(result.capped).toBe(true);
+    expect(result.beforeBytes).toBeGreaterThan(1024);
+    expect(statSync(logFile).size).toBeLessThanOrEqual(1024);
+    expect(contents).toContain("older output was truncated");
+    expect(contents.endsWith("last-line\n")).toBe(true);
+  });
+
+  test("refuses to truncate when the path no longer names the inherited descriptor", () => {
+    const repo = createTempRepo();
+    const inherited = repo.write(".smithers/logs/inherited.log", "x".repeat(2_000));
+    const replacement = repo.write(".smithers/logs/replacement.log", "keep me");
+    const fd = openSync(inherited, "a");
+    try {
+      const result = capDetachedRunLog({
+        logFile: replacement,
+        fd,
+        env: { SMITHERS_LOG_MAX_BYTES: "1024" },
+      });
+      expect(result.capped).toBe(false);
+    } finally {
+      closeSync(fd);
+    }
+    expect(readFileSync(replacement, "utf8")).toBe("keep me");
+    expect(statSync(inherited).size).toBe(2_000);
   });
 });
 

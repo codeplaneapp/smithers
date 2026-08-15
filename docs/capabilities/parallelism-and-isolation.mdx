@@ -116,7 +116,7 @@ Worktrees isolate the *working copy*, not the machine - a lane can still `rm -rf
 
 - **Guaranteed:** deterministic lane admission on resume; serialized worktree creation; worktree `cwd` inheritance; caps enforced at leaf, subtree, and run level; `DEPENDENCY_DEADLOCK` (not a hang) when a `deps` key names a task that never produces.
 - **Not guaranteed:** conflict resolution (an agent or a human does it); dependency installation in fresh worktrees (lanes must `pnpm install` themselves - the isolation preamble tells agents this); cost control (N lanes ≈ N× tokens; cap concurrency and lane count deliberately).
-- **Cleanup is yours to run:** finished runs leave worktrees behind until pruned.
+- **Cleanup is guarded:** successful runs automatically reap clean, published worktrees. Failed/cancelled runs retain them for debugging until `worktree prune` or the unified `gc` command confirms the owning run is terminal.
 
 ## Operating it
 
@@ -126,6 +126,7 @@ smithers status <run>                        # which lanes are in flight / gatin
 smithers worktree list                       # every worktree Smithers created, and its owning run
 smithers worktree prune --older-than 24h     # reclaim worktrees of finished runs
 smithers worktree prune --force              # also drop uncommitted/unpushed lane work
+smithers gc --dry-run                        # report disk use and every reclaimable artifact
 bunx smthrs restore --node NODE_ID                 # restore a lane's worktree to a durability checkpoint
 ```
 
