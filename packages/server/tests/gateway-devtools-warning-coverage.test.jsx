@@ -106,6 +106,45 @@ function makeDbPath(name) {
 }
 
 describe("gateway devtools serializer warnings and audit recovery", () => {
+  test("close waits for register-time rewind recovery to release the backend", async () => {
+    let markRecoveryStarted;
+    const recoveryStarted = new Promise((resolve) => {
+      markRecoveryStarted = resolve;
+    });
+    let releaseRecovery;
+    const recoveryBlocked = new Promise((resolve) => {
+      releaseRecovery = resolve;
+    });
+    const workflow = {
+      db: {
+        dialect: "postgres",
+        connection: {
+          async query() {
+            markRecoveryStarted();
+            await recoveryBlocked;
+            return { rows: [] };
+          },
+        },
+      },
+      build: () => null,
+      opts: {},
+    };
+    const gateway = new Gateway({});
+    gateway.register("blocked-recovery", workflow);
+    await recoveryStarted;
+
+    let closeSettled = false;
+    const closing = gateway.close().then(() => {
+      closeSettled = true;
+    });
+    await sleep(10);
+    expect(closeSettled).toBe(false);
+
+    releaseRecovery();
+    await closing;
+    expect(closeSettled).toBe(true);
+  });
+
   test("a too-deep snapshot tree drives the serializer onWarning on both routes", async () => {
     const dbPath = makeDbPath("deep");
     const { workflow, db } = makeWorkflow(dbPath);
@@ -146,6 +185,9 @@ describe("gateway devtools serializer warnings and audit recovery", () => {
     expect(streamRes.ok).toBe(true);
     await sleep(120);
     expect(streamConn.sent.some((e) => e.event === "devtools.event")).toBe(true);
+    expect(gateway.getDevToolsSubscriberCount(runId)).toBe(1);
+    await gateway.close();
+    expect(gateway.getDevToolsSubscriberCount(runId)).toBe(0);
   }, 20000);
 
   test("register swallows a rewind-audit recovery failure and still registers", async () => {
