@@ -142,6 +142,11 @@ import { extractBalancedJson, extractLastBalancedJson } from "./json-extraction.
 import { setupBudgetTracker } from "./aspects/setupBudgetTracker.js";
 import { evaluateAspectBudget } from "./aspects/evaluateAspectBudget.js";
 import { buildMemoryPromptBlock, createTaskMemoryTools, retainTaskMemory } from "./memory-runtime.js";
+import {
+  cancellationAttributionFromAbortSignal,
+  makeCancellationAbortReason,
+  withCancellationSource,
+} from "./cancellation-attribution.js";
 /** @typedef {import("@smthrs/graph/GraphSnapshot").GraphSnapshot} GraphSnapshot */
 /** @typedef {import("./HijackState.ts").HijackState} HijackState */
 /** @typedef {import("@smthrs/driver/RunOptions").RunOptions} RunOptions */
@@ -3133,26 +3138,6 @@ function wireAbortSignal(controller, signal) {
   return () => signal.removeEventListener("abort", forwardAbort);
 }
 /**
- * POSIX-aware CLI owners attach the durable source to the AbortSignal reason.
- * Keep ordinary AbortSignals unattributed: only the explicitly branded signal
- * shape may populate the terminal run row and RunCancelled event.
- * @param {AbortSignal | undefined} signal
- */
-function cancellationAttributionFromAbortSignal(signal) {
-  if (!signal?.aborted) return undefined;
-  const reason = signal.reason;
-  if (!reason || typeof reason !== "object") return undefined;
-  const source = reason.smithersCancellationSource;
-  if (!source || typeof source !== "object" || source.kind !== "signal") return undefined;
-  if (typeof source.signal !== "string" || !source.signal.startsWith("SIG")) return undefined;
-  return {
-    kind: "signal",
-    ...(typeof source.detail === "string" ? { detail: source.detail } : {}),
-    signal: source.signal,
-    ...(Number.isSafeInteger(source.clientPid) && source.clientPid > 0 ? { clientPid: source.clientPid } : {}),
-  };
-}
-/**
  * @param {SmithersDb} adapter
  * @param {string} runId
  * @param {string} runtimeOwnerId
@@ -3227,7 +3212,8 @@ function startRunSupervisor(adapter, runId, runtimeOwnerId, controller, hijackSt
             },
             "engine:cancel-watch",
           );
-          controller.abort();
+          const source = runCancellationSourceFromRow(run);
+          controller.abort(source ? makeCancellationAbortReason(source) : makeAbortError());
           return;
         }
       } catch (error) {
@@ -4723,8 +4709,10 @@ export async function finalizeCancelledRun(adapter, runId, options = {}) {
   await adapter.withTransaction(
     "cancel-finalization",
     Effect.promise(async () => {
+      const beforeClaim = await Promise.resolve(adapter.getRun(runId));
+      const attribution = beforeClaim?.cancelRequestedAtMs ? null : (options.attribution ?? null);
       claimed = await Effect.runPromise(
-        adapter.claimRunCancellation(runId, cancelledAtMs, options.errorJson ?? null, options.attribution ?? null),
+        adapter.claimRunCancellation(runId, cancelledAtMs, options.errorJson ?? null, attribution),
       );
       current = await Promise.resolve(adapter.getRun(runId));
       if (current && (current.status === "cancelled" || current.status === "canceled")) {
@@ -5058,7 +5046,13 @@ async function legacyExecuteTask(
         traceCollector?.discard();
         heartbeatEvidenceAtMs = Math.max(startedAtMs, heartbeatLastPersistedWriteAtMs);
         if (!taskSignal.aborted) {
-          taskAbortController.abort(new SmithersError("HEARTBEAT_FENCE_LOST", "Task heartbeat ownership was lost."));
+          const error = new SmithersError("HEARTBEAT_FENCE_LOST", "Task heartbeat ownership was lost.");
+          taskAbortController.abort(
+            withCancellationSource(error, {
+              kind: "engine",
+              detail: `Task ${desc.nodeId} heartbeat ownership was lost`,
+            }),
+          );
         }
         return;
       }
@@ -5425,7 +5419,12 @@ async function legacyExecuteTask(
             timestampMs: nowMs(),
           });
           heartbeatTimeoutWon = true;
-          taskAbortController.abort(timeoutError);
+          taskAbortController.abort(
+            withCancellationSource(timeoutError, {
+              kind: "engine",
+              detail: `Task ${desc.nodeId} heartbeat timed out after ${desc.heartbeatTimeoutMs}ms`,
+            }),
+          );
           // Abort is the shared terminal signal. Do not fail a detached
           // watchdog fiber or reject an unobserved promise (legacy
           // compute/static tasks do not race that promise).
@@ -6822,7 +6821,12 @@ async function legacyExecuteTask(
               config: handoffConfig,
               timestampMs: nowMs(),
             });
-            runAbortController.abort();
+            runAbortController.abort(
+              makeCancellationAbortReason({
+                kind: "engine",
+                detail: `Run hijacked after task ${desc.nodeId} completed its handoff`,
+              }),
+            );
           } finally {
             hijackCompletionCheckInFlight = false;
           }
@@ -10661,7 +10665,13 @@ async function runWorkflowBodyDriver(workflow, opts) {
           runId,
           adapter,
           eventBus,
-          requestCancel: () => runAbortController.abort(),
+          requestCancel: () =>
+            runAbortController.abort(
+              makeCancellationAbortReason({
+                kind: "engine",
+                detail: "Alert policy requested run cancellation",
+              }),
+            ),
           createHumanRequest: async (reqOpts) => {
             await Effect.runPromise(
               adapter.insertHumanRequest({
@@ -11006,7 +11016,8 @@ async function runWorkflowBodyDriver(workflow, opts) {
         }
         const latestRun = await Effect.runPromise(adapter.getRun(runId));
         if (latestRun?.cancelRequestedAtMs) {
-          runAbortController.abort();
+          const source = runCancellationSourceFromRow(latestRun);
+          runAbortController.abort(source ? makeCancellationAbortReason(source) : makeAbortError());
           return { runId, status: "cancelled" };
         }
         const nextRalphState = ralphStateFromDriverTransition(transition);

@@ -292,7 +292,7 @@ describe("lifecycle controls x child workflows", () => {
   );
 
   test(
-    "cancelling the parent mid-child cancels the child run and leaks no running rows or in-progress attempts",
+    "parent RPC cancellation wins over engine child cleanup and leaves no running work",
     async () => {
       const { smithers, outputs, db, cleanup } = buildSmithers();
       try {
@@ -322,8 +322,13 @@ describe("lifecycle controls x child workflows", () => {
         const runPromise = Effect.runPromise(runWorkflow(parent, { input: {}, runId }));
         expect(await waitFor(() => childStarted)).toBe(true);
         expect(await waitFor(async () => Boolean((await adapter.getRun(childRunId))?.heartbeatAtMs))).toBe(true);
-        // Exactly what `smithers cancel <parentRunId>` writes for a live run.
-        await adapter.requestRunCancel(runId, Date.now());
+        // A durable RPC request races the engine's in-flight child cleanup.
+        await adapter.requestRunCancel(runId, Date.now(), {
+          kind: "rpc",
+          detail: "gateway requested cancellation",
+          requestId: "cancel-parent-request",
+          clientIdentity: "gateway:test",
+        });
         const result = await runPromise;
         expect(result.status).toBe("cancelled");
         // The in-flight child is cancelled with the parent: no zombie run row
@@ -333,6 +338,27 @@ describe("lifecycle controls x child workflows", () => {
         expect(childRow?.parentRunId).toBe(runId);
         expect(childRow?.heartbeatAtMs ?? null).toBeNull();
         expect(childRow?.runtimeOwnerId ?? null).toBeNull();
+        expect(childRow).toMatchObject({
+          cancelRequestSource: "rpc",
+          cancelRequestDetail: "gateway requested cancellation",
+          cancelRequestId: "cancel-parent-request",
+          cancelRequestClientIdentity: "gateway:test",
+        });
+        expect(await adapter.getRun(runId)).toMatchObject({
+          cancelRequestSource: "rpc",
+          cancelRequestDetail: "gateway requested cancellation",
+          cancelRequestId: "cancel-parent-request",
+          cancelRequestClientIdentity: "gateway:test",
+        });
+        for (const cancelledRunId of [runId, childRunId]) {
+          const event = (await adapter.listEventsByType(cancelledRunId, "RunCancelled")).at(-1);
+          expect(JSON.parse(event.payloadJson).source).toEqual({
+            kind: "rpc",
+            detail: "gateway requested cancellation",
+            requestId: "cancel-parent-request",
+            clientIdentity: "gateway:test",
+          });
+        }
         expect((await adapter.listRuns(50, "running")).map((row) => row.runId)).toEqual([]);
         // Node + attempt bookkeeping settles on both sides.
         const parentNode = (await adapter.listNodes(runId)).find((node) => node.nodeId === "sub");
@@ -349,7 +375,7 @@ describe("lifecycle controls x child workflows", () => {
   );
 
   test(
-    "a Subflow timeout cancels the running child instead of orphaning it",
+    "a Subflow timeout attributes engine cleanup and cancels the child instead of orphaning it",
     async () => {
       const { smithers, outputs, db, cleanup } = buildSmithers();
       try {
@@ -378,7 +404,17 @@ describe("lifecycle controls x child workflows", () => {
         expect(result.status).toBe("failed");
         // Settles quickly and leaves no phantom running child behind.
         await waitFor(async () => (await adapter.getRun(childRunId))?.status !== "running", 5_000);
-        expect((await adapter.getRun(childRunId))?.status).toBe("cancelled");
+        const childRow = await adapter.getRun(childRunId);
+        expect(childRow?.status).toBe("cancelled");
+        expect(childRow).toMatchObject({
+          cancelRequestSource: "engine",
+          cancelRequestDetail: "Task sub stopped nested work: Compute callback timed out after 800ms",
+        });
+        const childCancelled = (await adapter.listEventsByType(childRunId, "RunCancelled")).at(-1);
+        expect(JSON.parse(childCancelled.payloadJson).source).toEqual({
+          kind: "engine",
+          detail: "Task sub stopped nested work: Compute callback timed out after 800ms",
+        });
         expect((await adapter.listRuns(50, "running")).map((row) => row.runId)).toEqual([]);
       } finally {
         cleanup();
