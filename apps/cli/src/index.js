@@ -885,6 +885,13 @@ function buildProgressReporter() {
           `[${ts}] ✗ ${event.nodeId} (attempt ${event.attempt ?? 1}): ${typeof event.error === "string" ? event.error : (event.error?.message ?? "failed")}\n`,
         );
         break;
+      case "NodeStalled":
+        // Non-progress detection (#1500): name the repeat count so a livelock
+        // reads differently from the ordinary failure above it.
+        process.stderr.write(
+          `[${ts}] ✗ ${event.nodeId} stalled after ${event.identicalFailures ?? "?"} identical failures: ${typeof event.error === "string" ? event.error : (event.error?.message ?? "stalled")}\n`,
+        );
+        break;
       case "NodeRetrying":
         process.stderr.write(`[${ts}] ↻ ${event.nodeId} retrying (attempt ${event.attempt ?? 1})\n`);
         break;
@@ -2640,7 +2647,11 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
     Number.isInteger(finishedPayload.failedChildren) &&
     finishedPayload.failedChildren >= 0;
   const derivedFailedChildKeys = isSuccessTerminal
-    ? nodes.filter((node) => node.state === "failed").map((node) => `${node.nodeId}::${node.iteration ?? 0}`)
+    ? nodes
+        // A `stalled` node (#1500) is a tolerated failure too when the run
+        // still finished, so it belongs in the same fallback tally.
+        .filter((node) => node.state === "failed" || node.state === "stalled")
+        .map((node) => `${node.nodeId}::${node.iteration ?? 0}`)
     : [];
   const failedChildren = eventHasFailedChildren ? finishedPayload.failedChildren : derivedFailedChildKeys.length;
   const failedChildKeys =
@@ -4654,6 +4665,32 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
         }
       }
       const outputResult = c.format === "json" || c.format === "jsonl" ? result : summarizeRunResult(result);
+      // Point of failure (#1500 §4): offer the concrete recovery action for
+      // the last good checkpoint instead of making the operator reconstruct
+      // the replay invocation by hand.
+      let failureRecoveryCtas = [];
+      if (result.status === "failed" && result.runId) {
+        try {
+          const lastFrame = await Effect.runPromise(adapter.getLastFrameEffect(result.runId));
+          const frameNo = Number(lastFrame?.frameNo ?? lastFrame?.frame_no);
+          failureRecoveryCtas = [
+            {
+              command: `up ${workflowPath} --run-id ${result.runId} --resume true`,
+              description: "Resume the failed run in place",
+            },
+            ...(Number.isSafeInteger(frameNo)
+              ? [
+                  {
+                    command: `replay ${workflowPath} --run-id ${result.runId} --frame ${frameNo}`,
+                    description: `Replay from the last good checkpoint (frame ${frameNo})`,
+                  },
+                ]
+              : []),
+          ];
+        } catch {
+          // Best-effort CTA enrichment; never mask the run result.
+        }
+      }
       return c.ok(outputResult, {
         cta: result.runId
           ? withAgentNextSteps(
@@ -4664,6 +4701,7 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
                 human: humanTty,
               },
               [
+                ...failureRecoveryCtas,
                 ...pauseCtas(result.status, result.runId),
                 ...getWorkflowFollowUpCtas(workflowPath),
                 { command: `inspect ${result.runId}`, description: "Inspect run state" },

@@ -1099,3 +1099,50 @@ describe("loop exhaustion naming (#1464 AWF-1)", () => {
     expect(diagnosis.summary).toBe("Run is finished, nothing is blocked.");
   });
 });
+
+describe("stall and recovery affordances (#1500)", () => {
+  test("a stalled node reports the identical-failure streak and its last error", async () => {
+    const adapter = makeAdapter({
+      run: runRow({ status: "failed", finishedAtMs: NOW - 1_000 }),
+      nodes: [nodeRow({ nodeId: "author-diagram", state: "stalled", lastAttempt: 3 })],
+      attempts: [
+        attemptRow({
+          nodeId: "author-diagram",
+          attempt: 3,
+          errorJson: JSON.stringify({
+            code: "WORKFLOW_EXECUTION_FAILED",
+            message: "Diagram login-flow changed its planned participant ordering.",
+            details: { identicalFailureStreak: 3, errorSignature: "WORKFLOW_EXECUTION_FAILED:<sig>" },
+          }),
+        }),
+      ],
+    });
+    const diagnosis = await diagnose(adapter);
+    const stalled = diagnosis.blockers.find((blocker) => blocker.kind === "stalled");
+    expect(stalled).toBeDefined();
+    expect(stalled.nodeId).toBe("author-diagram");
+    expect(stalled.attempt).toBe(3);
+    expect(stalled.reason).toContain("3 consecutive attempts failed with an identical error");
+    expect(stalled.reason).toContain("participant ordering");
+    expect(stalled.context).toContain("Retrying the same way will reproduce the same failure");
+    expect(stalled.unblocker).toContain("retry-task");
+    expect(diagnosisCtaCommands(diagnosis).length).toBeGreaterThan(0);
+  });
+
+  test("a failed run names the last good checkpoint with resume and replay commands", async () => {
+    const adapter = makeAdapter({
+      run: runRow({ status: "failed", finishedAtMs: NOW - 1_000 }),
+      nodes: [nodeRow({ nodeId: "author-diagram", state: "failed", lastAttempt: 2 })],
+      lastFrame: workflowFrame([
+        { kind: "element", tag: "smithers:task", props: { id: "author-diagram" }, children: [] },
+      ]),
+    });
+    const diagnosis = await diagnose(adapter);
+    const checkpointLine = diagnosis.information.find((line) => line.includes("Last good checkpoint"));
+    expect(checkpointLine).toBeDefined();
+    expect(checkpointLine).toContain("frame 1");
+    expect(checkpointLine).toContain("--resume true");
+    expect(checkpointLine).toContain("replay");
+    expect(renderWhyDiagnosisHuman(diagnosis)).toContain("Last good checkpoint");
+  });
+});

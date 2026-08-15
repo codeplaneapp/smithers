@@ -334,7 +334,7 @@ export function predictNodeDurationMs(nodeId: string, timings: readonly NodeTimi
 
 const TASK_KINDS = new Set(["task", "agent", "compute", "static"]);
 const PENDING_STATUSES = new Set(["", "pending", "queued", "not-started", "idle"]);
-const TERMINAL_STATUSES = new Set(["finished", "failed", "cancelled", "skipped", "cached"]);
+const TERMINAL_STATUSES = new Set(["finished", "failed", "stalled", "cancelled", "skipped", "cached"]);
 
 type LeafWork = { nodeId: string; status: string; model?: string };
 
