@@ -3,6 +3,7 @@
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayRpcErrorCode} GatewayRpcErrorCode */
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayRpcMethod} GatewayRpcMethod */
 /** @typedef {import("./gatewayRpcTypes.ts").RunStartedBy} RunStartedBy */
+/** @typedef {import("./gatewayRpcTypes.ts").RunCancellationSource} RunCancellationSource */
 /** @typedef {import("./gatewayRpcTypes.ts").LaunchRunRequest} LaunchRunRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").LaunchRunResponse} LaunchRunResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").ResumeRunRequest} ResumeRunRequest */
@@ -25,6 +26,7 @@
 /** @typedef {import("./gatewayRpcTypes.ts").SubmitApprovalResponse} SubmitApprovalResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").SubmitSignalRequest} SubmitSignalRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").GetRunRequest} GetRunRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").GetRunResponse} GetRunResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").RunTokenUsageEvent} RunTokenUsageEvent */
 /** @typedef {import("./gatewayRpcTypes.ts").ListRunTokenUsageRequest} ListRunTokenUsageRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").ListRunTokenUsageResponse} ListRunTokenUsageResponse */

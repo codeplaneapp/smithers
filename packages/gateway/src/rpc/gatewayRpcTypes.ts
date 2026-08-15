@@ -47,6 +47,7 @@ export type {
   ListRunDescendantsRequest,
   ListRunDescendantsResponse,
   GatewayRunDescendant,
+  GetRunResponse,
   RunTokenUsageEvent,
   GetRunDiffRequest,
   GetRunDiffResponse,
@@ -134,6 +135,7 @@ export type {
   BrowserActivityEvent,
   BrowserScreenshot,
   BrowserSelection,
+  RunCancellationSource,
 } from "@smthrs/protocol/gateway-rpc";
 
 export type GatewayRpcErrorDetails = ProtocolGatewayRpcErrorDetails;

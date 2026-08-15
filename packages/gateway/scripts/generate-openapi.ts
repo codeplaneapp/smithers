@@ -95,6 +95,9 @@ const listUsageReportsRpc = requireRpcDefinition("listUsageReports");
 const listRunTokenUsageRpc = requireRpcDefinition("listRunTokenUsage");
 const listRunDescendantsRpc = requireRpcDefinition("listRunDescendants");
 const launchRunRpc = requireRpcDefinition("launchRun");
+const getRunRpc = requireRpcDefinition("getRun");
+const listRunsRpc = requireRpcDefinition("listRuns");
+const cancelRunRpc = requireRpcDefinition("cancelRun");
 
 const gatewayApiRoutes: readonly GatewayApiRouteDefinition[] = [
   {
@@ -104,7 +107,7 @@ const gatewayApiRoutes: readonly GatewayApiRouteDefinition[] = [
     summary: "List runs.",
     rpcMethod: "listRuns",
     requiredScope: scopeForRpc("listRuns"),
-    responseSchema: { type: "array", items: objectSchema },
+    responseSchema: listRunsRpc.responseSchema,
     parameters: [
       { name: "status", in: "query", description: "Optional run status filter.", schema: requireRequestFilterProperty(requireRpcDefinition("listRuns"), "status") },
       { name: "workflow", in: "query", description: "Optional workflow key filter.", schema: requireRequestFilterProperty(requireRpcDefinition("listRuns"), "workflow") },
@@ -114,7 +117,7 @@ const gatewayApiRoutes: readonly GatewayApiRouteDefinition[] = [
     ],
   },
   { method: "post", path: "/v1/api/runs", operationId: "apiLaunchRun", summary: "Launch a run.", rpcMethod: "launchRun", requiredScope: scopeForRpc("launchRun"), requestSchema: launchRunRpc.requestSchema, responseSchema: launchRunRpc.responseSchema, mutation: true },
-  { method: "get", path: "/v1/api/runs/{runId}", operationId: "apiGetRun", summary: "Read one run.", rpcMethod: "getRun", requiredScope: scopeForRpc("getRun"), responseSchema: objectSchema },
+  { method: "get", path: "/v1/api/runs/{runId}", operationId: "apiGetRun", summary: "Read one run.", rpcMethod: "getRun", requiredScope: scopeForRpc("getRun"), responseSchema: getRunRpc.responseSchema },
   {
     method: "get",
     path: "/v1/api/runs/{runId}/token-usage",
@@ -151,7 +154,7 @@ const gatewayApiRoutes: readonly GatewayApiRouteDefinition[] = [
       },
     ],
   },
-  { method: "post", path: "/v1/api/runs/{runId}/cancel", operationId: "apiCancelRun", summary: "Cancel a run.", rpcMethod: "cancelRun", requiredScope: scopeForRpc("cancelRun"), requestSchema: objectSchema, responseSchema: objectSchema, mutation: true },
+  { method: "post", path: "/v1/api/runs/{runId}/cancel", operationId: "apiCancelRun", summary: "Cancel a run.", rpcMethod: "cancelRun", requiredScope: scopeForRpc("cancelRun"), requestSchema: objectSchema, responseSchema: cancelRunRpc.responseSchema, mutation: true },
   { method: "post", path: "/v1/api/runs/{runId}/resume", operationId: "apiResumeRun", summary: "Resume a run.", rpcMethod: "resumeRun", requiredScope: scopeForRpc("resumeRun"), requestSchema: objectSchema, responseSchema: objectSchema, mutation: true },
   { method: "post", path: "/v1/api/runs/{runId}/rewind", operationId: "apiRewindRun", summary: "Rewind a run.", rpcMethod: "rewindRun", requiredScope: scopeForRpc("rewindRun"), requestSchema: objectSchema, responseSchema: objectSchema, mutation: true },
   { method: "get", path: "/v1/api/runs/{runId}/tree", operationId: "apiGetRunTree", summary: "Read a DevTools tree snapshot.", rpcMethod: "getDevToolsSnapshot", requiredScope: scopeForRpc("getDevToolsSnapshot"), responseSchema: objectSchema },

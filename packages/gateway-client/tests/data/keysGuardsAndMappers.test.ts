@@ -180,6 +180,26 @@ describe("normalizeGatewayRunEventRow", () => {
   });
 });
 
+describe("mapSmithersElectricRow run mapping", () => {
+  test("projects persisted cancellation attribution into the typed run source", () => {
+    const run = mapSmithersElectricRow("run", {
+      run_id: "cancelled-run",
+      cancel_request_source: "rpc",
+      cancel_request_detail: "HTTP cancellation request",
+      cancel_request_client_pid: 4321,
+      cancel_request_id: "cancel-1",
+      cancel_request_client_identity: "user:operator",
+    });
+    expect(run.cancellationSource).toEqual({
+      kind: "rpc",
+      detail: "HTTP cancellation request",
+      clientPid: 4321,
+      requestId: "cancel-1",
+      clientIdentity: "user:operator",
+    });
+  });
+});
+
 describe("mapSmithersElectricRow node mapping", () => {
   test("coerces bigint and numeric-string iteration values", () => {
     expect(

@@ -17,6 +17,8 @@ export type {
   GatewayRpcPayload,
   GatewayRpcRequestMap,
   GatewayRpcResponseMap,
+  GetRunResponse,
+  RunCancellationSource,
   RunStartedBy,
   ListUsageReportsRequest,
   UsageReport,

@@ -125,6 +125,37 @@ describe("generate-openapi helpers", () => {
     );
   });
 
+  test("RPC and REST run contracts publish cancellation attribution without schema drift", () => {
+    const doc = buildOpenApiDocument();
+    const cancelSchema = getGatewayRpcDefinition("cancelRun")!.responseSchema;
+    const getSchema = getGatewayRpcDefinition("getRun")!.responseSchema;
+    const listSchema = getGatewayRpcDefinition("listRuns")!.responseSchema;
+
+    expect(cancelSchema.properties?.cancellationSource?.properties?.kind?.enum).toEqual([
+      "signal",
+      "rpc",
+      "cli",
+      "engine",
+    ]);
+    expect(getSchema.properties?.cancellationSource).toEqual(cancelSchema.properties?.cancellationSource);
+    expect(listSchema.items?.properties?.cancellationSource).toEqual(cancelSchema.properties?.cancellationSource);
+    expect(
+      (doc.paths["/v1/rpc/cancelRun"] as any).post.responses["200"].content["application/json"].schema.properties
+        .payload,
+    ).toBe(cancelSchema);
+    expect(
+      (doc.paths["/v1/api/runs"] as any).get.responses["200"].content["application/json"].schema.properties.data,
+    ).toBe(listSchema);
+    expect(
+      (doc.paths["/v1/api/runs/{runId}"] as any).get.responses["200"].content["application/json"].schema.properties
+        .data,
+    ).toBe(getSchema);
+    expect(
+      (doc.paths["/v1/api/runs/{runId}/cancel"] as any).post.responses["200"].content["application/json"].schema
+        .properties.data,
+    ).toBe(cancelSchema);
+  });
+
   test("score REST aliases publish exact parameters and RPC response schemas", () => {
     const doc = buildOpenApiDocument();
     const compare = (doc.paths["/v1/api/scores/compare"] as any).get;
