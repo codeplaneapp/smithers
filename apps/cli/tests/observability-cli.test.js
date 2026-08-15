@@ -250,8 +250,10 @@ describe("CLI observability", () => {
           });
           expect(human.exitCode, `${human.stdout}\n${human.stderr}`).toBe(0);
           expect(human.stdout).toContain("cancellationSource:");
-          expect(human.stdout).toContain(`kind: ${source.kind}`);
-          expect(human.stdout).toContain(source.detail);
+          for (const [key, value] of Object.entries(source)) {
+            expect(human.stdout).toContain(`${key}:`);
+            expect(human.stdout).toContain(String(value));
+          }
         }
       } finally {
         sqlite.close();
