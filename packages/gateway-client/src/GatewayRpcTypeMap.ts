@@ -51,6 +51,7 @@ import type {
   WhatHappenedRequest,
   WhatHappenedResponse,
   GetRunRequest,
+  GetRunResponse,
   ListRunTokenUsageRequest,
   ListRunTokenUsageResponse,
   GetRunDiffRequest,
@@ -78,7 +79,7 @@ import type { GatewayCronRow } from "./sync/GatewayCronRow.ts";
 import type { UsageReport } from "@smthrs/usage";
 
 export type { UsageReport, UsageWindow } from "@smthrs/usage";
-export type { RunStartedBy } from "@smthrs/protocol/gateway-rpc";
+export type { RunCancellationSource, RunStartedBy } from "@smthrs/protocol/gateway-rpc";
 
 export type ListUsageReportsRequest = { fresh?: boolean };
 
@@ -138,7 +139,7 @@ export type GatewayRpcResponseMap = {
   rewindRun: RewindRunResponse;
   submitApproval: SubmitApprovalResponse;
   submitSignal: Record<string, unknown>;
-  getRun: Record<string, unknown>;
+  getRun: GetRunResponse;
   listRunTokenUsage: ListRunTokenUsageResponse;
   listRuns: ListRunsResponse;
   listRunDescendants: ListRunDescendantsResponse;

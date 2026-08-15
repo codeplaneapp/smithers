@@ -22,6 +22,33 @@ function validStartedBy(value) {
   };
 }
 
+const CANCELLATION_SOURCE_KINDS = new Set(["signal", "rpc", "cli", "engine"]);
+
+/** @param {Record<string, unknown>} row */
+function cancellationSourceFromRow(row) {
+  if (typeof row.cancelRequestSource !== "string") return undefined;
+  const rawKind = row.cancelRequestSource;
+  const legacyTransport = rawKind === "http" || rawKind === "websocket" || rawKind === "gateway";
+  const kind = legacyTransport ? "rpc" : rawKind;
+  if (!CANCELLATION_SOURCE_KINDS.has(kind)) return undefined;
+  const detail =
+    typeof row.cancelRequestDetail === "string"
+      ? row.cancelRequestDetail
+      : legacyTransport
+        ? `${rawKind} cancellation request`
+        : undefined;
+  return {
+    kind,
+    ...(detail !== undefined ? { detail } : {}),
+    ...(typeof row.cancelRequestSignal === "string" ? { signal: row.cancelRequestSignal } : {}),
+    ...(Number.isSafeInteger(row.cancelRequestClientPid) && Number(row.cancelRequestClientPid) > 0
+      ? { clientPid: Number(row.cancelRequestClientPid) }
+      : {}),
+    ...(typeof row.cancelRequestId === "string" ? { requestId: row.cancelRequestId } : {}),
+    ...(typeof row.cancelRequestClientIdentity === "string" ? { clientIdentity: row.cancelRequestClientIdentity } : {}),
+  };
+}
+
 /**
  * @template {Record<string, unknown>} Row
  * @param {Row} row
@@ -29,6 +56,8 @@ function validStartedBy(value) {
  */
 export function serializeRunRow(row) {
   const normalized = normalizeApiRow(row);
+  const cancellationSource = cancellationSourceFromRow(normalized);
+  if (cancellationSource) normalized.cancellationSource = cancellationSource;
   let config;
   if (typeof normalized.configJson === "string") {
     try {

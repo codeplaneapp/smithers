@@ -29,6 +29,7 @@ import {
   type SubmitApprovalResponse,
   type SubmitSignalRequest,
   type GetRunRequest,
+  type GetRunResponse,
   type ListRunTokenUsageRequest,
   type ListRunTokenUsageResponse,
   type GetRunDiffRequest,
@@ -551,19 +552,43 @@ describe("Gateway RPC contract", () => {
     // above would be a no-op.
     const cancelRun = getGatewayRpcDefinition("cancelRun");
     expect(cancelRun).toBeDefined();
-    const driftedExample = { runId: "run_01", status: "cancelling", typo: true };
+    const driftedExample = { ...(cancelRun!.exampleResponse as Record<string, unknown>), typo: true };
     const errors = validateAgainstSchema(driftedExample, cancelRun!.responseSchema);
     expect(errors.length).toBeGreaterThan(0);
     expect(errors.join(" ")).toContain("additionalProperties:false");
 
     // And a missing required field is caught too.
-    const missingRequired = validateAgainstSchema({ status: "cancelling" }, cancelRun!.responseSchema);
+    const missingRequired = validateAgainstSchema({ status: "cancelled" }, cancelRun!.responseSchema);
     expect(missingRequired.join(" ")).toContain("required property missing");
 
     // And a wrong const (rewindRun's confirm must be true).
     const rewind = getGatewayRpcDefinition("rewindRun")!;
     const badConst = validateAgainstSchema({ runId: "r", frameNo: 1, confirm: false }, rewind.requestSchema);
     expect(badConst.join(" ")).toContain("expected const");
+  });
+
+  test("run contracts share one strict cancellation-source schema", () => {
+    const cancelSource = getGatewayRpcDefinition("cancelRun")!.responseSchema.properties!.cancellationSource!;
+    const getSource = getGatewayRpcDefinition("getRun")!.responseSchema.properties!.cancellationSource!;
+    const listSource = getGatewayRpcDefinition("listRuns")!.responseSchema.items!.properties!.cancellationSource!;
+    expect(getSource).toEqual(cancelSource);
+    expect(listSource).toEqual(cancelSource);
+
+    expect(
+      validateAgainstSchema(
+        {
+          kind: "rpc",
+          detail: "websocket cancellation request",
+          clientPid: 4321,
+          requestId: "cancel-1",
+          clientIdentity: "user:operator",
+        },
+        cancelSource,
+      ),
+    ).toEqual([]);
+    expect(validateAgainstSchema({ kind: "unknown" }, cancelSource).length).toBeGreaterThan(0);
+    expect(validateAgainstSchema({ kind: "rpc", clientPid: 0 }, cancelSource).length).toBeGreaterThan(0);
+    expect(validateAgainstSchema({ kind: "rpc", extra: true }, cancelSource).length).toBeGreaterThan(0);
   });
 
   test("scope grants honor wildcard prefix grants", () => {
@@ -757,7 +782,20 @@ describe("Gateway RPC contract", () => {
       {
         method: "cancelRun",
         request: { runId: "r1" } satisfies CancelRunRequest,
-        response: { runId: "r1", status: "cancelling" } satisfies CancelRunResponse,
+        response: {
+          runId: "r1",
+          won: true,
+          status: "cancelled",
+          terminalStatus: "cancelled",
+          repaired: false,
+          cancellationSource: {
+            kind: "rpc",
+            detail: "websocket cancellation request",
+            clientPid: 4321,
+            requestId: "cancel-1",
+            clientIdentity: "user:operator",
+          },
+        } satisfies CancelRunResponse,
       },
       {
         method: "pauseRun",
@@ -801,7 +839,12 @@ describe("Gateway RPC contract", () => {
       {
         method: "getRun",
         request: { runId: "r1" } satisfies GetRunRequest,
-        response: { runId: "r1", system: false },
+        response: {
+          runId: "r1",
+          status: "cancelled",
+          system: false,
+          cancellationSource: { kind: "signal", signal: "SIGTERM" },
+        } satisfies GetRunResponse,
       },
       {
         method: "listRunTokenUsage",
@@ -832,9 +875,15 @@ describe("Gateway RPC contract", () => {
       },
       {
         method: "listRuns",
-        request: { filter: { status: "finished", limit: 10, includeSystem: true } } satisfies ListRunsRequest,
+        request: { filter: { status: "cancelled", limit: 10, includeSystem: true } } satisfies ListRunsRequest,
         response: [
-          { runId: "r1", workflowKey: "deploy", status: "finished", system: false },
+          {
+            runId: "r1",
+            workflowKey: "deploy",
+            status: "cancelled",
+            system: false,
+            cancellationSource: { kind: "engine", detail: "subflow deadline exceeded" },
+          },
         ] satisfies ListRunsResponse,
       },
       {

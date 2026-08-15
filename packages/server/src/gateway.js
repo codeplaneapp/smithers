@@ -8023,12 +8023,15 @@ a { color: var(--brand); }</style>
         if (!includeSystem && system) {
           continue;
         }
-        byRunId.set(row.runId, {
-          ...row,
-          workflowKey,
-          system,
-          ...(rowStartedBy ? { startedBy: rowStartedBy } : {}),
-        });
+        byRunId.set(
+          row.runId,
+          serializeRunRow({
+            ...row,
+            workflowKey,
+            system,
+            ...(rowStartedBy ? { startedBy: rowStartedBy } : {}),
+          }),
+        );
       }
     }
     const results = [...byRunId.values()];
@@ -9371,18 +9374,21 @@ a { color: var(--brand); }</style>
           readPersistedDegradedOutcome(resolved.adapter, runId, run.status),
         ]);
         const startedBy = runStartedByFromRow(run);
-        return responseOk(frame.id, {
-          ...run,
-          workflowKey: resolved.workflowKey,
-          system: runSystemFromRow(run),
-          summary: summary.reduce((acc, row) => {
-            acc[row.state] = row.count;
-            return acc;
-          }, {}),
-          ...(runState ? { runState } : {}),
-          ...(startedBy ? { startedBy } : {}),
-          ...degradedOutcome,
-        });
+        return responseOk(
+          frame.id,
+          serializeRunRow({
+            ...run,
+            workflowKey: resolved.workflowKey,
+            system: runSystemFromRow(run),
+            summary: summary.reduce((acc, row) => {
+              acc[row.state] = row.count;
+              return acc;
+            }, {}),
+            ...(runState ? { runState } : {}),
+            ...(startedBy ? { startedBy } : {}),
+            ...degradedOutcome,
+          }),
+        );
       }
       case "frames.list": {
         const runId = asString(params.runId);
@@ -10199,7 +10205,14 @@ a { color: var(--brand); }</style>
           const { finalizeCancelledRun } = await loadEngineRuntime();
           const claimed = await finalizeCancelledRun(resolved.adapter, runId, { now: Date.now() });
           if (claimed.won) active.abort.abort();
-          return responseOk(frame.id, claimed);
+          const cancelledRun = await resolved.adapter.getRun(runId);
+          const cancellationSource = cancelledRun
+            ? asObject(serializeRunRow(cancelledRun))?.cancellationSource
+            : undefined;
+          return responseOk(frame.id, {
+            ...claimed,
+            ...(cancellationSource ? { cancellationSource } : {}),
+          });
         }
         const resolved = await this.resolveRun(runId).catch(() => null);
         const run = resolved ? await resolved.adapter.getRun(runId) : null;
@@ -10222,7 +10235,14 @@ a { color: var(--brand); }</style>
         }
         const { finalizeCancelledRun } = await loadEngineRuntime();
         const result = await finalizeCancelledRun(resolved.adapter, runId);
-        return responseOk(frame.id, result);
+        const cancelledRun = await resolved.adapter.getRun(runId);
+        const cancellationSource = cancelledRun
+          ? asObject(serializeRunRow(cancelledRun))?.cancellationSource
+          : undefined;
+        return responseOk(frame.id, {
+          ...result,
+          ...(cancellationSource ? { cancellationSource } : {}),
+        });
       }
       case "runs.pause":
       case "pauseRun": {
