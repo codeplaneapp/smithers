@@ -37,6 +37,28 @@ describe("classifySessionLoss", () => {
     expect(err.code).toBe("AGENT_SESSION_LOST");
   });
 
+  test("claude 'No conversation found' on a FRESH session is flagged so the chain fails over", () => {
+    const err = classifySessionLoss(
+      "claude",
+      "No conversation found with session ID: 6375a571-173f-4de8-b914-87500f95065f",
+      "",
+      false,
+    );
+    expect(err).not.toBeNull();
+    expect(err.code).toBe("AGENT_SESSION_LOST");
+    expect(err.details.freshSessionFailure).toBe(true);
+    // Still discard the id: the heartbeat may have captured the broken one.
+    expect(err.details.discardResumeSession).toBe(true);
+    expect(err.message).toContain("FRESH session");
+    expect(err.message).not.toContain("Retry will start a fresh session");
+  });
+
+  test("claude session loss WITH a resume id keeps the retry-fresh message", () => {
+    const err = classifySessionLoss("claude", "No conversation found with session ID: abc12345", "", true);
+    expect(err.details.freshSessionFailure).toBe(false);
+    expect(err.message).toContain("Retry will start a fresh session");
+  });
+
   test("kimi resume banner is session loss with the id captured", () => {
     const err = classifySessionLoss("kimi", "", "To resume this session: kimi -r 0a1b2c3d-4e5f-6789-abcd-ef0123456789");
     expect(err).not.toBeNull();

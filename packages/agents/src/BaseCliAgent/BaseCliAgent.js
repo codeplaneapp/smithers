@@ -221,10 +221,13 @@ export function classifySessionLoss(command, errorText, rawStderr, hadResumeSess
     const lostId = claudeMatch[1] ? ` ${claudeMatch[1]}` : "";
     return new SmithersError(
       "AGENT_SESSION_LOST",
-      `Claude conversation${lostId} no longer exists; the persisted resume id is dead. Retry will start a fresh session.`,
+      hadResumeSession
+        ? `Claude conversation${lostId} no longer exists; the persisted resume id is dead. Retry will start a fresh session.`
+        : `Claude conversation${lostId} was not found even though this attempt started a FRESH session — the claude CLI is failing to establish sessions on this account; retrying it will not help. Failing over to the next agent in the chain (if any).`,
       {
         failureRetryable: true,
         discardResumeSession: true,
+        freshSessionFailure: !hadResumeSession,
         command: "claude",
       },
     );
