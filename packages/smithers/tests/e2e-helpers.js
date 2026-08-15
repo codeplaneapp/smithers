@@ -20,6 +20,7 @@ const ROOT_NODE_MODULES = resolve(REPO_ROOT, "node_modules");
 const BUN_BINARY = process.execPath;
 const EXECUTABLE_SHEBANG = `#!${BUN_BINARY}`;
 const activeProcessRecords = new Set();
+const activeDetachedProcessRecords = new Set();
 const tempDirs = new Set();
 
 function killProcessGroup(pid) {
@@ -40,6 +41,10 @@ function reapOwnedProcesses() {
     reapProcessRecord(record);
   }
   activeProcessRecords.clear();
+  for (const record of activeDetachedProcessRecords) {
+    killProcessGroup(record.pid);
+  }
+  activeDetachedProcessRecords.clear();
 }
 
 function reapProcessRecord(record) {
@@ -50,6 +55,28 @@ function reapProcessRecord(record) {
     if (error?.code !== "ENOENT") throw error;
   }
   cleanupTempDir(record.dir);
+}
+
+function reapDetachedProcessesForCwd(cwd) {
+  for (const record of activeDetachedProcessRecords) {
+    if (record.cwd !== cwd) continue;
+    activeDetachedProcessRecords.delete(record);
+    killProcessGroup(record.pid);
+  }
+}
+
+// A successful `up -d` launch intentionally escapes the process runner's
+// group, but its JSON receipt gives the harness the new group leader. Keep it
+// alive for the test, then reap it before the fixture workspace disappears.
+function trackDetachedProcess(result, cwd) {
+  const pid = Number(result?.pid);
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  const record = { pid, cwd: resolve(cwd) };
+  activeDetachedProcessRecords.add(record);
+  onTestFinished(() => {
+    if (!activeDetachedProcessRecords.delete(record)) return;
+    killProcessGroup(pid);
+  });
 }
 
 afterAll(() => {
@@ -152,6 +179,7 @@ export function createTempRepo(options = {}) {
   const dir = realpathSync(mkdtempSync(join(options.parentDir ?? tmpdir(), ".smithers-e2e-")));
   tempDirs.add(dir);
   onTestFinished(() => {
+    reapDetachedProcessesForCwd(dir);
     cleanupTempDir(dir);
     tempDirs.delete(dir);
   });
@@ -257,6 +285,7 @@ export function runSmithers(args, options) {
     if (options.format === "json") {
       json = parseTrailingJson(stdout);
     }
+    trackDetachedProcess(json, options.cwd);
     return {
       exitCode: result.status ?? (result.signal === "SIGTERM" ? 143 : 1),
       stdout,
