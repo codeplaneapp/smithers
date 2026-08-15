@@ -354,7 +354,7 @@ describe("remaining monitor control migrations", () => {
     expect(more.getAttribute("aria-expanded")).toBe("true");
   });
 
-  test("tree controls expose shared active and disabled states", async () => {
+  test("tree controls stay shared while historical selection remains local", async () => {
     const selected: string[] = [];
     const task = { key: "task#0", id: "task", name: "Task", kind: "task", status: "finished", children: [] };
     const workflow = {
@@ -389,10 +389,14 @@ describe("remaining monitor control migrations", () => {
     )!;
     expect(taskRow.getAttribute("data-slot")).toBe("row-button");
     expect(taskRow.getAttribute("data-active")).toBe("true");
-    await act(async () => taskRow.focus());
-    expect(document.activeElement).toBe(taskRow);
+    expect(taskRow.tabIndex).toBe(-1);
+    const tree = byTestId("monitor-tree");
+    await act(async () => tree.focus());
+    expect(document.activeElement).toBe(tree);
+    expect(tree.getAttribute("aria-activedescendant")).toBe(taskRow.closest('[role="treeitem"]')?.id);
     await click(taskRow);
     expect(selected).toEqual(["task"]);
+    expect(document.activeElement).toBe(tree);
 
     await rerender(
       <ExecutionTree
@@ -403,12 +407,14 @@ describe("remaining monitor control migrations", () => {
         frameOverride={{ root: workflow, loading: false }}
       />,
     );
-    const disabledTask = [...document.querySelectorAll<HTMLButtonElement>('[data-testid="monitor-tree-node"]')].find(
+    const historicalTask = [...document.querySelectorAll<HTMLButtonElement>('[data-testid="monitor-tree-node"]')].find(
       (row) => row.textContent?.includes("Task"),
     )!;
-    expect(disabledTask.disabled).toBe(true);
-    await click(disabledTask);
+    expect(historicalTask.disabled).toBe(false);
+    expect(historicalTask.getAttribute("aria-label")).toContain("Select historical node");
+    await click(historicalTask);
     expect(selected).toEqual(["task"]);
+    expect(historicalTask.closest('[role="treeitem"]')?.getAttribute("aria-selected")).toBe("true");
   });
 
   test("timeline rows are shared RowButtons with selected state and preserved activation", async () => {
@@ -1084,6 +1090,197 @@ describe("event log accessibility", () => {
   });
 });
 
+const accessibleTaskA = {
+  key: "task-a#0",
+  id: "task-a",
+  name: "Task A",
+  kind: "task",
+  status: "finished",
+  children: [],
+};
+const accessibleTaskB = {
+  key: "task-b#0",
+  id: "task-b",
+  name: "Task B",
+  kind: "approval",
+  status: "waiting",
+  children: [],
+};
+const accessibleSequence = {
+  key: "sequence#0",
+  id: "sequence",
+  name: "Build sequence",
+  kind: "sequence",
+  status: "running",
+  children: [accessibleTaskA, accessibleTaskB],
+};
+const accessibleTaskC = {
+  key: "task-c#0",
+  id: "task-c",
+  name: "Task C",
+  kind: "task",
+  status: "queued",
+  children: [],
+};
+const accessibleRoot = {
+  key: "workflow#0",
+  id: "workflow",
+  name: "Workflow",
+  kind: "workflow",
+  status: "running",
+  children: [accessibleSequence, accessibleTaskC],
+};
+const accessibleNodes = [accessibleRoot, accessibleSequence, accessibleTaskA, accessibleTaskB, accessibleTaskC];
+
+function AccessibleTreeHarness({
+  asXml = false,
+  historical = false,
+  onSelect,
+}: {
+  asXml?: boolean;
+  historical?: boolean;
+  onSelect?: (nodeId: string) => void;
+}) {
+  const [selectedKey, setSelectedKey] = useState<string | undefined>(undefined);
+  return (
+    <ExecutionTree
+      runId="run-accessible-tree"
+      treeQuery={{
+        root: accessibleRoot,
+        nodes: accessibleNodes,
+        status: "running",
+        isLoading: false,
+        error: undefined,
+      }}
+      selectedNodeKey={selectedKey}
+      onSelectNode={(node) => {
+        setSelectedKey(node.key ?? node.id);
+        onSelect?.(node.id ?? "");
+      }}
+      frameOverride={historical ? { root: accessibleRoot, loading: false } : undefined}
+      asXml={asXml}
+    />
+  );
+}
+
+function activeTreeItem(tree: HTMLElement): HTMLElement {
+  const id = tree.getAttribute("aria-activedescendant");
+  if (!id) throw new Error("tree has no active descendant");
+  const item = document.getElementById(id);
+  if (!item) throw new Error(`missing active treeitem ${id}`);
+  return item;
+}
+
+function directTreeItems(group: Element): HTMLElement[] {
+  return [...group.children].filter((child) => child.getAttribute("role") === "treeitem") as HTMLElement[];
+}
+
+describe("execution tree accessibility", () => {
+  test("exposes a complete tree hierarchy and supports the APG keyboard model", async () => {
+    const selected: string[] = [];
+    await render(<AccessibleTreeHarness onSelect={(nodeId) => selected.push(nodeId)} />);
+
+    const tree = byTestId("monitor-tree");
+    expect(tree.getAttribute("role")).toBe("tree");
+    expect(tree.getAttribute("aria-label")).toBe("Execution tree");
+    expect(tree.getAttribute("aria-orientation")).toBe("vertical");
+    expect(tree.tabIndex).toBe(0);
+    expect([...tree.querySelectorAll<HTMLElement>("button")].every((button) => button.tabIndex === -1)).toBe(true);
+
+    const items = [...tree.querySelectorAll<HTMLElement>('[role="treeitem"]')];
+    expect(items).toHaveLength(5);
+    const rootItem = items.find((item) => item.getAttribute("aria-label")?.startsWith("Workflow,"))!;
+    const sequenceItem = items.find((item) => item.getAttribute("aria-label")?.startsWith("Build sequence,"))!;
+    const taskAItem = items.find((item) => item.getAttribute("aria-label")?.startsWith("Task A,"))!;
+    const taskCItem = items.find((item) => item.getAttribute("aria-label")?.startsWith("Task C,"))!;
+
+    expect(rootItem.getAttribute("aria-level")).toBe("1");
+    expect(rootItem.getAttribute("aria-posinset")).toBe("1");
+    expect(rootItem.getAttribute("aria-setsize")).toBe("1");
+    expect(rootItem.getAttribute("aria-expanded")).toBe("true");
+    expect(rootItem.getAttribute("aria-selected")).toBe("false");
+    expect(rootItem.getAttribute("aria-label")).toContain("workflow");
+    expect(sequenceItem.getAttribute("aria-level")).toBe("2");
+    expect(sequenceItem.getAttribute("aria-posinset")).toBe("1");
+    expect(sequenceItem.getAttribute("aria-setsize")).toBe("2");
+    expect(sequenceItem.getAttribute("aria-label")).toContain("runs children in order");
+    expect(taskAItem.getAttribute("aria-level")).toBe("3");
+    expect(taskAItem.getAttribute("aria-posinset")).toBe("1");
+    expect(taskAItem.getAttribute("aria-setsize")).toBe("2");
+    expect(taskCItem.getAttribute("aria-posinset")).toBe("2");
+
+    const rootGroup = [...rootItem.children].find((child) => child.getAttribute("role") === "group")!;
+    const sequenceGroup = [...sequenceItem.children].find((child) => child.getAttribute("role") === "group")!;
+    expect(directTreeItems(rootGroup)).toHaveLength(2);
+    expect(directTreeItems(sequenceGroup)).toHaveLength(2);
+    const rootToggle = rootItem.querySelector<HTMLElement>('[data-testid="monitor-tree-toggle"]')!;
+    expect(rootToggle.getAttribute("aria-label")).toBe("Collapse workflow Workflow");
+    expect(document.getElementById(rootToggle.getAttribute("aria-controls")!)).toBe(rootGroup);
+
+    await act(async () => tree.focus());
+    expect(document.activeElement).toBe(tree);
+    expect(activeTreeItem(tree)).toBe(rootItem);
+
+    await keydown(tree, "ArrowDown");
+    expect(activeTreeItem(tree)).toBe(sequenceItem);
+    await keydown(tree, "ArrowUp");
+    expect(activeTreeItem(tree)).toBe(rootItem);
+    await keydown(tree, "ArrowDown");
+    expect(activeTreeItem(tree)).toBe(sequenceItem);
+    await keydown(tree, "ArrowRight");
+    expect(activeTreeItem(tree).getAttribute("aria-label")).toStartWith("Task A,");
+    await keydown(tree, "ArrowLeft");
+    expect(activeTreeItem(tree)).toBe(sequenceItem);
+    await keydown(tree, "ArrowLeft");
+    expect(sequenceItem.getAttribute("aria-expanded")).toBe("false");
+    expect(tree.querySelectorAll('[role="treeitem"]')).toHaveLength(3);
+    await keydown(tree, "ArrowRight");
+    expect(sequenceItem.getAttribute("aria-expanded")).toBe("true");
+    await keydown(tree, "ArrowRight");
+    expect(activeTreeItem(tree).getAttribute("aria-label")).toStartWith("Task A,");
+    await keydown(tree, "End");
+    expect(activeTreeItem(tree).getAttribute("aria-label")).toStartWith("Task C,");
+    await keydown(tree, "Home");
+    expect(activeTreeItem(tree)).toBe(rootItem);
+    await keydown(tree, "Enter");
+    expect(rootItem.getAttribute("aria-selected")).toBe("true");
+    expect(selected).toEqual(["workflow"]);
+  });
+
+  test("preserves tree keyboard and selection semantics in historical XML", async () => {
+    const externalSelections: string[] = [];
+    await render(<AccessibleTreeHarness asXml historical onSelect={(nodeId) => externalSelections.push(nodeId)} />);
+
+    const tree = byTestId("monitor-tree-xml");
+    expect(tree.getAttribute("role")).toBe("tree");
+    expect(tree.getAttribute("aria-label")).toBe("Execution tree XML");
+    expect(tree.querySelectorAll('[role="treeitem"]')).toHaveLength(5);
+    expect(tree.querySelectorAll('[role="group"]')).toHaveLength(2);
+    expect(
+      [...tree.querySelectorAll<HTMLElement>('[data-testid="monitor-xml-node"]')].every((button) =>
+        button.getAttribute("aria-label")?.startsWith("Select historical node"),
+      ),
+    ).toBe(true);
+
+    await act(async () => tree.focus());
+    await keydown(tree, "End");
+    expect(activeTreeItem(tree).getAttribute("aria-label")).toStartWith("Task C,");
+    await keydown(tree, "Enter");
+    expect(activeTreeItem(tree).getAttribute("aria-selected")).toBe("true");
+    expect(externalSelections).toEqual([]);
+
+    await keydown(tree, "ArrowLeft");
+    expect(activeTreeItem(tree).getAttribute("aria-label")).toStartWith("Workflow,");
+    await keydown(tree, "ArrowLeft");
+    expect(tree.querySelectorAll('[role="treeitem"]')).toHaveLength(1);
+    expect(activeTreeItem(tree).getAttribute("aria-expanded")).toBe("false");
+    await keydown(tree, "ArrowRight");
+    expect(tree.querySelectorAll('[role="treeitem"]')).toHaveLength(5);
+    await keydown(tree, "ArrowRight");
+    expect(activeTreeItem(tree).getAttribute("aria-label")).toStartWith("Build sequence,");
+  });
+});
+
 describe("execution tree unavailable states", () => {
   const historicalRoot = {
     key: "workflow#0",
@@ -1200,12 +1397,17 @@ describe("execution tree unavailable states", () => {
 });
 
 describe("monitor theme contract", () => {
-  test("execution views expose named focusable regions without claiming an incomplete ARIA tree", () => {
-    expect(monitorSource).not.toContain('role="tree"');
-    expect(monitorSource).not.toContain('role="treeitem"');
+  test("execution views expose the complete composite tree contract", () => {
+    expect(monitorSource).toContain('role="tree"');
+    expect(monitorSource).toContain('role="treeitem"');
+    expect(monitorSource).toContain('role="group"');
     expect(monitorSource).toContain('aria-label="Execution tree"');
     expect(monitorSource).toContain('aria-label="Execution tree XML"');
+    expect(monitorSource).toContain("aria-activedescendant");
+    expect(monitorSource).toContain("aria-posinset");
+    expect(monitorSource).toContain("aria-setsize");
     expect(monitorSource).toContain("aria-expanded={expanded}");
+    expect(monitorSource).toContain("aria-selected={selected}");
   });
 
   test("inherits explicit light/dark and OS-fallback tokens from the shared theme", () => {

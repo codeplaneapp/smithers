@@ -6,7 +6,17 @@
  * `smithers monitor`). Purely an observer: it launches nothing, everything on
  * screen is live gateway state. Domain logic lives in ./monitorModel.ts.
  */
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import {
   createGatewayReactRoot,
   useGatewayActions,
@@ -1804,6 +1814,69 @@ type TreeNode = TreeNodeLike & {
   children?: TreeNode[] | null;
 };
 
+/** Leaf kinds own transcripts/outputs; everything else is structural grouping. */
+const LEAF_KINDS = new Set(["task", "agent", "compute", "static"]);
+
+/** Human names for glyphs and assistive labels. */
+const KIND_LABELS: Record<string, string> = {
+  workflow: "workflow",
+  sequence: "sequence — runs children in order",
+  parallel: "parallel — runs children concurrently",
+  task: "task",
+  approval: "approval gate",
+  loop: "loop",
+  foreach: "loop over items",
+  timer: "timer wait",
+  branch: "conditional branch",
+  conditional: "conditional branch",
+  subflow: "sub-workflow",
+};
+
+function treeNodeName(node: TreeNode): string {
+  return (node.cardLabel ?? node.name ?? node.id ?? treeNodeKey(node)) || "Unnamed node";
+}
+
+function treeNodeKindLabel(node: TreeNode): string {
+  const kind = (node.kind ?? "node").toLowerCase();
+  return KIND_LABELS[kind] ?? `${kind} node`;
+}
+
+function treeNodeAccessibleLabel(node: TreeNode): string {
+  const details = [treeNodeName(node), treeNodeKindLabel(node)];
+  const status = asString(node.status);
+  if (status) details.push(labelForStatus(status));
+  if (typeof node.iteration === "number" && node.iteration > 0) details.push(`iteration ${node.iteration}`);
+  if (typeof node.attempt === "number" && node.attempt > 0) {
+    details.push(
+      typeof node.maxAttempts === "number"
+        ? `attempt ${node.attempt} of ${node.maxAttempts}`
+        : `attempt ${node.attempt}`,
+    );
+  }
+  return details.join(", ");
+}
+
+function treeItemDomId(treeId: string, key: string): string {
+  return `${treeId}-item-${encodeURIComponent(key || "node")}`;
+}
+
+function treeGroupDomId(treeId: string, key: string): string {
+  return `${treeId}-group-${encodeURIComponent(key || "node")}`;
+}
+
+type TreeItemInteractionProps = {
+  treeId: string;
+  positionInSet: number;
+  setSize: number;
+  focusedKey: string;
+  selectedNodeKey: string | undefined;
+  onFocus: (key: string) => void;
+  onToggle: (key: string) => void;
+  onActivate: (node: TreeNode) => void;
+  onItemRef: (key: string, element: HTMLDivElement | null) => void;
+  activationLabel: string;
+};
+
 /**
  * React-DevTools-style XML rendering of the execution tree: colored tags and
  * attributes, clickable chevrons, click-to-inspect — sharing the exact same
@@ -1814,35 +1887,44 @@ function XmlRow({
   depth,
   expandedOverrides,
   defaults,
+  treeId,
+  positionInSet,
+  setSize,
+  focusedKey,
   selectedNodeKey,
   onToggle,
-  onSelect,
-  selectDisabled,
+  onFocus,
+  onActivate,
+  onItemRef,
+  activationLabel,
 }: {
   node: TreeNode;
   depth: number;
   expandedOverrides: ReadonlyMap<string, boolean>;
   defaults: ReadonlySet<string>;
-  selectedNodeKey: string | undefined;
-  onToggle: (key: string) => void;
-  onSelect: (node: TreeNode) => void;
-  selectDisabled?: boolean;
-}) {
+} & TreeItemInteractionProps) {
   const key = treeNodeKey(node);
   const children = (node.children ?? []) as TreeNode[];
   const expanded = expandedOverrides.get(key) ?? defaults.has(key);
+  const selected = key === selectedNodeKey;
+  const focused = key === focusedKey;
   const kind = (node.kind ?? "node").replace(/[^a-zA-Z0-9_.-]/g, "") || "Node";
   const tag = kind.charAt(0).toUpperCase() + kind.slice(1);
   const status = asString(node.status);
   const name = asString(node.name);
+  const groupId = treeGroupDomId(treeId, key);
   const openTag = (
     <Button
       variant="ghost"
       size="sm"
       className="mon-xml-open"
       data-testid="monitor-xml-node"
-      disabled={selectDisabled}
-      onClick={() => onSelect(node)}
+      tabIndex={-1}
+      aria-label={`${activationLabel} ${treeNodeAccessibleLabel(node)}`}
+      onClick={() => {
+        onFocus(key);
+        onActivate(node);
+      }}
     >
       <span className="mon-xml-punct">&lt;</span>
       <span className="mon-xml-tag">{tag}</span>
@@ -1880,20 +1962,35 @@ function XmlRow({
     </Button>
   );
   return (
-    <>
-      <div
-        className={`mon-xml-row${key === selectedNodeKey ? " is-active" : ""}`}
-        style={{ paddingLeft: 8 + depth * 16 }}
-      >
+    <div
+      id={treeItemDomId(treeId, key)}
+      ref={(element) => onItemRef(key, element)}
+      role="treeitem"
+      aria-label={treeNodeAccessibleLabel(node)}
+      aria-level={depth + 1}
+      aria-posinset={positionInSet}
+      aria-setsize={setSize}
+      aria-expanded={children.length > 0 ? expanded : undefined}
+      aria-selected={selected}
+      data-focused={focused ? "true" : undefined}
+      className="mon-tree-item"
+    >
+      <div className={`mon-xml-row${selected ? " is-active" : ""}`} style={{ paddingLeft: 8 + depth * 16 }}>
         {children.length > 0 ? (
           <Button
             variant="ghost"
             size="icon"
             className="mon-tree-chevron"
             data-testid="monitor-tree-toggle"
-            onClick={() => onToggle(key)}
+            tabIndex={-1}
+            onClick={(event) => {
+              event.stopPropagation();
+              onFocus(key);
+              onToggle(key);
+            }}
             aria-expanded={expanded}
-            aria-label={`${expanded ? "Collapse" : "Expand"} ${node.cardLabel ?? node.name ?? node.id ?? key}`}
+            aria-controls={expanded ? groupId : undefined}
+            aria-label={`${expanded ? "Collapse" : "Expand"} ${treeNodeKindLabel(node)} ${treeNodeName(node)}`}
           >
             {expanded ? "▾" : "▸"}
           </Button>
@@ -1906,19 +2003,27 @@ function XmlRow({
       </div>
       {expanded && children.length > 0 ? (
         <>
-          {children.map((child) => (
-            <XmlRow
-              key={treeNodeKey(child)}
-              node={child}
-              depth={depth + 1}
-              expandedOverrides={expandedOverrides}
-              defaults={defaults}
-              selectedNodeKey={selectedNodeKey}
-              onToggle={onToggle}
-              onSelect={onSelect}
-              selectDisabled={selectDisabled}
-            />
-          ))}
+          <div id={groupId} role="group">
+            {children.map((child, index) => (
+              <XmlRow
+                key={treeNodeKey(child)}
+                node={child}
+                depth={depth + 1}
+                expandedOverrides={expandedOverrides}
+                defaults={defaults}
+                treeId={treeId}
+                positionInSet={index + 1}
+                setSize={children.length}
+                focusedKey={focusedKey}
+                selectedNodeKey={selectedNodeKey}
+                onToggle={onToggle}
+                onFocus={onFocus}
+                onActivate={onActivate}
+                onItemRef={onItemRef}
+                activationLabel={activationLabel}
+              />
+            ))}
+          </div>
           <div className="mon-xml-row" style={{ paddingLeft: 8 + depth * 16 }}>
             <span className="mon-tree-chevron" aria-hidden />
             <span className="mon-xml-punct">
@@ -1927,55 +2032,41 @@ function XmlRow({
           </div>
         </>
       ) : null}
-    </>
+    </div>
   );
 }
-
-/** Leaf kinds own transcripts/outputs; everything else is structural grouping. */
-const LEAF_KINDS = new Set(["task", "agent", "compute", "static"]);
-
-/** One-line glyph legend, surfaced as a tooltip on each tree glyph. */
-const KIND_LABELS: Record<string, string> = {
-  workflow: "workflow",
-  sequence: "sequence — runs children in order",
-  parallel: "parallel — runs children concurrently",
-  task: "task",
-  approval: "approval gate",
-  loop: "loop",
-  foreach: "loop over items",
-  timer: "timer wait",
-  branch: "conditional branch",
-  conditional: "conditional branch",
-  subflow: "sub-workflow",
-};
 
 function TreeRow({
   node,
   depth,
   expandedOverrides,
   defaults,
+  treeId,
+  positionInSet,
+  setSize,
+  focusedKey,
   selectedNodeKey,
   durations,
   tokensById,
   onToggle,
-  onSelect,
-  selectDisabled,
+  onFocus,
+  onActivate,
+  onItemRef,
+  activationLabel,
 }: {
   node: TreeNode;
   depth: number;
   expandedOverrides: ReadonlyMap<string, boolean>;
   defaults: ReadonlySet<string>;
-  selectedNodeKey: string | undefined;
   durations?: ReadonlyMap<string, number>;
   /** nodeId → subtree token spend (+estimated in-flight), right-aligned beside the duration. */
   tokensById?: ReadonlyMap<string, { spent: number; inFlight?: number }>;
-  onToggle: (key: string) => void;
-  onSelect: (node: TreeNode) => void;
-  selectDisabled?: boolean;
-}) {
+} & TreeItemInteractionProps) {
   const key = treeNodeKey(node);
   const children = (node.children ?? []) as TreeNode[];
   const expanded = expandedOverrides.get(key) ?? defaults.has(key);
+  const selected = key === selectedNodeKey;
+  const focused = key === focusedKey;
   const kindKey = (node.kind ?? "").toLowerCase();
   const glyph = KIND_GLYPHS[kindKey] ?? "○";
   const agentName = isRecord(node.agent) ? asString(node.agent.name) : asString(node.agent);
@@ -1987,8 +2078,21 @@ function TreeRow({
   const showPill = !isContainer || tone === "failed" || tone === "waiting" || tone === "running";
   const durationMs = durations?.get(`${node.id ?? key}#${node.iteration ?? 0}`);
   const tokens = tokensById?.get(node.id ?? key);
+  const groupId = treeGroupDomId(treeId, key);
   return (
-    <>
+    <div
+      id={treeItemDomId(treeId, key)}
+      ref={(element) => onItemRef(key, element)}
+      role="treeitem"
+      aria-label={treeNodeAccessibleLabel(node)}
+      aria-level={depth + 1}
+      aria-posinset={positionInSet}
+      aria-setsize={setSize}
+      aria-expanded={children.length > 0 ? expanded : undefined}
+      aria-selected={selected}
+      data-focused={focused ? "true" : undefined}
+      className="mon-tree-item"
+    >
       <div
         className={`mon-tree-row${isContainer ? " mon-tree-container" : ""}`}
         style={{ paddingLeft: 8 + depth * 16 }}
@@ -1999,9 +2103,15 @@ function TreeRow({
             size="icon"
             className="mon-tree-chevron"
             data-testid="monitor-tree-toggle"
-            onClick={() => onToggle(key)}
+            tabIndex={-1}
+            onClick={(event) => {
+              event.stopPropagation();
+              onFocus(key);
+              onToggle(key);
+            }}
             aria-expanded={expanded}
-            aria-label={`${expanded ? "Collapse" : "Expand"} ${node.cardLabel ?? node.name ?? node.id ?? key}`}
+            aria-controls={expanded ? groupId : undefined}
+            aria-label={`${expanded ? "Collapse" : "Expand"} ${treeNodeKindLabel(node)} ${treeNodeName(node)}`}
           >
             {expanded ? "▾" : "▸"}
           </Button>
@@ -2011,14 +2121,17 @@ function TreeRow({
           </span>
         )}
         <RowButton
-          active={key === selectedNodeKey}
+          active={selected}
           className="mon-tree-main"
           data-testid="monitor-tree-node"
-          disabled={selectDisabled}
-          onClick={() => onSelect(node)}
-          title={selectDisabled ? "Node selection is disabled while scrubbing frames" : undefined}
+          tabIndex={-1}
+          aria-label={`${activationLabel} ${treeNodeAccessibleLabel(node)}`}
+          onClick={() => {
+            onFocus(key);
+            onActivate(node);
+          }}
         >
-          <span className="mon-tree-glyph mon-dim" title={KIND_LABELS[kindKey] ?? kindKey ?? "node"}>
+          <span className="mon-tree-glyph mon-dim" title={KIND_LABELS[kindKey] ?? kindKey ?? "node"} aria-hidden="true">
             {glyph}
           </span>
           <span className="mon-tree-name">{node.cardLabel ?? node.name ?? node.id ?? key}</span>
@@ -2047,25 +2160,58 @@ function TreeRow({
           {showPill ? <StatusTag status={node.status} /> : null}
         </RowButton>
       </div>
-      {expanded
-        ? children.map((child) => (
+      {expanded && children.length > 0 ? (
+        <div id={groupId} role="group">
+          {children.map((child, index) => (
             <TreeRow
               key={treeNodeKey(child)}
               node={child}
               depth={depth + 1}
               expandedOverrides={expandedOverrides}
               defaults={defaults}
+              treeId={treeId}
+              positionInSet={index + 1}
+              setSize={children.length}
+              focusedKey={focusedKey}
               selectedNodeKey={selectedNodeKey}
               durations={durations}
               tokensById={tokensById}
               onToggle={onToggle}
-              onSelect={onSelect}
-              selectDisabled={selectDisabled}
+              onFocus={onFocus}
+              onActivate={onActivate}
+              onItemRef={onItemRef}
+              activationLabel={activationLabel}
             />
-          ))
-        : null}
-    </>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
+}
+
+type VisibleTreeItem = {
+  key: string;
+  node: TreeNode;
+  parentKey: string | undefined;
+  firstChildKey: string | undefined;
+};
+
+function visibleTreeItems(
+  root: TreeNode | null,
+  expandedOverrides: ReadonlyMap<string, boolean>,
+  defaults: ReadonlySet<string>,
+): VisibleTreeItem[] {
+  if (!root) return [];
+  const visible: VisibleTreeItem[] = [];
+  const visit = (node: TreeNode, parentKey: string | undefined): void => {
+    const key = treeNodeKey(node);
+    const children = (node.children ?? []) as TreeNode[];
+    visible.push({ key, node, parentKey, firstChildKey: children[0] ? treeNodeKey(children[0]) : undefined });
+    if (!(expandedOverrides.get(key) ?? defaults.has(key))) return;
+    for (const child of children) visit(child, key);
+  };
+  visit(root, undefined);
+  return visible;
 }
 
 export function ExecutionTree({
@@ -2092,9 +2238,10 @@ export function ExecutionTree({
   onRetry?: () => void;
   /**
    * Frame-scrubber override: when set, render this static tree instead of the
-   * live one and disable node selection. `root: null` means a successfully
-   * loaded frame maps to an empty tree. While loading or unavailable, a
-   * non-null root is the previous valid frame and remains visible.
+   * live one. Activation selects within the historical tree without changing
+   * the live inspector. `root: null` means a successfully loaded frame maps to
+   * an empty tree. While loading or unavailable, a non-null root is the
+   * previous valid frame and remains visible.
    */
   frameOverride?: {
     root: TreeNode | null;
@@ -2115,6 +2262,12 @@ export function ExecutionTree({
   const root = isStatic ? frameOverride.root : (liveRoot as TreeNode | null);
   const frameLoading = frameOverride?.loading ?? false;
   const frameError = frameLoading ? undefined : frameOverride?.error;
+  const reactTreeId = useId();
+  const treeId = `monitor-tree-${reactTreeId.replace(/:/g, "")}`;
+  const treeRef = useRef<HTMLDivElement | null>(null);
+  const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const [focusedKey, setFocusedKey] = useState<string | undefined>(undefined);
+  const [frameSelectedKey, setFrameSelectedKey] = useState<string | undefined>(undefined);
   // ?nodeId= deep link: select the node once it exists in the live tree.
   useEffect(() => {
     if (isStatic || !autoSelectNodeId || nodes.length === 0) return;
@@ -2134,6 +2287,103 @@ export function ExecutionTree({
     if (overrides.size > 0) setOverrides(new Map());
   }
   const defaults = useMemo(() => autoExpandKeys(root as TreeNodeLike | null), [root]);
+  const visibleItems = useMemo(() => visibleTreeItems(root, overrides, defaults), [root, overrides, defaults]);
+  const itemByKey = useMemo(() => new Map(visibleItems.map((item) => [item.key, item])), [visibleItems]);
+  const effectiveSelectedKey = isStatic ? (frameSelectedKey ?? selectedNodeKey) : selectedNodeKey;
+  const effectiveFocusedKey =
+    (focusedKey && itemByKey.has(focusedKey) ? focusedKey : undefined) ??
+    (effectiveSelectedKey && itemByKey.has(effectiveSelectedKey) ? effectiveSelectedKey : undefined) ??
+    visibleItems[0]?.key ??
+    "";
+
+  useEffect(() => {
+    setFocusedKey(undefined);
+    setFrameSelectedKey(undefined);
+  }, [runId, isStatic]);
+
+  useEffect(() => {
+    if (!isStatic && selectedNodeKey) setFocusedKey(selectedNodeKey);
+  }, [isStatic, selectedNodeKey]);
+
+  useEffect(() => {
+    if (typeof document === "undefined" || document.activeElement !== treeRef.current) return;
+    itemRefs.current.get(effectiveFocusedKey)?.scrollIntoView?.({ block: "nearest" });
+  }, [asXml, effectiveFocusedKey, visibleItems.length]);
+
+  const setExpanded = (key: string, expanded: boolean): void => {
+    setOverrides((previous) => {
+      const next = new Map(previous);
+      next.set(key, expanded);
+      return next;
+    });
+  };
+
+  const toggleExpanded = (key: string): void => {
+    const expanded = overrides.get(key) ?? defaults.has(key);
+    setExpanded(key, !expanded);
+  };
+
+  const focusItem = (key: string): void => {
+    setFocusedKey(key);
+    treeRef.current?.focus({ preventScroll: true });
+  };
+
+  const activateItem = (node: TreeNode): void => {
+    const key = treeNodeKey(node);
+    setFocusedKey(key);
+    if (isStatic) setFrameSelectedKey(key);
+    else onSelectNode(node);
+  };
+
+  const registerItem = (key: string, element: HTMLDivElement | null): void => {
+    if (element) itemRefs.current.set(key, element);
+    else itemRefs.current.delete(key);
+  };
+
+  const onTreeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    if (event.target !== event.currentTarget || visibleItems.length === 0) return;
+    const currentIndex = Math.max(
+      0,
+      visibleItems.findIndex((item) => item.key === effectiveFocusedKey),
+    );
+    const current = visibleItems[currentIndex];
+    if (!current) return;
+    const children = (current.node.children ?? []) as TreeNode[];
+    const expanded = overrides.get(current.key) ?? defaults.has(current.key);
+    let nextKey: string | undefined;
+
+    switch (event.key) {
+      case "ArrowDown":
+        nextKey = visibleItems[Math.min(currentIndex + 1, visibleItems.length - 1)]?.key;
+        break;
+      case "ArrowUp":
+        nextKey = visibleItems[Math.max(currentIndex - 1, 0)]?.key;
+        break;
+      case "Home":
+        nextKey = visibleItems[0]?.key;
+        break;
+      case "End":
+        nextKey = visibleItems[visibleItems.length - 1]?.key;
+        break;
+      case "ArrowRight":
+        if (children.length > 0 && !expanded) setExpanded(current.key, true);
+        else if (children.length > 0) nextKey = current.firstChildKey;
+        break;
+      case "ArrowLeft":
+        if (children.length > 0 && expanded) setExpanded(current.key, false);
+        else nextKey = current.parentKey;
+        break;
+      case "Enter":
+      case " ":
+        activateItem(current.node);
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    if (nextKey) setFocusedKey(nextKey);
+  };
   if (!isStatic && error) {
     return (
       <div className="mon-empty" data-testid="monitor-tree-error" role="alert">
@@ -2219,56 +2469,64 @@ export function ExecutionTree({
   ) : null;
   const tree = asXml ? (
     <div
-      role="region"
+      id={treeId}
+      ref={treeRef}
+      role="tree"
       aria-label="Execution tree XML"
+      aria-orientation="vertical"
+      aria-activedescendant={treeItemDomId(treeId, effectiveFocusedKey)}
       tabIndex={0}
       className={`mon-tree mon-tree-xml${isStatic ? " is-static" : ""}`}
       data-testid="monitor-tree-xml"
+      onKeyDown={onTreeKeyDown}
     >
       <XmlRow
         node={root}
         depth={0}
         expandedOverrides={overrides}
         defaults={defaults}
-        selectedNodeKey={selectedNodeKey}
-        onToggle={(key) =>
-          setOverrides((prev) => {
-            const next = new Map(prev);
-            const current = next.get(key) ?? defaults.has(key);
-            next.set(key, !current);
-            return next;
-          })
-        }
-        onSelect={onSelectNode}
-        selectDisabled={isStatic}
+        treeId={treeId}
+        positionInSet={1}
+        setSize={1}
+        focusedKey={effectiveFocusedKey}
+        selectedNodeKey={effectiveSelectedKey}
+        onToggle={toggleExpanded}
+        onFocus={focusItem}
+        onActivate={activateItem}
+        onItemRef={registerItem}
+        activationLabel={isStatic ? "Select historical node" : "Inspect"}
       />
     </div>
   ) : (
     <div
-      role="region"
+      id={treeId}
+      ref={treeRef}
+      role="tree"
       aria-label="Execution tree"
+      aria-orientation="vertical"
+      aria-activedescendant={treeItemDomId(treeId, effectiveFocusedKey)}
       tabIndex={0}
       className={`mon-tree${isStatic ? " is-static" : ""}`}
       data-testid="monitor-tree"
+      onKeyDown={onTreeKeyDown}
     >
       <TreeRow
         node={root}
         depth={0}
         expandedOverrides={overrides}
         defaults={defaults}
-        selectedNodeKey={selectedNodeKey}
+        treeId={treeId}
+        positionInSet={1}
+        setSize={1}
+        focusedKey={effectiveFocusedKey}
+        selectedNodeKey={effectiveSelectedKey}
         durations={durations}
         tokensById={tokensById}
-        onToggle={(key) =>
-          setOverrides((prev) => {
-            const next = new Map(prev);
-            const current = next.get(key) ?? defaults.has(key);
-            next.set(key, !current);
-            return next;
-          })
-        }
-        onSelect={onSelectNode}
-        selectDisabled={isStatic}
+        onToggle={toggleExpanded}
+        onFocus={focusItem}
+        onActivate={activateItem}
+        onItemRef={registerItem}
+        activationLabel={isStatic ? "Select historical node" : "Inspect"}
       />
     </div>
   );
@@ -5175,7 +5433,10 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-progress-fill { height: 100%; border-radius: var(--r-full); background: var(--brand); transition: width 300ms ease; }
 
 .mon-tree { overflow-x: auto; }
+.mon-tree-item { min-width: max-content; }
 .mon-tree-row { display: flex; align-items: center; border-radius: var(--r-1); }
+.mon-tree:focus-visible .mon-tree-item[data-focused='true'] > .mon-tree-row,
+.mon-tree:focus-visible .mon-tree-item[data-focused='true'] > .mon-xml-row { box-shadow: inset 0 0 0 2px var(--ring-border); }
 .mon-tree-chevron { flex: none; color: var(--muted); }
 .mon-tree-main { justify-content: flex-start; gap: var(--sp-2); flex: 1; min-width: 0; padding: var(--sp-1) var(--sp-2); }
 .mon-tree-glyph { flex: none; width: 14px; text-align: center; cursor: help; }
