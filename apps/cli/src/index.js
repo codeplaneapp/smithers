@@ -3831,6 +3831,7 @@ async function preflightDetachedLaunch(options) {
       iteration: 0,
       input: inputRow ?? {},
       outputs,
+      zodToKeyName: workflow.zodToKeyName,
     });
     const rendered = await Effect.runPromise(
       Effect.result(
@@ -11414,6 +11415,7 @@ const cli = Cli.create({
           iteration: 0,
           input: inputRow ?? {},
           outputs,
+          zodToKeyName: workflow.zodToKeyName,
         });
         const baseRootDir = resolveLaunchRootDir(c.options.root);
         const rendered = await Effect.runPromise(
