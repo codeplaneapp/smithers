@@ -158,6 +158,11 @@ export const smithersErrorDefinitions = {
     when: "A task heartbeat timeout is exceeded while the task is still in progress.",
     details: "{ nodeId, iteration, attempt, timeoutMs, staleForMs, lastHeartbeatAtMs }",
   },
+  AGENT_WORKER_EXITED: {
+    category: "engine",
+    when: "A spawned agent worker process exits without the attempt reaching a terminal state.",
+    details: "{ nodeId, iteration, attempt, pid, exitCode, signal, attemptRunningForMs, sinceWorkerExitMs, graceMs }",
+  },
   HEARTBEAT_PAYLOAD_TOO_LARGE: {
     category: "engine",
     when: "A task heartbeat payload exceeds the maximum persisted checkpoint size.",

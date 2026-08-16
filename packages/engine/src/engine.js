@@ -807,26 +807,58 @@ function serializeHeartbeatPayload(data) {
   }
   return { heartbeatDataJson, dataSizeBytes };
 }
+// Abort reasons the engine raises on itself to end a doomed attempt. They ride
+// the task AbortSignal like a cancellation but are attempt *failures*: they
+// must reach the retry / fallbackAgents chain instead of parking the node in
+// `cancelled` the way an operator-initiated cancel does.
+const ABORT_ATTEMPT_FAILURE_MESSAGES = {
+  TASK_HEARTBEAT_TIMEOUT: "Task heartbeat timed out.",
+  AGENT_WORKER_EXITED: "Agent worker process exited without completing the attempt.",
+};
+/**
+ * @param {AbortSignal | undefined} signal
+ * @param {unknown} err
+ * @param {readonly string[]} codes
+ * @returns {SmithersError | null}
+ */
+function abortFailureReason(signal, err, codes) {
+  const reason = signal?.aborted ? signal.reason : undefined;
+  const candidate = reason ?? err;
+  if (candidate instanceof SmithersError && codes.includes(candidate.code)) {
+    return candidate;
+  }
+  if (
+    candidate &&
+    typeof candidate === "object" &&
+    typeof candidate.code === "string" &&
+    codes.includes(candidate.code)
+  ) {
+    return new SmithersError(
+      candidate.code,
+      String(candidate.message ?? ABORT_ATTEMPT_FAILURE_MESSAGES[candidate.code] ?? "Task failed."),
+      candidate.details,
+      { cause: candidate },
+    );
+  }
+  return null;
+}
 /**
  * @param {AbortSignal | undefined} signal
  * @param {unknown} err
  * @returns {SmithersError | null}
  */
 function heartbeatTimeoutReasonFromAbort(signal, err) {
-  const reason = signal?.aborted ? signal.reason : undefined;
-  const candidate = reason ?? err;
-  if (candidate instanceof SmithersError && candidate.code === "TASK_HEARTBEAT_TIMEOUT") {
-    return candidate;
-  }
-  if (candidate && typeof candidate === "object" && candidate.code === "TASK_HEARTBEAT_TIMEOUT") {
-    return new SmithersError(
-      "TASK_HEARTBEAT_TIMEOUT",
-      String(candidate.message ?? "Task heartbeat timed out."),
-      candidate.details,
-      { cause: candidate },
-    );
-  }
-  return null;
+  return abortFailureReason(signal, err, ["TASK_HEARTBEAT_TIMEOUT"]);
+}
+/**
+ * Engine-raised aborts that must be recorded as attempt failures rather than
+ * cancellations: heartbeat timeouts and dead agent workers (#1582).
+ * @param {AbortSignal | undefined} signal
+ * @param {unknown} err
+ * @returns {SmithersError | null}
+ */
+function attemptFailureReasonFromAbort(signal, err) {
+  return abortFailureReason(signal, err, ["TASK_HEARTBEAT_TIMEOUT", "AGENT_WORKER_EXITED"]);
 }
 /**
  * @param {unknown} err
@@ -1704,6 +1736,24 @@ const RUN_CANCEL_POLL_MS = 250;
 const TASK_HEARTBEAT_THROTTLE_MS = 500;
 const TASK_HEARTBEAT_MAX_PAYLOAD_BYTES = 1_000_000;
 const TASK_HEARTBEAT_TIMEOUT_CHECK_MS = 250;
+// Grace between a spawned agent worker's OS-level exit and failing its
+// still-outstanding attempt (#1582). It only has to cover an adapter's
+// post-exit bookkeeping (draining buffered stdout, reading an output file,
+// building the checkpoint), so 30s is generous while turning a lane parked
+// for hours into a retry within half a minute. It is deliberately unrelated
+// to `heartbeatTimeoutMs`: this is proof of death, not absence of activity.
+// SMITHERS_AGENT_WORKER_EXIT_GRACE_MS is an internal tuning/test override.
+const DEFAULT_AGENT_WORKER_EXIT_GRACE_MS = 30_000;
+/**
+ * @returns {number}
+ */
+function resolveAgentWorkerExitGraceMs() {
+  const raw = process.env.SMITHERS_AGENT_WORKER_EXIT_GRACE_MS;
+  if (typeof raw !== "string" || raw.trim() === "") return DEFAULT_AGENT_WORKER_EXIT_GRACE_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_AGENT_WORKER_EXIT_GRACE_MS;
+  return Math.floor(parsed);
+}
 // A tool call that is genuinely executing keeps the task alive past the
 // heartbeat window, but not forever. An adapter that reports a tool start and
 // then wedges reports no further activity, so the lease expires and the task
@@ -5000,6 +5050,15 @@ async function legacyExecuteTask(
   let toolActivityLeaseUntilMs = 0;
   let agentProcessObserved = false;
   let agentProcessExited = false;
+  // Dead-worker detection state (#1582). `agentWorkerExitAtMs` is set when the
+  // last live agent worker process reports its OS-level exit and cleared the
+  // moment another worker starts, so a multi-process attempt never trips it.
+  let agentWorkerExitAtMs = null;
+  /** @type {{ pid: number; exitCode: number | null; signal: string | null } | null} */
+  let agentWorkerExitInfo = null;
+  let agentCallsInFlight = 0;
+  let agentWorkerExitFailureWon = false;
+  const AGENT_WORKER_EXIT_GRACE_MS = resolveAgentWorkerExitGraceMs();
   // Construct the abort race only for an agent call that consumes it. A
   // static/compute attempt may never observe the promise; constructing it
   // eagerly would leave a rejected promise behind when the watchdog fires.
@@ -5028,6 +5087,22 @@ async function legacyExecuteTask(
   const raceAgentCallAbort = async (promise) => {
     const agentCall = Promise.resolve(promise);
     agentCall.catch(() => undefined);
+    // Dead-worker detection only applies while an agent call is outstanding:
+    // a settled call cannot park the lane no matter what its worker did, and
+    // an exit observed before this call started belongs to the previous one.
+    if (agentCallsInFlight === 0) {
+      agentWorkerExitAtMs = null;
+      agentWorkerExitInfo = null;
+    }
+    agentCallsInFlight += 1;
+    agentCall.then(
+      () => {
+        agentCallsInFlight -= 1;
+      },
+      () => {
+        agentCallsInFlight -= 1;
+      },
+    );
     try {
       return await Promise.race([agentCall, getTaskAbortPromise()]);
     } catch (error) {
@@ -5438,6 +5513,65 @@ async function legacyExecuteTask(
             nowMs() < streamActivityLeaseUntilMs;
           if (hasLiveActivity) {
             recordInternalHeartbeat();
+            return Effect.void;
+          }
+          // Dead-worker detection (#1582). A spawned agent worker that exited
+          // while its generate() call is still outstanding has parked the
+          // lane: no process, no stream, no tools, and no terminal attempt
+          // state. Wait out a short grace so a healthy worker still gets to
+          // drain its output and settle, then fail the attempt so the normal
+          // retry / fallbackAgents chain takes over. Nothing here depends on
+          // heartbeatTimeoutMs, so a task that declares none is covered too.
+          if (
+            !agentWorkerExitFailureWon &&
+            agentWorkerExitAtMs !== null &&
+            agentCallsInFlight > 0 &&
+            !taskSignal.aborted &&
+            nowMs() - agentWorkerExitAtMs > AGENT_WORKER_EXIT_GRACE_MS
+          ) {
+            const sinceWorkerExitMs = nowMs() - agentWorkerExitAtMs;
+            const attemptRunningForMs = nowMs() - startedAtMs;
+            const exitDescription = agentWorkerExitInfo?.signal
+              ? `signal ${agentWorkerExitInfo.signal}`
+              : `exit code ${agentWorkerExitInfo?.exitCode ?? "unknown"}`;
+            const workerExitError = new SmithersError(
+              "AGENT_WORKER_EXITED",
+              `Agent worker process for task ${desc.nodeId} exited (${exitDescription}) without completing the attempt; ` +
+                `no result arrived in the ${AGENT_WORKER_EXIT_GRACE_MS}ms since it died and the attempt had been running for ${attemptRunningForMs}ms.`,
+              {
+                nodeId: desc.nodeId,
+                iteration: desc.iteration,
+                attempt: attemptNo,
+                pid: agentWorkerExitInfo?.pid ?? null,
+                exitCode: agentWorkerExitInfo?.exitCode ?? null,
+                signal: agentWorkerExitInfo?.signal ?? null,
+                attemptRunningForMs,
+                sinceWorkerExitMs,
+                graceMs: AGENT_WORKER_EXIT_GRACE_MS,
+              },
+            );
+            logWarning(
+              "agent worker exited without completing the attempt",
+              {
+                runId,
+                nodeId: desc.nodeId,
+                iteration: desc.iteration,
+                attempt: attemptNo,
+                pid: agentWorkerExitInfo?.pid ?? null,
+                exitCode: agentWorkerExitInfo?.exitCode ?? null,
+                signal: agentWorkerExitInfo?.signal ?? null,
+                attemptRunningForMs,
+                sinceWorkerExitMs,
+              },
+              "engine:agent-worker-exit",
+            );
+            agentWorkerExitFailureWon = true;
+            taskAbortController.abort(
+              withCancellationSource(workerExitError, {
+                kind: "engine",
+                detail: `Task ${desc.nodeId} agent worker exited without completing the attempt`,
+              }),
+            );
             return Effect.void;
           }
           if (!desc.heartbeatTimeoutMs) {
@@ -7011,7 +7145,7 @@ async function legacyExecuteTask(
           activeSdkToolExecutions.delete(key);
           if (!heartbeatOwnerLost && !agentProcessExited) recordInternalHeartbeat();
         };
-        handleProcess = ({ phase, pid }) => {
+        handleProcess = ({ phase, pid, exitCode, signal }) => {
           if (typeof pid !== "number" || pid <= 0 || heartbeatOwnerLost) return;
           if (phase === "exited") {
             agentProcessExited = true;
@@ -7022,9 +7156,22 @@ async function legacyExecuteTask(
             activeSdkToolExecutions.clear();
             streamActivityLeaseUntilMs = 0;
             toolActivityLeaseUntilMs = 0;
+            // Arm dead-worker detection only once no worker is left running.
+            if (liveOwnedPids.size === 0 && pendingOwnedPids.size === 0) {
+              agentWorkerExitAtMs = nowMs();
+              agentWorkerExitInfo = {
+                pid,
+                exitCode: typeof exitCode === "number" ? exitCode : null,
+                signal: typeof signal === "string" ? signal : null,
+              };
+            }
           } else {
             agentProcessObserved = true;
             agentProcessExited = false;
+            // A fresh worker supersedes any earlier exit: the attempt is live
+            // again and must not be failed for the process that came before.
+            agentWorkerExitAtMs = null;
+            agentWorkerExitInfo = null;
           }
           // A process callback is evidence only after the same fenced
           // heartbeat used by stdout/stderr has proved ownership.
@@ -8341,8 +8488,8 @@ async function legacyExecuteTask(
         "engine:task-events",
       );
     }
-    const heartbeatTimeoutError = heartbeatTimeoutReasonFromAbort(taskSignal, err);
-    const effectiveError = heartbeatTimeoutError ?? err;
+    const abortFailureError = attemptFailureReasonFromAbort(taskSignal, err);
+    const effectiveError = abortFailureError ?? err;
     if (isHeartbeatPayloadValidationError(effectiveError)) {
       attemptMeta.failureRetryable = false;
     }
@@ -8381,7 +8528,7 @@ async function legacyExecuteTask(
     ) {
       attemptMeta.discardAgentCheckpoint = true;
     }
-    if (!heartbeatTimeoutError && (taskSignal.aborted || isAbortError(err))) {
+    if (!abortFailureError && (taskSignal.aborted || isAbortError(err))) {
       const currentAttempt = await Effect.runPromise(adapter.getAttempt(runId, desc.nodeId, desc.iteration, attemptNo));
       if (currentAttempt?.state === "cancelled") {
         await annotateTaskSpan({ status: "cancelled" });
@@ -11358,6 +11505,9 @@ export function runWorkflow(workflow, opts) {
 
 export const __engineInternals = {
   createCliTurnCompletionState,
+  legacyExecuteTask,
+  attemptFailureReasonFromAbort,
+  resolveAgentWorkerExitGraceMs,
   isSamePath,
   sha256Hex,
   isBlockingAgentActionKind,

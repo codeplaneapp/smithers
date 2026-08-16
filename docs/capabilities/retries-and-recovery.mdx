@@ -52,6 +52,21 @@ The pieces, as implemented:
 - **`timeoutMs` / `heartbeatTimeoutMs`** - a hard wall-clock limit and a Temporal-style liveness check: an agent that stops producing output past the heartbeat window fails the attempt instead of hanging the run.
 - **`continueOnFail` / `failurePolicy`** - whether a terminal failure halts the run, or quarantines the branch and lets independent work proceed.
 
+### Dead worker detection
+
+Liveness does not depend on declaring `heartbeatTimeoutMs`. When the agent CLI
+process the engine spawned for an attempt exits at the OS level (any exit code,
+including a signal) while its `generate()` call is still outstanding, the engine
+fails that attempt with `AGENT_WORKER_EXITED` once a short grace period passes
+with no result. This catches the case where a worker is killed but a leaked
+grandchild (an MCP server, a tool child) keeps the capture pipe open, so the
+adapter promise never settles and the lane would otherwise sit `in-progress`
+forever. The failure is an ordinary retryable attempt failure: `retries`,
+`retryPolicy`, and the `agent` failover chain all apply. Detection is armed only
+after a worker start is observed and is disarmed the moment another worker
+starts, so a healthy but slow attempt and a resumed session that reattaches to
+an existing worker are never affected.
+
 ### Non-progress detection: the `stalled` state
 
 A task that fails 84 times with a byte-identical error is not retrying, it is livelocked. Smithers computes a stable **error signature** for every failed attempt (the error code plus its message with paths, ids, and numbers normalized away, `packages/scheduler/src/errorSignature.js`) and counts consecutive failures that share it. After `maxIdenticalFailures` of them (default **3**) the task stops retrying and enters a terminal state of its own: **`stalled`**, distinct from `failed`.

@@ -114,6 +114,7 @@ try {
 | `WORKFLOW_EXECUTION_FAILED` | A child or builder workflow exits unsuccessfully without surfacing a typed error payload. | `{ status }` |
 | `SANDBOX_EXECUTION_FAILED` | Sandbox setup or execution fails before a more specific sandbox error can be emitted. | `{ sandboxId, runId?, maxConcurrent?, activeSandboxCount? }` |
 | `TASK_HEARTBEAT_TIMEOUT` | A task heartbeat timeout expires while the task is still running. | `{ nodeId, iteration, attempt, timeoutMs, staleForMs, lastHeartbeatAtMs }` |
+| `AGENT_WORKER_EXITED` | A spawned agent worker process exits without the attempt reaching a terminal state. The attempt fails and feeds the normal retry / `fallbackAgents` chain. | `{ nodeId, iteration, attempt, pid, exitCode, signal, attemptRunningForMs, sinceWorkerExitMs, graceMs }` |
 | `HEARTBEAT_PAYLOAD_TOO_LARGE` | A task heartbeat payload exceeds the maximum persisted checkpoint size. | `{ dataSizeBytes, maxBytes }` |
 | `HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE` | A task heartbeat payload contains values not serializable to JSON. | `{ path, valueType? }` |
 | `RUN_CANCELLED` | A run is cancelled while runtime work is still active. | `{ runId }` |

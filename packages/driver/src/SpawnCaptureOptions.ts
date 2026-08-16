@@ -16,5 +16,16 @@ export type SpawnCaptureOptions = {
   detached?: boolean;
   onStdout?: (chunk: string) => void;
   onStderr?: (chunk: string) => void;
-  onProcess?: (event: { phase: "started" | "exited"; pid: number | undefined }) => void;
+  /**
+   * Process lifecycle notifications. `exited` fires on the OS-level exit of
+   * the spawned process, which can precede the capture promise settling: a
+   * grandchild that inherited the stdio pipes keeps `close` pending long after
+   * the worker itself is gone. `exitCode`/`signal` describe how it died.
+   */
+  onProcess?: (event: {
+    phase: "started" | "exited";
+    pid: number | undefined;
+    exitCode?: number | null;
+    signal?: string | null;
+  }) => void;
 };
