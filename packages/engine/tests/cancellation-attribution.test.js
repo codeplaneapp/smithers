@@ -32,42 +32,52 @@ async function insertRunningRun(adapter, runId) {
 }
 
 describe("cancellation attribution contract", () => {
-  test("persists explicit attribution on the terminal row and RunCancelled event", async () => {
-    const adapter = createAdapter();
-    await insertRunningRun(adapter, "signal-run");
-
-    const result = await finalizeCancelledRun(adapter, "signal-run", {
-      now: 1234,
-      attribution: {
+  test.each([
+    [
+      "signal",
+      {
         kind: "signal",
         detail: "worker received SIGTERM",
         signal: "SIGTERM",
         clientPid: 4321,
-        requestId: "request-1",
+        requestId: "signal-request",
       },
-    });
+    ],
+    [
+      "rpc",
+      {
+        kind: "rpc",
+        detail: "http cancellation request",
+        clientPid: 5432,
+        requestId: "rpc-request",
+        clientIdentity: "user:operator",
+      },
+    ],
+    ["cli", { kind: "cli", detail: "smithers cancel cli-run", clientPid: 6543 }],
+    ["engine", { kind: "engine", detail: "task heartbeat timed out" }],
+  ])("persists %s attribution on the terminal row and RunCancelled event", async (kind, attribution) => {
+    const adapter = createAdapter();
+    const runId = `${kind}-run`;
+    await insertRunningRun(adapter, runId);
+
+    const result = await finalizeCancelledRun(adapter, runId, { now: 1234, attribution });
 
     expect(result.won).toBe(true);
-    expect(await adapter.getRun("signal-run")).toMatchObject({
+    expect(await adapter.getRun(runId)).toMatchObject({
       status: "cancelled",
-      cancelRequestSource: "signal",
-      cancelRequestDetail: "worker received SIGTERM",
-      cancelRequestSignal: "SIGTERM",
-      cancelRequestClientPid: 4321,
-      cancelRequestId: "request-1",
+      cancelRequestSource: attribution.kind,
+      cancelRequestDetail: attribution.detail ?? null,
+      cancelRequestSignal: attribution.signal ?? null,
+      cancelRequestClientPid: attribution.clientPid ?? null,
+      cancelRequestId: attribution.requestId ?? null,
+      cancelRequestClientIdentity: attribution.clientIdentity ?? null,
     });
-    const event = (await adapter.listEventsByType("signal-run", "RunCancelled")).at(-1);
+    const event = (await adapter.listEventsByType(runId, "RunCancelled")).at(-1);
     expect(JSON.parse(event.payloadJson)).toEqual({
       type: "RunCancelled",
-      runId: "signal-run",
+      runId,
       timestampMs: 1234,
-      source: {
-        kind: "signal",
-        detail: "worker received SIGTERM",
-        signal: "SIGTERM",
-        clientPid: 4321,
-        requestId: "request-1",
-      },
+      source: attribution,
     });
   });
 
