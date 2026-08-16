@@ -464,7 +464,7 @@ function App() {
       .find((candidate) => !settled.has(candidate.nodeId as StageId) && !dismissed.has(candidate.nodeId));
   }, [candidates, dismissed, states]);
 
-  const runRecord = isRecord(run.data) ? run.data : {};
+  const runRecord: Record<string, unknown> = isRecord(run.data) ? run.data : {};
   const runState = isRecord(runRecord.runState) ? asString(runRecord.runState.state) : undefined;
   const storedStatus = runState ?? asString(runRecord.status) ?? "running";
   const allComplete = PIPELINE_STAGES.every((stage) => states[stage.id] === "complete");
