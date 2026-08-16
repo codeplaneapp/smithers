@@ -30,6 +30,7 @@ import { loadVcsTag } from "../src/vcs-version/index.js";
 import { retryTask } from "../src/retry-task.js";
 import { timeTravel } from "../src/timetravel.js";
 import { spawnSync } from "node:child_process";
+import { hostname } from "node:os";
 import { chmodSync } from "node:fs";
 import { delimiter } from "node:path";
 import { createTempRepo, pinSqliteBackend, runSmithers } from "../../smithers/tests/e2e-helpers.js";
@@ -211,6 +212,8 @@ describe("isRunLikelyLive", () => {
     expect(parseRuntimeOwnerPid("   ")).toBeNull();
     expect(parseRuntimeOwnerPid("pid:1234")).toBe(1234);
     expect(parseRuntimeOwnerPid("PID:77:host-a")).toBe(77);
+    expect(parseRuntimeOwnerPid("pid:77@host-a:session", "host-a")).toBe(77);
+    expect(parseRuntimeOwnerPid("pid:77@host-a:session", "host-b")).toBeNull();
     expect(parseRuntimeOwnerPid("4321")).toBe(4321);
     expect(parseRuntimeOwnerPid("owner-abc")).toBeNull();
     expect(parseRuntimeOwnerPid("pid:0")).toBeNull();
@@ -218,7 +221,15 @@ describe("isRunLikelyLive", () => {
   });
 
   test("a run owned by this live process is live regardless of heartbeat", () => {
-    expect(isRunLikelyLive({ runtimeOwnerId: `pid:${process.pid}`, heartbeatAtMs: null })).toBe(true);
+    const localOwner = `pid:${process.pid}@${encodeURIComponent(hostname().toLowerCase())}:session`;
+    expect(isRunLikelyLive({ runtimeOwnerId: localOwner, heartbeatAtMs: null })).toBe(true);
+  });
+
+  test("a remote owner never probes a same-numbered local pid", () => {
+    const remoteOwner = `pid:${process.pid}@${encodeURIComponent(`${hostname().toLowerCase()}.remote`)}:session`;
+    const now = 1_000_000;
+    expect(isRunLikelyLive({ runtimeOwnerId: remoteOwner, heartbeatAtMs: now - 60_000 }, now)).toBe(false);
+    expect(isRunLikelyLive({ runtimeOwnerId: remoteOwner, heartbeatAtMs: now - 1_000 }, now)).toBe(true);
   });
 
   test("a dead owner pid falls back to the heartbeat window", () => {
