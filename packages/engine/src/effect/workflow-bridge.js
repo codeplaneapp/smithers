@@ -12,6 +12,7 @@ import { isRetryableFailure } from "@smthrs/scheduler";
 import { makeWorkerTask } from "./entity-worker.js";
 import { executeTaskActivity, makeTaskBridgeKey, RetriableTaskFailure } from "./activity-bridge.js";
 import { parseAttemptMetaJson } from "./bridge-utils.js";
+import { isDiscardedSessionAttempt } from "./isDiscardedSessionAttempt.js";
 import { canExecuteBridgeManagedComputeTask, executeComputeTaskBridge } from "./compute-task-bridge.js";
 import { canExecuteBridgeManagedStaticTask, executeStaticTaskBridge } from "./static-task-bridge.js";
 import { dispatchWorkerTask } from "./single-runner.js";
@@ -193,7 +194,9 @@ const classifyTaskAttempt = async (adapter, runId, desc, context) => {
   if (latestState === "failed") {
     const failedAttempts = attempts.filter((attempt) => attempt.state === "failed");
     const hasNonRetryableFailure = failedAttempts.some((attempt) => !isRetryableBridgeTaskFailure(attempt, desc));
-    const retryConsumingFailures = failedAttempts.filter((attempt) => !isQuotaBridgeTaskFailure(attempt));
+    const retryConsumingFailures = failedAttempts.filter(
+      (attempt) => !isQuotaBridgeTaskFailure(attempt) && !isDiscardedSessionAttempt(attempt),
+    );
     if (
       !hasNonRetryableFailure &&
       (isQuotaBridgeTaskFailure(latest) || retryConsumingFailures.length <= desc.retries)

@@ -1,4 +1,5 @@
 import { createDurableRetryState, isRetryableFailure } from "@smthrs/scheduler";
+import { isDiscardedSessionAttempt } from "./isDiscardedSessionAttempt.js";
 
 export const RETRY_STATE_META_KEY = "retryState";
 
@@ -56,7 +57,9 @@ function retryAfterMs(error) {
 export function stampDurableRetryState(input) {
   if (isQuotaFailurePayload(input.error)) return null;
   const failureCount =
-    input.attempts.filter((attempt) => attempt.state === "failed" && !isQuotaAttempt(attempt)).length + 1;
+    input.attempts.filter(
+      (attempt) => attempt.state === "failed" && !isQuotaAttempt(attempt) && !isDiscardedSessionAttempt(attempt),
+    ).length + 1;
   const code = typeof input.error.code === "string" ? input.error.code : null;
   const kind = typeof input.attemptMeta.kind === "string" ? input.attemptMeta.kind : null;
   const retryable =

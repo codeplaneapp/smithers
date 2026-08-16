@@ -121,6 +121,7 @@ import { attachSandboxComputeFns, attachSubflowComputeFns, getSubflowChildRunId 
 import { SUBFLOW_RUN_LINEAGE_MAX_ROWS, subflowRunLineage } from "@smthrs/graph/subflow-run-lineage";
 import { buildCacheScopeIdentity, isFreshCacheRow, normalizeCacheScope } from "./cache-policy.js";
 import { RETRY_STATE_META_KEY, stampDurableRetryState } from "./effect/retry-state.js";
+import { isDiscardedSessionAttempt } from "./effect/isDiscardedSessionAttempt.js";
 import { runWorkflowWithMakeBridge } from "./effect/workflow-make-bridge.js";
 import {
   createWorkflowVersioningRuntime,
@@ -3979,7 +3980,9 @@ function retrySessionStateFromAttempts(attempts) {
   const retryWait = new Map();
   const taskFailures = new Map();
   for (const [key, rows] of byTask) {
-    const failed = rows.filter((attempt) => attempt.state === "failed" && !isQuotaTaskFailure(attempt));
+    const failed = rows.filter(
+      (attempt) => attempt.state === "failed" && !isQuotaTaskFailure(attempt) && !isDiscardedSessionAttempt(attempt),
+    );
     const latest = rows.reduce((candidate, attempt) => {
       if (!candidate) return attempt;
       const startedDelta = Number(attempt.startedAtMs ?? 0) - Number(candidate.startedAtMs ?? 0);
@@ -8783,7 +8786,9 @@ async function legacyExecuteTask(
     const updatedAttempts = await Effect.runPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
     const failedAttempts = updatedAttempts.filter((a) => a.state === "failed");
     const hasNonRetryableFailure = failedAttempts.some((attempt) => !isRetryableTaskFailure(attempt));
-    const retryConsumingFailedAttempts = failedAttempts.filter((a) => !isQuotaTaskFailure(a));
+    const retryConsumingFailedAttempts = failedAttempts.filter(
+      (a) => !isQuotaTaskFailure(a) && !isDiscardedSessionAttempt(a),
+    );
     const latestFailedAttemptIsQuota = isQuotaTaskFailure(failedAttempts[0]);
     if (
       !stalledVerdict &&
@@ -10223,7 +10228,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
         const attempts = await Effect.runPromise(adapter.listAttempts(runId, task.nodeId, task.iteration));
         const failedAttempts = attempts.filter((attempt) => attempt.state === "failed");
         const hasNonRetryableFailure = failedAttempts.some((attempt) => !isRetryableTaskFailure(attempt));
-        const retryConsumingFailedAttempts = failedAttempts.filter((attempt) => !isQuotaTaskFailure(attempt));
+        const retryConsumingFailedAttempts = failedAttempts.filter(
+          (attempt) => !isQuotaTaskFailure(attempt) && !isDiscardedSessionAttempt(attempt),
+        );
         const latestFailedAttemptIsQuota = isQuotaTaskFailure(failedAttempts[0]);
         if (
           !latestFailedAttemptIsQuota &&
