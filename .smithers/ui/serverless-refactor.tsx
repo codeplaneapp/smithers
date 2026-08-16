@@ -24,9 +24,14 @@ import {
   WorkflowUiShell,
   nodeStatusIndex,
 } from "smthrs/gateway-ui";
-import { EmptyState, KpiStat, Tabs, TabsContent, TabsList, TabsTrigger } from "smthrs/ui";
+import { EmptyState, KpiStat, SmithersUiStyles, Tabs, TabsContent, TabsList, TabsTrigger } from "smthrs/ui";
 
 const WORKFLOW = "serverless-refactor";
+
+// Layout-only rules for this UI. Pack UIs may not use inline style props or
+// <style> tags; SmithersUiStyles is the sanctioned per-UI stylesheet seam.
+const serverlessRefactorStyles =
+  ".wf-actions { display:flex; align-items:center; gap:12px; } .wf-body { display:flex; flex-direction:column; gap:12px; padding:16px; } .wf-kpis { display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; } .wf-columns { display:grid; grid-template-columns:260px 1fr 1fr; gap:12px; } .wf-detail { display:flex; flex-direction:column; gap:12px; } @media (max-width: 900px) { .wf-columns { grid-template-columns:1fr; } .wf-kpis { grid-template-columns:1fr; } }";
 
 /** Mirrors DEFAULT_TASKS in the workflow: id, phase, short title. */
 const TASKS: Array<{ id: string; phase: string; title: string }> = [
@@ -88,7 +93,7 @@ export function ServerlessRefactorApp() {
       title="Serverless Refactor — Sol plan/review → Luna implement → Terra validate/PR"
       meta={<RunMeta runId={runId} showConnection={false} />}
       actions={
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div className="wf-actions">
           <StatusPill status={tree.status} label={`run ${tree.status}`} />
           <ConnectionBadge />
           <MonitorButton runId={runId} />
@@ -96,14 +101,15 @@ export function ServerlessRefactorApp() {
       }
       testId="serverless-refactor-ui"
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 16 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+      <SmithersUiStyles extra={serverlessRefactorStyles} />
+      <div className="wf-body">
+        <div className="wf-kpis">
           <KpiStat label="Tasks approved" value={`${approved}/${TASKS.length}`} hint="Sol review synthesis approved" />
           <KpiStat label="PRs opened" value={String(prOpened)} hint="one PR per isolated task, off main" />
           <KpiStat label="Lanes" value={String(TASKS.length)} hint="sequential by default; dependent tasks" />
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "260px 1fr 1fr", gap: 12 }}>
+        <div className="wf-columns">
           <RunList
             filter={{ workflow: WORKFLOW, limit: 25 }}
             activeRunId={runId}
@@ -130,7 +136,7 @@ export function ServerlessRefactorApp() {
               setNodeId(undefined);
             }}
           />
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className="wf-detail">
             {detailNodeId && runId ? (
               <NodeOutputView runId={runId} nodeId={detailNodeId} />
             ) : (

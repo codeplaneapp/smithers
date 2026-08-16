@@ -28,9 +28,24 @@ import {
   WorkflowUiShell,
   nodeStatusIndex,
 } from "smthrs/gateway-ui";
-import { EmptyState, KpiStat, SectionHeader, StageStrip, Tabs, TabsContent, TabsList, TabsTrigger } from "smthrs/ui";
+import {
+  EmptyState,
+  KpiStat,
+  SectionHeader,
+  SmithersUiStyles,
+  StageStrip,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "smthrs/ui";
 
 const WORKFLOW = "test-fortress";
+
+// Layout-only rules for this UI. Pack UIs may not use inline style props or
+// <style> tags; SmithersUiStyles is the sanctioned per-UI stylesheet seam.
+const testFortressStyles =
+  ".wf-actions { display:flex; align-items:center; gap:12px; } .wf-body { display:flex; flex-direction:column; gap:12px; padding:16px; } .wf-kpis { display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; } .wf-columns { display:grid; grid-template-columns:260px 1fr 1fr; gap:12px; } .wf-detail { display:flex; flex-direction:column; gap:12px; } @media (max-width: 900px) { .wf-columns { grid-template-columns:1fr; } .wf-kpis { grid-template-columns:1fr; } }";
 
 /** The fixed spine around the dynamic per-group loops. */
 const SPINE: Array<{ nodeId: string; label: string }> = [
@@ -83,7 +98,7 @@ export function TestFortressApp() {
       title="Test Fortress — discovery swarm → debate loops → Codex LGTM"
       meta={<RunMeta runId={runId} showConnection={false} />}
       actions={
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div className="wf-actions">
           <StatusPill status={tree.status} label={`run ${tree.status}`} />
           <ConnectionBadge />
           <MonitorButton runId={runId} />
@@ -91,14 +106,15 @@ export function TestFortressApp() {
       }
       testId="test-fortress-ui"
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 16 }}>
+      <SmithersUiStyles extra={testFortressStyles} />
+      <div className="wf-body">
         <StageStrip
           stages={SPINE.map((stage) => ({
             label: stage.label,
             status: statuses.get(stage.nodeId) ?? "pending",
           }))}
         />
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+        <div className="wf-kpis">
           <KpiStat label="Debate loops" value={String(groups.length)} hint="unit + e2e feature groups" />
           <KpiStat
             label="Judged"
@@ -111,7 +127,7 @@ export function TestFortressApp() {
           />
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "260px 1fr 1fr", gap: 12 }}>
+        <div className="wf-columns">
           <RunList
             filter={{ workflow: WORKFLOW, limit: 25 }}
             activeRunId={runId}
@@ -148,7 +164,7 @@ export function TestFortressApp() {
               />
             )}
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className="wf-detail">
             {detailNodeId && runId ? (
               <NodeOutputView runId={runId} nodeId={detailNodeId} />
             ) : (

@@ -30,6 +30,7 @@ import {
   CardTitle,
   EmptyState,
   KpiStat,
+  SmithersUiStyles,
   StageStrip,
   StatusPill,
   Tabs,
@@ -39,6 +40,11 @@ import {
 } from "smthrs/ui";
 
 const WORKFLOW = "pr-review-improve-merge";
+
+// Layout-only rules for this UI. Pack UIs may not use inline style props or
+// <style> tags; SmithersUiStyles is the sanctioned per-UI stylesheet seam.
+const prReviewImproveMergeStyles =
+  ".wf-actions { display:flex; align-items:center; gap:12px; } .wf-body { display:flex; flex-direction:column; gap:12px; padding:16px; } .wf-kpis { display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; } .wf-columns { display:grid; grid-template-columns:260px 1fr 1fr; gap:12px; } .wf-detail { display:flex; flex-direction:column; gap:12px; } @media (max-width: 900px) { .wf-columns { grid-template-columns:1fr; } .wf-kpis { grid-template-columns:1fr; } }";
 
 function runIdFromUrl(): string | undefined {
   if (typeof location === "undefined") return undefined;
@@ -67,7 +73,7 @@ function PrKpis({ runId }: { runId?: string }) {
   const merged = statuses.get("merge") === "ok";
   const verdict = merged ? "merged" : halted ? "not legit" : (statuses.get("rereview") ?? "pending");
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+    <div className="wf-kpis">
       <KpiStat label="Pull request" value={pr !== undefined ? `#${pr}` : "--"} hint="input.pr" />
       <KpiStat
         label="Verdict"
@@ -92,7 +98,7 @@ export function PrReviewImproveMergeApp() {
       title="PR Review · Improve · Merge"
       meta={<RunMeta runId={runId} showConnection={false} />}
       actions={
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div className="wf-actions">
           <StatusPill status={runStatus} label={`run ${runStatus}`} />
           <ConnectionBadge />
           <MonitorButton runId={runId} />
@@ -100,7 +106,8 @@ export function PrReviewImproveMergeApp() {
       }
       testId="pr-review-improve-merge-ui"
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 16 }}>
+      <SmithersUiStyles extra={prReviewImproveMergeStyles} />
+      <div className="wf-body">
         <StageStrip
           stages={STAGES.map((stage) => ({
             label: stage.label,
@@ -112,7 +119,7 @@ export function PrReviewImproveMergeApp() {
         ) : null}
         <PrKpis runId={runId} />
 
-        <div style={{ display: "grid", gridTemplateColumns: "260px 1fr 1fr", gap: 12 }}>
+        <div className="wf-columns">
           <RunList
             filter={{ workflow: WORKFLOW, limit: 25 }}
             activeRunId={runId}
@@ -141,7 +148,7 @@ export function PrReviewImproveMergeApp() {
               )}
             </TabsContent>
           </Tabs>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className="wf-detail">
             {nodeId ? (
               <NodeOutputView runId={runId} nodeId={nodeId} />
             ) : (
