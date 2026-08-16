@@ -23,6 +23,11 @@ function fixture(): string {
   return root;
 }
 
+// createSmithers() attaches the workflow input schema to the returned workflow
+// object, but the public WorkflowDefinition type does not declare it yet.
+type WorkflowWithInputSchema = { inputSchema: { parse(input: unknown): { gateCommand: string } } };
+const inputSchemaOf = (candidate: unknown) => (candidate as WorkflowWithInputSchema).inputSchema;
+
 const variants = [
   ["live", workflow, runGate],
   ["pinned", pinnedWorkflow, runPinnedGate],
@@ -31,9 +36,10 @@ const variants = [
 for (const [name, variantWorkflow, runVariantGate] of variants) {
   describe(`sol issue train ${name} gate`, () => {
     test("defaults to the full root check set and accepts a run-specific override", () => {
-      expect(variantWorkflow.inputSchema.parse({}).gateCommand).toBe(FULL_GATE_COMMAND);
-      expect(variantWorkflow.inputSchema.parse({ gateCommand: "  true  " }).gateCommand).toBe("true");
-      expect(() => variantWorkflow.inputSchema.parse({ gateCommand: "  " })).toThrow();
+      const inputSchema = inputSchemaOf(variantWorkflow);
+      expect(inputSchema.parse({}).gateCommand).toBe(FULL_GATE_COMMAND);
+      expect(inputSchema.parse({ gateCommand: "  true  " }).gateCommand).toBe("true");
+      expect(() => inputSchema.parse({ gateCommand: "  " })).toThrow();
     });
 
     test("records the exact clean commit that passed", async () => {

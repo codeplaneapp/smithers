@@ -4603,6 +4603,10 @@ paths:
                               type: integer
                               minimum: 0
                               description: "Reported input tokens."
+                            freshInputTokens:
+                              type: integer
+                              minimum: 0
+                              description: "Reported input tokens excluding cache reads."
                             outputTokens:
                               type: integer
                               minimum: 0
@@ -4619,6 +4623,11 @@ paths:
                               type: integer
                               minimum: 0
                               description: "Reported reasoning tokens."
+                            costUsd:
+                              type:
+                                - number
+                                - "null"
+                              description: "Reported cost in USD, null when unknown."
                             timestampMs:
                               type: integer
                               minimum: 0
@@ -4630,10 +4639,12 @@ paths:
                             - model
                             - agent
                             - inputTokens
+                            - freshInputTokens
                             - outputTokens
                             - cacheReadTokens
                             - cacheWriteTokens
                             - reasoningTokens
+                            - costUsd
                             - timestampMs
                           additionalProperties: false
                     required:
@@ -4655,10 +4666,12 @@ paths:
                       model: gpt-5.4-codex
                       agent: codex-work
                       inputTokens: 120
+                      freshInputTokens: 80
                       outputTokens: 30
                       cacheReadTokens: 40
                       cacheWriteTokens: 5
                       reasoningTokens: 12
+                      costUsd: null
                       timestampMs: 1710000000000
         400:
           description: "The request shape is invalid."
@@ -21647,6 +21660,10 @@ paths:
                               type: integer
                               minimum: 0
                               description: "Reported input tokens."
+                            freshInputTokens:
+                              type: integer
+                              minimum: 0
+                              description: "Reported input tokens excluding cache reads."
                             outputTokens:
                               type: integer
                               minimum: 0
@@ -21663,6 +21680,11 @@ paths:
                               type: integer
                               minimum: 0
                               description: "Reported reasoning tokens."
+                            costUsd:
+                              type:
+                                - number
+                                - "null"
+                              description: "Reported cost in USD, null when unknown."
                             timestampMs:
                               type: integer
                               minimum: 0
@@ -21674,10 +21696,12 @@ paths:
                             - model
                             - agent
                             - inputTokens
+                            - freshInputTokens
                             - outputTokens
                             - cacheReadTokens
                             - cacheWriteTokens
                             - reasoningTokens
+                            - costUsd
                             - timestampMs
                           additionalProperties: false
                     required:

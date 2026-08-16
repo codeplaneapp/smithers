@@ -166,6 +166,12 @@ describe("isRetryableSqliteWriteError edge cases", () => {
   test("returns true for 'disk i/o error' message", () => {
     expect(isRetryableSqliteWriteError(new Error("disk i/o error"))).toBe(true);
   });
+  test("returns true for SQLITE_PROTOCOL code", () => {
+    expect(isRetryableSqliteWriteError(makeSqliteError("SQLITE_PROTOCOL", "locking protocol"))).toBe(true);
+  });
+  test("returns true for 'locking protocol' message", () => {
+    expect(isRetryableSqliteWriteError(new Error("locking protocol"))).toBe(true);
+  });
   test("returns true for mixed-case message", () => {
     expect(isRetryableSqliteWriteError(new Error("Database Is Locked"))).toBe(true);
   });

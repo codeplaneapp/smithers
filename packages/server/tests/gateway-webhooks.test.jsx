@@ -157,13 +157,22 @@ describe("Gateway webhook ingestion", () => {
         message: "Webhook signature verification failed",
       },
     });
-    await sleep(50);
-    const metrics = await fetch(`http://127.0.0.1:${port}/metrics`).then((res) => res.text());
-    expect(metrics).toMatch(/smithers_gateway_webhooks_received_total\{[^}]*workflow="github"[^}]*\}\s+1\b/);
-    expect(metrics).toMatch(
-      /smithers_gateway_webhooks_rejected_total\{[^}]*reason="invalid_signature"[^}]*workflow="github"[^}]*\}\s+1\b/,
-    );
-  });
+    // Metric updates run on forked fibers with no ordering guarantee, so poll
+    // until BOTH counters appear instead of sleeping once: a loaded runner can
+    // schedule the forks late and in either order.
+    const receivedPattern = /smithers_gateway_webhooks_received_total\{[^}]*workflow="github"[^}]*\}\s+1\b/;
+    const rejectedPattern =
+      /smithers_gateway_webhooks_rejected_total\{[^}]*reason="invalid_signature"[^}]*workflow="github"[^}]*\}\s+1\b/;
+    let metrics = "";
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      metrics = await fetch(`http://127.0.0.1:${port}/metrics`).then((res) => res.text());
+      if (receivedPattern.test(metrics) && rejectedPattern.test(metrics)) break;
+      await sleep(50);
+    }
+    expect(metrics).toMatch(receivedPattern);
+    expect(metrics).toMatch(rejectedPattern);
+  }, 30_000);
   test("delivers matching webhooks as signals to waiting runs", async () => {
     const dbPath = makeDbPath("signal");
     dbPaths.push(dbPath);
