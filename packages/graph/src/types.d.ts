@@ -29,6 +29,18 @@ type HostText = {
 type RetryPolicy = {
     backoff?: "fixed" | "linear" | "exponential";
     initialDelayMs?: number;
+    /**
+     * Non-progress detection (#1500): after this many consecutive attempts fail
+     * with an identical error signature, the task is marked `stalled` instead of
+     * being retried again. Defaults to 3; 0 disables.
+     */
+    maxIdenticalFailures?: number;
+    /**
+     * Author-facing retry gate (#1500): `false` marks every failure terminal; a
+     * predicate is consulted per failure and a `false` return makes that
+     * failure terminal (no retry).
+     */
+    retryable?: boolean | ((error: unknown) => boolean);
 };
 type CachePolicy<Ctx = unknown> = {
     by?: (ctx: Ctx) => unknown;

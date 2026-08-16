@@ -6,6 +6,8 @@ import { buildStateKey } from "./buildStateKey.js";
 import { cloneTaskStateMap } from "./cloneTaskStateMap.js";
 import { computeRetryDelayMs } from "./computeRetryDelayMs.js";
 import { durableRetryStateFromError, retryDeadlineMs } from "./durableRetryState.js";
+import { computeErrorSignature, readIdenticalFailureStreak, resolveMaxIdenticalFailures } from "./errorSignature.js";
+import { isTerminalFailureShape } from "./failureClassification.js";
 import { findDescriptor } from "./findDescriptor.js";
 import { parseStateKey } from "./parseStateKey.js";
 import { scheduleTasks } from "./scheduleTasks.js";
@@ -250,11 +252,15 @@ const NON_RETRYABLE_COMPUTE_CODES = new Set([
 // remaining duration from the unchanged deadline.
 const MAX_SAFE_TIMER_DELAY_MS = 2_147_483_647;
 /**
+ * Whether a failure may consume retry budget. Exported so the engine can
+ * mirror the scheduler's retry/terminal verdict when it persists attempt
+ * rows and node states (#1500): both sides must agree or a resumed run
+ * would re-classify the same failure differently.
  * @param {TaskDescriptor} descriptor
  * @param {unknown} error
  * @returns {boolean}
  */
-function isRetryableFailure(descriptor, error) {
+export function isRetryableFailure(descriptor, error) {
   const payloadCode = error && typeof error === "object" && typeof error.code === "string" ? error.code : undefined;
   const payloadDetails =
     error && typeof error === "object" && error.details && typeof error.details === "object"
@@ -268,6 +274,22 @@ function isRetryableFailure(descriptor, error) {
   }
   if (failureRetryable === true) return true;
   if (code === "AGENT_CONFIG_INVALID") return false;
+  // Failure shapes retrying can never fix (ENOENT preconditions, hard size
+  // caps) are terminal for every task kind (#1500).
+  if (isTerminalFailureShape(error)) return false;
+  // Author-facing retry gate on the task's retry policy: `retryable: false`
+  // or a `retryable(error)` predicate returning false makes the failure
+  // terminal (#1500). A throwing predicate must not wedge scheduling, so it
+  // falls back to retryable.
+  const authorGate = descriptor.retryPolicy?.retryable;
+  if (authorGate === false) return false;
+  if (typeof authorGate === "function") {
+    try {
+      if (authorGate(error) === false) return false;
+    } catch {
+      // Predicate errors are authoring bugs, not a verdict on this failure.
+    }
+  }
   const isAgentTask = Boolean(descriptor.agent);
   if (!isAgentTask && NON_RETRYABLE_COMPUTE_CODES.has(code)) {
     return false;
@@ -350,6 +372,26 @@ function isTransientSessionFailure(error) {
   );
 }
 /**
+ * Whether a failure may consume the non-progress budget (#1500). Stall
+ * detection only applies to failures the task could plausibly keep retrying:
+ * a failure the scheduler will not retry at all is already terminal, and a
+ * transient agent-session failure is explicitly exempted from failing the run
+ * (see unhandledFailureDecision), so stalling on one would park the node in a
+ * terminal state the run never acts on.
+ *
+ * Exported so the engine reaches the same verdict when it persists the node
+ * row: both sides must agree or a resumed run would re-classify the same
+ * failure differently.
+ * @param {TaskDescriptor} descriptor
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+export function isStallableFailure(descriptor, error) {
+  if (!isRetryableFailure(descriptor, error)) return false;
+  if (descriptor.agent && isTransientSessionFailure(error)) return false;
+  return true;
+}
+/**
  * Build a human-readable diagnostic for a dependency deadlock: pending tasks
  * that can never run because their `dependsOn` edges point at tasks missing from
  * the graph or themselves permanently blocked. The most common cause is a
@@ -373,7 +415,11 @@ function describeDeadlock(state) {
         unmet.push(`'${depId}' (no such task)`);
       } else {
         const depState = state.states.get(stateKeyFor(dep)) ?? "pending";
-        if (depState !== "finished" && depState !== "skipped" && !(depState === "failed" && dep.continueOnFail)) {
+        if (
+          depState !== "finished" &&
+          depState !== "skipped" &&
+          !((depState === "failed" || depState === "stalled") && dep.continueOnFail)
+        ) {
           unmet.push(`'${depId}' (${depState})`);
         }
       }
@@ -421,6 +467,7 @@ function failedDecision(error, label) {
  * @property {Map<string, unknown>} failures
  * @property {Map<string, TaskDescriptor>} failureDescriptors
  * @property {Map<string, number>} retryCounts
+ * @property {Map<string, { signature: string, streak: number }>} errorStreaks state key → latest error signature and its consecutive-failure count (#1500)
  * @property {RetryWaitMap} retryWait state key → earliest retry time (ms)
  * @property {Set<string>} approvals
  * @property {RalphStateMap} ralphState keyed by ralph loop id
@@ -453,6 +500,7 @@ export function makeWorkflowSession(options = {}) {
     retryWait: new Map(
       [...(options.initialRetryWait ?? [])].filter(([, retryAtMs]) => Number.isFinite(retryAtMs) && retryAtMs >= 0),
     ),
+    errorStreaks: new Map(),
     approvals: new Set(),
     ralphState: new Map(options.initialRalphState ?? []),
     quotaResetTimes: new Map(),
@@ -489,7 +537,7 @@ export function makeWorkflowSession(options = {}) {
       // inspect.
       const failedChildKeys = [];
       for (const [key, taskState] of state.states) {
-        if (taskState === "failed") {
+        if (taskState === "failed" || taskState === "stalled") {
           failedChildKeys.push(key);
         }
       }
@@ -546,7 +594,7 @@ export function makeWorkflowSession(options = {}) {
   function cascadeQuarantinedFailures() {
     const blockedKeys = new Set();
     for (const [key, taskState] of state.states) {
-      if (taskState !== "failed") continue;
+      if (taskState !== "failed" && taskState !== "stalled") continue;
       const parsed = parseStateKey(key);
       const descriptor =
         findDescriptor(state.descriptors, parsed.nodeId, parsed.iteration) ?? state.failureDescriptors.get(key);
@@ -648,6 +696,7 @@ export function makeWorkflowSession(options = {}) {
     state.outputs.set(key, output);
     state.retryWait.delete(key);
     state.failureDescriptors.delete(key);
+    state.errorStreaks.delete(key);
     state.quotaResetTimes.delete(key);
     state.timerStarts.delete(key);
   }
@@ -780,6 +829,29 @@ export function makeWorkflowSession(options = {}) {
     const failureCount = durableRetryState?.failureCount ?? (state.retryCounts.get(key) ?? 0) + 1;
     state.retryCounts.set(key, failureCount);
     const retryable = isRetryableFailure(descriptor, error);
+    // Non-progress detection (#1500): count consecutive failures with an
+    // identical error signature. The engine recomputes and stamps the streak
+    // from durable attempt rows on every failure
+    // (details.identicalFailureStreak), so the verdict survives a run resume;
+    // the in-memory map covers failures this session observed itself.
+    const signature = computeErrorSignature(error);
+    const previousStreak = state.errorStreaks.get(key);
+    const streak = Math.max(
+      readIdenticalFailureStreak(error) ?? 0,
+      previousStreak && previousStreak.signature === signature ? previousStreak.streak + 1 : 1,
+    );
+    state.errorStreaks.set(key, { signature, streak });
+    if (isStallableFailure(descriptor, error) && streak >= resolveMaxIdenticalFailures(descriptor.retryPolicy)) {
+      state.states.set(key, "stalled");
+      state.failures.set(key, error);
+      state.failureDescriptors.set(key, descriptor);
+      state.retryWait.delete(key);
+      return decideAfterOutputChange(descriptor.iteration, {
+        reason: "task-finished",
+        nodeId: descriptor.nodeId,
+        iteration: descriptor.iteration,
+      });
+    }
     const canRetry = retryable && (descriptor.retries === Infinity || failureCount <= descriptor.retries);
     if (canRetry) {
       state.states.set(key, "pending");
@@ -812,6 +884,28 @@ export function makeWorkflowSession(options = {}) {
     });
   }
   /**
+   * The real diagnostic payload of a failure, flattened to one bounded line
+   * so it can ride inside the run-level error message (#1500 §6).
+   * @param {unknown} error
+   * @param {number} [max]
+   * @returns {string}
+   */
+  function failureExcerpt(error, max = 300) {
+    const normalized = toSmithersError(error);
+    // toSmithersError summarizes non-Error plain objects as "[object
+    // Object]"; a payload carrying its own string message wins over that.
+    const payloadMessage =
+      error && typeof error === "object" && typeof error.message === "string" ? error.message : undefined;
+    const summary = normalized.summary;
+    const raw =
+      (summary && summary !== String(error) ? summary : undefined) ??
+      payloadMessage ??
+      normalized.message ??
+      String(error);
+    const text = raw.replace(/\s+/g, " ").trim();
+    return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+  }
+  /**
    * @param {Set<string>} [recoveryKeys]
    * @returns {EngineDecision | null}
    */
@@ -820,20 +914,42 @@ export function makeWorkflowSession(options = {}) {
       const parsed = parseStateKey(key);
       const descriptor =
         findDescriptor(state.descriptors, parsed.nodeId, parsed.iteration) ?? state.failureDescriptors.get(key);
-      if (taskState === "failed" && !descriptor?.continueOnFail && descriptor?.failurePolicy !== "quarantine") {
+      const isTerminalFailure = taskState === "failed" || taskState === "stalled";
+      if (isTerminalFailure && !descriptor?.continueOnFail && descriptor?.failurePolicy !== "quarantine") {
         if (recoveryKeys.has(key)) {
           continue;
         }
         if (descriptor?.agent && isTransientSessionFailure(state.failures.get(key))) {
           continue;
         }
+        const nodeId = descriptor?.nodeId ?? parsed.nodeId;
+        const failure = state.failures.get(key);
+        const attempts = state.retryCounts.get(key) ?? 1;
+        if (taskState === "stalled") {
+          const streak = state.errorStreaks.get(key);
+          return {
+            _tag: "Failed",
+            error: new SmithersError(
+              "TASK_STALLED",
+              `Task stalled: ${nodeId} failed ${streak?.streak ?? attempts} consecutive attempts with an identical error: ${failureExcerpt(failure)}`,
+              {
+                key,
+                nodeId,
+                attempts,
+                identicalFailures: streak?.streak ?? attempts,
+                signature: streak?.signature ?? computeErrorSignature(failure),
+              },
+              failure,
+            ),
+          };
+        }
         return {
           _tag: "Failed",
           error: new SmithersError(
             "SESSION_ERROR",
-            `Task failed: ${descriptor?.nodeId ?? key}`,
-            { key },
-            state.failures.get(key),
+            `Task failed: ${nodeId} after ${attempts} attempt${attempts === 1 ? "" : "s"}: ${failureExcerpt(failure)}`,
+            { key, nodeId, attempts },
+            failure,
           ),
         };
       }
@@ -1371,7 +1487,12 @@ export function makeWorkflowSession(options = {}) {
       Effect.sync(() => {
         state.cancelled = true;
         for (const [key, taskState] of state.states) {
-          if (taskState !== "finished" && taskState !== "failed" && taskState !== "skipped") {
+          if (
+            taskState !== "finished" &&
+            taskState !== "failed" &&
+            taskState !== "stalled" &&
+            taskState !== "skipped"
+          ) {
             state.states.set(key, "cancelled");
           }
         }

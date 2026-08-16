@@ -739,6 +739,7 @@ describe("event views", () => {
   test("notable keeps the human-decision set", () => {
     expect(eventViewFor("NodeStarted")).toBe("notable");
     expect(eventViewFor("NodeFailed")).toBe("notable");
+    expect(eventViewFor("NodeStalled")).toBe("notable");
     expect(eventViewFor("RunFinished")).toBe("notable");
     expect(eventViewFor("ApprovalRequested")).toBe("notable");
     expect(eventViewFor("HumanRequestCreated")).toBe("notable");

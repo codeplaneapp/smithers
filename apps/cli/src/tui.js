@@ -49,6 +49,9 @@ const STEP = {
   running: { symbol: pc.blue("↻"), label: "RUNNING", color: pc.blue },
   waiting: { symbol: pc.yellow("⏸"), label: "WAITING", color: pc.yellow },
   failed: { symbol: pc.red("✗"), label: "FAILED", color: pc.red },
+  // A stalled node livelocked on an identical error (#1500): same red ✗ as a
+  // failure, with its own label so the livelock reads differently.
+  stalled: { symbol: pc.red("✗"), label: "STALLED", color: pc.red },
   // A user-cancelled node is terminal but NOT a failure: dim/grey ⊘, never the
   // red ✗, so a deliberate cancel doesn't read as an error (mirrors the TUI).
   cancelled: { symbol: pc.dim("⊘"), label: "CANCELLED", color: pc.dim },
@@ -75,6 +78,7 @@ const NODE_STATUS = {
   done: "persisted",
   persisted: "persisted",
   failed: "failed",
+  stalled: "stalled",
   cancelled: "cancelled",
   pending: "pending",
   "waiting-event": "waiting",

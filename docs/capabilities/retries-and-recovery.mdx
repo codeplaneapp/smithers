@@ -47,10 +47,64 @@ The retry surface lives directly on `<Task>` (verified in `packages/components/s
 The pieces, as implemented:
 
 - **`retries`** - additional attempts after the first. The default is **infinite retries** with exponential backoff starting at 1s (`resolveRetryConfig` in `packages/graph/src/extract.js` returns `retries: Infinity` and `{ backoff: "exponential", initialDelayMs: 1000 }` when nothing is set). Bound it with `retries={N}` or disable with `noRetry`. `continueOnFail` tasks default to 0 retries - except agent tasks, which get one free retry for transient CLI flakes.
-- **`retryPolicy`** - `{ backoff: "fixed" | "linear" | "exponential", initialDelayMs }`. Delays are computed as an Effect `Schedule` and capped at **5 minutes** (`packages/scheduler/src/retryPolicyToSchedule.js`). There is no jitter today; with typical fan-outs of tens of lanes against one provider, that is a real (if modest) gap versus [full jitter](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/).
+- **`retryPolicy`** - `{ backoff: "fixed" | "linear" | "exponential", initialDelayMs, maxIdenticalFailures, retryable }`. Delays are computed as an Effect `Schedule` and capped at **5 minutes** (`packages/scheduler/src/retryPolicyToSchedule.js`). There is no jitter today; with typical fan-outs of tens of lanes against one provider, that is a real (if modest) gap versus [full jitter](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/). `maxIdenticalFailures` and `retryable` are the non-progress and classification knobs described below.
 - **`maxSchemaRetries`** - separate from failure retries: up to 3 (default) cheap correction calls when output doesn't parse against the Zod schema, before the attempt is considered failed at all.
 - **`timeoutMs` / `heartbeatTimeoutMs`** - a hard wall-clock limit and a Temporal-style liveness check: an agent that stops producing output past the heartbeat window fails the attempt instead of hanging the run.
 - **`continueOnFail` / `failurePolicy`** - whether a terminal failure halts the run, or quarantines the branch and lets independent work proceed.
+
+### Non-progress detection: the `stalled` state
+
+A task that fails 84 times with a byte-identical error is not retrying, it is livelocked. Smithers computes a stable **error signature** for every failed attempt (the error code plus its message with paths, ids, and numbers normalized away, `packages/scheduler/src/errorSignature.js`) and counts consecutive failures that share it. After `maxIdenticalFailures` of them (default **3**) the task stops retrying and enters a terminal state of its own: **`stalled`**, distinct from `failed`.
+
+```tsx
+<Task
+  id="author-diagram"
+  agent={author}
+  retries={20}
+  retryPolicy={{ maxIdenticalFailures: 3 }}   // default; 0 disables stall detection
+  output={outputs.diagram}
+>
+  Draw the sequence diagram.
+</Task>
+```
+
+What `stalled` gives you over `failed`:
+
+- The streak is recomputed from durable attempt rows on every failure, so the verdict survives a resume or an owner handoff. The count and the signature are stamped on the attempt (`details.identicalFailureStreak`, `details.errorSignature`).
+- A `NodeStalled` event carries the signature, the repeat count, and the full error payload.
+- `bunx smthrs status`, `bunx smthrs inspect`, `bunx smthrs why`, the TUI, and the run UIs render `stalled` as its own status, so a livelock does not read as an ordinary failure.
+- The run-level error is a `TASK_STALLED` SmithersError naming the node, the repeat count, and the real message.
+
+`stalled` behaves exactly like `failed` for control flow: `continueOnFail` still tolerates it, `failurePolicy="quarantine"` still quarantines the branch, and dependents are still gated. Two failure classes never stall: quota failures, which park the run instead of consuming any budget, and transient agent-session failures (`SESSION_ERROR`, `TASK_TIMEOUT`, `TASK_ABORTED`), which the run already tolerates rather than failing on.
+
+### Failure classification: what is never retried
+
+Some failure shapes cannot be fixed by running the task again, so Smithers classifies them **before** scheduling a retry and sends them straight to the terminal state with the full payload (`packages/scheduler/src/failureClassification.js`):
+
+| Shape | Why retrying is waste |
+| --- | --- |
+| `ENOENT` in the error message | A missing filesystem precondition. `statx` on a path that does not exist fails the same way on attempt 74. |
+| Any `*_TOO_LARGE` error code | A hard size cap (heartbeat payload, tool file or patch, sandbox bundle). Regenerating the same artifact breaches the same cap. |
+| `AGENT_CONFIG_INVALID` | The agent is misconfigured, not flaky. |
+| `INVALID_OUTPUT` on a non-agent task | A compute or static task is deterministic, so the schema violation reproduces. |
+
+Agent-task schema violations are deliberately **not** on that list: a fresh generation may well parse. Those are caught by stall detection once the failures start repeating byte-identically.
+
+For anything the platform cannot classify, declare it yourself with `retryPolicy.retryable`:
+
+```tsx
+<Task
+  id="verify-contract"
+  agent={verifier}
+  retryPolicy={{ retryable: (error) => error?.code !== "CONTRACT_VIOLATION" }}
+>
+  Verify the generation-input boundary.
+</Task>
+
+<Task id="gate" retryPolicy={{ retryable: false }} agent={gate}>Check the invariant.</Task>
+```
+
+`retryable: false` makes every failure of the task terminal. A `retryable(error)` predicate is consulted per failure; returning `false` makes that failure terminal while other failures keep their retry budget. A predicate that throws is treated as an authoring bug and the failure stays retryable, so a bad predicate can never wedge scheduling.
 
 ### Escalation: the failover chain
 
@@ -86,6 +140,39 @@ Retrying a task that already sent the email is not recovery, it's a duplicate se
 
 On retry after a non-idempotent side-effect executed, Smithers injects an explicit warning into the next attempt's prompt ("previous attempts already ran non-idempotent side effects") and reuses the same `ctx.idempotencyKey`; `revert`/`timetravel` run registered compensation handlers ([saga-style](https://microservices.io/patterns/data/saga.html)) unless you pass `--no-revert`, and replay across unresolved non-idempotent effects is refused without `--force`. See [Recipes → retry policy](/recipes#retry-policy--timeouts).
 
+## What a failed run tells you
+
+The run-level error is the first thing an operator reads, so it carries the diagnosis rather than a pointer to it. When a node exhausts its retries or stalls, the run error names the node, the attempt count, and the real payload from the last failed attempt:
+
+```text
+Task failed: probe-author after 4 attempts: rendered prompt is 683304 bytes, over the 500000-byte cap
+  Last good checkpoint: frame 118. Resume with: smithers up workflow.tsx --run-id RUN_ID --resume true
+  or replay from the checkpoint with: smithers replay workflow.tsx --run-id RUN_ID --frame 118
+```
+
+A stalled node reports the livelock instead:
+
+```text
+Task stalled: author-diagram failed 3 consecutive attempts with an identical error:
+Diagram login-flow changed its planned participant ordering.
+```
+
+The pieces are also structured on the error, so gateway and UI consumers read them without parsing prose: `details.nodeId`, `details.attempts`, and (for `TASK_STALLED`) `details.identicalFailures` and `details.signature`; the raw attempt error stays attached as the error's `cause`.
+
+### Resume is offered at the point of failure
+
+Every terminally failed run gets a `details.recovery` block naming the last good checkpoint and the exact commands to act on it, so recovery does not require knowing which frame to fork:
+
+| Field | Meaning |
+| --- | --- |
+| `recovery.runId` | The failed run to resume or fork from. |
+| `recovery.frameNo` | The last committed frame, if one exists. |
+| `recovery.checkpointSeq` | The last workspace checkpoint, if one exists. |
+| `recovery.resume` | `bunx smthrs up <workflow> --run-id RUN_ID --resume true` |
+| `recovery.replay` | `bunx smthrs replay <workflow> --run-id RUN_ID --frame <n>` |
+
+The same commands appear as next-step actions when `bunx smthrs up` reports a failed run, and `bunx smthrs why` prints the checkpoint and both commands for a failed run. See [Time Travel](/capabilities/time-travel) for what fork and replay actually do.
+
 ## When the run itself dies
 
 - **Stale runs** - `bunx smthrs supervise -r RUN_ID` (or `--all` for a workspace sweep) polls every 10s and auto-resumes runs whose heartbeat is stale past 30s (`--interval`, `--stale-threshold`, `--max-concurrent 3`, `--dry-run`). Kubernetes-style restart supervision, but resuming from the durable DB position rather than from zero.
@@ -98,7 +185,8 @@ On retry after a non-idempotent side-effect executed, Smithers injects an explic
 - Attempt history is durable and complete: every attempt, its error, and its filesystem pointer survive process death.
 - Retries are **infinite by default**. That is the right default for overnight runs and the wrong one for side-effectful tasks - bound those explicitly.
 - Backoff is capped at 5 minutes and **has no jitter**; large synchronized fan-outs can still thundering-herd a provider on recovery.
-- There are no Temporal-style `nonRetryableErrorTypes` on tasks: error classification is built in (quota, preflight/auth, heartbeat, timeout), not user-extensible per error type.
+- Error classification is built in (quota, preflight/auth, heartbeat, timeout, `ENOENT` preconditions, hard size caps). Instead of Temporal-style `nonRetryableErrorTypes`, per-task control is a `retryPolicy.retryable` flag or predicate.
+- Stall detection is per node and per iteration, keyed on consecutive identical signatures. An error that alternates between two messages never stalls; bound those tasks with `retries` as well.
 - Retries cannot detect a *plausible wrong answer*. That is what `scorers`, review tasks, and approval gates are for - a retry policy is not a quality gate.
 
 ## See also

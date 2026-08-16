@@ -468,7 +468,7 @@ export function diagnoseRun(input: {
  * signal — the event log defaults to this filter with an "all" escape hatch.
  */
 const NOTABLE_EVENT_PATTERN =
-  /^(Node(Started|Finished|Failed|Retrying|Skipped|Cancelled|WaitingApproval)|Run[A-Z]|Approval|Human|Signal|Quota)/;
+  /^(Node(Started|Finished|Failed|Stalled|Retrying|Skipped|Cancelled|WaitingApproval)|Run[A-Z]|Approval|Human|Signal|Quota)/;
 
 /**
  * The agent's actual work, on top of the notable set: tool calls, agent

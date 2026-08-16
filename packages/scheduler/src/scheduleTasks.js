@@ -27,7 +27,7 @@ function descriptorPriority(descriptor) {
  */
 function isTraversalTerminal(state, descriptor) {
   if (isTerminalState(state, descriptor)) return true;
-  if (state === "failed" && descriptor.failurePolicy === "quarantine") return true;
+  if ((state === "failed" || state === "stalled") && descriptor.failurePolicy === "quarantine") return true;
   return Boolean(descriptor.waitAsync && (state === "waiting-approval" || state === "waiting-event"));
 }
 /**
@@ -169,7 +169,8 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
           const descriptor = descriptors.get(node.nodeId);
           if (!descriptor) return;
           const key = buildStateKey(descriptor.nodeId, descriptor.iteration);
-          if ((states.get(key) ?? "pending") !== "failed") return;
+          const taskState = states.get(key) ?? "pending";
+          if (taskState !== "failed" && taskState !== "stalled") return;
           const failure = taskFailures?.get(key);
           const code =
             failure &&
@@ -229,10 +230,13 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
           state === "finished" ||
           state === "skipped" ||
           state === "failed" ||
+          state === "stalled" ||
           Boolean(descriptor.waitAsync && (state === "waiting-approval" || state === "waiting-event"));
         return {
           terminal,
-          failed: state === "failed" && (options.includeContinuedFailures || !descriptor.continueOnFail),
+          failed:
+            (state === "failed" || state === "stalled") &&
+            (options.includeContinuedFailures || !descriptor.continueOnFail),
         };
       }
       case "sequence":
@@ -358,7 +362,10 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
         if (!descriptor) return;
         const key = buildStateKey(descriptor.nodeId, descriptor.iteration);
         const state = states.get(key) ?? "pending";
-        if (state === "failed" && (options.includeContinuedFailures || !descriptor.continueOnFail)) {
+        if (
+          (state === "failed" || state === "stalled") &&
+          (options.includeContinuedFailures || !descriptor.continueOnFail)
+        ) {
           failureRecoveryKeys.add(key);
         }
         return;
