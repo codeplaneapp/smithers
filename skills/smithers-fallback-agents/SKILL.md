@@ -26,7 +26,10 @@ failover chain for a `<Task>`:
   headroom orders healthy accounts first. A seeded shuffle breaks ties.
 - The Smithers engine already fails over along the chain when a rung is
   rate-limited. Smithers persists the reset per account and turns a known
-  blocked account into a no-network quota rung until that time.
+  blocked account into a no-network quota rung until that time. The rung
+  re-checks the clock when invoked, so a chain built once — a generated
+  `agents.ts` builds its pool at module load — recovers the account after
+  the reset instead of retiring it for the whole process.
 - The "normal" agent is appended as the last rung, and is returned alone when
   the registry is missing, empty, or unreadable — a workflow using this
   helper still runs on machines with no registered accounts (CI, teammates).
@@ -100,7 +103,7 @@ shared plan window.
 import { fallbackAgents, ClaudeCodeAgent } from "smthrs";
 
 // All Claude + Codex subscriptions, ordered by quota headroom, then the stock
-// agent last. The seed keeps equal-headroom ties stable for one run.
+// agent last. The seed pins account positions for one run.
 <Task agent={fallbackAgents({ seed: ctx.runId })} ... />
 
 // Only Codex accounts, pinned to a model, with an explicit normal agent:
@@ -134,6 +137,10 @@ Replace a direct Fable agent while preserving unattended permissions:
   {...taskProps}
 />
 ```
+
+This example deliberately excludes the ambient `~/.claude` login. Omit
+`fallback: []` to keep it as the last pool member, and pass
+`agents reauth --include-default` when checking its login.
 
 A running agent subprocess cannot swap chains. Edit the workflow, run
 `smithers cancel RUN_ID`, then start the workflow as a new run. Do not use
@@ -172,9 +179,11 @@ checkout that way, and there only that name resolves. Match whatever the
 sibling workflows in the same `.smithers/workflows/` directory already
 import; guessing wrong fails at module load, not at review time.
 
-Why seed at all? A workflow re-renders on every frame. Usage headroom remains
-the primary order. Seeding by run id makes equal-headroom ties stable for the
-whole run while different runs still spread across tied accounts.
+Why seed at all? A workflow re-renders on every frame. Usage headroom chooses
+the initial order. Seeding by run id pins that account order for the whole run,
+even after a quota callback changes persisted state, so the engine's saved
+chain indexes still identify the same accounts. Different runs still spread
+across tied accounts.
 
 Registered accounts also flow into generated `.smithers/agents.ts` pools
 (`smithers agents add` regenerates it when present), so default workflows
