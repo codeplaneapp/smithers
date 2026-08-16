@@ -558,6 +558,7 @@ describe("resume without time travel", () => {
       const run = await adapter.getRun(runId);
       expect(run?.status).toBe("running");
       expect(run?.runtimeOwnerId).toContain("pid:");
+      expect(run?.runtimeOwnerId).toContain("@");
       const attempts = await adapter.listAttempts(runId, "stuck", 0);
       expect(attempts).toHaveLength(1);
       expect(attempts[0]?.state).toBe("in-progress");

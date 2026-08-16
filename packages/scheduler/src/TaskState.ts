@@ -9,5 +9,6 @@ export type TaskState =
   | "in-progress"
   | "finished"
   | "failed"
+  | "stalled"
   | "cancelled"
   | "skipped";

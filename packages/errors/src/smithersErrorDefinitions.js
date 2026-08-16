@@ -239,6 +239,11 @@ export const smithersErrorDefinitions = {
     category: "engine",
     when: "The workflow session state machine reaches an invalid or failed state.",
   },
+  TASK_STALLED: {
+    category: "engine",
+    when: "A task stopped retrying after consecutive attempts failed with an identical error signature (non-progress detection) and the run failed.",
+    details: "{ key, nodeId, attempts, identicalFailures, signature }",
+  },
   TASK_ID_REQUIRED: {
     category: "components",
     when: "<Task> is missing a valid string id.",

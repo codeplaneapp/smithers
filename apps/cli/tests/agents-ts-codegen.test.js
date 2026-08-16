@@ -48,7 +48,9 @@ const ALL_TIERS = [...Object.keys(CODEX_DEFAULT_TIERS), ...CLAUDE_LED_TIERS];
 function activePoolProviders(source, pool) {
   const match = uncommented(source).match(new RegExp(`(?:^|\\n)  ${pool}: \\[([\\s\\S]*?)\\n  \\],`));
   expect(match, `missing generated ${pool} pool`).toBeTruthy();
-  return [...match[1].matchAll(/providers\.([A-Za-z_$][\w$]*)/g)].map((entry) => entry[1]);
+  return [...match[1].matchAll(/providers\.([A-Za-z_$][\w$]*)|\.\.\.(claudeAccountPool)/g)].map(
+    (entry) => entry[1] ?? entry[2],
+  );
 }
 
 function expectCodexFirstDefaultTiers(source, providerPrefix) {
@@ -89,7 +91,9 @@ describe("generateAgentsTs (account-driven)", () => {
     expect(generated).toContain("codexWork: new SmithersCodexAgent(");
     expect(generated).toContain('id: "smithers-account:claude-work"');
     // pools group by engine family
-    expect(generated).toMatch(/claude:\s*\[\s*providers\.claudeWork,\s*providers\.claudePersonal,\s*\]/);
+    expect(generated).toContain('import { fallbackAgents } from "smthrs";');
+    expect(generated).toMatch(/const claudeAccountPool = fallbackAgents\(\{[\s\S]*?providers: \["claude-code"\]/);
+    expect(generated).toContain("claude: claudeAccountPool");
     expect(generated).toMatch(/codex:\s*\[\s*providers\.codexWork,\s*\]/);
     // A registered Codex account gets role-specific model siblings. Claude
     // accounts remain behind Codex as runtime fallbacks.
@@ -100,20 +104,12 @@ describe("generateAgentsTs (account-driven)", () => {
     // Claude accounts lead implementation (registry v7); the Codex Terra
     // sibling follows as the checking / second-build lane.
     const implementPool = activePoolProviders(generated, "implement");
-    expect(implementPool[0]).toBe("claudeWork");
+    expect(implementPool[0]).toBe("claudeAccountPool");
     expect(implementPool).toContain("codexWorkTerra");
     // Claude accounts lead the orchestrator/planning seats; Codex Sol is
     // only the availability fallback behind them.
-    expect(activePoolProviders(generated, "orchestrator").slice(0, 3)).toEqual([
-      "claudeWork",
-      "claudePersonal",
-      "codexWorkSol",
-    ]);
-    expect(activePoolProviders(generated, "planning").slice(0, 3)).toEqual([
-      "claudeWork",
-      "claudePersonal",
-      "codexWorkSol",
-    ]);
+    expect(activePoolProviders(generated, "orchestrator").slice(0, 2)).toEqual(["claudeAccountPool", "codexWorkSol"]);
+    expect(activePoolProviders(generated, "planning").slice(0, 2)).toEqual(["claudeAccountPool", "codexWorkSol"]);
     expect(uncommented(generated)).not.toContain("cwd: process.cwd()");
   });
 
@@ -128,7 +124,7 @@ describe("generateAgentsTs (account-driven)", () => {
     );
 
     const providers = activePoolProviders(generateAgentsTs(env), "implement");
-    expect(providers[0]).toBe("claudeBackup");
+    expect(providers[0]).toBe("claudeAccountPool");
     expect(providers.slice(1, 5)).toEqual(["codexATerra", "codexBTerra", "codexCTerra", "codexDTerra"]);
   });
 
@@ -164,7 +160,8 @@ describe("generateAgentsTs (account-driven)", () => {
     expect(generated).toContain('apiKey: registeredAccountApiKey("anthropic-prod")');
     // openai-api goes in the codex pool, anthropic-api in the claude pool
     expect(generated).toMatch(/codex:\s*\[\s*providers\.openaiProd,\s*\]/);
-    expect(generated).toMatch(/claude:\s*\[\s*providers\.anthropicProd,\s*\]/);
+    expect(generated).toMatch(/const claudeAccountPool = fallbackAgents\(\{[\s\S]*?providers: \["anthropic-api"\]/);
+    expect(generated).toContain("claude: claudeAccountPool");
     // user-specified model wins over the default
     expect(generated).toContain('model: "gpt-5"');
     // The explicit base-account pin does not weaken the Smithers default
@@ -173,13 +170,13 @@ describe("generateAgentsTs (account-driven)", () => {
     expect(generated).toContain('openaiProdTerra: new SmithersCodexAgent({ model: "gpt-5.6-terra"');
     expect(generated).toContain('openaiProdLuna: new SmithersCodexAgent({ model: "gpt-5.6-luna"');
     expectCodexFirstDefaultTiers(generated, "openaiProd");
-    expect(activePoolProviders(generated, "review")).toContain("anthropicProd");
+    expect(activePoolProviders(generated, "review")).toContain("claudeAccountPool");
     // The Claude account leads implementation; the Codex Terra sibling
     // follows as the checking / second-build lane.
-    expect(activePoolProviders(generated, "implement").slice(0, 2)).toEqual(["anthropicProd", "openaiProdTerra"]);
+    expect(activePoolProviders(generated, "implement").slice(0, 2)).toEqual(["claudeAccountPool", "openaiProdTerra"]);
     // The Claude account leads orchestration; the Codex Sol sibling stays
     // behind it as the availability fallback.
-    expect(activePoolProviders(generated, "orchestrator").slice(0, 2)).toEqual(["anthropicProd", "openaiProdSol"]);
+    expect(activePoolProviders(generated, "orchestrator").slice(0, 2)).toEqual(["claudeAccountPool", "openaiProdSol"]);
   });
 
   test("does not serialize both configDir and apiKey for malformed account entries", () => {

@@ -10,7 +10,7 @@ import { RUN_ID_PATTERN } from "./RUN_ID_PATTERN.js";
 const NODE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,128}$/;
 const INT32_MAX = 2_147_483_647;
 const CACHE_MAX_ENTRIES = 200;
-const TERMINAL_STATES = new Set(["finished", "failed", "cancelled"]);
+const TERMINAL_STATES = new Set(["finished", "failed", "stalled", "cancelled"]);
 
 export class WhatHappenedRouteError extends Error {
   /**

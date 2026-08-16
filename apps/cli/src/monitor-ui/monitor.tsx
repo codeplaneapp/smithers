@@ -6,7 +6,17 @@
  * `smithers monitor`). Purely an observer: it launches nothing, everything on
  * screen is live gateway state. Domain logic lives in ./monitorModel.ts.
  */
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import {
   createGatewayReactRoot,
   useGatewayActions,
@@ -101,6 +111,9 @@ import {
   metricValue,
   middleTruncate,
   nextCron,
+  normalizeStatus,
+  nodeAttemptHistoryRowsOf,
+  nodeAttemptHistoryView,
   nodeErrorOf,
   nodeStateRowsOf,
   nodeSummaryEligible,
@@ -140,6 +153,7 @@ import {
   waitTone,
   workflowOptions,
   type CronRow,
+  type NodeAttemptHistoryRow,
   type NodeStateRow,
   type PromScrape,
   type RunRow,
@@ -1834,6 +1848,69 @@ type TreeNode = TreeNodeLike & {
   children?: TreeNode[] | null;
 };
 
+/** Leaf kinds own transcripts/outputs; everything else is structural grouping. */
+const LEAF_KINDS = new Set(["task", "agent", "compute", "static"]);
+
+/** Human names for glyphs and assistive labels. */
+const KIND_LABELS: Record<string, string> = {
+  workflow: "workflow",
+  sequence: "sequence — runs children in order",
+  parallel: "parallel — runs children concurrently",
+  task: "task",
+  approval: "approval gate",
+  loop: "loop",
+  foreach: "loop over items",
+  timer: "timer wait",
+  branch: "conditional branch",
+  conditional: "conditional branch",
+  subflow: "sub-workflow",
+};
+
+function treeNodeName(node: TreeNode): string {
+  return (node.cardLabel ?? node.name ?? node.id ?? treeNodeKey(node)) || "Unnamed node";
+}
+
+function treeNodeKindLabel(node: TreeNode): string {
+  const kind = (node.kind ?? "node").toLowerCase();
+  return KIND_LABELS[kind] ?? `${kind} node`;
+}
+
+function treeNodeAccessibleLabel(node: TreeNode): string {
+  const details = [treeNodeName(node), treeNodeKindLabel(node)];
+  const status = asString(node.status);
+  if (status) details.push(labelForStatus(status));
+  if (typeof node.iteration === "number" && node.iteration > 0) details.push(`iteration ${node.iteration}`);
+  if (typeof node.attempt === "number" && node.attempt > 0) {
+    details.push(
+      typeof node.maxAttempts === "number"
+        ? `attempt ${node.attempt} of ${node.maxAttempts}`
+        : `attempt ${node.attempt}`,
+    );
+  }
+  return details.join(", ");
+}
+
+function treeItemDomId(treeId: string, key: string): string {
+  return `${treeId}-item-${encodeURIComponent(key || "node")}`;
+}
+
+function treeGroupDomId(treeId: string, key: string): string {
+  return `${treeId}-group-${encodeURIComponent(key || "node")}`;
+}
+
+type TreeItemInteractionProps = {
+  treeId: string;
+  positionInSet: number;
+  setSize: number;
+  focusedKey: string;
+  selectedNodeKey: string | undefined;
+  onFocus: (key: string) => void;
+  onToggle: (key: string) => void;
+  onActivate: (node: TreeNode) => void;
+  onItemRef: (key: string, element: HTMLDivElement | null) => void;
+  activationLabel: string;
+};
+
 /**
  * React-DevTools-style XML rendering of the execution tree: colored tags and
  * attributes, clickable chevrons, click-to-inspect — sharing the exact same
@@ -1844,35 +1921,44 @@ function XmlRow({
   depth,
   expandedOverrides,
   defaults,
+  treeId,
+  positionInSet,
+  setSize,
+  focusedKey,
   selectedNodeKey,
   onToggle,
-  onSelect,
-  selectDisabled,
+  onFocus,
+  onActivate,
+  onItemRef,
+  activationLabel,
 }: {
   node: TreeNode;
   depth: number;
   expandedOverrides: ReadonlyMap<string, boolean>;
   defaults: ReadonlySet<string>;
-  selectedNodeKey: string | undefined;
-  onToggle: (key: string) => void;
-  onSelect: (node: TreeNode) => void;
-  selectDisabled?: boolean;
-}) {
+} & TreeItemInteractionProps) {
   const key = treeNodeKey(node);
   const children = (node.children ?? []) as TreeNode[];
   const expanded = expandedOverrides.get(key) ?? defaults.has(key);
+  const selected = key === selectedNodeKey;
+  const focused = key === focusedKey;
   const kind = (node.kind ?? "node").replace(/[^a-zA-Z0-9_.-]/g, "") || "Node";
   const tag = kind.charAt(0).toUpperCase() + kind.slice(1);
   const status = asString(node.status);
   const name = asString(node.name);
+  const groupId = treeGroupDomId(treeId, key);
   const openTag = (
     <Button
       variant="ghost"
       size="sm"
       className="mon-xml-open"
       data-testid="monitor-xml-node"
-      disabled={selectDisabled}
-      onClick={() => onSelect(node)}
+      tabIndex={-1}
+      aria-label={`${activationLabel} ${treeNodeAccessibleLabel(node)}`}
+      onClick={() => {
+        onFocus(key);
+        onActivate(node);
+      }}
     >
       <span className="mon-xml-punct">&lt;</span>
       <span className="mon-xml-tag">{tag}</span>
@@ -1910,20 +1996,35 @@ function XmlRow({
     </Button>
   );
   return (
-    <>
-      <div
-        className={`mon-xml-row${key === selectedNodeKey ? " is-active" : ""}`}
-        style={{ paddingLeft: 8 + depth * 16 }}
-      >
+    <div
+      id={treeItemDomId(treeId, key)}
+      ref={(element) => onItemRef(key, element)}
+      role="treeitem"
+      aria-label={treeNodeAccessibleLabel(node)}
+      aria-level={depth + 1}
+      aria-posinset={positionInSet}
+      aria-setsize={setSize}
+      aria-expanded={children.length > 0 ? expanded : undefined}
+      aria-selected={selected}
+      data-focused={focused ? "true" : undefined}
+      className="mon-tree-item"
+    >
+      <div className={`mon-xml-row${selected ? " is-active" : ""}`} style={{ paddingLeft: 8 + depth * 16 }}>
         {children.length > 0 ? (
           <Button
             variant="ghost"
             size="icon"
             className="mon-tree-chevron"
             data-testid="monitor-tree-toggle"
-            onClick={() => onToggle(key)}
+            tabIndex={-1}
+            onClick={(event) => {
+              event.stopPropagation();
+              onFocus(key);
+              onToggle(key);
+            }}
             aria-expanded={expanded}
-            aria-label={`${expanded ? "Collapse" : "Expand"} ${node.cardLabel ?? node.name ?? node.id ?? key}`}
+            aria-controls={expanded ? groupId : undefined}
+            aria-label={`${expanded ? "Collapse" : "Expand"} ${treeNodeKindLabel(node)} ${treeNodeName(node)}`}
           >
             {expanded ? "▾" : "▸"}
           </Button>
@@ -1936,19 +2037,27 @@ function XmlRow({
       </div>
       {expanded && children.length > 0 ? (
         <>
-          {children.map((child) => (
-            <XmlRow
-              key={treeNodeKey(child)}
-              node={child}
-              depth={depth + 1}
-              expandedOverrides={expandedOverrides}
-              defaults={defaults}
-              selectedNodeKey={selectedNodeKey}
-              onToggle={onToggle}
-              onSelect={onSelect}
-              selectDisabled={selectDisabled}
-            />
-          ))}
+          <div id={groupId} role="group">
+            {children.map((child, index) => (
+              <XmlRow
+                key={treeNodeKey(child)}
+                node={child}
+                depth={depth + 1}
+                expandedOverrides={expandedOverrides}
+                defaults={defaults}
+                treeId={treeId}
+                positionInSet={index + 1}
+                setSize={children.length}
+                focusedKey={focusedKey}
+                selectedNodeKey={selectedNodeKey}
+                onToggle={onToggle}
+                onFocus={onFocus}
+                onActivate={onActivate}
+                onItemRef={onItemRef}
+                activationLabel={activationLabel}
+              />
+            ))}
+          </div>
           <div className="mon-xml-row" style={{ paddingLeft: 8 + depth * 16 }}>
             <span className="mon-tree-chevron" aria-hidden />
             <span className="mon-xml-punct">
@@ -1957,55 +2066,41 @@ function XmlRow({
           </div>
         </>
       ) : null}
-    </>
+    </div>
   );
 }
-
-/** Leaf kinds own transcripts/outputs; everything else is structural grouping. */
-const LEAF_KINDS = new Set(["task", "agent", "compute", "static"]);
-
-/** One-line glyph legend, surfaced as a tooltip on each tree glyph. */
-const KIND_LABELS: Record<string, string> = {
-  workflow: "workflow",
-  sequence: "sequence — runs children in order",
-  parallel: "parallel — runs children concurrently",
-  task: "task",
-  approval: "approval gate",
-  loop: "loop",
-  foreach: "loop over items",
-  timer: "timer wait",
-  branch: "conditional branch",
-  conditional: "conditional branch",
-  subflow: "sub-workflow",
-};
 
 function TreeRow({
   node,
   depth,
   expandedOverrides,
   defaults,
+  treeId,
+  positionInSet,
+  setSize,
+  focusedKey,
   selectedNodeKey,
   durations,
   tokensById,
   onToggle,
-  onSelect,
-  selectDisabled,
+  onFocus,
+  onActivate,
+  onItemRef,
+  activationLabel,
 }: {
   node: TreeNode;
   depth: number;
   expandedOverrides: ReadonlyMap<string, boolean>;
   defaults: ReadonlySet<string>;
-  selectedNodeKey: string | undefined;
   durations?: ReadonlyMap<string, number>;
   /** nodeId → subtree token spend (+estimated in-flight), right-aligned beside the duration. */
   tokensById?: ReadonlyMap<string, { spent: number; inFlight?: number }>;
-  onToggle: (key: string) => void;
-  onSelect: (node: TreeNode) => void;
-  selectDisabled?: boolean;
-}) {
+} & TreeItemInteractionProps) {
   const key = treeNodeKey(node);
   const children = (node.children ?? []) as TreeNode[];
   const expanded = expandedOverrides.get(key) ?? defaults.has(key);
+  const selected = key === selectedNodeKey;
+  const focused = key === focusedKey;
   const kindKey = (node.kind ?? "").toLowerCase();
   const glyph = KIND_GLYPHS[kindKey] ?? "○";
   const agentName = isRecord(node.agent) ? asString(node.agent.name) : asString(node.agent);
@@ -2017,8 +2112,21 @@ function TreeRow({
   const showPill = !isContainer || tone === "failed" || tone === "waiting" || tone === "running";
   const durationMs = durations?.get(`${node.id ?? key}#${node.iteration ?? 0}`);
   const tokens = tokensById?.get(node.id ?? key);
+  const groupId = treeGroupDomId(treeId, key);
   return (
-    <>
+    <div
+      id={treeItemDomId(treeId, key)}
+      ref={(element) => onItemRef(key, element)}
+      role="treeitem"
+      aria-label={treeNodeAccessibleLabel(node)}
+      aria-level={depth + 1}
+      aria-posinset={positionInSet}
+      aria-setsize={setSize}
+      aria-expanded={children.length > 0 ? expanded : undefined}
+      aria-selected={selected}
+      data-focused={focused ? "true" : undefined}
+      className="mon-tree-item"
+    >
       <div
         className={`mon-tree-row${isContainer ? " mon-tree-container" : ""}`}
         style={{ paddingLeft: 8 + depth * 16 }}
@@ -2029,9 +2137,15 @@ function TreeRow({
             size="icon"
             className="mon-tree-chevron"
             data-testid="monitor-tree-toggle"
-            onClick={() => onToggle(key)}
+            tabIndex={-1}
+            onClick={(event) => {
+              event.stopPropagation();
+              onFocus(key);
+              onToggle(key);
+            }}
             aria-expanded={expanded}
-            aria-label={`${expanded ? "Collapse" : "Expand"} ${node.cardLabel ?? node.name ?? node.id ?? key}`}
+            aria-controls={expanded ? groupId : undefined}
+            aria-label={`${expanded ? "Collapse" : "Expand"} ${treeNodeKindLabel(node)} ${treeNodeName(node)}`}
           >
             {expanded ? "▾" : "▸"}
           </Button>
@@ -2041,14 +2155,17 @@ function TreeRow({
           </span>
         )}
         <RowButton
-          active={key === selectedNodeKey}
+          active={selected}
           className="mon-tree-main"
           data-testid="monitor-tree-node"
-          disabled={selectDisabled}
-          onClick={() => onSelect(node)}
-          title={selectDisabled ? "Node selection is disabled while scrubbing frames" : undefined}
+          tabIndex={-1}
+          aria-label={`${activationLabel} ${treeNodeAccessibleLabel(node)}`}
+          onClick={() => {
+            onFocus(key);
+            onActivate(node);
+          }}
         >
-          <span className="mon-tree-glyph mon-dim" title={KIND_LABELS[kindKey] ?? kindKey ?? "node"}>
+          <span className="mon-tree-glyph mon-dim" title={KIND_LABELS[kindKey] ?? kindKey ?? "node"} aria-hidden="true">
             {glyph}
           </span>
           <span className="mon-tree-name">{node.cardLabel ?? node.name ?? node.id ?? key}</span>
@@ -2077,25 +2194,58 @@ function TreeRow({
           {showPill ? <StatusTag status={node.status} /> : null}
         </RowButton>
       </div>
-      {expanded
-        ? children.map((child) => (
+      {expanded && children.length > 0 ? (
+        <div id={groupId} role="group">
+          {children.map((child, index) => (
             <TreeRow
               key={treeNodeKey(child)}
               node={child}
               depth={depth + 1}
               expandedOverrides={expandedOverrides}
               defaults={defaults}
+              treeId={treeId}
+              positionInSet={index + 1}
+              setSize={children.length}
+              focusedKey={focusedKey}
               selectedNodeKey={selectedNodeKey}
               durations={durations}
               tokensById={tokensById}
               onToggle={onToggle}
-              onSelect={onSelect}
-              selectDisabled={selectDisabled}
+              onFocus={onFocus}
+              onActivate={onActivate}
+              onItemRef={onItemRef}
+              activationLabel={activationLabel}
             />
-          ))
-        : null}
-    </>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
+}
+
+type VisibleTreeItem = {
+  key: string;
+  node: TreeNode;
+  parentKey: string | undefined;
+  firstChildKey: string | undefined;
+};
+
+function visibleTreeItems(
+  root: TreeNode | null,
+  expandedOverrides: ReadonlyMap<string, boolean>,
+  defaults: ReadonlySet<string>,
+): VisibleTreeItem[] {
+  if (!root) return [];
+  const visible: VisibleTreeItem[] = [];
+  const visit = (node: TreeNode, parentKey: string | undefined): void => {
+    const key = treeNodeKey(node);
+    const children = (node.children ?? []) as TreeNode[];
+    visible.push({ key, node, parentKey, firstChildKey: children[0] ? treeNodeKey(children[0]) : undefined });
+    if (!(expandedOverrides.get(key) ?? defaults.has(key))) return;
+    for (const child of children) visit(child, key);
+  };
+  visit(root, undefined);
+  return visible;
 }
 
 export function ExecutionTree({
@@ -2122,9 +2272,10 @@ export function ExecutionTree({
   onRetry?: () => void;
   /**
    * Frame-scrubber override: when set, render this static tree instead of the
-   * live one and disable node selection. `root: null` means a successfully
-   * loaded frame maps to an empty tree. While loading or unavailable, a
-   * non-null root is the previous valid frame and remains visible.
+   * live one. Activation selects within the historical tree without changing
+   * the live inspector. `root: null` means a successfully loaded frame maps to
+   * an empty tree. While loading or unavailable, a non-null root is the
+   * previous valid frame and remains visible.
    */
   frameOverride?: {
     root: TreeNode | null;
@@ -2145,6 +2296,12 @@ export function ExecutionTree({
   const root = isStatic ? frameOverride.root : (liveRoot as TreeNode | null);
   const frameLoading = frameOverride?.loading ?? false;
   const frameError = frameLoading ? undefined : frameOverride?.error;
+  const reactTreeId = useId();
+  const treeId = `monitor-tree-${reactTreeId.replace(/:/g, "")}`;
+  const treeRef = useRef<HTMLDivElement | null>(null);
+  const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const [focusedKey, setFocusedKey] = useState<string | undefined>(undefined);
+  const [frameSelectedKey, setFrameSelectedKey] = useState<string | undefined>(undefined);
   // ?nodeId= deep link: select the node once it exists in the live tree.
   useEffect(() => {
     if (isStatic || !autoSelectNodeId || nodes.length === 0) return;
@@ -2164,6 +2321,103 @@ export function ExecutionTree({
     if (overrides.size > 0) setOverrides(new Map());
   }
   const defaults = useMemo(() => autoExpandKeys(root as TreeNodeLike | null), [root]);
+  const visibleItems = useMemo(() => visibleTreeItems(root, overrides, defaults), [root, overrides, defaults]);
+  const itemByKey = useMemo(() => new Map(visibleItems.map((item) => [item.key, item])), [visibleItems]);
+  const effectiveSelectedKey = isStatic ? (frameSelectedKey ?? selectedNodeKey) : selectedNodeKey;
+  const effectiveFocusedKey =
+    (focusedKey && itemByKey.has(focusedKey) ? focusedKey : undefined) ??
+    (effectiveSelectedKey && itemByKey.has(effectiveSelectedKey) ? effectiveSelectedKey : undefined) ??
+    visibleItems[0]?.key ??
+    "";
+
+  useEffect(() => {
+    setFocusedKey(undefined);
+    setFrameSelectedKey(undefined);
+  }, [runId, isStatic]);
+
+  useEffect(() => {
+    if (!isStatic && selectedNodeKey) setFocusedKey(selectedNodeKey);
+  }, [isStatic, selectedNodeKey]);
+
+  useEffect(() => {
+    if (typeof document === "undefined" || document.activeElement !== treeRef.current) return;
+    itemRefs.current.get(effectiveFocusedKey)?.scrollIntoView?.({ block: "nearest" });
+  }, [asXml, effectiveFocusedKey, visibleItems.length]);
+
+  const setExpanded = (key: string, expanded: boolean): void => {
+    setOverrides((previous) => {
+      const next = new Map(previous);
+      next.set(key, expanded);
+      return next;
+    });
+  };
+
+  const toggleExpanded = (key: string): void => {
+    const expanded = overrides.get(key) ?? defaults.has(key);
+    setExpanded(key, !expanded);
+  };
+
+  const focusItem = (key: string): void => {
+    setFocusedKey(key);
+    treeRef.current?.focus({ preventScroll: true });
+  };
+
+  const activateItem = (node: TreeNode): void => {
+    const key = treeNodeKey(node);
+    setFocusedKey(key);
+    if (isStatic) setFrameSelectedKey(key);
+    else onSelectNode(node);
+  };
+
+  const registerItem = (key: string, element: HTMLDivElement | null): void => {
+    if (element) itemRefs.current.set(key, element);
+    else itemRefs.current.delete(key);
+  };
+
+  const onTreeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    if (event.target !== event.currentTarget || visibleItems.length === 0) return;
+    const currentIndex = Math.max(
+      0,
+      visibleItems.findIndex((item) => item.key === effectiveFocusedKey),
+    );
+    const current = visibleItems[currentIndex];
+    if (!current) return;
+    const children = (current.node.children ?? []) as TreeNode[];
+    const expanded = overrides.get(current.key) ?? defaults.has(current.key);
+    let nextKey: string | undefined;
+
+    switch (event.key) {
+      case "ArrowDown":
+        nextKey = visibleItems[Math.min(currentIndex + 1, visibleItems.length - 1)]?.key;
+        break;
+      case "ArrowUp":
+        nextKey = visibleItems[Math.max(currentIndex - 1, 0)]?.key;
+        break;
+      case "Home":
+        nextKey = visibleItems[0]?.key;
+        break;
+      case "End":
+        nextKey = visibleItems[visibleItems.length - 1]?.key;
+        break;
+      case "ArrowRight":
+        if (children.length > 0 && !expanded) setExpanded(current.key, true);
+        else if (children.length > 0) nextKey = current.firstChildKey;
+        break;
+      case "ArrowLeft":
+        if (children.length > 0 && expanded) setExpanded(current.key, false);
+        else nextKey = current.parentKey;
+        break;
+      case "Enter":
+      case " ":
+        activateItem(current.node);
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    if (nextKey) setFocusedKey(nextKey);
+  };
   if (!isStatic && error) {
     return (
       <Alert variant="destructive" data-testid="monitor-tree-error">
@@ -2248,56 +2502,64 @@ export function ExecutionTree({
   ) : null;
   const tree = asXml ? (
     <div
-      role="region"
+      id={treeId}
+      ref={treeRef}
+      role="tree"
       aria-label="Execution tree XML"
+      aria-orientation="vertical"
+      aria-activedescendant={treeItemDomId(treeId, effectiveFocusedKey)}
       tabIndex={0}
       className={`mon-tree mon-tree-xml${isStatic ? " is-static" : ""}`}
       data-testid="monitor-tree-xml"
+      onKeyDown={onTreeKeyDown}
     >
       <XmlRow
         node={root}
         depth={0}
         expandedOverrides={overrides}
         defaults={defaults}
-        selectedNodeKey={selectedNodeKey}
-        onToggle={(key) =>
-          setOverrides((prev) => {
-            const next = new Map(prev);
-            const current = next.get(key) ?? defaults.has(key);
-            next.set(key, !current);
-            return next;
-          })
-        }
-        onSelect={onSelectNode}
-        selectDisabled={isStatic}
+        treeId={treeId}
+        positionInSet={1}
+        setSize={1}
+        focusedKey={effectiveFocusedKey}
+        selectedNodeKey={effectiveSelectedKey}
+        onToggle={toggleExpanded}
+        onFocus={focusItem}
+        onActivate={activateItem}
+        onItemRef={registerItem}
+        activationLabel={isStatic ? "Select historical node" : "Inspect"}
       />
     </div>
   ) : (
     <div
-      role="region"
+      id={treeId}
+      ref={treeRef}
+      role="tree"
       aria-label="Execution tree"
+      aria-orientation="vertical"
+      aria-activedescendant={treeItemDomId(treeId, effectiveFocusedKey)}
       tabIndex={0}
       className={`mon-tree${isStatic ? " is-static" : ""}`}
       data-testid="monitor-tree"
+      onKeyDown={onTreeKeyDown}
     >
       <TreeRow
         node={root}
         depth={0}
         expandedOverrides={overrides}
         defaults={defaults}
-        selectedNodeKey={selectedNodeKey}
+        treeId={treeId}
+        positionInSet={1}
+        setSize={1}
+        focusedKey={effectiveFocusedKey}
+        selectedNodeKey={effectiveSelectedKey}
         durations={durations}
         tokensById={tokensById}
-        onToggle={(key) =>
-          setOverrides((prev) => {
-            const next = new Map(prev);
-            const current = next.get(key) ?? defaults.has(key);
-            next.set(key, !current);
-            return next;
-          })
-        }
-        onSelect={onSelectNode}
-        selectDisabled={isStatic}
+        onToggle={toggleExpanded}
+        onFocus={focusItem}
+        onActivate={activateItem}
+        onItemRef={registerItem}
+        activationLabel={isStatic ? "Select historical node" : "Inspect"}
       />
     </div>
   );
@@ -3950,6 +4212,253 @@ function InspectorSection({
   );
 }
 
+type NodeAttemptHistoryQuery = {
+  key: string;
+  attempts: NodeAttemptHistoryRow[] | null;
+  loading: boolean;
+  error: Error | null;
+};
+
+/**
+ * Read the existing attempts.list RPC for exactly one node iteration. Raw
+ * attempt metadata can contain full conversations, so it is reduced to the
+ * small Monitor model before entering React state.
+ */
+function useNodeAttemptHistory({
+  runId,
+  nodeId,
+  iteration,
+  live,
+  refreshKey,
+  enabled = true,
+}: {
+  runId: string;
+  nodeId: string;
+  iteration: number;
+  live: boolean;
+  refreshKey: string;
+  enabled?: boolean;
+}): Omit<NodeAttemptHistoryQuery, "key"> & { refetch: () => void } {
+  const key = `${runId}\u0000${nodeId}\u0000${iteration}`;
+  const [retryVersion, setRetryVersion] = useState(0);
+  const [query, setQuery] = useState<NodeAttemptHistoryQuery>({ key, attempts: null, loading: true, error: null });
+  useEffect(() => {
+    if (!enabled) {
+      setQuery({ key, attempts: [], loading: false, error: null });
+      return;
+    }
+    let cancelled = false;
+    let inFlight = false;
+    const load = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      setQuery((previous) => ({
+        key,
+        attempts: previous.key === key ? previous.attempts : null,
+        loading: true,
+        error: null,
+      }));
+      try {
+        const response = await fetch("/v1/rpc/attempts.list", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ runId, nodeId, iteration }),
+        });
+        const body: unknown = await response.json().catch(() => null);
+        const envelope = isRecord(body) ? body : {};
+        if (!response.ok || envelope.ok === false) {
+          const message = isRecord(envelope.error) ? asString(envelope.error.message) : undefined;
+          throw new Error(message ?? `attempt history failed (${response.status})`);
+        }
+        const attempts = nodeAttemptHistoryRowsOf(body);
+        if (!cancelled) setQuery({ key, attempts, loading: false, error: null });
+      } catch (cause) {
+        if (!cancelled) {
+          setQuery((previous) => ({
+            key,
+            attempts: previous.key === key ? previous.attempts : null,
+            loading: false,
+            error: cause instanceof Error ? cause : new Error(String(cause)),
+          }));
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+    void load();
+    const timer = live ? setInterval(() => void load(), 2_500) : null;
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [key, runId, nodeId, iteration, live, refreshKey, retryVersion, enabled]);
+  const scoped = query.key === key ? query : { key, attempts: null, loading: true, error: null };
+  return {
+    attempts: scoped.attempts,
+    loading: scoped.loading,
+    error: scoped.error,
+    refetch: () => setRetryVersion((version) => version + 1),
+  };
+}
+
+function attemptDuration(attempt: NodeAttemptHistoryRow): string | null {
+  if (attempt.startedAtMs === undefined) return null;
+  const end = attempt.finishedAtMs ?? Date.now();
+  return formatDurationMs(Math.max(0, end - attempt.startedAtMs));
+}
+
+export function NodeAttemptHistoryState({
+  attempts,
+  loading,
+  error,
+  iteration,
+  nodeStatus,
+  currentAttempt,
+  maxAttempts,
+  nodeFailed,
+  retryAvailable,
+  retryBusy,
+  retryArmed,
+  retryRequested,
+  retryError,
+  onRetryLoad,
+}: {
+  attempts: readonly NodeAttemptHistoryRow[] | null;
+  loading: boolean;
+  error?: Error | null;
+  iteration: number;
+  nodeStatus?: string;
+  currentAttempt?: number;
+  maxAttempts?: number;
+  nodeFailed: boolean;
+  retryAvailable: boolean;
+  retryBusy: boolean;
+  retryArmed: boolean;
+  retryRequested: boolean;
+  retryError?: Error | null;
+  onRetryLoad: () => void | Promise<void>;
+}) {
+  const errorAlert = error ? (
+    <Alert variant="destructive" data-testid="monitor-attempt-history-error">
+      <AlertTitle>Couldn&apos;t load attempt history.</AlertTitle>
+      <AlertDescription>{error.message || "The attempt request failed."}</AlertDescription>
+      <Button variant="outline" data-testid="monitor-attempt-history-retry" onClick={() => void onRetryLoad()}>
+        Retry history
+      </Button>
+    </Alert>
+  ) : null;
+  let history: ReactNode;
+  if (attempts === null) {
+    history = errorAlert ?? (
+      <div className="mon-empty mon-dim" data-testid="monitor-attempt-history-loading" role="status">
+        <span className="mon-live-pending">
+          <span className="mon-dot mon-dot-pulse" aria-hidden /> loading attempt history…
+        </span>
+      </div>
+    );
+  } else if (attempts.length === 0) {
+    history = (
+      <>
+        {errorAlert}
+        <div className="mon-empty mon-dim" data-testid="monitor-attempt-history-empty">
+          {loading ? "Refreshing attempt history…" : "No attempts recorded for this node iteration yet."}
+        </div>
+      </>
+    );
+  } else {
+    const view = nodeAttemptHistoryView({ attempts, nodeStatus, currentAttempt, maxAttempts });
+    const summaryStatus =
+      view.state === "recovered" || view.state === "succeeded"
+        ? "finished"
+        : view.state === "retrying" || view.state === "first-attempt"
+          ? "in-progress"
+          : view.state === "failed" || view.state === "exhausted"
+            ? "failed"
+            : nodeStatus;
+    history = (
+      <>
+        {errorAlert}
+        <div className="mon-attempt-summary" data-testid="monitor-attempt-summary" data-retry-state={view.state}>
+          <StatusTag status={summaryStatus} label={view.state.replace("-", " ")} />
+          <div>
+            <div className="mon-attempt-headline">{view.headline}</div>
+            <div className="mon-dim mon-attempt-detail">
+              Iteration {iteration} · {view.detail}
+            </div>
+          </div>
+        </div>
+        <div className="mon-attempt-list" data-testid="monitor-attempt-history" role="list">
+          {attempts.map((attempt) => {
+            const duration = attemptDuration(attempt);
+            const current = attempt.attempt === view.currentAttempt;
+            return (
+              <div
+                className={`mon-attempt-row${current ? " is-current" : ""}`}
+                data-testid="monitor-attempt-row"
+                data-attempt={attempt.attempt}
+                data-current={current ? "true" : undefined}
+                key={`${attempt.iteration}:${attempt.attempt}`}
+                role="listitem"
+              >
+                <div className="mon-attempt-row-head">
+                  <strong className="mon-mono">Attempt {attempt.attempt}</strong>
+                  <StatusTag status={attempt.state} pulse={false} />
+                  <span className="mon-dim mon-attempt-agent">acting: {attempt.agent ?? "not recorded"}</span>
+                  {duration ? <span className="mon-dim mon-mono mon-attempt-duration">{duration}</span> : null}
+                </div>
+                {attempt.retryAtMs !== undefined ? (
+                  <div className="mon-attempt-note" data-testid="monitor-attempt-retry-scheduled">
+                    Automatic retry scheduled · next attempt {attempt.attempt + 1} ·{" "}
+                    {new Date(attempt.retryAtMs).toLocaleTimeString()}
+                  </div>
+                ) : null}
+                {normalizeStatus(attempt.state) === "failed" && !attempt.consumesRetryBudget ? (
+                  <div className="mon-dim mon-attempt-note">Retry budget preserved for this failure.</div>
+                ) : null}
+                {attempt.error ? (
+                  <div className="mon-attempt-error" data-testid="monitor-attempt-error">
+                    {[attempt.error.name, attempt.error.code].filter(Boolean).join(" · ")}
+                    {attempt.error.name || attempt.error.code ? " — " : ""}
+                    {attempt.error.message}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </>
+    );
+  }
+  let retryMessage: string | null = null;
+  if (nodeFailed) {
+    retryMessage = retryError
+      ? `Retry request failed: ${retryError.message}`
+      : retryBusy
+        ? "Retry request in progress…"
+        : retryRequested
+          ? "Retry requested — waiting for the next attempt to start."
+          : retryArmed
+            ? "Confirmation required — click Confirm retry? to reset this task and its dependents."
+            : retryAvailable
+              ? "Manual retry available — this resets the task and everything that ran after it."
+              : "Manual retry unavailable while the run is active; pause or cancel the run first.";
+  }
+  return (
+    <>
+      {history}
+      {retryMessage ? (
+        <div
+          className={`mon-retry-state${retryError ? " tone-failed" : ""}`}
+          data-testid="monitor-retry-state"
+          role={retryError ? "alert" : "status"}
+        >
+          {retryMessage}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 /**
  * The AI "what happened" recap at the top of the inspector. The gateway's
  * whatHappened RPC narrates with the host-configured cheap agent and falls
@@ -4073,6 +4582,14 @@ function NodeInspector({
   // those panels there is pure noise. Leaf kinds keep the full inspector.
   const kind = String(node.kind ?? "").toLowerCase();
   const isContainer = !["task", "agent", "compute", "static"].includes(kind) && (node.children?.length ?? 0) > 0;
+  const attemptHistory = useNodeAttemptHistory({
+    runId,
+    nodeId,
+    iteration: node.iteration ?? 0,
+    live: isLive,
+    refreshKey: outputRefreshKey,
+    enabled: !isContainer,
+  });
   // Retry affordance: failed leaf tasks get a "Retry task" button. The RPC
   // resets the node (and everything that ran after it) with the same library
   // machinery as `smithers retry-task`, then resumes the run — so it is only
@@ -4080,10 +4597,23 @@ function NodeInspector({
   const nodeFailed = toneForStatus(node.status) === "failed" && !isContainer;
   const retryEnabled = canRetryTask(node.status, runStatus);
   const [retryBusy, setRetryBusy] = useState(false);
+  const [retryError, setRetryError] = useState<Error | null>(null);
+  const retryLifecycleKey = `${runId}\u0000${nodeId}\u0000${node.iteration ?? 0}\u0000${nodeAttempt ?? 0}\u0000${String(node.status ?? "")}`;
+  const [retryRequestedAt, setRetryRequestedAt] = useState<string | null>(null);
+  const retryRequested = retryRequestedAt === retryLifecycleKey;
   const retryArm = useArmConfirm();
-  const retryArmed = retryArm.isArmed("retry");
+  const retryKey = `retry:${runId}:${nodeId}:${node.iteration ?? 0}`;
+  const retryArmed = retryArm.isArmed(retryKey);
+  useEffect(() => {
+    setRetryError(null);
+    setRetryRequestedAt(null);
+  }, [retryKey]);
   const retryTask = async () => {
-    if (!retryArm.armOrConfirm("retry")) return;
+    if (!retryArm.armOrConfirm(retryKey)) {
+      setRetryError(null);
+      return;
+    }
+    setRetryError(null);
     setRetryBusy(true);
     try {
       const response = await fetch(
@@ -4100,9 +4630,12 @@ function NodeInspector({
         const error = isRecord(envelope.error) ? asString(envelope.error.message) : undefined;
         throw new Error(error ?? `retry failed (${response.status})`);
       }
+      setRetryRequestedAt(retryLifecycleKey);
       onResult("ok", `Retry requested for ${nodeId} — the run is resuming.`);
-    } catch (error) {
-      onResult("err", `Retry failed: ${error instanceof Error ? error.message : String(error)}`);
+    } catch (cause) {
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      setRetryError(error);
+      onResult("err", `Retry failed: ${error.message}`);
     } finally {
       setRetryBusy(false);
     }
@@ -4123,7 +4656,7 @@ function NodeInspector({
           <Button
             variant={retryArmed ? "destructive" : "outline"}
             data-testid="monitor-retry-task"
-            disabled={!retryEnabled || retryBusy}
+            disabled={!retryEnabled || retryBusy || retryRequested}
             title={
               retryArmed
                 ? "Click again to confirm — this resets the task and everything after it"
@@ -4133,7 +4666,13 @@ function NodeInspector({
             }
             onClick={() => void retryTask()}
           >
-            {retryBusy ? "Retrying…" : retryArmed ? "Confirm retry?" : "Retry task"}
+            {retryBusy
+              ? "Retrying…"
+              : retryRequested
+                ? "Retry requested…"
+                : retryArmed
+                  ? "Confirm retry?"
+                  : "Retry task"}
           </Button>
         ) : null}
         <HijackCandidateButton
@@ -4273,6 +4812,29 @@ function NodeInspector({
           </div>
         ) : null}
       </InspectorSection>
+      {!isContainer ? (
+        <InspectorSection
+          title={`Attempts${attemptHistory.attempts?.length ? ` (${attemptHistory.attempts.length})` : ""}`}
+          testId="monitor-node-attempts"
+        >
+          <NodeAttemptHistoryState
+            attempts={attemptHistory.attempts}
+            loading={attemptHistory.loading}
+            error={attemptHistory.error}
+            iteration={node.iteration ?? 0}
+            nodeStatus={node.status}
+            currentAttempt={nodeAttempt}
+            maxAttempts={nodeMaxAttempts}
+            nodeFailed={nodeFailed}
+            retryAvailable={retryEnabled}
+            retryBusy={retryBusy}
+            retryArmed={retryArmed}
+            retryRequested={retryRequested}
+            retryError={retryError}
+            onRetryLoad={attemptHistory.refetch}
+          />
+        </InspectorSection>
+      ) : null}
       {promptText ? (
         <InspectorSection title="Prompt" testId="monitor-node-prompt">
           <pre className="mon-output mon-prompt">{promptText}</pre>
@@ -5247,7 +5809,10 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-progress-track { flex: 1; max-width: 320px; }
 
 .mon-tree { overflow-x: auto; }
+.mon-tree-item { min-width: max-content; }
 .mon-tree-row { display: flex; align-items: center; border-radius: var(--r-1); }
+.mon-tree:focus-visible .mon-tree-item[data-focused='true'] > .mon-tree-row,
+.mon-tree:focus-visible .mon-tree-item[data-focused='true'] > .mon-xml-row { box-shadow: inset 0 0 0 2px var(--ring-border); }
 .mon-tree-chevron { flex: none; color: var(--muted); }
 .mon-tree-main { justify-content: flex-start; gap: var(--sp-2); flex: 1; min-width: 0; padding: var(--sp-1) var(--sp-2); }
 .mon-tree-glyph { flex: none; width: 14px; text-align: center; cursor: help; }
@@ -5292,6 +5857,22 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-usage-attempt { display: flex; align-items: baseline; gap: var(--sp-2); padding: var(--sp-1) 0; border-bottom: 1px solid var(--border); font-size: var(--fs-1); }
 .mon-usage-attempt:last-child { border-bottom: 0; }
 .mon-usage-attempt-model { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Node inspector: persisted attempt lifecycle, retry budget, actor, and error. */
+.mon-attempt-summary { display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-2); background: var(--panel); }
+.mon-attempt-headline { font-weight: 650; line-height: var(--lh-tight); }
+.mon-attempt-detail { margin-top: var(--sp-1); font-size: var(--fs-1); }
+.mon-attempt-list { display: flex; flex-direction: column; margin-top: var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-2); overflow: hidden; }
+.mon-attempt-row { padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); background: var(--panel); }
+.mon-attempt-row:last-child { border-bottom: 0; }
+.mon-attempt-row.is-current { box-shadow: inset 2px 0 0 var(--brand); background: var(--brand-soft); }
+.mon-attempt-row-head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.mon-attempt-agent { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mon-attempt-duration { margin-left: auto; flex: none; }
+.mon-attempt-note { margin-top: var(--sp-1); font-size: var(--fs-1); }
+.mon-attempt-error { margin-top: var(--sp-2); padding: var(--sp-2); border-radius: var(--r-1); background: var(--danger-soft); color: var(--err); font-size: var(--fs-1); overflow-wrap: anywhere; }
+.mon-retry-state { margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--warning-border); border-radius: var(--r-1); background: var(--warning-soft); color: var(--text); font-size: var(--fs-1); }
+.mon-retry-state.tone-failed { border-color: var(--danger-border); background: var(--danger-soft); color: var(--err); }
 
 /* Timeline: one row per (nodeId, iteration), chronological, click to inspect. */
 .mon-timeline { display: flex; flex-direction: column; overflow-y: auto; max-height: 60vh; }

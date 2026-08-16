@@ -11,6 +11,7 @@ import { buildOutputValidationDiagnostics } from "../output-validation-diagnosti
 import { getPlatformLayer } from "../platform-layer.js";
 import { isThenablePayload, makeThenablePayloadError } from "../thenable-payload.js";
 import { stampDurableRetryState } from "./retry-state.js";
+import { stampIdenticalFailureStreak } from "../failure-streak.js";
 /** @typedef {import("@smthrs/db/adapter").SmithersDb} _SmithersDb */
 /**
  * @typedef {{ rootDir: string; }} StaticTaskBridgeToolConfig
@@ -329,6 +330,13 @@ export const executeStaticTaskBridge = async (adapter, runId, desc, eventBus, to
     );
     const failedAtMs = nowMs();
     const failureErrorJson = errorToJson(effectiveError);
+    // Non-progress detection (#1500): a static task that keeps failing the
+    // same way reaches the same `stalled` verdict as an agent or compute task.
+    const {
+      signature: failureSignature,
+      streak: identicalFailureStreak,
+      stalled: stalledVerdict,
+    } = stampIdenticalFailureStreak(failureErrorJson, attempts, desc);
     stampDurableRetryState({
       attemptMeta,
       attempts,
@@ -358,7 +366,7 @@ export const executeStaticTaskBridge = async (adapter, runId, desc, eventBus, to
           runId,
           nodeId: desc.nodeId,
           iteration: desc.iteration,
-          state: "failed",
+          state: stalledVerdict ? "stalled" : "failed",
           lastAttempt: attemptNo,
           updatedAtMs: failedAtMs,
           outputTable: desc.outputTableName,
@@ -386,9 +394,24 @@ export const executeStaticTaskBridge = async (adapter, runId, desc, eventBus, to
         timestampMs: nowMs(),
       }),
     );
+    if (stalledVerdict) {
+      await Effect.runPromise(
+        eventBus.emitEventWithPersist({
+          type: "NodeStalled",
+          runId,
+          nodeId: desc.nodeId,
+          iteration: desc.iteration,
+          attempt: attemptNo,
+          identicalFailures: identicalFailureStreak,
+          signature: failureSignature,
+          error: failureErrorJson,
+          timestampMs: nowMs(),
+        }),
+      );
+    }
     const updatedAttempts = await Effect.runPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
     const failedAttempts = updatedAttempts.filter((attempt) => attempt.state === "failed");
-    if (attemptMeta.failureRetryable !== false && failedAttempts.length <= desc.retries) {
+    if (!stalledVerdict && attemptMeta.failureRetryable !== false && failedAttempts.length <= desc.retries) {
       await Effect.runPromise(
         eventBus.emitEventWithPersist({
           type: "NodeRetrying",

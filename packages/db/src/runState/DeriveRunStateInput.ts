@@ -16,10 +16,10 @@ export type DeriveRunStateInput = {
   /** Grace window (ms) past a timer's wake time before it is flagged overdue. */
   timerOverdueGraceMs?: number;
   /**
-   * Liveness probe for the run's recorded owner PID (defaults to a local
-   * `process.kill(pid, 0)` probe). A stale run whose owner PID is alive is
-   * reported `"stale"` (busy engine, lagging heartbeat), never `"orphaned"`.
-   * Callers classifying runs owned by another host should inject their own.
+   * Liveness probe for a local recorded owner PID. It defaults to
+   * `process.kill(pid, 0)`. A stale run with a live local owner is reported
+   * `"stale"`. A host-scoped remote owner is classified from its heartbeat
+   * without calling this probe.
    */
   isOwnerPidAlive?: (pid: number) => boolean;
 };

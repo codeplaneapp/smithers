@@ -15,6 +15,7 @@ export * from "./input.js";
 export * from "./internal-schema.js";
 export * from "./output.js";
 export * from "./openDurableSqliteDatabase.js";
+export * from "./runtime-owner.js";
 export * from "./schema-signature.js";
 export * from "./snapshot.js";
 export * from "./sql-message-storage.js";

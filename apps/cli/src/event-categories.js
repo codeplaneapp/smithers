@@ -46,6 +46,7 @@ const EVENT_CATEGORY_BY_TYPE = {
   TaskHeartbeatTimeout: "node",
   NodeFinished: "node",
   NodeFailed: "node",
+  NodeStalled: "node",
   NodeCancelled: "node",
   NodeSkipped: "node",
   NodeRetrying: "node",

@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { dirname } from "node:path";
 import {
   Approval,
+  Parallel,
   Workflow,
   Task,
   Sequence,
@@ -127,6 +128,72 @@ describe("approval extended", () => {
     });
     expect(r3.status).toBe("finished");
     cleanup();
+  });
+  test("resume consumes a durable approval before a newly waiting capped lane", async () => {
+    const { smithers, outputs, tables, db, dbPath, cleanup } = createTestSmithers(schemas);
+    const workflow = smithers(() => (
+      <Workflow name="parked-approval-ordering">
+        <Parallel subtreeConcurrency={1}>
+          <Task id="new-gate" output={outputs.b} needsApproval>
+            {{ v: 2 }}
+          </Task>
+          <Task id="approved-gate" output={outputs.a} needsApproval>
+            {{ v: 1 }}
+          </Task>
+        </Parallel>
+      </Workflow>
+    ));
+    try {
+      const first = await runInTestRoot(workflow, dbPath, { input: {} });
+      expect(first.status).toBe("waiting-approval");
+      const adapter = new SmithersDb(db);
+      expect((await adapter.getApproval(first.runId, "new-gate", 0))?.status).toBe("requested");
+
+      const requestedAtMs = Date.now();
+      await Effect.runPromise(
+        adapter.insertNode({
+          runId: first.runId,
+          nodeId: "approved-gate",
+          iteration: 0,
+          state: "waiting-approval",
+          lastAttempt: null,
+          updatedAtMs: requestedAtMs,
+          outputTable: "",
+          label: "approved-gate",
+        }),
+      );
+      await Effect.runPromise(
+        adapter.insertOrUpdateApproval({
+          runId: first.runId,
+          nodeId: "approved-gate",
+          iteration: 0,
+          status: "requested",
+          requestedAtMs,
+          decidedAtMs: null,
+          note: null,
+          decidedBy: null,
+          requestJson: JSON.stringify({ mode: "gate", waitAsync: false }),
+          decisionJson: null,
+          autoApproved: false,
+        }),
+      );
+      await Effect.runPromise(approveNode(adapter, first.runId, "approved-gate", 0, "ok", "tester"));
+
+      const resumed = await runInTestRoot(workflow, dbPath, {
+        input: {},
+        runId: first.runId,
+        resume: true,
+      });
+
+      expect(resumed.status).toBe("waiting-approval");
+      expect((await adapter.getNode(first.runId, "approved-gate", 0))?.state).toBe("finished");
+      expect(await db.select().from(tables.a)).toEqual([
+        expect.objectContaining({ runId: first.runId, nodeId: "approved-gate", iteration: 0, v: 1 }),
+      ]);
+      expect((await adapter.getApproval(first.runId, "new-gate", 0))?.status).toBe("requested");
+    } finally {
+      cleanup();
+    }
   });
   test("approval persists the approver and note", async () => {
     const { smithers, outputs, db, dbPath, cleanup } = createTestSmithers(schemas);

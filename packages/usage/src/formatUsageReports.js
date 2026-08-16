@@ -37,23 +37,32 @@ export function formatUsageReports(reports, nowMs = Date.now()) {
   if (reports.length === 0) {
     return "No accounts registered. Add one with `smithers agents add`.";
   }
-  const header = ["ACCOUNT", "PROVIDER", "PLAN", "WINDOW", "USED", "RESETS IN"];
+  const header = ["ACCOUNT", "PROVIDER", "SUBSCRIPTION", "PLAN", "WINDOW", "USED", "RESETS IN"];
   /** @type {string[][]} */
   const rows = [header];
   for (const r of reports) {
     const plan = r.planType ?? (r.authMode === "api-key" ? "—" : "");
+    const subscription = `${r.signedInAs ?? ""}${r.duplicateOf?.length ? ` (same as ${r.duplicateOf.join(", ")})` : ""}`;
     if (r.windows.length === 0) {
       const note = r.error ?? (r.source === "none" ? "not supported" : "");
-      rows.push([r.accountLabel, r.provider, plan, "—", note, ""]);
+      rows.push([r.accountLabel, r.provider, subscription, plan, "—", note, ""]);
       continue;
     }
     for (const w of r.windows) {
       const used = usedCell(w) + (w.unit === "estimated" ? " (est)" : "");
-      rows.push([r.accountLabel, r.provider, plan, w.label, used, formatRelativeReset(w.resetsAt, nowMs)]);
+      rows.push([
+        r.accountLabel,
+        r.provider,
+        subscription,
+        plan,
+        w.label,
+        used,
+        formatRelativeReset(w.resetsAt, nowMs),
+      ]);
     }
     // A probe can fail (e.g. HTTP 429) and still return windows; surface the reason anyway.
     if (r.error !== undefined) {
-      rows.push([r.accountLabel, r.provider, plan, "—", r.error, ""]);
+      rows.push([r.accountLabel, r.provider, subscription, plan, "—", r.error, ""]);
     }
   }
   const widths = header.map((_, col) => Math.max(...rows.map((row) => row[col].length)));

@@ -193,4 +193,25 @@ describe("whatHappenedRoute cache", () => {
     expect(calls).toBe(2);
     expect(cache.size).toBe(0);
   });
+
+  test("caches a stalled node as a terminal target", async () => {
+    const cache = new Map();
+    let calls = 0;
+    const adapter = makeAdapter({
+      nodes: [{ runId: "run-1", nodeId: "task", iteration: 0, state: "stalled", lastAttempt: 3, updatedAtMs: NOW }],
+    });
+    const params = () =>
+      makeParams({
+        adapter,
+        cache,
+        nodeId: "task",
+        summarize: async () => {
+          calls += 1;
+          return { summary: "The node repeated the same failure.", agentId: "luna" };
+        },
+      });
+    expect((await whatHappenedRoute(params())).cached).toBe(false);
+    expect((await whatHappenedRoute(params())).cached).toBe(true);
+    expect(calls).toBe(1);
+  });
 });
