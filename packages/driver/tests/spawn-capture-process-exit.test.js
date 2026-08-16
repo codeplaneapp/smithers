@@ -57,8 +57,17 @@ describe("spawnCaptureEffect process-exit notifications", () => {
 
     const exited = events.find((event) => event.phase === "exited");
     expect(exited).toBeDefined();
-    expect(exited.signal).toBe("SIGKILL");
-    expect(exited.exitCode).toBeNull();
+    if (process.platform === "win32") {
+      // Windows has no POSIX signals: libuv turns `process.kill(pid, "SIGKILL")`
+      // into TerminateProcess, which node reports as a plain non-zero exit with
+      // a null signal. The property under test — that the death is reported at
+      // all, ahead of the capture settling — is the same either way.
+      expect(exited.signal).toBeNull();
+      expect(exited.exitCode).not.toBeNull();
+    } else {
+      expect(exited.signal).toBe("SIGKILL");
+      expect(exited.exitCode).toBeNull();
+    }
 
     // The worker is provably dead while the capture is still outstanding: the
     // effect only settles once the pipe holder finally goes away, seconds
