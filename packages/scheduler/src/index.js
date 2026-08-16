@@ -45,7 +45,7 @@ export { SchedulerLive } from "./SchedulerLive.js";
 export { buildPlanTree } from "./buildPlanTree.js";
 export { scheduleTasks } from "./scheduleTasks.js";
 export { WorkflowSession } from "./WorkflowSession.js";
-export { makeWorkflowSession } from "./makeWorkflowSession.js";
+export { isRetryableFailure, isStallableFailure, makeWorkflowSession } from "./makeWorkflowSession.js";
 export { WorkflowSessionLive } from "./WorkflowSessionLive.js";
 export { nowMs } from "./nowMs.js";
 export { retryPolicyToSchedule } from "./retryPolicyToSchedule.js";
@@ -58,3 +58,11 @@ export {
   parseDurableRetryState,
   retryDeadlineMs,
 } from "./durableRetryState.js";
+export {
+  computeErrorSignature,
+  normalizeErrorMessage,
+  readIdenticalFailureStreak,
+  resolveMaxIdenticalFailures,
+  DEFAULT_MAX_IDENTICAL_FAILURES,
+} from "./errorSignature.js";
+export { isTerminalFailureShape } from "./failureClassification.js";

@@ -212,7 +212,8 @@ test("agents add regenerates .smithers/agents.ts when one already exists", () =>
   expect(regenerated).toContain("claudeWork: new SmithersClaudeCodeAgent(");
   // …and any tier pool whose preferred order references the `claude`
   // family (smart, smartTool) gets the account appended.
-  expect(regenerated).toMatch(/smart(Tool)?: \[[^\]]*providers\.claudeWork[^\]]*\]/);
+  expect(regenerated).toMatch(/smart(Tool)?: \[[^\]]*\.\.\.claudeAccountPool[^\]]*\]/);
+  expect(regenerated).toMatch(/planning: \[\s*\.\.\.claudeAccountPool,\s*providers\.claude,/);
 });
 
 test("agents add does NOT overwrite a hand-edited agents.ts (no sentinel)", () => {

@@ -63,6 +63,7 @@ const CHILD_RESET_TARGET_STATES = new Set([
   "bound-stale",
   "in-progress",
   "failed",
+  "stalled",
   "cancelled",
 ]);
 /**

@@ -154,6 +154,7 @@ present, it contains `kind` (`signal`, `rpc`, `cli`, or `engine`) plus optional
 | `TaskHeartbeatTimeout` | `runId`, `nodeId`, `iteration`, `attempt`, `lastHeartbeatAtMs`, `timeoutMs`, `timestampMs` |
 | `NodeFinished` | `runId`, `nodeId`, `iteration`, `attempt`, `timestampMs` |
 | `NodeFailed` | `runId`, `nodeId`, `iteration`, `attempt`, `error`, `timestampMs` |
+| `NodeStalled` | `runId`, `nodeId`, `iteration`, `attempt`, `identicalFailures`, `signature`, `error`, `timestampMs` |
 | `NodeCancelled` | `runId`, `nodeId`, `iteration`, `attempt?`, `reason?`, `timestampMs` |
 | `NodeSkipped` | `runId`, `nodeId`, `iteration`, `timestampMs` |
 | `NodeRetrying` | `runId`, `nodeId`, `iteration`, `attempt`, `timestampMs` |

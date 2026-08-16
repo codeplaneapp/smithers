@@ -1,4 +1,4 @@
-import { createDurableRetryState } from "@smthrs/scheduler";
+import { createDurableRetryState, isRetryableFailure } from "@smthrs/scheduler";
 
 export const RETRY_STATE_META_KEY = "retryState";
 
@@ -63,7 +63,14 @@ export function stampDurableRetryState(input) {
     input.attemptMeta.failureRetryable === true ||
     (input.attemptMeta.failureRetryable !== false &&
       code !== "AGENT_CONFIG_INVALID" &&
-      !(kind !== "agent" && code === "INVALID_OUTPUT"));
+      !(kind !== "agent" && code === "INVALID_OUTPUT") &&
+      // Terminal failure shapes (#1500: ENOENT preconditions, hard size caps)
+      // and the author's retryPolicy.retryable gate must not carry a retry
+      // deadline into a resume. The scheduler will not retry them either.
+      isRetryableFailure(
+        { agent: kind === "agent" ? true : undefined, retryPolicy: input.descriptor.retryPolicy },
+        input.error,
+      ));
   if (!retryable || (input.descriptor.retries !== Infinity && failureCount > input.descriptor.retries)) {
     return null;
   }

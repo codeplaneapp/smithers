@@ -99,6 +99,9 @@ import {
   metricValue,
   middleTruncate,
   nextCron,
+  normalizeStatus,
+  nodeAttemptHistoryRowsOf,
+  nodeAttemptHistoryView,
   nodeErrorOf,
   nodeStateRowsOf,
   nodeSummaryEligible,
@@ -138,6 +141,7 @@ import {
   waitTone,
   workflowOptions,
   type CronRow,
+  type NodeAttemptHistoryRow,
   type NodeStateRow,
   type PromScrape,
   type RunRow,
@@ -3905,6 +3909,253 @@ function InspectorSection({
   );
 }
 
+type NodeAttemptHistoryQuery = {
+  key: string;
+  attempts: NodeAttemptHistoryRow[] | null;
+  loading: boolean;
+  error: Error | null;
+};
+
+/**
+ * Read the existing attempts.list RPC for exactly one node iteration. Raw
+ * attempt metadata can contain full conversations, so it is reduced to the
+ * small Monitor model before entering React state.
+ */
+function useNodeAttemptHistory({
+  runId,
+  nodeId,
+  iteration,
+  live,
+  refreshKey,
+  enabled = true,
+}: {
+  runId: string;
+  nodeId: string;
+  iteration: number;
+  live: boolean;
+  refreshKey: string;
+  enabled?: boolean;
+}): Omit<NodeAttemptHistoryQuery, "key"> & { refetch: () => void } {
+  const key = `${runId}\u0000${nodeId}\u0000${iteration}`;
+  const [retryVersion, setRetryVersion] = useState(0);
+  const [query, setQuery] = useState<NodeAttemptHistoryQuery>({ key, attempts: null, loading: true, error: null });
+  useEffect(() => {
+    if (!enabled) {
+      setQuery({ key, attempts: [], loading: false, error: null });
+      return;
+    }
+    let cancelled = false;
+    let inFlight = false;
+    const load = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      setQuery((previous) => ({
+        key,
+        attempts: previous.key === key ? previous.attempts : null,
+        loading: true,
+        error: null,
+      }));
+      try {
+        const response = await fetch("/v1/rpc/attempts.list", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ runId, nodeId, iteration }),
+        });
+        const body: unknown = await response.json().catch(() => null);
+        const envelope = isRecord(body) ? body : {};
+        if (!response.ok || envelope.ok === false) {
+          const message = isRecord(envelope.error) ? asString(envelope.error.message) : undefined;
+          throw new Error(message ?? `attempt history failed (${response.status})`);
+        }
+        const attempts = nodeAttemptHistoryRowsOf(body);
+        if (!cancelled) setQuery({ key, attempts, loading: false, error: null });
+      } catch (cause) {
+        if (!cancelled) {
+          setQuery((previous) => ({
+            key,
+            attempts: previous.key === key ? previous.attempts : null,
+            loading: false,
+            error: cause instanceof Error ? cause : new Error(String(cause)),
+          }));
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+    void load();
+    const timer = live ? setInterval(() => void load(), 2_500) : null;
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [key, runId, nodeId, iteration, live, refreshKey, retryVersion, enabled]);
+  const scoped = query.key === key ? query : { key, attempts: null, loading: true, error: null };
+  return {
+    attempts: scoped.attempts,
+    loading: scoped.loading,
+    error: scoped.error,
+    refetch: () => setRetryVersion((version) => version + 1),
+  };
+}
+
+function attemptDuration(attempt: NodeAttemptHistoryRow): string | null {
+  if (attempt.startedAtMs === undefined) return null;
+  const end = attempt.finishedAtMs ?? Date.now();
+  return formatDurationMs(Math.max(0, end - attempt.startedAtMs));
+}
+
+export function NodeAttemptHistoryState({
+  attempts,
+  loading,
+  error,
+  iteration,
+  nodeStatus,
+  currentAttempt,
+  maxAttempts,
+  nodeFailed,
+  retryAvailable,
+  retryBusy,
+  retryArmed,
+  retryRequested,
+  retryError,
+  onRetryLoad,
+}: {
+  attempts: readonly NodeAttemptHistoryRow[] | null;
+  loading: boolean;
+  error?: Error | null;
+  iteration: number;
+  nodeStatus?: string;
+  currentAttempt?: number;
+  maxAttempts?: number;
+  nodeFailed: boolean;
+  retryAvailable: boolean;
+  retryBusy: boolean;
+  retryArmed: boolean;
+  retryRequested: boolean;
+  retryError?: Error | null;
+  onRetryLoad: () => void | Promise<void>;
+}) {
+  const errorAlert = error ? (
+    <Alert variant="destructive" data-testid="monitor-attempt-history-error">
+      <AlertTitle>Couldn&apos;t load attempt history.</AlertTitle>
+      <AlertDescription>{error.message || "The attempt request failed."}</AlertDescription>
+      <Button variant="outline" data-testid="monitor-attempt-history-retry" onClick={() => void onRetryLoad()}>
+        Retry history
+      </Button>
+    </Alert>
+  ) : null;
+  let history: ReactNode;
+  if (attempts === null) {
+    history = errorAlert ?? (
+      <div className="mon-empty mon-dim" data-testid="monitor-attempt-history-loading" role="status">
+        <span className="mon-live-pending">
+          <span className="mon-dot mon-dot-pulse" aria-hidden /> loading attempt history…
+        </span>
+      </div>
+    );
+  } else if (attempts.length === 0) {
+    history = (
+      <>
+        {errorAlert}
+        <div className="mon-empty mon-dim" data-testid="monitor-attempt-history-empty">
+          {loading ? "Refreshing attempt history…" : "No attempts recorded for this node iteration yet."}
+        </div>
+      </>
+    );
+  } else {
+    const view = nodeAttemptHistoryView({ attempts, nodeStatus, currentAttempt, maxAttempts });
+    const summaryStatus =
+      view.state === "recovered" || view.state === "succeeded"
+        ? "finished"
+        : view.state === "retrying" || view.state === "first-attempt"
+          ? "in-progress"
+          : view.state === "failed" || view.state === "exhausted"
+            ? "failed"
+            : nodeStatus;
+    history = (
+      <>
+        {errorAlert}
+        <div className="mon-attempt-summary" data-testid="monitor-attempt-summary" data-retry-state={view.state}>
+          <StatusTag status={summaryStatus} label={view.state.replace("-", " ")} />
+          <div>
+            <div className="mon-attempt-headline">{view.headline}</div>
+            <div className="mon-dim mon-attempt-detail">
+              Iteration {iteration} · {view.detail}
+            </div>
+          </div>
+        </div>
+        <div className="mon-attempt-list" data-testid="monitor-attempt-history" role="list">
+          {attempts.map((attempt) => {
+            const duration = attemptDuration(attempt);
+            const current = attempt.attempt === view.currentAttempt;
+            return (
+              <div
+                className={`mon-attempt-row${current ? " is-current" : ""}`}
+                data-testid="monitor-attempt-row"
+                data-attempt={attempt.attempt}
+                data-current={current ? "true" : undefined}
+                key={`${attempt.iteration}:${attempt.attempt}`}
+                role="listitem"
+              >
+                <div className="mon-attempt-row-head">
+                  <strong className="mon-mono">Attempt {attempt.attempt}</strong>
+                  <StatusTag status={attempt.state} pulse={false} />
+                  <span className="mon-dim mon-attempt-agent">acting: {attempt.agent ?? "not recorded"}</span>
+                  {duration ? <span className="mon-dim mon-mono mon-attempt-duration">{duration}</span> : null}
+                </div>
+                {attempt.retryAtMs !== undefined ? (
+                  <div className="mon-attempt-note" data-testid="monitor-attempt-retry-scheduled">
+                    Automatic retry scheduled · next attempt {attempt.attempt + 1} ·{" "}
+                    {new Date(attempt.retryAtMs).toLocaleTimeString()}
+                  </div>
+                ) : null}
+                {normalizeStatus(attempt.state) === "failed" && !attempt.consumesRetryBudget ? (
+                  <div className="mon-dim mon-attempt-note">Retry budget preserved for this failure.</div>
+                ) : null}
+                {attempt.error ? (
+                  <div className="mon-attempt-error" data-testid="monitor-attempt-error">
+                    {[attempt.error.name, attempt.error.code].filter(Boolean).join(" · ")}
+                    {attempt.error.name || attempt.error.code ? " — " : ""}
+                    {attempt.error.message}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </>
+    );
+  }
+  let retryMessage: string | null = null;
+  if (nodeFailed) {
+    retryMessage = retryError
+      ? `Retry request failed: ${retryError.message}`
+      : retryBusy
+        ? "Retry request in progress…"
+        : retryRequested
+          ? "Retry requested — waiting for the next attempt to start."
+          : retryArmed
+            ? "Confirmation required — click Confirm retry? to reset this task and its dependents."
+            : retryAvailable
+              ? "Manual retry available — this resets the task and everything that ran after it."
+              : "Manual retry unavailable while the run is active; pause or cancel the run first.";
+  }
+  return (
+    <>
+      {history}
+      {retryMessage ? (
+        <div
+          className={`mon-retry-state${retryError ? " tone-failed" : ""}`}
+          data-testid="monitor-retry-state"
+          role={retryError ? "alert" : "status"}
+        >
+          {retryMessage}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 /**
  * The AI "what happened" recap at the top of the inspector. The gateway's
  * whatHappened RPC narrates with the host-configured cheap agent and falls
@@ -4026,6 +4277,14 @@ function NodeInspector({
   // those panels there is pure noise. Leaf kinds keep the full inspector.
   const kind = String(node.kind ?? "").toLowerCase();
   const isContainer = !["task", "agent", "compute", "static"].includes(kind) && (node.children?.length ?? 0) > 0;
+  const attemptHistory = useNodeAttemptHistory({
+    runId,
+    nodeId,
+    iteration: node.iteration ?? 0,
+    live: isLive,
+    refreshKey: outputRefreshKey,
+    enabled: !isContainer,
+  });
   // Retry affordance: failed leaf tasks get a "Retry task" button. The RPC
   // resets the node (and everything that ran after it) with the same library
   // machinery as `smithers retry-task`, then resumes the run — so it is only
@@ -4033,10 +4292,23 @@ function NodeInspector({
   const nodeFailed = toneForStatus(node.status) === "failed" && !isContainer;
   const retryEnabled = canRetryTask(node.status, runStatus);
   const [retryBusy, setRetryBusy] = useState(false);
+  const [retryError, setRetryError] = useState<Error | null>(null);
+  const retryLifecycleKey = `${runId}\u0000${nodeId}\u0000${node.iteration ?? 0}\u0000${nodeAttempt ?? 0}\u0000${String(node.status ?? "")}`;
+  const [retryRequestedAt, setRetryRequestedAt] = useState<string | null>(null);
+  const retryRequested = retryRequestedAt === retryLifecycleKey;
   const retryArm = useArmConfirm();
-  const retryArmed = retryArm.isArmed("retry");
+  const retryKey = `retry:${runId}:${nodeId}:${node.iteration ?? 0}`;
+  const retryArmed = retryArm.isArmed(retryKey);
+  useEffect(() => {
+    setRetryError(null);
+    setRetryRequestedAt(null);
+  }, [retryKey]);
   const retryTask = async () => {
-    if (!retryArm.armOrConfirm("retry")) return;
+    if (!retryArm.armOrConfirm(retryKey)) {
+      setRetryError(null);
+      return;
+    }
+    setRetryError(null);
     setRetryBusy(true);
     try {
       const response = await fetch(
@@ -4053,9 +4325,12 @@ function NodeInspector({
         const error = isRecord(envelope.error) ? asString(envelope.error.message) : undefined;
         throw new Error(error ?? `retry failed (${response.status})`);
       }
+      setRetryRequestedAt(retryLifecycleKey);
       onResult("ok", `Retry requested for ${nodeId} — the run is resuming.`);
-    } catch (error) {
-      onResult("err", `Retry failed: ${error instanceof Error ? error.message : String(error)}`);
+    } catch (cause) {
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      setRetryError(error);
+      onResult("err", `Retry failed: ${error.message}`);
     } finally {
       setRetryBusy(false);
     }
@@ -4076,7 +4351,7 @@ function NodeInspector({
           <Button
             variant={retryArmed ? "destructive" : "outline"}
             data-testid="monitor-retry-task"
-            disabled={!retryEnabled || retryBusy}
+            disabled={!retryEnabled || retryBusy || retryRequested}
             title={
               retryArmed
                 ? "Click again to confirm — this resets the task and everything after it"
@@ -4086,7 +4361,13 @@ function NodeInspector({
             }
             onClick={() => void retryTask()}
           >
-            {retryBusy ? "Retrying…" : retryArmed ? "Confirm retry?" : "Retry task"}
+            {retryBusy
+              ? "Retrying…"
+              : retryRequested
+                ? "Retry requested…"
+                : retryArmed
+                  ? "Confirm retry?"
+                  : "Retry task"}
           </Button>
         ) : null}
         <HijackCandidateButton
@@ -4226,6 +4507,29 @@ function NodeInspector({
           </div>
         ) : null}
       </InspectorSection>
+      {!isContainer ? (
+        <InspectorSection
+          title={`Attempts${attemptHistory.attempts?.length ? ` (${attemptHistory.attempts.length})` : ""}`}
+          testId="monitor-node-attempts"
+        >
+          <NodeAttemptHistoryState
+            attempts={attemptHistory.attempts}
+            loading={attemptHistory.loading}
+            error={attemptHistory.error}
+            iteration={node.iteration ?? 0}
+            nodeStatus={node.status}
+            currentAttempt={nodeAttempt}
+            maxAttempts={nodeMaxAttempts}
+            nodeFailed={nodeFailed}
+            retryAvailable={retryEnabled}
+            retryBusy={retryBusy}
+            retryArmed={retryArmed}
+            retryRequested={retryRequested}
+            retryError={retryError}
+            onRetryLoad={attemptHistory.refetch}
+          />
+        </InspectorSection>
+      ) : null}
       {promptText ? (
         <InspectorSection title="Prompt" testId="monitor-node-prompt">
           <pre className="mon-output mon-prompt">{promptText}</pre>
@@ -5223,6 +5527,22 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-usage-attempt { display: flex; align-items: baseline; gap: var(--sp-2); padding: var(--sp-1) 0; border-bottom: 1px solid var(--border); font-size: var(--fs-1); }
 .mon-usage-attempt:last-child { border-bottom: 0; }
 .mon-usage-attempt-model { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Node inspector: persisted attempt lifecycle, retry budget, actor, and error. */
+.mon-attempt-summary { display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-2); background: var(--panel); }
+.mon-attempt-headline { font-weight: 650; line-height: var(--lh-tight); }
+.mon-attempt-detail { margin-top: var(--sp-1); font-size: var(--fs-1); }
+.mon-attempt-list { display: flex; flex-direction: column; margin-top: var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-2); overflow: hidden; }
+.mon-attempt-row { padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); background: var(--panel); }
+.mon-attempt-row:last-child { border-bottom: 0; }
+.mon-attempt-row.is-current { box-shadow: inset 2px 0 0 var(--brand); background: var(--brand-soft); }
+.mon-attempt-row-head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.mon-attempt-agent { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mon-attempt-duration { margin-left: auto; flex: none; }
+.mon-attempt-note { margin-top: var(--sp-1); font-size: var(--fs-1); }
+.mon-attempt-error { margin-top: var(--sp-2); padding: var(--sp-2); border-radius: var(--r-1); background: var(--danger-soft); color: var(--err); font-size: var(--fs-1); overflow-wrap: anywhere; }
+.mon-retry-state { margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--warning-border); border-radius: var(--r-1); background: var(--warning-soft); color: var(--text); font-size: var(--fs-1); }
+.mon-retry-state.tone-failed { border-color: var(--danger-border); background: var(--danger-soft); color: var(--err); }
 
 /* Timeline: one row per (nodeId, iteration), chronological, click to inspect. */
 .mon-timeline { display: flex; flex-direction: column; overflow-y: auto; max-height: 60vh; }

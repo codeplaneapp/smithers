@@ -180,6 +180,186 @@ export function nodeErrorOf(
   };
 }
 
+export type NodeAttemptHistoryRow = {
+  iteration: number;
+  attempt: number;
+  state: string;
+  startedAtMs?: number;
+  finishedAtMs?: number;
+  agent?: string;
+  error?: { name?: string; code?: string; message: string };
+  /** Quota failures are real attempts but deliberately do not spend retry budget. */
+  consumesRetryBudget: boolean;
+  retryable?: boolean;
+  /** Persisted scheduler deadline; present only when this failure will retry automatically. */
+  retryAtMs?: number;
+};
+
+function jsonRecord(value: unknown): Record<string, unknown> | null {
+  if (isRecord(value)) return value;
+  if (typeof value !== "string" || value.length === 0) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function attemptErrorOf(value: unknown): NodeAttemptHistoryRow["error"] {
+  const parsed = jsonRecord(value);
+  if (!parsed) {
+    const raw = asString(value)?.trim();
+    return raw ? { message: raw.slice(0, 4_000) } : undefined;
+  }
+  const message = asString(parsed.message) ?? asString(parsed.summary);
+  if (!message) return undefined;
+  const name = asString(parsed.name);
+  const code = asString(parsed.code);
+  return {
+    ...(name ? { name } : {}),
+    ...(code ? { code } : {}),
+    message: message.slice(0, 4_000),
+  };
+}
+
+/**
+ * Parse the legacy `attempts.list` RPC payload into the deliberately small
+ * Monitor view. Attempt metadata may contain full conversations, so callers
+ * retain only agent/retry facts and immediately discard the raw envelope.
+ */
+export function nodeAttemptHistoryRowsOf(value: unknown): NodeAttemptHistoryRow[] {
+  const envelope = isRecord(value) ? (value.payload ?? value.data ?? value) : value;
+  const rows = Array.isArray(envelope) ? envelope : [];
+  const out: NodeAttemptHistoryRow[] = [];
+  for (const raw of rows) {
+    if (!isRecord(raw)) continue;
+    const attempt = asNumber(raw.attempt);
+    if (attempt === undefined || attempt < 0 || !Number.isInteger(attempt)) continue;
+    const state = asString(raw.state) ?? "unknown";
+    const iteration = asNumber(raw.iteration) ?? 0;
+    const meta = jsonRecord(pick(raw, "metaJson", "meta_json"));
+    const errorValue = pick(raw, "errorJson", "error_json");
+    const errorRecord = jsonRecord(errorValue);
+    const error = attemptErrorOf(errorValue);
+    const agentParts = [asString(meta?.agentId), asString(meta?.agentEngine), asString(meta?.agentModel)].filter(
+      (part, index, parts): part is string => Boolean(part) && parts.indexOf(part) === index,
+    );
+    const retryState = isRecord(meta?.retryState) ? meta.retryState : null;
+    const retryAtMs = asNumber(retryState?.retryAtMs);
+    const retryable = typeof meta?.failureRetryable === "boolean" ? meta.failureRetryable : undefined;
+    const errorDetails = isRecord(errorRecord?.details) ? errorRecord.details : null;
+    const quota =
+      errorRecord?.code === "AGENT_QUOTA_EXCEEDED" ||
+      errorDetails?.failureQuota === true ||
+      meta?.failureQuota === true;
+    const startedAtMs = asNumber(pick(raw, "startedAtMs", "started_at_ms"));
+    const finishedAtMs = asNumber(pick(raw, "finishedAtMs", "finished_at_ms"));
+    out.push({
+      iteration,
+      attempt,
+      state,
+      ...(startedAtMs !== undefined ? { startedAtMs } : {}),
+      ...(finishedAtMs !== undefined ? { finishedAtMs } : {}),
+      ...(agentParts.length > 0 ? { agent: agentParts.join(" · ") } : {}),
+      ...(error ? { error } : {}),
+      consumesRetryBudget: normalizeStatus(state) === "failed" && !quota,
+      ...(retryable !== undefined ? { retryable } : {}),
+      ...(retryAtMs !== undefined ? { retryAtMs } : {}),
+    });
+  }
+  return out.sort((left, right) => left.attempt - right.attempt);
+}
+
+export type NodeAttemptHistoryView = {
+  state: "first-attempt" | "retrying" | "failed" | "exhausted" | "succeeded" | "recovered" | "idle";
+  headline: string;
+  detail: string;
+  currentAttempt?: number;
+  maxAttempts?: number;
+  retriesUsed: number;
+  retriesAllowed?: number;
+};
+
+/** Turn persisted attempts plus the live tree row into the inspector's retry verdict. */
+export function nodeAttemptHistoryView(input: {
+  attempts: readonly NodeAttemptHistoryRow[];
+  nodeStatus?: string;
+  currentAttempt?: number;
+  maxAttempts?: number;
+}): NodeAttemptHistoryView {
+  const attempts = [...input.attempts].sort((left, right) => left.attempt - right.attempt);
+  const latest = attempts.at(-1);
+  const currentAttempt = input.currentAttempt ?? latest?.attempt;
+  const maxAttempts =
+    typeof input.maxAttempts === "number" && Number.isFinite(input.maxAttempts) && input.maxAttempts > 0
+      ? input.maxAttempts
+      : undefined;
+  const retryFailures = attempts.filter((attempt) => attempt.consumesRetryBudget).length;
+  const retriesAllowed = maxAttempts === undefined ? undefined : Math.max(0, maxAttempts - 1);
+  const retriesUsed = retriesAllowed === undefined ? retryFailures : Math.min(retryFailures, retriesAllowed);
+  const attemptLabel =
+    currentAttempt === undefined
+      ? "No attempt recorded"
+      : maxAttempts === undefined
+        ? `Attempt ${currentAttempt}`
+        : `Attempt ${currentAttempt} of ${maxAttempts}`;
+  const budgetLabel =
+    retriesAllowed === undefined
+      ? `retry budget unlimited · ${retriesUsed} used`
+      : retriesAllowed === 0
+        ? "no automatic retries"
+        : `retry budget ${retriesUsed} of ${retriesAllowed} used`;
+  const detail = `${attemptLabel} · ${budgetLabel}`;
+  if (!latest) {
+    return {
+      state: "idle",
+      headline: "Waiting for the first attempt",
+      detail,
+      ...(currentAttempt !== undefined ? { currentAttempt } : {}),
+      ...(maxAttempts !== undefined ? { maxAttempts } : {}),
+      retriesUsed,
+      ...(retriesAllowed !== undefined ? { retriesAllowed } : {}),
+    };
+  }
+  const failedBeforeLatest = attempts.some(
+    (attempt) => attempt.attempt < latest.attempt && normalizeStatus(attempt.state) === "failed",
+  );
+  const latestTone = toneForStatus(latest.state);
+  let state: NodeAttemptHistoryView["state"];
+  let headline: string;
+  if (latestTone === "ok") {
+    state = failedBeforeLatest ? "recovered" : "succeeded";
+    headline = failedBeforeLatest ? `Recovered on attempt ${latest.attempt}` : `Succeeded on attempt ${latest.attempt}`;
+  } else if (latest.retryAtMs !== undefined) {
+    state = "retrying";
+    headline = `Retry scheduled as attempt ${latest.attempt + 1}`;
+  } else if (latestTone === "running" || toneForStatus(input.nodeStatus) === "running") {
+    state = latest.attempt > 1 || retryFailures > 0 ? "retrying" : "first-attempt";
+    headline = state === "retrying" ? `Retrying on attempt ${latest.attempt}` : "First attempt in progress";
+  } else if (latestTone === "failed") {
+    const exhausted = maxAttempts !== undefined && retryFailures >= maxAttempts;
+    state = exhausted ? "exhausted" : "failed";
+    headline = exhausted
+      ? `Retry budget exhausted after attempt ${latest.attempt}`
+      : latest.retryable === false
+        ? `Attempt ${latest.attempt} failed and will not retry automatically`
+        : `Attempt ${latest.attempt} failed`;
+  } else {
+    state = "idle";
+    headline = `${labelForStatus(latest.state)} on attempt ${latest.attempt}`;
+  }
+  return {
+    state,
+    headline,
+    detail,
+    ...(currentAttempt !== undefined ? { currentAttempt } : {}),
+    ...(maxAttempts !== undefined ? { maxAttempts } : {}),
+    retriesUsed,
+    ...(retriesAllowed !== undefined ? { retriesAllowed } : {}),
+  };
+}
+
 /**
  * Quota-park details from a run row's `errorJson` — the engine writes
  * `{quotaBlockedCount, resetAtMs?, blocked?: [{nodeId, resetAtMs?, message?}]}`
@@ -468,7 +648,7 @@ export function diagnoseRun(input: {
  * signal — the event log defaults to this filter with an "all" escape hatch.
  */
 const NOTABLE_EVENT_PATTERN =
-  /^(Node(Started|Finished|Failed|Retrying|Skipped|Cancelled|WaitingApproval)|Run[A-Z]|Approval|Human|Signal|Quota)/;
+  /^(Node(Started|Finished|Failed|Stalled|Retrying|Skipped|Cancelled|WaitingApproval)|Run[A-Z]|Approval|Human|Signal|Quota)/;
 
 /**
  * The agent's actual work, on top of the notable set: tool calls, agent

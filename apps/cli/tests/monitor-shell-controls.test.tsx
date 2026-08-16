@@ -40,6 +40,7 @@ const {
   EventLog,
   ExecutionTree,
   monitorCss,
+  NodeAttemptHistoryState,
   NodeOutputState,
   NodeTranscriptState,
   RunProgressCell,
@@ -189,6 +190,24 @@ function nodeTranscriptState(overrides: Partial<Parameters<typeof NodeTranscript
   return <NodeTranscriptState lines={[]} loading={false} live={false} onRetry={() => {}} {...overrides} />;
 }
 
+function nodeAttemptHistoryState(overrides: Partial<Parameters<typeof NodeAttemptHistoryState>[0]> = {}): ReactElement {
+  return (
+    <NodeAttemptHistoryState
+      attempts={[]}
+      loading={false}
+      iteration={0}
+      nodeStatus="failed"
+      nodeFailed={true}
+      retryAvailable={true}
+      retryBusy={false}
+      retryArmed={false}
+      retryRequested={false}
+      onRetryLoad={() => {}}
+      {...overrides}
+    />
+  );
+}
+
 describe("node inspector output states", () => {
   test("renders structured output and keeps it visible when a refresh fails", async () => {
     await render(nodeOutputState({ row: { summary: "done" } }));
@@ -263,6 +282,115 @@ describe("node inspector transcript states", () => {
     );
     expect(byTestId("monitor-live-output").textContent).toContain("agent output");
     expect(byTestId("monitor-transcript-error").textContent).toContain("poll failed");
+  });
+});
+
+describe("node inspector attempt history", () => {
+  const failedAttempt = (attempt: number, retryAtMs?: number) => ({
+    iteration: 0,
+    attempt,
+    state: "failed",
+    consumesRetryBudget: true,
+    agent: attempt === 1 ? "claude · opus" : "codex · gpt-5.4",
+    error: { code: `FAIL_${attempt}`, message: `failure ${attempt}` },
+    ...(retryAtMs !== undefined ? { retryAtMs } : {}),
+  });
+
+  test("shows first failure, scheduled retry, acting agent, error, budget, and iteration", async () => {
+    await render(
+      nodeAttemptHistoryState({
+        attempts: [failedAttempt(1, 2_000)],
+        currentAttempt: 1,
+        maxAttempts: 3,
+      }),
+    );
+    expect(byTestId("monitor-attempt-summary").dataset.retryState).toBe("retrying");
+    expect(byTestId("monitor-attempt-summary").textContent).toContain("Retry scheduled as attempt 2");
+    expect(byTestId("monitor-attempt-summary").textContent).toContain("Iteration 0");
+    expect(byTestId("monitor-attempt-summary").textContent).toContain("retry budget 1 of 2 used");
+    expect(byTestId("monitor-attempt-history").textContent).toContain("claude · opus");
+    expect(byTestId("monitor-attempt-error").textContent).toContain("FAIL_1 — failure 1");
+    expect(byTestId("monitor-attempt-retry-scheduled").textContent).toContain("next attempt 2");
+  });
+
+  test("distinguishes a running later attempt, exhausted retries, and a successful retry", async () => {
+    await render(
+      nodeAttemptHistoryState({
+        attempts: [
+          failedAttempt(1),
+          { iteration: 0, attempt: 2, state: "in-progress", consumesRetryBudget: false, agent: "codex" },
+        ],
+        nodeStatus: "in-progress",
+        currentAttempt: 2,
+        maxAttempts: 3,
+        nodeFailed: false,
+        retryAvailable: false,
+      }),
+    );
+    expect(byTestId("monitor-attempt-summary").dataset.retryState).toBe("retrying");
+    expect(byTestId("monitor-attempt-summary").textContent).toContain("Retrying on attempt 2");
+    expect(document.querySelector('[data-attempt="2"]')?.getAttribute("data-current")).toBe("true");
+
+    await rerender(
+      nodeAttemptHistoryState({
+        attempts: [failedAttempt(1), failedAttempt(2)],
+        currentAttempt: 2,
+        maxAttempts: 2,
+      }),
+    );
+    expect(byTestId("monitor-attempt-summary").dataset.retryState).toBe("exhausted");
+    expect(byTestId("monitor-attempt-summary").textContent).toContain("Retry budget exhausted");
+    expect(byTestId("monitor-retry-state").textContent).toContain("Manual retry available");
+
+    await rerender(
+      nodeAttemptHistoryState({
+        attempts: [
+          failedAttempt(1),
+          { iteration: 0, attempt: 2, state: "finished", consumesRetryBudget: false, agent: "codex" },
+        ],
+        nodeStatus: "finished",
+        currentAttempt: 2,
+        maxAttempts: 3,
+        nodeFailed: false,
+        retryAvailable: false,
+      }),
+    );
+    expect(byTestId("monitor-attempt-summary").dataset.retryState).toBe("recovered");
+    expect(byTestId("monitor-attempt-summary").textContent).toContain("Recovered on attempt 2");
+  });
+
+  test("makes manual retry unavailable, confirmation, busy, requested, and error states explicit", async () => {
+    const attempts = [failedAttempt(1)];
+    await render(nodeAttemptHistoryState({ attempts, maxAttempts: 1, retryAvailable: false }));
+    expect(byTestId("monitor-retry-state").textContent).toContain("unavailable while the run is active");
+
+    await rerender(nodeAttemptHistoryState({ attempts, maxAttempts: 1, retryArmed: true }));
+    expect(byTestId("monitor-retry-state").textContent).toContain("Confirmation required");
+
+    await rerender(nodeAttemptHistoryState({ attempts, maxAttempts: 1, retryBusy: true }));
+    expect(byTestId("monitor-retry-state").textContent).toContain("in progress");
+
+    await rerender(nodeAttemptHistoryState({ attempts, maxAttempts: 1, retryRequested: true }));
+    expect(byTestId("monitor-retry-state").textContent).toContain("waiting for the next attempt");
+
+    await rerender(nodeAttemptHistoryState({ attempts, maxAttempts: 1, retryError: new Error("gateway refused") }));
+    expect(byTestId("monitor-retry-state").getAttribute("role")).toBe("alert");
+    expect(byTestId("monitor-retry-state").textContent).toContain("gateway refused");
+  });
+
+  test("keeps prior rows visible when refresh fails and makes the history query retryable", async () => {
+    let retries = 0;
+    await render(
+      nodeAttemptHistoryState({
+        attempts: [failedAttempt(1)],
+        error: new Error("attempts unavailable"),
+        onRetryLoad: () => retries++,
+      }),
+    );
+    expect(byTestId("monitor-attempt-history").textContent).toContain("Attempt 1");
+    expect(byTestId("monitor-attempt-history-error").textContent).toContain("attempts unavailable");
+    await click(byTestId("monitor-attempt-history-retry"));
+    expect(retries).toBe(1);
   });
 });
 

@@ -30,4 +30,8 @@ export type UsageReport = {
   estimate: boolean;
   /** Human-readable reason when `source` is `none` or a probe failed. */
   error?: string;
+  /** Non-secret signed-in subscription identity added by the CLI. */
+  signedInAs?: string;
+  /** Registered labels that resolve to the same provider subscription. */
+  duplicateOf?: string[];
 };

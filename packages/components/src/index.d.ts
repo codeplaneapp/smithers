@@ -134,8 +134,8 @@ type UIProps$1 = WorkflowViewProps$1;
 type TUIProps$1 = Omit<WorkflowViewProps$1, "path">;
 
 declare const roleSchema: z.ZodEnum<{
-    fable: "fable";
     sol: "sol";
+    fable: "fable";
     terra: "terra";
     luna: "luna";
 }>;
@@ -144,11 +144,11 @@ declare const workKindSchema: z.ZodEnum<{
     synthesize: "synthesize";
     plan: "plan";
     review: "review";
-    preview: "preview";
-    poc: "poc";
-    research: "research";
     refine_goal: "refine_goal";
+    research: "research";
+    poc: "poc";
     execute: "execute";
+    preview: "preview";
 }>;
 type DelegationV2WorkKind = z.infer<typeof workKindSchema>;
 declare const outputContractIdSchema: z.ZodEnum<{
@@ -1020,6 +1020,11 @@ type MemoryProps$2 = {
     children?: React__default.ReactNode;
 };
 
+type MemoryTrellisProps$2 = TrellisProps$2 & {
+    /** Shared bounded memory policy inherited by every generated Trellis task. */
+    memory: Omit<MemoryProps$2, "children">;
+};
+
 /**
  * Queue tasks so that at most `maxConcurrency` run concurrently across the group.
  * Defaults to 1, providing an easy merge queue primitive.
@@ -1402,8 +1407,8 @@ declare const dcPlanSchema: z.ZodObject<{
         id: z.ZodString;
         description: z.ZodString;
         probe: z.ZodNullable<z.ZodEnum<{
-            poc: "poc";
             research: "research";
+            poc: "poc";
         }>>;
         reason: z.ZodString;
     }, z.core.$strip>>;
@@ -1481,8 +1486,8 @@ declare const dcProbeSchema: z.ZodObject<{
     probeId: z.ZodString;
     parentLogicalId: z.ZodString;
     kind: z.ZodEnum<{
-        poc: "poc";
         research: "research";
+        poc: "poc";
     }>;
     question: z.ZodString;
     answer: z.ZodString;
@@ -2642,6 +2647,15 @@ declare function Memory(props: MemoryProps$1): React__default.FunctionComponentE
 type MemoryProps$1 = MemoryProps$2;
 
 /**
+ * Run Trellis with one bounded memory policy inherited by every generated
+ * author, validation, worker, settlement, continuation, and final task.
+ *
+ * @param {MemoryTrellisProps} props
+ */
+declare function MemoryTrellis({ memory, ...trellis }: MemoryTrellisProps$1): React__default.FunctionComponentElement<MemoryProps$2>;
+type MemoryTrellisProps$1 = MemoryTrellisProps$2;
+
+/**
  * SuperSmithers — a workflow wrapper that reads and modifies source code
  * to intervene via hot reload. Takes a markdown strategy doc and an agent
  * that decides what to change.
@@ -3597,8 +3611,8 @@ declare function settleDelegationV2Envelope({ envelope, assignment, identity, ta
     invocationKey: string;
     logicalId: string;
     generation: number;
-    role: "fable" | "sol" | "terra" | "luna";
-    work: "synthesize" | "plan" | "review" | "preview" | "poc" | "research" | "refine_goal" | "execute";
+    role: "sol" | "fable" | "terra" | "luna";
+    work: "synthesize" | "plan" | "review" | "refine_goal" | "research" | "poc" | "execute" | "preview";
     outputContract: "plan" | "goal_contract" | "work_product" | "evidence_collection" | "issue_scan" | "classification" | "condition" | "evaluation" | "artifact_collection";
     assignmentDigest: string;
     acceptanceCriterionIds: string[];
@@ -3616,13 +3630,13 @@ declare function settleDelegationV2Envelope({ envelope, assignment, identity, ta
         }[];
         evidence: {
             id: string;
-            kind: "source" | "artifact" | "observation" | "test" | "analysis" | "user_input";
+            kind: "source" | "observation" | "test" | "artifact" | "analysis" | "user_input";
             summary: string;
             locator?: string | undefined;
         }[];
         artifacts: {
             id: string;
-            kind: "file" | "preview" | "url" | "report" | "diff" | "command_output" | "other";
+            kind: "file" | "preview" | "diff" | "command_output" | "url" | "report" | "other";
             locator: string;
             summary: string;
         }[];
@@ -3642,7 +3656,7 @@ declare function settleDelegationV2Envelope({ envelope, assignment, identity, ta
         requiredNextAction: string;
         evidence: {
             id: string;
-            kind: "source" | "artifact" | "observation" | "test" | "analysis" | "user_input";
+            kind: "source" | "observation" | "test" | "artifact" | "analysis" | "user_input";
             summary: string;
             locator?: string | undefined;
         }[];
@@ -3651,7 +3665,7 @@ declare function settleDelegationV2Envelope({ envelope, assignment, identity, ta
             impact: string;
             mitigation?: string | undefined;
         }[];
-        work: "synthesize" | "plan" | "review" | "preview" | "poc" | "research" | "refine_goal" | "execute";
+        work: "synthesize" | "plan" | "review" | "refine_goal" | "research" | "poc" | "execute" | "preview";
     } | undefined;
     runtimeFailure?: {
         code: "cancelled" | "crash" | "timeout" | "invalid_return" | "budget_exhausted" | "invalid_subworkflow";
@@ -4105,9 +4119,9 @@ declare const authorEnvelopeSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -4119,10 +4133,10 @@ declare const authorEnvelopeSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -4152,9 +4166,9 @@ declare const authorEnvelopeSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -4166,10 +4180,10 @@ declare const authorEnvelopeSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -4199,9 +4213,9 @@ declare const authorEnvelopeSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -4213,10 +4227,10 @@ declare const authorEnvelopeSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -4246,9 +4260,9 @@ declare const authorEnvelopeSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -4260,10 +4274,10 @@ declare const authorEnvelopeSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -4293,9 +4307,9 @@ declare const authorEnvelopeSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -4307,10 +4321,10 @@ declare const authorEnvelopeSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -4340,9 +4354,9 @@ declare const authorEnvelopeSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -4354,10 +4368,10 @@ declare const authorEnvelopeSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -4387,9 +4401,9 @@ declare const authorEnvelopeSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -4401,10 +4415,10 @@ declare const authorEnvelopeSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -4434,9 +4448,9 @@ declare const authorEnvelopeSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -4448,10 +4462,10 @@ declare const authorEnvelopeSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -4477,9 +4491,9 @@ declare const authorEnvelopeSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -4495,11 +4509,11 @@ declare const authorEnvelopeSchema: z.ZodObject<{
                 synthesize: "synthesize";
                 plan: "plan";
                 review: "review";
-                preview: "preview";
-                poc: "poc";
-                research: "research";
                 refine_goal: "refine_goal";
+                research: "research";
+                poc: "poc";
                 execute: "execute";
+                preview: "preview";
             }>;
         }, z.core.$strict>;
     }, z.core.$strict>], "tag">;
@@ -4534,9 +4548,9 @@ declare const workerEnvelopeSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -4548,10 +4562,10 @@ declare const workerEnvelopeSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -4581,9 +4595,9 @@ declare const workerEnvelopeSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -4595,10 +4609,10 @@ declare const workerEnvelopeSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -4628,9 +4642,9 @@ declare const workerEnvelopeSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -4642,10 +4656,10 @@ declare const workerEnvelopeSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -4675,9 +4689,9 @@ declare const workerEnvelopeSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -4689,10 +4703,10 @@ declare const workerEnvelopeSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -4722,9 +4736,9 @@ declare const workerEnvelopeSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -4736,10 +4750,10 @@ declare const workerEnvelopeSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -4769,9 +4783,9 @@ declare const workerEnvelopeSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -4783,10 +4797,10 @@ declare const workerEnvelopeSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -4816,9 +4830,9 @@ declare const workerEnvelopeSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -4830,10 +4844,10 @@ declare const workerEnvelopeSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -4863,9 +4877,9 @@ declare const workerEnvelopeSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -4877,10 +4891,10 @@ declare const workerEnvelopeSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -4906,9 +4920,9 @@ declare const workerEnvelopeSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -4924,11 +4938,11 @@ declare const workerEnvelopeSchema: z.ZodObject<{
                 synthesize: "synthesize";
                 plan: "plan";
                 review: "review";
-                preview: "preview";
-                poc: "poc";
-                research: "research";
                 refine_goal: "refine_goal";
+                research: "research";
+                poc: "poc";
                 execute: "execute";
+                preview: "preview";
             }>;
         }, z.core.$strict>;
     }, z.core.$strict>], "tag">;
@@ -5059,8 +5073,8 @@ declare const dv2OutcomeSchema: z.ZodObject<{
     logicalId: z.ZodString;
     generation: z.ZodNumber;
     role: z.ZodEnum<{
-        fable: "fable";
         sol: "sol";
+        fable: "fable";
         terra: "terra";
         luna: "luna";
     }>;
@@ -5068,11 +5082,11 @@ declare const dv2OutcomeSchema: z.ZodObject<{
         synthesize: "synthesize";
         plan: "plan";
         review: "review";
-        preview: "preview";
-        poc: "poc";
-        research: "research";
         refine_goal: "refine_goal";
+        research: "research";
+        poc: "poc";
         execute: "execute";
+        preview: "preview";
     }>;
     outputContract: z.ZodEnum<{
         plan: "plan";
@@ -5111,9 +5125,9 @@ declare const dv2OutcomeSchema: z.ZodObject<{
             id: z.ZodString;
             kind: z.ZodEnum<{
                 source: "source";
-                artifact: "artifact";
                 observation: "observation";
                 test: "test";
+                artifact: "artifact";
                 analysis: "analysis";
                 user_input: "user_input";
             }>;
@@ -5125,10 +5139,10 @@ declare const dv2OutcomeSchema: z.ZodObject<{
             kind: z.ZodEnum<{
                 file: "file";
                 preview: "preview";
-                url: "url";
-                report: "report";
                 diff: "diff";
                 command_output: "command_output";
+                url: "url";
+                report: "report";
                 other: "other";
             }>;
             locator: z.ZodString;
@@ -5158,9 +5172,9 @@ declare const dv2OutcomeSchema: z.ZodObject<{
             id: z.ZodString;
             kind: z.ZodEnum<{
                 source: "source";
-                artifact: "artifact";
                 observation: "observation";
                 test: "test";
+                artifact: "artifact";
                 analysis: "analysis";
                 user_input: "user_input";
             }>;
@@ -5172,10 +5186,10 @@ declare const dv2OutcomeSchema: z.ZodObject<{
             kind: z.ZodEnum<{
                 file: "file";
                 preview: "preview";
-                url: "url";
-                report: "report";
                 diff: "diff";
                 command_output: "command_output";
+                url: "url";
+                report: "report";
                 other: "other";
             }>;
             locator: z.ZodString;
@@ -5205,9 +5219,9 @@ declare const dv2OutcomeSchema: z.ZodObject<{
             id: z.ZodString;
             kind: z.ZodEnum<{
                 source: "source";
-                artifact: "artifact";
                 observation: "observation";
                 test: "test";
+                artifact: "artifact";
                 analysis: "analysis";
                 user_input: "user_input";
             }>;
@@ -5219,10 +5233,10 @@ declare const dv2OutcomeSchema: z.ZodObject<{
             kind: z.ZodEnum<{
                 file: "file";
                 preview: "preview";
-                url: "url";
-                report: "report";
                 diff: "diff";
                 command_output: "command_output";
+                url: "url";
+                report: "report";
                 other: "other";
             }>;
             locator: z.ZodString;
@@ -5252,9 +5266,9 @@ declare const dv2OutcomeSchema: z.ZodObject<{
             id: z.ZodString;
             kind: z.ZodEnum<{
                 source: "source";
-                artifact: "artifact";
                 observation: "observation";
                 test: "test";
+                artifact: "artifact";
                 analysis: "analysis";
                 user_input: "user_input";
             }>;
@@ -5266,10 +5280,10 @@ declare const dv2OutcomeSchema: z.ZodObject<{
             kind: z.ZodEnum<{
                 file: "file";
                 preview: "preview";
-                url: "url";
-                report: "report";
                 diff: "diff";
                 command_output: "command_output";
+                url: "url";
+                report: "report";
                 other: "other";
             }>;
             locator: z.ZodString;
@@ -5299,9 +5313,9 @@ declare const dv2OutcomeSchema: z.ZodObject<{
             id: z.ZodString;
             kind: z.ZodEnum<{
                 source: "source";
-                artifact: "artifact";
                 observation: "observation";
                 test: "test";
+                artifact: "artifact";
                 analysis: "analysis";
                 user_input: "user_input";
             }>;
@@ -5313,10 +5327,10 @@ declare const dv2OutcomeSchema: z.ZodObject<{
             kind: z.ZodEnum<{
                 file: "file";
                 preview: "preview";
-                url: "url";
-                report: "report";
                 diff: "diff";
                 command_output: "command_output";
+                url: "url";
+                report: "report";
                 other: "other";
             }>;
             locator: z.ZodString;
@@ -5346,9 +5360,9 @@ declare const dv2OutcomeSchema: z.ZodObject<{
             id: z.ZodString;
             kind: z.ZodEnum<{
                 source: "source";
-                artifact: "artifact";
                 observation: "observation";
                 test: "test";
+                artifact: "artifact";
                 analysis: "analysis";
                 user_input: "user_input";
             }>;
@@ -5360,10 +5374,10 @@ declare const dv2OutcomeSchema: z.ZodObject<{
             kind: z.ZodEnum<{
                 file: "file";
                 preview: "preview";
-                url: "url";
-                report: "report";
                 diff: "diff";
                 command_output: "command_output";
+                url: "url";
+                report: "report";
                 other: "other";
             }>;
             locator: z.ZodString;
@@ -5393,9 +5407,9 @@ declare const dv2OutcomeSchema: z.ZodObject<{
             id: z.ZodString;
             kind: z.ZodEnum<{
                 source: "source";
-                artifact: "artifact";
                 observation: "observation";
                 test: "test";
+                artifact: "artifact";
                 analysis: "analysis";
                 user_input: "user_input";
             }>;
@@ -5407,10 +5421,10 @@ declare const dv2OutcomeSchema: z.ZodObject<{
             kind: z.ZodEnum<{
                 file: "file";
                 preview: "preview";
-                url: "url";
-                report: "report";
                 diff: "diff";
                 command_output: "command_output";
+                url: "url";
+                report: "report";
                 other: "other";
             }>;
             locator: z.ZodString;
@@ -5440,9 +5454,9 @@ declare const dv2OutcomeSchema: z.ZodObject<{
             id: z.ZodString;
             kind: z.ZodEnum<{
                 source: "source";
-                artifact: "artifact";
                 observation: "observation";
                 test: "test";
+                artifact: "artifact";
                 analysis: "analysis";
                 user_input: "user_input";
             }>;
@@ -5454,10 +5468,10 @@ declare const dv2OutcomeSchema: z.ZodObject<{
             kind: z.ZodEnum<{
                 file: "file";
                 preview: "preview";
-                url: "url";
-                report: "report";
                 diff: "diff";
                 command_output: "command_output";
+                url: "url";
+                report: "report";
                 other: "other";
             }>;
             locator: z.ZodString;
@@ -5481,9 +5495,9 @@ declare const dv2OutcomeSchema: z.ZodObject<{
             id: z.ZodString;
             kind: z.ZodEnum<{
                 source: "source";
-                artifact: "artifact";
                 observation: "observation";
                 test: "test";
+                artifact: "artifact";
                 analysis: "analysis";
                 user_input: "user_input";
             }>;
@@ -5499,11 +5513,11 @@ declare const dv2OutcomeSchema: z.ZodObject<{
             synthesize: "synthesize";
             plan: "plan";
             review: "review";
-            preview: "preview";
-            poc: "poc";
-            research: "research";
             refine_goal: "refine_goal";
+            research: "research";
+            poc: "poc";
             execute: "execute";
+            preview: "preview";
         }>;
     }, z.core.$strict>>;
     runtimeFailure: z.ZodOptional<z.ZodObject<{
@@ -5531,8 +5545,8 @@ declare const dv2FinalSchema: z.ZodObject<{
         logicalId: z.ZodString;
         generation: z.ZodNumber;
         role: z.ZodEnum<{
-            fable: "fable";
             sol: "sol";
+            fable: "fable";
             terra: "terra";
             luna: "luna";
         }>;
@@ -5540,11 +5554,11 @@ declare const dv2FinalSchema: z.ZodObject<{
             synthesize: "synthesize";
             plan: "plan";
             review: "review";
-            preview: "preview";
-            poc: "poc";
-            research: "research";
             refine_goal: "refine_goal";
+            research: "research";
+            poc: "poc";
             execute: "execute";
+            preview: "preview";
         }>;
         outputContract: z.ZodEnum<{
             plan: "plan";
@@ -5583,9 +5597,9 @@ declare const dv2FinalSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -5597,10 +5611,10 @@ declare const dv2FinalSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -5630,9 +5644,9 @@ declare const dv2FinalSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -5644,10 +5658,10 @@ declare const dv2FinalSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -5677,9 +5691,9 @@ declare const dv2FinalSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -5691,10 +5705,10 @@ declare const dv2FinalSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -5724,9 +5738,9 @@ declare const dv2FinalSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -5738,10 +5752,10 @@ declare const dv2FinalSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -5771,9 +5785,9 @@ declare const dv2FinalSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -5785,10 +5799,10 @@ declare const dv2FinalSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -5818,9 +5832,9 @@ declare const dv2FinalSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -5832,10 +5846,10 @@ declare const dv2FinalSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -5865,9 +5879,9 @@ declare const dv2FinalSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -5879,10 +5893,10 @@ declare const dv2FinalSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -5912,9 +5926,9 @@ declare const dv2FinalSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -5926,10 +5940,10 @@ declare const dv2FinalSchema: z.ZodObject<{
                 kind: z.ZodEnum<{
                     file: "file";
                     preview: "preview";
-                    url: "url";
-                    report: "report";
                     diff: "diff";
                     command_output: "command_output";
+                    url: "url";
+                    report: "report";
                     other: "other";
                 }>;
                 locator: z.ZodString;
@@ -5953,9 +5967,9 @@ declare const dv2FinalSchema: z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     source: "source";
-                    artifact: "artifact";
                     observation: "observation";
                     test: "test";
+                    artifact: "artifact";
                     analysis: "analysis";
                     user_input: "user_input";
                 }>;
@@ -5971,11 +5985,11 @@ declare const dv2FinalSchema: z.ZodObject<{
                 synthesize: "synthesize";
                 plan: "plan";
                 review: "review";
-                preview: "preview";
-                poc: "poc";
-                research: "research";
                 refine_goal: "refine_goal";
+                research: "research";
+                poc: "poc";
                 execute: "execute";
+                preview: "preview";
             }>;
         }, z.core.$strict>>;
         runtimeFailure: z.ZodOptional<z.ZodObject<{
@@ -6255,6 +6269,7 @@ type KanbanProps = KanbanProps$2;
 type LoopProps = LoopProps$2;
 type MergeQueueProps = MergeQueueProps$2;
 type MemoryProps = MemoryProps$2;
+type MemoryTrellisProps = MemoryTrellisProps$2;
 type MonitorCondition = MonitorCondition$2;
 type MonitorProps = MonitorProps$2;
 type OptimizerProps = OptimizerProps$2;
@@ -6362,4 +6377,4 @@ type XmlElement = _smthrs_graph.XmlElement;
 type XmlNode = _smthrs_graph.XmlNode;
 type XmlText = _smthrs_graph.XmlText;
 
-export { Approval, type ApprovalAutoApprove, type ApprovalDecision, ApprovalGate, type ApprovalGateProps, type ApprovalMode, type ApprovalOption, type ApprovalProps, type ApprovalRanking, type ApprovalRequest, type ApprovalSelection, Aspects, type AspectsProps, BackpressurePlanning, type BackpressurePlanningProps, Branch, type BranchProps, type CachePolicy, type CategoryConfig, type CheckConfig, CheckSuite, type CheckSuiteProps, ClassifyAndRoute, type ClassifyAndRouteProps, type ColumnDef, ContentPipeline, type ContentPipelineProps, type ContentPipelineStage, ContinueAsNew, type ContinueAsNewProps, DC_EDIT_SIGNAL, DC_SKIP_PREVIEW_SIGNAL, DEFAULT_DELEGATION_V2_LIMITS, DEFAULT_TIER_ORDER, DELEGATION_V2_COMPILER_VERSION, DELEGATION_V2_PROGRAM_VERSION, DELEGATION_V2_PROTOCOL_VERSION, DELEGATION_V2_REGISTRY_VERSION, DELEGATION_V2_RUNTIME_VERSION, DELEGATION_V2_SETTLEMENT_VERSION, type DcApprovalRow, type DcBudgetRow, type DcDevPreviewRow, type DcEditRow, type DcExecRow, type DcForecastRow, type DcGatesRow, type DcGoalApprovalRow, type DcGoalRow, type DcPlanRow, type DcPollRow, type DcPreviewRow, type DcProbeRow, type DcQuestionRow, type DcReplanRow, type DcReviewRow, type DcScoreRow, type DcSkipRow, Debate, type DebateProps, type DecisionRule, DecisionTable, type DecisionTableProps, type DelegationAgents, type DelegationBudget, DelegationChain, type DelegationChainProps, DelegationEditListener, type DelegationEditListenerProps, DelegationExecution, type DelegationExecutionProps, type DelegationOutputs, DelegationPlanning, type DelegationPlanningProps, DelegationPreview, type DelegationPreviewProps, type DelegationScorers, DelegationScoring, type DelegationScoringProps, type DelegationSharedProps, type DepsSpec, DeriskLoop, type DeriskLoopProps, type DevPreviewKind, DriftDetector, type DriftDetectorProps, type EngineDecision, EscalationChain, type EscalationChainProps, type EscalationLevel, type Estimate, type ExtractOptions, ForkFanOut, type ForkFanOutProps, type ForkFanOutTask, type ForkFanOutTaskOptions, type Gate, GatherAndSynthesize, type GatherAndSynthesizeProps, GoalRefinement, type GoalRefinementProps, type HostElement, type HostNode, type HostText, HumanTask, type HumanTaskProps, type InferDeps, type InferOutputEntry, type InferRow, Kanban, type KanbanProps, Loop, type LoopProps, MONITOR_CONDITIONS, MONITOR_DEFAULT_AUTO_HEAL, MONITOR_TERMINAL_STATUSES, Memory, type MemoryProps, MergeQueue, type MergeQueueProps, Monitor, type MonitorCondition, type MonitorProps, Optimizer, type OptimizerProps, type OutputAccessor, type OutputKey, type OutputTarget, Panel, type PanelProps, type PanelistConfig, Parallel, type ParallelProps, Poller, type PollerProps, Ralph, type RalphProps, type RenderContext, type RetryPolicy, ReviewLoop, type ReviewLoopProps, type RunAuthContext, type RunOptions, type RunResult, Runbook, type RunbookProps, type RunbookStep, SMITHERS_WORKFLOW_VIEW_KIND, Saga, type SagaProps, SagaStep, type SagaStepDef, type SagaStepProps, Sandbox, type SandboxEgressConfig, type SandboxProps, type SandboxRuntime, type SandboxVolumeMount, type SandboxWorkspaceSpec, ScanFixVerify, type ScanFixVerifyProps, type SchemaRegistryEntry, type ScorersMap, Sequence, type SequenceProps, Sidecar, type SidecarDelta, type SidecarProps, Signal, type SignalProps, type SmithersAlertLabels, type SmithersAlertPolicy, type SmithersAlertPolicyDefaults, type SmithersAlertPolicyRule, type SmithersAlertReaction, type SmithersAlertReactionKind, type SmithersAlertReactionRef, type SmithersAlertSeverity, type SmithersCtx, type SmithersErrorCode, type SmithersWorkflow, type SmithersWorkflowDriverOptions, type SmithersWorkflowOptions, type SourceDef, Subflow, type SubflowProps, SuperSmithers, type SuperSmithersProps, Supervisor, type SupervisorProps, TUI, type TUIProps, Task, type TaskDescriptor, type TaskProps$1 as TaskProps, type Tier, Timer, type TimerProps, Trellis, type TrellisProps, TryCatchFinally, type TryCatchFinallyProps, UI, type UIProps, WaitForEvent, type WaitForEventProps, type WaitReason, Workflow, type WorkflowFileRef, type WorkflowGraph, type WorkflowProps, type WorkflowRuntime, type WorkflowSession, type WorkflowViewBootProps, type WorkflowViewProps, Worktree, type WorktreeProps, type XmlElement, type XmlNode, type XmlText, actualTotals, agentForTier, approvalDecisionSchema, approvalRankingSchema, approvalSelectionSchema, captureWorkingCopyCommit, chunkGateFailures, compileDelegationV2Program, computeSidecarDelta, continueAsNew, dcApprovalSchema, dcBudgetSchema, dcDevPreviewSchema, dcEditSchema, dcExecSchema, dcForecastSchema, dcGatesSchema, dcGoalApprovalSchema, dcGoalSchema, dcPlanSchema, dcPollSchema, dcPreviewSchema, dcProbeSchema, dcQuestionSchema, dcReplanSchema, dcReviewSchema, dcScoreSchema, dcSkipSchema, delegationPrompts, delegationSchemas, delegationV2AssignmentDigest, delegationV2ProgramDigest, delegationV2Schemas, dependentsOf, devPreviewKindSchema, devPreviewNodeId, enforceDelegationV2AuthorFuel, estimateSchema, executionComplete, foldGates, foldPlans, frontierLeaves, gateSchema, leafAttemptState, leafComplete, leavesUnder, markdownComponents, monitorAuthorityRules, monitorEvidenceRules, monitorHealthSignals, monitorPrompt, monitorReadPathRules, nodeIndex, partitionDelegationV2AuthorFuel, pendingTriggers, physicalId, planOwnerOf, planningComplete, probeIdFor, probesRequested, renderMdx, renderPromptToText, replanCountFor, settleDelegationV2Envelope, splitGates, synthesizeDelegationEvents, tierSchema, delegationV2Prompts as trellisPrompts, triggerTargetOf, unplannedChunks, validateWorkflowProgram, withCommitRange, zodSchemaToJsonExample };
+export { Approval, type ApprovalAutoApprove, type ApprovalDecision, ApprovalGate, type ApprovalGateProps, type ApprovalMode, type ApprovalOption, type ApprovalProps, type ApprovalRanking, type ApprovalRequest, type ApprovalSelection, Aspects, type AspectsProps, BackpressurePlanning, type BackpressurePlanningProps, Branch, type BranchProps, type CachePolicy, type CategoryConfig, type CheckConfig, CheckSuite, type CheckSuiteProps, ClassifyAndRoute, type ClassifyAndRouteProps, type ColumnDef, ContentPipeline, type ContentPipelineProps, type ContentPipelineStage, ContinueAsNew, type ContinueAsNewProps, DC_EDIT_SIGNAL, DC_SKIP_PREVIEW_SIGNAL, DEFAULT_DELEGATION_V2_LIMITS, DEFAULT_TIER_ORDER, DELEGATION_V2_COMPILER_VERSION, DELEGATION_V2_PROGRAM_VERSION, DELEGATION_V2_PROTOCOL_VERSION, DELEGATION_V2_REGISTRY_VERSION, DELEGATION_V2_RUNTIME_VERSION, DELEGATION_V2_SETTLEMENT_VERSION, type DcApprovalRow, type DcBudgetRow, type DcDevPreviewRow, type DcEditRow, type DcExecRow, type DcForecastRow, type DcGatesRow, type DcGoalApprovalRow, type DcGoalRow, type DcPlanRow, type DcPollRow, type DcPreviewRow, type DcProbeRow, type DcQuestionRow, type DcReplanRow, type DcReviewRow, type DcScoreRow, type DcSkipRow, Debate, type DebateProps, type DecisionRule, DecisionTable, type DecisionTableProps, type DelegationAgents, type DelegationBudget, DelegationChain, type DelegationChainProps, DelegationEditListener, type DelegationEditListenerProps, DelegationExecution, type DelegationExecutionProps, type DelegationOutputs, DelegationPlanning, type DelegationPlanningProps, DelegationPreview, type DelegationPreviewProps, type DelegationScorers, DelegationScoring, type DelegationScoringProps, type DelegationSharedProps, type DepsSpec, DeriskLoop, type DeriskLoopProps, type DevPreviewKind, DriftDetector, type DriftDetectorProps, type EngineDecision, EscalationChain, type EscalationChainProps, type EscalationLevel, type Estimate, type ExtractOptions, ForkFanOut, type ForkFanOutProps, type ForkFanOutTask, type ForkFanOutTaskOptions, type Gate, GatherAndSynthesize, type GatherAndSynthesizeProps, GoalRefinement, type GoalRefinementProps, type HostElement, type HostNode, type HostText, HumanTask, type HumanTaskProps, type InferDeps, type InferOutputEntry, type InferRow, Kanban, type KanbanProps, Loop, type LoopProps, MONITOR_CONDITIONS, MONITOR_DEFAULT_AUTO_HEAL, MONITOR_TERMINAL_STATUSES, Memory, type MemoryProps, MemoryTrellis, type MemoryTrellisProps, MergeQueue, type MergeQueueProps, Monitor, type MonitorCondition, type MonitorProps, Optimizer, type OptimizerProps, type OutputAccessor, type OutputKey, type OutputTarget, Panel, type PanelProps, type PanelistConfig, Parallel, type ParallelProps, Poller, type PollerProps, Ralph, type RalphProps, type RenderContext, type RetryPolicy, ReviewLoop, type ReviewLoopProps, type RunAuthContext, type RunOptions, type RunResult, Runbook, type RunbookProps, type RunbookStep, SMITHERS_WORKFLOW_VIEW_KIND, Saga, type SagaProps, SagaStep, type SagaStepDef, type SagaStepProps, Sandbox, type SandboxEgressConfig, type SandboxProps, type SandboxRuntime, type SandboxVolumeMount, type SandboxWorkspaceSpec, ScanFixVerify, type ScanFixVerifyProps, type SchemaRegistryEntry, type ScorersMap, Sequence, type SequenceProps, Sidecar, type SidecarDelta, type SidecarProps, Signal, type SignalProps, type SmithersAlertLabels, type SmithersAlertPolicy, type SmithersAlertPolicyDefaults, type SmithersAlertPolicyRule, type SmithersAlertReaction, type SmithersAlertReactionKind, type SmithersAlertReactionRef, type SmithersAlertSeverity, type SmithersCtx, type SmithersErrorCode, type SmithersWorkflow, type SmithersWorkflowDriverOptions, type SmithersWorkflowOptions, type SourceDef, Subflow, type SubflowProps, SuperSmithers, type SuperSmithersProps, Supervisor, type SupervisorProps, TUI, type TUIProps, Task, type TaskDescriptor, type TaskProps$1 as TaskProps, type Tier, Timer, type TimerProps, Trellis, type TrellisProps, TryCatchFinally, type TryCatchFinallyProps, UI, type UIProps, WaitForEvent, type WaitForEventProps, type WaitReason, Workflow, type WorkflowFileRef, type WorkflowGraph, type WorkflowProps, type WorkflowRuntime, type WorkflowSession, type WorkflowViewBootProps, type WorkflowViewProps, Worktree, type WorktreeProps, type XmlElement, type XmlNode, type XmlText, actualTotals, agentForTier, approvalDecisionSchema, approvalRankingSchema, approvalSelectionSchema, captureWorkingCopyCommit, chunkGateFailures, compileDelegationV2Program, computeSidecarDelta, continueAsNew, dcApprovalSchema, dcBudgetSchema, dcDevPreviewSchema, dcEditSchema, dcExecSchema, dcForecastSchema, dcGatesSchema, dcGoalApprovalSchema, dcGoalSchema, dcPlanSchema, dcPollSchema, dcPreviewSchema, dcProbeSchema, dcQuestionSchema, dcReplanSchema, dcReviewSchema, dcScoreSchema, dcSkipSchema, delegationPrompts, delegationSchemas, delegationV2AssignmentDigest, delegationV2ProgramDigest, delegationV2Schemas, dependentsOf, devPreviewKindSchema, devPreviewNodeId, enforceDelegationV2AuthorFuel, estimateSchema, executionComplete, foldGates, foldPlans, frontierLeaves, gateSchema, leafAttemptState, leafComplete, leavesUnder, markdownComponents, monitorAuthorityRules, monitorEvidenceRules, monitorHealthSignals, monitorPrompt, monitorReadPathRules, nodeIndex, partitionDelegationV2AuthorFuel, pendingTriggers, physicalId, planOwnerOf, planningComplete, probeIdFor, probesRequested, renderMdx, renderPromptToText, replanCountFor, settleDelegationV2Envelope, splitGates, synthesizeDelegationEvents, tierSchema, delegationV2Prompts as trellisPrompts, triggerTargetOf, unplannedChunks, validateWorkflowProgram, withCommitRange, zodSchemaToJsonExample };

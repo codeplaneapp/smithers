@@ -1373,12 +1373,27 @@ function renderUnavailablePreferenceComments(tier, order, allProviderIds, detect
  * @param {string[]} activeProviderIds
  * @param {string[]} commentedProviderIds
  * @param {string[]} comments
+ * @param {Set<string>} [pooledClaudeProviderIds]
  */
-function renderTierLine(tier, activeProviderIds, commentedProviderIds, comments) {
+function renderTierLine(tier, activeProviderIds, commentedProviderIds, comments, pooledClaudeProviderIds = new Set()) {
+  const activeLines = [];
+  let emittedClaudePool = false;
+  for (const id of activeProviderIds) {
+    if (!emittedClaudePool && pooledClaudeProviderIds.size > 0 && baseAgentIdForProviderId(id) === "claude") {
+      activeLines.push("    ...claudeAccountPool,");
+      emittedClaudePool = true;
+    }
+    if (pooledClaudeProviderIds.has(id)) {
+      if (!emittedClaudePool) activeLines.push("    ...claudeAccountPool,");
+      emittedClaudePool = true;
+      continue;
+    }
+    activeLines.push(`    providers.${id},`);
+  }
   return [
     ...comments,
     `  ${tier}: [`,
-    ...activeProviderIds.map((id) => `    providers.${id},`),
+    ...activeLines,
     ...commentedProviderIds.map((id) => `    // providers.${id},`),
     `  ],`,
   ];
@@ -1544,6 +1559,9 @@ export function generateAgentsTs(env = process.env, options = {}) {
   }
   const smithersImportLines = [
     'import { type AgentLike } from "smthrs";',
+    ...(registeredAccounts.some((account) => ACCOUNT_PROVIDER_POOL[account.provider] === "claude")
+      ? ['import { fallbackAgents } from "smthrs";']
+      : []),
     ...[...activeImportNames].map((importName) => `import { ${importName} as Smithers${importName} } from "smthrs";`),
     ...[...inactiveImportNames].map(
       (importName) => `// import { ${importName} as Smithers${importName} } from "smthrs";`,
@@ -1596,8 +1614,34 @@ export function generateAgentsTs(env = process.env, options = {}) {
     accountPoolMembers.set(family, arr);
   }
   const accountPoolLines = [...accountPoolMembers.entries()]
-    .map(([family, members]) => renderTierLine(family, members, [], []))
+    .map(([family, members]) => {
+      if (family !== "claude") return renderTierLine(family, members, [], []);
+      return [`  ${family}: claudeAccountPool,`];
+    })
     .flat();
+  const claudeAccountProviderIds = new Set(
+    registeredAccounts
+      .filter((account) => ACCOUNT_PROVIDER_POOL[account.provider] === "claude")
+      .map((account) => labelToCamel(account.label)),
+  );
+  const claudePoolProviders = [
+    ...new Set(
+      registeredAccounts
+        .filter((account) => ACCOUNT_PROVIDER_POOL[account.provider] === "claude")
+        .map((account) => account.provider),
+    ),
+  ];
+  const claudeAccountPoolLines =
+    claudePoolProviders.length === 0
+      ? []
+      : [
+          "const claudeAccountPool = fallbackAgents({",
+          `  providers: ${JSON.stringify(claudePoolProviders)},`,
+          `  models: { "claude-code": ${JSON.stringify(SOTA_SLOTS.fable)}, "anthropic-api": ${JSON.stringify(SOTA_SLOTS.fable)} },`,
+          "  fallback: [],",
+          "});",
+          "",
+        ];
   // Tier lines: detection-resolved members, then accounts whose engine
   // family is in the tier's preference order get appended.
   const resolvedTierLines = Object.entries(TIER_PREFERENCES).map(([tier, { codexVariant, order, maxSize }]) => {
@@ -1658,7 +1702,7 @@ export function generateAgentsTs(env = process.env, options = {}) {
         order[0] === codexVariant
           ? "  // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails."
           : "  // Claude leads this seat (Codex 5.6 does not orchestrate or gate). Later entries, including Codex, are runtime fallbacks.";
-      return renderTierLine(tier, members, unavailableFallbacks, [leadComment]);
+      return renderTierLine(tier, members, unavailableFallbacks, [leadComment], claudeAccountProviderIds);
     }
     let resolved = order.filter((id) => allProviderIds.has(id)).slice(0, maxSize);
     if (resolved.length === 0) {
@@ -1687,6 +1731,7 @@ export function generateAgentsTs(env = process.env, options = {}) {
       merged,
       commented,
       renderUnavailablePreferenceComments(tier, order, allProviderIds, detectionsById),
+      claudeAccountProviderIds,
     );
   });
   const tierLines = [...accountPoolLines, ...resolvedTierLines.flat()];
@@ -1731,6 +1776,7 @@ export function generateAgentsTs(env = process.env, options = {}) {
     ...providerLines,
     "} as const;",
     "",
+    ...claudeAccountPoolLines,
     "export const agents = {",
     ...tierLines,
     "} as const satisfies Record<string, AgentLike[]>;",
