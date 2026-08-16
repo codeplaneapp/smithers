@@ -39,9 +39,13 @@ function nonNegativeEnvNumber(raw, fallback, integer = false) {
  * @param {{
  *   cwd?: string;
  *   logDir?: string;
- *   adapter?: Pick<import("@smthrs/db/adapter").SmithersDb, "getRun">;
+ *   adapter?: Pick<import("@smthrs/db/adapter").SmithersDb, "getRun"> | null;
  *   env?: NodeJS.ProcessEnv;
  *   nowMs?: number;
+ *   olderThanMs?: number;
+ *   dryRun?: boolean;
+ *   allowAbsentRuns?: boolean;
+ *   minimumAgeForSizeCap?: boolean;
  *   warn?: (line: string) => void;
  * }} [options]
  */
@@ -50,23 +54,26 @@ export async function reapDetachedRunLogs(options = {}) {
   const logDir = options.logDir ?? dirname(resolveDetachedRunLogFile("gc-probe", { cwd }));
   const env = options.env ?? process.env;
   const nowMs = options.nowMs ?? Date.now();
+  const dryRun = options.dryRun ?? false;
+  const allowAbsentRuns = options.allowAbsentRuns ?? true;
+  const minimumAgeForSizeCap = options.minimumAgeForSizeCap ?? false;
   const warn = options.warn ?? ((line) => process.stderr.write(line));
   const retentionDays = nonNegativeEnvNumber(env.SMITHERS_LOG_RETENTION_DAYS, DEFAULT_LOG_RETENTION_DAYS);
   const maxTotalBytes = nonNegativeEnvNumber(env.SMITHERS_LOG_MAX_TOTAL_BYTES, DEFAULT_LOG_MAX_TOTAL_BYTES, true);
-  const cutoffMs = nowMs - retentionDays * DAY_MS;
+  const cutoffMs = nowMs - (options.olderThanMs ?? retentionDays * DAY_MS);
   const removed = [];
   let dirEntries;
   try {
     dirEntries = readdirSync(logDir, { withFileTypes: true });
   } catch (error) {
     if (/** @type {NodeJS.ErrnoException} */ (error)?.code === "ENOENT") {
-      return { removed, bytesFreed: 0, totalBytes: 0, logDir };
+      return { removed, bytesFreed: 0, totalBytes: 0, logDir, dryRun };
     }
     safeWarn(
       warn,
       `[smithers] Warning: detached run log GC could not read ${logDir}: ${error instanceof Error ? error.message : String(error)}\n`,
     );
-    return { removed, bytesFreed: 0, totalBytes: 0, logDir };
+    return { removed, bytesFreed: 0, totalBytes: 0, logDir, dryRun };
   }
   const logs = [];
   for (const entry of dirEntries) {
@@ -89,12 +96,12 @@ export async function reapDetachedRunLogs(options = {}) {
     }
   }
   if (logs.length === 0) {
-    return { removed, bytesFreed: 0, totalBytes: 0, logDir };
+    return { removed, bytesFreed: 0, totalBytes: 0, logDir, dryRun };
   }
 
   let adapter = options.adapter;
   let cleanup = () => {};
-  if (!adapter) {
+  if (!adapter && options.adapter !== null) {
     try {
       const opened = await findAndOpenDb(cwd);
       adapter = opened.adapter;
@@ -113,8 +120,18 @@ export async function reapDetachedRunLogs(options = {}) {
         bytesFreed: 0,
         totalBytes: logs.reduce((sum, log) => sum + log.size, 0),
         logDir,
+        dryRun,
       };
     }
+  }
+  if (!adapter) {
+    return {
+      removed,
+      bytesFreed: 0,
+      totalBytes: logs.reduce((sum, log) => sum + log.size, 0),
+      logDir,
+      dryRun,
+    };
   }
 
   const runs = new Map();
@@ -136,6 +153,7 @@ export async function reapDetachedRunLogs(options = {}) {
       bytesFreed: 0,
       totalBytes: logs.reduce((sum, log) => sum + log.size, 0),
       logDir,
+      dryRun,
     };
   } finally {
     try {
@@ -154,13 +172,14 @@ export async function reapDetachedRunLogs(options = {}) {
     const terminalAtMs =
       typeof run?.finishedAtMs === "number" && Number.isFinite(run.finishedAtMs) ? run.finishedAtMs : null;
     const ageAtMs = terminal && terminalAtMs !== null ? terminalAtMs : log.mtimeMs;
-    const absentAndOld = !run && log.mtimeMs < cutoffMs;
+    const oldEnough = ageAtMs < cutoffMs;
+    const absentAndOld = allowAbsentRuns && !run && oldEnough;
     return {
       ...log,
       terminal,
       ageAtMs,
-      expired: (terminal && ageAtMs < cutoffMs) || absentAndOld,
-      capEligible: terminal || absentAndOld,
+      expired: (terminal && oldEnough) || absentAndOld,
+      capEligible: (terminal || absentAndOld) && (!minimumAgeForSizeCap || oldEnough),
     };
   });
   let totalBytes = candidates.reduce((sum, log) => sum + log.size, 0);
@@ -170,7 +189,7 @@ export async function reapDetachedRunLogs(options = {}) {
 
   const remove = (candidate, reason) => {
     try {
-      unlinkSync(candidate.logFile);
+      if (!dryRun) unlinkSync(candidate.logFile);
       deleted.add(candidate.logFile);
       totalBytes -= candidate.size;
       bytesFreed += candidate.size;
@@ -199,7 +218,7 @@ export async function reapDetachedRunLogs(options = {}) {
       remove(candidate, "size-cap");
     }
   }
-  return { removed, bytesFreed, totalBytes: Math.max(0, totalBytes), logDir };
+  return { removed, bytesFreed, totalBytes: Math.max(0, totalBytes), logDir, dryRun };
 }
 
 /** @param {{ mtimeMs: number; logFile: string }} left @param {{ mtimeMs: number; logFile: string }} right */

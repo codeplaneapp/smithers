@@ -82,6 +82,35 @@ To drive a run to completion across pauses, use the Gateway (`getRun`, `streamRu
 
 If resume fails with `RESUME_METADATA_MISMATCH`, the workflow file changed after the run started. Resume validates the original workflow metadata and source hash; it is not a hot-reload mechanism for stopped runs. Start a fresh run instead, for example with a new `--run-id`, or overwrite an existing planned id with `--force` when that command supports it. When iterating on a workflow definition, expect each edit to require a fresh run rather than `--resume`.
 
+## Disk hygiene
+
+Detached run output is bounded while the run is live. Each inherited log is
+checked every five seconds and capped at 100 MiB; rotation writes a truncation
+notice and preserves up to 1 MiB of the newest output on the same inode, so
+agent descendants keep writing to the managed file. Set
+`SMITHERS_LOG_MAX_BYTES` to another byte limit, or `0` to disable the per-file
+cap. Completed-run retention still uses `SMITHERS_LOG_RETENTION_DAYS` (seven
+days by default) and `SMITHERS_LOG_MAX_TOTAL_BYTES` (1 GiB by default).
+
+Use the unified collector to inspect filesystem capacity and stale artifacts:
+
+```sh
+bunx smthrs gc --dry-run
+bunx smthrs gc --older-than 24h
+```
+
+`gc` reclaims logs, `.smithers/sandboxes/<runId>` roots, and Smithers-owned
+worktrees only when their run is terminal. Unknown, running, paused, and
+waiting runs are kept. Legacy `.smithers/workflows/<runId>.log` files are also
+reclaimed when a terminal run record proves their ownership. It also reports
+legacy hidden campaign worktrees and the historical `<tmp>/smithers/*` and
+`upgrade-smthrs*.previous*` scratch
+shapes, but never deletes them by default. After inspecting a dry run, pass
+`--include-unmanaged` to opt in: a live-process working-directory check still
+protects every candidate, and an unowned worktree must be clean with its HEAD
+already merged or pushed. `--force` applies only to owned worktrees and allows
+their uncommitted or unpushed contents to be removed.
+
 ## Interactive mode and the full-screen TUI monitor
 
 `bunx smthrs up --interactive` (or just `bunx smthrs up` / `bunx smthrs workflow run` from an interactive TTY without a positional argument) opens a terminal UI that guides you through three steps:
@@ -189,7 +218,7 @@ See [Time-travel API](/reference/time-travel) and [Revert](/runtime/revert) for 
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[112]:
+commands[113]:
   - name: add
     purpose: Install a workflow pack from GitHub, npm, or a local file
     args[1]{name,type,required,desc}:
@@ -637,6 +666,13 @@ commands[112]:
     purpose: Cancel all active runs in the current Smithers workspace
     flags[1]{name,short,type,default,desc}:
       force,,boolean,false,Cancel runs even if they still appear live; without this only stale runs are cancelled
+  - name: gc
+    purpose: Report disk use and reclaim stale Smithers logs, sandboxes, worktrees, and campaign scratch
+    flags[4]{name,short,type,default,desc}:
+      older-than,,string,7d,Only reclaim artifacts unused for at least this long e.g. 24h
+      dry-run,,boolean,false,Report what would be removed without removing anything
+      include-unmanaged,,boolean,false,Also reclaim recognized legacy campaign worktrees and temp artifacts after safety checks
+      force,,boolean,false,Also remove owned worktrees holding uncommitted or unpushed work
   - name: graph
     purpose: Render the workflow graph without executing it
     args[1]{name,type,required,desc}:
@@ -811,14 +847,15 @@ commands[112]:
       iteration,,number,,Loop iteration
       seq,,number,,Checkpoint seq; latest if omitted
   - name: worktree.list
-    purpose: List every worktree Smithers created in this repository and the run that owns it
+    purpose: List owned worktrees and legacy worktrees registered under Smithers' hidden campaign directories
   - name: worktree.prune
     purpose: Remove the worktrees of runs that are over (finished, failed, or cancelled)
-    flags[4]{name,short,type,default,desc}:
+    flags[5]{name,short,type,default,desc}:
       run,,string,,Only prune worktrees owned by this run id
       older-than,,string,,Only prune worktrees untouched for at least this long e.g. 24h
       dry-run,,boolean,false,Report what would be removed without removing anything
       force,,boolean,false,Also remove worktrees holding uncommitted or unpushed work
+      include-unmanaged,,boolean,false,Also remove stale hidden campaign worktrees without owner metadata when clean and published
   - name: snapshot-hook
     purpose: "Internal: PostToolUse hook that requests a Tier 1 durability snapshot"
   - name: observability
