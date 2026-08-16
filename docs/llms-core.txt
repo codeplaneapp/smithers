@@ -10527,6 +10527,7 @@ type GatewayAuthConfig =
     }
   | {
       mode: "trusted-proxy";
+      trustedProxies: string[];      // REQUIRED: peer IPs / CIDR blocks, or "unix"
       trustedHeaders?: string[];     // default ["x-user-id","x-user-scopes","x-user-role"]
       allowedOrigins?: string[];     // default [] (no Origin allowlist)
       defaultRole?: string;          // default "operator"
@@ -11342,6 +11343,7 @@ JSON response codes, not `SmithersErrorInstance` objects.
 | `INVALID_JSON` | 400 | Body not valid JSON |
 | `SERVER_ERROR` | 500 | Unexpected server error |
 | `UNAUTHORIZED` | 401 | Missing or invalid auth token |
+| `UNTRUSTED_PROXY_PEER` | 403 | `mode: "trusted-proxy"` request or WebSocket upgrade whose transport peer is not in `auth.trustedProxies`. The identity headers are discarded, not honored. See [Gateway auth](/integrations/gateway). |
 | `WORKFLOW_PATH_OUTSIDE_ROOT` | 400 | Workflow path outside server root |
 | `RUN_ID_REQUIRED` | 400 | `runId` required when `resume: true` |
 | `RUN_ALREADY_EXISTS` | 409 | Run ID already exists |
@@ -13591,6 +13593,8 @@ The proxy usually has two Gateway-auth branches:
 The Gateway auth mode determines which branch preserves per-user identity. In `mode: "trusted-proxy"`, the Gateway reads role, scopes, user id, and token id from the trusted headers the proxy set. In `mode: "token"` or `mode: "jwt"`, the Gateway reads the bearer credential and ignores trusted-proxy identity headers; use the service-token branch only when service identity is acceptable. The browser never sees a Gateway credential; the iframe's RPC calls and WebSocket upgrades flow through the proxy.
 
 The same shape works behind any reverse proxy (Cloudflare, Cloudflare Access, Caddy, nginx, an internal API gateway): terminate session, strip identity headers off the request, set them from the validated session, forward to the Gateway. Trusted-proxy mode is **only safe behind something you control** that strips and rewrites identity headers; the Gateway docs call this out explicitly.
+
+Stripping headers at the proxy is necessary but not sufficient, because it does nothing about a client that skips the proxy entirely. Set `auth.trustedProxies` to the peer addresses, CIDR blocks, or `"unix"` socket the proxy connects from: the Gateway reads identity headers only from those peers, answers `403 UNTRUSTED_PROXY_PEER` to anything else, and refuses to start in trusted-proxy mode without the list. See [Gateway auth](/integrations/gateway).
 
 ## Local dev quick reference
 

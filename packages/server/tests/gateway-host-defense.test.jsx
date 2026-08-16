@@ -10,11 +10,11 @@ import { Gateway } from "../src/gateway.js";
  * reject a non-loopback Host — even though its Origin allow-list is permissive.
  */
 
-function req(host, origin) {
+function req(host, origin, remoteAddress = "127.0.0.1") {
   const headers = {};
   if (host !== undefined) headers.host = host;
   if (origin !== undefined) headers.origin = origin;
-  return { headers, socket: {} };
+  return { headers, socket: { remoteAddress } };
 }
 
 /** @type {Gateway[]} */
@@ -263,24 +263,128 @@ describe("gateway — JWT signature verification", () => {
  */
 describe("gateway — trusted-proxy scope fail-closed", () => {
   test("missing scopes header with no defaultScopes is rejected (no implicit '*')", async () => {
-    const gateway = makeGateway({ auth: { mode: "trusted-proxy" } });
+    const gateway = makeGateway({ auth: { mode: "trusted-proxy", trustedProxies: ["127.0.0.1"] } });
     const res = await gateway.authenticateRequest(req("127.0.0.1:7331"), null);
     expect(res.ok).toBe(false);
     expect(res.code).toBe("UNAUTHORIZED");
   });
 
   test("an explicitly-configured defaultScopes is honored when the header is absent", async () => {
-    const gateway = makeGateway({ auth: { mode: "trusted-proxy", defaultScopes: ["runs:read"] } });
+    const gateway = makeGateway({
+      auth: { mode: "trusted-proxy", trustedProxies: ["127.0.0.1"], defaultScopes: ["runs:read"] },
+    });
     const res = await gateway.authenticateRequest(req("127.0.0.1:7331"), null);
     expect(res.ok).toBe(true);
     expect(res.scopes).toEqual(["runs:read"]);
   });
 
   test("a present scopes header is parsed and used", async () => {
-    const gateway = makeGateway({ auth: { mode: "trusted-proxy" } });
+    const gateway = makeGateway({ auth: { mode: "trusted-proxy", trustedProxies: ["127.0.0.1"] } });
     const headers = { host: "127.0.0.1:7331", "x-user-scopes": "runs:read runs:write" };
-    const res = await gateway.authenticateRequest({ headers, socket: {} }, null);
+    const res = await gateway.authenticateRequest({ headers, socket: { remoteAddress: "127.0.0.1" } }, null);
     expect(res.ok).toBe(true);
     expect(res.scopes).toEqual(["runs:read", "runs:write"]);
+  });
+});
+
+/**
+ * #785: trusted-proxy identity headers are forgeable by anyone who can reach
+ * the listener, so the gateway honors them only when the IMMEDIATE TRANSPORT
+ * PEER (`req.socket.remoteAddress`, never `X-Forwarded-For`) is a configured
+ * trusted proxy. These unit cases pin the peer-matching rules; the real-server
+ * HTTP/WS coverage lives in gateway-trusted-proxy-peer.test.jsx.
+ */
+describe("gateway — trusted-proxy peer boundary (#785)", () => {
+  test("startup fails when trusted-proxy mode has no trust boundary", () => {
+    for (const auth of [
+      { mode: "trusted-proxy" },
+      { mode: "trusted-proxy", trustedProxies: [] },
+      { mode: "trusted-proxy", trustedProxies: ["not-an-ip"] },
+      { mode: "trusted-proxy", trustedProxies: ["10.0.0.0/33"] },
+      { mode: "trusted-proxy", trustedProxies: [""] },
+    ]) {
+      expect(() => new Gateway({ auth })).toThrow(/trustedProxies/);
+    }
+  });
+
+  test("a forged header set from an untrusted peer is rejected, not downgraded", async () => {
+    const gateway = makeGateway({
+      auth: { mode: "trusted-proxy", trustedProxies: ["10.4.0.0/24"], defaultScopes: ["runs:read"] },
+    });
+    const res = await gateway.authenticateRequest(
+      {
+        headers: {
+          host: "gateway.example.com",
+          "x-user-id": "attacker",
+          "x-user-role": "operator",
+          "x-user-scopes": "*",
+          "x-smithers-token-id": "forged",
+        },
+        socket: { remoteAddress: "203.0.113.9" },
+      },
+      null,
+    );
+    expect(res.ok).toBe(false);
+    expect(res.code).toBe("UNTRUSTED_PROXY_PEER");
+    // The forged identity must not leak into the result in any form.
+    expect(JSON.stringify(res)).not.toContain("operator");
+    expect(JSON.stringify(res)).not.toContain("attacker");
+  });
+
+  test("X-Forwarded-For cannot forge the peer: only the last hop counts", async () => {
+    const gateway = makeGateway({
+      auth: { mode: "trusted-proxy", trustedProxies: ["10.4.0.7"], defaultScopes: ["runs:read"] },
+    });
+    // An untrusted peer claiming a trusted address in XFF stays untrusted.
+    const spoofed = await gateway.authenticateRequest(
+      {
+        headers: { host: "gw", "x-forwarded-for": "10.4.0.7", "x-user-scopes": "*" },
+        socket: { remoteAddress: "203.0.113.9" },
+      },
+      null,
+    );
+    expect(spoofed.ok).toBe(false);
+    expect(spoofed.code).toBe("UNTRUSTED_PROXY_PEER");
+    // A trusted last hop is accepted even though earlier hops are untrusted.
+    const chained = await gateway.authenticateRequest(
+      {
+        headers: {
+          host: "gw",
+          "x-forwarded-for": "203.0.113.9, 198.51.100.4, 10.4.0.7",
+          "x-user-scopes": "run:read",
+        },
+        socket: { remoteAddress: "10.4.0.7" },
+      },
+      null,
+    );
+    expect(chained.ok).toBe(true);
+    expect(chained.scopes).toEqual(["run:read"]);
+  });
+
+  test("CIDR blocks, IPv6, and IPv4-mapped peers match as configured", async () => {
+    const gateway = makeGateway({
+      auth: { mode: "trusted-proxy", trustedProxies: ["10.4.0.0/24", "fd00::/8"], defaultScopes: ["run:read"] },
+    });
+    const allow = ["10.4.0.1", "10.4.0.254", "::ffff:10.4.0.9", "fd00::1", "fdaa:bb::5"];
+    for (const remoteAddress of allow) {
+      const res = await gateway.authenticateRequest({ headers: { host: "gw" }, socket: { remoteAddress } }, null);
+      expect(res.ok).toBe(true);
+    }
+    const deny = ["10.4.1.1", "10.5.0.1", "::1", "fe80::1", "203.0.113.9", ""];
+    for (const remoteAddress of deny) {
+      const res = await gateway.authenticateRequest({ headers: { host: "gw" }, socket: { remoteAddress } }, null);
+      expect(res.ok).toBe(false);
+      expect(res.code).toBe("UNTRUSTED_PROXY_PEER");
+    }
+  });
+
+  test('a "unix" entry never trusts a socket that merely lost its address', async () => {
+    const gateway = makeGateway({
+      auth: { mode: "trusted-proxy", trustedProxies: ["unix"], defaultScopes: ["run:read"] },
+    });
+    // No Unix listener was bound, so an address-less socket stays untrusted.
+    const res = await gateway.authenticateRequest({ headers: { host: "gw" }, socket: {} }, null);
+    expect(res.ok).toBe(false);
+    expect(res.code).toBe("UNTRUSTED_PROXY_PEER");
   });
 });
