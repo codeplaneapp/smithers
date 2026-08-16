@@ -38,10 +38,9 @@ export type FallbackAgentsOptions = {
    */
   agentOptions?: Partial<Record<FallbackAgentProvider, Record<string, unknown>>>;
   /**
-   * Randomly order the registered accounts (default `true`). Each
-   * `fallbackAgents()` call draws a fresh order, so load spreads across
-   * subscriptions while the engine's quota failover walks the chain in order.
-   * Set `false` to keep registration order.
+   * Randomly order accounts with equal cached headroom (default `true`). Known
+   * quota blocks and usage headroom take precedence. Set `false` to use
+   * registration order as the tie-break.
    */
   shuffle?: boolean;
   /**

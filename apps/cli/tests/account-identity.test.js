@@ -13,9 +13,12 @@ function tempDir(prefix) {
 }
 
 /** Build a config dir holding a Claude Code post-login state file. */
-function claudeDir(email, accountUuid) {
+function claudeDir(email, accountUuid, organizationUuid) {
   const dir = tempDir("smithers-identity-claude-");
-  writeFileSync(join(dir, ".claude.json"), JSON.stringify({ oauthAccount: { emailAddress: email, accountUuid } }));
+  writeFileSync(
+    join(dir, ".claude.json"),
+    JSON.stringify({ oauthAccount: { emailAddress: email, accountUuid, organizationUuid } }),
+  );
   return dir;
 }
 
@@ -85,6 +88,14 @@ describe("findDuplicateAccounts", () => {
   test("distinct subscriptions are not duplicates", () => {
     const first = claudeDir("a@example.com", "uuid-a");
     const second = claudeDir("b@example.com", "uuid-b");
+    const accounts = [account("claude-1", "claude-code", first)];
+    const identity = readAccountIdentity("claude-code", second);
+    expect(findDuplicateAccounts(identity, "claude-code", accounts, "claude-2")).toEqual([]);
+  });
+
+  test("organization id distinguishes subscriptions that share an email", () => {
+    const first = claudeDir("same@example.com", "uuid-a", "org-a");
+    const second = claudeDir("same@example.com", "uuid-b", "org-b");
     const accounts = [account("claude-1", "claude-code", first)];
     const identity = readAccountIdentity("claude-code", second);
     expect(findDuplicateAccounts(identity, "claude-code", accounts, "claude-2")).toEqual([]);

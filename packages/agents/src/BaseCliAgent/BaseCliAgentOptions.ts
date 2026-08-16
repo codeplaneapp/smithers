@@ -18,6 +18,14 @@ export type BaseCliAgentOptions = {
   idleTimeoutMs?: number;
   maxOutputBytes?: number;
   extraArgs?: string[];
+  /** Called after a provider quota error is classified. */
+  onQuotaExceeded?: (details: {
+    agentId?: string;
+    agentEngine?: string;
+    agentModel?: string;
+    quotaResetAtMs?: number;
+    underlying?: string;
+  }) => void;
   /**
    * First-class reasoning effort, shared across every CLI adapter so a workflow
    * can request it uniformly and the engine can persist/display it per attempt.
