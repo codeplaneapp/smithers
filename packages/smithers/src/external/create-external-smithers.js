@@ -8,7 +8,8 @@
 // @smithers-type-exports-end
 
 import React from "react";
-import { loadBunSqliteDatabase, loadBunSqliteDrizzle } from "@smthrs/db/bunSqliteRuntime";
+import { loadBunSqliteDrizzle } from "@smthrs/db/bunSqliteRuntime";
+import { acquireSqliteConnection } from "@smthrs/db/sqliteConnectionRegistry";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { zodToTable } from "@smthrs/db/zodToTable";
 import { syncZodTableSchema } from "@smthrs/db/zodToCreateTableSQL";
@@ -82,19 +83,23 @@ export function createExternalSmithers(config) {
   const dbPath = config.dbPath
     ? resolve(config.dbPath)
     : join(mkdtempSync(join(tmpdir(), "smithers-ext-")), "smithers.db");
-  const Database = loadBunSqliteDatabase();
-  const sqlite = new Database(dbPath);
-  sqlite.run("PRAGMA journal_mode = WAL");
-  // 30s timeout: concurrent worktrees each spawn agent processes that all write
-  // to smithers.db simultaneously. 5s is too short and causes SQLITE_IOERR_VNODE
-  // on macOS when the VFS can't acquire the WAL shared-memory lock in time.
-  sqlite.run("PRAGMA busy_timeout = 30000");
-  // NORMAL is safe in WAL mode (no data loss on crash) and reduces fsync
-  // stalls that contribute to WAL checkpoint contention across processes.
-  sqlite.run("PRAGMA synchronous = NORMAL");
-  // Ensure no exclusive lock is held, allowing multiple readers/writers.
-  sqlite.run("PRAGMA locking_mode = NORMAL");
-  sqlite.run("PRAGMA foreign_keys = ON");
+  // One connection per database file per process; see `acquireSqliteConnection`.
+  const sqlite = acquireSqliteConnection(dbPath, {
+    configure: (connection) => {
+      // 30s timeout: concurrent worktrees each spawn agent processes that all write
+      // to smithers.db simultaneously. 5s is too short and causes SQLITE_IOERR_VNODE
+      // on macOS when the VFS can't acquire the WAL shared-memory lock in time.
+      // Must precede the journal_mode change: switching journal modes takes locks.
+      connection.run("PRAGMA busy_timeout = 30000");
+      connection.run("PRAGMA journal_mode = WAL");
+      // NORMAL is safe in WAL mode (no data loss on crash) and reduces fsync
+      // stalls that contribute to WAL checkpoint contention across processes.
+      connection.run("PRAGMA synchronous = NORMAL");
+      // Ensure no exclusive lock is held, allowing multiple readers/writers.
+      connection.run("PRAGMA locking_mode = NORMAL");
+      connection.run("PRAGMA foreign_keys = ON");
+    },
+  });
   let dbClosed = false;
   const closeDb = () => {
     if (dbClosed) return;

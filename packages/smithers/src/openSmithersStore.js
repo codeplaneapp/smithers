@@ -15,35 +15,50 @@ const RUNS_TABLE_PROBE_BUSY_TIMEOUT_MS = 500;
 const RUNS_TABLE_PROBE_MAX_ATTEMPTS = 3;
 
 async function openSqliteStore(dbPath, opts = {}) {
-  const { Database } = await import("bun:sqlite");
+  const { acquireSqliteConnection } = await import("@smthrs/db/sqliteConnectionRegistry");
   const { drizzle } = await import("drizzle-orm/bun-sqlite");
-  const sqlite = new Database(dbPath);
+  // Read mode executes NO DDL: a `smithers ps` must not mutate the store
+  // (spec: singleton-gateway.md decision 9). A store written by an older
+  // smithers that lacks a newer table fails loud on the query instead of
+  // being silently upgraded by a passing reader; any write path (or
+  // `smithers migrate`) brings the schema forward.
+  //
+  // Transient CLI readers (inspect/ps/tui/logs) must NOT disturb the WAL that a
+  // concurrent `smithers up` writer depends on. They can't use {readonly:true}
+  // (SQLite can't read a WAL db read-only — it needs write access to the -shm
+  // wal-index to register as a reader, so a read-only handle would miss all
+  // un-checkpointed WAL data). Instead, disable THIS connection's auto- and
+  // close-time checkpointing so it never truncates the shared WAL/-shm out from
+  // under the live writer (the writer owns checkpointing). This is what curbs
+  // the SQLITE_IOERR_VNODE churn on macOS without breaking WAL visibility.
+  // busy_timeout lets a brief writer lock clear instead of erroring immediately.
+  //
+  // Both pragmas are connection-scoped, so they only apply when this call is
+  // what opens the connection. When the process ALREADY holds this store open
+  // (a gateway answering an in-process read), the reader shares that single
+  // connection: no second synchronous handle, so no event-loop-blocking busy
+  // wait, and no separate WAL reader to keep out of the writer's way either.
+  const sqlite = acquireSqliteConnection(dbPath, {
+    configure: (connection) => {
+      if (!opts.read) return;
+      connection.run("PRAGMA busy_timeout = 30000");
+      connection.run("PRAGMA wal_autocheckpoint = 0");
+      // Match the write path's connection baseline so a writer that later
+      // shares this connection still gets foreign-key enforcement.
+      connection.run("PRAGMA foreign_keys = ON");
+    },
+  });
   const db = drizzle(sqlite);
-  if (opts.read) {
-    // Read mode executes NO DDL: a `smithers ps` must not mutate the store
-    // (spec: singleton-gateway.md decision 9). A store written by an older
-    // smithers that lacks a newer table fails loud on the query instead of
-    // being silently upgraded by a passing reader; any write path (or
-    // `smithers migrate`) brings the schema forward.
-    //
-    // Transient CLI readers (inspect/ps/tui/logs) must NOT disturb the WAL that a
-    // concurrent `smithers up` writer depends on. They can't use {readonly:true}
-    // (SQLite can't read a WAL db read-only — it needs write access to the -shm
-    // wal-index to register as a reader, so a read-only handle would miss all
-    // un-checkpointed WAL data). Instead, disable THIS connection's auto- and
-    // close-time checkpointing so it never truncates the shared WAL/-shm out from
-    // under the live writer (the writer owns checkpointing). This is what curbs
-    // the SQLITE_IOERR_VNODE churn on macOS without breaking WAL visibility.
-    // busy_timeout lets a brief writer lock clear instead of erroring immediately.
-    sqlite.run("PRAGMA busy_timeout = 30000");
-    sqlite.run("PRAGMA wal_autocheckpoint = 0");
-  } else {
+  if (!opts.read) {
     ensureSmithersTables(db);
   }
+  let released = false;
   return {
     adapter: new SmithersDb(db),
     db,
     cleanup: () => {
+      if (released) return;
+      released = true;
       try {
         sqlite.close();
       } catch {
@@ -80,12 +95,15 @@ async function sqliteHasRunsTable(dbPath) {
   if (!existsSync(dbPath)) {
     return false;
   }
-  const { Database } = await import("bun:sqlite");
+  const { acquireSqliteConnection } = await import("@smthrs/db/sqliteConnectionRegistry");
   for (let attempt = 1; ; attempt += 1) {
     let sqlite;
     try {
-      sqlite = new Database(dbPath);
-      sqlite.run(`PRAGMA busy_timeout = ${RUNS_TABLE_PROBE_BUSY_TIMEOUT_MS}`);
+      // Reuses the process's existing handle when there is one, so the probe
+      // can never contend with (or block) a writer living in this same process.
+      sqlite = acquireSqliteConnection(dbPath, {
+        configure: (connection) => connection.run(`PRAGMA busy_timeout = ${RUNS_TABLE_PROBE_BUSY_TIMEOUT_MS}`),
+      });
       const row = sqlite.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_runs'").get();
       return Boolean(row);
     } catch (error) {

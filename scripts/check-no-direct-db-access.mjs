@@ -16,14 +16,16 @@ const sanctionedSourceRoots = new Set(["packages/db/src", "packages/gateway/src"
 const directDbPattern =
   /new Database\(|new \(loadBunSqliteDatabase\(\)\)\(|new pg\.Client\(|new pg\.Pool\(|PGlite\.create\(/g;
 
+// The bun:sqlite entries here dropped when every in-process sqlite open moved
+// behind `@smthrs/db/sqliteConnectionRegistry` (issue #1577): one refcounted
+// connection per database file per process. What remains in these files is the
+// Postgres/PGlite constructors, which the registry does not cover.
 const allowedDirectDbAccess = new Map([
-  ["packages/engine/src/effect/builder.js", 3],
-  ["packages/smithers/src/openSmithersStore.js", 4],
+  ["packages/engine/src/effect/builder.js", 2],
+  ["packages/smithers/src/openSmithersStore.js", 2],
   ["packages/smithers/src/migrateSmithersStore.js", 7],
   ["packages/smithers/src/resolveSmithersBackendChoice.js", 3],
-  ["packages/smithers/src/create.js", 3],
-  ["packages/smithers/src/external/create-external-smithers.js", 1],
-  ["apps/cli/src/openInlineWorkflowStore.js", 1],
+  ["packages/smithers/src/create.js", 2],
 ]);
 
 /** @param {string} path */

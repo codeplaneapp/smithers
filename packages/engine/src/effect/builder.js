@@ -1,16 +1,11 @@
 import { createRequire } from "node:module";
 
-// bun:sqlite is Bun-only, and createBuilderDb (the only user) runs only on the
+// drizzle-orm/bun-sqlite is Bun-only, and createBuilderDb (the only user) runs only on the
 // Bun sqlite path. Load it lazily via createRequire (which stays synchronous, so
 // createBuilderDb keeps its sync signature) so this module -- and therefore the
 // engine that transitively imports it -- IMPORTS on Node / V8 isolates, where
 // createBuilderDb is never called. Fixes engine load under a Node serverless host.
 const requireBun = createRequire(import.meta.url);
-/** @type {typeof import("bun:sqlite").Database | undefined} */
-let BunDatabase;
-function loadBunDatabase() {
-  return (BunDatabase ??= requireBun("bun:sqlite").Database);
-}
 /** @type {typeof import("drizzle-orm/bun-sqlite").drizzle | undefined} */
 let bunDrizzle;
 function loadBunDrizzle() {
@@ -21,6 +16,7 @@ import { Context, Duration, Effect, Layer, Result, Schedule, Schema, SchemaParse
 import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import React from "react";
 import { SmithersDb } from "@smthrs/db/adapter";
+import { acquireSqliteConnection } from "@smthrs/db/sqliteConnectionRegistry";
 import { runWorkflow } from "../engine.js";
 import { ignoreSyncError } from "@smthrs/driver/interop";
 import { requireTaskRuntime } from "@smthrs/driver/task-runtime";
@@ -700,19 +696,26 @@ function createInputTable() {
  * @param {BuilderStepHandle[]} handles
  */
 function createBuilderDb(filename, handles) {
-  const Database = loadBunDatabase();
-  const sqlite = new Database(filename);
-  sqlite.run("PRAGMA journal_mode = WAL");
-  // 30s timeout: concurrent worktrees each spawn agent processes that all write
-  // to smithers.db simultaneously. 5s is too short and causes SQLITE_IOERR_VNODE
-  // on macOS when the VFS can't acquire the WAL shared-memory lock in time.
-  sqlite.run("PRAGMA busy_timeout = 30000");
-  // NORMAL is safe in WAL mode (no data loss on crash) and reduces fsync
-  // stalls that contribute to WAL checkpoint contention across processes.
-  sqlite.run("PRAGMA synchronous = NORMAL");
-  // Ensure no exclusive lock is held, allowing multiple readers/writers.
-  sqlite.run("PRAGMA locking_mode = NORMAL");
-  sqlite.run("PRAGMA foreign_keys = ON");
+  // One connection per database file per process; see `acquireSqliteConnection`.
+  // A builder run inside a host that already holds this store open would
+  // otherwise add a second synchronous handle and block the event loop for the
+  // full busy_timeout the first time the two contend.
+  const sqlite = acquireSqliteConnection(filename, {
+    configure: (connection) => {
+      // 30s timeout: concurrent worktrees each spawn agent processes that all write
+      // to smithers.db simultaneously. 5s is too short and causes SQLITE_IOERR_VNODE
+      // on macOS when the VFS can't acquire the WAL shared-memory lock in time.
+      // Must precede the journal_mode change: switching journal modes takes locks.
+      connection.run("PRAGMA busy_timeout = 30000");
+      connection.run("PRAGMA journal_mode = WAL");
+      // NORMAL is safe in WAL mode (no data loss on crash) and reduces fsync
+      // stalls that contribute to WAL checkpoint contention across processes.
+      connection.run("PRAGMA synchronous = NORMAL");
+      // Ensure no exclusive lock is held, allowing multiple readers/writers.
+      connection.run("PRAGMA locking_mode = NORMAL");
+      connection.run("PRAGMA foreign_keys = ON");
+    },
+  });
   sqlite.run(`CREATE TABLE IF NOT EXISTS "input" (run_id TEXT PRIMARY KEY, payload TEXT)`);
   for (const handle of handles) {
     sqlite.run(

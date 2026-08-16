@@ -3,15 +3,21 @@ import { SmithersError } from "@smthrs/errors";
 
 /** @param {string} cwd @param {Record<string, import("zod").ZodTypeAny>} schemas */
 export async function openInlineWorkflowStore(cwd, schemas) {
-  const [{ Database }, { drizzle }, { sqliteTable, text }, { zodToTable }, { syncZodTableSchema }, { camelToSnake }] =
-    await Promise.all([
-      import("bun:sqlite"),
-      import("drizzle-orm/bun-sqlite"),
-      import("drizzle-orm/sqlite-core"),
-      import("@smthrs/db/zodToTable"),
-      import("@smthrs/db/zodToCreateTableSQL"),
-      import("@smthrs/db/utils/camelToSnake"),
-    ]);
+  const [
+    { acquireSqliteConnection },
+    { drizzle },
+    { sqliteTable, text },
+    { zodToTable },
+    { syncZodTableSchema },
+    { camelToSnake },
+  ] = await Promise.all([
+    import("@smthrs/db/sqliteConnectionRegistry"),
+    import("drizzle-orm/bun-sqlite"),
+    import("drizzle-orm/sqlite-core"),
+    import("@smthrs/db/zodToTable"),
+    import("@smthrs/db/zodToCreateTableSQL"),
+    import("@smthrs/db/utils/camelToSnake"),
+  ]);
   const { findSmithersAnchorDir } = await import("smthrs/findSmithersAnchorDir");
   const { resolveSmithersBackendPreference } = await import("smthrs/resolveSmithersBackendChoice");
   const anchorDir = findSmithersAnchorDir(cwd);
@@ -28,12 +34,19 @@ export async function openInlineWorkflowStore(cwd, schemas) {
         `Pin sqlite for this workspace to run inline workflows such as \`smithers oneshot\`: set SMITHERS_BACKEND=sqlite, ` +
         `add \`backend: "sqlite"\` to .smithers/smithers.config.ts, or write {"backend":"sqlite"} to .smithers/backend.json.`,
     );
-  const sqlite = new Database(resolve(anchorDir ?? cwd, "smithers.db"));
-  sqlite.run("PRAGMA journal_mode = WAL");
-  sqlite.run("PRAGMA busy_timeout = 30000");
-  sqlite.run("PRAGMA synchronous = NORMAL");
-  sqlite.run("PRAGMA locking_mode = NORMAL");
-  sqlite.run("PRAGMA foreign_keys = ON");
+  // One connection per database file per process; see `acquireSqliteConnection`.
+  // An inline workflow runs inside a CLI process that may already hold this
+  // store open (`smithers up`, the gateway), and a second synchronous handle
+  // would block the event loop for the whole busy_timeout on first contention.
+  const sqlite = acquireSqliteConnection(resolve(anchorDir ?? cwd, "smithers.db"), {
+    configure: (connection) => {
+      connection.run("PRAGMA busy_timeout = 30000");
+      connection.run("PRAGMA journal_mode = WAL");
+      connection.run("PRAGMA synchronous = NORMAL");
+      connection.run("PRAGMA locking_mode = NORMAL");
+      connection.run("PRAGMA foreign_keys = ON");
+    },
+  });
   sqlite.exec(`CREATE TABLE IF NOT EXISTS "input" (run_id TEXT PRIMARY KEY, payload TEXT)`);
   const inputTable = sqliteTable("input", {
     runId: text("run_id").primaryKey(),
