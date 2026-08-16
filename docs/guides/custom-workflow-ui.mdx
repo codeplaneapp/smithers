@@ -3,7 +3,7 @@ title: Custom Workflow UIs
 description: Build a first-class browser UI for your workflow with bunx smthrs ui, the Gateway, gateway-client, and gateway-react.
 ---
 
-A custom workflow UI is a small browser bundle that *belongs to your workflow*
+A custom workflow UI is a small browser bundle that _belongs to your workflow_
 and talks to the Smithers Gateway through its domain API, RPC API, and live
 event streams. Declare it in the workflow with `<UI entry="../ui/<workflow>.tsx"
 />`, keep the browser code in `.smithers/ui/<workflow>.tsx`, and the Gateway
@@ -17,11 +17,18 @@ gateway-ui widgets and the gateway-react hooks this guide builds on.
 
 This guide covers the whole shape: vanilla SDK boot, React hooks, the boot config the iframe receives, live event subscriptions (with automatic pushed updates and resilient reconnection), node-output and diff reads, approvals and signals, the crucial stale-data-free update model to avoid data bleeding across runs, DevTools observability streams, sample tests, and the same-origin proxy patterns you reach for when custom UIs run through bunx smthrs ui and the Gateway.
 
-For the underlying RPC and event protocol, see [Gateway](/integrations/gateway). For the TanStack DB collection layer that backs the React hooks, see [Sync](/guides/sync). For two compact end-to-end examples, see [Workflow UI (React)](/examples/workflow-ui-react) and [Workflow UI (Vanilla)](/examples/workflow-ui-vanilla). For the *visual* language every workflow UI shares (tokens, type, depth, motion) so they look like one product, see [Workflow UI Design Principles](/guides/workflow-ui-design).
+For the underlying RPC and event protocol, see [Gateway](/integrations/gateway). For the TanStack DB collection layer that backs the React hooks, see [Sync](/guides/sync). For two compact end-to-end examples, see [Workflow UI (React)](/examples/workflow-ui-react) and [Workflow UI (Vanilla)](/examples/workflow-ui-vanilla). For the _visual_ language every workflow UI shares (tokens, type, depth, motion) so they look like one product, see [Workflow UI Design Principles](/guides/workflow-ui-design).
 
-<Note>API reference: [Gateway React](/reference/gateway-react) lists every hook and component, its options, and links to source and tests.</Note>
+<Note>
+  API reference: [Gateway React](/reference/gateway-react) lists every hook and component, its options, and links to
+  source and tests.
+</Note>
 
-<Tip>Want a dashboard without wiring hooks by hand? [`@smthrs/gateway-ui`](/reference/gateway-ui) ships prebuilt components (`RunList`, `RunTree`, `RunEventLog`, `ApprovalPanel`, `LaunchButton`, and more) that each connect to the Gateway by themselves. Compose a full UI in a dozen lines, then drop to the hooks below only where you need something custom.</Tip>
+<Tip>
+  Want a dashboard without wiring hooks by hand? [`@smthrs/gateway-ui`](/reference/gateway-ui) ships prebuilt components
+  (`RunList`, `RunTree`, `RunEventLog`, `ApprovalPanel`, `LaunchButton`, and more) that each connect to the Gateway by
+  themselves. Compose a full UI in a dozen lines, then drop to the hooks below only where you need something custom.
+</Tip>
 
 Local launch is one command:
 
@@ -45,14 +52,14 @@ Three pieces collaborate:
 
 ## Two SDKs: pick by appetite
 
-| | `smthrs/gateway-client` | `smthrs/gateway-react` |
-|---|---|---|
-| **Footprint** | One zero-dep class, no framework | React 19 + ReactDOM + hooks |
-| **Boot** | `new SmithersGatewayClient()` | `createGatewayReactRoot(<App />)` |
-| **Live events** | `streamRunEventsResilient` async generator | `useGatewayRunEvents(runId)` over TanStack DB |
-| **Reads** | `client.getNodeOutput({...})` and REST domain calls | `useGateway*` hooks or `useLiveQuery` over collections |
-| **Writes** | `client.submitApproval(...)` and REST domain writes | `useGatewayActions()` or collection mutation handlers |
-| **Use when** | You want one tiny bundle, or you already own your render layer (Solid, Lit, vanilla DOM) | You are writing a React UI and want the stale-data-free model baked in |
+|                 | `smthrs/gateway-client`                                                                  | `smthrs/gateway-react`                                                 |
+| --------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| **Footprint**   | One zero-dep class, no framework                                                         | React 19 + ReactDOM + hooks                                            |
+| **Boot**        | `new SmithersGatewayClient()`                                                            | `createGatewayReactRoot(<App />)`                                      |
+| **Live events** | `streamRunEventsResilient` async generator                                               | `useGatewayRunEvents(runId)` over TanStack DB                          |
+| **Reads**       | `client.getNodeOutput({...})` and REST domain calls                                      | `useGateway*` hooks or `useLiveQuery` over collections                 |
+| **Writes**      | `client.submitApproval(...)` and REST domain writes                                      | `useGatewayActions()` or collection mutation handlers                  |
+| **Use when**    | You want one tiny bundle, or you already own your render layer (Solid, Lit, vanilla DOM) | You are writing a React UI and want the stale-data-free model baked in |
 
 Both SDKs talk to the same Gateway. The vanilla SDK is published as `@smthrs/gateway-client`; the React layer is `@smthrs/gateway-react` and adds providers plus hooks over the TanStack DB collections.
 
@@ -89,7 +96,12 @@ function App() {
           <CardTitle>Launch</CardTitle>
         </CardHeader>
         <div style={{ display: "flex", gap: 8 }}>
-          <Input style={{ flex: 1 }} value={prompt} onChange={(e) => setPrompt(e.currentTarget.value)} placeholder="Optional prompt..." />
+          <Input
+            style={{ flex: 1 }}
+            value={prompt}
+            onChange={(e) => setPrompt(e.currentTarget.value)}
+            placeholder="Optional prompt..."
+          />
           <Button onClick={() => void actions.launchRun({ workflow: "triage", input: { prompt } })}>Start</Button>
         </div>
       </Card>
@@ -134,9 +146,9 @@ type GatewayUiBootConfig = {
   apiVersion: "v1";
   kind: "gateway" | "workflow";
   workflowKey: string | null;
-  mountPath: string;     // where the Gateway mounted you, e.g. "/workflows/vcs"
-  rpcPath: string;       // "/v1/rpc"
-  wsPath: string;        // "/": the WebSocket path under the Gateway origin
+  mountPath: string; // where the Gateway mounted you, e.g. "/workflows/vcs"
+  rpcPath: string; // "/v1/rpc"
+  wsPath: string; // "/": the WebSocket path under the Gateway origin
   assetBasePath: string; // where to resolve relative bundle assets
   props: Record<string, unknown>; // free-form, set by `<UI props={...} />`
 };
@@ -167,9 +179,10 @@ import {
 const runId = new URLSearchParams(location.search).get("runId") ?? undefined;
 
 function App() {
-  const run = useGatewayRun(runId);                   // run record + optional runState, refetches when runId changes
-  const events = useGatewayRunEvents(runId);          // live stream, resilient reconnect, gap resync
-  const output = useGatewayNodeOutput({               // last task output, refetches when the input key changes
+  const run = useGatewayRun(runId); // run record + optional runState, refetches when runId changes
+  const events = useGatewayRunEvents(runId); // live stream, resilient reconnect, gap resync
+  const output = useGatewayNodeOutput({
+    // last task output, refetches when the input key changes
     runId,
     nodeId: "ship",
   });
@@ -177,10 +190,16 @@ function App() {
 
   return (
     <main>
-      <h1>{run.data?.workflowKey} · {run.data?.status}</h1>
+      <h1>
+        {run.data?.workflowKey} · {run.data?.status}
+      </h1>
       <button onClick={() => cancelRun({ runId: runId! })}>Cancel</button>
       <pre>{JSON.stringify(output.data?.row, null, 2)}</pre>
-      <ul>{events.events.map((f) => <li key={f.seq}>{f.event}</li>)}</ul>
+      <ul>
+        {events.events.map((f) => (
+          <li key={f.seq}>{f.event}</li>
+        ))}
+      </ul>
     </main>
   );
 }
@@ -190,22 +209,91 @@ createGatewayReactRoot(<App />);
 
 The React hooks all live in `packages/gateway-react/src` and follow one rule: **they never surface a previous run's data after the inputs change.** Collection hooks key their TanStack DB query to the current input, and RPC escape hatches still clear `data` and `error` synchronously before issuing a fresh fetch. A late response from the previous `runId` cannot repopulate the cleared state, so the UI never blinks the wrong run between transitions. See [Stale-data-free update model](#stale-data-free-update-model) for why this matters at the iframe boundary.
 
-| Hook | Returns | Notes |
-|---|---|---|
-| `useSmithersGateway()` | `SmithersGatewayClient` | Bare client; fall back to it for one-off RPC. |
-| `useGatewayRun(runId)` | `{ data: Record<string, unknown>, loading, error, refetch }` | Reads the `getRun` payload: a run record with `summary` and optional `runState: RunStateView`. Refetches when `runId` changes. Disabled when `runId` is `undefined`. |
-| `useGatewayRuns({ filter? })` | `GatewayAsyncState<Record<string, unknown>[]>` | List recent runs; `filter` accepts `status`, `limit`. |
-| `useGatewayWorkflows()` | `GatewayAsyncState<ListWorkflowsResponse>` | Powers picker UIs. |
-| `useGatewayRunEvents(runId, opts?)` | `{ events, lastHeartbeat, streaming, error }` | Live WebSocket subscription. Drops the oldest events past `maxEvents` (default 1000). |
-| `useGatewayNodeOutput({ runId, nodeId, iteration? })` | `GatewayAsyncState<Record<string, unknown>>` | Reads a finished task's row + schema. |
-| `useGatewayApprovals({ filter? })` | `GatewayAsyncState<ListApprovalsResponse>` | All gates waiting; `filter` accepts `runId`, `workflow`, `limit`. |
-| `useGatewayActions()` | Bound `submitApproval`, `submitSignal`, `cancelRun`, `resumeRun`, `rewindRun`, `cronCreate`, … | Memoized so dependent effects do not retrigger. |
-| `useGatewayRpc(method, params, opts?)` | `GatewayAsyncState<Payload>` | Escape hatch for any v1 RPC. |
-| `useGatewayExtensionResource(namespace, key, params?, opts?)` | `GatewayAsyncState<T>` | Declarative extension read/action call over `SmithersGatewayClient.extensionRpc` with the same stale-response fence as `useGatewayRpc`. |
-| `useGatewayExtensionAction(namespace, key)` | `{ call, pending, error, data }` | Imperative extension action helper backed by `extensionRpc`; generation-fenced so rapid calls cannot leave stale state. |
-| `useGatewayExtensionStream(namespace, key, params?, opts?)` | `{ frames, latest, error, streaming }` | Extension stream subscription with bounded frames, stale-frame fencing, and backoff reconnect. |
-| `useSmithersCollections()` | `{ client, collections, queryClient }` | Direct access to the TanStack DB collection registry for custom `useLiveQuery` reads. |
-| `SmithersCollectionsProvider` | React provider | Advanced provider for supplying a custom `WorkspaceMode`, `SmithersDataClient`, or `QueryClient`. |
+| Hook                                                          | Returns                                                                                        | Notes                                                                                                                                                                |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `useSmithersGateway()`                                        | `SmithersGatewayClient`                                                                        | Bare client; fall back to it for one-off RPC.                                                                                                                        |
+| `useGatewayRun(runId)`                                        | `{ data: Record<string, unknown>, loading, error, refetch }`                                   | Reads the `getRun` payload: a run record with `summary` and optional `runState: RunStateView`. Refetches when `runId` changes. Disabled when `runId` is `undefined`. |
+| `useGatewayRuns({ filter? })`                                 | `GatewayAsyncState<Record<string, unknown>[]>`                                                 | List recent runs; `filter` accepts `status`, `limit`.                                                                                                                |
+| `useGatewayWorkflows()`                                       | `GatewayAsyncState<ListWorkflowsResponse>`                                                     | Powers picker UIs.                                                                                                                                                   |
+| `useGatewayRunEvents(runId, opts?)`                           | `{ events, lastHeartbeat, streaming, error }`                                                  | Live WebSocket subscription. Drops the oldest events past `maxEvents` (default 1000).                                                                                |
+| `useGatewayNodeOutput({ runId, nodeId, iteration? })`         | `GatewayAsyncState<Record<string, unknown>>`                                                   | Reads a finished task's row + schema.                                                                                                                                |
+| `useGatewayApprovals({ filter? })`                            | `GatewayAsyncState<ListApprovalsResponse>`                                                     | All gates waiting; `filter` accepts `runId`, `workflow`, `limit`.                                                                                                    |
+| `useGatewayActions()`                                         | Bound `submitApproval`, `submitSignal`, `cancelRun`, `resumeRun`, `rewindRun`, `cronCreate`, … | Memoized so dependent effects do not retrigger.                                                                                                                      |
+| `useGatewayRpc(method, params, opts?)`                        | `GatewayAsyncState<Payload>`                                                                   | Escape hatch for any v1 RPC.                                                                                                                                         |
+| `useGatewayExtensionResource(namespace, key, params?, opts?)` | `GatewayAsyncState<T>`                                                                         | Declarative extension read/action call over `SmithersGatewayClient.extensionRpc` with the same stale-response fence as `useGatewayRpc`.                              |
+| `useGatewayExtensionAction(namespace, key)`                   | `{ call, pending, error, data }`                                                               | Imperative extension action helper backed by `extensionRpc`; generation-fenced so rapid calls cannot leave stale state.                                              |
+| `useGatewayExtensionStream(namespace, key, params?, opts?)`   | `{ frames, latest, error, streaming }`                                                         | Extension stream subscription with bounded frames, stale-frame fencing, and backoff reconnect.                                                                       |
+| `useSmithersCollections()`                                    | `{ client, collections, queryClient }`                                                         | Direct access to the TanStack DB collection registry for custom `useLiveQuery` reads.                                                                                |
+| `SmithersCollectionsProvider`                                 | React provider                                                                                 | Advanced provider for supplying a custom `WorkspaceMode`, `SmithersDataClient`, or `QueryClient`.                                                                    |
+
+## Serve pack-specific domain data
+
+When a workflow UI needs project data that is not part of the run model, put
+the server half beside the pack as `.smithers/gateway-extensions.ts`.
+`bunx smthrs gateway` loads the declaration automatically; do not start a second
+hand-written Gateway.
+
+```ts
+import { readFile, writeFile } from "node:fs/promises";
+import { isAbsolute, relative, resolve } from "node:path";
+import type { GatewayExtensionDefinition } from "smthrs";
+
+const workspaceRoot = resolve(import.meta.dir, "..");
+
+function workspacePath(value: unknown): string {
+  const file = resolve(workspaceRoot, String(value ?? ""));
+  const rel = relative(workspaceRoot, file);
+  if (rel.startsWith("..") || isAbsolute(rel)) throw new Error("Path leaves the workspace");
+  return file;
+}
+
+export default {
+  vault: {
+    title: "Vault",
+    defaultScope: "run:read",
+    resources: {
+      file: {
+        handler: async (params) => ({
+          path: String(params.path ?? ""),
+          content: await readFile(workspacePath(params.path), "utf8"),
+        }),
+      },
+    },
+    actions: {
+      save: {
+        scope: "run:write",
+        handler: async (params) => {
+          await writeFile(workspacePath(params.path), String(params.content ?? ""), "utf8");
+          return { saved: String(params.path ?? "") };
+        },
+      },
+    },
+  },
+} satisfies Record<string, GatewayExtensionDefinition>;
+```
+
+Call it from the workflow UI through the shipped hooks:
+
+```tsx
+const file = useGatewayExtensionResource<{ path: string; content: string }>("vault", "file", { path });
+const save = useGatewayExtensionAction<{ path: string; content: string }, { saved: string }>("vault", "save");
+
+await save.call({ path, content });
+```
+
+The supported declaration names are `gateway-extensions.ts`, `.tsx`, `.js`,
+and `.mjs`; the first one found in each pack wins. Local, installed-local,
+global, and installed-global packs use the same precedence as workflow
+discovery. A higher-precedence namespace wins a collision. A pack that cannot
+be imported is skipped, and an invalid namespace disables only that namespace,
+so one extension cannot prevent the Gateway from serving runs.
+
+Definitions use the existing Gateway extension contract: `resources` and
+`queries` are reads, `actions` are writes, and `streams` are subscriptions.
+Their `scope` or `defaultScope` is enforced by the same authentication path as
+built-in RPC methods. Handlers run as server code with the Gateway process's
+filesystem and network privileges, so validate every parameter and confine
+paths explicitly. Restart the Gateway after changing a declaration module.
 
 ## Vanilla SDK
 
@@ -288,7 +376,7 @@ const diff = useGatewayRpc("getNodeDiff", { runId, nodeId: "ship" });
 // diff.data: { status, files: [{ path, status, hunks?: [...] }], … }
 ```
 
-A row arrives either inline (`status: "produced"`) or as a typed `pending` / `failed` state with an optional `partial` payload on failure. Node-output hooks default to a row-shaped value that you should destructure as either the row directly *or* `{ row, schema, status }`; `.smithers/ui/vcs.tsx` shows the canonical normalizer (`rowOf(value)`).
+A row arrives either inline (`status: "produced"`) or as a typed `pending` / `failed` state with an optional `partial` payload on failure. Node-output hooks default to a row-shaped value that you should destructure as either the row directly _or_ `{ row, schema, status }`; `.smithers/ui/vcs.tsx` shows the canonical normalizer (`rowOf(value)`).
 
 ## DevTools observability streams
 
@@ -327,7 +415,11 @@ const { submitApproval } = useGatewayActions();
 return (approvals.data ?? []).map((gate) => (
   <div key={gate.nodeId}>
     <span>{gate.requestTitle ?? gate.nodeId}</span>
-    <button onClick={() => submitApproval({ runId, nodeId: gate.nodeId, iteration: gate.iteration, decision: { approved: true } })}>
+    <button
+      onClick={() =>
+        submitApproval({ runId, nodeId: gate.nodeId, iteration: gate.iteration, decision: { approved: true } })
+      }
+    >
       Approve
     </button>
   </div>
@@ -339,7 +431,7 @@ show this pattern at scale.
 
 ## Stale-data-free update model
 
-The fundamental rule across both SDKs is: **a hook or read whose inputs have changed must never surface the previous inputs' result.** Without this, a UI that switches from `runId=A` to `runId=B` momentarily shows A's data before B's fetch lands. At the iframe boundary that looks like the embed *belongs* to the wrong run, which is the most confusing failure mode possible.
+The fundamental rule across both SDKs is: **a hook or read whose inputs have changed must never surface the previous inputs' result.** Without this, a UI that switches from `runId=A` to `runId=B` momentarily shows A's data before B's fetch lands. At the iframe boundary that looks like the embed _belongs_ to the wrong run, which is the most confusing failure mode possible.
 
 `useGatewayRpc` enforces this by:
 
@@ -426,7 +518,7 @@ The server package's Gateway UI tests are the closest in-repo reference for the 
 - A dependency-free vanilla bundle that reads `?runId=` from `location.search` and renders a heading. Use it to assert the bundle path without coupling to a UI library.
 - The same demo on `gateway-react`. Drive `createGatewayReactRoot`, `useGatewayRun`, and `useGatewayActions` against the real fixture Gateway to prove the React hooks survive an iframe boundary, a stale-data transition, and a button-driven action.
 
-Register your fixture with `gateway.register("<key>", workflow, { entryFile: "/path/to/.smithers/workflows/<key>.tsx" })` and put `<UI entry="../ui/<key>.tsx" />` inside that workflow. Execute the run to completion *before* binding the port so Playwright never races the run's tree.
+Register your fixture with `gateway.register("<key>", workflow, { entryFile: "/path/to/.smithers/workflows/<key>.tsx" })` and put `<UI entry="../ui/<key>.tsx" />` inside that workflow. Execute the run to completion _before_ binding the port so Playwright never races the run's tree.
 
 ## Reference
 
