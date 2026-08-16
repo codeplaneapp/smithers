@@ -40,6 +40,7 @@ const {
   EventLog,
   ExecutionTree,
   monitorCss,
+  NodeAttemptHistoryState,
   NodeOutputState,
   NodeTranscriptState,
   RunProgressCell,
@@ -189,6 +190,24 @@ function nodeTranscriptState(overrides: Partial<Parameters<typeof NodeTranscript
   return <NodeTranscriptState lines={[]} loading={false} live={false} onRetry={() => {}} {...overrides} />;
 }
 
+function nodeAttemptHistoryState(overrides: Partial<Parameters<typeof NodeAttemptHistoryState>[0]> = {}): ReactElement {
+  return (
+    <NodeAttemptHistoryState
+      attempts={[]}
+      loading={false}
+      iteration={0}
+      nodeStatus="failed"
+      nodeFailed={true}
+      retryAvailable={true}
+      retryBusy={false}
+      retryArmed={false}
+      retryRequested={false}
+      onRetryLoad={() => {}}
+      {...overrides}
+    />
+  );
+}
+
 describe("node inspector output states", () => {
   test("renders structured output and keeps it visible when a refresh fails", async () => {
     await render(nodeOutputState({ row: { summary: "done" } }));
@@ -263,6 +282,115 @@ describe("node inspector transcript states", () => {
     );
     expect(byTestId("monitor-live-output").textContent).toContain("agent output");
     expect(byTestId("monitor-transcript-error").textContent).toContain("poll failed");
+  });
+});
+
+describe("node inspector attempt history", () => {
+  const failedAttempt = (attempt: number, retryAtMs?: number) => ({
+    iteration: 0,
+    attempt,
+    state: "failed",
+    consumesRetryBudget: true,
+    agent: attempt === 1 ? "claude · opus" : "codex · gpt-5.4",
+    error: { code: `FAIL_${attempt}`, message: `failure ${attempt}` },
+    ...(retryAtMs !== undefined ? { retryAtMs } : {}),
+  });
+
+  test("shows first failure, scheduled retry, acting agent, error, budget, and iteration", async () => {
+    await render(
+      nodeAttemptHistoryState({
+        attempts: [failedAttempt(1, 2_000)],
+        currentAttempt: 1,
+        maxAttempts: 3,
+      }),
+    );
+    expect(byTestId("monitor-attempt-summary").dataset.retryState).toBe("retrying");
+    expect(byTestId("monitor-attempt-summary").textContent).toContain("Retry scheduled as attempt 2");
+    expect(byTestId("monitor-attempt-summary").textContent).toContain("Iteration 0");
+    expect(byTestId("monitor-attempt-summary").textContent).toContain("retry budget 1 of 2 used");
+    expect(byTestId("monitor-attempt-history").textContent).toContain("claude · opus");
+    expect(byTestId("monitor-attempt-error").textContent).toContain("FAIL_1 — failure 1");
+    expect(byTestId("monitor-attempt-retry-scheduled").textContent).toContain("next attempt 2");
+  });
+
+  test("distinguishes a running later attempt, exhausted retries, and a successful retry", async () => {
+    await render(
+      nodeAttemptHistoryState({
+        attempts: [
+          failedAttempt(1),
+          { iteration: 0, attempt: 2, state: "in-progress", consumesRetryBudget: false, agent: "codex" },
+        ],
+        nodeStatus: "in-progress",
+        currentAttempt: 2,
+        maxAttempts: 3,
+        nodeFailed: false,
+        retryAvailable: false,
+      }),
+    );
+    expect(byTestId("monitor-attempt-summary").dataset.retryState).toBe("retrying");
+    expect(byTestId("monitor-attempt-summary").textContent).toContain("Retrying on attempt 2");
+    expect(document.querySelector('[data-attempt="2"]')?.getAttribute("data-current")).toBe("true");
+
+    await rerender(
+      nodeAttemptHistoryState({
+        attempts: [failedAttempt(1), failedAttempt(2)],
+        currentAttempt: 2,
+        maxAttempts: 2,
+      }),
+    );
+    expect(byTestId("monitor-attempt-summary").dataset.retryState).toBe("exhausted");
+    expect(byTestId("monitor-attempt-summary").textContent).toContain("Retry budget exhausted");
+    expect(byTestId("monitor-retry-state").textContent).toContain("Manual retry available");
+
+    await rerender(
+      nodeAttemptHistoryState({
+        attempts: [
+          failedAttempt(1),
+          { iteration: 0, attempt: 2, state: "finished", consumesRetryBudget: false, agent: "codex" },
+        ],
+        nodeStatus: "finished",
+        currentAttempt: 2,
+        maxAttempts: 3,
+        nodeFailed: false,
+        retryAvailable: false,
+      }),
+    );
+    expect(byTestId("monitor-attempt-summary").dataset.retryState).toBe("recovered");
+    expect(byTestId("monitor-attempt-summary").textContent).toContain("Recovered on attempt 2");
+  });
+
+  test("makes manual retry unavailable, confirmation, busy, requested, and error states explicit", async () => {
+    const attempts = [failedAttempt(1)];
+    await render(nodeAttemptHistoryState({ attempts, maxAttempts: 1, retryAvailable: false }));
+    expect(byTestId("monitor-retry-state").textContent).toContain("unavailable while the run is active");
+
+    await rerender(nodeAttemptHistoryState({ attempts, maxAttempts: 1, retryArmed: true }));
+    expect(byTestId("monitor-retry-state").textContent).toContain("Confirmation required");
+
+    await rerender(nodeAttemptHistoryState({ attempts, maxAttempts: 1, retryBusy: true }));
+    expect(byTestId("monitor-retry-state").textContent).toContain("in progress");
+
+    await rerender(nodeAttemptHistoryState({ attempts, maxAttempts: 1, retryRequested: true }));
+    expect(byTestId("monitor-retry-state").textContent).toContain("waiting for the next attempt");
+
+    await rerender(nodeAttemptHistoryState({ attempts, maxAttempts: 1, retryError: new Error("gateway refused") }));
+    expect(byTestId("monitor-retry-state").getAttribute("role")).toBe("alert");
+    expect(byTestId("monitor-retry-state").textContent).toContain("gateway refused");
+  });
+
+  test("keeps prior rows visible when refresh fails and makes the history query retryable", async () => {
+    let retries = 0;
+    await render(
+      nodeAttemptHistoryState({
+        attempts: [failedAttempt(1)],
+        error: new Error("attempts unavailable"),
+        onRetryLoad: () => retries++,
+      }),
+    );
+    expect(byTestId("monitor-attempt-history").textContent).toContain("Attempt 1");
+    expect(byTestId("monitor-attempt-history-error").textContent).toContain("attempts unavailable");
+    await click(byTestId("monitor-attempt-history-retry"));
+    expect(retries).toBe(1);
   });
 });
 
@@ -354,7 +482,7 @@ describe("remaining monitor control migrations", () => {
     expect(more.getAttribute("aria-expanded")).toBe("true");
   });
 
-  test("tree controls expose shared active and disabled states", async () => {
+  test("tree controls stay shared while historical selection remains local", async () => {
     const selected: string[] = [];
     const task = { key: "task#0", id: "task", name: "Task", kind: "task", status: "finished", children: [] };
     const workflow = {
@@ -389,10 +517,14 @@ describe("remaining monitor control migrations", () => {
     )!;
     expect(taskRow.getAttribute("data-slot")).toBe("row-button");
     expect(taskRow.getAttribute("data-active")).toBe("true");
-    await act(async () => taskRow.focus());
-    expect(document.activeElement).toBe(taskRow);
+    expect(taskRow.tabIndex).toBe(-1);
+    const tree = byTestId("monitor-tree");
+    await act(async () => tree.focus());
+    expect(document.activeElement).toBe(tree);
+    expect(tree.getAttribute("aria-activedescendant")).toBe(taskRow.closest('[role="treeitem"]')?.id);
     await click(taskRow);
     expect(selected).toEqual(["task"]);
+    expect(document.activeElement).toBe(tree);
 
     await rerender(
       <ExecutionTree
@@ -403,12 +535,14 @@ describe("remaining monitor control migrations", () => {
         frameOverride={{ root: workflow, loading: false }}
       />,
     );
-    const disabledTask = [...document.querySelectorAll<HTMLButtonElement>('[data-testid="monitor-tree-node"]')].find(
+    const historicalTask = [...document.querySelectorAll<HTMLButtonElement>('[data-testid="monitor-tree-node"]')].find(
       (row) => row.textContent?.includes("Task"),
     )!;
-    expect(disabledTask.disabled).toBe(true);
-    await click(disabledTask);
+    expect(historicalTask.disabled).toBe(false);
+    expect(historicalTask.getAttribute("aria-label")).toContain("Select historical node");
+    await click(historicalTask);
     expect(selected).toEqual(["task"]);
+    expect(historicalTask.closest('[role="treeitem"]')?.getAttribute("aria-selected")).toBe("true");
   });
 
   test("timeline rows are shared RowButtons with selected state and preserved activation", async () => {
@@ -1084,6 +1218,197 @@ describe("event log accessibility", () => {
   });
 });
 
+const accessibleTaskA = {
+  key: "task-a#0",
+  id: "task-a",
+  name: "Task A",
+  kind: "task",
+  status: "finished",
+  children: [],
+};
+const accessibleTaskB = {
+  key: "task-b#0",
+  id: "task-b",
+  name: "Task B",
+  kind: "approval",
+  status: "waiting",
+  children: [],
+};
+const accessibleSequence = {
+  key: "sequence#0",
+  id: "sequence",
+  name: "Build sequence",
+  kind: "sequence",
+  status: "running",
+  children: [accessibleTaskA, accessibleTaskB],
+};
+const accessibleTaskC = {
+  key: "task-c#0",
+  id: "task-c",
+  name: "Task C",
+  kind: "task",
+  status: "queued",
+  children: [],
+};
+const accessibleRoot = {
+  key: "workflow#0",
+  id: "workflow",
+  name: "Workflow",
+  kind: "workflow",
+  status: "running",
+  children: [accessibleSequence, accessibleTaskC],
+};
+const accessibleNodes = [accessibleRoot, accessibleSequence, accessibleTaskA, accessibleTaskB, accessibleTaskC];
+
+function AccessibleTreeHarness({
+  asXml = false,
+  historical = false,
+  onSelect,
+}: {
+  asXml?: boolean;
+  historical?: boolean;
+  onSelect?: (nodeId: string) => void;
+}) {
+  const [selectedKey, setSelectedKey] = useState<string | undefined>(undefined);
+  return (
+    <ExecutionTree
+      runId="run-accessible-tree"
+      treeQuery={{
+        root: accessibleRoot,
+        nodes: accessibleNodes,
+        status: "running",
+        isLoading: false,
+        error: undefined,
+      }}
+      selectedNodeKey={selectedKey}
+      onSelectNode={(node) => {
+        setSelectedKey(node.key ?? node.id);
+        onSelect?.(node.id ?? "");
+      }}
+      frameOverride={historical ? { root: accessibleRoot, loading: false } : undefined}
+      asXml={asXml}
+    />
+  );
+}
+
+function activeTreeItem(tree: HTMLElement): HTMLElement {
+  const id = tree.getAttribute("aria-activedescendant");
+  if (!id) throw new Error("tree has no active descendant");
+  const item = document.getElementById(id);
+  if (!item) throw new Error(`missing active treeitem ${id}`);
+  return item;
+}
+
+function directTreeItems(group: Element): HTMLElement[] {
+  return [...group.children].filter((child) => child.getAttribute("role") === "treeitem") as HTMLElement[];
+}
+
+describe("execution tree accessibility", () => {
+  test("exposes a complete tree hierarchy and supports the APG keyboard model", async () => {
+    const selected: string[] = [];
+    await render(<AccessibleTreeHarness onSelect={(nodeId) => selected.push(nodeId)} />);
+
+    const tree = byTestId("monitor-tree");
+    expect(tree.getAttribute("role")).toBe("tree");
+    expect(tree.getAttribute("aria-label")).toBe("Execution tree");
+    expect(tree.getAttribute("aria-orientation")).toBe("vertical");
+    expect(tree.tabIndex).toBe(0);
+    expect([...tree.querySelectorAll<HTMLElement>("button")].every((button) => button.tabIndex === -1)).toBe(true);
+
+    const items = [...tree.querySelectorAll<HTMLElement>('[role="treeitem"]')];
+    expect(items).toHaveLength(5);
+    const rootItem = items.find((item) => item.getAttribute("aria-label")?.startsWith("Workflow,"))!;
+    const sequenceItem = items.find((item) => item.getAttribute("aria-label")?.startsWith("Build sequence,"))!;
+    const taskAItem = items.find((item) => item.getAttribute("aria-label")?.startsWith("Task A,"))!;
+    const taskCItem = items.find((item) => item.getAttribute("aria-label")?.startsWith("Task C,"))!;
+
+    expect(rootItem.getAttribute("aria-level")).toBe("1");
+    expect(rootItem.getAttribute("aria-posinset")).toBe("1");
+    expect(rootItem.getAttribute("aria-setsize")).toBe("1");
+    expect(rootItem.getAttribute("aria-expanded")).toBe("true");
+    expect(rootItem.getAttribute("aria-selected")).toBe("false");
+    expect(rootItem.getAttribute("aria-label")).toContain("workflow");
+    expect(sequenceItem.getAttribute("aria-level")).toBe("2");
+    expect(sequenceItem.getAttribute("aria-posinset")).toBe("1");
+    expect(sequenceItem.getAttribute("aria-setsize")).toBe("2");
+    expect(sequenceItem.getAttribute("aria-label")).toContain("runs children in order");
+    expect(taskAItem.getAttribute("aria-level")).toBe("3");
+    expect(taskAItem.getAttribute("aria-posinset")).toBe("1");
+    expect(taskAItem.getAttribute("aria-setsize")).toBe("2");
+    expect(taskCItem.getAttribute("aria-posinset")).toBe("2");
+
+    const rootGroup = [...rootItem.children].find((child) => child.getAttribute("role") === "group")!;
+    const sequenceGroup = [...sequenceItem.children].find((child) => child.getAttribute("role") === "group")!;
+    expect(directTreeItems(rootGroup)).toHaveLength(2);
+    expect(directTreeItems(sequenceGroup)).toHaveLength(2);
+    const rootToggle = rootItem.querySelector<HTMLElement>('[data-testid="monitor-tree-toggle"]')!;
+    expect(rootToggle.getAttribute("aria-label")).toBe("Collapse workflow Workflow");
+    expect(document.getElementById(rootToggle.getAttribute("aria-controls")!)).toBe(rootGroup);
+
+    await act(async () => tree.focus());
+    expect(document.activeElement).toBe(tree);
+    expect(activeTreeItem(tree)).toBe(rootItem);
+
+    await keydown(tree, "ArrowDown");
+    expect(activeTreeItem(tree)).toBe(sequenceItem);
+    await keydown(tree, "ArrowUp");
+    expect(activeTreeItem(tree)).toBe(rootItem);
+    await keydown(tree, "ArrowDown");
+    expect(activeTreeItem(tree)).toBe(sequenceItem);
+    await keydown(tree, "ArrowRight");
+    expect(activeTreeItem(tree).getAttribute("aria-label")).toStartWith("Task A,");
+    await keydown(tree, "ArrowLeft");
+    expect(activeTreeItem(tree)).toBe(sequenceItem);
+    await keydown(tree, "ArrowLeft");
+    expect(sequenceItem.getAttribute("aria-expanded")).toBe("false");
+    expect(tree.querySelectorAll('[role="treeitem"]')).toHaveLength(3);
+    await keydown(tree, "ArrowRight");
+    expect(sequenceItem.getAttribute("aria-expanded")).toBe("true");
+    await keydown(tree, "ArrowRight");
+    expect(activeTreeItem(tree).getAttribute("aria-label")).toStartWith("Task A,");
+    await keydown(tree, "End");
+    expect(activeTreeItem(tree).getAttribute("aria-label")).toStartWith("Task C,");
+    await keydown(tree, "Home");
+    expect(activeTreeItem(tree)).toBe(rootItem);
+    await keydown(tree, "Enter");
+    expect(rootItem.getAttribute("aria-selected")).toBe("true");
+    expect(selected).toEqual(["workflow"]);
+  });
+
+  test("preserves tree keyboard and selection semantics in historical XML", async () => {
+    const externalSelections: string[] = [];
+    await render(<AccessibleTreeHarness asXml historical onSelect={(nodeId) => externalSelections.push(nodeId)} />);
+
+    const tree = byTestId("monitor-tree-xml");
+    expect(tree.getAttribute("role")).toBe("tree");
+    expect(tree.getAttribute("aria-label")).toBe("Execution tree XML");
+    expect(tree.querySelectorAll('[role="treeitem"]')).toHaveLength(5);
+    expect(tree.querySelectorAll('[role="group"]')).toHaveLength(2);
+    expect(
+      [...tree.querySelectorAll<HTMLElement>('[data-testid="monitor-xml-node"]')].every((button) =>
+        button.getAttribute("aria-label")?.startsWith("Select historical node"),
+      ),
+    ).toBe(true);
+
+    await act(async () => tree.focus());
+    await keydown(tree, "End");
+    expect(activeTreeItem(tree).getAttribute("aria-label")).toStartWith("Task C,");
+    await keydown(tree, "Enter");
+    expect(activeTreeItem(tree).getAttribute("aria-selected")).toBe("true");
+    expect(externalSelections).toEqual([]);
+
+    await keydown(tree, "ArrowLeft");
+    expect(activeTreeItem(tree).getAttribute("aria-label")).toStartWith("Workflow,");
+    await keydown(tree, "ArrowLeft");
+    expect(tree.querySelectorAll('[role="treeitem"]')).toHaveLength(1);
+    expect(activeTreeItem(tree).getAttribute("aria-expanded")).toBe("false");
+    await keydown(tree, "ArrowRight");
+    expect(tree.querySelectorAll('[role="treeitem"]')).toHaveLength(5);
+    await keydown(tree, "ArrowRight");
+    expect(activeTreeItem(tree).getAttribute("aria-label")).toStartWith("Build sequence,");
+  });
+});
+
 describe("execution tree unavailable states", () => {
   const historicalRoot = {
     key: "workflow#0",
@@ -1200,12 +1525,17 @@ describe("execution tree unavailable states", () => {
 });
 
 describe("monitor theme contract", () => {
-  test("execution views expose named focusable regions without claiming an incomplete ARIA tree", () => {
-    expect(monitorSource).not.toContain('role="tree"');
-    expect(monitorSource).not.toContain('role="treeitem"');
+  test("execution views expose the complete composite tree contract", () => {
+    expect(monitorSource).toContain('role="tree"');
+    expect(monitorSource).toContain('role="treeitem"');
+    expect(monitorSource).toContain('role="group"');
     expect(monitorSource).toContain('aria-label="Execution tree"');
     expect(monitorSource).toContain('aria-label="Execution tree XML"');
+    expect(monitorSource).toContain("aria-activedescendant");
+    expect(monitorSource).toContain("aria-posinset");
+    expect(monitorSource).toContain("aria-setsize");
     expect(monitorSource).toContain("aria-expanded={expanded}");
+    expect(monitorSource).toContain("aria-selected={selected}");
   });
 
   test("inherits explicit light/dark and OS-fallback tokens from the shared theme", () => {

@@ -14,8 +14,10 @@ export function openDurableSqliteDatabase(path) {
   const Database = loadBunSqliteDatabase();
   const drizzle = loadBunSqliteDrizzle();
   const sqlite = new Database(path);
-  sqlite.run("PRAGMA journal_mode = WAL");
+  // busy_timeout must precede the journal_mode change: switching journal modes
+  // takes locks, and with no busy_timeout a contended open fails SQLITE_BUSY.
   sqlite.run("PRAGMA busy_timeout = 30000");
+  sqlite.run("PRAGMA journal_mode = WAL");
   sqlite.run("PRAGMA synchronous = NORMAL");
   sqlite.run("PRAGMA locking_mode = NORMAL");
   sqlite.run("PRAGMA foreign_keys = ON");

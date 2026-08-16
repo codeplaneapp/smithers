@@ -93,6 +93,20 @@ describe("parseClaudeOauthUsage", () => {
     expect(windows.map((w) => w.id)).toEqual(["5h", "weekly", "weekly-opus"]);
     expect(windows[0]).toMatchObject({ unit: "percent", usedPercent: 33 });
   });
+  test("labels the Fable-specific 50% plan window", () => {
+    expect(
+      parseClaudeOauthUsage({
+        seven_day_fable: { utilization: 70, resets_at: "2026-08-18T00:00:00Z" },
+      }),
+    ).toContainEqual({
+      id: "weekly-fable",
+      label: "weekly (Fable, 50% plan cap)",
+      unit: "percent",
+      usedPercent: 70,
+      resetsAt: "2026-08-18T00:00:00Z",
+      capPercent: 50,
+    });
+  });
   test("tolerates junk", () => {
     expect(parseClaudeOauthUsage(null)).toEqual([]);
     expect(parseClaudeOauthUsage({ five_hour: { utilization: "x" } })).toEqual([]);

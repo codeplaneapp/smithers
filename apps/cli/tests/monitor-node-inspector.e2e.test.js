@@ -208,18 +208,52 @@ browserTest(
         },
         { timeout: 30_000 },
       );
+      const scopedAttemptRequest = page.waitForRequest(
+        (request) => {
+          const url = new URL(request.url());
+          if (url.pathname !== "/v1/rpc/attempts.list") return false;
+          try {
+            const params = request.postDataJSON();
+            return params.runId === runId && params.nodeId === "probe" && params.iteration === 0;
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 30_000 },
+      );
+      const scopedOutputRequest = page.waitForRequest(
+        (request) => {
+          const url = new URL(request.url());
+          return url.pathname === `/v1/api/nodes/${runId}/probe/output` && url.searchParams.get("iteration") === "0";
+        },
+        { timeout: 30_000 },
+      );
       // Deep-link straight into the node inspector while the task is RUNNING.
       await page.goto(`${base}/monitor?runId=${runId}&nodeId=probe`, { waitUntil: "domcontentloaded" });
       await page.waitForSelector('[data-testid="monitor-root"]', { timeout: 20_000 });
       await page.waitForSelector('[data-testid="monitor-inspector"]', { timeout: 30_000 });
-      await scopedTranscriptRequest;
+      await Promise.all([scopedTranscriptRequest, scopedAttemptRequest, scopedOutputRequest]);
 
       // Sections are collapsible <details> elements, open by default.
-      for (const testId of ["monitor-node-details", "monitor-node-output", "monitor-node-transcript"]) {
+      for (const testId of [
+        "monitor-node-details",
+        "monitor-node-attempts",
+        "monitor-node-output",
+        "monitor-node-transcript",
+      ]) {
         expect(await page.locator(`[data-testid="${testId}"]`).evaluate((el) => el.tagName)).toBe("DETAILS");
         expect(await page.locator(`[data-testid="${testId}"]`).evaluate((el) => el.open)).toBe(true);
       }
       expect((await page.locator('[data-testid="monitor-node-details"]').textContent()) ?? "").toContain("probe");
+      await page.waitForFunction(
+        () =>
+          (document.querySelector('[data-testid="monitor-node-attempts"]')?.textContent ?? "").includes("Attempt 1"),
+        undefined,
+        { timeout: 30_000 },
+      );
+      const attemptsText = (await page.locator('[data-testid="monitor-node-attempts"]').textContent()) ?? "";
+      expect(attemptsText).toContain("Iteration 0");
+      expect(attemptsText).toContain("no automatic retries");
 
       // 1 — The task's initial prompt is shown (recorded in attempt metadata the
       // moment the attempt started, so it renders even while the node runs).

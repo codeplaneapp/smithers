@@ -932,6 +932,7 @@ export class BaseCliAgent {
   idleTimeoutMs;
   maxOutputBytes;
   extraArgs;
+  onQuotaExceeded;
   /**
    * @param {BaseCliAgentOptions} opts
    */
@@ -947,6 +948,7 @@ export class BaseCliAgent {
     this.idleTimeoutMs = opts.idleTimeoutMs;
     this.maxOutputBytes = opts.maxOutputBytes;
     this.extraArgs = opts.extraArgs;
+    this.onQuotaExceeded = opts.onQuotaExceeded;
   }
   /**
    * @param {AgentGenerateOptions | undefined} options
@@ -996,7 +998,17 @@ export class BaseCliAgent {
         Effect.flatMap((durationMs) => Metric.update(taggedMetric(agentDurationMs, metricTags), durationMs)),
       );
     const agentCtx = { agentId: this.id, agentModel: this.model, agentEngine: resolveAgentEngineTag(this) };
-    const classifyQuota = (message, command) => classifyQuotaError(message, command, agentCtx);
+    const classifyQuota = (message, command) => {
+      const quota = classifyQuotaError(message, command, agentCtx);
+      if (quota && this.onQuotaExceeded) {
+        try {
+          this.onQuotaExceeded(/** @type {any} */ (quota.details ?? {}));
+        } catch {
+          // Quota persistence is best-effort and must not mask the provider error.
+        }
+      }
+      return quota;
+    };
     const program = Effect.all(
       [
         Metric.update(taggedMetric(agentInvocationsTotal, metricTags), 1),

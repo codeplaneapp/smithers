@@ -1,6 +1,6 @@
 import * as ai from 'ai';
 import { Tool as Tool$1, ToolSet, ToolLoopAgentSettings, LanguageModel, ToolLoopAgent } from 'ai';
-import { A as AgentGenerateOptions$4, a as AgentCheckpoint$1, b as AgentFileChange$1, c as AgentCheckpointCapability$1, d as AgentCheckpointFormat$1, B as BaseCliAgentOptions, e as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, f as PiExtensionUiResponse$1, g as BaseCliAgent, C as CliOutputInterpreter$e, h as CodexConfigOverrides, i as AgentCliEvent$1, j as CliOutputInterpreter$f, k as AgentCheckpointResult$1, l as AgentCheckpointMode$1, m as AgentCliActionKind, n as AgentCheckpointContinuationOptions$1, o as AgentCheckpointJsonArray$1, p as AgentCheckpointJsonObject$1, q as AgentCheckpointJsonPrimitive$1, r as AgentCheckpointJsonValue$1, s as AgentCheckpointPublisher$1, t as AgentFileChangeKind$1 } from './index-DpEmkgQk.js';
+import { A as AgentGenerateOptions$4, a as AgentCheckpoint$1, b as AgentFileChange$1, c as AgentCheckpointCapability$1, d as AgentCheckpointFormat$1, B as BaseCliAgentOptions, e as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, f as PiExtensionUiResponse$1, g as BaseCliAgent, C as CliOutputInterpreter$e, h as CodexConfigOverrides, i as AgentCliEvent$1, j as CliOutputInterpreter$f, k as AgentCheckpointResult$1, l as AgentCheckpointMode$1, m as AgentCliActionKind, n as AgentCheckpointContinuationOptions$1, o as AgentCheckpointJsonArray$1, p as AgentCheckpointJsonObject$1, q as AgentCheckpointJsonPrimitive$1, r as AgentCheckpointJsonValue$1, s as AgentCheckpointPublisher$1, t as AgentFileChangeKind$1 } from './index-BmtuOVcd.js';
 import * as zod from 'zod';
 import '@smthrs/errors/SmithersError';
 import 'effect';
@@ -457,10 +457,9 @@ type FallbackAgentsOptions$2 = {
      */
     agentOptions?: Partial<Record<FallbackAgentProvider$1, Record<string, unknown>>>;
     /**
-     * Randomly order the registered accounts (default `true`). Each
-     * `fallbackAgents()` call draws a fresh order, so load spreads across
-     * subscriptions while the engine's quota failover walks the chain in order.
-     * Set `false` to keep registration order.
+     * Randomly order accounts with equal cached headroom (default `true`). Known
+     * quota blocks and usage headroom take precedence. Set `false` to use
+     * registration order as the tie-break.
      */
     shuffle?: boolean;
     /**
@@ -1585,9 +1584,10 @@ type VibeAgentOptions$1 = VibeAgentOptions$2;
 /**
  * Build a failover chain over every registered account (`smithers agents add`)
  * so a `<Task agent={fallbackAgents()}>` spreads load across all of the
- * user's Claude/Codex subscriptions: the accounts are randomly ordered per
- * call and the engine's quota failover walks the chain when a rung is
- * rate-limited. The "normal" agent (`options.fallback`, defaulting to a stock
+ * user's Claude/Codex subscriptions. Cached quota headroom orders healthy
+ * accounts first. A seeded shuffle breaks ties. Persisted quota blocks become
+ * no-network rungs, and the engine's quota failover walks the chain without
+ * probing those accounts again. The "normal" agent (`options.fallback`, defaulting to a stock
  * agent for the first requested family) is appended as the last rung, and is
  * returned alone when the global registry is missing, empty, or unreadable —
  * a workflow using this helper degrades to single-agent behavior on machines

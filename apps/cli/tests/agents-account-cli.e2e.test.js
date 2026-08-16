@@ -200,19 +200,31 @@ test("agents remove deletes by label and is idempotent under --silent", () => {
 test("agents add regenerates .smithers/agents.ts when one already exists", () => {
   const repo = createTempRepo();
   const home = newSmithersHome();
+  // Make the claude CLI detectable so tier lines list providers.claude as
+  // active; CI runners have no real claude binary on PATH.
+  const binDir = createExecutableDir();
+  writeFakeClaudeBinary(binDir);
+  repo.write(".claude/.credentials.json", "{}\n");
   // Pre-populate a generated agents.ts so the regen helper rewrites it.
   repo.write(".smithers/agents.ts", "// smithers-source: generated\n// (placeholder)\n");
   runSmithers(["agents", "add", "--provider", "claude-code", "--label", "claude-work", "--skip-login"], {
     cwd: repo.dir,
     format: "json",
-    env: { SMITHERS_HOME: home },
+    env: {
+      HOME: repo.dir,
+      PATH: [binDir, process.env.PATH ?? ""].filter(Boolean).join(delimiter),
+      SMITHERS_HOME: home,
+      ANTHROPIC_API_KEY: "sk-ant-test",
+      OPENAI_API_KEY: "",
+    },
   });
   const regenerated = repo.read(".smithers/agents.ts");
   // The new account shows up as a provider…
   expect(regenerated).toContain("claudeWork: new SmithersClaudeCodeAgent(");
   // …and any tier pool whose preferred order references the `claude`
   // family (smart, smartTool) gets the account appended.
-  expect(regenerated).toMatch(/smart(Tool)?: \[[^\]]*providers\.claudeWork[^\]]*\]/);
+  expect(regenerated).toMatch(/smart(Tool)?: \[[^\]]*\.\.\.claudeAccountPool[^\]]*\]/);
+  expect(regenerated).toMatch(/planning: \[\s*\.\.\.claudeAccountPool,\s*providers\.claude,/);
 });
 
 test("agents add does NOT overwrite a hand-edited agents.ts (no sentinel)", () => {

@@ -1,8 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { hostname } from "node:os";
 import { deriveRunState } from "../src/runState/deriveRunState.js";
 import { RUN_STATE_HEARTBEAT_STALE_MS } from "../src/runState/RUN_STATE_HEARTBEAT_STALE_MS.js";
-import { isPidAlive, parseRuntimeOwnerPid } from "../src/runState/runtimeOwnerLiveness.js";
+import {
+  formatRuntimeOwnerId,
+  isPidAlive,
+  parseRuntimeOwnerIdentity,
+  parseRuntimeOwnerPid,
+} from "../src/runtime-owner.js";
 
 const NOW = 1_700_000_000_000;
 const STALE = NOW - (RUN_STATE_HEARTBEAT_STALE_MS + 5_000);
@@ -46,7 +52,7 @@ function deadPid() {
 describe("deriveRunState — owner PID verification before orphaned", () => {
   test("stale heartbeat + live owner PID → stale (busy engine), never orphaned", () => {
     const view = deriveRunState({
-      run: makeRun({ runtimeOwnerId: `pid:${process.pid}:session` }),
+      run: makeRun({ runtimeOwnerId: formatRuntimeOwnerId(process.pid, hostname(), "session") }),
       now: NOW,
     });
     expect(view.state).toBe("stale");
@@ -58,7 +64,7 @@ describe("deriveRunState — owner PID verification before orphaned", () => {
 
   test("stale heartbeat + demonstrably dead owner PID → orphaned", () => {
     const view = deriveRunState({
-      run: makeRun({ runtimeOwnerId: `pid:${deadPid()}:session` }),
+      run: makeRun({ runtimeOwnerId: formatRuntimeOwnerId(deadPid(), hostname(), "session") }),
       now: NOW,
     });
     expect(view.state).toBe("orphaned");
@@ -71,6 +77,18 @@ describe("deriveRunState — owner PID verification before orphaned", () => {
       now: NOW,
     });
     expect(view.state).toBe("stale");
+  });
+
+  test("stale remote owner falls back to heartbeat instead of probing the same local PID", () => {
+    const view = deriveRunState({
+      run: makeRun({ runtimeOwnerId: formatRuntimeOwnerId(process.pid, `${hostname()}.remote`, "session") }),
+      now: NOW,
+      isOwnerPidAlive: () => {
+        throw new Error("a remote PID must not be probed locally");
+      },
+    });
+    expect(view.state).toBe("orphaned");
+    expect(view.unhealthy?.kind).toBe("engine-heartbeat-stale");
   });
 
   test("stale heartbeat + no recorded owner → orphaned (recovery guidance preserved)", () => {
@@ -134,14 +152,23 @@ describe("deriveRunState — owner PID verification before orphaned", () => {
 });
 
 describe("runtimeOwnerLiveness helpers", () => {
-  test("parseRuntimeOwnerPid parses pid formats and rejects garbage", () => {
+  test("host-scoped ids parse only on their owning host while legacy ids remain local", () => {
     expect(parseRuntimeOwnerPid(null)).toBeNull();
     expect(parseRuntimeOwnerPid("   ")).toBeNull();
     expect(parseRuntimeOwnerPid("pid:1234")).toBe(1234);
     expect(parseRuntimeOwnerPid("PID:77:host-a")).toBe(77);
     expect(parseRuntimeOwnerPid("4321")).toBe(4321);
+    expect(formatRuntimeOwnerId(77, "HOST-A.", "session")).toBe("pid:77@host-a:session");
+    expect(parseRuntimeOwnerPid("pid:77@host-a:session", "HOST-A")).toBe(77);
+    expect(parseRuntimeOwnerPid("pid:77@host-a:session", "host-b")).toBeNull();
+    expect(parseRuntimeOwnerIdentity("pid:77@host-a:session", "host-b")).toEqual({
+      pid: 77,
+      hostname: "host-a",
+      isLocal: false,
+    });
     expect(parseRuntimeOwnerPid("host:1234")).toBeNull();
     expect(parseRuntimeOwnerPid("pid:0")).toBeNull();
+    expect(parseRuntimeOwnerPid("pid:77@%zz:session", "host-a")).toBeNull();
   });
 
   test("isPidAlive is true for this process and false for a reaped child", () => {

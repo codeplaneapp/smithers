@@ -24,7 +24,13 @@ describe("default infinite retries e2e", () => {
       };
       const workflow = smithers(() => (
         <Workflow name="default-infinite-retry-success">
-          <Task id="flaky" output={outputs.outputA} agent={agent}>
+          {/*
+           * The agent fails five times with the same normalized signature, so
+           * non-progress detection (#1500) would stop it at three attempts.
+           * This test is about the infinite-retries default, not the stall
+           * default, so it opts out explicitly.
+           */}
+          <Task id="flaky" output={outputs.outputA} agent={agent} retryPolicy={{ maxIdenticalFailures: 0 }}>
             Keep retrying until success.
           </Task>
         </Workflow>

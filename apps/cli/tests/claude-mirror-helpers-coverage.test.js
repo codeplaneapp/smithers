@@ -24,6 +24,7 @@ describe("isTerminalClaudeMirrorNodeState", () => {
   test("recognizes terminal node states", () => {
     expect(isTerminalClaudeMirrorNodeState("finished")).toBe(true);
     expect(isTerminalClaudeMirrorNodeState("failed")).toBe(true);
+    expect(isTerminalClaudeMirrorNodeState("stalled")).toBe(true);
     expect(isTerminalClaudeMirrorNodeState("cancelled")).toBe(true);
   });
 

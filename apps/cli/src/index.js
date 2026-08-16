@@ -191,10 +191,12 @@ import {
   preflightConfigEntry,
 } from "./oneshot-preflight.js";
 import { listAccounts, removeAccount } from "@smthrs/accounts";
-import { getUsageForAccounts, formatUsageReports } from "@smthrs/usage";
+import { getUsageForAccounts, formatUsageReports, readClaudeCredentials } from "@smthrs/usage";
 import { runAgentAdd, pingAccount } from "./agent-commands/runAgentAdd.js";
 import { runAgentAddWithTmuxLogin } from "./agent-commands/tmuxLogin.js";
-import { formatAccountIdentity, readAccountIdentity } from "./agent-commands/accountIdentity.js";
+import { reauthClaudeAccounts } from "./agent-commands/reauthClaudeAccounts.js";
+import { claudeShellArgv, runClaudeShell } from "./agent-commands/claudeShell.js";
+import { findDuplicateAccounts, formatAccountIdentity, readAccountIdentity } from "./agent-commands/accountIdentity.js";
 import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
 import { getWorkflowFollowUpCtas } from "./workflow-pack.js";
 import { buildMonitoringGuidance, hasCustomUi, workflowIdFromPath } from "./monitoring-suggestion.js";
@@ -883,6 +885,13 @@ function buildProgressReporter() {
       case "NodeFailed":
         process.stderr.write(
           `[${ts}] ✗ ${event.nodeId} (attempt ${event.attempt ?? 1}): ${typeof event.error === "string" ? event.error : (event.error?.message ?? "failed")}\n`,
+        );
+        break;
+      case "NodeStalled":
+        // Non-progress detection (#1500): name the repeat count so a livelock
+        // reads differently from the ordinary failure above it.
+        process.stderr.write(
+          `[${ts}] ✗ ${event.nodeId} stalled after ${event.identicalFailures ?? "?"} identical failures: ${typeof event.error === "string" ? event.error : (event.error?.message ?? "stalled")}\n`,
         );
         break;
       case "NodeRetrying":
@@ -2640,7 +2649,11 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
     Number.isInteger(finishedPayload.failedChildren) &&
     finishedPayload.failedChildren >= 0;
   const derivedFailedChildKeys = isSuccessTerminal
-    ? nodes.filter((node) => node.state === "failed").map((node) => `${node.nodeId}::${node.iteration ?? 0}`)
+    ? nodes
+        // A `stalled` node (#1500) is a tolerated failure too when the run
+        // still finished, so it belongs in the same fallback tally.
+        .filter((node) => node.state === "failed" || node.state === "stalled")
+        .map((node) => `${node.nodeId}::${node.iteration ?? 0}`)
     : [];
   const failedChildren = eventHasFailedChildren ? finishedPayload.failedChildren : derivedFailedChildKeys.length;
   const failedChildKeys =
@@ -3831,6 +3844,7 @@ async function preflightDetachedLaunch(options) {
       iteration: 0,
       input: inputRow ?? {},
       outputs,
+      zodToKeyName: workflow.zodToKeyName,
     });
     const rendered = await Effect.runPromise(
       Effect.result(
@@ -4654,6 +4668,32 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
         }
       }
       const outputResult = c.format === "json" || c.format === "jsonl" ? result : summarizeRunResult(result);
+      // Point of failure (#1500 §4): offer the concrete recovery action for
+      // the last good checkpoint instead of making the operator reconstruct
+      // the replay invocation by hand.
+      let failureRecoveryCtas = [];
+      if (result.status === "failed" && result.runId) {
+        try {
+          const lastFrame = await Effect.runPromise(adapter.getLastFrameEffect(result.runId));
+          const frameNo = Number(lastFrame?.frameNo ?? lastFrame?.frame_no);
+          failureRecoveryCtas = [
+            {
+              command: `up ${workflowPath} --run-id ${result.runId} --resume true`,
+              description: "Resume the failed run in place",
+            },
+            ...(Number.isSafeInteger(frameNo)
+              ? [
+                  {
+                    command: `replay ${workflowPath} --run-id ${result.runId} --frame ${frameNo}`,
+                    description: `Replay from the last good checkpoint (frame ${frameNo})`,
+                  },
+                ]
+              : []),
+          ];
+        } catch {
+          // Best-effort CTA enrichment; never mask the run result.
+        }
+      }
       return c.ok(outputResult, {
         cta: result.runId
           ? withAgentNextSteps(
@@ -4664,6 +4704,7 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
                 human: humanTty,
               },
               [
+                ...failureRecoveryCtas,
                 ...pauseCtas(result.status, result.runId),
                 ...getWorkflowFollowUpCtas(workflowPath),
                 { command: `inspect ${result.runId}`, description: "Inspect run state" },
@@ -6980,18 +7021,72 @@ const agentsCli = Cli.create({
       // need the signed-in subscription too. Without it a machine reader can
       // see that claude-3 is at 90% but not which subscription to go
       // re-authenticate, which is exactly what a quota dashboard is for.
-      const identified = accounts.map((a) => ({
-        ...a,
-        signedInAs: formatAccountIdentity(readAccountIdentity(a.provider, a.configDir)) || null,
-      }));
+      const identified = accounts.map((a) => {
+        const identity = readAccountIdentity(a.provider, a.configDir);
+        return {
+          ...a,
+          signedInAs: formatAccountIdentity(identity) || null,
+          planType: a.provider === "claude-code" ? (readClaudeCredentials(a)?.subscriptionType ?? null) : null,
+          duplicateOf: findDuplicateAccounts(identity, a.provider, accounts, a.label),
+        };
+      });
       const rows = identified.map((a) => {
         const where = a.configDir ?? (a.apiKey ? "(api key set)" : "");
         // Naming the signed-in subscription makes two labels sharing one
         // rate limit obvious instead of silently halving the pool.
-        return `  ${a.label.padEnd(24)}  ${a.provider.padEnd(14)}  ${(a.signedInAs ?? "").padEnd(26)}  ${where}`;
+        return `  ${a.label.padEnd(24)}  ${a.provider.padEnd(14)}  ${(a.signedInAs ?? "").padEnd(26)}  ${(a.planType ?? "").padEnd(8)}  ${where}`;
       });
-      process.stderr.write(`Registered accounts (${accounts.length}):\n${rows.join("\n")}\n`);
+      process.stderr.write(
+        `Registered accounts (${accounts.length}):\n  ${"LABEL".padEnd(24)}  ${"PROVIDER".padEnd(14)}  ${"SUBSCRIPTION".padEnd(26)}  ${"PLAN".padEnd(8)}  CONFIG\n${rows.join("\n")}\n`,
+      );
+      const duplicateGroups = identified.filter((account) => account.duplicateOf.length > 0);
+      if (duplicateGroups.length > 0) {
+        process.stderr.write(
+          `Warning: duplicate subscriptions share one quota: ${duplicateGroups
+            .map((account) => `${account.label}=${account.duplicateOf.join(",")}`)
+            .join("; ")}\n`,
+        );
+      }
       return c.ok({ accounts: identified });
+    },
+  })
+  .command("reauth", {
+    description: "Check and sequentially reauthenticate registered Claude accounts in the browser.",
+    options: z.object({
+      provider: z.enum(["claude-code"]).default("claude-code").describe("Account provider to reauthenticate"),
+      label: z.string().optional().describe("Only reauthenticate this account label"),
+      force: z.boolean().default(false).describe("Reauthenticate even when the current login is live"),
+      includeDefault: z
+        .boolean()
+        .default(false)
+        .describe("Also check the ambient ~/.claude login (not a registered pool account)"),
+    }),
+    async run(c) {
+      try {
+        const results = await reauthClaudeAccounts({
+          force: c.options.force,
+          label: c.options.label,
+          includeDefault: c.options.includeDefault,
+          onStatus: (message) => process.stderr.write(`${message}\n`),
+        });
+        const failed = results.filter((result) => !result.ok);
+        if (failed.length > 0) {
+          commandExitOverride = 1;
+          return c.error({
+            code: "AGENT_REAUTH_FAILED",
+            message: `${failed.length} Claude account(s) did not complete authentication.`,
+            exitCode: 1,
+          });
+        }
+        return c.ok({ accounts: results });
+      } catch (err) {
+        commandExitOverride = 1;
+        return c.error({
+          code: "AGENT_REAUTH_FAILED",
+          message: err?.message ?? String(err),
+          exitCode: 1,
+        });
+      }
     },
   })
   .command("remove", {
@@ -11414,6 +11509,7 @@ const cli = Cli.create({
           iteration: 0,
           input: inputRow ?? {},
           outputs,
+          zodToKeyName: workflow.zodToKeyName,
         });
         const baseRootDir = resolveLaunchRootDir(c.options.root);
         const rendered = await Effect.runPromise(
@@ -12785,11 +12881,37 @@ const cli = Cli.create({
       if (c.options.provider) {
         accounts = accounts.filter((a) => a.provider === c.options.provider);
       }
-      const reports = await getUsageForAccounts(accounts, { fresh: c.options.fresh });
+      const reports = (await getUsageForAccounts(accounts, { fresh: c.options.fresh })).map((report) => {
+        const account = accounts.find((candidate) => candidate.label === report.accountLabel);
+        const identity = readAccountIdentity(account?.provider, account?.configDir);
+        return {
+          ...report,
+          signedInAs: formatAccountIdentity(identity) || undefined,
+          duplicateOf: account ? findDuplicateAccounts(identity, account.provider, accounts, account.label) : [],
+        };
+      });
       // Human-readable table to stderr; the structured envelope (--format json/toon)
       // goes to stdout, matching `smithers agents list`.
       process.stderr.write(`${formatUsageReports(reports)}\n`);
       return c.ok({ reports });
+    },
+  })
+  // Registered for `--help` and the generated command reference only. `main()`
+  // intercepts `claude-shell` before parsing so arbitrary Claude flags reach
+  // the spawned process instead of failing this schema.
+  .command("claude-shell", {
+    description: "Launch Claude Code with the registered account that has the most quota headroom.",
+    options: z.object({
+      label: z.string().optional().describe("Pin one registered Claude account"),
+      dryRun: z.boolean().default(false).describe("Print the selected account without launching Claude"),
+    }),
+    run(c) {
+      const args = [
+        ...(c.options.label ? ["--label", c.options.label] : []),
+        ...(c.options.dryRun ? ["--dry-run"] : []),
+      ];
+      process.exitCode = runClaudeShell(args);
+      return c.ok({ exitCode: process.exitCode });
     },
   })
   .command(workflowCli)
@@ -13499,6 +13621,13 @@ async function main() {
   }
   const rawArgv = process.argv.slice(2);
   let argv = rawArgv.map((arg) => (arg === "-v" ? "--version" : arg));
+  // Intercept before the parser so every argument after the command name
+  // reaches `claude` verbatim instead of failing the command's own schema.
+  const claudeShellForwarded = claudeShellArgv(argv);
+  if (claudeShellForwarded) {
+    process.exitCode = runClaudeShell(claudeShellForwarded);
+    return;
+  }
   argv = rewriteGuiShortcutArgv(argv);
   argv = rewriteChatCreateArgv(argv);
   argv = rewriteWorkflowCommandArgv(argv);

@@ -120,7 +120,8 @@ describe.skipIf(process.platform === "win32")("cascading cancellation and orphan
         expect(engine.exitCode).toBeNull();
         expect(engine.signalCode).toBeNull();
         const liveRun = await adapter.getRun(runId);
-        expect(liveRun.runtimeOwnerId).toContain(`pid:${engine.pid}:`);
+        // Owner ids are host-scoped: pid:<pid>@<hostname>:<sessionId>.
+        expect(liveRun.runtimeOwnerId).toContain(`pid:${engine.pid}@`);
         expect(Date.now() - liveRun.heartbeatAtMs).toBeLessThan(30_000);
 
         engine.kill("SIGKILL");

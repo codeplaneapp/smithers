@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { getAccountUsage } from "./getAccountUsage.js";
 import { readUsageCache, writeUsageCache } from "./usageCache.js";
+import { readClaudeCredentials } from "./readClaudeCredentials.js";
 
 /** @typedef {import("@smthrs/accounts").Account} Account */
 /** @typedef {import("./UsageReport.ts").UsageReport} UsageReport */
@@ -53,7 +54,7 @@ function entryFailed(entry) {
  * distinguishes replacements without persisting the key itself.
  *
  * @param {Account} account
- * @returns {{ provider: Account["provider"]; configDir?: string; model?: string; apiKeyHash?: string }}
+ * @returns {{ provider: Account["provider"]; configDir?: string; model?: string; apiKeyHash?: string; credentialHash?: string }}
  */
 function accountIdentity(account) {
   const identity = { provider: account.provider };
@@ -61,6 +62,10 @@ function accountIdentity(account) {
   if (account.model !== undefined) identity.model = account.model;
   if (account.apiKey !== undefined) {
     identity.apiKeyHash = createHash("sha256").update(account.apiKey).digest("hex");
+  }
+  if (account.provider === "claude-code") {
+    const accessToken = readClaudeCredentials(account)?.accessToken;
+    if (accessToken) identity.credentialHash = createHash("sha256").update(accessToken).digest("hex");
   }
   return identity;
 }
@@ -75,7 +80,8 @@ function entryMatchesAccount(entry, identity) {
     entry?.identity?.provider === identity.provider &&
     entry.identity.configDir === identity.configDir &&
     entry.identity.model === identity.model &&
-    entry.identity.apiKeyHash === identity.apiKeyHash
+    entry.identity.apiKeyHash === identity.apiKeyHash &&
+    entry.identity.credentialHash === identity.credentialHash
   );
 }
 
@@ -85,11 +91,11 @@ function entryMatchesAccount(entry, identity) {
  * once, so parallel probes never race on the file.
  *
  * @param {Account[]} accounts
- * @param {{ fresh?: boolean; env?: NodeJS.ProcessEnv; nowMs?: number }} [options]
+ * @param {{ fresh?: boolean; bypassHardFloor?: boolean; env?: NodeJS.ProcessEnv; nowMs?: number }} [options]
  * @returns {Promise<UsageReport[]>}
  */
 export async function getUsageForAccounts(accounts, options = {}) {
-  const { fresh = false, env = process.env, nowMs = Date.now() } = options;
+  const { fresh = false, bypassHardFloor = false, env = process.env, nowMs = Date.now() } = options;
   const cache = readUsageCache(env);
   const decisions = accounts.map((account) => {
     const entry = cache.entries[account.label];
@@ -99,7 +105,7 @@ export async function getUsageForAccounts(accounts, options = {}) {
     const useCache =
       entryMatchesAccount(entry, identity) &&
       Number.isFinite(ageMs) &&
-      ((!entryFailed(entry) && ageMs < hardFloorMs(account.provider)) ||
+      ((!bypassHardFloor && !entryFailed(entry) && ageMs < hardFloorMs(account.provider)) ||
         (!fresh && ageMs < refreshIntervalMs(account.provider)));
     return { account, entry, identity, useCache };
   });

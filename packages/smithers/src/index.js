@@ -82,6 +82,7 @@
 /** @typedef {import("@smthrs/memory").HindsightMemoryStoreOptions} HindsightMemoryStoreOptions */
 /** @typedef {import("@smthrs/memory").MemoryMessage} MemoryMessage */
 /** @typedef {import("@smthrs/components").MemoryProps} MemoryProps */
+/** @typedef {import("@smthrs/components").MemoryTrellisProps} MemoryTrellisProps */
 /** @typedef {import("@smthrs/memory").MemoryNamespace} MemoryNamespace */
 /** @typedef {import("@smthrs/memory").MemoryNamespaceKind} MemoryNamespaceKind */
 /** @typedef {import("@smthrs/memory").MemoryProcessor} MemoryProcessor */
@@ -236,6 +237,7 @@ export {
   Kanban,
   Loop,
   Memory,
+  MemoryTrellis,
   MergeQueue,
   Monitor,
   Optimizer,

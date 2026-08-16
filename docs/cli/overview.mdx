@@ -189,7 +189,7 @@ See [Time-travel API](/reference/time-travel) and [Revert](/runtime/revert) for 
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[110]:
+commands[112]:
   - name: add
     purpose: Install a workflow pack from GitHub, npm, or a local file
     args[1]{name,type,required,desc}:
@@ -875,6 +875,11 @@ commands[110]:
       log-dir,,string,,NDJSON event logs directory.
       backend,,enum,,"sqlite|pglite|postgres"
       auth-token,,string,,Bearer token passed to the interactive monitor gateway client.
+  - name: claude-shell
+    purpose: Launch Claude Code with the registered account that has the most quota headroom
+    flags[2]{name,short,type,default,desc}:
+      label,,string,,Pin one registered Claude account
+      dry-run,,boolean,false,Print the selected account without launching Claude
   - name: agents.capabilities
     purpose: Print JSON capability registry for built-in CLI agents
   - name: agents.doctor
@@ -895,6 +900,13 @@ commands[110]:
       loop,,boolean,false,Wizard mode; keep adding accounts until done
   - name: agents.list
     purpose: List registered Smithers agent accounts
+  - name: agents.reauth
+    purpose: Check and sequentially reauthenticate registered Claude accounts in the browser
+    flags[4]{name,short,type,default,desc}:
+      provider,,enum,claude-code,Account provider to reauthenticate
+      label,,string,,Only reauthenticate this account label
+      force,,boolean,false,Reauthenticate even when the current login is live
+      include-default,,boolean,false,Also check the ambient ~/.claude login
   - name: agents.remove
     purpose: Remove a registered agent account by label
     args[1]{name,type,required,desc}:
