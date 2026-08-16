@@ -101,8 +101,20 @@ export function MonitorToolbar({
   totalCount: number;
   showMetrics: boolean;
   onToggleMetrics: () => void;
-  onRefresh: () => void;
+  onRefresh: () => void | Promise<void>;
 }) {
+  // A refetch never flips the runs query back to `loading` (it keeps the rows
+  // it already has), so the only honest place to report one in flight is the
+  // control that started it.
+  const [refreshing, setRefreshing] = useState(false);
+  const refresh = () => {
+    const result = onRefresh();
+    if (!(result instanceof Promise)) return;
+    setRefreshing(true);
+    // A rejected refetch is already reported by the query's own error state;
+    // swallow it here so it cannot surface as an unhandled rejection.
+    void result.finally(() => setRefreshing(false)).catch(() => {});
+  };
   return (
     <div className="mon-toolbar">
       <Input
@@ -140,8 +152,14 @@ export function MonitorToolbar({
       >
         Metrics
       </Chip>
-      <Button variant="outline" onClick={onRefresh}>
-        Refresh
+      <Button
+        variant="outline"
+        data-testid="monitor-refresh"
+        aria-busy={refreshing}
+        disabled={refreshing}
+        onClick={refresh}
+      >
+        {refreshing ? "Refreshing…" : "Refresh"}
       </Button>
     </div>
   );

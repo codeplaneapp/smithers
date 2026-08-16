@@ -87,7 +87,9 @@ import {
   diagnoseRun,
   diffPatchesOf,
   diffSummaryOf,
+  eventLogViewState,
   eventViewFor,
+  executionTreeViewState,
   filterRuns,
   formatDiffSummary,
   formatDurationMs,
@@ -115,6 +117,7 @@ import {
   nodeAttemptHistoryRowsOf,
   nodeAttemptHistoryView,
   nodeErrorOf,
+  nodeOutputViewState,
   nodeStateRowsOf,
   nodeSummaryEligible,
   nodeTimingsOf,
@@ -130,7 +133,6 @@ import {
   runProgress,
   runsLandingState,
   runUsageChipOf,
-  runsViewState,
   RUNS_PAGE_SIZE,
   scoreRowsOf,
   scoresForNode,
@@ -158,7 +160,9 @@ import {
   type PromScrape,
   type RunRow,
   type MonitorConnectionStatus,
+  type RunsLandingState,
   type RunsTableSort,
+  type RunsViewState,
   type ScoreRow,
   type Tone,
   type TreeNodeLike,
@@ -683,6 +687,17 @@ function RunListRow({
   );
 }
 
+/**
+ * The runs-list zero states the surfaces share: the ordinary
+ * loading/error/filtered/empty classification plus "connecting", the transport
+ * state that must never be reported as "no runs yet" — nothing has arrived, so
+ * emptiness is a claim the client cannot back.
+ */
+type RunsZeroStateKind = Exclude<RunsViewState, "ready"> | "connecting";
+
+/** Landing states the rail answers with a zero state rather than a banner. */
+const RAIL_ZERO_STATES = new Set<RunsLandingState>(["loading", "error", "empty", "filtered", "connecting"]);
+
 function RunsZeroState({
   state,
   testId,
@@ -692,7 +707,7 @@ function RunsZeroState({
   onResetFilters,
   onRetry,
 }: {
-  state: Exclude<ReturnType<typeof runsViewState>, "ready">;
+  state: RunsZeroStateKind;
   testId: string;
   hero?: boolean;
   totalCount: number;
@@ -711,6 +726,20 @@ function RunsZeroState({
           </Button>
         ) : null}
       </Alert>
+    );
+  }
+  if (state === "connecting") {
+    return (
+      <EmptyState
+        className={hero ? "mon-empty-hero" : undefined}
+        data-testid={testId}
+        data-state={state}
+        role="status"
+        title="Connecting to the Smithers gateway…"
+        description="Runs will appear after the first successful response."
+      >
+        <Skeleton className="mon-state-skeleton" />
+      </EmptyState>
     );
   }
   if (state === "loading") {
@@ -788,12 +817,20 @@ export function RunsRail({
   const banner = connection.banner;
   const lastKnown = connStatus === "offline" && runs.length > 0;
   const blocked = connStatus === "unauthorized";
-  const zeroState = runsViewState({
+  // Transport-aware: a rail deep-linked into a run must not answer "No runs
+  // yet" while the socket is still opening (runsLandingState's contract).
+  const landingState = runsLandingState({
     visibleCount: runs.length,
     totalCount,
     loading,
     queryError: queryError !== undefined,
+    connectionStatus: connStatus,
   });
+  // Offline and unauthorized states already render `banner`, which owns the
+  // surface; everything else that is not "ready" earns a zero state.
+  const zeroState: RunsZeroStateKind | null = RAIL_ZERO_STATES.has(landingState)
+    ? (landingState as RunsZeroStateKind)
+    : null;
   return (
     <nav className="mon-rail-runs" data-testid="monitor-runs">
       {banner ? (
@@ -804,7 +841,7 @@ export function RunsRail({
           <AlertDescription>{lastKnown && connection.hint ? connection.hint : banner.detail}</AlertDescription>
         </Alert>
       ) : null}
-      {!banner && zeroState !== "ready" ? (
+      {!banner && zeroState ? (
         <RunsZeroState
           state={zeroState}
           testId="monitor-empty"
@@ -814,7 +851,7 @@ export function RunsRail({
           onRetry={onRetry}
         />
       ) : null}
-      {queryError && zeroState === "ready" && !banner ? (
+      {queryError && !zeroState && !banner ? (
         <Alert variant="destructive" data-testid="monitor-runs-query-error">
           <AlertTitle>Couldn&apos;t refresh runs.</AlertTitle>
           <AlertDescription>{queryError.message}</AlertDescription>
@@ -1613,20 +1650,6 @@ export function RunsTable({
     connectionStatus: connStatus,
     hasCachedData,
   });
-  if (landingState === "connecting") {
-    return (
-      <EmptyState
-        className="mon-empty-hero"
-        data-testid="monitor-empty-detail"
-        data-state={landingState}
-        role="status"
-        title="Connecting to the Smithers gateway…"
-        description="Runs will appear after the first successful response."
-      >
-        <Skeleton className="mon-state-skeleton" />
-      </EmptyState>
-    );
-  }
   if (landingState === "offline-without-cache") {
     return (
       <Alert
@@ -2418,11 +2441,19 @@ export function ExecutionTree({
     event.preventDefault();
     if (nextKey) setFocusedKey(nextKey);
   };
-  if (!isStatic && error) {
+  const treeState = executionTreeViewState({
+    hasRoot: root !== null && root !== undefined,
+    loading: isLoading,
+    queryError: error !== undefined,
+    isStatic,
+    frameLoading,
+    frameError: frameError !== undefined,
+  });
+  if (treeState === "error") {
     return (
       <Alert variant="destructive" data-testid="monitor-tree-error">
         <AlertTitle>Failed to load the execution tree.</AlertTitle>
-        <AlertDescription>{error.message}</AlertDescription>
+        <AlertDescription>{error?.message ?? "The execution tree query failed."}</AlertDescription>
         {onRetry ? (
           <div className="mon-empty-actions">
             <Chip data-testid="monitor-tree-retry" onClick={onRetry}>
@@ -2433,46 +2464,72 @@ export function ExecutionTree({
       </Alert>
     );
   }
-  if (!isStatic && isLoading) {
+  if (treeState === "loading") {
     return (
-      <EmptyState data-testid="monitor-tree-loading" role="status" title="Loading execution tree…">
+      <EmptyState
+        data-testid="monitor-tree-loading"
+        data-state={treeState}
+        role="status"
+        title="Loading execution tree…"
+        description="Reading this run's nodes from the gateway."
+      >
         <Skeleton className="mon-state-skeleton" />
       </EmptyState>
     );
   }
-  if (!root) {
-    if (frameLoading) {
-      return (
-        <EmptyState data-testid="monitor-frame-loading" role="status" title="Loading frame…">
-          <Skeleton className="mon-state-skeleton" />
-        </EmptyState>
-      );
-    }
-    if (frameError) {
-      return (
-        <Alert variant="destructive" data-testid="monitor-frame-unavailable">
-          <AlertTitle>Frame unavailable.</AlertTitle>
-          <AlertDescription>{frameError.message}</AlertDescription>
-          <div className="mon-empty-actions">
-            {frameOverride?.onRetry ? (
-              <Chip data-testid="monitor-frame-retry" onClick={frameOverride.onRetry}>
-                Retry
-              </Chip>
-            ) : null}
-            {frameOverride?.onReturnToLive ? (
-              <Chip data-testid="monitor-frame-live" onClick={frameOverride.onReturnToLive}>
-                Return to live
-              </Chip>
-            ) : null}
-          </div>
-        </Alert>
-      );
-    }
+  if (treeState === "frame-loading") {
     return (
       <EmptyState
-        data-testid={isStatic ? "monitor-frame-empty" : "monitor-tree-empty"}
-        data-state="empty"
-        title={isStatic ? "No nodes in this frame." : "No nodes recorded yet."}
+        data-testid="monitor-frame-loading"
+        data-state={treeState}
+        role="status"
+        title="Loading frame…"
+        description="Rebuilding the execution tree at this point in the run's history."
+      >
+        <Skeleton className="mon-state-skeleton" />
+      </EmptyState>
+    );
+  }
+  if (treeState === "frame-error") {
+    return (
+      <Alert variant="destructive" data-testid="monitor-frame-unavailable" data-state={treeState}>
+        <AlertTitle>Frame unavailable.</AlertTitle>
+        <AlertDescription>{frameError?.message ?? "This frame could not be rebuilt."}</AlertDescription>
+        <div className="mon-empty-actions">
+          {frameOverride?.onRetry ? (
+            <Chip data-testid="monitor-frame-retry" onClick={frameOverride.onRetry}>
+              Retry
+            </Chip>
+          ) : null}
+          {frameOverride?.onReturnToLive ? (
+            <Chip data-testid="monitor-frame-live" onClick={frameOverride.onReturnToLive}>
+              Return to live
+            </Chip>
+          ) : null}
+        </div>
+      </Alert>
+    );
+  }
+  // Every other rootless state returned above, so this is settled emptiness.
+  if (!root) {
+    const frame = treeState === "frame-empty";
+    return (
+      <EmptyState
+        data-testid={frame ? "monitor-frame-empty" : "monitor-tree-empty"}
+        data-state={treeState}
+        title={frame ? "No nodes in this frame." : "No nodes recorded yet."}
+        description={
+          frame
+            ? "This point in the run's history is before its first node was scheduled."
+            : "Nodes appear here as the engine schedules this run's work."
+        }
+        action={
+          frame && frameOverride?.onReturnToLive ? (
+            <Chip data-testid="monitor-frame-live" onClick={frameOverride.onReturnToLive}>
+              Return to live
+            </Chip>
+          ) : undefined
+        }
       />
     );
   }
@@ -3289,6 +3346,15 @@ export function EventLog({ runId, eventsState }: { runId: string; eventsState: R
   };
 
   const hasLastKnownEvents = allEvents.length > 0;
+  // One classification for the list: a pending or failed query is never
+  // reported as emptiness, and a buffer hidden by the view chips reads as
+  // "filtered" (with a way back to All) rather than "no events".
+  const listState = eventLogViewState({
+    visibleCount: events.length,
+    totalCount: allEvents.length,
+    loading,
+    queryError: error !== undefined,
+  });
   const errorState =
     connectionStatus === "unauthorized"
       ? "unauthorized"
@@ -3419,23 +3485,39 @@ export function EventLog({ runId, eventsState }: { runId: string; eventsState: R
           aria-atomic={false}
           aria-busy={loading}
         >
-          {events.length === 0 && !error ? (
+          {listState !== "ready" && listState !== "error" ? (
             <li>
               <EmptyState
                 data-testid="monitor-events-state"
-                data-state={loading ? "loading" : allEvents.length === 0 ? "empty" : `filtered-${view}`}
-                role={loading ? "status" : undefined}
+                data-state={listState === "filtered" ? `filtered-${view}` : listState}
+                role={listState === "loading" ? "status" : undefined}
                 title={
-                  loading
+                  listState === "loading"
                     ? "Loading events…"
-                    : allEvents.length === 0
+                    : listState === "empty"
                       ? "No events recorded for this run yet."
                       : view === "notable"
-                        ? "No notable events in this buffer. Switch to Activity or All to inspect other events."
-                        : "No activity events in this buffer. Switch to All to inspect session and heartbeat events."
+                        ? "No notable events in this buffer."
+                        : "No activity events in this buffer."
+                }
+                description={
+                  listState === "loading"
+                    ? "Reading this run's event history from the gateway."
+                    : listState === "empty"
+                      ? "Events stream in here as the engine schedules and runs tasks."
+                      : view === "notable"
+                        ? `Switch to Activity or All to inspect the ${allEvents.length} buffered ${allEvents.length === 1 ? "event" : "events"}.`
+                        : `Switch to All to inspect the ${allEvents.length} buffered session and heartbeat ${allEvents.length === 1 ? "event" : "events"}.`
+                }
+                action={
+                  listState === "filtered" ? (
+                    <Button variant="outline" data-testid="monitor-events-show-all" onClick={() => setView("all")}>
+                      Show all events
+                    </Button>
+                  ) : undefined
                 }
               >
-                {loading ? <Skeleton className="mon-state-skeleton" /> : null}
+                {listState === "loading" ? <Skeleton className="mon-state-skeleton" /> : null}
               </EmptyState>
             </li>
           ) : null}
@@ -4117,6 +4199,14 @@ export function NodeOutputState({
     </Alert>
   ) : null;
 
+  const state = nodeOutputViewState({
+    hasRow: row !== null,
+    loading,
+    queryError: error !== undefined,
+    failed: failure !== null && failure !== undefined,
+    live,
+  });
+  // "ready" is exactly `row !== null`; test the row so it narrows.
   if (row) {
     return (
       <>
@@ -4125,35 +4215,50 @@ export function NodeOutputState({
       </>
     );
   }
-  if (loading) {
+  if (state === "loading") {
     return (
-      <EmptyState data-testid="monitor-output-loading" role="status" title="Loading output…">
+      <EmptyState
+        data-testid="monitor-output-loading"
+        data-state={state}
+        role="status"
+        title="Loading output…"
+        description="Reading this node's structured output from the gateway."
+      >
         <Skeleton className="mon-state-skeleton" />
       </EmptyState>
     );
   }
-  if (errorAlert) return errorAlert;
-  if (failure) {
+  if (state === "error") return errorAlert;
+  if (state === "failed") {
     return (
       <EmptyState
         data-testid="monitor-output-failed"
-        title="The node failed before producing structured output. Failure details are shown above."
+        data-state={state}
+        title="The node failed before producing structured output."
+        description="Failure details are shown above."
       />
     );
   }
-  if (live) {
+  if (state === "live") {
     return (
       <EmptyState
         data-testid="monitor-output-live"
+        data-state={state}
         role="status"
-        title="running — structured output lands here when the node finishes"
+        title="Still running…"
+        description="Structured output lands here when the node finishes."
       >
         <Skeleton className="mon-state-skeleton" />
       </EmptyState>
     );
   }
   return (
-    <EmptyState data-testid="monitor-output-empty" title="This node completed without recording structured output." />
+    <EmptyState
+      data-testid="monitor-output-empty"
+      data-state={state}
+      title="No structured output."
+      description="This node completed without recording structured output."
+    />
   );
 }
 
@@ -5509,7 +5614,7 @@ function App() {
             totalCount={allRuns.length}
             showMetrics={showMetrics}
             onToggleMetrics={() => setShowMetrics((value) => !value)}
-            onRefresh={() => void runsQuery.refetch()}
+            onRefresh={runsQuery.refetch}
           />
         </header>
       ) : null}
