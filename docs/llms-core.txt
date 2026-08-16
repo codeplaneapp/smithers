@@ -2798,7 +2798,7 @@ Five commands cross historical boundaries. Pick by what each acts on:
 | --- | --- | --- |
 | `rewind` | a run | Rewinds a run to a previous frame. Args: `RUN_ID FRAME_NO`. |
 | `replay` | a snapshot checkpoint | Forks from a checkpoint and resumes execution (time-travel fork). Takes a workflow. |
-| `fork` | a snapshot checkpoint | Creates a child run. `--run` also resumes it. |
+| `fork` | a snapshot checkpoint | Creates a child run. `--run` also resumes it. `--reset-node` resets exactly the nodes you name; downstream dependents keep the parent's finished output unless you name them too. |
 | `timetravel` | a past task state | Reverts filesystem plus DB state to a previous task state, then optionally resumes. Takes a workflow. |
 | `revert` | the workspace | Reverts the workspace to a previous task attempt's filesystem state only, no DB reset. Takes a workflow. |
 
@@ -3373,7 +3373,7 @@ commands[113]:
     flags[7]{name,short,type,default,desc}:
       run-id,r,string,,Source run ID
       frame,f,number,,Frame number to fork from
-      node,n,string,,Node ID to reset to pending
+      node,n,string,,Node ID to reset to pending (comma-separate ids; dependents are not reset for you)
       input,i,string,,Input overrides as JSON
       label,l,string,,Branch label for the fork
       restore-vcs,,boolean,false,Restore jj filesystem state to source frame revision
@@ -3385,7 +3385,7 @@ commands[113]:
     flags[7]{name,short,type,default,desc}:
       run-id,r,string,,Source run ID
       frame,f,number,,Frame number to fork from
-      reset-node,n,string,,Node ID to reset to pending
+      reset-node,n,string,,Node ID to reset to pending (comma-separate ids; dependents are not reset for you)
       input,i,string,,Input overrides as JSON
       label,l,string,,Branch label
       run,,boolean,false,Immediately start the forked run
@@ -8279,8 +8279,13 @@ GitHub API mutations such as `gh pr merge` are not.
 bunx smthrs timeline RUN_ID --tree
 bunx smthrs diff RUN_ID NODE_ID
 bunx smthrs fork workflow.tsx --run-id RUN_ID --frame 5 --reset-node analyze --label exp1
+bunx smthrs fork workflow.tsx --run-id RUN_ID --frame 5 --reset-node analyze,implement   # dependents are not reset for you
 bunx smthrs replay workflow.tsx --run-id RUN_ID --frame 5 --restore-vcs
 ```
+
+`--reset-node` resets exactly the nodes you name and nothing else: a task that
+consumed a reset task's output keeps the parent's finished output unless you
+name it too, so comma-separate the whole set you want re-run.
 
 Fork makes a child run without starting it (add `--run` to start immediately);
 replay also makes a child run but immediately resumes it. Branch operations do
