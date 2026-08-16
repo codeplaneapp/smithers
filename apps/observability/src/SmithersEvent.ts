@@ -389,6 +389,17 @@ export type SmithersEvent =
       timestampMs: number;
     }
   | {
+      type: "NodeStalled";
+      runId: string;
+      nodeId: string;
+      iteration: number;
+      attempt: number;
+      identicalFailures: number;
+      signature: string;
+      error: unknown;
+      timestampMs: number;
+    }
+  | {
       type: "NodeCancelled";
       runId: string;
       nodeId: string;

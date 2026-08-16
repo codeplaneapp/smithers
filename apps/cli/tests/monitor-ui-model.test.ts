@@ -12,6 +12,8 @@ import {
   histogramStats,
   metricValue,
   nextCron,
+  nodeAttemptHistoryRowsOf,
+  nodeAttemptHistoryView,
   nodeTimingsOf,
   nonZeroErrorCounters,
   openTicketCount,
@@ -143,6 +145,153 @@ describe("cancel confirmation", () => {
     });
     expect(cancelConfirmationStateAt(armed.state, 4_100)).toEqual({ armedAtMs: null });
     expect(cancelConfirmationTransition(armed.state, "confirm", 4_100).decision).toBe("disarmed");
+  });
+});
+
+describe("node attempt history", () => {
+  test("parses agent, failure, quota, and durable retry facts without retaining raw metadata", () => {
+    expect(
+      nodeAttemptHistoryRowsOf({
+        payload: [
+          {
+            iteration: 2,
+            attempt: 2,
+            state: "in-progress",
+            started_at_ms: 200,
+            meta_json: JSON.stringify({ agentId: "reviewer", agentEngine: "codex", agentModel: "gpt-5.4" }),
+          },
+          {
+            iteration: 2,
+            attempt: 1,
+            state: "failed",
+            startedAtMs: 100,
+            finishedAtMs: 150,
+            errorJson: JSON.stringify({ name: "ProviderError", code: "RATE_LIMIT", message: "try again" }),
+            metaJson: JSON.stringify({
+              agentId: "reviewer",
+              agentEngine: "claude",
+              agentModel: "opus",
+              retryState: { version: 1, failureCount: 1, retryAtMs: 175 },
+              agentConversation: [{ role: "user", content: "must not survive parsing" }],
+            }),
+          },
+          {
+            iteration: 2,
+            attempt: 0,
+            state: "failed",
+            errorJson: JSON.stringify({ code: "AGENT_QUOTA_EXCEEDED", message: "quota" }),
+            metaJson: JSON.stringify({ agentId: "reviewer" }),
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        iteration: 2,
+        attempt: 0,
+        state: "failed",
+        agent: "reviewer",
+        error: { code: "AGENT_QUOTA_EXCEEDED", message: "quota" },
+        consumesRetryBudget: false,
+      },
+      {
+        iteration: 2,
+        attempt: 1,
+        state: "failed",
+        startedAtMs: 100,
+        finishedAtMs: 150,
+        agent: "reviewer · claude · opus",
+        error: { name: "ProviderError", code: "RATE_LIMIT", message: "try again" },
+        consumesRetryBudget: true,
+        retryAtMs: 175,
+      },
+      {
+        iteration: 2,
+        attempt: 2,
+        state: "in-progress",
+        startedAtMs: 200,
+        agent: "reviewer · codex · gpt-5.4",
+        consumesRetryBudget: false,
+      },
+    ]);
+  });
+
+  test("does not charge failures with the nested quota marker against retry budget", () => {
+    expect(
+      nodeAttemptHistoryRowsOf([
+        {
+          iteration: 0,
+          attempt: 1,
+          state: "failed",
+          errorJson: JSON.stringify({
+            code: "PROVIDER_THROTTLED",
+            message: "quota exhausted",
+            details: { failureQuota: true },
+          }),
+        },
+      ]),
+    ).toEqual([
+      {
+        iteration: 0,
+        attempt: 1,
+        state: "failed",
+        error: { code: "PROVIDER_THROTTLED", message: "quota exhausted" },
+        consumesRetryBudget: false,
+      },
+    ]);
+  });
+
+  test("distinguishes scheduled, active, exhausted, and successful retries", () => {
+    const failed = (attempt: number, retryAtMs?: number) => ({
+      iteration: 0,
+      attempt,
+      state: "failed",
+      consumesRetryBudget: true,
+      ...(retryAtMs !== undefined ? { retryAtMs } : {}),
+    });
+    const running = { iteration: 0, attempt: 2, state: "in-progress", consumesRetryBudget: false };
+    const finished = { iteration: 0, attempt: 2, state: "finished", consumesRetryBudget: false };
+
+    expect(
+      nodeAttemptHistoryView({ attempts: [failed(1, 2_000)], nodeStatus: "failed", currentAttempt: 1, maxAttempts: 3 }),
+    ).toMatchObject({
+      state: "retrying",
+      headline: "Retry scheduled as attempt 2",
+      detail: "Attempt 1 of 3 · retry budget 1 of 2 used",
+    });
+    expect(
+      nodeAttemptHistoryView({ attempts: [failed(1), running], nodeStatus: "in-progress", maxAttempts: 3 }),
+    ).toMatchObject({
+      state: "retrying",
+      headline: "Retrying on attempt 2",
+      detail: "Attempt 2 of 3 · retry budget 1 of 2 used",
+    });
+    expect(
+      nodeAttemptHistoryView({ attempts: [failed(1), failed(2)], nodeStatus: "failed", maxAttempts: 2 }),
+    ).toMatchObject({
+      state: "exhausted",
+      headline: "Retry budget exhausted after attempt 2",
+      detail: "Attempt 2 of 2 · retry budget 1 of 1 used",
+    });
+    expect(
+      nodeAttemptHistoryView({ attempts: [failed(1), finished], nodeStatus: "finished", maxAttempts: 3 }),
+    ).toMatchObject({
+      state: "recovered",
+      headline: "Recovered on attempt 2",
+      detail: "Attempt 2 of 3 · retry budget 1 of 2 used",
+    });
+  });
+
+  test("makes first attempts and unlimited retry budgets explicit", () => {
+    expect(
+      nodeAttemptHistoryView({
+        attempts: [{ iteration: 0, attempt: 1, state: "in-progress", consumesRetryBudget: false }],
+        nodeStatus: "in-progress",
+      }),
+    ).toMatchObject({
+      state: "first-attempt",
+      headline: "First attempt in progress",
+      detail: "Attempt 1 · retry budget unlimited · 0 used",
+    });
   });
 });
 
@@ -739,6 +888,7 @@ describe("event views", () => {
   test("notable keeps the human-decision set", () => {
     expect(eventViewFor("NodeStarted")).toBe("notable");
     expect(eventViewFor("NodeFailed")).toBe("notable");
+    expect(eventViewFor("NodeStalled")).toBe("notable");
     expect(eventViewFor("RunFinished")).toBe("notable");
     expect(eventViewFor("ApprovalRequested")).toBe("notable");
     expect(eventViewFor("HumanRequestCreated")).toBe("notable");

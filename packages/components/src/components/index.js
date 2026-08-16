@@ -78,6 +78,7 @@
 /** @typedef {import("./LoopProps.ts").LoopProps} LoopProps */
 /** @typedef {import("./MergeQueueProps.ts").MergeQueueProps} MergeQueueProps */
 /** @typedef {import("./MemoryProps.ts").MemoryProps} MemoryProps */
+/** @typedef {import("./MemoryTrellisProps.ts").MemoryTrellisProps} MemoryTrellisProps */
 /** @typedef {import("./MonitorCondition.ts").MonitorCondition} MonitorCondition */
 /** @typedef {import("./MonitorProps.ts").MonitorProps} MonitorProps */
 /** @typedef {import("./OptimizerProps.ts").OptimizerProps} OptimizerProps */
@@ -185,6 +186,7 @@ export { TryCatchFinally } from "./TryCatchFinally.js";
 // --- Core Enhancements ---
 export { Aspects } from "./Aspects.js";
 export { Memory } from "./Memory.js";
+export { MemoryTrellis } from "./MemoryTrellis.js";
 export { SuperSmithers } from "./SuperSmithers.js";
 // --- Delegation Chain ---
 export { DelegationChain } from "./delegation/DelegationChain.js";

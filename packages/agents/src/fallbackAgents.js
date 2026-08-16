@@ -3,6 +3,14 @@ import { AntigravityAgent } from "./AntigravityAgent.js";
 import { ClaudeCodeAgent } from "./ClaudeCodeAgent.js";
 import { CodexAgent } from "./CodexAgent.js";
 import { KimiAgent } from "./KimiAgent.js";
+import { SmithersError } from "@smthrs/errors/SmithersError";
+import {
+  accountQuotaBlock,
+  orderAccountsByUsage,
+  readAccountQuotaState,
+  readUsageCache,
+  recordAccountQuotaLimit,
+} from "@smthrs/usage";
 
 /** @typedef {import("./AgentLike.ts").AgentLike} AgentLike */
 /** @typedef {import("./FallbackAgentsOptions.ts").FallbackAgentsOptions} FallbackAgentsOptions */
@@ -11,6 +19,14 @@ import { KimiAgent } from "./KimiAgent.js";
 
 /** Providers included when `options.providers` is omitted. */
 const DEFAULT_PROVIDERS = /** @type {FallbackAgentProvider[]} */ (["claude-code", "codex"]);
+
+// A workflow re-renders while attempts advance. The engine records failed
+// rungs by chainIndex, so one run's account order must not change after a
+// quota callback updates the persisted state. Cache only labels, not agent
+// instances, so every render still sees new quota sentinels and options.
+const MAX_STABLE_ORDERS = 256;
+/** @type {Map<string, string[]>} */
+const stableOrders = new Map();
 
 /**
  * Account provider → agent factory. Subscription accounts authenticate via
@@ -126,6 +142,82 @@ function shuffleInPlace(items, random) {
 }
 
 /**
+ * @param {FallbackAgentsOptions} options
+ * @param {FallbackAgentProvider[]} providers
+ * @param {Account[]} accounts
+ */
+function stableOrderKey(options, providers, accounts) {
+  if (options.seed === undefined || options.random) return null;
+  return JSON.stringify({
+    seed: String(options.seed),
+    shuffle: options.shuffle !== false,
+    home: options.env?.SMITHERS_HOME ?? process.env.SMITHERS_HOME ?? "",
+    providers,
+    models: options.models ?? {},
+    accounts: accounts.map(({ label, provider, configDir, apiKey, model }) => ({
+      label,
+      provider,
+      configDir,
+      apiKey: apiKey ? "set" : "",
+      model,
+    })),
+  });
+}
+
+/** @param {string} key @param {string[]} labels */
+function rememberStableOrder(key, labels) {
+  if (stableOrders.has(key)) stableOrders.delete(key);
+  stableOrders.set(key, labels);
+  if (stableOrders.size > MAX_STABLE_ORDERS) {
+    stableOrders.delete(stableOrders.keys().next().value);
+  }
+}
+
+/**
+ * A no-network rung for an account whose provider reset is already known. It
+ * preserves the reset in the engine's normal quota failover path without
+ * starting another Claude process before that time.
+ *
+ * A chain outlives the call that built it — a generated `agents.ts` spreads
+ * one pool at module load — so the rung re-checks the clock when it is
+ * actually invoked and hands off to the real agent once the reset has passed.
+ * Without that, one rate limit would retire the account for the whole process.
+ *
+ * @param {Account} account
+ * @param {string | undefined} model
+ * @param {{ untilMs: number }} quota
+ * @param {() => AgentLike | null} buildAgent
+ * @returns {AgentLike}
+ */
+function knownQuotaBlockedAgent(account, model, quota, buildAgent) {
+  const id = registeredAgentId(account.label);
+  return {
+    id,
+    model,
+    generate(options) {
+      if (Date.now() >= quota.untilMs) {
+        const revived = buildAgent();
+        if (revived) return revived.generate(options);
+      }
+      return Promise.reject(
+        new SmithersError(
+          "AGENT_QUOTA_EXCEEDED",
+          `Account "${account.label}" is rate-limited until ${new Date(quota.untilMs).toISOString()}.`,
+          {
+            failureQuota: true,
+            agentId: id,
+            agentEngine: account.provider,
+            agentModel: model ?? "<unset>",
+            quotaResetAtMs: quota.untilMs,
+            persistedQuota: true,
+          },
+        ),
+      );
+    },
+  };
+}
+
+/**
  * @param {FallbackAgentProvider[]} providers
  * @returns {AgentLike}
  */
@@ -140,9 +232,10 @@ function defaultFallbackAgent(providers) {
 /**
  * Build a failover chain over every registered account (`smithers agents add`)
  * so a `<Task agent={fallbackAgents()}>` spreads load across all of the
- * user's Claude/Codex subscriptions: the accounts are randomly ordered per
- * call and the engine's quota failover walks the chain when a rung is
- * rate-limited. The "normal" agent (`options.fallback`, defaulting to a stock
+ * user's Claude/Codex subscriptions. Cached quota headroom orders healthy
+ * accounts first. A seeded shuffle breaks ties. Persisted quota blocks become
+ * no-network rungs, and the engine's quota failover walks the chain without
+ * probing those accounts again. The "normal" agent (`options.fallback`, defaulting to a stock
  * agent for the first requested family) is appended as the last rung, and is
  * returned alone when the global registry is missing, empty, or unreadable —
  * a workflow using this helper degrades to single-agent behavior on machines
@@ -173,21 +266,72 @@ export function fallbackAgents(options = {}) {
     return [...fallback];
   }
   const providerSet = new Set(providers);
-  /** @type {AgentLike[]} */
-  const chain = [];
+  /** @type {Account[]} */
+  const matchingAccounts = [];
   for (const account of accounts) {
     const provider = /** @type {FallbackAgentProvider} */ (account.provider);
     if (!providerSet.has(provider)) continue;
-    const factory = PROVIDER_FACTORIES[provider];
-    if (!factory) continue;
-    const model = options.models?.[provider] ?? account.model;
-    const agent = factory(account, model, options.agentOptions?.[provider] ?? {});
-    if (agent) chain.push(agent);
+    if (!PROVIDER_FACTORIES[provider]) continue;
+    matchingAccounts.push(account);
   }
-  if (chain.length === 0) return [...fallback];
+  if (matchingAccounts.length === 0) return [...fallback];
+  const random = options.random ?? (options.seed !== undefined ? seededRandom(options.seed) : Math.random);
+  const shuffled = [...matchingAccounts];
   if (options.shuffle !== false) {
-    const random = options.random ?? (options.seed !== undefined ? seededRandom(options.seed) : Math.random);
-    shuffleInPlace(chain, random);
+    shuffleInPlace(shuffled, random);
+  }
+  const tieBreak = new Map(shuffled.map((account, index) => [account.label, index]));
+  const orderKey = stableOrderKey(options, providers, matchingAccounts);
+  const rememberedLabels = orderKey ? stableOrders.get(orderKey) : undefined;
+  const ordered = rememberedLabels
+    ? rememberedLabels.map((label) => matchingAccounts.find((account) => account.label === label)).filter(Boolean)
+    : orderAccountsByUsage(matchingAccounts, {
+        env,
+        tieBreak,
+        modelFor: (account) =>
+          options.models?.[/** @type {FallbackAgentProvider} */ (account.provider)] ?? account.model,
+      });
+  if (orderKey && !rememberedLabels)
+    rememberStableOrder(
+      orderKey,
+      ordered.map((account) => account.label),
+    );
+  const quota = readAccountQuotaState(env).entries;
+  const usage = readUsageCache(env).entries;
+  /** @type {AgentLike[]} */
+  const chain = [];
+  for (const account of ordered) {
+    const provider = /** @type {FallbackAgentProvider} */ (account.provider);
+    const model = options.models?.[provider] ?? account.model;
+    const extra = options.agentOptions?.[provider] ?? {};
+    const callerQuotaHook = typeof extra.onQuotaExceeded === "function" ? extra.onQuotaExceeded : null;
+    const buildAgent = () =>
+      PROVIDER_FACTORIES[provider](account, model, {
+        ...extra,
+        onQuotaExceeded: (details) => {
+          const providerMessage = typeof details?.underlying === "string" ? details.underlying : "";
+          const modelFamilyMatch = /\b(fable|opus|sonnet)\b/i.exec(providerMessage)?.[1]?.toLowerCase();
+          const modelSpecific = Boolean(modelFamilyMatch);
+          const quotaModel = model ?? (modelFamilyMatch ? `claude-${modelFamilyMatch}` : undefined);
+          try {
+            recordAccountQuotaLimit(account.label, {
+              env,
+              model: quotaModel,
+              scope: modelSpecific ? "model" : "shared",
+              untilMs: typeof details?.quotaResetAtMs === "number" ? details.quotaResetAtMs : undefined,
+            });
+          } finally {
+            callerQuotaHook?.(details);
+          }
+        },
+      });
+    const block = accountQuotaBlock(quota, account.label, model, usage[account.label]?.report);
+    if (block) {
+      chain.push(knownQuotaBlockedAgent(account, model, block, buildAgent));
+      continue;
+    }
+    const agent = buildAgent();
+    if (agent) chain.push(agent);
   }
   return [...chain, ...fallback];
 }

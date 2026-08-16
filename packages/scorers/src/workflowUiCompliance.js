@@ -27,6 +27,7 @@ const NORMALIZED_AWAY = new Set([
   "bound-stale",
   "in-progress",
   "finished",
+  "stalled",
   "skipped",
   // Non-TaskState aliases that toRunStatus also accepts.
   "retrying",

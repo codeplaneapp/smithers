@@ -19,6 +19,7 @@ import { createHash } from "node:crypto";
 import { runWithToolContext } from "@smthrs/tool-context";
 import { createToolJournalContext } from "../createToolJournalContext.js";
 import { stampDurableRetryState } from "./retry-state.js";
+import { stampIdenticalFailureStreak } from "../failure-streak.js";
 import { cancellationAttributionFromAbortSignal, withCancellationSource } from "../cancellation-attribution.js";
 /**
  * @typedef {{ rootDir: string; }} ComputeTaskBridgeToolConfig
@@ -1164,6 +1165,14 @@ export const executeComputeTaskBridge = async (
     );
     const failedAtMs = nowMs();
     const failureErrorJson = errorToJson(effectiveError);
+    // Non-progress detection (#1500): a compute task that keeps throwing the
+    // same error is livelocked exactly like an agent task, so it reaches the
+    // same `stalled` verdict from the same durable attempt evidence.
+    const {
+      signature: failureSignature,
+      streak: identicalFailureStreak,
+      stalled: stalledVerdict,
+    } = stampIdenticalFailureStreak(failureErrorJson, attempts, desc);
     stampDurableRetryState({
       attemptMeta,
       attempts,
@@ -1196,7 +1205,7 @@ export const executeComputeTaskBridge = async (
           runId,
           nodeId: desc.nodeId,
           iteration: desc.iteration,
-          state: "failed",
+          state: stalledVerdict ? "stalled" : "failed",
           lastAttempt: attemptNo,
           updatedAtMs: failedAtMs,
           outputTable: desc.outputTableName,
@@ -1224,9 +1233,24 @@ export const executeComputeTaskBridge = async (
         timestampMs: nowMs(),
       }),
     );
+    if (stalledVerdict) {
+      await Effect.runPromise(
+        eventBus.emitEventWithPersist({
+          type: "NodeStalled",
+          runId,
+          nodeId: desc.nodeId,
+          iteration: desc.iteration,
+          attempt: attemptNo,
+          identicalFailures: identicalFailureStreak,
+          signature: failureSignature,
+          error: failureErrorJson,
+          timestampMs: nowMs(),
+        }),
+      );
+    }
     const updatedAttempts = await Effect.runPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
     const failedAttempts = updatedAttempts.filter((attempt) => attempt.state === "failed");
-    if (attemptMeta.failureRetryable !== false && failedAttempts.length <= desc.retries) {
+    if (!stalledVerdict && attemptMeta.failureRetryable !== false && failedAttempts.length <= desc.retries) {
       await Effect.runPromise(
         eventBus.emitEventWithPersist({
           type: "NodeRetrying",

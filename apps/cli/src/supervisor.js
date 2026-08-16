@@ -3,6 +3,7 @@ import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
 import { Effect } from "effect";
 import { toSmithersError } from "@smthrs/errors/toSmithersError";
 import { trackEvent } from "@smthrs/observability/metrics";
+import { parseRuntimeOwnerIdentity } from "@smthrs/db/runtime-owner";
 import { isPidAlive, parseRuntimeOwnerPid } from "@smthrs/engine/runtime-owner";
 import * as engineModule from "@smthrs/engine/engine";
 import { SmithersError } from "@smthrs/errors";
@@ -497,12 +498,12 @@ function processCandidateEffect(options, staleRun, staleBeforeMs) {
       // this mirrors deriveRunState's "orphaned" classification (no owner
       // recorded, or a recorded owner PID we can prove is dead on this host).
       // A live owner PID is a busy engine whose heartbeat write was merely
-      // starved under load ("stale"), and an owner id with no locally
-      // verifiable PID is unproven ("stale/unproven"): resuming either races a
-      // SECOND engine against the still-alive driver's merge queue and corrupts
-      // the run's frames (land nodes marked finished with empty output rows,
-      // issues that landed but never closed). A stale heartbeat alone is NOT
-      // proof of death.
+      // starved under load ("stale"), and a legacy owner id with no verifiable
+      // PID is unproven ("stale/unproven"): resuming either races a SECOND
+      // engine against the still-alive driver's merge queue and corrupts the
+      // run's frames. A host-scoped owner from another host is different: its
+      // PID cannot describe this process table, so the already-stale durable
+      // heartbeat is the portable death signal and makes it recoverable.
       //
       // One owner shape IS verifiably dead despite having no pid: a
       // `supervisor:` claim whose heartbeat went stale again. Activation
@@ -512,9 +513,11 @@ function processCandidateEffect(options, staleRun, staleBeforeMs) {
       // maxResumeAttempts below.
       const priorResumeAttempts = parseSupervisorClaimAttempts(staleRun.runtimeOwnerId);
       const hasOwner = staleRun.runtimeOwnerId != null && staleRun.runtimeOwnerId.length > 0;
+      const ownerIdentity = parseRuntimeOwnerIdentity(staleRun.runtimeOwnerId);
+      const remoteOwner = ownerIdentity?.isLocal === false;
       const ownerPid = options.deps.parseRuntimeOwnerPid(staleRun.runtimeOwnerId);
       const ownerPidAlive = ownerPid !== null && options.deps.isPidAlive(ownerPid);
-      const orphaned = !hasOwner || (ownerPid !== null && !ownerPidAlive) || priorResumeAttempts > 0;
+      const orphaned = !hasOwner || remoteOwner || (ownerPid !== null && !ownerPidAlive) || priorResumeAttempts > 0;
       if (!orphaned) {
         const reason = ownerPidAlive ? "pid-alive" : "owner-unverified";
         yield* Effect.logInfo(

@@ -3,10 +3,10 @@
  *
  * A run in any of these states either has a live engine editing files, or is
  * parked in a way it resumes from and expects its tree intact. `orphaned` is
- * deliberately absent: `deriveRunState` only reports it when the recorded
- * owner PID fails a liveness probe, so an orphaned run is a dead engine whose
- * tree nobody is coming back for. Terminal states are absent for the same
- * reason.
+ * deliberately absent: `deriveRunState` reports it when a local owner PID is
+ * dead or a remote owner's heartbeat is stale. The supervisor may take over
+ * that run, so oneshot does not reserve its working tree. Terminal states are
+ * absent for the same reason.
  */
 const HOLDING_STATES = new Set([
   "running",

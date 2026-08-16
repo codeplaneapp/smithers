@@ -93,7 +93,7 @@ rawDb.run(
     factTime + 10_000,
     factTime + 10_100,
     factTime + 10_200,
-    JSON.stringify({ gatewayWorkflowKey: "e2e-task" }),
+    JSON.stringify({ gatewaySystem: false, gatewayWorkflowKey: "e2e-task" }),
   ],
 );
 

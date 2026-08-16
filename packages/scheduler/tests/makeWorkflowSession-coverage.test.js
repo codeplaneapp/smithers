@@ -126,6 +126,36 @@ describe("makeWorkflowSession approval resolution branches", () => {
   });
 });
 
+describe("makeWorkflowSession durable approval hydration", () => {
+  test("a previously approved subtree keeps its slot ahead of a newly waiting gate", () => {
+    const approvedKey = "approved-gate::0";
+    const session = makeWorkflowSession({ initialApprovals: new Set([approvedKey]) });
+    const pending = descriptor("new-gate", {
+      needsApproval: true,
+      subtreeGroupId: "lanes",
+      subtreeChildKey: "new",
+      subtreeMax: 1,
+    });
+    const approved = descriptor("approved-gate", {
+      needsApproval: true,
+      subtreeGroupId: "lanes",
+      subtreeChildKey: "approved",
+      subtreeMax: 1,
+    });
+    const xml = el("smithers:workflow", {}, [
+      el("smithers:parallel", { id: "lanes", subtreeConcurrency: "1" }, [
+        el("smithers:task", { id: "new-gate" }),
+        el("smithers:task", { id: "approved-gate" }),
+      ]),
+    ]);
+
+    const decision = run(session.submitGraph(graph([pending, approved], xml)));
+
+    expect(decision._tag).toBe("Execute");
+    expect(decision.tasks.map((task) => task.nodeId)).toEqual(["approved-gate"]);
+  });
+});
+
 describe("makeWorkflowSession timer scheduling", () => {
   test("a timer with an __timerUntil deadline parks in waiting-timer", () => {
     const session = makeWorkflowSession({ nowMs: () => 1_000 });
