@@ -250,7 +250,13 @@ import { fallbackAgents } from "smthrs";
 Copy every permission, sandbox, and tool option from the old
 `ClaudeCodeAgent` into `agentOptions["claude-code"]`. Smithers orders healthy
 accounts by model-specific headroom. It persists provider reset times and
-skips known rate-limited accounts without starting Claude again.
+skips known rate-limited accounts without starting Claude again. A cached
+window at 100% also blocks the account until its reported reset. The run seed
+keeps every account at the same chain index after quota state changes.
+
+The example excludes the ambient `~/.claude` login because `fallback: []`
+disables the default tail. Omit that line to keep the ambient login as the
+last fallback. Use `agents reauth --include-default` to check it too.
 
 A live agent process cannot change its account chain. After editing the
 workflow, cancel the old run and start a new run:

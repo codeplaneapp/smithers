@@ -196,8 +196,10 @@ type BaseCliAgentOptions$2 = {
     /** Called after a provider quota error is classified. */
     onQuotaExceeded?: (details: {
         agentId?: string;
+        agentEngine?: string;
         agentModel?: string;
         quotaResetAtMs?: number;
+        underlying?: string;
     }) => void;
     /**
      * First-class reasoning effort, shared across every CLI adapter so a workflow
@@ -532,8 +534,10 @@ declare class BaseCliAgent {
     extraArgs: string[] | undefined;
     onQuotaExceeded: ((details: {
         agentId?: string;
+        agentEngine?: string;
         agentModel?: string;
         quotaResetAtMs?: number;
+        underlying?: string;
     }) => void) | undefined;
     /**
      * @param {AgentGenerateOptions | undefined} options
