@@ -294,6 +294,12 @@ const runWorkflowInputSchema = z
     runId: z.string().optional(),
     resume: z.boolean().default(false),
     force: z.boolean().default(false),
+    stealOwnership: z
+      .boolean()
+      .default(false)
+      .describe(
+        "With resume=true, attach even though the run still has a live driver. force=true does NOT grant this (#1056).",
+      ),
     waitForTerminal: z.boolean().default(false),
     waitForStartMs: z.number().int().min(0).default(1_000),
     maxConcurrency: z.number().int().min(1).optional(),
@@ -561,6 +567,10 @@ const timeTravelInputSchema = z.object({
   restoreVcs: z.boolean().default(true),
   resetDependents: z.boolean().default(true),
   force: z.boolean().default(false),
+  stealOwnership: z
+    .boolean()
+    .default(false)
+    .describe("Time-travel a run that still has a live driver. force=true does NOT grant this (#1056)."),
   noRevert: z.boolean().default(false),
   confirm: z.boolean().default(false),
 });
@@ -1156,6 +1166,7 @@ export function createSemanticToolDefinitions(options = {}) {
               runId,
               resume: input.resume,
               force: input.force,
+              stealOwnership: input.stealOwnership,
               workflowPath: summary.entryFile,
               maxConcurrency: input.maxConcurrency,
               rootDir: input.rootDir,
@@ -1841,7 +1852,7 @@ export function createSemanticToolDefinitions(options = {}) {
               });
             }
             const run = await adapter.getRun(input.runId);
-            if (run?.status === "running" && !input.force) {
+            if (run?.status === "running" && !input.force && !input.stealOwnership) {
               throw new SmithersError(
                 "RUN_STILL_RUNNING",
                 `Run ${input.runId} is still marked running. Pass force=true to time-travel it anyway.`,
@@ -1858,6 +1869,7 @@ export function createSemanticToolDefinitions(options = {}) {
               resetDependents: input.resetDependents,
               restoreVcs: input.restoreVcs,
               force: input.force,
+              stealOwnership: input.stealOwnership,
               noRevert: input.noRevert,
               caller: "mcp:semantic",
             });

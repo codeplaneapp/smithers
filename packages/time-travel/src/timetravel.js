@@ -10,6 +10,7 @@ import { updateRewindAuditRow } from "./updateRewindAuditRow.js";
 import { guardEffectBoundary } from "./guardEffectBoundary.js";
 import { archiveDiscardedEffects } from "./archiveDiscardedEffects.js";
 import { isRunLikelyLive } from "./isRunLikelyLive.js";
+import { classifyRunDriverLiveness, describeLiveDriverRefusal } from "@smthrs/db/runDriverLiveness";
 import { markRunNeedsAttention } from "./markRunNeedsAttention.js";
 /** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./TimeTravelOptions.ts").TimeTravelOptions} TimeTravelOptions */
@@ -289,7 +290,29 @@ export async function timeTravel(adapter, opts) {
   let auditResult = "failed";
   try {
     const run = typeof adapter.getRun === "function" ? await adapter.getRun(runId) : null;
-    if (opts.force !== true && run?.status === "running" && isRunLikelyLive(run, nowMs())) {
+    // Evidence of a live driver (owner PID alive, heartbeating remote owner, or
+    // a held resume claim) is refused regardless of `force`: rewinding under a
+    // running engine races its frame writes against the truncation, and `force`
+    // is asked for by callers who only meant to cross an effect boundary
+    // (#1056). Only the separately named `stealOwnership` gets through.
+    if (opts.stealOwnership !== true) {
+      const liveness = classifyRunDriverLiveness(run, { now: nowMs() });
+      if (liveness.live) {
+        return {
+          success: false,
+          vcsRestored: false,
+          resetNodes: [],
+          error: describeLiveDriverRefusal(runId, liveness),
+          effectBoundary: cleanReport,
+        };
+      }
+    }
+    if (
+      opts.force !== true &&
+      opts.stealOwnership !== true &&
+      run?.status === "running" &&
+      isRunLikelyLive(run, nowMs())
+    ) {
       return {
         success: false,
         vcsRestored: false,

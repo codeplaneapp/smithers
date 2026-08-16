@@ -262,6 +262,7 @@ type RunOptions = {
   pauseSignal?: AbortSignal;        // graceful pause: stop scheduling, let in-flight finish, park `paused`
   resume?: boolean;
   force?: boolean;                  // resume even if marked running
+  stealOwnership?: boolean;         // attach to a run whose driver is still ALIVE; `force` deliberately does not grant this (`--steal-ownership`)
   acceptWorkflowChange?: boolean;   // resume same run id after workflow source changed, re-blessing hashes
   workflowPath?: string;
   rootDir?: string;

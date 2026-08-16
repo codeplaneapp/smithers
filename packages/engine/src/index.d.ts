@@ -14,6 +14,7 @@ import * as _smthrs_observability_SmithersEvent from '@smthrs/observability/Smit
 import * as _smthrs_observability_correlation from '@smthrs/observability/correlation';
 import { EventEmitter } from 'node:events';
 export { isPidAlive, parseRuntimeOwnerPid } from '@smthrs/db/runtime-owner';
+export { RUN_DRIVER_HEARTBEAT_STALE_MS, STEAL_OWNERSHIP_FLAG, classifyRunDriverLiveness, describeLiveDriverRefusal, isRunDriverAlive, readProcessStartMs } from '@smthrs/db/runDriverLiveness';
 import * as _smthrs_graph_XmlNode from '@smthrs/graph/XmlNode';
 import * as _smthrs_graph_TaskDescriptor from '@smthrs/graph/TaskDescriptor';
 import { TaskDescriptor } from '@smthrs/graph/TaskDescriptor';

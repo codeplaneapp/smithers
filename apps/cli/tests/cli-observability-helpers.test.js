@@ -40,6 +40,24 @@ describe("CLI observability helpers", () => {
         force: false,
         acceptWorkflowChange: true,
       }),
-    ).toEqual({ resume: true, force: false, acceptWorkflowChange: true });
+    ).toEqual({ resume: true, force: false, stealOwnership: false, acceptWorkflowChange: true });
+  });
+
+  // #1056: ownership is a separately named override. `force` must never imply
+  // it, or a user who forced something unrelated silently attaches a second
+  // engine to a live run.
+  test("steal-ownership is threaded independently of force", () => {
+    expect(buildDurabilityRunOptions({ resume: true, force: true })).toEqual({
+      resume: true,
+      force: true,
+      stealOwnership: false,
+      acceptWorkflowChange: false,
+    });
+    expect(buildDurabilityRunOptions({ resume: true, stealOwnership: true })).toEqual({
+      resume: true,
+      force: false,
+      stealOwnership: true,
+      acceptWorkflowChange: false,
+    });
   });
 });

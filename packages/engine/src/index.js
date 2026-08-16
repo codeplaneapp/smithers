@@ -23,6 +23,7 @@ export * from "./createDocWatcher.js";
 export * from "./getDefinedToolMetadata.js";
 export * from "./human-requests.js";
 export * from "./runtime-owner.js";
+export * from "./runDriverLiveness.js";
 export * from "./scheduler.js";
 export * from "./signals.js";
 export * from "./steers.js";

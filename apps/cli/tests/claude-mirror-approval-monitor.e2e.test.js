@@ -139,7 +139,13 @@ describe("claude mirror approvals + monitor (real run)", () => {
     }
 
     // Approve, resume to completion, and confirm the mirror sees it all.
-    const approve = runSmithers(["approve", runId, "--node", "gate"], { cwd: repo.dir, format: "json" });
+    // --no-resume: this test drives the resume itself below. Letting approve's
+    // auto-resume also claim the run would be two engines on one run, which the
+    // ownership guard (#1056) correctly refuses.
+    const approve = runSmithers(["approve", runId, "--node", "gate", "--no-resume"], {
+      cwd: repo.dir,
+      format: "json",
+    });
     expect(approve.exitCode, `${approve.stdout}\n${approve.stderr}`).toBe(0);
     const resume = runSmithers(["up", "workflow.tsx", "--resume", runId], {
       cwd: repo.dir,
