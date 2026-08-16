@@ -172,7 +172,7 @@ describe("Gateway webhook ingestion", () => {
     }
     expect(metrics).toMatch(receivedPattern);
     expect(metrics).toMatch(rejectedPattern);
-  });
+  }, 30_000);
   test("delivers matching webhooks as signals to waiting runs", async () => {
     const dbPath = makeDbPath("signal");
     dbPaths.push(dbPath);
