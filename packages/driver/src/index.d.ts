@@ -121,6 +121,17 @@ type RunOptions$2 = {
     resume?: boolean;
     force?: boolean;
     /**
+     * Take over a run whose driver is still demonstrably alive (live owner PID,
+     * a heartbeating remote owner, or a held durable resume claim).
+     *
+     * Deliberately separate from the overloaded {@link force}: attaching a second
+     * engine to a live run splits scheduling and races run/attempt writes, so it
+     * must be asked for by name (`--steal-ownership`) and never as a side effect
+     * of forcing something unrelated. Stale runs (dead driver, expired claim)
+     * resume without it, so ordinary crash recovery is unaffected.
+     */
+    stealOwnership?: boolean;
+    /**
      * Resume this run after its workflow source changed, re-blessing the stored
      * durability metadata (workflow hashes) in place instead of forking to a new
      * run id. Skips ONLY the two workflow-hash mismatches; workflow-path and

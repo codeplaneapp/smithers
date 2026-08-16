@@ -78,7 +78,40 @@ Read each row as two comma-separated fields declared by the `{command,descriptio
 
 `bunx smthrs up` exits when a run reaches a durable wait state (`waiting-approval`, `waiting-event`, or `waiting-timer`), even in foreground mode. `bunx smthrs up --detach` starts a background owner and returns its `runId`, but that owner also exits when the run pauses. This is expected: the persisted run is waiting for an external decision, signal, or timer rather than burning a process.
 
-To drive a run to completion across pauses, use the Gateway (`getRun`, `streamRunEventsResilient`, `submitApproval`, `submitSignal`, and `resumeRun`) for an automated keeper. For ad-hoc operation, the equivalent public CLI commands are `ps`, `why RUN_ID`, `inspect RUN_ID`, `logs RUN_ID -f`, `approve`/`deny`, `signal`, and `up <workflow.tsx> --resume RUN_ID`. Use `--force` only after confirming the previous owner is gone or intentionally replacing it. Never implement the keeper by querying the run store.
+To drive a run to completion across pauses, use the Gateway (`getRun`, `streamRunEventsResilient`, `submitApproval`, `submitSignal`, and `resumeRun`) for an automated keeper. For ad-hoc operation, the equivalent public CLI commands are `ps`, `why RUN_ID`, `inspect RUN_ID`, `logs RUN_ID -f`, `approve`/`deny`, `signal`, and `up <workflow.tsx> --resume RUN_ID`. Never implement the keeper by querying the run store.
+
+### `--steal-ownership`: taking a run from a live driver
+
+Two engines on one run split its scheduling in two and race each other's state
+writes, so resume refuses whenever it can still find evidence of a driver:
+
+- the recorded owner PID is alive on this host (and did not merely inherit a
+  recycled PID number: the process must be old enough to have written the run's
+  last heartbeat);
+- the owner runs on another host and is still heartbeating;
+- a durable resume claim on the run is still heartbeating, meaning another
+  resumer already won the race.
+
+The refusal is `RUN_OWNER_ALIVE` and leaves the owner, the run row, and the task
+attempts exactly as they were. **`--force` does not defeat it.** `--force` is an
+overloaded escape hatch (crossing effect boundaries, ignoring a fresh heartbeat,
+overwriting a planned id), and passing it for one of those reasons must never
+hand your run to a second engine as a side effect.
+
+To take a live run anyway, ask for it by name:
+
+```bash
+bunx smthrs up workflow.tsx --resume --run-id RUN_ID --steal-ownership
+```
+
+`--steal-ownership` is accepted by `up`, `oneshot`, `retry-task`, and
+`timetravel` (and as `stealOwnership` on the `run_workflow` and `time_travel`
+MCP tools). It also subsumes the weaker heartbeat-freshness check, so it never
+needs to be combined with `--force`. The gateway's `resumeRun` RPC deliberately
+has no equivalent: a remote caller can never steal a live run.
+
+A *stale* run (dead driver, expired claim) still resumes with no extra flag,
+so ordinary crash recovery and `bunx smthrs supervise` are unaffected.
 
 If resume fails with `RESUME_METADATA_MISMATCH`, the workflow file changed after the run started. Resume validates the original workflow metadata and source hash; it is not a hot-reload mechanism for stopped runs. Start a fresh run instead, for example with a new `--run-id`, or overwrite an existing planned id with `--force` when that command supports it. When iterating on a workflow definition, expect each edit to require a fresh run rather than `--resume`.
 
@@ -189,7 +222,7 @@ bunx smthrs revert workflow.tsx \
   --run-id RUN_ID --node-id NODE_ID --attempt 1 [--force] [--no-revert]
 
 bunx smthrs timetravel workflow.tsx \
-  --run-id RUN_ID --node-id NODE_ID [--force] [--no-revert]
+  --run-id RUN_ID --node-id NODE_ID [--force] [--steal-ownership] [--no-revert]
 
 bunx smthrs rewind RUN_ID FRAME_NO \
   [--force] [--no-revert]
@@ -247,7 +280,7 @@ commands[113]:
     purpose: Build a new Smithers workflow from a plain-English description. Dispatches to the create-workflow builder.
     args[1]{name,type,required,desc}:
       task,string,false,Plain-English description of the workflow to build (forwarded as the builder prompt)
-    flags[38]{name,short,type,default,desc}:
+    flags[39]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; preflight the graph, then print runId/pid/logFile once the run is admitted
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -262,6 +295,7 @@ commands[113]:
       annotations,,string,,Run annotations as flat JSON string/number/boolean object or '-' to read JSON from stdin
       resume,,boolean|string,false,Resume an existing run; may be true or a run ID
       force,,boolean,false,Resume even if still marked running
+      steal-ownership,,boolean,false,Take over a run whose driver is still alive (live owner PID; heartbeating remote owner; or held resume claim). Two engines on one run split-brain its scheduling; --force does NOT grant this
       parent-run-id,,string,,Existing run ID to record as this run's parent (persisted lineage, surfaced by inspect/ps and the MCP run tools)
       accept-workflow-change,,boolean,false,Resume this run after its workflow source changed, re-blessing durability metadata in place; you own replay determinism
       resume-claim-owner,,string,,Internal durable resume claim owner
@@ -301,7 +335,7 @@ commands[113]:
     purpose: Start or resume a workflow execution from a discovered workflow ID or a .tsx workflow file path
     args[1]{name,type,required,desc}:
       workflow,string,false,Workflow ID or file path (omit with --interactive to pick one)
-    flags[40]{name,short,type,default,desc}:
+    flags[41]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; preflight the graph, then print runId/pid/logFile once the run is admitted
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -316,6 +350,7 @@ commands[113]:
       annotations,,string,,Run annotations as flat JSON string/number/boolean object or '-' to read JSON from stdin
       resume,,boolean|string,false,Resume an existing run; may be true or a run ID
       force,,boolean,false,Resume even if still marked running
+      steal-ownership,,boolean,false,Take over a run whose driver is still alive (live owner PID; heartbeating remote owner; or held resume claim). Two engines on one run split-brain its scheduling; --force does NOT grant this
       parent-run-id,,string,,Existing run ID to record as this run's parent (persisted lineage, surfaced by inspect/ps and the MCP run tools)
       accept-workflow-change,,boolean,false,Resume this run after its workflow source changed, re-blessing durability metadata in place; you own replay determinism
       resume-claim-owner,,string,,Internal durable resume claim owner
@@ -717,18 +752,19 @@ commands[113]:
     purpose: Retry a specific task within a run, then resume the workflow
     args[1]{name,type,required,desc}:
       workflow,string,true,Workflow file path
-    flags[6]{name,short,type,default,desc}:
+    flags[7]{name,short,type,default,desc}:
       run-id,r,string,,Run ID
       node-id,n,string,,Task/node ID to retry
       iteration,,number,0,Loop iteration
       no-deps,,boolean,false,Only reset this node; skip dependents
       force,,boolean,false,Allow retry even if run is still running
+      steal-ownership,,boolean,false,Retry and resume even though the run still has a live driver; --force does NOT grant this
       accept-workflow-change,,boolean,false,Resume this run after its workflow source changed, re-blessing durability metadata in place; you own replay determinism
   - name: timetravel
     purpose: Time-travel to a task state; revert filesystem, reset DB, optionally resume
     args[1]{name,type,required,desc}:
       workflow,string,true,Workflow file path
-    flags[9]{name,short,type,default,desc}:
+    flags[10]{name,short,type,default,desc}:
       run-id,r,string,,Run ID
       node-id,n,string,,Task/node ID
       iteration,,number,0,Loop iteration
@@ -737,6 +773,7 @@ commands[113]:
       no-deps,,boolean,false,Only reset this node
       resume,,boolean,false,Resume after time travel
       force,,boolean,false,Force even if run is still running
+      steal-ownership,,boolean,false,Time-travel (and --resume) even though the run still has a live driver; --force does NOT grant this
       revert,,boolean,true,Run compensation handlers; use --no-revert to skip
   - name: replay
     purpose: Fork from a checkpoint and resume execution
@@ -960,7 +997,7 @@ commands[113]:
     purpose: Run a discovered workflow by ID
     args[1]{name,type,required,desc}:
       name,string,false,Workflow ID (omit with --interactive to pick one)
-    flags[42]{name,short,type,default,desc}:
+    flags[43]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; preflight the graph, then print runId/pid/logFile once the run is admitted
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -975,6 +1012,7 @@ commands[113]:
       annotations,,string,,Run annotations as flat JSON string/number/boolean object or '-' to read JSON from stdin
       resume,,boolean|string,false,Resume an existing run; may be true or a run ID
       force,,boolean,false,Resume even if still marked running
+      steal-ownership,,boolean,false,Take over a run whose driver is still alive (live owner PID; heartbeating remote owner; or held resume claim). Two engines on one run split-brain its scheduling; --force does NOT grant this
       parent-run-id,,string,,Existing run ID to record as this run's parent (persisted lineage, surfaced by inspect/ps and the MCP run tools)
       accept-workflow-change,,boolean,false,Resume this run after its workflow source changed, re-blessing durability metadata in place; you own replay determinism
       resume-claim-owner,,string,,Internal durable resume claim owner

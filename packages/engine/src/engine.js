@@ -92,7 +92,8 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSyn
 import { toSmithersError } from "@smthrs/errors/toSmithersError";
 import { logDebug, logError, logInfo, logWarning } from "@smthrs/observability/logging";
 import { formatRuntimeOwnerId } from "@smthrs/db/runtime-owner";
-import { isPidAlive, parseRuntimeOwnerPid } from "./runtime-owner.js";
+import { isPidAlive } from "./runtime-owner.js";
+import { classifyRunDriverLiveness, describeLiveDriverRefusal } from "./runDriverLiveness.js";
 import { spawn as nodeSpawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { hostname, platform } from "node:os";
@@ -8941,15 +8942,38 @@ function assertResumeActivationPreconditions(existingRun, opts) {
       },
     );
   }
-  const ownerPid = parseRuntimeOwnerPid(existingRun.runtimeOwnerId);
-  if (existingRun.status === "running" && ownerPid !== null && isPidAlive(ownerPid)) {
-    throw new SmithersError("RUN_OWNER_ALIVE", `Run ${existingRun.runId} still belongs to live process ${ownerPid}.`, {
-      runId: existingRun.runId,
-      runtimeOwnerId: existingRun.runtimeOwnerId ?? null,
-      ownerPid,
-    });
+  // Ownership guard (#1056). Evidence-based, and deliberately NOT defeated by
+  // the overloaded `force` flag: `force` is passed for several unrelated
+  // escapes, so honouring it here silently hands one run to two engines. Only
+  // the separately named `stealOwnership` override gets through.
+  //
+  // A caller that already holds the durable resume claim recorded on the row is
+  // the current owner, not a second engine, so it is never refused — that is
+  // how `retry-task`, the approval auto-resume, and the supervisor hand a
+  // claimed run to the child that will drive it.
+  const holdsRecordedClaim =
+    opts.resumeClaim != null && opts.resumeClaim.claimOwnerId === (existingRun.runtimeOwnerId ?? null);
+  if (!holdsRecordedClaim && !opts.stealOwnership) {
+    const liveness = classifyRunDriverLiveness(existingRun);
+    if (liveness.live) {
+      throw new SmithersError("RUN_OWNER_ALIVE", describeLiveDriverRefusal(existingRun.runId, liveness), {
+        runId: existingRun.runId,
+        runtimeOwnerId: existingRun.runtimeOwnerId ?? null,
+        ownerPid: liveness.ownerPid,
+        evidence: liveness.evidence,
+      });
+    }
   }
-  if (!opts.resumeClaim && existingRun.status === "running" && isRunHeartbeatFresh(existingRun) && !opts.force) {
+  // The weaker heartbeat-only heuristic. `stealOwnership` is a superset of
+  // `force` here: an operator who explicitly asked to take a LIVE run should not
+  // additionally have to force past a merely-fresh heartbeat.
+  if (
+    !opts.resumeClaim &&
+    existingRun.status === "running" &&
+    isRunHeartbeatFresh(existingRun) &&
+    !opts.force &&
+    !opts.stealOwnership
+  ) {
     throw new SmithersError("RUN_STILL_RUNNING", `Run ${existingRun.runId} is still actively running.`, {
       runId: existingRun.runId,
       heartbeatAtMs: existingRun.heartbeatAtMs ?? null,
@@ -9012,7 +9036,7 @@ async function activateRunForResume(
           staleBeforeMs: nowMs() - RUN_HEARTBEAT_STALE_MS,
           claimOwnerId,
           claimHeartbeatAtMs,
-          requireStale: existingRun.status === "running" ? !opts.force : false,
+          requireStale: existingRun.status === "running" ? !opts.force && !opts.stealOwnership : false,
         }),
       );
       if (!claimed) {

@@ -245,7 +245,10 @@ describe("monitor workflow lifecycle", () => {
       );
       expect(monitorStatus, `monitor ${monitorRunId ?? "not started"}`).toBe("running");
 
-      const approved = runSmithers(["approve", "watched-parked", "--node", "gate"], {
+      // --no-resume: the manual `up --resume` below is this test's resume; approve's
+      // auto-resume would claim the run first and the ownership guard (#1056)
+      // would then refuse the manual one.
+      const approved = runSmithers(["approve", "watched-parked", "--node", "gate", "--no-resume"], {
         cwd: repo.dir,
         format: "json",
         timeoutMs: 60_000,
@@ -286,7 +289,7 @@ describe("monitor workflow lifecycle", () => {
       );
       expect(monitorStatus, `monitor ${monitorRunId ?? "not started"}`).toBe("running");
 
-      const approved = runSmithers(["approve", "watched-rejected", "--node", "gate"], {
+      const approved = runSmithers(["approve", "watched-rejected", "--node", "gate", "--no-resume"], {
         cwd: repo.dir,
         format: "json",
         timeoutMs: 60_000,

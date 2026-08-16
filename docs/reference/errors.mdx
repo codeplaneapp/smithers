@@ -119,8 +119,8 @@ try {
 | `HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE` | A task heartbeat payload contains values not serializable to JSON. | `{ path, valueType? }` |
 | `RUN_CANCELLED` | A run is cancelled while runtime work is still active. | `{ runId }` |
 | `RUN_NOT_RESUMABLE` | A resume request targets a run state that cannot be resumed. | `{ runId, status }` |
-| `RUN_OWNER_ALIVE` | A resume attempt is skipped because the process that started the run is still alive (heartbeating): normal behavior that prevents two processes from running the same workflow simultaneously. | `{ runId, runtimeOwnerId }` |
-| `RUN_STILL_RUNNING` | A recovery or resume operation finds a run still active. | `{ runId }` |
+| `RUN_OWNER_ALIVE` | A resume, retry, or time-travel attempt is refused because the run still has a live driver: its owner PID is alive on this host, a remote owner is still heartbeating, or a durable resume claim is still held. Normal behavior that stops two engines from driving one run. `--force` does not defeat it; pass `--steal-ownership` to take the run anyway. | `{ runId, runtimeOwnerId, ownerPid, evidence }` |
+| `RUN_STILL_RUNNING` | A recovery or resume operation finds a run still active by heartbeat freshness alone. Relaxed by `--force` (or `--steal-ownership`). | `{ runId }` |
 | `RUN_RESUME_CLAIM_LOST` | A runtime loses the resume claim before it can update the run. | `{ runId, runtimeOwnerId }` |
 | `RUN_RESUME_CLAIM_FAILED` | A runtime cannot claim a stale run for resume. | `{ runId, runtimeOwnerId }` |
 | `RUN_RESUME_ACTIVATION_FAILED` | A claimed run cannot be moved back into active execution. | `{ runId, runtimeOwnerId }` |

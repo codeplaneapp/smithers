@@ -11,6 +11,7 @@
  *   runId?: string;
  *   resume?: boolean;
  *   force?: boolean;
+ *   stealOwnership?: boolean;
  *   resumeClaimOwner?: string;
  *   resumeClaimHeartbeat?: number;
  *   resumeRestoreOwner?: string;
@@ -32,6 +33,7 @@ export function buildOneshotChildArgs(options) {
   if (options.runId) args.push("--run-id", options.runId);
   if (options.resume) args.push("--resume", "true");
   if (options.force) args.push("--force", "true");
+  if (options.stealOwnership) args.push("--steal-ownership", "true");
   if (options.resumeClaimOwner) args.push("--resume-claim-owner", options.resumeClaimOwner);
   if (options.resumeClaimHeartbeat) args.push("--resume-claim-heartbeat", String(options.resumeClaimHeartbeat));
   if (options.resumeRestoreOwner) args.push("--resume-restore-owner", options.resumeRestoreOwner);

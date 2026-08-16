@@ -29,6 +29,7 @@ import { mdxPlugin } from "./mdx-plugin.js";
 import { smithersRuntimeReentry, smithersRuntimeSpawn } from "./node-loader/smithersRuntimeSpawn.js";
 import { approveNode, denyNode } from "@smthrs/engine/approvals";
 import { isPidAlive, parseRuntimeOwnerPid } from "@smthrs/engine/runtime-owner";
+import { classifyRunDriverLiveness, describeLiveDriverRefusal } from "@smthrs/engine/runDriverLiveness";
 import { signalRun } from "@smthrs/engine/signals";
 import { loadInput, loadOutputs } from "@smthrs/db/snapshot";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
@@ -538,6 +539,20 @@ const FORCE_EXIT_BACKSTOP_MS = 5000;
 // stale); this only bounds the rare case where the row still carries an old
 // heartbeat the owner-liveness gate already judged not-fresh.
 const CLI_RESUME_HEARTBEAT_STALE_MS = 30_000;
+/**
+ * True when the caller was handed the durable resume claim currently recorded
+ * on the run row, i.e. it IS the owner rather than a second engine attaching to
+ * one. The claim/restore plumbing (`--resume-claim-owner` and friends) is how
+ * `retry-task`, the approval auto-resume, and the supervisor pass a claimed run
+ * to the child that will drive it, so those handoffs must not be refused by the
+ * live-driver guard (#1056).
+ *
+ * @param {{ runtimeOwnerId?: string | null } | null | undefined} run
+ * @param {{ resumeClaimOwner?: string }} options
+ */
+function holdsSuppliedResumeClaim(run, options) {
+  return Boolean(options.resumeClaimOwner) && options.resumeClaimOwner === (run?.runtimeOwnerId ?? null);
+}
 /**
  * @param {string | undefined} status
  */
@@ -2920,6 +2935,12 @@ const upOptions = z.object({
     .default(false)
     .describe("Resume a previous run. Pass true with --run-id, or pass the run ID directly (e.g. --resume <run-id>)"),
   force: z.boolean().default(false).describe("Resume even if still marked running"),
+  stealOwnership: z
+    .boolean()
+    .default(false)
+    .describe(
+      "Take over a run whose driver is still alive (live owner PID, heartbeating remote owner, or held resume claim). Two engines on one run split-brain its scheduling; --force does NOT grant this",
+    ),
   acceptWorkflowChange: z
     .boolean()
     .default(false)
@@ -3033,6 +3054,10 @@ const oneshotOptions = z
       .default(false)
       .describe("Resume the existing run named by --run-id instead of starting a new one"),
     force: z.boolean().default(false).describe("With --resume, resume even when the run still looks active"),
+    stealOwnership: z
+      .boolean()
+      .default(false)
+      .describe("With --resume, attach even though the run still has a live driver. --force does NOT grant this"),
     resumeClaimOwner: z.string().optional().describe("Internal durable resume claim owner"),
     resumeClaimHeartbeat: z.number().int().min(1).optional().describe("Internal durable resume claim heartbeat"),
     resumeRestoreOwner: z.string().optional().describe("Internal durable resume restore owner"),
@@ -3747,6 +3772,36 @@ async function findParentRunError(parentRunId) {
     opened.cleanup?.();
   }
 }
+/**
+ * Fail a detached `--resume` BEFORE spawning when the run still has a live
+ * driver (#1056). The child re-checks this itself, but a refusal there surfaces
+ * only as DETACHED_ADMISSION_FAILED plus a log tail, so the caller who typed
+ * `up -d --resume --force` would not see the actual reason.
+ *
+ * @param {string | undefined} runId
+ * @param {{ stealOwnership?: boolean; resumeClaimOwner?: string }} options
+ * @returns {Promise<{ code: string; message: string; exitCode: number } | null>}
+ */
+async function findLiveDriverError(runId, options) {
+  if (!runId || options.stealOwnership) return null;
+  let opened;
+  try {
+    opened = await findAndOpenDb();
+  } catch (err) {
+    // No store yet means no run to collide with.
+    if (err instanceof SmithersError && err.code === "CLI_DB_NOT_FOUND") return null;
+    throw err;
+  }
+  try {
+    const run = await opened.adapter.getRun(runId);
+    if (!run || holdsSuppliedResumeClaim(run, options)) return null;
+    const liveness = classifyRunDriverLiveness(run);
+    if (!liveness.live) return null;
+    return { code: "RUN_OWNER_ALIVE", message: describeLiveDriverRefusal(runId, liveness), exitCode: 4 };
+  } finally {
+    opened.cleanup?.();
+  }
+}
 
 /**
  * Derive the workflow to relaunch for `up --resume <runId>` with no workflow
@@ -4018,6 +4073,10 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
         const parentError = await findParentRunError(options.parentRunId);
         if (parentError) return fail(parentError);
       }
+      if (resume) {
+        const liveDriverError = await findLiveDriverError(runId, options);
+        if (liveDriverError) return fail(liveDriverError);
+      }
       const effectiveRunId = runId ?? `run-${Date.now()}`;
       try {
         await preflightDetachedLaunch({
@@ -4068,6 +4127,7 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
       if (options.hot) childArgs.push("--hot");
       if (resume) childArgs.push("--resume");
       if (options.force) childArgs.push("--force");
+      if (options.stealOwnership) childArgs.push("--steal-ownership");
       if (options.acceptWorkflowChange) childArgs.push("--accept-workflow-change");
       if (options.resumeClaimOwner) childArgs.push("--resume-claim-owner", options.resumeClaimOwner);
       if (options.resumeClaimHeartbeat)
@@ -4340,7 +4400,29 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
       if (resume && !existingRun) {
         return fail({ code: "RUN_NOT_FOUND", message: `Run not found: ${runId}`, exitCode: 4 });
       }
-      if (resume && existingRun?.status === "running" && isRunHeartbeatFresh(existingRun) && !options.force) {
+      // Two guards, deliberately distinct (#1056). The first refuses on
+      // EVIDENCE that a driver is still running the run — attaching a second
+      // engine there splits scheduling and races state writes — and only the
+      // separately named --steal-ownership defeats it; --force keeps its other
+      // meanings but no longer buys ownership. The second is the old
+      // heartbeat-only heuristic, which --force still relaxes.
+      if (resume && existingRun && !options.stealOwnership && !holdsSuppliedResumeClaim(existingRun, options)) {
+        const liveness = classifyRunDriverLiveness(existingRun);
+        if (liveness.live) {
+          return fail({
+            code: "RUN_OWNER_ALIVE",
+            message: describeLiveDriverRefusal(runId, liveness),
+            exitCode: 4,
+          });
+        }
+      }
+      if (
+        resume &&
+        existingRun?.status === "running" &&
+        isRunHeartbeatFresh(existingRun) &&
+        !options.force &&
+        !options.stealOwnership
+      ) {
         return fail({
           code: "RUN_STILL_RUNNING",
           message: `Run is still actively running: ${runId}. Use --force to resume anyway.`,
@@ -4512,7 +4594,13 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
           candidate.workflowPath && resolve(candidate.workflowPath) === resolve(monitorPlan.monitor.entryFile),
       );
       const monitorRunId = existingMonitor?.runId ?? buildMonitorRunId(monitoredRunId);
-      if (existingMonitor?.status === "running" && isRunHeartbeatFresh(existingMonitor)) {
+      // Adopt rather than relaunch whenever the existing monitor still has a
+      // driver — a fresh heartbeat OR hard evidence of a live one. Relaunching
+      // there would spawn a second engine that the resume guard refuses anyway.
+      if (
+        existingMonitor?.status === "running" &&
+        (isRunHeartbeatFresh(existingMonitor) || classifyRunDriverLiveness(existingMonitor).live)
+      ) {
         monitorRun = { runId: monitorRunId, pid: undefined };
         process.stderr.write(`[smithers] monitor ${monitorRunId} already watching ${monitoredRunId}; adopted.\n`);
         return;
@@ -4802,6 +4890,7 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
           ...buildDurabilityRunOptions({
             resume,
             force: options.force,
+            stealOwnership: options.stealOwnership,
             acceptWorkflowChange: options.acceptWorkflowChange,
           }),
           resumeClaim,
@@ -4856,6 +4945,7 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
           ...buildDurabilityRunOptions({
             resume,
             force: options.force,
+            stealOwnership: options.stealOwnership,
             acceptWorkflowChange: options.acceptWorkflowChange,
           }),
           resumeClaim,
@@ -8654,6 +8744,7 @@ const cli = Cli.create({
               runId: c.options.runId,
               resume: c.options.resume,
               force: c.options.force,
+              stealOwnership: c.options.stealOwnership,
               resumeClaimOwner: c.options.resumeClaimOwner,
               resumeClaimHeartbeat: c.options.resumeClaimHeartbeat,
               resumeRestoreOwner: c.options.resumeRestoreOwner,
@@ -8686,6 +8777,7 @@ const cli = Cli.create({
                 runId: c.options.runId,
                 resume: c.options.resume,
                 force: c.options.force,
+                stealOwnership: c.options.stealOwnership,
                 resumeClaimOwner: c.options.resumeClaimOwner,
                 resumeClaimHeartbeat: c.options.resumeClaimHeartbeat,
                 resumeRestoreOwner: c.options.resumeRestoreOwner,
@@ -8715,6 +8807,7 @@ const cli = Cli.create({
           runId: c.options.runId,
           resume: c.options.resume,
           force: c.options.force,
+          stealOwnership: c.options.stealOwnership,
           resumeClaimOwner: c.options.resumeClaimOwner,
           resumeClaimHeartbeat: c.options.resumeClaimHeartbeat,
           resumeRestoreOwner: c.options.resumeRestoreOwner,
@@ -8773,6 +8866,7 @@ const cli = Cli.create({
             runId: effectiveRunId,
             resume: c.options.resume,
             force: c.options.force,
+            stealOwnership: c.options.stealOwnership,
             resumeClaimOwner: c.options.resumeClaimOwner,
             resumeClaimHeartbeat: c.options.resumeClaimHeartbeat,
             resumeRestoreOwner: c.options.resumeRestoreOwner,
@@ -8884,7 +8978,11 @@ const cli = Cli.create({
               },
               [BUILTIN_RESUME_CONFIG_KEY]: builtinResume,
             },
-            ...buildDurabilityRunOptions({ resume: c.options.resume, force: c.options.force }),
+            ...buildDurabilityRunOptions({
+              resume: c.options.resume,
+              force: c.options.force,
+              stealOwnership: c.options.stealOwnership,
+            }),
             resumeClaim,
             startedBy,
             onProgress: buildProgressReporter(),
@@ -11727,6 +11825,12 @@ const cli = Cli.create({
         .default(false)
         .describe("After the reset, resume the run in the background (like `up -d`) and exit"),
       force: z.boolean().default(false).describe("Allow retry even if run is still running"),
+      stealOwnership: z
+        .boolean()
+        .default(false)
+        .describe(
+          "Retry and resume even though the run still has a live driver (live owner PID, heartbeating remote owner, or held resume claim). --force does NOT grant this",
+        ),
       acceptWorkflowChange: z
         .boolean()
         .default(false)
@@ -11767,6 +11871,7 @@ const cli = Cli.create({
               iteration: c.options.iteration,
               resetDependents: c.options.deps,
               force: c.options.force,
+              stealOwnership: c.options.stealOwnership,
               acceptWorkflowChange: c.options.acceptWorkflowChange,
               onProgress,
               resumeClaim: retryResumeClaim,
@@ -11814,6 +11919,7 @@ const cli = Cli.create({
                 workflowPath: workflowFile,
                 resume: true,
                 force: c.options.force,
+                stealOwnership: c.options.stealOwnership,
                 acceptWorkflowChange: c.options.acceptWorkflowChange,
                 resumeClaim: retryResumeClaim,
                 onProgress,
@@ -11878,6 +11984,12 @@ const cli = Cli.create({
       deps: z.boolean().default(true).describe("Also reset dependents. Use --no-deps to reset only this node."),
       resume: z.boolean().default(false).describe("Resume the workflow after time travel"),
       force: z.boolean().default(false).describe("Force even if run is still running"),
+      stealOwnership: z
+        .boolean()
+        .default(false)
+        .describe(
+          "Time-travel (and --resume) even though the run still has a live driver. --force does NOT grant this",
+        ),
       revert: z.boolean().default(true).describe("Compensate effects; --no-revert skips"),
     }),
     alias: { runId: "r", nodeId: "n", attempt: "a" },
@@ -11887,7 +11999,17 @@ const cli = Cli.create({
         const { adapter, cleanup } = await loadWorkflowDb(c.args.workflow);
         try {
           const run = await adapter.getRun(c.options.runId);
-          if (run?.status === "running" && !c.options.force) {
+          if (!c.options.stealOwnership) {
+            const liveness = classifyRunDriverLiveness(run);
+            if (liveness.live) {
+              return fail({
+                code: "RUN_OWNER_ALIVE",
+                message: describeLiveDriverRefusal(c.options.runId, liveness),
+                exitCode: 4,
+              });
+            }
+          }
+          if (run?.status === "running" && !c.options.force && !c.options.stealOwnership) {
             return fail({
               code: "RUN_STILL_RUNNING",
               message: `Run ${c.options.runId} is still marked running. Re-run with --force to time-travel it anyway.`,
@@ -11902,6 +12024,7 @@ const cli = Cli.create({
             resetDependents: c.options.deps,
             restoreVcs: c.options.vcs,
             force: c.options.force,
+            stealOwnership: c.options.stealOwnership,
             noRevert: !c.options.revert,
             caller: "cli",
             onProgress: (e) => console.log(JSON.stringify(e)),
@@ -11928,6 +12051,10 @@ const cli = Cli.create({
               workflowPath: c.args.workflow,
               resume: true,
               force: true,
+              // The rewind above already refused a live driver; carry the
+              // operator's explicit override through so the engine's guard sees
+              // the same decision instead of being defeated by `force`.
+              stealOwnership: c.options.stealOwnership,
               onProgress,
               signal: abort.signal,
             }),

@@ -3,6 +3,7 @@ import { nowMs } from "@smthrs/scheduler/nowMs";
 import { parseSubflowChildRunId } from "@smthrs/graph/subflow-run-lineage";
 import { markResetCancelledMeta } from "./resetCancelMarker.js";
 import { validateWorkflowIdentity } from "./validateWorkflowIdentity.js";
+import { classifyRunDriverLiveness, describeLiveDriverRefusal } from "@smthrs/db/runDriverLiveness";
 /** @typedef {import("./RetryTaskOptions.ts").RetryTaskOptions} RetryTaskOptions */
 /** @typedef {import("./RetryTaskResult.ts").RetryTaskResult} RetryTaskResult */
 /** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
@@ -302,7 +303,29 @@ export async function retryTask(adapter, opts) {
     });
     return { success: false, resetNodes: [], error };
   }
-  if (!force && isActiveRunStatus(run.status)) {
+  // A live driver is refused whatever `force` says: the reset rewrites attempt
+  // rows the running engine is mid-flight on, and the resume that follows would
+  // put a second engine on the run (#1056). `stealOwnership` is the only way
+  // past it; `force` still relaxes the weaker "status is active but nothing is
+  // actually driving it" case below.
+  const stealOwnership = /** @type {any} */ (opts).stealOwnership === true;
+  const claimHoldsRun = resumeClaim != null && resumeClaim.claimOwnerId === (run.runtimeOwnerId ?? null);
+  if (!stealOwnership && !claimHoldsRun) {
+    const liveness = classifyRunDriverLiveness(run, { now: nowMs() });
+    if (liveness.live) {
+      const error = describeLiveDriverRefusal(runId, liveness);
+      emitRetryFinished(opts, {
+        runId,
+        nodeId,
+        iteration,
+        resetNodes: [],
+        success: false,
+        error,
+      });
+      return { success: false, resetNodes: [], error };
+    }
+  }
+  if (!force && !stealOwnership && isActiveRunStatus(run.status)) {
     const error = `Run is still running: ${runId}`;
     emitRetryFinished(opts, {
       runId,

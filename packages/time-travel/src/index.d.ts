@@ -63,6 +63,12 @@ type TimeTravelOptions$2 = {
     resetDependents?: boolean;
     restoreVcs?: boolean;
     force?: boolean;
+    /**
+     * Proceed even though the run still has a demonstrably live driver. Separate
+     * from `force` on purpose: `force` crosses effect boundaries, this one takes
+     * ownership away from a running engine (`--steal-ownership`).
+     */
+    stealOwnership?: boolean;
     noRevert?: boolean;
     caller?: string;
     onProgress?: (event: SmithersEvent$1) => void;
