@@ -309,6 +309,15 @@ export function isJjRepo(cwd) {
 const LOCK_CONTENTION_PATTERN =
   /could not be obtained|Could not acquire lock|index\.lock|packed-refs\.lock|lock file already exists/i;
 const LOCK_CONTENTION_RETRIES = 8;
+/**
+ * jj refuses to snapshot from a workspace whose working copy is stale — which
+ * happens whenever another workspace (a concurrent agent lane, a sibling
+ * session) commits an operation that moves this workspace's working-copy
+ * commit. The refusal is self-healing: `jj workspace update-stale` brings the
+ * working copy to the latest operation without discarding anything, after
+ * which the original command succeeds.
+ */
+const STALE_WORKING_COPY_PATTERN = /working copy is stale/i;
 
 export function workspaceAdd(name, path, opts = {}) {
   const attempts = [];
@@ -357,12 +366,17 @@ export function workspaceAdd(name, path, opts = {}) {
     // syntax ladder (issue #935: 38 of 50 parallel lanes lost this race).
     for (const args of attempts) {
       let res = yield* runJj(args, { cwd: opts.cwd });
-      for (
-        let retry = 0;
-        res.code !== 0 && LOCK_CONTENTION_PATTERN.test(jjError(res)) && retry < LOCK_CONTENTION_RETRIES;
-        retry += 1
-      ) {
-        yield* Effect.sleep(`${150 + Math.floor(Math.random() * 600)} millis`);
+      for (let retry = 0; res.code !== 0 && retry < LOCK_CONTENTION_RETRIES; retry += 1) {
+        const err = jjError(res);
+        if (STALE_WORKING_COPY_PATTERN.test(err)) {
+          // Recover, then retry the same invocation. update-stale failures
+          // fall through to the retried command, whose error stays canonical.
+          yield* runJj(["workspace", "update-stale"], { cwd: opts.cwd });
+        } else if (LOCK_CONTENTION_PATTERN.test(err)) {
+          yield* Effect.sleep(`${150 + Math.floor(Math.random() * 600)} millis`);
+        } else {
+          break;
+        }
         res = yield* runJj(args, { cwd: opts.cwd });
       }
       if (res.code === 0) {
