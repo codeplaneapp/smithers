@@ -350,6 +350,71 @@ test("oneshot accepts a registered Claude account and uses its config directory"
   ).toBe(configDir);
 }, 60_000);
 
+test("oneshot spreads a Claude rung across every registered account, least used first", async () => {
+  const home = temp("smithers-oneshot-claude-pool-");
+  const binDir = createExecutableDir();
+  writeExecutable(binDir, "claude", `#!${process.execPath}\nprocess.exit(1);\n`);
+  const smithersHome = join(home, ".smithers");
+  const labels = ["claude-1", "claude-2", "claude-3"];
+  const configDirs = {};
+  for (const label of labels) {
+    const configDir = join(smithersHome, "accounts", label);
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, ".credentials.json"),
+      JSON.stringify({ claudeAiOauth: { accessToken: `oauth-${label}`, expiresAt: Date.now() + 60_000 } }) + "\n",
+    );
+    configDirs[label] = configDir;
+  }
+  writeFileSync(
+    join(smithersHome, "accounts.json"),
+    JSON.stringify({
+      version: 1,
+      accounts: labels.map((label) => ({ label, provider: "claude-code", configDir: configDirs[label] })),
+    }) + "\n",
+  );
+  // claude-1 is registered first but its weekly window is spent: the pool must
+  // not pin the rung to it while claude-2 and claude-3 sit idle.
+  writeFileSync(
+    join(smithersHome, "usage-cache.json"),
+    JSON.stringify({
+      version: 1,
+      entries: {
+        "claude-1": {
+          report: {
+            source: "oauth",
+            windows: [{ id: "weekly", usedPercent: 100, resetsAt: new Date(Date.now() + 3_600_000).toISOString() }],
+          },
+        },
+        "claude-2": { report: { source: "oauth", windows: [{ id: "weekly", usedPercent: 10 }] } },
+        "claude-3": { report: { source: "oauth", windows: [{ id: "weekly", usedPercent: 60 }] } },
+      },
+    }) + "\n",
+  );
+  const env = {
+    ...process.env,
+    HOME: home,
+    SMITHERS_HOME: smithersHome,
+    PATH: `${binDir}${delimiter}${process.env.PATH}`,
+  };
+
+  const detections = detectAvailableAgents(env, { cwd: home });
+  const selected = await selectOneshotAgents(detections, { cwd: home, agent: "claude", env });
+  const claudeIds = selected.agents
+    .filter((agent) => typeof agent.id === "string" && agent.id.startsWith("smithers-account:"))
+    .map((agent) => agent.id);
+
+  // Every registered account is a rung, not just the first one on file.
+  for (const label of labels) {
+    expect(claudeIds).toContain(`smithers-account:${label}`);
+  }
+  // The quota-blocked account sinks below the usable ones.
+  expect(claudeIds.indexOf("smithers-account:claude-2")).toBeLessThan(claudeIds.indexOf("smithers-account:claude-1"));
+  expect(claudeIds.indexOf("smithers-account:claude-3")).toBeLessThan(claudeIds.indexOf("smithers-account:claude-1"));
+  // Least-used usable account leads.
+  expect(claudeIds[0]).toBe("smithers-account:claude-2");
+}, 60_000);
+
 describe("oneshot status updater", () => {
   test("pins every default narrator to the cheap model tier", () => {
     expect(ONESHOT_NARRATOR_MODELS).toEqual({

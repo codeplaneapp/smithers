@@ -1,5 +1,6 @@
 import { resolveOneshotChain } from "./resolveOneshotChain.js";
 import { listAccounts } from "@smthrs/accounts";
+import { orderAccountsByUsage } from "@smthrs/usage";
 import { registeredAgentId } from "../registered-agent-id.js";
 
 const ACCOUNT_PROVIDERS = {
@@ -54,21 +55,51 @@ async function createAgent(spec, cwd, account) {
 }
 
 /**
+ * Expand one engine/model rung into one agent per registered account for that
+ * engine, least-used account first.
+ *
+ * A rung bound to a single account fails the whole run when that one
+ * subscription is rate-limited, even with other accounts registered and idle —
+ * the same failure `fallbackAgents()` exists to prevent. Ordering reuses
+ * `orderAccountsByUsage`, so a quota-blocked account sinks below usable ones
+ * instead of being tried first.
+ *
+ * Engines with no account concept (opencode, pi) and engines with no registered
+ * account fall back to a single ambient agent.
+ *
+ * @param {{ engine: string; model: string; provider?: string }} spec
+ * @param {string} cwd
+ * @param {import("@smthrs/accounts").Account[]} accounts
+ * @param {NodeJS.ProcessEnv} env
+ */
+async function createAgentsForSpec(spec, cwd, accounts, env) {
+  const providers = ACCOUNT_PROVIDERS[spec.engine];
+  const matching = providers ? accounts.filter((account) => providers.has(account.provider)) : [];
+  if (matching.length === 0) return [await createAgent(spec, cwd, undefined)];
+  const ordered = orderAccountsByUsage(matching, { env, modelFor: () => spec.model });
+  return Promise.all(ordered.map((account) => createAgent(spec, cwd, account)));
+}
+
+/**
  * @param {import("../AgentAvailability.ts").AgentAvailability[]} detections
  * @param {{ cwd: string; model?: string; agent?: string; goal?: string; env?: NodeJS.ProcessEnv }} options
  */
 export async function selectOneshotAgents(detections, options) {
+  const env = options.env ?? process.env;
   const specs = resolveOneshotChain(detections, options);
-  const accounts = listAccounts(options.env ?? process.env);
-  const accountFor = (engine) => {
+  const accounts = listAccounts(env);
+  const accountsFor = (engine) => {
     const labels = detections.find((detection) => detection.id === engine)?.registeredAccountLabels ?? [];
-    const providers = ACCOUNT_PROVIDERS[engine];
-    return accounts.find((account) => labels.includes(account.label) && providers?.has(account.provider));
+    return accounts.filter((account) => labels.includes(account.label));
   };
-  const agents = await Promise.all(specs.map((spec) => createAgent(spec, options.cwd, accountFor(spec.engine))));
+  const expand = async (list) => {
+    const groups = await Promise.all(
+      list.map((spec) => createAgentsForSpec(spec, options.cwd, accountsFor(spec.engine), env)),
+    );
+    return groups.flat();
+  };
+  const agents = await expand(specs);
   const reviewSpecs = specs.length > 1 ? [...specs.slice(1), specs[0]] : specs;
-  const reviewAgents = await Promise.all(
-    reviewSpecs.map((spec) => createAgent(spec, options.cwd, accountFor(spec.engine))),
-  );
+  const reviewAgents = await expand(reviewSpecs);
   return { agents, reviewAgents, chain: specs };
 }
