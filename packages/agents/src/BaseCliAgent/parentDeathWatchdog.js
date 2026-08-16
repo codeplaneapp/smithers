@@ -1,9 +1,13 @@
 import { spawn } from "node:child_process";
 
-const [expectedParentPidText, command, ...args] = process.argv.slice(2);
+// argv: <expected parent pid> <agent cwd> <command> [...args]. The agent cwd is
+// passed explicitly rather than inherited: this watchdog is deliberately booted
+// outside the agent's directory so a `bunfig.toml` there cannot preload into the
+// watchdog process (see parentDeathCommand.js).
+const [expectedParentPidText, childCwd, command, ...args] = process.argv.slice(2);
 const expectedParentPid = Number(expectedParentPidText);
 
-if (!Number.isInteger(expectedParentPid) || expectedParentPid <= 0 || !command) {
+if (!Number.isInteger(expectedParentPid) || expectedParentPid <= 0 || !childCwd || !command) {
   process.exit(64);
 }
 
@@ -22,7 +26,7 @@ function parentIsAlive() {
 if (!parentIsAlive()) process.exit(1);
 
 const child = spawn(command, args, {
-  cwd: process.cwd(),
+  cwd: childCwd,
   env: process.env,
   stdio: "inherit",
 });

@@ -121,9 +121,10 @@ export function runRpcCommandEffect(command, args, options) {
     let stderrTruncated = false;
     let terminationStarted = false;
     logDebug("starting agent RPC command", logAnnotations, span);
-    const invocation = parentDeathCommand(command, args, spawnFn === spawn);
+    const invocation = parentDeathCommand(command, args, spawnFn === spawn, cwd);
     const child = spawnFn(invocation.command, invocation.args, {
-      cwd,
+      // See runCommandEffect: the watchdog must not boot inside the agent's cwd.
+      cwd: invocation.cwd ?? cwd,
       env,
       detached: true,
       stdio: ["pipe", "pipe", "pipe"],
