@@ -30,6 +30,7 @@ import {
   readKimiCredentials,
   refreshKimiToken,
   recordAccountQuotaLimit,
+  withFableQuotaEstimate,
   writeUsageCache,
 } from "../src/index.js";
 
@@ -1028,6 +1029,30 @@ describe("quota-aware account selection", () => {
     expect(Object.keys(readAccountQuotaState(env, 0).entries)).toEqual([]);
   });
 
+  test("fable-capped account sorts last for fable pools and normally for opus pools", () => {
+    const env = { SMITHERS_HOME: tempDir() };
+    const nowMs = Date.parse("2026-08-15T00:00:00Z");
+    recordAccountQuotaLimit("capped", {
+      env,
+      nowMs,
+      untilMs: nowMs + 3_600_000,
+      model: "claude-fable-5",
+      scope: "model",
+    });
+    const accounts = [
+      { label: "healthy", provider: "claude-code", configDir: "/healthy" },
+      { label: "capped", provider: "claude-code", configDir: "/capped" },
+    ];
+    expect(
+      orderAccountsByUsage(accounts, { env, nowMs, modelFor: () => "claude-fable-5" }).map((row) => row.label),
+    ).toEqual(["healthy", "capped"]);
+    // The model-scoped block does not apply to Opus, so neither account is
+    // penalized and the label tie-break puts "capped" first.
+    expect(
+      orderAccountsByUsage(accounts, { env, nowMs, modelFor: () => "claude-opus-5" }).map((row) => row.label),
+    ).toEqual(["capped", "healthy"]);
+  });
+
   test("treats exhausted cached model usage as blocked until its reset", () => {
     const nowMs = Date.parse("2026-08-15T00:00:00Z");
     const resetAt = "2026-08-15T01:00:00Z";
@@ -1050,6 +1075,79 @@ describe("quota-aware account selection", () => {
     });
     expect(accountQuotaBlock({}, "a", "claude-opus-5", report, nowMs)).toBeUndefined();
     expect(accountQuotaBlock({}, "a", "claude-fable-5", report, Date.parse(resetAt) + 1)).toBeUndefined();
+  });
+});
+
+describe("fable quota estimate", () => {
+  const baseReport = {
+    accountLabel: "cl",
+    provider: "claude-code",
+    authMode: "subscription",
+    source: "oauth",
+    stale: false,
+    estimate: false,
+    fetchedAt: "2026-08-15T00:00:00Z",
+    windows: [{ id: "weekly", label: "weekly", unit: "percent", usedPercent: 40 }],
+  };
+
+  test("derives an estimated Fable window from a persisted fable quota event", () => {
+    const untilMs = Date.parse("2026-08-15T01:00:00Z");
+    const report = withFableQuotaEstimate(baseReport, {
+      "cl::fable": { untilMs, model: "claude-fable-5", observedAt: "2026-08-15T00:00:00Z" },
+    });
+    expect(report.windows).toHaveLength(2);
+    expect(report.windows[1]).toEqual({
+      id: "weekly-fable",
+      label: "weekly (Fable, 50% plan cap)",
+      unit: "estimated",
+      usedPercent: 100,
+      resetsAt: "2026-08-15T01:00:00.000Z",
+      capPercent: 50,
+      estimate: true,
+    });
+  });
+
+  test("does not estimate over a provider-reported Fable window or for other providers", () => {
+    const entries = {
+      "cl::fable": { untilMs: Date.parse("2026-08-15T01:00:00Z"), observedAt: "2026-08-15T00:00:00Z" },
+    };
+    const withFable = {
+      ...baseReport,
+      windows: [
+        ...baseReport.windows,
+        { id: "weekly-fable", label: "weekly (Fable, 50% plan cap)", unit: "percent", usedPercent: 12 },
+      ],
+    };
+    expect(withFableQuotaEstimate(withFable, entries)).toBe(withFable);
+    const codex = { ...baseReport, provider: "codex" };
+    expect(withFableQuotaEstimate(codex, entries)).toBe(codex);
+    expect(withFableQuotaEstimate(baseReport, {})).toBe(baseReport);
+  });
+
+  test("getUsageForAccounts surfaces the estimate as a ~100% (est) row", async () => {
+    const env = { SMITHERS_HOME: tempDir() };
+    const nowMs = Date.parse("2026-08-15T00:00:00Z");
+    recordAccountQuotaLimit("cl", {
+      env,
+      nowMs,
+      untilMs: nowMs + 3_600_000,
+      model: "claude-fable-5",
+      scope: "model",
+    });
+    // No credentials on disk: the probe degrades to `none`, but the persisted
+    // Fable rejection still yields an estimated meter.
+    const [report] = await getUsageForAccounts([{ label: "cl", provider: "claude-code", configDir: "/missing" }], {
+      env,
+      nowMs,
+    });
+    const fable = report.windows.find((window) => window.id === "weekly-fable");
+    expect(fable).toMatchObject({
+      unit: "estimated",
+      usedPercent: 100,
+      estimate: true,
+      resetsAt: new Date(nowMs + 3_600_000).toISOString(),
+    });
+    expect(formatUsageReports([report], nowMs)).toContain("~100% (est)");
   });
 });
 

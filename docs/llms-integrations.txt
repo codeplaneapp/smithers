@@ -304,9 +304,14 @@ The result names each signed-in subscription and warns when labels share one
 Anthropic organization and quota.
 
 `bunx smthrs usage --fresh` shows the 5-hour, weekly, Opus, Sonnet, and Fable
-windows that the provider returns. Fable has a 50% weekly plan cap. Smithers
-normalizes the shared weekly value against that cap when the provider omits a
-dedicated Fable window.
+windows that the provider returns. The Claude usage endpoint reports per-model
+windows as model-scoped weekly limit entries (`limits[]` with
+`kind: "weekly_scoped"` and `scope.model.display_name`), not as dedicated
+payload fields. Fable has a 50% weekly plan cap. When the provider omits the
+Fable window but Smithers has recorded a Fable rejection for the account,
+`usage` derives a best-effort Fable window from that event and marks it as an
+estimate (`~100% (est)`) until the recorded reset. The quota dashboard renders
+the Fable window as its own per-account meter labeled "Fable (50% cap)".
 
 ### Multi-account Claude pool
 
@@ -334,10 +339,12 @@ import { fallbackAgents } from "smthrs";
 
 Copy every permission, sandbox, and tool option from the old
 `ClaudeCodeAgent` into `agentOptions["claude-code"]`. Smithers orders healthy
-accounts by model-specific headroom. It persists provider reset times and
-skips known rate-limited accounts without starting Claude again. A cached
-window at 100% also blocks the account until its reported reset. The run seed
-keeps every account at the same chain index after quota state changes.
+accounts by model-specific headroom: a Fable pool sorts by Fable-window
+headroom, while an Opus or Sonnet pool ignores the Fable window. It persists
+provider reset times and skips known rate-limited accounts without starting
+Claude again. A cached window at 100% also blocks the account until its
+reported reset. The run seed keeps every account at the same chain index
+after quota state changes.
 
 The example excludes the ambient `~/.claude` login because `fallback: []`
 disables the default tail. Omit that line to keep the ambient login as the

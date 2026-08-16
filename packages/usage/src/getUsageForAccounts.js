@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { getAccountUsage } from "./getAccountUsage.js";
 import { readUsageCache, writeUsageCache } from "./usageCache.js";
 import { readClaudeCredentials } from "./readClaudeCredentials.js";
+import { readAccountQuotaState } from "./accountSelection.js";
+import { withFableQuotaEstimate } from "./fableQuotaEstimate.js";
 
 /** @typedef {import("@smthrs/accounts").Account} Account */
 /** @typedef {import("./UsageReport.ts").UsageReport} UsageReport */
@@ -115,6 +117,11 @@ export async function getUsageForAccounts(accounts, options = {}) {
       return getAccountUsage(d.account);
     }),
   );
+  // The usage endpoint does not always report a Fable window. When it does
+  // not, a persisted Fable quota rejection still bounds the window, so surface
+  // it as an estimated meter.
+  const quotaEntries = readAccountQuotaState(env, nowMs).entries;
+  const withEstimates = reports.map((report) => withFableQuotaEstimate(report, quotaEntries));
   let changed = false;
   reports.forEach((report, i) => {
     if (!decisions[i].useCache) {
@@ -129,5 +136,5 @@ export async function getUsageForAccounts(accounts, options = {}) {
       // a cache write failure must not break the command
     }
   }
-  return reports;
+  return withEstimates;
 }

@@ -41,6 +41,8 @@ type UsageWindow$5 = {
     resetsAt?: string;
     /** Share of the plan available to this model-specific window. */
     capPercent?: number;
+    /** True when this window is derived from a local signal, not the provider. */
+    estimate?: boolean;
 };
 
 /**
@@ -48,7 +50,7 @@ type UsageWindow$5 = {
  * utilization, API-key headers, local estimate — produces this same shape so the
  * CLI, gateway, and UI render one model.
  */
-type UsageReport$6 = {
+type UsageReport$7 = {
     /** The account's label in `~/.smithers/accounts.json`. */
     accountLabel: string;
     /** The account's provider. */
@@ -94,9 +96,9 @@ type UsageReport$6 = {
  * @param {Account} account
  * @returns {Promise<UsageReport>}
  */
-declare function getAccountUsage(account: Account$4): Promise<UsageReport$5>;
+declare function getAccountUsage(account: Account$4): Promise<UsageReport$6>;
 type Account$4 = _smthrs_accounts.Account;
-type UsageReport$5 = UsageReport$6;
+type UsageReport$6 = UsageReport$7;
 
 /**
  * Gathers usage for many accounts in parallel, served through the on-disk cache.
@@ -112,9 +114,9 @@ declare function getUsageForAccounts(accounts: Account$3[], options?: {
     bypassHardFloor?: boolean;
     env?: NodeJS.ProcessEnv;
     nowMs?: number;
-}): Promise<UsageReport$4[]>;
+}): Promise<UsageReport$5[]>;
 type Account$3 = _smthrs_accounts.Account;
-type UsageReport$4 = UsageReport$6;
+type UsageReport$5 = UsageReport$7;
 
 /** @typedef {import("@smthrs/accounts").Account} Account */
 /** @typedef {import("./UsageReport.ts").UsageReport} UsageReport */
@@ -142,9 +144,9 @@ type UsageReport$4 = UsageReport$6;
  */
 declare function buildUsageReport(account: Account$2, probe: UsageProbe$6, options?: {
     nowIso?: string;
-}): UsageReport$3;
+}): UsageReport$4;
 type Account$2 = _smthrs_accounts.Account;
-type UsageReport$3 = UsageReport$6;
+type UsageReport$4 = UsageReport$7;
 /**
  * The partial result an adapter returns. The dispatcher wraps it with the
  * account identity and timestamp to form a complete {@link UsageReport}.
@@ -170,8 +172,8 @@ type UsageProbe$6 = {
  * @param {number} [nowMs]
  * @returns {string}
  */
-declare function formatUsageReports(reports: UsageReport$2[], nowMs?: number): string;
-type UsageReport$2 = UsageReport$6;
+declare function formatUsageReports(reports: UsageReport$3[], nowMs?: number): string;
+type UsageReport$3 = UsageReport$7;
 
 /**
  * Formats an ISO reset timestamp as a relative "resets in" string. Returns an
@@ -197,6 +199,11 @@ declare function humanizeDurationShort(seconds: number): string;
  * Normalizes the Claude Code subscription usage payload into usage windows. The
  * payload powers the in-CLI `/usage` view: a 5-hour rolling window, a weekly
  * window, and optional per-model weekly windows.
+ *
+ * Per-model windows come from two shapes. Current payloads carry them in
+ * `limits[]` as `kind: "weekly_scoped"` entries with
+ * `scope.model.display_name` (for example "Fable"). Older payloads carried
+ * dedicated `seven_day_<model>` blocks. Both parse to the same window ids.
  *
  * @param {unknown} payload
  * @returns {UsageWindow[]}
@@ -499,6 +506,107 @@ declare function googleUsage(account: {
 }): Promise<UsageProbe>;
 type UsageProbe = UsageProbe$6;
 
+/** @param {NodeJS.ProcessEnv} [env] */
+declare function accountQuotaStatePath(env?: NodeJS.ProcessEnv): string;
+/**
+ * Read persisted account quota blocks. Expired and malformed entries are
+ * ignored so an old marker never disables an account permanently.
+ *
+ * @param {NodeJS.ProcessEnv} [env]
+ * @param {number} [nowMs]
+ * @returns {{ version: 1; entries: Record<string, { untilMs: number; model?: string; observedAt: string }> }}
+ */
+declare function readAccountQuotaState$1(env?: NodeJS.ProcessEnv, nowMs?: number): {
+    version: 1;
+    entries: Record<string, {
+        untilMs: number;
+        model?: string;
+        observedAt: string;
+    }>;
+};
+/**
+ * Persist a provider-reported quota reset for an account. A short bounded TTL
+ * is used when the provider omits a reset, which prevents immediate hammering
+ * without permanently disabling the account.
+ *
+ * @param {string} label
+ * @param {{ untilMs?: number; model?: string; scope?: "shared" | "model"; nowMs?: number; env?: NodeJS.ProcessEnv }} [options]
+ */
+declare function recordAccountQuotaLimit(label: string, options?: {
+    untilMs?: number;
+    model?: string;
+    scope?: "shared" | "model";
+    nowMs?: number;
+    env?: NodeJS.ProcessEnv;
+}): {
+    untilMs: number;
+    model?: string;
+    observedAt: string;
+};
+/** @param {string} label @param {NodeJS.ProcessEnv} [env] */
+declare function clearAccountQuotaLimit(label: string, env?: NodeJS.ProcessEnv): boolean;
+/**
+ * Find the quota block that applies to a model. Shared blocks apply to every
+ * model. Fable, Opus, and Sonnet blocks apply only to their own family. When
+ * both apply, the later reset is when the account becomes usable.
+ *
+ * @param {ReturnType<typeof readAccountQuotaState>["entries"]} entries
+ * @param {string} label
+ * @param {string | undefined} model
+ * @param {UsageReport | undefined} [report]
+ * @param {number} [nowMs]
+ */
+declare function accountQuotaBlock(entries: ReturnType<typeof readAccountQuotaState$1>["entries"], label: string, model: string | undefined, report?: UsageReport$2 | undefined, nowMs?: number): {
+    untilMs: number;
+    model?: string;
+    observedAt: string;
+};
+/** @param {UsageReport | undefined} report @param {string | undefined} model */
+declare function accountUsageScore(report: UsageReport$2 | undefined, model: string | undefined): number;
+/**
+ * Order registered accounts from most headroom to least. Persisted quota-dead
+ * accounts sort last, with the soonest reset first. The caller can replace
+ * those rows with no-network quota sentinels instead of probing them again.
+ *
+ * @param {Account[]} accounts
+ * @param {{ env?: NodeJS.ProcessEnv; modelFor?: (account: Account) => string | undefined; nowMs?: number; tieBreak?: Map<string, number> }} [options]
+ */
+declare function orderAccountsByUsage(accounts: Account$1[], options?: {
+    env?: NodeJS.ProcessEnv;
+    modelFor?: (account: Account$1) => string | undefined;
+    nowMs?: number;
+    tieBreak?: Map<string, number>;
+}): {
+    label: string;
+    provider: "claude-code" | "antigravity" | "codex" | "kimi" | "anthropic-api" | "openai-api" | "gemini-api";
+    configDir?: string;
+    apiKey?: string;
+    model?: string;
+    addedAt?: string;
+}[];
+type Account$1 = _smthrs_accounts.Account;
+type UsageReport$2 = UsageReport$7;
+
+/** @typedef {import("./UsageReport.ts").UsageReport} UsageReport */
+/** @typedef {import("./UsageWindow.ts").UsageWindow} UsageWindow */
+/** @typedef {import("./accountSelection.js").readAccountQuotaState} readAccountQuotaState */
+/**
+ * Derives a best-effort Fable window from a persisted model-scoped quota
+ * event. The Claude usage endpoint does not always report a Fable window, but
+ * a recorded Fable rejection (`<label>::fable` in account-quota-state.json)
+ * still pinpoints the cap: the window is full until the recorded reset.
+ *
+ * The derived window is marked `unit: "estimated"` and `estimate: true` so
+ * renderers can distinguish it from provider-authoritative windows.
+ *
+ * @param {UsageReport} report
+ * @param {ReturnType<typeof readAccountQuotaState>["entries"]} entries Quota-state entries, already filtered to unexpired rows.
+ * @returns {UsageReport}
+ */
+declare function withFableQuotaEstimate(report: UsageReport$1, entries: ReturnType<typeof readAccountQuotaState>["entries"]): UsageReport$1;
+type UsageReport$1 = UsageReport$7;
+type readAccountQuotaState = typeof readAccountQuotaState$1;
+
 /**
  * Looks up a published cap by tier id. Returns `undefined` for unknown tiers so
  * the caller can degrade to "unknown" rather than invent a number.
@@ -556,10 +664,10 @@ declare function readUsageCache(env?: NodeJS.ProcessEnv): UsageCacheFile;
 declare function writeUsageCache(contents: UsageCacheFile, env?: NodeJS.ProcessEnv): string;
 /** @param {string} label @param {NodeJS.ProcessEnv} [env] */
 declare function clearAccountUsageCache(label: string, env?: NodeJS.ProcessEnv): boolean;
-type UsageReport$1 = UsageReport$6;
-type Account$1 = _smthrs_accounts.Account;
+type UsageReport = UsageReport$7;
+type Account = _smthrs_accounts.Account;
 type UsageCacheAccountIdentity = {
-    provider: Account$1["provider"];
+    provider: Account["provider"];
     configDir?: string;
     model?: string;
     apiKeyHash?: string;
@@ -569,89 +677,8 @@ type UsageCacheFile = {
     version: 1;
     entries: Record<string, {
         identity?: UsageCacheAccountIdentity;
-        report: UsageReport$1;
+        report: UsageReport;
     }>;
 };
 
-/** @param {NodeJS.ProcessEnv} [env] */
-declare function accountQuotaStatePath(env?: NodeJS.ProcessEnv): string;
-/**
- * Read persisted account quota blocks. Expired and malformed entries are
- * ignored so an old marker never disables an account permanently.
- *
- * @param {NodeJS.ProcessEnv} [env]
- * @param {number} [nowMs]
- * @returns {{ version: 1; entries: Record<string, { untilMs: number; model?: string; observedAt: string }> }}
- */
-declare function readAccountQuotaState(env?: NodeJS.ProcessEnv, nowMs?: number): {
-    version: 1;
-    entries: Record<string, {
-        untilMs: number;
-        model?: string;
-        observedAt: string;
-    }>;
-};
-/**
- * Persist a provider-reported quota reset for an account. A short bounded TTL
- * is used when the provider omits a reset, which prevents immediate hammering
- * without permanently disabling the account.
- *
- * @param {string} label
- * @param {{ untilMs?: number; model?: string; scope?: "shared" | "model"; nowMs?: number; env?: NodeJS.ProcessEnv }} [options]
- */
-declare function recordAccountQuotaLimit(label: string, options?: {
-    untilMs?: number;
-    model?: string;
-    scope?: "shared" | "model";
-    nowMs?: number;
-    env?: NodeJS.ProcessEnv;
-}): {
-    untilMs: number;
-    model?: string;
-    observedAt: string;
-};
-/** @param {string} label @param {NodeJS.ProcessEnv} [env] */
-declare function clearAccountQuotaLimit(label: string, env?: NodeJS.ProcessEnv): boolean;
-/**
- * Find the quota block that applies to a model. Shared blocks apply to every
- * model. Fable, Opus, and Sonnet blocks apply only to their own family. When
- * both apply, the later reset is when the account becomes usable.
- *
- * @param {ReturnType<typeof readAccountQuotaState>["entries"]} entries
- * @param {string} label
- * @param {string | undefined} model
- * @param {UsageReport | undefined} [report]
- * @param {number} [nowMs]
- */
-declare function accountQuotaBlock(entries: ReturnType<typeof readAccountQuotaState>["entries"], label: string, model: string | undefined, report?: UsageReport | undefined, nowMs?: number): {
-    untilMs: number;
-    model?: string;
-    observedAt: string;
-};
-/** @param {UsageReport | undefined} report @param {string | undefined} model */
-declare function accountUsageScore(report: UsageReport | undefined, model: string | undefined): number;
-/**
- * Order registered accounts from most headroom to least. Persisted quota-dead
- * accounts sort last, with the soonest reset first. The caller can replace
- * those rows with no-network quota sentinels instead of probing them again.
- *
- * @param {Account[]} accounts
- * @param {{ env?: NodeJS.ProcessEnv; modelFor?: (account: Account) => string | undefined; nowMs?: number; tieBreak?: Map<string, number> }} [options]
- */
-declare function orderAccountsByUsage(accounts: Account[], options?: {
-    env?: NodeJS.ProcessEnv;
-    modelFor?: (account: Account) => string | undefined;
-    nowMs?: number;
-    tieBreak?: Map<string, number>;
-}): {
-    label: string;
-    provider: "claude-code" | "antigravity" | "codex" | "kimi" | "anthropic-api" | "openai-api" | "gemini-api";
-    configDir?: string;
-    apiKey?: string;
-    model?: string;
-    addedAt?: string;
-}[];
-type Account = _smthrs_accounts.Account;
-type UsageReport = UsageReport$6;
-
-export { PUBLISHED_CAPS, type UsageReport$6 as UsageReport, type UsageWindow$5 as UsageWindow, accountQuotaBlock, accountQuotaStatePath, accountUsageScore, anthropicHeaderUsage, buildUsageReport, claudeKeychainSuffix, claudeOauthUsage, clearAccountQuotaLimit, clearAccountUsageCache, codexWhamUsage, decodeJwtClaims, formatRelativeReset, formatUsageReports, getAccountUsage, getUsageForAccounts, googleUsage, humanizeDurationShort, kimiCodeUsage, openaiHeaderUsage, orderAccountsByUsage, parseAnthropicRateLimitHeaders, parseClaudeOauthUsage, parseCodexUsage, parseDurationSeconds, parseKimiUsage, parseOpenAiRateLimitHeaders, publishedCapForTier, readAccountQuotaState, readClaudeCredentials, readCodexCredentials, readKimiCredentials, readUsageCache, recordAccountQuotaLimit, refreshKimiToken, usageCachePath, writeUsageCache };
+export { PUBLISHED_CAPS, type UsageReport$7 as UsageReport, type UsageWindow$5 as UsageWindow, accountQuotaBlock, accountQuotaStatePath, accountUsageScore, anthropicHeaderUsage, buildUsageReport, claudeKeychainSuffix, claudeOauthUsage, clearAccountQuotaLimit, clearAccountUsageCache, codexWhamUsage, decodeJwtClaims, formatRelativeReset, formatUsageReports, getAccountUsage, getUsageForAccounts, googleUsage, humanizeDurationShort, kimiCodeUsage, openaiHeaderUsage, orderAccountsByUsage, parseAnthropicRateLimitHeaders, parseClaudeOauthUsage, parseCodexUsage, parseDurationSeconds, parseKimiUsage, parseOpenAiRateLimitHeaders, publishedCapForTier, readAccountQuotaState$1 as readAccountQuotaState, readClaudeCredentials, readCodexCredentials, readKimiCredentials, readUsageCache, recordAccountQuotaLimit, refreshKimiToken, usageCachePath, withFableQuotaEstimate, writeUsageCache };

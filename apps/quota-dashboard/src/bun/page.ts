@@ -110,13 +110,14 @@ function windowRow(name, w) {
   if (!w) return "";
   const used = pct(w.usedPercent);
   const free = 100 - used;
+  const est = w.unit === "estimated" || w.estimate ? " · estimated" : "";
   return \`<div class="row">
     <div class="row-head">
       <span class="name">\${name}</span>
       <span class="free" style="color:\${tone(used)}">\${free}% free</span>
     </div>
     <div class="bar"><div class="fill" style="width:\${used}%;background:\${tone(used)}"></div></div>
-    <div class="reset">\${used}% used · \${until(w.resetsAt)}</div>
+    <div class="reset">\${used}% used · \${until(w.resetsAt)}\${est}</div>
   </div>\`;
 }
 
@@ -136,7 +137,8 @@ function seatCard(seat) {
     <div class="who">\${seat.account ?? "—"}</div>
     \${windowRow("weekly", seat.weekly)}
     \${windowRow("5-hour", seat.session)}
-    \${!seat.weekly && !seat.session ? '<div class="none">no usage windows reported</div>' : ""}
+    \${windowRow("Fable (50% cap)", seat.fable)}
+    \${!seat.weekly && !seat.session && !seat.fable ? '<div class="none">no usage windows reported</div>' : ""}
   </div>\`;
 }
 

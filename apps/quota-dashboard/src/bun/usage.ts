@@ -12,6 +12,8 @@ export type UsageWindow = {
   unit: string;
   usedPercent: number;
   resetsAt: string | null;
+  capPercent?: number | null;
+  estimate?: boolean;
 };
 
 export type UsageReport = {
@@ -34,6 +36,8 @@ export type Seat = {
   planType: string | null;
   weekly: UsageWindow | null;
   session: UsageWindow | null;
+  /** Fable model window, when the seat reports or estimates one. */
+  fable: UsageWindow | null;
   /** Set when the seat cannot report — expired token, missing credentials. */
   error: string | null;
 };
@@ -139,8 +143,9 @@ export function readSnapshot(): Snapshot {
       provider: report.provider as Seat["provider"],
       account: identities.get(report.accountLabel) ?? null,
       planType: report.planType ?? null,
-      weekly: pickWindow(windows, (s) => s.includes("week")),
+      weekly: pickWindow(windows, (s) => s.includes("week") && !s.includes("fable")),
       session: pickWindow(windows, (s) => s.includes("hour") || s.includes("session")),
+      fable: pickWindow(windows, (s) => s.includes("fable")),
       error: report.error ?? null,
     };
     (report.provider === "codex" ? codex : claude).push(seat);

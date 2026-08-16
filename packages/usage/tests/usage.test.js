@@ -107,6 +107,82 @@ describe("parseClaudeOauthUsage", () => {
       capPercent: 50,
     });
   });
+  test("parses the limits[] model-scoped window (current endpoint shape)", () => {
+    // Captured 2026-08-16 from GET /api/oauth/usage on a Max account that had
+    // hit the Fable cap. There is no seven_day_fable field; the Fable window
+    // only appears as a weekly_scoped limits[] entry.
+    const windows = parseClaudeOauthUsage({
+      five_hour: { utilization: 7, resets_at: "2026-08-16T17:59:59.765937+00:00" },
+      seven_day: { utilization: 53, resets_at: "2026-08-18T21:59:59.765981+00:00" },
+      seven_day_opus: null,
+      seven_day_sonnet: null,
+      limits: [
+        {
+          kind: "session",
+          group: "session",
+          percent: 7,
+          severity: "normal",
+          resets_at: "2026-08-16T17:59:59.765937+00:00",
+          scope: null,
+          is_active: false,
+        },
+        {
+          kind: "weekly_all",
+          group: "weekly",
+          percent: 53,
+          severity: "normal",
+          resets_at: "2026-08-18T21:59:59.765981+00:00",
+          scope: null,
+          is_active: false,
+        },
+        {
+          kind: "weekly_scoped",
+          group: "weekly",
+          percent: 100,
+          severity: "critical",
+          resets_at: "2026-08-18T21:59:59.766338+00:00",
+          scope: { model: { id: null, display_name: "Fable" }, surface: null },
+          is_active: true,
+        },
+      ],
+    });
+    expect(windows.map((w) => w.id)).toEqual(["5h", "weekly", "weekly-fable"]);
+    expect(windows[2]).toMatchObject({
+      label: "weekly (Fable, 50% plan cap)",
+      unit: "percent",
+      usedPercent: 100,
+      resetsAt: "2026-08-18T21:59:59.766338+00:00",
+      capPercent: 50,
+    });
+  });
+  test("maps other limits[] model scopes and dedupes against seven_day_* blocks", () => {
+    const windows = parseClaudeOauthUsage({
+      seven_day_opus: { utilization: 5, resets_at: isoIn(86400) },
+      limits: [
+        {
+          kind: "weekly_scoped",
+          group: "weekly",
+          percent: 40,
+          resets_at: isoIn(86400),
+          scope: { model: { id: null, display_name: "Opus" }, surface: null },
+          is_active: false,
+        },
+        {
+          kind: "weekly_scoped",
+          group: "weekly",
+          percent: 12,
+          resets_at: isoIn(86400),
+          scope: { model: { id: null, display_name: "Sonnet" }, surface: null },
+          is_active: false,
+        },
+      ],
+    });
+    // The dedicated seven_day_opus block wins over the limits[] duplicate.
+    expect(windows).toEqual([
+      { id: "weekly-opus", label: "weekly (Opus)", unit: "percent", usedPercent: 5, resetsAt: isoIn(86400) },
+      { id: "weekly-sonnet", label: "weekly (Sonnet)", unit: "percent", usedPercent: 12, resetsAt: isoIn(86400) },
+    ]);
+  });
   test("tolerates junk", () => {
     expect(parseClaudeOauthUsage(null)).toEqual([]);
     expect(parseClaudeOauthUsage({ five_hour: { utilization: "x" } })).toEqual([]);

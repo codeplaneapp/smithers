@@ -32,3 +32,4 @@ export {
   accountQuotaBlock,
   orderAccountsByUsage,
 } from "./accountSelection.js";
+export { withFableQuotaEstimate } from "./fableQuotaEstimate.js";

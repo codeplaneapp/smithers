@@ -27,4 +27,6 @@ export type UsageWindow = {
   resetsAt?: string;
   /** Share of the plan available to this model-specific window. */
   capPercent?: number;
+  /** True when this window is derived from a local signal, not the provider. */
+  estimate?: boolean;
 };
