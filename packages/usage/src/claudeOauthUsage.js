@@ -29,8 +29,13 @@ export async function claudeOauthUsage(account, readCreds = readClaudeCredential
   if (!creds) {
     return { source: "none", error: "No Claude OAuth credentials in configDir or Keychain" };
   }
+  const plan = creds.subscriptionType ? { planType: creds.subscriptionType } : {};
   if (typeof creds.expiresAt === "number" && creds.expiresAt <= Date.now()) {
-    return { source: "none", error: "Claude OAuth token expired; run `claude` to refresh" };
+    return {
+      source: "none",
+      ...plan,
+      error: "Claude OAuth token expired; run `claude` to refresh",
+    };
   }
   try {
     const res = await fetch(USAGE_URL, {
@@ -43,17 +48,29 @@ export async function claudeOauthUsage(account, readCreds = readClaudeCredential
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
     if (res.status === 401) {
-      return { source: "none", error: "Claude OAuth token rejected (401); run `claude` to refresh" };
+      return {
+        source: "none",
+        ...plan,
+        error: "Claude OAuth token rejected (401); run `claude` to refresh",
+      };
     }
     if (res.status === 429) {
-      return { source: "none", error: "Claude usage endpoint rate limited (429); try again shortly" };
+      return {
+        source: "none",
+        ...plan,
+        error: "Claude usage endpoint rate limited (429); try again shortly",
+      };
     }
     if (!res.ok) {
-      return { source: "none", error: `Claude usage endpoint returned ${res.status}` };
+      return { source: "none", ...plan, error: `Claude usage endpoint returned ${res.status}` };
     }
     const payload = await res.json();
-    return { source: "oauth", windows: parseClaudeOauthUsage(payload), planType: creds.subscriptionType };
+    return { source: "oauth", windows: parseClaudeOauthUsage(payload), ...plan };
   } catch (err) {
-    return { source: "none", error: `Claude usage probe failed: ${err instanceof Error ? err.message : String(err)}` };
+    return {
+      source: "none",
+      ...plan,
+      error: `Claude usage probe failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
 }

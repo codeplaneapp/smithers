@@ -91,11 +91,11 @@ function entryMatchesAccount(entry, identity) {
  * once, so parallel probes never race on the file.
  *
  * @param {Account[]} accounts
- * @param {{ fresh?: boolean; env?: NodeJS.ProcessEnv; nowMs?: number }} [options]
+ * @param {{ fresh?: boolean; bypassHardFloor?: boolean; env?: NodeJS.ProcessEnv; nowMs?: number }} [options]
  * @returns {Promise<UsageReport[]>}
  */
 export async function getUsageForAccounts(accounts, options = {}) {
-  const { fresh = false, env = process.env, nowMs = Date.now() } = options;
+  const { fresh = false, bypassHardFloor = false, env = process.env, nowMs = Date.now() } = options;
   const cache = readUsageCache(env);
   const decisions = accounts.map((account) => {
     const entry = cache.entries[account.label];
@@ -105,7 +105,7 @@ export async function getUsageForAccounts(accounts, options = {}) {
     const useCache =
       entryMatchesAccount(entry, identity) &&
       Number.isFinite(ageMs) &&
-      ((!entryFailed(entry) && ageMs < hardFloorMs(account.provider)) ||
+      ((!bypassHardFloor && !entryFailed(entry) && ageMs < hardFloorMs(account.provider)) ||
         (!fresh && ageMs < refreshIntervalMs(account.provider)));
     return { account, entry, identity, useCache };
   });

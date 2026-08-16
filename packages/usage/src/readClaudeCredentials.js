@@ -21,18 +21,18 @@ import { join } from "node:path";
  * @param {{ configDir?: string }} account
  * @param {NodeJS.Platform} [platform]
  * @param {typeof spawnSync} [spawn] Injectable for tests; defaults to `node:child_process` `spawnSync`.
+ * @param {string} [homeDir] Injectable for tests; defaults to `node:os` `homedir()`.
  * @returns {{ accessToken: string; expiresAt?: number; subscriptionType?: string } | null}
  */
-export function readClaudeCredentials(account, platform = process.platform, spawn = spawnSync) {
-  if (account.configDir) {
-    const path = join(account.configDir, ".credentials.json");
-    if (existsSync(path)) {
-      const parsed = parseCredentials(readFileSafe(path));
-      if (parsed) return parsed;
-    }
+export function readClaudeCredentials(account, platform = process.platform, spawn = spawnSync, homeDir = homedir()) {
+  const effectiveConfigDir = account.configDir ?? join(homeDir, ".claude");
+  const path = join(effectiveConfigDir, ".credentials.json");
+  if (existsSync(path)) {
+    const parsed = parseCredentials(readFileSafe(path));
+    if (parsed) return parsed;
   }
   if (platform === "darwin") {
-    const isDefaultDir = !account.configDir || account.configDir === join(homedir(), ".claude");
+    const isDefaultDir = !account.configDir || account.configDir === join(homeDir, ".claude");
     const services = [
       ...(account.configDir ? [`Claude Code-credentials-${claudeKeychainSuffix(account.configDir)}`] : []),
       // The unsuffixed item belongs to the default ~/.claude install only.

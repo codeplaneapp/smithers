@@ -374,6 +374,20 @@ describe("credential readers", () => {
     expect(readClaudeCredentials({ configDir: badDir }, "linux")).toBeNull();
   });
 
+  test("readClaudeCredentials reads the default non-Keychain credential file", () => {
+    const homeDir = tempDir();
+    mkdirSync(join(homeDir, ".claude"));
+    writeFileSync(
+      join(homeDir, ".claude", ".credentials.json"),
+      JSON.stringify({ claudeAiOauth: { accessToken: "default-token", subscriptionType: "max" } }),
+    );
+    expect(readClaudeCredentials({}, "linux", undefined, homeDir)).toEqual({
+      accessToken: "default-token",
+      expiresAt: undefined,
+      subscriptionType: "max",
+    });
+  });
+
   test("readClaudeCredentials falls back to macOS Keychain credentials", () => {
     // Inject spawnSync rather than mock.module + `?query` re-import: the
     // re-imported module is a distinct instance whose coverage bun discards,
@@ -736,6 +750,18 @@ describe("getUsageForAccounts cache decisions", () => {
     });
 
     expect(reports[0]).toMatchObject({ stale: true, error: "cached-floor" });
+
+    const probed = await getUsageForAccounts([{ label: "claude", provider: "claude-code", configDir: "/x" }], {
+      env,
+      fresh: true,
+      bypassHardFloor: true,
+      nowMs: Date.parse("2026-06-03T00:02:59.000Z"),
+    });
+    expect(probed[0]).toMatchObject({
+      stale: false,
+      source: "none",
+      error: "No Claude OAuth credentials in configDir or Keychain",
+    });
   });
 
   test("--fresh re-probes a claude-code account whose cached report is a failure", async () => {
@@ -976,6 +1002,8 @@ describe("quota-aware account selection", () => {
     ];
     expect(orderAccountsByUsage(accounts, { env, nowMs }).map((row) => row.label)).toEqual(["c", "b", "a"]);
     expect(readAccountQuotaState(env, nowMs).entries.b.untilMs).toBe(nowMs + 10_000);
+    recordAccountQuotaLimit("b", { env, nowMs, untilMs: nowMs + 5_000 });
+    expect(readAccountQuotaState(env, nowMs).entries.b.untilMs).toBe(nowMs + 10_000);
     expect(clearAccountQuotaLimit("b", env)).toBe(true);
   });
 
@@ -998,6 +1026,30 @@ describe("quota-aware account selection", () => {
     );
     expect(clearAccountQuotaLimit("a", env)).toBe(true);
     expect(Object.keys(readAccountQuotaState(env, 0).entries)).toEqual([]);
+  });
+
+  test("treats exhausted cached model usage as blocked until its reset", () => {
+    const nowMs = Date.parse("2026-08-15T00:00:00Z");
+    const resetAt = "2026-08-15T01:00:00Z";
+    const report = {
+      accountLabel: "a",
+      provider: "claude-code",
+      authMode: "subscription",
+      source: "oauth",
+      stale: false,
+      estimate: false,
+      fetchedAt: "2026-08-14T23:59:00Z",
+      windows: [
+        { id: "weekly", label: "weekly", unit: "percent", usedPercent: 30, resetsAt: resetAt },
+        { id: "weekly-fable", label: "weekly Fable", unit: "percent", usedPercent: 100, resetsAt: resetAt },
+      ],
+    };
+    expect(accountQuotaBlock({}, "a", "claude-fable-5", report, nowMs)).toMatchObject({
+      untilMs: Date.parse(resetAt),
+      model: "claude-fable-5",
+    });
+    expect(accountQuotaBlock({}, "a", "claude-opus-5", report, nowMs)).toBeUndefined();
+    expect(accountQuotaBlock({}, "a", "claude-fable-5", report, Date.parse(resetAt) + 1)).toBeUndefined();
   });
 });
 

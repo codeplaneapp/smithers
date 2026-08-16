@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { accountsRoot } from "@smthrs/accounts";
+import { accountsRoot, withAccountsLock } from "@smthrs/accounts";
 import { readUsageCache } from "./usageCache.js";
 
 /** @typedef {import("@smthrs/accounts").Account} Account */
@@ -70,28 +70,33 @@ export function recordAccountQuotaLimit(label, options = {}) {
     typeof options.untilMs === "number" && Number.isFinite(options.untilMs) && options.untilMs > nowMs
       ? options.untilMs
       : nowMs + UNKNOWN_QUOTA_TTL_MS;
-  const state = readAccountQuotaState(env, nowMs);
-  const family = modelFamily(options.model);
-  const key = options.scope === "model" && family !== "shared" ? `${label}::${family}` : label;
-  state.entries[key] = {
-    untilMs,
-    ...(options.model ? { model: options.model } : {}),
-    observedAt: new Date(nowMs).toISOString(),
-  };
-  writeAccountQuotaState(state, env);
-  return state.entries[key];
+  return withAccountsLock(env, () => {
+    const state = readAccountQuotaState(env, nowMs);
+    const family = modelFamily(options.model);
+    const key = options.scope === "model" && family !== "shared" ? `${label}::${family}` : label;
+    const effectiveUntilMs = Math.max(untilMs, state.entries[key]?.untilMs ?? 0);
+    state.entries[key] = {
+      untilMs: effectiveUntilMs,
+      ...(options.model ? { model: options.model } : {}),
+      observedAt: new Date(nowMs).toISOString(),
+    };
+    writeAccountQuotaState(state, env);
+    return state.entries[key];
+  });
 }
 
 /** @param {string} label @param {NodeJS.ProcessEnv} [env] */
 export function clearAccountQuotaLimit(label, env = process.env) {
-  // Read all syntactically valid entries, including expired ones. Clearing an
-  // account is an explicit cleanup operation and must also remove stale rows.
-  const state = readAccountQuotaState(env, 0);
-  const keys = Object.keys(state.entries).filter((key) => key === label || key.startsWith(`${label}::`));
-  if (keys.length === 0) return false;
-  for (const key of keys) delete state.entries[key];
-  writeAccountQuotaState(state, env);
-  return true;
+  return withAccountsLock(env, () => {
+    // Read all syntactically valid entries, including expired ones. Clearing an
+    // account is an explicit cleanup operation and must also remove stale rows.
+    const state = readAccountQuotaState(env, 0);
+    const keys = Object.keys(state.entries).filter((key) => key === label || key.startsWith(`${label}::`));
+    if (keys.length === 0) return false;
+    for (const key of keys) delete state.entries[key];
+    writeAccountQuotaState(state, env);
+    return true;
+  });
 }
 
 /** @param {string | undefined} model */
@@ -111,12 +116,53 @@ function modelFamily(model) {
  * @param {ReturnType<typeof readAccountQuotaState>["entries"]} entries
  * @param {string} label
  * @param {string | undefined} model
+ * @param {UsageReport | undefined} [report]
+ * @param {number} [nowMs]
  */
-export function accountQuotaBlock(entries, label, model) {
+export function accountQuotaBlock(entries, label, model, report, nowMs = Date.now()) {
   const blocks = [entries[label]];
   const family = modelFamily(model);
   if (family !== "shared") blocks.push(entries[`${label}::${family}`]);
+  const usageBlock = exhaustedUsageBlock(report, model, nowMs);
+  if (usageBlock) blocks.push(usageBlock);
   return blocks.filter(Boolean).sort((a, b) => b.untilMs - a.untilMs)[0];
+}
+
+/**
+ * Treat a persisted 100% usage window as a known quota block. If several
+ * applicable windows are exhausted, the account is usable only after the
+ * latest one resets.
+ *
+ * @param {UsageReport | undefined} report
+ * @param {string | undefined} model
+ * @param {number} nowMs
+ */
+function exhaustedUsageBlock(report, model, nowMs) {
+  if (!report || report.source === "none") return undefined;
+  const family = modelFamily(model);
+  const relevant = new Set(["5h", "weekly"]);
+  if (family !== "shared") relevant.add(`weekly-${family}`);
+  const exhausted = report.windows.filter((window) => {
+    if (!relevant.has(window.id)) return false;
+    let usedPercent = window.usedPercent;
+    if (family === "fable" && window.id === "weekly" && !report.windows.some((row) => row.id === "weekly-fable")) {
+      usedPercent = typeof usedPercent === "number" ? usedPercent * 2 : usedPercent;
+    }
+    return typeof usedPercent === "number" && Number.isFinite(usedPercent) && usedPercent >= 100;
+  });
+  if (exhausted.length === 0) return undefined;
+  const resetTimes = exhausted.flatMap((window) => {
+    const resetMs = typeof window.resetsAt === "string" ? Date.parse(window.resetsAt) : Number.NaN;
+    if (Number.isFinite(resetMs)) return resetMs > nowMs ? [resetMs] : [];
+    return [nowMs + UNKNOWN_QUOTA_TTL_MS];
+  });
+  if (resetTimes.length === 0) return undefined;
+  const untilMs = Math.max(...resetTimes);
+  return {
+    untilMs,
+    ...(model ? { model } : {}),
+    observedAt: report.fetchedAt,
+  };
 }
 
 /** @param {UsageReport | undefined} report @param {string | undefined} model */
@@ -154,8 +200,8 @@ export function orderAccountsByUsage(accounts, options = {}) {
   const quota = readAccountQuotaState(env, nowMs).entries;
   const modelFor = options.modelFor ?? ((account) => account.model);
   return [...accounts].sort((a, b) => {
-    const aq = accountQuotaBlock(quota, a.label, modelFor(a));
-    const bq = accountQuotaBlock(quota, b.label, modelFor(b));
+    const aq = accountQuotaBlock(quota, a.label, modelFor(a), reports[a.label]?.report, nowMs);
+    const bq = accountQuotaBlock(quota, b.label, modelFor(b), reports[b.label]?.report, nowMs);
     if (Boolean(aq) !== Boolean(bq)) return aq ? 1 : -1;
     if (aq && bq && aq.untilMs !== bq.untilMs) return aq.untilMs - bq.untilMs;
     const score =

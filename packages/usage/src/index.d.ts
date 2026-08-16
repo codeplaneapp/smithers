@@ -104,11 +104,12 @@ type UsageReport$5 = UsageReport$6;
  * once, so parallel probes never race on the file.
  *
  * @param {Account[]} accounts
- * @param {{ fresh?: boolean; env?: NodeJS.ProcessEnv; nowMs?: number }} [options]
+ * @param {{ fresh?: boolean; bypassHardFloor?: boolean; env?: NodeJS.ProcessEnv; nowMs?: number }} [options]
  * @returns {Promise<UsageReport[]>}
  */
 declare function getUsageForAccounts(accounts: Account$3[], options?: {
     fresh?: boolean;
+    bypassHardFloor?: boolean;
     env?: NodeJS.ProcessEnv;
     nowMs?: number;
 }): Promise<UsageReport$4[]>;
@@ -396,11 +397,12 @@ type KimiRefreshFailure = {
  * @param {{ configDir?: string }} account
  * @param {NodeJS.Platform} [platform]
  * @param {typeof spawnSync} [spawn] Injectable for tests; defaults to `node:child_process` `spawnSync`.
+ * @param {string} [homeDir] Injectable for tests; defaults to `node:os` `homedir()`.
  * @returns {{ accessToken: string; expiresAt?: number; subscriptionType?: string } | null}
  */
 declare function readClaudeCredentials(account: {
     configDir?: string;
-}, platform?: NodeJS.Platform, spawn?: typeof spawnSync): {
+}, platform?: NodeJS.Platform, spawn?: typeof spawnSync, homeDir?: string): {
     accessToken: string;
     expiresAt?: number;
     subscriptionType?: string;
@@ -618,8 +620,10 @@ declare function clearAccountQuotaLimit(label: string, env?: NodeJS.ProcessEnv):
  * @param {ReturnType<typeof readAccountQuotaState>["entries"]} entries
  * @param {string} label
  * @param {string | undefined} model
+ * @param {UsageReport | undefined} [report]
+ * @param {number} [nowMs]
  */
-declare function accountQuotaBlock(entries: ReturnType<typeof readAccountQuotaState>["entries"], label: string, model: string | undefined): {
+declare function accountQuotaBlock(entries: ReturnType<typeof readAccountQuotaState>["entries"], label: string, model: string | undefined, report?: UsageReport | undefined, nowMs?: number): {
     untilMs: number;
     model?: string;
     observedAt: string;
