@@ -332,9 +332,18 @@ etc.) with the same arguments, for use inside an Effect pipeline.
 
 <Note>
 Note writes and search require bun:sqlite: transactions give note+edge
-atomicity, FTS5 gives search. Migration 0023 creates note tables on
-Postgres/PGlite, but the runtime still rejects `saveNote`/`enableNoteSearch`
-there with `DB_WRITE_FAILED`, and `searchNotes` with `DB_QUERY_FAILED`.
+atomicity, FTS5 gives search. The runtime rejects `saveNote`/`enableNoteSearch`
+on Postgres/PGlite with `DB_WRITE_FAILED`, and `searchNotes` with
+`DB_QUERY_FAILED`.
+
+`_smithers_memory_notes` and `_smithers_memory_note_supersessions` still exist
+on Postgres — `0001_current_tables` creates every current table on a fresh
+database, and `0023_add_memory_notes` adds them to an upgraded one. They are
+**staged, not served**: `0043_memory_notes_postgres_staged` stamps a
+`COMMENT ON TABLE` saying so, so `\d+ _smithers_memory_notes` and a `pg_dump`
+carry the same warning the runtime error does. Nothing writes them, and a
+Postgres/PGlite workspace keeps its memory in the `.smithers/smithers.db`
+sqlite sidecar that `openSmithersBackend` opens alongside the main database.
 </Note>
 
 <ResponseField name="Threads & messages" type="methods">

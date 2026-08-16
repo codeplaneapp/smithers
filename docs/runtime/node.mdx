@@ -81,10 +81,15 @@ node -e "import('smthrs').then(() => console.log('ok'))"
   under Node.
 - Cross-run memory uses the main database under Node. Under Bun a Postgres or
   PGlite run keeps memory in a local sqlite sidecar; under Node there is no
-  sqlite, so memory is stored in the run database instead. Memory facts and
-  message history behave the same either way. Memory notes and note search ride
-  the synchronous sqlite driver and its FTS5 index, so on a Postgres-dialect
-  database they are unavailable and `saveNote`, `searchNotes`, and `deleteThread`
-  fail with `DB_WRITE_FAILED` or `DB_QUERY_FAILED`. That limit already applies to
-  a Bun run that opens the memory store on Postgres directly. Run under Bun on
-  the sqlite backend when a workflow needs notes.
+  sqlite, so memory is routed at the run database instead. `MemoryStore` is
+  built on a synchronous Drizzle sqlite handle, so on a Postgres-dialect database
+  memory operations fail rather than fall back — `saveNote`, `searchNotes`,
+  `enableNoteSearch`, and `deleteThread` fail loud with `DB_WRITE_FAILED` or
+  `DB_QUERY_FAILED`, and the portable fact/thread/message operations surface a
+  driver error of their own. That limit already applies to a Bun run that opens
+  the memory store on Postgres directly. Run under Bun, or on the sqlite backend,
+  when a workflow uses cross-run memory.
+- The Postgres schema still carries `_smithers_memory_notes` and
+  `_smithers_memory_note_supersessions`; migration
+  `0043_memory_notes_postgres_staged` labels them *staged, not served* so the
+  catalog does not imply support the runtime declines to give.
