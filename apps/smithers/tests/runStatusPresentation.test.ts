@@ -4,13 +4,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { StatusPill } from "../src/cards/StatusPill";
 import {
   normalizeRunStatus,
+  runActionAvailability,
   runStatusCategory,
   runStatusLabel,
   runStatusToNode,
   runStatusTone,
 } from "../src/runs/runsList";
 import { toRunSummary } from "../src/runs/RunsListBridge";
-import { useRunsListStore } from "../src/runs/runsListStore";
 
 describe("run status presentation", () => {
   test.each([
@@ -78,18 +78,15 @@ describe("run status presentation", () => {
   });
 
   test.each([
-    ["approve", "waiting-approval", "running"],
-    ["deny", "waiting-approval", "failed"],
-    ["resume", "failed", "running"],
-  ] as const)("keeps the lifecycle label synchronized after %s", (action, initial, expected) => {
-    useRunsListStore.setState({
-      runs: [{ ...toRunSummary({ runId: `run-${action}`, status: initial }), blockedNodeLabel: "review" }],
-    });
-
-    useRunsListStore.getState()[action](`run-${action}`);
-
-    const [run] = useRunsListStore.getState().runs;
-    expect(run?.lifecycleStatus).toBe(expected);
-    expect(runStatusLabel(run?.lifecycleStatus)).toBe(runStatusLabel(expected));
+    ["running", { pause: true, resume: false, cancel: true, retry: false }],
+    ["paused", { pause: false, resume: true, cancel: true, retry: false }],
+    ["stale", { pause: false, resume: true, cancel: true, retry: false }],
+    ["orphaned", { pause: false, resume: true, cancel: true, retry: false }],
+    ["failed", { pause: false, resume: false, cancel: false, retry: true }],
+    ["cancelled", { pause: false, resume: false, cancel: false, retry: false }],
+    ["finished", { pause: false, resume: false, cancel: false, retry: false }],
+  ] as const)("admits lifecycle actions for %s", (status, expected) => {
+    const run = toRunSummary({ runId: `run-${status}`, status });
+    expect(runActionAvailability(run)).toEqual(expected);
   });
 });

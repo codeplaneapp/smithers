@@ -1,11 +1,62 @@
 import { useEffect } from "react";
-import { useGatewayConnectionStatus, useGatewayRuns } from "@smthrs/gateway-react";
+import {
+  useGatewayActions,
+  useGatewayConnectionStatus,
+  useGatewayRuns,
+  useSmithersCollections,
+} from "@smthrs/gateway-react";
 import { useLocalModeRefetch } from "../sync/useLocalModeRefetch";
 import { normalizeRunStatus, runStatusCategory, type RunSummary } from "./runsList";
-import { useRunsListStore } from "./runsListStore";
+import { bindRunActions, useRunsListStore } from "./runsListStore";
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function gatewayHeaders(token: string | undefined): Record<string, string> {
+  const headers = { "content-type": "application/json" };
+  return token ? { ...headers, authorization: `Bearer ${token}` } : headers;
+}
+
+async function gatewayFetch(
+  apiBaseUrl: string,
+  token: string | undefined,
+  path: string,
+  init?: RequestInit,
+): Promise<Record<string, unknown>> {
+  const response = await fetch(new URL(path, `${apiBaseUrl.replace(/\/+$/, "")}/`), {
+    ...init,
+    headers: gatewayHeaders(token),
+  });
+  const body = asRecord(await response.json().catch(() => null));
+  if (!response.ok || body.ok === false) {
+    const error = asRecord(body.error);
+    throw new Error(asString(error.message) ?? `Gateway request failed (${response.status})`);
+  }
+  return asRecord(body.data);
+}
+
+async function gatewayRpcFetch(
+  apiBaseUrl: string,
+  token: string | undefined,
+  method: string,
+  params: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const response = await fetch(new URL(`/v1/rpc/${encodeURIComponent(method)}`, `${apiBaseUrl.replace(/\/+$/, "")}/`), {
+    method: "POST",
+    headers: gatewayHeaders(token),
+    body: JSON.stringify(params),
+  });
+  const body = asRecord(await response.json().catch(() => null));
+  if (!response.ok || body.ok === false) {
+    const error = asRecord(body.error);
+    throw new Error(asString(error.message) ?? `Gateway request failed (${response.status})`);
+  }
+  return asRecord(body.payload);
 }
 
 /**
@@ -58,6 +109,29 @@ export function toRunSummary(row: Record<string, unknown>): RunSummary {
 export function RunsListBridge() {
   const { data, loading, error, refetch } = useGatewayRuns({ filter: { limit: 100 } });
   const connection = useGatewayConnectionStatus();
+  const actions = useGatewayActions();
+  const { client } = useSmithersCollections();
+  const apiBaseUrl = client.mode.apiBaseUrl;
+  const token = client.mode.token;
+
+  useEffect(() => {
+    bindRunActions({
+      pause: (runId) =>
+        gatewayFetch(apiBaseUrl, token, `/v1/api/runs/${encodeURIComponent(runId)}/pause`, {
+          method: "POST",
+          body: "{}",
+        }),
+      resume: (runId) => actions.resumeRun({ runId }),
+      cancel: (runId) => actions.cancelRun({ runId }),
+      retry: (runId) => gatewayRpcFetch(apiBaseUrl, token, "runs.rerun", { runId }),
+      health: async (runId) => {
+        const run = await gatewayFetch(apiBaseUrl, token, `/v1/api/runs/${encodeURIComponent(runId)}`);
+        const runState = asRecord(run.runState);
+        return asString(runState.state) ?? asString(run.status) ?? "available";
+      },
+      refetch,
+    });
+  }, [actions, apiBaseUrl, refetch, token]);
 
   // LOCAL-MODE freshness: the `runs` collection is pull-only (no stream), so a
   // run launched/advanced after the initial pull is never pushed here. Poll the

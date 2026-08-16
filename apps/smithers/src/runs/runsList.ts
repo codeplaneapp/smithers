@@ -298,3 +298,22 @@ export function summarizeRuns(runs: RunSummary[]): RunsSummary {
 export function isTerminal(status: RunListStatus): boolean {
   return status === "finished" || status === "failed" || status === "cancelled";
 }
+
+/** Lifecycle controls admitted by the run's authoritative gateway status. */
+export function runActionAvailability(run: RunSummary): {
+  pause: boolean;
+  resume: boolean;
+  cancel: boolean;
+  retry: boolean;
+} {
+  const status = normalizeRunStatus(runLifecycleStatus(run));
+  const completed = ["finished", "succeeded", "completed", "ok", "continued"].includes(status);
+  const cancelled = status === "cancelled";
+  const failed = ["failed", "errored"].includes(status);
+  return {
+    pause: status === "running",
+    resume: ["paused", "stale", "orphaned"].includes(status),
+    cancel: !completed && !cancelled && !failed,
+    retry: failed,
+  };
+}

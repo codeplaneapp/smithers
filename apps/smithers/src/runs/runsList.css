@@ -277,6 +277,35 @@
   padding: 4px 10px;
   font-size: 11.5px;
 }
+.runs-action-confirm,
+.runs-action-feedback {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  font-size: 12px;
+}
+.runs-action-confirm {
+  flex-wrap: wrap;
+  border: 1px solid color-mix(in srgb, var(--st-failed) 35%, var(--border));
+  background: color-mix(in srgb, var(--st-failed) 8%, var(--surface));
+}
+.runs-action-confirm > span {
+  flex: 1 1 240px;
+}
+.runs-action-feedback {
+  border: 1px solid var(--border);
+}
+.runs-action-feedback.is-success {
+  color: var(--st-ok);
+  background: color-mix(in srgb, var(--st-ok) 8%, var(--surface));
+}
+.runs-action-feedback.is-error {
+  color: var(--st-failed);
+  background: color-mix(in srgb, var(--st-failed) 8%, var(--surface));
+}
 
 /* The inline blocked-node approval banner on a waiting row. */
 .runs-approval {

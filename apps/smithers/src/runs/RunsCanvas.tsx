@@ -1,4 +1,5 @@
 import "./runsList.css";
+import { useEffect, useRef, useState } from "react";
 import { Alert, AlertDescription, Badge, EmptyState, Skeleton, StatusPill } from "@smthrs/ui";
 import { openSurface } from "../app/navigation";
 import { useUiStore } from "../app/uiStore";
@@ -11,8 +12,8 @@ import {
   filterRuns,
   groupRuns,
   hasActiveFilters,
-  isTerminal,
   runDisplayName,
+  runActionAvailability,
   runLifecycleStatus,
   runStatusLabel,
   runStatusToNode,
@@ -22,7 +23,7 @@ import {
   type RunStatusFilter,
   type RunSummary,
 } from "./runsList";
-import { useRunsListStore } from "./runsListStore";
+import { useRunsListStore, type RunAction } from "./runsListStore";
 
 /** The status filter values, mirroring RunsView's status Menu. */
 const STATUS_OPTIONS: { id: RunStatusFilter; label: string }[] = [
@@ -131,20 +132,57 @@ function openRunInspector(run: RunSummary): void {
 function RunRow({ run }: { run: RunSummary }) {
   const selectedRunId = useRunsListStore((state) => state.selectedRunId);
   const selectRun = useRunsListStore((state) => state.selectRun);
-  const rerun = useRunsListStore((state) => state.rerun);
-  const resume = useRunsListStore((state) => state.resume);
-  const approve = useRunsListStore((state) => state.approve);
-  const deny = useRunsListStore((state) => state.deny);
+  const actingRunId = useRunsListStore((state) => state.actingRunId);
+  const actingAction = useRunsListStore((state) => state.actingAction);
+  const actionFeedback = useRunsListStore((state) => state.actionFeedback);
+  const connectionStatus = useRunsListStore((state) => state.connectionStatus);
+  const rpcReady = useRunsListStore((state) => state.rpc !== null);
+  const performAction = useRunsListStore((state) => state.performAction);
+  const [confirming, setConfirming] = useState<"cancel" | "retry" | null>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const retryRef = useRef<HTMLButtonElement>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  const feedbackRef = useRef<HTMLDivElement>(null);
+  const restoreFocus = useRef<"cancel" | "retry" | null>(null);
 
-  const terminal = isTerminal(run.status);
   const showProgress = shouldShowProgress(run);
   const pct = Math.round(run.progress * 100);
   const selected = selectedRunId === run.runId;
+  const availability = runActionAvailability(run);
+  const busy = actingRunId === run.runId;
+  const actionsDisabled = actingRunId !== null || connectionStatus !== "online" || !rpcReady;
+  const feedback = actionFeedback?.runId === run.runId ? actionFeedback : null;
+
+  useEffect(() => {
+    if (confirming) {
+      confirmRef.current?.focus();
+      return;
+    }
+    const action = restoreFocus.current;
+    restoreFocus.current = null;
+    if (action === "cancel") cancelRef.current?.focus();
+    if (action === "retry") retryRef.current?.focus();
+  }, [confirming]);
+
+  useEffect(() => {
+    if (feedback) feedbackRef.current?.focus();
+  }, [feedback]);
+
+  const cancelConfirmation = () => {
+    restoreFocus.current = confirming;
+    setConfirming(null);
+  };
+
+  const act = (action: RunAction) => {
+    setConfirming(null);
+    performAction(run.runId, action);
+  };
 
   return (
     <div
       className={selected ? "runs-row is-on" : "runs-row"}
       data-testid="runs-row"
+      data-run-id={run.runId}
       onClick={() => {
         selectRun(run.runId);
         openRunInspector(run);
@@ -187,11 +225,8 @@ function RunRow({ run }: { run: RunSummary }) {
             Waiting for approval: <span className="runs-approval-node">{run.blockedNodeLabel}</span>
           </AlertDescription>
           <div className="runs-approval-actions">
-            <button className="btn btn-brand tone-ok" type="button" onClick={() => approve(run.runId)}>
-              Approve
-            </button>
-            <button className="btn btn-deny" type="button" onClick={() => deny(run.runId)}>
-              Deny
+            <button className="btn btn-brand" type="button" onClick={() => openSurface({ kind: "approvals" })}>
+              Review approval
             </button>
           </div>
         </Alert>
@@ -221,17 +256,119 @@ function RunRow({ run }: { run: RunSummary }) {
         >
           Timeline
         </button>
-        {!terminal ? (
-          <button className="btn" type="button" onClick={() => rerun(run.runId)}>
-            Rerun
+        {availability.pause ? (
+          <button
+            className="btn"
+            type="button"
+            data-testid="runs-pause"
+            aria-label={`Pause run ${run.runId}`}
+            disabled={actionsDisabled}
+            onClick={() => act("pause")}
+          >
+            {busy && actingAction === "pause" ? "Pausing…" : "Pause"}
           </button>
         ) : null}
-        {run.status === "failed" || run.status === "cancelled" ? (
-          <button className="btn run-resume" type="button" onClick={() => resume(run.runId)}>
-            Resume
+        {availability.resume ? (
+          <button
+            className="btn run-resume"
+            type="button"
+            data-testid="runs-resume"
+            aria-label={`Resume run ${run.runId}`}
+            disabled={actionsDisabled}
+            onClick={() => act("resume")}
+          >
+            {busy && actingAction === "resume" ? "Resuming…" : "Resume"}
           </button>
         ) : null}
+        {availability.retry ? (
+          <button
+            ref={retryRef}
+            className="btn"
+            type="button"
+            data-testid="runs-retry"
+            aria-label={`Retry failed run ${run.runId}`}
+            disabled={actionsDisabled}
+            onClick={() => setConfirming("retry")}
+          >
+            Retry
+          </button>
+        ) : null}
+        {availability.cancel ? (
+          <button
+            ref={cancelRef}
+            className="btn btn-deny"
+            type="button"
+            data-testid="runs-cancel"
+            aria-label={`Cancel run ${run.runId}`}
+            disabled={actionsDisabled}
+            onClick={() => setConfirming("cancel")}
+          >
+            Cancel
+          </button>
+        ) : null}
+        <button
+          className="btn"
+          type="button"
+          data-testid="runs-health"
+          aria-label={`Check health of run ${run.runId}`}
+          disabled={actionsDisabled}
+          onClick={() => act("health")}
+        >
+          {busy && actingAction === "health" ? "Checking…" : "Check health"}
+        </button>
       </div>
+
+      {confirming ? (
+        <div
+          className="runs-action-confirm"
+          role="alertdialog"
+          aria-label={`${confirming === "cancel" ? "Cancel" : "Retry"} run ${run.runId}?`}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            event.stopPropagation();
+            cancelConfirmation();
+          }}
+        >
+          <span>
+            {confirming === "cancel"
+              ? "Cancel this run? In-flight work may be interrupted."
+              : "Launch a new run with the same workflow input?"}
+          </span>
+          <button
+            ref={confirmRef}
+            className="btn btn-deny"
+            type="button"
+            data-testid={`runs-confirm-${confirming}`}
+            disabled={actionsDisabled}
+            onClick={() => act(confirming)}
+          >
+            Confirm {confirming}
+          </button>
+          <button
+            className="btn"
+            type="button"
+            aria-label={`Keep run ${run.runId}`}
+            disabled={actionsDisabled}
+            onClick={cancelConfirmation}
+          >
+            Keep run
+          </button>
+        </div>
+      ) : null}
+
+      {feedback ? (
+        <div
+          ref={feedbackRef}
+          className={`runs-action-feedback is-${feedback.kind}`}
+          role={feedback.kind === "error" ? "alert" : "status"}
+          tabIndex={-1}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {feedback.message}
+        </div>
+      ) : null}
     </div>
   );
 }

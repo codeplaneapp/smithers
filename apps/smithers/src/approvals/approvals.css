@@ -27,6 +27,22 @@
   padding: 8px;
   background: var(--surface);
 }
+.appr-feedback {
+  grid-column: 1 / -1;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12.5px;
+}
+.appr-feedback.is-success {
+  color: var(--st-ok);
+  background: color-mix(in srgb, var(--st-ok) 8%, var(--surface));
+}
+.appr-feedback.is-error,
+.appr-feedback.is-stale {
+  color: var(--st-failed);
+  background: color-mix(in srgb, var(--st-failed) 8%, var(--surface));
+}
 .appr-detail {
   min-width: 0;
   min-height: 0;
