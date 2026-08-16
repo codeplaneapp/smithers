@@ -112,6 +112,7 @@ const CORE_PAGES = [
   "components/kanban.mdx",
   "components/delegation-chain.mdx",
   "components/trellis.mdx",
+  "components/memory-trellis.mdx",
   // Recipes and reference
   "recipes.mdx",
   "workflows/authoring-rules.mdx",

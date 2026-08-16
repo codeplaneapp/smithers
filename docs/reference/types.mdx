@@ -1378,6 +1378,9 @@ type TrellisProps = {
   limits?: TrellisLimits;
   skipIf?: boolean;
 };
+type MemoryTrellisProps = TrellisProps & {
+  memory: Omit<MemoryProps, "children">;
+};
 
 type OptimizerProps = {
   id?: string;

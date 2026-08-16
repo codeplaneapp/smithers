@@ -325,7 +325,8 @@
                 "group": "Delegation",
                 "pages": [
                   "components/delegation-chain",
-                  "components/trellis"
+                  "components/trellis",
+                  "components/memory-trellis"
                 ]
               },
               {
