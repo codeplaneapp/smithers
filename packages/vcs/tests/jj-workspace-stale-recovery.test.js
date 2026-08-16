@@ -35,7 +35,9 @@ async function withFakeJj(script, fn) {
   }
 }
 
-describe("workspaceAdd stale working-copy recovery", () => {
+// The fake jj is a bash-shebang script; Windows cannot execute it, matching
+// the platform skips in the real-jj suites.
+describe.skipIf(process.platform === "win32")("workspaceAdd stale working-copy recovery", () => {
   test("runs `workspace update-stale` and retries when add reports a stale working copy", async () => {
     // The fake jj rejects `workspace add` with jj's stale-working-copy error
     // until `workspace update-stale` has run, then accepts it. A state file
