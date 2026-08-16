@@ -25,6 +25,14 @@ export type WorkflowSessionOptions = {
   readonly initialRetryCounts?: ReadonlyMap<string, number>;
   /** Absolute retry deadlines restored from durable attempts. */
   readonly initialRetryWait?: ReadonlyMap<string, number>;
+  /** Last durable failures restored for tasks that may already be exhausted. */
+  readonly initialTaskFailures?: ReadonlyMap<
+    string,
+    {
+      readonly error: unknown;
+      readonly recoveryCommand?: string;
+    }
+  >;
   /** Approval task keys restored from durable approved rows. */
   readonly initialApprovals?: ReadonlySet<string>;
   /**

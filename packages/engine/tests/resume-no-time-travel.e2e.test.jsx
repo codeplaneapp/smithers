@@ -301,7 +301,7 @@ describe("resume without time travel", () => {
     }
   }, 30_000);
 
-  test("resume keeps exhausted failed task failed until retries increase", async () => {
+  test("resume identifies exhausted state as recorded after an accepted agent-chain edit", async () => {
     const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);
     try {
       const adapter = new SmithersDb(db);
@@ -344,6 +344,30 @@ describe("resume without time travel", () => {
           </Sequence>
         </Workflow>
       ));
+      let replacementCalls = 0;
+      const replacementAgent = {
+        id: "healthy-implement-agent",
+        tools: {},
+        async generate() {
+          replacementCalls += 1;
+          return { text: '{"value":7}', output: { value: 7 } };
+        },
+      };
+      const editedWorkflow = smithers(() => (
+        <Workflow name="resume-current-state">
+          <Sequence>
+            <Task id="analyze" output={outputs.outputA} agent={makeAgent("analyze")}>
+              analyze the problem
+            </Task>
+            <Task id="implement" output={outputs.outputB} agent={replacementAgent} retries={0}>
+              implement the fix
+            </Task>
+            <Task id="test" output={outputs.outputC} agent={makeAgent("test")}>
+              validate the result
+            </Task>
+          </Sequence>
+        </Workflow>
+      ));
       const first = await Effect.runPromise(
         runWorkflow(workflow, {
           input: {},
@@ -355,13 +379,35 @@ describe("resume without time travel", () => {
       expect(nodeState(firstNodes, "analyze")).toBe("finished");
       expect(nodeState(firstNodes, "implement")).toBe("failed");
       const resumed = await Effect.runPromise(
-        runWorkflow(workflow, {
+        runWorkflow(editedWorkflow, {
           input: {},
           runId: first.runId,
           resume: true,
+          acceptWorkflowChange: true,
         }),
       );
       expect(resumed.status).toBe("failed");
+      expect(resumed.error?.message).toContain("exhausted 1 recorded attempt before this resume");
+      expect(resumed.error?.message).toContain("no new attempt ran");
+      expect(resumed.error?.message).toContain("Last recorded error: implement failed");
+      expect(resumed.error?.message).toContain(
+        "smithers retry-task <workflow> --run-id resume-no-time-travel-retry --node-id implement --iteration 0",
+      );
+      expect(resumed.error?.details).toMatchObject({
+        nodeId: "implement",
+        iteration: 0,
+        attempts: 1,
+        exhaustedBeforeResume: true,
+      });
+      const resumedRun = await adapter.getRun(first.runId);
+      const persistedError = JSON.parse(resumedRun?.errorJson ?? "null");
+      expect(persistedError?.message).toContain("no new attempt ran");
+      expect(persistedError?.details).toMatchObject({
+        nodeId: "implement",
+        iteration: 0,
+        attempts: 1,
+        exhaustedBeforeResume: true,
+      });
       const analyzeAttempts = await adapter.listAttempts(first.runId, "analyze", 0);
       const implementAttempts = await adapter.listAttempts(first.runId, "implement", 0);
       const testAttempts = await adapter.listAttempts(first.runId, "test", 0);
@@ -371,6 +417,7 @@ describe("resume without time travel", () => {
       expect(callsByNodeId.analyze).toBe(1);
       expect(callsByNodeId.implement).toBe(1);
       expect(callsByNodeId.test).toBeUndefined();
+      expect(replacementCalls).toBe(0);
     } finally {
       cleanup();
     }

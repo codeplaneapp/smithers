@@ -372,6 +372,20 @@ function isTransientSessionFailure(error) {
   );
 }
 /**
+ * Flatten a restored failure to one bounded line for the resume diagnostic.
+ * @param {unknown} error
+ * @param {number} [max]
+ */
+function recordedFailureExcerpt(error, max = 300) {
+  const payloadMessage =
+    error && typeof error === "object" && typeof error.message === "string" ? error.message : undefined;
+  const normalized = toSmithersError(error);
+  const text = String(payloadMessage ?? normalized.summary ?? normalized.message ?? error)
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+/**
  * Whether a failure may consume the non-progress budget (#1500). Stall
  * detection only applies to failures the task could plausibly keep retrying:
  * a failure the scheduler will not retry at all is already terminal, and a
@@ -465,6 +479,7 @@ function failedDecision(error, label) {
  * @property {TaskStateMap} states
  * @property {Map<string, TaskOutput>} outputs
  * @property {Map<string, unknown>} failures
+ * @property {Map<string, { readonly error: unknown, readonly recoveryCommand?: string }>} restoredTaskFailures
  * @property {Map<string, TaskDescriptor>} failureDescriptors
  * @property {Map<string, number>} retryCounts
  * @property {Map<string, { signature: string, streak: number }>} errorStreaks state key → latest error signature and its consecutive-failure count (#1500)
@@ -484,6 +499,16 @@ function failedDecision(error, label) {
  */
 export function makeWorkflowSession(options = {}) {
   const nowMs = options.nowMs ?? (() => Date.now());
+  const restoredTaskFailures = new Map(
+    [...(options.initialTaskFailures ?? [])].filter(
+      ([key, failure]) =>
+        typeof key === "string" &&
+        key.length > 0 &&
+        failure !== null &&
+        typeof failure === "object" &&
+        Object.prototype.hasOwnProperty.call(failure, "error"),
+    ),
+  );
   /** @type {SessionState} */
   const state = {
     runId: options.runId ?? defaultRunId(),
@@ -492,7 +517,8 @@ export function makeWorkflowSession(options = {}) {
     descriptors: new Map(),
     states: new Map(),
     outputs: new Map(),
-    failures: new Map(),
+    failures: new Map([...restoredTaskFailures].map(([key, failure]) => [key, failure.error])),
+    restoredTaskFailures,
     failureDescriptors: new Map(),
     retryCounts: new Map(
       [...(options.initialRetryCounts ?? [])].filter(([, count]) => Number.isSafeInteger(count) && count >= 1),
@@ -645,6 +671,7 @@ export function makeWorkflowSession(options = {}) {
         state.retryWait.delete(key);
         state.approvals.delete(key);
         state.retryCounts.delete(key);
+        state.restoredTaskFailures.delete(key);
         state.failureDescriptors.delete(key);
         state.quotaResetTimes.delete(key);
         state.timerStarts.delete(key);
@@ -698,6 +725,7 @@ export function makeWorkflowSession(options = {}) {
     state.states.set(key, "finished");
     state.outputs.set(key, output);
     state.retryWait.delete(key);
+    state.restoredTaskFailures.delete(key);
     state.failureDescriptors.delete(key);
     state.errorStreaks.delete(key);
     state.quotaResetTimes.delete(key);
@@ -770,6 +798,9 @@ export function makeWorkflowSession(options = {}) {
    */
   function applyFailure(descriptor, error) {
     const key = stateKeyFor(descriptor);
+    // From this point onward the scheduler is handling a failure observed by
+    // this live session, not the durable failure hydrated at resume startup.
+    state.restoredTaskFailures.delete(key);
     const suspensionStatus =
       error &&
       typeof error === "object" &&
@@ -921,6 +952,30 @@ export function makeWorkflowSession(options = {}) {
       if (isTerminalFailure && !descriptor?.continueOnFail && descriptor?.failurePolicy !== "quarantine") {
         if (recoveryKeys.has(key)) {
           continue;
+        }
+        const restored = state.restoredTaskFailures.get(key);
+        if (restored) {
+          const nodeId = descriptor?.nodeId ?? parsed.nodeId;
+          const attempts = state.retryCounts.get(key) ?? 1;
+          const excerpt = recordedFailureExcerpt(restored.error);
+          const punctuation = /[.!?]$/.test(excerpt) ? "" : ".";
+          const recovery = restored.recoveryCommand ? ` Reset it with: ${restored.recoveryCommand}` : "";
+          return {
+            _tag: "Failed",
+            error: new SmithersError(
+              "SESSION_ERROR",
+              `Task ${nodeId} exhausted ${attempts} recorded attempt${attempts === 1 ? "" : "s"} before this resume; no new attempt ran. Last recorded error: ${excerpt}${punctuation}${recovery}`,
+              {
+                key,
+                nodeId,
+                iteration: parsed.iteration,
+                attempts,
+                exhaustedBeforeResume: true,
+                ...(restored.recoveryCommand ? { recoveryCommand: restored.recoveryCommand } : {}),
+              },
+              restored.error,
+            ),
+          };
         }
         if (descriptor?.agent && isTransientSessionFailure(state.failures.get(key))) {
           continue;

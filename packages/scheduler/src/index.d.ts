@@ -281,6 +281,11 @@ type WorkflowSessionOptions$2 = {
     readonly initialRetryCounts?: ReadonlyMap<string, number>;
     /** Absolute retry deadlines restored from durable attempts. */
     readonly initialRetryWait?: ReadonlyMap<string, number>;
+    /** Last durable failures restored for tasks that may already be exhausted. */
+    readonly initialTaskFailures?: ReadonlyMap<string, {
+        readonly error: unknown;
+        readonly recoveryCommand?: string;
+    }>;
     /** Approval task keys restored from durable approved rows. */
     readonly initialApprovals?: ReadonlySet<string>;
     /**
@@ -618,6 +623,7 @@ declare function isStallableFailure(descriptor: TaskDescriptor, error: unknown):
  * @property {TaskStateMap} states
  * @property {Map<string, TaskOutput>} outputs
  * @property {Map<string, unknown>} failures
+ * @property {Map<string, { readonly error: unknown, readonly recoveryCommand?: string }>} restoredTaskFailures
  * @property {Map<string, TaskDescriptor>} failureDescriptors
  * @property {Map<string, number>} retryCounts
  * @property {Map<string, { signature: string, streak: number }>} errorStreaks state key → latest error signature and its consecutive-failure count (#1500)

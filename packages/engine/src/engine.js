@@ -3774,6 +3774,18 @@ function parseAttemptErrorCode(errorJson) {
   }
 }
 /**
+ * @param {string | null} [errorJson]
+ * @returns {unknown}
+ */
+function parseAttemptFailure(errorJson) {
+  if (!errorJson) return { message: "No error payload was recorded." };
+  try {
+    return JSON.parse(errorJson);
+  } catch {
+    return errorJson;
+  }
+}
+/**
  * Normalize token usage carried by provider failures. Access stays inside the
  * failure-path telemetry guard because exotic error objects may expose
  * throwing getters.
@@ -3913,6 +3925,7 @@ function retrySessionStateFromAttempts(attempts) {
   }
   const retryCounts = new Map();
   const retryWait = new Map();
+  const taskFailures = new Map();
   for (const [key, rows] of byTask) {
     const failed = rows.filter((attempt) => attempt.state === "failed" && !isQuotaTaskFailure(attempt));
     const latest = rows.reduce((candidate, attempt) => {
@@ -3934,7 +3947,22 @@ function retrySessionStateFromAttempts(attempts) {
     ) {
       continue;
     }
-    if (failed.length > 0) retryCounts.set(key, failed.length);
+    if (failed.length > 0) {
+      retryCounts.set(key, failed.length);
+      const latestFailure = failed.reduce((candidate, attempt) => {
+        if (!candidate) return attempt;
+        const startedDelta = Number(attempt.startedAtMs ?? 0) - Number(candidate.startedAtMs ?? 0);
+        if (startedDelta !== 0) return startedDelta > 0 ? attempt : candidate;
+        return attempt.attempt > candidate.attempt ? attempt : candidate;
+      }, /** @type {AttemptRow | null} */ (null));
+      if (latestFailure) {
+        taskFailures.set(key, {
+          nodeId: latestFailure.nodeId,
+          iteration: latestFailure.iteration ?? 0,
+          error: parseAttemptFailure(latestFailure.errorJson),
+        });
+      }
+    }
     if (latest.state !== "failed") continue;
     const meta = parseAttemptMetaJson(latest.metaJson);
     if (!Object.prototype.hasOwnProperty.call(meta, RETRY_STATE_META_KEY)) continue;
@@ -3954,7 +3982,25 @@ function retrySessionStateFromAttempts(attempts) {
     retryCounts.set(key, retryState.failureCount);
     retryWait.set(key, retryState.retryAtMs);
   }
-  return { retryCounts, retryWait };
+  return { retryCounts, retryWait, taskFailures };
+}
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function shellEscapeCommandArg(value) {
+  if (/^[a-zA-Z0-9._/:-]+$/.test(value)) return value;
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+/**
+ * @param {string | null | undefined} workflowPath
+ * @param {string} runId
+ * @param {string} nodeId
+ * @param {number} iteration
+ */
+function buildRetryTaskRecoveryCommand(workflowPath, runId, nodeId, iteration) {
+  const workflowArg = workflowPath ? shellEscapeCommandArg(workflowPath) : "<workflow>";
+  return `smithers retry-task ${workflowArg} --run-id ${shellEscapeCommandArg(runId)} --node-id ${shellEscapeCommandArg(nodeId)} --iteration ${iteration}`;
 }
 /**
  * @param {Record<string, unknown> | null | undefined} errorJson
@@ -10862,7 +10908,23 @@ async function runWorkflowBodyDriver(workflow, opts) {
     });
     const retrySessionState = opts.resume
       ? retrySessionStateFromAttempts(await Effect.runPromise(adapter.listAttemptsForRun(runId)))
-      : { retryCounts: new Map(), retryWait: new Map() };
+      : { retryCounts: new Map(), retryWait: new Map(), taskFailures: new Map() };
+    const recoveryWorkflowPath =
+      resolvedWorkflowPath ?? opts.workflowPath ?? activeRun?.workflowPath ?? existingRun?.workflowPath ?? null;
+    const initialTaskFailures = new Map(
+      [...retrySessionState.taskFailures].map(([key, failure]) => [
+        key,
+        {
+          error: failure.error,
+          recoveryCommand: buildRetryTaskRecoveryCommand(
+            recoveryWorkflowPath,
+            runId,
+            failure.nodeId,
+            failure.iteration,
+          ),
+        },
+      ]),
+    );
     const initialApprovals = new Set();
     if (opts.resume) {
       const decidedApprovals = await Effect.runPromise(adapter.listDecidedApprovals(runId));
@@ -10880,6 +10942,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
       initialTimerStarts: carriedTimerStarts,
       initialRetryCounts: retrySessionState.retryCounts,
       initialRetryWait: retrySessionState.retryWait,
+      initialTaskFailures,
       initialApprovals,
       evaluateAspectBudget: (descriptor) =>
         budgetTracker ? evaluateAspectBudget(descriptor.aspects, budgetTracker.snapshot(nowMs())) : null,
@@ -11383,6 +11446,7 @@ export const __engineInternals = {
   isRetryableTaskFailure,
   isQuotaTaskFailure,
   retrySessionStateFromAttempts,
+  buildRetryTaskRecoveryCommand,
   cancelInProgress,
   cancelStaleAttempts,
   cancelPendingExternalWaits,
