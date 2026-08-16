@@ -129,7 +129,7 @@ token counts and iteration counts, code does the pricing.
 The prompt-driven, user-launched ones (first parallel step, `continueOnFail`):
 `implement.tsx`, `plan.tsx`, `research-plan-implement.tsx`, `research.tsx`,
 `review.tsx`, `open-code-review.tsx`, `ralph.tsx`, `hello.tsx` (as the documented
-example), and `fix-all-issues.tsx` (highest cost → highest value).
+example), and `archive/fix-all-issues.tsx` (highest cost → highest value).
 
 ## Scoring (eval-driven)
 

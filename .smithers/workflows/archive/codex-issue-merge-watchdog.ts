@@ -6,13 +6,13 @@
  * Cron usually has a minimal PATH, so use absolute paths or set PATH and
  * SMITHERS_BIN explicitly:
  *   PATH=/usr/local/bin:/usr/bin:/bin SMITHERS_BIN=/path/to/smithers \
- *     /path/to/bun /path/to/repo/.smithers/scripts/codex-issue-merge-watchdog.ts --root /path/to/repo --run-id RUN_ID
+ *     /path/to/bun /path/to/repo/.smithers/workflows/archive/codex-issue-merge-watchdog.ts --root /path/to/repo --run-id RUN_ID
  *
  * Smithers' supervisor should run alongside this script for process-level stale
  * owner recovery. This watchdog asks Terra to diagnose semantic progress and
  * only invokes Sol when repair is actually required.
  */
-// crontab: */5 * * * * PATH=/usr/local/bin:/usr/bin:/bin SMITHERS_BIN=/absolute/path/to/smithers /absolute/path/to/bun /path/to/repo/.smithers/scripts/codex-issue-merge-watchdog.ts --root /path/to/repo --run-id RUN_ID
+// crontab: */5 * * * * PATH=/usr/local/bin:/usr/bin:/bin SMITHERS_BIN=/absolute/path/to/smithers /absolute/path/to/bun /path/to/repo/.smithers/workflows/archive/codex-issue-merge-watchdog.ts --root /path/to/repo --run-id RUN_ID
 import { ClaudeCodeAgent, type AgentLike } from "smthrs";
 import {
   existsSync,
@@ -31,8 +31,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-import { subscriptionCodexFirst } from "../lib/codexAccounts";
-import { buildPublicIssueAgentPolicy, resolvePublicIssueToolchainReadPaths } from "../lib/publicIssueAgentPolicy";
+import { subscriptionCodexFirst } from "../../lib/codexAccounts";
+import { buildPublicIssueAgentPolicy, resolvePublicIssueToolchainReadPaths } from "../../lib/publicIssueAgentPolicy";
 
 export type WatchdogOptions = {
   runId: string;
@@ -1375,7 +1375,7 @@ export async function watchdogTick(options: WatchdogOptions, now = Date.now()): 
 
 function usage(): string {
   return [
-    "Usage: bun .smithers/scripts/codex-issue-merge-watchdog.ts RUN_ID [options]",
+    "Usage: bun .smithers/workflows/archive/codex-issue-merge-watchdog.ts RUN_ID [options]",
     "",
     "Options:",
     "  --run-id, -r <id>           Run id (alternative to positional)",

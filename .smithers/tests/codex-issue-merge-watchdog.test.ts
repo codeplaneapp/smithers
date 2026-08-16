@@ -25,9 +25,9 @@ import {
   stateKeyForRunId,
   validateReplacementRun,
   validateRetryTaskProposal,
-} from "../scripts/codex-issue-merge-watchdog";
+} from "../workflows/archive/codex-issue-merge-watchdog";
 
-const watchdogScript = fileURLToPath(new URL("../scripts/codex-issue-merge-watchdog.ts", import.meta.url));
+const watchdogScript = fileURLToPath(new URL("../workflows/archive/codex-issue-merge-watchdog.ts", import.meta.url));
 
 function compileFixture(sourcePath: string, outputPath: string): void {
   const result = Bun.spawnSync([process.execPath, "build", "--compile", sourcePath, `--outfile=${outputPath}`], {

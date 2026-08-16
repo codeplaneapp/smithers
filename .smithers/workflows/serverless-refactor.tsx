@@ -39,7 +39,7 @@
 //    phase's PR before its dependents land, or run them in waves via `only`.
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
-import { createSmithers, Parallel, Sequence, Task, Worktree } from "smthrs";
+import { createSmithers, Parallel, Sequence, Task, UI, Worktree } from "smthrs";
 import { z } from "zod/v4";
 import { implementer, panelists, synthesizer, validator } from "../components/roles";
 import { PlanPanel, planOutputSchema, planSynthesisSchema } from "../components/PlanPanel";
@@ -413,6 +413,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="serverless-refactor">
+      <UI entry="../ui/serverless-refactor.tsx" title="Serverless Refactor" />
       {sequential ? <Sequence>{cards}</Sequence> : <Parallel maxConcurrency={maxConcurrency}>{cards}</Parallel>}
     </Workflow>
   );

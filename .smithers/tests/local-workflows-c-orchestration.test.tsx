@@ -123,14 +123,14 @@ describe("local orchestration workflows C", () => {
   });
 
   test("route-and-merge pairs the current fix/review, scopes worktrees, and trusts only ancestry verification", async () => {
-    const mod = await import("../workflows/route-and-merge-issues.tsx");
+    const mod = await import("../workflows/archive/route-and-merge-issues.tsx");
     expect(mod.inputSchema.safeParse({ reviewIterations: 0 }).success).toBe(false);
     expect(
       mod.mergeSchema.safeParse({ issueNumber: 1, status: "merged", gatePassed: false, mergeSha: "abc" }).success,
     ).toBe(false);
 
     const input = { defaultStrategy: "opus-sandwich", reviewIterations: 2, consolidate: true, gateCommand: "true" };
-    const initial = await render("route-and-merge-issues.tsx", input, {}, { runId: "Collision / Run" });
+    const initial = await render("archive/route-and-merge-issues.tsx", input, {}, { runId: "Collision / Run" });
     let outputs = add(initial, {}, "discover", {
       issues: [
         { number: 41, title: "Fable", bodyExcerpt: "", url: "", labels: [] },
@@ -140,7 +140,9 @@ describe("local orchestration workflows C", () => {
       ],
       summary: "four",
     });
-    const routedFrame = await render("route-and-merge-issues.tsx", input, outputs, { runId: "Collision / Run" });
+    const routedFrame = await render("archive/route-and-merge-issues.tsx", input, outputs, {
+      runId: "Collision / Run",
+    });
     for (const [id, strategy] of [
       ["route-41", "fable-sandwich"],
       ["route-42", "self-workflow"],
@@ -154,7 +156,7 @@ describe("local orchestration workflows C", () => {
         directiveQuote: "route",
       });
     }
-    const strategies = await render("route-and-merge-issues.tsx", input, outputs, { runId: "Collision / Run" });
+    const strategies = await render("archive/route-and-merge-issues.tsx", input, outputs, { runId: "Collision / Run" });
     expect(optional(strategies, "i41:plan")).toBeDefined();
     expect(optional(strategies, "i42:plan")).toBeUndefined();
     expect(optional(strategies, "i43:plan")).toBeDefined();
@@ -174,10 +176,13 @@ describe("local orchestration workflows C", () => {
     const approved = { issueNumber: 41, approved: true, feedback: "LGTM", issues: [] };
     const stale = { ...outputs, fix: [row("i41:implement", 1, fix)], review: [row("i41:review", 0, approved)] };
     expect(
-      optional(await render("route-and-merge-issues.tsx", input, stale, { runId: "Collision / Run" }), "i41:merge"),
+      optional(
+        await render("archive/route-and-merge-issues.tsx", input, stale, { runId: "Collision / Run" }),
+        "i41:merge",
+      ),
     ).toBeUndefined();
     const rejected = await render(
-      "route-and-merge-issues.tsx",
+      "archive/route-and-merge-issues.tsx",
       input,
       { ...stale, review: [row("i41:review", 1, { ...approved, approved: false, feedback: "still wrong" })] },
       { runId: "Collision / Run" },
@@ -186,7 +191,7 @@ describe("local orchestration workflows C", () => {
     expect(rejected.toXml()).toContain('"maxIterations":"2"');
 
     const paired = { ...stale, review: [row("i41:review", 1, approved)] };
-    const queued = await render("route-and-merge-issues.tsx", input, paired, { runId: "Collision / Run" });
+    const queued = await render("archive/route-and-merge-issues.tsx", input, paired, { runId: "Collision / Run" });
     expect(task(queued, "i41:merge").parallelMaxConcurrency).toBe(1);
     const withClaim = add(queued, paired, "i41:merge", {
       issueNumber: 41,
@@ -198,7 +203,7 @@ describe("local orchestration workflows C", () => {
       verified: true,
       summary: "agent claim",
     });
-    const verify = await render("route-and-merge-issues.tsx", input, withClaim, { runId: "Collision / Run" });
+    const verify = await render("archive/route-and-merge-issues.tsx", input, withClaim, { runId: "Collision / Run" });
     expect(task(verify, "i41:verify-land").needs).toEqual({ merge: "i41:merge" });
     expect(optional(verify, "consolidate")).toBeUndefined();
     const verified = add(verify, withClaim, "i41:verify-land", {
@@ -208,13 +213,13 @@ describe("local orchestration workflows C", () => {
       landed: true,
       summary: "ancestor",
     });
-    const landed = await render("route-and-merge-issues.tsx", input, verified, { runId: "Collision / Run" });
+    const landed = await render("archive/route-and-merge-issues.tsx", input, verified, { runId: "Collision / Run" });
     expect(optional(landed, "consolidate")).toBeDefined();
     expect((task(landed, "run-summary").staticPayload as any).landedToMain).toBe(1);
   });
 
   test("route-and-merge ancestry verifier checks a real remote branch", async () => {
-    const { resolveRepoRoot, verifyLandedCommit } = await import("../workflows/route-and-merge-issues.tsx");
+    const { resolveRepoRoot, verifyLandedCommit } = await import("../workflows/archive/route-and-merge-issues.tsx");
     const root = await mkdtemp(join(tmpdir(), "smithers-route-ancestry-"));
     const remote = join(root, "remote.git");
     const repo = join(root, "repo");

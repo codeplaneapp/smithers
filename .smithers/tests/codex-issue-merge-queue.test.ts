@@ -279,7 +279,7 @@ describe("codex issue local merge queue gates", () => {
 });
 
 describe("codex issue local merge queue graph contract", () => {
-  const source = readFileSync(join(import.meta.dir, "../workflows/codex-issue-merge-queue.tsx"), "utf8");
+  const source = readFileSync(join(import.meta.dir, "../workflows/archive/codex-issue-merge-queue.tsx"), "utf8");
 
   test("has no pull-request, GitHub Actions, or remote issue-branch machinery", () => {
     for (const forbidden of [

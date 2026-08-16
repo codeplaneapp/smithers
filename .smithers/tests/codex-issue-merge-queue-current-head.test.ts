@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveJjBinary } from "@smthrs/vcs";
 
-import { currentHead } from "../workflows/codex-issue-merge-queue.tsx";
+import { currentHead } from "../workflows/archive/codex-issue-merge-queue.tsx";
 
 const run = (cwd: string, command: string, args: string[]) =>
   execFileSync(command, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -56,7 +56,7 @@ describe("codex issue merge queue current head", () => {
   );
 
   test("keeps jj reads side-effect-free and checkout-aware", () => {
-    const source = Bun.file(join(import.meta.dir, "../workflows/codex-issue-merge-queue.tsx"));
+    const source = Bun.file(join(import.meta.dir, "../workflows/archive/codex-issue-merge-queue.tsx"));
     return source.text().then((text) => {
       expect(text).toContain('execFileSync("jj", ["workspace", "root", "--ignore-working-copy"]');
       expect(text).toContain(

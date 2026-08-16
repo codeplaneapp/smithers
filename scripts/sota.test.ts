@@ -132,14 +132,20 @@ describe("the checked-in registry", () => {
 
     expect(flatReviewerPools).toEqual([]);
     expect(readFileSync(CLI_WORKFLOW_PACK_PATH, "utf8")).not.toContain("reviewAgents={agents.review}");
-    expect(workflow("issue-222-integrations-agent-callable-tool-catalog.tsx")).toContain("reviewAgents={[solPool]}");
+    expect(workflow("archive/issue-222-integrations-agent-callable-tool-catalog.tsx")).toContain(
+      "reviewAgents={[solPool]}",
+    );
 
-    const issue522 = workflow("issue-522-components-seven-composite-components-ar.tsx");
+    const issue522 = workflow("archive/issue-522-components-seven-composite-components-ar.tsx");
     expect(issue522).toMatch(/id="p522:plan"[^>]+agent=\{synthesizer\}/);
     expect(issue522).toContain("validateAgents={validator}");
     expect(issue522).toContain("reviewAgents={panelists}");
 
-    for (const file of ["fix-all-issues.tsx", "fix-six-issues.tsx", "merge-train-all-issues.tsx"]) {
+    for (const file of [
+      "archive/fix-all-issues.tsx",
+      "archive/fix-six-issues.tsx",
+      "archive/merge-train-all-issues.tsx",
+    ]) {
       expect(workflow(file)).toMatch(/id=\{`[^`]+:review-codex`\}[\s\S]+?agent=\{solReviewer\}/);
     }
 

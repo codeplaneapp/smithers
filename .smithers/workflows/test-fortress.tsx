@@ -3,7 +3,7 @@
 // smithers-description: Swarm features.ts for missing items, then debate-harden unit + e2e test coverage per feature until a judge rules every remaining gap trivial, then loop a Codex review until LGTM.
 // smithers-tags: coding, tests, coverage, debate, codex, parallel
 /** @jsxImportSource smthrs */
-import { Loop, Parallel, Sequence, Task, createSmithers } from "smthrs";
+import { Loop, Parallel, Sequence, Task, UI, createSmithers } from "smthrs";
 import { z } from "zod/v4";
 import { implementer, polishReviewer } from "../components/roles";
 import { FeatureGroups } from "../specs/features";
@@ -288,6 +288,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="test-fortress">
+      <UI entry="../ui/test-fortress.tsx" title="Test Fortress" />
       <Sequence>
         {/* Phase 1 — swarm the codebase for features missing from features.ts */}
         {!skipDiscovery ? (

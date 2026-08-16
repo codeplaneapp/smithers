@@ -7,7 +7,7 @@ import { ClaudeCodeAgent, createSmithers } from "smthrs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
-import { codexFirst } from "../lib/codexAccounts";
+import { codexFirst } from "../../lib/codexAccounts";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const REPO = "smithersai/smithers";

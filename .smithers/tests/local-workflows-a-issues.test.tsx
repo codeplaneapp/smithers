@@ -5,7 +5,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fakeAgent, renderPrompt, renderWorkflow, runTask, simulate } from "smthrs/testing";
-import { parsePorcelainPaths } from "../workflows/fix-six-issues.tsx";
+import { parsePorcelainPaths } from "../workflows/archive/fix-six-issues.tsx";
 
 const workflows = join(import.meta.dir, "..", "workflows");
 const load = async (file: string) =>
@@ -17,7 +17,7 @@ const task = (frame: any, nodeId: string) => {
 };
 const render = (workflow: any, input: unknown, outputs: Record<string, unknown[]> = {}, iteration = 0) =>
   renderWorkflow(workflow, {
-    workflowPath: join(workflows, workflow.__file ?? "fix-all-issues.tsx"),
+    workflowPath: join(workflows, workflow.__file ?? "archive/fix-all-issues.tsx"),
     input,
     outputs,
     iteration,
@@ -58,7 +58,7 @@ const staged = (frame: any, nodeId: string, value: Record<string, unknown>, iter
 
 describe.serial("Local-A causal issue workflows", () => {
   test("fix-all joins exact current producer rows and safe PR gating", async () => {
-    const workflow = await load("fix-all-issues.tsx");
+    const workflow = await load("archive/fix-all-issues.tsx");
     const input = { numbers: [11, 12], maxConcurrency: 2, maxWorkItemsPerIssue: 1, reviewIterations: 2 };
     const outputs: Record<string, unknown[]> = {};
     let frame = await render(workflow, { ...input, numbers: [] }, outputs);
@@ -153,7 +153,7 @@ describe.serial("Local-A causal issue workflows", () => {
   });
 
   test("fix-all carries both rejection feedback and bounded no-PR exhaustion", async () => {
-    const workflow = await load("fix-all-issues.tsx");
+    const workflow = await load("archive/fix-all-issues.tsx");
     const input = { numbers: [11], maxConcurrency: 1, maxWorkItemsPerIssue: 1, reviewIterations: 1 };
     const outputs: Record<string, unknown[]> = {};
     let frame = await stage(workflow, input, outputs, "discover", { issues: [issue(11)], summary: "one" });
@@ -192,7 +192,7 @@ describe.serial("Local-A causal issue workflows", () => {
   });
 
   test("fix-six filters, investigates first, gates current reviews, and serializes landing", async () => {
-    const workflow = await load("fix-six-issues.tsx");
+    const workflow = await load("archive/fix-six-issues.tsx");
     const input = { maxConcurrency: 2, perIssueIterations: 2 };
     const outputs: Record<string, unknown[]> = {};
     let frame = await stage(workflow, input, outputs, "discover", { issues: [issue(236), issue(999)], summary: "two" });
