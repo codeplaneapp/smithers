@@ -65,7 +65,12 @@ const CLAUDE_LED_TIERS = ["planning", "orchestrator"];
 function activePoolProviders(source, pool) {
   const match = uncommented(source).match(new RegExp(`(?:^|\\n)  ${pool}: \\[([\\s\\S]*?)\\n  \\],`));
   expect(match, `missing generated ${pool} pool`).toBeTruthy();
-  return [...match[1].matchAll(/providers\.([A-Za-z_$][\w$]*)/g)].map((entry) => entry[1]);
+  // Registered Claude accounts enter tier pools as one quota-balanced
+  // `...claudeAccountPool` spread; report it as a seat alongside
+  // `providers.X` references so head-of-pool assertions can see it.
+  return [...match[1].matchAll(/providers\.([A-Za-z_$][\w$]*)|\.\.\.(claudeAccountPool)/g)].map(
+    (entry) => entry[1] ?? entry[2],
+  );
 }
 
 function expectCodexFirstDefaultTiers(source, providerPrefix = "codex") {
@@ -370,14 +375,18 @@ test("smithers init creates role-specific Sol, Terra, and Luna variants for a Co
   expect(agentsSource).toContain('codexWorkTerra: new SmithersCodexAgent({ model: "gpt-5.6-terra"');
   expect(agentsSource).toContain('codexWorkLuna: new SmithersCodexAgent({ model: "gpt-5.6-luna"');
   expectCodexFirstDefaultTiers(agentsSource, "codexWork");
-  expectOpusLedTiers(agentsSource, "claudeBackup", "codexWork");
+  // Registered Claude accounts are represented by the quota-balanced
+  // claudeAccountPool spread, not individual providers.<label> seats.
+  expect(agentsSource).toContain("const claudeAccountPool = fallbackAgents({");
+  expect(agentsSource).toContain('providers: ["claude-code"]');
+  expectOpusLedTiers(agentsSource, "claudeAccountPool", "codexWork");
   for (const tier of [...Object.keys(CODEX_DEFAULT_TIERS), ...Object.keys(OPUS_LED_TIERS)]) {
-    expect(activePoolProviders(agentsSource, tier)).toContain("claudeBackup");
+    expect(activePoolProviders(agentsSource, tier)).toContain("claudeAccountPool");
   }
-  // The registered Claude account leads the Claude-led seats; the Codex
+  // The registered Claude account pool leads the Claude-led seats; the Codex
   // account's Sol sibling stays behind it as the availability fallback.
   for (const tier of CLAUDE_LED_TIERS) {
-    expect(activePoolProviders(agentsSource, tier)[0]).toBe("claudeBackup");
+    expect(activePoolProviders(agentsSource, tier)[0]).toBe("claudeAccountPool");
     expect(activePoolProviders(agentsSource, tier)).toContain("codexWorkSol");
   }
 });
