@@ -1,6 +1,15 @@
 import { spawnSync } from "node:child_process";
+import { rmSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { listAccounts } from "@smthrs/accounts";
-import { claudeKeychainSuffix, claudeOauthUsage, clearAccountUsageCache, readClaudeCredentials } from "@smthrs/usage";
+import {
+  claudeKeychainSuffix,
+  clearAccountQuotaLimit,
+  clearAccountUsageCache,
+  getUsageForAccounts,
+  readClaudeCredentials,
+} from "@smthrs/usage";
 import {
   findDuplicateAccounts,
   formatAccountIdentity,
@@ -22,6 +31,8 @@ const REFRESH_PROBE_ARGS = [
   "0.000001",
   "Reply with exactly OK.",
 ];
+
+/** @typedef {{ source: string; windows?: unknown[]; planType?: string; error?: string }} ClaudeUsageProbe */
 
 /** @param {{ configDir?: string }} account @param {NodeJS.ProcessEnv} base */
 function claudeEnv(account, base) {
@@ -47,8 +58,8 @@ function authStatusLoggedIn(result) {
  * token. A quota banner proves authentication is live and does not trigger a
  * browser login.
  *
- * @param {{ configDir?: string }} account
- * @param {{ env: NodeJS.ProcessEnv; spawn: typeof spawnSync; usageProbe: typeof claudeOauthUsage; readCredentials: typeof readClaudeCredentials }} deps
+ * @param {{ label: string; provider: "claude-code"; configDir?: string }} account
+ * @param {{ env: NodeJS.ProcessEnv; spawn: typeof spawnSync; usageProbe: (account: { label: string; provider: "claude-code"; configDir?: string }) => Promise<ClaudeUsageProbe>; readCredentials: typeof readClaudeCredentials }} deps
  */
 async function probeClaudeLogin(account, deps) {
   const env = claudeEnv(account, deps.env);
@@ -77,6 +88,7 @@ async function probeClaudeLogin(account, deps) {
 function clearClaudeLogin(account, env, spawn) {
   const accountEnv = claudeEnv(account, env);
   spawn("claude", ["auth", "logout"], { env: accountEnv, encoding: "utf8" });
+  rmSync(join(account.configDir ?? join(homedir(), ".claude"), ".credentials.json"), { force: true });
   if (process.platform !== "darwin") return;
   const service = account.configDir
     ? `Claude Code-credentials-${claudeKeychainSuffix(account.configDir)}`
@@ -86,15 +98,25 @@ function clearClaudeLogin(account, env, spawn) {
   spawn("security", ["delete-generic-password", "-s", service], { env, encoding: "utf8" });
 }
 
+/** @param {ReturnType<typeof readAccountIdentity>} before @param {ReturnType<typeof readAccountIdentity>} after */
+function sameSubscription(before, after) {
+  if (!before || !after) return false;
+  if (before.organizationId && after.organizationId) return before.organizationId === after.organizationId;
+  if (before.accountId && after.accountId) return before.accountId === after.accountId;
+  return Boolean(before.email && after.email && before.email === after.email);
+}
+
 /**
  * Reauthenticate registered Claude accounts sequentially.
  *
- * @param {{ force?: boolean; label?: string; includeDefault?: boolean; env?: NodeJS.ProcessEnv; accounts?: import("@smthrs/accounts").Account[]; spawn?: typeof spawnSync; usageProbe?: typeof claudeOauthUsage; readCredentials?: typeof readClaudeCredentials; onStatus?: (message: string) => void }} [input]
+ * @param {{ force?: boolean; label?: string; includeDefault?: boolean; env?: NodeJS.ProcessEnv; accounts?: import("@smthrs/accounts").Account[]; spawn?: typeof spawnSync; usageProbe?: (account: { label: string; provider: "claude-code"; configDir?: string }) => Promise<ClaudeUsageProbe>; readCredentials?: typeof readClaudeCredentials; onStatus?: (message: string) => void }} [input]
  */
 export async function reauthClaudeAccounts(input = {}) {
   const env = input.env ?? process.env;
   const spawn = input.spawn ?? spawnSync;
-  const usageProbe = input.usageProbe ?? claudeOauthUsage;
+  const usageProbe =
+    input.usageProbe ??
+    (async (account) => (await getUsageForAccounts([account], { fresh: true, bypassHardFloor: true, env }))[0]);
   const readCredentials = input.readCredentials ?? readClaudeCredentials;
   const onStatus = input.onStatus ?? (() => {});
   const registered = (input.accounts ?? listAccounts(env)).filter((account) => account.provider === "claude-code");
@@ -107,6 +129,9 @@ export async function reauthClaudeAccounts(input = {}) {
   }
   const results = [];
   for (const account of targets) {
+    const identityBefore = account.isDefault
+      ? readDefaultClaudeIdentity()
+      : readAccountIdentity(account.provider, account.configDir);
     onStatus(`Checking ${account.label}...`);
     const health = input.force
       ? { live: false, refreshed: false }
@@ -129,6 +154,13 @@ export async function reauthClaudeAccounts(input = {}) {
         onStatus(`${account.label}: login did not produce a credential artifact.`);
         continue;
       }
+      if (!account.isDefault) {
+        try {
+          clearAccountUsageCache(account.label, env);
+        } catch {
+          onStatus(`${account.label}: could not clear its old usage cache before verification.`);
+        }
+      }
       const verified = await usageProbe(account);
       const status = spawn("claude", ["auth", "status", "--json"], {
         env: claudeEnv(account, env),
@@ -146,16 +178,16 @@ export async function reauthClaudeAccounts(input = {}) {
       }
       reauthenticated = true;
     }
-    if (!account.isDefault && (reauthenticated || health.refreshed)) {
-      try {
-        clearAccountUsageCache(account.label, env);
-      } catch {
-        onStatus(`${account.label}: could not clear its usage cache; the next probe may show stale data.`);
-      }
-    }
     const identity = account.isDefault
       ? readDefaultClaudeIdentity()
       : readAccountIdentity(account.provider, account.configDir);
+    if (!account.isDefault && reauthenticated && !sameSubscription(identityBefore, identity)) {
+      try {
+        clearAccountQuotaLimit(account.label, env);
+      } catch {
+        onStatus(`${account.label}: could not clear the previous subscription's quota marker.`);
+      }
+    }
     const duplicateOf = account.isDefault
       ? findDuplicateAccounts(identity, "claude-code", registered, "__default__")
       : findDuplicateAccounts(identity, account.provider, registered, account.label);

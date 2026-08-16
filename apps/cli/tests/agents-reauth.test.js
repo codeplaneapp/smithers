@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTempDirPath } from "../../../packages/testing/src/cleanup/tempDir.ts";
 import { reauthClaudeAccounts } from "../src/agent-commands/reauthClaudeAccounts.js";
+import { readAccountQuotaState, recordAccountQuotaLimit } from "@smthrs/usage";
 
 function account(root, label, email, organizationUuid) {
   const configDir = join(root, label);
@@ -101,5 +102,44 @@ describe("reauthClaudeAccounts", () => {
     const logins = calls.filter((call) => call.includes("claude:auth login"));
     expect(logins).toEqual(["one:claude:auth login --claudeai", "two:claude:auth login --claudeai"]);
     expect(results.map((row) => row.ok)).toEqual([true, true]);
+  });
+
+  test("removes stale credential files and quota markers after switching subscriptions", async () => {
+    const root = makeTempDirPath("smithers-reauth-switch-");
+    const target = account(root, "one", "old@example.com", "org-old");
+    const credentialPath = join(target.configDir, ".credentials.json");
+    writeFileSync(credentialPath, JSON.stringify({ claudeAiOauth: { accessToken: "old" } }));
+    recordAccountQuotaLimit(target.label, { env: { SMITHERS_HOME: root }, untilMs: Date.now() + 60_000 });
+    let loggedIn = false;
+    const results = await reauthClaudeAccounts({
+      force: true,
+      accounts: [target],
+      env: { SMITHERS_HOME: root },
+      spawn(_command, args) {
+        if (args[0] === "auth" && args[1] === "login") {
+          loggedIn = true;
+          writeFileSync(
+            join(target.configDir, ".claude.json"),
+            JSON.stringify({
+              oauthAccount: {
+                emailAddress: "new@example.com",
+                accountUuid: "new-account",
+                organizationUuid: "org-new",
+              },
+            }),
+          );
+        }
+        return {
+          status: 0,
+          stdout: args[0] === "auth" && args[1] === "status" ? JSON.stringify({ loggedIn: true }) : "",
+          stderr: "",
+        };
+      },
+      readCredentials: () => (loggedIn ? { accessToken: "new", expiresAt: Date.now() + 60_000 } : null),
+      usageProbe: async () => ({ source: "oauth", windows: [] }),
+    });
+    expect(results[0]).toMatchObject({ ok: true, signedInAs: "new@example.com" });
+    expect(existsSync(credentialPath)).toBe(false);
+    expect(readAccountQuotaState({ SMITHERS_HOME: root }).entries).toEqual({});
   });
 });
