@@ -318,8 +318,8 @@ process.exit(1);
   test("bounds a raw system/init fallback when claude exits without a structured error", async () => {
     const fake = await makeFakeClaude(`
 const largeToolList = "tool-entry-".repeat(1_000) + "UNBOUNDED_INIT_MARKER" + "tool-entry-".repeat(49_000);
-process.stdout.write(JSON.stringify({ type: "system", subtype: "init", cwd: "/tmp", session_id: "abc", tools: [largeToolList] }) + "\\n");
-process.exit(1);
+// The payload exceeds the pipe buffer, so exit only after the write flushes.
+process.stdout.write(JSON.stringify({ type: "system", subtype: "init", cwd: "/tmp", session_id: "abc", tools: [largeToolList] }) + "\\n", () => process.exit(1));
 `);
     try {
       process.env.PATH = prependPath(fake.dir, originalPath);

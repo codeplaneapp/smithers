@@ -26,9 +26,11 @@ function findSqliteErrorMetadata(error) {
       const message = metadata.message.toLowerCase();
       if (
         metadata.code.startsWith("SQLITE_BUSY") ||
+        metadata.code.startsWith("SQLITE_PROTOCOL") ||
         metadata.code.startsWith("SQLITE_IOERR") ||
         message.includes("database is locked") ||
         message.includes("database is busy") ||
+        message.includes("locking protocol") ||
         message.includes("disk i/o error")
       ) {
         return metadata;
@@ -46,11 +48,14 @@ export function isRetryableSqliteWriteError(error) {
   const metadata = findSqliteErrorMetadata(error);
   if (!metadata) return false;
   const { code } = metadata;
-  if (code.startsWith("SQLITE_BUSY") || code.startsWith("SQLITE_IOERR")) {
+  if (code.startsWith("SQLITE_BUSY") || code.startsWith("SQLITE_PROTOCOL") || code.startsWith("SQLITE_IOERR")) {
     return true;
   }
   const message = metadata.message.toLowerCase();
   return (
-    message.includes("database is locked") || message.includes("database is busy") || message.includes("disk i/o error")
+    message.includes("database is locked") ||
+    message.includes("database is busy") ||
+    message.includes("locking protocol") ||
+    message.includes("disk i/o error")
   );
 }
