@@ -123,6 +123,8 @@ type AgentGenerateOptionsBase = {
     onProcess?: (event: {
         phase: "started" | "exited";
         pid: number | undefined;
+        exitCode?: number | null;
+        signal?: string | null;
     }) => void;
     onToolExecutionStart?: (event: {
         callId?: string;
@@ -360,7 +362,7 @@ type GenerateTextResult$1 = ai.GenerateTextResult<any, any, any>;
 type LanguageModelUsage = ai.LanguageModelUsage;
 
 /**
- * @typedef {{ cwd: string; env: Record<string, string>; input?: string; timeoutMs?: number; idleTimeoutMs?: number; signal?: AbortSignal; maxOutputBytes?: number; truncateKeep?: "head" | "tail"; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onProcess?: (event: { phase: "started" | "exited"; pid: number | undefined }) => void; }} RunCommandOptions
+ * @typedef {{ cwd: string; env: Record<string, string>; input?: string; timeoutMs?: number; idleTimeoutMs?: number; signal?: AbortSignal; maxOutputBytes?: number; truncateKeep?: "head" | "tail"; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onProcess?: (event: { phase: "started" | "exited"; pid: number | undefined; exitCode?: number | null; signal?: string | null }) => void; }} RunCommandOptions
  */
 /** @typedef {import("./RunCommandResult.ts").RunCommandResult} RunCommandResult */
 /** @typedef {import("@smthrs/errors/SmithersError").SmithersError} SmithersError */
@@ -385,6 +387,8 @@ type RunCommandOptions = {
     onProcess?: (event: {
         phase: "started" | "exited";
         pid: number | undefined;
+        exitCode?: number | null;
+        signal?: string | null;
     }) => void;
 };
 type RunCommandResult$1 = RunCommandResult$2;
@@ -418,6 +422,8 @@ type RunRpcCommandOptions = {
     onProcess?: (event: {
         phase: "started" | "exited";
         pid: number | undefined;
+        exitCode?: number | null;
+        signal?: string | null;
     }) => void;
     onJsonEvent?: (event: Record<string, unknown>) => Promise<void> | void;
     onExtensionUiRequest?: (request: PiExtensionUiRequest$1) => Promise<PiExtensionUiResponse$1 | null> | PiExtensionUiResponse$1 | null;

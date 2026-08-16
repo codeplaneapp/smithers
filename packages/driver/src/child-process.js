@@ -207,6 +207,21 @@ export function spawnCaptureEffect(command, args, options) {
       stdio: ["pipe", "pipe", "pipe"],
     });
     onProcess?.({ phase: "started", pid: child.pid });
+    // The worker's death and this effect's settlement are different events. A
+    // grandchild that inherited the stdio pipes (an MCP server, a tool child)
+    // keeps `close` pending indefinitely after the worker itself is gone, so
+    // report `exited` from the OS-level `exit` event. Consumers use it as
+    // liveness truth; `close` still drives the captured result (#1582).
+    let processExitNotified = false;
+    /**
+     * @param {number | null} [exitCode]
+     * @param {string | null} [signal]
+     */
+    const notifyProcessExited = (exitCode = null, signal = null) => {
+      if (processExitNotified) return;
+      processExitNotified = true;
+      onProcess?.({ phase: "exited", pid: child.pid, exitCode, signal });
+    };
     /** @type {(() => void) | undefined} Detaches the abort listener once the effect has settled. */
     let detachAbort;
     /**
@@ -237,7 +252,7 @@ export function spawnCaptureEffect(command, args, options) {
           // ignore
         }
       }
-      onProcess?.({ phase: "exited", pid: child.pid });
+      notifyProcessExited(null, "SIGKILL");
       resume(Effect.fail(new SmithersError(code, reason, errorDetails)));
     };
     let totalTimer;
@@ -273,7 +288,7 @@ export function spawnCaptureEffect(command, args, options) {
       if (settled) return;
       settled = true;
       detachAbort?.();
-      onProcess?.({ phase: "exited", pid: child.pid });
+      notifyProcessExited(result.exitCode ?? null, null);
       if (totalTimer) clearTimeout(totalTimer);
       if (idleTimer) clearTimeout(idleTimer);
       logDebug(
@@ -358,6 +373,9 @@ export function spawnCaptureEffect(command, args, options) {
         );
         resume(Effect.fail(smithersError));
       }
+    });
+    child.on("exit", (code, signal) => {
+      notifyProcessExited(code ?? null, signal ?? null);
     });
     child.on("close", (code) => {
       finalize({ stdout, stderr, exitCode: code ?? null, stdoutTruncated, stderrTruncated });

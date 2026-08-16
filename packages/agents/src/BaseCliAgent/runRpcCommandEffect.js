@@ -15,7 +15,7 @@ import { sanitizeCliArgs, sanitizeCliErrorCause } from "./sanitizeCliArgs.js";
 
 /** @typedef {import("./PiExtensionUiRequest.ts").PiExtensionUiRequest} PiExtensionUiRequest */
 /**
- * @typedef {{ cwd: string; env: Record<string, string>; prompt: string; timeoutMs?: number; idleTimeoutMs?: number; signal?: AbortSignal; maxOutputBytes?: number; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onProcess?: (event: { phase: "started" | "exited"; pid: number | undefined }) => void; onJsonEvent?: (event: Record<string, unknown>) => Promise<void> | void; onExtensionUiRequest?: (request: PiExtensionUiRequest) => Promise<PiExtensionUiResponse | null> | PiExtensionUiResponse | null; spawnFn?: typeof spawn; }} RunRpcCommandOptions
+ * @typedef {{ cwd: string; env: Record<string, string>; prompt: string; timeoutMs?: number; idleTimeoutMs?: number; signal?: AbortSignal; maxOutputBytes?: number; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onProcess?: (event: { phase: "started" | "exited"; pid: number | undefined; exitCode?: number | null; signal?: string | null }) => void; onJsonEvent?: (event: Record<string, unknown>) => Promise<void> | void; onExtensionUiRequest?: (request: PiExtensionUiRequest) => Promise<PiExtensionUiResponse | null> | PiExtensionUiResponse | null; spawnFn?: typeof spawn; }} RunRpcCommandOptions
  */
 
 /**
@@ -130,10 +130,14 @@ export function runRpcCommandEffect(command, args, options) {
     });
     onProcess?.({ phase: "started", pid: child.pid });
     let processExited = false;
-    const notifyProcessExited = () => {
+    /**
+     * @param {number | null} [notifiedExitCode]
+     * @param {string | null} [notifiedSignal]
+     */
+    const notifyProcessExited = (notifiedExitCode = null, notifiedSignal = null) => {
       if (processExited) return;
       processExited = true;
-      onProcess?.({ phase: "exited", pid: child.pid });
+      onProcess?.({ phase: "exited", pid: child.pid, exitCode: notifiedExitCode, signal: notifiedSignal });
     };
     child.unref();
     // A fast-exiting or early-closing child can make writes to stdin emit an
@@ -422,6 +426,11 @@ export function runRpcCommandEffect(command, args, options) {
       stderr = truncateToBytes(nextStderr, maxOutputBytes);
       onStderr?.(text);
     });
+    // The RPC child's OS-level exit is liveness truth even when the JSON-RPC
+    // stream never produces a terminal message (#1582).
+    child.on("exit", (code, signal) => {
+      notifyProcessExited(code ?? null, signal ?? null);
+    });
     child.on("error", (err) => {
       inactivity.clear();
       totalTimeout.clear();
@@ -436,8 +445,8 @@ export function runRpcCommandEffect(command, args, options) {
         }),
       );
     });
-    child.on("close", (code) => {
-      notifyProcessExited();
+    child.on("close", (code, signal) => {
+      notifyProcessExited(code ?? null, signal ?? null);
       exitCode = code ?? null;
       inactivity.clear();
       totalTimeout.clear();

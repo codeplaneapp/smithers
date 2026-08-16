@@ -3,7 +3,7 @@ import { spawnCaptureEffect } from "@smthrs/driver/child-process";
 import { parentDeathCommand } from "./parentDeathCommand.js";
 import { sanitizeCliArgs } from "./sanitizeCliArgs.js";
 /**
- * @typedef {{ cwd: string; env: Record<string, string>; input?: string; timeoutMs?: number; idleTimeoutMs?: number; signal?: AbortSignal; maxOutputBytes?: number; truncateKeep?: "head" | "tail"; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onProcess?: (event: { phase: "started" | "exited"; pid: number | undefined }) => void; }} RunCommandOptions
+ * @typedef {{ cwd: string; env: Record<string, string>; input?: string; timeoutMs?: number; idleTimeoutMs?: number; signal?: AbortSignal; maxOutputBytes?: number; truncateKeep?: "head" | "tail"; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onProcess?: (event: { phase: "started" | "exited"; pid: number | undefined; exitCode?: number | null; signal?: string | null }) => void; }} RunCommandOptions
  */
 /** @typedef {import("./RunCommandResult.ts").RunCommandResult} RunCommandResult */
 /** @typedef {import("@smthrs/errors/SmithersError").SmithersError} SmithersError */

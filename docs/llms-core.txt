@@ -10407,7 +10407,7 @@ type KnownSmithersErrorCode =
   | "TASK_FORK_SESSION_UNAVAILABLE" | "TASK_FORK_CHECKPOINT_INCOMPATIBLE" | "TASK_FORK_CYCLE"
   | "RUN_NOT_FOUND" | "NODE_NOT_FOUND" | "INVALID_EVENTS_OPTIONS"
   | "SANDBOX_BUNDLE_INVALID" | "SANDBOX_BUNDLE_TOO_LARGE" | "WORKFLOW_EXECUTION_FAILED"
-  | "SANDBOX_EXECUTION_FAILED" | "TASK_HEARTBEAT_TIMEOUT" | "HEARTBEAT_PAYLOAD_TOO_LARGE"
+  | "SANDBOX_EXECUTION_FAILED" | "TASK_HEARTBEAT_TIMEOUT" | "AGENT_WORKER_EXITED" | "HEARTBEAT_PAYLOAD_TOO_LARGE"
   | "HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE" | "TASK_ABORTED" | "RUN_CANCELLED" | "RUN_NOT_RESUMABLE"
   | "RUN_OWNER_ALIVE" | "RUN_STILL_RUNNING" | "RUN_RESUME_CLAIM_LOST" | "RUN_RESUME_CLAIM_FAILED"
   | "RUN_RESUME_ACTIVATION_FAILED" | "AUTO_RESUME_GAVE_UP" | "RUN_HIJACKED" | "CONTINUATION_STATE_TOO_LARGE"
@@ -11128,6 +11128,7 @@ try {
 | `WORKFLOW_EXECUTION_FAILED` | A child or builder workflow exits unsuccessfully without surfacing a typed error payload. | `{ status }` |
 | `SANDBOX_EXECUTION_FAILED` | Sandbox setup or execution fails before a more specific sandbox error can be emitted. | `{ sandboxId, runId?, maxConcurrent?, activeSandboxCount? }` |
 | `TASK_HEARTBEAT_TIMEOUT` | A task heartbeat timeout expires while the task is still running. | `{ nodeId, iteration, attempt, timeoutMs, staleForMs, lastHeartbeatAtMs }` |
+| `AGENT_WORKER_EXITED` | A spawned agent worker process exits without the attempt reaching a terminal state. The attempt fails and feeds the normal retry / `fallbackAgents` chain. | `{ nodeId, iteration, attempt, pid, exitCode, signal, attemptRunningForMs, sinceWorkerExitMs, graceMs }` |
 | `HEARTBEAT_PAYLOAD_TOO_LARGE` | A task heartbeat payload exceeds the maximum persisted checkpoint size. | `{ dataSizeBytes, maxBytes }` |
 | `HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE` | A task heartbeat payload contains values not serializable to JSON. | `{ path, valueType? }` |
 | `RUN_CANCELLED` | A run is cancelled while runtime work is still active. | `{ runId }` |
