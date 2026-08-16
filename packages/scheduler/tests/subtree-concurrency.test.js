@@ -73,6 +73,13 @@ describe("scheduleTasks subtree concurrency cap", () => {
     expect(result.runnable.map((r) => r.nodeId)).toEqual(["a1"]);
   });
 
+  test("a restored approval keeps its subtree slot ahead of new pending siblings", () => {
+    const { plan, descs } = ticketFixture(1);
+    const approvedTaskKeys = new Set([buildStateKey("b1", 0)]);
+    const result = scheduleTasks(plan, new Map(), descs, new Map(), new Map(), 0, undefined, approvedTaskKeys);
+    expect(result.runnable.map((r) => r.nodeId)).toEqual(["b1"]);
+  });
+
   test("an active child runs its remaining tasks freely while inactive children wait", () => {
     const { plan, descs } = ticketFixture(1);
     // A has started (a1 finished) and is not fully terminal: it stays active.

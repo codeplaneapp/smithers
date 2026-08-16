@@ -130,6 +130,7 @@ try {
 | `RALPH_MAX_REACHED` | A Ralph loop reaches maxIterations with fail-on-max behavior. | `{ ralphId, maxIterations }` |
 | `SCHEDULER_ERROR` | The scheduler cannot produce a valid execution decision. | -- |
 | `SESSION_ERROR` | The workflow session state machine reaches an invalid or failed state. | -- |
+| `TASK_STALLED` | A task stopped retrying after consecutive attempts failed with an identical error signature (non-progress detection) and the run failed. | `{ key, nodeId, attempts, identicalFailures, signature }` |
 
 ## Components
 

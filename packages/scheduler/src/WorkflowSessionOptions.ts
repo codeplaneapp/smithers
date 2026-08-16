@@ -33,6 +33,8 @@ export type WorkflowSessionOptions = {
       readonly recoveryCommand?: string;
     }
   >;
+  /** Approval task keys restored from durable approved rows. */
+  readonly initialApprovals?: ReadonlySet<string>;
   /**
    * Evaluate a runnable task's Aspects budgets against the run's accumulated
    * usage. Return the first breach, or `null`/`undefined` when within budget.

@@ -23,6 +23,7 @@ export const DEFAULT_LIFECYCLE_EVENT_TYPES = [
   "NodeStarted",
   "NodeFinished",
   "NodeFailed",
+  "NodeStalled",
   "NodeCancelled",
   "NodeSkipped",
   "NodeRetrying",

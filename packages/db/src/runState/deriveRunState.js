@@ -1,6 +1,6 @@
 import { RUN_STATE_HEARTBEAT_STALE_MS } from "./RUN_STATE_HEARTBEAT_STALE_MS.js";
 import { RUN_STATE_TIMER_OVERDUE_GRACE_MS } from "./RUN_STATE_TIMER_OVERDUE_GRACE_MS.js";
-import { isPidAlive, parseRuntimeOwnerPid } from "./runtimeOwnerLiveness.js";
+import { isPidAlive, parseRuntimeOwnerIdentity } from "./runtimeOwnerLiveness.js";
 
 /** @typedef {import("./DeriveRunStateInput.ts").DeriveRunStateInput} DeriveRunStateInput */
 /** @typedef {import("./RunStateView.ts").RunStateView} RunStateView */
@@ -177,15 +177,19 @@ function classifyRunning(run, sandboxHeartbeats, now, staleThresholdMs, base, is
   }
 
   const lastHeartbeatAt = new Date(lastAlive).toISOString();
-  // Verify the recorded driver PID before claiming "orphaned":
+  // Verify a local recorded driver PID before claiming "orphaned":
   // - no registered owner → orphaned (supervisor has nothing to take over);
-  // - owner PID recorded and demonstrably dead → orphaned;
-  // - owner PID recorded and alive → the engine is busy with a lagging
+  // - local owner PID recorded and demonstrably dead → orphaned;
+  // - local owner PID recorded and alive → the engine is busy with a lagging
   //   heartbeat (e.g. saturated), never orphaned → stale;
+  // - remote host-scoped owner → use the already-stale durable heartbeat,
+  //   never a same-numbered local process, as the portable death signal;
   // - owner recorded without a locally verifiable PID → stale (unproven).
-  const ownerPid = parseRuntimeOwnerPid(run.runtimeOwnerId);
+  const ownerIdentity = parseRuntimeOwnerIdentity(run.runtimeOwnerId);
+  const ownerPid = ownerIdentity?.isLocal ? ownerIdentity.pid : null;
+  const remoteOwner = ownerIdentity?.isLocal === false;
   const hasOwner = run.runtimeOwnerId != null && run.runtimeOwnerId.length > 0;
-  const orphaned = !hasOwner || (ownerPid != null && !isOwnerPidAlive(ownerPid));
+  const orphaned = !hasOwner || remoteOwner || (ownerPid != null && !isOwnerPidAlive(ownerPid));
   // A durable cancel request plus a verifiably absent engine is cancellation
   // awaiting terminal bookkeeping, not completed cancellation and not work
   // that should be resumed. Keep the stale-heartbeat evidence, but classify

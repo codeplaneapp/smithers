@@ -27,7 +27,7 @@ function descriptorPriority(descriptor) {
  */
 function isTraversalTerminal(state, descriptor) {
   if (isTerminalState(state, descriptor)) return true;
-  if (state === "failed" && descriptor.failurePolicy === "quarantine") return true;
+  if ((state === "failed" || state === "stalled") && descriptor.failurePolicy === "quarantine") return true;
   return Boolean(descriptor.waitAsync && (state === "waiting-approval" || state === "waiting-event"));
 }
 /**
@@ -92,9 +92,11 @@ function forkSourceTerminal(forkSource, states, descriptors) {
  * @param {ReadonlyMap<string, unknown>} [taskFailures] recorded failure payloads
  *   keyed by task state key; consulted by the <TryCatchFinally catchErrors>
  *   gate to match failed try tasks against the filtered error codes
+ * @param {ReadonlySet<string>} [approvedTaskKeys] approval task keys restored
+ *   from durable decisions; these keep their subtree admission across resume
  * @returns {ScheduleResult}
  */
-export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, nowMs, taskFailures) {
+export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, nowMs, taskFailures, approvedTaskKeys) {
   const runnable = [];
   let pendingExists = false;
   let waitingApprovalExists = false;
@@ -141,7 +143,8 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
         childStats.set(statsKey, stats);
       }
       const state = states.get(buildStateKey(descriptor.nodeId, descriptor.iteration)) ?? "pending";
-      if (state !== "pending" && state !== "cancelled") stats.started = true;
+      const stateKey = buildStateKey(descriptor.nodeId, descriptor.iteration);
+      if ((state !== "pending" && state !== "cancelled") || approvedTaskKeys?.has(stateKey)) stats.started = true;
       if (!isTraversalTerminal(state, descriptor)) stats.allTerminal = false;
     }
     for (const stats of childStats.values()) {
@@ -169,7 +172,8 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
           const descriptor = descriptors.get(node.nodeId);
           if (!descriptor) return;
           const key = buildStateKey(descriptor.nodeId, descriptor.iteration);
-          if ((states.get(key) ?? "pending") !== "failed") return;
+          const taskState = states.get(key) ?? "pending";
+          if (taskState !== "failed" && taskState !== "stalled") return;
           const failure = taskFailures?.get(key);
           const code =
             failure &&
@@ -229,10 +233,13 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
           state === "finished" ||
           state === "skipped" ||
           state === "failed" ||
+          state === "stalled" ||
           Boolean(descriptor.waitAsync && (state === "waiting-approval" || state === "waiting-event"));
         return {
           terminal,
-          failed: state === "failed" && (options.includeContinuedFailures || !descriptor.continueOnFail),
+          failed:
+            (state === "failed" || state === "stalled") &&
+            (options.includeContinuedFailures || !descriptor.continueOnFail),
         };
       }
       case "sequence":
@@ -358,7 +365,10 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
         if (!descriptor) return;
         const key = buildStateKey(descriptor.nodeId, descriptor.iteration);
         const state = states.get(key) ?? "pending";
-        if (state === "failed" && (options.includeContinuedFailures || !descriptor.continueOnFail)) {
+        if (
+          (state === "failed" || state === "stalled") &&
+          (options.includeContinuedFailures || !descriptor.continueOnFail)
+        ) {
           failureRecoveryKeys.add(key);
         }
         return;

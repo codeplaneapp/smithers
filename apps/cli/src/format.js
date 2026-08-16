@@ -246,6 +246,8 @@ export function formatEventLine(event, baseMs, options) {
       return `${prefix}✓ ${payload?.nodeId ?? "?"} (attempt ${payload?.attempt ?? 1})`;
     case "NodeFailed":
       return `${prefix}✗ ${payload?.nodeId ?? "?"} (attempt ${payload?.attempt ?? 1}): ${truncateText(formatErrorPayload(payload?.error ?? "failed"), truncatePayloadAt)}`;
+    case "NodeStalled":
+      return `${prefix}✗ ${payload?.nodeId ?? "?"} stalled after ${payload?.identicalFailures ?? "?"} identical failures: ${truncateText(formatErrorPayload(payload?.error ?? "stalled"), truncatePayloadAt)}`;
     case "NodeCancelled":
       return `${prefix}⊘ ${payload?.nodeId ?? "?"} cancelled`;
     case "NodeSkipped":

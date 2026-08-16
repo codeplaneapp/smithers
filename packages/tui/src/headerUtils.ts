@@ -25,7 +25,7 @@ const PAUSED_STATES = new Set([
 function isPausedStatus(status: string): boolean {
   return PAUSED_STATES.has(status) || status.startsWith("waiting-");
 }
-const FAILED_STATES = new Set(["failed", "errored", "error", "stale", "orphaned"]);
+const FAILED_STATES = new Set(["failed", "stalled", "errored", "error", "stale", "orphaned"]);
 /**
  * User-cancelled runs are terminal but NOT failures: they are shown dim/grey, not
  * red, so a deliberate cancel doesn't read as an error. Kept out of FAILED_STATES.

@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 
 /** @typedef {import("@smthrs/accounts").Account} Account */
-/** @typedef {{ email?: string; accountId?: string }} AccountIdentity */
+/** @typedef {{ email?: string; accountId?: string; organizationId?: string }} AccountIdentity */
 
 /**
  * Which subscription a config directory is actually logged into. Registering
@@ -34,7 +35,19 @@ function readClaudeIdentity(configDir) {
   if (!oauth || typeof oauth !== "object") return null;
   const email = typeof oauth.emailAddress === "string" ? oauth.emailAddress : undefined;
   const accountId = typeof oauth.accountUuid === "string" ? oauth.accountUuid : undefined;
-  return email || accountId ? { email, accountId } : null;
+  const organizationId = typeof oauth.organizationUuid === "string" ? oauth.organizationUuid : undefined;
+  return email || accountId || organizationId ? { email, accountId, organizationId } : null;
+}
+
+/** @returns {AccountIdentity | null} */
+export function readDefaultClaudeIdentity() {
+  const state = readJson(join(homedir(), ".claude.json"));
+  const oauth = state?.oauthAccount;
+  if (!oauth || typeof oauth !== "object") return null;
+  const email = typeof oauth.emailAddress === "string" ? oauth.emailAddress : undefined;
+  const accountId = typeof oauth.accountUuid === "string" ? oauth.accountUuid : undefined;
+  const organizationId = typeof oauth.organizationUuid === "string" ? oauth.organizationUuid : undefined;
+  return email || accountId || organizationId ? { email, accountId, organizationId } : null;
 }
 
 /**
@@ -111,15 +124,19 @@ export function formatAccountIdentity(identity) {
  * @returns {string[]}
  */
 export function findDuplicateAccounts(identity, provider, accounts, excludeLabel) {
-  if (!identity || (!identity.accountId && !identity.email)) return [];
+  if (!identity || (!identity.organizationId && !identity.accountId && !identity.email)) return [];
   const duplicates = [];
   for (const account of accounts) {
     if (account.label === excludeLabel || account.provider !== provider) continue;
     const other = readAccountIdentity(account.provider, account.configDir);
     if (!other) continue;
-    const sameId = identity.accountId && other.accountId && identity.accountId === other.accountId;
-    const sameEmail = identity.email && other.email && identity.email === other.email;
-    if (sameId || sameEmail) duplicates.push(account.label);
+    const sameSubscription =
+      identity.organizationId && other.organizationId
+        ? identity.organizationId === other.organizationId
+        : identity.accountId && other.accountId
+          ? identity.accountId === other.accountId
+          : Boolean(identity.email && other.email && identity.email === other.email);
+    if (sameSubscription) duplicates.push(account.label);
   }
   return duplicates;
 }
