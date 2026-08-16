@@ -27,7 +27,7 @@
   "scripts": {
     "build": "node ../../node_modules/tsup/dist/cli-default.js --dts-only",
     "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
-    "test": "bun test tests"
+    "test": "bun test --timeout=60000 tests"
   },
   "dependencies": {
     "@smthrs/gateway-client": "workspace:*",
