@@ -14,7 +14,7 @@ import {
 } from "../src/human-requests.js";
 import { isPidAlive, parseRuntimeOwnerPid } from "../src/runtime-owner.js";
 import { signalRun } from "../src/signals.js";
-import { isRunHeartbeatFresh } from "../src/engine.js";
+import { __engineInternals, isRunHeartbeatFresh } from "../src/engine.js";
 
 function makeSignalAdapter(run = { runId: "run-1" }) {
   return {
@@ -25,6 +25,27 @@ function makeSignalAdapter(run = { runId: "run-1" }) {
 }
 
 describe("engine small utilities", () => {
+  test("only ordinary approved gates restore into scheduler state", () => {
+    const isRestorable = __engineInternals.isRestorableApprovedTask;
+
+    expect(isRestorable({ status: "approved", requestJson: null })).toBe(true);
+    expect(isRestorable({ status: "approved", requestJson: "not-json" })).toBe(true);
+    expect(isRestorable({ status: "requested", requestJson: null })).toBe(false);
+    expect(isRestorable({ status: "denied", requestJson: null })).toBe(false);
+    expect(
+      isRestorable({
+        status: "approved",
+        requestJson: JSON.stringify({ kind: "ReplayUnsafeApproval" }),
+      }),
+    ).toBe(false);
+    expect(
+      isRestorable({
+        status: "approved",
+        requestJson: JSON.stringify({ metadata: { humanTask: true } }),
+      }),
+    ).toBe(false);
+  });
+
   test("AlertRuntime stores services and has lifecycle no-ops", () => {
     const policy = { rules: {} };
     const services = { runId: "run-1" };
