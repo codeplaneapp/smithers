@@ -237,6 +237,45 @@ describe("node inspector output states", () => {
     expect(byTestId("monitor-output-empty").getAttribute("data-slot")).toBe("empty-state");
   });
 
+  test("every missing-output state labels itself and explains what is happening", async () => {
+    // Issue #855: a label alone leaves the operator guessing whether output is
+    // coming, gone, or never existed.
+    await render(nodeOutputState({ loading: true }));
+    expect(byTestId("monitor-output-loading").getAttribute("data-state")).toBe("loading");
+    expect(byTestId("monitor-output-loading").querySelector(".sui-empty-title")?.textContent).toBe("Loading output…");
+    expect(byTestId("monitor-output-loading").querySelector(".sui-empty-description")?.textContent).toContain(
+      "from the gateway",
+    );
+
+    await rerender(nodeOutputState({ live: true }));
+    expect(byTestId("monitor-output-live").getAttribute("data-state")).toBe("live");
+    expect(byTestId("monitor-output-live").querySelector(".sui-empty-title")?.textContent).toBe("Still running…");
+    expect(byTestId("monitor-output-live").querySelector(".sui-empty-description")?.textContent).toContain(
+      "lands here when the node finishes",
+    );
+
+    await rerender(nodeOutputState({ failure: { message: "agent failed" } }));
+    expect(byTestId("monitor-output-failed").getAttribute("data-state")).toBe("failed");
+    expect(byTestId("monitor-output-failed").querySelector(".sui-empty-title")?.textContent).toContain(
+      "failed before producing structured output",
+    );
+    expect(byTestId("monitor-output-failed").querySelector(".sui-empty-description")?.textContent).toBe(
+      "Failure details are shown above.",
+    );
+
+    await rerender(nodeOutputState());
+    expect(byTestId("monitor-output-empty").getAttribute("data-state")).toBe("empty");
+    expect(byTestId("monitor-output-empty").querySelector(".sui-empty-title")?.textContent).toBe(
+      "No structured output.",
+    );
+    expect(byTestId("monitor-output-empty").querySelector(".sui-empty-description")?.textContent).toContain(
+      "completed without recording structured output",
+    );
+    // A settled empty node is not a spinner: no skeleton, no live region.
+    expect(byTestId("monitor-output-empty").querySelector('[data-slot="skeleton"]')).toBeNull();
+    expect(byTestId("monitor-output-empty").getAttribute("role")).toBeNull();
+  });
+
   test("makes output query failures actionable", async () => {
     let retries = 0;
     await render(
@@ -791,11 +830,19 @@ describe("migrated monitor surfaces", () => {
     expect(byTestId("monitor-run-row").getAttribute("data-active")).toBe("true");
     expect(byTestId("monitor-run-row").textContent).toContain("rendered-coverage");
 
+    // A socket that has not opened yet outranks the query's own loading flag:
+    // the rail must not claim emptiness it cannot back (issue #855).
     await rerender(
       <RunsRail runs={[]} loading connStatus="connecting" selectedRunId={undefined} onSelect={() => {}} />,
     );
-    expect(byTestId("monitor-runs").textContent).toContain("Loading runs");
+    expect(byTestId("monitor-runs").textContent).toContain("Connecting to the Smithers gateway");
+    expect(byTestId("monitor-empty").getAttribute("data-state")).toBe("connecting");
     expect(byTestId("monitor-empty").getAttribute("data-slot")).toBe("empty-state");
+    expect(byTestId("monitor-empty").querySelector('[data-slot="skeleton"]')).not.toBeNull();
+
+    await rerender(<RunsRail runs={[]} loading connStatus="online" selectedRunId={undefined} onSelect={() => {}} />);
+    expect(byTestId("monitor-runs").textContent).toContain("Loading runs");
+    expect(byTestId("monitor-empty").getAttribute("data-state")).toBe("loading");
     expect(byTestId("monitor-empty").querySelector('[data-slot="skeleton"]')).not.toBeNull();
     await rerender(
       <RunsRail runs={[]} loading={false} connStatus="online" selectedRunId={undefined} onSelect={() => {}} />,
@@ -1072,6 +1119,37 @@ describe("monitor event states", () => {
     await click(buttonNamed("All"));
     expect(document.querySelectorAll(".mon-event").length).toBe(1);
     expect(document.querySelector('[data-testid="monitor-events-state"]')).toBeNull();
+  });
+
+  test("a buffer hidden by the view chips offers a one-click way back to All", async () => {
+    // Issue #855: a filtered-empty log must carry the control, not just prose.
+    const chatter = eventLogState({
+      events: [
+        { event: "AgentSessionEvent", seq: 1, stateVersion: 0, payload: {} },
+        { event: "AgentSessionEvent", seq: 2, stateVersion: 0, payload: {} },
+      ],
+    });
+    await render(<EventLog runId="run-events" eventsState={chatter} />);
+    expect(byTestId("monitor-events-state").getAttribute("data-state")).toBe("filtered-activity");
+    expect(byTestId("monitor-events-state").querySelector(".sui-empty-title")?.textContent).toBe(
+      "No activity events in this buffer.",
+    );
+    expect(byTestId("monitor-events-state").querySelector(".sui-empty-description")?.textContent).toContain(
+      "Switch to All to inspect the 2 buffered",
+    );
+
+    await click(byTestId("monitor-events-show-all"));
+    expect(document.querySelector('[data-testid="monitor-events-state"]')).toBeNull();
+    expect(document.querySelectorAll(".mon-event").length).toBe(2);
+
+    // The durable-empty state has nothing to clear, so it offers no action.
+    await rerender(<EventLog runId="run-events" eventsState={eventLogState()} />);
+    expect(byTestId("monitor-events-state").getAttribute("data-state")).toBe("empty");
+    expect(byTestId("monitor-events-state").querySelector(".sui-empty-description")?.textContent).toContain(
+      "Events stream in here",
+    );
+    expect(document.querySelector('[data-testid="monitor-events-show-all"]')).toBeNull();
+    expect(byTestId("monitor-events-state").querySelector('[data-slot="skeleton"]')).toBeNull();
   });
 
   test("surfaces an empty query failure with guidance and a retry action", async () => {
@@ -1569,6 +1647,44 @@ describe("execution tree unavailable states", () => {
     expect(byTestId("monitor-frame-unavailable").getAttribute("data-slot")).toBe("alert");
     expect(byTestId("monitor-tree").textContent).toContain("Previous valid frame");
   });
+
+  test("empty trees explain themselves and an empty frame offers the way back to live", async () => {
+    // Issue #855: "No nodes recorded yet." alone reads like a broken panel.
+    let returnsToLive = 0;
+    await render(executionTree({ isLoading: true }));
+    expect(byTestId("monitor-tree-loading").getAttribute("data-state")).toBe("loading");
+    expect(byTestId("monitor-tree-loading").querySelector(".sui-empty-description")?.textContent).toContain(
+      "from the gateway",
+    );
+
+    await rerender(executionTree());
+    expect(byTestId("monitor-tree-empty").getAttribute("data-state")).toBe("empty");
+    expect(byTestId("monitor-tree-empty").querySelector(".sui-empty-title")?.textContent).toBe(
+      "No nodes recorded yet.",
+    );
+    expect(byTestId("monitor-tree-empty").querySelector(".sui-empty-description")?.textContent).toContain(
+      "as the engine schedules this run's work",
+    );
+    // A settled empty tree is not a spinner and has no run to return to.
+    expect(byTestId("monitor-tree-empty").querySelector('[data-slot="skeleton"]')).toBeNull();
+    expect(document.querySelector('[data-testid="monitor-frame-live"]')).toBeNull();
+
+    await rerender(
+      <ExecutionTree
+        runId="run-tree-states"
+        treeQuery={{ root: null, nodes: [], status: "queued", isLoading: false, error: undefined }}
+        selectedNodeKey={undefined}
+        onSelectNode={() => {}}
+        frameOverride={{ root: null, loading: false, onReturnToLive: () => returnsToLive++ }}
+      />,
+    );
+    expect(byTestId("monitor-frame-empty").getAttribute("data-state")).toBe("frame-empty");
+    expect(byTestId("monitor-frame-empty").querySelector(".sui-empty-description")?.textContent).toContain(
+      "before its first node was scheduled",
+    );
+    await click(byTestId("monitor-frame-live"));
+    expect(returnsToLive).toBe(1);
+  });
 });
 
 describe("monitor theme contract", () => {
@@ -1747,6 +1863,33 @@ describe("MonitorToolbar", () => {
     await keydown(document.activeElement ?? trigger, "Escape");
     expect(document.querySelector('[data-slot="select-content"]')).toBeNull();
     expect(calls.workflow).toEqual([]);
+  });
+
+  test("reports an in-flight refetch on the control that started it", async () => {
+    // Issue #855: a refetch never flips the runs query back to `loading` (the
+    // rows stay), so Refresh is the only honest place to say it is in flight.
+    let settle: (() => void) | undefined;
+    const { element } = toolbarHarness({
+      onRefresh: () =>
+        new Promise<void>((resolve) => {
+          settle = resolve;
+        }),
+    });
+    await render(element);
+    const refresh = byTestId("monitor-refresh");
+    expect(refresh.textContent).toBe("Refresh");
+    expect(refresh.getAttribute("aria-busy")).toBe("false");
+
+    await click(refresh);
+    expect(byTestId("monitor-refresh").textContent).toBe("Refreshing…");
+    expect(byTestId("monitor-refresh").getAttribute("aria-busy")).toBe("true");
+    expect((byTestId("monitor-refresh") as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      settle?.();
+    });
+    expect(byTestId("monitor-refresh").textContent).toBe("Refresh");
+    expect((byTestId("monitor-refresh") as HTMLButtonElement).disabled).toBe(false);
   });
 
   test("active: the Metrics chip carries aria-pressed and the is-on accent only when on", async () => {
