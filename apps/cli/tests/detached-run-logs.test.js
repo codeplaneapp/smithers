@@ -45,6 +45,28 @@ async function waitForRunConfig(repo, runId) {
   throw new Error(`Detached run did not finish: ${runId}`);
 }
 
+/**
+ * Wait for a detached child to actually exit. The run row flips to a terminal
+ * status from inside the child, so a terminal status only means the child is
+ * on its way out. Rotation caps the inherited log periodically and once more
+ * on `exit`, so the size cap holds for a settled log, not for a log sampled
+ * mid-run between sweeps.
+ *
+ * @param {number | undefined} pid
+ */
+async function waitForProcessExit(pid) {
+  if (typeof pid !== "number") throw new Error("Detached launch did not report a pid");
+  for (let attempt = 0; attempt < 240; attempt += 1) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return;
+    }
+    await Bun.sleep(50);
+  }
+  throw new Error(`Detached child did not exit: ${pid}`);
+}
+
 describe("detached run log paths", () => {
   test(
     "defaults to the workspace .smithers/logs directory and records the exact path",
@@ -128,6 +150,7 @@ describe("detached run log paths", () => {
         },
       });
       await waitForRunConfig(repo, runId);
+      await waitForProcessExit(result.json?.pid);
 
       const logFile = repo.path(".smithers", "logs", `${runId}.log`);
       const contents = readFileSync(logFile, "utf8");
