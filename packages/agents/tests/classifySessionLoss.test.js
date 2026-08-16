@@ -83,6 +83,33 @@ describe("classifySessionLoss", () => {
     expect(err.message).not.toContain("Retry will start a fresh session");
   });
 
+  test("claude crash on a FRESH session is flagged so it counts as an agent failure, not a fixable resume", () => {
+    const err = classifySessionLoss(
+      "claude",
+      "No conversation found with session ID: 68b187d0-a325-4384-a248-b2a0e6edbd90",
+      "",
+      false,
+    );
+    expect(err).not.toBeNull();
+    expect(err.code).toBe("AGENT_SESSION_LOST");
+    expect(err.details.freshSessionFailure).toBe(true);
+    // Still discard the broken id: the heartbeat may have captured it.
+    expect(err.details.discardResumeSession).toBe(true);
+    expect(err.message).toContain("FRESH session");
+    expect(err.message).not.toContain("Retry will start a fresh session");
+  });
+
+  test("a resumed claude session is flagged as recoverable so it does not consume retry budget", () => {
+    const err = classifySessionLoss(
+      "claude",
+      "No conversation found with session ID: 68b187d0-a325-4384-a248-b2a0e6edbd90",
+      "",
+      true,
+    );
+    expect(err.details.freshSessionFailure).toBe(false);
+    expect(err.message).toContain("Retry will start a fresh session");
+  });
+
   test("the claude pattern on a different CLI is NOT session loss", () => {
     expect(classifySessionLoss("codex", "No conversation found with session ID: abc12345", "")).toBeNull();
   });
