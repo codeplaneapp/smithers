@@ -111,6 +111,68 @@ test.describe.serial("served Smithers Monitor", () => {
     expectNoPageErrors(pageErrors);
   });
 
+  test("supports complete keyboard and ARIA tree semantics in live and historical XML views", async ({ page }) => {
+    const pageErrors = trackPageErrors(page);
+    const rich = await runFor(page, "e2e-monitor");
+    await openRun(page, rich);
+
+    const tree = page.getByTestId("monitor-tree");
+    await expect(tree).toHaveRole("tree");
+    await expect(tree).toHaveAttribute("aria-label", "Execution tree");
+    const rootItem = tree.getByRole("treeitem").first();
+    await expect(rootItem).toHaveAttribute("aria-level", "1");
+    await expect(rootItem).toHaveAttribute("aria-posinset", "1");
+    await expect(rootItem).toHaveAttribute("aria-setsize", "1");
+    await expect(rootItem).toHaveAttribute("aria-expanded", "true");
+    await expect(rootItem).toHaveAttribute("aria-selected", "false");
+    await expect(rootItem.locator(':scope > [role="group"]')).toHaveCount(1);
+    await expect(rootItem.getByRole("button", { name: /^(Collapse|Expand)/ }).first()).toHaveAccessibleName(
+      /workflow/i,
+    );
+
+    await tree.focus();
+    await expect(tree).toBeFocused();
+    const rootActiveId = await tree.getAttribute("aria-activedescendant");
+    expect(rootActiveId).toBeTruthy();
+    await tree.press("End");
+    expect(await tree.getAttribute("aria-activedescendant")).not.toBe(rootActiveId);
+    await tree.press("Home");
+    expect(await tree.getAttribute("aria-activedescendant")).toBe(rootActiveId);
+    await tree.press("ArrowLeft");
+    await expect(tree.getByRole("treeitem")).toHaveCount(1);
+    await tree.press("ArrowRight");
+    await expect(tree.getByRole("treeitem")).not.toHaveCount(1);
+    await tree.press("End");
+    await tree.press("Enter");
+    await expect
+      .poll(async () => {
+        const activeId = await tree.getAttribute("aria-activedescendant");
+        return activeId ? page.locator(`[id="${activeId}"]`).getAttribute("aria-selected") : null;
+      })
+      .toBe("true");
+    await expect.poll(() => new URL(page.url()).searchParams.get("nodeId")).not.toBeNull();
+    const liveNodeId = new URL(page.url()).searchParams.get("nodeId");
+
+    await page.getByTestId("monitor-debug-chip").click();
+    await page.getByTestId("monitor-xml-chip").click();
+    await page.getByTestId("monitor-frames-chip").click();
+    const frame = page.getByRole("slider", { name: "Frame" });
+    await expect(frame).toBeEnabled();
+    await frame.fill((await frame.getAttribute("min")) ?? "0");
+
+    const xmlTree = page.getByTestId("monitor-tree-xml");
+    await expect(xmlTree).toHaveRole("tree");
+    await expect(xmlTree).toHaveAttribute("aria-label", "Execution tree XML");
+    await expect(xmlTree.getByRole("treeitem").first()).toHaveAttribute("aria-level", "1");
+    await xmlTree.focus();
+    await xmlTree.press("End");
+    await xmlTree.press("Enter");
+    const historicalActiveId = await xmlTree.getAttribute("aria-activedescendant");
+    await expect(page.locator(`[id="${historicalActiveId ?? "missing"}"]`)).toHaveAttribute("aria-selected", "true");
+    expect(new URL(page.url()).searchParams.get("nodeId")).toBe(liveNodeId);
+    expectNoPageErrors(pageErrors);
+  });
+
   test("renders real nested iterations, retries, failure rollups, output, XML, timeline, and frames", async ({
     page,
   }) => {
@@ -179,7 +241,7 @@ test.describe.serial("served Smithers Monitor", () => {
     await openRun(page, failed);
     await expect(page.getByTestId("monitor-tree")).toContainText("deterministic-failure");
     const failureContainer = page.getByRole("treeitem").filter({ hasText: "nested-failure-container" }).last();
-    await failureContainer.getByRole("button", { name: "Toggle" }).click();
+    await failureContainer.getByRole("button", { name: /^(Collapse|Expand).*nested-failure-container/ }).click();
     await expect(failureContainer).toHaveAttribute("aria-expanded", "false");
     await expect(failureContainer.locator(".mon-dot")).toHaveCount(2);
 

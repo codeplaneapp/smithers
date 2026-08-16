@@ -91,10 +91,11 @@ import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { toSmithersError } from "@smthrs/errors/toSmithersError";
 import { logDebug, logError, logInfo, logWarning } from "@smthrs/observability/logging";
+import { formatRuntimeOwnerId } from "@smthrs/db/runtime-owner";
 import { isPidAlive, parseRuntimeOwnerPid } from "./runtime-owner.js";
 import { spawn as nodeSpawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { platform } from "node:os";
+import { hostname, platform } from "node:os";
 import { annotateSmithersTrace, smithersSpanNames, withSmithersSpan } from "@smthrs/observability";
 import { withTaskRuntime } from "@smthrs/driver/task-runtime";
 import { hashCapabilityRegistry } from "@smthrs/agents/capability-registry";
@@ -1839,7 +1840,7 @@ function workflowSessionSummaryKey(summary) {
   return JSON.stringify(summary);
 }
 function buildRuntimeOwnerId() {
-  return `pid:${process.pid}:${randomUUID()}`;
+  return formatRuntimeOwnerId(process.pid, hostname(), randomUUID());
 }
 const DURABILITY_CONFIG_KEY = "__smithersDurability";
 const DURABILITY_METADATA_VERSION = 2;

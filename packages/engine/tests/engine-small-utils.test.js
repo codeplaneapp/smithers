@@ -72,6 +72,8 @@ describe("engine small utilities", () => {
     expect(parseRuntimeOwnerPid(null)).toBe(null);
     expect(parseRuntimeOwnerPid(" ")).toBe(null);
     expect(parseRuntimeOwnerPid("pid:123:abc")).toBe(123);
+    expect(parseRuntimeOwnerPid("pid:123@host-a:abc", "host-a")).toBe(123);
+    expect(parseRuntimeOwnerPid("pid:123@host-a:abc", "host-b")).toBe(null);
     expect(parseRuntimeOwnerPid("456")).toBe(456);
     expect(parseRuntimeOwnerPid("pid:0")).toBe(null);
     expect(parseRuntimeOwnerPid("nope")).toBe(null);
