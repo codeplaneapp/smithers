@@ -50,11 +50,13 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  EmptyState,
   Input,
   observeReducedMotion,
   prefersReducedMotion,
   Progress,
   RowButton,
+  Skeleton,
   SmithersUiStyles,
   StatusPill,
   Table,
@@ -698,53 +700,63 @@ function RunsZeroState({
   onResetFilters?: () => void;
   onRetry?: () => void | Promise<void>;
 }) {
+  if (state === "error") {
+    return (
+      <Alert variant="destructive" data-testid={testId} data-state={state}>
+        <AlertTitle>Couldn&apos;t load runs.</AlertTitle>
+        <AlertDescription>{queryError?.message || "Refresh to try the query again."}</AlertDescription>
+        {onRetry ? (
+          <Button variant="outline" data-testid={`${testId}-retry`} onClick={() => void onRetry()}>
+            Retry
+          </Button>
+        ) : null}
+      </Alert>
+    );
+  }
+  if (state === "loading") {
+    return (
+      <EmptyState
+        className={hero ? "mon-empty-hero" : undefined}
+        data-testid={testId}
+        data-state={state}
+        role="status"
+        title="Loading runs…"
+        description={
+          hero
+            ? "Live status, execution tree, node outputs, events, and approvals — for every run this gateway owns."
+            : undefined
+        }
+      >
+        <Skeleton className="mon-state-skeleton" />
+      </EmptyState>
+    );
+  }
+  const filtered = state === "filtered";
   return (
-    <div
-      className={`mon-empty${hero ? " mon-empty-hero" : ""}`}
+    <EmptyState
+      className={hero ? "mon-empty-hero" : undefined}
       data-testid={testId}
       data-state={state}
-      role={state === "error" ? "alert" : undefined}
-    >
-      {state === "loading" ? (
-        <>
-          <div>Loading runs…</div>
-          {hero ? (
-            <div className="mon-dim">
-              Live status, execution tree, node outputs, events, and approvals — for every run this gateway owns.
-            </div>
-          ) : null}
-        </>
-      ) : state === "error" ? (
-        <>
-          <div>Couldn&apos;t load runs.</div>
-          <div className="mon-dim">{queryError?.message || "Refresh to try the query again."}</div>
-          {onRetry ? (
-            <Button variant="outline" data-testid={`${testId}-retry`} onClick={() => void onRetry()}>
-              Retry
-            </Button>
-          ) : null}
-        </>
-      ) : state === "filtered" ? (
-        <>
-          <div>No runs match your filters.</div>
-          <div className="mon-dim">
+      title={filtered ? "No runs match your filters." : "No runs yet."}
+      description={
+        filtered ? (
+          <>
             Clear filters to show all {totalCount} {totalCount === 1 ? "run" : "runs"}.
-          </div>
-          {onResetFilters ? (
-            <Button variant="outline" data-testid={`${testId}-reset`} onClick={onResetFilters}>
-              Clear filters
-            </Button>
-          ) : null}
-        </>
-      ) : (
-        <>
-          <div>No runs yet.</div>
-          <div className="mon-dim">
+          </>
+        ) : (
+          <>
             Launch one with <code>smithers up &lt;workflow&gt;</code> or <code>smithers workflow run &lt;id&gt;</code>.
-          </div>
-        </>
-      )}
-    </div>
+          </>
+        )
+      }
+      action={
+        filtered && onResetFilters ? (
+          <Button variant="outline" data-testid={`${testId}-reset`} onClick={onResetFilters}>
+            Clear filters
+          </Button>
+        ) : undefined
+      }
+    />
   );
 }
 
@@ -1168,19 +1180,25 @@ function CronsPanel() {
       </CardHeader>
       <CardContent>
         {!cronsApi.loaded ? (
-          <div className="mon-empty mon-dim">
-            {cronsApi.failed ? (
-              "Could not load crons — the gateway did not answer."
-            ) : (
-              <span className="mon-live-pending">
-                <span className="mon-dot mon-dot-pulse" aria-hidden /> loading crons…
-              </span>
-            )}
-          </div>
+          cronsApi.failed ? (
+            <Alert variant="destructive">
+              <AlertTitle>Could not load crons.</AlertTitle>
+              <AlertDescription>The gateway did not answer.</AlertDescription>
+            </Alert>
+          ) : (
+            <EmptyState title="Loading crons…" role="status">
+              <Skeleton className="mon-state-skeleton" />
+            </EmptyState>
+          )
         ) : crons.length === 0 ? (
-          <div className="mon-empty mon-dim">
-            No crons registered. Add one with <code>smithers cron add &lt;pattern&gt; &lt;workflow&gt;</code>.
-          </div>
+          <EmptyState
+            title="No crons registered."
+            description={
+              <>
+                Add one with <code>smithers cron add &lt;pattern&gt; &lt;workflow&gt;</code>.
+              </>
+            }
+          />
         ) : (
           <div className="mon-crons-scroll">
             <Table className="mon-runs-table mon-crons-table">
@@ -1376,15 +1394,16 @@ function MetricsPanel() {
           <h2 className="mon-kicker">Metrics</h2>
         </CardHeader>
         <CardContent>
-          <div className="mon-empty mon-dim">
-            {failed ? (
-              "Could not scrape /metrics — the gateway did not answer."
-            ) : (
-              <span className="mon-live-pending">
-                <span className="mon-dot mon-dot-pulse" aria-hidden /> scraping /metrics…
-              </span>
-            )}
-          </div>
+          {failed ? (
+            <Alert variant="destructive">
+              <AlertTitle>Could not scrape /metrics.</AlertTitle>
+              <AlertDescription>The gateway did not answer.</AlertDescription>
+            </Alert>
+          ) : (
+            <EmptyState title="Scraping /metrics…" role="status">
+              <Skeleton className="mon-state-skeleton" />
+            </EmptyState>
+          )}
         </CardContent>
       </Card>
     );
@@ -1406,10 +1425,10 @@ function MetricsPanel() {
         <div className="mon-metrics-section" data-testid="monitor-metrics-agents">
           <h3 className="mon-kicker">Agent latency (this gateway process)</h3>
           {agentLatency.length === 0 ? (
-            <div className="mon-empty mon-dim">
-              No agent invocations recorded by this gateway process yet — engines attached elsewhere (e.g. `smithers up`
-              in a terminal) report to their own process.
-            </div>
+            <EmptyState
+              title="No agent invocations recorded yet."
+              description="Engines attached elsewhere, such as smithers up in a terminal, report to their own process."
+            />
           ) : (
             <div className="mon-metrics-table">
               <div className="mon-metric-row mon-metric-head">
@@ -1460,7 +1479,7 @@ function MetricsPanel() {
             ) : null}
           </h3>
           {rpcStats.length === 0 ? (
-            <div className="mon-empty mon-dim">No RPC calls recorded yet.</div>
+            <EmptyState title="No RPC calls recorded yet." />
           ) : (
             <div className="mon-metrics-table">
               <div className="mon-metric-row mon-metric-head">
@@ -1596,17 +1615,23 @@ export function RunsTable({
   });
   if (landingState === "connecting") {
     return (
-      <div className="mon-empty mon-empty-hero" data-testid="monitor-empty-detail" data-state={landingState}>
-        <div>Connecting to the Smithers gateway…</div>
-        <div className="mon-dim">Runs will appear after the first successful response.</div>
-      </div>
+      <EmptyState
+        className="mon-empty-hero"
+        data-testid="monitor-empty-detail"
+        data-state={landingState}
+        role="status"
+        title="Connecting to the Smithers gateway…"
+        description="Runs will appear after the first successful response."
+      >
+        <Skeleton className="mon-state-skeleton" />
+      </EmptyState>
     );
   }
   if (landingState === "offline-without-cache") {
     return (
       <Alert
         variant="destructive"
-        className="mon-empty mon-empty-hero tone-failed"
+        className="mon-empty-hero"
         data-testid="monitor-empty-detail"
         data-state={landingState}
       >
@@ -1619,7 +1644,7 @@ export function RunsTable({
     return (
       <Alert
         variant="destructive"
-        className="mon-empty mon-empty-hero tone-failed"
+        className="mon-empty-hero"
         data-testid="monitor-empty-detail"
         data-state={landingState}
       >
@@ -1644,15 +1669,20 @@ export function RunsTable({
   const lastKnown = landingState === "offline-with-cache";
   if (lastKnown && total === 0) {
     return (
-      <div className="mon-empty mon-empty-hero" data-testid="monitor-empty-detail" data-state={landingState}>
-        <div>Gateway offline. Last-known runs are hidden by your filters.</div>
-        <div className="mon-dim">Clear filters to inspect the cached results. They may be out of date.</div>
-        {onResetFilters ? (
-          <Button variant="outline" data-testid="monitor-empty-detail-reset" onClick={onResetFilters}>
-            Clear filters
-          </Button>
-        ) : null}
-      </div>
+      <EmptyState
+        className="mon-empty-hero"
+        data-testid="monitor-empty-detail"
+        data-state={landingState}
+        title="Gateway offline. Last-known runs are hidden by your filters."
+        description="Clear filters to inspect the cached results. They may be out of date."
+        action={
+          onResetFilters ? (
+            <Button variant="outline" data-testid="monitor-empty-detail-reset" onClick={onResetFilters}>
+              Clear filters
+            </Button>
+          ) : undefined
+        }
+      />
     );
   }
   const firstRow = (shownPage - 1) * RUNS_PAGE_SIZE + 1;
@@ -2390,9 +2420,9 @@ export function ExecutionTree({
   };
   if (!isStatic && error) {
     return (
-      <div className="mon-empty" data-testid="monitor-tree-error" role="alert">
-        <div>Failed to load the execution tree.</div>
-        <span className="mon-dim">{error.message}</span>
+      <Alert variant="destructive" data-testid="monitor-tree-error">
+        <AlertTitle>Failed to load the execution tree.</AlertTitle>
+        <AlertDescription>{error.message}</AlertDescription>
         {onRetry ? (
           <div className="mon-empty-actions">
             <Chip data-testid="monitor-tree-retry" onClick={onRetry}>
@@ -2400,29 +2430,29 @@ export function ExecutionTree({
             </Chip>
           </div>
         ) : null}
-      </div>
+      </Alert>
     );
   }
   if (!isStatic && isLoading) {
     return (
-      <div className="mon-empty" data-testid="monitor-tree-loading" role="status">
-        Loading execution tree…
-      </div>
+      <EmptyState data-testid="monitor-tree-loading" role="status" title="Loading execution tree…">
+        <Skeleton className="mon-state-skeleton" />
+      </EmptyState>
     );
   }
   if (!root) {
     if (frameLoading) {
       return (
-        <div className="mon-empty" data-testid="monitor-frame-loading" role="status">
-          Loading frame…
-        </div>
+        <EmptyState data-testid="monitor-frame-loading" role="status" title="Loading frame…">
+          <Skeleton className="mon-state-skeleton" />
+        </EmptyState>
       );
     }
     if (frameError) {
       return (
-        <div className="mon-empty" data-testid="monitor-frame-unavailable" role="alert">
-          <div>Frame unavailable.</div>
-          <span className="mon-dim">{frameError.message}</span>
+        <Alert variant="destructive" data-testid="monitor-frame-unavailable">
+          <AlertTitle>Frame unavailable.</AlertTitle>
+          <AlertDescription>{frameError.message}</AlertDescription>
           <div className="mon-empty-actions">
             {frameOverride?.onRetry ? (
               <Chip data-testid="monitor-frame-retry" onClick={frameOverride.onRetry}>
@@ -2435,29 +2465,28 @@ export function ExecutionTree({
               </Chip>
             ) : null}
           </div>
-        </div>
+        </Alert>
       );
     }
     return (
-      <div
-        className="mon-empty"
+      <EmptyState
         data-testid={isStatic ? "monitor-frame-empty" : "monitor-tree-empty"}
         data-state="empty"
-      >
-        {isStatic ? "No nodes in this frame." : "No nodes recorded yet."}
-      </div>
+        title={isStatic ? "No nodes in this frame." : "No nodes recorded yet."}
+      />
     );
   }
   const notice = frameLoading ? (
-    <div className="mon-tree-state" data-testid="monitor-frame-loading" role="status">
-      Loading frame… Showing the previous frame until it arrives.
-    </div>
+    <Alert variant="warning" data-testid="monitor-frame-loading" role="status">
+      <AlertTitle>Loading frame…</AlertTitle>
+      <AlertDescription>Showing the previous frame until it arrives.</AlertDescription>
+      <Skeleton className="mon-state-skeleton" />
+    </Alert>
   ) : frameError ? (
-    <div className="mon-tree-state mon-tree-state-error" data-testid="monitor-frame-unavailable" role="alert">
-      <span>
-        Frame unavailable. <span className="mon-dim">Showing the previous frame. {frameError.message}</span>
-      </span>
-      <span className="mon-tree-state-actions">
+    <Alert variant="destructive" data-testid="monitor-frame-unavailable">
+      <AlertTitle>Frame unavailable.</AlertTitle>
+      <AlertDescription>Showing the previous frame. {frameError.message}</AlertDescription>
+      <div className="mon-tree-state-actions">
         {frameOverride?.onRetry ? (
           <Chip data-testid="monitor-frame-retry" onClick={frameOverride.onRetry}>
             Retry
@@ -2468,8 +2497,8 @@ export function ExecutionTree({
             Return to live
           </Chip>
         ) : null}
-      </span>
-    </div>
+      </div>
+    </Alert>
   ) : null;
   const tree = asXml ? (
     <div
@@ -2635,15 +2664,18 @@ export function TimelinePanel({
     );
   };
   if (rows === null) {
-    return (
-      <div className="mon-empty">
-        {failed
-          ? "Could not load the timeline — the gateway did not answer the node-states request."
-          : "Loading timeline…"}
-      </div>
+    return failed ? (
+      <Alert variant="destructive">
+        <AlertTitle>Could not load the timeline.</AlertTitle>
+        <AlertDescription>The gateway did not answer the node-states request.</AlertDescription>
+      </Alert>
+    ) : (
+      <EmptyState title="Loading timeline…" role="status">
+        <Skeleton className="mon-state-skeleton" />
+      </EmptyState>
     );
   }
-  if (entries.length === 0) return <div className="mon-empty">No task executions recorded yet.</div>;
+  if (entries.length === 0) return <EmptyState title="No task executions recorded yet." />;
   return (
     <div className="mon-timeline" data-testid="monitor-timeline" role="list">
       {entries.map((entry) => {
@@ -3003,12 +3035,12 @@ function ExecutionPanel({
 /** Remaining-quota bar row: fill is what is LEFT, tone follows the headroom. */
 function UsageWindowBar({ row }: { row: UsageWindowRow }) {
   return (
-    <span className="mon-usage-bar" aria-hidden>
-      <span
-        className={`mon-usage-bar-fill tone-${row.tone}`}
-        style={{ width: `${Math.round((row.remainingFraction ?? 0) * 100)}%` }}
-      />
-    </span>
+    <Progress
+      className={`mon-usage-bar tone-${row.tone}`}
+      value={row.remainingFraction ?? 0}
+      max={1}
+      aria-label={`${row.label}: ${row.text}`}
+    />
   );
 }
 
@@ -3061,12 +3093,12 @@ function UsageShareBars({ rows }: { rows: readonly UsageShareRow[] }) {
           <span className="mon-usage-label" title={row.key}>
             {row.key}
           </span>
-          <span className="mon-usage-bar" aria-hidden>
-            <span
-              className="mon-usage-bar-fill mon-usage-share-fill"
-              style={{ width: `${Math.round(row.fraction * 100)}%` }}
-            />
-          </span>
+          <Progress
+            className="mon-usage-bar"
+            value={row.fraction}
+            max={1}
+            aria-label={`${row.key}: ${formatTokens(row.tokens)} tokens`}
+          />
           <span className="mon-mono mon-dim mon-usage-text">{formatTokens(row.tokens)}</span>
         </div>
       ))}
@@ -3098,11 +3130,16 @@ function UsagePanel({
       <section className="mon-usage-section">
         <h3 className="mon-kicker">Rate limits</h3>
         {reportsQuery.data === undefined && reportsQuery.error ? (
-          <div className="mon-dim">Could not load account usage: {reportsQuery.error.message}</div>
+          <Alert variant="destructive">
+            <AlertTitle>Could not load account usage.</AlertTitle>
+            <AlertDescription>{reportsQuery.error.message}</AlertDescription>
+          </Alert>
         ) : reportsQuery.data === undefined ? (
-          <div className="mon-dim">Loading account usage…</div>
+          <EmptyState title="Loading account usage…" role="status">
+            <Skeleton className="mon-state-skeleton" />
+          </EmptyState>
         ) : windowRows.length === 0 ? (
-          <div className="mon-dim">No rate-limit windows reported for the registered accounts.</div>
+          <EmptyState title="No rate-limit windows reported for the registered accounts." />
         ) : (
           windowRows.map((row) =>
             row.unavailable ? (
@@ -3131,11 +3168,15 @@ function UsagePanel({
       <section className="mon-usage-section">
         <h3 className="mon-kicker">Burn — tokens/min</h3>
         {usageLoading ? (
-          <div className="mon-dim">Loading token usage…</div>
+          <EmptyState title="Loading token usage…" role="status">
+            <Skeleton className="mon-state-skeleton" />
+          </EmptyState>
         ) : usageFailed ? (
-          <div className="mon-dim">Token usage is unavailable right now.</div>
+          <Alert variant="destructive">
+            <AlertTitle>Token usage is unavailable right now.</AlertTitle>
+          </Alert>
         ) : fold.eventCount === 0 ? (
-          <div className="mon-dim">No token usage reported for this run yet.</div>
+          <EmptyState title="No token usage reported for this run yet." />
         ) : (
           <BurnSparkline buckets={buckets} />
         )}
@@ -3379,19 +3420,23 @@ export function EventLog({ runId, eventsState }: { runId: string; eventsState: R
           aria-busy={loading}
         >
           {events.length === 0 && !error ? (
-            <li
-              className="mon-empty"
-              data-testid="monitor-events-state"
-              data-state={loading ? "loading" : allEvents.length === 0 ? "empty" : `filtered-${view}`}
-              role={loading ? "status" : undefined}
-            >
-              {loading
-                ? "Loading events…"
-                : allEvents.length === 0
-                  ? "No events recorded for this run yet."
-                  : view === "notable"
-                    ? "No notable events in this buffer. Switch to Activity or All to inspect other events."
-                    : "No activity events in this buffer. Switch to All to inspect session and heartbeat events."}
+            <li>
+              <EmptyState
+                data-testid="monitor-events-state"
+                data-state={loading ? "loading" : allEvents.length === 0 ? "empty" : `filtered-${view}`}
+                role={loading ? "status" : undefined}
+                title={
+                  loading
+                    ? "Loading events…"
+                    : allEvents.length === 0
+                      ? "No events recorded for this run yet."
+                      : view === "notable"
+                        ? "No notable events in this buffer. Switch to Activity or All to inspect other events."
+                        : "No activity events in this buffer. Switch to All to inspect session and heartbeat events."
+                }
+              >
+                {loading ? <Skeleton className="mon-state-skeleton" /> : null}
+              </EmptyState>
             </li>
           ) : null}
           {events.map((frame) => {
@@ -3508,6 +3553,7 @@ function HealthStrip({
         <AlertTitle className="mon-health-headline">
           <span className="mon-dot mon-dot-pulse" aria-hidden /> <b>Assessing run health…</b>
         </AlertTitle>
+        <Skeleton className="mon-state-skeleton" />
       </Alert>
     );
   }
@@ -3693,19 +3739,20 @@ export function NodeTranscriptState({
     if (errorAlert) return errorAlert;
     if (loading) {
       return (
-        <div className="mon-empty mon-dim" data-testid="monitor-transcript-loading" role="status">
-          <span className="mon-live-pending">
-            <span className="mon-dot mon-dot-pulse" aria-hidden /> loading transcript…
-          </span>
-        </div>
+        <EmptyState data-testid="monitor-transcript-loading" role="status" title="Loading transcript…">
+          <Skeleton className="mon-state-skeleton" />
+        </EmptyState>
       );
     }
     return (
-      <div className="mon-empty mon-dim" data-testid="monitor-transcript-empty">
-        {live
-          ? "No transcript events from this node yet — new events will appear here."
-          : "This node finished without recording transcript events."}
-      </div>
+      <EmptyState
+        data-testid="monitor-transcript-empty"
+        title={
+          live
+            ? "No transcript events from this node yet — new events will appear here."
+            : "This node finished without recording transcript events."
+        }
+      />
     );
   }
 
@@ -4080,35 +4127,33 @@ export function NodeOutputState({
   }
   if (loading) {
     return (
-      <div className="mon-empty mon-dim" data-testid="monitor-output-loading" role="status">
-        <span className="mon-live-pending">
-          <span className="mon-dot mon-dot-pulse" aria-hidden /> loading output…
-        </span>
-      </div>
+      <EmptyState data-testid="monitor-output-loading" role="status" title="Loading output…">
+        <Skeleton className="mon-state-skeleton" />
+      </EmptyState>
     );
   }
   if (errorAlert) return errorAlert;
   if (failure) {
     return (
-      <div className="mon-empty mon-dim" data-testid="monitor-output-failed">
-        The node failed before producing structured output. Failure details are shown above.
-      </div>
+      <EmptyState
+        data-testid="monitor-output-failed"
+        title="The node failed before producing structured output. Failure details are shown above."
+      />
     );
   }
   if (live) {
     return (
-      <div className="mon-empty mon-dim" data-testid="monitor-output-live" role="status">
-        <span className="mon-live-pending">
-          <span className="mon-dot mon-dot-pulse" aria-hidden /> running — structured output lands here when the node
-          finishes
-        </span>
-      </div>
+      <EmptyState
+        data-testid="monitor-output-live"
+        role="status"
+        title="running — structured output lands here when the node finishes"
+      >
+        <Skeleton className="mon-state-skeleton" />
+      </EmptyState>
     );
   }
   return (
-    <div className="mon-empty mon-dim" data-testid="monitor-output-empty">
-      This node completed without recording structured output.
-    </div>
+    <EmptyState data-testid="monitor-output-empty" title="This node completed without recording structured output." />
   );
 }
 
@@ -4446,7 +4491,9 @@ function NodeWhatHappened({
           </div>
         </>
       ) : (
-        <div className="mon-empty mon-dim">Summarizing what happened…</div>
+        <EmptyState title="Summarizing what happened…" role="status">
+          <Skeleton className="mon-state-skeleton" />
+        </EmptyState>
       )}
     </InspectorSection>
   );
@@ -4828,7 +4875,7 @@ function NodeInspector({
               ))}
             </div>
           ) : (
-            <div className="mon-empty mon-dim">No children yet.</div>
+            <EmptyState title="No children yet." />
           )}
           <div className="mon-dim mon-container-note">
             {String(node.kind ?? "container")} nodes group other nodes — select a task inside for its transcript and
@@ -4939,38 +4986,61 @@ export function RunSelectionState({
 }) {
   if (loading) {
     return (
-      <div className="mon-empty" data-testid="monitor-run-loading" role="status">
-        <div>Loading run…</div>
-        <div className="mon-dim mon-mono">{runId}</div>
-      </div>
+      <EmptyState
+        data-testid="monitor-run-loading"
+        role="status"
+        title="Loading run…"
+        description={<span className="mon-mono">{runId}</span>}
+      >
+        <Skeleton className="mon-state-skeleton" />
+      </EmptyState>
     );
   }
 
   const missing = error === undefined || isRunNotFoundError(error);
+  if (!missing) {
+    return (
+      <Alert variant="destructive" data-testid="monitor-run-query-error">
+        <AlertTitle>Couldn&apos;t load run.</AlertTitle>
+        <AlertDescription>
+          <span className="mon-mono">{runId}</span>
+          <br />
+          {error?.message}
+        </AlertDescription>
+        <div className="mon-empty-actions">
+          <Button variant="outline" data-testid="monitor-run-retry" onClick={() => void onRetry()}>
+            Retry
+          </Button>
+          <Button variant="outline" data-testid="monitor-run-return" onClick={onReturnToRuns}>
+            Return to runs
+          </Button>
+        </div>
+      </Alert>
+    );
+  }
   return (
-    <div
-      className="mon-empty"
-      data-testid={missing ? "monitor-run-unavailable" : "monitor-run-query-error"}
-      role={missing ? "status" : "alert"}
-    >
-      <div>{missing ? "Run unavailable." : "Couldn't load run."}</div>
-      <div className="mon-dim mon-mono">{runId}</div>
-      <div className="mon-dim">
-        {missing ? "The requested run does not exist or is no longer available." : error?.message}
-      </div>
-      <div className="mon-empty-actions">
-        <Button
-          variant="outline"
-          data-testid={missing ? "monitor-run-refresh" : "monitor-run-retry"}
-          onClick={() => void onRetry()}
-        >
-          {missing ? "Refresh" : "Retry"}
-        </Button>
-        <Button variant="outline" data-testid="monitor-run-return" onClick={onReturnToRuns}>
-          Return to runs
-        </Button>
-      </div>
-    </div>
+    <EmptyState
+      data-testid="monitor-run-unavailable"
+      role="status"
+      title="Run unavailable."
+      description={
+        <>
+          <span className="mon-mono">{runId}</span>
+          <br />
+          The requested run does not exist or is no longer available.
+        </>
+      }
+      action={
+        <div className="mon-empty-actions">
+          <Button variant="outline" data-testid="monitor-run-refresh" onClick={() => void onRetry()}>
+            Refresh
+          </Button>
+          <Button variant="outline" data-testid="monitor-run-return" onClick={onReturnToRuns}>
+            Return to runs
+          </Button>
+        </div>
+      }
+    />
   );
 }
 
@@ -5132,9 +5202,12 @@ function RunDetail({
             className="mon-progress"
             title={`${progress.done} done · ${progress.failed} failed · ${progress.total} tasks`}
           >
-            <div className="mon-progress-track">
-              <div className="mon-progress-fill" style={{ width: `${Math.round(progress.fraction * 100)}%` }} />
-            </div>
+            <Progress
+              className="mon-progress-track"
+              value={progress.done + progress.failed}
+              max={progress.total}
+              aria-label={`${progress.done + progress.failed} of ${progress.total} tasks complete`}
+            />
             <span className="mon-dim mon-mono">
               {progress.done + progress.failed}/{progress.total} tasks
               {progress.failed > 0 ? ` · ${progress.failed} failed` : ""}
@@ -5733,8 +5806,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-runid { align-self: flex-start; font-family: var(--font-mono); font-size: var(--fs-1); color: var(--muted); text-decoration: none; }
 .mon-runid:hover { color: var(--text); }
 .mon-progress { display: flex; align-items: center; gap: var(--sp-2); }
-.mon-progress-track { flex: 1; max-width: 320px; height: 5px; border-radius: var(--r-full); background: var(--brand-soft); overflow: hidden; }
-.mon-progress-fill { height: 100%; border-radius: var(--r-full); background: var(--brand); transition: width 300ms ease; }
+.mon-progress-track { flex: 1; max-width: 320px; }
 
 .mon-tree { overflow-x: auto; }
 .mon-tree-item { min-width: max-content; }
@@ -5754,8 +5826,6 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-tree-main .sui-badge { margin-left: auto; }
 .mon-tree-duration ~ .sui-badge { margin-left: var(--sp-2); }
 .mon-tree.is-static { opacity: 0.92; }
-.mon-tree-state { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); flex-wrap: wrap; margin-bottom: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-2); color: var(--muted); background: var(--panel); font-size: var(--fs-1); }
-.mon-tree-state-error { color: var(--err); border-color: var(--danger-border); background: var(--danger-soft); }
 .mon-tree-state-actions { display: flex; align-items: center; gap: var(--sp-2); }
 
 /* Measured vs estimated: estimates are always dim + italic + tilde-marked,
@@ -5772,9 +5842,8 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-usage-section { display: flex; flex-direction: column; gap: var(--sp-1); }
 .mon-usage-row { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) 0; font-size: var(--fs-2); }
 .mon-usage-label { flex: 0 1 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.mon-usage-bar { flex: 1; min-width: 60px; height: 6px; border-radius: var(--r-full); background: var(--hover); overflow: hidden; }
-.mon-usage-bar-fill { display: block; height: 100%; border-radius: var(--r-full); background: var(--tone, var(--brand)); }
-.mon-usage-share-fill { background: var(--brand); }
+.mon-usage-bar { flex: 1; min-width: 60px; }
+.mon-usage-bar .sui-progress-indicator { background: var(--tone, var(--brand)); }
 .mon-usage-text { flex: none; min-width: 84px; text-align: right; font-variant-numeric: tabular-nums; }
 .mon-usage-reset { flex: none; min-width: 72px; text-align: right; font-size: var(--fs-1); font-variant-numeric: tabular-nums; }
 .mon-usage-shares { display: flex; flex-direction: column; }
@@ -5881,7 +5950,6 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-live-cmd { font-family: var(--font-mono); color: var(--text); }
 .mon-live-text { }
 .mon-live-meta { color: var(--muted); font-style: italic; }
-.mon-live-pending { display: inline-flex; align-items: center; gap: var(--sp-2); }
 .mon-live-line:last-child { border-bottom: 0; }
 .mon-quota { flex-direction: column; align-items: flex-start; }
 .mon-health { flex-direction: column; align-items: flex-start; gap: var(--sp-1); }
@@ -5905,7 +5973,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
    the monitor only sizes and themes the panel it renders into. */
 .mon-hijack-surface { padding: var(--sp-2) var(--sp-3); background: var(--surface); color: var(--text); outline-color: var(--ring-border); }
 
-.mon-empty { color: var(--muted); text-align: center; padding: var(--sp-6) var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-1); }
+.mon-state-skeleton { width: min(100%, 320px); }
 .mon-empty-actions { display: flex; justify-content: center; gap: var(--sp-2); margin-top: var(--sp-3); }
 .mon-empty-hero { padding-top: 18vh; }
 

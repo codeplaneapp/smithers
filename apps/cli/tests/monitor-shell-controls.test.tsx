@@ -221,15 +221,20 @@ describe("node inspector output states", () => {
   test("distinguishes loading from every missing-output outcome", async () => {
     await render(nodeOutputState({ loading: true }));
     expect(byTestId("monitor-output-loading").getAttribute("role")).toBe("status");
+    expect(byTestId("monitor-output-loading").getAttribute("data-slot")).toBe("empty-state");
+    expect(byTestId("monitor-output-loading").querySelector('[data-slot="skeleton"]')).not.toBeNull();
 
     await rerender(nodeOutputState({ failure: { message: "agent failed" } }));
     expect(byTestId("monitor-output-failed").textContent).toContain("Failure details are shown above");
+    expect(byTestId("monitor-output-failed").getAttribute("data-slot")).toBe("empty-state");
 
     await rerender(nodeOutputState({ live: true }));
     expect(byTestId("monitor-output-live").textContent).toContain("running");
+    expect(byTestId("monitor-output-live").querySelector('[data-slot="skeleton"]')).not.toBeNull();
 
     await rerender(nodeOutputState());
     expect(byTestId("monitor-output-empty").textContent).toContain("completed without recording structured output");
+    expect(byTestId("monitor-output-empty").getAttribute("data-slot")).toBe("empty-state");
   });
 
   test("makes output query failures actionable", async () => {
@@ -251,9 +256,12 @@ describe("node inspector transcript states", () => {
   test("distinguishes loading and empty live or completed transcripts", async () => {
     await render(nodeTranscriptState({ loading: true }));
     expect(byTestId("monitor-transcript-loading").getAttribute("role")).toBe("status");
+    expect(byTestId("monitor-transcript-loading").getAttribute("data-slot")).toBe("empty-state");
+    expect(byTestId("monitor-transcript-loading").querySelector('[data-slot="skeleton"]')).not.toBeNull();
 
     await rerender(nodeTranscriptState({ live: true }));
     expect(byTestId("monitor-transcript-empty").textContent).toContain("No transcript events from this node yet");
+    expect(byTestId("monitor-transcript-empty").getAttribute("data-slot")).toBe("empty-state");
 
     await rerender(nodeTranscriptState());
     expect(byTestId("monitor-transcript-empty").textContent).toContain("finished without recording transcript events");
@@ -579,6 +587,25 @@ describe("remaining monitor control migrations", () => {
     await click(rows[0]);
     expect(selected).toEqual(["plan"]);
   });
+
+  test("timeline delegates loading, empty, and failure states to shared primitives", async () => {
+    const props = {
+      treeNodes: [],
+      selectedNode: undefined,
+      onSelectNode: () => {},
+    };
+    await render(<TimelinePanel nodeStates={{ rows: null, failed: false }} {...props} />);
+    expect(document.querySelector('[data-slot="empty-state"]')?.textContent).toContain("Loading timeline");
+    expect(document.querySelector('[data-slot="skeleton"]')).not.toBeNull();
+
+    await rerender(<TimelinePanel nodeStates={{ rows: [], failed: false }} {...props} />);
+    expect(document.querySelector('[data-slot="empty-state"]')?.textContent).toContain(
+      "No task executions recorded yet",
+    );
+
+    await rerender(<TimelinePanel nodeStates={{ rows: null, failed: true }} {...props} />);
+    expect(document.querySelector('[data-slot="alert"]')?.textContent).toContain("Could not load the timeline");
+  });
 });
 
 describe("monitor global keyboard selection", () => {
@@ -768,6 +795,8 @@ describe("migrated monitor surfaces", () => {
       <RunsRail runs={[]} loading connStatus="connecting" selectedRunId={undefined} onSelect={() => {}} />,
     );
     expect(byTestId("monitor-runs").textContent).toContain("Loading runs");
+    expect(byTestId("monitor-empty").getAttribute("data-slot")).toBe("empty-state");
+    expect(byTestId("monitor-empty").querySelector('[data-slot="skeleton"]')).not.toBeNull();
     await rerender(
       <RunsRail runs={[]} loading={false} connStatus="online" selectedRunId={undefined} onSelect={() => {}} />,
     );
@@ -802,6 +831,8 @@ describe("migrated monitor surfaces", () => {
     await render(<RunsTable runs={[]} loading page={1} onPageChange={() => {}} onSelect={() => {}} />);
     expect(byTestId("monitor-empty-detail").textContent).toContain("Loading runs");
     expect(byTestId("monitor-empty-detail").getAttribute("data-state")).toBe("loading");
+    expect(byTestId("monitor-empty-detail").getAttribute("data-slot")).toBe("empty-state");
+    expect(byTestId("monitor-empty-detail").querySelector('[data-slot="skeleton"]')).not.toBeNull();
     await rerender(
       <RunsTable
         runs={[]}
@@ -816,11 +847,13 @@ describe("migrated monitor surfaces", () => {
     expect(byTestId("monitor-empty-detail").textContent).toContain("Couldn't load runs");
     expect(byTestId("monitor-empty-detail").textContent).toContain("query failed");
     expect(byTestId("monitor-empty-detail").getAttribute("data-state")).toBe("error");
+    expect(byTestId("monitor-empty-detail").getAttribute("data-slot")).toBe("alert");
     await click(byTestId("monitor-empty-detail-retry"));
     expect(retries).toBe(1);
     await rerender(<RunsTable runs={[]} loading={false} page={1} onPageChange={() => {}} onSelect={() => {}} />);
     expect(byTestId("monitor-empty-detail").textContent).toContain("No runs yet");
     expect(byTestId("monitor-empty-detail").textContent).toContain("smithers up");
+    expect(byTestId("monitor-empty-detail").getAttribute("data-slot")).toBe("empty-state");
     await rerender(
       <RunsTable
         runs={[]}
@@ -863,6 +896,8 @@ describe("migrated monitor surfaces", () => {
 
     await render(table());
     expect(byTestId("monitor-empty-detail").getAttribute("data-state")).toBe("connecting");
+    expect(byTestId("monitor-empty-detail").getAttribute("data-slot")).toBe("empty-state");
+    expect(byTestId("monitor-empty-detail").querySelector('[data-slot="skeleton"]')).not.toBeNull();
     expect(byTestId("monitor-empty-detail").textContent).toContain("Connecting to the Smithers gateway");
     expect(byTestId("monitor-empty-detail").textContent).not.toContain("No runs yet");
 
@@ -1015,10 +1050,13 @@ describe("monitor event states", () => {
     expect(byTestId("monitor-events-state").getAttribute("data-state")).toBe("loading");
     expect(byTestId("monitor-events-state").getAttribute("role")).toBe("status");
     expect(byTestId("monitor-events-state").textContent).toContain("Loading events");
+    expect(byTestId("monitor-events-state").getAttribute("data-slot")).toBe("empty-state");
+    expect(byTestId("monitor-events-state").querySelector('[data-slot="skeleton"]')).not.toBeNull();
 
     await rerender(<EventLog runId="run-events" eventsState={eventLogState()} />);
     expect(byTestId("monitor-events-state").getAttribute("data-state")).toBe("empty");
     expect(byTestId("monitor-events-state").textContent).toContain("No events recorded for this run yet");
+    expect(byTestId("monitor-events-state").getAttribute("data-slot")).toBe("empty-state");
 
     const chatter = eventLogState({
       events: [{ event: "AgentSessionEvent", seq: 1, stateVersion: 0, payload: {} }],
@@ -1423,9 +1461,12 @@ describe("execution tree unavailable states", () => {
     let retries = 0;
     await render(executionTree({ isLoading: true }));
     expect(byTestId("monitor-tree-loading").textContent).toContain("Loading execution tree");
+    expect(byTestId("monitor-tree-loading").getAttribute("data-slot")).toBe("empty-state");
+    expect(byTestId("monitor-tree-loading").querySelector('[data-slot="skeleton"]')).not.toBeNull();
 
     await rerender(executionTree());
     expect(byTestId("monitor-tree-empty").textContent).toContain("No nodes recorded yet");
+    expect(byTestId("monitor-tree-empty").getAttribute("data-slot")).toBe("empty-state");
 
     await rerender(
       <ExecutionTree
@@ -1443,6 +1484,7 @@ describe("execution tree unavailable states", () => {
       />,
     );
     expect(byTestId("monitor-tree-error").textContent).toContain("live query failed");
+    expect(byTestId("monitor-tree-error").getAttribute("data-slot")).toBe("alert");
     await click(byTestId("monitor-tree-retry"));
     expect(retries).toBe(1);
   });
@@ -1467,6 +1509,7 @@ describe("execution tree unavailable states", () => {
       />,
     );
     expect(byTestId("monitor-frame-empty").textContent).toContain("No nodes in this frame");
+    expect(byTestId("monitor-frame-empty").getAttribute("data-slot")).toBe("empty-state");
 
     await rerender(
       <ExecutionTree
@@ -1484,6 +1527,7 @@ describe("execution tree unavailable states", () => {
       />,
     );
     expect(byTestId("monitor-frame-unavailable").textContent).toContain("snapshot fetch failed");
+    expect(byTestId("monitor-frame-unavailable").getAttribute("data-slot")).toBe("alert");
     await click(byTestId("monitor-frame-retry"));
     await click(byTestId("monitor-frame-live"));
     expect(retries).toBe(1);
@@ -1508,6 +1552,8 @@ describe("execution tree unavailable states", () => {
       />,
     );
     expect(byTestId("monitor-frame-loading").textContent).toContain("previous frame");
+    expect(byTestId("monitor-frame-loading").getAttribute("data-slot")).toBe("alert");
+    expect(byTestId("monitor-frame-loading").querySelector('[data-slot="skeleton"]')).not.toBeNull();
     expect(byTestId("monitor-tree").textContent).toContain("Previous valid frame");
 
     await rerender(
@@ -1520,6 +1566,7 @@ describe("execution tree unavailable states", () => {
       />,
     );
     expect(byTestId("monitor-frame-unavailable").textContent).toContain("Showing the previous frame");
+    expect(byTestId("monitor-frame-unavailable").getAttribute("data-slot")).toBe("alert");
     expect(byTestId("monitor-tree").textContent).toContain("Previous valid frame");
   });
 });
@@ -1555,9 +1602,9 @@ describe("monitor theme contract", () => {
       // The stat surface itself moved to the shared Card slot (data-slot="card",
       // asserted above); .mon-stat keeps only its flex sizing.
       [".mon-stat {", "flex: 1 1 120px"],
-      [".mon-progress-fill", "var(--brand)"],
+      [".mon-state-skeleton", "width: min(100%, 320px)"],
+      [".mon-usage-bar .sui-progress-indicator", "var(--tone, var(--brand))"],
       [".mon-modal.sui-dialog-content", "max-width: none"],
-      [".mon-empty", "var(--muted)"],
       [".mon-hijack-surface", "var(--sp-2)"],
     ];
     for (const [selector, declaration] of rules) {
@@ -1565,7 +1612,20 @@ describe("monitor theme contract", () => {
       expect(start).toBeGreaterThanOrEqual(0);
       expect(monitorCss.slice(start, start + 500)).toContain(declaration);
     }
-    expect(smithersUiCss).toContain(".sui-dialog-content");
+    for (const selector of [
+      ".sui-badge",
+      ".sui-card",
+      ".sui-alert",
+      ".sui-progress",
+      ".sui-skeleton",
+      ".sui-empty",
+      ".sui-dialog-content",
+    ]) {
+      expect(smithersUiCss).toContain(selector);
+    }
+    expect(monitorSource).not.toContain("mon-progress-fill");
+    expect(monitorSource).not.toContain("mon-usage-bar-fill");
+    expect(monitorSource).not.toContain(".mon-empty {");
     expect(monitorCss).not.toContain(".mon-modal-backdrop");
     expect(smithersUiCss).toContain(".sui-card");
     for (const selector of [".sui-badge", ".sui-alert"]) {
@@ -1914,11 +1974,14 @@ describe("unavailable run selections", () => {
     const noOp = () => {};
     await render(<RunSelectionState runId="deep-link-42" loading onRetry={noOp} onReturnToRuns={noOp} />);
     expect(byTestId("monitor-run-loading").textContent).toContain("deep-link-42");
+    expect(byTestId("monitor-run-loading").getAttribute("data-slot")).toBe("empty-state");
+    expect(byTestId("monitor-run-loading").querySelector('[data-slot="skeleton"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="monitor-run-return"]')).toBeNull();
 
     await rerender(<RunSelectionState runId="deep-link-42" loading={false} onRetry={noOp} onReturnToRuns={noOp} />);
     expect(byTestId("monitor-run-unavailable").textContent).toContain("Run unavailable");
     expect(byTestId("monitor-run-unavailable").textContent).toContain("deep-link-42");
+    expect(byTestId("monitor-run-unavailable").getAttribute("data-slot")).toBe("empty-state");
     expect(byTestId("monitor-run-refresh")).toBeTruthy();
     expect(byTestId("monitor-run-return")).toBeTruthy();
 
@@ -1942,6 +2005,7 @@ describe("unavailable run selections", () => {
       />,
     );
     expect(byTestId("monitor-run-query-error").getAttribute("role")).toBe("alert");
+    expect(byTestId("monitor-run-query-error").getAttribute("data-slot")).toBe("alert");
     expect(byTestId("monitor-run-query-error").textContent).toContain("Couldn't load run");
     expect(byTestId("monitor-run-query-error").textContent).toContain("gateway timed out");
     expect(byTestId("monitor-run-retry")).toBeTruthy();
