@@ -1,4 +1,6 @@
 import { attachDurableRetryState, makeWorkflowSession, parseDurableRetryState } from "@smthrs/scheduler";
+import { stampIdenticalFailureStreak } from "./failure-streak.js";
+import { attachRunFailureRecovery } from "./run-failure-recovery.js";
 import { ReactWorkflowDriver } from "@smthrs/react-reconciler/driver";
 import { SmithersRenderer } from "@smthrs/react-reconciler/dom/renderer";
 import { normalizeRunStartedBy } from "@smthrs/driver";
@@ -89,10 +91,11 @@ import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { toSmithersError } from "@smthrs/errors/toSmithersError";
 import { logDebug, logError, logInfo, logWarning } from "@smthrs/observability/logging";
+import { formatRuntimeOwnerId } from "@smthrs/db/runtime-owner";
 import { isPidAlive, parseRuntimeOwnerPid } from "./runtime-owner.js";
 import { spawn as nodeSpawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { platform } from "node:os";
+import { hostname, platform } from "node:os";
 import { annotateSmithersTrace, smithersSpanNames, withSmithersSpan } from "@smthrs/observability";
 import { withTaskRuntime } from "@smthrs/driver/task-runtime";
 import { hashCapabilityRegistry } from "@smthrs/agents/capability-registry";
@@ -1074,6 +1077,21 @@ function parseJsonRecord(value) {
   }
 }
 /**
+ * Only ordinary approval tasks can be restored directly into a fresh
+ * scheduler session. Replay-safety approvals gate an attempt rather than the
+ * task descriptor, and HumanTask decisions must pass through the durable
+ * request-validation bridge on every resume.
+ * @param {ApprovalRow} approval
+ * @returns {boolean}
+ */
+function isRestorableApprovedTask(approval) {
+  if (approval.status !== "approved") return false;
+  const request = parseJsonRecord(approval.requestJson);
+  if (request?.kind === "ReplayUnsafeApproval") return false;
+  const metadata = request?.metadata;
+  return !(metadata && typeof metadata === "object" && !Array.isArray(metadata) && metadata.humanTask === true);
+}
+/**
  * @param {ApprovalRow | undefined} approval
  * @param {{ runId: string; nodeId: string; iteration: number; fingerprint: string; authorizedAttempt: number }} expected
  * @returns {boolean}
@@ -1822,7 +1840,7 @@ function workflowSessionSummaryKey(summary) {
   return JSON.stringify(summary);
 }
 function buildRuntimeOwnerId() {
-  return `pid:${process.pid}:${randomUUID()}`;
+  return formatRuntimeOwnerId(process.pid, hostname(), randomUUID());
 }
 const DURABILITY_CONFIG_KEY = "__smithersDurability";
 const DURABILITY_METADATA_VERSION = 2;
@@ -8460,6 +8478,17 @@ async function legacyExecuteTask(
       }
       failureErrorJson.details = details;
     }
+    // Non-progress detection (#1500): stamp the error signature and the
+    // identical-failure streak onto the attempt payload and mirror the
+    // scheduler's stall verdict, used below to persist the node row as
+    // `stalled` and to skip the NodeRetrying event.
+    const {
+      signature: failureSignature,
+      streak: identicalFailureStreak,
+      stalled: stalledVerdict,
+    } = stampIdenticalFailureStreak(failureErrorJson, attempts, desc, {
+      isQuota: isQuotaErrorPayload(failureErrorJson),
+    });
     stampDurableRetryState({
       attemptMeta,
       attempts,
@@ -8492,7 +8521,7 @@ async function legacyExecuteTask(
           runId,
           nodeId: desc.nodeId,
           iteration: desc.iteration,
-          state: "failed",
+          state: stalledVerdict ? "stalled" : "failed",
           lastAttempt: attemptNo,
           updatedAtMs: failedAtMs,
           outputTable: desc.outputTableName,
@@ -8534,6 +8563,25 @@ async function legacyExecuteTask(
         timestampMs: nowMs(),
       }),
     );
+    if (stalledVerdict) {
+      // The attempt failed AND the node stopped making progress: emit the
+      // terminal stall verdict as its own event so run UIs and logs can
+      // distinguish a livelocked node from an ordinary retryable failure
+      // (#1500).
+      await Effect.runPromise(
+        eventBus.emitEventWithPersist({
+          type: "NodeStalled",
+          runId,
+          nodeId: desc.nodeId,
+          iteration: desc.iteration,
+          attempt: attemptNo,
+          identicalFailures: identicalFailureStreak,
+          signature: failureSignature,
+          error: failureErrorJson,
+          timestampMs: nowMs(),
+        }),
+      );
+    }
     await annotateTaskSpan({
       status: "failed",
     });
@@ -8543,8 +8591,8 @@ async function legacyExecuteTask(
     const retryConsumingFailedAttempts = failedAttempts.filter((a) => !isQuotaTaskFailure(a));
     const latestFailedAttemptIsQuota = isQuotaTaskFailure(failedAttempts[0]);
     if (
-      latestFailedAttemptIsQuota ||
-      (!hasNonRetryableFailure && retryConsumingFailedAttempts.length <= desc.retries)
+      !stalledVerdict &&
+      (latestFailedAttemptIsQuota || (!hasNonRetryableFailure && retryConsumingFailedAttempts.length <= desc.retries))
     ) {
       await Effect.runPromise(
         eventBus.emitEventWithPersist({
@@ -9908,6 +9956,13 @@ async function runWorkflowBodyDriver(workflow, opts) {
           );
           return existingOutput;
         }
+        // A node the previous pass marked `stalled` (#1500) stays terminal:
+        // re-dispatching it after a resume would restart the very livelock
+        // stall detection just stopped.
+        const priorNode = await Effect.runPromise(adapter.getNode(runId, task.nodeId, task.iteration));
+        if (priorNode?.state === "stalled") {
+          throw await readTaskFailure(task);
+        }
         const attempts = await Effect.runPromise(adapter.listAttempts(runId, task.nodeId, task.iteration));
         const failedAttempts = attempts.filter((attempt) => attempt.state === "failed");
         const hasNonRetryableFailure = failedAttempts.some((attempt) => !isRetryableTaskFailure(attempt));
@@ -9987,7 +10042,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
           ),
         );
         const node = await Effect.runPromise(adapter.getNode(runId, task.nodeId, task.iteration));
-        if (node?.state === "failed") {
+        // `stalled` is a terminal failure verdict (#1500), so it surfaces the
+        // attempt failure exactly like `failed` does.
+        if (node?.state === "failed" || node?.state === "stalled") {
           throw await readTaskFailure(task);
         }
         if (node?.state === "cancelled") {
@@ -10357,6 +10414,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
       }
       if (runOwnedByCurrentProcess) {
         await cancelPendingTimersBridge(adapter, runId, eventBus, "run-failed");
+        // Point the operator at the last good checkpoint with concrete
+        // resume/replay commands (#1500 §4) before the error is persisted.
+        await attachRunFailureRecovery(adapter, runId, resolvedWorkflowPath ?? opts.workflowPath, errorInfo);
         const failedAtMs = nowMs();
         const failed = await commitTerminalRunWithSteerExpiry(adapter, eventBus, {
           writeGroup: "driver run failure",
@@ -10803,6 +10863,14 @@ async function runWorkflowBodyDriver(workflow, opts) {
     const retrySessionState = opts.resume
       ? retrySessionStateFromAttempts(await Effect.runPromise(adapter.listAttemptsForRun(runId)))
       : { retryCounts: new Map(), retryWait: new Map() };
+    const initialApprovals = new Set();
+    if (opts.resume) {
+      const decidedApprovals = await Effect.runPromise(adapter.listDecidedApprovals(runId));
+      for (const approval of decidedApprovals) {
+        if (!isRestorableApprovedTask(approval)) continue;
+        initialApprovals.add(buildStateKey(approval.nodeId, approval.iteration));
+      }
+    }
     workflowSession = makeWorkflowSession({
       runId,
       nowMs,
@@ -10812,6 +10880,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
       initialTimerStarts: carriedTimerStarts,
       initialRetryCounts: retrySessionState.retryCounts,
       initialRetryWait: retrySessionState.retryWait,
+      initialApprovals,
       evaluateAspectBudget: (descriptor) =>
         budgetTracker ? evaluateAspectBudget(descriptor.aspects, budgetTracker.snapshot(nowMs())) : null,
       onAspectBudgetSkip: (descriptor) => {
@@ -11135,6 +11204,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
     const errorInfo = errorToJson(err);
     if (runOwnedByCurrentProcess) {
       await cancelPendingTimersBridge(adapter, runId, eventBus, "run-failed");
+      await attachRunFailureRecovery(adapter, runId, resolvedWorkflowPath ?? opts.workflowPath, errorInfo);
       const failedAtMs = nowMs();
       const failed = await commitTerminalRunWithSteerExpiry(adapter, eventBus, {
         writeGroup: "unhandled run failure",
@@ -11265,6 +11335,7 @@ export const __engineInternals = {
   summarizeWorkflowSessionDecision,
   summarizeLegacySchedulerDecision,
   workflowSessionSummaryKey,
+  isRestorableApprovedTask,
   coercePositiveInt,
   buildInputRow,
   normalizeInputRow,

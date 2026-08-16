@@ -152,6 +152,7 @@ export function toRunStatus(state: string | undefined): string {
     case "canceled":
       return "cancelled";
     case "failed":
+    case "stalled":
     case "errored":
       return "failed";
     case "waiting-approval":

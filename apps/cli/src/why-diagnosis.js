@@ -606,6 +606,18 @@ function buildDiagnosis(params) {
   const information = boundaryInformation ? [boundaryInformation] : [];
   const concurrencyWarning = latestConcurrencySaturationWarning(events);
   const warnings = concurrencyWarning ? [concurrencyWarning] : [];
+  if (status === "failed" && lastFrame) {
+    // Point at the last good checkpoint with the exact replay command
+    // (#1500 §4): recovery affordances exist but went unused when the
+    // operator had to reconstruct them by hand.
+    const frameNo = parseNumber(lastFrame.frameNo ?? lastFrame.frame_no);
+    if (frameNo != null) {
+      const workflowArg = run.workflowPath ? shellEscape(run.workflowPath) : "<workflow>";
+      information.push(
+        `Last good checkpoint: frame ${frameNo}. Resume in place with \`${buildResumeUnblocker(run)}\` or replay from the checkpoint with \`smithers replay ${workflowArg} --run-id ${runId} --frame ${frameNo}\`.`,
+      );
+    }
+  }
   if (status === "finished" || status === "cancelled") {
     // A loop that exited via return-last with its `until` predicate still false
     // is exhaustion, not success — name the loop and the unmet condition
@@ -988,6 +1000,29 @@ function buildDiagnosis(params) {
       maxAttempts: descriptor?.retries != null ? descriptor.retries + 1 : null,
     });
   }
+  for (const node of nodes.filter((entry) => entry.state === "stalled")) {
+    const key = nodeKey(node.nodeId, node.iteration ?? 0);
+    const nodeAttempts = attemptsByNode.get(key) ?? [];
+    const latestFailed = nodeAttempts.filter((attempt) => attempt.state === "failed")[0];
+    const latestError = parseObjectJson(latestFailed?.errorJson);
+    const latestDetails = isRecord(latestError.details) ? latestError.details : {};
+    const identicalFailures = parseNumber(latestDetails.identicalFailureStreak);
+    const lastError = parseErrorSummary(latestFailed?.errorJson);
+    blockers.push({
+      kind: "stalled",
+      nodeId: node.nodeId,
+      iteration: node.iteration ?? 0,
+      reason:
+        `Node stopped making progress: ${identicalFailures != null ? `${identicalFailures} ` : ""}consecutive attempts failed with an identical error.` +
+        (lastError ? ` Last error: ${lastError}` : ""),
+      waitingSince: waitingSinceFallback(nowMs, node.updatedAtMs, run.finishedAtMs, run.startedAtMs),
+      unblocker: buildRetryTaskUnblocker(run, node.nodeId, node.iteration ?? 0),
+      context:
+        "Retrying the same way will reproduce the same failure. Fix the underlying cause (or the contract the output must satisfy), then retry the node or resume the run.",
+      attempt: identicalFailures,
+      maxAttempts: null,
+    });
+  }
   for (const node of nodes.filter((entry) => entry.state === "failed")) {
     const key = nodeKey(node.nodeId, node.iteration ?? 0);
     const insight = retryInsightsByNode.get(key);
@@ -1041,7 +1076,9 @@ function buildDiagnosis(params) {
     if (dependsOn.length === 0) continue;
     for (const dependencyId of dependsOn) {
       const candidateNodes = nodesByLogicalId.get(logicalNodeId(dependencyId)) ?? [];
-      const failedDependency = candidateNodes.find((candidate) => candidate.state === "failed");
+      const failedDependency = candidateNodes.find(
+        (candidate) => candidate.state === "failed" || candidate.state === "stalled",
+      );
       if (!failedDependency) continue;
       const failedDescriptor = resolveDescriptorMetadata(descriptorMetadata, failedDependency.nodeId);
       if (failedDescriptor?.continueOnFail) continue;
@@ -1310,6 +1347,7 @@ export function diagnosisCtaCommands(diagnosis) {
     "stale-task-heartbeat": "Retry timed-out task",
     "retry-backoff": "Retry blocked node",
     "retries-exhausted": "Resume run after fixing failure",
+    stalled: "Retry stalled node after fixing its cause",
     "stale-heartbeat": "Force resume orphaned run",
     "engine-busy": "Tail busy engine logs",
     "dependency-failed": "Resume after dependency fix",

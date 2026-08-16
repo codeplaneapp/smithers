@@ -7,6 +7,7 @@ export type WhyBlockerKind =
   | "stale-task-heartbeat"
   | "retry-backoff"
   | "retries-exhausted"
+  | "stalled"
   | "stale-heartbeat"
   | "engine-busy"
   | "dependency-failed"

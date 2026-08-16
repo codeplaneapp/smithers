@@ -47,9 +47,11 @@ function findSqliteErrorMetadata(error) {
       const message = metadata.message.toLowerCase();
       if (
         metadata.code.startsWith("SQLITE_BUSY") ||
+        metadata.code.startsWith("SQLITE_PROTOCOL") ||
         metadata.code.startsWith("SQLITE_IOERR") ||
         message.includes("database is locked") ||
         message.includes("database is busy") ||
+        message.includes("locking protocol") ||
         message.includes("disk i/o error")
       ) {
         return metadata;

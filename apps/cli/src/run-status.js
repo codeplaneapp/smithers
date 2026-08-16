@@ -221,7 +221,7 @@ export function parseFrameDependsOn(xmlJson) {
  * @property {"done"|"degraded"|"running-healthy"|"progressing"|"stalled"|"orphaned"|"blocked"|"waiting-quota"|"paused"|"cancelled"|"failed"} verdict
  * @property {string} reason
  * @property {{ state: string; unhealthy?: { kind: string; lastHeartbeatAt?: string } } | undefined} [liveness] derived process liveness; absent when it was not computed
- * @property {{ finished: number; inProgress: number; pending: number; failed: number; waitingApproval: number; waitingEvent: number; waitingTimer: number; skipped: number; other: number; total: number }} counts
+ * @property {{ finished: number; inProgress: number; pending: number; failed: number; stalled: number; waitingApproval: number; waitingEvent: number; waitingTimer: number; skipped: number; other: number; total: number }} counts
  * @property {Array<{ engine: string; model: string; attempts: number; quotaParked: boolean }>} modelMix
  * @property {{ recentFinished: number; windowMs: number; totalFinished: number; lastFinishedAtMs: number | null }} throughput
  * @property {RunStatusBottleneckEntry[]} bottleneck
@@ -273,6 +273,7 @@ export function summarizeRunStatus(params) {
     inProgress: 0,
     pending: 0,
     failed: 0,
+    stalled: 0,
     waitingApproval: 0,
     waitingEvent: 0,
     waitingTimer: 0,
@@ -314,6 +315,12 @@ export function summarizeRunStatus(params) {
         break;
       case "failed":
         counts.failed += 1;
+        failedNodes.push(node);
+        break;
+      case "stalled":
+        // A stalled node livelocked on an identical error (#1500). Count it
+        // apart from ordinary failures, but gate dependents like a failure.
+        counts.stalled += 1;
         failedNodes.push(node);
         break;
       case "waiting-approval":
@@ -822,6 +829,7 @@ export function renderRunStatusHuman(summary) {
   const c = summary.counts;
   const waiting = c.waitingApproval + c.waitingEvent + c.waitingTimer;
   const nodeParts = [`${c.finished} done`, `${c.inProgress} running`, `${c.pending} pending`, `${c.failed} failed`];
+  if (c.stalled > 0) nodeParts.push(`${c.stalled} stalled`);
   if (waiting > 0) nodeParts.push(`${waiting} waiting`);
   if (c.skipped > 0) nodeParts.push(`${c.skipped} skipped`);
   lines.push(`${label("Nodes")}${nodeParts.join(" · ")}`);

@@ -91,7 +91,7 @@ describe("CLI_SUBCOMMANDS command registry", () => {
     expect(groupCommands("cron")).toEqual(["add", "list", "rm", "start"]);
     expect(groupCommands("memory")).toEqual(["get", "list", "rm", "set"]);
     expect(groupCommands("openapi")).toEqual(["generate", "list"]);
-    expect(groupCommands("agents")).toEqual(["add", "capabilities", "doctor", "list", "remove", "test"]);
+    expect(groupCommands("agents")).toEqual(["add", "capabilities", "doctor", "list", "reauth", "remove", "test"]);
     expect(groupCommands("token")).toEqual(["exec", "issue", "revoke"]);
     expect(groupCommands("claude")).toEqual(["monitor", "node-wait", "subscribe", "tick", "unsubscribe"]);
   });
