@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { listAccounts } from "@smthrs/accounts";
-import { accountQuotaBlock, orderAccountsByUsage, readAccountQuotaState } from "@smthrs/usage";
+import { accountQuotaBlock, orderAccountsByUsage, readAccountQuotaState, readUsageCache } from "@smthrs/usage";
 
 /** @param {string[]} argv */
 export function parseClaudeShellArgs(argv) {
@@ -31,6 +31,18 @@ export function parseClaudeShellArgs(argv) {
   return { label, dryRun, forwarded };
 }
 
+/**
+ * Arguments to forward when `argv` invokes `claude-shell`, else `null`. Only
+ * the leading token counts: an account label or workflow argument named
+ * "claude-shell" must not hijack an unrelated command.
+ *
+ * @param {string[]} argv
+ * @returns {string[] | null}
+ */
+export function claudeShellArgv(argv) {
+  return argv[0] === "claude-shell" ? argv.slice(1) : null;
+}
+
 /** @param {string[]} argv */
 function forwardedModel(argv) {
   const equals = argv.find((arg) => arg.startsWith("--model="));
@@ -57,7 +69,12 @@ export function runClaudeShell(argv, deps = {}) {
     stdout.write("Usage: smithers claude-shell [--label LABEL] [--dry-run] [--] [CLAUDE_ARGS...]\n");
     return 0;
   }
-  const registered = (deps.accounts ?? listAccounts(env)).filter((account) => account.provider === "claude-code");
+  // Only accounts with an isolated config directory can be selected: the
+  // wrapper works by pointing CLAUDE_CONFIG_DIR at one subscription, and an
+  // account without one would silently launch the ambient `~/.claude` login.
+  const registered = (deps.accounts ?? listAccounts(env)).filter(
+    (account) => account.provider === "claude-code" && account.configDir,
+  );
   const candidates = parsed.label ? registered.filter((account) => account.label === parsed.label) : registered;
   if (candidates.length === 0) {
     stderr.write(
@@ -70,12 +87,15 @@ export function runClaudeShell(argv, deps = {}) {
   const model = forwardedModel(parsed.forwarded);
   const ordered = orderAccountsByUsage(candidates, { env, modelFor: () => model });
   const quota = readAccountQuotaState(env).entries;
-  const selected = ordered.find((account) => !accountQuotaBlock(quota, account.label, model));
+  const usage = readUsageCache(env).entries;
+  const selected = ordered.find(
+    (account) => !accountQuotaBlock(quota, account.label, model, usage[account.label]?.report),
+  );
   if (!selected) {
     const soonest = ordered[0];
-    const block = accountQuotaBlock(quota, soonest.label, model);
+    const block = accountQuotaBlock(quota, soonest.label, model, usage[soonest.label]?.report);
     stderr.write(
-      `All registered Claude accounts are rate-limited. ${soonest.label} resets at ${new Date(block.untilMs).toISOString()}.\n`,
+      `${parsed.label ? `Claude account ${parsed.label} is` : "All registered Claude accounts are"} rate-limited. ${soonest.label} resets at ${new Date(block.untilMs).toISOString()}.\n`,
     );
     return 75;
   }

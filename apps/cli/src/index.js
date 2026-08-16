@@ -195,7 +195,7 @@ import { getUsageForAccounts, formatUsageReports, readClaudeCredentials } from "
 import { runAgentAdd, pingAccount } from "./agent-commands/runAgentAdd.js";
 import { runAgentAddWithTmuxLogin } from "./agent-commands/tmuxLogin.js";
 import { reauthClaudeAccounts } from "./agent-commands/reauthClaudeAccounts.js";
-import { runClaudeShell } from "./agent-commands/claudeShell.js";
+import { claudeShellArgv, runClaudeShell } from "./agent-commands/claudeShell.js";
 import { findDuplicateAccounts, formatAccountIdentity, readAccountIdentity } from "./agent-commands/accountIdentity.js";
 import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
 import { getWorkflowFollowUpCtas } from "./workflow-pack.js";
@@ -12856,6 +12856,9 @@ const cli = Cli.create({
       return c.ok({ reports });
     },
   })
+  // Registered for `--help` and the generated command reference only. `main()`
+  // intercepts `claude-shell` before parsing so arbitrary Claude flags reach
+  // the spawned process instead of failing this schema.
   .command("claude-shell", {
     description: "Launch Claude Code with the registered account that has the most quota headroom.",
     options: z.object({
@@ -13578,9 +13581,11 @@ async function main() {
   }
   const rawArgv = process.argv.slice(2);
   let argv = rawArgv.map((arg) => (arg === "-v" ? "--version" : arg));
-  const claudeShellIndex = argv.indexOf("claude-shell");
-  if (claudeShellIndex >= 0) {
-    process.exitCode = runClaudeShell(argv.slice(claudeShellIndex + 1));
+  // Intercept before the parser so every argument after the command name
+  // reaches `claude` verbatim instead of failing the command's own schema.
+  const claudeShellForwarded = claudeShellArgv(argv);
+  if (claudeShellForwarded) {
+    process.exitCode = runClaudeShell(claudeShellForwarded);
     return;
   }
   argv = rewriteGuiShortcutArgv(argv);

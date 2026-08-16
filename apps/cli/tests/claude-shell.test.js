@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { recordAccountQuotaLimit, writeUsageCache } from "@smthrs/usage";
-import { parseClaudeShellArgs, runClaudeShell } from "../src/agent-commands/claudeShell.js";
+import { claudeShellArgv, parseClaudeShellArgs, runClaudeShell } from "../src/agent-commands/claudeShell.js";
 
 const account = (label) => ({ label, provider: "claude-code", configDir: `/${label}` });
 const sink = () => ({
@@ -15,6 +15,31 @@ const sink = () => ({
 });
 
 describe("claude-shell", () => {
+  test("claims argv only when claude-shell leads it", () => {
+    expect(claudeShellArgv(["claude-shell", "--", "--model", "opus"])).toEqual(["--", "--model", "opus"]);
+    expect(claudeShellArgv(["claude-shell"])).toEqual([]);
+    // A label, workflow argument, or run id named "claude-shell" belongs to
+    // the command the user actually typed.
+    expect(claudeShellArgv(["agents", "remove", "claude-shell"])).toBeNull();
+    expect(claudeShellArgv(["up", "--name", "claude-shell"])).toBeNull();
+    expect(claudeShellArgv([])).toBeNull();
+  });
+
+  test("ignores a Claude account with no isolated config directory", () => {
+    const env = { SMITHERS_HOME: mkdtempSync(join(tmpdir(), "smithers-shell-")) };
+    const stderr = sink();
+    // Without CLAUDE_CONFIG_DIR the wrapper would launch the ambient
+    // ~/.claude login while reporting a registered label.
+    expect(
+      runClaudeShell(["--dry-run"], {
+        env,
+        accounts: [{ label: "ambient", provider: "claude-code" }],
+        stderr,
+      }),
+    ).toBe(4);
+    expect(stderr.output).toContain("No Claude accounts are registered.");
+  });
+
   test("parses wrapper flags and forwards Claude flags", () => {
     expect(parseClaudeShellArgs(["--label", "claude-2", "--", "--model", "opus"])).toEqual({
       label: "claude-2",
@@ -25,8 +50,10 @@ describe("claude-shell", () => {
 
   test("forwards Claude help after the separator", () => {
     const spawn = mock(() => ({ status: 0 }));
+    const env = { SMITHERS_HOME: mkdtempSync(join(tmpdir(), "smithers-shell-")) };
     expect(
       runClaudeShell(["--", "--help"], {
+        env,
         accounts: [account("claude-1")],
         spawn,
         stderr: sink(),
