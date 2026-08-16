@@ -1,7 +1,7 @@
 // smithers-source: authored
 // smithers-display-name: PR Review, Improve & Merge
 /** @jsxImportSource smthrs */
-import { createSmithers, Sequence, Loop } from "smthrs";
+import { createSmithers, Sequence, Loop, UI } from "smthrs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -177,6 +177,7 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="pr-review-improve-merge">
+      <UI entry="../ui/pr-review-improve-merge.tsx" title="PR Review · Improve · Merge" />
       <Sequence>
         {/* 1. FIRST REVIEW — legitimacy + improvement list (read-only, Sol). */}
         <Task id="review" output={outputs.review} agent={reviewer}>

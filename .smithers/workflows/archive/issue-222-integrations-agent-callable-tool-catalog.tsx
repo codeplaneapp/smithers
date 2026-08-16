@@ -8,9 +8,9 @@ import {
   implementOutputSchema,
   validateOutputSchema,
   validationLoopState,
-} from "../components/ValidationLoop";
-import { reviewOutputSchema, reviewSynthesisSchema } from "../components/Review";
-import { codexFirst } from "../lib/codexAccounts";
+} from "../../components/ValidationLoop";
+import { reviewOutputSchema, reviewSynthesisSchema } from "../../components/Review";
+import { codexFirst } from "../../lib/codexAccounts";
 
 // Codex-first role pools: Sol plans/reviews, Luna implements, Terra validates.
 const solPool: AgentLike[] = codexFirst({ model: "gpt-5.6-sol", skipGitRepoCheck: true }, [

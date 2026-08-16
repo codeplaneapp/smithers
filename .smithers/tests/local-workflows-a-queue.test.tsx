@@ -30,24 +30,24 @@ const triage = (number: number, action: "fix" | "skip" | "blocked") =>
 describe("Local-A causal queue and recovery workflows", () => {
   test("codex queue gates discovery, triage, research, planning, and exact candidate readiness", async () => {
     const input = { issueNumbers: [7, 8], dryRun: true, reviewIterations: 2 };
-    const discovered = await render("codex-issue-merge-queue.tsx", input, {
+    const discovered = await render("archive/codex-issue-merge-queue.tsx", input, {
       discovery: row("discover", { issues: [issue(7), issue(8)], summary: "two" }),
     });
     has(discovered, "i7:triage");
-    const triaged = await render("codex-issue-merge-queue.tsx", input, {
+    const triaged = await render("archive/codex-issue-merge-queue.tsx", input, {
       discovery: row("discover", { issues: [issue(7), issue(8)], summary: "two" }),
       triage: [...triage(7, "skip"), ...triage(8, "blocked")],
     });
     absent(triaged, "i7:bootstrap-deps");
     absent(triaged, "i8:bootstrap-deps");
 
-    const selected = await render("codex-issue-merge-queue.tsx", input, {
+    const selected = await render("archive/codex-issue-merge-queue.tsx", input, {
       discovery: row("discover", { issues: [issue(7), issue(8)], summary: "two" }),
       triage: [...triage(7, "skip"), ...triage(8, "fix")],
     });
     has(selected, "i8:bootstrap-deps");
     const setup = { issueNumber: 8, cwd: "/tmp/issue-8", baseSha: "base", ready: true, summary: "ready" };
-    const researched = await render("codex-issue-merge-queue.tsx", input, {
+    const researched = await render("archive/codex-issue-merge-queue.tsx", input, {
       discovery: row("discover", { issues: [issue(8)], summary: "one" }),
       triage: triage(8, "fix"),
       setup: row("i8:bootstrap-deps", setup),
@@ -62,7 +62,7 @@ describe("Local-A causal queue and recovery workflows", () => {
       recommendedTests: ["test"],
       report: "report",
     };
-    const planned = await render("codex-issue-merge-queue.tsx", input, {
+    const planned = await render("archive/codex-issue-merge-queue.tsx", input, {
       discovery: row("discover", { issues: [issue(8)], summary: "one" }),
       triage: triage(8, "fix"),
       setup: row("i8:bootstrap-deps", setup),
@@ -78,7 +78,7 @@ describe("Local-A causal queue and recovery workflows", () => {
       risks: [],
       panelScore: { sol: 90, fable: 80, winner: "sol", rationale: "grounded" },
     };
-    const implementing = await render("codex-issue-merge-queue.tsx", input, {
+    const implementing = await render("archive/codex-issue-merge-queue.tsx", input, {
       discovery: row("discover", { issues: [issue(8)], summary: "one" }),
       triage: triage(8, "fix"),
       setup: row("i8:bootstrap-deps", setup),
@@ -95,7 +95,7 @@ describe("Local-A causal queue and recovery workflows", () => {
       ready: true,
       summary: "candidate",
     };
-    const ready = await render("codex-issue-merge-queue.tsx", input, {
+    const ready = await render("archive/codex-issue-merge-queue.tsx", input, {
       discovery: row("discover", { issues: [issue(8)], summary: "one" }),
       triage: triage(8, "fix"),
       setup: row("i8:bootstrap-deps", setup),
@@ -116,7 +116,7 @@ describe("Local-A causal queue and recovery workflows", () => {
     expect(reviewTask.parallelGroupId).toBeDefined();
     expect(task(ready, "i8:candidate-gate").parallelGroupId).toBeDefined();
     expect(task(ready, "i8:candidate-gate").parallelMaxConcurrency).toBe(2);
-    const stale = await render("codex-issue-merge-queue.tsx", input, {
+    const stale = await render("archive/codex-issue-merge-queue.tsx", input, {
       discovery: row("discover", { issues: [issue(8)], summary: "one" }),
       triage: triage(8, "fix"),
       setup: row("i8:bootstrap-deps", setup),
@@ -155,7 +155,7 @@ describe("Local-A causal queue and recovery workflows", () => {
 
   test("codex terminal summary rejects zero work and failed final gates, while dry-run does not close", async () => {
     const frame = await render(
-      "codex-issue-merge-queue.tsx",
+      "archive/codex-issue-merge-queue.tsx",
       { dryRun: true },
       { discovery: row("discover", { issues: [], summary: "empty" }) },
     );
@@ -166,7 +166,7 @@ describe("Local-A causal queue and recovery workflows", () => {
     absent(frame, "close-issue");
 
     const mergedButRed = await render(
-      "codex-issue-merge-queue.tsx",
+      "archive/codex-issue-merge-queue.tsx",
       { dryRun: false },
       {
         discovery: row("discover", { issues: [issue(7)], summary: "one" }),
@@ -195,7 +195,7 @@ describe("Local-A causal queue and recovery workflows", () => {
     const redPublication = await runTask(task(mergedButRed, "publish-main"));
     expect(redPublication).toMatchObject({ status: "blocked", gatePassed: false });
     const stagedDryRun = await render(
-      "codex-issue-merge-queue.tsx",
+      "archive/codex-issue-merge-queue.tsx",
       { dryRun: true },
       {
         discovery: row("discover", { issues: [issue(7)], summary: "one" }),
@@ -283,12 +283,12 @@ describe("Local-A causal queue and recovery workflows", () => {
         reviewDiff: "diff",
       }),
     };
-    const landing = await render("codex-issue-merge-queue.tsx", input, common);
+    const landing = await render("archive/codex-issue-merge-queue.tsx", input, common);
     has(landing, "i7:queue-review-panel-moderator");
     has(landing, "i7:queue-gate");
     expect(task(landing, "i7:land-local-main")).toBeDefined();
     expect(task(landing, "i7:queue-rebase").parallelGroupId).toBe("local-main-entry-serialization");
-    const badReview = await render("codex-issue-merge-queue.tsx", input, {
+    const badReview = await render("archive/codex-issue-merge-queue.tsx", input, {
       ...common,
       review: row("i7:queue-review-panel-moderator", {
         issueNumber: 7,

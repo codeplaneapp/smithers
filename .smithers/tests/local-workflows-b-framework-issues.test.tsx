@@ -21,21 +21,21 @@ type PlannedCase = {
 
 const plannedCases: PlannedCase[] = [
   {
-    file: "issue-222-integrations-agent-callable-tool-catalog.tsx",
+    file: "archive/issue-222-integrations-agent-callable-tool-catalog.tsx",
     prefix: "i222",
     inputKey: "spec",
     defaultNeedle: "buildAuthorizationUrl",
     panelistIds: ["i222:impl:review-panelist-0"],
   },
   {
-    file: "issue-491-review-cloud-hosted-walkthrough-lifecycl.tsx",
+    file: "archive/issue-491-review-cloud-hosted-walkthrough-lifecycl.tsx",
     prefix: "p491",
     inputKey: "spec",
     defaultNeedle: "/api/plan",
     panelistIds: ["p491:impl:review-panelist-0", "p491:impl:review-panelist-1"],
   },
   {
-    file: "issue-522-components-seven-composite-components-ar.tsx",
+    file: "archive/issue-522-components-seven-composite-components-ar.tsx",
     prefix: "p522",
     inputKey: "spec",
     defaultNeedle: "ReviewLoop",
@@ -105,7 +105,7 @@ describe("issue workflow owner coverage", () => {
   );
 
   test("issue 306 defaults to its real case08 request", async () => {
-    const module = await load("issue-306-audit-test-coverage-gaps-apps-gateway-ui.tsx");
+    const module = await load("archive/issue-306-audit-test-coverage-gaps-apps-gateway-ui.tsx");
     expect(module.inputSchema.parse({}).prompt).toContain("case08-inspector-real-product-path.test.ts");
   });
 
@@ -114,7 +114,7 @@ describe("issue workflow owner coverage", () => {
     { name: "red then green", outcomes: [false, true], trace: 2, finalPassed: true },
     { name: "all red", outcomes: [false, false], trace: 2, finalPassed: false },
   ])("issue 306: $name", async ({ outcomes, trace, finalPassed }) => {
-    const file = "issue-306-audit-test-coverage-gaps-apps-gateway-ui.tsx";
+    const file = "archive/issue-306-audit-test-coverage-gaps-apps-gateway-ui.tsx";
     const module = await load(file);
     const sim = simulate(module.default, {
       input: { prompt: "INPUT_SENTINEL_306" },

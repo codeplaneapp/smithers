@@ -7,13 +7,13 @@ import { existsSync, mkdirSync, mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod/v4";
-import { subscriptionCodexFirst } from "../lib/codexAccounts";
-import { protectedAutomationPaths } from "../lib/codexIssueMergeQueue";
+import { subscriptionCodexFirst } from "../../lib/codexAccounts";
+import { protectedAutomationPaths } from "../../lib/codexIssueMergeQueue";
 import {
   buildLocalGateCodexPolicy,
   buildPublicIssueAgentPolicy,
   resolvePublicIssueToolchainReadPaths,
-} from "../lib/publicIssueAgentPolicy";
+} from "../../lib/publicIssueAgentPolicy";
 
 const DEFAULT_REPO = "smithersai/smithers";
 const LOCAL_GATE_COMMAND = "pnpm typecheck && pnpm test";

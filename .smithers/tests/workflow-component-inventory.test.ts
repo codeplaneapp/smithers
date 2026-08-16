@@ -76,7 +76,6 @@ const workflowOwners = {
     "close-issues.tsx",
   ],
   "./tests/local-workflows-a-queue.test.tsx": [
-    "codex-issue-merge-queue.tsx",
     "consolidate-tanstack-db.tsx",
     "context-engineering-levers.tsx",
     "coverage-codex-swarm.tsx",
@@ -92,23 +91,16 @@ const workflowOwners = {
     "e2e-probe.tsx",
     "fail-probe.tsx",
   ],
-  "./tests/local-workflows-a-issues.test.tsx": [
-    "fix-all-issues.tsx",
-    "fix-six-issues.tsx",
-    "implement-codex-antigravity.tsx",
-  ],
+  "./tests/local-workflows-a-issues.test.tsx": ["implement-codex-antigravity.tsx"],
   "./tests/local-workflows-b-delivery.test.tsx": [
     "kanban.tsx",
     "local-ui-feature-swarm.tsx",
-    "merge-train-all-issues.tsx",
     "plan-implement-review-issues.tsx",
     "pr-review-improve-merge.tsx",
   ],
   "./tests/local-workflows-b-framework-issues.test.tsx": [
-    "issue-222-integrations-agent-callable-tool-catalog.tsx",
-    "issue-306-audit-test-coverage-gaps-apps-gateway-ui.tsx",
-    "issue-491-review-cloud-hosted-walkthrough-lifecycl.tsx",
-    "issue-522-components-seven-composite-components-ar.tsx",
+    // Owns only archived issue single-shots under workflows/archive/, which
+    // are not discoverable and therefore not part of this inventory.
   ],
   "./tests/local-workflows-b-pipeline.test.tsx": [
     "implement-packs.tsx",
@@ -151,7 +143,6 @@ const workflowOwners = {
   "./tests/local-workflows-c-orchestration.test.tsx": [
     "monitor-redesign.tsx",
     "orchbench.tsx",
-    "route-and-merge-issues.tsx",
     "sol-issue-train.tsx",
     "studio-parity-swarm.tsx",
     "test-fortress.tsx",

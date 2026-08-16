@@ -4,14 +4,14 @@
 import { UI } from "smthrs";
 import { createSmithers, Sequence, Task } from "smthrs";
 import { z } from "zod/v4";
-import { implementer, panelists, synthesizer, validator } from "../components/roles";
+import { implementer, panelists, synthesizer, validator } from "../../components/roles";
 import {
   ValidationLoop,
   implementOutputSchema,
   validateOutputSchema,
   validationLoopState,
-} from "../components/ValidationLoop";
-import { reviewOutputSchema, reviewSynthesisSchema } from "../components/Review";
+} from "../../components/ValidationLoop";
+import { reviewOutputSchema, reviewSynthesisSchema } from "../../components/Review";
 
 // Codex role split: Sol plans/reviews, Luna implements, Terra validates.
 // The shared role chains retain Claude/Gemini as no-Codex fallbacks.

@@ -1,23 +1,41 @@
-// smithers-display-name: Fix All Issues
+// smithers-display-name: Merge-Train All Issues
 // smithers-source: one-off — discover every open GitHub issue, decompose multi-finding
 // epics into one work-item-per-fix, then for each work item (in its own git worktree, up
-// to 8 in parallel): Codex Luna researches + TDD-fixes in a SINGLE task; two Codex Sol
-// review passes loop until BOTH approve (LGTM); then Codex Terra opens ONE PR per work
-// item via the gh CLI. One fix == one PR; epics get "Relates to #N", single-fix issues get
-// "Closes #N". No human gate and no auto-merge — the workflow runs to a wall of open PRs.
+// to N in parallel): Codex Luna researches + TDD-fixes; two Codex Sol passes review in
+// a loop until BOTH approve; Codex Terra commits + pushes + opens ONE PR per item. THEN — the
+// part fix-all-issues lacks — a SERIAL MERGE QUEUE drains the approved PRs one at a time:
+// each item rebases its branch onto the LATEST origin/main, runs the full test gate on that
+// rebased tree (the merge-queue check: proves the fix still passes ALL tests stacked on
+// everything merged so far, catching integration breakage between independently-approved
+// PRs), and only then merges to main. Because the queue is serial and re-fetches main every
+// item, every merge lands on top of the previous one — a rebasing merge train. A final
+// consolidation step regenerates the llms bundles on main and confirms main is green.
 //
-// LAUNCH (concurrency is min(maxConcurrency prop, runner --max-concurrency); the runner
-// default is 4, so pass --max-concurrency 8 to actually get 8):
-//   smithers up .smithers/workflows/fix-all-issues.tsx --max-concurrency 8 \
-//     --run-id fix-all --input '{"maxConcurrency":8,"reviewIterations":3}' -d
-// Scope a first validation run to one standalone bug:
+// DESIGN NOTES (hard-won — see memories stacked-pr-merge-train-pitfalls / codex-agentic-…):
+//   • The merge queue is a <Sequence> (serial) so item N+1 rebases onto the result of item N.
+//   • NEVER `--delete-branch` mid-train — it orphans/closes other PRs. Prune at the very end.
+//   • Rebase onto current main RIGHT BEFORE merging; resolve conflicts removing markers of
+//     ANY length + diff3 (`<<<<<<<`, `=======`, `>>>>>>>`, `|||||||`, 7+ chars).
+//   • Gate LOCALLY (pnpm typecheck && pnpm test) — do not wait on flooded GitHub CI.
+//   • Verify every merge DETERMINISTICALLY (`gh pr view --json state` + merge-base ancestry);
+//     agents lie about having merged.
+//   • main is currently unprotected, so `gh pr merge --rebase` lands immediately once our
+//     local gate is green.
+//
+// LAUNCH (implement concurrency is min(maxConcurrency prop, runner --max-concurrency); the
+// merge queue is always serial regardless of the flag):
+//   smithers up .smithers/workflows/merge-train-all-issues.tsx --max-concurrency 8 \
+//     --run-id merge-train --input '{"maxConcurrency":8,"reviewIterations":3}' -d
+// First validate end-to-end on ONE standalone bug before unleashing on every issue:
 //   ... --input '{"numbers":[296],"reviewIterations":2}'
+// Skip the heavy gate while smoke-testing the plumbing:
+//   ... --input '{"gateCommand":"pnpm typecheck"}'
 /** @jsxImportSource smthrs */
 import { ClaudeCodeAgent, createSmithers } from "smthrs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
-import { codexFirst } from "../lib/codexAccounts";
+import { codexFirst } from "../../lib/codexAccounts";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const REPO = "smithersai/smithers";
@@ -71,7 +89,7 @@ const fixSchema = z.object({
   summary: z.string().default(""),
   filesChanged: z.array(z.string()).default([]),
   testAdded: z.string().default(""),
-  allTestsPassing: z.boolean().default(false),
+  allTestsPassing: z.boolean().default(true),
   commitMessage: z.string().default(""),
 });
 type Fix = z.infer<typeof fixSchema>;
@@ -105,20 +123,52 @@ const prSchema = z.object({
   worktreePath: z.string().default(""),
   summary: z.string().default(""),
 });
+type Pr = z.infer<typeof prSchema>;
+
+// The merge-queue result for one item. `status: "merged"` + `verified: true` is the ONLY
+// combination that counts as landed — every other state leaves the PR open for a later pass.
+const mergeSchema = z.object({
+  workItemId: z.string(),
+  issueNumber: z.number().int(),
+  branch: z.string().default(""),
+  prNumber: z.number().int().nullable().default(null),
+  status: z.enum(["merged", "conflict", "tests-failed", "skipped", "error"]).default("error"),
+  rebasedOnto: z.string().default(""), // origin/main sha the branch was rebased onto
+  mergeSha: z.string().nullable().default(null),
+  gatePassed: z.boolean().default(false),
+  verified: z.boolean().default(false), // deterministically confirmed on main (NOT self-reported)
+  summary: z.string().default(""),
+});
+type Merge = z.infer<typeof mergeSchema>;
+
+const consolidateSchema = z.object({
+  status: z.enum(["clean", "pushed", "failed", "skipped"]).default("skipped"),
+  llmsRegenerated: z.boolean().default(false),
+  mainGreen: z.boolean().default(false),
+  pushedSha: z.string().nullable().default(null),
+  summary: z.string().default(""),
+});
 
 const inputSchema = z.object({
   // Filters (empty = every open issue). `labels` ORs the gh --label filter; `numbers`
-  // restricts to specific issue numbers; `excludeAuthors` drops issues by login.
+  // restricts to specific issue numbers; `excludeNumbers`/`excludeAuthors` drop issues.
   labels: z.array(z.string()).default([]),
   numbers: z.array(z.number().int()).default([]),
   excludeNumbers: z.array(z.number().int()).default([]),
   excludeAuthors: z.array(z.string()).default([]),
-  // 8 max concurrent work items (also pass the runner --max-concurrency 8 flag).
+  // Max concurrent IMPLEMENT work items (also pass the runner --max-concurrency flag).
+  // The MERGE QUEUE is always serial, independent of this value.
   maxConcurrency: z.number().int().min(1).max(8).default(8),
   // Dual-review iterations per work item before giving up (no PR if never LGTM).
   reviewIterations: z.number().int().min(1).max(4).default(3),
   // Bound a single epic's fan-out; decompose reports the true count when it caps.
   maxWorkItemsPerIssue: z.number().int().min(1).max(100).default(20),
+  // The merge-queue gate run in each rebased worktree before merging. Defaults to the CI
+  // gate (CLAUDE.md "Verify before you push"). Override with "pnpm typecheck" to smoke-test.
+  gateCommand: z.string().default("pnpm typecheck && pnpm test"),
+  // Regenerate llms bundles + reverify main green after the train (memory: merged docs PRs
+  // leave the bundles stale). Set false to skip the consolidation step.
+  consolidate: z.boolean().default(true),
 });
 
 const { Workflow, Task, Sequence, Parallel, Loop, Worktree, smithers, outputs } = createSmithers({
@@ -129,11 +179,15 @@ const { Workflow, Task, Sequence, Parallel, Loop, Worktree, smithers, outputs } 
   reviewClaude: reviewClaudeSchema,
   reviewCodex: reviewCodexSchema,
   pr: prSchema,
+  merge: mergeSchema,
+  consolidate: consolidateSchema,
 });
 
 // ── Agents ─────────────────────────────────────────────────────────────────────
-// NO `cwd` on any agent used inside a <Worktree>: an explicit cwd overrides the
-// worktree, so the agent would read/write the repo root and the branch stays empty.
+// NO `cwd` on any agent used INSIDE a <Worktree>: an explicit cwd overrides the worktree,
+// so the agent would read/write the repo root and the branch stays empty. The merge agents
+// are the exception — they run OUTSIDE a <Worktree> in the serial queue and MUST be pointed
+// at their item's already-on-disk worktree via cwd (see makeMergeAgent below).
 // Codex is primary in every chain; Claude is retained only for failover.
 const opus = codexFirst(
   {
@@ -172,15 +226,30 @@ const codex = codexFirst(
   },
   [new ClaudeCodeAgent({ model: "claude-sonnet-5" })],
 );
+// One merge agent per item, bound to that item's worktree directory.
+function makeMergeAgent(worktreePath: string) {
+  return codexFirst(
+    {
+      model: "gpt-5.6-terra",
+      sandbox: "danger-full-access",
+      dangerouslyBypassApprovalsAndSandbox: true,
+      skipGitRepoCheck: true,
+      cwd: worktreePath,
+    },
+    [new ClaudeCodeAgent({ model: "claude-sonnet-5", cwd: worktreePath })],
+  );
+}
 
 const AGENT_RETRIES = 2;
 const DECOMPOSE_TIMEOUT_MS = 15 * 60_000;
 const FIX_TIMEOUT_MS = 50 * 60_000;
 const REVIEW_TIMEOUT_MS = 30 * 60_000;
 const PR_TIMEOUT_MS = 20 * 60_000;
+const MERGE_TIMEOUT_MS = 60 * 60_000; // rebase + full gate + (maybe) integration fix + merge
+const CONSOLIDATE_TIMEOUT_MS = 40 * 60_000;
 const HEARTBEAT_MS = 10 * 60_000;
 
-// ── A flattened unit of work: exactly one fix → one PR ──────────────────────────
+// ── A flattened unit of work: exactly one fix → one PR → one merge ──────────────
 type WorkItem = {
   workItemId: string; // stable across re-renders: i<issue>-w<index-within-issue>
   issueNumber: number;
@@ -195,38 +264,13 @@ type WorkItem = {
 
 // ── Pure helpers ─────────────────────────────────────────────────────────────
 function latest<T>(rows: T[] | undefined): T | undefined {
-  if (!rows || rows.length === 0) return undefined;
-  let selected = rows[0];
-  let selectedIteration = iterationOf(selected);
-  for (const row of rows.slice(1)) {
-    const iteration = iterationOf(row);
-    if (iteration >= selectedIteration) {
-      selected = row;
-      selectedIteration = iteration;
-    }
-  }
-  return selected;
+  return rows && rows.length > 0 ? rows[rows.length - 1] : undefined;
 }
 function latestForIssue<T extends { issueNumber: number }>(rows: T[] | undefined, n: number): T | undefined {
   return latest((rows ?? []).filter((r) => r.issueNumber === n));
 }
 function latestForItem<T extends { workItemId: string }>(rows: T[] | undefined, id: string): T | undefined {
   return latest((rows ?? []).filter((r) => r.workItemId === id));
-}
-function iterationOf(row: unknown): number {
-  const iteration = Number((row as { iteration?: unknown } | undefined)?.iteration);
-  return Number.isFinite(iteration) ? iteration : 0;
-}
-function latestItemIteration(ctx: any, key: string): number | undefined {
-  const fix = latestForItem<Fix>(ctx.outputs.fix, key);
-  return fix ? iterationOf(fix) : undefined;
-}
-function latestReviewForItem<T extends { workItemId: string }>(
-  rows: T[] | undefined,
-  id: string,
-  iteration: number,
-): T | undefined {
-  return latest((rows ?? []).filter((r) => r.workItemId === id && iterationOf(r) === iteration));
 }
 function slugify(s: string): string {
   return (
@@ -239,8 +283,7 @@ function slugify(s: string): string {
 }
 
 // Build the full work-item list from whatever decomposition rows exist. Ids/branches/
-// worktree paths are derived from (issueNumber, index) so they are STABLE across
-// re-renders — the agent-proposed slug only decorates the branch for readability.
+// worktree paths are derived from (issueNumber, index) so they are STABLE across re-renders.
 function buildWorkItems(ctx: any, issues: Issue[], cap: number): WorkItem[] {
   const out: WorkItem[] = [];
   for (const issue of issues) {
@@ -268,16 +311,25 @@ function buildWorkItems(ctx: any, issues: Issue[], cap: number): WorkItem[] {
 
 function itemDone(ctx: any, key: string): boolean {
   const fix = latestForItem<Fix>(ctx.outputs.fix, key);
-  const iteration = latestItemIteration(ctx, key);
-  if (!fix || iteration === undefined) return false;
-  const rc = latestReviewForItem<Review>(ctx.outputs.reviewClaude, key, iteration);
-  const rx = latestReviewForItem<Review>(ctx.outputs.reviewCodex, key, iteration);
-  return fix.status === "implemented" && fix.allTestsPassing === true && rc?.approved === true && rx?.approved === true;
+  const rc = latestForItem<Review>(ctx.outputs.reviewClaude, key);
+  const rx = latestForItem<Review>(ctx.outputs.reviewCodex, key);
+  return fix?.status === "implemented" && rc?.approved === true && rx?.approved === true;
+}
+
+// A work item is mergeable once it is dual-approved AND a PR was actually opened for it.
+function itemPrReady(ctx: any, key: string): boolean {
+  const pr = latestForItem<Pr>(ctx.outputs.pr, key);
+  return itemDone(ctx, key) && pr?.prepared === true;
+}
+
+// Landed = the merge agent reported "merged" AND deterministically verified it on main.
+function itemMerged(ctx: any, key: string): boolean {
+  const m = latestForItem<Merge>(ctx.outputs.merge, key);
+  return m?.status === "merged" && m?.verified === true;
 }
 
 function itemFeedback(ctx: any, key: string): string {
   const fix = latestForItem<Fix>(ctx.outputs.fix, key);
-  const iteration = latestItemIteration(ctx, key);
   const parts: string[] = [];
   if (fix && fix.status !== "implemented") {
     parts.push(`PRIOR ATTEMPT SELF-REPORTED ${fix.status.toUpperCase()}:\n${fix.summary}`);
@@ -286,7 +338,7 @@ function itemFeedback(ctx: any, key: string): string {
     ["CODEX SOL REVIEWER A", ctx.outputs.reviewClaude],
     ["CODEX SOL REVIEWER B", ctx.outputs.reviewCodex],
   ] as const) {
-    const r = iteration === undefined ? undefined : latestReviewForItem<Review>(rows, key, iteration);
+    const r = latestForItem<Review>(rows, key);
     if (r && !r.approved) {
       parts.push(`${who} REJECTED:\n${r.feedback}`);
       for (const i of r.issues ?? []) {
@@ -444,7 +496,7 @@ function prPrompt(wi: WorkItem, commitMessage: string, linkage: string) {
     "Open EXACTLY ONE pull request for THIS work item using git + the gh CLI from the current directory. Steps, in order:",
     "",
     "1. Confirm there are changes: `git status --porcelain` and `git diff origin/main...HEAD`. If there is genuinely nothing to ship, return prepared=false with that reason.",
-    `2. If there are uncommitted changes, enumerate the changed paths from \`git status --porcelain\`, then stage only those exact paths with \`git add -- <pathspec>...\`; do not use broad repository staging. Commit with subject EXACTLY:\n   ${commitMessage}\n   and a body that includes the line "${linkage}" and the trailer "Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>".`,
+    `2. If there are uncommitted changes, stage and commit them: \`git add -A\` then commit with subject EXACTLY:\n   ${commitMessage}\n   and a body that includes the line "${linkage}" and the trailer "Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>".`,
     `3. Push the branch: \`git push -u origin ${wi.branch} --force-with-lease\`.`,
     `4. Open the PR: \`gh pr create --repo ${REPO} --head ${wi.branch} --base main --title "${commitMessage}" --body <body>\`. The body MUST start with "${linkage}", then concisely explain WHAT was fixed and HOW (root cause + approach, naming the key files), note that Codex implemented it via TDD and Codex + Claude Opus both approved in review, and end with "🤖 Generated with [Claude Code](https://claude.com/claude-code)".`,
     `   - If a PR for branch ${wi.branch} already exists, do NOT create a duplicate — reuse it via \`gh pr view ${wi.branch} --repo ${REPO} --json number,url\`.`,
@@ -456,27 +508,89 @@ function prPrompt(wi: WorkItem, commitMessage: string, linkage: string) {
   ].join("\n");
 }
 
+function mergePrompt(wi: WorkItem, pr: Pr | undefined, gateCommand: string) {
+  const prRef = pr?.prNumber ? `#${pr.prNumber}` : `branch ${wi.branch}`;
+  return [
+    `You are the MERGE-QUEUE OPERATOR landing ONE dual-approved PR for work item from GitHub issue #${wi.issueNumber} in ${REPO}.`,
+    `Your current working directory IS the git worktree for branch "${wi.branch}", which holds the approved, committed fix. Its PR is ${prRef}.`,
+    "",
+    "This is a SERIAL merge train: items land ONE AT A TIME, and earlier items in this run may have ALREADY merged into main since this branch was created. Your job is to rebase THIS branch onto the LATEST main, prove it still passes the FULL test gate stacked on top of everything merged so far, and only then merge. Do the steps IN ORDER and STOP at the first that says stop:",
+    "",
+    "1. SANITY: `git status` and `git log origin/main..HEAD --oneline`. Confirm you are on branch " +
+      wi.branch +
+      " with the fix committed. If there are UNCOMMITTED changes, commit them now (`git add -A`; reuse the existing commit subject).",
+    "2. FETCH: `git fetch origin main`.",
+    "3. REBASE onto the latest main: `git rebase origin/main`.",
+    "   - On CONFLICT: resolve each conflicted file by editing it to the correct COMBINED result, then `git add <file>` and `git rebase --continue`. You MUST remove EVERY conflict marker — search for and eliminate all lines matching `<<<<<<<`, `=======`, `>>>>>>>`, and `|||||||` (markers can be 7+ chars and diff3-style). Re-read each resolved file to be sure no marker leaked through.",
+    "   - If the conflict is genuinely unresolvable within THIS fix's scope: `git rebase --abort`, set status=conflict, summarize the conflict, and STOP (do NOT merge). The PR stays open for a later pass.",
+    "4. INSTALL: `pnpm install` at the worktree root (shared pnpm store makes this cheap; node_modules may be absent).",
+    `5. GATE (the merge-queue check): run \`${gateCommand}\` from the worktree root. This proves your fix still passes ALL tests when stacked on the CURRENT main — it catches integration breakage between two PRs that were each green in isolation.`,
+    "   - If it fails because YOUR fix now collides with something already merged into main during this run, FIX it minimally here (commit the fix onto this branch) and re-run the gate until it is fully green.",
+    "   - If it fails for reasons clearly OUTSIDE this fix's scope that you cannot responsibly fix here, set status=tests-failed, summarize, and STOP (do NOT merge).",
+    "6. PUSH the rebased (and possibly fix-augmented) branch: `git push --force-with-lease origin " + wi.branch + "`.",
+    pr?.prNumber
+      ? `7. MERGE the existing PR: \`gh pr merge ${pr.prNumber} --repo ${REPO} --rebase\`.`
+      : `7. ENSURE a PR then MERGE: \`gh pr view ${wi.branch} --repo ${REPO} --json number\` (create one with \`gh pr create --repo ${REPO} --head ${wi.branch} --base main\` if none exists), then \`gh pr merge <that-number> --repo ${REPO} --rebase\`.`,
+    "   - DO NOT pass `--delete-branch`. Deleting a branch mid-train can orphan/close other PRs; branches are pruned only after the whole run.",
+    "   - DO NOT `--admin`-bypass anything; main is unprotected so a plain `--rebase` merge lands immediately now that your local gate is green.",
+    "8. VERIFY DETERMINISTICALLY — do NOT trust the merge command's exit code alone:",
+    `   - \`gh pr view ${prRef.startsWith("#") ? prRef.slice(1) : wi.branch} --repo ${REPO} --json state,mergedAt,mergeCommit\` → state MUST be MERGED.`,
+    "   - `git fetch origin main` then `git merge-base --is-ancestor HEAD origin/main` (exit code 0) to confirm your commits are now on main.",
+    "   Only set status=merged AND verified=true when BOTH confirm. Otherwise set verified=false and report what you saw.",
+    "",
+    `Return JSON: workItemId (exactly "${wi.workItemId}"), issueNumber (exactly ${wi.issueNumber}), branch (exactly "${wi.branch}"), prNumber, status (merged|conflict|tests-failed|skipped|error), rebasedOnto (the origin/main sha you rebased onto), mergeSha (the commit on main, or null), gatePassed (boolean), verified (boolean — only true if BOTH deterministic checks confirmed), summary (what happened).`,
+  ].join("\n");
+}
+
+function consolidatePrompt(gateCommand: string) {
+  return [
+    `You are the POST-TRAIN CONSOLIDATOR for ${REPO}. The merge train has finished landing PRs onto main.`,
+    "Your current working directory IS a git worktree branched off main. Bring it to the very latest main and make sure main's generated artifacts are consistent and the tree is green.",
+    "",
+    "Steps, in order:",
+    "1. `git fetch origin main` then `git reset --hard origin/main` so you are exactly on the landed main.",
+    "2. `pnpm install`.",
+    "3. Regenerate the LLM doc bundles: `pnpm docs:llms` (merged docs PRs can leave docs/llms-*.txt stale; CI gates on check-docs / check-llms).",
+    "4. `git status --porcelain`. If `pnpm docs:llms` produced NO changes, set llmsRegenerated=false and skip to step 6.",
+    '5. If there ARE changes, commit them — subject EXACTLY "📝 docs: regenerate llms bundles after merge train" with the trailer "Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>" — then push DIRECTLY to main: `git push origin HEAD:main` (main is unprotected). Set llmsRegenerated=true and record the pushed sha.',
+    `6. Confirm main is fully green: run \`${gateCommand}\` from the worktree root. Set mainGreen=true only if it passes cleanly.`,
+    "",
+    "Do NOT touch any feature branches or open PRs; only operate on main via this worktree.",
+    "",
+    "Return JSON: status (clean|pushed|failed|skipped), llmsRegenerated (boolean), mainGreen (boolean), pushedSha (string or null), summary (what happened, including the gate result).",
+  ].join("\n");
+}
+
 // ── Workflow ─────────────────────────────────────────────────────────────────
 export default smithers((ctx) => {
   const input = ctx.input ?? ({} as z.infer<typeof inputSchema>);
   const concurrency = input.maxConcurrency ?? 8;
   const iterations = input.reviewIterations ?? 3;
   const cap = input.maxWorkItemsPerIssue ?? 20;
+  const gateCommand = input.gateCommand ?? "pnpm typecheck && pnpm test";
 
   const discovery = latest(ctx.outputs.discovery);
   const issues = (discovery?.issues ?? []) as Issue[];
 
-  // Built from whatever decomposition rows exist. The fix <Parallel> is sequenced after
-  // the decompose <Parallel>, so by the time these dispatch, decompose is terminal.
+  // Built from whatever decomposition rows exist. The implement <Parallel> is sequenced
+  // after the decompose <Parallel>, so by the time these dispatch decompose is terminal.
   const workItems = buildWorkItems(ctx, issues, cap);
 
+  // The serial merge queue drains every dual-approved item that has an open PR, in stable
+  // (issue, index) order. This list only fills in once the implement <Parallel> is terminal,
+  // and the merge <Sequence> is sequenced AFTER it — so the train starts on a stable set.
+  const mergeItems = workItems.filter((wi) => itemPrReady(ctx, wi.workItemId));
+  const mergedCount = workItems.filter((wi) => itemMerged(ctx, wi.workItemId)).length;
+
   return (
-    <Workflow name="fix-all-issues">
+    <Workflow name="merge-train-all-issues">
       <Sequence>
+        {/* ── Phase 0: discover open issues ───────────────────────────────── */}
         <Task id="discover" output={outputs.discovery} timeoutMs={5 * 60_000}>
           {() => fetchIssues(input)}
         </Task>
 
+        {/* ── Phase 1: decompose each issue into one-fix-per-PR work items ──── */}
         {issues.length > 0 ? (
           <Parallel maxConcurrency={concurrency}>
             {issues.map((issue) => (
@@ -496,6 +610,7 @@ export default smithers((ctx) => {
           </Parallel>
         ) : null}
 
+        {/* ── Phase 2: implement → dual-review loop → PR, each in its own worktree ── */}
         {workItems.length > 0 ? (
           <Parallel maxConcurrency={concurrency}>
             {workItems.map((wi) => {
@@ -550,7 +665,7 @@ export default smithers((ctx) => {
                       </Sequence>
                     </Loop>
 
-                    {/* Only open a PR once BOTH reviewers approve (LGTM). Sonnet drives gh. */}
+                    {/* Once BOTH reviewers approve, Sonnet commits + pushes + opens the PR. */}
                     {done ? (
                       <Task
                         id={`${key}:pr`}
@@ -569,6 +684,58 @@ export default smithers((ctx) => {
               );
             })}
           </Parallel>
+        ) : null}
+
+        {/* ── Phase 3: SERIAL merge queue — rebase onto latest main, gate, merge ──
+            A <Sequence> runs these one at a time: item N+1 only fetches + rebases AFTER
+            item N has merged, so every PR lands on top of the previous one (a rebasing
+            merge train). continueOnFail keeps the train moving past a conflicting / failing
+            item (it just stays open). skipIf makes re-runs idempotent. The merge agent runs
+            OUTSIDE a <Worktree> and is pointed at the item's existing worktree via cwd. */}
+        {mergeItems.length > 0 ? (
+          <Sequence>
+            {mergeItems.map((wi) => {
+              const key = wi.workItemId;
+              const pr = latestForItem<Pr>(ctx.outputs.pr, key);
+              return (
+                <Task
+                  key={`${key}:merge`}
+                  id={`${key}:merge`}
+                  output={outputs.merge}
+                  agent={makeMergeAgent(wi.worktreePath)}
+                  retries={1}
+                  timeoutMs={MERGE_TIMEOUT_MS}
+                  heartbeatTimeoutMs={HEARTBEAT_MS}
+                  continueOnFail
+                  skipIf={itemMerged(ctx, key)}
+                >
+                  {mergePrompt(wi, pr, gateCommand)}
+                </Task>
+              );
+            })}
+          </Sequence>
+        ) : null}
+
+        {/* ── Phase 4: consolidate main — regenerate llms bundles, confirm green ── */}
+        {input.consolidate !== false && mergedCount > 0 ? (
+          <Worktree
+            key="consolidate"
+            path={join(repoRoot, ".smithers", "workflows", ".worktrees", "consolidate")}
+            branch="chore/merge-train-consolidate"
+            baseBranch="main"
+          >
+            <Task
+              id="consolidate"
+              output={outputs.consolidate}
+              agent={opus}
+              retries={1}
+              timeoutMs={CONSOLIDATE_TIMEOUT_MS}
+              heartbeatTimeoutMs={HEARTBEAT_MS}
+              continueOnFail
+            >
+              {consolidatePrompt(gateCommand)}
+            </Task>
+          </Worktree>
         ) : null}
       </Sequence>
     </Workflow>

@@ -274,7 +274,7 @@ describe.serial("Batch B delivery-core behavior", () => {
   test.serial(
     "merge train keeps discovery unbounded, lanes concurrent, and merge/consolidation idempotent",
     async () => {
-      const file = "merge-train-all-issues.tsx";
+      const file = "archive/merge-train-all-issues.tsx";
       const issue = { number: 7, title: "Fix", body: "body", url: "", labels: [], author: "a" };
       const base = await render(file, { maxConcurrency: 3, reviewIterations: 2, consolidate: true });
       expect(task(base, "discover").parallelMaxConcurrency).toBeUndefined();

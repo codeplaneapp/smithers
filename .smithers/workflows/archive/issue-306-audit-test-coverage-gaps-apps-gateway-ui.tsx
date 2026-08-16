@@ -2,8 +2,8 @@
 /** @jsxImportSource smthrs */
 import { createSmithers } from "smthrs";
 import { z } from "zod/v4";
-import { agents } from "../agents";
-import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";
+import { agents } from "../../agents";
+import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../../components/ValidationLoop";
 
 // Self-workflow for GitHub issue #306 (audit: test-coverage gaps), tackling the
 // still-open cov-11 finding: e2e/faults/case08-inspector-never-idle.test.ts is a

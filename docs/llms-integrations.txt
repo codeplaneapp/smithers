@@ -2953,7 +2953,7 @@ banner for everything else.
 ### Swarm and long-horizon
 
 *"I am an exception handler, not a babysitter."* A fan-out over issues, features,
-or tickets (`fix-all-issues`, `merge-train-all-issues`, `mission`, `ralph`) runs
+or tickets (`ticket-fleet`, `sol-issue-train`, `mission`, `ralph`) runs
 dozens of mostly-mechanical workers, most with no human gate at all. Here the cap
 earns its keep: the workers stay unpaned, the overview tab is the dashboard (its
 queue summary tallies working/blocked/failed/done across the whole swarm), and only
