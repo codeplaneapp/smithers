@@ -1,5 +1,6 @@
 import { findVcsRoot } from "@smthrs/vcs/find-root";
 import { reapWorktrees } from "@smthrs/engine/reapWorktrees";
+import { compactLegacySnapshots, retainRunHistory } from "@smthrs/db/run-history-gc";
 import { findSmithersAnchorDir } from "smthrs/findSmithersAnchorDir";
 import { join } from "node:path";
 import { cliWorkspace } from "./cliWorkspace.js";
@@ -19,7 +20,7 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
  *
  * @param {{
  *   cwd?: string;
- *   adapter?: Pick<import("@smthrs/db/adapter").SmithersDb, "getRun"> | null;
+ *   adapter?: import("@smthrs/db/adapter").SmithersDb | null;
  *   olderThanMs?: number;
  *   dryRun?: boolean;
  *   includeUnmanaged?: boolean;
@@ -29,6 +30,10 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
  *   tempRoots?: string[];
  *   liveCwds?: string[] | null;
  *   sizeOf?: (path: string) => Promise<number>;
+ *   env?: NodeJS.ProcessEnv;
+ *   dbRetentionDays?: number | null;
+ *   dbChunkSize?: number;
+ *   snapshotBatchSize?: number;
  * }} [options]
  */
 export async function runWorkspaceGc(options = {}) {
@@ -37,6 +42,15 @@ export async function runWorkspaceGc(options = {}) {
   const olderThanMs = options.olderThanMs ?? 7 * DAY_MS;
   const dryRun = options.dryRun ?? false;
   const nowMs = options.nowMs ?? Date.now();
+  const env = options.env ?? process.env;
+  const configuredRetention = options.dbRetentionDays ?? env.SMITHERS_DB_RETENTION_DAYS;
+  let dbRetentionDays = null;
+  if (configuredRetention !== undefined && configuredRetention !== null && configuredRetention !== "") {
+    dbRetentionDays = Number(configuredRetention);
+    if (!Number.isFinite(dbRetentionDays) || dbRetentionDays < 0) {
+      throw new Error("SMITHERS_DB_RETENTION_DAYS must be a nonnegative number");
+    }
+  }
   const before = filesystemUsage(workspaceRoot);
   const liveCwds =
     options.includeUnmanaged && options.liveCwds === undefined ? listLiveProcessCwds() : options.liveCwds;
@@ -60,6 +74,7 @@ export async function runWorkspaceGc(options = {}) {
       olderThanMs,
       dryRun,
       nowMs,
+      env,
       allowAbsentRuns: false,
       minimumAgeForSizeCap: true,
     });
@@ -70,6 +85,7 @@ export async function runWorkspaceGc(options = {}) {
       olderThanMs,
       dryRun,
       nowMs,
+      env,
       allowAbsentRuns: false,
       minimumAgeForSizeCap: true,
     });
@@ -113,6 +129,40 @@ export async function runWorkspaceGc(options = {}) {
       liveCwds,
       sizeOf: options.sizeOf,
     });
+    const retention =
+      adapter && dbRetentionDays !== null
+        ? await retainRunHistory(adapter, {
+            cutoffMs: nowMs - dbRetentionDays * DAY_MS,
+            dryRun,
+            chunkSize: options.dbChunkSize,
+          })
+        : {
+            enabled: false,
+            dryRun,
+            retentionDays: null,
+            removedRuns: [],
+            rowsByTable: {},
+            interrupted: false,
+            skipped: adapter ? "retention-not-configured" : "no-database",
+          };
+    if (retention.enabled) retention.retentionDays = dbRetentionDays;
+    // Delete explicitly retained history first so snapshot compaction never
+    // spends I/O deduplicating payloads that this invocation will remove.
+    const snapshots = adapter
+      ? await compactLegacySnapshots(adapter, {
+          dryRun,
+          batchSize: options.snapshotBatchSize,
+        })
+      : {
+          dryRun,
+          migratedRows: 0,
+          clearedInlineBytes: 0,
+          batches: 0,
+          remainingRows: 0,
+          remainingInlineBytes: 0,
+          interrupted: false,
+          skipped: "no-database",
+        };
     const bytesFreed =
       logs.bytesFreed +
       legacyLogs.bytesFreed +
@@ -132,8 +182,13 @@ export async function runWorkspaceGc(options = {}) {
       worktrees,
       unownedWorktrees,
       unmanagedScratch,
+      database: {
+        snapshots,
+        retention,
+        vacuumed: false,
+      },
     };
   } finally {
-    cleanup();
+    await cleanup();
   }
 }

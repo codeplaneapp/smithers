@@ -13099,6 +13099,11 @@ const cli = Cli.create({
     options: z.object({
       olderThan: z.string().default("7d").describe("Only reclaim artifacts unused for at least this long, e.g. 24h"),
       dryRun: z.boolean().default(false).describe("Report what would be removed without removing anything"),
+      dbRetentionDays: z
+        .number()
+        .nonnegative()
+        .optional()
+        .describe("Opt in to deleting terminal database runs older than this many days"),
       includeUnmanaged: z
         .boolean()
         .default(false)
@@ -13115,6 +13120,7 @@ const cli = Cli.create({
           dryRun: c.options.dryRun,
           includeUnmanaged: c.options.includeUnmanaged,
           forceWorktrees: c.options.force,
+          dbRetentionDays: c.options.dbRetentionDays,
         });
         if (c.format !== "json") {
           const disk = result.disk.before;
@@ -13135,6 +13141,23 @@ const cli = Cli.create({
               `Keeping ${formatBytes(unmanagedBytes)} of unowned legacy scratch; inspect with --dry-run and opt in with --include-unmanaged.`,
             );
           }
+          const snapshots = result.database.snapshots;
+          console.log(
+            result.dryRun
+              ? `Would compact ${snapshots.remainingRows ?? 0} legacy snapshot row(s), removing ${formatBytes(snapshots.remainingInlineBytes ?? 0)} of inline payloads.`
+              : `Compacted ${snapshots.migratedRows} legacy snapshot row(s), clearing ${formatBytes(snapshots.clearedInlineBytes)} of inline payloads for content-addressed reuse.`,
+          );
+          const retention = result.database.retention;
+          if (retention.enabled) {
+            console.log(
+              `${result.dryRun ? "Would remove" : "Removed"} ${retention.removedRuns.length} terminal database run(s) older than ${retention.retentionDays} day(s).`,
+            );
+          } else {
+            console.log(
+              "Database run retention is disabled; opt in with --db-retention-days or SMITHERS_DB_RETENTION_DAYS.",
+            );
+          }
+          console.log("Database pages are reusable, but Smithers never VACUUMs an online database.");
         }
         return c.ok(result);
       } catch (err) {
