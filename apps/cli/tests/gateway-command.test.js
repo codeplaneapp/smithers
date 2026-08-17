@@ -4,10 +4,15 @@ import { basename, join, resolve } from "node:path";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 import { createTempRepo, runSmithers, writeTestWorkflow } from "../../../packages/smithers/tests/e2e-helpers.js";
+import { parseRuntimeOwnerPid } from "@smthrs/engine/runtime-owner";
 import { gatewayRuntimePaths, readGatewayRuntimeState, writeGatewayRuntimeState } from "../src/gateway-runtime.js";
 
 const CLI_ENTRY = resolve(import.meta.dir, "..", "src", "index.js");
+const TASK_RUNTIME_MODULE = pathToFileURL(
+  resolve(import.meta.dir, "..", "..", "..", "packages", "driver", "src", "task-runtime.js"),
+).href;
 
 function makeStateDirEnv() {
   const stateDir = mkdtempSync(join(tmpdir(), "smithers-gwstate-e2e-"));
@@ -24,7 +29,7 @@ function makeStateDirEnv() {
  */
 async function startGateway(repo, env, extraArgs = []) {
   const gateway = spawnGateway(repo, env, extraArgs);
-  await waitFor(() => gateway.stderr().includes("Runtime state:"), 20_000);
+  await waitFor(() => gateway.stderr().includes("Runtime state:"), 30_000);
   const state = readGatewayRuntimeState(repo.dir, { ...process.env, ...env });
   expect(state?.url).toBeTruthy();
   const health = await fetch(`${state.url}/health`, { signal: AbortSignal.timeout(5_000) }).then((response) =>
@@ -128,6 +133,48 @@ function writeBasicUi(repo) {
 
 function writeWorkspacePack(repo) {
   repo.write(".smithers/smithers.config.ts", "export default {};\n");
+}
+
+function writeGatewayParkWorkflow(repo, releaseFile) {
+  repo.write(
+    ".smithers/workflows/parkable.tsx",
+    [
+      "/** @jsxImportSource smthrs */",
+      'import { existsSync } from "node:fs";',
+      'import { createSmithers } from "smthrs";',
+      `import { getTaskRuntime } from ${JSON.stringify(TASK_RUNTIME_MODULE)};`,
+      'import { z } from "zod";',
+      "const api = createSmithers({ out: z.object({ value: z.number() }) });",
+      "export default api.smithers(() => (",
+      '  <api.Workflow name="parkable">',
+      '    <api.Task id="work" output={api.outputs.out}>',
+      "      {async () => {",
+      `        if (existsSync(${JSON.stringify(releaseFile)})) return { value: 2 };`,
+      "        const signal = getTaskRuntime()?.signal;",
+      "        await new Promise((_, reject) => {",
+      '          const abort = () => reject(signal?.reason ?? new Error("aborted"));',
+      "          if (signal?.aborted) abort();",
+      '          else signal?.addEventListener("abort", abort, { once: true });',
+      "        });",
+      "      }}",
+      "    </api.Task>",
+      "  </api.Workflow>",
+      "));",
+      "",
+    ].join("\n"),
+  );
+}
+
+async function gatewayRpc(url, method, params = {}) {
+  const response = await fetch(`${url}/v1/rpc/${method}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(params),
+    signal: AbortSignal.timeout(5_000),
+  });
+  const frame = await response.json();
+  if (!frame.ok) throw new Error(frame.error?.message ?? `${method} failed`);
+  return frame.payload;
 }
 
 async function findOpenPort(host = "127.0.0.1") {
@@ -655,6 +702,98 @@ for (const backend of ["sqlite", "pglite"]) {
     expect(statusAfter.json?.running).toBe(false);
   }, 90_000);
 }
+
+test("gateway stop parks hosted runs, prints exact recovery commands, and the run resumes", async () => {
+  const repo = createTempRepo();
+  const releaseFile = repo.path("release-parked-run");
+  writeGatewayParkWorkflow(repo, releaseFile);
+  const { env } = makeStateDirEnv();
+  const port = await findOpenPort();
+  const gateway = await startGateway(repo, env, ["--port", String(port)]);
+  const runId = "gateway-stop-parked-run";
+
+  await gatewayRpc(`http://127.0.0.1:${port}`, "launchRun", { workflow: "parkable", runId, input: {} });
+  await waitFor(async () => {
+    try {
+      const run = await gatewayRpc(`http://127.0.0.1:${port}`, "getRun", { runId });
+      return parseRuntimeOwnerPid(run?.runtimeOwnerId) === gateway.child.pid;
+    } catch {
+      return false;
+    }
+  });
+
+  const stopped = runSmithers(["gateway", "stop"], {
+    cwd: repo.dir,
+    format: "json",
+    env,
+    timeoutMs: 30_000,
+  });
+  expect(stopped.exitCode).toBe(0);
+  expect(stopped.json?.parkedRuns).toEqual([runId]);
+  expect(stopped.json?.killedRuns).toEqual([]);
+  const resumeCommand = `smithers up --run-id ${runId} --resume true -d`;
+  expect(stopped.json?.resumeCommands).toEqual([resumeCommand]);
+  expect(stopped.stderr).toContain(`Parked: ${runId}`);
+  expect(stopped.stderr).toContain(`Resume: ${resumeCommand}`);
+  await gateway.closePromise;
+
+  const parked = runSmithers(["inspect", runId], { cwd: repo.dir, format: "json", env, timeoutMs: 30_000 });
+  expect(parked.exitCode).toBe(0);
+  expect(parked.json?.run?.status).toBe("paused");
+  writeFileSync(releaseFile, "resume\n");
+  const resumed = runSmithers(["up", "--run-id", runId, "--resume", "true", "-d"], {
+    cwd: repo.dir,
+    format: "json",
+    env,
+    timeoutMs: 30_000,
+  });
+  expect(resumed.exitCode).toBe(0);
+  const finished = await waitFor(() => {
+    const inspected = runSmithers(["inspect", runId], {
+      cwd: repo.dir,
+      format: "json",
+      env,
+      timeoutMs: 30_000,
+    });
+    return inspected.json?.run?.status === "finished" ? inspected : null;
+  }, 30_000);
+  expect(finished.json?.run?.status).toBe("finished");
+}, 90_000);
+
+test("gateway stop --kill-runs still cancels hosted runs and names them", async () => {
+  const repo = createTempRepo();
+  writeGatewayParkWorkflow(repo, repo.path("never-release-killed-run"));
+  const { env } = makeStateDirEnv();
+  const port = await findOpenPort();
+  const gateway = await startGateway(repo, env, ["--port", String(port)]);
+  const runId = "gateway-stop-killed-run";
+
+  await gatewayRpc(`http://127.0.0.1:${port}`, "launchRun", { workflow: "parkable", runId, input: {} });
+  await waitFor(async () => {
+    try {
+      const run = await gatewayRpc(`http://127.0.0.1:${port}`, "getRun", { runId });
+      return parseRuntimeOwnerPid(run?.runtimeOwnerId) === gateway.child.pid;
+    } catch {
+      return false;
+    }
+  });
+
+  const stopped = runSmithers(["gateway", "stop", "--kill-runs"], {
+    cwd: repo.dir,
+    format: "json",
+    env,
+    timeoutMs: 30_000,
+  });
+  expect(stopped.exitCode).toBe(0);
+  expect(stopped.json?.parkedRuns).toEqual([]);
+  expect(stopped.json?.killedRuns).toEqual([runId]);
+  expect(stopped.stderr).toContain(`Killed: ${runId}`);
+  await gateway.closePromise;
+
+  const killed = runSmithers(["inspect", runId], { cwd: repo.dir, format: "json", env, timeoutMs: 30_000 });
+  expect(killed.exitCode).toBe(0);
+  expect(killed.json?.run?.status).toBe("cancelled");
+}, 90_000);
 
 test("concurrent ui autostarts converge on one workspace gateway", async () => {
   const repo = createTempRepo();

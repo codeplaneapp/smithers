@@ -305,6 +305,7 @@ import {
 } from "./update-check.js";
 import { SOTA_REGISTRY_VERSION } from "./sota-models.generated.js";
 import { reportReplayResult } from "./reportReplayResult.js";
+import { parseResetNodeList } from "./parseResetNodeList.js";
 import { renderEffectBoundaryReport } from "./renderEffectBoundaryReport.js";
 import { buildClaudeMirrorTick } from "./claude-mirror/buildClaudeMirrorTick.js";
 import { buildClaudeNodeWait } from "./claude-mirror/buildClaudeNodeWait.js";
@@ -3147,6 +3148,10 @@ const gatewayOptions = z.object({
     .describe(
       "Allow binding a non-loopback --host with NO auth (exposes a full-control, unauthenticated control plane — dangerous)",
     ),
+  killRuns: z
+    .boolean()
+    .default(false)
+    .describe("With gateway stop, cancel gateway-hosted runs instead of parking them for resume"),
   idleTimeout: z
     .number()
     .int()
@@ -5636,6 +5641,50 @@ async function runGatewayStatusCommand(c) {
     stateFile,
   });
 }
+
+function gatewayStopRpcBase(state) {
+  const base = new URL(state.url);
+  const hostname = base.hostname.replace(/^\[(.*)\]$/, "$1");
+  if (hostname === "0.0.0.0") base.hostname = "127.0.0.1";
+  if (hostname === "::") base.hostname = "::1";
+  return base.toString().replace(/\/+$/, "");
+}
+
+async function gatewayStopRpc(state, method, params = {}) {
+  const response = await fetch(`${gatewayStopRpcBase(state)}/v1/rpc/${method}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(state.token ? { authorization: `Bearer ${state.token}` } : {}),
+    },
+    body: JSON.stringify(params),
+    signal: AbortSignal.timeout(5_000),
+  });
+  const frame = await response.json().catch(() => null);
+  if (!frame?.ok) {
+    throw new Error(frame?.error?.message ?? `Gateway RPC ${method} failed with HTTP ${response.status}`);
+  }
+  return frame.payload;
+}
+
+async function listGatewayHostedRunIds(state) {
+  const pageSize = 200;
+  const hosted = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const page = await gatewayStopRpc(state, "listRuns", {
+      filter: { includeSystem: true, limit: pageSize, offset },
+    });
+    if (!Array.isArray(page)) throw new Error("Gateway listRuns returned a non-array payload");
+    for (const run of page) {
+      if (parseRuntimeOwnerPid(run?.runtimeOwnerId) === state.pid && typeof run?.runId === "string") {
+        hosted.push(run.runId);
+      }
+    }
+    if (page.length < pageSize) break;
+  }
+  return hosted;
+}
+
 async function runGatewayStopCommand(c) {
   const workspace = resolveGatewayWorkspace();
   if (!workspace) {
@@ -5677,6 +5726,21 @@ async function runGatewayStopCommand(c) {
     clearGatewayRuntimeState(workspace, state.pid);
     return c.ok({ stopped: false, running: false, workspace, cleanedStaleState: true });
   }
+  let hostedRunIds;
+  try {
+    hostedRunIds = await listGatewayHostedRunIds(state);
+    if (c.options.killRuns) {
+      for (const runId of hostedRunIds) {
+        await gatewayStopRpc(state, "cancelRun", { runId });
+      }
+    }
+  } catch (error) {
+    return c.error({
+      code: "GATEWAY_STOP_FAILED",
+      message: `Could not ${c.options.killRuns ? "cancel" : "inventory"} gateway-hosted runs before shutdown: ${error?.message ?? String(error)}`,
+      exitCode: 1,
+    });
+  }
   try {
     process.kill(state.pid, "SIGTERM");
   } catch (error) {
@@ -5699,7 +5763,26 @@ async function runGatewayStopCommand(c) {
     });
   }
   clearGatewayRuntimeState(workspace, state.pid);
-  return c.ok({ stopped: true, workspace, pid: state.pid });
+  const resumeCommands = c.options.killRuns
+    ? []
+    : hostedRunIds.map((runId) => `smithers up --run-id ${runId} --resume true -d`);
+  for (let index = 0; index < hostedRunIds.length; index += 1) {
+    const runId = hostedRunIds[index];
+    if (c.options.killRuns) {
+      process.stderr.write(`⊘ Killed: ${runId}\n`);
+    } else {
+      process.stderr.write(`⏸ Parked: ${runId}\n  Resume: ${resumeCommands[index]}\n`);
+    }
+  }
+  return c.ok({
+    stopped: true,
+    workspace,
+    pid: state.pid,
+    affectedRuns: hostedRunIds,
+    parkedRuns: c.options.killRuns ? [] : hostedRunIds,
+    killedRuns: c.options.killRuns ? hostedRunIds : [],
+    resumeCommands,
+  });
 }
 /**
  * @param {{ host: string; port: number; backend?: "sqlite" | "pglite" | "postgres"; authToken?: string; mintToken?: boolean; insecure?: boolean; idleTimeout?: number }} options
@@ -8921,7 +9004,11 @@ const cli = Cli.create({
         // its engine can never be auto-resumed (it was skipped forever with
         // "workflow file not found at (missing path)").
         let builtinResumeGoalArgs = [goal];
-        if (Buffer.byteLength(goal, "utf8") > 64 * 1024) {
+        // Same ceiling the launch path enforces on an inline goal. A goal that
+        // launches but is re-inlined into the resume argv above the CLI's own
+        // limit is a run that executes once and can never be resumed, so both
+        // sides read one constant.
+        if (Buffer.byteLength(goal, "utf8") > CLI_TEXT_ARGUMENT_MAX_LENGTH) {
           const smithersHome =
             process.env.SMITHERS_HOME ||
             (process.env.HOME ? resolve(process.env.HOME, ".smithers") : resolve(taskCwd, ".smithers"));
@@ -9644,7 +9731,20 @@ const cli = Cli.create({
             ...summary,
           });
         }
-        await runPromise(supervisorLoopEffect(supervisorOptions), { signal: abort.signal });
+        const loopSummary = await runPromise(supervisorLoopEffect(supervisorOptions), { signal: abort.signal });
+        // Giving up is a failure of unattended recovery, not a clean stop: the
+        // supervised runs are abandoned and marked failed. Exiting 0 here made
+        // that invisible to whatever supervises the supervisor.
+        if (loopSummary.gaveUpRunIds.length > 0) {
+          return fail({
+            code: "SUPERVISOR_GAVE_UP",
+            message:
+              `Supervisor gave up on ${loopSummary.gaveUpRunIds.join(", ")}: ` +
+              "consecutive auto-resumes died before activation. Each run is marked failed with AUTO_RESUME_GAVE_UP " +
+              "diagnostics and a durable alert; inspect with `smithers alerts` and resume manually once the startup failure is fixed.",
+            exitCode: 1,
+          });
+        }
         return c.ok({ status: "stopped" });
       } catch (error) {
         if (abort.signal.aborted) {
@@ -12219,7 +12319,12 @@ const cli = Cli.create({
     options: z.object({
       runId: z.string().describe("Source run ID to replay from"),
       frame: z.number().int().describe("Frame number to fork from"),
-      node: z.string().optional().describe("Node ID to reset to pending"),
+      node: z
+        .string()
+        .optional()
+        .describe(
+          "Node ID to reset to pending; comma-separate ids to reset several (dependents are not reset for you)",
+        ),
       input: z.string().optional().describe("Input overrides as JSON string"),
       label: z.string().optional().describe("Branch label for the fork"),
       restoreVcs: z.boolean().default(false).describe("Restore jj filesystem state to the source frame's revision"),
@@ -12235,7 +12340,7 @@ const cli = Cli.create({
           const parsedOverrides = tryParseJsonInput(c.options.input, "input");
           if (!parsedOverrides.ok) return fail(parsedOverrides.error);
           const inputOverrides = parsedOverrides.value;
-          const resetNodes = c.options.node ? [c.options.node] : undefined;
+          const resetNodes = parseResetNodeList(c.options.node);
           const resolvedReplayWorkflowPath = resolve(c.args.workflow);
           const result = await replayFromCheckpoint(adapter, {
             parentRunId: c.options.runId,
@@ -12504,7 +12609,12 @@ const cli = Cli.create({
     options: z.object({
       runId: z.string().describe("Source run ID"),
       frame: z.number().int().describe("Frame number to fork from"),
-      resetNode: z.string().optional().describe("Node ID to reset to pending"),
+      resetNode: z
+        .string()
+        .optional()
+        .describe(
+          "Node ID to reset to pending; comma-separate ids to reset several (dependents are not reset for you)",
+        ),
       input: z.string().optional().describe("Input overrides as JSON string"),
       label: z.string().optional().describe("Branch label"),
       run: z.boolean().default(false).describe("Immediately start the forked run"),
@@ -12520,7 +12630,7 @@ const cli = Cli.create({
           const parsedOverrides = tryParseJsonInput(c.options.input, "input");
           if (!parsedOverrides.ok) return fail(parsedOverrides.error);
           const inputOverrides = parsedOverrides.value;
-          const resetNodes = c.options.resetNode ? [c.options.resetNode] : undefined;
+          const resetNodes = parseResetNodeList(c.options.resetNode);
           const resolvedForkWorkflowPath = resolve(c.args.workflow);
           const result = await forkRun(adapter, {
             parentRunId: c.options.runId,

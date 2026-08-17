@@ -35,6 +35,8 @@ const NODE_LIFECYCLE_EVENTS = new Set([
   "node.finished",
   "NodeFailed",
   "node.failed",
+  "NodeStalled",
+  "node.stalled",
   "NodeRetrying",
   "node.retrying",
   "NodeSkipped",

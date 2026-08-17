@@ -300,6 +300,7 @@
       "name": "@smthrs/quota-dashboard",
       "version": "0.0.0",
       "dependencies": {
+        "@smthrs/usage": "workspace:*",
         "electrobun": "1.18.1",
       },
     },

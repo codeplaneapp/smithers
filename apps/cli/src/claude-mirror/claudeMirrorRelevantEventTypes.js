@@ -9,6 +9,7 @@ export const claudeMirrorRelevantEventTypes = new Set([
   "NodeStarted",
   "NodeFinished",
   "NodeFailed",
+  "NodeStalled",
   "NodeCancelled",
   "NodeSkipped",
   "NodeRetrying",

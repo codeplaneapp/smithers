@@ -186,7 +186,7 @@ function aggregateChildState(kids) {
     )
   )
     return "in-progress";
-  if (kids.some((k) => k.state === "failed")) return "failed";
+  if (kids.some((k) => k.state === "failed" || k.state === "stalled")) return "failed";
   if (kids.length > 0 && kids.every((k) => k.state === "finished" || k.state === "skipped")) return "finished";
   if (kids.some((k) => k.state === "pending")) return "pending";
   return kids[0]?.state ?? "pending";

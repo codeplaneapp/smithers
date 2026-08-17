@@ -529,6 +529,7 @@ describe("supervisor e2e", () => {
         skippedCount: 2,
         durationMs: 0,
         wouldResumeRunIds: [],
+        gaveUpRunIds: [],
       });
       expect(resumed.slice().sort()).toEqual(["run-stale", "run-staler", "run-stalest"]);
       for (const runId of ["run-stalest", "run-staler", "run-stale"]) {
@@ -618,6 +619,7 @@ describe("supervisor e2e", () => {
         skippedCount: 0,
         durationMs: 0,
         wouldResumeRunIds: [],
+        gaveUpRunIds: [],
       });
       expect(resumed.slice().sort()).toEqual(["run-stale", "run-timer-due"]);
       expect(await eventPayloads(adapter, "run-stale", "RunAutoResumed")).toHaveLength(1);
@@ -662,6 +664,7 @@ describe("supervisor e2e", () => {
         skippedCount: 0,
         durationMs: 0,
         wouldResumeRunIds: [],
+        gaveUpRunIds: [],
       });
       expect(second).toEqual({
         staleCount: 0,
@@ -669,6 +672,7 @@ describe("supervisor e2e", () => {
         skippedCount: 0,
         durationMs: 0,
         wouldResumeRunIds: [],
+        gaveUpRunIds: [],
       });
       expect(resumed).toEqual(["run-idempotent"]);
       const run = await adapter.getRun("run-idempotent");
@@ -733,6 +737,7 @@ describe("supervisor e2e", () => {
         skippedCount: 0,
         durationMs: 0,
         wouldResumeRunIds: [],
+        gaveUpRunIds: [],
       });
       expect(second).toEqual({
         staleCount: 0,
@@ -740,6 +745,7 @@ describe("supervisor e2e", () => {
         skippedCount: 0,
         durationMs: 0,
         wouldResumeRunIds: [],
+        gaveUpRunIds: [],
       });
       expect(resumed).toEqual(["run-timer-idempotent"]);
       const run = await adapter.getRun("run-timer-idempotent");
@@ -805,6 +811,7 @@ describe("supervisor e2e", () => {
         skippedCount: 2,
         durationMs: 0,
         wouldResumeRunIds: [],
+        gaveUpRunIds: [],
       });
       expect(resumed.slice().sort()).toEqual(["run-dead-a", "run-dead-b"]);
       expect(await eventPayloads(adapter, "run-alive", "RunAutoResumeSkipped")).toEqual([

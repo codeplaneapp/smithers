@@ -653,6 +653,7 @@ describe("Gateway", () => {
       heartbeatMs: 100,
       auth: {
         mode: "trusted-proxy",
+        trustedProxies: ["127.0.0.1", "::1"],
         allowedOrigins: ["https://app.example.com"],
         trustedHeaders: ["x-user-id", "x-user-scopes", "x-user-role"],
         defaultRole: "viewer",

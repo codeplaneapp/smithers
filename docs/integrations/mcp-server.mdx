@@ -540,7 +540,7 @@ Create a branched run from a time-travel snapshot checkpoint without starting it
 |---|---|---|
 | `parentRunId` | `string` | Source run ID |
 | `frameNo` | `number` | Snapshot frame number |
-| `resetNodes` | `string[]` | Node IDs to reset to pending in the fork |
+| `resetNodes` | `string[]` | Node IDs to reset to pending in the fork. Only these reset - downstream dependents keep the parent's finished output, so list them here too. An entry is a node ID (every iteration) or a `nodeId::iteration` key |
 | `inputOverrides` | `Record<string, unknown>` | Input fields to overlay on the snapshot input |
 | `branchLabel` | `string` | Optional branch label |
 

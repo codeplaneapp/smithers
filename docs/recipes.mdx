@@ -335,8 +335,13 @@ GitHub API mutations such as `gh pr merge` are not.
 bunx smthrs timeline RUN_ID --tree
 bunx smthrs diff RUN_ID NODE_ID
 bunx smthrs fork workflow.tsx --run-id RUN_ID --frame 5 --reset-node analyze --label exp1
+bunx smthrs fork workflow.tsx --run-id RUN_ID --frame 5 --reset-node analyze,implement   # dependents are not reset for you
 bunx smthrs replay workflow.tsx --run-id RUN_ID --frame 5 --restore-vcs
 ```
+
+`--reset-node` resets exactly the nodes you name and nothing else: a task that
+consumed a reset task's output keeps the parent's finished output unless you
+name it too, so comma-separate the whole set you want re-run.
 
 Fork makes a child run without starting it (add `--run` to start immediately);
 replay also makes a child run but immediately resumes it. Branch operations do

@@ -176,6 +176,90 @@ describe("forkRun", () => {
     expect(parsed.nodes["implement::0"].state).toBe("pending");
     expect(parsed.nodes["implement::0"].lastAttempt).toBeNull();
   });
+  // Contract pin for the fork half of https://github.com/smithersai/smithers/issues/584.
+  // `resetNodes` resets ONLY what the caller named. `implement` consumed
+  // `analyze`'s output, but a fork that resets `analyze` alone leaves
+  // `implement` finished, still carrying the parent's output. If someone
+  // teaches fork to expand to downstream dependents, this test fails and the
+  // contract change has to be made deliberately.
+  test("does not reset a downstream dependent of a reset node", async () => {
+    const { adapter } = createTestDb();
+    const dependentNodes = [
+      { nodeId: "analyze", iteration: 0, state: "finished", lastAttempt: 1, outputTable: "out_analyze", label: null },
+      {
+        nodeId: "implement",
+        iteration: 0,
+        state: "finished",
+        lastAttempt: 2,
+        outputTable: "out_implement",
+        label: null,
+      },
+    ];
+    await captureSnapshot(
+      adapter,
+      "parent-dependents",
+      1,
+      sampleData({
+        nodes: dependentNodes,
+        // `implement` consumed `analyze`'s output to produce its own.
+        outputs: { out_analyze: [{ text: "analysis" }], out_implement: [{ text: "built from analysis" }] },
+      }),
+    );
+
+    const result = await forkRun(adapter, {
+      parentRunId: "parent-dependents",
+      frameNo: 1,
+      resetNodes: ["analyze"],
+    });
+
+    const parsed = parseSnapshot(await loadSnapshot(adapter, result.runId, 0));
+    expect(parsed.nodes["analyze::0"]).toMatchObject({ state: "pending", lastAttempt: null });
+    expect(parsed.nodes["implement::0"]).toMatchObject({ state: "finished", lastAttempt: 2 });
+    expect(parsed.outputs.out_implement).toEqual([{ text: "built from analysis" }]);
+
+    // The documented remedy: name the dependent too.
+    const withDependent = await forkRun(adapter, {
+      parentRunId: "parent-dependents",
+      frameNo: 1,
+      resetNodes: ["analyze", "implement"],
+    });
+    const bothReset = parseSnapshot(await loadSnapshot(adapter, withDependent.runId, 0));
+    expect(bothReset.nodes["analyze::0"]).toMatchObject({ state: "pending", lastAttempt: null });
+    expect(bothReset.nodes["implement::0"]).toMatchObject({ state: "pending", lastAttempt: null });
+  });
+  test("resets a single iteration when given a fully-qualified nodeId::iteration key", async () => {
+    const { adapter } = createTestDb();
+    await captureSnapshot(
+      adapter,
+      "parent-iterations",
+      1,
+      sampleData({
+        nodes: [
+          { nodeId: "loop", iteration: 0, state: "finished", lastAttempt: 1, outputTable: "out_loop", label: null },
+          { nodeId: "loop", iteration: 1, state: "finished", lastAttempt: 1, outputTable: "out_loop", label: null },
+        ],
+        outputs: {},
+      }),
+    );
+
+    const exact = await forkRun(adapter, {
+      parentRunId: "parent-iterations",
+      frameNo: 1,
+      resetNodes: ["loop::1"],
+    });
+    const exactNodes = parseSnapshot(await loadSnapshot(adapter, exact.runId, 0)).nodes;
+    expect(exactNodes["loop::0"].state).toBe("finished");
+    expect(exactNodes["loop::1"].state).toBe("pending");
+
+    const base = await forkRun(adapter, {
+      parentRunId: "parent-iterations",
+      frameNo: 1,
+      resetNodes: ["loop"],
+    });
+    const baseNodes = parseSnapshot(await loadSnapshot(adapter, base.runId, 0)).nodes;
+    expect(baseNodes["loop::0"].state).toBe("pending");
+    expect(baseNodes["loop::1"].state).toBe("pending");
+  });
   test("inherits completed checkpoints while reset nodes start fresh with parent-deletion safety", async () => {
     const { adapter } = createTestDb();
     await adapter.insertRun({

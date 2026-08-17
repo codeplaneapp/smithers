@@ -2402,7 +2402,10 @@ seat closing the chain.
 Every rung is availability-gated: oneshot selects only from the agents
 detected usable on the machine, the claude seats fall back to opencode when
 the Claude CLI is unavailable, and the kimi seats all run Kimi K3 (1M-token
-context). An explicit `--model` (a slot: `sol`, `terra`, `luna`, `kimi`,
+context). When an engine has several registered accounts, each rung runs on
+the account with the most cached quota headroom for that rung's model:
+rate-limited seats sink, and a model-scoped cap such as the Fable weekly
+limit routes Fable rungs to seats that can still serve them. An explicit `--model` (a slot: `sol`, `terra`, `luna`, `kimi`,
 `fable`, `opus`, `sonnet`; or a canonical model id) or `--agent` (`codex`,
 `kimi`, `claude-code`, `opencode`, `pi`) always overrides classification; the
 default `auto` follows the task shape, with review on Sol at high reasoning
@@ -2812,7 +2815,7 @@ Five commands cross historical boundaries. Pick by what each acts on:
 | --- | --- | --- |
 | `rewind` | a run | Rewinds a run to a previous frame. Args: `RUN_ID FRAME_NO`. |
 | `replay` | a snapshot checkpoint | Forks from a checkpoint and resumes execution (time-travel fork). Takes a workflow. |
-| `fork` | a snapshot checkpoint | Creates a child run. `--run` also resumes it. |
+| `fork` | a snapshot checkpoint | Creates a child run. `--run` also resumes it. `--reset-node` resets exactly the nodes you name; downstream dependents keep the parent's finished output unless you name them too. |
 | `timetravel` | a past task state | Reverts filesystem plus DB state to a previous task state, then optionally resumes. Takes a workflow. |
 | `revert` | the workspace | Reverts the workspace to a previous task attempt's filesystem state only, no DB reset. Takes a workflow. |
 
@@ -3387,7 +3390,7 @@ commands[113]:
     flags[7]{name,short,type,default,desc}:
       run-id,r,string,,Source run ID
       frame,f,number,,Frame number to fork from
-      node,n,string,,Node ID to reset to pending
+      node,n,string,,Node ID to reset to pending (comma-separate ids; dependents are not reset for you)
       input,i,string,,Input overrides as JSON
       label,l,string,,Branch label for the fork
       restore-vcs,,boolean,false,Restore jj filesystem state to source frame revision
@@ -3399,7 +3402,7 @@ commands[113]:
     flags[7]{name,short,type,default,desc}:
       run-id,r,string,,Source run ID
       frame,f,number,,Frame number to fork from
-      reset-node,n,string,,Node ID to reset to pending
+      reset-node,n,string,,Node ID to reset to pending (comma-separate ids; dependents are not reset for you)
       input,i,string,,Input overrides as JSON
       label,l,string,,Branch label
       run,,boolean,false,Immediately start the forked run
@@ -8280,8 +8283,13 @@ GitHub API mutations such as `gh pr merge` are not.
 bunx smthrs timeline RUN_ID --tree
 bunx smthrs diff RUN_ID NODE_ID
 bunx smthrs fork workflow.tsx --run-id RUN_ID --frame 5 --reset-node analyze --label exp1
+bunx smthrs fork workflow.tsx --run-id RUN_ID --frame 5 --reset-node analyze,implement   # dependents are not reset for you
 bunx smthrs replay workflow.tsx --run-id RUN_ID --frame 5 --restore-vcs
 ```
+
+`--reset-node` resets exactly the nodes you name and nothing else: a task that
+consumed a reset task's output keeps the parent's finished output unless you
+name it too, so comma-separate the whole set you want re-run.
 
 Fork makes a child run without starting it (add `--run` to start immediately);
 replay also makes a child run but immediately resumes it. Branch operations do
@@ -10526,6 +10534,7 @@ type GatewayAuthConfig =
     }
   | {
       mode: "trusted-proxy";
+      trustedProxies: string[];      // REQUIRED: peer IPs / CIDR blocks, or "unix"
       trustedHeaders?: string[];     // default ["x-user-id","x-user-scopes","x-user-role"]
       allowedOrigins?: string[];     // default [] (no Origin allowlist)
       defaultRole?: string;          // default "operator"
@@ -11341,6 +11350,7 @@ JSON response codes, not `SmithersErrorInstance` objects.
 | `INVALID_JSON` | 400 | Body not valid JSON |
 | `SERVER_ERROR` | 500 | Unexpected server error |
 | `UNAUTHORIZED` | 401 | Missing or invalid auth token |
+| `UNTRUSTED_PROXY_PEER` | 403 | `mode: "trusted-proxy"` request or WebSocket upgrade whose transport peer is not in `auth.trustedProxies`. The identity headers are discarded, not honored. See Gateway auth. |
 | `WORKFLOW_PATH_OUTSIDE_ROOT` | 400 | Workflow path outside server root |
 | `RUN_ID_REQUIRED` | 400 | `runId` required when `resume: true` |
 | `RUN_ALREADY_EXISTS` | 409 | Run ID already exists |
@@ -13585,6 +13595,8 @@ The proxy usually has two Gateway-auth branches:
 The Gateway auth mode determines which branch preserves per-user identity. In `mode: "trusted-proxy"`, the Gateway reads role, scopes, user id, and token id from the trusted headers the proxy set. In `mode: "token"` or `mode: "jwt"`, the Gateway reads the bearer credential and ignores trusted-proxy identity headers; use the service-token branch only when service identity is acceptable. The browser never sees a Gateway credential; the iframe's RPC calls and WebSocket upgrades flow through the proxy.
 
 The same shape works behind any reverse proxy (Cloudflare, Cloudflare Access, Caddy, nginx, an internal API gateway): terminate session, strip identity headers off the request, set them from the validated session, forward to the Gateway. Trusted-proxy mode is **only safe behind something you control** that strips and rewrites identity headers; the Gateway docs call this out explicitly.
+
+Stripping headers at the proxy is necessary but not sufficient, because it does nothing about a client that skips the proxy entirely. Set `auth.trustedProxies` to the peer addresses, CIDR blocks, or `"unix"` socket the proxy connects from: the Gateway reads identity headers only from those peers, answers `403 UNTRUSTED_PROXY_PEER` to anything else, and refuses to start in trusted-proxy mode without the list. See Gateway auth.
 
 ## Local dev quick reference
 
@@ -16611,6 +16623,17 @@ pass `{ namespace }` to stay namespace-local on a shared backend. See
 [`examples/incident-runbook-memory.jsx`](https://github.com/smithersai/smithers/blob/main/examples/incident-runbook-memory.jsx)
 for the full recall → triage → bank → distill → ratify loop.
 
+Notes are a **SQLite-only** capability: the note + supersession-edge write needs
+one synchronous transaction and search needs FTS5, neither of which the Postgres
+path provides. `saveNote`, `enableNoteSearch`, `searchNotes`, and the
+transactional `deleteThread` fail loud against a Postgres/PGlite handle rather
+than degrading. The Postgres schema still carries `_smithers_memory_notes` and
+`_smithers_memory_note_supersessions` for dialect parity, labelled *staged, not
+served* by migration `0043_memory_notes_postgres_staged`. Under Bun, a Postgres
+or PGlite workspace still gets notes: `openSmithersBackend` keeps memory in the
+`.smithers/smithers.db` sqlite sidecar it opens alongside the main database. Under
+Node there is no sqlite at all. See Node runtime.
+
 ## Processors
 
 Maintenance jobs you run periodically:
@@ -17851,6 +17874,7 @@ type GatewayAuthConfig =
     }
   | {
       mode: "trusted-proxy";
+      trustedProxies: string[];      // REQUIRED: peer IPs / CIDR blocks, or "unix"
       allowedOrigins?: string[];     // default [] (no Origin allowlist)
       trustedHeaders?: string[];     // default ["x-user-id","x-user-scopes","x-user-role"]
       defaultRole?: string;          // default "operator"
@@ -17858,7 +17882,43 @@ type GatewayAuthConfig =
     };
 ```
 
-JWT auth reads scopes from `scope`, role from `role`, and user id from `sub` unless the `*Claim` options override those claim names. Missing JWT role falls back to `defaultRole` and then `operator`; missing JWT scopes fall back to `defaultScopes` and then `[]`. Trusted-proxy auth reads `trustedHeaders` as `[user, scopes, role]`; missing role falls back to `defaultRole` and then `operator`, and missing scopes fall back to `defaultScopes`, or the request is rejected when no `defaultScopes` is configured.
+JWT auth reads scopes from `scope`, role from `role`, and user id from `sub` unless the `*Claim` options override those claim names. Missing JWT role falls back to `defaultRole` and then `operator`; missing JWT scopes fall back to `defaultScopes` and then `[]`. Trusted-proxy auth reads `trustedHeaders` as `[user, scopes, role]`; missing role falls back to `defaultRole` and then `operator`, and missing scopes fall back to `defaultScopes`, or the request is rejected when no `defaultScopes` is configured. Those headers are only read at all when the request's transport peer matches `trustedProxies` (see below).
+
+### Trusted-proxy trust boundary
+
+`trustedProxies` is **required** in `mode: "trusted-proxy"` and must be non-empty. The identity headers above are ordinary request headers, so any client that can reach the listener can set them. The Gateway therefore honors them only when the request's **immediate transport peer** is on the `trustedProxies` list.
+
+Each entry is one of:
+
+| Entry | Matches |
+|---|---|
+| `"10.4.0.7"` | that exact peer address (IPv4 or IPv6; `::ffff:10.4.0.7` matches `10.4.0.7`) |
+| `"10.4.0.0/24"` | any peer inside that CIDR block (IPv4 or IPv6 prefixes) |
+| `"unix"` | any peer of a Unix-domain listener, bounded by the socket file's filesystem permissions |
+
+The peer is `req.socket.remoteAddress`: the far end of the TCP (or Unix) connection actually attached to this process. It is never read from `X-Forwarded-For` or any other header, because those are supplied by the caller whose provenance is being checked, which would make the check circular. In a chain such as `client -> edge proxy -> internal proxy -> Gateway`, list **only the last hop**, the internal proxy that opens the connection to the Gateway. Earlier hops in `X-Forwarded-For` are data your trusted proxy vouched for, not identity the Gateway verifies.
+
+Failure modes, all fail-closed:
+
+| Condition | Result |
+|---|---|
+| `trustedProxies` missing, empty, or malformed | `new Gateway(...)` throws `INVALID_INPUT`; the process never starts |
+| Listening on a TCP port with only a `"unix"` entry | `gateway.listen()` throws `INVALID_INPUT` |
+| Listening on a Unix socket without a `"unix"` entry | `gateway.listen()` throws `INVALID_INPUT` |
+| Request or WebSocket upgrade from a peer not on the list | `403 UNTRUSTED_PROXY_PEER`, logged as `Gateway rejected trusted-proxy identity headers from an untrusted peer` |
+
+An untrusted peer is rejected rather than downgraded to an anonymous session, so a forged-credential attempt is visible in logs and metrics and the supplied headers never enter the authenticated context. WebSocket upgrades are refused at the handshake, before the socket opens. There is no configuration flag that restores the previous behavior of accepting identity headers from any peer.
+
+```ts
+const gateway = new Gateway({
+  auth: {
+    mode: "trusted-proxy",
+    trustedProxies: ["10.4.0.0/24"],   // the proxy subnet that fronts this Gateway
+    defaultScopes: ["run:read"],
+  },
+});
+await gateway.listen({ host: "10.4.0.20", port: 7331 });
+```
 
 `allowedOrigins` is available in every mode (token, jwt, trusted-proxy) as defense-in-depth. It defaults to `[]`, which enforces no Origin allowlist. When non-empty, the gateway rejects any HTTP RPC or WebSocket upgrade whose browser `Origin` header is not on the list; requests with no `Origin` header (server-to-server / CLI callers) are always allowed. Set it to your operator-UI origin(s) when exposing a token/jwt gateway to a browser.
 
@@ -18430,7 +18490,7 @@ Create a branched run from a time-travel snapshot checkpoint without starting it
 |---|---|---|
 | `parentRunId` | `string` | Source run ID |
 | `frameNo` | `number` | Snapshot frame number |
-| `resetNodes` | `string[]` | Node IDs to reset to pending in the fork |
+| `resetNodes` | `string[]` | Node IDs to reset to pending in the fork. Only these reset - downstream dependents keep the parent's finished output, so list them here too. An entry is a node ID (every iteration) or a `nodeId::iteration` key |
 | `inputOverrides` | `Record<string, unknown>` | Input fields to overlay on the snapshot input |
 | `branchLabel` | `string` | Optional branch label |
 
@@ -23344,7 +23404,7 @@ Used by `bunx smthrs events --type <category>` and the metrics layer.
 |---|---|
 | `run` | RunAutoResumed, RunAutoResumeSkipped, RunStarted, RunStatusChanged, RunStateChanged, RunConcurrencySaturated, RunFinished, RunFailed, RunCancelled, RunContinuedAsNew, RunHijackRequested, RunHijacked, RetryTaskStarted, RetryTaskFinished, RunForked, ReplayStarted |
 | `frame` | FrameCommitted |
-| `node` | NodePending, NodeStarted, TaskHeartbeat, TaskHeartbeatTimeout, NodeFinished, NodeFailed, NodeCancelled, NodeSkipped, NodeRetrying, NodeWaitingApproval, NodeWaitingTimer |
+| `node` | NodePending, NodeStarted, TaskHeartbeat, TaskHeartbeatTimeout, NodeFinished, NodeFailed, NodeStalled, NodeCancelled, NodeSkipped, NodeRetrying, NodeWaitingApproval, NodeWaitingTimer |
 | `approval` | ApprovalRequested, ApprovalGranted, ApprovalAutoApproved, ApprovalDenied |
 | `tool-call` | ToolCallStarted, ToolCallFinished |
 | `agent` | AgentEvent, AgentTraceEvent, AgentTraceSummary, AgentSessionEvent |
@@ -23454,6 +23514,7 @@ type TaskState =
   | "in-progress"
   | "finished"
   | "failed"
+  | "stalled"
   | "cancelled"
   | "skipped";
 ```
@@ -23465,7 +23526,7 @@ type TaskState =
 Node lifecycle events do not carry a separate `NodeStatus` or `TaskState`
 field. Their names report transitions: `NodePending`, `NodeStarted`,
 `NodeRetrying`, the `NodeWaiting*` variants, and the terminal
-`NodeFinished`/`NodeFailed`/`NodeCancelled`/`NodeSkipped` variants. Read node
+`NodeFinished`/`NodeFailed`/`NodeStalled`/`NodeCancelled`/`NodeSkipped` variants. Read node
 records or a DevTools snapshot when you need the current persisted
 `TaskState`; some states, including bound waits, have no dedicated event.
 Browser run trees intentionally collapse the detailed states to the
