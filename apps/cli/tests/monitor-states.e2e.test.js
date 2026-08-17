@@ -24,6 +24,38 @@ const WORKFLOW = "fixture-workflow";
 const RUN_ID = "monitor-states-run";
 const MISSING_RUN = "monitor-states-missing";
 
+const WORKFLOW_WITH_UI = `
+/** @jsxImportSource smthrs */
+import { createSmithers, Workflow, Task, UI } from "smthrs";
+import { z } from "zod";
+
+const { smithers, outputs } = createSmithers({
+  result: z.object({ summary: z.string() }),
+});
+
+export default smithers(() => (
+  <Workflow name="${WORKFLOW}">
+    <UI entry="../ui/${WORKFLOW}.tsx" title="Fixture UI" />
+    <Task id="write-result" output={outputs.result}>{{ summary: "fixture workflow ran" }}</Task>
+  </Workflow>
+));
+`;
+
+const WORKFLOW_UI = `
+/** @jsxImportSource react */
+import { createGatewayReactRoot } from "smthrs/gateway-react";
+import { Card, CardContent, SmithersUiStyles } from "smthrs/ui";
+
+createGatewayReactRoot(
+  <>
+    <SmithersUiStyles />
+    <main aria-label="Fixture workflow UI">
+      <Card><CardContent>Fixture workflow UI</CardContent></Card>
+    </main>
+  </>,
+);
+`;
+
 function resolveChromium() {
   try {
     const chromium = require("playwright").chromium;
@@ -87,6 +119,8 @@ browserTest(
   async () => {
     const repo = createTempRepo();
     writeTestWorkflow(repo, `.smithers/workflows/${WORKFLOW}.tsx`);
+    repo.write(`.smithers/workflows/${WORKFLOW}.tsx`, WORKFLOW_WITH_UI);
+    repo.write(`.smithers/ui/${WORKFLOW}.tsx`, WORKFLOW_UI);
     const port = await findOpenPort();
     const base = `http://127.0.0.1:${port}`;
     const gateway = spawn(
@@ -122,6 +156,37 @@ browserTest(
       const darkColor = await descriptionColor(page, "monitor-empty-detail", "dark");
       expect(lightColor).not.toBe("");
       expect(lightColor).not.toBe(darkColor);
+
+      // The shell owns no horizontal overflow from phone through wide desktop,
+      // and the same responsive layout is real in both explicit themes.
+      for (const viewport of [
+        { name: "mobile", width: 390, height: 844, bodyDisplay: "block" },
+        { name: "tablet", width: 900, height: 800, bodyDisplay: "grid" },
+        { name: "desktop", width: 1440, height: 900, bodyDisplay: "grid" },
+      ]) {
+        await page.setViewportSize({ width: viewport.width, height: viewport.height });
+        for (const theme of ["light", "dark"]) {
+          await page.evaluate((value) => document.documentElement.setAttribute("data-theme", value), theme);
+          const layout = await page.evaluate(() => {
+            const shell = document.querySelector('[data-testid="monitor-root"]');
+            const body = document.querySelector(".mon-body");
+            const search = document.querySelector('[data-testid="monitor-filter"]');
+            if (!(shell instanceof HTMLElement) || !(body instanceof HTMLElement) || !(search instanceof HTMLElement)) {
+              throw new Error("Monitor shell did not mount");
+            }
+            return {
+              pageOverflows: document.documentElement.scrollWidth > window.innerWidth,
+              shellOverflows: shell.getBoundingClientRect().right > window.innerWidth + 1,
+              bodyDisplay: getComputedStyle(body).display,
+              searchLabel: search.getAttribute("aria-label"),
+            };
+          });
+          expect(layout.pageOverflows, `${viewport.name}/${theme} page overflow`).toBe(false);
+          expect(layout.shellOverflows, `${viewport.name}/${theme} shell overflow`).toBe(false);
+          expect(layout.bodyDisplay).toBe(viewport.bodyDisplay);
+          expect(layout.searchLabel).toBe("Search runs");
+        }
+      }
       await page.evaluate(() => document.documentElement.removeAttribute("data-theme"));
 
       // 2. Runs exist but the filter matches none: a different claim, with a
@@ -138,6 +203,32 @@ browserTest(
       await page.getByTestId("monitor-empty-detail-reset").click();
       await page.waitForSelector(`[data-run-id="${RUN_ID}"]`, { timeout: 30_000 });
       expect(await page.getByTestId("monitor-filter").inputValue()).toBe("");
+
+      // The monitor's shared Radix dialog traps focus, closes on Escape, and
+      // restores focus to its trigger in a real browser.
+      await page.locator(`[data-run-id="${RUN_ID}"]`).first().click();
+      await page.waitForSelector('[data-testid="monitor-run-detail"]', { timeout: 30_000 });
+      const openUi = page.getByTestId("monitor-open-ui");
+      await openUi.focus();
+      await openUi.click();
+      const modal = page.getByTestId("monitor-ui-modal");
+      await modal.waitFor();
+      expect(await modal.getAttribute("role")).toBe("dialog");
+      expect(await modal.getAttribute("aria-modal")).toBe("true");
+      expect(await page.evaluate(() => document.activeElement?.textContent)).toContain("Open in new tab");
+      await page.keyboard.press("Escape");
+      await modal.waitFor({ state: "detached" });
+      await page.waitForFunction(() => document.activeElement?.matches('[data-testid="monitor-open-ui"]'));
+      expect(await openUi.evaluate((node) => document.activeElement === node)).toBe(true);
+
+      await openUi.click();
+      await modal.waitFor();
+      await page.keyboard.press("Tab");
+      expect(await modal.evaluate((node) => node.contains(document.activeElement))).toBe(true);
+      await modal.locator(".sui-dialog-close").click();
+      await modal.waitFor({ state: "detached" });
+      await page.waitForFunction(() => document.activeElement?.matches('[data-testid="monitor-open-ui"]'));
+      expect(await openUi.evaluate((node) => document.activeElement === node)).toBe(true);
 
       // 3. A requested run that does not exist: an honest unavailable state
       //    with both recovery actions, never a blank detail pane.

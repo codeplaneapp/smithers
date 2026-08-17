@@ -8,7 +8,17 @@
  * booting a gateway; RPC wiring stays in ./monitor.tsx.
  */
 import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
-import { Button, Input, RowButton, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "smthrs/ui";
+import {
+  Button,
+  Input,
+  RowButton,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  StatusPill,
+} from "smthrs/ui";
 import { cancelConfirmationTransition, type Tone } from "./monitorModel.ts";
 
 export function ToneDot({ tone, pulse }: { tone: Tone; pulse?: boolean }) {
@@ -172,7 +182,8 @@ export function RunRailRow({
   name,
   title,
   shortId,
-  tone,
+  status,
+  statusLabel,
   pulse,
   when,
   active,
@@ -182,7 +193,8 @@ export function RunRailRow({
   name: string;
   title: string;
   shortId: string;
-  tone: Tone;
+  status: string | undefined;
+  statusLabel: string;
   pulse: boolean;
   when: ReactNode;
   active: boolean;
@@ -192,13 +204,13 @@ export function RunRailRow({
     <RowButton
       active={active}
       aria-current={active ? "true" : undefined}
-      aria-label={`${name}, run ${runId}`}
+      aria-label={`${name}, ${statusLabel}, run ${runId}`}
       className="mon-run-row"
       data-testid="monitor-run-row"
       data-run-id={runId}
       onClick={() => onSelect(runId)}
     >
-      <ToneDot tone={tone} pulse={pulse} />
+      <StatusPill status={status} className={pulse ? "mon-status-pulse" : undefined} />
       <span className="mon-run-name" title={title}>
         {name}
       </span>
