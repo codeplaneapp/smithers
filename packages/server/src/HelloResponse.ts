@@ -20,6 +20,7 @@ export type HelloResponse = {
     role: string;
     scopes: string[];
     userId: string | null;
+    appId: string | null;
   };
   snapshot: {
     runs: unknown[];

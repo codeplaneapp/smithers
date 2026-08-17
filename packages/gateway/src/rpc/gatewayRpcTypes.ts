@@ -136,6 +136,7 @@ export type {
   BrowserScreenshot,
   BrowserSelection,
   RunCancellationSource,
+  RunOwnership,
 } from "@smthrs/protocol/gateway-rpc";
 
 export type GatewayRpcErrorDetails = ProtocolGatewayRpcErrorDetails;

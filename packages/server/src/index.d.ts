@@ -206,6 +206,8 @@ type GatewayTokenGrant$1 = {
     role: string;
     scopes: string[];
     userId?: string;
+    /** Application half of the persisted `(owner, app)` tenant key. */
+    appId?: string;
     tokenId?: string;
     issuedAtMs?: number;
     expiresAtMs?: number;
@@ -230,6 +232,8 @@ type GatewayAuthConfig$1 = {
     scopesClaim?: string;
     roleClaim?: string;
     userClaim?: string;
+    /** JWT claim containing the application key (default: `app`). */
+    appClaim?: string;
     defaultRole?: string;
     defaultScopes?: string[];
     clockSkewSeconds?: number;
@@ -254,6 +258,7 @@ type GatewayAuthConfig$1 = {
      * to the socket the gateway binds.
      */
     trustedProxies: string[];
+    /** Identity, scopes, role, and application headers, in that order. */
     trustedHeaders?: string[];
     allowedOrigins?: string[];
     defaultRole?: string;
@@ -587,6 +592,7 @@ type HelloResponse$1 = {
         role: string;
         scopes: string[];
         userId: string | null;
+        appId: string | null;
     };
     snapshot: {
         runs: unknown[];
@@ -1055,6 +1061,11 @@ declare class Gateway {
      */
     preAuthConnections: Set<Record<string, unknown>>;
     runRegistry: Map<any, any>;
+    /** @type {Map<string, { owner: string; app: string } | null | false>} */
+    runOwnershipById: Map<string, {
+        owner: string;
+        app: string;
+    } | null | false>;
     activeRuns: Map<any, any>;
     inflightRuns: Map<any, any>;
     /**
@@ -1528,6 +1539,8 @@ declare class Gateway {
         summary: {};
         runId: string;
         parentRunId: string | null;
+        owner?: string | null;
+        app?: string | null;
         workflowName: string;
         workflowPath: string | null;
         workflowHash: string | null;
@@ -1853,6 +1866,10 @@ declare class Gateway {
         toolTimeoutMs?: number;
         startedBy?: _smthrs_driver_RunStartedBy.RunStartedBy;
     }): Promise<{
+        ownership?: {
+            owner: string;
+            app: string;
+        } | undefined;
         runId: string;
         workflow: string;
         system: boolean;
@@ -1899,17 +1916,20 @@ declare class Gateway {
     /**
      * @param {IncomingMessage} req
      * @param {ConnectRequest} request
-     * @returns {Promise< | { ok: true; role: string; scopes: string[]; userId?: string } | { ok: false; code: string; message: string } >}
+     * @returns {Promise< | { ok: true; role: string; scopes: string[]; userId?: string; appId?: string; tokenId?: string } | { ok: false; code: string; message: string; details?: Record<string, unknown> } >}
      */
     authenticate(req: IncomingMessage, request: ConnectRequest): Promise<{
         ok: true;
         role: string;
         scopes: string[];
         userId?: string;
+        appId?: string;
+        tokenId?: string;
     } | {
         ok: false;
         code: string;
         message: string;
+        details?: Record<string, unknown>;
     }>;
     /**
      * Whether `req`'s browser `Origin` is permitted by the configured auth-mode
@@ -1993,17 +2013,20 @@ declare class Gateway {
     /**
      * @param {IncomingMessage} req
      * @param {string | null} token
-     * @returns {Promise< | { ok: true; role: string; scopes: string[]; userId?: string } | { ok: false; code: string; message: string } >}
+     * @returns {Promise< | { ok: true; role: string; scopes: string[]; userId?: string; appId?: string; tokenId?: string } | { ok: false; code: string; message: string; details?: Record<string, unknown> } >}
      */
     authenticateRequest(req: IncomingMessage, token: string | null): Promise<{
         ok: true;
         role: string;
         scopes: string[];
         userId?: string;
+        appId?: string;
+        tokenId?: string;
     } | {
         ok: false;
         code: string;
         message: string;
+        details?: Record<string, unknown>;
     }>;
     /**
      * @param {IncomingMessage} req
@@ -2076,7 +2099,7 @@ declare class Gateway {
      */
     browserSubscriberCount(sessionId: any): number;
     broadcastEvent(event: any, payload: any): void;
-    buildSnapshot(): Promise<{
+    buildSnapshot(connection: any): Promise<{
         runs: any[];
         approvals: {
             runId: string;
@@ -2125,6 +2148,39 @@ declare class Gateway {
         workflowName?: string;
         workflowPath?: string;
     }, registeredKeys: Set<string>, fallbackKey: string): string;
+    /** @param {Record<string, unknown>} run */
+    rememberRunOwnership(run: Record<string, unknown>): void;
+    /**
+     * Scope checks answer whether a method may act; this ownership check then
+     * confines authenticated non-admin callers to their exact tenant pair.
+     * Unowned historical rows retain their pre-migration shared behavior.
+     * @param {GatewayRequestContext} connection
+     * @param {Record<string, unknown>} run
+     */
+    canAccessRun(connection: GatewayRequestContext, run: Record<string, unknown>): boolean;
+    /** @param {GatewayRequestContext} connection @param {string | null} runId */
+    canAccessCachedRun(connection: GatewayRequestContext, runId: string | null): boolean;
+    /** @param {GatewayRequestContext | null | undefined} connection */
+    ownershipListOptions(connection: GatewayRequestContext | null | undefined): {
+        ownership?: undefined;
+        includeUnowned?: undefined;
+        unownedOnly?: undefined;
+    } | {
+        ownership: {
+            owner: string;
+            app: string;
+        };
+        includeUnowned: boolean;
+        unownedOnly?: undefined;
+    } | {
+        unownedOnly: boolean;
+        ownership?: undefined;
+        includeUnowned?: undefined;
+    };
+    /** @param {GatewayRequestContext} connection @param {string} runId */
+    canAccessRunId(connection: GatewayRequestContext, runId: string): Promise<boolean>;
+    /** @param {GatewayRequestContext} connection @param {string} method @param {Record<string, unknown>} params */
+    authorizeRunScopedRequest(connection: GatewayRequestContext, method: string, params: Record<string, unknown>): Promise<boolean>;
     /**
      * @param {string} [status]
      * @param {string} [workflow]
@@ -2132,7 +2188,7 @@ declare class Gateway {
      * @param {boolean} [includeSystem] Include internal and historical unstamped runs.
      * @param {string} [parentRunId] Return only direct children of this run.
      */
-    listRunsAcrossWorkflows(limit?: number, status?: string, workflow?: string, offset?: number, includeSystem?: boolean, parentRunId?: string): Promise<any[]>;
+    listRunsAcrossWorkflows(limit?: number, status?: string, workflow?: string, offset?: number, includeSystem?: boolean, parentRunId?: string, ownershipOptions?: {}): Promise<any[]>;
     /**
      * Cross-run memory facts for the `listMemoryFacts` RPC. Memory is global (keyed
      * by namespace+key, not per-run), so iterate each DISTINCT workflow DB exactly
@@ -2353,7 +2409,7 @@ declare class Gateway {
     watchTicketsDirectory(dir: string): {
         close: () => void;
     } | null;
-    listPendingApprovals(): Promise<{
+    listPendingApprovals(connection: any): Promise<{
         runId: string;
         workflowKey: string;
         nodeId: string;
@@ -2538,6 +2594,7 @@ type GatewayRequestContext = {
     role?: string;
     scopes?: string[];
     userId?: string | null;
+    appId?: string | null;
     tokenId?: string | null;
     origin?: string;
     transport?: GatewayTransport;
@@ -2548,6 +2605,7 @@ type ConnectionState = {
     role: string;
     scopes: string[];
     userId: string | null;
+    appId: string | null;
     subscribedRuns?: Set<string>;
     heartbeat?: unknown;
     runEventHeartbeatTimer?: ReturnType<typeof setInterval> | null;
@@ -2559,6 +2617,7 @@ type RunStartAuthContext = {
     role: string;
     scopes: string[];
     userId?: string | null;
+    appId?: string | null;
     tokenId?: string | null;
     connectionId?: string;
 };

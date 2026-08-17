@@ -58,6 +58,9 @@ export function serializeRunRow(row) {
   const normalized = normalizeApiRow(row);
   const cancellationSource = cancellationSourceFromRow(normalized);
   if (cancellationSource) normalized.cancellationSource = cancellationSource;
+  if (typeof normalized.owner === "string" && typeof normalized.app === "string") {
+    normalized.ownership = { owner: normalized.owner, app: normalized.app };
+  }
   let config;
   if (typeof normalized.configJson === "string") {
     try {

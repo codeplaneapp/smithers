@@ -1437,7 +1437,7 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
 
     test("0043 is the recorded schema head", async () => {
       const head = await client.query("SELECT id FROM _smithers_schema_migrations ORDER BY id DESC LIMIT 1");
-      expect(head.rows[0].id).toBe("0043_memory_notes_postgres_staged");
+      expect(head.rows[0].id).toBe("0044_run_ownership");
     });
   });
 });

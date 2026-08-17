@@ -20,6 +20,8 @@ export type GatewayAuthConfig =
       scopesClaim?: string;
       roleClaim?: string;
       userClaim?: string;
+      /** JWT claim containing the application key (default: `app`). */
+      appClaim?: string;
       defaultRole?: string;
       defaultScopes?: string[];
       clockSkewSeconds?: number;
@@ -45,6 +47,7 @@ export type GatewayAuthConfig =
        * to the socket the gateway binds.
        */
       trustedProxies: string[];
+      /** Identity, scopes, role, and application headers, in that order. */
       trustedHeaders?: string[];
       allowedOrigins?: string[];
       defaultRole?: string;

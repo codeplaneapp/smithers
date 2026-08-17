@@ -1,6 +1,9 @@
 export type RunRow = {
   runId: string;
   parentRunId: string | null;
+  /** Exact tenant pair when ownership is enabled; both fields are present together. */
+  owner?: string | null;
+  app?: string | null;
   workflowName: string;
   workflowPath: string | null;
   workflowHash: string | null;

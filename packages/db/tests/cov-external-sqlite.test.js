@@ -120,6 +120,28 @@ describe("SqlMessageStorage external-sqlite connection", () => {
     ).toBeUndefined();
   });
 
+  test("ensureSchema adds ownership columns and index to an existing external store", async () => {
+    const { raw, descriptor } = makeExternalDb();
+    const storage = new SqlMessageStorage(descriptor);
+    await storage.ensureSchema();
+    raw.run("DROP INDEX _smithers_runs_owner_app_created_idx");
+    raw.run("ALTER TABLE _smithers_runs DROP COLUMN owner");
+    raw.run("ALTER TABLE _smithers_runs DROP COLUMN app");
+
+    await storage.ensureSchema();
+
+    const columns = raw
+      .query('PRAGMA table_info("_smithers_runs")')
+      .all()
+      .map((row) => row.name);
+    const indexes = raw
+      .query('PRAGMA index_list("_smithers_runs")')
+      .all()
+      .map((row) => row.name);
+    expect(columns).toEqual(expect.arrayContaining(["owner", "app"]));
+    expect(indexes).toContain("_smithers_runs_owner_app_created_idx");
+  });
+
   test("executeRaw falls back to queryAllRaw when the descriptor has no execute()", async () => {
     const { raw, descriptor } = makeExternalDb({ withExecute: false, withQueryValues: false });
     // No descriptor.execute → schema DDL must run through the run()/queryAllRaw

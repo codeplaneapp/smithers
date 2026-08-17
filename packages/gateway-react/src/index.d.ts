@@ -56,6 +56,10 @@ declare function useGatewayActions(): {
         runId: string;
         workflow: string;
         system: boolean;
+        ownership?: {
+            owner: string;
+            app: string;
+        };
     } & {
         seq?: number;
         txid?: string;
@@ -167,6 +171,10 @@ declare function useGatewayActions(): {
         runId: string;
         workflow: string;
         system: boolean;
+        ownership?: {
+            owner: string;
+            app: string;
+        };
     } & {
         seq?: number;
         txid?: string;

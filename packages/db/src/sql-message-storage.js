@@ -66,6 +66,8 @@ const CREATE_TABLE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS _smithers_runs (
     run_id TEXT PRIMARY KEY,
     parent_run_id TEXT,
+    owner TEXT,
+    app TEXT,
     workflow_name TEXT NOT NULL,
     workflow_path TEXT,
     workflow_hash TEXT,
@@ -618,6 +620,8 @@ const CREATE_INDEX_STATEMENTS = [
     ON _smithers_agent_checkpoints (content_hash)`,
   `CREATE INDEX IF NOT EXISTS _smithers_runs_status_heartbeat_idx
     ON _smithers_runs (status, heartbeat_at_ms)`,
+  `CREATE INDEX IF NOT EXISTS _smithers_runs_owner_app_created_idx
+    ON _smithers_runs (owner, app, created_at_ms DESC)`,
   `CREATE INDEX IF NOT EXISTS _smithers_signals_lookup_idx
     ON _smithers_signals (run_id, signal_name, correlation_id, received_at_ms)`,
   `CREATE INDEX IF NOT EXISTS _smithers_steers_queued_idx

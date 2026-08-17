@@ -188,7 +188,7 @@ describe("DB migration edges", () => {
       ).toEqual(before);
       // The head the migrate CLI reports back as `schemaVersion`.
       expect(sqlite.query("SELECT id FROM _smithers_schema_migrations ORDER BY id DESC LIMIT 1").get().id).toBe(
-        "0043_memory_notes_postgres_staged",
+        "0044_run_ownership",
       );
       // Notes still work on sqlite: the tables 0023 created are untouched.
       expect(before).toContain("_smithers_memory_notes");
@@ -526,6 +526,13 @@ describe("DB migration edges", () => {
     // defaulted to 'full'.
     expect(row.run_id).toBe("legacy");
     expect(row.encoding).toBe("full");
+    const legacyRun = sqlite.query("SELECT owner, app FROM _smithers_runs WHERE run_id = 'legacy'").get();
+    expect(legacyRun).toEqual({ owner: null, app: null });
+    const runIndexes = sqlite
+      .query('PRAGMA index_list("_smithers_runs")')
+      .all()
+      .map((index) => index.name);
+    expect(runIndexes).toContain("_smithers_runs_owner_app_created_idx");
     sqlite.close();
   });
 

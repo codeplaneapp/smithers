@@ -233,6 +233,14 @@ const cancellationSource = objectSchema(
   ["kind"],
   "Durable attribution for the first caller that cancelled the run.",
 );
+const runOwnership = objectSchema(
+  {
+    owner: stringSchema("Authenticated tenant owner key.", 1),
+    app: stringSchema("Authenticated application key.", 1),
+  },
+  ["owner", "app"],
+  "Exact persisted run ownership pair.",
+);
 const runSummary = objectSchema(
   {
     runId,
@@ -242,6 +250,7 @@ const runSummary = objectSchema(
     parentRunId: { type: ["string", "null"], description: "Immediate parent run id, if this is a child run." },
     system: booleanSchema("Whether this run belongs to an internal system workflow."),
     cancellationSource,
+    ownership: runOwnership,
   },
   ["runId", "status", "system"],
   "Run summary view.",
@@ -280,6 +289,7 @@ const runRecord = objectSchema(
     summary: objectSchema({}, [], "Counts keyed by persisted node state.", true),
     runState: runStateView,
     cancellationSource,
+    ownership: runOwnership,
   },
   ["runId", "system"],
   "Current run record, including node-state counts and optional derived runState.",
@@ -856,7 +866,12 @@ export const GATEWAY_RPC_DEFINITIONS = [
       ["workflow"],
     ),
     responseSchema: objectSchema(
-      { runId, workflow, system: booleanSchema("Whether the launched workflow is an internal system workflow.") },
+      {
+        runId,
+        workflow,
+        system: booleanSchema("Whether the launched workflow is an internal system workflow."),
+        ownership: runOwnership,
+      },
       ["runId", "workflow", "system"],
     ),
     errors: ["InvalidRequest", "InvalidInput", "Unauthorized", "Forbidden", "Internal"],
@@ -1211,6 +1226,8 @@ export const GATEWAY_RPC_DEFINITIONS = [
         workflow: stringSchema("Optional workflow key filter."),
         parentRunId: stringSchema("Return only direct children of this run."),
         includeSystem: booleanSchema("Include internal system runs; they are excluded by default."),
+        owner: stringSchema("Admin-only owner filter; must be paired with app.", 1),
+        app: stringSchema("Admin-only application filter; must be paired with owner.", 1),
       }),
     }),
     responseSchema: arraySchema(runSummary, "Run summaries."),

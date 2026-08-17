@@ -93,6 +93,43 @@ example `{ harness: "openclaw", sessionId: "session-key" }`. It is durable and
 projects as `startedBy` on run list/get rows. It never changes Gateway auth,
 scopes, `auth.triggeredBy`, or cron/webhook source classification.
 
+### Run ownership and tenant isolation
+
+Run ownership is the indexed, persisted pair `(owner, app)`. Both values must
+be present or both absent. Authenticated Gateway launches derive the pair from
+the verified `userId` and `appId`; callers cannot supply different ownership in
+launch options. Child runs, continue-as-new runs, retries, rewinds, and forks
+inherit the source run's pair.
+
+For owned runs, the Gateway provides **isolation**, not merely list scoping.
+It applies the existing method scope check first, then requires an exact
+`(owner, app)` match for non-admin requests. A foreign run id is answered as
+`RunNotFound`, including when guessed directly. Reusing an existing id for a
+launch is rejected with `CONFLICT`. `role: "admin"` (and internal `system`
+execution) is the explicit cross-owner bypass. `listRuns` accepts an exact
+`owner`/`app` filter for admin and unauthenticated trusted-local callers; tenant
+callers are automatically limited to their own pair. The composite
+`(owner, app, created_at_ms)` index backs this filter.
+
+Ownership guards cover Gateway reads for run list/get, descendants, events,
+frames, attempts, node states and outputs, diffs, run trees/devtools streams,
+token usage, approvals, scores, and run summaries. They also cover resume,
+retry, pause, cancel, approval/deny, signal, hijack, rewind, and rerun controls.
+Artifacts, durable workspace snapshots, human-request administration, local
+fork commands, CLI commands, and MCP store tools are trusted operator surfaces:
+they access the store directly and intentionally have the same cross-owner
+authority as `role: "admin"`. Do not expose those local surfaces to tenants;
+tenant-facing clients must use the Gateway.
+
+Migration leaves existing runs with `owner = NULL, app = NULL`. These legacy
+unowned runs keep their previous shared read/control behavior, including for
+authenticated callers, so upgrading a single-tenant deployment is invisible.
+This means a database containing unowned runs is not retroactively isolated.
+Before relying on tenant isolation, configure both identity dimensions, ensure
+new launches go through the Gateway, restrict local store/CLI/MCP access to
+operators, and either retain legacy runs as intentionally shared or migrate
+them to an explicit pair.
+
 ## Live browser viewer
 
 Browser sessions expose a stationary viewer at `/browser/<sessionId>/viewer`.
@@ -675,6 +712,7 @@ type GatewayTokenGrant = {
   role: string;
   scopes: string[];
   userId?: string;
+  appId?: string;
   tokenId?: string;
   issuedAtMs?: number;
   expiresAtMs?: number;
@@ -695,6 +733,7 @@ type GatewayAuthConfig =
       scopesClaim?: string;          // default "scope"
       roleClaim?: string;            // default "role"
       userClaim?: string;            // default "sub"
+      appClaim?: string;             // default "app"
       defaultRole?: string;          // default "operator"
       defaultScopes?: string[];      // default [] when scope claim is absent
       clockSkewSeconds?: number;     // default 60; negative values clamp to 0
@@ -704,13 +743,21 @@ type GatewayAuthConfig =
       mode: "trusted-proxy";
       trustedProxies: string[];      // REQUIRED: peer IPs / CIDR blocks, or "unix"
       allowedOrigins?: string[];     // default [] (no Origin allowlist)
-      trustedHeaders?: string[];     // default ["x-user-id","x-user-scopes","x-user-role"]
+      trustedHeaders?: string[];     // default ["x-user-id","x-user-scopes","x-user-role","x-app-id"]
       defaultRole?: string;          // default "operator"
       defaultScopes?: string[];      // trusted-proxy: used when the scopes header is absent, else the request is rejected
     };
 ```
 
-JWT auth reads scopes from `scope`, role from `role`, and user id from `sub` unless the `*Claim` options override those claim names. Missing JWT role falls back to `defaultRole` and then `operator`; missing JWT scopes fall back to `defaultScopes` and then `[]`. Trusted-proxy auth reads `trustedHeaders` as `[user, scopes, role]`; missing role falls back to `defaultRole` and then `operator`, and missing scopes fall back to `defaultScopes`, or the request is rejected when no `defaultScopes` is configured. Those headers are only read at all when the request's transport peer matches `trustedProxies` (see below).
+JWT auth reads scopes from `scope`, role from `role`, user id from `sub`, and app
+id from `app` unless the `*Claim` options override those claim names. Missing JWT
+role falls back to `defaultRole` and then `operator`; missing JWT scopes fall
+back to `defaultScopes` and then `[]`. Trusted-proxy auth reads
+`trustedHeaders` as `[user, scopes, role, app]`; missing role falls back to
+`defaultRole` and then `operator`, and missing scopes fall back to
+`defaultScopes`, or the request is rejected when no `defaultScopes` is
+configured. Those headers are only read at all when the request's transport
+peer matches `trustedProxies` (see below).
 
 ### Trusted-proxy trust boundary
 

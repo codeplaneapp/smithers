@@ -160,6 +160,22 @@ paths:
                       system:
                         type: boolean
                         description: "Whether the launched workflow is an internal system workflow."
+                      ownership:
+                        type: object
+                        description: "Exact persisted run ownership pair."
+                        properties:
+                          owner:
+                            type: string
+                            minLength: 1
+                            description: "Authenticated tenant owner key."
+                          app:
+                            type: string
+                            minLength: 1
+                            description: "Authenticated application key."
+                        required:
+                          - owner
+                          - app
+                        additionalProperties: false
                     required:
                       - runId
                       - workflow
@@ -4170,6 +4186,22 @@ paths:
                         required:
                           - kind
                         additionalProperties: false
+                      ownership:
+                        type: object
+                        description: "Exact persisted run ownership pair."
+                        properties:
+                          owner:
+                            type: string
+                            minLength: 1
+                            description: "Authenticated tenant owner key."
+                          app:
+                            type: string
+                            minLength: 1
+                            description: "Authenticated application key."
+                        required:
+                          - owner
+                          - app
+                        additionalProperties: false
                     required:
                       - runId
                       - system
@@ -5036,6 +5068,14 @@ paths:
                         includeSystem:
                           type: boolean
                           description: "Include internal system runs; they are excluded by default."
+                        owner:
+                          type: string
+                          minLength: 1
+                          description: "Admin-only owner filter; must be paired with app."
+                        app:
+                          type: string
+                          minLength: 1
+                          description: "Admin-only application filter; must be paired with owner."
                       required: []
                       additionalProperties: false
                   required: []
@@ -5135,6 +5175,22 @@ paths:
                               description: "Authenticated identity of the first cancellation caller."
                           required:
                             - kind
+                          additionalProperties: false
+                        ownership:
+                          type: object
+                          description: "Exact persisted run ownership pair."
+                          properties:
+                            owner:
+                              type: string
+                              minLength: 1
+                              description: "Authenticated tenant owner key."
+                            app:
+                              type: string
+                              minLength: 1
+                              description: "Authenticated application key."
+                          required:
+                            - owner
+                            - app
                           additionalProperties: false
                       required:
                         - runId
@@ -20690,6 +20746,22 @@ paths:
                           required:
                             - kind
                           additionalProperties: false
+                        ownership:
+                          type: object
+                          description: "Exact persisted run ownership pair."
+                          properties:
+                            owner:
+                              type: string
+                              minLength: 1
+                              description: "Authenticated tenant owner key."
+                            app:
+                              type: string
+                              minLength: 1
+                              description: "Authenticated application key."
+                          required:
+                            - owner
+                            - app
+                          additionalProperties: false
                       required:
                         - runId
                         - status
@@ -20952,6 +21024,22 @@ paths:
                       system:
                         type: boolean
                         description: "Whether the launched workflow is an internal system workflow."
+                      ownership:
+                        type: object
+                        description: "Exact persisted run ownership pair."
+                        properties:
+                          owner:
+                            type: string
+                            minLength: 1
+                            description: "Authenticated tenant owner key."
+                          app:
+                            type: string
+                            minLength: 1
+                            description: "Authenticated application key."
+                        required:
+                          - owner
+                          - app
+                        additionalProperties: false
                     required:
                       - runId
                       - workflow
@@ -21367,6 +21455,22 @@ paths:
                             description: "Authenticated identity of the first cancellation caller."
                         required:
                           - kind
+                        additionalProperties: false
+                      ownership:
+                        type: object
+                        description: "Exact persisted run ownership pair."
+                        properties:
+                          owner:
+                            type: string
+                            minLength: 1
+                            description: "Authenticated tenant owner key."
+                          app:
+                            type: string
+                            minLength: 1
+                            description: "Authenticated application key."
+                        required:
+                          - owner
+                          - app
                         additionalProperties: false
                     required:
                       - runId
