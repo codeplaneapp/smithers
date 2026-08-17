@@ -11,8 +11,12 @@ Forking a run from a snapshot checkpoint.
   Effect variants — this is the public `time-travel/fork` surface; do not flip
   the Promise signatures.
 - `_helpers.js` (`expandResetSet`) computes which snapshot node keys to reset
-  on fork. It is imported directly by `tests/rewindAuditHelpers.test.ts`, so
-  its behavior is pinned — do not inline or rename it.
+  on fork: **only the nodes the caller names**, never their downstream
+  dependents (snapshot rows carry no dependency edges, and a fork may target an
+  edited workflow whose edges differ). It is imported directly by
+  `tests/rewindAuditHelpers.test.ts`, which pins that contract along with
+  `tests/fork.test.js` — do not inline or rename it, and do not widen the reset
+  set without changing both tests deliberately.
 
 Dual write paths throughout: PostgreSQL goes through
 `adapter.internalStorage.upsert`, SQLite through drizzle `onConflictDoUpdate`
