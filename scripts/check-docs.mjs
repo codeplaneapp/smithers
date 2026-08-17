@@ -1754,7 +1754,7 @@ function checkAgentAndCacheDocsMatchSourceTypes() {
     [AGENT_GENERATE_OPTIONS_SOURCE, "[key: string]: unknown;"],
     [
       AGENT_CAPABILITY_REGISTRY_SOURCE,
-      'engine: "claude-code" | "codex" | "cursor" | "antigravity" | "gemini" | "kimi" | "pi" | "omp" | "amp" | "forge" | "hermes" | "opencode" | "openclaw" | "pool" | "vibe";',
+      'engine: "claude-code" | "codex" | "cursor" | "antigravity" | "gemini" | "kimi" | "grok" | "pi" | "omp" | "amp" | "forge" | "hermes" | "opencode" | "openclaw" | "pool" | "vibe";',
     ],
     [AGENT_CAPABILITY_REGISTRY_SOURCE, "runtimeTools: Record<string, AgentToolDescriptor>;"],
     [AGENT_TOOL_DESCRIPTOR_SOURCE, 'source?: "builtin" | "mcp" | "extension" | "skill" | "runtime";'],
@@ -1765,7 +1765,7 @@ function checkAgentAndCacheDocsMatchSourceTypes() {
     [TYPES_REFERENCE, "type AgentCapabilityRegistry = {"],
     [
       TYPES_REFERENCE,
-      'engine: "claude-code" | "codex" | "cursor" | "antigravity" | "gemini" | "kimi" | "pi" | "omp" | "amp" | "forge" | "hermes" | "opencode" | "openclaw" | "pool" | "vibe";',
+      'engine: "claude-code" | "codex" | "cursor" | "antigravity" | "gemini" | "kimi" | "grok" | "pi" | "omp" | "amp" | "forge" | "hermes" | "opencode" | "openclaw" | "pool" | "vibe";',
     ],
     [TYPES_REFERENCE, "runtimeTools: Record<string, AgentToolDescriptor>;"],
     [TYPES_REFERENCE, "type AgentGenerateOptions = {"],
@@ -3720,7 +3720,7 @@ function checkCliAgentDocsMatchCurrentModelDefaults() {
   ]);
   const required = [
     [BASE_CLI_AGENT_SOURCE, "this.model = opts.model;"],
-    [CLI_AGENTS_INTEGRATION, "agents[16]{class,cli,modelDefault,hijack,notes}:"],
+    [CLI_AGENTS_INTEGRATION, "agents[17]{class,cli,modelDefault,hijack,notes}:"],
     [CLI_AGENTS_INTEGRATION, "ClaudeCodeAgent,claude,CLI default,native session id"],
     [CLI_AGENTS_INTEGRATION, "CodexAgent,codex,CLI default,native thread id"],
     [CLI_AGENTS_INTEGRATION, "PiAgent,pi,CLI default,native session id"],
@@ -3734,19 +3734,24 @@ function checkCliAgentDocsMatchCurrentModelDefaults() {
     [CLI_AGENTS_INTEGRATION, "OpenClawAgent,openclaw,CLI default,session id"],
     [CLI_AGENTS_INTEGRATION, "OmpAgent,omp,CLI default,native session id"],
     [CLI_AGENTS_INTEGRATION, "CursorAgent,cursor-agent,CLI default,not yet"],
+    [CLI_AGENTS_INTEGRATION, "GrokAgent,grok,CLI default,not yet"],
     [CLI_AGENT_DETECTION_SOURCE, 'id: "vibe"'],
     [CLI_AGENT_DETECTION_SOURCE, 'id: "openclaw"'],
     [CLI_AGENT_DETECTION_SOURCE, 'id: "pool"'],
     [CLI_AGENT_DETECTION_SOURCE, 'id: "cursor"'],
+    [CLI_AGENT_DETECTION_SOURCE, 'id: "grok"'],
     [CLI_AGENT_AVAILABILITY_TYPE, '"vibe"'],
     [CLI_AGENT_AVAILABILITY_TYPE, '"openclaw"'],
     [CLI_AGENT_AVAILABILITY_TYPE, '"pool"'],
     [CLI_AGENT_AVAILABILITY_TYPE, '"cursor"'],
+    [CLI_AGENT_AVAILABILITY_TYPE, '"grok"'],
   ];
   const forbidden = [
     [CLI_AGENTS_INTEGRATION, "agents[12]{class,cli,modelDefault,hijack,notes}:"],
     [CLI_AGENTS_INTEGRATION, "agents[13]{class,cli,modelDefault,hijack,notes}:"],
     [CLI_AGENTS_INTEGRATION, "agents[14]{class,cli,modelDefault,hijack,notes}:"],
+    [CLI_AGENTS_INTEGRATION, "agents[15]{class,cli,modelDefault,hijack,notes}:"],
+    [CLI_AGENTS_INTEGRATION, "agents[16]{class,cli,modelDefault,hijack,notes}:"],
     [CLI_AGENTS_INTEGRATION, "agents[13]{class,cli,defaultModel,hijack,notes}:"],
     [CLI_AGENTS_INTEGRATION, "ClaudeCodeAgent,claude,claude-sonnet-4-20250514,"],
     [CLI_AGENTS_INTEGRATION, "HermesCliAgent,hermes,hermes-4,"],
@@ -3798,7 +3803,7 @@ function checkCliAgentHijackDocsMatchLauncher() {
     [CLI_HIJACK_SOURCE, 'command: "omp"'],
     [
       CLI_AGENTS_INTEGRATION,
-      "native `bunx smthrs hijack` support for Cursor, Vibe, OpenCode, and OpenClaw is not shipped yet",
+      "native `bunx smthrs hijack` support for Grok, Cursor, Vibe, OpenCode, and OpenClaw is not shipped yet",
     ],
   ];
   const forbidden = [

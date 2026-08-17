@@ -143,9 +143,11 @@ const ACCOUNT_PROVIDERS = [
   "codex",
   "gemini",
   "kimi",
+  "grok",
   "anthropic-api",
   "openai-api",
   "gemini-api",
+  "xai-api",
 ];
 
 // The closed set of work-doc kinds in `_smithers_docs`. The GatewayDocKind

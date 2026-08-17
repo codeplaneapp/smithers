@@ -12152,9 +12152,11 @@ paths:
                             - codex
                             - gemini
                             - kimi
+                            - grok
                             - anthropic-api
                             - openai-api
                             - gemini-api
+                            - xai-api
                           description: "Provider id, one of the fixed `smithers agents` catalog."
                         configDir:
                           type:
@@ -12527,9 +12529,11 @@ paths:
                             - codex
                             - gemini
                             - kimi
+                            - grok
                             - anthropic-api
                             - openai-api
                             - gemini-api
+                            - xai-api
                           description: "Provider id, one of the fixed `smithers agents` catalog."
                         authMode:
                           type: string
@@ -27689,9 +27693,11 @@ paths:
                             - codex
                             - gemini
                             - kimi
+                            - grok
                             - anthropic-api
                             - openai-api
                             - gemini-api
+                            - xai-api
                           description: "Provider id, one of the fixed `smithers agents` catalog."
                         authMode:
                           type: string
