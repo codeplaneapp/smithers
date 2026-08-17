@@ -53,6 +53,7 @@ import {
 import { runFork, runPromise } from "./smithersRuntime.js";
 import { prometheusContentType, renderPrometheusMetrics } from "@smthrs/observability";
 import { nowMs } from "@smthrs/scheduler/nowMs";
+import { makeRunParkAbortReason } from "@smthrs/engine/run-parking";
 import { errorToJson } from "@smthrs/errors/errorToJson";
 import { isSmithersError } from "@smthrs/errors/isSmithersError";
 import { SmithersError } from "@smthrs/errors/SmithersError";
@@ -5874,7 +5875,10 @@ a { color: var(--brand); }</style>
     }
     return server;
   }
-  async close() {
+  /**
+   * @param {{ killRuns?: boolean }} [options]
+   */
+  async close(options = {}) {
     this.gatewayClosing = true;
     this.stopIdleMonitor();
     // A closing gateway never renders queued workflow views.
@@ -5883,10 +5887,27 @@ a { color: var(--brand); }</style>
       session.dispose();
     }
     this.ptySessions.clear();
-    const activeRuns = [...this.activeRuns.values()];
-    for (const activeRun of activeRuns) {
-      activeRun.abort.abort();
-    }
+    const killRuns = options.killRuns === true;
+    const handledRuns = new Set();
+    const stopActiveRuns = async (activeRuns) => {
+      if (!killRuns) {
+        await Promise.allSettled(
+          activeRuns.map(async ([runId, activeRun]) => {
+            if (handledRuns.has(activeRun) || !activeRun.workflow) return;
+            await this.adapterForWorkflow(activeRun.workflow).requestRunPause(runId, nowMs());
+          }),
+        );
+      }
+      for (const [, activeRun] of activeRuns) {
+        if (handledRuns.has(activeRun)) continue;
+        handledRuns.add(activeRun);
+        activeRun.abort.abort(
+          killRuns ? undefined : makeRunParkAbortReason("Run parked because the Gateway is stopping"),
+        );
+      }
+    };
+    const activeRuns = [...this.activeRuns.entries()];
+    await stopActiveRuns(activeRuns);
     // Approval decisions can start a detached resume while the original run
     // is still settling. Drain that gate before taking the final active/inflight
     // snapshots so a resume cannot begin using its database after close.
@@ -5896,9 +5917,7 @@ a { color: var(--brand); }</style>
     }
     // A resume that had already entered startRun before gatewayClosing was set
     // may have registered while we awaited it. Abort that raced run too.
-    for (const activeRun of this.activeRuns.values()) {
-      activeRun.abort.abort();
-    }
+    await stopActiveRuns([...this.activeRuns.entries()]);
     const inflightRuns = [...this.inflightRuns.values()];
     if (inflightRuns.length > 0) {
       await Promise.allSettled(inflightRuns);

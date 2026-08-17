@@ -354,16 +354,17 @@ curl http://localhost:8080/health
 `Gateway` is Smithers' headless control plane. Reach for it (instead of [`startServer()`](/integrations/server)) when long-lived clients (bots, dashboards, schedulers, and custom UIs) need to authenticate once, stream events over WebSocket with resilient reconnection, decide [approvals](/components/approval), inject [signals](/runtime/events), access metrics, and manage cron schedules across many registered workflows. Custom UIs, whether using the vanilla SDK or React hooks, rely on the Gateway to provide pushed updates and a stale-data-free model. For the single-workflow Hono-based HTTP surface, see [Serve Mode](/integrations/serve) (`createServeApp()` / `bunx smthrs up --serve`).
 
 <Warning>
-  **Gateway-first client contract:** controllers, Bun cron jobs, monitors, bots,
-  and custom clients must use this Gateway API. Do not open `smithers.db`,
-  `.smithers/pg`, or Postgres directly; do not query `_smithers_*`; do not import
-  `openSmithersStore` or CLI-internal `findAndOpenDb`; and do not pass
-  `--backend` to read/control commands to hunt for runs. Direct backend access
-  exists for runtime implementation, `smithers migrate`, backend integration
-  tests, and maintainer diagnostics only. It is not a control-plane API.
+  **Gateway-first client contract:** controllers, Bun cron jobs, monitors, bots, and custom clients must use this
+  Gateway API. Do not open `smithers.db`, `.smithers/pg`, or Postgres directly; do not query `_smithers_*`; do not
+  import `openSmithersStore` or CLI-internal `findAndOpenDb`; and do not pass `--backend` to read/control commands to
+  hunt for runs. Direct backend access exists for runtime implementation, `smithers migrate`, backend integration tests,
+  and maintainer diagnostics only. It is not a control-plane API.
 </Warning>
 
-<Note>API reference: [Server & Gateway](/reference/server-gateway) and [Gateway Client](/reference/gateway-client) list every gateway and client export, its options, and links to source and tests.</Note>
+<Note>
+  API reference: [Server & Gateway](/reference/server-gateway) and [Gateway Client](/reference/gateway-client) list
+  every gateway and client export, its options, and links to source and tests.
+</Note>
 
 ## Quick start
 
@@ -378,7 +379,9 @@ const { smithers, outputs } = createSmithers({
 
 const deploy = smithers((ctx) => (
   <Workflow name="deploy">
-    <Task id="ship" output={outputs.result}>{{ ok: true }}</Task>
+    <Task id="ship" output={outputs.result}>
+      {{ ok: true }}
+    </Task>
   </Workflow>
 ));
 
@@ -397,17 +400,20 @@ await gateway.listen({ port: 7331 });
 ```ts
 const ws = new WebSocket("ws://localhost:7331");
 ws.onmessage = (m) => console.log(JSON.parse(m.data));
-ws.onopen = () => ws.send(JSON.stringify({
-  type: "req",
-  id: "c1",
-  method: "connect",
-  params: {
-    minProtocol: 1,
-    maxProtocol: 1,
-    client: { id: "docs-example", version: "1.0.0", platform: "browser" },
-    auth: { token: "operator-token" },
-  },
-}));
+ws.onopen = () =>
+  ws.send(
+    JSON.stringify({
+      type: "req",
+      id: "c1",
+      method: "connect",
+      params: {
+        minProtocol: 1,
+        maxProtocol: 1,
+        client: { id: "docs-example", version: "1.0.0", platform: "browser" },
+        auth: { token: "operator-token" },
+      },
+    }),
+  );
 ```
 
 ## Gateway client SDK
@@ -429,10 +435,10 @@ for await (const frame of gateway.streamRunEventsResilient({ runId: "run-1" })) 
 
 Gateway client exports:
 
-| Package | Exports |
-|---|---|
-| `smthrs/gateway-client` | `SmithersGatewayClient`, `SmithersGatewayConnection`, `GatewayRpcError`, `gatewayBackoffDelay`, RPC frame/type-map types, extension envelope helpers/types, `GatewayUiBootConfig`, `SmithersGatewayClientOptions`, `createSmithersCollections`, `createSmithersDataClient`, `WorkspaceMode`, `SmithersCollections`, `SmithersDataClient`, collection row types, `gatewayKeys`, `smithersCollectionKeys`, `smithersLocalCollectionOptions`, `smithersElectricCollectionOptions`, `flattenGatewayRunNode`, `snapshotToGatewayRunNode`, `reconcileSnapshotNodes` |
-| `smthrs/gateway-react` | `SmithersGatewayProvider`, `SmithersCollectionsProvider`, `createGatewayReactRoot`, `useSmithersCollections`, `useGatewayRun`, `useGatewayRuns`, `useGatewayWorkflows`, `useGatewayApprovals`, `useGatewayNodeOutput`, `useGatewayNodeEvents`, `useGatewayRunEvents`, `useGatewayActions`, `useGatewayRpc`, `useSmithersGateway`, `useGatewayExtensionResource`, `useGatewayExtensionAction`, `useGatewayExtensionStream`, `useGatewayRunTree`, `useGatewayConnectionStatus`, `useGatewayCrons`, `useGatewayMemoryFacts`, `useGatewayScores`, `useGatewayTickets`, `useGatewayPrompts` |
+| Package                 | Exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `smthrs/gateway-client` | `SmithersGatewayClient`, `SmithersGatewayConnection`, `GatewayRpcError`, `gatewayBackoffDelay`, RPC frame/type-map types, extension envelope helpers/types, `GatewayUiBootConfig`, `SmithersGatewayClientOptions`, `createSmithersCollections`, `createSmithersDataClient`, `WorkspaceMode`, `SmithersCollections`, `SmithersDataClient`, collection row types, `gatewayKeys`, `smithersCollectionKeys`, `smithersLocalCollectionOptions`, `smithersElectricCollectionOptions`, `flattenGatewayRunNode`, `snapshotToGatewayRunNode`, `reconcileSnapshotNodes`                          |
+| `smthrs/gateway-react`  | `SmithersGatewayProvider`, `SmithersCollectionsProvider`, `createGatewayReactRoot`, `useSmithersCollections`, `useGatewayRun`, `useGatewayRuns`, `useGatewayWorkflows`, `useGatewayApprovals`, `useGatewayNodeOutput`, `useGatewayNodeEvents`, `useGatewayRunEvents`, `useGatewayActions`, `useGatewayRpc`, `useSmithersGateway`, `useGatewayExtensionResource`, `useGatewayExtensionAction`, `useGatewayExtensionStream`, `useGatewayRunTree`, `useGatewayConnectionStatus`, `useGatewayCrons`, `useGatewayMemoryFacts`, `useGatewayScores`, `useGatewayTickets`, `useGatewayPrompts` |
 
 ### Launch attribution
 
@@ -475,9 +481,7 @@ assuming port 7331 (the preferred port may already be occupied):
 ```ts
 import { SmithersGatewayClient } from "smthrs/gateway-client";
 
-const statusProcess = Bun.spawnSync([
-  "bunx", "smthrs", "gateway", "status", "--format", "json",
-], {
+const statusProcess = Bun.spawnSync(["bunx", "smthrs", "gateway", "status", "--format", "json"], {
   cwd: process.cwd(),
   stdout: "pipe",
   stderr: "pipe",
@@ -517,15 +521,16 @@ invalidation, and event emission stay intact.
   (Next.js) fail hard unless you add it to
   [`transpilePackages`](https://nextjs.org/docs/app/api-reference/config/next-config-js/transpilePackages):
 
-  ```js
-  // next.config.mjs
-  export default {
-    transpilePackages: ["@smthrs/electric-proxy"],
-  };
-  ```
+```js
+// next.config.mjs
+export default {
+  transpilePackages: ["@smthrs/electric-proxy"],
+};
+```
 
-  Releases after 0.28.0 ship the package as plain JavaScript with bundled type
-  declarations, so the workaround is not needed there.
+Releases after 0.28.0 ship the package as plain JavaScript with bundled type
+declarations, so the workaround is not needed there.
+
 </Note>
 
 ## REST domain API
@@ -683,9 +688,9 @@ Request:
 
 ```ts
 type RewindRunRequest = {
-  runId: string;     // /^[a-z0-9_-][a-z0-9_.-]{0,63}$/
-  frameNo: number;   // 0 <= frameNo <= latestFrameNo
-  confirm: true;     // must be literal true
+  runId: string; // /^[a-z0-9_-][a-z0-9_.-]{0,63}$/
+  frameNo: number; // 0 <= frameNo <= latestFrameNo
+  confirm: true; // must be literal true
 };
 ```
 
@@ -714,19 +719,19 @@ Quota: 10 rewinds per run per caller per hour (default window). Exceeded
 
 Failure modes and HTTP status:
 
-| Code                   | Meaning                                                                   | HTTP  |
-| ---------------------- | ------------------------------------------------------------------------- | ----- |
-| `InvalidRunId`         | `runId` fails `/^[a-z0-9_-][a-z0-9_.-]{0,63}$/`.                          | `400` |
-| `InvalidFrameNo`       | `frameNo` is not a non-negative i32 integer.                              | `400` |
-| `ConfirmationRequired` | Caller omitted `confirm: true`.                                           | `400` |
-| `FrameOutOfRange`      | `frameNo` > latest frame, or run has no frames.                           | `400` |
-| `Unauthorized`         | Caller is neither the run owner nor an admin (audit row still written).   | `401` |
-| `RunNotFound`          | `runId` does not exist.                                                   | `404` |
-| `Busy`                 | Another rewind is in flight for this run.                                 | `409` |
-| `RateLimited`          | Caller exceeded rewind quota (default 10/hour).                           | `429` |
-| `UnsupportedSandbox`   | A sandbox cannot be reverted (missing / untrackable `jjPointer`).         | `501` |
-| `VcsError`             | A JJ revert call failed; DB/reconciler rolled back.                       | `500` |
-| `RewindFailed`         | Rewind failed and rollback was partial; run marked `needs_attention`.     | `500` |
+| Code                   | Meaning                                                                 | HTTP  |
+| ---------------------- | ----------------------------------------------------------------------- | ----- |
+| `InvalidRunId`         | `runId` fails `/^[a-z0-9_-][a-z0-9_.-]{0,63}$/`.                        | `400` |
+| `InvalidFrameNo`       | `frameNo` is not a non-negative i32 integer.                            | `400` |
+| `ConfirmationRequired` | Caller omitted `confirm: true`.                                         | `400` |
+| `FrameOutOfRange`      | `frameNo` > latest frame, or run has no frames.                         | `400` |
+| `Unauthorized`         | Caller is neither the run owner nor an admin (audit row still written). | `401` |
+| `RunNotFound`          | `runId` does not exist.                                                 | `404` |
+| `Busy`                 | Another rewind is in flight for this run.                               | `409` |
+| `RateLimited`          | Caller exceeded rewind quota (default 10/hour).                         | `429` |
+| `UnsupportedSandbox`   | A sandbox cannot be reverted (missing / untrackable `jjPointer`).       | `501` |
+| `VcsError`             | A JJ revert call failed; DB/reconciler rolled back.                     | `500` |
+| `RewindFailed`         | Rewind failed and rollback was partial; run marked `needs_attention`.   | `500` |
 
 Every call, whether success, failure, or unauthorized, writes one row to
 `_smithers_time_travel_audit` with `result ∈ { success, failed, partial, in_progress }`.
@@ -845,17 +850,17 @@ type DevToolsNode = {
 ```ts
 type DevToolsDelta = {
   version: 1;
-  baseSeq: number;   // must match the subscriber's current seq
-  seq: number;       // new seq after applying ops, in order
+  baseSeq: number; // must match the subscriber's current seq
+  seq: number; // new seq after applying ops, in order
   ops: Array<
     | { op: "addNode"; parentId: number; index: number; node: DevToolsNode }
     | { op: "removeNode"; id: number }
     | { op: "updateProps"; id: number; props: Record<string, unknown> }
     | { op: "updateTask"; id: number; task: DevToolsNode["task"] }
     | { op: "replaceRoot"; node: DevToolsNode } // emitted when the root's
-                                                // identity or shape changes;
-                                                // `removeNode` of the root is
-                                                // never emitted.
+    // identity or shape changes;
+    // `removeNode` of the root is
+    // never emitted.
   >;
 };
 ```
@@ -864,8 +869,7 @@ type DevToolsDelta = {
 
 ```ts
 type DevToolsEvent =
-  | { version: 1; kind: "snapshot"; snapshot: DevToolsSnapshot }
-  | { version: 1; kind: "delta"; delta: DevToolsDelta };
+  { version: 1; kind: "snapshot"; snapshot: DevToolsSnapshot } | { version: 1; kind: "delta"; delta: DevToolsDelta };
 ```
 
 A subscription always starts with a `snapshot` event, then emits `delta` events
@@ -885,29 +889,29 @@ Handshake: on connect the server immediately pushes `connect.challenge` (`{ nonc
 
 After `connect`, the gateway emits `tick` events every `heartbeatMs`. `launchRun`, `submitApproval`, `submitSignal`, and `cronRun` automatically subscribe the connection to the affected `runId`. Server-pushed event names:
 
-| Event | Category |
-|---|---|
-| `connect.challenge` | Connection |
-| `tick` | Connection |
-| `run.event` | Run lifecycle |
-| `run.heartbeat` | Run lifecycle |
-| `run.gap_resync` | Run lifecycle |
-| `run.error` | Run lifecycle |
-| `run.completed` | Run lifecycle |
-| `run.time_travel_jumped` | Run lifecycle |
-| `run.side_effect_boundary_crossed` | Run lifecycle |
-| `node.started` | Run lifecycle |
-| `node.finished` | Run lifecycle |
-| `node.failed` | Run lifecycle |
-| `task.output` | Run lifecycle |
-| `task.heartbeat` | Run lifecycle |
-| `approval.requested` | Approval |
-| `approval.decided` | Approval |
-| `approval.auto_approved` | Approval |
-| `cron.triggered` | Cron |
-| `devtools.event` | DevTools |
-| `browser.frame` | Browser viewer frames; delivered only to subscribed browser sessions |
-| `browser.activity` | Browser settled action journal entries |
+| Event                              | Category                                                             |
+| ---------------------------------- | -------------------------------------------------------------------- |
+| `connect.challenge`                | Connection                                                           |
+| `tick`                             | Connection                                                           |
+| `run.event`                        | Run lifecycle                                                        |
+| `run.heartbeat`                    | Run lifecycle                                                        |
+| `run.gap_resync`                   | Run lifecycle                                                        |
+| `run.error`                        | Run lifecycle                                                        |
+| `run.completed`                    | Run lifecycle                                                        |
+| `run.time_travel_jumped`           | Run lifecycle                                                        |
+| `run.side_effect_boundary_crossed` | Run lifecycle                                                        |
+| `node.started`                     | Run lifecycle                                                        |
+| `node.finished`                    | Run lifecycle                                                        |
+| `node.failed`                      | Run lifecycle                                                        |
+| `task.output`                      | Run lifecycle                                                        |
+| `task.heartbeat`                   | Run lifecycle                                                        |
+| `approval.requested`               | Approval                                                             |
+| `approval.decided`                 | Approval                                                             |
+| `approval.auto_approved`           | Approval                                                             |
+| `cron.triggered`                   | Cron                                                                 |
+| `devtools.event`                   | DevTools                                                             |
+| `browser.frame`                    | Browser viewer frames; delivered only to subscribed browser sessions |
+| `browser.activity`                 | Browser settled action journal entries                               |
 
 ### Browser viewer
 
@@ -974,38 +978,40 @@ only on the gateway host itself.
 
 ```ts
 type GatewayOptions = {
-  protocol?: number;                 // default 1
-  features?: string[];               // default ["streaming", "runs"]
-  heartbeatMs?: number;              // default 15_000
+  protocol?: number; // default 1
+  features?: string[]; // default ["streaming", "runs"]
+  heartbeatMs?: number; // default 15_000
   auth?: GatewayAuthConfig;
-  workspaceRoot?: string;            // anchors disk-backed reads and the advertised identity
-  workflowRegistryStatus?: () => {   // additive readiness fields on health
+  workspaceRoot?: string; // anchors disk-backed reads and the advertised identity
+  workflowRegistryStatus?: () => {
+    // additive readiness fields on health
     workflowsLoaded?: number;
     workflowsTotal?: number;
   };
-  identity?: {                       // advertised on GET /health, the health RPC, and the WS hello
-    backend?: string;                // sqlite | pglite | postgres
-    version?: string;                // serving package version
+  identity?: {
+    // advertised on GET /health, the health RPC, and the WS hello
+    backend?: string; // sqlite | pglite | postgres
+    version?: string; // serving package version
   };
-  ui?: GatewayUiConfig;              // custom gateway UI; true mounts the built-in console
+  ui?: GatewayUiConfig; // custom gateway UI; true mounts the built-in console
   operatorUi?: GatewayOperatorUiConfig | false; // default { path: "/console" }; false disables
   defaults?: {
     cliAgentTools?: "all" | "explicit-only";
     outOfProcessEventBridge?: boolean;
     outOfProcessEventBridgePollMs?: number;
   };
-  maxBodyBytes?: number;             // default 1_048_576 for POST /rpc
-  maxPayload?: number;               // default 1_048_576 for WebSocket frames
-  maxConnections?: number;           // default 1_000
-  eventWindowSize?: number;          // default 10_000 per-run replay frames
+  maxBodyBytes?: number; // default 1_048_576 for POST /rpc
+  maxPayload?: number; // default 1_048_576 for WebSocket frames
+  maxConnections?: number; // default 1_000
+  eventWindowSize?: number; // default 10_000 per-run replay frames
   outOfProcessEventBridge?: boolean; // default true; streams persisted events from detached runs
   outOfProcessEventBridgePollMs?: number; // default 1_000
-  headersTimeout?: number;           // default 30_000
-  requestTimeout?: number;           // default 60_000
+  headersTimeout?: number; // default 30_000
+  requestTimeout?: number; // default 60_000
 };
 
 type GatewayOperatorUiConfig = {
-  path?: string;                      // default "/console"
+  path?: string; // default "/console"
   title?: string;
   props?: Record<string, unknown>;
 };
@@ -1014,7 +1020,7 @@ type GatewayUiConfig =
   | true
   | {
       entry: string;
-      path?: string;                  // gateway default "/"; workflow default "/workflows/<workflowKey>"
+      path?: string; // gateway default "/"; workflow default "/workflows/<workflowKey>"
       title?: string;
       props?: Record<string, unknown>;
     };
@@ -1033,27 +1039,27 @@ type GatewayAuthConfig =
   | {
       mode: "token";
       tokens: Record<string, GatewayTokenGrant>;
-      allowedOrigins?: string[];     // default [] (no Origin allowlist)
+      allowedOrigins?: string[]; // default [] (no Origin allowlist)
     }
   | {
       mode: "jwt";
       issuer: string;
       audience: string | string[];
-      secret: string;                // HS256
-      scopesClaim?: string;          // default "scope"
-      roleClaim?: string;            // default "role"
-      userClaim?: string;            // default "sub"
-      defaultRole?: string;          // default "operator"
-      defaultScopes?: string[];      // default [] when scope claim is absent
-      clockSkewSeconds?: number;     // default 60; negative values clamp to 0
-      allowedOrigins?: string[];     // default [] (no Origin allowlist)
+      secret: string; // HS256
+      scopesClaim?: string; // default "scope"
+      roleClaim?: string; // default "role"
+      userClaim?: string; // default "sub"
+      defaultRole?: string; // default "operator"
+      defaultScopes?: string[]; // default [] when scope claim is absent
+      clockSkewSeconds?: number; // default 60; negative values clamp to 0
+      allowedOrigins?: string[]; // default [] (no Origin allowlist)
     }
   | {
       mode: "trusted-proxy";
-      allowedOrigins?: string[];     // default [] (no Origin allowlist)
-      trustedHeaders?: string[];     // default ["x-user-id","x-user-scopes","x-user-role"]
-      defaultRole?: string;          // default "operator"
-      defaultScopes?: string[];      // trusted-proxy: used when the scopes header is absent, else the request is rejected
+      allowedOrigins?: string[]; // default [] (no Origin allowlist)
+      trustedHeaders?: string[]; // default ["x-user-id","x-user-scopes","x-user-role"]
+      defaultRole?: string; // default "operator"
+      defaultScopes?: string[]; // trusted-proxy: used when the scopes header is absent, else the request is rejected
     };
 ```
 
@@ -1077,7 +1083,7 @@ An acquire waits a bounded 10 seconds for a free connection; set `SMITHERS_POSTG
 
 - Identity: `GET /health`, the `health` RPC, and the WS hello carry `identity: { workspaceRoot, backend, version, pid, startedAtMs }`. Clients (the CLI's `ui`/`gateway status` among them) verify `workspaceRoot` against the workspace they resolved locally instead of trusting whichever process owns the port.
 - Bind failures reject: `gateway.listen()` rejects on `EADDRINUSE` (and any other bind error) instead of crashing the process. The `smithers gateway` command retries on an ephemeral port and records the real port in its runtime state file.
-- Singleton per workspace: `smithers gateway` writes `{pid, host, port, url, token, workspaceRoot, backend, version, protocol, startedAtMs}` to `<tmpdir>/smithers-gateway/<workspace-hash>.json` (mode 0600) after listening, refuses to start when a healthy gateway for the same workspace is already running, and cleans the file up on shutdown. `smithers gateway status` and `smithers gateway stop` manage it; stale files (dead pid, identity mismatch) are cleaned up on the next discovery.
+- Singleton per workspace: `smithers gateway` writes `{pid, host, port, url, token, workspaceRoot, backend, version, protocol, startedAtMs}` to `<tmpdir>/smithers-gateway/<workspace-hash>.json` (mode 0600) after listening, refuses to start when a healthy gateway for the same workspace is already running, and cleans the file up on shutdown. `smithers gateway status` and `smithers gateway stop` manage it; stale files (dead pid, identity mismatch) are cleaned up on the next discovery. `gateway stop` durably parks in-process hosted runs as `paused` and prints `smithers up --run-id <id> --resume true -d` for each; `gateway stop --kill-runs` deliberately cancels them. Because the pause request is persisted before teardown, a graceful stop is distinguishable from a process crash that leaves a stale `running` owner. `smithers down` remains an explicit workspace-wide cancellation.
 - Monitor mount: the `smithers gateway` CLI singleton also serves the [Smithers Monitor](/guides/monitor), a live web UI over every run in the workspace, at `/monitor` (open it with `bunx smthrs monitor`). The mount ships inside the CLI, so it needs no `.smithers/` pack and no registered workflow UI. Library embedders control the other UI mounts through `ui` (custom gateway UI, workflow UIs at `/workflows/<key>`) and `operatorUi` (the embeddable operator console, default `/console`).
 - `--mint-token`: mints a random bearer, requires it on every request, and records it only in the runtime state file (plus the daemon's own stderr). `bunx smthrs ui` reads the token from the state file automatically for CLI RPC calls, but browser navigation to the printed workflow UI URL cannot send that bearer header until UI token injection ships; use `smithers gateway` without `--mint-token` when you need browser-served workflow UIs. Other clients can read `SMITHERS_TOKEN` / `SMITHERS_API_KEY`.
 - Cron: `gateway.register(name, wf, { schedule })` writes a cron row keyed `gateway:<name>`; the gateway polls between 1 s and 15 s (clamped from `heartbeatMs`). Cron-fired runs get `ctx.auth.role = "system"`, `triggeredBy = "cron:gateway"`, `scopes = ["*"]`.

@@ -1768,7 +1768,12 @@ declare class Gateway {
         host?: string;
         path?: string;
     }): Promise<node_http.Server<typeof node_http.IncomingMessage, typeof node_http.ServerResponse>>;
-    close(): Promise<void>;
+    /**
+     * @param {{ killRuns?: boolean }} [options]
+     */
+    close(options?: {
+        killRuns?: boolean;
+    }): Promise<void>;
     ticketWatchers: Map<any, any> | null | undefined;
     startScheduler(): void;
     /**
