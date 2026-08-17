@@ -65,6 +65,10 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
 } from "smthrs/ui";
 import { Chip, MonitorToolbar, RunLifecycleControls, RunRailRow, RunsPagination, ToneDot } from "./monitorShell.tsx";
 import { processPatch, type CodeViewItem } from "@pierre/diffs";
@@ -90,6 +94,7 @@ import {
   eventLogViewState,
   eventViewFor,
   executionTreeViewState,
+  failedDescendantCount,
   filterRuns,
   formatDiffSummary,
   formatDurationMs,
@@ -101,7 +106,6 @@ import {
   frameScrubBounds,
   groupForStatus,
   groupRuns,
-  hasFailedDescendant,
   histogramStats,
   isCancellable,
   isPausable,
@@ -339,6 +343,9 @@ function ConnectionBadge() {
   const view = connectionViewFor(status);
   return (
     <span className="mon-conn-wrap">
+      <span className="sui-sr-only" role="status" aria-live="polite" aria-atomic="true">
+        Connection status: {view.label}. {view.hint}
+      </span>
       <Badge
         variant={badgeVariantForTone(view.tone)}
         className="mon-conn"
@@ -628,15 +635,18 @@ function ApprovalsInbox({
       <h2 className="mon-kicker">
         Approvals <span className="mon-count">{approvals.length}</span>
       </h2>
-      {approvals.map((approval) => (
-        <ApprovalCard
-          key={approvalKey(approval)}
-          approval={approval}
-          busy={decidingKey === approvalKey(approval)}
-          decide={decide}
-          onSelectRun={onSelectRun}
-        />
-      ))}
+      <ul className="mon-plain-list">
+        {approvals.map((approval) => (
+          <li key={approvalKey(approval)}>
+            <ApprovalCard
+              approval={approval}
+              busy={decidingKey === approvalKey(approval)}
+              decide={decide}
+              onSelectRun={onSelectRun}
+            />
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
@@ -670,7 +680,8 @@ function RunListRow({
       name={`${run.workflowKey ?? "unknown"}${startedBy?.harness ? ` · ${startedBy.harness}` : ""}${lastKnown ? " · last-known" : ""}`}
       title={`${run.workflowKey ?? "unknown workflow"}${startedLabel}${startedBy?.detected ? " · auto-detected" : ""}`}
       shortId={shortRunId(run.runId)}
-      tone={tone}
+      status={run.status}
+      statusLabel={lastKnown ? `${labelForStatus(run.status)}, last-known` : labelForStatus(run.status)}
       pulse={!lastKnown && tone === "running"}
       when={
         lastKnown ? (
@@ -832,7 +843,7 @@ export function RunsRail({
     ? (landingState as RunsZeroStateKind)
     : null;
   return (
-    <nav className="mon-rail-runs" data-testid="monitor-runs">
+    <nav className="mon-rail-runs" data-testid="monitor-runs" aria-label="Runs">
       {banner ? (
         <Alert variant="destructive" data-testid={`monitor-runs-${connStatus}`}>
           <AlertTitle>{banner.title}</AlertTitle>
@@ -869,15 +880,18 @@ export function RunsRail({
               {group.title}
               {lastKnown ? " · last-known" : ""} <span className="mon-count">{group.runs.length}</span>
             </h2>
-            {group.runs.map((run) => (
-              <RunListRow
-                key={run.runId}
-                run={run}
-                active={run.runId === selectedRunId}
-                lastKnown={lastKnown}
-                onSelect={onSelect}
-              />
-            ))}
+            <ul className="mon-plain-list mon-run-list">
+              {group.runs.map((run) => (
+                <li key={run.runId}>
+                  <RunListRow
+                    run={run}
+                    active={run.runId === selectedRunId}
+                    lastKnown={lastKnown}
+                    onSelect={onSelect}
+                  />
+                </li>
+              ))}
+            </ul>
           </section>
         ))}
     </nav>
@@ -1083,26 +1097,37 @@ function NeedsYouBand({
       <h2 className="mon-kicker">
         Needs you <span className="mon-count">{needsCount}</span>
       </h2>
-      {approvals.map((approval) => (
-        <ApprovalCard
-          key={approvalKey(approval)}
-          approval={approval}
-          busy={decidingKey === approvalKey(approval)}
-          decide={decide}
-          onSelectRun={onSelectRun}
-        />
-      ))}
-      {parked.slice(0, NEEDS_YOU_ROW_CAP).map((run) => (
-        <NeedsYouRunRow key={run.runId} run={run} onSelectRun={onSelectRun} />
-      ))}
+      <ul className="mon-plain-list">
+        {approvals.map((approval) => (
+          <li key={approvalKey(approval)}>
+            <ApprovalCard
+              approval={approval}
+              busy={decidingKey === approvalKey(approval)}
+              decide={decide}
+              onSelectRun={onSelectRun}
+            />
+          </li>
+        ))}
+        {parked.slice(0, NEEDS_YOU_ROW_CAP).map((run) => (
+          <li key={run.runId}>
+            <NeedsYouRunRow run={run} onSelectRun={onSelectRun} />
+          </li>
+        ))}
+      </ul>
       {parked.length > NEEDS_YOU_ROW_CAP ? (
         <div className="mon-dim mon-needs-more">
           +{parked.length - NEEDS_YOU_ROW_CAP} more waiting — see the table below
         </div>
       ) : null}
-      {recentFailures.slice(0, NEEDS_YOU_ROW_CAP).map((run) => (
-        <NeedsYouRunRow key={run.runId} run={run} onSelectRun={onSelectRun} />
-      ))}
+      {recentFailures.length > 0 ? (
+        <ul className="mon-plain-list">
+          {recentFailures.slice(0, NEEDS_YOU_ROW_CAP).map((run) => (
+            <li key={run.runId}>
+              <NeedsYouRunRow run={run} onSelectRun={onSelectRun} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {recentFailures.length > NEEDS_YOU_ROW_CAP ? (
         <div className="mon-dim mon-needs-more">
           +{recentFailures.length - NEEDS_YOU_ROW_CAP} more failed in the last 24h — filter the table on failed
@@ -1124,24 +1149,27 @@ export function ActiveNowBand({ runs, onSelectRun }: { runs: RunRow[]; onSelectR
         </h2>
       </CardHeader>
       <CardContent>
-        {active.map((run) => (
-          <RowButton
-            className="mon-active-row"
-            data-testid="monitor-active-run-row"
-            key={run.runId}
-            onClick={() => onSelectRun(run.runId)}
-          >
-            <ToneDot tone={toneForStatus(run.status)} pulse={toneForStatus(run.status) === "running"} />
-            <span className="mon-active-name">{middleTruncate(run.workflowKey ?? "unknown", 56)}</span>
-            <span className="mon-mono mon-dim">{shortRunId(run.runId)}</span>
-            <span className="mon-active-progress">
-              <RunProgressCell run={run} />
-            </span>
-            <span className="mon-mono mon-dim mon-active-elapsed">
-              <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={undefined} />
-            </span>
-          </RowButton>
-        ))}
+        <ul className="mon-plain-list">
+          {active.map((run) => (
+            <li key={run.runId}>
+              <RowButton
+                className="mon-active-row"
+                data-testid="monitor-active-run-row"
+                onClick={() => onSelectRun(run.runId)}
+              >
+                <ToneDot tone={toneForStatus(run.status)} pulse={toneForStatus(run.status) === "running"} />
+                <span className="mon-active-name">{middleTruncate(run.workflowKey ?? "unknown", 56)}</span>
+                <span className="mon-mono mon-dim">{shortRunId(run.runId)}</span>
+                <span className="mon-active-progress">
+                  <RunProgressCell run={run} />
+                </span>
+                <span className="mon-mono mon-dim mon-active-elapsed">
+                  <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={undefined} />
+                </span>
+              </RowButton>
+            </li>
+          ))}
+        </ul>
       </CardContent>
     </Card>
   );
@@ -2010,6 +2038,12 @@ function XmlRow({
           <span className="mon-xml-attr-name">iteration</span>=<span className="mon-xml-str">"{node.iteration}"</span>
         </span>
       ) : null}
+      {typeof node.attempt === "number" && node.attempt > 0 ? (
+        <span className="mon-xml-attr">
+          {" "}
+          <span className="mon-xml-attr-name">attempt</span>=<span className="mon-xml-str">"{node.attempt}"</span>
+        </span>
+      ) : null}
       <span className="mon-xml-punct">{children.length === 0 ? " />" : expanded ? ">" : ""}</span>
       {children.length > 0 && !expanded ? (
         <span className="mon-xml-punct">
@@ -2127,7 +2161,7 @@ function TreeRow({
   const kindKey = (node.kind ?? "").toLowerCase();
   const glyph = KIND_GLYPHS[kindKey] ?? "○";
   const agentName = isRecord(node.agent) ? asString(node.agent.name) : asString(node.agent);
-  const failedBelow = !expanded && hasFailedDescendant(node);
+  const failedBelow = expanded ? 0 : failedDescendantCount(node);
   // Containers read quieter than real tasks: dimmer name, and no status pill
   // unless the state is worth interrupting for (running/waiting/failed).
   const isContainer = !LEAF_KINDS.has(kindKey) && children.length > 0;
@@ -2192,11 +2226,42 @@ function TreeRow({
             {glyph}
           </span>
           <span className="mon-tree-name">{node.cardLabel ?? node.name ?? node.id ?? key}</span>
-          {agentName ? <span className="mon-chip">{agentName}</span> : null}
-          {typeof node.iteration === "number" && node.iteration > 0 ? (
-            <span className="mon-chip mon-dim">#{node.iteration}</span>
+          <Badge variant="outline" className="mon-tree-kind" aria-hidden="true">
+            {kindKey || "node"}
+          </Badge>
+          {agentName ? (
+            <Badge variant="secondary" className="mon-tree-agent">
+              {agentName}
+            </Badge>
           ) : null}
-          {failedBelow ? <ToneDot tone="failed" /> : null}
+          {typeof node.iteration === "number" && node.iteration > 0 ? (
+            <Badge variant="muted" className="mon-tree-iteration">
+              iteration {node.iteration}
+            </Badge>
+          ) : null}
+          {typeof node.attempt === "number" && node.attempt > 0 ? (
+            <Badge
+              variant={node.attempt > 1 ? "warning" : "muted"}
+              className="mon-tree-attempt"
+              title={
+                typeof node.maxAttempts === "number"
+                  ? `Attempt ${node.attempt} of ${node.maxAttempts}${node.attempt > 1 ? ` · retry ${node.attempt - 1}` : ""}`
+                  : `Attempt ${node.attempt}${node.attempt > 1 ? ` · retry ${node.attempt - 1}` : ""}`
+              }
+            >
+              a{node.attempt}
+              {typeof node.maxAttempts === "number" ? `/${node.maxAttempts}` : ""}
+            </Badge>
+          ) : null}
+          {failedBelow > 0 ? (
+            <Badge
+              variant="destructive"
+              className="mon-tree-failure-rollup"
+              aria-label={`${failedBelow} failed ${failedBelow === 1 ? "descendant" : "descendants"}`}
+            >
+              {failedBelow} failed
+            </Badge>
+          ) : null}
           {durationMs !== undefined ? (
             <span className="mon-mono mon-dim mon-tree-duration">{formatDurationMs(durationMs)}</span>
           ) : null}
@@ -2756,7 +2821,7 @@ export function TimelinePanel({
             <span className="mon-timeline-node" title={entry.label ?? entry.nodeId}>
               {entry.nodeId}
             </span>
-            {entry.iteration > 0 ? <span className="mon-chip mon-dim">#{entry.iteration}</span> : null}
+            {entry.iteration > 0 ? <Badge variant="muted">iteration {entry.iteration}</Badge> : null}
             {entry.lastAttempt != null ? (
               <span className="mon-dim mon-mono mon-timeline-attempt" title={`latest attempt ${entry.lastAttempt}`}>
                 a{entry.lastAttempt}
@@ -2917,168 +2982,170 @@ function ExecutionPanel({
     }
     return map.size > 0 ? map : undefined;
   }, [predictionTree, usagePrediction]);
+  const executionView = showUsage ? "usage" : showTimeline ? "timeline" : "tree";
+  const selectExecutionView = (view: string): void => {
+    setShowTimeline(view === "timeline");
+    setShowUsage(view === "usage");
+    if (view !== "tree") goLive();
+  };
   return (
     <Card className="mon-tree-panel">
-      <CardHeader className="mon-panel-head">
-        <h2 className="mon-kicker">Execution</h2>
-        {selectedNode && !scrubbing ? <Chip onClick={() => onSelectNode(undefined)}>Clear selection</Chip> : null}
-        <Chip
-          on={showTimeline}
-          data-testid="monitor-timeline-chip"
-          onClick={() => {
-            if (!showTimeline) {
-              goLive();
-              setShowUsage(false);
-            }
-            setShowTimeline((value) => !value);
-          }}
-          title="Every task execution in the order it ran — loops unrolled, one row per iteration"
-        >
-          Timeline
-        </Chip>
-        <Chip
-          on={showUsage}
-          data-testid="monitor-usage-panel-chip"
-          onClick={() => {
-            if (!showUsage) {
-              goLive();
-              setShowTimeline(false);
-            }
-            setShowUsage((value) => !value);
-          }}
-          title="Token burn for this run plus per-account rate limits — measured solid, estimates dimmed"
-        >
-          Usage
-        </Chip>
-        {showDebug ? (
-          <Chip
-            on={scrubbing}
-            data-testid="monitor-frames-chip"
-            onClick={() => {
-              setShowTimeline(false);
-              setShowUsage(false);
-              if (scrubbing) goLive();
-              else setScrubbing(true);
-            }}
-            title="Scrub the execution tree frame by frame instead of following it live"
-          >
-            Frames
-          </Chip>
-        ) : null}
-        {showDebug ? (
-          <Chip
-            on={asXml && !showTimeline}
-            data-testid="monitor-xml-chip"
-            onClick={() => {
-              if (showTimeline) {
+      <Tabs value={executionView} onValueChange={selectExecutionView}>
+        <CardHeader className="mon-panel-head">
+          <h2 className="mon-kicker">Execution</h2>
+          <TabsList aria-label="Execution views">
+            <TabsTrigger value="tree" data-testid="monitor-tree-tab">
+              Tree
+            </TabsTrigger>
+            <TabsTrigger
+              value="timeline"
+              data-testid="monitor-timeline-chip"
+              title="Every task execution in the order it ran — loops unrolled, one row per iteration"
+            >
+              Timeline
+            </TabsTrigger>
+            <TabsTrigger
+              value="usage"
+              data-testid="monitor-usage-panel-chip"
+              title="Token burn for this run plus per-account rate limits — measured solid, estimates dimmed"
+            >
+              Usage
+            </TabsTrigger>
+          </TabsList>
+          {selectedNode && !scrubbing ? <Chip onClick={() => onSelectNode(undefined)}>Clear selection</Chip> : null}
+          {showDebug ? (
+            <Chip
+              on={scrubbing}
+              data-testid="monitor-frames-chip"
+              onClick={() => {
                 setShowTimeline(false);
-                setAsXml(true);
-                return;
-              }
-              setAsXml((value) => !value);
-            }}
-            title="Toggle between the expandable tree and the engine's XML view of the same nodes"
-          >
-            XML
-          </Chip>
-        ) : null}
-        <Chip
-          on={showDebug}
-          data-testid="monitor-debug-chip"
-          onClick={() => {
-            // Folding the tools away also puts them down: back to the live tree.
-            if (showDebug) {
-              goLive();
-              setAsXml(false);
-            }
-            setShowDebug((value) => !value);
-          }}
-          title="Power tools: frame-by-frame time travel and the engine's XML view"
-        >
-          Debug
-        </Chip>
-      </CardHeader>
-      <CardContent>
-        {scrubbing && !showTimeline && !showUsage ? (
-          <div className="mon-scrub" data-testid="monitor-scrub">
-            <Chip
-              onClick={() => step(-1)}
-              disabled={latestFrameNo === undefined || shownFrame <= bounds.min}
-              aria-label="Previous frame"
-            >
-              ◀
-            </Chip>
-            <Input
-              className="mon-scrub-range"
-              data-testid="monitor-frame-slider"
-              type="range"
-              min={bounds.min}
-              max={bounds.max}
-              step={1}
-              value={shownFrame}
-              disabled={latestFrameNo === undefined}
-              onChange={(event) => {
-                if (latestFrameNo === undefined) return;
-                setFrame(clampFrameNo(Number(event.currentTarget.value), latestFrameNo));
+                setShowUsage(false);
+                if (scrubbing) goLive();
+                else setScrubbing(true);
               }}
-              aria-label="Frame"
-            />
-            <Chip
-              onClick={() => step(1)}
-              disabled={latestFrameNo === undefined || shownFrame >= bounds.max}
-              aria-label="Next frame"
+              title="Scrub the execution tree frame by frame instead of following it live"
             >
-              ▶
+              Frames
             </Chip>
-            <span className="mon-mono mon-dim mon-scrub-note">
-              frame {latestFrameNo === undefined ? "… / …" : `${shownFrame} / ${bounds.max}`}
-            </span>
-            {scrubLoading ? <span className="mon-dim mon-scrub-loading">loading…</span> : null}
-            {scrubError && !scrubLoading ? (
-              <span className="mon-dim mon-scrub-note" title={scrubError.message}>
-                frame unavailable
-              </span>
+          ) : null}
+          {showDebug ? (
+            <Chip
+              on={asXml && executionView === "tree"}
+              data-testid="monitor-xml-chip"
+              onClick={() => {
+                if (showTimeline || showUsage) {
+                  setShowTimeline(false);
+                  setShowUsage(false);
+                  setAsXml(true);
+                  return;
+                }
+                setAsXml((value) => !value);
+              }}
+              title="Toggle between the expandable tree and the engine's XML view of the same nodes"
+            >
+              XML
+            </Chip>
+          ) : null}
+          <Chip
+            on={showDebug}
+            data-testid="monitor-debug-chip"
+            onClick={() => {
+              // Folding the tools away also puts them down: back to the live tree.
+              if (showDebug) {
+                goLive();
+                setAsXml(false);
+              }
+              setShowDebug((value) => !value);
+            }}
+            title="Power tools: frame-by-frame time travel and the engine's XML view"
+          >
+            Debug
+          </Chip>
+        </CardHeader>
+        <CardContent>
+          <TabsContent value="tree">
+            {scrubbing ? (
+              <div className="mon-scrub" data-testid="monitor-scrub">
+                <Chip
+                  onClick={() => step(-1)}
+                  disabled={latestFrameNo === undefined || shownFrame <= bounds.min}
+                  aria-label="Previous frame"
+                >
+                  ◀
+                </Chip>
+                <Input
+                  className="mon-scrub-range"
+                  data-testid="monitor-frame-slider"
+                  type="range"
+                  min={bounds.min}
+                  max={bounds.max}
+                  step={1}
+                  value={shownFrame}
+                  disabled={latestFrameNo === undefined}
+                  onChange={(event) => {
+                    if (latestFrameNo === undefined) return;
+                    setFrame(clampFrameNo(Number(event.currentTarget.value), latestFrameNo));
+                  }}
+                  aria-label="Frame"
+                />
+                <Chip
+                  onClick={() => step(1)}
+                  disabled={latestFrameNo === undefined || shownFrame >= bounds.max}
+                  aria-label="Next frame"
+                >
+                  ▶
+                </Chip>
+                <span className="mon-mono mon-dim mon-scrub-note">
+                  frame {latestFrameNo === undefined ? "… / …" : `${shownFrame} / ${bounds.max}`}
+                </span>
+                {scrubLoading ? <span className="mon-dim mon-scrub-loading">loading…</span> : null}
+                {scrubError && !scrubLoading ? (
+                  <span className="mon-dim mon-scrub-note" title={scrubError.message}>
+                    frame unavailable
+                  </span>
+                ) : null}
+                <Chip onClick={goLive} title="Return to the live tree">
+                  Live
+                </Chip>
+              </div>
             ) : null}
-            <Chip onClick={goLive} title="Return to the live tree">
-              Live
-            </Chip>
-          </div>
-        ) : null}
-        {showUsage ? (
-          <UsagePanel usageEvents={usageEvents} usageLoading={usageLoading} usageFailed={usageFailed} />
-        ) : showTimeline ? (
-          <TimelinePanel
-            nodeStates={nodeStates}
-            treeNodes={treeQuery.nodes as TreeNode[]}
-            selectedNode={selectedNode}
-            onSelectNode={onSelectNode}
-          />
-        ) : (
-          <ExecutionTree
-            runId={runId}
-            treeQuery={treeQuery}
-            selectedNodeKey={selectedNode ? treeNodeKey(selectedNode) : undefined}
-            onSelectNode={onSelectNode}
-            autoSelectNodeId={autoSelectNodeId}
-            onAutoSelected={onAutoSelected}
-            onRetry={() => location.reload()}
-            frameOverride={
-              scrubbing
-                ? {
-                    root: scrubTree,
-                    loading: scrubLoading,
-                    error: scrubError,
-                    onRetry: () => void retryScrub(),
-                    onReturnToLive: goLive,
-                  }
-                : undefined
-            }
-            asXml={asXml}
-            durations={durations}
-            tokensById={tokensById}
-          />
-        )}
-      </CardContent>
+            <ExecutionTree
+              runId={runId}
+              treeQuery={treeQuery}
+              selectedNodeKey={selectedNode ? treeNodeKey(selectedNode) : undefined}
+              onSelectNode={onSelectNode}
+              autoSelectNodeId={autoSelectNodeId}
+              onAutoSelected={onAutoSelected}
+              onRetry={() => location.reload()}
+              frameOverride={
+                scrubbing
+                  ? {
+                      root: scrubTree,
+                      loading: scrubLoading,
+                      error: scrubError,
+                      onRetry: () => void retryScrub(),
+                      onReturnToLive: goLive,
+                    }
+                  : undefined
+              }
+              asXml={asXml}
+              durations={durations}
+              tokensById={tokensById}
+            />
+          </TabsContent>
+          <TabsContent value="timeline">
+            <TimelinePanel
+              nodeStates={nodeStates}
+              treeNodes={treeQuery.nodes as TreeNode[]}
+              selectedNode={selectedNode}
+              onSelectNode={onSelectNode}
+            />
+          </TabsContent>
+          <TabsContent value="usage">
+            <UsagePanel usageEvents={usageEvents} usageLoading={usageLoading} usageFailed={usageFailed} />
+          </TabsContent>
+        </CardContent>
+      </Tabs>
     </Card>
   );
 }
@@ -3283,6 +3350,7 @@ function UsagePanel({
 // ---------------------------------------------------------------------------
 
 const FOLLOW_THRESHOLD_PX = 80;
+const EVENT_ANNOUNCE_WINDOW_MS = 750;
 
 type EventView = "notable" | "activity" | "all";
 
@@ -3296,6 +3364,67 @@ const EVENT_VIEW_LABELS: Record<EventView, string> = {
  * buffer. Token-usage totals come from useGatewayRunTokenUsage (full durable
  * scan), not this ring. */
 type RunEventsState = ReturnType<typeof useGatewayRunEvents>;
+
+/** Coalesce a busy stream into at most one polite announcement per window. */
+export function EventBatchAnnouncer({ runId, events }: { runId: string; events: RunEventsState["events"] }) {
+  const [message, setMessage] = useState("");
+  const runRef = useRef<string | undefined>(undefined);
+  const lastSeqRef = useRef(0);
+  const pendingRef = useRef<{ count: number; latest: RunEventsState["events"][number] | undefined }>({
+    count: 0,
+    latest: undefined,
+  });
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const visible = splitHeartbeatEvents(events).rest;
+    const latestSeq = visible.reduce((max, event) => Math.max(max, asNumber(event.seq) ?? 0), 0);
+    if (runRef.current !== runId) {
+      runRef.current = runId;
+      lastSeqRef.current = latestSeq;
+      pendingRef.current = { count: 0, latest: undefined };
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = null;
+      setMessage("");
+      return;
+    }
+
+    const fresh = visible.filter((event) => (asNumber(event.seq) ?? 0) > lastSeqRef.current);
+    lastSeqRef.current = Math.max(lastSeqRef.current, latestSeq);
+    if (fresh.length === 0) return;
+    pendingRef.current.count += fresh.length;
+    pendingRef.current.latest = fresh[fresh.length - 1];
+    if (timerRef.current) return;
+    timerRef.current = setTimeout(() => {
+      const pending = pendingRef.current;
+      const latest = pending.latest ? formatEventLine(pending.latest) : undefined;
+      setMessage(
+        `${pending.count} new ${pending.count === 1 ? "event" : "events"}.${latest ? ` Latest #${latest.seq}: ${latest.name}.` : ""}`,
+      );
+      pendingRef.current = { count: 0, latest: undefined };
+      timerRef.current = null;
+    }, EVENT_ANNOUNCE_WINDOW_MS);
+  }, [events, runId]);
+
+  return (
+    <span
+      className="sui-sr-only"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      data-testid="monitor-events-announcer"
+    >
+      {message}
+    </span>
+  );
+}
 
 export function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEventsState }) {
   const { events: allEvents, lastHeartbeat, streaming, error, loading, refetch, connectionStatus } = eventsState;
@@ -3455,6 +3584,7 @@ export function EventLog({ runId, eventsState }: { runId: string; eventsState: R
         >
           {following ? "Following new events." : "Event stream paused."}
         </span>
+        <EventBatchAnnouncer runId={runId} events={allEvents} />
       </CardHeader>
       <CardContent>
         {error ? (
@@ -3480,8 +3610,7 @@ export function EventLog({ runId, eventsState }: { runId: string; eventsState: R
           tabIndex={0}
           aria-label={`${EVENT_VIEW_LABELS[view]} event stream`}
           aria-describedby={followStatusId}
-          aria-live={following ? "polite" : "off"}
-          aria-relevant="additions text"
+          aria-live="off"
           aria-atomic={false}
           aria-busy={loading}
         >
@@ -4628,6 +4757,11 @@ function NodeInspector({
   onClose: () => void;
 }) {
   const nodeId = node.id ?? treeNodeKey(node);
+  const inspectorRef = useRef<HTMLElement | null>(null);
+  const inspectorTitleId = useId();
+  useEffect(() => {
+    inspectorRef.current?.focus({ preventScroll: true });
+  }, [runId, nodeId]);
   const nodeUsage = useMemo(
     () => (usageEvents ? nodeUsageBreakdown(usageEvents, nodeId) : undefined),
     [usageEvents, nodeId],
@@ -4754,9 +4888,15 @@ function NodeInspector({
     return [...counts.entries()].sort((left, right) => right[1] - left[1]);
   }, [node]);
   return (
-    <aside className="mon-inspector" data-testid="monitor-inspector">
+    <aside
+      ref={inspectorRef}
+      className="mon-inspector"
+      data-testid="monitor-inspector"
+      aria-labelledby={inspectorTitleId}
+      tabIndex={-1}
+    >
       <header className="mon-panel-head">
-        <h2 className="mon-kicker">Node</h2>
+        <span className="mon-kicker">Node inspector</span>
         {nodeFailed ? (
           <Button
             variant={retryArmed ? "destructive" : "outline"}
@@ -4816,7 +4956,9 @@ function NodeInspector({
           data-testid="monitor-hijack-modal"
         />
       ) : null}
-      <div className="mon-inspector-title">{node.cardLabel ?? node.name ?? nodeId}</div>
+      <h2 id={inspectorTitleId} className="mon-inspector-title">
+        {node.cardLabel ?? node.name ?? nodeId}
+      </h2>
       <NodeWhatHappened runId={runId} nodeId={nodeId} iteration={node.iteration ?? 0} status={node.status} />
       <NodeScoreChips nodeId={nodeId} scores={scores} />
       <InspectorSection title="Details" testId="monitor-node-details">
@@ -5234,7 +5376,10 @@ function RunDetail({
   const unhealthy =
     healthState !== undefined &&
     healthState !== labelForStatus(status) &&
-    (healthState === "stale" || healthState === "orphaned" || healthState === "recovering");
+    (healthState === "stale" ||
+      healthState === "orphaned" ||
+      healthState === "recovering" ||
+      healthState === "succeeded-with-failures");
   // ONE progress vocabulary: logical tasks (the health strip's counting),
   // never the node-state summary, which also counts structural container rows.
   // The summary only fills in while the tree is still loading.
@@ -5283,6 +5428,15 @@ function RunDetail({
 
   return (
     <div className="mon-detail" data-testid="monitor-run-detail">
+      <span
+        className="sui-sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="monitor-run-status-announcer"
+      >
+        Run status: {labelForStatus(status)}.
+      </span>
       <Card className="mon-detail-head">
         <div className="mon-detail-title">
           <StatusTag status={status} />
@@ -5331,7 +5485,11 @@ function RunDetail({
           {customUiUrl ? (
             <Dialog open={showCustomUi} onOpenChange={setShowCustomUi}>
               <DialogTrigger asChild>
-                <Button variant="outline" title={`Open this workflow's custom UI (${customUiPath})`}>
+                <Button
+                  variant="outline"
+                  data-testid="monitor-open-ui"
+                  title={`Open this workflow's custom UI (${customUiPath})`}
+                >
                   Open UI
                 </Button>
               </DialogTrigger>
@@ -5479,6 +5637,7 @@ function App() {
   const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [showMetrics, setShowMetrics] = useState(false);
   const bannerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inspectorReturnFocusRef = useRef<HTMLElement | null>(null);
 
   const { status: connStatus } = useGatewayConnectionStatus();
   // No offset/cursor in the gateway's ListRunsRequest filter, so fetch a wide
@@ -5523,8 +5682,20 @@ function App() {
     emitSelection(runId, undefined);
   };
   const selectNode = (node: TreeNode | undefined) => {
+    if (node && !selectedNodeKey) {
+      const active = document.activeElement;
+      inspectorReturnFocusRef.current = active instanceof HTMLElement && active !== document.body ? active : null;
+    }
     setSelectedNodeKey(node ? treeNodeKey(node) : undefined);
     emitSelection(selectedRunId, node ? (node.id ?? treeNodeKey(node)) : undefined);
+    if (!node) {
+      const returnFocus = inspectorReturnFocusRef.current;
+      inspectorReturnFocusRef.current = null;
+      queueMicrotask(() => {
+        if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+        else document.querySelector<HTMLElement>('[data-testid="monitor-tree"]')?.focus({ preventScroll: true });
+      });
+    }
   };
 
   const showResult = (kind: "ok" | "err", text: string) => {
@@ -5591,9 +5762,14 @@ function App() {
   }, []);
 
   return (
-    <main className={`mon-shell${monitorMode.embed ? " mon-embed" : ""}`} data-testid="monitor-root">
+    <div className={`mon-shell${monitorMode.embed ? " mon-embed" : ""}`} data-testid="monitor-root">
       <WorkflowUiStyles mode="theme" />
       <SmithersUiStyles extra={monitorCss} />
+      {!monitorMode.embed ? (
+        <a className="mon-skip-link" href="#monitor-main">
+          Skip to monitor content
+        </a>
+      ) : null}
       {!monitorMode.embed ? (
         <header className="mon-topbar">
           <div className="mon-brand">
@@ -5628,7 +5804,7 @@ function App() {
 
       <div className={`mon-body${inspectorOpen ? "" : " mon-body-no-inspector"}${railOpen ? "" : " mon-body-no-rail"}`}>
         {railOpen ? (
-          <div className="mon-rail">
+          <aside className="mon-rail" aria-label="Run navigation">
             <ApprovalsInbox onSelectRun={selectRun} onResult={showResult} />
             <RunsRail
               runs={visibleRuns}
@@ -5641,10 +5817,11 @@ function App() {
               selectedRunId={selectedRunId}
               onSelect={selectRun}
             />
-          </div>
+          </aside>
         ) : null}
 
-        <div className="mon-main">
+        <main id="monitor-main" className="mon-main" tabIndex={-1}>
+          {monitorMode.embed ? <h1 className="sui-sr-only">Smithers Monitor</h1> : null}
           {showMetrics ? (
             <MetricsPanel />
           ) : selectedRunId ? (
@@ -5697,7 +5874,7 @@ function App() {
               ) : null}
             </div>
           )}
-        </div>
+        </main>
 
         {inspectorOpen ? (
           <>
@@ -5712,7 +5889,7 @@ function App() {
           </>
         ) : null}
       </div>
-    </main>
+    </div>
   );
 }
 
@@ -5743,6 +5920,10 @@ body { margin: 0; background: var(--bg); color: var(--text); font-size: var(--fs
 button, input, select { font: inherit; color: inherit; }
 code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-1); padding: 0 var(--sp-1); }
 
+.mon-skip-link { position: fixed; top: var(--sp-2); left: var(--sp-2); z-index: 100; transform: translateY(-200%); padding: var(--sp-2) var(--sp-3); border: 2px solid var(--ring-border); border-radius: var(--r-1); background: var(--surface); color: var(--text); font-weight: 700; }
+.mon-skip-link:focus-visible { transform: translateY(0); outline: none; box-shadow: 0 0 0 3px var(--ring); }
+.mon-plain-list { margin: 0; padding: 0; list-style: none; }
+
 .tone-running { --tone: var(--brand); --tone-soft: var(--brand-soft); --tone-border: var(--brand-border); }
 .tone-ok { --tone: var(--ok); --tone-soft: var(--success-soft); --tone-border: var(--success-border); }
 .tone-waiting { --tone: var(--warn); --tone-soft: var(--warning-soft); --tone-border: var(--warning-border); }
@@ -5768,9 +5949,6 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-btn-ok { color: var(--ok); border-color: var(--success-border); }
 .mon-toggle { color: var(--muted); font-size: var(--fs-1); font-weight: 600; }
 .mon-toggle.is-on { color: var(--brand); border-color: var(--brand-border); background: var(--brand-soft); }
-
-/* Non-interactive label chips (agent names, #iteration, score chips). */
-.mon-chip { display: inline-flex; align-items: center; gap: var(--sp-1); height: 20px; padding: 0 var(--sp-2); border-radius: var(--r-full); font-size: var(--fs-1); font-weight: 600; border: 1px solid var(--border); background: var(--surface); color: var(--muted); white-space: nowrap; }
 
 .mon-kicker { margin: 0; font-size: var(--fs-1); line-height: var(--lh-tight); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
 .mon-kicker-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
@@ -5799,23 +5977,24 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 
 .mon-banner-app { margin: var(--sp-2) var(--sp-4) 0; }
 
-.mon-body { display: grid; grid-template-columns: 320px minmax(420px, 1fr) minmax(0, 380px); flex: 1; overflow: hidden; }
+.mon-body { display: grid; grid-template-columns: 320px minmax(0, 1fr) minmax(0, 380px); flex: 1; min-width: 0; overflow: hidden; }
 /* No node selected: the inspector column collapses instead of reserving ~380px of dead gutter. */
-.mon-body-no-inspector { grid-template-columns: 320px minmax(420px, 1fr); }
+.mon-body-no-inspector { grid-template-columns: 320px minmax(0, 1fr); }
 /* Overview: no rail (the table owns the run list), main takes the row. */
 .mon-body-no-rail { grid-template-columns: minmax(420px, 1fr) minmax(0, 380px); }
 .mon-body-no-rail.mon-body-no-inspector { grid-template-columns: minmax(0, 1fr); }
 .mon-overview { max-width: 1160px; margin: 0 auto; width: 100%; }
-.mon-rail { border-right: 1px solid var(--border); overflow-y: auto; padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); }
-.mon-main { overflow-y: auto; padding: var(--sp-4); }
+.mon-rail { min-width: 0; border-right: 1px solid var(--border); overflow-y: auto; padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); }
+.mon-main { min-width: 0; overflow-y: auto; padding: var(--sp-4); }
 .mon-embed .mon-body { display: block; }
 .mon-embed .mon-main { height: 100%; padding: var(--sp-4); }
 .mon-embed .mon-inspector { display: none; }
 .mon-inspector { border-left: 1px solid var(--border); overflow-y: auto; padding: var(--panel-pad); animation: mon-in 140ms ease-out; }
+.mon-inspector:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--ring-border); }
 /* Click-outside-to-close backdrop — only visible in the overlay layout. */
 .mon-inspector-backdrop { display: none; }
 @media (max-width: 1160px) {
-  .mon-body, .mon-body-no-inspector { grid-template-columns: 300px 1fr; }
+  .mon-body, .mon-body-no-inspector { grid-template-columns: 300px minmax(0, 1fr); }
   .mon-body-no-rail, .mon-body-no-rail.mon-body-no-inspector { grid-template-columns: minmax(0, 1fr); }
   .mon-inspector { position: fixed; right: 0; top: 0; bottom: 0; width: min(420px, 90vw); background: var(--bg); box-shadow: -12px 0 36px rgb(var(--shadow-rgb) / 0.14); z-index: 10; }
   .mon-inspector-backdrop { display: block; position: fixed; inset: 0; z-index: 9; background: rgb(var(--shadow-rgb) / 0.35); }
@@ -5843,6 +6022,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-inbox .mon-kicker { margin-bottom: var(--sp-1); }
 .mon-approval { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) 0; border-top: 1px solid var(--border); }
 .mon-approval:first-of-type { border-top: 0; }
+.mon-plain-list > li + li .mon-approval { border-top: 1px solid var(--border); }
 .mon-approval:last-of-type { padding-bottom: 0; }
 .mon-approval-main { display: block; padding: var(--sp-2) var(--sp-3); }
 .mon-approval-main:hover .mon-approval-title { color: var(--brand); }
@@ -5864,7 +6044,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-run-group .mon-kicker { padding: 0 var(--sp-1) var(--sp-1); }
 /* Rail rows are shared RowButtons; only the internal layout is monitor-specific. */
 .mon-run-row { justify-content: flex-start; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
-.mon-run-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mon-run-name { flex: 1 1 auto; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mon-run-when { margin-left: auto; font-size: var(--fs-1); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* Landing runs table: fills the main column; the table body scrolls inside the
@@ -5915,6 +6095,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 
 .mon-tree { overflow-x: auto; }
 .mon-tree-item { min-width: max-content; }
+.mon-tree [role="group"] { border-left: 1px solid var(--border); }
 .mon-tree-row { display: flex; align-items: center; border-radius: var(--r-1); }
 .mon-tree:focus-visible .mon-tree-item[data-focused='true'] > .mon-tree-row,
 .mon-tree:focus-visible .mon-tree-item[data-focused='true'] > .mon-xml-row { box-shadow: inset 0 0 0 2px var(--ring-border); }
@@ -5922,6 +6103,8 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-tree-main { justify-content: flex-start; gap: var(--sp-2); flex: 1; min-width: 0; padding: var(--sp-1) var(--sp-2); }
 .mon-tree-glyph { flex: none; width: 14px; text-align: center; cursor: help; }
 .mon-tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mon-tree-kind, .mon-tree-agent, .mon-tree-iteration, .mon-tree-attempt, .mon-tree-failure-rollup { flex: none; }
+.mon-tree-kind { color: var(--muted); }
 /* Containers (sequence/parallel/loop…) group tasks — they read quieter so
    the tree scans like a task list interrupted only where structure matters. */
 .mon-tree-container .mon-tree-name { color: var(--muted); font-weight: 400; }
@@ -5983,7 +6166,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-timeline { display: flex; flex-direction: column; overflow-y: auto; max-height: 60vh; }
 .mon-timeline-row { justify-content: flex-start; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); font-size: var(--fs-2); }
 .mon-timeline-node { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mon-timeline-row .mon-chip { flex: none; }
+.mon-timeline-row .sui-badge { flex: none; }
 .mon-timeline-attempt { flex: none; }
 .mon-timeline-right { display: flex; align-items: baseline; gap: var(--sp-3); margin-left: auto; flex: none; }
 .mon-timeline-duration { font-variant-numeric: tabular-nums; }

@@ -28,12 +28,12 @@ pruning keep their current eviction contracts.
 
 SQLite `dbstat` reported:
 
-| Table | Physical bytes |
-| --- | ---: |
+| Table                 | Physical bytes |
+| --------------------- | -------------: |
 | `_smithers_snapshots` | 41,281,441,792 |
-| `_smithers_events` | 2,140,786,688 |
-| `_smithers_frames` | 1,489,481,728 |
-| `_smithers_attempts` | 197,328,896 |
+| `_smithers_events`    |  2,140,786,688 |
+| `_smithers_frames`    |  1,489,481,728 |
+| `_smithers_attempts`  |    197,328,896 |
 
 The dominant sampled snapshot held about 6.45 MB of state, almost all in
 `outputs_json`; 40 consecutive rows shared the exact same content hash, making
@@ -41,8 +41,8 @@ snapshot representation the first storage target by a wide margin.
 
 ## Snapshot representation
 
-Migration `0025_snapshot_contents` leaves `_smithers_snapshots` physically
-unchanged and only adds:
+Migration `0025_snapshot_contents` left `_smithers_snapshots` physically
+unchanged and added:
 
 - `_smithers_snapshot_contents`, keyed by the snapshot content hash, holding the
   four raw JSON fields once;
@@ -75,6 +75,12 @@ External SQLite descriptors must provide an atomic `transaction()` callback;
 those that can't hold that boundary, including Cloudflare D1, fail before a
 transactional write begins rather than risk a partial frame or snapshot.
 
+`smithers gc` now migrates those pre-0025 inline rows in bounded transactions.
+Each transaction inserts and verifies content, compacts the snapshot metadata,
+and adds its reference atomically. Progress is the data shape itself: an
+interrupted invocation resumes from the remaining non-empty inline rows. The
+command's dry run reports row and byte totals without writing.
+
 The unreleased gzip prototype behind existing dogfood data stays under its old
 table name, readable with hash verification; the final migration doesn't
 rename, copy, index, or add a column to the roughly 41 GB snapshot table.
@@ -97,14 +103,20 @@ pnpm -C packages/time-travel exec bun test tests/snapshot.test.js
 pnpm -C packages/engine exec bun test tests/time-travel-postgres.test.js
 ```
 
-## What this does not reclaim
+## Retention and physical file size
 
-The change limits future growth without rewriting existing inline snapshots.
-SQLite has `auto_vacuum=0`, so deleting or clearing old payloads wouldn't return
-file space to the OS anyway; reclaiming existing space needs a separate offline
-workflow (verified backup, free-space check, batched materialization, integrity
-verification, `VACUUM INTO`, atomic replacement) that must never run
-automatically against the live 66 GB store.
+`smithers gc --db-retention-days DAYS` opts into incremental deletion of old
+terminal runs. There is no default database retention window and the existing
+filesystem `--older-than` setting does not enable it. The dry run inventories
+eligible runs and per-table rows. Active, paused, waiting, unfinished
+`continued` runs, and ancestors needed by retained descendants are never
+eligible.
+
+SQLite has `auto_vacuum=0`, so compaction and retention return pages to its
+freelist for reuse without returning file bytes to the OS. Smithers deliberately
+does not expose an online vacuum path. Physical shrinking remains an explicit
+offline operator workflow after every process holding the store is stopped and
+a backup is verified. PostgreSQL remains under operator-managed vacuum policy.
 
 Old binaries don't understand compact rows, so rollback after new writes means
 restoring a pre-upgrade backup: the migration doesn't claim an unavailable
@@ -120,7 +132,8 @@ The next candidates are representation changes rather than metrics deletion:
    metadata, preserving the existing bounded keyframe/delta codec.
 3. Deduplicate the same large error JSON currently present in both attempts and
    matching `NodeFailed` events.
-4. Offer explicit terminal-run archival with complete run-owned-table coverage.
+4. Add archive/export-before-retention for operators who want a cold history
+   tier instead of deletion.
 
 Each needs its own compatibility, concurrency, store-copy, and recovery design;
 none is folded into the snapshot migration.

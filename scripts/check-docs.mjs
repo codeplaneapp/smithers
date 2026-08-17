@@ -1274,8 +1274,14 @@ function checkGatewayCancelRunDocsMatchRuntimeErrors() {
     [serverSource, 'return responseError(frame.id, "RUN_NOT_ACTIVE", "Run is not currently active");'],
     [GATEWAY_RPC_TYPES, '| "RUN_NOT_ACTIVE"'],
     [GATEWAY_RPC_INDEX, 'RUN_NOT_ACTIVE: { version: SMITHERS_API_VERSION, code: "RUN_NOT_ACTIVE", httpStatus: 409'],
-    [GATEWAY_RPC_INDEX, 'errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RUN_NOT_ACTIVE", "Internal"],'],
-    [cancelRunDoc, "include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RUN_NOT_ACTIVE`, and `Internal`"],
+    [
+      GATEWAY_RPC_INDEX,
+      'errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "RUN_NOT_ACTIVE", "Internal"],',
+    ],
+    [
+      cancelRunDoc,
+      "include `InvalidRequest`, `Unauthorized`, `Forbidden`, `RunNotFound`, `RUN_NOT_ACTIVE`, and `Internal`",
+    ],
     [cancelRunDoc, "`RUN_NOT_ACTIVE` means the run is not currently active"],
     [GATEWAY_INTEGRATION, "RUN_NOT_ACTIVE,409"],
   ];
@@ -2597,15 +2603,20 @@ function checkVcsHelperDocsMatchCurrentExports() {
   ]);
   const expectedRuntimeExports = [
     "captureWorkspaceSnapshot",
+    "createIsolatedClone",
     "findVcsRoot",
     "getJjPointer",
+    "gitDirtyPaths",
     "isJjRepo",
+    "isolatedCloneEnvironment",
+    "listGitRefs",
     "parseWorkspaceSnapshot",
     "resolveBundledJjPath",
     "resolveGitBinary",
     "resolveJjBinary",
     "revertToJjPointer",
     "runJj",
+    "runStreamingProcess",
     "runsVersion",
     "vcsToolingStatus",
     "workspaceAdd",
@@ -2660,7 +2671,7 @@ function checkVcsHelperDocsMatchCurrentExports() {
     [VCS_DECLARATIONS, "type WorkspaceSnapshot = {"],
     [
       VCS_DECLARATIONS,
-      "export { type JjRevertResult, type RunJjOptions, type RunJjResult, type VcsToolingStatus, type WorkspaceAddOptions, type WorkspaceInfo, type WorkspaceResult, type WorkspaceSnapshot, captureWorkspaceSnapshot,",
+      "export { type GitRef, type IsolatedCloneCapsule, type JjRevertResult, type RunJjOptions, type RunJjResult, type StreamingProcessResult, type VcsToolingStatus, type WorkspaceAddOptions, type WorkspaceInfo, type WorkspaceResult, type WorkspaceSnapshot, captureWorkspaceSnapshot, createIsolatedClone,",
     ],
     [
       SMITHERS_FACADE_DECLARATIONS,
@@ -3459,7 +3470,10 @@ function checkMcpToolsetDocsMatchPackageSurface() {
     [MCP_TOOLSET_OPTIONS_SOURCE, readFileSync(MCP_TOOLSET_OPTIONS_SOURCE, "utf8")],
   ]);
   const required = [
-    [MCP_CREATE_TOOLSET_SOURCE, 'import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";'],
+    // The MCP SDK is an optional peer: the toolset loads it lazily so core
+    // consumers do not install it, and the error tells the user what to add.
+    [MCP_CREATE_TOOLSET_SOURCE, 'import("@modelcontextprotocol/sdk/client/stdio.js")'],
+    [MCP_CREATE_TOOLSET_SOURCE, "createMcpToolset requires the optional @modelcontextprotocol/sdk package"],
     [MCP_CREATE_TOOLSET_SOURCE, 'import { dynamicTool, jsonSchema } from "ai";'],
     [MCP_CREATE_TOOLSET_SOURCE, 'import("./McpToolsetOptions.ts").McpToolsetOptions'],
     [MCP_CREATE_TOOLSET_SOURCE, "export async function createMcpToolset(config, options = {})"],

@@ -297,8 +297,35 @@ describe("CLI observability", () => {
           timeoutMs: TIMEOUT_MS,
         });
         expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+        expect(result.json.run.status).toBe("finished");
+        expect(result.json.runState.state).toBe("succeeded-with-failures");
         expect(result.json.failedChildren).toBe(2);
         expect(result.json.failedChildKeys).toEqual(["fanout::1", "fanout::4"]);
+
+        const status = runSmithers(["status", "inspect-degraded-run"], {
+          cwd: repo.dir,
+          format: "json",
+          timeoutMs: TIMEOUT_MS,
+        });
+        expect(status.exitCode, `${status.stdout}\n${status.stderr}`).toBe(0);
+        expect(status.json.status).toBe("finished");
+        expect(status.json.verdict).toBe("degraded");
+        expect(status.json.liveness.state).toBe("succeeded-with-failures");
+
+        const ps = runSmithers(["ps"], {
+          cwd: repo.dir,
+          format: "json",
+          timeoutMs: TIMEOUT_MS,
+        });
+        expect(ps.exitCode, `${ps.stdout}\n${ps.stderr}`).toBe(0);
+        expect(ps.json.runs).toContainEqual(
+          expect.objectContaining({
+            id: "inspect-degraded-run",
+            status: "finished",
+            dbStatus: "finished",
+            state: "succeeded-with-failures",
+          }),
+        );
       } finally {
         sqlite.close();
       }

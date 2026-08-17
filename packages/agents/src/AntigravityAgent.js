@@ -99,7 +99,7 @@ export class AntigravityAgent extends BaseCliAgent {
    * @param {AntigravityAgentOptions} [opts]
    */
   constructor(opts = {}) {
-    super(opts);
+    super(opts, "AntigravityAgent");
     this.opts = opts;
     this.capabilities = createAntigravityCapabilityRegistry(opts);
   }

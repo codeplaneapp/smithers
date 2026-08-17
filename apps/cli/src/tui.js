@@ -21,7 +21,7 @@ import { computeRunStateFromRow } from "@smthrs/db/runState";
 import { DETACHED_RUN_LOG_FILE_ENV } from "./detachedRunLogEnv.js";
 import { reapDetachedRunLogs } from "./reapDetachedRunLogs.js";
 import { resolveDetachedRunLogFile } from "./resolveDetachedRunLogFile.js";
-import { sanitizeTerminalText } from "@smthrs/tui/src/sanitizeTerminalText.ts";
+import { sanitizeTerminalText } from "./sanitizeTerminalText.js";
 import { smithersRuntimeSpawn } from "./node-loader/smithersRuntimeSpawn.js";
 
 export { formatStreamText } from "./tui-format.js";
@@ -67,6 +67,7 @@ const STATE_BADGE = {
   recovering: pc.cyan,
   failed: pc.red,
   succeeded: pc.green,
+  "succeeded-with-failures": pc.yellow,
   cancelled: pc.dim,
 };
 
@@ -87,7 +88,7 @@ const NODE_STATUS = {
 };
 
 // Run states at which the live loop stops watching (nothing will change without us).
-const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled", "waiting-approval"]);
+const TERMINAL_STATES = new Set(["succeeded", "succeeded-with-failures", "failed", "cancelled", "waiting-approval"]);
 const STOP_STATES = new Set([...TERMINAL_STATES, "stale", "orphaned"]);
 
 const cols = () => process.stdout.columns || 80;
@@ -1437,6 +1438,7 @@ export function monitorUnavailableFailure(runId, logFile) {
     code: "TUI_MONITOR_UNAVAILABLE",
     message:
       "The run monitor package (@smthrs/tui) could not be resolved, so the full-screen monitor can't launch. " +
+      "Install it with `npm install -D @smthrs/tui` or `bun add -d @smthrs/tui`. " +
       `The run is still running detached; watch it with \`smithers ps\` / \`smithers inspect ${runId}\` or see ${logFile}.`,
     exitCode: 1,
     runId,

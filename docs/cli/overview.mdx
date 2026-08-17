@@ -110,7 +110,7 @@ MCP tools). It also subsumes the weaker heartbeat-freshness check, so it never
 needs to be combined with `--force`. The gateway's `resumeRun` RPC deliberately
 has no equivalent: a remote caller can never steal a live run.
 
-A *stale* run (dead driver, expired claim) still resumes with no extra flag,
+A _stale_ run (dead driver, expired claim) still resumes with no extra flag,
 so ordinary crash recovery and `bunx smthrs supervise` are unaffected.
 
 If resume fails with `RESUME_METADATA_MISMATCH`, the workflow file changed after the run started. Resume validates the original workflow metadata and source hash; it is not a hot-reload mechanism for stopped runs. Start a fresh run instead, for example with a new `--run-id`, or overwrite an existing planned id with `--force` when that command supports it. When iterating on a workflow definition, expect each edit to require a fresh run rather than `--resume`.
@@ -130,6 +130,8 @@ Use the unified collector to inspect filesystem capacity and stale artifacts:
 ```sh
 bunx smthrs gc --dry-run
 bunx smthrs gc --older-than 24h
+bunx smthrs gc --dry-run --db-retention-days 30
+bunx smthrs gc --db-retention-days 30
 ```
 
 `gc` reclaims logs, `.smithers/sandboxes/<runId>` roots, and Smithers-owned
@@ -144,6 +146,27 @@ protects every candidate, and an unowned worktree must be clean with its HEAD
 already merged or pushed. `--force` applies only to owned worktrees and allows
 their uncommitted or unpushed contents to be removed.
 
+The same explicit `gc` invocation reports legacy inline snapshot payloads and,
+without `--dry-run`, moves them into the content-addressed snapshot store in
+small resumable transactions. This representation-only compaction preserves
+run history and is independent of retention.
+
+Database run retention has **no destructive default**. Opt in per invocation
+with `--db-retention-days DAYS`, or set `SMITHERS_DB_RETENTION_DAYS`; zero is
+allowed. Only runs in a terminal state with a recorded finish time older than
+the cutoff are eligible. Running, paused, waiting, unfinished `continued`
+runs, and terminal ancestors of retained descendants are protected. Deletion
+uses small committed chunks and removes the run record last. `--dry-run`
+reports eligible runs and row counts without changing either snapshots or run
+history.
+
+Cleared and deleted SQLite pages become reusable inside `smithers.db`, but the
+file does not shrink automatically. Smithers never runs `VACUUM` against an
+online store. To return those pages to the filesystem, stop every engine,
+gateway, and other process using the database, verify a backup, and run the
+SQLite `VACUUM` command offline. PostgreSQL installations should use their
+normal operator-managed vacuum policy.
+
 ## Interactive mode and the full-screen TUI monitor
 
 `bunx smthrs up --interactive` (or just `bunx smthrs up` / `bunx smthrs workflow run` from an interactive TTY without a positional argument) opens a terminal UI that guides you through three steps:
@@ -152,22 +175,22 @@ their uncommitted or unpushed contents to be removed.
 2. **Input prompts** - fill required fields for the chosen workflow.
 3. **Full-screen monitor** - the run starts in a detached background process and the terminal switches into a full-screen view that tracks it live.
 
-The monitor connects to a local Gateway on port 7331, starting one automatically if none is running.  It exits when you press `q`.
+The monitor connects to a local Gateway on port 7331, starting one automatically if none is running. It exits when you press `q`.
 
 **Agents: hand humans interactive commands.** When you (an AI agent) give a human a command to run themselves, include the `--interactive` flag whenever the command supports it (`bunx smthrs up --interactive`, `bunx smthrs workflow run WORKFLOW_ID --interactive`), so the human lands in this full-screen monitor instead of a detached log tail. Reserve the non-interactive forms for CI, scripts, and the commands you execute yourself with your shell tool. Never pass `--interactive` to a command you run programmatically, since it opens a full-screen TUI your harness cannot drive.
 
 ### Monitor modes and keybindings
 
-The monitor opens in **Tree** mode. Switch modes with the letter aliases below. From any *non-Tree* mode the number keys `1`–`5` also jump straight to a mode (and `1` returns to Tree).
+The monitor opens in **Tree** mode. Switch modes with the letter aliases below. From any _non-Tree_ mode the number keys `1`–`5` also jump straight to a mode (and `1` returns to Tree).
 
-| Mode | Reach it with | What you see |
-|------|---------------|--------------|
-| **Tree** | `1` (from another mode) | Node tree with per-node output, logs, diffs, and props; inline approval banner when waiting |
-| **Graph** | `g` (toggles Tree ↔ Graph), or `2` | Directed dependency graph; `j`/`k` navigate, `⏎` inspects a node in Tree |
-| **Logs** | `l`, or `3` | Filtered event stream (up to 2 000 events); `[`/`]` filter by attempt, `f` toggles follow |
-| **Timeline** | `t`, or `4` | Horizontal tick strip you scrub with `j`/`k` to inspect node state at past frames; `L` jumps back to live (inspect-only; rewind with `bunx smthrs rewind`) |
-| **Hijack** | `h`, or `5` | Hand off to `bunx smthrs hijack` for an active node |
-| **Quit** | `q` (or Ctrl-C) | (quit) |
+| Mode         | Reach it with                      | What you see                                                                                                                                               |
+| ------------ | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Tree**     | `1` (from another mode)            | Node tree with per-node output, logs, diffs, and props; inline approval banner when waiting                                                                |
+| **Graph**    | `g` (toggles Tree ↔ Graph), or `2` | Directed dependency graph; `j`/`k` navigate, `⏎` inspects a node in Tree                                                                                   |
+| **Logs**     | `l`, or `3`                        | Filtered event stream (up to 2 000 events); `[`/`]` filter by attempt, `f` toggles follow                                                                  |
+| **Timeline** | `t`, or `4`                        | Horizontal tick strip you scrub with `j`/`k` to inspect node state at past frames; `L` jumps back to live (inspect-only; rewind with `bunx smthrs rewind`) |
+| **Hijack**   | `h`, or `5`                        | Hand off to `bunx smthrs hijack` for an active node                                                                                                        |
+| **Quit**     | `q` (or Ctrl-C)                    | (quit)                                                                                                                                                     |
 
 Inside **Tree** mode the number keys are **inspector tabs, not mode switches**: `1` output, `2` logs, `3` diff, `4` props (`←`/`→` also walk the tabs). Use the `g`/`l`/`t`/`h` aliases to leave Tree.
 
@@ -203,13 +226,13 @@ bunx smthrs ui RUN_ID
 
 Five commands cross historical boundaries. Pick by what each acts on:
 
-| Command | Acts on | Behavior |
-| --- | --- | --- |
-| `rewind` | a run | Rewinds a run to a previous frame. Args: `RUN_ID FRAME_NO`. |
-| `replay` | a snapshot checkpoint | Forks from a checkpoint and resumes execution (time-travel fork). Takes a workflow. |
-| `fork` | a snapshot checkpoint | Creates a child run. `--run` also resumes it. `--reset-node` resets exactly the nodes you name; downstream dependents keep the parent's finished output unless you name them too. |
-| `timetravel` | a past task state | Reverts filesystem plus DB state to a previous task state, then optionally resumes. Takes a workflow. |
-| `revert` | the workspace | Reverts the workspace to a previous task attempt's filesystem state only, no DB reset. Takes a workflow. |
+| Command      | Acts on               | Behavior                                                                                                                                                                          |
+| ------------ | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rewind`     | a run                 | Rewinds a run to a previous frame. Args: `RUN_ID FRAME_NO`.                                                                                                                       |
+| `replay`     | a snapshot checkpoint | Forks from a checkpoint and resumes execution (time-travel fork). Takes a workflow.                                                                                               |
+| `fork`       | a snapshot checkpoint | Creates a child run. `--run` also resumes it. `--reset-node` resets exactly the nodes you name; downstream dependents keep the parent's finished output unless you name them too. |
+| `timetravel` | a past task state     | Reverts filesystem plus DB state to a previous task state, then optionally resumes. Takes a workflow.                                                                             |
+| `revert`     | the workspace         | Reverts the workspace to a previous task attempt's filesystem state only, no DB reset. Takes a workflow.                                                                          |
 
 Every command prints an effect-boundary report, including a clean report when
 no effects are crossed. `revert`, `timetravel`, and `rewind` run registered

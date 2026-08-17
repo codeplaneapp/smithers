@@ -78,7 +78,7 @@ export class AmpAgent extends BaseCliAgent {
    * @param {AmpAgentOptions} [opts] - Configuration options for the agent
    */
   constructor(opts = {}) {
-    super(opts);
+    super(opts, "AmpAgent");
     this.opts = opts;
     this.capabilities = createAmpCapabilityRegistry();
   }

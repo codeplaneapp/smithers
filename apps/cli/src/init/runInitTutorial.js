@@ -93,7 +93,7 @@ export function buildInitTutorialPrompt(opts) {
       "Walk the user through this arc:",
       "1. One-sentence welcome and what Smithers gives them (durable, resumable, observable agent workflows).",
       "2. What init detected and configured (the facts above).",
-      "3. Run `smithers workflow list` and call out the installed pack: `create-workflow` (builds new workflows from a plain-English ask), `create-skill` (writes reusable agent skills), and `docs-driven-development` (maintains a living product spec). Former starter workflows like hello/plan/review/debug are preserved as copyable patterns under examples/init-pack/, not installed by default.",
+      "3. Run `smithers workflow list` and call out the compact installed pack: `create-workflow` builds workflows from a plain-English ask and `create-skill` writes reusable agent skills. Specialized workflows remain available from workflow packs and the source repository instead of being installed into every project.",
       "4. Run `smithers ps` and explain runs, attempts, and resume — even with no runs yet, show what the output looks like once one starts.",
       '5. Show how they\'d do real work: `smithers make-workflow "<their task>"`, or simply asking you (their coding agent, now equipped with the smithers plugin/skill) for things like "implement X and keep iterating until the tests pass".',
       "6. Point them at `smithers monitor` (live web UI over every run) and `smithers starters` (outcome-based templates).",

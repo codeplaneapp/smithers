@@ -63,6 +63,16 @@ describe("single runner internals", () => {
       message: "boom",
     });
     expect(I.consumeWorkerError({ _tag: "Failure", executionId: "tagged", error: tagged })._tag).toBe("TaskAborted");
+    const taggedWithCause = I.toWorkerTaskError("tagged-cause", {
+      _tag: "TaskAborted",
+      message: "provider aborted",
+      cause: new Error("socket closed"),
+    });
+    expect(
+      I.consumeWorkerError({ _tag: "Failure", executionId: "tagged-cause", error: taggedWithCause }).cause,
+    ).toMatchObject({
+      message: "socket closed",
+    });
     expect(I.consumeWorkerError({ _tag: "Failure", executionId: "unknown", error: unknown })).toBe(unknownError);
     expect(
       I.consumeWorkerError({

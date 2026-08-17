@@ -114,6 +114,10 @@ Used by `bunx smthrs events --type <category>` and the metrics layer.
 
 `RunStateChanged` is categorized as `run` because the type is part of the public event union, but the current runtime does not emit it; use `RunStatusChanged` from the stream plus `getRun` / `computeRunState` for derived run state.
 
+`RunFinished` persists optional `failedChildren` and `failedChildKeys`. A
+nonzero count keeps lifecycle status `finished` but makes `computeRunState`
+return `succeeded-with-failures`.
+
 `OpenApiToolCalled` is categorized as `openapi` for forward compatibility, but the current OpenAPI tool factory records Effect metrics and log spans rather than emitting that event onto the run event bus.
 
 ## Effect reverts
@@ -188,6 +192,7 @@ type RunState =
   | "failed"
   | "cancelled"
   | "succeeded"
+  | "succeeded-with-failures"
   | "unknown";
 
 type TaskState =
@@ -271,8 +276,8 @@ present, it contains `kind` (`signal`, `rpc`, `cli`, or `engine`) plus optional
 | `RunStarted` | `runId`, `timestampMs` |
 | `RunStatusChanged` | `runId`, `status`, `timestampMs` |
 | `RunStateChanged` | `runId`, `before`, `after`, `timestampMs` |
-| `RunConcurrencySaturated` | `runId`, `requestedDemand`, `effectiveCap`, `remediationCommand`, `timestampMs` |
-| `RunFinished` | `runId`, `timestampMs` |
+| `RunConcurrencySaturated` | `runId`, `requestedDemand`, `effectiveCap`, `remediationCommand`, `descendantRunId?`, `budget?`, `subtreeGroupId?`, `timestampMs` |
+| `RunFinished` | `runId`, `failedChildren?`, `failedChildKeys?`, `exhaustedLoops?`, `timestampMs` |
 | `RunFailed` | `runId`, `error`, `timestampMs` |
 | `RunCancelled` | `runId`, `source?`, `timestampMs` |
 | `RunContinuedAsNew` | `runId`, `newRunId`, `iteration`, `carriedStateSize`, `ancestryDepth?`, `timestampMs` |

@@ -17,3 +17,8 @@ Gotcha: `createExternalSmithers` opens its own bun:sqlite DB (temp dir unless
 `dbPath` is given) with the same WAL/busy_timeout PRAGMA recipe as `create.js`
 and registers a process-exit close hook; call the returned `cleanup()` when
 done.
+
+Plain-Node and long-lived embedders use `createExternalSmithersEngine` instead.
+It opens the normal async PGlite/Postgres backend once, creates multiple
+HostNode workflows over that backend, scopes an injected logger per run, and
+closes the shared runtime/backend through `engine.close()`.

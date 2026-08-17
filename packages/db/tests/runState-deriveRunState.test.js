@@ -46,6 +46,15 @@ describe("deriveRunState — terminal states", () => {
     });
   });
 
+  test("finished with tolerated child failures maps to succeeded-with-failures", () => {
+    const view = deriveRunState({
+      run: makeRun({ status: "finished" }),
+      failedChildren: 2,
+      now: NOW,
+    });
+    expect(view.state).toBe("succeeded-with-failures");
+  });
+
   test("continued maps to succeeded", () => {
     const view = deriveRunState({
       run: makeRun({ status: "continued" }),

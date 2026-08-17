@@ -12,7 +12,7 @@
 
 import pc from "picocolors";
 import { buildDigestBlock, formatElapsed, isLikelyWorkerNodeId } from "@smthrs/herdr";
-import { sanitizeTerminalText } from "@smthrs/tui/src/sanitizeTerminalText.ts";
+import { sanitizeTerminalText } from "./sanitizeTerminalText.js";
 import { ACTIVITY_STRIP_LINES, formatActivityPlain } from "./cockpit-activity.js";
 import { flattenOutlineTree, outlinePhasesToTree } from "./cockpit-outline-graph.js";
 import { buildDigestInputFromOverview, overviewStateLabel } from "./tail-overview.js";
@@ -719,7 +719,16 @@ export function buildCockpitOutlineModel(input) {
   const statusEarly = input.status ?? "unknown";
   const terminal =
     input.live === false ||
-    ["finished", "failed", "cancelled", "canceled", "stale", "orphaned", "succeeded"].includes(statusEarly);
+    [
+      "finished",
+      "failed",
+      "cancelled",
+      "canceled",
+      "stale",
+      "orphaned",
+      "succeeded",
+      "succeeded-with-failures",
+    ].includes(statusEarly);
   const endMs =
     terminal && typeof input.finishedAtMs === "number" && input.finishedAtMs > 0
       ? input.finishedAtMs
@@ -941,7 +950,7 @@ export function clampScrollToSelection(scrollOffset, selectedBodyIndex, bodyLen,
 export function supervisorRunStatus(status, live) {
   const s = String(status ?? "");
   if (s === "failed") return "failed";
-  if (s === "finished" || s === "succeeded") return "finished";
+  if (s === "finished" || s === "succeeded" || s === "succeeded-with-failures") return "finished";
   if (s === "cancelled" || s === "canceled" || s === "stale" || s === "orphaned") {
     return "stopped";
   }

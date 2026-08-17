@@ -171,6 +171,7 @@ describe("codex issue merge watchdog", () => {
       }),
     ).toMatchObject({ healthy: false, repairRequired: true });
     expect(knownStateDecision({ ok: true, data: { runState: { state: "succeeded" }, failedChildren: 2 } })).toBeNull();
+    expect(knownStateDecision({ ok: true, data: { runState: { state: "succeeded-with-failures" } } })).toBeNull();
     expect(knownStateDecision({ runState: { state: "stale" } })).toMatchObject({
       healthy: false,
       repairRequired: true,

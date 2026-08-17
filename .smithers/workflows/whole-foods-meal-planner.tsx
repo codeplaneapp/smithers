@@ -1,4 +1,4 @@
-// smithers-source: seeded
+// smithers-source: authored
 // smithers-metadata-version: 1
 // smithers-display-name: Whole Foods Meal Planner
 // smithers-description: Plans a calorie-and-budget-targeted, Whole Foods-biased meal plan, validates it deterministically with a bounded re-plan loop, gates ordering behind a durable approval, then places the order or returns checkout links.

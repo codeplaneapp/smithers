@@ -316,13 +316,13 @@ test(
     expect(repo.exists(".smithers/prompts/create-workflow-document.mdx")).toBe(true);
     expect(repo.exists(".smithers/ui/create-workflow.tsx")).toBe(true);
     expect(repo.exists(".smithers/ui/create-skill.tsx")).toBe(true);
-    expect(repo.exists(".smithers/ui/docs-driven-development.tsx")).toBe(true);
-    expect(repo.exists(".smithers/lib/ddd/build.ts")).toBe(true);
+    expect(repo.exists(".smithers/ui/docs-driven-development.tsx")).toBe(false);
+    expect(repo.exists(".smithers/lib/ddd/build.ts")).toBe(false);
     expect(repo.exists(".smithers/skills/.gitkeep")).toBe(true);
     expect(repo.exists(".smithers/tickets/.gitkeep")).toBe(true);
     expect(repo.read(".smithers/workflows/create-workflow.tsx")).toContain("skillPath");
     expect(repo.read(".smithers/workflows/create-skill.tsx")).toContain("Skill");
-    expect(repo.read(".smithers/workflows/docs-driven-development.tsx")).toContain("docs-driven-development");
+    expect(repo.exists(".smithers/workflows/docs-driven-development.tsx")).toBe(false);
     expect(repo.read(".smithers/workflows/init.tsx")).toContain("smithers-source: seeded");
     expect(repo.read(".smithers/gateway.ts")).toContain("process.chdir(projectRoot);");
     runWorkflowPackTypecheck(repo);

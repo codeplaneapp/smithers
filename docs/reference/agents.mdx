@@ -290,6 +290,11 @@ export default smithers(() => (
 ));
 ```
 
+CLI agent constructors reject unknown option keys. A misspelling or an option
+from a newer Smithers version throws immediately instead of being accepted and
+ignored. This check is adapter-specific: a valid Claude option passed to
+`CodexAgent` is also an error.
+
 <a id="base-cli-options" />
 
 <ParamField path="options" type="BaseCliAgentOptions">
@@ -312,7 +317,13 @@ export default smithers(() => (
       Working directory for the spawned process.
     </ParamField>
     <ParamField path="env" type="Record<string, string>">
-      Extra environment variables for the spawned process.
+      Per-key overrides applied after the inherited process environment. This
+      does not replace the environment.
+    </ParamField>
+    <ParamField path="inheritEnv" type="boolean" default="true">
+      When `true`, the CLI process receives `process.env` followed by `env`
+      overrides. When `false`, it receives only `env`, task-context variables,
+      and command-specific variables.
     </ParamField>
     <ParamField path="yolo" type="boolean">
       Run the CLI in its most permissive (no-confirmation) mode.

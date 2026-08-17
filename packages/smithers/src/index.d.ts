@@ -24,9 +24,11 @@ import { OutputSnapshot } from '@smthrs/driver/OutputSnapshot';
 import * as _smthrs_db_SchemaRegistryEntry from '@smthrs/db/SchemaRegistryEntry';
 import * as _smthrs_driver_RunStatus from '@smthrs/driver/RunStatus';
 import * as _smthrs_driver_RunResult from '@smthrs/driver/RunResult';
+import { RunResult as RunResult$1 } from '@smthrs/driver/RunResult';
 import * as _smthrs_driver_SmithersErrorReport from '@smthrs/driver/SmithersErrorReport';
 import * as _smthrs_driver_RunStartedBy from '@smthrs/driver/RunStartedBy';
 import * as _smthrs_driver_RunOptions from '@smthrs/driver/RunOptions';
+import { RunOptions as RunOptions$1 } from '@smthrs/driver/RunOptions';
 import * as _smthrs_time_travel_revert from '@smthrs/time-travel/revert';
 export { revertToAttempt } from '@smthrs/time-travel/revert';
 import * as _smthrs_observability from '@smthrs/observability';
@@ -71,6 +73,7 @@ export { Smithers, approveNode, closeSingleRunnerRuntime, denyNode, fragment, ge
 export { SmithersDb, loadOutputs, loadOutputsEffect } from '@smthrs/db';
 import { SmithersDb } from '@smthrs/db/adapter';
 export { camelToSnake } from '@smthrs/db/utils/camelToSnake';
+export { createIsolatedClone, gitDirtyPaths, isolatedCloneEnvironment, listGitRefs } from '@smthrs/vcs';
 export { ensureSmithersTables } from '@smthrs/db/ensure';
 export { errorToJson } from '@smthrs/errors/errorToJson';
 export { executeChildWorkflow } from '@smthrs/engine/child-workflow';
@@ -107,6 +110,107 @@ type HostNodeJson$1 = {
 } | {
     kind: "text";
     text: string;
+};
+
+type CreateSmithersOptions$2 = {
+    readableName?: string;
+    description?: string;
+    alertPolicy?: SmithersAlertPolicy$1;
+    dbPath?: string;
+    journalMode?: string;
+    /**
+     * Maximum connections in the process-local PostgreSQL pool for this URL.
+     * Defaults to 16; all owners of one normalized URL must use one value.
+     * Exceeding it fails an acquire with `PG_POOL_SATURATED` rather than queueing
+     * forever.
+     */
+    postgresPoolMax?: number;
+    /**
+     * Backend the caller resolved this API to. The synchronous `createSmithers`
+     * only serves `"sqlite"`; `"pglite"`/`"postgres"` require the async
+     * `openSmithersBackend` factory and fail loud here rather than silently
+     * opening bun:sqlite.
+     */
+    backend?: "sqlite" | "pglite" | "postgres";
+};
+
+type SmithersBackend = "sqlite" | "pglite" | "postgres";
+type OpenSmithersBackendOptions$1 = CreateSmithersOptions$2 & {
+    backend?: SmithersBackend;
+    cwd?: string;
+    configPath?: string;
+    env?: Record<string, string | undefined>;
+    connectionString?: string;
+    connection?: object;
+    pgliteDataDir?: string;
+};
+
+type SmithersEngineLogLevel$1 = "debug" | "info" | "warn" | "error";
+type SmithersEngineLogRecord$1 = {
+    readonly level: SmithersEngineLogLevel$1;
+    readonly message: string;
+    readonly timestamp: Date;
+    readonly annotations: Record<string, unknown>;
+    readonly spans: readonly string[];
+};
+type SmithersEngineLogger$1 = (record: SmithersEngineLogRecord$1) => void;
+type ExternalSmithersEngineConfig$2<S extends Record<string, z.ZodObject<z.ZodRawShape>>> = OpenSmithersBackendOptions$1 & {
+    schemas: S;
+    agents: Record<string, AgentLike$1>;
+    /** `false` silences engine logs; a callback routes structured records to the host. */
+    logger?: SmithersEngineLogger$1 | false;
+};
+
+/** Union of all Zod schema values registered in the schema, constrained to ZodObject. */
+type SchemaOutput<Schema> = Extract<Schema[keyof Schema], z.ZodObject<z.ZodRawShape>>;
+type RuntimeSchema<Schema> = Schema extends {
+    input: infer Input;
+} ? Omit<Schema, "input"> & {
+    input: Input extends z.ZodTypeAny ? z.infer<Input> : Input;
+} : Schema;
+type CreateSmithersApi$1<Schema = unknown> = {
+    Workflow: (props: WorkflowProps) => React.ReactElement;
+    Approval: <Row>(props: ApprovalProps$1<Row, SchemaOutput<Schema>>) => React.ReactElement;
+    Task: <Row, D extends DepsSpec$1 = {}>(props: TaskProps$1<Row, SchemaOutput<Schema>, D>) => React.ReactElement;
+    Sequence: typeof Sequence;
+    Parallel: typeof Parallel;
+    MergeQueue: typeof MergeQueue;
+    Branch: typeof Branch;
+    Loop: typeof Loop;
+    Ralph: typeof Ralph;
+    ContinueAsNew: typeof ContinueAsNew;
+    continueAsNew: typeof continueAsNew;
+    Worktree: typeof Worktree;
+    Sandbox: (props: SandboxProps$1) => React.ReactElement;
+    Signal: <SignalSchema extends z.ZodObject<z.ZodRawShape>>(props: SignalProps$1<SignalSchema>) => React.ReactElement;
+    Timer: typeof Timer;
+    UI: typeof UI;
+    TUI: typeof TUI;
+    useCtx: () => SmithersCtx$1<RuntimeSchema<Schema>>;
+    smithers: (build: (ctx: SmithersCtx$1<RuntimeSchema<Schema>>) => React.ReactElement, opts?: SmithersWorkflowOptions$1) => SmithersWorkflow$1<RuntimeSchema<Schema>>;
+    db: BunSQLiteDatabase<Record<string, unknown>>;
+    tables: {
+        [K in keyof Schema]: unknown;
+    };
+    outputs: {
+        [K in keyof Schema]: Schema[K];
+    };
+    /**
+     * Release the underlying database handle. Idempotent, and a no-op for
+     * backends that own no closable handle. Callers that open many short-lived
+     * databases (test fixtures above all) should call this in teardown so the
+     * fds, WAL/`-shm` mappings, and sqlite3 locking state are released instead
+     * of accumulating until the process exits.
+     */
+    close: () => void;
+};
+
+type ExternalSmithersEngine$2<S extends Record<string, z.ZodObject<z.ZodRawShape>>> = {
+    readonly api: CreateSmithersApi$1<S>;
+    workflow(buildFn: (ctx: SerializedCtx$1) => HostNodeJson$1, options?: SmithersWorkflowOptions$1): SmithersWorkflow$1<S>;
+    /** Runs reject on `failed`; the thrown SmithersError retains its nested `cause` chain. */
+    run(workflow: SmithersWorkflow$1<S>, options: Omit<RunOptions$1, "effectPlatformRuntime" | "effectPlatformLayer">): Promise<RunResult$1>;
+    close(): Promise<void>;
 };
 
 type ExternalSmithersConfig$2<S extends Record<string, z.ZodObject<z.ZodRawShape>>> = {
@@ -172,83 +276,6 @@ type MigrateSmithersStoreOptions$2 = {
         tableCount?: number;
         durationMs?: number;
     }) => void | Promise<void>;
-};
-
-type CreateSmithersOptions$2 = {
-    readableName?: string;
-    description?: string;
-    alertPolicy?: SmithersAlertPolicy$1;
-    dbPath?: string;
-    journalMode?: string;
-    /**
-     * Maximum connections in the process-local PostgreSQL pool for this URL.
-     * Defaults to 16; all owners of one normalized URL must use one value.
-     * Exceeding it fails an acquire with `PG_POOL_SATURATED` rather than queueing
-     * forever.
-     */
-    postgresPoolMax?: number;
-    /**
-     * Backend the caller resolved this API to. The synchronous `createSmithers`
-     * only serves `"sqlite"`; `"pglite"`/`"postgres"` require the async
-     * `openSmithersBackend` factory and fail loud here rather than silently
-     * opening bun:sqlite.
-     */
-    backend?: "sqlite" | "pglite" | "postgres";
-};
-
-type SmithersBackend = "sqlite" | "pglite" | "postgres";
-type OpenSmithersBackendOptions$1 = CreateSmithersOptions$2 & {
-    backend?: SmithersBackend;
-    cwd?: string;
-    configPath?: string;
-    env?: Record<string, string | undefined>;
-    connectionString?: string;
-    connection?: object;
-    pgliteDataDir?: string;
-};
-
-/** Union of all Zod schema values registered in the schema, constrained to ZodObject. */
-type SchemaOutput<Schema> = Extract<Schema[keyof Schema], z.ZodObject<z.ZodRawShape>>;
-type RuntimeSchema<Schema> = Schema extends {
-    input: infer Input;
-} ? Omit<Schema, "input"> & {
-    input: Input extends z.ZodTypeAny ? z.infer<Input> : Input;
-} : Schema;
-type CreateSmithersApi$1<Schema = unknown> = {
-    Workflow: (props: WorkflowProps) => React.ReactElement;
-    Approval: <Row>(props: ApprovalProps$1<Row, SchemaOutput<Schema>>) => React.ReactElement;
-    Task: <Row, D extends DepsSpec$1 = {}>(props: TaskProps$1<Row, SchemaOutput<Schema>, D>) => React.ReactElement;
-    Sequence: typeof Sequence;
-    Parallel: typeof Parallel;
-    MergeQueue: typeof MergeQueue;
-    Branch: typeof Branch;
-    Loop: typeof Loop;
-    Ralph: typeof Ralph;
-    ContinueAsNew: typeof ContinueAsNew;
-    continueAsNew: typeof continueAsNew;
-    Worktree: typeof Worktree;
-    Sandbox: (props: SandboxProps$1) => React.ReactElement;
-    Signal: <SignalSchema extends z.ZodObject<z.ZodRawShape>>(props: SignalProps$1<SignalSchema>) => React.ReactElement;
-    Timer: typeof Timer;
-    UI: typeof UI;
-    TUI: typeof TUI;
-    useCtx: () => SmithersCtx$1<RuntimeSchema<Schema>>;
-    smithers: (build: (ctx: SmithersCtx$1<RuntimeSchema<Schema>>) => React.ReactElement, opts?: SmithersWorkflowOptions$1) => SmithersWorkflow$1<RuntimeSchema<Schema>>;
-    db: BunSQLiteDatabase<Record<string, unknown>>;
-    tables: {
-        [K in keyof Schema]: unknown;
-    };
-    outputs: {
-        [K in keyof Schema]: Schema[K];
-    };
-    /**
-     * Release the underlying database handle. Idempotent, and a no-op for
-     * backends that own no closable handle. Callers that open many short-lived
-     * databases (test fixtures above all) should call this in teardown so the
-     * fds, WAL/`-shm` mappings, and sqlite3 locking state are released instead
-     * of accumulating until the process exits.
-     */
-    close: () => void;
 };
 
 /**
@@ -341,22 +368,6 @@ declare function openSmithersStore(opts?: OpenSmithersStoreOptions): Promise<Ope
 declare function migrateSmithersStore(opts?: MigrateSmithersStoreOptions$1): Promise<MigrateSmithersStoreResult>;
 type MigrateSmithersStoreOptions$1 = MigrateSmithersStoreOptions$2;
 type MigrateSmithersStoreResult = SmithersMigrationResult$1;
-
-/**
- * Create a SmithersWorkflow from an external build function.
- *
- * Schemas and agents are defined in TS. The build function produces a HostNode JSON tree
- * that maps 1:1 to what the JSX renderer would produce.
- *
- * @template {Record<string, import("zod").ZodObject<any>>} S
- * @param {ExternalSmithersConfig<S>} config
- * @returns {import("@smthrs/components/SmithersWorkflow").SmithersWorkflow<S> & { tables: Record<string, any>; cleanup: () => void }}
- */
-declare function createExternalSmithers<S extends Record<string, zod.ZodObject<any>>>(config: ExternalSmithersConfig$1<S>): _smthrs_components_SmithersWorkflow.SmithersWorkflow<S> & {
-    tables: Record<string, any>;
-    cleanup: () => void;
-};
-type ExternalSmithersConfig$1<S> = ExternalSmithersConfig$2<S>;
 
 /**
  * Teach the runtime module loader to compile `.mdx` workflow files on import.
@@ -604,6 +615,36 @@ declare const tools: {
   bash: typeof bash;
 };
 
+/**
+ * Open one reusable engine over the normal Smithers runtime. Plain Node
+ * defaults to PGlite; Bun keeps SQLite as its default. Node callers may choose
+ * managed Postgres, but asking for SQLite fails explicitly because bun:sqlite
+ * is the only SQLite driver supported by the durable engine.
+ *
+ * @template {Record<string, import("zod").ZodObject<any>>} S
+ * @param {ExternalSmithersEngineConfig<S>} config
+ * @returns {Promise<ExternalSmithersEngine<S>>}
+ */
+declare function createExternalSmithersEngine<S extends Record<string, zod.ZodObject<any>>>(config: ExternalSmithersEngineConfig$1<S>): Promise<ExternalSmithersEngine$1<S>>;
+type ExternalSmithersEngine$1<S> = ExternalSmithersEngine$2<S>;
+type ExternalSmithersEngineConfig$1<S> = ExternalSmithersEngineConfig$2<S>;
+
+/**
+ * Create a SmithersWorkflow from an external build function.
+ *
+ * Schemas and agents are defined in TS. The build function produces a HostNode JSON tree
+ * that maps 1:1 to what the JSX renderer would produce.
+ *
+ * @template {Record<string, import("zod").ZodObject<any>>} S
+ * @param {ExternalSmithersConfig<S>} config
+ * @returns {import("@smthrs/components/SmithersWorkflow").SmithersWorkflow<S> & { tables: Record<string, any>; cleanup: () => void }}
+ */
+declare function createExternalSmithers<S extends Record<string, zod.ZodObject<any>>>(config: ExternalSmithersConfig$1<S>): _smthrs_components_SmithersWorkflow.SmithersWorkflow<S> & {
+    tables: Record<string, any>;
+    cleanup: () => void;
+};
+type ExternalSmithersConfig$1<S> = ExternalSmithersConfig$2<S>;
+
 type AgentCapabilityRegistry = _smthrs_agents_capability_registry.AgentCapabilityRegistry;
 type AgentCheckpoint = _smthrs_agents.AgentCheckpoint;
 type AgentCheckpointCapability = _smthrs_agents.AgentCheckpointCapability;
@@ -643,6 +684,8 @@ type SmithersMigrationResult = SmithersMigrationResult$1;
 type DepsSpec = _smthrs_components.DepsSpec;
 type EventFrame = _smthrs_server_gateway.EventFrame;
 type ExternalSmithersConfig<S> = ExternalSmithersConfig$2<S>;
+type ExternalSmithersEngine<S> = ExternalSmithersEngine$2<S>;
+type ExternalSmithersEngineConfig<S> = ExternalSmithersEngineConfig$2<S>;
 type GatewayAuthConfig = _smthrs_server_gateway.GatewayAuthConfig;
 type GatewayDefaults = _smthrs_server_gateway.GatewayDefaults;
 type GatewayExtensionDefinition = _smthrs_server.GatewayExtensionDefinition;
@@ -658,6 +701,9 @@ type GraphSnapshot = _smthrs_graph_GraphSnapshot.GraphSnapshot;
 type HelloResponse = _smthrs_server_gateway.HelloResponse;
 type HostContainer = _smthrs_react_reconciler_dom_renderer.HostContainer;
 type HostNodeJson = HostNodeJson$1;
+type SmithersEngineLogger = SmithersEngineLogger$1;
+type SmithersEngineLogLevel = SmithersEngineLogLevel$1;
+type SmithersEngineLogRecord = SmithersEngineLogRecord$1;
 type InferOutputEntry<T> = _smthrs_driver_OutputAccessor.InferOutputEntry<T>;
 type InferRow<TTable> = _smthrs_driver_OutputAccessor.InferRow<TTable>;
 type JjRevertResult = _smthrs_vcs_jj.JjRevertResult;
@@ -780,4 +826,4 @@ type InferDeps<D extends DepsSpec$2> = InferDeps$1<D>;
 type SignalProps<Schema extends z.ZodObject<z.ZodRawShape> = z.ZodObject<z.ZodRawShape>> = SignalProps$2<Schema>;
 type TaskProps<Row, Output extends OutputTarget$1 = OutputTarget$1, D extends DepsSpec$2 = {}> = TaskProps$2<Row, Output, D>;
 
-export { type AgentCapabilityRegistry, type AgentCheckpoint, type AgentCheckpointCapability, type AgentCheckpointContinuationOptions, type AgentCheckpointFormat, type AgentCheckpointJsonArray, type AgentCheckpointJsonObject, type AgentCheckpointJsonPrimitive, type AgentCheckpointJsonValue, type AgentCheckpointMode, type AgentCheckpointPublisher, type AgentCheckpointResult, type AgentFileChange, type AgentFileChangeKind, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, type AggregateOptions, type AggregateScore, type AnthropicAgentOptions, type ApprovalAutoApprove, type ApprovalDecision, type ApprovalMode, type ApprovalOption, type ApprovalProps, type ApprovalRanking, type ApprovalRequest, type ApprovalSelection, type ColumnDef, type ConnectRequest, type ContinueAsNewProps, type CreateScorerConfig, type CreateSmithersApi, type CreateSmithersOptions, type CursorAgentOptions, type DepsSpec, type EventFrame, type ExternalSmithersConfig, type GatewayAuthConfig, type GatewayDefaults, type GatewayExtensionDefinition, type GatewayOperatorUiConfig, type GatewayOptions, type GatewayRegisterOptions, type GatewayTokenGrant, type GatewayUiConfig, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GraphSnapshot, type HelloResponse, type HermesAgentOptions, type HermesCliAgentOptions, type HindsightMemoryStoreOptions, type HostContainer, type HostNodeJson, type InferDeps, type InferOutputEntry, type InferRow, type JjRevertResult, type KanbanProps, type KnownSmithersErrorCode, type LlmJudgeConfig, type MemoryFact, type MemoryLayerConfig, type MemoryMessage, type MemoryNamespace, type MemoryNamespaceKind, type MemoryProcessor, type MemoryProcessorConfig, type MemoryProps, type MemoryServiceApi, type MemoryStore, type MemoryThread, type MemoryTrellisProps, type MessageHistoryConfig, type MigrateSmithersStoreOptions, type MonitorCondition, type MonitorProps, type NanocodexAgentOptions, type NanocodexAuth, type NanocodexGenerateOptions, type NanocodexReasoningMode, type NanocodexThinking, type OmpAgentOptions, type OpenAIAgentOptions, type OpenApiAuth, type OpenApiSpec, type OpenApiToolsOptions, type OpenClawAgentOptions, type OpenCodeAgentOptions, type OpenSmithersBackendOptions, type OutputAccessor, type OutputKey, type OutputTarget, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type PollerProps, type PoolAgentOptions, type ProofBinding, type RequestFrame, type ResolvedSmithersObservabilityOptions, type ResponseFrame, type RevertOptions, type RevertResult, type RunJjOptions, type RunJjResult, type RunOptions, type RunResult, type RunStartedBy, type RunStatus, type SagaProps, type SagaStepDef, type SagaStepProps, type SamplingConfig, type SandboxProps, type SandboxRuntime, type SandboxVolumeMount, type SandboxWorkspaceSpec, type SchemaRegistryEntry, type ScoreResult, type ScoreRow, type Scorer, type ScorerBinding, type ScorerContext, type ScorerFn, type ScorerInput, type ScorersMap, type SemanticRecallConfig, type SerializedCtx, type ServeOptions, type ServerOptions, type SignalProps, type SmithersAlertLabels, type SmithersAlertPolicy, type SmithersAlertPolicyDefaults, type SmithersAlertPolicyRule, type SmithersAlertReaction, type SmithersAlertReactionKind, type SmithersAlertReactionRef, type SmithersAlertSeverity, type SmithersCtx, type SmithersError, type SmithersErrorCode, type SmithersErrorReport, type SmithersEvent, type SmithersLogFormat, type SmithersMigrationResult, type SmithersObservabilityOptions, type SmithersObservabilityService, type SmithersWorkflow, type SmithersWorkflowOptions, type TUIProps, type TaskDescriptor, type TaskMemoryConfig, type TaskProps, type TimeTravelOptions, type TimeTravelResult, type TimerProps, type TrellisProps, type TryCatchFinallyProps, type UIProps, type VibeAgentOptions, type WaitForEventProps, type WorkflowViewBootProps, type WorkflowViewProps, type WorkingMemoryConfig, type WorkspaceAddOptions, type WorkspaceInfo, type WorkspaceResult, type XmlElement, type XmlNode, type XmlText, bash, createExternalSmithers, createSmithers, createSmithersCloudflare, createSmithersPostgres, defineTool, edit, getDefinedToolMetadata, grep, mdxPlugin, migrateSmithersStore, openSmithersBackend, openSmithersStore, read, resolveSmithersBackendChoice, resolveSmithersBackendPreference, tools, write };
+export { type AgentCapabilityRegistry, type AgentCheckpoint, type AgentCheckpointCapability, type AgentCheckpointContinuationOptions, type AgentCheckpointFormat, type AgentCheckpointJsonArray, type AgentCheckpointJsonObject, type AgentCheckpointJsonPrimitive, type AgentCheckpointJsonValue, type AgentCheckpointMode, type AgentCheckpointPublisher, type AgentCheckpointResult, type AgentFileChange, type AgentFileChangeKind, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, type AggregateOptions, type AggregateScore, type AnthropicAgentOptions, type ApprovalAutoApprove, type ApprovalDecision, type ApprovalMode, type ApprovalOption, type ApprovalProps, type ApprovalRanking, type ApprovalRequest, type ApprovalSelection, type ColumnDef, type ConnectRequest, type ContinueAsNewProps, type CreateScorerConfig, type CreateSmithersApi, type CreateSmithersOptions, type CursorAgentOptions, type DepsSpec, type EventFrame, type ExternalSmithersConfig, type ExternalSmithersEngine, type ExternalSmithersEngineConfig, type GatewayAuthConfig, type GatewayDefaults, type GatewayExtensionDefinition, type GatewayOperatorUiConfig, type GatewayOptions, type GatewayRegisterOptions, type GatewayTokenGrant, type GatewayUiConfig, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GraphSnapshot, type HelloResponse, type HermesAgentOptions, type HermesCliAgentOptions, type HindsightMemoryStoreOptions, type HostContainer, type HostNodeJson, type InferDeps, type InferOutputEntry, type InferRow, type JjRevertResult, type KanbanProps, type KnownSmithersErrorCode, type LlmJudgeConfig, type MemoryFact, type MemoryLayerConfig, type MemoryMessage, type MemoryNamespace, type MemoryNamespaceKind, type MemoryProcessor, type MemoryProcessorConfig, type MemoryProps, type MemoryServiceApi, type MemoryStore, type MemoryThread, type MemoryTrellisProps, type MessageHistoryConfig, type MigrateSmithersStoreOptions, type MonitorCondition, type MonitorProps, type NanocodexAgentOptions, type NanocodexAuth, type NanocodexGenerateOptions, type NanocodexReasoningMode, type NanocodexThinking, type OmpAgentOptions, type OpenAIAgentOptions, type OpenApiAuth, type OpenApiSpec, type OpenApiToolsOptions, type OpenClawAgentOptions, type OpenCodeAgentOptions, type OpenSmithersBackendOptions, type OutputAccessor, type OutputKey, type OutputTarget, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type PollerProps, type PoolAgentOptions, type ProofBinding, type RequestFrame, type ResolvedSmithersObservabilityOptions, type ResponseFrame, type RevertOptions, type RevertResult, type RunJjOptions, type RunJjResult, type RunOptions, type RunResult, type RunStartedBy, type RunStatus, type SagaProps, type SagaStepDef, type SagaStepProps, type SamplingConfig, type SandboxProps, type SandboxRuntime, type SandboxVolumeMount, type SandboxWorkspaceSpec, type SchemaRegistryEntry, type ScoreResult, type ScoreRow, type Scorer, type ScorerBinding, type ScorerContext, type ScorerFn, type ScorerInput, type ScorersMap, type SemanticRecallConfig, type SerializedCtx, type ServeOptions, type ServerOptions, type SignalProps, type SmithersAlertLabels, type SmithersAlertPolicy, type SmithersAlertPolicyDefaults, type SmithersAlertPolicyRule, type SmithersAlertReaction, type SmithersAlertReactionKind, type SmithersAlertReactionRef, type SmithersAlertSeverity, type SmithersCtx, type SmithersEngineLogLevel, type SmithersEngineLogRecord, type SmithersEngineLogger, type SmithersError, type SmithersErrorCode, type SmithersErrorReport, type SmithersEvent, type SmithersLogFormat, type SmithersMigrationResult, type SmithersObservabilityOptions, type SmithersObservabilityService, type SmithersWorkflow, type SmithersWorkflowOptions, type TUIProps, type TaskDescriptor, type TaskMemoryConfig, type TaskProps, type TimeTravelOptions, type TimeTravelResult, type TimerProps, type TrellisProps, type TryCatchFinallyProps, type UIProps, type VibeAgentOptions, type WaitForEventProps, type WorkflowViewBootProps, type WorkflowViewProps, type WorkingMemoryConfig, type WorkspaceAddOptions, type WorkspaceInfo, type WorkspaceResult, type XmlElement, type XmlNode, type XmlText, bash, createExternalSmithers, createExternalSmithersEngine, createSmithers, createSmithersCloudflare, createSmithersPostgres, defineTool, edit, getDefinedToolMetadata, grep, mdxPlugin, migrateSmithersStore, openSmithersBackend, openSmithersStore, read, resolveSmithersBackendChoice, resolveSmithersBackendPreference, tools, write };
