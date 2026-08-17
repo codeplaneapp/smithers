@@ -10,6 +10,7 @@
     "start": "electrobun dev"
   },
   "dependencies": {
+    "@smthrs/usage": "workspace:*",
     "electrobun": "1.18.1"
   }
 }
