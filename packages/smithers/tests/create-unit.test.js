@@ -447,30 +447,32 @@ describe("createSmithers", () => {
     if (api) closeApi(api);
   });
 
-  test("registered database exit close hook is idempotent and catches close failures", () => {
-    const before = process.listeners("exit");
-    const api = createSmithers(
-      { result: z.object({ value: z.string() }) },
-      { dbPath: makeDbPath("smithers-close-hook-") },
-    );
-    const closeHook = process.listeners("exit").find((listener) => !before.includes(listener));
-    expect(closeHook).toBeFunction();
-    try {
-      expect(() => closeHook?.(0)).not.toThrow();
-      expect(() => closeHook?.(0)).not.toThrow();
-    } finally {
-      if (closeHook) {
-        process.off("exit", closeHook);
-      }
-      closeApi(api);
-    }
+  test("many databases share ONE exit listener, and close() is idempotent and swallows close failures", () => {
+    // The point of the shared hook is that opening N databases does not register
+    // N `process.once("exit")` listeners: a suite running hundreds of fixtures
+    // used to blow past the max-listeners warning and retain a closure per
+    // handle. Assert the listener DELTA rather than looking for a listener this
+    // create added — the hook is registered lazily on the first createSmithers
+    // in the *process*, so by the time any given test runs it may already exist.
+    const listenersBefore = process.listeners("exit").length;
+    const apis = [
+      createSmithers({ result: z.object({ value: z.string() }) }, { dbPath: makeDbPath("smithers-close-hook-a-") }),
+      createSmithers({ result: z.object({ value: z.string() }) }, { dbPath: makeDbPath("smithers-close-hook-b-") }),
+      createSmithers({ result: z.object({ value: z.string() }) }, { dbPath: makeDbPath("smithers-close-hook-c-") }),
+    ];
+    expect(process.listeners("exit").length - listenersBefore).toBeLessThanOrEqual(1);
 
-    const beforeThrowing = process.listeners("exit");
+    // close() is idempotent: a second call is a no-op, not a double-close error.
+    expect(() => apis[0].close()).not.toThrow();
+    expect(() => apis[0].close()).not.toThrow();
+    for (const api of apis) closeApi(api);
+
+    // A handle whose underlying sqlite close() throws must not surface that
+    // error, so one bad handle cannot break exit-time cleanup of the others.
     const throwingApi = createSmithers(
       { result: z.object({ value: z.string() }) },
       { dbPath: makeDbPath("smithers-close-hook-throw-") },
     );
-    const throwingHook = process.listeners("exit").find((listener) => !beforeThrowing.includes(listener));
     const sqlite = throwingApi.db.$client;
     const originalClose = sqlite.close.bind(sqlite);
     let throwOnce = true;
@@ -482,11 +484,8 @@ describe("createSmithers", () => {
       return originalClose();
     };
     try {
-      expect(() => throwingHook?.(0)).not.toThrow();
+      expect(() => throwingApi.close()).not.toThrow();
     } finally {
-      if (throwingHook) {
-        process.off("exit", throwingHook);
-      }
       sqlite.close = originalClose;
       originalClose();
     }
