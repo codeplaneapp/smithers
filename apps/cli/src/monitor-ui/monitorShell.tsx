@@ -120,6 +120,7 @@ export function MonitorToolbar({
       <Input
         className="mon-filter-input"
         data-testid="monitor-filter"
+        aria-label="Search runs"
         value={filterText}
         onChange={(event) => onFilterText(event.currentTarget.value)}
         placeholder="Search runs…"
