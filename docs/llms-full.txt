@@ -11701,11 +11701,12 @@ Defined in the root `package.json` for development:
 | `generate:init-pack` | `bun scripts/generate-workflow-pack.ts` | Regenerate the local workflow pack used by `bunx smthrs init` |
 | `sota:gen` | `bun scripts/generate-sota.ts` | Render the SOTA model registry (`docs/data/sota-models.json`) into its docs page and CLI module |
 | `sota:research` | `bun scripts/sota-research.ts` | Research whether new SOTA models shipped and rewrite the registry if so (used by the daily cron) |
-| `test` | `node scripts/check-single-effect-version.mjs && node scripts/check-npm-dedupe.mjs && node scripts/check-dependency-boundaries.mjs && node scripts/check-ui-architecture.mjs && node --test scripts/check-ui-architecture.test.mjs && node scripts/check-no-direct-db-access.mjs && node scripts/check-local-smithers.mjs && node --test scripts/check-local-smithers.test.mjs && node scripts/check-docs.mjs && node scripts/check-llms.mjs && node scripts/check-sota.mjs && node scripts/check-dts.mjs && node scripts/check-smithers-test-script.mjs && node --test scripts/qualify-nanocodex-release.test.mjs && bun test scripts/publish-next.test.mjs scripts/release-next-gate.test.mjs scripts/bump.test.mjs scripts/run-workspace-tests-timeout.test.mjs && pnpm -r --no-bail test` | Run UI architecture, docs/config, dependency, direct DB access, llms, SOTA registry, declaration freshness, and Nanocodex release qualification guards; run root script tests and every package test script (no-bail so every failing package is reported) |
+| `test` | `node scripts/check-single-effect-version.mjs && node scripts/check-npm-dedupe.mjs && node scripts/check-dependency-boundaries.mjs && node scripts/check-installed-footprint.mjs && node scripts/check-ui-architecture.mjs && node --test scripts/check-ui-architecture.test.mjs && node scripts/check-no-direct-db-access.mjs && node scripts/check-local-smithers.mjs && node --test scripts/check-local-smithers.test.mjs && node scripts/check-docs.mjs && node scripts/check-llms.mjs && node scripts/check-sota.mjs && node scripts/check-dts.mjs && node scripts/check-smithers-test-script.mjs && node --test scripts/qualify-nanocodex-release.test.mjs && bun test scripts/publish-next.test.mjs scripts/release-next-gate.test.mjs scripts/bump.test.mjs scripts/run-workspace-tests-timeout.test.mjs && pnpm -r --no-bail test` | Run UI architecture, docs/config, dependency, installed-footprint, direct DB access, llms, SOTA registry, declaration freshness, and Nanocodex release qualification guards; run root script tests and every package test script (no-bail so every failing package is reported) |
 | `coverage` | `node scripts/coverage.mjs` | Generate a test coverage report across the workspace |
 | `check:effect` | `node scripts/check-single-effect-version.mjs` | Verify the workspace resolves a single Effect version |
 | `check:npm-dedupe` | `node scripts/check-npm-dedupe.mjs` | Verify published dependency versions are deduplicated |
-| `check:deps` | `node scripts/check-dependency-boundaries.mjs` | Verify package dependency boundaries |
+| `check:deps` | `node scripts/check-dependency-boundaries.mjs && node scripts/check-installed-footprint.mjs` | Verify package dependency boundaries and the installed-footprint budget |
+| `check:footprint` | `node scripts/check-installed-footprint.mjs` | Verify the init pack and packed CLI stay under the installed-footprint budget |
 | `check:ui-architecture` | `node scripts/check-ui-architecture.mjs` | Verify UI package architecture boundaries against the checked-in baseline |
 | `test:ui-architecture` | `node --test scripts/check-ui-architecture.test.mjs` | Run the UI architecture guard self-tests |
 | `check:db-access` | `node scripts/check-no-direct-db-access.mjs` | Verify direct run/store DB access remains confined to the tracked issue #470 baseline |
@@ -20472,6 +20473,14 @@ import {
 ```
 
 `createMcpToolset` is intentionally a deep import from `@smthrs/agents/mcp/createMcpToolset`; it is not re-exported from the top-level `smthrs` facade.
+
+The MCP client SDK is an optional peer of `@smthrs/agents`. Projects using `createMcpToolset` must install it explicitly:
+
+```bash
+bun add @modelcontextprotocol/sdk
+```
+
+Without it, `createMcpToolset` throws an error naming the package to install; consumers that do not use the MCP adapter never install it.
 
 ## Quick Start
 

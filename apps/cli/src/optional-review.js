@@ -8,9 +8,12 @@ export async function loadOptionalReviewCli(load = () => import("@smthrs/review/
   try {
     return await load();
   } catch (error) {
-    const code = /** @type {{ code?: string }} */ (error)?.code;
+    // Match on the message, not just ERR_MODULE_NOT_FOUND: Node and Bun both
+    // name the missing specifier, and a bare code check would also fire when
+    // the review package is installed but one of its own imports is missing,
+    // which this install hint cannot fix.
     const message = error instanceof Error ? error.message : String(error);
-    if (code === "ERR_MODULE_NOT_FOUND" || message.includes("@smthrs/review")) {
+    if (message.includes("@smthrs/review")) {
       throw new Error(
         "`smithers review` requires the optional @smthrs/review package. Install it with `npm install -D @smthrs/review` or `bun add -d @smthrs/review`, then retry.",
         { cause: error },

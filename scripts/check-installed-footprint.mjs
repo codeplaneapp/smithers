@@ -7,8 +7,13 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const MAX_INIT_FILES = 35;
 const MAX_INIT_BYTES = 350 * 1024;
-const MAX_CLI_PACKED_BYTES = 2_000_000;
-const MAX_CLI_UNPACKED_BYTES = 7_000_000;
+// Headroom above the current ~1.9 MB packed / ~6.7 MB unpacked CLI tarball.
+// The packaged docs bundle (apps/cli/docs/llms-full.txt) grows with unrelated
+// doc edits, so a threshold within a few percent of the current size would
+// false-fail; these limits exist to catch multi-MB regressions like rebundling
+// the agent rig, not to ratchet every byte.
+const MAX_CLI_PACKED_BYTES = 2_500_000;
+const MAX_CLI_UNPACKED_BYTES = 8_000_000;
 
 function readJson(path) {
   return JSON.parse(readFileSync(resolve(root, path), "utf8"));

@@ -90,9 +90,12 @@ async function loadMcpSdk() {
     ]);
     return { Client, StdioClientTransport };
   } catch (error) {
-    const code = /** @type {{ code?: string }} */ (error)?.code;
+    // Match on the message, not just ERR_MODULE_NOT_FOUND: Node and Bun both
+    // name the missing specifier, and a bare code check would also fire when
+    // the SDK is installed but one of its own imports is missing, which this
+    // install hint cannot fix.
     const message = error instanceof Error ? error.message : String(error);
-    if (code === "ERR_MODULE_NOT_FOUND" || message.includes("@modelcontextprotocol/sdk")) {
+    if (message.includes("@modelcontextprotocol/sdk")) {
       throw new Error(
         "createMcpToolset requires the optional @modelcontextprotocol/sdk package. Install it with `npm install @modelcontextprotocol/sdk` or `bun add @modelcontextprotocol/sdk`, then retry.",
         { cause: error },

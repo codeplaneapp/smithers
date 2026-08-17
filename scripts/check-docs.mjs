@@ -3459,7 +3459,10 @@ function checkMcpToolsetDocsMatchPackageSurface() {
     [MCP_TOOLSET_OPTIONS_SOURCE, readFileSync(MCP_TOOLSET_OPTIONS_SOURCE, "utf8")],
   ]);
   const required = [
-    [MCP_CREATE_TOOLSET_SOURCE, 'import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";'],
+    // The MCP SDK is an optional peer: the toolset loads it lazily so core
+    // consumers do not install it, and the error tells the user what to add.
+    [MCP_CREATE_TOOLSET_SOURCE, 'import("@modelcontextprotocol/sdk/client/stdio.js")'],
+    [MCP_CREATE_TOOLSET_SOURCE, "createMcpToolset requires the optional @modelcontextprotocol/sdk package"],
     [MCP_CREATE_TOOLSET_SOURCE, 'import { dynamicTool, jsonSchema } from "ai";'],
     [MCP_CREATE_TOOLSET_SOURCE, 'import("./McpToolsetOptions.ts").McpToolsetOptions'],
     [MCP_CREATE_TOOLSET_SOURCE, "export async function createMcpToolset(config, options = {})"],
