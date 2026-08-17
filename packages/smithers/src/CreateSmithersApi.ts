@@ -59,4 +59,20 @@ export type CreateSmithersApi<Schema = unknown> = {
   db: BunSQLiteDatabase<Record<string, unknown>>;
   tables: { [K in keyof Schema]: unknown };
   outputs: { [K in keyof Schema]: Schema[K] };
+  /**
+   * Release the underlying database handle. Idempotent, and a no-op for
+   * backends that own no closable handle. Callers that open many short-lived
+   * databases (test fixtures above all) should call this in teardown instead
+   * of letting handles accumulate until the process exits.
+   *
+   * On the sqlite backend this hands off to `sqlite3_close_v2`, which unwinds
+   * the connection only once every prepared statement on it is finalized.
+   * Drizzle's bun-sqlite driver leaves one unreachable statement behind per
+   * database, so the three fds, the `-shm` mapping and the sqlite3 locking
+   * state survive this call and are handed back on the next full garbage
+   * collection. A caller that needs them back at a definite point — a test
+   * suite closing fixtures in teardown — must force a collection after
+   * closing.
+   */
+  close: () => void;
 };

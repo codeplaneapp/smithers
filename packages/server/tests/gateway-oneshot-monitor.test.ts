@@ -1,12 +1,14 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import React from "react";
 import { z } from "zod";
-import { createSmithers } from "smthrs";
+import { closeTrackedSmithers, createTrackedSmithers as createSmithers } from "./fixtures/tracked-smithers.js";
 import { SmithersDb } from "@smthrs/db/adapter";
 import { Gateway } from "../src/gateway.js";
+
+afterAll(closeTrackedSmithers);
 
 const cleanups: Array<() => Promise<void> | void> = [];
 

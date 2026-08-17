@@ -116,8 +116,12 @@ describe("createSmithersCloudflare", () => {
       .map((c) => c.name);
     expect(inputCols).toContain("prompt");
     expect(inputCols).toContain("retries");
-    // No close callback supplied => close is undefined.
-    expect(api.close).toBeUndefined();
+    // No close callback supplied => close is a no-op, never undefined. A
+    // sometimes-undefined close() would force every caller to optional-chain,
+    // and an explicit `close: undefined` used to shadow the fallback and make
+    // api.close() throw.
+    expect(api.close).toBeFunction();
+    expect(() => api.close()).not.toThrow();
   });
 
   test("backfills the payload column onto a legacy default input table (run_id only)", async () => {

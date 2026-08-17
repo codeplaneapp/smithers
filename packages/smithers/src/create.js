@@ -67,6 +67,36 @@ import { acquireSharedPostgresPool } from "./sharedPostgresPool.js";
 const hotCache = new Map();
 
 /**
+ * Every still-open bun:sqlite handle created by `createSmithers`, closed on
+ * process exit. A single shared listener rather than one `process.once("exit")`
+ * per database: a process that opens hundreds of databases (a test suite
+ * running many fixtures) would otherwise blow past the default max-listeners
+ * warning and retain a closure per handle.
+ *
+ * @type {Set<() => void>}
+ */
+const openSqliteHandles = new Set();
+let exitHookRegistered = false;
+
+/**
+ * @param {() => void} closeDb
+ */
+function registerSqliteHandleForExit(closeDb) {
+  openSqliteHandles.add(closeDb);
+  if (exitHookRegistered) return;
+  exitHookRegistered = true;
+  process.once("exit", () => {
+    // Each close() removes only its own entry, and deleting the current
+    // element mid-iteration is well defined for a Set, so iterate directly.
+    for (const close of openSqliteHandles) {
+      try {
+        close();
+      } catch {}
+    }
+  });
+}
+
+/**
  * @param {unknown} db
  */
 function createMemoryService(db) {
@@ -231,11 +261,22 @@ function prepareSmithersTables(schemas) {
  *   memoryService?: import("@smthrs/driver/MemoryRuntimeService").MemoryRuntimeService;
  *   opts?: CreateSmithersOptions;
  *   inputSchema?: unknown;
+ *   close?: () => void;
  * }} config
  */
 function buildSmithersApi(config) {
-  const { db, tables, schemaRegistry, outputs, zodToKeyName, ambiguousZodSchemas, memoryService, opts, inputSchema } =
-    config;
+  const {
+    db,
+    tables,
+    schemaRegistry,
+    outputs,
+    zodToKeyName,
+    ambiguousZodSchemas,
+    memoryService,
+    opts,
+    inputSchema,
+    close,
+  } = config;
   const { SmithersContext: RuntimeSmithersContext, useCtx } = createSmithersContext();
   const ctxRef = { current: null };
   const moduleAlertPolicy = opts?.alertPolicy;
@@ -346,6 +387,10 @@ function buildSmithersApi(config) {
     db,
     tables,
     outputs,
+    // Release the underlying database handle. Backends with no closable
+    // handle (Cloudflare descriptors, an externally owned connection) pass
+    // nothing and get a no-op, so callers can always call it unconditionally.
+    close: close ?? (() => {}),
   };
   return { api };
 }
@@ -424,6 +469,9 @@ export function createSmithers(schemas, opts) {
         memoryService,
         opts,
         inputSchema: schemas.input,
+        // The hot path reuses the cached database, so it must reuse that
+        // database's close rather than mint a second one over the same handle.
+        close: cached.api.close,
       });
       hotCache.set(absDbPath, {
         api,
@@ -452,20 +500,31 @@ export function createSmithers(schemas, opts) {
   // Ensure no exclusive lock is held, allowing multiple readers/writers.
   sqlite.run("PRAGMA locking_mode = NORMAL");
   sqlite.run("PRAGMA foreign_keys = ON");
-  // Register a process-exit hook to explicitly close the Database.
+  // Close the Database explicitly rather than leaving it to GC.
   // bun:sqlite's GC finalizer calls sqlite3_close() which fatally aborts if
   // Drizzle's cached prepared statements haven't been finalized first.
   // Calling close() ourselves lets sqlite3 finalize everything gracefully.
+  //
+  // `close` is also exposed on the returned API so a caller that opens many
+  // short-lived databases (notably test suites) can retire them at the end of
+  // each fixture instead of holding every handle until the process exits.
+  // Note what that does NOT buy: `Database.close()` is `sqlite3_close_v2`, so
+  // the connection only unwinds once its last prepared statement is finalized,
+  // and Drizzle leaves one unreachable statement per database behind. The fds,
+  // the `-shm` mapping and the locking state therefore come back on the next
+  // full collection, not on this call. Forcing that collection is the caller's
+  // decision — a library has no business imposing a stop-the-world GC — so it
+  // is documented on the API type rather than done here.
   let dbClosed = false;
   const closeDb = () => {
     if (dbClosed) return;
     dbClosed = true;
+    openSqliteHandles.delete(closeDb);
     try {
       sqlite.close();
     } catch {}
-    process.removeListener("exit", closeDb);
   };
-  process.once("exit", closeDb);
+  registerSqliteHandleForExit(closeDb);
   // 3. Auto-create tables, and ALTER any existing tables to add columns the
   // current schema introduced (CREATE TABLE IF NOT EXISTS would silently
   // skip the columns and a later upsert would fail with "no column named X").
@@ -503,6 +562,7 @@ export function createSmithers(schemas, opts) {
     memoryService,
     opts,
     inputSchema: schemas.input,
+    close: closeDb,
   });
   if (process.env.SMITHERS_HOT === "1") {
     const sig = computeSchemaSig(schemas, absDbPath);
@@ -561,7 +621,7 @@ async function syncZodTableSchemaStorage(storage, tableName, schema, opts) {
  * @template {Record<string, import("zod").ZodObject<any>>} Schemas
  * @param {Schemas} schemas
  * @param {CreateSmithersOptions & { db: unknown; close?: () => Promise<void> | void }} opts
- * @returns {Promise<import("./CreateSmithersApi.ts").CreateSmithersApi<Schemas> & { close?: () => Promise<void> }>}
+ * @returns {Promise<import("./CreateSmithersApi.ts").CreateSmithersApi<Schemas> & { close: () => void | Promise<void> }>}
  */
 export async function createSmithersCloudflare(schemas, opts) {
   assertNoReservedPublicOutputNames(schemas);
@@ -603,11 +663,13 @@ export async function createSmithersCloudflare(schemas, opts) {
   });
   return {
     ...api,
+    // Fall back to the API's own close (a no-op for a Cloudflare descriptor,
+    // which owns no closable handle) so `close()` is always callable.
     close: opts.close
       ? async () => {
           await opts.close?.();
         }
-      : undefined,
+      : api.close,
   };
 }
 /**

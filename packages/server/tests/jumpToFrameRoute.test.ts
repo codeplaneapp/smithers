@@ -1,13 +1,15 @@
 /** @jsxImportSource smthrs */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "zod";
-import { createSmithers } from "smthrs";
+import { closeTrackedSmithers, createTrackedSmithers as createSmithers } from "./fixtures/tracked-smithers.js";
 import { SmithersDb } from "@smthrs/db/adapter";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { jumpToFrameRoute, JumpToFrameError } from "../src/gatewayRoutes/jumpToFrame.js";
+
+afterAll(closeTrackedSmithers);
 
 function makeDbPath(name: string) {
   return join(tmpdir(), `smithers-jump-route-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);

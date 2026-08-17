@@ -4,8 +4,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { createSmithers } from "smthrs";
+import { closeTrackedSmithers, createTrackedSmithers as createSmithers } from "./fixtures/tracked-smithers.js";
 import { Gateway } from "../src/gateway.js";
+
+afterAll(closeTrackedSmithers);
 
 // The gateway resolves `.smithers/ui/<key>.tsx` (a sibling of the workflow's
 // `workflows/` dir) by convention AT REQUEST TIME, so a UI file authored while

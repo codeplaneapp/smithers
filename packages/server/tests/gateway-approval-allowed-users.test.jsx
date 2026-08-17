@@ -1,13 +1,17 @@
 /** @jsxImportSource smthrs */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { WebSocket } from "ws";
-import { createSmithers, approvalDecisionSchema } from "smthrs";
+import { closeTrackedSmithers, createTrackedSmithers as createSmithers } from "./fixtures/tracked-smithers.js";
+import { approvalDecisionSchema } from "smthrs";
 import { Gateway } from "../src/gateway.js";
 import { SmithersDb } from "@smthrs/db/adapter";
 import { sleep } from "../../smithers/tests/helpers.js";
+
+afterAll(closeTrackedSmithers);
+
 /**
  * @param {Server} server
  * @returns {number}

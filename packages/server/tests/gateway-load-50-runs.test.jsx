@@ -1,11 +1,13 @@
 /** @jsxImportSource smthrs */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "zod";
-import { createSmithers } from "smthrs";
+import { closeTrackedSmithers, createTrackedSmithers as createSmithers } from "./fixtures/tracked-smithers.js";
 import { Gateway } from "../src/gateway.js";
+
+afterAll(closeTrackedSmithers);
 
 /**
  * Scale coverage for the singleton-gateway model (spec decision 15): one
@@ -29,7 +31,8 @@ function makeDbPath(name) {
 
 /** One workflow with a couple of nodes so each run writes several events. */
 function createLoadWorkflow(dbPath) {
-  const { smithers, Workflow, Task, outputs } = createSmithers({ out: z.object({ value: z.number() }) }, { dbPath });
+  const api = createSmithers({ out: z.object({ value: z.number() }) }, { dbPath });
+  const { smithers, Workflow, Task, outputs } = api;
   const workflow = smithers(() => (
     <Workflow name="load">
       <Task id="a" output={outputs.out}>
@@ -40,7 +43,7 @@ function createLoadWorkflow(dbPath) {
       </Task>
     </Workflow>
   ));
-  return workflow;
+  return { api, workflow };
 }
 
 describe("gateway — 50 concurrent runs through one owner", () => {
@@ -48,10 +51,14 @@ describe("gateway — 50 concurrent runs through one owner", () => {
   let gateway;
   /** @type {string | undefined} */
   let dbPath;
+  let api;
 
   afterEach(async () => {
     try {
       await gateway?.close?.();
+    } catch {}
+    try {
+      api?.close();
     } catch {}
     if (dbPath) {
       rmSync(dbPath, { force: true });
@@ -59,12 +66,15 @@ describe("gateway — 50 concurrent runs through one owner", () => {
       rmSync(`${dbPath}-shm`, { force: true });
     }
     gateway = undefined;
+    api = undefined;
     dbPath = undefined;
   });
 
   test("all 50 runs finish, each attributed once, no cross-run corruption", async () => {
     dbPath = makeDbPath("50");
-    const workflow = createLoadWorkflow(dbPath);
+    const fixture = createLoadWorkflow(dbPath);
+    api = fixture.api;
+    const workflow = fixture.workflow;
     gateway = new Gateway({ heartbeatMs: 1000 });
     gateway.register("load", workflow);
 
