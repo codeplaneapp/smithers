@@ -320,6 +320,12 @@ build function returns a `HostNodeJson` tree mapping 1:1 to what the JSX
 renderer produces, so a workflow can be authored in any language that can
 emit that JSON.
 
+This synchronous compatibility helper owns a `bun:sqlite` database. Plain-Node
+and reusable hosts should use
+[`createExternalSmithersEngine()`](/integrations/embedded-engine), which opens
+PGlite/Postgres asynchronously, injects a host logger, and runs multiple
+workflows before one `close()`.
+
 ```ts
 function createExternalSmithers<S extends Record<string, ZodObject>>(
   config: ExternalSmithersConfig<S>,

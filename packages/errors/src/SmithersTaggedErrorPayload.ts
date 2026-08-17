@@ -1,6 +1,6 @@
 import type { TaggedErrorDetails } from "./TaggedErrorDetails.ts";
 
-export type SmithersTaggedErrorPayload =
+export type SmithersTaggedErrorPayload = (
   | {
       readonly _tag: "TaskAborted";
       readonly message: string;
@@ -49,4 +49,8 @@ export type SmithersTaggedErrorPayload =
       readonly message: string;
       readonly details?: TaggedErrorDetails;
       readonly status?: number;
-    };
+    }
+) & {
+  /** JSON-safe cause retained across the worker RPC boundary. */
+  readonly cause?: unknown;
+};

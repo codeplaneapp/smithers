@@ -11451,7 +11451,7 @@ Use the subpath form to import only the surface you need. Entry files in this ta
 
 | Import path | Entry file | Purpose |
 |---|---|---|
-| `smthrs` | `./src/index.js` | Core API: `createSmithers`, `openSmithersBackend`, components, `runWorkflow`, `renderMdx`, errors |
+| `smthrs` | `./src/index.js` | Core API: `createSmithers`, `openSmithersBackend`, `createExternalSmithersEngine`, components, `runWorkflow`, `renderMdx`, errors |
 | `smthrs/gateway` | `./src/gateway.js` | Gateway server primitives from `@smthrs/server/gateway` |
 | `smthrs/gateway-client` | `./src/gateway-client.js` | Typed client helpers from `@smthrs/gateway-client` |
 | `smthrs/gateway-react` | `./src/gateway-react.js` | React hooks and providers for gateway-backed UIs |
@@ -11517,7 +11517,7 @@ Most applications should import from `smthrs`. The workspace packages below are 
 | `@smthrs/devtools` | Snapshot, tree, diff, node lookup, task collection, and DevTools run-store helpers behind the CLI inspect commands | [Debugging](/guides/debugging), [CLI Overview](/cli/overview) |
 | `@smthrs/driver` | Runtime driver contracts: `RunOptions`, `RunResult`, `RunStatus`, `SmithersCtx`, outputs, task runtime, interop, and child process helpers | [Run Workflow](/runtime/run-workflow), [Execution Model](/how-it-works) |
 | `@smthrs/electric-proxy` | ElectricSQL shape proxy for cloud sync, scoped shape access, rate limits, stripped auth forwarding, and shape metrics | [Production Hardening](/deployment/production-hardening), [Gateway](/integrations/gateway) |
-| `@smthrs/engine` | Workflow rendering/execution API: `runWorkflow`, `renderFrame`, `workflow`, `Smithers`, `fragment`, signals, and Effect versioning | [Render Frame](/runtime/render-frame), [Run Workflow](/runtime/run-workflow) |
+| `@smthrs/engine` | Workflow rendering/execution API: `runWorkflow`, Node/Bun platform layers, `renderFrame`, `workflow`, `Smithers`, signals, and Effect versioning | [Embed the engine in Node](/integrations/embedded-engine), [Run Workflow](/runtime/run-workflow) |
 | `@smthrs/errors` | Error definitions, known codes, JSON serialization, docs URLs, and type guards | [Errors](/reference/errors) |
 | `@smthrs/ferric-site` | Private Cloudflare Worker deployment for the Operation Ferric site at `ferric.smithers.sh` (React's runtime rewritten in Rust) | [Ecosystem](/integrations/ecosystem) |
 | `@smthrs/gateway` | Stable Gateway RPC contracts, auth scopes, deployment metadata, and generated OpenAPI schema | [Gateway](/integrations/gateway), [RPC](/rpc/launch-run) |
@@ -13801,6 +13801,11 @@ function reopenSingleRunnerRuntime(): void;
 Nothing in Smithers calls either function for you. Gateway, `up --serve`, and
 the HTTP server deliberately keep the runtime open across many runs, so
 `Gateway.close()` does not close it.
+
+`createExternalSmithersEngine()` is the higher-level exception: its `close()`
+waits for runs started by that instance, closes the database, and closes the
+process-local runtime when the last external engine instance closes. See
+[Embed the engine in Node](/integrations/embedded-engine).
 
 ## Semantics
 
