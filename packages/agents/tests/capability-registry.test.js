@@ -287,6 +287,7 @@ describe("smithers agents capabilities", () => {
       "antigravity",
       "forge",
       "hermes",
+      "grok",
       "kimi",
       "opencode",
       "openclaw",

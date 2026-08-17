@@ -15,9 +15,11 @@ export const SUBSCRIPTION_LOGIN_BIN = {
   antigravity: "agy",
   codex: "codex",
   kimi: "kimi",
+  grok: "grok",
   "anthropic-api": null,
   "openai-api": null,
   "gemini-api": null,
+  "xai-api": null,
 };
 
 /**
@@ -31,6 +33,7 @@ export const SUBSCRIPTION_LOGIN_ARGS = {
   antigravity: (configDir) => ["--gemini_dir", configDir],
   codex: ["login"],
   kimi: ["login"],
+  grok: ["login", "--device-auth"],
 };
 
 /**
@@ -42,9 +45,11 @@ export const SUBSCRIPTION_DIR_ENV_VAR = {
   antigravity: "GEMINI_DIR",
   codex: "CODEX_HOME",
   kimi: "KIMI_SHARE_DIR",
+  grok: "GROK_HOME",
   "anthropic-api": null,
   "openai-api": null,
   "gemini-api": null,
+  "xai-api": null,
 };
 
 /**

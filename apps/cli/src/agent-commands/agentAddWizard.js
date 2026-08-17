@@ -10,9 +10,11 @@ const PROVIDER_CHOICES = [
   { value: "openai-api", label: "OpenAI API key", hint: "Pay-per-token via api.openai.com (Codex-first roles)" },
   { value: "claude-code", label: "Claude Code (fallback)", hint: "Pro / Max plan via `claude` CLI" },
   { value: "kimi", label: "Kimi (fallback)", hint: "OAuth via `kimi` CLI" },
+  { value: "grok", label: "Grok Build", hint: "xAI subscription via `grok` CLI" },
   { value: "antigravity", label: "Antigravity (fallback)", hint: "Google account via `agy` CLI" },
   { value: "anthropic-api", label: "Anthropic API key (fallback)", hint: "Pay-per-token via api.anthropic.com" },
   { value: "gemini-api", label: "Gemini API key", hint: "Pay-per-token via Google AI Studio" },
+  { value: "xai-api", label: "xAI API key", hint: "Pay-per-token via api.x.ai" },
 ];
 
 const SUBSCRIPTION_LOGIN_BIN = {
@@ -20,6 +22,7 @@ const SUBSCRIPTION_LOGIN_BIN = {
   antigravity: "agy",
   codex: "codex",
   kimi: "kimi",
+  grok: "grok",
 };
 
 const SUBSCRIPTION_DIR_ENV_VAR = {
@@ -27,6 +30,7 @@ const SUBSCRIPTION_DIR_ENV_VAR = {
   antigravity: "GEMINI_DIR",
   codex: "CODEX_HOME",
   kimi: "KIMI_SHARE_DIR",
+  grok: "GROK_HOME",
 };
 
 /**
@@ -44,6 +48,7 @@ const SUBSCRIPTION_LOGIN_RECIPE = {
   },
   codex: { args: ["login"] },
   kimi: { args: ["login"] },
+  grok: { args: ["login", "--device-auth"] },
 };
 
 function bail() {

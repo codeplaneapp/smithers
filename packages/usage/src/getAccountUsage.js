@@ -3,6 +3,7 @@ import { buildUsageReport } from "./buildUsageReport.js";
 import { claudeOauthUsage } from "./claudeOauthUsage.js";
 import { codexWhamUsage } from "./codexWhamUsage.js";
 import { googleUsage } from "./googleUsage.js";
+import { grokUsage } from "./grokUsage.js";
 import { kimiCodeUsage } from "./kimiCodeUsage.js";
 import { openaiHeaderUsage } from "./openaiHeaderUsage.js";
 
@@ -44,6 +45,9 @@ async function probeFor(account) {
       return googleUsage(account);
     case "kimi":
       return kimiCodeUsage(account);
+    case "grok":
+    case "xai-api":
+      return grokUsage();
     default:
       return { source: "none", error: `Usage not supported for provider "${account.provider}"` };
   }

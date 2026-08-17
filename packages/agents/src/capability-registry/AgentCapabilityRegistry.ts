@@ -9,6 +9,7 @@ export type AgentCapabilityRegistry = {
     | "antigravity"
     | "gemini"
     | "kimi"
+    | "grok"
     | "pi"
     | "omp"
     | "amp"

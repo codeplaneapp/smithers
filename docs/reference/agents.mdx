@@ -20,12 +20,13 @@ fingerprints an agent's capabilities for cache keys.
 ```ts
 import {
   CodexAgent,
+  GrokAgent,
   NanocodexAgent,
   OpenAIAgent,
   createHttpTool,
   hashCapabilityRegistry,
 } from "smthrs";
-import type { AgentLike, NanocodexAgentOptions, OpenAIAgentOptions } from "smthrs";
+import type { AgentLike, GrokAgentOptions, NanocodexAgentOptions, OpenAIAgentOptions } from "smthrs";
 ```
 
 <Note>
@@ -364,6 +365,7 @@ content). Per-engine support:
 | `OpenCodeAgent` | `true` | `false` | Tool input carries a path, reported without a diff pending verification of its full tool-call surface. |
 | `CursorAgent` | `true` | `false` | The protobuf `agent.v1.ToolCall` oneof (`writeToolCall`/`editToolCall`/`deleteToolCall`) carries the target path in `args.path` but no verified before/after content, so paths-only (`source: "reported"`). |
 | `AmpAgent` | `true` | `false` | Amp speaks Claude-compatible stream-json with `create_file`/`edit_file` tool schemas; the input carries a path but no verified prior content, so paths-only (`source: "reported"`). |
+| `GrokAgent` | `false` | `false` | Grok Build streams tool lifecycle data, but its verified protocol does not provide enough before/after data to reconstruct diffs. |
 | `GeminiAgent` and all other CLI agents | `false` | `false` | No adapter evidence of a verifiable file-change reporting shape yet. |
 
 **Source** [`AgentFileChange.ts`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/agent-contract/AgentFileChange.ts) · [`parseAnthropicStyleFileChanges.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/BaseCliAgent/parseAnthropicStyleFileChanges.js) · **Tests** [`file-change-contract.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/file-change-contract.test.js)
@@ -433,6 +435,17 @@ and [CLI agents → Oh My Pi (OMP)](/integrations/cli-agents).
 Wraps the Moonshot `kimi` CLI and auto-isolates `KIMI_SHARE_DIR` per run. Adds
 `thinking`, `agent`, `maxRalphIterations`, `session`, `continue`, `configDir`,
 and MCP config flags.
+
+### GrokAgent
+
+Wraps xAI's official `grok` coding-agent CLI in headless
+`streaming-json` mode. Adds `effort`, `tools`, `disallowedTools`, `maxTurns`,
+`sandbox`, `rules`, planning/subagent/memory/web-search controls, `configDir`
+(`GROK_HOME`), and `apiKey` (`XAI_API_KEY`). Text, tool calls, usage, and native
+session ids stream into Smithers events; retry resume uses `--resume`.
+Typed tasks use Grok Build's native `--json-schema` constraint and consume the
+schema-validated terminal payload. See
+[`GrokAgentOptions`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/GrokAgentOptions.ts).
 
 ### ForgeAgent
 

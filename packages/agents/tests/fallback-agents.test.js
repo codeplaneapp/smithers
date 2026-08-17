@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeTempDirPath } from "../../testing/src/cleanup/tempDir.ts";
-import { ClaudeCodeAgent, CodexAgent, fallbackAgents } from "../src/index.js";
+import { ClaudeCodeAgent, CodexAgent, GrokAgent, fallbackAgents } from "../src/index.js";
 import { recordAccountQuotaLimit, writeUsageCache } from "@smthrs/usage";
 
 /**
@@ -23,6 +23,9 @@ function registryEnv(accounts) {
 const CLAUDE_1 = { label: "claude-1", provider: "claude-code", configDir: "/tmp/claude-1" };
 const CLAUDE_2 = { label: "claude-2", provider: "claude-code", configDir: "/tmp/claude-2" };
 const CODEX_1 = { label: "codex-1", provider: "codex", configDir: "/tmp/codex-1", model: "gpt-5.6-sol" };
+const GROK_1 = { label: "grok-1", provider: "grok", configDir: "/tmp/grok-1" };
+const GROK_2 = { label: "grok-2", provider: "grok", configDir: "/tmp/grok-2" };
+const XAI_1 = { label: "xai-1", provider: "xai-api", apiKey: "xai-test-key" };
 
 describe("fallbackAgents", () => {
   test("builds one agent per registered claude/codex account plus the default fallback tail", () => {
@@ -42,6 +45,22 @@ describe("fallbackAgents", () => {
     expect(tail).toBeInstanceOf(ClaudeCodeAgent);
     expect(tail.opts.configDir).toBeUndefined();
     expect(tail.opts.id).toBeUndefined();
+  });
+
+  test("builds Grok subscription and API accounts and sinks a rate-limited account", () => {
+    const env = registryEnv([GROK_1, GROK_2, XAI_1]);
+    recordAccountQuotaLimit("grok-1", { env, untilMs: Date.now() + 60_000 });
+    const chain = fallbackAgents({ env, providers: ["grok", "xai-api"], fallback: [], shuffle: false });
+    expect(chain.map((agent) => agent.id)).toEqual([
+      "smithers-account:grok-2",
+      "smithers-account:xai-1",
+      "smithers-account:grok-1",
+    ]);
+    expect(chain[0]).toBeInstanceOf(GrokAgent);
+    expect(chain[0].opts.configDir).toBe("/tmp/grok-2");
+    expect(chain[1]).toBeInstanceOf(GrokAgent);
+    expect(chain[1].opts.apiKey).toBe("xai-test-key");
+    expect(chain[1].opts.configDir).toContain("xai-1");
   });
 
   test("agentOptions applies caller authority to every pooled rung", () => {

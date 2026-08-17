@@ -189,6 +189,8 @@ function classifyNonRetryableAgentError(message, command, context = {}) {
  *   The disconnect is transient; without discarding the id the retry resumes
  *   the same non-existent thread and the run burns its whole attempt budget
  *   before failing over.
+ * - grok: a deleted or relocated session reports `Session does not exist` (or
+ *   the title-resolution equivalent) when `--resume` is reused.
  *
  * `hadResumeSession` says whether THIS invocation actually resumed a prior
  * session. When it did not — the session that broke was already freshly
@@ -255,6 +257,25 @@ export function classifySessionLoss(command, errorText, rawStderr, hadResumeSess
         discardResumeSession: true,
         freshSessionFailure: !hadResumeSession,
         command: "claude",
+      },
+    );
+  }
+  const grokMatch =
+    command === "grok"
+      ? errorText.match(/Session does not exist|no session id or title matched/i) ||
+        rawStderr.match(/Session does not exist|no session id or title matched/i)
+      : null;
+  if (grokMatch) {
+    return new SmithersError(
+      "AGENT_SESSION_LOST",
+      hadResumeSession
+        ? "Grok session no longer exists; the persisted resume id is dead. Retry will start a fresh session."
+        : "Grok session was not found even though this attempt started a FRESH session — the grok CLI is failing to establish sessions; retrying it will not help. Failing over to the next agent in the chain (if any).",
+      {
+        failureRetryable: true,
+        discardResumeSession: true,
+        freshSessionFailure: !hadResumeSession,
+        command: "grok",
       },
     );
   }

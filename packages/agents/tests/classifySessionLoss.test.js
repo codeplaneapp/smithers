@@ -138,4 +138,16 @@ describe("classifySessionLoss", () => {
       ),
     ).toBeNull();
   });
+
+  test("grok missing resume session is discarded", () => {
+    const err = classifySessionLoss("grok", "Couldn't start session: Session does not exist", "");
+    expect(err).toMatchObject({
+      code: "AGENT_SESSION_LOST",
+      details: { command: "grok", discardResumeSession: true, failureRetryable: true },
+    });
+  });
+
+  test("grok missing-session text on another CLI is ignored", () => {
+    expect(classifySessionLoss("claude", "Session does not exist", "")).toBeNull();
+  });
 });

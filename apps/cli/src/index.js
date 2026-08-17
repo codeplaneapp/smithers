@@ -3037,7 +3037,10 @@ const oneshotOptions = z
   .object({
     goalFile: z.string().optional().describe("Read a long goal from a file"),
     model: z.string().optional().describe("Model slot or canonical model id"),
-    agent: z.enum(["codex", "kimi", "claude-code", "opencode", "pi"]).optional().describe("Force an agent engine"),
+    agent: z
+      .enum(["codex", "grok", "kimi", "claude-code", "opencode", "pi"])
+      .optional()
+      .describe("Force an agent engine"),
     review: z.enum(["on", "off"]).optional().describe("Review preference for this run"),
     setReview: z.enum(["on", "off"]).optional().describe("Persist the review preference"),
     setTrivial: z.enum(["direct", "oneshot"]).optional().describe("Persist trivial-task routing"),
@@ -7115,7 +7118,17 @@ const agentsCli = Cli.create({
     description: "Register a Smithers agent account (interactive wizard, or non-interactive via flags).",
     options: z.object({
       provider: z
-        .enum(["claude-code", "antigravity", "codex", "kimi", "anthropic-api", "openai-api", "gemini-api"])
+        .enum([
+          "claude-code",
+          "antigravity",
+          "codex",
+          "kimi",
+          "grok",
+          "anthropic-api",
+          "openai-api",
+          "gemini-api",
+          "xai-api",
+        ])
         .optional()
         .describe("Provider id; omit to launch the interactive wizard"),
       label: z.string().optional().describe("Unique label, e.g. 'claude-work'"),

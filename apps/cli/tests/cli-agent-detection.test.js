@@ -124,6 +124,7 @@ describe("detectAvailableAgents", () => {
     expect(ids).toContain("antigravity");
     expect(ids).toContain("pi");
     expect(ids).toContain("kimi");
+    expect(ids).toContain("grok");
     expect(ids).toContain("amp");
     expect(ids).toContain("vibe");
     expect(ids).toContain("hermes");
@@ -131,7 +132,7 @@ describe("detectAvailableAgents", () => {
     expect(ids).toContain("pool");
     expect(ids).toContain("omp");
     expect(ids).toContain("cursor");
-    expect(results.length).toBe(14);
+    expect(results.length).toBe(15);
 
     const availabilitySource = readFileSync(new URL("../src/AgentAvailability.ts", import.meta.url), "utf8");
     const availabilityUnion = availabilitySource.match(/id:\s*([^;]+);/);
