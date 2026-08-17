@@ -183,6 +183,12 @@ function classifyNonRetryableAgentError(message, command, context = {}) {
  * - claude: `--resume <id>` of a killed/relocated conversation prints
  *   `No conversation found with session ID: <id>` (isolated jj worktrees can
  *   relocate the cwd its conversation store is keyed by).
+ * - codex: when the response stream drops before the rollout is recorded, the
+ *   thread id was captured but never persisted, so `exec resume <id>` fails
+ *   `thread/resume failed: no rollout found for thread id <id> (code -32600)`.
+ *   The disconnect is transient; without discarding the id the retry resumes
+ *   the same non-existent thread and the run burns its whole attempt budget
+ *   before failing over.
  *
  * `hadResumeSession` says whether THIS invocation actually resumed a prior
  * session. When it did not — the session that broke was already freshly
@@ -209,6 +215,26 @@ export function classifySessionLoss(command, errorText, rawStderr, hadResumeSess
         freshSessionFailure: !hadResumeSession,
         command: "kimi",
         kimiSessionId: kimiMatch[1],
+      },
+    );
+  }
+  const codexMatch =
+    command === "codex"
+      ? errorText.match(/no rollout found for thread id\s+([0-9a-z-]{8,})/i) ||
+        rawStderr.match(/no rollout found for thread id\s+([0-9a-z-]{8,})/i)
+      : null;
+  if (codexMatch) {
+    return new SmithersError(
+      "AGENT_SESSION_LOST",
+      hadResumeSession
+        ? `Codex thread ${codexMatch[1]} has no recorded rollout; the persisted resume id is dead. Retry will start a fresh session.`
+        : `Codex thread ${codexMatch[1]} has no recorded rollout even though this attempt started a FRESH session — the codex CLI is failing to record rollouts; retrying it will not help. Failing over to the next agent in the chain (if any).`,
+      {
+        failureRetryable: true,
+        discardResumeSession: true,
+        freshSessionFailure: !hadResumeSession,
+        command: "codex",
+        codexThreadId: codexMatch[1],
       },
     );
   }
