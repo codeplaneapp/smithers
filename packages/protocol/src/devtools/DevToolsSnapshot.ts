@@ -49,6 +49,7 @@ export type DevToolsRunState = {
     | "failed"
     | "cancelled"
     | "succeeded"
+    | "succeeded-with-failures"
     | "unknown";
   blocked?: DevToolsBlockedReason;
   unhealthy?: DevToolsUnhealthyReason;

@@ -1389,7 +1389,7 @@ async function* streamRunEventsCommand(c) {
       }
     }
     const initialRunState = await computeRunStateFromRow(adapter, run);
-    const initialFollowState = initialRunState.state === "succeeded" ? "finished" : initialRunState.state;
+    const initialFollowState = deriveTailStatus(initialRunState);
     // Follow only when explicitly asked (-f/--follow), or, when unset,
     // only if stdout is a TTY. A piped/redirected `logs <run>` (non-TTY)
     // snapshots and exits instead of hanging the pipe. --no-follow forces
@@ -1421,7 +1421,7 @@ async function* streamRunEventsCommand(c) {
       }
       const currentRun = await adapter.getRun(c.args.runId);
       const currentRunState = currentRun ? await computeRunStateFromRow(adapter, currentRun) : undefined;
-      const currentStatus = currentRunState?.state === "succeeded" ? "finished" : currentRunState?.state;
+      const currentStatus = deriveTailStatus(currentRunState);
       if (
         currentStatus === "waiting-approval" ||
         currentStatus === "waiting-event" ||
@@ -2384,10 +2384,10 @@ async function buildPsRows(adapter, limit, status) {
       // which the display name above need not match. (#26)
       workflowId: run.workflowPath ? workflowIdFromPath(run.workflowPath) : (run.workflowName ?? undefined),
       // Legacy `ps` consumers key off `status` and expect "finished", so
-      // only the derived "succeeded" is renamed; every other derived
+      // successful derived outcomes are renamed; every other derived
       // state passes through unchanged, including stale/orphaned so
       // dead-owner runs never read as "running".
-      status: view.state === "succeeded" ? "finished" : view.state,
+      status: deriveTailStatus(view),
       dbStatus: run.status,
       state: view.state,
       ...(view.unhealthy ? { unhealthy: view.unhealthy } : {}),

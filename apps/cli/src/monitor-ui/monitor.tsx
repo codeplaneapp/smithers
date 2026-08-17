@@ -5129,7 +5129,10 @@ function RunDetail({
   const unhealthy =
     healthState !== undefined &&
     healthState !== labelForStatus(status) &&
-    (healthState === "stale" || healthState === "orphaned" || healthState === "recovering");
+    (healthState === "stale" ||
+      healthState === "orphaned" ||
+      healthState === "recovering" ||
+      healthState === "succeeded-with-failures");
   // ONE progress vocabulary: logical tasks (the health strip's counting),
   // never the node-state summary, which also counts structural container rows.
   // The summary only fills in while the tree is still loading.

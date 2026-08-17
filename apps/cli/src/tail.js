@@ -116,7 +116,7 @@ export function renderTailEvent(event, options) {
  */
 export function deriveTailStatus(view) {
   const state = view?.state;
-  return state === "succeeded" ? "finished" : state;
+  return state === "succeeded" || state === "succeeded-with-failures" ? "finished" : state;
 }
 
 /**

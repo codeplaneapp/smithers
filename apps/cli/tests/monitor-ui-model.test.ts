@@ -307,6 +307,7 @@ describe("status tones", () => {
     expect(toneForStatus("queued")).toBe("idle");
     expect(toneForStatus("finished")).toBe("ok");
     expect(toneForStatus("succeeded")).toBe("ok");
+    expect(toneForStatus("succeeded-with-failures")).toBe("waiting");
     expect(toneForStatus("failed")).toBe("failed");
     expect(toneForStatus("stale")).toBe("failed");
     expect(toneForStatus("orphaned")).toBe("failed");
@@ -440,6 +441,7 @@ describe("run grouping", () => {
   });
 
   test("stale and orphaned runs group as failed; unknown as active", () => {
+    expect(groupForStatus("succeeded-with-failures")).toBe("attention");
     expect(groupForStatus("stale")).toBe("failed");
     expect(groupForStatus("orphaned")).toBe("failed");
     expect(groupForStatus("brand-new-state")).toBe("active");
@@ -1172,6 +1174,14 @@ describe("diagnoseRun", () => {
   test("clean finish is green, finish with failures is yellow", () => {
     expect(diagnoseRun({ ...base, status: "finished", treeNodes: nodes(["a", "ok"]) }).tone).toBe("ok");
     expect(diagnoseRun({ ...base, status: "finished", treeNodes: nodes(["a", "failed"]) }).tone).toBe("warn");
+    expect(
+      diagnoseRun({
+        ...base,
+        status: "finished",
+        healthState: "succeeded-with-failures",
+        treeNodes: nodes(["a", "ok"]),
+      }),
+    ).toMatchObject({ tone: "warn", headline: "Finished with failures" });
   });
 
   test("loop iterations dedupe to the busiest status per logical id", () => {

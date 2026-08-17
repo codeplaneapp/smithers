@@ -31,7 +31,7 @@ const { Workflow, Task, smithers, outputs } = createSmithers({
   health: healthSchema,
 });
 
-const DONE_STATES = new Set(["finished", "succeeded", "failed", "cancelled", "skipped"]);
+const DONE_STATES = new Set(["finished", "succeeded", "succeeded-with-failures", "failed", "cancelled", "skipped"]);
 const ACTIVE_STATES = new Set([
   "running",
   "active",

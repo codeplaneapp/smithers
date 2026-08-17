@@ -626,6 +626,10 @@ function buildDiagnosis(params) {
     const exhaustedLoops = Array.isArray(finishedPayload?.exhaustedLoops)
       ? finishedPayload.exhaustedLoops.filter((loop) => loop && typeof loop.id === "string")
       : [];
+    const failedChildren =
+      Number.isSafeInteger(finishedPayload?.failedChildren) && finishedPayload.failedChildren > 0
+        ? finishedPayload.failedChildren
+        : 0;
     const exhaustedSummary =
       status === "finished" && exhaustedLoops.length > 0
         ? `Run finished, but loop${exhaustedLoops.length > 1 ? "s" : ""} ${exhaustedLoops
@@ -638,17 +642,23 @@ function buildDiagnosis(params) {
               ", ",
             )} exhausted without its until condition ever being satisfied — the last output was kept, not approved.`
         : null;
+    const degradedSummary =
+      status === "finished" && failedChildren > 0
+        ? `Run finished with ${failedChildren} tolerated failed ${failedChildren === 1 ? "child" : "children"}. Inspect the failed nodes before treating it as a clean success.`
+        : null;
     const summary = exhaustedSummary
       ? exhaustedSummary
-      : forcedBoundary
-        ? forcedBoundary.lateCompletion
-          ? `Run is ${status}; an external effect completed after its journal row was archived and needs attention.`
-          : `Run is ${status}; a forced ${forcedBoundary.operation} side-effect crossing needs attention.`
-        : status === "finished"
-          ? "Run is finished, nothing is blocked."
-          : typeof run.finishedAtMs === "number"
-            ? `Run was cancelled at ${new Date(run.finishedAtMs).toISOString()}.`
-            : "Run was cancelled.";
+      : degradedSummary
+        ? degradedSummary
+        : forcedBoundary
+          ? forcedBoundary.lateCompletion
+            ? `Run is ${status}; an external effect completed after its journal row was archived and needs attention.`
+            : `Run is ${status}; a forced ${forcedBoundary.operation} side-effect crossing needs attention.`
+          : status === "finished"
+            ? "Run is finished, nothing is blocked."
+            : typeof run.finishedAtMs === "number"
+              ? `Run was cancelled at ${new Date(run.finishedAtMs).toISOString()}.`
+              : "Run was cancelled.";
     return {
       runId,
       status,

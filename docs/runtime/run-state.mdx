@@ -24,6 +24,7 @@ type RunState =
   | "failed"
   | "cancelled"
   | "succeeded"
+  | "succeeded-with-failures" // finished, but tolerated child failures
   | "unknown"           // telemetry gap; never invent a state
 ```
 
@@ -39,7 +40,7 @@ The legacy run-row `status` column maps to `RunState` like this:
 | `waiting-event`         | `waiting-event`                |
 | `waiting-timer`         | `waiting-timer`                |
 | `paused`                | `paused`                       |
-| `finished`              | `succeeded`                    |
+| `finished`              | `succeeded` or `succeeded-with-failures` |
 | `continued`             | `succeeded`                    |
 | `failed`                | `failed`                       |
 | `cancelled`             | `cancelled`                    |
@@ -67,7 +68,16 @@ detailed unblock command and may report other blockers such as
 `retries-exhausted` or `dependency-failed`.
 </Warning>
 <Warning>
-**`succeeded`/`finished` can mask failed child agents.** Run-level status is binary (`finished` or `failed`); a run fails only on an *unhandled* task failure. Two classes of failed children don't count as run-level failures: tasks marked [`continueOnFail`](/components/task), and agent tasks failing with a *transient* error (rate limits, timeouts, aborts: `SESSION_ERROR`, `TASK_TIMEOUT`, `TASK_HEARTBEAT_TIMEOUT`, `TASK_ABORTED`, or `failureRetryable`). A fan-out where most agents hit provider rate limits can still report `finished` → `succeeded`.
+**`finished` does not always mean clean success.** Run-level lifecycle status is
+binary (`finished` or `failed`); a run fails only on an *unhandled* task
+failure. Two classes of failed children don't count as run-level failures:
+tasks marked [`continueOnFail`](/components/task), and agent tasks failing with
+a *transient* error (rate limits, timeouts, aborts: `SESSION_ERROR`,
+`TASK_TIMEOUT`, `TASK_HEARTBEAT_TIMEOUT`, `TASK_ABORTED`, or
+`failureRetryable`). A fan-out where most agents hit provider rate limits can
+therefore persist `status: "finished"`, but now derives
+`RunState.state: "succeeded-with-failures"` instead of claiming clean
+`succeeded`.
 
 Never trust top-level status alone; inspect per-node/agent outcomes:
 
@@ -92,9 +102,19 @@ signal in three places:
   DevTools can flag the degraded outcome from the event stream without
   re-reading every node row.
 
-The run-row `status` stays `finished` (`RunState` stays `succeeded`), so existing
-`finished === success` callers and `continueOnFail` semantics are unchanged: the
-count is the signal, not a new terminal status.
+The run-row and `RunResult.status` stay `finished`. `RunState` reads the
+persisted `RunFinished.failedChildren` value and returns
+`succeeded-with-failures` when it is nonzero; historical or clean events still
+map to `succeeded`. This is deliberately a distinct derived outcome, not a
+third persisted `RunStatus`, so existing terminal pollers, Gateway clients, and
+`status === "finished"` callers continue to complete normally. State-aware
+consumers should treat both success states as terminal, while using
+`succeeded-with-failures` to request review or gate clean-success automation.
+
+`bunx smthrs up` keeps exit code `0` for this outcome. `continueOnFail` is an
+explicit instruction to finish the workflow; changing the exit code would
+silently break CI that already accepts `finished`. CI requiring a clean run
+should inspect `runState.state` or `failedChildren`.
 
 The same applies to **loops that never converged**: a `<Loop>`/`<ReviewLoop>`
 exiting via `onMaxReached: "return-last"` with its `until` predicate still false
@@ -164,8 +184,8 @@ run has no event-waiting node, or when that context is supplied to
 `deriveRunState`. A `waiting-*` state can be returned without `blocked` when
 the supporting row is unavailable. `unhealthy` is present for `stale`,
 `orphaned`, and overdue-timer results. `recovering` stays unemitted for now
-(see above), and terminal states (`succeeded`, `failed`, `cancelled`) carry
-neither.
+(see above), and terminal states (`succeeded`, `succeeded-with-failures`,
+`failed`, `cancelled`) carry neither.
 
 `warnings` retains durable operator diagnostics independently of lifecycle
 state. When automatic concurrency reaches its configured ceiling while demand
@@ -214,6 +234,9 @@ engine uses for `isRunHeartbeatFresh`.
   output (and rendered in the human view).
 - Gateway RPC `getRun`: `runState` field on the response.
 - DevTools snapshot header: `runState?: RunStateView` field.
+- `ps --json`: compatible `status: "finished"` plus the distinct
+  `state: "succeeded-with-failures"`; `status`, `inspect`, `tail`, `why`, and
+  monitor views render the degraded outcome without keeping the run active.
 - Event stream: `RunStatusChanged` records persisted status transitions.
   `RunStateChanged` is a typed/reserved event variant, but the current runtime
   does not emit it; call `getRun` or `computeRunState` when you need the
