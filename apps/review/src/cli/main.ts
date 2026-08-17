@@ -68,6 +68,39 @@ function elapsedLabel(ms: number): string {
   return minutes > 0 ? `${minutes}m${String(secondsPart).padStart(2, "0")}s` : `${totalSeconds}s`;
 }
 
+/**
+ * Build the one-line run summary.
+ *
+ * A review whose file-review tasks all failed for an environmental reason
+ * (expired credentials, provider rate limit, network) yields zero findings for
+ * a reason that has nothing to do with the code under review. Reporting the
+ * usual `findings: none` there is indistinguishable from a clean review, so a
+ * failed or partial review says what actually happened instead.
+ *
+ * @param summary.filesChanged Files the walkthrough covered.
+ * @param summary.elapsed Preformatted elapsed-time label.
+ * @param summary.breakdown Severity breakdown, or `none` when there are no findings.
+ * @param summary.reviewFailed The review task itself reached a failed status.
+ * @param summary.failedFileReviews Per-file reviews that errored.
+ */
+export function buildRunSummaryLine(summary: {
+  filesChanged: number;
+  elapsed: string;
+  breakdown: string;
+  reviewFailed: boolean;
+  failedFileReviews: number;
+}): string {
+  const { filesChanged, elapsed, breakdown, reviewFailed, failedFileReviews } = summary;
+  const filesLabel = `${filesChanged} file${filesChanged === 1 ? "" : "s"}`;
+  const failedLabel = `${failedFileReviews} file review${failedFileReviews === 1 ? "" : "s"} failed`;
+  if (reviewFailed) {
+    const cause = failedFileReviews > 0 ? ` (${failedLabel})` : "";
+    return `reviewed ${filesLabel} in ${elapsed} — review did not complete${cause}; findings unavailable`;
+  }
+  const partial = failedFileReviews > 0 ? ` (incomplete: ${failedLabel})` : "";
+  return `reviewed ${filesLabel} in ${elapsed} — findings: ${breakdown}${partial}`;
+}
+
 function untrustedPullRequestBackground(pr: PullRequestTarget): string {
   const content = `PR #${pr.number}: ${pr.title}${pr.body.trim() ? `\n\n${pr.body.trim()}` : ""}`;
   const fence = fenceFor(content);
@@ -368,7 +401,13 @@ export async function runReviewCli(
   const filesChanged = Number(walkthrough.files ?? 0);
   const impactLevel = typeof walkthrough.impact === "string" ? walkthrough.impact : "";
   const questionCount = Number(walkthrough.questions ?? 0);
-  const summaryLine = `reviewed ${filesChanged} file${filesChanged === 1 ? "" : "s"} in ${elapsedLabel(Date.now() - startedAtMs)} — findings: ${severityBreakdown(findings)}`;
+  const summaryLine = buildRunSummaryLine({
+    filesChanged,
+    elapsed: elapsedLabel(Date.now() - startedAtMs),
+    breakdown: severityBreakdown(findings),
+    reviewFailed,
+    failedFileReviews,
+  });
   console.error(`[smithers-review] ${summaryLine}`);
   if (args.quiz !== "off" && impactLevel) {
     console.error(
