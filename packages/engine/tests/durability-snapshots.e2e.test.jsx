@@ -247,6 +247,7 @@ describeIfJj("durability snapshots wired into the engine", () => {
     const child = spawnCheckpointCrashRun({ dbPath, markerPath, rootDir: jjDir, runId });
     let resumedWorkspace;
     let resumedSession;
+    let resumedCheckpoint;
     const stable = {
       codec: "smithers.cli-session",
       version: 1,
@@ -259,6 +260,7 @@ describeIfJj("durability snapshots wired into the engine", () => {
       checkpointCapabilities: [{ codec: stable.codec, versions: [1], modes: ["resume"] }],
       async generate(args) {
         resumedSession = args.resumeSession;
+        resumedCheckpoint = args.resumeCheckpoint;
         const file = join(args.rootDir, "agent-output.txt");
         resumedWorkspace = existsSync(file) ? readFileSync(file, "utf8") : null;
         return { text: '{"value":47}' };
@@ -285,7 +287,13 @@ describeIfJj("durability snapshots wired into the engine", () => {
         runWorkflow(workflow, { input: {}, runId, rootDir: jjDir, resume: true, force: true }),
       );
       expect(resumed.status).toBe("finished");
-      expect(resumedSession).toBe("stable-session");
+      // #1610: resume cancels the crashed attempt, so the session id it
+      // recorded is no longer handed back — that id is exactly the class of
+      // pointer that used to kill the next attempt with AGENT_SESSION_LOST.
+      // The agent restores from the checkpoint instead, and the workspace (the
+      // agent's real state) is still rewound to it.
+      expect(resumedSession).toBeUndefined();
+      expect(resumedCheckpoint).toEqual(stable);
       expect(resumedWorkspace).toBe("after republish\n");
     } finally {
       if (child.child.exitCode === null && !child.child.killed) {

@@ -70,6 +70,7 @@ import { withSqliteWriteRetryEffect } from "./write-retry.js";
 import { camelToSnake } from "./utils/camelToSnake.js";
 import { capturePostgresTransactionTxid, recordCommittedTxid, shouldCapturePostgresTxid } from "./captureTxid.js";
 import { normalizeWaitForEventCorrelationId, parseWaitForEventAttemptSnapshot } from "./waitForEventAttempt.js";
+import { clearAttemptResumePointers, isNonSuccessTerminalAttemptState } from "./attempt-resume-pointers.js";
 /** @typedef {import("./adapter/AlertRow.ts").AlertRow} AlertRow */
 /** @typedef {import("./adapter/AlertStatus.ts").AlertStatus} AlertStatus */
 /** @typedef {import("./adapter/AttemptRow.ts").AttemptRow} AttemptRow */
@@ -2602,14 +2603,29 @@ export class SmithersDb {
    * @returns {RunnableEffect<void, SmithersError>}
    */
   updateAttempt(runId, nodeId, iteration, attempt, patch) {
-    return this.write(`update attempt ${nodeId}#${attempt}`, () =>
-      this.internalStorage.updateWhere(
-        "_smithers_attempts",
-        patch,
-        "run_id = ? AND node_id = ? AND iteration = ? AND attempt = ?",
-        [runId, nodeId, iteration, attempt],
-      ),
-    );
+    const where = "run_id = ? AND node_id = ? AND iteration = ? AND attempt = ?";
+    const whereParams = [runId, nodeId, iteration, attempt];
+    if (!isNonSuccessTerminalAttemptState(patch?.state)) {
+      return this.write(`update attempt ${nodeId}#${attempt}`, () =>
+        this.internalStorage.updateWhere("_smithers_attempts", patch, where, whereParams),
+      );
+    }
+    // The attempt is ending without success, so its resume pointers now name a
+    // conversation that is usually already gone (#1610). Drop them in the same
+    // statement that writes the terminal state, so the row stops advertising a
+    // session the next attempt would resume straight into AGENT_SESSION_LOST.
+    return this.write(`update attempt ${nodeId}#${attempt}`, async () => {
+      const patchedMetaJson = Object.hasOwn(patch, "metaJson")
+        ? patch.metaJson
+        : (
+            await this.internalStorage.queryOne(`SELECT meta_json FROM _smithers_attempts WHERE ${where} LIMIT 1`, [
+              ...whereParams,
+            ])
+          )?.metaJson;
+      const cleared = clearAttemptResumePointers(patchedMetaJson);
+      const effectivePatch = cleared === null ? patch : { ...patch, metaJson: cleared };
+      return this.internalStorage.updateWhere("_smithers_attempts", effectivePatch, where, whereParams);
+    });
   }
   /**
    * @param {string} runId
@@ -2649,8 +2665,8 @@ export class SmithersDb {
     );
   }
   claimAttemptTerminal(runId, nodeId, iteration, attempt, runtimeOwnerId, state, finishedAtMs, errorJson) {
-    return this.write(`claim attempt ${state} ${nodeId}#${attempt}`, () =>
-      this.internalStorage
+    return this.write(`claim attempt ${state} ${nodeId}#${attempt}`, async () => {
+      const claimed = await this.internalStorage
         .updateWhere(
           "_smithers_attempts",
           {
@@ -2667,8 +2683,26 @@ export class SmithersDb {
         `,
           [runId, nodeId, iteration, attempt, runtimeOwnerId, runtimeOwnerId],
         )
-        .then((count) => count > 0),
-    );
+        .then((count) => count > 0);
+      // Same hygiene as updateAttempt (#1610): an attempt that just ended
+      // failed or cancelled must not keep advertising its resume pointers. The
+      // claim already fenced this row, so the follow-up write is safe; resume
+      // resolution ignores pointers from non-successful attempts anyway, which
+      // is what keeps a crash between the two statements harmless.
+      if (claimed && isNonSuccessTerminalAttemptState(state)) {
+        const where = "run_id = ? AND node_id = ? AND iteration = ? AND attempt = ?";
+        const whereParams = [runId, nodeId, iteration, attempt];
+        const row = await this.internalStorage.queryOne(
+          `SELECT meta_json FROM _smithers_attempts WHERE ${where} LIMIT 1`,
+          [...whereParams],
+        );
+        const cleared = clearAttemptResumePointers(row?.metaJson);
+        if (cleared !== null) {
+          await this.internalStorage.updateWhere("_smithers_attempts", { metaJson: cleared }, where, whereParams);
+        }
+      }
+      return claimed;
+    });
   }
   /**
    * @param {string} runId

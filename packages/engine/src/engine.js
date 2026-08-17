@@ -16,6 +16,7 @@ import {
 import { FRAME_KEYFRAME_INTERVAL } from "@smthrs/db/frame-codec";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { runCancellationSourceFromRow, SmithersDb } from "@smthrs/db/adapter";
+import { attemptResumePointersUsable, clearAttemptResumePointers } from "@smthrs/db/attempt-resume-pointers";
 import {
   selectOutputRow,
   validateOutput,
@@ -594,6 +595,22 @@ function shouldDiscardResumeSession(attempts) {
   return parseAttemptMetaJson(newestRelevantAttempt?.metaJson).discardResumeSession === true;
 }
 /**
+ * Serialize the attempt meta of an attempt that is ending without success.
+ *
+ * The row keeps everything that describes the work; it loses only the pointers
+ * that name a conversation (`agentResume`, `agentConversation`, the copied
+ * `lastHeartbeat`, and the resumedFrom* siblings), which are dead the moment
+ * the attempt is (#1610). This is hygiene — resume resolution ignores those
+ * pointers regardless, which is what repairs rows written before this existed.
+ *
+ * @param {Record<string, unknown>} attemptMeta
+ * @returns {string}
+ */
+function terminalAttemptMetaJson(attemptMeta) {
+  const metaJson = JSON.stringify(attemptMeta);
+  return clearAttemptResumePointers(metaJson) ?? metaJson;
+}
+/**
  * @param {unknown} value
  * @returns {unknown[] | undefined}
  */
@@ -960,14 +977,33 @@ function resolveCorrectionResumeSession(agent, meta) {
   return typeof meta.agentResume === "string" && meta.agentResume.length > 0 ? meta.agentResume : undefined;
 }
 /**
- * @param {Array<{ metaJson?: string | null }>} attempts
+ * Newest usable continuation across an attempt history.
+ *
+ * An attempt that ended failed or cancelled keeps recording where its
+ * conversation lived, but that conversation is usually already gone: resuming
+ * it kills the next attempt instantly with AGENT_SESSION_LOST and burns a retry
+ * doing no work (#1610). Ignoring those pointers at resolution time — rather
+ * than trusting the terminal transition to have scrubbed them — is what repairs
+ * histories that are already carrying one, and what survives a node reset.
+ *
+ * `hijackHandoff` is exempt: it is an explicit hand-off to a session a human is
+ * holding open, and the hand-off itself is what cancelled the attempt.
+ *
+ * Dropping a resume pointer costs conversation context, never work: the agent's
+ * real state lives in its worktree. Do not "restore" the pointer here as an
+ * optimization.
+ *
+ * @param {Array<{ state?: string | null, metaJson?: string | null }>} attempts
  * @param {string} engine
  * @returns {{ mode: "native-cli"; resume: string } | { mode: "conversation"; messages: unknown[] } | undefined}
  */
 function findHijackContinuation(attempts, engine) {
   for (const attempt of attempts) {
     const meta = parseAttemptMetaJson(attempt.metaJson);
-    const continuation = extractHijackContinuation(meta, engine);
+    const continuation = extractHijackContinuation(
+      attemptResumePointersUsable(attempt) ? meta : { hijackHandoff: meta.hijackHandoff },
+      engine,
+    );
     if (continuation) {
       return continuation;
     }
@@ -5016,13 +5052,22 @@ async function legacyExecuteTask(
   const resumeAttempts = resumeEligibleAttempts(attempts);
   const maxSchemaRetries =
     Number.isSafeInteger(desc.maxSchemaRetries) && desc.maxSchemaRetries >= 0 ? desc.maxSchemaRetries : 3;
-  const previousHeartbeat = (() => {
+  // The heartbeat payload is an application checkpoint that must survive a
+  // retry byte-for-byte, but it also mirrors the attempt's agentResume /
+  // agentConversation. Keep carrying the bytes forward; below, only the RESUME
+  // POINTERS inside them are ignored when the attempt that wrote them ended
+  // failed or cancelled (#1610).
+  // One pass: the payload and the attempt that wrote it must never disagree
+  // about which row they came from, so they are resolved together.
+  const previousHeartbeatSource = (() => {
     for (const attempt of resumeAttempts) {
       const parsed = parseAttemptHeartbeatData(attempt.heartbeatDataJson);
-      if (parsed !== null) return parsed;
+      if (parsed !== null) return { attempt, parsed };
     }
     return null;
   })();
+  const previousHeartbeat = previousHeartbeatSource?.parsed ?? null;
+  const heartbeatResumePointersUsable = attemptResumePointersUsable(previousHeartbeatSource?.attempt);
   const previousHeartbeatJson = (() => {
     for (const attempt of resumeAttempts) {
       if (typeof attempt.heartbeatDataJson === "string" && attempt.heartbeatDataJson.length > 0) {
@@ -6362,6 +6407,14 @@ async function legacyExecuteTask(
         const resetAttempts = new Set(
           attempts.filter(isResetCancelledAttempt).map((attempt) => `${attempt.iteration}:${attempt.attempt}`),
         );
+        // The engine mirrors every captured CLI session id into a
+        // `smithers.cli-session` checkpoint, so that row carries the same dead
+        // pointer as the attempt meta once the attempt ends without success
+        // (#1610). Agent-published checkpoints are untouched: they are durable
+        // state the agent asserted it can restore, not a session id.
+        const attemptsByKey = new Map(attempts.map((attempt) => [`${attempt.iteration}:${attempt.attempt}`, attempt]));
+        const checkpointResumePointerUsable = (candidate) =>
+          attemptResumePointersUsable(attemptsByKey.get(`${candidate.iteration}:${candidate.attempt}`));
         const checkpointDiscardAttempt = resumeAttempts.find(
           (attempt) =>
             !resetAttempts.has(`${attempt.iteration}:${attempt.attempt}`) &&
@@ -6399,9 +6452,10 @@ async function legacyExecuteTask(
             agentSupportsCheckpoint(effectiveAgent, candidate, "resume");
           if (!mayConsumeCheckpoint) continue;
           const loaded = await loadAgentCheckpoint(adapter, candidate, toolConfig.maxAgentCheckpointBytes);
-          const legacyResume = discardResumeSession
-            ? undefined
-            : resumeSessionFromCheckpoint(loaded, currentAgentEngine);
+          const legacyResume =
+            discardResumeSession || !checkpointResumePointerUsable(candidate)
+              ? undefined
+              : resumeSessionFromCheckpoint(loaded, currentAgentEngine);
           if (legacyResume) {
             resumeCheckpointRef = candidate;
             checkpointScanStopped = true;
@@ -6435,12 +6489,18 @@ async function legacyExecuteTask(
             );
           }
         }
+        // heartbeatResumePointersUsable is the #1610 gate: the heartbeat bytes
+        // still carry forward, but the session id and transcript inside them
+        // are ignored once the attempt that wrote them ended without success.
         const checkpointResumeSession =
-          !discardResumeSession && heartbeatCheckpointUsable && typeof heartbeatCheckpoint?.agentResume === "string"
+          !discardResumeSession &&
+          heartbeatCheckpointUsable &&
+          heartbeatResumePointersUsable &&
+          typeof heartbeatCheckpoint?.agentResume === "string"
             ? heartbeatCheckpoint.agentResume
             : undefined;
         const checkpointResumeMessages =
-          !discardResumeSession && heartbeatCheckpointUsable
+          !discardResumeSession && heartbeatCheckpointUsable && heartbeatResumePointersUsable
             ? asConversationMessages(heartbeatCheckpoint?.agentConversation)
             : undefined;
         const priorContinuation =
@@ -6455,7 +6515,12 @@ async function legacyExecuteTask(
           priorContinuation?.mode === "native-cli" && !discardResumeSession
             ? priorContinuation.resume
             : checkpointResumeSession;
-        if (!resumeSession && resumeCheckpointRef && !resumeCheckpoint) {
+        if (
+          !resumeSession &&
+          resumeCheckpointRef &&
+          !resumeCheckpoint &&
+          checkpointResumePointerUsable(resumeCheckpointRef)
+        ) {
           const stored = await loadAgentCheckpoint(adapter, resumeCheckpointRef, toolConfig.maxAgentCheckpointBytes);
           resumeSession = resumeSessionFromCheckpoint(stored, currentAgentEngine);
           resumeCheckpointRefConsumed = Boolean(resumeSession);
@@ -6466,11 +6531,15 @@ async function legacyExecuteTask(
         // params.options.continueSession; others ignore it. Caveat: if the
         // worktree is shared by concurrent tasks, --continue is cwd-scoped
         // and may attach the most recent session.
+        // --continue is the same pointer by another name: it re-attaches the
+        // newest session in this cwd, which is exactly the one the failed or
+        // cancelled attempt was using (#1610).
         const continueSession =
           !resumeSession &&
           !resumeCheckpoint &&
           !discardResumeSession &&
           heartbeatCheckpointUsable &&
+          heartbeatResumePointersUsable &&
           typeof heartbeatCheckpoint?.agentEngine === "string" &&
           resumeAttempts.length > 0;
         const resumeMessages =
@@ -8606,7 +8675,7 @@ async function legacyExecuteTask(
           );
           if (!claimed) return false;
           yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
-            metaJson: JSON.stringify(attemptMeta),
+            metaJson: terminalAttemptMetaJson(attemptMeta),
             responseText,
           });
           for (const journalContext of activeToolJournalContexts) {
@@ -8757,7 +8826,7 @@ async function legacyExecuteTask(
         );
         if (!claimed) return false;
         yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
-          metaJson: JSON.stringify(attemptMeta),
+          metaJson: terminalAttemptMetaJson(attemptMeta),
           responseText,
         });
         for (const journalContext of activeToolJournalContexts) {
