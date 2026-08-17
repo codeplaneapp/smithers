@@ -127,6 +127,13 @@ export async function createIsolatedClone(options) {
   if (existsSync(cloneDir)) throw new Error(`isolated clone destination already exists: ${cloneDir}`);
   await mkdir(dirname(cloneDir), { recursive: true });
   await git(["clone", "--no-local", "--no-hardlinks", "--no-checkout", repo, cloneDir]);
+  // The capsule exists to hand off a byte-faithful copy of `commit`. On a host
+  // with core.autocrlf enabled (the Windows default) checkout would rewrite LF
+  // to CRLF, so a patch or bundle produced from the capsule would report every
+  // text file as wholly changed against an LF source. Pin the conversion off
+  // for this clone rather than inheriting whatever the host configured.
+  await git(["config", "core.autocrlf", "false"], { cwd: cloneDir });
+  await git(["config", "core.eol", "lf"], { cwd: cloneDir });
   await git(["checkout", "--detach", commit], { cwd: cloneDir });
   await git(["remote", "remove", "origin"], { cwd: cloneDir });
   const refs = await listGitRefs(cloneDir);
@@ -184,6 +191,10 @@ export async function createIsolatedClone(options) {
       const proofDir = await mkdtemp(join(tmpdir(), "smithers-bundle-proof-"));
       try {
         await git(["init", proofDir]);
+        // Same reason as the capsule clone: the proof only means something if
+        // the imported tree is compared without line-ending conversion.
+        await git(["config", "core.autocrlf", "false"], { cwd: proofDir });
+        await git(["config", "core.eol", "lf"], { cwd: proofDir });
         await git(["fetch", bundlePath, `${bundleRef}:refs/heads/imported`], { cwd: proofDir });
         await git(["checkout", "--detach", "refs/heads/imported"], { cwd: proofDir });
         if ((await stat(patchPath)).size > 0) await git(["apply", "--index", patchPath], { cwd: proofDir });
