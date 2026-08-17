@@ -1,12 +1,15 @@
-import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import React from "react";
 import { z } from "zod";
-import { createSmithers, createSmithersPostgres } from "smthrs";
+import { closeTrackedSmithers, createTrackedSmithers as createSmithers } from "./fixtures/tracked-smithers.js";
+import { createSmithersPostgres } from "smthrs";
 import { Gateway } from "../src/gateway.js";
 import { sleep } from "../../smithers/tests/helpers.js";
+
+afterAll(closeTrackedSmithers);
 
 setDefaultTimeout(120_000);
 

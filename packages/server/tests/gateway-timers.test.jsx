@@ -1,13 +1,17 @@
 /** @jsxImportSource smthrs */
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "zod";
 import { sleep } from "../../smithers/tests/helpers.js";
 let createSmithers;
+/** Assigned with `createSmithers`; see ./fixtures/tracked-smithers.js. */
+let closeTrackedSmithers = () => {};
 let Gateway;
 let SmithersDb;
+
+afterAll(() => closeTrackedSmithers());
 /**
  * @param {string} name
  */
@@ -119,7 +123,9 @@ describe("Gateway timer sweep", () => {
   let gateway;
   let dbPaths = [];
   beforeAll(async () => {
-    createSmithers = (await import("smthrs/create")).createSmithers;
+    const tracked = await import("./fixtures/tracked-smithers.js");
+    createSmithers = tracked.createTrackedSmithers;
+    closeTrackedSmithers = tracked.closeTrackedSmithers;
     Gateway = (await import("../src/gateway.js")).Gateway;
     SmithersDb = (await import("@smthrs/db/adapter")).SmithersDb;
   });

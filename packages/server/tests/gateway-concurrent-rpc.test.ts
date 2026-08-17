@@ -3,15 +3,17 @@
  * getNodeOutput requests on the same run/node interleave safely, and that a
  * jumpToFrame interleaved with getNodeOutput does not corrupt either result.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import React from "react";
 import { z } from "zod";
-import { createSmithers } from "smthrs";
+import { closeTrackedSmithers, createTrackedSmithers as createSmithers } from "./fixtures/tracked-smithers.js";
 import { Gateway } from "../src/gateway.js";
 import { sleep } from "../../smithers/tests/helpers.js";
+
+afterAll(closeTrackedSmithers);
 
 function makeDbPath(name: string) {
   return join(tmpdir(), `smithers-concurrent-rpc-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);

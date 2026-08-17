@@ -1,5 +1,5 @@
 /** @jsxImportSource smthrs */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { join } from "node:path";
@@ -7,7 +7,7 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { WebSocket } from "ws";
 import { z } from "zod";
-import { createSmithers } from "smthrs";
+import { closeTrackedSmithers, createTrackedSmithers as createSmithers } from "./fixtures/tracked-smithers.js";
 import { canonicalizeXml } from "@smthrs/graph/utils/xml";
 import { renderPrometheusMetrics } from "@smthrs/observability";
 import { SmithersDb } from "@smthrs/db/adapter";
@@ -16,6 +16,8 @@ import { Gateway } from "../src/gateway.js";
 import { streamDevToolsRoute } from "../src/gatewayRoutes/streamDevTools.js";
 import { diffSnapshots } from "@smthrs/devtools";
 import { sleep } from "../../smithers/tests/helpers.js";
+
+afterAll(closeTrackedSmithers);
 
 function now() {
   return Date.now();

@@ -1,5 +1,5 @@
 /** @jsxImportSource smthrs */
-import { afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
@@ -16,9 +16,13 @@ import { z } from "zod";
  */
 
 let createSmithers;
+/** Assigned with `createSmithers`; see ./fixtures/tracked-smithers.js. */
+let closeTrackedSmithers = () => {};
 let Gateway;
 let SmithersDb;
 let WaitForEvent;
+
+afterAll(() => closeTrackedSmithers());
 
 function getPort(server) {
   const address = server.address();
@@ -60,7 +64,9 @@ afterEach(async () => {
 
 describe("Gateway webhook explicit-run signal targeting", () => {
   beforeAll(async () => {
-    createSmithers = (await import("smthrs/create")).createSmithers;
+    const tracked = await import("./fixtures/tracked-smithers.js");
+    createSmithers = tracked.createTrackedSmithers;
+    closeTrackedSmithers = tracked.closeTrackedSmithers;
     Gateway = (await import("../src/gateway.js")).Gateway;
     SmithersDb = (await import("@smthrs/db/adapter")).SmithersDb;
     WaitForEvent = (await import("@smthrs/components/components/WaitForEvent")).WaitForEvent;

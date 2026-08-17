@@ -1,15 +1,18 @@
 /** @jsxImportSource smthrs */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createSmithers, runWorkflow } from "smthrs";
+import { closeTrackedSmithers, createTrackedSmithers as createSmithers } from "./fixtures/tracked-smithers.js";
+import { runWorkflow } from "smthrs";
 import { getTaskRuntime } from "@smthrs/driver/task-runtime";
 import { retryTask } from "@smthrs/time-travel/retry-task";
 import { z } from "zod";
 import { Effect } from "effect";
 import { Gateway } from "../src/gateway.js";
 import { sleep } from "../../smithers/tests/helpers.js";
+
+afterAll(closeTrackedSmithers);
 
 /**
  * Run-id ownership regressions. A new launch must not overwrite an active run,
