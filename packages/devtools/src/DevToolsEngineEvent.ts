@@ -14,6 +14,7 @@ export type DevToolsEngineEvent =
   | NodeStartedEvent
   | NodeFinishedEvent
   | NodeFailedEvent
+  | NodeStalledEvent
   | NodeCancelledEvent
   | NodeSkippedEvent
   | NodeRetryingEvent
@@ -84,6 +85,13 @@ export type NodeFinishedEvent = NodeEventBase & {
 export type NodeFailedEvent = NodeEventBase & {
   type: "NodeFailed";
   attempt: number;
+  error?: unknown;
+};
+export type NodeStalledEvent = NodeEventBase & {
+  type: "NodeStalled";
+  attempt: number;
+  identicalFailures: number;
+  signature: string;
   error?: unknown;
 };
 export type NodeCancelledEvent = NodeEventBase & { type: "NodeCancelled" };

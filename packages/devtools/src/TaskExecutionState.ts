@@ -7,6 +7,7 @@ export type TaskExecutionState = {
     | "started"
     | "finished"
     | "failed"
+    | "stalled"
     | "cancelled"
     | "skipped"
     | "waiting-approval"

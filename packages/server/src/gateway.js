@@ -8889,6 +8889,18 @@ a { color: var(--brand); }</style>
             error: event.error,
           },
         };
+      case "NodeStalled":
+        return {
+          event: "node.stalled",
+          payload: {
+            runId: event.runId,
+            nodeId: event.nodeId,
+            state: "stalled",
+            identicalFailures: event.identicalFailures,
+            signature: event.signature,
+            error: event.error,
+          },
+        };
       case "NodeSkipped":
         return {
           event: "node.skipped",

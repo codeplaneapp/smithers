@@ -74,7 +74,7 @@ type SnapshotSerializerOptions$2 = {
 type TaskExecutionState$3 = {
     nodeId: string;
     iteration: number;
-    status: "pending" | "started" | "finished" | "failed" | "cancelled" | "skipped" | "waiting-approval" | "waiting-event" | "waiting-timer" | "retrying";
+    status: "pending" | "started" | "finished" | "failed" | "stalled" | "cancelled" | "skipped" | "waiting-approval" | "waiting-event" | "waiting-timer" | "retrying";
     attempt: number;
     startedAt?: number;
     finishedAt?: number;
@@ -92,7 +92,7 @@ type TaskExecutionState$3 = {
  * the open-ended tail so future event kinds can be added without changes to
  * consumers.
  */
-type DevToolsEngineEvent$2 = RunStartedEvent | RunFinishedEvent | RunFailedEvent | RunCancelledEvent | FrameCommittedEvent | NodePendingEvent | NodeStartedEvent | NodeFinishedEvent | NodeFailedEvent | NodeCancelledEvent | NodeSkippedEvent | NodeRetryingEvent | NodeWaitingApprovalEvent | NodeWaitingEventEvent | NodeWaitingTimerEvent | ToolCallStartedEvent | ToolCallFinishedEvent | UnknownEngineEvent;
+type DevToolsEngineEvent$2 = RunStartedEvent | RunFinishedEvent | RunFailedEvent | RunCancelledEvent | FrameCommittedEvent | NodePendingEvent | NodeStartedEvent | NodeFinishedEvent | NodeFailedEvent | NodeStalledEvent | NodeCancelledEvent | NodeSkippedEvent | NodeRetryingEvent | NodeWaitingApprovalEvent | NodeWaitingEventEvent | NodeWaitingTimerEvent | ToolCallStartedEvent | ToolCallFinishedEvent | UnknownEngineEvent;
 type RunEventBase = {
     runId: string;
     timestampMs: number;
@@ -155,6 +155,13 @@ type NodeFinishedEvent = NodeEventBase & {
 type NodeFailedEvent = NodeEventBase & {
     type: "NodeFailed";
     attempt: number;
+    error?: unknown;
+};
+type NodeStalledEvent = NodeEventBase & {
+    type: "NodeStalled";
+    attempt: number;
+    identicalFailures: number;
+    signature: string;
     error?: unknown;
 };
 type NodeCancelledEvent = NodeEventBase & {
