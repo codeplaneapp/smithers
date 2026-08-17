@@ -12,7 +12,7 @@
 /** @typedef {import("./ExternalSmithersEngineConfig.ts").SmithersEngineLogRecord} SmithersEngineLogRecord */
 // @smithers-type-exports-end
 
-import { Effect, Logger, References } from "effect";
+import { Effect, Layer, Logger, References } from "effect";
 import { closeSingleRunnerRuntime, reopenSingleRunnerRuntime, runWorkflow } from "@smthrs/engine";
 import { SmithersError } from "@smthrs/errors/SmithersError";
 import { isKnownSmithersErrorCode } from "@smthrs/errors/isKnownSmithersErrorCode";
@@ -88,6 +88,15 @@ function restoreError(value) {
   });
 }
 
+async function makeNodePlatformLayer() {
+  const { NodeChildProcessSpawner, NodeCrypto, NodeFileSystem, NodePath, NodeStdio, NodeTerminal } =
+    await import("@effect/platform-node-shared");
+  return Layer.provideMerge(
+    NodeChildProcessSpawner.layer,
+    Layer.mergeAll(NodeFileSystem.layer, NodeCrypto.layer, NodePath.layer, NodeStdio.layer, NodeTerminal.layer),
+  );
+}
+
 /**
  * Open one reusable engine over the normal Smithers runtime. Plain Node
  * defaults to PGlite; Bun keeps SQLite as its default. Node callers may choose
@@ -105,7 +114,7 @@ export async function createExternalSmithersEngine(config) {
   const nodeRuntime = typeof Bun === "undefined";
   const backend = backendOptions.backend ?? (nodeRuntime ? "pglite" : "sqlite");
   const api = await withLogger(() => openSmithersBackend(schemas, { ...backendOptions, backend }));
-  const platform = nodeRuntime ? await import("@effect/platform-node/NodeServices") : null;
+  const platformLayer = nodeRuntime ? await makeNodePlatformLayer() : null;
   reopenSingleRunnerRuntime();
   openEngineCount += 1;
   let closed = false;
@@ -129,7 +138,7 @@ export async function createExternalSmithersEngine(config) {
         let effect = runWorkflow(workflow, {
           ...options,
           ...(nodeRuntime
-            ? { effectPlatformRuntime: "node", effectPlatformLayer: platform.layer }
+            ? { effectPlatformRuntime: "node", effectPlatformLayer: platformLayer }
             : { effectPlatformRuntime: "bun" }),
         });
         if (loggerBinding) effect = effect.pipe(Effect.provide(loggerBinding.layer));

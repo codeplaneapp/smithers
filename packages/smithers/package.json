@@ -196,7 +196,7 @@
     "build": "rm -f src/index.d.ts src/index-*.d.ts && tsup --dts-only"
   },
   "dependencies": {
-    "@effect/platform-node": "4.0.0-beta.105",
+    "@effect/platform-node-shared": "4.0.0-beta.105",
     "@mdx-js/esbuild": "^3.1.1",
     "@smthrs/agents": "workspace:*",
     "@smthrs/aws": "workspace:*",
