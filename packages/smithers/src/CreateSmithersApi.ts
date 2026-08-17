@@ -59,4 +59,12 @@ export type CreateSmithersApi<Schema = unknown> = {
   db: BunSQLiteDatabase<Record<string, unknown>>;
   tables: { [K in keyof Schema]: unknown };
   outputs: { [K in keyof Schema]: Schema[K] };
+  /**
+   * Release the underlying database handle. Idempotent, and a no-op for
+   * backends that own no closable handle. Callers that open many short-lived
+   * databases (test fixtures above all) should call this in teardown so the
+   * fds, WAL/`-shm` mappings, and sqlite3 locking state are released instead
+   * of accumulating until the process exits.
+   */
+  close: () => void;
 };

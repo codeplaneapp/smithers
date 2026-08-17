@@ -241,6 +241,14 @@ type CreateSmithersApi$1<Schema = unknown> = {
     outputs: {
         [K in keyof Schema]: Schema[K];
     };
+    /**
+     * Release the underlying database handle. Idempotent, and a no-op for
+     * backends that own no closable handle. Callers that open many short-lived
+     * databases (test fixtures above all) should call this in teardown so the
+     * fds, WAL/`-shm` mappings, and sqlite3 locking state are released instead
+     * of accumulating until the process exits.
+     */
+    close: () => void;
 };
 
 /**
@@ -391,13 +399,13 @@ declare function createSmithers<Schemas extends Record<string, zod.ZodObject<any
  * @template {Record<string, import("zod").ZodObject<any>>} Schemas
  * @param {Schemas} schemas
  * @param {CreateSmithersOptions & { db: unknown; close?: () => Promise<void> | void }} opts
- * @returns {Promise<import("./CreateSmithersApi.ts").CreateSmithersApi<Schemas> & { close?: () => Promise<void> }>}
+ * @returns {Promise<import("./CreateSmithersApi.ts").CreateSmithersApi<Schemas> & { close: () => void | Promise<void> }>}
  */
 declare function createSmithersCloudflare<Schemas extends Record<string, zod.ZodObject<any>>>(schemas: Schemas, opts: CreateSmithersOptions$1 & {
     db: unknown;
     close?: () => Promise<void> | void;
 }): Promise<CreateSmithersApi$1<Schemas> & {
-    close?: () => Promise<void>;
+    close: () => void | Promise<void>;
 }>;
 /**
  * PostgreSQL/PGlite-backed equivalent of {@link createSmithers}. Asynchronous

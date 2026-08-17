@@ -56,7 +56,7 @@ describe("gateway — 50 concurrent runs through one owner", () => {
       await gateway?.close?.();
     } catch {}
     try {
-      api?.db.$client?.close?.();
+      api?.close();
     } catch {}
     if (dbPath) {
       rmSync(dbPath, { force: true });
