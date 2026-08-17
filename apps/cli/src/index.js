@@ -3148,6 +3148,10 @@ const gatewayOptions = z.object({
     .describe(
       "Allow binding a non-loopback --host with NO auth (exposes a full-control, unauthenticated control plane — dangerous)",
     ),
+  killRuns: z
+    .boolean()
+    .default(false)
+    .describe("With gateway stop, cancel gateway-hosted runs instead of parking them for resume"),
   idleTimeout: z
     .number()
     .int()
@@ -5637,6 +5641,50 @@ async function runGatewayStatusCommand(c) {
     stateFile,
   });
 }
+
+function gatewayStopRpcBase(state) {
+  const base = new URL(state.url);
+  const hostname = base.hostname.replace(/^\[(.*)\]$/, "$1");
+  if (hostname === "0.0.0.0") base.hostname = "127.0.0.1";
+  if (hostname === "::") base.hostname = "::1";
+  return base.toString().replace(/\/+$/, "");
+}
+
+async function gatewayStopRpc(state, method, params = {}) {
+  const response = await fetch(`${gatewayStopRpcBase(state)}/v1/rpc/${method}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(state.token ? { authorization: `Bearer ${state.token}` } : {}),
+    },
+    body: JSON.stringify(params),
+    signal: AbortSignal.timeout(5_000),
+  });
+  const frame = await response.json().catch(() => null);
+  if (!frame?.ok) {
+    throw new Error(frame?.error?.message ?? `Gateway RPC ${method} failed with HTTP ${response.status}`);
+  }
+  return frame.payload;
+}
+
+async function listGatewayHostedRunIds(state) {
+  const pageSize = 200;
+  const hosted = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const page = await gatewayStopRpc(state, "listRuns", {
+      filter: { includeSystem: true, limit: pageSize, offset },
+    });
+    if (!Array.isArray(page)) throw new Error("Gateway listRuns returned a non-array payload");
+    for (const run of page) {
+      if (parseRuntimeOwnerPid(run?.runtimeOwnerId) === state.pid && typeof run?.runId === "string") {
+        hosted.push(run.runId);
+      }
+    }
+    if (page.length < pageSize) break;
+  }
+  return hosted;
+}
+
 async function runGatewayStopCommand(c) {
   const workspace = resolveGatewayWorkspace();
   if (!workspace) {
@@ -5678,6 +5726,21 @@ async function runGatewayStopCommand(c) {
     clearGatewayRuntimeState(workspace, state.pid);
     return c.ok({ stopped: false, running: false, workspace, cleanedStaleState: true });
   }
+  let hostedRunIds;
+  try {
+    hostedRunIds = await listGatewayHostedRunIds(state);
+    if (c.options.killRuns) {
+      for (const runId of hostedRunIds) {
+        await gatewayStopRpc(state, "cancelRun", { runId });
+      }
+    }
+  } catch (error) {
+    return c.error({
+      code: "GATEWAY_STOP_FAILED",
+      message: `Could not ${c.options.killRuns ? "cancel" : "inventory"} gateway-hosted runs before shutdown: ${error?.message ?? String(error)}`,
+      exitCode: 1,
+    });
+  }
   try {
     process.kill(state.pid, "SIGTERM");
   } catch (error) {
@@ -5700,7 +5763,26 @@ async function runGatewayStopCommand(c) {
     });
   }
   clearGatewayRuntimeState(workspace, state.pid);
-  return c.ok({ stopped: true, workspace, pid: state.pid });
+  const resumeCommands = c.options.killRuns
+    ? []
+    : hostedRunIds.map((runId) => `smithers up --run-id ${runId} --resume true -d`);
+  for (let index = 0; index < hostedRunIds.length; index += 1) {
+    const runId = hostedRunIds[index];
+    if (c.options.killRuns) {
+      process.stderr.write(`⊘ Killed: ${runId}\n`);
+    } else {
+      process.stderr.write(`⏸ Parked: ${runId}\n  Resume: ${resumeCommands[index]}\n`);
+    }
+  }
+  return c.ok({
+    stopped: true,
+    workspace,
+    pid: state.pid,
+    affectedRuns: hostedRunIds,
+    parkedRuns: c.options.killRuns ? [] : hostedRunIds,
+    killedRuns: c.options.killRuns ? hostedRunIds : [],
+    resumeCommands,
+  });
 }
 /**
  * @param {{ host: string; port: number; backend?: "sqlite" | "pglite" | "postgres"; authToken?: string; mintToken?: boolean; insecure?: boolean; idleTimeout?: number }} options
