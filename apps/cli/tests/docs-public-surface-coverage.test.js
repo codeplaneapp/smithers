@@ -411,7 +411,8 @@ test("seeded workflow docs cover current init workflow pack", () => {
 });
 
 test("workflow overview, catalog, and sidebar cover the curated pack", () => {
-  const workflowDocIds = ["create-skill", "create-workflow", "docs-driven-development"];
+  const curatedWorkflowDocIds = ["create-skill", "create-workflow"];
+  const documentedWorkflowIds = [...curatedWorkflowDocIds, "docs-driven-development"];
 
   const overview = readRepoFile("docs/workflows/overview.mdx");
   const catalog = readRepoFile("docs/workflows/catalog.mdx");
@@ -422,7 +423,9 @@ test("workflow overview, catalog, and sidebar cover the curated pack", () => {
     .sort();
   const catalogWorkflowIds = [
     ...new Set(
-      [...catalog.matchAll(/`([a-z0-9-]+)`/g)].map((match) => match[1]).filter((id) => workflowDocIds.includes(id)),
+      [...catalog.matchAll(/`([a-z0-9-]+)`/g)]
+        .map((match) => match[1])
+        .filter((id) => curatedWorkflowDocIds.includes(id)),
     ),
   ].sort();
   const sidebarWorkflowIds = [...docsJson.matchAll(/"workflows\/([a-z0-9-]+)"/g)]
@@ -430,10 +433,10 @@ test("workflow overview, catalog, and sidebar cover the curated pack", () => {
     .filter((id) => id !== "overview" && id !== "catalog" && id !== "authoring-rules")
     .sort();
 
-  expect(overviewWorkflowIds).toEqual(workflowDocIds);
-  expect(catalogWorkflowIds).toEqual(workflowDocIds);
+  expect(overviewWorkflowIds).toEqual(curatedWorkflowDocIds);
+  expect(catalogWorkflowIds).toEqual(curatedWorkflowDocIds);
   expect(sidebarWorkflowIds).toEqual(
-    [...workflowDocIds, "add", "eval-suite-run", "init", "post-failure", "share-pack", "upgrade"].sort(),
+    [...documentedWorkflowIds, "add", "eval-suite-run", "init", "post-failure", "share-pack", "upgrade"].sort(),
   );
 });
 

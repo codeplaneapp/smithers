@@ -179,8 +179,6 @@ function buildFakeInstallTree() {
   for (const [packageName, version] of [
     ["react", "19.99.0"],
     ["react-dom", "19.99.0"],
-    ["mermaid", "11.99.0"],
-    ["@milkdown/crepe", "7.99.0"],
     ["@xyflow/react", "12.99.0"],
     ["dagre", "0.99.0"],
     ["yaml", "2.99.0"],
@@ -267,7 +265,7 @@ test("initWorkflowPack succeeds when run from a published install layout", () =>
   }
   const summary = JSON.parse(child.stdout);
   expect(summary.ok).toBe(true);
-  expect(summary.writtenCount).toBeGreaterThan(30);
+  expect(summary.writtenCount).toBeGreaterThan(20);
   expect(realpathSync(summary.rootDir)).toBe(realpathSync(join(tree.cwd, ".smithers")));
 
   const generated = JSON.parse(readFileSync(join(tree.cwd, ".smithers/package.json"), "utf8"));
@@ -278,8 +276,8 @@ test("initWorkflowPack succeeds when run from a published install layout", () =>
   expect(generated.dependencies.react).toBe("19.99.0");
   expect(generated.dependencies["react-dom"]).toBe("19.99.0");
   expect(generated.dependencies.zod).toBe("4.99.0");
-  expect(generated.dependencies["@milkdown/crepe"]).toBe("7.99.0");
-  expect(generated.dependencies.mermaid).toBe("11.99.0");
+  expect(generated.dependencies["@milkdown/crepe"]).toBeUndefined();
+  expect(generated.dependencies.mermaid).toBeUndefined();
   expect(generated.dependencies["@xyflow/react"]).toBe("12.99.0");
   expect(generated.dependencies.dagre).toBe("0.99.0");
   expect(generated.dependencies.yaml).toBe("2.99.0");
@@ -289,17 +287,8 @@ test("initWorkflowPack succeeds when run from a published install layout", () =>
   expect(generated.devDependencies["@types/mdx"]).toBe("2.99.0");
   expect(generated.devDependencies["@types/node"]).toBe("25.99.0");
   expect(generated.devDependencies["@types/dagre"]).toBe("0.99.0");
-  for (const file of [
-    "ui/docs-driven-development.tsx",
-    "ui/ddd-shared.tsx",
-    "lib/ddd/build.ts",
-    "lib/ddd/dddRoot.ts",
-    "lib/ddd/validateFeatures.ts",
-  ]) {
-    const installed = join(tree.cwd, ".smithers", file);
-    expect(existsSync(installed), `published pack omitted ${file}`).toBe(true);
-    expect(readFileSync(installed, "utf8").length).toBeGreaterThan(0);
-  }
+  expect(existsSync(join(tree.cwd, ".smithers/ui/docs-driven-development.tsx"))).toBe(false);
+  expect(existsSync(join(tree.cwd, ".smithers/lib/ddd/build.ts"))).toBe(false);
   expect(existsSync(join(tree.cwd, ".smithers/components"))).toBe(false);
 
   // init also installed the curated skill into the detected agent (Claude Code,

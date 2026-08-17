@@ -247,6 +247,7 @@ connection setup problems aren't hidden behind unrelated source-store errors.
 | Code | When | Details |
 |---|---|---|
 | `INVALID_EVENTS_OPTIONS` | The smithers events command receives invalid filter options. | -- |
+| `WORKFLOW_FILE_NOT_FOUND` | A path-like workflow argument does not exist at the path resolved from the operator working directory. | `{ given, resolved }` |
 | `WORKFLOW_EXISTS` | The workflow creation CLI refuses to overwrite an existing workflow file. | -- |
 | `CLI_DB_NOT_FOUND` | A CLI command cannot find a nearby `smithers.db` file. | -- |
 | `CLI_AGENT_UNSUPPORTED` | The ask command selects an agent integration Smithers doesn't support in that mode. | -- |

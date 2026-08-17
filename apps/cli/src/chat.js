@@ -1,5 +1,5 @@
 import { formatTimestamp } from "./format.js";
-import { sanitizeTerminalText } from "@smthrs/tui/src/sanitizeTerminalText.ts";
+import { sanitizeTerminalText } from "./sanitizeTerminalText.js";
 
 /** @typedef {import("./ChatAttemptMeta.ts").ChatAttemptMeta} ChatAttemptMeta */
 /** @typedef {import("./ChatAttemptRow.ts").ChatAttemptRow} ChatAttemptRow */

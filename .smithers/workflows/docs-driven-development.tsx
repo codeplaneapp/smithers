@@ -1,4 +1,4 @@
-// smithers-source: seeded
+// smithers-source: authored
 // smithers-metadata-version: 1
 // smithers-display-name: Docs Driven Development
 // smithers-description: Maintain a living product spec (features.json + WYSIWYG docs) and run an audit→triage→implement→review improvement loop over it.

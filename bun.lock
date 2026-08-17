@@ -161,8 +161,6 @@
         "@mdx-js/esbuild": "^3.1.1",
         "@mdx-js/mdx": "^3.1.1",
         "@modelcontextprotocol/sdk": "^1.29.0",
-        "@opentui/core": "^0.4.2",
-        "@opentui/react": "^0.4.2",
         "@pierre/diffs": "^1.2.11",
         "@smthrs/accounts": "workspace:*",
         "@smthrs/agents": "workspace:*",
@@ -178,12 +176,10 @@
         "@smthrs/observability": "workspace:*",
         "@smthrs/openapi": "workspace:*",
         "@smthrs/protocol": "workspace:*",
-        "@smthrs/review": "workspace:*",
         "@smthrs/scheduler": "workspace:*",
         "@smthrs/scorers": "workspace:*",
         "@smthrs/server": "workspace:*",
         "@smthrs/time-travel": "workspace:*",
-        "@smthrs/tui": "workspace:*",
         "@smthrs/usage": "workspace:*",
         "@smthrs/vcs": "workspace:*",
         "@toon-format/toon": "2.3.0",
@@ -201,10 +197,20 @@
         "zod": "^4.4.3",
       },
       "devDependencies": {
+        "@smthrs/review": "workspace:*",
+        "@smthrs/tui": "workspace:*",
         "@types/bun": "latest",
         "playwright": "^1.61.1",
         "typescript": "~6.0.3",
       },
+      "peerDependencies": {
+        "@smthrs/review": "workspace:*",
+        "@smthrs/tui": "workspace:*",
+      },
+      "optionalPeers": [
+        "@smthrs/review",
+        "@smthrs/tui",
+      ],
     },
     "apps/ddd-site": {
       "name": "@smthrs/ddd-site",
@@ -502,7 +508,6 @@
       "dependencies": {
         "@ai-sdk/anthropic": "^4.0.5",
         "@ai-sdk/openai": "^4.0.5",
-        "@modelcontextprotocol/sdk": "^1.29.0",
         "@smthrs/accounts": "workspace:*",
         "@smthrs/driver": "workspace:*",
         "@smthrs/errors": "workspace:*",
@@ -513,10 +518,17 @@
         "zod": "^4.4.3",
       },
       "devDependencies": {
+        "@modelcontextprotocol/sdk": "^1.29.0",
         "@types/bun": "latest",
         "react": "^19.2.7",
         "typescript": "~6.0.3",
       },
+      "peerDependencies": {
+        "@modelcontextprotocol/sdk": "^1.29.0",
+      },
+      "optionalPeers": [
+        "@modelcontextprotocol/sdk",
+      ],
     },
     "packages/aws": {
       "name": "@smthrs/aws",
@@ -1126,6 +1138,7 @@
         "smithers": "./src/bin/smithers.js",
       },
       "dependencies": {
+        "@effect/platform-node-shared": "4.0.0-beta.105",
         "@mdx-js/esbuild": "^3.1.1",
         "@smthrs/agents": "workspace:*",
         "@smthrs/aws": "workspace:*",
@@ -3807,7 +3820,7 @@
 
     "markdown-table": ["markdown-table@3.0.4", "", {}, "sha512-wiYz4+JrLyb/DqW2hkFJxP7Vd7JuTDm77fvbM8VfEQdmSMqcImWeeRbHwZjBjIFki/VaMK2BhFi7oUUZeM5bqw=="],
 
-    "marked": ["marked@17.0.1", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-boeBdiS0ghpWcSwoNm/jJBwdpFaMnZWRzjA6SkUMYb40SVaN1x7mmfGKp0jvexGcx+7y2La5zRZsYFZI6Qpypg=="],
+    "marked": ["marked@18.0.5", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-S6GcvALHg6K4ohtu4E7x0a1AqhAjp6cV8KhLSyN9qVapnzJkusVBxZRcIU9AeYsbe6P1hKDusSbEOzGyyuce6w=="],
 
     "math-intrinsics": ["math-intrinsics@1.1.0", "", {}, "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g=="],
 
@@ -4665,8 +4678,6 @@
 
     "@earendil-works/pi-coding-agent/undici": ["undici@8.5.0", "", {}, "sha512-xamtWoB1EshgjpmlXd7GGm2VfdDtw1+rD8uhry8pSNW3If6S8E0m2T2+orSKeZXEn/aPJMviCpDBA65WJt8zhg=="],
 
-    "@earendil-works/pi-tui/marked": ["marked@18.0.5", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-S6GcvALHg6K4ohtu4E7x0a1AqhAjp6cV8KhLSyN9qVapnzJkusVBxZRcIU9AeYsbe6P1hKDusSbEOzGyyuce6w=="],
-
     "@elizaos/core/uuid": ["uuid@13.0.2", "", { "bin": { "uuid": "dist-node/bin/uuid" } }, "sha512-vzi9uRZ926x4XV73S/4qQaTwPXM2JBj6/6lI/byHH1jOpCzb0zDbfytgA9LcN/hzb2l7WQSQnxITOVx5un/wGw=="],
 
     "@google-cloud/storage/mime": ["mime@3.0.0", "", { "bin": { "mime": "cli.js" } }, "sha512-jSCU7/VB1loIWBZe14aEYHU/+1UMEHoaO7qxCOVJOw9GgH72VAWppxNcjU+x9a2k3GSIBXNKxXQFqRvvZ7vr3A=="],
@@ -4716,6 +4727,8 @@
     "@opentelemetry/sdk-trace-base/@opentelemetry/resources": ["@opentelemetry/resources@2.10.0", "", { "dependencies": { "@opentelemetry/core": "2.10.0", "@opentelemetry/semantic-conventions": "^1.29.0" }, "peerDependencies": { "@opentelemetry/api": ">=1.3.0 <1.10.0" } }, "sha512-q6MMm2zhggzsHVNbabYwut+a6nbuQQe3URUoxaojM/8K1IBfwwPzvxIjNi2/lI1TFe+fMHMW9MWhrtDLEXEnkA=="],
 
     "@opentelemetry/sdk-trace-node/@opentelemetry/sdk-trace-base": ["@opentelemetry/sdk-trace-base@2.7.1", "", { "dependencies": { "@opentelemetry/core": "2.7.1", "@opentelemetry/resources": "2.7.1", "@opentelemetry/semantic-conventions": "^1.29.0" }, "peerDependencies": { "@opentelemetry/api": ">=1.3.0 <1.10.0" } }, "sha512-NAYIlsF8MPUsKqJMiDQJTMPOmlbawC1Iz/omMLygZ1C9am8fTKYjTaI+OZM+WTY3t3Glo0wnOg/6/pac6RGPPw=="],
+
+    "@opentui/core/marked": ["marked@17.0.1", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-boeBdiS0ghpWcSwoNm/jJBwdpFaMnZWRzjA6SkUMYb40SVaN1x7mmfGKp0jvexGcx+7y2La5zRZsYFZI6Qpypg=="],
 
     "@oxc-parser/binding-wasm32-wasi/@emnapi/core": ["@emnapi/core@1.9.2", "", { "dependencies": { "@emnapi/wasi-threads": "1.2.1", "tslib": "^2.4.0" } }, "sha512-UC+ZhH3XtczQYfOlu3lNEkdW/p4dsJ1r/bP7H8+rhao3TTTMO1ATq/4DdIi23XuGoFY+Cz0JmCbdVl0hz9jZcA=="],
 

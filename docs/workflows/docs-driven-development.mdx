@@ -3,11 +3,15 @@ title: docs-driven-development
 description: Maintain a portable living product specification and improve a target repository from it.
 ---
 
-`docs-driven-development` is the seeded workflow for a repository's living
-product specification. A fresh `bunx smthrs init` includes a blank
-portable starter spec plus the helper/UI closure it needs, not Smithers' own spec.
+`docs-driven-development` is an opt-in workflow for a repository's living
+product specification. It is not part of the default init pack. Install it by
+copying `.smithers/workflows/docs-driven-development.tsx`, its `.smithers/lib/ddd/`
+helpers, and `.smithers/ui/docs-driven-development.tsx` from the source
+repository into your project, or by installing a workflow pack that ships it.
+The seeded layout also includes a blank portable starter spec under
+`.smithers/spec/`, not Smithers' own spec.
 
-Run it from the initialized project:
+Run it from the project once installed:
 
 ```bash
 bunx smthrs workflow run docs-driven-development

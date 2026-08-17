@@ -289,7 +289,7 @@ Stateless RPC POSTs go to `POST /v1/rpc/<method>` with the method's params as th
 rpc[41]{method,params,returns,scope,transport}:
   launchRun,workflow/input?/options.runId?/options.idempotencyKey?,{runId/workflow},run:write,http+websocket
   resumeRun,runId/options.force?,{runId/status},run:write,http+websocket
-  cancelRun,runId,{runId/won/status/terminalStatus?/repaired/cancellationSource?},run:write,http+websocket
+  cancelRun,runId,{runId/won/status/terminalStatus?/repaired/cancellationSource?/cancelledAttempts?/descendants?/terminatedOwners?/terminatedAgents?},run:write,http+websocket
   pauseRun,runId,{runId/status:pausing},run:write,http+websocket
   hijackRun,runId/options?,{runId/status:hijack-ready/sessionId},run:admin,http+websocket
   rewindRun,runId/frameNo/confirm:true,JumpResult,run:admin,http+websocket
@@ -329,6 +329,8 @@ rpc[41]{method,params,returns,scope,transport}:
   closeBrowserSession,sessionId,{closed/sessionId},run:write,http+websocket
   listBrowserSessions,,Live BrowserSnapshot[],run:read,http+websocket
 ```
+
+`cancelRun` is recursive: it cancels the requested run **and every transitive child-workflow descendant** as one idempotent operation (see [Durability](/capabilities/durability)). `descendants` lists each run the cascade reached with its `depth` and `action` (`cancel-requested`, `cancelled`, `already-terminal`, `missing`), `cancelledAttempts` totals the attempts closed across the subtree, and `terminatedOwners`/`terminatedAgents` list the owner and agent process trees terminated so no work outlives the cancelled subtree. Runs outside the subtree are never touched; time-travel forks are spared. A run whose whole subtree is already terminal returns `RUN_NOT_ACTIVE`, and an unknown run returns `RunNotFound`.
 
 `getRun`, `listRuns`, and `cancelRun` expose the durable first-caller attribution as optional `cancellationSource`. Its `kind` is `signal`, `rpc`, `cli`, or `engine`; detail, signal, client PID, request ID, and authenticated client identity are included when persisted. Historical or unattributed cancellations omit the field.
 

@@ -615,7 +615,25 @@ export function diagnoseRun(input: {
       fix: "No action needed.",
     };
   }
-  if (status === "finished" || status === "succeeded" || status === "completed") {
+  if (input.healthState === "succeeded-with-failures") {
+    return {
+      tone: "warn",
+      headline: "Finished with failures",
+      detail: failed.length
+        ? `${progress}; ${failed.length} task(s) failed: ${failed
+            .slice(0, 4)
+            .map((task) => task.id)
+            .join(", ")}.${sample}`
+        : `${progress}; the persisted terminal outcome records tolerated child failures.`,
+      fix: `Review the failed nodes; \`smithers retry-task\` + resume if they should complete.`,
+    };
+  }
+  if (
+    status === "finished" ||
+    status === "succeeded" ||
+    status === "succeeded-with-failures" ||
+    status === "completed"
+  ) {
     return failed.length
       ? {
           tone: "warn",
@@ -835,6 +853,7 @@ export const GROUP_TITLES: Record<RunGroup, string> = {
 export function groupForStatus(status: string | undefined): RunGroup {
   const s = normalizeStatus(status);
   if (s.startsWith("waiting") || s === "paused") return "attention";
+  if (s === "succeeded-with-failures") return "attention";
   if (s === "finished" || s === "succeeded") return "completed";
   if (s === "failed" || s === "stale" || s === "orphaned") return "failed";
   if (s === "cancelled" || s === "canceled") return "cancelled";
@@ -980,7 +999,14 @@ export function nodeSummaryEligible(status: string | undefined): boolean {
 
 export function isTerminalStatus(status: string | undefined): boolean {
   const s = normalizeStatus(status);
-  return s === "finished" || s === "succeeded" || s === "failed" || s === "cancelled" || s === "canceled";
+  return (
+    s === "finished" ||
+    s === "succeeded" ||
+    s === "succeeded-with-failures" ||
+    s === "failed" ||
+    s === "cancelled" ||
+    s === "canceled"
+  );
 }
 
 export function isCancellable(status: string | undefined): boolean {
@@ -1311,12 +1337,20 @@ export function autoExpandKeys(root: TreeNodeLike | null): Set<string> {
   return expanded;
 }
 
-/** True when any descendant (not the node itself) failed — for rollup badges. */
-export function hasFailedDescendant(node: TreeNodeLike): boolean {
+/** Number of deepest failed descendants — propagated container failures count once. */
+export function failedDescendantCount(node: TreeNodeLike): number {
+  let count = 0;
   for (const child of node.children ?? []) {
-    if (toneForStatus(child.status) === "failed" || hasFailedDescendant(child)) return true;
+    const nestedFailures = failedDescendantCount(child);
+    if (nestedFailures > 0) count += nestedFailures;
+    else if (toneForStatus(child.status) === "failed") count += 1;
   }
-  return false;
+  return count;
+}
+
+/** True when any descendant (not the node itself) failed. */
+export function hasFailedDescendant(node: TreeNodeLike): boolean {
+  return failedDescendantCount(node) > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -2153,7 +2187,8 @@ export function opsStats(runs: ReadonlyArray<Record<string, unknown>>, nowMs: nu
       stats.attention += 1;
     }
     if (finishedAtMs !== undefined && finishedAtMs >= dayStartMs && finishedAtMs <= nowMs) {
-      if (status === "finished" || status === "succeeded") stats.completedToday += 1;
+      if (status === "finished" || status === "succeeded" || status === "succeeded-with-failures")
+        stats.completedToday += 1;
       else if (status === "failed") stats.failedToday += 1;
     }
   }

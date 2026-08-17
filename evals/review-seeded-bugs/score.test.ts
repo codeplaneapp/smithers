@@ -106,6 +106,20 @@ describe("review seeded-bug scoring", () => {
     expect(score.recall).toBe(1);
     expect(score.precision).toBe(plantedCount / (plantedCount + 1));
     expect(score.counts.falsePositives).toBe(1);
+    const precision = plantedCount / (plantedCount + 1);
+    expect(score.f1).toBe((2 * precision) / (precision + 1));
+  });
+
+  test("reports F1 as the harmonic mean of precision and recall", () => {
+    const labels = loadCorpus();
+    expect(scoreCorpus(labels, perfectFindings(labels)).f1).toBe(1);
+
+    // Silence scores perfect precision by the empty-denominator convention, so
+    // only F1 exposes that a reviewer which reports nothing has found nothing.
+    const silent = scoreCorpus(labels, {});
+    expect(silent.precision).toBe(1);
+    expect(silent.recall).toBe(0);
+    expect(silent.f1).toBe(0);
   });
 
   test("keeps tolerant anchor matches but records tight-anchor accuracy", () => {

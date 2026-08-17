@@ -12,7 +12,7 @@ Covered bug classes:
 - `tautological-test`
 - `cross-file-signature-mismatch`
 
-The deterministic scorer lives in `score.ts` and does not perform I/O or call agents. It matches review findings to labels by relative path and line anchor tolerance, then reports recall, precision, anchor accuracy, and severity calibration.
+The deterministic scorer lives in `score.ts` and does not perform I/O or call agents. It matches review findings to labels by relative path and line anchor tolerance, then reports recall, precision, F1, anchor accuracy, and severity calibration.
 
 ## CI-Safe Checks
 

@@ -643,6 +643,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 
   function statusClass(status) {
     if (status === "finished" || status === "succeeded" || status === "completed") return "ok";
+    if (status === "succeeded-with-failures") return "warn";
     if (status === "failed") return "warn";
     if (String(status ?? "").startsWith("waiting") || status === "paused") return "wait";
     if (status === "running" || status === "recovering") return "run";

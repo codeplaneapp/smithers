@@ -54,6 +54,12 @@ export type CorpusScore = {
   };
   recall: number;
   precision: number;
+  /**
+   * Harmonic mean of precision and recall: the single rank metric for
+   * comparing reviewers, since precision alone rewards silence and recall
+   * alone rewards spraying findings at every line. `0` when both are `0`.
+   */
+  f1: number;
   anchorAccuracy: {
     matchedFindings: number;
     tightTolerance: number;
@@ -236,6 +242,9 @@ export function scoreCorpus(
     Math.abs(severityOrdinal[match.finding.severity] - severityOrdinal[match.label.severity]),
   );
 
+  const recall = plantedBugs === 0 ? 1 : truePositives / plantedBugs;
+  const precision = precisionDenominator === 0 ? 1 : truePositives / precisionDenominator;
+
   return {
     counts: {
       fixtures: labelsByFixture.size,
@@ -247,8 +256,9 @@ export function scoreCorpus(
       falseNegatives,
       unknownFixtureFindings,
     },
-    recall: plantedBugs === 0 ? 1 : truePositives / plantedBugs,
-    precision: precisionDenominator === 0 ? 1 : truePositives / precisionDenominator,
+    recall,
+    precision,
+    f1: precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall),
     anchorAccuracy: {
       matchedFindings: allMatches.length,
       tightTolerance,

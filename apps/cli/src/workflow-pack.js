@@ -124,11 +124,6 @@ const BUNDLED_VERSION_PINS = {
   reactDomTypes: "19.2.3",
   mdxTypes: "2.0.13",
   nodeTypes: "25.6.0",
-  // The DDD UI uses the canonical Milkdown editor; former graph UI runtime
-  // dependencies are no longer part of the default pack.
-  milkdownCrepe: "7.21.2",
-  // DDD renders Mermaid fenced diagrams in its markdown preview.
-  mermaid: "11.12.1",
   // create-workflow parses the skill doc it writes as real YAML frontmatter.
   yaml: "2.9.0",
   xyflow: "12.10.2",
@@ -149,8 +144,6 @@ function readDependencyVersions() {
     reactDomTypesVersion: resolveInstalledPackageVersion("@types/react-dom", BUNDLED_VERSION_PINS.reactDomTypes),
     mdxTypesVersion: resolveInstalledPackageVersion("@types/mdx", BUNDLED_VERSION_PINS.mdxTypes),
     nodeTypesVersion: resolveInstalledPackageVersion("@types/node", BUNDLED_VERSION_PINS.nodeTypes),
-    milkdownCrepeVersion: resolveInstalledPackageVersion("@milkdown/crepe", BUNDLED_VERSION_PINS.milkdownCrepe),
-    mermaidVersion: resolveInstalledPackageVersion("mermaid", BUNDLED_VERSION_PINS.mermaid),
     yamlVersion: resolveInstalledPackageVersion("yaml", BUNDLED_VERSION_PINS.yaml),
     xyflowVersion: resolveInstalledPackageVersion("@xyflow/react", BUNDLED_VERSION_PINS.xyflow),
     dagreVersion: resolveInstalledPackageVersion("dagre", BUNDLED_VERSION_PINS.dagre),
@@ -184,8 +177,6 @@ function renderPackageJson(versions) {
           // scaffolding functions to make re-init a durable run.
           "@smthrs/cli": smithersSpec,
           zod: versions.zodVersion,
-          "@milkdown/crepe": versions.milkdownCrepeVersion,
-          mermaid: versions.mermaidVersion,
           yaml: versions.yamlVersion,
           "@xyflow/react": versions.xyflowVersion,
           dagre: versions.dagreVersion,
@@ -204,13 +195,7 @@ function renderPackageJson(versions) {
     ) + "\n"
   );
 }
-export const CURATED_PUBLIC_WORKFLOW_IDS = [
-  "create-workflow",
-  "create-skill",
-  "docs-driven-development",
-  "smithers-repo-federation",
-  "whole-foods-meal-planner",
-];
+export const CURATED_PUBLIC_WORKFLOW_IDS = ["create-workflow", "create-skill"];
 export const CURATED_SYSTEM_WORKFLOW_IDS = [
   "add",
   "create-ui",
@@ -267,14 +252,11 @@ function renderAgentScaffoldFiles(options = {}) {
 const UI_WORKFLOWS = [
   { key: "create-workflow", title: "Create Workflow" },
   { key: "create-skill", title: "Create Skill" },
-  { key: "docs-driven-development", title: "Docs Driven Development" },
   // System workflow that ships its own gateway-react UI (SEEDED_UI_IDS) and
   // declares <UI entry="../ui/share-pack.tsx" /> in its source. It must be
   // mounted so the shipped UI is reachable; the manifest, e2e descriptor, and
   // ui-drift guard all treat it as a first-class UI workflow.
   { key: "share-pack", title: "Share Pack" },
-  { key: "smithers-repo-federation", title: "Smithers Repo Federation" },
-  { key: "whole-foods-meal-planner", title: "Whole Foods Meal Planner" },
 ];
 export const UI_WORKFLOW_IDS = UI_WORKFLOWS.map((workflow) => workflow.key);
 function renderGatewayFile() {

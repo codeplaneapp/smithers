@@ -6213,6 +6213,12 @@ a { color: var(--brand); }</style>
       session.dispose();
     }
     this.ptySessions.clear();
+    // Shutdown, NOT cancellation: aborting an in-process run releases this
+    // process without writing a terminal status, so the run stays resumable
+    // and its descendants keep their own owners. Durably ending a run subtree
+    // is `cancelRun` (or `smithers down`), which claims each row terminally
+    // and reaps its owner/agent process trees. Keeping the two apart is what
+    // makes `close()` safe to call on a healthy gateway.
     const killRuns = options.killRuns === true;
     const handledRuns = new Set();
     const stopActiveRuns = async (activeRuns) => {
@@ -10922,55 +10928,110 @@ a { color: var(--brand); }</style>
           return responseError(frame.id, "INVALID_REQUEST", "runId is required");
         }
         const attribution = gatewayCancellationSource(connection, frame);
+        // A run this process is executing is cancellable by definition — its
+        // row may not even be persisted yet (startRun inserts asynchronously),
+        // so it must never be status-checked or 404'd.
         const active = this.activeRuns.get(runId);
-        if (active) {
-          const resolved = await this.resolveRun(runId).catch(() => null);
-          if (!resolved) {
-            return responseError(frame.id, "RunNotFound", "Run not found");
-          }
-          const { finalizeCancelledRun } = await loadEngineRuntime();
-          const claimed = await finalizeCancelledRun(resolved.adapter, runId, {
-            now: Date.now(),
-            attribution,
-          });
-          if (claimed.won) active.abort.abort();
-          const cancelledRun = await resolved.adapter.getRun(runId);
-          const cancellationSource = cancelledRun
-            ? asObject(serializeRunRow(cancelledRun))?.cancellationSource
-            : undefined;
-          return responseOk(frame.id, {
-            ...claimed,
-            ...(cancellationSource ? { cancellationSource } : {}),
-          });
-        }
         const resolved = await this.resolveRun(runId).catch(() => null);
         const run = resolved ? await resolved.adapter.getRun(runId) : null;
-        if (!resolved || !run) {
+        if (!resolved || (!run && !active)) {
           return responseError(frame.id, "RunNotFound", "Run not found");
         }
-        if (
-          ![
-            "running",
-            "waiting-approval",
-            "waiting-event",
-            "waiting-timer",
-            "waiting-quota",
-            "paused",
-            "cancelled",
-            "canceled",
-          ].includes(run.status)
-        ) {
-          return responseError(frame.id, "RUN_NOT_ACTIVE", "Run is not currently active");
+        const {
+          cancelRunSubtree,
+          finalizeCancelledOwnedRun,
+          isCancellableRunStatus,
+          isRunHeartbeatFresh,
+          listCascadeLineage,
+          terminateSubtreeAgentProcesses,
+        } = await loadEngineRuntime();
+        const rootRepairable = run?.status === "cancelled" || run?.status === "canceled";
+        if (run && !active && !isCancellableRunStatus(run.status) && !rootRepairable) {
+          // A terminal root can still own live descendants (a child workflow
+          // outliving a crashed parent). Only refuse when the whole subtree is
+          // done, so the public RPC never reports success while cancelling
+          // nothing — and never silently ignores a live descendant.
+          const lineage = await listCascadeLineage(resolved.adapter, runId).catch(() => []);
+          const survivors = await Promise.all(
+            lineage
+              .filter((row) => row.depth > 0)
+              // Adapter reads are Effects: thenable, but not real Promises.
+              .map((row) => Promise.resolve(resolved.adapter.getRun(row.runId)).catch(() => null)),
+          );
+          if (!survivors.some((descendant) => descendant && isCancellableRunStatus(descendant.status))) {
+            return responseError(frame.id, "RUN_NOT_ACTIVE", "Run is not currently active");
+          }
         }
-        const { finalizeCancelledRun } = await loadEngineRuntime();
-        const result = await finalizeCancelledRun(resolved.adapter, runId, { attribution });
+        // The claim below clears the row's attempts, owner, and heartbeat, so
+        // everything the cascade reports about the root has to be read first.
+        const rootActiveAttempts = run
+          ? (await resolved.adapter.listAttemptsForRun(runId)).filter((attempt) =>
+              ["in-progress", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota"].includes(
+                attempt.state,
+              ),
+            ).length
+          : 0;
+        // A live engine (fresh heartbeat) aborts itself once its cancel watcher
+        // sees the durable flag the claim persists, so its owner process is left
+        // to shut down gracefully — the same policy the cascade applies to every
+        // descendant. Any other owner (parked detached engine, hung engine) must
+        // not outlive the claim, so its pid is handed to the process-tree kill.
+        const rootOwnerIsLive = Boolean(run && run.status === "running" && isRunHeartbeatFresh(run));
+        // Claim the root terminally first so the caller's `won`/`terminalStatus`
+        // verdict is decided by the single-winner compare-and-set even when the
+        // owning engine is this very process (whose fresh heartbeat would
+        // otherwise only earn a durable cancel request).
+        const rootClaim = await finalizeCancelledOwnedRun(
+          resolved.adapter,
+          { runId, runtimeOwnerId: rootOwnerIsLive ? null : (run?.runtimeOwnerId ?? null) },
+          {
+            now: Date.now(),
+            attribution,
+            // Agents are reaped once below, after the cascade has fenced the
+            // whole subtree, so a late registration cannot slip through.
+            reapAgents: false,
+          },
+        );
+        const claimed = rootClaim.cancellation;
+        if (claimed.won) active?.abort.abort();
+        // Then cascade: every transitive descendant is cancelled under the same
+        // attribution, detached owners get a durable request their cancel
+        // watcher observes, and surviving owner/agent process trees are reaped.
+        const summary = await cancelRunSubtree(resolved.adapter, runId, { attribution });
+        for (const outcome of summary.descendants) {
+          if (outcome.action === "already-terminal" || outcome.action === "missing") continue;
+          this.activeRuns.get(outcome.runId)?.abort.abort();
+        }
+        // The root was claimed above rather than by the cascade, so its own
+        // agent processes are outside the cascade's reap scope. Sweep them
+        // here: the row is terminal, so anything still registered against it
+        // is unsupervised work that must not outlive the cancellation.
+        if (claimed.won || claimed.repaired) {
+          summary.cancelledAttempts += rootActiveAttempts;
+          const rootAgents = await terminateSubtreeAgentProcesses(resolved.adapter, [runId]).catch(() => null);
+          if (rootAgents) summary.terminatedAgents.push(...rootAgents.terminatedAgents);
+        }
+        // Likewise the root's owner process tree: the cascade re-reads a row the
+        // claim already stripped of its runtimeOwnerId, so only this call sees
+        // the pid that must not survive the cancellation.
+        if (rootClaim.ownerTerminated && rootClaim.ownerPid !== null) {
+          summary.terminatedOwners.push({ runId, pid: rootClaim.ownerPid });
+        }
         const cancelledRun = await resolved.adapter.getRun(runId);
         const cancellationSource = cancelledRun
           ? asObject(serializeRunRow(cancelledRun))?.cancellationSource
           : undefined;
         return responseOk(frame.id, {
-          ...result,
+          ...claimed,
           ...(cancellationSource ? { cancellationSource } : {}),
+          cancelledAttempts: summary.cancelledAttempts,
+          descendants: summary.descendants.map((outcome) => ({
+            runId: outcome.runId,
+            depth: outcome.depth,
+            action: outcome.action,
+          })),
+          terminatedOwners: summary.terminatedOwners,
+          terminatedAgents: summary.terminatedAgents,
         });
       }
       case "runs.pause":

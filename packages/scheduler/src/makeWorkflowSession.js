@@ -940,6 +940,41 @@ export function makeWorkflowSession(options = {}) {
     return text.length > max ? `${text.slice(0, max - 1)}…` : text;
   }
   /**
+   * Surface a fail-closed task's durable diagnostic row at the boundary that
+   * would otherwise replace it with a generic composite failure.
+   * @param {number} [max]
+   */
+  function outputFailureExcerpt(max = 500) {
+    const outputs = [...state.outputs.values()].reverse();
+    for (const taskOutput of outputs) {
+      const output = taskOutput?.output;
+      if (!output || typeof output !== "object" || Array.isArray(output)) continue;
+      const parts = [];
+      if (typeof output.summary === "string" && output.summary.trim()) parts.push(output.summary.trim());
+      if (Array.isArray(output.blockers) && output.blockers.length > 0) {
+        const blockers = output.blockers
+          .map((blocker) => {
+            if (typeof blocker === "string") return blocker;
+            if (!blocker || typeof blocker !== "object") return String(blocker);
+            for (const key of ["message", "summary", "reason", "error"]) {
+              if (typeof blocker[key] === "string" && blocker[key].trim()) return blocker[key].trim();
+            }
+            try {
+              return JSON.stringify(blocker);
+            } catch {
+              return String(blocker);
+            }
+          })
+          .filter(Boolean);
+        if (blockers.length > 0) parts.push(`Blockers: ${blockers.join("; ")}`);
+      }
+      if (parts.length === 0) continue;
+      const text = `${taskOutput.nodeId}: ${parts.join(" ")}`.replace(/\s+/g, " ").trim();
+      return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+    }
+    return undefined;
+  }
+  /**
    * @param {Set<string>} [recoveryKeys]
    * @returns {EngineDecision | null}
    */
@@ -1103,9 +1138,10 @@ export function makeWorkflowSession(options = {}) {
     cascadeQuarantinedFailures();
     const schedule = computeSchedule();
     if (schedule.fatalError) {
+      const leaf = outputFailureExcerpt();
       return {
         _tag: "Failed",
-        error: new SmithersError("SCHEDULER_ERROR", schedule.fatalError),
+        error: new SmithersError("SCHEDULER_ERROR", `${schedule.fatalError}${leaf ? `. Leaf output: ${leaf}` : ""}`),
       };
     }
     if (schedule.continuation) {

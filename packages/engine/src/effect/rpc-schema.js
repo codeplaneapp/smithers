@@ -15,6 +15,8 @@
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import { Schema } from "effect";
+// Persisted lifecycle stays `finished` for tolerated child failures. Read the
+// derived RunState to distinguish `succeeded-with-failures`.
 export const RunStatusSchema = Schema.Literals([
   "running",
   "waiting-approval",

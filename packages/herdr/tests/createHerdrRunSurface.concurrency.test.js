@@ -200,27 +200,40 @@ describeUnixSocket("createHerdrRunSurface circuit breaker (silent real-socket fi
       const callTimeoutMs = 250;
       const inner = createHerdrClient({ socketPath: silent.socketPath, callTimeoutMs, logger: () => {} });
       const rec = makeSwappableClient(inner);
-      const surface = createHerdrRunSurface({ client: rec.client, callTimeoutMs, logger: () => {} });
+      const logs = [];
+      const surface = createHerdrRunSurface({
+        client: rec.client,
+        callTimeoutMs,
+        logger: (_level, message) => logs.push(message),
+      });
       const runId = makeRunId();
 
       // Trip the breaker.
       surface.onEvent(ev("NodeWaitingApproval", runId, { nodeId: "n1" }));
       expect(await waitFor(() => rec.countOf("notification.show") === 1, 5000)).toBe(true);
+      // Seeing the RPC start is not enough: the breaker opens only after that
+      // RPC times out. Wait for its observable transition before measuring the
+      // cooldown, otherwise coverage overhead can consume the assumed margin.
+      expect(await waitFor(() => logs.some((message) => message.includes("pausing mirror pushes")), 5000)).toBe(true);
 
       // After the cooldown (2×callTimeoutMs) exactly ONE probe is admitted; it hits
       // the silent server, times out, and re-arms the cooldown.
-      await sleep(callTimeoutMs * 2 + 250);
+      await sleep(callTimeoutMs * 2);
       surface.onEvent(ev("NodeWaitingApproval", runId, { nodeId: "n1" }));
       expect(await waitFor(() => rec.countOf("notification.show") === 2, 5000)).toBe(true);
+      expect(
+        await waitFor(
+          () => logs.filter((message) => message.includes("herdr notification.show failed (soft)")).length === 2,
+          5000,
+        ),
+      ).toBe(true);
       const afterProbe = rec.countOf("notification.show");
 
-      // A push that lands within the RE-ARMED cooldown fast-drops again (the serial
-      // queue guarantees it runs after the probe's failure has re-armed the breaker).
+      // The failed-probe log above is emitted after the breaker re-arms. Drain the
+      // next queued push and assert that it fast-dropped without another RPC.
       surface.onEvent(ev("NodeWaitingApproval", runId, { nodeId: "n1" }));
-      await sleep(callTimeoutMs * 2);
-      expect(rec.countOf("notification.show")).toBe(afterProbe);
-
       await surface.close();
+      expect(rec.countOf("notification.show")).toBe(afterProbe);
     } finally {
       await silent.close();
     }

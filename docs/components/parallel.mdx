@@ -46,7 +46,10 @@ type ParallelProps = {
   children** in flight at once; each descendant task counts toward its child.
   A child is in flight from its first task to its last; a freed slot admits
   the next child in document order, and an in-flight child always finishes
-  (even nested tasks) while over-cap siblings wait.
+  (even nested tasks) while over-cap siblings wait. If that child launches a
+  lifecycle-linked workflow, tasks in the child and deeper descendants also
+  draw from this budget; dynamic child-run fan-out therefore stays bounded by
+  the declaring ancestor.
 
 The two diverge once children are subtrees. In a kanban workflow where each
 ticket is a sequence of implement then reviews, `maxConcurrency={4}` bounds
@@ -101,3 +104,8 @@ run-level cap still bounds total in-flight tasks.
 - A group completes when all children finish. `continueOnFail` on a failing child `<Task>` (not a `<Parallel>` prop) lets the group proceed past it.
 - Children carry `parallelGroupId`/`parallelMaxConcurrency` in their descriptor; under a subtree cap, descendants also get `subtreeGroupId`, `subtreeChildKey`, and `subtreeMax`.
 - The run-wide cap layers on top of every group cap. Unpinned, it starts at 4 and grows with demand up to `SMITHERS_AUTO_MAX_CONCURRENCY_CEILING` (default 16); a declared `maxConcurrency`/`subtreeConcurrency` can raise that starting point above the ceiling. `--max-concurrency N` pins the cap instead, disabling those raises and holding the run at `N` even above the ceiling. Leaf cap, subtree cap, and run-wide cap must all pass.
+- Lifecycle-linked `<Subflow>` children inherit every ancestor run/subtree
+  admission scope. The awaiting parent task releases its scopes before the
+  child starts and reacquires them after it settles, so inheritance cannot
+  deadlock at `--max-concurrency 1`. A direct `runWorkflow` call with only
+  `parentRunId` records detached lineage and does not inherit.

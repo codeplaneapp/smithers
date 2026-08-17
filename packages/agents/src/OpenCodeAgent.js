@@ -113,7 +113,7 @@ export class OpenCodeAgent extends BaseCliAgent {
    * @param {OpenCodeAgentOptions} [opts]
    */
   constructor(opts = {}) {
-    super(opts);
+    super(opts, "OpenCodeAgent");
     this.opts = opts;
     this.capabilities = createOpenCodeCapabilityRegistry(opts);
   }

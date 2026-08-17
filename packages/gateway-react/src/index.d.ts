@@ -92,6 +92,20 @@ declare function useGatewayActions(): {
             requestId?: string;
             clientIdentity?: string;
         };
+        cancelledAttempts?: number;
+        descendants?: {
+            runId: string;
+            depth: number;
+            action: "cancel-requested" | "cancelled" | "already-terminal" | "missing";
+        }[];
+        terminatedOwners?: {
+            runId: string | null;
+            pid: number;
+        }[];
+        terminatedAgents?: {
+            runId: string | null;
+            pid: number;
+        }[];
     } & {
         seq?: number;
         txid?: string;

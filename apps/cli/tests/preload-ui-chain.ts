@@ -17,6 +17,11 @@ const nativeFetch = globalThis.fetch;
 const monitorShellProcess = process.argv.some((arg) => arg.includes("monitor-shell-controls.test.tsx"));
 GlobalRegistrator.register({ url: "http://localhost/preload" });
 globalThis.fetch = nativeFetch;
+// The rendered monitor shard uses React act(); enable its environment before
+// the component family loads without changing the non-DOM CLI shards.
+if (monitorShellProcess) {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+}
 try {
   await import("react");
   await import("smthrs/ui");
