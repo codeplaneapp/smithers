@@ -50,8 +50,11 @@ jobs:
 
       - name: Run nightly fault matrix and update history
         env:
-          SMITHERS_E2E_FLAKE_HISTORY: .e2e-flakes/history.json
-          SMITHERS_E2E_FLAKE_RESULTS: .e2e-flakes/latest-nightly.json
+          # pnpm --filter runs in e2e/, so these must be absolute or the
+          # scripts would read/write e2e/.e2e-flakes/ while the cache and
+          # artifact steps below use the repo-root path.
+          SMITHERS_E2E_FLAKE_HISTORY: ${{ github.workspace }}/.e2e-flakes/history.json
+          SMITHERS_E2E_FLAKE_RESULTS: ${{ github.workspace }}/.e2e-flakes/latest-nightly.json
         run: pnpm --filter @smthrs/e2e test:soak
 
       - name: Save flake history

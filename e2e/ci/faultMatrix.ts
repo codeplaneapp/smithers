@@ -78,10 +78,18 @@ export function loadMatrix(path = MATRIX_PATH): FaultMatrix {
 
 export function loadMatrixFromGit(ref: string): FaultMatrix | null {
   const object = `${ref}:e2e/fault-matrix.json`;
-  execFileSync("git", ["cat-file", "-e", `${ref}^{commit}`], {
-    cwd: REPO_ROOT,
-    stdio: "ignore",
-  });
+  try {
+    execFileSync("git", ["cat-file", "-e", `${ref}^{commit}`], {
+      cwd: REPO_ROOT,
+      stdio: "ignore",
+    });
+  } catch {
+    // Failing closed here is deliberate: without the base manifest the gate
+    // cannot tell a promotion from a no-op, so it must not silently allow one.
+    throw new Error(
+      `Cannot resolve base ref ${ref}; the promotion gate needs it fetched (checkout with fetch-depth: 0)`,
+    );
+  }
   try {
     execFileSync("git", ["cat-file", "-e", object], { cwd: REPO_ROOT, stdio: "ignore" });
   } catch {
@@ -111,6 +119,9 @@ function attributes(tag: string): Record<string, string> {
 }
 
 export function parseJUnitResults(xml: string, matrix: FaultMatrix): CaseResult[] {
+  // Bun nests a describe-level <testsuite> inside the file-level one and leaves
+  // the file-level `time` at 0, so per-case duration has to come from summing
+  // the leaf <testcase> times rather than reading the enclosing suite.
   const suites = new Map<string, Record<string, string>>();
   for (const match of xml.matchAll(/<testsuite\b([^>]*)>/g)) {
     const attrs = attributes(match[1]!);
@@ -118,17 +129,63 @@ export function parseJUnitResults(xml: string, matrix: FaultMatrix): CaseResult[
       suites.set(attrs.name, attrs);
     }
   }
+  const seconds = new Map<string, number>();
+  for (const match of xml.matchAll(/<testcase\b([^>]*)>/g)) {
+    const attrs = attributes(match[1]!);
+    if (!attrs.file?.startsWith("e2e/faults/")) continue;
+    seconds.set(attrs.file, (seconds.get(attrs.file) ?? 0) + (Number(attrs.time) || 0));
+  }
+
+  // No report at all (crash or budget kill before Bun flushed it) means no case
+  // demonstrably failed, so nothing is charged as a flake. Every case is still
+  // incomplete, which resets the promotion counter exactly like a flake does.
+  const reportPresent = /<testsuites\b/.test(xml);
 
   return matrix.cases.map((entry) => {
     const file = `e2e/${entry.file}`;
     const attrs = suites.get(file);
     const tests = Number(attrs?.tests ?? 0);
-    const failures = Number(attrs?.failures ?? (attrs ? 0 : 1));
+    const failures = Number(attrs?.failures ?? (reportPresent ? 1 : 0));
     const skipped = Number(attrs?.skipped ?? 0);
-    const durationMs = Number(attrs?.time ?? 0) * 1000;
+    const durationMs = Math.round((seconds.get(file) ?? 0) * 1000);
     const outcome = failures > 0 ? "flake" : tests === 0 || skipped > 0 ? "incomplete" : "pass";
     return { id: entry.id, file, tests, failures, skipped, durationMs, outcome };
   });
+}
+
+export function formatMs(ms: number): string {
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/**
+ * Decides whether a fault suite honoured its configured wall-time ceiling.
+ * Kept separate from the runner so the failure text — which suite blew which
+ * budget by how much — is unit-tested rather than only observed in CI.
+ */
+export function budgetVerdict(input: {
+  suite: string;
+  budgetName: string;
+  budgetMs: number;
+  elapsedMs: number;
+  killedAtBudget: boolean;
+}): { ok: boolean; message: string } {
+  const { suite, budgetName, budgetMs, elapsedMs, killedAtBudget } = input;
+  if (killedAtBudget) {
+    return {
+      ok: false,
+      message: `[fault-budget] ${suite} suite exceeded ${budgetName}=${formatMs(budgetMs)}: still running at the ceiling after ${formatMs(elapsedMs)} and was killed`,
+    };
+  }
+  if (elapsedMs > budgetMs) {
+    return {
+      ok: false,
+      message: `[fault-budget] ${suite} suite exceeded ${budgetName}=${formatMs(budgetMs)}: elapsed ${formatMs(elapsedMs)}, over by ${formatMs(elapsedMs - budgetMs)}`,
+    };
+  }
+  return {
+    ok: true,
+    message: `[fault-budget] ${suite} suite completed in ${formatMs(elapsedMs)} within ${budgetName}=${formatMs(budgetMs)} (${formatMs(budgetMs - elapsedMs)} headroom)`,
+  };
 }
 
 export function readHistory(path: string): FlakeHistory {
@@ -199,8 +256,11 @@ export function promotionFailures(
     const window = recent.slice(-current.promotionPassesRequired);
     const passes = window.filter((run) => run.outcome === "pass").length;
     if (window.length !== current.promotionPassesRequired || passes !== window.length) {
+      const required = current.promotionPassesRequired;
       failures.push(
-        `${entry.id} cannot move to pr: requires 100 consecutive complete nightly passes; history has ${passes}/${current.promotionPassesRequired}`,
+        before
+          ? `${entry.id} cannot move to pr: requires ${required} consecutive complete nightly passes; history has ${passes}/${required}`
+          : `${entry.id} is new and cannot enter the pr tier directly: land it as promotionTier "nightly" first, then promote after ${required} consecutive complete nightly passes; history has ${passes}/${required}`,
       );
     }
   }

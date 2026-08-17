@@ -48,12 +48,15 @@ jobs:
       - name: Enforce promotion gate
         if: github.event_name == 'pull_request'
         env:
-          SMITHERS_E2E_FLAKE_HISTORY: .e2e-flakes/history.json
+          # pnpm --filter runs in e2e/, so these must be absolute or the
+          # scripts would read/write e2e/.e2e-flakes/ while the cache and
+          # artifact steps below use the repo-root path.
+          SMITHERS_E2E_FLAKE_HISTORY: ${{ github.workspace }}/.e2e-flakes/history.json
         run: pnpm --filter @smthrs/e2e check:fault-promotion -- --base-ref "origin/${GITHUB_BASE_REF}"
 
       - name: Run PR fault matrix
         env:
-          SMITHERS_E2E_FLAKE_RESULTS: .e2e-flakes/latest-pr.json
+          SMITHERS_E2E_FLAKE_RESULTS: ${{ github.workspace }}/.e2e-flakes/latest-pr.json
         run: pnpm --filter @smthrs/e2e test:faults
 
       - name: Upload PR fault results

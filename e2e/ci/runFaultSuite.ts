@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   assertMatrixInventory,
+  budgetVerdict,
   loadMatrix,
   mergeHistory,
   parseJUnitResults,
@@ -21,10 +22,6 @@ function requestedSuite(): Suite {
     throw new Error("usage: bun ci/runFaultSuite.ts --suite <pr|nightly>");
   }
   return suite;
-}
-
-function formatMs(ms: number): string {
-  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 const suite = requestedSuite();
@@ -63,20 +60,27 @@ const child = Bun.spawn(
   },
 );
 
+// A suite that ignores SIGTERM would otherwise sit until the GitHub job
+// timeout, which is exactly the outcome the budget exists to prevent.
+const HARD_KILL_GRACE_MS = 30_000;
+let hardKillTimer: ReturnType<typeof setTimeout> | undefined;
 const budgetTimer = setTimeout(() => {
   budgetExpired = true;
   child.kill("SIGTERM");
+  hardKillTimer = setTimeout(() => child.kill("SIGKILL"), HARD_KILL_GRACE_MS);
 }, budgetMs);
 const exitCode = await child.exited;
 clearTimeout(budgetTimer);
+if (hardKillTimer) clearTimeout(hardKillTimer);
 const elapsedMs = performance.now() - startedAt;
 
 let junit = "";
 try {
   junit = readFileSync(junitPath, "utf8");
 } catch {
-  // A crash or budget kill can happen before Bun flushes the report. Missing
-  // cases become flake outcomes below instead of disappearing from history.
+  // A crash or budget kill can happen before Bun flushes the report. Those
+  // cases become incomplete outcomes below instead of disappearing from
+  // history, so the run still fails closed without inventing flakes.
 }
 const results = parseJUnitResults(junit, matrix);
 const resultPath = process.env.SMITHERS_E2E_FLAKE_RESULTS;
@@ -98,15 +102,17 @@ if (historyPath) {
 }
 rmSync(tempDir, { recursive: true, force: true });
 
-if (budgetExpired || elapsedMs > budgetMs) {
-  const overMs = Math.max(0, elapsedMs - budgetMs);
-  console.error(
-    `[fault-budget] ${suite} suite exceeded ${budgetName}: elapsed ${formatMs(elapsedMs)}, budget ${formatMs(budgetMs)}, over by ${formatMs(overMs)}`,
-  );
+const verdict = budgetVerdict({
+  suite,
+  budgetName,
+  budgetMs,
+  elapsedMs,
+  killedAtBudget: budgetExpired,
+});
+if (!verdict.ok) {
+  console.error(verdict.message);
   process.exit(1);
 }
 
-console.log(
-  `[fault-budget] ${suite} suite completed in ${formatMs(elapsedMs)} within ${budgetName}=${formatMs(budgetMs)} (${formatMs(budgetMs - elapsedMs)} headroom)`,
-);
+console.log(verdict.message);
 process.exit(exitCode);

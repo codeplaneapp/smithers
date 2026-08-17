@@ -50,16 +50,20 @@ the JSON when a budget changes; never silently widen one in test code.
 Every nightly run writes per-case JUnit-derived outcomes to
 `.e2e-flakes/history.json`. The nightly workflow restores and saves that rolling
 file with GitHub Actions cache and uploads both the latest result and history as
-artifacts. A failure or missing result is a flake; a run containing skips is
-incomplete and does not count as a clean run. The rolling window retains the
-latest 100 attempts per case.
+artifacts. A failure, or a case missing from an otherwise-produced report, is a
+flake; a run containing skips is incomplete, as is every case when the run died
+before Bun flushed any report at all. Only a `pass` counts toward promotion, so
+both flakes and incomplete runs reset the counter. The rolling window retains
+the latest 100 attempts per case.
 
-To promote a case, change its `promotionTier` in `fault-matrix.json` from
-`nightly` to `pr` and remove its nightly-only runtime skip in the same PR. The PR
-workflow compares the manifest with the base branch and fails unless the cached
-history contains 100 consecutive complete passes. A flake or incomplete run
-resets the consecutive counter. The committed markdown flake log is retained
-only for historical notes; CI history is authoritative. The first change that
+New cases land as `promotionTier: "nightly"`; the gate rejects a case that
+appears in `fault-matrix.json` as `pr` without nightly history behind it. To
+promote a case, change its `promotionTier` from `nightly` to `pr` and remove its
+nightly-only runtime skip in the same PR. The PR workflow compares the manifest
+with the base branch and fails unless the cached history contains 100
+consecutive complete passes. A flake or incomplete run resets the consecutive
+counter. The committed markdown flake log is retained only for historical notes;
+CI history is authoritative. The first change that
 introduces `fault-matrix.json` is necessarily grandfathered because its base
 branch has no machine-readable tiers to compare; subsequent promotions are
 gated.
