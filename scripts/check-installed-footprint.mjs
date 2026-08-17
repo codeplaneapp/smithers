@@ -23,7 +23,10 @@ const generated = await import(new URL("../apps/cli/src/seeded-workflow-pack.gen
 const initFiles = generated.GENERATED_SEEDED_FILES;
 const initBytes = initFiles.reduce((total, file) => total + Buffer.byteLength(file.contents), 0);
 
-const packed = spawnSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
+// npm ships as npm.cmd on Windows, which spawnSync cannot resolve from a bare
+// "npm" without a shell, so the check failed there with ENOENT.
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+const packed = spawnSync(npmCommand, ["pack", "--dry-run", "--json", "--ignore-scripts"], {
   cwd: resolve(root, "apps/cli"),
   encoding: "utf8",
   timeout: 120_000,
