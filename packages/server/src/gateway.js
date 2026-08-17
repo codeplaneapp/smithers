@@ -128,6 +128,8 @@ import { SMITHERS_WORKFLOW_VIEW_KIND } from "@smthrs/components";
 import { createBrowserSessionRegistry } from "./browser.js";
 import { validateBrowserRequest } from "./gatewayRoutes/browser.js";
 import { renderBrowserViewer } from "./gatewayUi/browserViewer.js";
+import { deliverEvent } from "@smthrs/integrations";
+import { decodeGitHubWebhook } from "@smthrs/integrations/github";
 /** @typedef {import("./GatewayWebhookRunConfig.js").GatewayWebhookRunConfig} GatewayWebhookRunConfig */
 /** @typedef {import("./GatewayWebhookSignalConfig.js").GatewayWebhookSignalConfig} GatewayWebhookSignalConfig */
 /** @typedef {import("./ConnectRequest.js").ConnectRequest} ConnectRequest */
@@ -5336,6 +5338,66 @@ a { color: var(--brand); }</style>
       );
       const payload = parseJsonBuffer(rawBody, "Webhook payload");
       const adapter = this.adapterForWorkflow(entry.workflow);
+      if (webhook.source === "github") {
+        const headers = {};
+        for (const [name, value] of Object.entries(req.headers)) {
+          if (value !== undefined) headers[name] = value;
+        }
+        const events = decodeGitHubWebhook({ rawBody: rawBody.toString("utf8"), headers });
+        const deliveredRunIds = new Set();
+        let started = null;
+        let allDeduped = events.length > 0;
+        const githubDeliveryId = headerValue(req, "x-github-delivery") ?? requestId;
+        const githubRunId = `github-${createHash("sha256")
+          .update(`${workflowKey}\u0000${githubDeliveryId}`)
+          .digest("hex")
+          .slice(0, 32)}`;
+        for (let index = 0; index < events.length; index += 1) {
+          const event = events[index];
+          const outcome = await Effect.runPromise(
+            deliverEvent(
+              adapter,
+              event,
+              index === 0 && runEnabled
+                ? {
+                    onDelivery: () =>
+                      Effect.tryPromise({
+                        try: async () => {
+                          const existing = await adapter.getRun(githubRunId);
+                          if (existing) return { runId: githubRunId, existing: true };
+                          return this.startRun(
+                            workflowKey,
+                            normalizeWebhookRunInput(readPathValue(payload, runConfig?.inputPath)),
+                            { triggeredBy: webhookTriggerUserId(workflowKey), scopes: ["*"], role: "system" },
+                            githubRunId,
+                          );
+                        },
+                        catch: (cause) => cause,
+                      }),
+                  }
+                : undefined,
+            ),
+          );
+          if (!outcome.deduped) allDeduped = false;
+          for (const runId of outcome.runIds) deliveredRunIds.add(runId);
+          if (outcome.action) started = outcome.action;
+        }
+        for (const runId of deliveredRunIds) {
+          await this.resumeRunIfNeeded(runId, workflowKey, adapter, {
+            triggeredBy: webhookTriggerUserId(workflowKey),
+            scopes: ["*"],
+            role: "system",
+          });
+        }
+        return respond(200, {
+          ok: true,
+          workflow: workflowKey,
+          verified: true,
+          deliveredRunIds: [...deliveredRunIds],
+          started,
+          deduped: allDeduped,
+        });
+      }
       const explicitRunId = asWebhookString(readPathValue(payload, signalConfig?.runIdPath));
       const correlationId = normalizeCorrelationId(
         asWebhookString(readPathValue(payload, signalConfig?.correlationIdPath)) ?? null,

@@ -46,6 +46,7 @@
     "@smthrs/errors": "workspace:*",
     "@smthrs/graph": "workspace:*",
     "@smthrs/herdr": "workspace:*",
+    "@smthrs/integrations": "workspace:*",
     "@smthrs/memory": "workspace:*",
     "@smthrs/observability": "workspace:*",
     "@smthrs/openapi": "workspace:*",

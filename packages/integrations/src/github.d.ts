@@ -1,6 +1,8 @@
+import { GitHubListener as GitHubListener$1, GitHubListenerEvent as GitHubListenerEvent$1, GitHubListenerOwnership as GitHubListenerOwnership$1, GitHubRemoteHook as GitHubRemoteHook$1, ListenerOwnershipState as ListenerOwnershipState$1, ListenerPlanAction as ListenerPlanAction$1, ListenerReconcilePlan as ListenerReconcilePlan$1, ListenerRegistry as ListenerRegistry$1, ReconcileGitHubListenersOptions as ReconcileGitHubListenersOptions$1 } from './github/ListenerRegistryTypes.js';
 export { GitHubCommentOutputSchema, GitHubCommentSchema, GitHubCommitStatusOutputSchema, GitHubIssueCommentEventSchema, GitHubIssueOutputSchema, GitHubIssueSchema, GitHubIssuesEventSchema, GitHubLabelsOutputSchema, GitHubPullRequestEventSchema, GitHubPullRequestOutputSchema, GitHubPullRequestSchema, GitHubPushEventSchema, GitHubRepositorySchema, GitHubUserSchema, GitHubWebhookPayloadSchema } from './github/schemas.js';
 export { DEFAULT_GITHUB_API_BASE_URL, configureGitHub } from './github/config.js';
 export { GitHubClient, githubClientLayer, makeGitHubClient, nextPageUrl } from './github/GitHubClient.js';
+export { DEFAULT_LISTENER_REGISTRY_PATH, DEFAULT_LISTENER_STATE_PATH, listenerRegistrySchema, parseListenerRegistry, planGitHubListenerReconciliation, readListenerOwnershipState, readListenerRegistry, reconcileGitHubListeners } from './github/ListenerRegistry.js';
 export { GITHUB_SOURCE_ID, decodeGitHubWebhook, githubWebhookSourceConfig, makeGitHubWebhookSource } from './github/GitHubWebhookSource.js';
 export { OnIssueComment, OnIssueOpened, OnPullRequest, OnPush, OnWebhook, githubCorrelationId } from './github/components/OnWebhook.js';
 export { AddLabels, Comment, CreateIssue, CreatePullRequest, SetCommitStatus, splitRepo } from './github/components/outbound.js';
@@ -17,3 +19,15 @@ import './github/components/OnWebhookProps.js';
 import 'react';
 import 'zod/v4/core';
 import './github/components/outboundProps.js';
+
+type GitHubListener = GitHubListener$1;
+type GitHubListenerEvent = GitHubListenerEvent$1;
+type GitHubListenerOwnership = GitHubListenerOwnership$1;
+type GitHubRemoteHook = GitHubRemoteHook$1;
+type ListenerOwnershipState = ListenerOwnershipState$1;
+type ListenerPlanAction = ListenerPlanAction$1;
+type ListenerReconcilePlan = ListenerReconcilePlan$1;
+type ListenerRegistry = ListenerRegistry$1;
+type ReconcileGitHubListenersOptions = ReconcileGitHubListenersOptions$1;
+
+export type { GitHubListener, GitHubListenerEvent, GitHubListenerOwnership, GitHubRemoteHook, ListenerOwnershipState, ListenerPlanAction, ListenerReconcilePlan, ListenerRegistry, ReconcileGitHubListenersOptions };

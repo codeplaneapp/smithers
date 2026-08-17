@@ -24,9 +24,10 @@ const CLAIM_HEARTBEAT_SCHEDULE = Schedule.spaced("10 seconds");
  *
  * @param {SmithersDb} adapter
  * @param {ExternalEvent} event
- * @returns {Effect.Effect<{ deduped: boolean; runIds: string[] }, import("@smthrs/errors/SmithersError").SmithersError>}
+ * @param {{ onDelivery?: (result: { runIds: string[] }) => Effect.Effect<unknown, import("@smthrs/errors/SmithersError").SmithersError> }} [options]
+ * @returns {Effect.Effect<{ deduped: boolean; runIds: string[]; action?: unknown }, import("@smthrs/errors/SmithersError").SmithersError>}
  */
-export function deliverEvent(adapter, event) {
+export function deliverEvent(adapter, event, options) {
   return Effect.gen(function* () {
     const ownerToken = randomUUID();
     const claimRow = {
@@ -134,7 +135,21 @@ export function deliverEvent(adapter, event) {
         return delivered;
       });
       const heartbeat = Effect.repeat(renewClaim, CLAIM_HEARTBEAT_SCHEDULE).pipe(Effect.flatMap(() => Effect.never));
-      const delivered = yield* Effect.raceFirst(fanout, heartbeat);
+      // `onDelivery` runs while the claim is still pending, so a failing hook
+      // releases the claim and the provider's redelivery retries it. Completing
+      // first would mark the event done and dedupe the retry away, silently
+      // losing the launch. Callers must therefore keep `onDelivery` idempotent
+      // (derive a deterministic run id) in case completion later fails.
+      const { delivered, action } = yield* Effect.raceFirst(
+        Effect.gen(function* () {
+          const runIds = yield* fanout;
+          return {
+            delivered: runIds,
+            action: options?.onDelivery ? yield* options.onDelivery({ runIds }) : undefined,
+          };
+        }),
+        heartbeat,
+      );
       const completed = yield* adapter.completeIntegrationDelivery(
         canonicalEvent.source,
         canonicalEvent.dedupeKey,
@@ -163,7 +178,9 @@ export function deliverEvent(adapter, event) {
         },
         "integrations:deliver",
       );
-      return { deduped: false, runIds: delivered };
+      return action === undefined
+        ? { deduped: false, runIds: delivered }
+        : { deduped: false, runIds: delivered, action };
     });
     return yield* delivery.pipe(
       Effect.onExit((exit) =>

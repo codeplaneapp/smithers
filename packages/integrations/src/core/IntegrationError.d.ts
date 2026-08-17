@@ -6,7 +6,7 @@ import { SmithersError } from '@smthrs/errors/SmithersError';
  */
 declare function isIntegrationError(error: unknown): error is IntegrationError;
 /**
- * @typedef {"invalid-config" | "invalid-signature" | "unknown-source" | "decode-failed" | "poll-failed" | "delivery-failed" | "queue-full" | "queue-closed"} IntegrationErrorReason
+ * @typedef {"invalid-config" | "invalid-signature" | "unknown-source" | "decode-failed" | "poll-failed" | "delivery-failed" | "queue-full" | "queue-closed" | "credentials-missing" | "permission-denied" | "listener-conflict"} IntegrationErrorReason
  */
 /**
  * Error raised by integration event sources and the delivery pipeline.
@@ -29,6 +29,6 @@ declare class IntegrationError extends SmithersError {
     /** @type {IntegrationErrorReason} */
     reason: IntegrationErrorReason;
 }
-type IntegrationErrorReason = "invalid-config" | "invalid-signature" | "unknown-source" | "decode-failed" | "poll-failed" | "delivery-failed" | "queue-full" | "queue-closed";
+type IntegrationErrorReason = "invalid-config" | "invalid-signature" | "unknown-source" | "decode-failed" | "poll-failed" | "delivery-failed" | "queue-full" | "queue-closed" | "credentials-missing" | "permission-denied" | "listener-conflict";
 
 export { IntegrationError, type IntegrationErrorReason, isIntegrationError };

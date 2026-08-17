@@ -437,6 +437,9 @@ importers:
       '@smthrs/herdr':
         specifier: workspace:*
         version: link:../../packages/herdr
+      '@smthrs/integrations':
+        specifier: workspace:*
+        version: link:../../packages/integrations
       '@smthrs/memory':
         specifier: workspace:*
         version: link:../../packages/memory

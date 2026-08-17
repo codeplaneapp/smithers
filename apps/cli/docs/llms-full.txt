@@ -2906,7 +2906,7 @@ See Time-travel API and Revert for the programmatic surface.
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[113]:
+commands[114]:
   - name: add
     purpose: Install a workflow pack from GitHub, npm, or a local file
     args[1]{name,type,required,desc}:
@@ -3105,14 +3105,23 @@ commands[113]:
     purpose: Serve the multi-run Gateway RPC/WS control plane for workspace run state (one singleton per workspace; a second start refuses); unlike up --serve, this is not tied to one run
     args[1]{name,type,required,desc}:
       action,enum,false,Manage the running singleton instead of serving: status | stop
-    flags[7]{name,short,type,default,desc}:
+    flags[10]{name,short,type,default,desc}:
       host,H,string,127.0.0.1,Gateway bind address
       port,p,number,7331,Preferred port (falls back to an ephemeral port when taken; clients discover the verified URL with gateway status)
       backend,,enum,,Storage behind this workspace Gateway; a boot/deployment choice, not a client run-lookup flag (sqlite|pglite|postgres)
       auth-token,,string,,Bearer token for HTTP/WS auth (or SMITHERS_API_KEY); required for a non-loopback host
       mint-token,,boolean,false,Mint a random bearer; require it on every request and record it only in the 0600 runtime state file
       insecure,,boolean,false,Allow a non-loopback host with NO auth (dangerous)
+      kill-runs,,boolean,false,With gateway stop cancel gateway-hosted runs instead of parking them for resume
+      apply-listeners,,boolean,false,Apply declared listener creates and updates on boot and registry changes (otherwise plan only)
+      delete-listeners,,boolean,false,Also delete owned hooks removed from the registry; requires --apply-listeners
       idle-timeout,,number,,Exit after this many ms with no clients, in-flight runs, or registered schedules (0 = stay up; autostarted daemons set this automatically); overridable via SMITHERS_GATEWAY_IDLE_MS
+  - name: listeners
+    purpose: Plan or explicitly apply the .smithers/listeners.json GitHub webhook declaration
+    args[1]{name,type,required,desc}:
+      action,enum,false,Plan by default; use apply to mutate GitHub
+    flags[1]{name,short,type,default,desc}:
+      delete,,boolean,false,With apply delete owned hooks removed from the registry
   - name: monitor
     purpose: Open the Smithers Monitor. A built-in oneshot opens its dedicated live transcript, honest steering delivery, restart, and attachment-scoped cheap narrator controls. Other runs use the all-runs workspace view. Resolves the workspace's singleton gateway (--gateway probe, then runtime-state discovery, then legacy port probe, then autostart) and opens the browser
     args[1]{name,type,required,desc}:
@@ -10542,6 +10551,7 @@ type KnownSmithersErrorCode =
   | "AGENT_CLI_ERROR" | "AGENT_QUOTA_EXCEEDED" | "AGENT_CONFIG_INVALID" | "AGENT_RPC_FILE_ARGS" | "AGENT_BUILD_COMMAND" | "AGENT_DIAGNOSTIC_TIMEOUT"
   | "DB_MISSING_COLUMNS" | "DB_REQUIRES_BUN_SQLITE" | "DB_QUERY_FAILED" | "DB_WRITE_FAILED" | "PG_POOL_SATURATED"
   | "SMITHERS_BACKEND_CONFLICT" | "SMITHERS_MIGRATION_REQUIRED"
+  | "LISTENER_CREDENTIALS_MISSING" | "LISTENER_RECONCILE_FAILED" | "INTEGRATION_ERROR"
   | "STORAGE_ERROR" | "INTERNAL_ERROR" | "PROCESS_ABORTED" | "PROCESS_TIMEOUT"
   | "PROCESS_IDLE_TIMEOUT" | "PROCESS_SPAWN_FAILED" | "TASK_RUNTIME_UNAVAILABLE"
   | "SCHEMA_CHANGE_HOT" | "HOT_OVERLAY_FAILED" | "HOT_RELOAD_INVALID_MODULE"
@@ -11386,6 +11396,8 @@ connection setup problems aren't hidden behind unrelated source-store errors.
 | `WORKFLOW_EXISTS` | The workflow creation CLI refuses to overwrite an existing workflow file. | -- |
 | `CLI_DB_NOT_FOUND` | A CLI command cannot find a nearby `smithers.db` file. | -- |
 | `CLI_AGENT_UNSUPPORTED` | The ask command selects an agent integration Smithers doesn't support in that mode. | -- |
+| `LISTENER_CREDENTIALS_MISSING` | A declared listener workflow names a webhook secret environment variable that is not set. | `workflow`, `secretEnv` |
+| `LISTENER_RECONCILE_FAILED` | The listeners CLI encounters an unexpected reconciliation failure outside a typed integration error. | -- |
 
 ## Integrations
 
@@ -11401,6 +11413,7 @@ connection setup problems aren't hidden behind unrelated source-store errors.
 | `ACCOUNT_NOT_FOUND` | An account operation references an unregistered label. | -- |
 | `ACCOUNT_DUPLICATE_LABEL` | An account add operation would create a duplicate label without replace enabled. | -- |
 | `ACCOUNTS_FILE_INVALID` | The accounts.json file isn't valid JSON, or doesn't match the expected account registry schema after tolerant entry filtering. | -- |
+| `INTEGRATION_ERROR` | An integration source, delivery, or listener reconciliation operation fails. Listener reasons include `credentials-missing`, `permission-denied`, and `listener-conflict`. | `reason`, provider-specific safe details |
 
 Unknown legacy account providers are tolerated entry-by-entry. For example, an
 old `"provider": "gemini"` subscription is skipped with a warning naming the
@@ -23879,6 +23892,30 @@ Consumers should still retain an unknown fallback. Do not convert an unknown
 value to `failed` or `running`; preserve it for diagnostics and treat an
 unknown `waiting-*` value as suspended and nonterminal.
 </Warning>
+
+## External integration events
+
+External provider deliveries are durable workflow signals, not
+`SmithersEvent` lifecycle variants. GitHub webhook delivery names use these
+forms:
+
+```text
+integration:github:issues
+integration:github:issues.opened
+integration:github:issue_comment
+integration:github:issue_comment.created
+integration:github:pull_request
+integration:github:pull_request.opened
+integration:github:pull_request_review
+integration:github:pull_request_review_comment
+```
+
+When GitHub supplies an action, Smithers emits both the base and action-specific
+name. Correlation IDs are emitted from most specific to broadest:
+`owner/repo#number`, `owner/repo`, then no correlation. Each variant includes
+the original provider payload and a dedupe key based on
+`X-GitHub-Delivery`, event name, and correlation. See
+Declarative GitHub Listeners.
 
 ## Event Variants
 

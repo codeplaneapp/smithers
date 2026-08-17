@@ -251,6 +251,8 @@ connection setup problems aren't hidden behind unrelated source-store errors.
 | `WORKFLOW_EXISTS` | The workflow creation CLI refuses to overwrite an existing workflow file. | -- |
 | `CLI_DB_NOT_FOUND` | A CLI command cannot find a nearby `smithers.db` file. | -- |
 | `CLI_AGENT_UNSUPPORTED` | The ask command selects an agent integration Smithers doesn't support in that mode. | -- |
+| `LISTENER_CREDENTIALS_MISSING` | A declared listener workflow names a webhook secret environment variable that is not set. | `workflow`, `secretEnv` |
+| `LISTENER_RECONCILE_FAILED` | The listeners CLI encounters an unexpected reconciliation failure outside a typed integration error. | -- |
 
 ## Integrations
 
@@ -266,6 +268,7 @@ connection setup problems aren't hidden behind unrelated source-store errors.
 | `ACCOUNT_NOT_FOUND` | An account operation references an unregistered label. | -- |
 | `ACCOUNT_DUPLICATE_LABEL` | An account add operation would create a duplicate label without replace enabled. | -- |
 | `ACCOUNTS_FILE_INVALID` | The accounts.json file isn't valid JSON, or doesn't match the expected account registry schema after tolerant entry filtering. | -- |
+| `INTEGRATION_ERROR` | An integration source, delivery, or listener reconciliation operation fails. Listener reasons include `credentials-missing`, `permission-denied`, and `listener-conflict`. | `reason`, provider-specific safe details |
 
 Unknown legacy account providers are tolerated entry-by-entry. For example, an
 old `"provider": "gemini"` subscription is skipped with a warning naming the

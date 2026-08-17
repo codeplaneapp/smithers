@@ -18,9 +18,10 @@ type TaggedErrorDetails$1 = Record<string, unknown>;
 type GenericTaggedErrorArgs$1 = {
     readonly message: string;
     readonly details?: TaggedErrorDetails$1;
+    readonly cause?: unknown;
 };
 
-type SmithersTaggedErrorPayload$3 = {
+type SmithersTaggedErrorPayload$3 = ({
     readonly _tag: "TaskAborted";
     readonly message: string;
     readonly details?: TaggedErrorDetails$1;
@@ -61,17 +62,21 @@ type SmithersTaggedErrorPayload$3 = {
     readonly message: string;
     readonly details?: TaggedErrorDetails$1;
     readonly status?: number;
+}) & {
+    /** JSON-safe cause retained across the worker RPC boundary. */
+    readonly cause?: unknown;
 };
 
 declare const TaskAborted_base: new <A extends Record<string, any> = {}>(args: effect_Types.VoidIfEmpty<{ readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }>) => effect_Cause.YieldableError & {
     readonly _tag: "TaskAborted";
 } & Readonly<A>;
 declare class TaskAborted extends TaskAborted_base {
-    /** @param {{ readonly message: string, readonly details?: import("./TaggedErrorDetails.ts").TaggedErrorDetails, readonly name?: string }} args */
+    /** @param {{ readonly message: string, readonly details?: import("./TaggedErrorDetails.ts").TaggedErrorDetails, readonly name?: string, readonly cause?: unknown }} args */
     constructor(args: {
         readonly message: string;
         readonly details?: TaggedErrorDetails$1;
         readonly name?: string;
+        readonly cause?: unknown;
     });
 }
 
@@ -79,12 +84,13 @@ declare const TaskTimeout_base: new <A extends Record<string, any> = {}>(args: e
     readonly _tag: "TaskTimeout";
 } & Readonly<A>;
 declare class TaskTimeout extends TaskTimeout_base {
-    /** @param {{ readonly message: string, readonly nodeId: string, readonly attempt: number, readonly timeoutMs: number }} args */
+    /** @param {{ readonly message: string, readonly nodeId: string, readonly attempt: number, readonly timeoutMs: number, readonly cause?: unknown }} args */
     constructor(args: {
         readonly message: string;
         readonly nodeId: string;
         readonly attempt: number;
         readonly timeoutMs: number;
+        readonly cause?: unknown;
     });
 }
 
@@ -92,7 +98,7 @@ declare const TaskHeartbeatTimeout_base: new <A extends Record<string, any> = {}
     readonly _tag: "TaskHeartbeatTimeout";
 } & Readonly<A>;
 declare class TaskHeartbeatTimeout extends TaskHeartbeatTimeout_base {
-    /** @param {{ readonly message: string, readonly nodeId: string, readonly iteration: number, readonly attempt: number, readonly timeoutMs: number, readonly staleForMs: number, readonly lastHeartbeatAtMs: number }} args */
+    /** @param {{ readonly message: string, readonly nodeId: string, readonly iteration: number, readonly attempt: number, readonly timeoutMs: number, readonly staleForMs: number, readonly lastHeartbeatAtMs: number, readonly cause?: unknown }} args */
     constructor(args: {
         readonly message: string;
         readonly nodeId: string;
@@ -101,6 +107,7 @@ declare class TaskHeartbeatTimeout extends TaskHeartbeatTimeout_base {
         readonly timeoutMs: number;
         readonly staleForMs: number;
         readonly lastHeartbeatAtMs: number;
+        readonly cause?: unknown;
     });
 }
 
@@ -108,10 +115,11 @@ declare const RunNotFound_base: new <A extends Record<string, any> = {}>(args: e
     readonly _tag: "RunNotFound";
 } & Readonly<A>;
 declare class RunNotFound extends RunNotFound_base {
-    /** @param {{ readonly message: string, readonly runId: string }} args */
+    /** @param {{ readonly message: string, readonly runId: string, readonly cause?: unknown }} args */
     constructor(args: {
         readonly message: string;
         readonly runId: string;
+        readonly cause?: unknown;
     });
 }
 
@@ -143,11 +151,12 @@ declare const WorkflowFailed_base: new <A extends Record<string, any> = {}>(args
     readonly _tag: "WorkflowFailed";
 } & Readonly<A>;
 declare class WorkflowFailed extends WorkflowFailed_base {
-    /** @param {{ readonly message: string, readonly details?: import("./TaggedErrorDetails.ts").TaggedErrorDetails, readonly status?: number }} args */
+    /** @param {{ readonly message: string, readonly details?: import("./TaggedErrorDetails.ts").TaggedErrorDetails, readonly status?: number, readonly cause?: unknown }} args */
     constructor(args: {
         readonly message: string;
         readonly details?: TaggedErrorDetails$1;
         readonly status?: number;
+        readonly cause?: unknown;
     });
 }
 
@@ -941,21 +950,21 @@ declare namespace smithersErrorDefinitions {
         let when_109: string;
         export { when_109 as when };
     }
-    namespace PI_HTTP_ERROR {
+    namespace LISTENER_CREDENTIALS_MISSING {
         let category_110: string;
         export { category_110 as category };
         let when_110: string;
         export { when_110 as when };
+        let details_58: string;
+        export { details_58 as details };
     }
-    namespace EXTERNAL_BUILD_FAILED {
+    namespace LISTENER_RECONCILE_FAILED {
         let category_111: string;
         export { category_111 as category };
         let when_111: string;
         export { when_111 as when };
-        let details_58: string;
-        export { details_58 as details };
     }
-    namespace SCHEMA_DISCOVERY_FAILED {
+    namespace INTEGRATION_ERROR {
         let category_112: string;
         export { category_112 as category };
         let when_112: string;
@@ -963,39 +972,61 @@ declare namespace smithersErrorDefinitions {
         let details_59: string;
         export { details_59 as details };
     }
-    namespace OPENAPI_SPEC_LOAD_FAILED {
+    namespace PI_HTTP_ERROR {
         let category_113: string;
         export { category_113 as category };
         let when_113: string;
         export { when_113 as when };
     }
-    namespace OPENAPI_OPERATION_NOT_FOUND {
+    namespace EXTERNAL_BUILD_FAILED {
         let category_114: string;
         export { category_114 as category };
         let when_114: string;
         export { when_114 as when };
+        let details_60: string;
+        export { details_60 as details };
     }
-    namespace OPENAPI_TOOL_EXECUTION_FAILED {
+    namespace SCHEMA_DISCOVERY_FAILED {
         let category_115: string;
         export { category_115 as category };
         let when_115: string;
         export { when_115 as when };
+        let details_61: string;
+        export { details_61 as details };
     }
-    namespace SINGLE_RUNNER_BUSY {
+    namespace OPENAPI_SPEC_LOAD_FAILED {
         let category_116: string;
         export { category_116 as category };
         let when_116: string;
         export { when_116 as when };
-        let details_60: string;
-        export { details_60 as details };
     }
-    namespace SINGLE_RUNNER_CLOSED {
+    namespace OPENAPI_OPERATION_NOT_FOUND {
         let category_117: string;
         export { category_117 as category };
         let when_117: string;
         export { when_117 as when };
-        let details_61: string;
-        export { details_61 as details };
+    }
+    namespace OPENAPI_TOOL_EXECUTION_FAILED {
+        let category_118: string;
+        export { category_118 as category };
+        let when_118: string;
+        export { when_118 as when };
+    }
+    namespace SINGLE_RUNNER_BUSY {
+        let category_119: string;
+        export { category_119 as category };
+        let when_119: string;
+        export { when_119 as when };
+        let details_62: string;
+        export { details_62 as details };
+    }
+    namespace SINGLE_RUNNER_CLOSED {
+        let category_120: string;
+        export { category_120 as category };
+        let when_120: string;
+        export { when_120 as when };
+        let details_63: string;
+        export { details_63 as details };
     }
 }
 

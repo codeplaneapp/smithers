@@ -39,6 +39,7 @@ embed Smithers in your own server.
 | --- | --- |
 | "When the nightly release run fails, page the on-call with the runbook link." | An `alertPolicy` on the workflow (ownership, severity, runbook, reactions), with durable alert rows via `bunx smthrs alerts` ([Alerting](/guides/alerting)). |
 | "Send me a daily digest of my runs on Telegram." | The [Telegram integration](/integrations/telegram) and the `telegram-daily-digest` pack workflow. |
+| "Run this workflow whenever someone opens or comments on a GitHub issue." | Declare the repository, events, workflow, callback, and secret environment variable in `.smithers/listeners.json`; preview with `bunx smthrs listeners plan`, then explicitly apply the owned webhook changes ([GitHub listeners](/integrations/github-listeners)). |
 
 ## Go back in time
 
