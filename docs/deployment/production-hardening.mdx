@@ -57,6 +57,8 @@ Recommended scopes by client type:
 
 Rotate token grants regularly; revoke them once a user, CI job, or integration no longer needs access.
 
+If you terminate user sessions at a reverse proxy and run the Gateway in `mode: "trusted-proxy"`, you must also declare the transport-level trust boundary with `auth.trustedProxies`: the peer addresses, CIDR blocks, or `"unix"` socket the proxy connects from. Identity headers are honored only from those peers, anything else gets `403 UNTRUSTED_PROXY_PEER`, and a Gateway configured for trusted-proxy mode without an enforceable boundary refuses to start. The peer is the transport peer (the last hop that opened the connection), never an `X-Forwarded-For` entry. Bind the listener so the proxy is the only thing that can reach it, and see [Gateway auth](/integrations/gateway) for the full failure-mode table.
+
 For multi-tenant deployments, see [Control Plane](/deployment/control-plane) for org, project, usage, and audit primitives.
 
 ## Execution Boundary
@@ -122,6 +124,7 @@ Before a production release:
 - CI is green on typecheck, dependency checks, and tests.
 - Database backups have been restored in a staging environment.
 - Gateway tokens are scoped and have bounded TTLs.
+- Trusted-proxy deployments declare `auth.trustedProxies`, and a direct request bypassing the proxy is refused with `403 UNTRUSTED_PROXY_PEER`.
 - Sandbox runtime enforcement has been tested against the intended threat model.
 - Approval paths have a named owner and a fallback owner (see [Approval](/components/approval)).
 - Logs are retained long enough to investigate delayed workflow failures.

@@ -242,6 +242,18 @@ type GatewayAuthConfig$1 = {
     allowedOrigins?: string[];
 } | {
     mode: "trusted-proxy";
+    /**
+     * Transport-level trust boundary. Required and non-empty: trusted-proxy
+     * mode authenticates from client-supplied identity headers, so the
+     * gateway only honors them when the immediate socket peer matches one of
+     * these entries. Each entry is an IP literal (`"10.0.0.7"`, `"::1"`), a
+     * CIDR block (`"10.0.0.0/24"`), or the literal `"unix"` for a
+     * Unix-domain listener. The peer is the transport peer — never
+     * `X-Forwarded-For` — so behind a proxy chain list only the last hop.
+     * Startup fails when this is missing, empty, malformed, or cannot apply
+     * to the socket the gateway binds.
+     */
+    trustedProxies: string[];
     trustedHeaders?: string[];
     allowedOrigins?: string[];
     defaultRole?: string;
@@ -1133,6 +1145,14 @@ declare class Gateway {
     hasActiveCrons: boolean;
     hasPendingTimers: boolean;
     cronSweepInFlight: boolean;
+    trustedProxies: {
+        cidrs: {
+            bytes: Uint8Array;
+            prefix: number;
+        }[];
+        unix: boolean;
+    } | null;
+    unixSocketListener: boolean;
     trustAnyHost: boolean;
     whatHappenedNarrator: any;
     /** @type {Map<string, { payload: Record<string, unknown> }>} */
@@ -1922,6 +1942,35 @@ declare class Gateway {
      * @returns {boolean}
      */
     isCookieOriginTrusted(req: IncomingMessage): boolean;
+    /**
+     * The immediate transport peer of `req`: the address of the socket that is
+     * actually connected to this process.
+     *
+     * Deliberately NOT derived from `X-Forwarded-For` (or any other header):
+     * those are supplied by the very caller whose provenance is in question, so
+     * reading the peer from them would make the trust check circular. Behind a
+     * proxy chain (`client -> edge -> internal proxy -> gateway`) the peer is the
+     * LAST hop, the one that opened this connection — only that hop belongs in
+     * `trustedProxies`, and the earlier hops in `X-Forwarded-For` are just data
+     * the trusted proxy vouched for. A request whose socket reports no remote
+     * address arrived over a Unix-domain socket, whose peer set is bounded by the
+     * socket file's filesystem permissions rather than by an address.
+     * @param {IncomingMessage} req
+     * @returns {{ kind: "ip"; address: string } | { kind: "unix" }}
+     */
+    requestPeer(req: IncomingMessage): {
+        kind: "ip";
+        address: string;
+    } | {
+        kind: "unix";
+    };
+    /**
+     * Whether `req`'s transport peer is a configured trusted proxy, the only
+     * condition under which trusted-proxy identity headers may be honored (#785).
+     * @param {IncomingMessage} req
+     * @returns {boolean}
+     */
+    isTrustedProxyPeer(req: IncomingMessage): boolean;
     /**
      * DNS-rebinding defense (spec decision 16a). An unauthenticated daemon grants
      * operator scope to every request, so a browser page at a name rebound to

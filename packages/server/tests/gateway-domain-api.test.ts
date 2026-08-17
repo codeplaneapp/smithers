@@ -749,7 +749,7 @@ describe("Gateway REST domain API auth and SSE bounds", () => {
 
     const api = await createApi("sqlite");
     const trusted = new Gateway({
-      auth: { mode: "trusted-proxy", defaultScopes: [] },
+      auth: { mode: "trusted-proxy", trustedProxies: ["127.0.0.1", "::1"], defaultScopes: [] },
     });
     trusted.register("value", createValueWorkflow(api));
     const server = await trusted.listen({ port: 0, host: "127.0.0.1" });

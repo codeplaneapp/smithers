@@ -33,6 +33,18 @@ export type GatewayAuthConfig =
     }
   | {
       mode: "trusted-proxy";
+      /**
+       * Transport-level trust boundary. Required and non-empty: trusted-proxy
+       * mode authenticates from client-supplied identity headers, so the
+       * gateway only honors them when the immediate socket peer matches one of
+       * these entries. Each entry is an IP literal (`"10.0.0.7"`, `"::1"`), a
+       * CIDR block (`"10.0.0.0/24"`), or the literal `"unix"` for a
+       * Unix-domain listener. The peer is the transport peer — never
+       * `X-Forwarded-For` — so behind a proxy chain list only the last hop.
+       * Startup fails when this is missing, empty, malformed, or cannot apply
+       * to the socket the gateway binds.
+       */
+      trustedProxies: string[];
       trustedHeaders?: string[];
       allowedOrigins?: string[];
       defaultRole?: string;

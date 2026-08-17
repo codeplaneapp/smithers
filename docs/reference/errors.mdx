@@ -289,6 +289,7 @@ JSON response codes, not `SmithersErrorInstance` objects.
 | `INVALID_JSON` | 400 | Body not valid JSON |
 | `SERVER_ERROR` | 500 | Unexpected server error |
 | `UNAUTHORIZED` | 401 | Missing or invalid auth token |
+| `UNTRUSTED_PROXY_PEER` | 403 | `mode: "trusted-proxy"` request or WebSocket upgrade whose transport peer is not in `auth.trustedProxies`. The identity headers are discarded, not honored. See [Gateway auth](/integrations/gateway). |
 | `WORKFLOW_PATH_OUTSIDE_ROOT` | 400 | Workflow path outside server root |
 | `RUN_ID_REQUIRED` | 400 | `runId` required when `resume: true` |
 | `RUN_ALREADY_EXISTS` | 409 | Run ID already exists |
